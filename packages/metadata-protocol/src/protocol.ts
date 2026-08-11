@@ -12212,7 +12212,52 @@ export class ObjectStackProtocolImplementation implements
         await this.ensureOverlayIndex();
         const orgId = request.organizationId ?? null;
         const where: Record<string, unknown> = { id: request.commitId };
-        if (request.organizationId) where.organization_id = request.organizationId;
+        // [#7819] Resolve BOTH org-scoped and env-wide (`organization_id IS
+        // NULL`) commit rows for an org-scoped caller — the same defect and
+        // remedy as the sibling {@link listCommits} (#7779) and {@link
+        // deletePackage} (#7705). `organization_id = <org>` matches no NULL
+        // column, so this answered `COMMIT_NOT_FOUND` (404) for a row that
+        // demonstrably exists and that the SAME caller's `listCommits`
+        // returns.
+        //
+        // ⚠️ This site is NOT the family's plain scan-scoping, and the `$or`
+        // was chosen over the two alternatives rather than copied. `where` is
+        // keyed on `id`, so the predicate reads like an AUTHORIZATION filter
+        // layered on a unique key. Measured against the only door, it is not
+        // one: authorization on `POST /packages/:id/commits/:commitId/revert`
+        // is `requireManageMetadata`, checked before this call; the
+        // `organizationId` that arrives is the session's *active org
+        // selection* from `resolveActiveOrganizationId`, whose body is
+        // entirely `catch`-wrapped and answers `undefined` on any auth-seam
+        // throw — and `undefined` omits this predicate, which is the WIDEST
+        // reading (every organization's commits). A boundary that fails OPEN
+        // is not a boundary, so there is no authz here to make precise; that
+        // rules out "keep it but distinguish 'not yours' from 'no such
+        // commit'". Dropping the predicate outright is defensible on an id
+        // lookup, but it would newly let an org caller revert ANOTHER
+        // organization's commit by id — a widening this card never asked for.
+        // The `$or` admits the env-wide rows and refuses that one.
+        //
+        // The body already agreed with this reading before the lookup did:
+        // #7559 made each item resolve its scope FROM THE ROW ({@link
+        // resolveMetaItemOrgScope}) precisely because "a batch legitimately
+        // mixes an env-wide artifact with an org overlay", so the loop below
+        // processes env-wide items for an org caller while the lookup above
+        // refused to hand them over. {@link rollbackToPackageCommit} made the
+        // contradiction self-evident: since #7814 it plans from `listCommits`
+        // (org + env-wide) and fed each id straight back into this lookup.
+        //
+        // The no-org branch is deliberately NOT narrowed to `organization_id
+        // IS NULL`, exactly as #7705 and #7779 left theirs: the direct-mount
+        // REST registrar passes no `organizationId` at all, and restricting
+        // that door to env-wide rows would make every org-scoped commit
+        // unrevertable — the same bug pointed the other way.
+        if (request.organizationId) {
+            where.$or = [
+                { organization_id: request.organizationId },
+                { organization_id: null },
+            ];
+        }
         const row = (await this.engine.findOne('sys_metadata_commit', { where })) as any;
         if (!row) {
             const err: any = new Error(`[commit_not_found] No commit '${request.commitId}'.`);
@@ -12487,7 +12532,20 @@ export class ObjectStackProtocolImplementation implements
         failed: Array<{ commitId: string; error: string }>;
     }> {
         const where: Record<string, unknown> = { id: request.commitId };
-        if (request.organizationId) where.organization_id = request.organizationId;
+        // [#7819] Same widening as the {@link revertCommit} lookup above, and
+        // for the sharper reason: this function PLANS from {@link listCommits},
+        // which since #7814 returns org-scoped and env-wide rows alike to an
+        // org caller. With the strict equality here, an org-scoped rollback
+        // whose TARGET happened to be recorded env-wide answered 404 before it
+        // planned anything at all — for a commit the caller's own timeline had
+        // just listed. The rationale for the `$or` over the alternatives, and
+        // for leaving the no-org branch un-narrowed, is stated in full there.
+        if (request.organizationId) {
+            where.$or = [
+                { organization_id: request.organizationId },
+                { organization_id: null },
+            ];
+        }
         const target = (await this.engine.findOne('sys_metadata_commit', { where })) as any;
         if (!target) {
             const err: any = new Error(`[commit_not_found] No commit '${request.commitId}'.`);

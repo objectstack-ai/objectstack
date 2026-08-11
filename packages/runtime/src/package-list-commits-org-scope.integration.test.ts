@@ -303,21 +303,30 @@ describe('#7779 — org-scoped listCommits must not hide env-wide commit rows', 
     const commits = await p.listCommits({ packageId: PKG, organizationId: ACTIVE_ORG });
     expect(idsOf(commits)).toEqual([c1, c2].sort());
 
-    // ⚠️ KNOWN REMAINING GAP, measured and reported on #7779 rather than fixed
-    // here — `packages/metadata-protocol/src/protocol.ts` is serialized and
-    // this card holds it for `listCommits` alone.
+    // [#7819 tier 1] ⭐ THE GAP THIS SUITE HANDED ON IS NOW CLOSED — these
+    // lines are the handoff, and they changed exactly as it predicted.
     //
-    // `revertCommit` (its own `findOne`) and `rollbackToPackageCommit` (its
-    // target lookup) still carry the byte-identical strict equality. So the
-    // planner now SEES C2 and asks `revertCommit` to undo it, and that lookup
-    // still cannot find an env-wide row: the rollback reports
-    // `success: false` naming C2, instead of the silent `success: true` it
-    // reported before. That is strictly better — the failure is now loud,
-    // attributable and non-destructive rather than invisible — but it is not
-    // the whole repair, and this assertion is here so the remaining half
-    // cannot drift unnoticed before its own card lands.
+    // What they asserted until #7819: `revertCommit` (its own `findOne`) and
+    // `rollbackToPackageCommit` (its target lookup) still carried the
+    // byte-identical strict equality, because `protocol.ts` is serialized and
+    // #7779 held it for `listCommits` alone. So the planner SAW C2 and asked
+    // `revertCommit` to undo it, and that lookup could not resolve an env-wide
+    // row — the rollback answered `success: false` naming C2. Already strictly
+    // better than the silent `success: true` of before #7814 (loud,
+    // attributable, non-destructive), but still a legitimate operation
+    // blocked; the assertion existed so the remaining half could not drift
+    // unnoticed before its own card landed.
+    //
+    // #7819 tier 1 widened both lookups to the same `$or` this suite pinned
+    // for `listCommits`, so C2 now resolves and is actually undone. The case
+    // survives as the family's END-TO-END pin: the planner sees the env-wide
+    // commit (asserted above) AND can now act on it — the only combination
+    // under which an org-scoped rollback past an env-wide publish does what it
+    // reports. Its own negative directions live in the sibling
+    // `package-revert-commit-org-scope.integration.test.ts`.
     const rollback = await p.rollbackToPackageCommit({ commitId: c1, organizationId: ACTIVE_ORG });
-    expect(rollback.success).toBe(false);
-    expect(rollback.failed.map((f: any) => f.commitId)).toEqual([c2]);
+    expect(rollback.failed).toEqual([]);
+    expect(rollback.success).toBe(true);
+    expect(rollback.revertedCommits).toEqual([c2]);
   });
 });
