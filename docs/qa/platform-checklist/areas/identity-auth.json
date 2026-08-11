@@ -278,7 +278,7 @@
       "title": "Invitation issuance honors role-scope gates: delegated_admin can invite members but cannot mint admins; a plain member cannot invite at all",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["delegated_admin org member", "plain member", "tenant admin (setup only)"],
@@ -297,7 +297,7 @@
         "as a plain member: verify the invite affordance is absent in the UI, then fire the invitation endpoint directly and capture the server refusal",
         "as the invited member address, verify the pending invitation is visible/actionable where the product surfaces it, and check its status vocabulary against the spec enum",
         "exercise cancel_invitation (or resend_invitation) on the pending row as the entitled persona and verify the status/state change via the API",
-        "read the delegable-scope surface that feeds the invite role picker: GET /api/v1/security/my-delegable-scope as the delegated_admin (strictly self-scoped, no target-user parameter — ADR-0090 D12 / ADR-0105 D8) and confirm the returned role set EXCLUDES admin-mintable roles; repeat as a plain member and confirm the scope is empty or the call is denied"
+        "read the delegable-scope surface: GET /api/v1/security/my-delegable-scope as the delegated_admin (strictly self-scoped, no target-user parameter — ADR-0090 D12 / ADR-0105 D8) and record the response shape; repeat as a plain member. NOTE (run #7663): this is a DIFFERENT axis from the invitation role — DelegableScope carries { isTenantAdmin, scopes, placeableBusinessUnitIds, assignablePositions } and has no field for a better-auth org invitation role, so do NOT score it as the role picker's allowlist"
       ],
       "acceptance": [
         {
@@ -337,16 +337,16 @@
           "evidence": "the before/after reads"
         },
         {
-          "clause": "the delegable-scope read is the picker's server truth: GET /api/v1/security/my-delegable-scope returns, for the delegated_admin, exactly the roles that principal may mint (admin-mintable roles absent) — so the UI cannot offer an admin invite it would then be refused for; a plain member's scope is empty or the call is denied",
+          "clause": "the delegable-scope read is self-scoped and stays on ITS OWN axis: GET /api/v1/security/my-delegable-scope answers for the caller only (no target-user parameter) and returns ObjectStack delegation scope — positions, permission sets, business-unit subtrees — never a better-auth org invitation role. It may therefore UNDER-report relative to what the caller can invite (an empty scope alongside a delegate who can still mint a member invitation is CORRECT), and it must never grow a role the caller cannot mint",
           "oracle": "api",
-          "verify": "the delegated_admin response's role list contains member but NOT admin; the plain member's response is empty/denied — cross-checked against the admin-role refusal proven above (client method security.describeDelegableScope, rest-route-ledger.ts)",
+          "verify": "the two /security/my-delegable-scope responses match the DelegableScope shape { isTenantAdmin, scopes[{assignablePermissionSets, businessUnitIds}], placeableBusinessUnitIds, assignablePositions } (packages/spec/src/contracts/security-service.ts:92-105) — assert on those keys, NOT on a role list; the plain member's scope is empty or the call is denied. Score the invite-role gate from clauses 1-4 (the endpoint), not from this read (client method security.describeDelegableScope, rest-route-ledger.ts)",
           "evidence": "the two /security/my-delegable-scope responses"
         }
       ],
       "negative": [
         "an admin-role invitation that returns success, or that leaves ANY row behind, is a FAIL of privilege-escalation severity — file immediately, P0-verify per RUNNER rule 7",
         "UI-only enforcement (affordance hidden but the forged request succeeds) is a FAIL — the server is the authority (ADR-0057 D10)",
-        "my-delegable-scope returning admin (or any role the caller cannot actually mint) is a FAIL — the picker would offer an invite the endpoint then refuses, and worse, a client that trusts the scope could try to mint it"
+        "my-delegable-scope OVER-reporting is a FAIL — a position, permission set or BU subtree the caller cannot actually delegate, or (were the shape ever to grow one) a role the caller cannot mint: a client that trusts the scope would offer what the endpoint then refuses. UNDER-reporting is NOT a FAIL and must not be filed as one: the endpoint answering an empty scope while the delegate can still mint a member invitation is the safe direction and the expected state on stock fixtures (run #7663 — DelegableScope has no invitation-role field at all)"
       ],
       "automated": { "kind": "e2e", "ref": "packages/qa/dogfood/test/delegated-admin-invite.dogfood.test.ts" },
       "traps": ["wrong-persona", "dispatcher-vs-hono-route"],
@@ -354,11 +354,13 @@
         "packages/qa/dogfood/test/delegated-admin-invite.dogfood.test.ts (ADR-0105 D8 / #3697; the escalation chain the role cap blocks)",
         "packages/spec/src/identity/organization.zod.ts (InvitationSchema, InvitationStatus enum)",
         "packages/rest/src/rest-route-ledger.ts (GET /api/v1/security/my-delegable-scope — security.describeDelegableScope, ADR-0090 D12 / ADR-0105 D8, self-scoped read half of the delegated-admin gate)",
+        "packages/spec/src/contracts/security-service.ts:92-105 (DelegableScope: isTenantAdmin, scopes, placeableBusinessUnitIds, assignablePositions — no invitation-role field, which is why the scope read cannot be the invite picker's allowlist)",
         "packages/spec/src/kernel/public-auth-features.ts (organization feature gates sys_invitation invite/cancel/resend actions)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item: invitation scope gates and lifecycle, pinned to the delegated-admin-invite dogfood test", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-08-08", "change": "added GET /api/v1/security/my-delegable-scope clause (delegated_admin scope excludes admin-mintable roles; plain member empty/denied) — the read half that feeds the invite role picker (PENDING-GAPS §D)", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 2, "date": "2026-08-08", "change": "added GET /api/v1/security/my-delegable-scope clause (delegated_admin scope excludes admin-mintable roles; plain member empty/denied) — the read half that feeds the invite role picker (PENDING-GAPS §D)", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 3, "date": "2026-08-11", "change": "CORRECTION from run #7663: the delegable-scope clause conflated two axes. DelegableScope models ObjectStack positions / permission sets / business units (security-service.ts:92-105) and has NO field that could carry a better-auth org invitation role, so 'the returned role set contains member but not admin' was unassertable — the run watched a delegate mint a member invitation while the endpoint reported an empty assignable set. Rewrote the clause to assert the DelegableScope shape and the self-scoping, moved the invite-role gate onto clauses 1-4 (where the endpoint is the authority), and split the negative: OVER-reporting is the FAIL, UNDER-reporting is the safe direction and must not be filed", "ref": "#7740" }
       ]
     },
     {
@@ -366,7 +368,7 @@
       "title": "Admin user-lifecycle operations (ban/unban, set-password, impersonate, create/set-role/remove, revoke-sessions) enforce, persist, and stay closed to non-admins",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["platform admin", "target user", "non-admin forger"],
@@ -385,7 +387,7 @@
         "attempt to sign in as the banned user (POST /api/v1/auth/sign-in/email) and capture the refusal",
         "unban, then verify the same sign-in now succeeds",
         "set the target's password via the admin set-password (out-of-band recovery); verify the NEW password signs in and the OLD one is refused",
-        "sign the target in to establish a LIVE session, then as admin POST /api/v1/auth/admin/revoke-user-sessions for that target; the target's very next authed request (get-session) must 401 mid-flight — the kill is immediate, not deferred to expiry",
+        "sign the target in to establish a LIVE session, then as admin POST /api/v1/auth/admin/revoke-user-sessions for that target; the target's very next PROTECTED authed request (e.g. GET /api/v1/data/<an object the target could read a moment ago>) must be refused mid-flight — the kill is immediate, not deferred to expiry. Do NOT score this off get-session's status code: better-auth answers get-session with HTTP 200 and a JSON null body when the session is gone (session-of-record.test.ts:165), so a status-only assertion passes against a fully revoked session",
         "change the target's role via POST /api/v1/auth/admin/set-role and prove the change bites: an operation the new role gates flips outcome (e.g. promote → an admin-only read now 2xx; demote → it now 403)",
         "impersonate the target from the admin surface; verify via the API that the impersonation session carries impersonated_by, and screenshot the console's impersonation state; stop impersonating and verify the admin's own session is restored",
         "POST /api/v1/auth/admin/remove-user for a throwaway user that OWNS at least one showcase row (task/note), then read that owned row back: its owner_id is cleared to null (engine referential-integrity FK clear), the row itself survives, and the owner-anchor transfer guard did NOT veto the cascade (#3023/#3048)",
@@ -418,10 +420,10 @@
           "evidence": "the two gated-request responses bracketing the set-role"
         },
         {
-          "clause": "revoke-user-sessions kills the target's LIVE session mid-flight: a session that answered get-session a moment earlier now 401s immediately after the admin revoke — not at token expiry",
+          "clause": "revoke-user-sessions kills the target's LIVE session mid-flight: a PROTECTED authed request that succeeded a moment earlier is refused immediately after the admin revoke — not at token expiry",
           "oracle": "api",
-          "verify": "get-session as the target: 2xx before the admin revoke, 401 on the very next call after it",
-          "evidence": "the before/after get-session pair"
+          "verify": "ORACLE = a protected authed request as the target (a data read the target was entitled to), 2xx before the revoke and refused on the very next call after it. get-session is NOT the oracle for this clause: better-auth's no-session convention is HTTP 200 with a JSON null body, so a 401 expectation misdescribes a correct implementation and a status-only assertion passes against a revoked session (packages/plugins/plugin-auth/src/session-of-record.test.ts:165). If get-session is captured at all, read its BODY (user null) as corroboration only",
+          "evidence": "the before/after protected-request pair (plus the get-session body, if captured)"
         },
         {
           "clause": "engine cascade exemption (§A5): removing a user who OWNS rows clears owner_id to null on those rows via the engine's referential-integrity FK clear — the owner-anchor transfer guard does NOT veto this system-context cascade write (it rides a server-DERIVED marker, __referentialFieldClear, that cannot be forged from a request), and the owned row survives with owner_id null rather than the delete aborting",
@@ -457,7 +459,7 @@
       "negative": [
         "a non-admin forged admin operation succeeding is a FAIL of the highest severity — apply RUNNER rule 7 (independent re-derivation) before acting on it",
         "a ban that hides the user in the UI while their sign-in still works is a FAIL — the sign-in refusal is the enforcement, not the list filter",
-        "revoke-user-sessions that only stops NEW logins while the existing live session keeps answering is a FAIL — the contract is an immediate kill",
+        "revoke-user-sessions that only stops NEW logins while the existing live session keeps answering a PROTECTED request is a FAIL — the contract is an immediate kill. A get-session that answers 200 after the revoke is NOT that failure (better-auth's no-session convention is 200-with-null-body); filing it as one is the false positive run #7663 corrected — read the body, or better, re-drive a protected request",
         "remove-user aborting because the owner-anchor guard vetoed the owner_id-null cascade (instead of exempting the engine FK clear) is the #3023 regression returned — FAIL; equally, a create-user that applies the GENERATED password when an explicit one was supplied is the #3031 failure — FAIL"
       ],
       "automated": { "kind": "e2e", "ref": "packages/qa/dogfood/test/admin-identity-audit-trail.dogfood.test.ts" },
@@ -468,11 +470,13 @@
         "packages/plugins/plugin-auth/src/admin-user-endpoints.ts (create-user resolvePassword: explicit password wins over generatePassword — #3031/#3033; leaves sys_user + credential sys_account)",
         "packages/plugins/plugin-security/src/security-plugin.ts (§A5 #3023 EXEMPTION: __referentialFieldClear owner_id-null cascade rides a server-derived context, the owner-anchor guard must not veto it) + security-plugin.test.ts '[#3023] … engine referential FK clear … is exempt'",
         "packages/spec/src/kernel/public-auth-features.ts (admin flag gates the sys_user lifecycle actions; SCIM forces it on — ADR-0071)",
-        "packages/qa/dogfood/test/admin-identity-audit-trail.dogfood.test.ts"
+        "packages/qa/dogfood/test/admin-identity-audit-trail.dogfood.test.ts",
+        "packages/plugins/plugin-auth/src/session-of-record.test.ts:165 (better-auth answers /get-session with HTTP 200 + a JSON null body when the session is gone — NOT 401; a status-only assertion would pass against a fully revoked session)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item: admin lifecycle operations with persistence, enforcement, attribution and both-sides gate checks", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-08-08", "change": "added admin/list-users, create-user (explicit-password-wins §E12 #3031/#3033, signs in), set-role (flips gate outcomes), remove-user, revoke-user-sessions (kills live session mid-flight), each non-admin-refused; plus the §A5 engine cascade exemption clause (delete sys_user → owned rows' owner_id set_null; owner-anchor guard does not veto the system-context cascade, #3023/#3048) (PENDING-GAPS §D + §G)", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 2, "date": "2026-08-08", "change": "added admin/list-users, create-user (explicit-password-wins §E12 #3031/#3033, signs in), set-role (flips gate outcomes), remove-user, revoke-user-sessions (kills live session mid-flight), each non-admin-refused; plus the §A5 engine cascade exemption clause (delete sys_user → owned rows' owner_id set_null; owner-anchor guard does not veto the system-context cascade, #3023/#3048) (PENDING-GAPS §D + §G)", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 3, "date": "2026-08-11", "change": "CORRECTION from run #7663: the revoke-user-sessions clause named get-session's status code as its oracle and expected 401. better-auth's no-session convention is HTTP 200 with a JSON null body (session-of-record.test.ts:165), so the literal 401 expectation misdescribes a CORRECT implementation and a status-only assertion would also pass against a live session's absence. Re-pointed the clause, the step and the negative at the authed-request oracle — a protected request the target could serve a moment earlier, refused on the very next call — with get-session's body kept as corroboration only. The session was provably gone in the run; only the oracle was wrong", "ref": "#7740" }
       ]
     },
     {
@@ -726,7 +730,7 @@
       "title": "Setup Organization page resolves the active org and drives member/invitation/team management through the better-auth org endpoints — non-admins refused server-side",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["tenant admin / org owner", "a target org member", "a non-admin org member (forger)"],
@@ -740,7 +744,8 @@
       "steps": [
         "sign in as the org owner/admin and open Setup → People & Org → Organization (nav_organization: type object, objectName sys_organization, recordId {current_org_id}, ADR-0081); screenshot the org record page and confirm {current_org_id} resolved to the session's active org (not the list fallback)",
         "confirm the record page exposes the Members / Invitations / Teams tabs with the better-auth row actions (GET list-members, list-invitations, list-teams feed them)",
-        "change a member's role: POST /api/v1/auth/organization/update-member-role (client organizations.updateMemberRole) to one of the 4-name vocabulary {owner, admin, member, guest}; read the membership back and confirm the new role",
+        "change a member's role: POST /api/v1/auth/organization/update-member-role (client organizations.updateMemberRole) to one of the ADR-0108 closed 4-name vocabulary {owner, admin, delegated_admin, member}; read the membership back and confirm the new role",
+        "prove the vocabulary is CLOSED, not merely conventional: attempt the same call with role 'guest' (and with any stack-declared position/permission-set name, e.g. showcase's 'contributor') — better-auth's role check refuses it (400 ROLE_NOT_FOUND) before any insert, and no membership/invitation row is left behind",
         "prove the role change bites: an operation the new role gates flips outcome for that member (e.g. promote to admin → an org-admin-only action now permitted; demote → refused)",
         "rename the organization: POST /api/v1/auth/organization/update (organizations.update) with a new name; re-read GET get-full-organization and confirm the rename persisted and the nav label follows",
         "remove a member: POST /api/v1/auth/organization/remove-member (organizations.removeMember); confirm the member's org-scoped access SHRINKS — a resource they could read as a member now refuses",
@@ -755,10 +760,16 @@
           "evidence": "the org-page screenshot + the get-active/get-full response"
         },
         {
-          "clause": "update-member-role writes a role from the 4-name vocabulary and it bites: the membership read shows the new role (one of owner/admin/member/guest) and a role-gated operation flips outcome accordingly",
+          "clause": "update-member-role writes a role from the ADR-0108 closed vocabulary and it bites: the membership read shows the new role (one of owner/admin/delegated_admin/member) and a role-gated operation flips outcome accordingly",
           "oracle": "api",
-          "verify": "GET list-members after update-member-role shows the new role; the same gated request returns 2xx vs 403 before/after for that member",
+          "verify": "GET list-members after update-member-role shows the new role; the same gated request returns 2xx vs 403 before/after for that member. The four names are BUILTIN_MEMBERSHIP_ROLE_OPTIONS (packages/spec/src/identity/membership-role.ts:116) — the registered select options for sys_member.role and sys_invitation.role, pinned by packages/qa/dogfood/test/membership-role-vocabulary.dogfood.test.ts",
           "evidence": "the membership read + the bracketing gated requests"
+        },
+        {
+          "clause": "the vocabulary is CLOSED at the door: role 'guest' — and any stack-declared position or permission-set name — is REFUSED (400 ROLE_NOT_FOUND) rather than stored, and leaves no row behind. `guest` is not a membership role on this platform; `delegated_admin` is",
+          "oracle": "api",
+          "verify": "the update-member-role (or invite-member) call with role 'guest' returns non-2xx with ROLE_NOT_FOUND; a follow-up sys_member/sys_invitation read shows no row. Nothing widens the option list at boot any more (ADR-0108 — no withMembershipRoleOptions, no kernel:ready re-registration)",
+          "evidence": "the refusal response + the follow-up read"
         },
         {
           "clause": "rename via organization/update persists: get-full-organization returns the new name and the surface follows",
@@ -788,18 +799,22 @@
       "negative": [
         "an org management surface where the affordance is hidden but the forged endpoint succeeds for a non-admin is a FAIL — the server is the authority (ADR-0057 D10)",
         "remove-member that drops the roster row but leaves the ex-member's org-scoped access intact is a FAIL — removal must change authorization",
-        "a role written outside the {owner, admin, member, guest} vocabulary, or a role change that does not flip any gate, is a FAIL",
+        "a role written outside the {owner, admin, delegated_admin, member} vocabulary is a FAIL — including a stored 'guest': the closed list is the write-side guardrail that makes an ungoverned capability grant unrepresentable (ADR-0108), so a 2xx that persists 'guest' is a regression of the closure, not a vocabulary difference. A role change that does not flip any gate is equally a FAIL",
         "the Organization nav landing on the raw sys_organization list because {current_org_id} did not resolve (when an active org exists) is a FAIL of the ADR-0081 wiring"
       ],
       "traps": ["wrong-persona", "dispatcher-vs-hono-route", "hydration-race"],
       "source": [
         "packages/platform-objects/src/apps/setup-nav.contributions.ts (nav_organization recordId {current_org_id}, ADR-0081; Teams/Invitations always mounted per ADR-0081 D1)",
         "packages/plugins/plugin-auth/src/auth-route-ledger.ts (organization family: update-member-role, remove-member, update, create-team, add-team-member, list-members/teams/invitations, get-active-member, get-full-organization)",
-        "packages/spec/src/identity/organization.zod.ts (MemberSchema role vocabulary: owner/admin/member/guest)",
+        "packages/spec/src/identity/membership-role.ts (BUILTIN_MEMBERSHIP_ROLES / BUILTIN_MEMBERSHIP_ROLE_OPTIONS — THE role vocabulary: owner/admin/delegated_admin/member, ADR-0108; 'nothing widens these at boot any more')",
+        "docs/adr/0108-membership-grade-is-not-a-capability-channel.md (why the list is closed: a grade decides what you can REACH, never a bundle of what you may do)",
+        "packages/qa/dogfood/test/membership-role-vocabulary.dogfood.test.ts (both enforced selects offer exactly the four; a declared position or PermissionSet name is refused at better-auth's role check — ROLE_NOT_FOUND — before any insert)",
+        "packages/platform-objects/src/identity/sys-member.object.ts + sys-invitation.object.ts (role select options: [...BUILTIN_MEMBERSHIP_ROLE_OPTIONS])",
         "packages/platform-objects/src/identity/sys-team-member.object.ts (add_team_member/remove_team_member actions → organization/add-team-member; unique team_id+user_id; requiresFeature organization)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-08", "change": "new item: Setup Organization page {current_org_id} resolution (ADR-0081) with Members/Invitations/Teams tabs, update-member-role (4-name vocab)/remove-member/rename, create-team + add-team-member → sys_team_member rows, non-admin refused server-side (PENDING-GAPS §B). Teams membership deep-tested in identity-auth.teams-bu-membership; org-member management stays here", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-08", "change": "new item: Setup Organization page {current_org_id} resolution (ADR-0081) with Members/Invitations/Teams tabs, update-member-role (4-name vocab)/remove-member/rename, create-team + add-team-member → sys_team_member rows, non-admin refused server-side (PENDING-GAPS §B). Teams membership deep-tested in identity-auth.teams-bu-membership; org-member management stays here", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-11", "change": "CORRECTION from run #7663: the role vocabulary named here was wrong. The enforced builtin set is {owner, admin, delegated_admin, member} (ADR-0108 BUILTIN_MEMBERSHIP_ROLE_OPTIONS), NOT {owner, admin, member, guest} — 'guest' is rejected 400 ROLE_NOT_FOUND and delegated_admin is legitimate. Corrected the step, the acceptance clause and the negative; added a closed-vocabulary clause (guest / a stack position / a PermissionSet name each refused, no row left behind); re-pointed source at membership-role.ts + ADR-0108 + the vocabulary dogfood pin instead of the stale organization.zod.ts doc-comment the wrong text came from (that doc-comment is fixed in the same PR)", "ref": "#7740" }
     ]
     },
     {
@@ -807,7 +822,7 @@
       "title": "Teams and the Business Unit tree: memberships land real rows, and a BU placement widens/narrows a scoped persona's read along the tree",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["org admin", "two members to place on a team", "a scope-limited persona whose read follows the BU tree"],
@@ -816,10 +831,11 @@
         "requires": [
           "the organization capability mounted (for the team half — sys_team / sys_team_member via the better-auth org endpoints)",
           "the sys_business_unit tree available (managedBy 'platform' — writable over the data API, unlike the better-auth identity tables) with at least a root company node to parent a child under",
-          "for the scope-geometry clause: a sharing/scope configuration that actually consumes the BU tree (recipient_type business_unit sharing rules, or a scope-depth persona) — if no showcase geometry consumes BU membership, run that clause blocked(fixture) and record it"
+          "for the scope-geometry clause: the showcase DOES ship a BU-consuming geometry — the `share_new_inquiries_with_field_ops` sharing rule expands the `bu_field_ops` SUBTREE (Field Operations + West/East Coast) onto showcase_inquiry, and the `showcase_field_ops_delegate` adminScope is bounded by the same tree (examples/app-showcase/src/security/sharing-rules.ts:63, seed/index.ts:200-218). The clause RUNS; it is not blocked"
         ],
         "knownGaps": [
-          "whether a stock showcase persona's read is scoped BY the business-unit tree depends on the seeded sharing/scope config; if none consumes it, the tree-widening clause is blocked(fixture) — the team-membership and BU-placement clauses still run"
+          "RETIRED (run #7663): the old gap read 'whether a stock persona's read is scoped BY the business-unit tree depends on the seeded config; if none consumes it the tree-widening clause is blocked(fixture)'. A BU-consuming geometry does ship (`share_new_inquiries_with_field_ops` → the bu_field_ops subtree), so the clause runs on stock showcase. Kept as a retired line rather than deleted so a future sweep does not re-block the clause on the retired reasoning",
+          "ZERO SEEDED PLACEMENTS — the `seed-data-thin` trap for this item, and the thing that actually costs a run: a fresh boot seeds the sys_business_unit TREE (explicit ids, so metadata can reference units statically) but ZERO `sys_business_unit_member` rows — 'users can't be seeded (they sign up), so user↔unit membership and position assignments stay runtime admin actions' (examples/app-showcase/src/data/seed/index.ts:216-218). The sharing rule therefore materializes NOTHING until the tester places someone: create the sys_business_unit_member row FIRST, then read the scoped persona's rows. An empty before/after diff with no placement made is a fixture artifact, not a geometry failure"
         ]
       },
       "steps": [
@@ -827,7 +843,7 @@
         "remove one via remove-team-member and confirm the join row is gone (the endpoint keys on the (teamId,userId) pair, not the row id)",
         "create a CHILD sys_business_unit under an existing root: POST /api/v1/data/sys_business_unit with kind (company|division|department|office|cost_center) and parent_business_unit_id = the root's id; confirm it appears in the Org Chart tree view under its parent",
         "place a user in the child BU: create a sys_business_unit_member row (business_unit_id, user_id, function_in_business_unit member|lead|deputy, is_primary); confirm the placement via a data-API read",
-        "if BU scope geometry is configured: as the scope-limited persona, record the row set visible BEFORE the placement, then place the persona (or a record they can see) into the child BU and re-read — the visible set should WIDEN or NARROW along the tree per the geometry (cross-ref identity-auth via access-security.scope-depth-asymmetry which owns the depth matrix)",
+        "BU scope geometry IS configured on stock showcase — `share_new_inquiries_with_field_ops` expands the bu_field_ops subtree onto showcase_inquiry: as the scope-limited persona, record the showcase_inquiry row set visible BEFORE any placement (expect it EMPTY of shared rows — a fresh boot seeds zero sys_business_unit_member rows, so the rule matches nobody yet), then place the persona into bu_field_ops (or a descendant) and re-read — the visible set should WIDEN along the subtree (cross-ref access-security.scope-depth-asymmetry, which owns the depth matrix)",
         "move the child BU to a different parent (re-parent parent_business_unit_id) and, if geometry consumes it, re-read the scoped persona's rows to confirm the read follows the new tree position",
         "negative: attempt the team mutations and the BU writes as a non-admin and capture the refusals"
       ],
@@ -851,10 +867,10 @@
           "evidence": "the membership read"
         },
         {
-          "clause": "when scope geometry consumes the BU tree, a placement changes a scoped persona's visible rows along the tree — widening (placed higher / into a parent that expands subordinates) or narrowing accordingly; re-parenting moves the read with it",
+          "clause": "the shipped BU geometry is load-bearing: a placement changes a scoped persona's visible rows along the tree — widening (placed higher / into a parent that expands subordinates) or narrowing accordingly; re-parenting moves the read with it",
           "oracle": "api",
-          "verify": "the scoped persona's row set before vs after the placement/re-parent differs exactly by the subtree the geometry expands; if no geometry consumes BU membership this clause is blocked(fixture) and recorded",
-          "evidence": "the before/after scoped reads (or the recorded block)"
+          "verify": "the scoped persona's row set before vs after the placement/re-parent differs exactly by the subtree `share_new_inquiries_with_field_ops` expands (bu_field_ops + descendants). The BEFORE read is expected to show none of the shared rows — a fresh boot seeds the tree but zero sys_business_unit_member rows, so the rule materializes nothing until the placement exists; make the placement, do not record a block",
+          "evidence": "the before/after scoped reads + the sys_business_unit_member row that made the difference"
         },
         {
           "clause": "team and BU mutations are admin-gated: a non-admin's create-team/add-team-member and BU writes are refused server-side",
@@ -873,10 +889,13 @@
         "packages/platform-objects/src/identity/sys-team-member.object.ts (add_team_member/remove_team_member → organization/add-team-member|remove-team-member; unique team_id+user_id)",
         "packages/platform-objects/src/identity/sys-business-unit.object.ts (canonical BU tree ADR-0057 D2; kind enum; parent_business_unit_id self-ref; org_chart tree view; managedBy 'platform' — writable over the data API)",
         "packages/platform-objects/src/identity/sys-business-unit-member.object.ts (user↔BU placement: function_in_business_unit member/lead/deputy, is_primary)",
-        "docs/qa/platform-checklist/areas/access-security.json (access-security.scope-depth-asymmetry — the depth matrix this cross-references for the tree-widening geometry)"
+        "docs/qa/platform-checklist/areas/access-security.json (access-security.scope-depth-asymmetry — the depth matrix this cross-references for the tree-widening geometry)",
+        "examples/app-showcase/src/security/sharing-rules.ts:63 (`share_new_inquiries_with_field_ops` — the shipped BU-consuming geometry: expands the bu_field_ops subtree onto showcase_inquiry)",
+        "examples/app-showcase/src/data/seed/index.ts:200-218 (the sys_business_unit tree is seeded with explicit ids; user↔unit membership — sys_business_unit_member — and position assignments are NOT seeded, they stay runtime admin actions)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-08", "change": "new item: team membership rows (create-team/add/remove) + child business-unit creation and user placement on the sys_business_unit tree, with a scope-geometry-consumes-the-tree clause cross-referencing access-security.scope-depth-asymmetry (PENDING-GAPS §C). Org-member management lives in identity-auth.org-membership-team-management", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-08", "change": "new item: team membership rows (create-team/add/remove) + child business-unit creation and user placement on the sys_business_unit tree, with a scope-geometry-consumes-the-tree clause cross-referencing access-security.scope-depth-asymmetry (PENDING-GAPS §C). Org-member management lives in identity-auth.org-membership-team-management", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-11", "change": "from run #7663: retired the 'maybe nothing consumes the BU tree' knownGap — a BU-consuming geometry DOES ship (`share_new_inquiries_with_field_ops` expands the bu_field_ops subtree onto showcase_inquiry), so the tree-widening clause runs on stock showcase instead of being blocked(fixture). Replaced it with the zero-seeded-placements note that actually costs runs: a fresh boot seeds the BU tree but ZERO sys_business_unit_member rows, so the rule materializes nothing until the tester places someone — the seed-data-thin trap for this item. Step and clause now say make the placement, expect an empty BEFORE, and do not record a block", "ref": "#7740" }
       ]
     },
     {
@@ -1117,7 +1136,7 @@
       "title": "Admin CSV identity import: password-policy auto/temporary drive per-row credentials, imported users sign in, non-admins denied",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["platform admin (running the import)", "an imported user (signing in afterwards)", "a non-admin (forger)"],
@@ -1129,7 +1148,8 @@
           "for the `auto` invite-reachable path: an email/SMS transport so an invitation can be issued (dev `log` transport is sufficient to observe it); unreachable rows fall back to a one-time password"
         ],
         "knownGaps": [
-          "observing the `auto` INVITE path needs a transport to capture the invitation; with the dev log transport it is observable, otherwise the invite-vs-fallback split is blocked(fixture). The one-time passwords (auto-fallback + all of temporary) are returned ONLY in the response — the result step must reveal them; they are never persisted"
+          "observing the `auto` INVITE path needs a transport to capture the invitation; with the dev log transport it is observable, otherwise the invite-vs-fallback split is blocked(fixture). The one-time passwords (auto-fallback + all of temporary) are returned ONLY in the response — the result step must reveal them; they are never persisted",
+          "the `auto` policy's TEMPORARY-FALLBACK branch is UNREACHABLE on `objectstack dev` (run #7663) — do not score it as a missing behaviour and do not re-derive this next sweep. `auto` falls back only when a row is neither email- nor SMS-deliverable (admin-import-users.ts:216-221), and on dev neither can be made false: service-email / service-sms always register (a log transport is the no-provider fallback, service-sms/src/sms-plugin.ts:149,169), so isEmailServiceAvailable() is a bare 'is a service wired?' check (auth-manager.ts:4054) and returns true; and isPhoneOtpDeliverable() (auth-manager.ts:4074) only returns false for an unconfigured transport when NODE_ENV === 'production', which `objectstack dev` rules out (cli/src/commands/dev.ts:194 spawns with NODE_ENV='development'; serve.ts:490 sets it under --dev). So every email row takes the invite path, and a phone-only row without the phoneNumber plugin fails PHONE_NOT_ENABLED before any plan is chosen. To exercise the fallback, boot WITHOUT an email service (or with NODE_ENV=production + an unconfigured SMS transport) — otherwise score the fallback via the `temporary` policy, which forces the same credential path for every row"
         ]
       },
       "steps": [
@@ -1145,7 +1165,7 @@
         {
           "clause": "policy `auto` splits per row: deliverable rows get an invitation, unreachable rows fall back to a one-time password revealed once — the wizard result surfaces both outcomes",
           "oracle": "api",
-          "verify": "the import response's per-row results show action + (for fallback rows) a temporaryPassword; deliverable rows show an invitation outcome (observed at the dev transport)",
+          "verify": "the import response's per-row results show action + rows[].delivery ('email' | 'sms' | 'temporary'); deliverable rows show an invitation outcome (observed at the dev transport). On `objectstack dev` the fallback HALF of this clause is not reachable — see the fixture note: every row is deliverable there, so score the invite half and record the fallback half as not-exercised-by-fixture (NOT as a defect); the fallback credential path itself is covered by the `temporary` clause below",
           "evidence": "the import response + the transport capture + the reveal screenshot"
         },
         {
@@ -1194,10 +1214,12 @@
       "traps": ["wrong-persona", "seed-data-thin"],
       "source": [
         "objectui packages/app-shell/src/views/identityImport.ts (IdentityPasswordPolicy 'auto'|'none'|'invite'|'temporary'; wraps ImportWizard onto POST /api/v1/auth/admin/import-users; ≤500-row batches; one-time passwords response-only, never persisted; upsert idempotent on email/phone)",
-        "packages/plugins/plugin-auth/src/admin-user-endpoints.ts (POST /api/v1/auth/admin/import-users — platform-admin-gated login-capable account creation; explicit-password/generatePassword resolution)"
+        "packages/plugins/plugin-auth/src/admin-user-endpoints.ts (POST /api/v1/auth/admin/import-users — platform-admin-gated login-capable account creation; explicit-password/generatePassword resolution)",
+        "packages/plugins/plugin-auth/src/admin-import-users.ts:216-221 (the `auto` per-row plan: invite where email- or SMS-deliverable, temporary only otherwise) + auth-manager.ts:4054,4074 (isEmailServiceAvailable / isPhoneOtpDeliverable — the two gates that decide it)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-08", "change": "new item: admin CSV identity import with password-policy matrix (auto/temporary/invite/none), imported-user sign-in, upsert idempotency, response-only one-time passwords, non-admin denied, grounded in objectui identityImport.ts + admin-user-endpoints.ts (PENDING-GAPS §G)", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-08", "change": "new item: admin CSV identity import with password-policy matrix (auto/temporary/invite/none), imported-user sign-in, upsert idempotency, response-only one-time passwords, non-admin denied, grounded in objectui identityImport.ts + admin-user-endpoints.ts (PENDING-GAPS §G)", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-11", "change": "from run #7663: recorded the fixture note that the `auto` policy's temporary-fallback branch cannot occur on `objectstack dev` — both transports always register (log fallback) and dev pins NODE_ENV='development', so neither deliverability gate can be made false and every row takes the invite path. The clause now says score the invite half and record the fallback half as not-exercised-by-fixture rather than as a defect, and names the boot that WOULD exercise it. Recorded so the next sweep does not re-derive it", "ref": "#7740" }
       ]
     }
   ]
