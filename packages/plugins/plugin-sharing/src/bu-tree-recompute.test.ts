@@ -24,7 +24,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { assertEngineDeleteDispatch } from '@objectstack/objectql';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { SharingService } from './sharing-service.js';
 import { SharingRuleService } from './sharing-rule-service.js';
 import { ruleRegrantQueue } from './rule-hooks.js';
@@ -118,15 +118,22 @@ function makeEngine() {
       await dispatch('afterInsert', o, { result: row, input: { data } });
       return row;
     },
-    async update(o: string, idOrData: any, dataOrOpts?: any) {
-      const data = typeof idOrData === 'object' ? idOrData : dataOrOpts;
-      const id = typeof idOrData === 'object' ? idOrData.id : idOrData;
+    // Both write verbs open with the PRODUCER's own dispatch predicate
+    // (#4550 / #5480 / #6277), never a hand-mirrored guard: a fixture that
+    // drifts to a call shape `ObjectQL` would refuse fails loudly here instead
+    // of collecting a green from gates that never ran.
+    async update(o: string, data: any, options?: any) {
+      const verdict = assertEngineUpdateDispatch(data, options);
       const t = ensure(o);
-      const i = t.findIndex((r) => r.id === id);
-      if (i >= 0) t[i] = { ...t[i], ...data };
+      const targets = verdict.kind === 'by-id'
+        ? t.filter((r) => r.id === verdict.id)
+        : t.filter((r) => matches(r, options?.where));
+      for (const r of targets) Object.assign(r, data);
       writes.push({ op: 'update', object: o });
-      await dispatch('afterUpdate', o, { result: t[i], input: { id, data } });
-      return t[i];
+      for (const r of targets) {
+        await dispatch('afterUpdate', o, { result: r, input: { id: r.id, data } });
+      }
+      return verdict.kind === 'by-id' ? (targets[0] ?? null) : targets.length;
     },
     async delete(o: string, opts?: any) {
       assertEngineDeleteDispatch(opts);
@@ -199,7 +206,22 @@ describe('#7729 business-unit graph writes recompute BU-tree sharing rules', () 
     engine._writes.length = 0; // only writes AFTER setup are interesting
   });
 
+  /**
+   * Release for the queue gate the security pin installs.
+   *
+   * Held HERE rather than inside that test, because the queue is module-scoped
+   * and shared by every test in this file: a gate left shut by a FAILING
+   * assertion blocks the chain forever, and every later test then dies in
+   * `whenIdle()` with a timeout. Measured during this fix's own ablation — the
+   * one clear assertion failure arrived as 15 timeouts, most of them in tests
+   * the ablation should not have touched at all. Releasing unconditionally
+   * here keeps a real regression legible as the one test it actually is.
+   */
+  let releaseGate: (() => void) | null = null;
+
   afterEach(async () => {
+    releaseGate?.();
+    releaseGate = null;
     // The re-grant queue is module-scoped; never leak a pending pass.
     await ruleRegrantQueue.whenIdle();
   });
@@ -216,8 +238,7 @@ describe('#7729 business-unit graph writes recompute BU-tree sharing rules', () 
       // Block the asynchronous re-grant queue so nothing it does can be
       // mistaken for the synchronous revoke. If the grant is gone while this
       // gate is shut, the revocation happened on the write path.
-      let release!: () => void;
-      const gate = new Promise<void>((r) => { release = r; });
+      const gate = new Promise<void>((r) => { releaseGate = r; });
       ruleRegrantQueue.enqueue(() => gate);
 
       await engine.update('sys_business_unit', {
@@ -228,7 +249,8 @@ describe('#7729 business-unit graph writes recompute BU-tree sharing rules', () 
       expect(grantsFor('priya')).toBe(0);       // was 1 before this fix
       expect(sharedRecordWrites()).toBe(0);     // …and nobody touched the record
 
-      release();
+      releaseGate!();
+      releaseGate = null;
       await ruleRegrantQueue.whenIdle();
       expect(grantsFor('priya')).toBe(0);       // still 0 once the queue drains
     },
@@ -383,6 +405,11 @@ describe('#7729 non-regression — rules that do not read the BU tree are left a
 
   it('an `is_primary` flip on a member row skips it too — that column drives the projection, not sharing', async () => {
     seedRule('srule_bu', 'unit_and_subordinates', 'bu_root');
+    // The row must EXIST, or the hook never dispatches and this passes for the
+    // wrong reason — a phantom check of the narrowing rather than a check.
+    engine.seed('sys_business_unit_member', [
+      { id: 'bum_x', business_unit_id: 'bu_west', user_id: 'priya', is_primary: true },
+    ]);
     await engine.update('sys_business_unit_member', { id: 'bum_x', is_primary: false });
     await ruleRegrantQueue.whenIdle();
     expect(revokeSpy).not.toHaveBeenCalled();
