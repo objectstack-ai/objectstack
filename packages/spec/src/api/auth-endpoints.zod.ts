@@ -24,6 +24,7 @@ import { z } from 'zod';
  * Based on better-auth's endpoint structure.
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
 export const AuthEndpointPaths = {
   // Email/Password Authentication
   signInEmail: '/sign-in/email',
@@ -191,12 +192,43 @@ export const EmailPasswordConfigPublicSchema = lazySchema(() => z.object({
 }));
 
 /**
+ * `passkeys` / `magicLink` were withdrawn from the `/api/v1/auth/config` payload
+ * in #7481 (maintainer ruling 2026-08-11) — see
+ * `PUBLIC_AUTH_FEATURES_NOT_ADVERTISED` in `kernel/public-auth-features.ts` for
+ * the standing record and the condition under which they come back.
+ *
+ * The two prescriptions differ because the two capabilities differ: nothing at
+ * all is behind `passkeys`, while `magicLink`'s better-auth endpoints are live
+ * and only their advertisement was withdrawn. A single shared string would have
+ * told half the readers something false.
+ */
+const PASSKEYS_UNADVERTISED =
+  '`features.passkeys` was removed from GET /api/v1/auth/config in @objectstack/spec 17 '
+  + '(#7481, ADR-0049) — it was served from introduction and consumed by nothing: no login '
+  + 'UI in any client reads it, and no better-auth passkey plugin is wired behind it, so a '
+  + 'deployer who set `plugins.passkeys: true` flipped a switch that changed no behaviour '
+  + 'anywhere. Delete the key. There is no replacement flag to read: passkey sign-in is not '
+  + 'a capability this platform offers yet. It returns to this payload in the change that '
+  + 'ships the login UI (objectui#4179), classified in PUBLIC_AUTH_FEATURES again at that '
+  + 'point — do not re-add it ahead of a consumer.';
+
+const MAGIC_LINK_UNADVERTISED =
+  '`features.magicLink` was removed from GET /api/v1/auth/config in @objectstack/spec 17 '
+  + '(#7481, ADR-0049) — the ADVERTISEMENT was inert, not the capability: no client renders '
+  + 'a magic-link sign-in affordance off this flag, so it only told a deployer that a UI '
+  + 'existed when none did. Delete the key. The server side is unchanged and still yours to '
+  + 'call: `AuthPluginConfig.plugins.magicLink` wires better-auth\'s magic-link plugin, and '
+  + '`/api/v1/auth/magic-link/send` + `/magic-link/verify` answer exactly as before — drive '
+  + 'them from your own UI, or wait for objectui#4179, which restores this flag along with '
+  + 'the login UI that reads it.';
+
+/**
  * Auth Features Configuration (Public)
  */
 export const AuthFeaturesConfigSchema = lazySchema(() => z.object({
   twoFactor: z.boolean().default(false).describe('Two-factor authentication enabled'),
-  passkeys: z.boolean().default(false).describe('Passkey/WebAuthn support enabled'),
-  magicLink: z.boolean().default(false).describe('Magic link login enabled'),
+  passkeys: retiredKey(PASSKEYS_UNADVERTISED),
+  magicLink: retiredKey(MAGIC_LINK_UNADVERTISED),
   organization: z.boolean().default(false).describe('Multi-tenant organization support enabled'),
   ssoEnforced: z.boolean().optional().describe(
     'SSO-only login enforced: the UI hides the local password form + self-registration (a break-glass "use a password" link remains)',

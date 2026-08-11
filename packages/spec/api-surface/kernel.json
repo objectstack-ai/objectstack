@@ -257,6 +257,7 @@
     "PROTOCOL_VERSION (const)",
     "PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS (const)",
     "PUBLIC_AUTH_FEATURES (const)",
+    "PUBLIC_AUTH_FEATURES_NOT_ADVERTISED (const)",
     "PUBLIC_AUTH_FEATURE_NAMES (const)",
     "PackageArtifact (type)",
     "PackageArtifactParsed (type)",

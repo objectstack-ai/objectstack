@@ -595,7 +595,9 @@ const response = await fetch('http://localhost:3000/api/v1/auth/two-factor/verif
 > **Not yet implemented.** Passkey/WebAuthn support is not currently wired into
 > `AuthPlugin`. The `plugins: { passkeys: true }` flag is accepted but no
 > passkey plugin is registered, so `/passkey/*` endpoints are not available.
-> This section will be updated once passkey support ships.
+> Since nothing is behind it, `GET /api/v1/auth/config` stopped reporting a
+> `features.passkeys` flag in protocol 17 (#7481) — there is no capability for
+> a client to detect. This section will be updated once passkey support ships.
 
 ### Magic Links
 
@@ -610,6 +612,14 @@ new AuthPlugin({
   }
 })
 ```
+
+> **Server-side only, for now.** The endpoints below work whenever
+> `plugins.magicLink` is on, but no shipped login UI drives them — so
+> `GET /api/v1/auth/config` stopped advertising a `features.magicLink` flag in
+> protocol 17 (#7481): a served flag no client reads told deployers a sign-in
+> option existed that users could never reach. Call the endpoints from your own
+> UI. The flag returns alongside the built-in magic-link login screen
+> (objectui#4179).
 
 #### Send Magic Link
 

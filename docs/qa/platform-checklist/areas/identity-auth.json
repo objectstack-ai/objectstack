@@ -161,7 +161,7 @@
           "an SMS service (@objectstack/service-sms) is required ONLY to make phone-OTP pass; its ABSENCE is itself a tested state (loud NOT_SUPPORTED)"
         ],
         "knownGaps": [
-          "magic-link and passkeys: the server flags exist (AuthPluginConfigSchema.magicLink/passkeys) but objectui ships NO login UI for either — advertised-but-unconsumed, tracked in objectui#2514. Run these variants as blocked(dependency, objectui#2514) at the browser lane; the flag-advertisement clause still applies",
+          "magic-link and passkeys: the AuthPluginConfigSchema flags still exist, but objectui ships NO login UI for either, so #7481 withdrew both from the /api/v1/auth/config payload (protocol 17) — features.magicLink / features.passkeys are now ABSENT by design, not false. Run these variants as blocked(dependency, objectui#4179) at the browser lane. The flag-advertisement clause inverts here: seeing either key in the payload is itself a FAIL now, and magic-link's endpoints (/magic-link/send, /magic-link/verify) stay live and drivable without a UI",
           "the two spec files disagree on the device-flow paths (packages/spec/src/api/auth-endpoints.zod.ts: /device/request, /device/token, /device/approve vs packages/spec/src/system/auth-config.zod.ts: /device/code, /device/token, /device, /device/approve, /device/deny) — the LIVE better-auth surface serves POST /device/code, /device/token, /device/approve, /device/deny and GET /device (auth-route-ledger.ts BETTER_AUTH_MOUNTED_SURFACE); trust the live routes and file the doc divergence",
           "the password-reset path names ALSO diverge from the spec: AuthEndpointPaths.forgetPassword = '/forget-password' but the live catch-all serves POST /request-password-reset, POST /reset-password and GET /reset-password/:token (BETTER_AUTH_MOUNTED_SURFACE) — trust the live routes (this is the same divergence identity-auth.self-service-password-reset drives)"
         ]
@@ -244,7 +244,8 @@
       "negative": [
         "a silent 200 on any disabled method's endpoint is a FAIL — a gate that only hides the button is not a gate",
         "phone OTP hanging or returning 2xx with no SMS service is a FAIL (the spec's own contract is 'loudly NOT_SUPPORTED')",
-        "ticking magic-link or passkeys as pass at the browser lane is a false positive — there is no UI to drive (objectui#2514); the honest verdict is blocked",
+        "ticking magic-link or passkeys as pass at the browser lane is a false positive — there is no UI to drive (objectui#4179); the honest verdict is blocked",
+        "features.magicLink or features.passkeys appearing in the /api/v1/auth/config payload is a FAIL — #7481 withdrew both until objectui#4179 ships the UI, so their return means the stop-advertising posture regressed",
         "a discovery document whose issuer/endpoints point at a base the server does not actually mount is a FAIL — a wrong .well-known breaks every downstream RP/relying party silently"
       ],
       "variants": [
@@ -255,8 +256,8 @@
         "social OAuth (socialProviders map, per-provider enabled)",
         "device authorization grant (RFC 8628 — CLI/TV login)",
         "two-factor (server-driven challenge, ADR-0069)",
-        "magic link (flag exists; no login UI — blocked, objectui#2514)",
-        "passkeys (flag exists; no login UI — blocked, objectui#2514)"
+        "magic link (server endpoints live; no login UI and no advertised flag since #7481 — blocked, objectui#4179)",
+        "passkeys (plugin flag accepted but nothing wired; no advertised flag since #7481 — blocked, objectui#4179)"
       ],
       "automated": { "kind": "e2e", "ref": "packages/qa/dogfood/test/oidc-authorization-code-flow.dogfood.test.ts" },
       "traps": ["hydration-race", "dispatcher-vs-hono-route", "wrong-persona"],
@@ -264,7 +265,7 @@
         "packages/spec/src/system/auth-config.zod.ts (AuthPluginConfigSchema: phoneNumber/twoFactor/deviceAuthorization/magicLink/passkeys; socialProviders; oidcProviders; EmailAndPasswordConfigSchema)",
         "packages/spec/src/api/auth-endpoints.zod.ts (AuthEndpointPaths; AuthFeaturesConfigSchema; device-flow response schemas)",
         "packages/plugins/plugin-auth/src/auth-route-ledger.ts (BETTER_AUTH_MOUNTED_SURFACE: the live change-email/delete-user + /.well-known/* rows; auth-plugin.ts mounts the two discovery docs at app root)",
-        "packages/spec/src/kernel/public-auth-features.ts (flag semantics, gated inputs, objectui#2513/#2514 known gaps)",
+        "packages/spec/src/kernel/public-auth-features.ts (flag semantics, gated inputs, the objectui#2513 known gap, and PUBLIC_AUTH_FEATURES_NOT_ADVERTISED — the reserved-but-unserved record for magicLink/passkeys)",
         "packages/qa/dogfood/test/oidc-authorization-code-flow.dogfood.test.ts"
       ],
       "history": [

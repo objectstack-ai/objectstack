@@ -3455,10 +3455,15 @@ export class AuthManager {
 
     const twoFactorFromEnv = readBooleanEnv('OS_AUTH_TWO_FACTOR');
 
+    // [#7481, maintainer ruling 2026-08-11] `passkeys` / `magicLink` are
+    // deliberately NOT advertised here — see PUBLIC_AUTH_FEATURES_NOT_ADVERTISED
+    // in @objectstack/spec/kernel. Both were served from introduction with no
+    // login UI at any consumer, so a deployer could flip a flag that did nothing
+    // anywhere (declared = enforced). They come back with the UI (objectui#4179).
+    // `magicLink`'s server endpoints are unaffected: `plugins.magicLink` still
+    // wires better-auth's magic-link plugin in buildPluginList().
     const features = {
       twoFactor: twoFactorFromEnv ?? pluginConfig.twoFactor ?? false,
-      passkeys: pluginConfig.passkeys ?? false,
-      magicLink: pluginConfig.magicLink ?? false,
       organization: pluginConfig.organization ?? true,
       multiOrgEnabled,
       // ADR-0105 D1 — WHICH posture is in force. `multiOrgEnabled` stays the

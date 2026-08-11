@@ -98,26 +98,6 @@ export const PUBLIC_AUTH_FEATURES = {
       'Login-surface 2FA challenge is server-driven remediation (ADR-0069), ' +
       'so the flag is intentionally unread by objectui LoginForm.',
   },
-  passkeys: {
-    surface: 'login',
-    semantics: 'opt-in',
-    exempt: {
-      reason:
-        'No spec input to gate. Typed in objectui (auth/src/types.ts) but no ' +
-        'passkey UI exists yet — advertised-but-unconsumed gap tracked in ' +
-        'objectui#2514 (#2874 P2②).',
-    },
-  },
-  magicLink: {
-    surface: 'login',
-    semantics: 'opt-in',
-    exempt: {
-      reason:
-        'No spec input to gate. Typed in objectui (auth/src/types.ts) but no ' +
-        'magic-link UI exists yet — advertised-but-unconsumed gap tracked in ' +
-        'objectui#2514 (#2874 P2②).',
-    },
-  },
   organization: {
     surface: 'crud',
     semantics: 'default-on',
@@ -267,6 +247,33 @@ export const PUBLIC_AUTH_FEATURE_NAMES = Object.keys(PUBLIC_AUTH_FEATURES) as [
  * belongs to.
  */
 export const PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS = ['termsUrl', 'privacyUrl', 'tenancyPosture'] as const;
+
+/**
+ * Capabilities that are RESERVED but deliberately **not advertised** — the
+ * server-side plugin flag may exist in `AuthPluginConfig`, but nothing is
+ * published on `/api/v1/auth/config` because no consumer can act on it.
+ *
+ * Why this list exists rather than a registry entry: {@link PUBLIC_AUTH_FEATURES}
+ * classifies flags that ARE served (the plugin-auth drift guard asserts key-set
+ * equivalence with `getPublicConfig()`), so an unserved flag has no honest entry
+ * shape there — and leaving it served-but-exempt is precisely what this list
+ * records the retirement of. Membership here is the *negative* record: these
+ * names must be absent from {@link PUBLIC_AUTH_FEATURES}, absent from the
+ * `features` payload, and therefore un-gateable via `requiresFeature`.
+ *
+ * - `passkeys` / `magicLink` (#7481, maintainer ruling 2026-08-11): both were
+ *   advertised from introduction with no login UI at either consumer — an
+ *   advertised-but-unconsumed capability, so a deployer could flip a flag that
+ *   did nothing anywhere. objectui#2514 documented them as reserved on the
+ *   consumer side (objectui PR #4182) and closed; the login UI that would make
+ *   them real is scoped as **objectui#4179**. They return to
+ *   {@link PUBLIC_AUTH_FEATURES} in the change that ships that UI — not before.
+ *
+ * `magicLink` remains a live **server** capability (`AuthPluginConfig.plugins.magicLink`
+ * still wires better-auth's magic-link endpoints); what was withdrawn is the
+ * public advertisement of it, not the endpoints.
+ */
+export const PUBLIC_AUTH_FEATURES_NOT_ADVERTISED = ['passkeys', 'magicLink'] as const;
 
 /**
  * The canonical CEL gate for a flag, per its default semantics:

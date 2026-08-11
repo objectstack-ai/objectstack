@@ -1762,6 +1762,32 @@ const step17: MigrationStep = {
         + 'gated by this refusal, so repair stays possible).',
     },
     {
+      id: 'auth-config-unadvertised-reserved-features',
+      surface: 'api.authConfig.features.passkeys / api.authConfig.features.magicLink',
+      replacement: '(removed — no replacement flag; the capabilities are not advertised)',
+      reason:
+        'Both flags were served by `GET /api/v1/auth/config` from introduction and read by no '
+        + 'client: no login UI anywhere renders a passkey or magic-link affordance off them, so '
+        + 'the payload advertised two sign-in methods a user could never reach, and a deployer '
+        + 'setting `plugins.passkeys` / `plugins.magicLink` flipped a switch with no observable '
+        + 'effect (ADR-0049 enforce-or-remove; maintainer ruling 2026-08-11 on #7481 chose remove '
+        + 'over keep-as-reserved). The two are not equally empty: nothing at all is wired behind '
+        + '`passkeys`, whereas `magicLink`\'s better-auth endpoints are live and only their '
+        + 'advertisement was withdrawn. This is a RESPONSE surface — nobody authors or persists '
+        + 'an `AuthFeaturesConfig` — so there is no source for the chain to rewrite; the schema '
+        + 'tombstones both keys via retiredKey() and consumers drop their read. The withdrawal is '
+        + 'conditional: both return to the payload in the change that ships the login UI '
+        + '(objectui#4179). ADR-0049, #7481.',
+      acceptanceCriteria:
+        'No client reads `features.passkeys` or `features.magicLink` off `/api/v1/auth/config`; '
+        + 'a client that gated UI on either now treats the capability as absent rather than '
+        + 'reading `undefined` as false by accident, and constructing an `AuthFeaturesConfig` '
+        + 'with either key fails to parse with its own prescription instead of being silently '
+        + 'stripped. Magic-link deployments keep working: `plugins.magicLink` still mounts '
+        + '`/api/v1/auth/magic-link/send` and `/magic-link/verify`, which a custom UI may call '
+        + 'directly.',
+    },
+    {
       id: 'batch-options-validate-only-retired',
       surface: 'api.batchOptions.validateOnly',
       replacement: '(removed — no dry-run today; open an issue to design a no-commit batch preview)',
@@ -3784,6 +3810,37 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
     // FILE — never by editing between the markers, which is generated.
     // <os-generated retired-key:17>
+    // #7481 — the sibling of `api/AuthFeaturesConfig:passkeys`, retired in the same
+    // maintainer ruling (2026-08-11) and for the same reason, but with one
+    // difference a reader of this table must not lose: what was inert here is the
+    // ADVERTISEMENT, not the capability. `AuthPluginConfig.plugins.magicLink` still
+    // wires better-auth's magic-link plugin and `/api/v1/auth/magic-link/{send,verify}`
+    // still answer — no client just renders anything off the served flag, so the
+    // flag alone was the false promise. The prescription says so explicitly rather
+    // than reusing its sibling's string.
+    //
+    // Same response-surface disposition as its sibling: no D2 conversion (nothing
+    // authors an `AuthFeaturesConfig`), prescription carried by this tombstone plus
+    // the D3 semantic entry `auth-config-unadvertised-reserved-features`.
+    'api/AuthFeaturesConfig:magicLink',
+    // #7481 — the `/api/v1/auth/config` `features` payload stops advertising the
+    // two capabilities no client can act on (maintainer ruling 2026-08-11,
+    // declared = enforced: a deployer must not be able to flip a flag that does
+    // nothing anywhere). `passkeys` is the emptier of the pair — no login UI reads
+    // it AND no better-auth passkey plugin is wired behind it.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the same reason
+    // as the `api/ListNotifications{Request,Response}:cursor` pair: this is a
+    // RESPONSE surface — the server mints it on every `GET /auth/config` and
+    // nobody authors or persists an `AuthFeaturesConfig` — so there is no source
+    // for `os migrate meta` to rewrite. The prescription reaches consumers as the
+    // D3 semantic entry `auth-config-unadvertised-reserved-features` plus this
+    // tombstone, the `EnhancedApiError.fieldErrors` disposition.
+    //
+    // The withdrawal is conditional, not permanent: the flags return in the change
+    // that ships the login UI (objectui#4179). Until then the standing record is
+    // `PUBLIC_AUTH_FEATURES_NOT_ADVERTISED` in `kernel/public-auth-features.ts`.
+    'api/AuthFeaturesConfig:passkeys',
     // #6361 — the notification-inbox pagination key, tombstoned on BOTH halves
     // of `GET /api/v1/notifications` because one capability is never half-
     // deleted (maintainer ruling 2026-08-07, ruled jointly with #6363). Two

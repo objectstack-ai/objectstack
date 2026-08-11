@@ -5,6 +5,7 @@ import {
   AuthEndpointPaths,
   AuthEndpointSchema,
   AuthEndpointAliases,
+  AuthFeaturesConfigSchema,
   EndpointMapping,
   getAuthEndpointUrl,
 } from './auth-endpoints.zod';
@@ -98,6 +99,35 @@ describe('AuthEndpointSchema', () => {
         description: 'Sign in with email and password',
       })
     ).toThrow();
+  });
+});
+
+// #7481 — the two flags withdrawn from `/api/v1/auth/config` by the maintainer
+// ruling of 2026-08-11. `AuthFeaturesConfigSchema` is not `.strict()`, so a
+// plain deletion would have Zod SILENTLY STRIP a key a client kept sending and
+// leave nothing to grep (#3733, ADR-0104) — the tombstone is what makes the
+// withdrawal audible, so it is pinned on both legs: the prescription a writer
+// hits, and the absence a reader gets.
+describe('AuthFeaturesConfig retired flags (#7481)', () => {
+  const valid = { twoFactor: false, organization: true };
+
+  it('rejects `passkeys` with its own prescription, naming the missing consumer', () => {
+    expect(() => AuthFeaturesConfigSchema.parse({ ...valid, passkeys: true }))
+      .toThrow(/`features\.passkeys` was removed.*Delete the key.*objectui#4179/s);
+  });
+
+  it('rejects `magicLink` with a prescription that keeps its endpoints alive', () => {
+    // Deliberately NOT the same string as passkeys: magic-link's better-auth
+    // endpoints still answer, and a shared prescription would tell a magic-link
+    // deployer to stop using a capability that was never withdrawn.
+    expect(() => AuthFeaturesConfigSchema.parse({ ...valid, magicLink: true }))
+      .toThrow(/`features\.magicLink` was removed.*magic-link\/send.*objectui#4179/s);
+  });
+
+  it('does not serve either key on a clean parse', () => {
+    const parsed = AuthFeaturesConfigSchema.parse(valid);
+    expect(parsed).not.toHaveProperty('passkeys');
+    expect(parsed).not.toHaveProperty('magicLink');
   });
 });
 

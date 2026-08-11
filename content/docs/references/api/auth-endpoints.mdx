@@ -55,8 +55,8 @@ const result = AuthEndpointSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **twoFactor** | `boolean` | ✅ | Two-factor authentication enabled |
-| **passkeys** | `boolean` | ✅ | Passkey/WebAuthn support enabled |
-| **magicLink** | `boolean` | ✅ | Magic link login enabled |
+| **passkeys** | `never` | optional | [REMOVED] `features.passkeys` was removed from GET /api/v1/auth/config in @objectstack/spec 17 (#7481, ADR-0049) — it was served from introduction and consumed by nothing: no login UI in any client reads it, and no better-auth passkey plugin is wired behind it, so a deployer who set `plugins.passkeys: true` flipped a switch that changed no behaviour anywhere. Delete the key. There is no replacement flag to read: passkey sign-in is not a capability this platform offers yet. It returns to this payload in the change that ships the login UI (objectui#4179), classified in PUBLIC_AUTH_FEATURES again at that point — do not re-add it ahead of a consumer. |
+| **magicLink** | `never` | optional | [REMOVED] `features.magicLink` was removed from GET /api/v1/auth/config in @objectstack/spec 17 (#7481, ADR-0049) — the ADVERTISEMENT was inert, not the capability: no client renders a magic-link sign-in affordance off this flag, so it only told a deployer that a UI existed when none did. Delete the key. The server side is unchanged and still yours to call: `AuthPluginConfig.plugins.magicLink` wires better-auth's magic-link plugin, and `/api/v1/auth/magic-link/send` + `/magic-link/verify` answer exactly as before — drive them from your own UI, or wait for objectui#4179, which restores this flag along with the login UI that reads it. |
 | **organization** | `boolean` | ✅ | Multi-tenant organization support enabled |
 | **ssoEnforced** | `boolean` | optional | SSO-only login enforced: the UI hides the local password form + self-registration (a break-glass "use a password" link remains) |
 | **phoneNumber** | `boolean` | optional | Phone-number sign-in enabled (phone + password, #2766 V1.5) |
@@ -155,7 +155,7 @@ This schema accepts one of the following structures:
 | :--- | :--- | :--- | :--- |
 | **emailPassword** | `{ enabled: boolean; disableSignUp?: boolean; requireEmailVerification?: boolean }` | ✅ | Email/password authentication config |
 | **socialProviders** | `{ id: string; name: string; enabled: boolean; type: Enum<'social' \| 'oidc'> }[]` | ✅ | Available social/OAuth providers |
-| **features** | `{ twoFactor: boolean; passkeys: boolean; magicLink: boolean; organization: boolean; … }` | ✅ | Enabled authentication features |
+| **features** | `{ twoFactor: boolean; organization: boolean; ssoEnforced?: boolean; phoneNumber?: boolean; … }` | ✅ | Enabled authentication features |
 
 
 ---

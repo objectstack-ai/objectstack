@@ -17,6 +17,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS,
+  PUBLIC_AUTH_FEATURES_NOT_ADVERTISED,
   PUBLIC_AUTH_FEATURE_NAMES,
   PUBLIC_AUTH_FEATURES,
 } from '@objectstack/spec/kernel';
@@ -62,6 +63,22 @@ describe('public feature-flag registry drift guard (#2874)', () => {
     const booleans = (f: Record<string, unknown>) =>
       Object.keys(f).filter((k) => typeof f[k] === 'boolean').sort();
     expect(booleans(variant)).toEqual(booleans(defaults));
+  });
+
+  // #7481. The key-set equivalence above already fails if one of these is
+  // re-added to BOTH sides — this case covers the shape that ruling actually
+  // withdrew: the flag served because a deployer turned the plugin flag ON.
+  // With the two dropped from the registry, `servedFeatures()` at defaults says
+  // nothing about `plugins: { passkeys: true }`, which is exactly the
+  // configuration that used to advertise a capability with no consumer.
+  it('reserved-but-unadvertised capabilities stay out of the payload even when their plugin flag is on', () => {
+    const features = servedFeatures({
+      plugins: { passkeys: true, magicLink: true },
+    } as never);
+    for (const name of PUBLIC_AUTH_FEATURES_NOT_ADVERTISED) {
+      expect(features, `features.${name} must not be advertised until objectui#4179 ships its UI`)
+        .not.toHaveProperty(name);
+    }
   });
 
   it('registry default semantics match the served defaults', () => {

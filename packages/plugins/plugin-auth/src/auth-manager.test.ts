@@ -2308,8 +2308,10 @@ describe('AuthManager', () => {
       // Should include features
       expect(config.features).toEqual({
         twoFactor: true,
-        passkeys: false,
-        magicLink: false,
+        // [#7481] `passkeys` / `magicLink` are deliberately absent — withdrawn
+        // from the payload by the maintainer ruling of 2026-08-11 until
+        // objectui#4179 ships a login UI that reads them. `toEqual` is an exact
+        // match, so this asserts their absence rather than merely omitting them.
         organization: true,
         oidcProvider: false,
         sso: false,

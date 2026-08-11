@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   PUBLIC_AUTH_FEATURES,
+  PUBLIC_AUTH_FEATURES_NOT_ADVERTISED,
   PUBLIC_AUTH_FEATURE_NAMES,
   featureGatePredicate,
   lowerRequiresFeature,
@@ -15,18 +16,16 @@ import {
 describe('PUBLIC_AUTH_FEATURES registry', () => {
   const entries = Object.entries(PUBLIC_AUTH_FEATURES);
 
-  it('classifies all 13 public flags', () => {
-    expect(PUBLIC_AUTH_FEATURE_NAMES).toHaveLength(13);
+  it('classifies all 11 public flags', () => {
+    expect(PUBLIC_AUTH_FEATURE_NAMES).toHaveLength(11);
     expect([...PUBLIC_AUTH_FEATURE_NAMES].sort()).toEqual(
       [
         'admin',
         'degradedTenancy',
         'deviceAuthorization',
-        'magicLink',
         'multiOrgEnabled',
         'oidcProvider',
         'organization',
-        'passkeys',
         'phoneNumber',
         'phoneNumberOtp',
         'sso',
@@ -34,6 +33,20 @@ describe('PUBLIC_AUTH_FEATURES registry', () => {
         'twoFactor',
       ].sort(),
     );
+  });
+
+  // #7481. The negative record has to be pinned as a negative: an entry in
+  // PUBLIC_AUTH_FEATURES is what makes a flag servable AND `requiresFeature`-
+  // gateable, so re-adding one of these ahead of its UI is exactly the
+  // regression the ruling withdrew them to prevent — and it would otherwise be
+  // a green two-line change.
+  it('reserved-but-unadvertised capabilities are absent from the registry', () => {
+    expect([...PUBLIC_AUTH_FEATURES_NOT_ADVERTISED].sort()).toEqual(['magicLink', 'passkeys']);
+    for (const name of PUBLIC_AUTH_FEATURES_NOT_ADVERTISED) {
+      expect(PUBLIC_AUTH_FEATURES, `${name} must not be classified while nothing consumes it`)
+        .not.toHaveProperty(name);
+      expect(PUBLIC_AUTH_FEATURE_NAMES as readonly string[]).not.toContain(name);
+    }
   });
 
   it.each(entries)('%s declares gatedInputs XOR an exemption reason', (_name, entry) => {

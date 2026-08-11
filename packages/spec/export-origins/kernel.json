@@ -257,6 +257,7 @@
     "PROTOCOL_VERSION": "src/kernel/protocol-version.ts#PROTOCOL_VERSION (const)",
     "PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS": "src/kernel/public-auth-features.ts#PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS (const)",
     "PUBLIC_AUTH_FEATURES": "src/kernel/public-auth-features.ts#PUBLIC_AUTH_FEATURES (const)",
+    "PUBLIC_AUTH_FEATURES_NOT_ADVERTISED": "src/kernel/public-auth-features.ts#PUBLIC_AUTH_FEATURES_NOT_ADVERTISED (const)",
     "PUBLIC_AUTH_FEATURE_NAMES": "src/kernel/public-auth-features.ts#PUBLIC_AUTH_FEATURE_NAMES (const)",
     "PackageArtifact": "src/kernel/package-artifact.zod.ts#PackageArtifact (type)",
     "PackageArtifactParsed": "src/kernel/package-artifact.zod.ts#PackageArtifactParsed (type)",
