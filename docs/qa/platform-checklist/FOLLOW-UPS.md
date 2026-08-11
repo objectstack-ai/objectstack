@@ -26,6 +26,7 @@ gaps. The one security-sensitive finding (D1) has since been fixed in #6683.
 | D9 | **`expand` discloses a record the caller is 403'd from reading** — the `#2850` expand waiver keys on the wrong axis, so it fires for *every* referenced object including ones the caller holds no grant on. | packages/plugins/plugin-security/src/security-plugin.ts (`expandSkipCrud`) | api-backend.query-contract-matrix clause 4 | **SECURITY — write-up below (§1a)** |
 | D10 | **Encrypted settings are echoed in plaintext on read** — storage is correct (`sys_secret`, aes-256-gcm) but the REST read decrypts and returns the secret verbatim, and repeats it in `cascadeChain`. | packages/services/service-settings/src/{settings-service.ts,settings-routes.ts} | platform-core.settings-hub-roundtrip clause 7 | **SECURITY (admin-gated) — write-up below (§1a)** |
 | D11 | **By-id WRITE is not gated by record visibility** — a low-privilege user PATCHes records they cannot read (404 by id, absent from list) on three objects. Two conformance rows claim this is `enforced`. | packages/plugins/plugin-security/src/security-plugin.ts (by-id write pre-image gate, `assertControlledByParentWrite`) | access-security.rls-both-sides c5 + owd-sharing-matrix c4 (one cause, two items) | **SECURITY — write-up below (§1a)** |
+| D12 | **Webhook HMAC signing secrets persisted in cleartext** — every `sys_http_delivery` row stores the subscriber's signing key verbatim, readable over the ordinary data API; the sibling datasource path splits its secret out correctly. | packages/plugins/plugin-webhooks (`sys_http_delivery.signing_secret`, outbox writer) | integration-system.webhook-lifecycle (adjacent observation, held back from the run card) | **SECURITY (admin-gated) — write-up below (§1a)** |
 
 ### §1a — Security-sensitive write-ups (delivered 2026-08-11, per the maintainer ruling on #7463)
 
@@ -97,6 +98,42 @@ masked marker instead of the value for any specifier that is `encrypted` or
 `type: 'password'`, and scrub `cascadeChain` the same way. If some internal caller genuinely
 needs the plaintext, that should be an explicit service-layer call, not the namespace read
 the settings UI uses.
+
+#### D12 — Webhook HMAC signing secrets are persisted in cleartext on every delivery row
+
+**Impact.** The shared secret that authenticates ObjectStack to a webhook receiver is stored
+verbatim, per delivery attempt, in a table that is readable over the ordinary data API. Anyone
+who can read `sys_http_delivery` can recover the signing key for every subscriber and mint
+payloads the receiver will accept as genuine — the signature is the receiver's *only* proof of
+origin. Admin-gated on this deployment (defense-in-depth, like D10, not privilege escalation),
+but the blast radius is external: it compromises the trust boundary at systems ObjectStack does
+not control, and rotating it means re-coordinating with every receiver operator.
+
+**Found by.** The `integration-system.webhook-lifecycle` run, as an adjacent observation while
+verifying HMAC correctness — the runner recomputed
+`HMAC-SHA256(raw body, <secret>)` against the delivered `x-objectstack-signature` (exact match,
+so signing itself is correct) and then noticed the secret it had authored came back verbatim
+from an ordinary admin read of the delivery table. Reproduced within that run; **not** filed on
+the public run card, deliberately.
+
+**Located.** `sys_http_delivery` carries the secret as a plain column alongside `headers_json`;
+the outbox writer persists it with the attempt rather than resolving it at send time. Contrast
+with the platform's own established pattern: `sys_setting` stores a `sec_` handle and keeps the
+ciphertext in `sys_secret` (aes-256-gcm) — the machinery to avoid this already exists and is
+used elsewhere. Note the same run proved the *datasource* admin path gets this right: an inline
+`secret` on `POST /api/v1/datasources` is split out server-side and a byte-level scan of every
+table/column of the running DB found **no** occurrence of it. So this is an inconsistency
+between two sibling subsystems, not a missing capability.
+
+**Suggested shape of a fix (not prescriptive).** Store a handle rather than the value on the
+delivery row and resolve it at send time, matching the `sys_setting`/`sys_secret` split; failing
+that, at minimum keep it off the delivery record entirely (it belongs to the subscriber, not to
+each attempt) and exclude the column from the data-API projection. Worth checking whether any
+other outbox/delivery table copies a credential the same way.
+
+**Verification note.** The webhook item itself is otherwise clean and passes — signature
+computation, custom headers, per-attempt durability, timeout enforcement and the retry ladder
+were all proven correct. This finding does not change that verdict.
 
 ## 2. Docs promise capabilities the runtime doesn't deliver (PD#10, docs side — file docs issues)
 
