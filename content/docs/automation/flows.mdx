@@ -1238,7 +1238,7 @@ curl -b cookies.txt -X POST \
 | Endpoint | Purpose |
 |:---|:---|
 | `POST /api/v1/automation/:name/trigger` | Start a flow (canonical) |
-| `GET /api/v1/automation/:name/runs` | List runs (`?limit`, `?cursor`) |
+| `GET /api/v1/automation/:name/runs` | List runs (`?limit`, `?cursor`, `?status` — narrow to one execution status; an undeclared value is refused `400 VALIDATION_FAILED`) |
 | `GET /api/v1/automation/:name/runs/:runId` | One run's detail (404 `Execution not found`) |
 | `POST /api/v1/automation/:name/runs/:runId/resume` | Resume a paused run — body `{ inputs, output, branchLabel }` |
 | `GET /api/v1/automation/:name/runs/:runId/screen` | The pending screen of a screen-flow run |
