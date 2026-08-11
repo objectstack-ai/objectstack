@@ -67,6 +67,36 @@ const leadershipCard = () =>
     (c) => c.type === 'page:card' && c.properties?.title === 'Leadership View',
   );
 
+const workQueueGrid = () => allComponents().find((c) => c.type === 'object-grid');
+
+/**
+ * The personal work queue's filter key, in the ONE spelling `object-grid`
+ * publishes and reads (objectstack#7750).
+ *
+ * This page authored the plural `filters:`. objectui's renderer reads only
+ * `schema.filter` (`plugin-grid/src/ObjectGrid.tsx`, lowered through
+ * `toFilterNode`) and the legacy `schema.defaultFilters`; `schema.filters` has
+ * zero read points on any ref. So the declared personal scope was accepted at
+ * authoring time and then dropped before the wire — no `$filter` parameter at
+ * all, and the "my work" queue listed every row.
+ *
+ * ⚠️ Not an authorization bypass: the unfiltered read is still RLS-constrained,
+ * so the caller only ever saw rows they may see. The defect is that a DECLARED
+ * personal-scope filter silently never applied.
+ *
+ * What these assertions can and cannot prove, stated honestly:
+ *  - they pin the AUTHORED key against the spelling objectui declares, which is
+ *    the whole of what is checkable inside this repo;
+ *  - they do NOT prove `$filter` reaches the wire. That is objectui's own pin
+ *    (`gridFilterInputSpelling.test.tsx`, objectui#4041 / `9154d9e`), and
+ *    driving it end-to-end here needs the vendored `packages/console/dist`
+ *    rebuilt at the current pin — tracked as objectstack#7752.
+ *
+ * The sibling `object-metric` tiles on this same page already spell `filter`
+ * singular, which is why the grid was the only site that drifted.
+ */
+const PLURAL_FILTER_SPELLINGS = ['filters', 'defaultFilters'] as const;
+
 describe('My Work — admin-only card gating (ADR-0089 component-level visibleWhen)', () => {
   it('carries the predicate at the COMPONENT level, not inside `properties`', () => {
     const card = leadershipCard();
@@ -104,5 +134,35 @@ describe('My Work — admin-only card gating (ADR-0089 component-level visibleWh
     const source = predicateSource(leadershipCard()!.visibleWhen)!;
     expect(evalPredicate(source, { current_user: { email: 'admin@objectos.ai' } })).toBe(true);
     expect(evalPredicate(source, { current_user: { email: 'analyst@objectos.ai' } })).toBe(false);
+  });
+});
+
+describe('My Work — the personal queue declares its filter in the key object-grid reads', () => {
+  it('authors `filter` (singular) on the work-queue grid', () => {
+    const grid = workQueueGrid();
+    expect(grid, 'the personal work queue `object-grid` must exist').toBeTruthy();
+    expect(
+      grid!.properties,
+      '`object-grid` publishes and reads `filter` — the singular key it lowers to `$filter`',
+    ).toHaveProperty('filter');
+  });
+
+  it('carries no spelling the renderer drops', () => {
+    // Pins the regression directly: a plural key here parses, renders, and
+    // silently widens the query to the object's full scope.
+    for (const key of PLURAL_FILTER_SPELLINGS) {
+      expect(
+        workQueueGrid()!.properties,
+        `\`${key}\` is not the key object-grid reads — it is dropped before the wire (#7750)`,
+      ).not.toHaveProperty(key);
+    }
+  });
+
+  it('still scopes the queue to the signed-in user', () => {
+    // The spelling is only half the fix; the predicate is what makes the page
+    // personal at all. `{current_user_id}` is the page-level identity token.
+    expect(workQueueGrid()!.properties!.filter).toEqual([
+      ['owner_id', '=', '{current_user_id}'],
+    ]);
   });
 });
