@@ -9027,9 +9027,33 @@ export class RestServer {
                     if (this.enforceAuth(req, res, context)) return;
                     const svc = await resolveService(environmentId);
                     if (!svc) return respond501(res);
+                    // [#7523] Deny-as-404, with the two deny arms collapsed onto ONE
+                    // response. `deleteReport()` is silently idempotent for an id that
+                    // does not exist but throws REPORT_NOT_FOUND for a report the
+                    // caller does not own — two shapes that used to reach the caller
+                    // as 204-vs-500 and let an authenticated prober read another
+                    // owner's report ids straight off the status code. Splitting them
+                    // 204-vs-404 would only re-dress the same oracle, so both arms are
+                    // answered here, before the delete fires, by the one call the
+                    // surface already keeps blind to the difference: `getReport()`
+                    // returns null for an unknown id AND for another owner's id
+                    // alike (#2980). The response is emitted by `handleValidation`
+                    // from a synthesised REPORT_NOT_FOUND, i.e. the exact code path
+                    // the thrown arm takes below — one emitter, so status and body
+                    // cannot drift apart.
+                    const visible = await svc.getReport(req.params.id, context ?? {});
+                    if (!visible) {
+                        handleValidation(res, new Error(`REPORT_NOT_FOUND: ${req.params.id}`));
+                        return;
+                    }
                     await svc.deleteReport(req.params.id, context ?? {});
                     res.status(204).end();
                 } catch (error: any) {
+                    // REPORT_NOT_FOUND → 404, VALIDATION_FAILED → 400. Reached only
+                    // when an IReportService gates in `deleteReport()` without also
+                    // blinding `getReport()`; routing it through the same helper keeps
+                    // that implementation's arms indistinguishable too.
+                    if (handleValidation(res, error)) return;
                     logError('[REST] Delete report error:', error);
                     res.status(500).json({ code: 'REPORT_DELETE_FAILED', error: String(error?.message ?? error).slice(0, 500) });
                 }
