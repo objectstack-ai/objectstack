@@ -3164,6 +3164,143 @@ export function selectViewMetadataBranch(body: unknown): ViewMetadataBranch | nu
   return null;
 }
 
+/**
+ * [#7510] What a branch reports once {@link focusClaimedBranch} has taken its
+ * own complaint off the table.
+ *
+ * The shape is chosen, not decorative: `code: 'invalid_type'` at path `[]` is
+ * exactly the "this branch only says the value is the wrong KIND" shape that
+ * every consumer of a failed union in this repo already drops before ranking —
+ * `isKindMismatchOnly` in `shared/error-map.zod.ts`, in `metadata-protocol`'s
+ * `zodIssuesToMetadataIssues`, and in `rest`'s `zodIssuesToFields`, one
+ * predicate written three times. So a muted branch does not become a quieter
+ * competitor for the reader's attention; it leaves the competition, and the
+ * branch the body actually claims is what remains to be rendered.
+ *
+ * The message still has to be true if some future consumer prints it anyway,
+ * so it says what happened (this is not the branch the body claims) and where
+ * the diagnosis is (the branch that is).
+ */
+function unclaimedBranchIssue(
+  branch: ViewMetadataBranch,
+  claimed: ViewMetadataBranch,
+  input: unknown,
+): z.core.$ZodIssue {
+  return {
+    code: 'invalid_type',
+    expected: 'object',
+    input,
+    path: [],
+    message:
+      `Not the \`${branch}\` branch — this body reads as \`${claimed}\`, `
+      + `so that branch carries the diagnosis.`,
+  } as z.core.$ZodIssue;
+}
+
+/**
+ * [#7510] Focus a FAILED `ViewMetadataSchema` union on the branch the body
+ * claims, so the branch that got furthest is the one whose prescription the
+ * author reads.
+ *
+ * ## The defect this closes
+ *
+ * Measured through the real write path (`saveMetaItem` → this union) on
+ * `origin/main` @ `9051802`: a form ViewItem whose field carries an unknown
+ * `publicPicker` subkey is correctly refused, and the message the author gets
+ * is the CONTAINER branch's —
+ *
+ * ```
+ * <root>: Unrecognized key(s) on this view container: `viewKind`, `config`.
+ *   • `viewKind` belongs to a single VIEW, not to the container. Wrap it: …
+ * ```
+ *
+ * — a confident, detailed prescription to restructure a container that was
+ * correct all along, with the word the author actually mistyped appearing
+ * nowhere. Not a `publicPicker` quirk: any ViewItem-branch failure whose
+ * top-level issue is not itself an `unrecognized_keys` reproduces it (#7510
+ * measured four — a picker subkey, an unknown form-field key, a bad field enum,
+ * a typo'd column summary — all four surfaced the container text).
+ *
+ * The cause is a tie the shared ranking cannot break on content it can see. It
+ * ranks a branch by `[issue count, carries an unrecognized_keys]`, and on such
+ * a body the container branch reports exactly ONE root `unrecognized_keys`
+ * (`viewKind`, `config` are not container keys) while the ViewItem branch
+ * reports exactly ONE nested `invalid_union` — the real key sits one level
+ * further down, inside it, where the tiebreak does not look. One issue each,
+ * and the unknown-key bonus hands it to the branch that understood the body
+ * least.
+ *
+ * ## Why the fix is here and not in the ranking
+ *
+ * The ranking is shared by every union in the repo and is right about unions in
+ * general; what it lacks is what only this file knows — which branch this body
+ * IS. That answer already exists here, as {@link selectViewMetadataBranch}, and
+ * {@link diagnoseViewMetadata} has been giving objectui the branch-correct
+ * reading from it since #6391. The union's own error path was the one door that
+ * did not consult it, which is why Studio's 422 and `diagnoseViewMetadata`
+ * could describe the same body two different ways. Now they cannot: one rule,
+ * one source, both doors.
+ *
+ * ## What it does and does not touch
+ *
+ * ⛔ **Not a gate.** A `$ZodCheck` runs after the union has already reached its
+ * verdict, and this one only ever REPLACES entries inside an existing
+ * `invalid_union` issue's `errors` — it never adds an issue, never removes one,
+ * and returns without touching anything when the parse succeeded. The
+ * accept/reject verdict of every input is therefore the union's, byte for byte,
+ * by construction rather than by test (and pinned anyway, over the 42-body
+ * corpus in `view-union-diagnostics.test.ts`).
+ *
+ * `when: () => true` is what lets it run at all: a check is skipped by default
+ * once parsing has produced aborting issues, which is precisely the state this
+ * one exists to describe. It is a declared field of `$ZodCheckDef`, not a
+ * reach into zod's internals.
+ *
+ * Three things deliberately stay exactly as they were:
+ *
+ * - **The `errors` array keeps its length and its ORDER.** A muted branch is
+ *   replaced in place, not filtered out, so a positional consumer (objectui's
+ *   canary read `errors[2]`) still finds branch 2 where branch 2 was.
+ * - **The wrapper itself is untouched.** Whether zod emits the
+ *   `invalid_union` wrapper or returns a lone non-aborted branch's issues
+ *   verbatim is decided in `handleUnionResults` before any check runs, so
+ *   nothing about the envelope's shape or issue codes moves.
+ * - **An unclaimed body is left alone.** When no discriminant settles the claim
+ *   (`selectViewMetadataBranch` → `null`) the ranking keeps the case, exactly as
+ *   {@link diagnoseViewMetadata} keeps it (`candidates = claimed ? [claimed] :
+ *   all`). A genuinely bad CONTAINER claims `container`, so the #4001 guidance
+ *   text that made this defect visible is also what a real container failure
+ *   still gets.
+ */
+function focusClaimedBranch(): z.core.$ZodCheck<unknown> {
+  const check = new z.core.$ZodCheck({ check: 'custom', when: () => true }) as z.core.$ZodCheck<unknown>;
+  check._zod.check = (payload) => {
+    if (payload.issues.length === 0) return;
+    const claimed = selectViewMetadataBranch(payload.value);
+    if (claimed === null) return;
+
+    for (let index = 0; index < payload.issues.length; index += 1) {
+      const issue = payload.issues[index] as { code?: string; errors?: readonly z.core.$ZodIssue[][] };
+      if (issue?.code !== 'invalid_union' || !Array.isArray(issue.errors)) continue;
+      // Defensive: the branch↔position mapping below is only meaningful for
+      // THIS union's own issue. A nested union that bubbled up unwrapped would
+      // have a different arity, and renaming its branches would be a lie.
+      if (issue.errors.length !== VIEW_METADATA_BRANCHES.length) continue;
+
+      payload.issues[index] = {
+        ...(payload.issues[index] as object),
+        errors: issue.errors.map((branchIssues, position) => {
+          const branch = VIEW_METADATA_BRANCHES[position]!;
+          return branch === claimed
+            ? branchIssues
+            : [unclaimedBranchIssue(branch, claimed, payload.value)];
+        }),
+      } as typeof payload.issues[number];
+    }
+  };
+  return check;
+}
+
 /** [#6391] The result of {@link diagnoseViewMetadata}. */
 export type ViewMetadataDiagnosis =
   | { success: true; branch: ViewMetadataBranch; data: ViewMetadataParsed }
@@ -3273,7 +3410,12 @@ export const ViewMetadataSchema = lazySchema(() => {
 
   return z.preprocess(
     (body, ctx) => (assertViewIdentity(body, ctx) ? stripViewConsoleDecorations(body) : z.NEVER),
-    z.union(members as unknown as readonly [z.ZodTypeAny, z.ZodTypeAny, ...z.ZodTypeAny[]]),
+    // [#7510] The `.check()` rides the UNION rather than the pipe, so the body
+    // it reads is the stripped one the members were actually judged against —
+    // the same input `diagnoseViewMetadata` claims a branch from. It changes no
+    // verdict; see {@link focusClaimedBranch}.
+    z.union(members as unknown as readonly [z.ZodTypeAny, z.ZodTypeAny, ...z.ZodTypeAny[]])
+      .check(focusClaimedBranch()),
   );
 });
 

@@ -174,6 +174,95 @@ describe('#5364 saveMetaItem 422 expands union branches', () => {
     });
 });
 
+/**
+ * #7510 — the 422 for a ViewItem body names the key the AUTHOR typed.
+ *
+ * #5364 (above) got a field name onto the wire at all. It did not settle WHICH
+ * branch's field name, and for a `viewKind`-carrying item the shared ranking
+ * picked the container branch: the author was told to restructure a correct
+ * container, in detail, with confidence, while the subkey they actually
+ * mistyped went unmentioned. `ViewMetadataSchema` now focuses a failed union on
+ * the branch the body claims (`spec/ui/view.zod.ts` → `focusClaimedBranch`), so
+ * the expansion below has the right branch to expand.
+ *
+ * Pinned HERE and not only in spec because this is the door the defect was
+ * measured through — `saveMetaItem`'s 422 is what Studio renders, and a spec
+ * fix that did not reach this envelope would be a fix nobody sees.
+ */
+describe('#7510 the 422 for a broken ViewItem names its own key, not the container\'s', () => {
+    /** The card's repro: a form ViewItem whose field's `publicPicker` carries `sort`. */
+    const pickerReproView = () => ({
+        name: 'lead.contact',
+        object: 'lead',
+        viewKind: 'form',
+        label: 'Contact us',
+        config: {
+            type: 'simple',
+            data: { provider: 'object', object: 'lead' },
+            sections: [{
+                label: 'About you',
+                fields: [{ field: 'owner', publicPicker: { displayFields: ['name'], sort: [{ field: 'email', order: 'desc' }] } }],
+            }],
+        },
+    });
+
+    it('the issue\'s body: `sort` reaches the author, the container prescription does not', async () => {
+        const { protocol, rows } = makeProtocol();
+
+        const err = await rejection(save(protocol, pickerReproView(), 'lead.contact'));
+
+        expect(err.code).toBe('INVALID_METADATA');
+        expect(err.status).toBe(422);
+        // Load-bearing: the verdict is unchanged — refused, nothing persisted.
+        // #7510 moves which refusal is explained, never whether it is one.
+        expect(rows.size).toBe(0);
+
+        // The union's own entry is still entry 0, unmoved (#5364's additive
+        // contract) — focusing happens inside its `errors`, not around it.
+        expect(err.issues[0]).toEqual({ path: '', message: 'Invalid input', code: 'invalid_union' });
+
+        const unknownKey = err.issues.find((i: any) => i.code === 'unrecognized_keys');
+        expect(unknownKey).toBeDefined();
+        expect(unknownKey.message).toContain('`sort`');
+        expect(unknownKey.path).toBe('config.sections.0.fields.0.publicPicker');
+
+        // ⛔ The measured misdirect, gone from the whole envelope: on
+        // `origin/main` @ `9051802` this message was the container branch's.
+        expect(err.message).not.toContain('belongs to a single VIEW, not to the container');
+        expect(JSON.stringify(err.issues)).not.toContain('this view container');
+    });
+
+    it('the same item minus the bad subkey still saves', async () => {
+        const { protocol, rows } = makeProtocol();
+        const item: any = pickerReproView();
+        delete item.config.sections[0].fields[0].publicPicker.sort;
+
+        const result = await save(protocol, item, 'lead.contact');
+
+        expect(result.success).toBe(true);
+        expect(rows.size).toBe(1);
+    });
+
+    it('a genuine container failure keeps the container prescription', async () => {
+        // Constraint (c) of the card: the #4001 guidance text is good, and a
+        // body that really is a container with wrong-layer keys still reads it.
+        const { protocol, rows } = makeProtocol();
+
+        const err = await rejection(save(protocol, {
+            name: 'lead',
+            object: 'lead',
+            list: { type: 'grid', columns: [{ field: 'title' }] },
+            type: 'grid',
+            columns: [{ field: 'title' }],
+        }, 'lead'));
+
+        expect(err.status).toBe(422);
+        expect(rows.size).toBe(0);
+        expect(err.message).toContain('Unrecognized key(s) on this view container');
+        expect(err.message).toContain('belongs to a single VIEW, not to the container');
+    });
+});
+
 describe('#5364 zodIssuesToMetadataIssues — the shared ranking, verbatim', () => {
     const union = (errors: unknown[][], path: unknown[] = []) =>
         ({ code: 'invalid_union', message: 'Invalid input', path, errors });
