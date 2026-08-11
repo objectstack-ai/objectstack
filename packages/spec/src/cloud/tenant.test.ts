@@ -119,9 +119,9 @@ describe('[#4739] `TenantPlan(Schema)` resolves to the ./cloud declaration every
     expect('ProvisioningStepSchema' in system).toBe(false);
   });
 
-  it('what the name now unambiguously means: the 5-value cloud plan vocabulary', () => {
-    // The full surviving vocabulary — an enum def has no authorable keys, so
-    // the vocabulary IS the surface this pin protects.
+  it('what the name now unambiguously means: the cloud declaration, opaque (objectstack#7513)', () => {
+    // The former 5-value enum is a strict subset of "any string" — still
+    // accepted, but no longer the boundary of what's valid.
     for (const plan of ['free', 'starter', 'pro', 'enterprise', 'custom']) {
       expect(() => TenantPlanSchema.parse(plan)).not.toThrow();
     }
@@ -129,8 +129,51 @@ describe('[#4739] `TenantPlan(Schema)` resolves to the ./cloud declaration every
     // rejected: their acceptance proves the survivor is the cloud declaration,
     // not the provisioning one.
     expect(TenantPlanSchema.parse('starter')).toBe('starter');
-    // And it is still a closed enum, not an open string.
-    expect(() => TenantPlanSchema.parse('solo')).toThrow();
-    expect(() => TenantPlanSchema.parse('')).toThrow();
+  });
+
+  // ─── [objectstack#7513] opaque widening — cloud#1216's measured "no reader
+  // outside the cloud distribution branches on plan values" ────────────────
+  //
+  // Flips (does not delete) the pre-#7513 pin that asserted the enum's closed
+  // set. That pin protected the CLOSED-SET boundary; this one protects the
+  // NEW contract's substance: any string is accepted (the cloud distribution
+  // owns the vocabulary, not this schema), and the schema's own `.describe()`
+  // still states that ownership so a reader who only sees the generated
+  // reference docs (not this source file) gets the same fact.
+  describe('[objectstack#7513] TenantPlanSchema is an opaque string, not a closed enum', () => {
+    it('accepts values the retired enum would have rejected — the widening is real', () => {
+      // `solo` is one of the CLOUD distribution's own vocabulary values
+      // (`packages/objectos-runtime/src/plan-entitlements.ts` in the cloud
+      // repo) — exactly the kind of value this widening exists to accept
+      // without a spec-side edit.
+      expect(() => TenantPlanSchema.parse('solo')).not.toThrow();
+      expect(TenantPlanSchema.parse('solo')).toBe('solo');
+      // Arbitrary/unknown strings — the vocabulary is cloud config, not a
+      // spec-enumerated set, so nothing here is "invalid" on shape grounds.
+      expect(() => TenantPlanSchema.parse('anything-the-cloud-distribution-declares')).not.toThrow();
+      // The empty string is accepted too — free-tier fallback is a cloud-side
+      // normalization convention, not a spec-level rejection or default.
+      expect(() => TenantPlanSchema.parse('')).not.toThrow();
+    });
+
+    it('still rejects non-string shapes — opaque means "any string", not "any value"', () => {
+      expect(() => TenantPlanSchema.parse(42)).toThrow();
+      expect(() => TenantPlanSchema.parse(null)).toThrow();
+      expect(() => TenantPlanSchema.parse(undefined)).toThrow();
+      expect(() => TenantPlanSchema.parse({ plan: 'free' })).toThrow();
+    });
+
+    it('the describe() states the ownership + convention, for readers who only see generated docs', () => {
+      const description = TenantPlanSchema.description;
+      expect(description, 'TenantPlanSchema must carry a .describe()').toBeDefined();
+      // Ownership statement (ask #1): vocabulary is control-plane config,
+      // owned by the cloud distribution — not protocol.
+      expect(description).toMatch(/control-plane config/);
+      expect(description).toMatch(/cloud distribution/);
+      expect(description).toMatch(/not protocol/);
+      // Empty/unknown ⇒ free tier convention (ask #2) — one sentence worth
+      // keeping, not enforced by this schema.
+      expect(description).toMatch(/free tier/);
+    });
   });
 });

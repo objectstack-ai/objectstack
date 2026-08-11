@@ -57,7 +57,7 @@ const result = EnvironmentSchema.parse(data);
 | **displayName** | `string` | ✅ | Display name shown in Studio and APIs |
 | **isDefault** | `boolean` | ✅ | Whether this is the default environment for the organization |
 | **isSystem** | `boolean` | ✅ | Whether this is a system environment (platform infrastructure, not user data) |
-| **plan** | `Enum<'free' \| 'starter' \| 'pro' \| 'enterprise' \| 'custom'>` | ✅ | Plan tier for this environment |
+| **plan** | `string` | ✅ | Plan tier for this environment |
 | **status** | `Enum<'provisioning' \| 'active' \| 'suspended' \| 'archived' \| 'failed' \| 'migrating'>` | ✅ | Environment lifecycle status |
 | **createdBy** | `string` | ✅ | User ID that created the environment |
 | **createdAt** | `string` | ✅ | Creation timestamp (ISO-8601) |
@@ -197,7 +197,7 @@ Public exposure of this environment artifacts (private | unlisted | public).
 | **organizationId** | `string` | ✅ | Organization that will own the new environment |
 | **displayName** | `string` | ✅ | Display name shown in Studio and APIs |
 | **driver** | `string` | optional | Driver key (defaults to provisioning service config) |
-| **plan** | `Enum<'free' \| 'starter' \| 'pro' \| 'enterprise' \| 'custom'>` | optional | Plan tier |
+| **plan** | `string` | optional | Plan tier |
 | **storageLimitMb** | `integer` | optional | Storage quota in megabytes |
 | **isDefault** | `boolean` | optional | Mark as the organization default environment |
 | **createdBy** | `string` | ✅ | User ID that initiated the provisioning |
@@ -233,7 +233,7 @@ Public exposure of this environment artifacts (private | unlisted | public).
 | **organizationId** | `string` | ✅ | Organization being bootstrapped |
 | **defaultEnvironmentDisplayName** | `string` | ✅ | Display name for the default environment |
 | **driver** | `string` | optional | Driver key |
-| **plan** | `Enum<'free' \| 'starter' \| 'pro' \| 'enterprise' \| 'custom'>` | optional | Plan tier |
+| **plan** | `string` | optional | Plan tier |
 | **storageLimitMb** | `integer` | optional | Storage quota in megabytes |
 | **createdBy** | `string` | ✅ | User ID that initiated provisioning |
 | **metadata** | `Record<string, any>` | optional | Free-form metadata |
