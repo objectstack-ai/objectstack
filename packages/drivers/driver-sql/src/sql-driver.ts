@@ -933,30 +933,158 @@ function fieldReferenceOf(value: unknown): string | null {
 }
 
 /**
- * [#5041] `{ $field }` reached a comparison this driver compiles to SQL.
+ * [#5041→#5222] `{ $field }` reached a position this driver does NOT compile to
+ * a column-to-column comparison.
  *
  * `FieldReferenceSchema` is declared in the spec and really is PRODUCED —
  * `compileCelToFilter` emits `{ $field: path }` for a field-to-field comparison
- * in a CEL permission/RLS rule — but the only implementation in the repo is the
- * in-memory evaluator. Pushed down to SQL, the reference object was handed to
- * Knex as a BIND VALUE, so sqlite answered with a bare `TypeError` ("can only
- * bind numbers, strings, bigints, buffers, and null") carrying no `code` and no
- * `status` — outside the ADR-0112 envelope every sibling filter refusal in this
- * driver speaks, and therefore served as an opaque 500-shaped body.
+ * in a CEL permission/RLS rule. #5041 refused the shape everywhere (before it,
+ * the reference object was handed to Knex as a BIND VALUE and sqlite answered
+ * with a bare `TypeError`); #5222 narrowed that gate: the reference now
+ * COMPILES when it is the whole comparand of one of the six scalar comparison
+ * operators ({@link CROSS_FIELD_COMPARISON_OPERATORS} — see
+ * {@link SqlDriver.applyCrossFieldComparison}). This error answers every
+ * position still outside that boundary, deliberately:
  *
- * Refusing loudly is the whole fix here (maintainer adjudication on #5041):
- * column-to-column compilation is a capability tracked separately, and until it
- * lands the honest answer to "this filter cannot run on this backend" is the
- * catalogued `INVALID_FILTER`, not a crash and not a silent wrong answer.
+ * - **`$in` / `$nin` / `$between` list MEMBERS.** The memory evaluator resolves
+ *   a member per record and `looseEq`s it, which SQL's `IN (…)` bind list has
+ *   no slot for — compiling it would need per-member OR-expansion whose NULL
+ *   and type-affinity behaviour was not proven conformance-equivalent, and an
+ *   unproven push-down of a permission shape is the #3948 class. Before #5041
+ *   this position did not even crash: it compiled and returned ZERO ROWS.
+ * - **The string operators (`$contains` / `$startsWith` / … / `like`).** In
+ *   memory the referenced value is matched as a LITERAL substring; in SQL it
+ *   would become the TEXT of a LIKE pattern, so any `%` / `_` / `\` stored in
+ *   the referenced column would act as WILDCARDS — the filter-bypass class
+ *   `applyLike` escapes literal comparands to prevent. Escaping a column-side
+ *   value portably needs a dialect REPLACE chain nobody has proven; refused.
+ * - **Any other operator** (`$null`, a retired spelling, …): no cross-field
+ *   reading exists to compile.
  */
 function crossFieldComparisonError(field: string, op: string, ref: string, index?: number): Error {
   const position = index === undefined ? '' : ` at index ${index} of its value list`;
   return unsupportedFilterError(
     `Operator "${op}" on field "${field}" compares against another field ` +
-      `({ "$field": "${ref}" })${position}. Cross-field comparison is currently supported ` +
-      `only on the in-memory evaluation path (matchesFilter); it cannot be compiled to SQL, ` +
-      `so this filter cannot be pushed down to the database. Compare against a literal value ` +
-      `instead, or evaluate the rule in memory.`,
+      `({ "$field": "${ref}" })${position}, a position SQL push-down does not compile. ` +
+      `Cross-field comparison compiles only as the whole comparand of a scalar comparison ` +
+      `operator ($eq/$ne/$gt/$gte/$lt/$lte) between two same-table declared columns. ` +
+      `Compare against a literal value here, or evaluate the rule in memory (matchesFilter).`,
+  );
+}
+
+/**
+ * [#5222] `{ field: { $field: 'other' } }` — a field reference used as a BARE
+ * field spec, i.e. in the implicit-equality position where a literal comparand
+ * would mean `field = value`.
+ *
+ * It is not a hypothetical spelling: `parseFilterAST` lowers the authored
+ * triple `['amount', '=', { $field: 'budget' }]` (and its `equals` word form)
+ * to exactly this shape, while `['amount', '>', …]` lowers to `{ $gt: … }`.
+ * So one authoring dialect produces both a supported and an unsupported
+ * spelling of the same intent, and the caller cannot see why from the generic
+ * "unsupported operator" message this used to fall through to.
+ *
+ * Refused rather than compiled to `$eq`, deliberately, and the reason is the
+ * conformance rule the rest of this capability is held to: the in-memory
+ * evaluator does NOT read this shape as an equality. `matches-filter.ts`
+ * `evalField` sees an all-`$` key set and dispatches `$field` to `evalOp`,
+ * which has no arm for it and answers `false` (its fail-closed default). So
+ * compiling a column-to-column equality here would make SQL answer rows for a
+ * filter the memory path answers `false` for — a NEW divergence, in the same
+ * change that closes one. The two paths must move together, which is a spec
+ * question rather than a driver one; filed separately.
+ */
+function bareFieldReferenceError(field: string, ref: string): Error {
+  return unsupportedFilterError(
+    `Field "${field}" is constrained by a bare field reference ({ "$field": "${ref}" }) with no ` +
+      `operator. Write the comparison explicitly — { "${field}": { "$eq": { "$field": "${ref}" } } } ` +
+      `— which compiles to a column-to-column comparison. The bare form is refused because the ` +
+      `in-memory evaluator does not read it as an equality (it matches no record), so compiling ` +
+      `it here would make the two execution paths answer this filter differently.`,
+  );
+}
+
+/**
+ * [#5222] The operators whose `{ $field }` comparand compiles to a
+ * column-to-column comparison — the six scalar comparisons, in the `$`-form
+ * spelling the emitters read (array-triple / infix authorings are lowered to
+ * these before a driver ever runs; see `parseFilterAST` and #5158).
+ *
+ * Deliberately NOT the whole of {@link SCALAR_COMPARAND_OPERATORS}: `like` /
+ * `ilike` are in that set only for the bind gate, and a cross-field LIKE is
+ * refused (see {@link crossFieldComparisonError}).
+ */
+const CROSS_FIELD_COMPARISON_OPERATORS: ReadonlySet<string> = new Set([
+  '$eq', '$ne', '$gt', '$gte', '$lt', '$lte',
+]);
+
+/**
+ * [#5222] The comparison class a declared field's stored column belongs to, or
+ * `null` for a field no column-to-column comparison can be compiled against.
+ *
+ * Cross-field comparison is only emitted between two columns of the SAME
+ * class. One class = one storage shape on both sides of one row, which is what
+ * makes the SQL answer provably the memory evaluator's answer (the cross-path
+ * conformance suite pins it).
+ *
+ * **The divergence is measured, not assumed — and it is DIRECTIONAL.** With
+ * this check disabled, `{ stage: { $gt: { $field: 'amount' } } }` (TEXT target,
+ * numeric referent) returns four rows on SQLite and NONE in memory: SQLite
+ * orders by STORAGE CLASS first, so every TEXT sorts above every INTEGER,
+ * while JS relational operators coerce `'won' > 10` to a NaN comparison and
+ * answer false. The mirrored spelling `{ amount: { $gt: { $field: 'stage' } } }`
+ * happens to agree (both answer nothing), and so does date-against-text — both
+ * are TEXT on both paths, so they agree while answering by lexicographic
+ * accident rather than by any temporal reading.
+ *
+ * The rule stays symmetric and covers the agreeing cells anyway, deliberately:
+ * a guard that admitted exactly the pairings measured non-divergent on ONE
+ * fixture would be a rule about this data rather than about the types, and the
+ * agreeing cells are agreeing by coincidence of storage — a `boolean` column
+ * holds `0/1` where the record holds `true/false`, and the three temporal
+ * classes store three different text shapes (`YYYY-MM-DD` / canonical UTC ISO /
+ * `HH:MM:SS`). Refusing a shape that would have agreed costs a caller an error
+ * message; admitting one that diverges costs a permission rule its meaning.
+ *
+ * `null` — refused outright — for: `formula` (virtual, no column to
+ * reference), every JSON-stored shape (`multiple: true` and the
+ * {@link JSON_COLUMN_TYPES} classes — element-wise semantics SQL comparison
+ * operators do not have), and anything else without a scalar stored form.
+ */
+function crossFieldComparisonClass(
+  decl: Record<string, unknown>,
+): 'numeric' | 'text' | 'boolean' | 'date' | 'datetime' | 'time' | null {
+  if (decl.multiple) return null;
+  const type = String((decl as { type?: unknown }).type || 'string');
+  if (type === 'formula') return null;
+  if (JSON_COLUMN_TYPES.has(type)) return null;
+  if (NUMERIC_SCALAR_TYPES.has(type)) return 'numeric';
+  if (type === 'boolean' || type === 'toggle') return 'boolean';
+  if (type === 'date') return 'date';
+  if (type === 'datetime') return 'datetime';
+  if (type === 'time') return 'time';
+  // Everything else `createColumn` stores as TEXT: string/text/textarea/html/
+  // markdown/email/url/phone/password, select, lookup/user (row ids),
+  // autonumber, and the unknown-type default.
+  return 'text';
+}
+
+/**
+ * [#5222] A `{ $field }` reference at a compilable operator that fails the
+ * v1 validation boundary — the maintainer's 2026-08-06 rulings on #5222,
+ * verbatim: same-table columns only (dot paths refused — no JOIN planning, no
+ * alias contract), declared-only enumeration (unknown columns refused at
+ * compile time; external/federated tables, whose column sets this driver does
+ * not own, refused wholesale), and the tenant-isolation column FORBIDDEN on
+ * either side of the comparison. `reason` carries the specific sentence;
+ * this wrapper keeps the envelope and the shared contract statement.
+ */
+function uncompilableFieldReferenceError(field: string, op: string, ref: string, reason: string): Error {
+  return unsupportedFilterError(
+    `Operator "${op}" on field "${field}" compares against another field ` +
+      `({ "$field": "${ref}" }), which cannot be compiled here: ${reason} ` +
+      `Cross-field comparison on SQL push-down supports same-table columns the object ` +
+      `declares, compared as the same type class, excluding the tenant-isolation column.`,
   );
 }
 
@@ -2089,6 +2217,15 @@ function nullValueSatisfiesOperator(op: string, value: unknown): boolean {
 
 /** [#5146] Is this operator's compiled SQL already total for a NULL column? */
 function operatorIsNullTotal(op: string, value: unknown): boolean {
+  // [#5222] A `{ $field }` comparand on a scalar comparison compiles to a
+  // TOTAL column-to-column predicate — `applyCrossFieldComparison` writes both
+  // columns' nullness INTO the emitted SQL, so it is never UNKNOWN and `NOT`
+  // over it is the exact complement. It must not fall to the literal arms
+  // below: their 'requireValue' guard assumes a NULL target column FAILS the
+  // operator, which is false for `$eq: { $field }` (a both-NULL row MATCHES,
+  // the memory evaluator's answer), so the guard would flip `$not` on exactly
+  // the rows the null pins in the conformance suite exist to protect.
+  if (CROSS_FIELD_COMPARISON_OPERATORS.has(op) && fieldReferenceOf(value) !== null) return true;
   switch (op) {
     // Compile to `IS NULL` / `IS NOT NULL` — two-valued by construction.
     case '$null':
@@ -8523,6 +8660,25 @@ export class SqlDriver implements IDataDriver {
         const columnExpr = this.filterColumnExpr(table, localField, field);
         for (const [rawOp, opValue] of Object.entries(value as Record<string, any>)) {
           const method = logicalOp === 'or' ? 'orWhere' : 'where';
+          // #5222 — a `{ $field }` that is the WHOLE comparand of a scalar
+          // comparison compiles to a same-table column-to-column comparison
+          // (or refuses inside the emitter, with the specific boundary named).
+          // Checked before the #5041 gate below, which still answers every
+          // other `$field` position — list members, the LIKE family — and
+          // before coercion/rewrites, which expect a literal comparand.
+          // #5222 — the bare `{ field: { $field: 'other' } }` spelling reaches
+          // this loop as an OPERATOR named `$field`, because the whole field
+          // spec is its own operator map. Answered here, ahead of the generic
+          // unsupported-operator arm, so the message can name the supported
+          // spelling instead of listing fifteen operator names.
+          if (rawOp === '$field' && typeof opValue === 'string') {
+            throw bareFieldReferenceError(field, opValue);
+          }
+          const crossFieldRef = fieldReferenceOf(opValue);
+          if (crossFieldRef !== null && CROSS_FIELD_COMPARISON_OPERATORS.has(rawOp)) {
+            this.applyCrossFieldComparison(builder, method, table, key, localField, field, rawOp, crossFieldRef);
+            continue;
+          }
           // #5041 — reject a comparand that cannot become a bind parameter
           // BEFORE any rewrite or coercion touches it, so the message names the
           // shape the caller actually sent.
@@ -8690,6 +8846,185 @@ export class SqlDriver implements IDataDriver {
         if (columnExpr && this.applyNormalizedComparison(builder, logicalOp, columnExpr, '=', coerced)) continue;
         (builder as any)[method](field, coerced as any);
       }
+    }
+  }
+
+  /**
+   * [#5222] Declared metadata fields for `object`, under either key the two
+   * registration paths use (`initObjects` keys by resolved TABLE name,
+   * `registerExternalObject` by object name — same double lookup as
+   * {@link paginationTieBreaker} / {@link resolveTenantField}). `undefined`
+   * means this driver does not OWN the object's column set: never registered,
+   * or federated/external (ADR-0015 — `registerExternalObject` deliberately
+   * does not populate {@link managedObjectFields}), and cross-field comparison
+   * refuses rather than guessing at columns it cannot enumerate.
+   */
+  protected declaredFieldsFor(object: string): Record<string, any> | undefined {
+    const tableName = StorageNameMapping.resolveTableName({ name: object } as any);
+    return this.managedObjectFields.get(tableName) ?? this.managedObjectFields.get(object);
+  }
+
+  /**
+   * [#5222] Compile `{ <target>: { <op>: { $field: <ref> } } }` into a
+   * SAME-TABLE column-to-column comparison — the capability #5041 catalogued
+   * and deliberately deferred — or refuse in the same ADR-0112 envelope
+   * (`INVALID_FILTER`, 400) it installed.
+   *
+   * # The validation boundary (maintainer rulings, 2026-08-06, on #5222)
+   *
+   * 1. **Same-table columns only.** A dotted `$field` is refused: in memory
+   *    `getPath` walks a dot path across related objects, and SQL has no
+   *    equivalent short of JOIN planning (rejected as disproportionate) or an
+   *    alias contract (rejected as nonexistent).
+   * 2. **Declared-only enumeration, on BOTH operands.** The `$field` value
+   *    lands in a SQL IDENTIFIER position; only names the object declared
+   *    ({@link managedObjectFields}) are accepted, so an unknown column is a
+   *    compile-time refusal, not a database error — and a table this driver
+   *    has no declaration for (external/federated, ADR-0015) refuses
+   *    wholesale. The TARGET field must be declared too: the type-class check
+   *    below needs both declarations, and a comparison is one surface — it
+   *    cannot be half-validated.
+   * 3. **The tenant-isolation column is forbidden, on either side.** The
+   *    ruling names the referent; both sides are closed because the operands
+   *    of `=` commute — `{ org_id: { $eq: { $field: x } } }` is the same
+   *    privilege-escalation comparison surface as
+   *    `{ x: { $eq: { $field: org_id } } }` spelled backwards, and a ban only
+   *    one swap away is not a ban.
+   * 4. **Same comparison class** ({@link crossFieldComparisonClass}) — the
+   *    conformance boundary: across classes SQLite's storage-class ordering
+   *    and the memory evaluator's JS coercion genuinely diverge, so those
+   *    shapes go to the refusal arm rather than shipping a per-backend answer.
+   *
+   * # The emitted SQL is TOTAL — never UNKNOWN — by construction
+   *
+   * Both columns can be NULL at once, and the memory evaluator answers every
+   * such row two-valuedly (`matches-filter.ts` `evalOp`): the orderings need
+   * both sides non-null; `$eq` with a null referent matches exactly the
+   * null-target rows; `$ne` is `$eq`'s complement. Each arm below writes that
+   * truth table into the predicate itself (`IS [NOT] NULL` conjuncts), which
+   * buys the same property #5146 buys leaf-by-leaf for `$not`: a total
+   * predicate's `NOT` is its exact complement, so the negation rewrite needs
+   * no guard here ({@link operatorIsNullTotal}'s cross-field arm) and every
+   * combinator nesting composes. The cross-path conformance suite pins the
+   * NULL rows on every operator, both polarities.
+   *
+   * Each side reads through {@link filterColumnExpr} when the column needs the
+   * legacy-datetime/time storage repair (#3912/#3994), the same normalisation
+   * every VALUE comparison applies — `??` identifier binding otherwise, so
+   * quoting stays Knex's on every dialect.
+   */
+  protected applyCrossFieldComparison(
+    builder: Knex.QueryBuilder,
+    method: 'where' | 'orWhere',
+    table: string | null,
+    targetKey: string,
+    targetLocalField: string,
+    targetColumn: string,
+    op: string,
+    ref: string,
+  ): void {
+    if (ref.includes('.')) {
+      throw uncompilableFieldReferenceError(targetColumn, op, ref,
+        `"${ref}" is a dotted path, and SQL push-down compiles same-table column references ` +
+        `only (no relation traversal, no alias-qualified columns).`);
+    }
+    if (!table) {
+      throw uncompilableFieldReferenceError(targetColumn, op, ref,
+        `the target table of this query could not be resolved, so the reference cannot be ` +
+        `checked against any declared column set.`);
+    }
+    const declared = this.declaredFieldsFor(table);
+    if (!declared) {
+      throw uncompilableFieldReferenceError(targetColumn, op, ref,
+        `object "${table}" has no declared column set on this driver (an external/federated ` +
+        `or unregistered table), so referenced column names cannot be validated.`);
+    }
+    const tenantField = this.resolveTenantField(table);
+    if (tenantField !== null && (ref === tenantField || targetKey === tenantField || targetLocalField === tenantField)) {
+      throw uncompilableFieldReferenceError(targetColumn, op, ref,
+        `"${tenantField}" is the tenant-isolation column of "${table}", which must not appear ` +
+        `on either side of a cross-field comparison.`);
+    }
+    const hasOwn = (name: string) => Object.prototype.hasOwnProperty.call(declared, name);
+    const refDeclaredName = hasOwn(ref) ? ref : this.mapSortField(ref);
+    if (!hasOwn(refDeclaredName)) {
+      throw uncompilableFieldReferenceError(targetColumn, op, ref,
+        `"${ref}" is not a declared field of "${table}" — only declared fields can be referenced.`);
+    }
+    const targetDeclaredName = hasOwn(targetKey) ? targetKey : targetLocalField;
+    if (!hasOwn(targetDeclaredName)) {
+      throw uncompilableFieldReferenceError(targetColumn, op, ref,
+        `the target field "${targetKey}" is not a declared field of "${table}", so the two ` +
+        `columns' types cannot be checked as comparable.`);
+    }
+    const refClass = crossFieldComparisonClass(declared[refDeclaredName] ?? {});
+    const targetClass = crossFieldComparisonClass(declared[targetDeclaredName] ?? {});
+    if (refClass === null) {
+      throw uncompilableFieldReferenceError(targetColumn, op, ref,
+        `"${ref}" (type "${String(declared[refDeclaredName]?.type ?? 'string')}"` +
+        `${declared[refDeclaredName]?.multiple ? ', multiple' : ''}) has no scalar stored ` +
+        `column a comparison can read.`);
+    }
+    if (targetClass === null) {
+      throw uncompilableFieldReferenceError(targetColumn, op, ref,
+        `the target field "${targetKey}" (type ` +
+        `"${String(declared[targetDeclaredName]?.type ?? 'string')}"` +
+        `${declared[targetDeclaredName]?.multiple ? ', multiple' : ''}) has no scalar stored ` +
+        `column a comparison can read.`);
+    }
+    if (refClass !== targetClass) {
+      throw uncompilableFieldReferenceError(targetColumn, op, ref,
+        `"${targetKey}" is stored as ${targetClass} but "${ref}" as ${refClass}, and a ` +
+        `cross-class comparison answers differently in SQL (storage-class ordering) than in ` +
+        `memory (JS coercion) — compare same-class columns.`);
+    }
+
+    const refLocal = this.mapSortField(ref);
+    const refColumn = this.remoteColumn(table, ref, refLocal);
+    const lhs = this.filterColumnExpr(table, targetLocalField, targetColumn)
+      ?? { sql: '??', bindings: [targetColumn] };
+    const rhs = this.filterColumnExpr(table, refLocal, refColumn)
+      ?? { sql: '??', bindings: [refColumn] };
+    const raw = method === 'orWhere' ? 'orWhereRaw' : 'whereRaw';
+    const A = lhs.sql;
+    const B = rhs.sql;
+    const ab = [...lhs.bindings, ...rhs.bindings];
+    switch (op) {
+      case '$eq':
+        // Matches when both are NULL, or both have a value and the values
+        // agree — `evalOp`'s `$eq` over a resolved reference, made total.
+        (builder as any)[raw](
+          `((${A} is null and ${B} is null) or (${A} is not null and ${B} is not null and ${A} = ${B}))`,
+          [...ab, ...ab, ...ab],
+        );
+        break;
+      case '$ne':
+        // The exact complement of the `$eq` arm: exactly one side NULL, or
+        // both valued and different.
+        (builder as any)[raw](
+          `((${A} is null and ${B} is not null) or (${A} is not null and ${B} is null) ` +
+            `or (${A} is not null and ${B} is not null and ${A} <> ${B}))`,
+          [...ab, ...ab, ...ab, ...ab],
+        );
+        break;
+      case '$gt':
+      case '$gte':
+      case '$lt':
+      case '$lte': {
+        // The orderings need both sides non-null (`evalOp`: `actual != null &&
+        // v != null && …`). A bare `A > B` already DROPS null rows via
+        // UNKNOWN; the explicit conjuncts are what make the predicate total,
+        // so `$not` of it re-admits exactly those rows — the memory answer.
+        const sqlOp = op === '$gt' ? '>' : op === '$gte' ? '>=' : op === '$lt' ? '<' : '<=';
+        (builder as any)[raw](
+          `(${A} is not null and ${B} is not null and ${A} ${sqlOp} ${B})`,
+          [...ab, ...ab],
+        );
+        break;
+      }
+      default:
+        // Unreachable: the call site gates on CROSS_FIELD_COMPARISON_OPERATORS.
+        throw crossFieldComparisonError(targetColumn, op, ref);
     }
   }
 

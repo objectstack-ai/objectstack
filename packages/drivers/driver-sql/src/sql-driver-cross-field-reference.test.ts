@@ -1,40 +1,42 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#5041] A `{ $field }` cross-field comparison is REFUSED by this driver, in
- * the ADR-0112 envelope — never as a bare `TypeError`, never as zero rows.
+ * [#5041 → #5222] The `{ $field }` POSITION MATRIX: which spellings of a
+ * cross-field comparison this driver compiles, and which it refuses.
  *
- * `FieldReferenceSchema` (`packages/spec/src/data/filter.zod.ts`) is declared,
- * and it is genuinely PRODUCED: `compileCelToFilter` emits `{ $field: path }`
- * whenever a CEL permission/RLS rule compares one field to another. The only
- * implementation in the repo is the in-memory evaluator
- * (`packages/formula/src/matches-filter.ts` — `resolveValue`). Pushed down to
- * SQL, the reference object was handed to Knex as a BIND VALUE:
+ * ## What changed, and what deliberately did not
  *
- * ```
- * { amount: { $gt: { $field: 'budget' } } }
- * → select `id` from `deal` where `amount` > {"$field":"budget"}
- * → TypeError: SQLite3 can only bind numbers, strings, bigints, buffers, and null
- * ```
+ * #5041 measured the defect and installed a refusal in every position: pushed
+ * down to SQL, the reference object was handed to Knex as a BIND VALUE, so
+ * sqlite answered with a bare `TypeError` ("can only bind numbers, strings,
+ * bigints, buffers, and null") carrying no `code` and no `status` — outside
+ * the ADR-0112 envelope, and therefore an opaque 500 to the client. Inside an
+ * `$in` list it did not even crash: the query compiled, ran, and returned ZERO
+ * ROWS. The maintainer's adjudication took the minimum path and tracked
+ * column-to-column compilation as its own capability.
  *
- * That error carried no `code` and no `status`, so it landed outside the
- * envelope every sibling filter refusal in this driver already speaks (#4436 /
- * ADR-0112) and reached the client as an opaque server error. The maintainer's
- * adjudication on #5041 is the minimum path: refuse loudly here, keep the spec
- * declaration, and track column-to-column compilation as its own capability.
+ * #5222 is that capability, and it NARROWS the refusal rather than removing
+ * it. This file is the matrix of the two arms — the same position grid the
+ * #5041 suite carried (six scalar operators, array triples symbolic and word,
+ * `$and`/`$or`/`$not` nesting, the string family, `$in`/`$between` list
+ * members), re-read as supported-vs-refused.
  *
- * These tests assert the FULL envelope — `code`, `status`, and the message
- * content a caller needs to act — not merely that something was thrown.
+ * **The row semantics are pinned elsewhere, on purpose.** This file asserts
+ * that a spelling compiles and which rows it returns for one small fixture;
+ * `sql-driver-cross-field-conformance.test.ts` is what proves those rows are
+ * the SAME rows the in-memory evaluator returns, over a fixture built to carry
+ * every NULL arrangement. Keep the equivalence claims there — a matrix that
+ * also tried to be the conformance suite would state the semantics twice and
+ * let the two copies drift.
  *
  * **Negative control** for the other half of the contract (the memory path
- * still RESOLVES `$field` and matches correctly) lives with that implementation
- * and is unchanged by this fix: `packages/formula/src/matches-filter.test.ts`
- * ("$field reference (field-to-field)"). Nothing in this change touches the
- * evaluator or the `cel-to-filter` producer.
+ * resolves `$field` against the record, dot paths included) lives with that
+ * implementation and is untouched by this change:
+ * `packages/formula/src/matches-filter.test.ts`.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { SqlDriver } from '../src/index.js';
+import { SqlDriver } from './index.js';
 import { parseFilterAST, type FilterCondition } from '@objectstack/spec/data';
 
 /** The shape `mapDataError` / `sendError` read off a thrown driver error. */
@@ -52,7 +54,7 @@ async function refusalOf(run: () => Promise<unknown>): Promise<WireBearingError>
   throw new Error('expected the driver to refuse this filter, but it resolved');
 }
 
-describe('[#5041] SqlDriver refuses `$field` cross-field comparison in the ADR-0112 envelope', () => {
+describe('[#5222] SqlDriver `$field` position matrix — compiled vs refused', () => {
   let driver: SqlDriver;
 
   beforeEach(async () => {
@@ -67,138 +69,222 @@ describe('[#5041] SqlDriver refuses `$field` cross-field comparison in the ADR-0
         fields: {
           id: { type: 'text', name: 'id' },
           stage: { type: 'text', name: 'stage' },
+          note: { type: 'text', name: 'note' },
           amount: { type: 'number', name: 'amount' },
           budget: { type: 'number', name: 'budget' },
+          organization_id: { type: 'text', name: 'organization_id' },
         },
       } as any,
     ]);
-    // `amount > budget` is TRUE for this row, so a driver that silently dropped
-    // the predicate would return it — the failure mode is visible, not implied.
-    await driver.create('deal', { id: '1', stage: 'won', amount: 10, budget: 5 });
+    // `amount > budget` is TRUE for this row and `amount = budget` is FALSE, so
+    // a compiled comparison and a dropped predicate are distinguishable — the
+    // failure mode stays visible rather than implied.
+    await driver.create('deal', {
+      id: '1', stage: 'won', note: 'won', amount: 10, budget: 5, organization_id: 'o1',
+    });
   });
 
   const find = (where: unknown) =>
     driver.find('deal', { fields: ['id'], where: where as FilterCondition });
+  const ids = async (where: unknown) => (await find(where)).map((r: any) => String(r.id));
 
-  it('the issue repro — `{ amount: { $gt: { $field: "budget" } } }` — carries the full envelope', async () => {
-    const err = await refusalOf(() => find({ amount: { $gt: { $field: 'budget' } } }));
+  // ── SUPPORTED: the six scalar comparison operators ────────────────────────
+  //
+  // The issue's repro is the first row. Each expectation is decided by the one
+  // seeded row (amount 10, budget 5), so a predicate that compiled to
+  // something unrelated — or was dropped entirely — changes the answer.
+  describe('the six scalar operators compile to a column-to-column comparison', () => {
+    const supported: Array<[string, unknown, string[]]> = [
+      ['$gt — the #5041 repro', { amount: { $gt: { $field: 'budget' } } }, ['1']],
+      ['$gte', { amount: { $gte: { $field: 'budget' } } }, ['1']],
+      ['$lt', { amount: { $lt: { $field: 'budget' } } }, []],
+      ['$lte', { amount: { $lte: { $field: 'budget' } } }, []],
+      ['$eq', { amount: { $eq: { $field: 'budget' } } }, []],
+      ['$ne', { amount: { $ne: { $field: 'budget' } } }, ['1']],
+    ];
 
-    // ADR-0112 wire identity: the catalogued code and a client-error status.
-    expect(err.code).toBe('INVALID_FILTER');
-    expect(err.status).toBe(400);
+    for (const [name, where, expected] of supported) {
+      it(`${name} → ${expected.length ? 'matches' : 'excludes'} the row`, async () => {
+        expect(await ids(where)).toEqual(expected);
+      });
+    }
 
-    // NOT the pre-fix failure: a bare TypeError with neither.
-    expect(err).not.toBeInstanceOf(TypeError);
-    expect(err.message).not.toContain('can only bind');
+    it('a reference object carrying EXTRA keys still resolves, matching the memory path', async () => {
+      // `fieldReferenceOf` recognises "an object, not an array, carrying a
+      // string `$field`" because `formula`'s `resolveValue` recognises exactly
+      // that (`'$field' in raw`) — both ignore any other key, and
+      // `FieldReferenceSchema` is a non-strict zod object, so the extra key is
+      // stripped rather than rejected. Pinned as SUPPORTED rather than left
+      // unstated: a driver that recognised a NARROWER shape than the evaluator
+      // would silently bind the remainder as a literal again, which is the
+      // #5041 defect returning at one more spelling.
+      expect(await ids({ amount: { $gt: { $field: 'budget', extra: 1 } } })).toEqual(['1']);
+    });
 
-    // #3867 — driver-internal wording never ships to a client.
-    expect(err.message).not.toContain('[sql-driver]');
-
-    // The actionable half: which field, which operator, which reference, and
-    // the reason — cross-field comparison is memory-path-only today.
-    expect(err.message).toContain('amount');
-    expect(err.message).toContain('$gt');
-    expect(err.message).toContain('budget');
-    expect(err.message).toContain('$field');
-    expect(err.message).toContain('in-memory');
-    expect(err.message).toContain('matchesFilter');
+    it('emits a real column reference, not a bound literal', async () => {
+      // The distinguishing measurement, and the reason this assertion exists
+      // beside the row-level ones: a compiler that bound the STRING 'budget'
+      // would answer `[]` for `$gt` (10 > 'budget' is false in SQLite's
+      // storage-class ordering) and would keep answering plausibly for other
+      // shapes. Comparing the column to itself can only be satisfied by a
+      // genuine identifier on the right-hand side.
+      expect(await ids({ amount: { $eq: { $field: 'amount' } } })).toEqual(['1']);
+      expect(await ids({ budget: { $lt: { $field: 'amount' } } })).toEqual(['1']);
+    });
   });
 
-  // One condition — "this comparison references another field" — gets one
-  // answer however the caller spelled it. Each of these bound the reference
-  // object as a VALUE before the fix.
-  const spellings: Array<[string, unknown]> = [
-    ['$eq', { amount: { $eq: { $field: 'budget' } } }],
-    ['$ne', { amount: { $ne: { $field: 'budget' } } }],
-    ['$gte', { amount: { $gte: { $field: 'budget' } } }],
-    ['$lt', { amount: { $lt: { $field: 'budget' } } }],
-    ['$lte', { amount: { $lte: { $field: 'budget' } } }],
-    ['nested under $and', { $and: [{ amount: { $gt: { $field: 'budget' } } }] }],
-    ['nested under $or', { $or: [{ amount: { $gt: { $field: 'budget' } } }] }],
-    ['nested under $not', { $not: { amount: { $gt: { $field: 'budget' } } } }],
-    ['array triple, symbolic op', [['amount', '>', { $field: 'budget' }]]],
-    ['array triple, word op', [['amount', 'gt', { $field: 'budget' }]]],
-    ['LIKE family (would have stringified to `[object Object]`)',
-      { stage: { $startsWith: { $field: 'budget' } } }],
-  ];
+  // ── SUPPORTED: the authored array-triple dialect, once lowered ───────────
+  //
+  // #5158 made `FilterArray` INPUT-ONLY authoring sugar: both doors into the
+  // runtime lower it before a driver is reached, so the triple is exercised
+  // the way it actually arrives. `>` and `gt` lower to `$gt`; the `=` / `equals`
+  // spellings lower to the BARE form, which has its own arm below.
+  describe('array triples compile once lowered by parseFilterAST (#5158)', () => {
+    const triples: Array<[string, unknown]> = [
+      ['symbolic op', [['amount', '>', { $field: 'budget' }]]],
+      ['word op', [['amount', 'gt', { $field: 'budget' }]]],
+    ];
 
-  for (const [name, where] of spellings) {
-    it(`${name} → 400 INVALID_FILTER naming the reference`, async () => {
-      const err = await refusalOf(() => find(where));
+    for (const [name, authored] of triples) {
+      it(`${name} → lowers to $gt and matches`, async () => {
+        expect(await ids(parseFilterAST(authored as any))).toEqual(['1']);
+      });
+    }
+
+    it('a raw (unlowered) array still hits the array refusal, unchanged (#5158)', async () => {
+      // Not a `$field` refusal — the array never reaches the comparand gate.
+      // Pinned so a future reader does not mistake the old suite's passing
+      // "array triple" rows for evidence about cross-field support: they were
+      // refused for being arrays.
+      const err = await refusalOf(() => find([['amount', '>', { $field: 'budget' }]]));
       expect(err.code).toBe('INVALID_FILTER');
       expect(err.status).toBe(400);
-      expect(err).not.toBeInstanceOf(TypeError);
-      expect(err.message).toContain('$field');
+    });
+  });
+
+  // ── SUPPORTED: nested under every combinator ─────────────────────────────
+  describe('the combinators carry a cross-field leaf', () => {
+    it('under $and', async () => {
+      expect(await ids({ $and: [{ amount: { $gt: { $field: 'budget' } } }] })).toEqual(['1']);
+    });
+    it('under $or', async () => {
+      expect(await ids({ $or: [{ amount: { $gt: { $field: 'budget' } } }] })).toEqual(['1']);
+    });
+    it('under $not — negated, and the row drops out', async () => {
+      expect(await ids({ $not: { amount: { $gt: { $field: 'budget' } } } })).toEqual([]);
+    });
+    it('under $not with the comparison inverted — the row comes back', async () => {
+      expect(await ids({ $not: { amount: { $lt: { $field: 'budget' } } } })).toEqual(['1']);
+    });
+  });
+
+  // ── REFUSED: the boundary of v1 ──────────────────────────────────────────
+  //
+  // Every one of these keeps the #5041 envelope. The reasons are recorded with
+  // the cases in `cross-field-conformance-cases.ts`, which drives the same
+  // list against both SQL drivers; this block pins the ones whose WORDING a
+  // caller has to act on, plus the positions unique to this matrix.
+  describe('refused positions keep the INVALID_FILTER envelope', () => {
+    const refused: Array<[string, unknown, string]> = [
+      ['a dotted relation path', { amount: { $gt: { $field: 'a.b' } } }, 'dotted path'],
+      ['an undeclared column', { amount: { $gt: { $field: 'nope' } } }, 'not a declared field'],
+      ['the tenant column as referent', { stage: { $eq: { $field: 'organization_id' } } }, 'tenant-isolation column'],
+      ['the tenant column as target', { organization_id: { $eq: { $field: 'stage' } } }, 'tenant-isolation column'],
+      ['a cross-class comparison', { amount: { $gt: { $field: 'stage' } } }, 'stored as'],
+      ['$in list member', { amount: { $in: [{ $field: 'budget' }, 1] } }, 'index 0'],
+      ['$nin list member', { amount: { $nin: [{ $field: 'budget' }] } }, 'index 0'],
+      ['$between lower bound', { amount: { $between: [{ $field: 'budget' }, 100] } }, 'index 0'],
+      ['$between upper bound', { amount: { $between: [0, { $field: 'budget' }] } }, 'index 1'],
+      ['$startsWith', { stage: { $startsWith: { $field: 'note' } } }, '$field'],
+      ['$contains', { stage: { $contains: { $field: 'note' } } }, '$field'],
+      ['$endsWith', { stage: { $endsWith: { $field: 'note' } } }, '$field'],
+      ['$notContains', { stage: { $notContains: { $field: 'note' } } }, '$field'],
+      ['$icontains', { stage: { $icontains: { $field: 'note' } } }, '$field'],
+    ];
+
+    for (const [name, where, fragment] of refused) {
+      it(`${name} → 400 INVALID_FILTER naming the reason`, async () => {
+        const err = await refusalOf(() => find(where));
+        expect(err.code).toBe('INVALID_FILTER');
+        expect(err.status).toBe(400);
+        expect(err).not.toBeInstanceOf(TypeError);
+        expect(err.message).not.toContain('can only bind');
+        expect(err.message).not.toContain('[sql-driver]');
+        expect(err.message).toContain(fragment);
+      });
+    }
+
+    it('a refused position stays refused INSIDE a combinator', async () => {
+      // The gate sits at the comparison emitter, which every combinator
+      // recurses into — so nesting is not a way around it. Worth pinning
+      // because a validation placed at the top-level entry instead would pass
+      // this and refuse only the flat spelling.
+      const err = await refusalOf(() =>
+        find({ $or: [{ stage: 'won' }, { amount: { $gt: { $field: 'organization_id' } } }] }),
+      );
+      expect(err.code).toBe('INVALID_FILTER');
+      expect(err.message).toContain('tenant-isolation column');
+    });
+
+    it('the bare `{ field: { $field } }` spelling names the operator form to use', async () => {
+      // What `parseFilterAST(['amount', '=', { $field: 'budget' }])` lowers to.
+      // Refused because the in-memory evaluator answers `false` for it rather
+      // than reading it as an equality — compiling it would open a divergence
+      // in the change that closes one — so the message points at `$eq`.
+      const lowered = parseFilterAST([['amount', '=', { $field: 'budget' }]] as any);
+      const err = await refusalOf(() => find(lowered));
+      expect(err.code).toBe('INVALID_FILTER');
+      expect(err.status).toBe(400);
+      expect(err.message).toContain('$eq');
       expect(err.message).toContain('budget');
     });
-  }
+  });
 
-  // A `$field` inside a LIST did not even crash before the fix: it compiled and
-  // returned ZERO ROWS. A silent wrong answer on a permission-scoped read is
-  // the failure #3948 / #4209 exist to prevent, so it gets the same refusal.
-  const listCases: Array<[string, unknown]> = [
-    ['$in', { amount: { $in: [{ $field: 'budget' }, 1] } }],
-    ['$nin', { amount: { $nin: [{ $field: 'budget' }] } }],
-    ['$between lower bound', { amount: { $between: [{ $field: 'budget' }, 100] } }],
-    ['$between upper bound', { amount: { $between: [0, { $field: 'budget' }] } }],
-  ];
+  // ── The general arm #5041 installed, untouched by the narrowing ──────────
+  //
+  // A KNOWN operator whose comparand is a shape no dialect can bind. These
+  // were the same bare `TypeError` before #5041; the `$field` narrowing must
+  // not have re-opened any of them, since `fieldReferenceOf` recognises only
+  // an object carrying a STRING `$field`.
+  describe('non-$field uncompilable comparands stay refused (#5041/#5234)', () => {
+    const uncompilable: Array<[string, unknown]> = [
+      ['$gt with a plain object', { amount: { $gt: { foo: 1 } } }],
+      ['$eq with a plain object', { amount: { $eq: { foo: 1 } } }],
+      ['$ne with a plain object', { amount: { $ne: { foo: 1 } } }],
+      ['$gt with an array', { amount: { $gt: [1, 2] } }],
+      ['$eq with an array', { amount: { $eq: [1, 2] } }],
+      ['a field spec with no operators', { amount: {} }],
+      ['a $field whose value is not a string', { amount: { $gt: { $field: 42 } } }],
+    ];
 
-  for (const [name, where] of listCases) {
-    it(`${name} with a $field member → refused, not silently zero rows`, async () => {
-      const err = await refusalOf(() => find(where));
-      expect(err.code).toBe('INVALID_FILTER');
-      expect(err.status).toBe(400);
-      expect(err.message).toContain('$field');
-      // The member's position is named, so a long list is still actionable.
-      expect(err.message).toMatch(/index \d+/);
-    });
-  }
+    for (const [name, where] of uncompilable) {
+      it(`${name} → 400 INVALID_FILTER instead of a bare TypeError`, async () => {
+        const err = await refusalOf(() => find(where));
+        expect(err.code).toBe('INVALID_FILTER');
+        expect(err.status).toBe(400);
+        expect(err).not.toBeInstanceOf(TypeError);
+        expect(err.message).not.toContain('can only bind');
+        expect(err.message).not.toContain('[sql-driver]');
+      });
+    }
+  });
 
-  // The general arm the issue reported as missing: a KNOWN operator whose value
-  // shape cannot be bound. Measured pre-fix, every one of these was the same
-  // bare `TypeError` as the `$field` case.
-  const uncompilable: Array<[string, unknown]> = [
-    ['$gt with a plain object', { amount: { $gt: { foo: 1 } } }],
-    ['$eq with a plain object', { amount: { $eq: { foo: 1 } } }],
-    ['$ne with a plain object', { amount: { $ne: { foo: 1 } } }],
-    ['$gt with an array', { amount: { $gt: [1, 2] } }],
-    ['$eq with an array', { amount: { $eq: [1, 2] } }],
-    ['implicit `=` with a plain object', { amount: { } }],
-  ];
-
-  for (const [name, where] of uncompilable) {
-    it(`${name} → 400 INVALID_FILTER instead of a bare TypeError`, async () => {
-      const err = await refusalOf(() => find(where));
-      expect(err.code).toBe('INVALID_FILTER');
-      expect(err.status).toBe(400);
-      expect(err).not.toBeInstanceOf(TypeError);
-      expect(err.message).not.toContain('can only bind');
-      expect(err.message).not.toContain('[sql-driver]');
-      expect(err.message).toContain('amount');
-    });
-  }
-
-  // The guard must not narrow what already compiled. These are the shapes it
-  // sits directly in front of.
+  // ── The guard must not narrow what already compiled ─────────────────────
   describe('comparands that legitimately compile are untouched', () => {
     it('a scalar equality still matches', async () => {
-      const rows = await find({ stage: 'won' });
-      expect(rows.map((r: any) => r.id)).toEqual(['1']);
+      expect(await ids({ stage: 'won' })).toEqual(['1']);
     });
 
     it('$in with a real value list still matches', async () => {
-      const rows = await find({ amount: { $in: [10, 20] } });
-      expect(rows.map((r: any) => r.id)).toEqual(['1']);
+      expect(await ids({ amount: { $in: [10, 20] } })).toEqual(['1']);
     });
 
     it('$nin with a real value list still matches', async () => {
-      const rows = await find({ amount: { $nin: [99] } });
-      expect(rows.map((r: any) => r.id)).toEqual(['1']);
+      expect(await ids({ amount: { $nin: [99] } })).toEqual(['1']);
     });
 
     it('$between with a real range still matches', async () => {
-      const rows = await find({ amount: { $between: [0, 100] } });
-      expect(rows.map((r: any) => r.id)).toEqual(['1']);
+      expect(await ids({ amount: { $between: [0, 100] } })).toEqual(['1']);
     });
 
     it('a Date comparand still binds', async () => {
@@ -206,13 +292,20 @@ describe('[#5041] SqlDriver refuses `$field` cross-field comparison in the ADR-0
     });
 
     it('a null comparand is still a null predicate, not a refusal', async () => {
-      const rows = await find({ budget: { $ne: null } });
-      expect(rows.map((r: any) => r.id)).toEqual(['1']);
+      expect(await ids({ budget: { $ne: null } })).toEqual(['1']);
     });
 
     it('an authored array triple with a scalar still matches, once lowered (#5158)', async () => {
-      const rows = await find(parseFilterAST([['amount', '>', 1]]));
-      expect(rows.map((r: any) => r.id)).toEqual(['1']);
+      expect(await ids(parseFilterAST([['amount', '>', 1]]))).toEqual(['1']);
+    });
+
+    it('a literal string comparand is never mistaken for a column reference', async () => {
+      // The inverse risk of this change: `{ stage: 'note' }` must compare
+      // against the TEXT 'note', not against the column of that name — the
+      // seeded row has stage 'won' and note 'won', so a compiler that resolved
+      // the literal as a column would match it.
+      expect(await ids({ stage: 'note' })).toEqual([]);
+      expect(await ids({ stage: { $eq: 'note' } })).toEqual([]);
     });
 
     it('the malformed-$between refusal keeps its own descriptive message', async () => {
