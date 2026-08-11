@@ -401,14 +401,18 @@ notes 6 的对照反查),等读数回贴再派;⛔ 不因「查不了」就当�
 不可达 ≠ 零命中,这是 notes 6「缺失类读数先证伪扫描器坏了」的跨仓版。
 
 **21. `enable_pr_auto_merge` 的空字段返回(`method: , enabled at `)对「入没入队」零
-区分度 —— 以队列读数为准,只在成员资格确实缺席时翻转一次。**(处方并入 notes 1:维护
-者 2026-08-11 裁定,#7492;正例 3 + 反例 3 + 对照组实测见 references §「auto-merge 空
-字段返回正反实测」。)**签名本身不构成任何方向的证据**;处方:先按 notes 1 读成员资格
-(timeline 事件;队列分支**正命中**亦充分,注意 `max_entries_to_build` 截断 —— 分支缺
-席单独不充分),成员资格**确实缺席**才 `disable` → `enable` 翻转一次,翻转后仍以
-notes 1 判据验证。⛔ 对已入队的 PR 补一记 `disable` **不解除队列成员资格**(只有转
-draft 才解除)、PR 照常落地,但**会清掉 auto-merge 旗** —— 此后它若被队列踢出将不会
-自动重挂(#7446 与 #7506 各实测一半)。
+区分度 —— 先验成员资格;⛔ enable 与它的队列验证之间永不插 `disable`。**(处方并入
+notes 1:维护者 2026-08-11 裁定,#7492;正例 3 + 反例 3 + 对照组实测见 references
+§「auto-merge 空字段返回正反实测」,乱序撤单反例见 §「#7655 armed 窗口 disable 撤单
+实测」。)**签名本身不构成任何方向的证据**,且「入队」webhook 可能**乱序迟到** —— 首次
+enable 可能已真实入队,armed 窗口里补的 `disable` 会把它撤掉(#7655)。序列:① 空字段
+返回 ⇒ **先验队列分支**(`git ls-remote --heads origin
+'refs/heads/gh-readonly-queue/*'`,给条目 ~20–30s 建出);② 分支在 ⇒ 结束,⛔ 不翻转;
+③ 等待后仍缺席**且队列已见 churn**(更新的条目建出
+了分支而你的没有 —— `max_entries_to_build` 截断下缺席单独不充分,notes 1 一字不变)
+⇒ 翻转**一次**(`disable` → `enable`),翻转后仍以 notes 1 判据(timeline 事件)验证;
+④ 已入队(成员资格已落定)后补 `disable` 不解除成员资格(只有转 draft 才解除),但
+**会清掉 auto-merge 旗** —— 踢出后不自动重挂(#7446/#7506,全文同节)。
 
 The product spans three repos with a fixed dependency direction:
 `objectstack` (backend; `packages/spec` is the single contract) →
@@ -1690,77 +1694,76 @@ heap/OOM signature, redispatch it alone rather than into a full batch.
 派发后端因此是**批次选择时按尺寸分流**,不再是「验证重量命中判据才例外升舱」:
 
 - **M 及以上 ⇒ 默认 `mode:cloud` 单独派卡**(独享容器),⛔ 不混进共享容器批次。旧判
-  据清单(`size/l` / `size/xl`、全量重生成、跨 3+ 包全量测试、dogfood / 浏览器验证、
-  依赖族升级、持 heavy-verify 锁 >~10 分钟)自此是 **M+ 类的示例**,不再是触发清单
-  —— 一条都不命中的 M 卡照样走云卡(裁决理由见 references §「云卡分流裁决理由」)。
+  据清单自此是 **M+ 类的示例**,不再是触发清单 —— 一条都不命中的 M 卡照样走云卡(清
+  单与理由见 references §「云卡分流裁决理由」,实测背景见 §「云卡分流实测背景」)。
 - **只有 S 级机械卡留 `mode:subagent` 共享容器** —— 为琐碎卡单开容器是纯开销,
   规则的两个方向同等硬。**S 级但不机械**的卡(判断面在设计上,不在门禁上)按
   M 待遇走云卡 —— 与 Model tiering「尺寸不是档位的充分判据」同款读法。
-- **三条随行纪律与新默认同段生效**(均为既有条款,点名以防散落):云卡创建即对
-  其 PR 挂 `subscribe_pr_activity`(入队与落地 B);dev 报告的权威通道是 issue
-  评论(`<!-- os-dev-report -->`,报告通道统一 —— step 6);卡到终局即
-  `archive_session`(入队与落地 B 的归档动作)。
+- **三条随行纪律与新默认同段生效**(点名以防散落):云卡 PR 出生即订阅(**硬步
+  骤** —— Dispatch backends 第 4 课);dev 报告的权威通道是 issue 评论
+  (`<!-- os-dev-report -->`,step 6);卡到终局即 `archive_session`(入队与落地 B)。
 - **判定写进认领评论,并带上模型档位**(step 5「Model tiering」)—— 尺寸/容器与档位
   是同一次判读的两个输出,分开写只会漂移。形如「容器判定:S 级机械卡,`mode:subagent`
   共享容器,`model: sonnet`」/「L 级,`mode:cloud` 单容器,`model: opus`」/「PM 技能
   批次卡,`mode:cloud` 单容器,`model: claude-fable-5`(Model tiering 强制条款)」。
   **S 级但不机械**照样写 `model: opus` —— 尺寸不是档位的充分判据,别让这一行的
   「S 级」自动推出 sonnet。
-- 实测背景:9 dev 共享一容器时,一张重卡(#5837 级)拖长**整批**墙钟(全文见
-  references §「云卡分流实测背景」)。
 
 #### Dispatch backends
 
 **`mode:subagent` — the S-grade mechanical lane.** The `Agent` tool, as
-described above. The devs
-run inside the PM's own session container — which in Claude Code on the web is
-already a cloud container, so the whole loop runs server-side and survives the
-browser tab closing. Reports come back directly as the subagent's final
-message — the accelerator beside the authoritative issue comment (step 6).
-Since the 2026-08-10 ruling (「M 及以上默认云卡」, the sizing section above)
-this mode is for S-grade mechanical cards, not the default for everything.
+described above. The devs run inside the PM's own session container — which in
+Claude Code on the web is already a cloud container, so the whole loop runs
+server-side and survives the browser tab closing. Reports come back directly
+as the subagent's final message — the accelerator beside the authoritative
+issue comment (step 6). Since the 2026-08-10 ruling (「M 及以上默认云卡」, the
+sizing section above) this mode is for S-grade mechanical cards, not the
+default for everything.
 
 **`mode:cloud` — the default for M and above** (same ruling). Each issue
-becomes an **independent cloud session** in the
-same environment — its own container and fresh clone, decoupled from the PM
-session's lifetime. Also the fallback for any card that needs
-resources/lifetime beyond one container, whatever its size. Requires the
-`Claude_Code_Remote`
-MCP tools (available in remote/web sessions; if absent, say so and fall back
-to `mode:subagent`).
+becomes an **independent cloud session** in the same environment — its own
+container and fresh clone, decoupled from the PM session's lifetime. Also the
+fallback for any card that needs resources/lifetime beyond one container,
+whatever its size. Requires the `Claude_Code_Remote` MCP tools (available in
+remote/web sessions; if absent, say so and fall back to `mode:subagent`).
 
 **一次性云卡用 `create_session`,⛔ 不用 create_trigger+fire**(维护者
 2026-08-07 拍板;trigger 流只保留给**定时/重复**型 —— 座位 Routine 一节)。
-实测三课,#6083 首派一天踩齐,每一条都写进派发动作:
+实测四课(1–3 课 #6083 首派一天踩齐,第 4 课 2026-08-11 A/B),每一条都写进派发动作:
 
-1. **授权面随 source,不随环境。** trigger 拉起的会话**没有仓库授权**(push / 开 PR /
-   发评论全 403,只能只读勘察);`create_session` 带 `source_url` 的会话**出生即持推
-   送授权**。同时带 `outcome_branch`(= 认领分支)、显式 `model`(trigger 流不可指
-   模型)、`title`(**以车道名开头,⛔ 不叫 os-dev**,维护者 2026-08-07 拍板;形如
-   `⚡ <车道> #<单号> <短语>`)。细节见 references §「云卡授权面第 1 课实测」。
-2. **派发词必须带自驱条款(回合终点约束)。** 云会话是对话形态 —— 回合结束
-   就停下等输入,不像 subagent 一口气跑完;不写这条,dev 会在中期汇报或提问
-   处停摆,而 PM 只能靠 poke 唤醒。条款原文形:⛔ 不为提问/中期汇报结束回合;
+1. **授权面随 source,不随环境。** trigger 拉起的会话**没有仓库授权**(只能只读
+   勘察);`create_session` 带 `source_url` 的会话**出生即持推送授权**。同时带
+   `outcome_branch`(= 认领分支)、显式 `model`(trigger 流不可指模型)、`title`
+   (**以车道名开头,⛔ 不叫 os-dev**,维护者 2026-08-07 拍板;形如
+   `⚡ <车道> #<单号> <短语>`)。403 面细节见 references §「云卡授权面第 1 课实测」。
+2. **派发词必须带自驱条款(回合终点约束)。** 云会话是对话形态,回合一结束就停摆
+   等 poke —— 不写这条,dev 会停在中期汇报或提问处。条款原文形:⛔ 不为提问/中期
+   汇报结束回合;
    开放选择按裁决与三轴/四棱自裁记入终报 open_questions;合法回合终点只有
    (a) 推送完成 + 终报 JSON 作为最后一条消息,或 (b) 硬阻塞详报。
-3. **交付通道:自开 PR + 订阅唤醒是正道,降级通道只属于 trigger 流**(初版「云会话
-   没有 GitHub API 工具」是过度保守误判,三例实测推翻 —— 全文见 references §「云卡
-   交付通道误判沿革」)。分流:
+3. **交付通道:自开 PR + 订阅唤醒是正道,降级通道只属于 trigger 流**(误判沿革与
+   三例实测见 references §「云卡交付通道误判沿革」)。分流:
    - **create_session 卡(常态)**:派发词要求 dev **自开 draft PR**(`Fixes #<n>`,
-     正文含验证记录)并把终报以 **issue 评论**(`<!-- os-dev-report -->`)交付;PM 在
-     派发后立即对该 PR 挂 `subscribe_pr_activity`。**例外仍归 PM 代办**:会话未
-     attach 的姊妹仓依旧够不着 —— 跨仓跟进卡由 PM 代立(#5775 即此形)。
+     正文含验证记录)并把终报以 **issue 评论**(`<!-- os-dev-report -->`)交付。
+     **例外仍归 PM 代办**:未 attach 的姊妹仓够不着,跨仓跟进卡由 PM 代立(#5775)。
    - **trigger 拉起的会话(定时/重复型)**:维持降级通道 —— 推送 outcome branch +
-     终报走报告 ref 或最后一条会话消息,PM 代开 draft PR、代转录。实测:报告 ref 的
-     `push --delete` 被 git 代理 403,清理走有权限的通道或留给维护者。
+     终报走报告 ref 或最后一条会话消息,PM 代开 draft PR、代转录。
+4. **云卡的 draft PR 一存在,立即对它挂 `subscribe_pr_activity` —— 硬步骤,不是随
+   行提醒。** 没订阅的云卡 PR 是轮询负债:A/B 实测,#7672 未订阅、合并靠轮询迟到数分
+   钟;#7655/#7657 已订阅、通知秒级送达零轮询(全文见 references §「云卡订阅 A/B 实测」)。
 
-**监控与转向**:事件面交给 PR 订阅(上条),`get_session` 读实时状态
-(status / model / `post_turn_summary`;IDLE + 分支未推送 = 停摆待 poke);
-投递消息用**绑定会话的 poke 触发器**(`create_trigger` 带
-`persistent_session_id` + `fire_trigger` + 用后即 `delete_trigger`)。巡检
-从主通知通道退为**兜底心跳**:webhook 不保证送达(CI success/新推送/踢队
-可能缺席),定时器仍要挂,但频率可放宽,且每轮先核订阅已覆盖哪些面、只补
-盲区(会话停摆、未开 PR 的分支、姊妹仓动静)。
+**监控与转向**:事件面交给 PR 订阅(上条),`get_session` 读实时状态(status /
+model / `post_turn_summary`;IDLE + 分支未推送 = 停摆待 poke);投递消息用**绑定
+会话的 poke 触发器**(`create_trigger` 带 `persistent_session_id` +
+`fire_trigger` + 用后即 `delete_trigger`)。巡检从主通知通道退为**兜底心跳**:
+webhook 不保证送达(CI success/新推送/踢队可能缺席),定时器仍要挂,但频率可放
+宽,且每轮先核订阅已覆盖哪些面、只补盲区(会话停摆、未开 PR 的分支、姊妹仓动静)。
+
+**跨会话消息面(维护者 2026-08-11 裁定):事件驱动架构即长期方案。** CCR 云会话
+**不注册**跨会话消息 roster —— `ListAgents` 列不到、`SendMessage` 直投
+not-reachable(可见门槛与实测见 references §「跨会话消息 roster 限制实测」)。
+云卡通道 = PR 订阅 webhook + 双落点报告契约 + 判据式定时器,如上;⛔ 不复测
+roster 路径、不提本地机迁移(2026-08-11 已查证收档,#7755)。
 
 #### 座位 Routine 化(PM 侧的运行形态,#5472 第 5 点)
 
@@ -2169,30 +2172,27 @@ git grep "<上一单实现体符号>" origin/main -- <实现文件>        # 实
 | **队列管家**(三仓一座,#5810) | 入队之后的看护:红/踢出的**签名分诊四分支**、队列停滞检测、跨仓 pin 链观测及其**机械产出**(窗口收口/发版后立 bump 单,#6162,见下) |
 
 车道 PM 的「首次入队」有一个标准动作:**ACCEPT 后立即挂 6–9 分钟的 send_later
-flip 定点**,到点核对门禁 job 结论(notes 10)、绿即转 ready + 挂 auto-merge,
-未绿再阶梯重挂。#6644 L2 之后这段是「报告在草稿 PR 时点到达」的 **PM 半边**:收敛
-读数、翻牌、入队的整段守门归这里。CI success webhook 不可靠(一班 13 次转 ready 全部
-由定点驱动、零漏接,#5885),⛔ 不要坐等 webhook,也不要忙轮询。定点文本按 notes 3 的
-**写法纪律**:以「幂等 —— 动手前先重读状态」开头、只写判据(「若 #N 的门禁 job 结论
-全绿 ⇒ 转 ready 并挂 auto-merge」),⛔ 不写结论 —— 那 6–9 分钟里 PR 可能已被管家处置、
-被踢出、转 `dirty` 或先入队,而已删除的定时器仍会投递。
+flip 定点**,到点核对门禁 job 结论(notes 10)、绿即转 ready + 挂 auto-merge,未绿
+再阶梯重挂;#6644 L2 后,收敛读数、翻牌、入队的整段守门归这里。CI success webhook
+不可靠(一班 13/13 全由定点驱动,#5885),⛔ 不坐等 webhook、不忙轮询。定点文本按
+notes 3 的**写法纪律**:以「幂等 —— 动手前先重读状态」开头、只写判据(「若 #N 的
+门禁 job 结论全绿 ⇒ 转 ready 并挂 auto-merge」),⛔ 不写结论 —— 窗口内 PR 可能已被
+他手处置(管家/踢出/转 `dirty`/先入队),而已删除的定时器仍会投递。
 
-**落地窗口给关键 PR 挂事件订阅(`subscribe_pr_activity`,维护者 2026-08-07
-拍板)。** 适用面:会话型座位、且 PR 已进入 PM 的落地窗口 —— ACCEPT 后,以及被
-压在多步落地序列里的单(补圈集、等上游 MERGED 的压后单)。这类单的 base 会在
-等待期间被 main 甩开,冲突转换与 CI 红正是 PM 可动作的事件;订阅把感知从
-「一个巡检周期的轮询滞后」缩到实时(出处:#6072 压后待放期间起冲突,维护者先于
-PM 看到 —— 感知通道缺口实测)。四条边界:
-- ⛔ 不订阅 dev 交报告前的 PR —— 报告前是 dev 的领地,双驾驶员互踩(#6644 L2 把
-  报告时点前移至草稿 PR 开出即刻,这个窗口随之收窄 —— 防双驾驶员的本意一字不变,
-  只是「报告前」这段变短了);
+**落地窗口给关键 PR 挂事件订阅(`subscribe_pr_activity`,维护者 2026-08-07 拍板)。**
+适用面:会话型座位、且 PR 已进入 PM 的落地窗口 —— ACCEPT 后,以及被压在多步落地序
+列里的单(补圈集、等上游 MERGED 的压后单);订阅把感知从「一个巡检周期的轮询滞后」
+缩到实时(动因与 #6072 实测见 references §「#6072 感知通道缺口实测」)。四条边界:
+- ⛔ 不订阅 dev 交报告前的 PR —— 报告前是 dev 的领地,双驾驶员互踩(#6644 L2 后
+  报告在草稿 PR 开出即刻到达,云卡出生即订阅因此不越此界);
 - 订阅是**感知补充**,不替代 flip 定点(上一段一字不变:CI success webhook
   依旧不可靠,转 ready 仍由定点驱动);
-- **MERGED / 关闭即退订(`unsubscribe_pr_activity`),同刻把 `mode:cloud` 派出的
-  那个会话 `archive_session`。** 归档是 ACCEPT 收尾的**固定动作序列**的一环,与
-  「flip / 跟到 MERGED」同级,不是可选的清理:触发条件是**卡的终局**(PR MERGED
-  或卡作废),不是「dev 交了报告」。实测代价:一个座位曾累积 **11 个**已完成未归档
-  的空转容器 —— 只会被问出来,不会被发现;
+- **MERGED / 关闭即退订(`unsubscribe_pr_activity`),同刻把 `mode:cloud` 派出的那
+  个会话 `archive_session`(维护者 2026-08-10)。** 归档与「flip / 跟到 MERGED」同
+  级、不是可选清理:触发条件是**卡的终局**(PR MERGED 或卡作废)**且报告已收复核**;
+  巡检顺手批扫 `list_sessions` 的 review_ready 存量(实测见 references §「云卡归档
+  欠账与 dirty 自救实测」)。⛔ PR 合并前不归档 —— 活会话是 dirty 自救的执行手
+  (#7265/#7325);误归档可 `unarchive_session`,但容器现场已失,宁晚勿早;
 - 仅会话型座位可用 —— webhook 投进订阅它的那个会话,Routine 座位每 fire 新
   会话、收不到,维持轮询姿态。暂停/交接时清点在挂的订阅并写进座位贴,⛔ 不留
   孤儿订阅。
