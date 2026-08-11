@@ -69,13 +69,22 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { AGGREGATION_CASES, AGGREGATION_ROWS } from '@objectstack/spec/data';
 import type { AggregationCase, Cube } from '@objectstack/spec/data';
+import type { DriverQuery } from '@objectstack/spec/contracts';
 import { InMemoryDriver } from './memory-driver.js';
 import { MemoryAnalyticsService } from './memory-analytics.js';
 
 const TABLE = 'conformance_agg';
 
-/** The case as the `DriverQuery` shape both doors consume. */
-const queryFor = (c: AggregationCase) => ({
+/**
+ * The case as the `DriverQuery` shape both doors consume.
+ *
+ * [#4918] The return type is DECLARED rather than left to inference and erased
+ * at each call site. Every case here is deliberately ON contract — the whole
+ * point of the file is that the standard's own vocabulary reaches the driver —
+ * so there is nothing for an `as any` to bypass, and typing it puts the two
+ * doors' argument under `tsc` instead of exempting it.
+ */
+const queryFor = (c: AggregationCase): DriverQuery => ({
   aggregations: [{ function: c.function, ...(c.field ? { field: c.field } : {}), alias: 'n' }],
   // [#6401] A case carrying `groupByAlias` is sent as the STRUCTURED node, so
   // the face receives the union member that declares `alias`. Without this the
@@ -140,7 +149,7 @@ describe('[#6814] InMemoryDriver — aggregate vocabulary conformance', () => {
 
   for (const c of AGGREGATION_CASES) {
     it(`find(): ${c.name}`, async () => {
-      const rows = await driver.find(TABLE, queryFor(c) as any);
+      const rows = await driver.find(TABLE, queryFor(c));
       expect(actualFor(c, rows as any[]), c.note ?? c.name).toEqual(expectedFor(c));
     });
 
@@ -151,7 +160,7 @@ describe('[#6814] InMemoryDriver — aggregate vocabulary conformance', () => {
      * stand for the other.
      */
     it(`aggregate(AST): ${c.name}`, async () => {
-      const rows = await driver.aggregate(TABLE, queryFor(c) as any);
+      const rows = await driver.aggregate(TABLE, queryFor(c));
       expect(actualFor(c, rows as any[]), c.note ?? c.name).toEqual(expectedFor(c));
     });
   }
@@ -165,7 +174,7 @@ describe('[#6814] InMemoryDriver — aggregate vocabulary conformance', () => {
    */
   it('never answers null for a declared aggregate function', async () => {
     for (const c of AGGREGATION_CASES) {
-      const rows = await driver.find(TABLE, queryFor(c) as any);
+      const rows = await driver.find(TABLE, queryFor(c));
       for (const row of rows as any[]) {
         expect(row.n, `${c.name} — a declared function resolving null is the #6814 defect`).not.toBeNull();
         expect(typeof row.n, c.name).toBe('number');
