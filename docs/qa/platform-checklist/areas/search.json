@@ -8,7 +8,7 @@
       "title": "$search is a server-resolved cross-field match: terms AND-ed, fields OR-ed, case-insensitive, select labels mapped to values",
       "since": "v15",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai)"],
@@ -16,12 +16,17 @@
         "app": "showcase",
         "requires": [
           "the seeded accounts: Northwind (industry 'retail', name does NOT contain 'retail'), Acme Retail (name-hit control), Contoso (cross-term control) — examples/app-showcase/src/data/seed/index.ts"
+        ],
+        "knownGaps": [
+          "the textual case-fold clause FAILS on builds carrying #7641: search-filter.ts fieldClausesForTerm emits { field: { $contains: term } } for textual types and `$contains` is contractually case-SENSITIVE (#4706 Q2 = A), so a lowercase term misses a capitalized name (run #7629, framework 92f26f75, reproduced on two fresh boots; the #6518 SQLite LIKE→GLOB change removed the incidental ASCII fold that used to hide it). Case-insensitive stays the DECLARED truth — this item states the contract and #7641 moves the executor onto `$icontains`. A run records the FAIL against #7641; it does NOT re-declare the semantics to match a red build",
+          "the automated pin (packages/qa/dogfood/test/showcase-search.dogfood.test.ts) stayed green through #7641 because its only case assertion is a select LABEL, which survives via optionValuesMatching's JS-side lowercasing. A run may not treat that pin as covering the textual case-fold clause — that clause needs its own lowercase-name assertion"
         ]
       },
       "steps": [
         "POST /api/v1/data/showcase_account/query with { search: 'retail' } and record the returned names",
         "verify the premise before ticking anything: Northwind's NAME must not contain 'retail' (else the multi-field claim proves nothing)",
         "POST the same search narrowed with { search: 'retail', searchFields: ['industry'] } — Northwind must still return, positively pinning the hit to the industry field",
+        "the TEXTUAL case-fold probe, pinned away from the select path: POST { search: 'retail', searchFields: ['name'] } and { search: 'Retail', searchFields: ['name'] } — both spellings must return the name-hit control (Acme Retail); narrowing to ['name'] keeps the select label→value mapping out of this verdict",
         "POST { search: 'Retail' } (capitalized label) — the select label→value mapping must still match the stored 'retail' value",
         "POST { search: 'retail northwind' } (terms AND across different fields of one row) and { search: 'retail contoso' } (terms that no single row satisfies)",
         "capture every response body as the evidence set"
@@ -40,9 +45,15 @@
           "evidence": "the response body"
         },
         {
-          "clause": "matching is case-insensitive and select labels map to option values: 'Retail' (label case) matches rows storing the value 'retail'",
+          "clause": "matching is case-insensitive on TEXTUAL fields: narrowed to ['name'], both 'retail' and 'Retail' return the name-hit control (Acme Retail) — the case-fold is a property of the matching itself, not a side effect of the select-label path",
           "oracle": "api",
-          "verify": "the capitalized search still returns Northwind (optionValuesMatching + raw-value $contains fallback)",
+          "verify": "the two ['name']-narrowed responses both carry Acme Retail. This is the DECLARED contract: `$contains` is case-SENSITIVE (#4706 Q2 = A), so a conforming executor emits the case-insensitive `$icontains` for textual fields. On a build where search-filter.ts still emits `$contains`, the lowercase spelling returns [] — FAIL this clause against #7641 rather than softening the declaration",
+          "evidence": "the two ['name']-narrowed response bodies"
+        },
+        {
+          "clause": "select labels map to option values: 'Retail' (label case) matches rows storing the value 'retail' — an independent mechanism from the textual case-fold above",
+          "oracle": "api",
+          "verify": "the capitalized search still returns Northwind (optionValuesMatching lowercases both sides in JS before emitting $in; raw-value $contains fallback). Ticking this clause says nothing about the textual clause — they are verified separately on purpose",
           "evidence": "the response body"
         },
         {
@@ -54,23 +65,26 @@
       ],
       "negative": [
         "'retail contoso' returning Contoso (terms OR-ed instead of AND-ed) is a FAIL against the declared matching semantics",
-        "an empty result for 'retail' means the executor silently dropped $search — the exact pre-ADR-0061 no-op this surface replaced; FAIL, not thin data"
+        "an empty result for 'retail' means the executor silently dropped $search — the exact pre-ADR-0061 no-op this surface replaced; FAIL, not thin data. Rule out the #7641 case-fold gap first: if 'Retail' hits where 'retail' misses, the executor did not drop $search, it failed to case-fold",
+        "a lowercase term missing a capitalized name ('retail' → [] while 'Retail' → Acme Retail) is a case-fold FAIL, not thin data and not a fixture problem — the declaration is the truth and the executor is what must move (#7641)"
       ],
       "variants": [
         "multi-term AND",
         "cross-field OR",
-        "case-insensitive $contains",
+        "case-insensitive textual matching (`$icontains` semantics — `$contains` itself is case-SENSITIVE per #4706 Q2 = A)",
         "select label→value mapping"
       ],
       "traps": ["seed-data-thin", "dispatcher-vs-hono-route"],
       "automated": { "kind": "api", "ref": "packages/qa/dogfood/test/showcase-search.dogfood.test.ts" },
       "source": [
         "packages/qa/dogfood/test/search-conformance.ledger.ts (rows search-executor, search-select-label-mapping — the variants list is the enforced behavior set)",
-        "packages/objectql/src/search-filter.ts (matching semantics: terms AND-ed, fields OR-ed, case-insensitive, label mapping)",
-        "packages/objectql/src/engine.ts expandSearchOnAst (the executor site the ledger names)"
+        "packages/objectql/src/search-filter.ts (docblock line 18 — matching semantics: terms AND-ed, fields OR-ed, case-insensitive, label mapping; the DECLARATION this item transcribes, which fieldClausesForTerm does not yet honor for textual types — #7641)",
+        "packages/objectql/src/engine.ts expandSearchOnAst (the executor site the ledger names)",
+        "#4706 Q2 = A (the operator ruling that fixes the direction: `$contains` is a case-SENSITIVE substring test and `$icontains` is the case-insensitive one — so 'case-insensitive $search' means $icontains, and the declaration is what the executor must satisfy)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "new item transcribed from the search-conformance ledger and its HTTP-level dogfood proof, seeded names (Northwind/Acme Retail/Contoso) verified in the showcase seed", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-07", "change": "new item transcribed from the search-conformance ledger and its HTTP-level dogfood proof, seeded names (Northwind/Acme Retail/Contoso) verified in the showcase seed", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-11", "change": "case-fold made separately assertable, and aligned TOWARD the declaration per the #4706 Q2 = A ruling (case-insensitive is the declared truth; the product-side conformance gap is #7641's job, not this file's). Run #7629 scored the old clause FAIL and showed why it had gone unnoticed for a release: one clause conflated two mechanisms — textual case-fold and select label→value mapping — and the label half passes on a case-SENSITIVE build because optionValuesMatching lowercases in JS, so a green tick (and a green dogfood pin) said nothing about the textual half. Now split into two clauses with a ['name']-narrowed probe that pins the textual case-fold away from the select path, a step and a negative for the lowercase-name assertion the run identified as the missing one, and knownGaps recording the #7641 expected FAIL plus the pin's blind spot. The variant string 'case-insensitive $contains' was self-contradictory under Q2 = A and now names $icontains semantics. Title, docblock citation and the case-insensitive declaration itself are deliberately UNCHANGED", "ref": "#7647" }
       ]
     },
     {
@@ -140,14 +154,14 @@
       "title": "Search honors RLS both ways: a restricted member gets no hits — and no total leakage — from rows they cannot see; the entitled persona finds the same rows",
       "since": "v15",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": ["seeded admin (sees all invoices)", "signed-up member bound to the contributor position (invoice_own_rows RLS: owner == current_user.email)"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "seeded invoices INV-1001..INV-1008 with owner emails (ada@example.com / linus@example.com / grace@example.com) none of which belong to the test member",
+          "seeded invoices INV-1001..INV-1012 (12 rows) with owner emails (ada@example.com ×5 / linus@example.com ×4 / grace@example.com ×3) none of which belong to the test member — INV-1003 is linus's, which is why it is the invisible row the guard uses",
           "a signed-up member holding the contributor position — positions are seeded, users are not: sign the member up, then bind contributor (sys_user_position) before the run"
         ],
         "knownGaps": [
@@ -172,7 +186,7 @@
         {
           "clause": "no count leakage: a searched list's total/hasMore derive from the caller-scoped result set — with `search` present the protocol computes a page-local total from the RLS-filtered find (it never runs a raw count for searched lists), and engine.count itself rides the same read middleware (#2737)",
           "oracle": "api",
-          "verify": "the member's paged totals reconcile exactly with the rows they can enumerate; no response reveals the true 8-row population",
+          "verify": "the member's paged totals reconcile exactly with the rows they can enumerate; no response reveals the true seeded population (12 rows, plus whatever the run itself created — read the count from the seed rather than from this clause)",
           "evidence": "the paged responses + reconciliation table"
         },
         {
@@ -195,12 +209,13 @@
       "traps": ["wrong-persona", "seed-data-thin"],
       "source": [
         "examples/app-showcase/src/security/permission-sets.ts (invoice_own_rows: owner == current_user.email, positions ['contributor'])",
-        "examples/app-showcase/src/data/seed/index.ts (INV-1001..1008 owner spread; 'ada sees INV-1001/1002's lines but never linus's INV-1003')",
+        "examples/app-showcase/src/data/seed/index.ts (INV-1001..1012 owner spread; 'ada sees INV-1001/1002's lines but never linus's INV-1003')",
         "packages/objectql/src/engine.ts (expandSearchOnAst ANDs into ast.where; count() rides the read middleware — the #2737 total-leak fix)",
         "packages/metadata-protocol/src/protocol.ts (searched lists: countable = search == null → page-local total from the scoped find)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "new item: RLS × $search both-personas contract; total-leakage clause grounded in the protocol's page-local total for searched lists and the #2737 count middleware fix, persona provisioning gap recorded honestly", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-07", "change": "new item: RLS × $search both-personas contract; total-leakage clause grounded in the protocol's page-local total for searched lists and the #2737 count middleware fix, persona provisioning gap recorded honestly", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-11", "change": "stale fixture count corrected against the seed (run #7629): the showcase now ships 12 invoices INV-1001..INV-1012, not 8. Three places carried the stale number — the fixtures requirement, the no-count-leakage clause's 'true 8-row population', and the seed source citation. The leakage clause no longer hard-codes a population at all (a run reconciles against the seed and its own created rows, which is what #7629 actually did: 3 visible to the member, 15 to admin); the owner spread is now stated as counts (ada ×5 / linus ×4 / grace ×3) with INV-1003 named as linus's, so the invisible-row premise is checkable without opening the seed. Item substance and all four acceptance clauses are otherwise unchanged — #7629 scored this item 4/4 PASS", "ref": "#7647" }
       ]
     },
     {
@@ -208,7 +223,7 @@
       "title": "Pinyin recall is gated end-to-end by OS_SEARCH_PINYIN_ENABLED: on, latin pinyin (full + initials) hits CJK names; off, it does not — while CJK terms keep matching",
       "since": "v15.1",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["seeded admin (admin@objectos.ai)"],
@@ -217,7 +232,11 @@
         "requires": [
           "seeded CJK rows: contact 张伟 (zhangwei@huaning.example) and account 华宁科技 — placed in the seed precisely so pinyin recall is demonstrable out of the box",
           "the showcase i18n config (supportedLocales includes zh-CN), which makes the flag default ON: unset OS_SEARCH_PINYIN_ENABLED + any zh-* locale → enabled, stamped into the env at serve boot",
-          "an environment lever for the OFF side: restart the server with OS_SEARCH_PINYIN_ENABLED=false (an explicit value always beats the locale-derived default — truthy is exactly 1/true/on/yes; anything else explicit disables)"
+          "an environment lever for the OFF side: restart the server with OS_SEARCH_PINYIN_ENABLED=false (an explicit value always beats the locale-derived default — truthy is exactly 1/true/on/yes; anything else explicit disables)",
+          "a readable boot log for BOTH boots (debug level) — the OFF-side oracle is the loaded-plugin roster, so the run needs the plugin count / `requires` list from each boot, not just the ON-side output"
+        ],
+        "knownGaps": [
+          "the plugin's own inert line ('OS_SEARCH_PINYIN_ENABLED is off — inert') is UNOBTAINABLE in a CLI-served deployment and must not be used as the OFF-side oracle: the CLI gates one layer upstream and omits `pinyin-search` from `requires` when the flag is off, so the plugin is never loaded and never reaches its own inert branch. Run #7629 measured 47 loaded plugins with the flag off vs 48 with it on, and found ZERO occurrences of 'pinyin' in a 1.2 MB debug boot log. The clause below therefore reads the roster difference; the inert line is kept only as the alternative oracle for a host that loads the plugin unconditionally"
         ]
       },
       "steps": [
@@ -227,7 +246,7 @@
         "POST /api/v1/data/showcase_account/query { search: 'huaning' } and { search: 'hnkj' } — both must return 华宁科技",
         "confirm the seeded rows were companion-backfilled on this very boot (rows written by seeds BEFORE hook binding are reconciled by the kernel:bootstrapped backfill — no restart needed) by checking the boot log for the backfill, then verify in the browser that the list quick-search / ⌘K / lookup picker send the same $search and hit",
         "restart the server with OS_SEARCH_PINYIN_ENABLED=false and re-run the same queries",
-        "capture the boot log line proving the plugin went inert"
+        "capture the OFF-side inertness from the plugin ROSTER, not from a plugin log line: record the loaded-plugin count and the `requires` list on both boots (the CLI omits `pinyin-search` when the flag is off) and grep the whole debug boot log for 'pinyin' — zero occurrences is the proof. Only if the host loaded the plugin anyway does the plugin's own inert line become the thing to capture"
       ],
       "acceptance": [
         {
@@ -249,10 +268,10 @@
           "evidence": "post-restart response bodies"
         },
         {
-          "clause": "OFF is inert end-to-end, not half-disabled: the plugin logs 'OS_SEARCH_PINYIN_ENABLED is off — inert' (no hooks, no backfill, pinyin-pro never imported) — the ADR-0049 no-half-state design: column provisioning and population share the SINGLE decision point resolveSearchPinyinEnabled",
+          "clause": "OFF is inert end-to-end, not half-disabled — and under CLI serving the gate sits one layer UPSTREAM of the plugin: with the flag off the CLI does not add `pinyin-search` to `requires`, so the plugin is never loaded (no hooks, no backfill, pinyin-pro never imported, and its own 'is off — inert' line never printed). A host that loads the plugin unconditionally takes the in-plugin inert branch instead. Either route satisfies the ADR-0049 no-half-state design: column provisioning and population share the SINGLE decision point resolveSearchPinyinEnabled",
           "oracle": "log",
-          "verify": "the boot log carries the inert line and no backfill activity",
-          "evidence": "boot log excerpt"
+          "verify": "diff the two boots' loaded-plugin roster — the OFF boot is one plugin short and `pinyin-search` is absent from `requires` (#7629 measured 47 vs 48) — and confirm a full-text grep of the OFF debug boot log yields ZERO 'pinyin' occurrences. Do NOT wait for the plugin's inert line: it cannot appear when the plugin was never loaded, and treating its absence as a failure is the trap this clause was rewritten to remove. If the roster shows the plugin WAS loaded, then the inert line is required instead. No backfill activity on either route",
+          "evidence": "both boots' plugin count / `requires` lines + the zero-hit grep over the OFF boot log (or, plugin-loaded hosts only, the inert line)"
         },
         {
           "clause": "seeded (pre-hook) rows are recallable on the FIRST boot: the kernel:bootstrapped backfill reconciles rows written before/around hook binding, and existing deployments' stale rows after a restart (#3027 / 15.1 plan G9)",
@@ -276,14 +295,15 @@
       "traps": ["stale-dist", "seed-data-thin"],
       "source": [
         "packages/types/src/env.ts (resolveSearchPinyinEnabled — explicit env wins, truthy set {1,true,on,yes}; unset derives from zh-* locales; stampSearchPinyinEnabled at boot)",
-        "packages/plugins/plugin-pinyin-search/src/pinyin-search-plugin.ts (inert-when-off, before-save hooks, kernel:bootstrapped backfill)",
+        "packages/plugins/plugin-pinyin-search/src/pinyin-search-plugin.ts (inert-when-off, before-save hooks, kernel:bootstrapped backfill) — reached only when the host loads the plugin; under the CLI the flag decides `requires` first, which is why the roster, not this file's log line, is the OFF-side oracle",
         "packages/objectql/src/search-companion.ts (__search companion: display-field-only materialization, FLS/secret eligibility gate)",
         "packages/objectql/src/search-filter.ts (each latin term ORs { __search: { $contains: term } } — purely additive)",
         "examples/app-showcase/src/data/seed/index.ts (张伟/华宁科技 seeded for exactly this demo) + examples/app-showcase/objectstack.config.ts (supportedLocales ['en','zh-CN'])",
         "docs/plans/release-15.1-test-plan.md E5/G9 (#3027/#3034)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "new item: both sides of the pinyin flag with toggle semantics read from resolveSearchPinyinEnabled's source (explicit-wins + zh-locale default), recall variants pinned to the seeded CJK rows, backfill contract from the plugin source", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-07", "change": "new item: both sides of the pinyin flag with toggle semantics read from resolveSearchPinyinEnabled's source (explicit-wins + zh-locale default), recall variants pinned to the seeded CJK rows, backfill contract from the plugin source", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-11", "change": "the OFF-inertness clause now names an oracle that exists. It demanded a specific plugin log line ('OS_SEARCH_PINYIN_ENABLED is off — inert') which run #7629 proved unobtainable under CLI serving: the flag gates one layer upstream, the CLI omits pinyin-search from `requires`, the plugin is never loaded, and a 1.2 MB debug boot log contained zero occurrences of 'pinyin' (47 loaded plugins off vs 48 on). That is a STRONGER proof of inertness than the log line would have been, so the clause now reads the plugin roster / `requires` difference plus the zero-hit grep, and keeps the inert line only as the alternative oracle for a host that loads the plugin unconditionally — the run is told which route it is on by the roster itself. Step 7, the fixtures requirement and the plugin source citation follow; knownGaps records the unobtainability so the next author does not restore the log-line oracle. This was the item's ONLY partial in #7629 — the substance (both flag sides, per-variant recall, backfill) is unchanged", "ref": "#7647" }
       ]
     },
     {
@@ -364,7 +384,7 @@
       "title": "The console global search — ⌘K palette, header Search button, and /search page — drives ONE path (GET /api/v1/search): hits group under object headings, RLS hides invisible rows, Enter opens the record, empty input shows recents",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -376,11 +396,12 @@
         "requires": [
           "the objectui console (app-shell) with CommandPaletteProvider — the ⌘K/Ctrl+K accelerator, the header Search button, and the ?palette=1/?cmdk=1 deep-link all drive the SAME idempotent open (ADR-0054 C1/C3)",
           "the seeded CJK/pinyin rows 张伟 (zhangwei@huaning.example) and 华宁科技 (examples/app-showcase/src/data/seed/index.ts) so a CJK/pinyin query has a real hit; the search service (pinyin full-text plugin) installed so GET /api/v1/search resolves",
-          "seeded invoices INV-1001..INV-1008 (owner spread ada/linus/grace) and a signed-up member bound to the contributor position (sys_user_position) so the RLS-parity side has an invisible row (INV-1003) to prove absence — provisioned exactly as in search.rls-both-personas"
+          "seeded invoices INV-1001..INV-1012 (12 rows, owner spread ada/linus/grace) and a signed-up member bound to the contributor position (sys_user_position) so the RLS-parity side has an invisible row (INV-1003, owned by linus) to prove absence — provisioned exactly as in search.rls-both-personas"
         ],
         "knownGaps": [
           "the /_console bundle is vendored and may be stale — verify the palette/page behavior against current objectui app-shell or a fresh build (stale-console-bundle, RUNNER §2)",
-          "when the search plugin is ABSENT, searchAll's GET /api/v1/search answers 404 and useRecordSearch degrades to the per-object find({ $search }) fanout — record WHICH path served from the network trace rather than assuming the global endpoint"
+          "when the search plugin is ABSENT, searchAll's GET /api/v1/search answers 404 and useRecordSearch degrades to the per-object find({ $search }) fanout — record WHICH path served from the network trace rather than assuming the global endpoint",
+          "the /search path inherits the same declared-vs-actual case gap as search.cross-field-object-search: matching is DECLARED case-insensitive (#4706 Q2 = A makes `$icontains` the case-insensitive operator) and searchAll's filter still emits `$contains`, so a query whose case differs from the stored value can miss on a build carrying #7641. Vary case deliberately, or query in the stored case, before scoring a miss as a palette/UI defect — the declaration stands and #7641 owns the executor side"
         ]
       },
       "steps": [
@@ -464,7 +485,8 @@
         "search.rls-both-personas (the RLS × $search read-path mechanism this item reuses) and search.cross-field-object-search (the /data $search path this item is DISTINCT from — this tests the console global-search UI + the /search route)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-08", "change": "new item: console global-search UI (⌘K palette + header button ADR-0054 C1 + /search page) over GET /api/v1/search — object-grouped hits, RLS parity, Enter-navigates, empty-shows-recents; grounded in objectui app-shell + the framework search route ledger", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-08", "change": "new item: console global-search UI (⌘K palette + header button ADR-0054 C1 + /search page) over GET /api/v1/search — object-grouped hits, RLS parity, Enter-navigates, empty-shows-recents; grounded in objectui app-shell + the framework search route ledger", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-11", "change": "two text corrections from run #7629, no clause substance changed. (1) The RLS-parity fixture carried the same stale invoice count as search.rls-both-personas — the seed ships 12 rows INV-1001..INV-1012, not 8; INV-1003's owner (linus) is now named so the invisible-row premise is checkable in place. (2) knownGaps records that this path inherits the declared-case-insensitive contract and the #7641 executor gap, since searchAll also emits `$contains` — without it a run scores a case-driven miss as a palette defect. Direction is per the #4706 Q2 = A ruling: case-insensitive is the declared truth, so the checklist reconciles toward the declaration and #7641 owns the product side", "ref": "#7647" }
       ]
     }
   ]

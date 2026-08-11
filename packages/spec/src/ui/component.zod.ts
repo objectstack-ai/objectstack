@@ -222,7 +222,22 @@ export type PageContainerProps = z.input<typeof PageContainerProps>;
  */
 
 export const PageHeaderProps = z.object({
-  title: I18nLabelSchema.describe('Page title'),
+  /**
+   * Page title (#7702, maintainer ruling 2026-08-11 「接受你的建议,开始加速处理」
+   * on the lane's A/B recommendation). OPTIONAL, not required: the platform's
+   * own synthesizer (objectui `buildDefaultHeader`) emits every seeded
+   * `page:header` with no `title` at all — `PageHeaderRenderer`
+   * (`containers.tsx:1013`) reads `schema?.title ?? schema?.properties?.title`
+   * and, finding neither, falls through to the record chip's own
+   * record-derived heading. A required `title` would reject the platform's
+   * own canonical output. Sanctioned spelling: title omitted ⇒ the renderer
+   * derives the heading from the record. Authors still set it explicitly for
+   * non-record pages (dashboards, landing pages) where there is no record to
+   * derive from.
+   */
+  title: I18nLabelSchema.optional().describe(
+    'Page title. Omit to let the renderer derive the heading from the record (the default for record pages) — set explicitly on non-record pages (dashboard, landing) with no record to derive from.',
+  ),
   subtitle: I18nLabelSchema.optional().describe('Page subtitle'),
   /**
    * REMOVED (#6946, maintainer ruling 2026-08-09 「全部接受」 on objectui#3829,

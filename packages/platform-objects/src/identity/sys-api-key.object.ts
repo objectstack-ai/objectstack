@@ -259,6 +259,19 @@ export const SysApiKey = ObjectSchema.create({
     // `key`, `user_id`, `expires_at`, `name`, … — is stripped, and a PATCH
     // that touches nothing else is refused 403 `PERMISSION_DENIED` rather
     // than degrading into a silent no-op.
+    //
+    // The batch primitive stays off DELIBERATELY (#7802), which is why this is
+    // the monorepo's only single-record-write whitelist without it. Revoking is
+    // a one-row, one-column gesture: the console renders no checkbox column for
+    // this object (no bulk action can arise — the grid's only implicit one is
+    // bulk-delete, and this object grants no delete affordance), and promoting
+    // a row action into a view's `bulkActions` fans out per row through the
+    // action runner rather than calling `/batch`. So the primitive would open
+    // `POST /data/sys_api_key/batch` and the `*Many` routes to API clients for
+    // no caller. The decision is on the record — with its evidence and the
+    // conditions that would reverse it — in `SINGLE_RECORD_WRITE_ONLY` in
+    // `@objectstack/spec`'s `data/api-methods-batch-conformance.test.ts`, whose
+    // stale-entry check fails if `bulk` is added here without retiring it.
     apiMethods: ['get', 'list', 'update'],
   },
 });
