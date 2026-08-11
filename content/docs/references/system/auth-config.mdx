@@ -179,8 +179,20 @@ OIDC / Generic OAuth2 provider configuration for enterprise SSO
 
 ---
 
+## OidcProvidersConfig
+
+List of OIDC/OAuth2 providers for enterprise SSO. Product or enterprise packages can pass this directly or contribute it through auth:configure.
+
+**Type:** `{ providerId: string; name?: string; discoveryUrl?: string; issuer?: string; … }[]`
+
 
 ---
+
+## SocialProviderConfig
+
+Social/OAuth provider map forwarded to better-auth socialProviders. Keys are provider ids (google, github, apple, …).
+
+**Type:** `Record<string, { clientId: string; clientSecret: string; enabled: boolean; scope?: string[] } & Record<string, any>>`
 
 
 ---
