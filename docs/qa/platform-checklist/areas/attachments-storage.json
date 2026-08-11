@@ -438,7 +438,7 @@
       "title": "Chunked uploads are resumable; abandoned sessions are reaped and their backend multipart uploads ABORTED before the row (the only pointer) is deleted",
       "since": "v15.1",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai)"],
@@ -452,7 +452,7 @@
         ]
       },
       "steps": [
-        "POST /api/v1/storage/upload/chunked { filename, mimeType, size, chunkSize } and capture { uploadId, fileId }",
+        "POST /api/v1/storage/upload/chunked { filename, mimeType, totalSize, chunkSize } and capture { uploadId, fileId } — the init route's required trio is filename/mimeType/`totalSize` (a body spelling `size` is refused 400 INVALID_REQUEST), and `chunkSize` is floored at 5 MiB, so a smaller requested value silently yields a different totalChunks than the caller computed (storage-routes.ts:274-281)",
         "PUT one chunk, then GET /upload/chunked/<uploadId>/progress and record uploadedChunks/percentComplete/status ('in_progress') — progress is the first step of the SDK's resumeUpload",
         "complete a full session on a second upload and verify its sys_upload_session row reaches status 'completed'",
         "abandon the first session mid-flight; backdate its expires_at past the 1d TTL (system write) and trigger the lifecycle sweep",
@@ -503,18 +503,20 @@
         "packages/services/service-storage/src/attachment-lifecycle.ts (createUploadSessionReapGuard — abort-before-reap contract, completed/no-backend confirm branches, veto-on-failure)",
         "packages/services/service-storage/src/objects/system-upload-session.object.ts (status enum = the variants list; ttl expires_at+1d, retention 7d terminal statuses)",
         "packages/services/service-storage/src/storage-route-ledger.ts (upload-chunked family)",
+        "packages/services/service-storage/src/storage-routes.ts:274-281 (POST /upload/chunked init contract: filename/mimeType/totalSize required, else 400 INVALID_REQUEST; chunkSize = Math.max(reqChunkSize ?? 5242880, 5242880), i.e. a 5 MiB floor)",
         "docs/plans/release-15.1-test-plan.md §C4 (#2970 item 4)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "new item: chunked-session lifecycle + multipart-abort guard from the reap-guard source, variants pinned to the sys_upload_session status enum; S3-only consequences honestly recorded as a known gap", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-07", "change": "new item: chunked-session lifecycle + multipart-abort guard from the reap-guard source, variants pinned to the sys_upload_session status enum; S3-only consequences honestly recorded as a known gap", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-11", "change": "step-text correction from run #7635: the chunked-init step said `size`, but the route destructures `totalSize` and 400s INVALID_REQUEST without it — a runner following the old text could not open a session at all. Step now names totalSize and the 5 MiB chunkSize floor (which silently rewrites totalChunks when a caller asks for less), with storage-routes.ts:274-281 added to source as the grounding. Clause 4's failed/expired enforce-or-remove finding from the same run is deliberately NOT touched here — it is owned by #7667", "ref": "#7671" }
       ]
     },
     {
       "id": "attachments-storage.inline-grid-receipt-cells",
-      "title": "Per-line Receipt upload cells in the invoice inline grid: auto-derived file column, real upload control, resolved file object in the atomic batch",
+      "title": "Per-line Receipt upload cells in the invoice inline grid: auto-derived file column, real upload control, opaque sys_file reference in the atomic batch",
       "since": "v15.1",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "browser",
       "personas": ["seeded admin (admin@objectos.ai)"],
@@ -532,8 +534,9 @@
         "materialize a row: pick 'Widget A' in the product lookup, set Qty 1",
         "upload a small PNG into the row's Receipt cell and wait for the file chip carrying the file name",
         "fill the header (name INV-QA-<ts>, pick an account, status draft) and submit while capturing the POST /api/v1/batch request",
-        "inspect the batch's showcase_invoice_line operation: the receipt value must be a RESOLVED stored-file object, and its url an absolute http(s) URL",
-        "re-open the created invoice and confirm the line's receipt renders as a chip/thumbnail, not a text value"
+        "inspect the batch's showcase_invoice_line operation: the receipt value must be the bare opaque `sys_file` id string (ADR-0104 D3 stored form) — NOT a resolved {name, url} object, and NOT a data:/blob: placeholder",
+        "read the referenced sys_file row as admin and confirm the field-ownership stamp fired: status 'committed' with ref_object='showcase_invoice_line', ref_id=<the created line's id>, ref_field='receipt', acl='private'",
+        "re-open the created invoice and confirm the line's receipt renders as a chip/thumbnail, not a text value — the {id, name, size, mimeType, url} shape the UI reads is the ADR-0104 EXPANDED form, derived at read time from the sys_file row, never the stored value"
       ],
       "acceptance": [
         {
@@ -555,15 +558,16 @@
           "evidence": "upload trace + chip screenshot"
         },
         {
-          "clause": "the atomic /api/v1/batch carries the line with receipt as a resolved stored-file object (absolute url), not a blob or text placeholder — and the create round-trips",
+          "clause": "the atomic /api/v1/batch carries the line's receipt as the ADR-0104 D3 stored form — the bare opaque `sys_file` id, a managed ACL-gated reference — not a data:/blob: placeholder and not a resolved {name, url} object (the inline blob is retired from the WRITE path; the resolved shape exists only as the read/expand form)",
           "oracle": "network",
-          "verify": "the captured batch's showcase_invoice_line operation has receipt.name (or original_name) containing the picked filename and an http(s) url; the batch answers success",
-          "evidence": "the batch payload + response"
+          "verify": "the captured batch's showcase_invoice_line operation has receipt === an opaque id string that resolves to a sys_file row whose status is 'committed' and whose field-ownership stamp reads ref_object='showcase_invoice_line' / ref_id=<the created line> / ref_field='receipt' / acl='private'; the batch answers success",
+          "evidence": "the batch payload + response + the sys_file row read"
         }
       ],
       "negative": [
         "a text input where the upload cell should be is the exact #2360 failure — FAIL",
-        "a batch that persists a data:/blob: placeholder instead of a stored-file reference is a FAIL even if the grid looked right (ADR-0104: an inline blob is not a managed file)"
+        "a batch that persists a data:/blob: placeholder instead of a stored-file reference is a FAIL even if the grid looked right (ADR-0104: an inline blob is not a managed file)",
+        "⛔ NOT a failure: a batch carrying the bare id instead of {name, url}. That is the shipped contract (ADR-0104 D3), and reading it as a defect is exactly the checklist-vs-product drift #7669 corrected — clause text that predates an ADR must be restated, never scored against the product"
       ],
       "traps": ["automation-input", "hydration-race", "stale-console-bundle"],
       "automated": { "kind": "e2e", "ref": "objectui: e2e/live/grid-file-upload.spec.ts" },
@@ -571,10 +575,14 @@
         "docs/plans/release-15.1-test-plan.md §C2 (#3051 + objectui#2585)",
         "objectui e2e/live/grid-file-upload.spec.ts (the live pin: auto-column, input-not-text, chip, batch payload shape)",
         "examples/app-showcase/src/data/objects/invoice.object.ts (showcase_invoice_line.receipt = Field.file, objectui#2360 note)",
+        "docs/adr/0104-field-runtime-value-shape-contract.md:211-224 — D3 'File-as-reference: field values point into sys_file': the STORED form is an opaque fileId string (the inline {url, name, size} blob is retired from the write path); the {id, name, size, mimeType, url} FileValueSchema is the EXPANDED form produced at read time, whose url is 'derived, never stored'; field-referenced files get parent-derived read checks",
+        "packages/services/service-storage/src/storage-routes.ts:250-252 — /upload/complete returns fileId, documented as 'the opaque sys_file id — the value a file field stores as a reference (ADR-0104 D3)'",
+        "ADR-0104 D3's parent-derived read gating for field-owned files is exercised by attachments-storage.download-authz-both-sides (which carries the non-entitled personas). Cross-reference, do not duplicate",
         "ADR-0059 — the FORM-side Confirm-disabled-while-uploading guard is records-forms.upload-guard-blocks-confirm; this item owns the storage/persistence side. Cross-reference, do not duplicate"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "new item transcribed from the live e2e pin (grid-file-upload.spec.ts) with seeded names verified (Widget A / showcase_invoice_line.receipt); ADR-0059 form-side guard cross-referenced to records-forms instead of duplicated", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-07", "change": "new item transcribed from the live e2e pin (grid-file-upload.spec.ts) with seeded names verified (Widget A / showcase_invoice_line.receipt); ADR-0059 form-side guard cross-referenced to records-forms instead of duplicated", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-11", "change": "clause 3 restated against ADR-0104 D3 after run #7635 scored it `partial` on a product that is CORRECT: the clause demanded a resolved stored-file object with receipt.name and an absolute http(s) url, but D3 makes the stored form the bare opaque sys_file id and the resolved shape the read/expand form only — so the item was asserting a contract the ADR had already retired from the write path. The clause now asserts the opaque id plus the field-ownership stamp (ref_object/ref_id/ref_field/acl) that proves the reference is managed rather than a placeholder, the step text and title follow, a negative pins the drift itself so a future run does not re-score the shipped shape as a defect, and source cites the ADR + the storage-routes.ts line documenting the id. Checklist mirrors the product; no product change", "ref": "#7669" }
       ]
     }
   ]
