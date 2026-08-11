@@ -38,7 +38,7 @@ const result = DashboardSchema.parse(data);
 | **gap** | `integer` | optional | Grid gap in Tailwind spacing units |
 | **refreshInterval** | `number` | optional | Auto-refresh interval in seconds |
 | **dateRange** | `{ field?: string; defaultRange: Enum<'today' \| 'yesterday' \| 'this_week' \| 'last_week' \| 'this_month' \| 'last_month' \| … +8 more>; allowCustomRange: boolean }` | optional | Global dashboard date range filter configuration |
-| **globalFilters** | `{ name?: string; field: string; label?: string \| Record<string, string>; type?: Enum<'text' \| 'select' \| 'date' \| 'number' \| 'lookup'>; … }[]` | optional | Global filters that apply to all widgets in the dashboard |
+| **globalFilters** | `{ name?: string; field: string; object?: string; label?: string \| Record<string, string>; … }[]` | optional | Global filters that apply to all widgets in the dashboard |
 | **aria** | `never` | optional | [REMOVED] `dashboard.aria` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no dashboard renderer ever applied it, so declared ARIA attributes silently did not reach the DOM. Delete the key. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **performance** | `never` | optional | [REMOVED] `dashboard.performance` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer or runtime read it; dashboard performance tuning was never implemented. Delete the key. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this dashboard. |
@@ -164,6 +164,7 @@ Widget configuration — declared query keys + open renderer extras
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | optional | Stable filter name (variable key); defaults to field |
 | **field** | `string` | ✅ | Field name to filter on |
+| **object** | `string` | optional | Object whose `fields.<object>.<field>` translation-bundle entry resolves this filter's field label and option labels (#7804) |
 | **label** | `string \| Record<string, string>` | optional | Display label for the filter |
 | **type** | `Enum<'text' \| 'select' \| 'date' \| 'number' \| 'lookup'>` | optional | Filter input type |
 | **options** | `{ value: string \| number \| boolean; label: string \| Record<string, string> }[]` | optional | Static filter options |
@@ -224,4 +225,3 @@ Widget color variant
 
 
 ---
-
