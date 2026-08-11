@@ -91,7 +91,7 @@ function harness(options: { protocol?: boolean } = {}) {
   // (`manage_metadata`) — every case here then reaches the multiplicity rule it
   // is named after. The gate itself is pinned in
   // `package-envelope.conformance.test.ts`'s `packages authz` describe.
-  registerPackageRoutes(server, svc as any, '/api/v1', {
+  registerPackageRoutes(server, () => svc as any, '/api/v1', {
     resolveExecutionContext: async () => ({
       userId: 'u_pkg', systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'],
     }),
