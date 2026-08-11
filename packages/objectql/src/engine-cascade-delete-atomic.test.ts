@@ -501,8 +501,19 @@ describe('hook firing is unchanged by the transaction wrap (#7413)', () => {
     // every atomic write path in this engine — `runAtomicBatch` (#4620) fires
     // per-row delete hooks inside the same rollback-able scope — and it is the
     // strictly better half of the trade: before this card the hook fired AND
-    // the row stayed gone. Re-timing `afterDelete` to fire after commit is a
-    // separate question, filed rather than folded in here.
+    // the row stayed gone.
+    //
+    // [#7477] The re-timing question this comment used to leave open ("filed
+    // rather than folded in here") has since been RULED, and the answer is the
+    // shape asserted below: `after*` fires INSIDE the unit of work, meaning
+    // "the write has been requested and will happen unless this unit is
+    // undone" — a hook with side effects outside the engine is responsible for
+    // tolerating the rollback. So this expectation is no longer the status quo
+    // pinned pending a decision; it is the decided contract, and changing it
+    // needs the ruling reopened rather than a test update. The author-facing
+    // statement lives on `HookEvent` (`@objectstack/spec`'s `data/hook.zod.ts`),
+    // on `DISPATCHABLE_HOOK_EVENTS` and `HookHandler` in `engine.ts`, and in
+    // `content/docs/automation/hooks.mdx`.
     expect(events).toEqual([
       'parent:beforeDelete',
       'kid:beforeDelete',

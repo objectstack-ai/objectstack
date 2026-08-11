@@ -68,6 +68,41 @@ const hookTargetError =
   + "`object: 'account'` or `object: ['account', 'contact']` — or, if firing on "
   + "every object really is the intent, write the wildcard explicitly: `object: '*'`.";
 
+/**
+ * The lifecycle events a hook can subscribe to.
+ *
+ * ## `after*` fires INSIDE the unit of work, not after it commits (#7477)
+ *
+ * `afterInsert` / `afterUpdate` / `afterDelete` mean **"the write has been
+ * requested and will happen unless this unit of work is undone"** — NOT "the
+ * write happened". They are dispatched before the enclosing transaction (if
+ * there is one) commits, so a later refusal can roll the row back after the
+ * hook has already run. Ruled on #7477 (2026-08-11) as the declared semantics,
+ * not an implementation detail to be re-timed later.
+ *
+ * Three ordinary ways a write ends up inside such a unit:
+ *   - a by-id `delete()` whose cascade is atomic — each dependent's own
+ *     `afterDelete` runs inside the wrap the parent opened (#7413);
+ *   - a `batchData`/`deleteManyData` call with `atomic: true` — every member's
+ *     `after*` runs inside one transaction that aborts on the first failure
+ *     (#4620);
+ *   - any caller that opened `engine.transaction()` / `ctx.api.transaction()`
+ *     around the write itself.
+ *
+ * What that means for a handler:
+ *   - **Effects through the same engine are safe.** `ctx.api` / `ctx.ql` writes
+ *     join the same transaction and roll back with everything else — which is
+ *     exactly what makes an in-engine audit hook correct.
+ *   - **Effects OUTSIDE the engine are the hook's own responsibility to make
+ *     rollback-tolerant** — webhooks, notifications, external index updates,
+ *     file deletion, email. On a rollback the row survives and the
+ *     announcement has already gone out. Make such an effect idempotent and
+ *     reconcilable, or enqueue it for a worker that re-reads the row before
+ *     acting rather than trusting the event alone.
+ *
+ * The `before*` events carry no such caveat: they run before the write is
+ * issued, and throwing from one refuses the operation.
+ */
 export const HookEvent = z.enum([
   // Read — one event per read, regardless of shape. `beforeFind`/`afterFind`
   // fire for BOTH `find` and `findOne` (the event attaches to record
@@ -847,6 +882,11 @@ export type Hook = z.input<typeof HookSchema>;
 /** Post-parse shape of {@link Hook} — defaults applied, transforms run (ADR-0122). */
 export type HookParsed = z.infer<typeof HookSchema>;
 export type ResolvedHook = z.output<typeof HookSchema>;
+/**
+ * One lifecycle event name. See {@link HookEvent} for the timing each one
+ * carries — in particular that `after*` fires INSIDE the unit of work, before
+ * the enclosing transaction commits (#7477).
+ */
 export type HookEventType = z.input<typeof HookEvent>;
 export type HookContext = z.input<typeof HookContextSchema>;
 /**

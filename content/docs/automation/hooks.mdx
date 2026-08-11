@@ -169,8 +169,11 @@ export const AccountBeforeWrite: Hook = {
 
 ## After Hook
 
-React after a record is persisted. Use `ctx.previous` for the pre-change
-snapshot and `ctx.api.object('x')` for cross-object writes:
+React after a record is written — but before the enclosing unit of work
+commits, so read [After hooks run inside the unit of
+work](#after-hooks-run-inside-the-unit-of-work) before giving one a side effect
+outside the engine. Use `ctx.previous` for the pre-change snapshot and
+`ctx.api.object('x')` for cross-object writes:
 
 ```typescript
 export const OpportunityAfterUpdate: Hook = {
@@ -194,6 +197,45 @@ export const OpportunityAfterUpdate: Hook = {
   },
 };
 ```
+
+## After hooks run inside the unit of work
+
+An `after*` hook does **not** mean "the write happened". It means **the write
+has been requested and will happen unless this unit of work is undone**.
+`afterInsert`, `afterUpdate` and `afterDelete` are dispatched *before* the
+enclosing transaction commits, so a later refusal in the same unit can roll the
+row back after your handler has already run.
+
+Three ordinary operations put a write inside such a unit:
+
+| Operation | What is inside the transaction |
+| :--- | :--- |
+| A by-id `delete()` that cascades to dependent records | Each **cascaded child's** `afterDelete`. The parent's own `afterDelete` runs after that unit closes, so it is unaffected |
+| `batchData` / `deleteManyData` with `atomic: true` | Every member's `after*` — the batch aborts and rolls back on the first failure |
+| Any write you wrapped yourself in `ctx.api.transaction(...)` or `engine.transaction(...)` | Everything in the callback |
+
+What this means when you write a handler:
+
+- **Effects that go back through the engine are safe.** Writes made with
+  `ctx.api.object('x')` join the same transaction and roll back with
+  everything else — that is what makes an in-engine audit or projection hook
+  correct in the first place.
+- **Effects that leave the engine are yours to make rollback-tolerant.** A
+  webhook, a notification, an email, an external search-index update or a file
+  deletion has already gone out when the rollback happens, announcing a change
+  that did not survive. Make the effect idempotent and reconcilable, or hand it
+  to a worker that re-reads the record before acting rather than trusting the
+  event on its own.
+
+Before hooks carry no such caveat: they run before the write is issued, and
+throwing from one refuses the operation outright.
+
+<Callout type="info">
+This is a deliberate, ruled semantics ([#7477](https://github.com/objectstack-ai/objectstack/issues/7477)),
+not an implementation detail awaiting a fix. Deferring `after*` to commit time
+would move a handler's own `ctx.api` writes *outside* the transaction the write
+ran in, which is a worse guarantee than the one documented here.
+</Callout>
 
 ## Hook Context
 
@@ -233,6 +275,9 @@ ctx = {
 - Trigger unbounded cascades of writes
 - Perform heavy/long-running work inline in a hook
 - Mutate `ctx.result` in before hooks (it is only populated for after hooks)
+- Treat an `after*` hook as proof the write committed — it fires inside the
+  unit of work, so an un-retractable external effect there can outlive a
+  rollback (see [above](#after-hooks-run-inside-the-unit-of-work))
 
 ## Related business logic
 

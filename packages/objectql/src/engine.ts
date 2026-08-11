@@ -193,6 +193,39 @@ export interface AdmittedValueShapeViolationTally {
  * events cover both single-id and bulk (`multi: true`) writes (#3195). A hook
  * subscribing to anything outside this set would silently never fire, so
  * `registerHook` warns rather than accepting it blindly.
+ *
+ * ## WHEN `after*` fires, relative to the commit (#7477)
+ *
+ * `afterInsert`/`afterUpdate`/`afterDelete` are dispatched INSIDE the unit of
+ * work, before the enclosing transaction (if any) commits. The declared
+ * meaning is **"the write has been requested and will happen unless this unit
+ * of work is undone"** — not "the write happened". This is the ruled semantics
+ * (#7477, 2026-08-11), not an accident of the current call sites: an `after*`
+ * dispatch is deliberately NOT deferred to commit, because deferring it would
+ * push a handler's own `ctx.api` writes outside the transaction the write ran
+ * in, and an in-engine audit hook depends on landing inside it.
+ *
+ * Three ordinary paths open such a unit around the dispatch:
+ *   - a by-id {@link ObjectQL.delete} whose cascade is `'atomic'` — each
+ *     dependent's own `afterDelete` fires inside the wrap the parent opened,
+ *     and the parent's row removal can still refuse afterwards (#7413). The
+ *     PARENT's `afterDelete` is outside that wrap by construction, so it is
+ *     unaffected; the cascaded CHILDREN's are not;
+ *   - `runAtomicBatch` in `@objectstack/metadata-protocol` —
+ *     `batchData`/`deleteManyData` with `atomic: true` runs every member's
+ *     `after*` inside one transaction that aborts on the first failure
+ *     (#4620);
+ *   - any caller that opened `transaction()` / `ctx.api.transaction()` around
+ *     the write itself.
+ *
+ * A rollback on any of those leaves a hook that fired for a row that still
+ * exists. Effects routed back through this engine roll back with it and are
+ * therefore safe; effects that leave the engine — webhooks, notifications,
+ * external index updates, file deletion — are the HANDLER's responsibility to
+ * make rollback-tolerant (idempotent and reconcilable, or re-checked against
+ * the row by a worker rather than trusted from the event alone). Documented
+ * for authors on `HookEvent` in `@objectstack/spec/data` and in
+ * `content/docs/automation/hooks.mdx`.
  */
 const DISPATCHABLE_HOOK_EVENTS: ReadonlySet<string> = new Set([
   'beforeFind', 'afterFind',
@@ -895,6 +928,21 @@ function hydrateWriteFormulas(
   applyFormulaPlan(plan, records, execCtx);
 }
 
+/**
+ * A hook body, as registered through {@link ObjectQL.registerHook} or bound
+ * from metadata by `bindHooksToEngine`.
+ *
+ * ## `after*` handlers run INSIDE the unit of work (#7477)
+ *
+ * An `afterInsert` / `afterUpdate` / `afterDelete` handler is dispatched
+ * before the enclosing transaction commits. The guarantee it may rely on is
+ * **"the write has been requested and will happen unless this unit of work is
+ * undone"** — not "the write happened": a later refusal in the same unit rolls
+ * the row back after this handler has already run. See
+ * {@link DISPATCHABLE_HOOK_EVENTS} for the full statement and for the paths
+ * that open such a unit; a handler whose side effects leave the engine is the
+ * one that has to tolerate it.
+ */
 export type HookHandler = (context: HookContext) => Promise<void> | void;
 
 /**
@@ -1935,6 +1983,17 @@ export class ObjectQL implements IObjectQLEngine {
     return (this as any)._hookMetricsRecorder;
   }
 
+  /**
+   * Dispatch `event` to every registered handler that covers `context.object`,
+   * in priority order, awaiting each in turn.
+   *
+   * ⚠️ This runs wherever the caller calls it — it does NOT wait for a commit.
+   * An `after*` dispatch made from inside an open transaction therefore fires
+   * for a write that can still be rolled back; that is the declared semantics
+   * (#7477), stated in full on {@link DISPATCHABLE_HOOK_EVENTS}. Anything
+   * added here that defers a dispatch past the enclosing unit of work would be
+   * changing that ruling, not implementing it.
+   */
   public async triggerHooks(event: string, context: HookContext) {
     const entries = this.hooks.get(event) || [];
     
