@@ -561,6 +561,68 @@ export class HonoHttpServer implements IHttpServer {
     }
 
     /**
+     * The LIVE mount table — every `(method, pattern)` this server registered,
+     * in registration order. See `IHttpServer.getMountedRoutes` for the
+     * contract; the ordering guarantee is load-bearing and honoured here
+     * because {@link registeredRoutes} is appended to inside the verb methods,
+     * on the same call that reaches `this.app`.
+     *
+     * A COPY, not the live array: a consumer of an OBSERVATION must not be able
+     * to edit the thing observed.
+     */
+    getMountedRoutes(): ReadonlyArray<{ method: string; pattern: string }> {
+        return this.registeredRoutes.map((r) => ({ ...r }));
+    }
+
+    /**
+     * Ask the LIVE Hono router which registered route actually answers a
+     * concrete request — see `IHttpServer.resolveMountedRoute` for why
+     * "is it in the table" is not the same question.
+     *
+     * Implemented against `app.router.match()`, i.e. the very router object
+     * that serves production traffic, so the answer is Hono's own and cannot
+     * drift from it. `match()` returns the matched handlers in the order Hono
+     * would run them — middleware included — so this walks that list and takes
+     * the first entry whose `RouterRoute` corresponds to a route THIS adapter
+     * registered. Middleware and the raw-app catch-alls (static / SPA) are
+     * absent from {@link registeredRoutes} by construction, so they are skipped
+     * rather than mistaken for the answer.
+     *
+     * `undefined` means the router matched no registered route at all — the
+     * request would reach the `notFound` sink (404, or 405 via
+     * {@link allowedMethodsForPath}).
+     */
+    resolveMountedRoute(method: string, path: string): { method: string; pattern: string } | undefined {
+        const router: any = (this.app as any)?.router;
+        if (!router || typeof router.match !== 'function') return undefined;
+        const verb = method.toUpperCase();
+        let matched: any;
+        try {
+            matched = router.match(verb, path);
+        } catch {
+            // A router that cannot answer is not evidence that nothing is
+            // mounted — say "unknown" rather than invent a verdict.
+            return undefined;
+        }
+        const handlers = Array.isArray(matched) ? matched[0] : undefined;
+        if (!Array.isArray(handlers)) return undefined;
+        for (const entry of handlers) {
+            // Each entry is `[[handler, RouterRoute], paramIndexMap]`; the
+            // RouterRoute carries the very `path` / `method` strings Hono was
+            // registered with.
+            const route = Array.isArray(entry) && Array.isArray(entry[0]) ? entry[0][1] : undefined;
+            const pattern = typeof route?.path === 'string' ? route.path : undefined;
+            const routeMethod = typeof route?.method === 'string' ? route.method.toUpperCase() : undefined;
+            if (!pattern || !routeMethod) continue;
+            const own = this.registeredRoutes.find(
+                (r) => r.pattern === pattern && r.method === routeMethod,
+            );
+            if (own) return { ...own };
+        }
+        return undefined;
+    }
+
+    /**
      * The HTTP methods registered for a concrete request `path`, ignoring the
      * request's own method. Empty when no registered route matches the path at
      * all (a genuine 404). Used by the `notFound` handler to build a `405`

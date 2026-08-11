@@ -1112,6 +1112,47 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                     }
                 });
 
+                // [#7526] `/actions`, `/connectors`, `/_status` — REGISTERED
+                // BEFORE `/automation/:name`, which is the whole point.
+                //
+                // `domains/automation.ts` has always ordered these three ahead
+                // of its `/:name → getFlow` catch-all, and its module doc says
+                // in as many words that the order is load-bearing. That care
+                // was spent inside `dispatch()`, on a path no request took:
+                // this bridge is the only thing that mounts `/automation`, and
+                // it mounted `/:name` and never these — so `GET
+                // /api/v1/automation/actions` resolved to `getFlow('actions')`
+                // and answered a flow-not-found where the ledger promises the
+                // action-descriptor palette. Found by the live-mount parity
+                // gate this issue added, as three more instances of the class
+                // it was built for.
+                server!.get(`${base}/automation/actions`, async (req: any, res: any) => {
+                    try {
+                        const result = await dispatcher.dispatch('GET', '/automation/actions', undefined, req.query, { request: req });
+                        sendResult(result, res);
+                    } catch (err: any) {
+                        errorResponse(err, res);
+                    }
+                });
+
+                server!.get(`${base}/automation/connectors`, async (req: any, res: any) => {
+                    try {
+                        const result = await dispatcher.dispatch('GET', '/automation/connectors', undefined, req.query, { request: req });
+                        sendResult(result, res);
+                    } catch (err: any) {
+                        errorResponse(err, res);
+                    }
+                });
+
+                server!.get(`${base}/automation/_status`, async (req: any, res: any) => {
+                    try {
+                        const result = await dispatcher.dispatch('GET', '/automation/_status', undefined, req.query, { request: req });
+                        sendResult(result, res);
+                    } catch (err: any) {
+                        errorResponse(err, res);
+                    }
+                });
+
                 server!.get(`${base}/automation/:name`, async (req: any, res: any) => {
                     try {
                         const result = await dispatcher.dispatch('GET', `/automation/${req.params.name}`, undefined, req.query, { request: req });

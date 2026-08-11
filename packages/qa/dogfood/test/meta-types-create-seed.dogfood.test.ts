@@ -6,6 +6,15 @@
 // registry response, so consumers derive their create defaults from the spec
 // instead of re-inventing them (the drift that produced the dashboard-`layout`
 // and action-`body` create-save 422s). Exercised end-to-end over real HTTP.
+//
+// [#7526] This header said `/meta/types` from the day it was written while the
+// call below asked `/meta` — so the file documented coverage of a path it never
+// touched, and `/meta/types` was in fact dead (swallowed by the `/meta/:type`
+// catch-all, answering `{"type":"types","items":[]}` for anyone who called it).
+// A test whose comment describes a route it does not call is worse than no
+// test: it is what someone reads when they ask "is this covered?". It reads
+// `/meta/types` now, and pins the two paths against each other so the alias
+// cannot rot back apart.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack from '@objectstack/example-showcase';
@@ -20,7 +29,7 @@ describe('dogfood: /meta/types exposes authoritative create seeds (spec-derived 
   beforeAll(async () => {
     stack = await bootStack(showcaseStack);
     token = await stack.signIn();
-    const res = await stack.apiAs(token, 'GET', '/meta'); // GET {prefix} lists all metadata types (entries[])
+    const res = await stack.apiAs(token, 'GET', '/meta/types');
     expect(res.status).toBe(200);
     const body = (await res.json()) as { entries?: Array<Record<string, unknown>> };
     entries = body.entries ?? [];
@@ -61,4 +70,34 @@ describe('dogfood: /meta/types exposes authoritative create seeds (spec-derived 
       expect(entry.createSeed, `${type} entry is missing its create seed`).toEqual(getMetadataCreateSeed(type));
     }
   });
+
+  // [#7526] `/meta/types` and `/meta` are ONE handler at two paths, and this is
+  // the assertion that keeps that true. It is also the regression pin for the
+  // defect: before the fix `/meta/types` answered `{type:'types', items:[]}` —
+  // the `/meta/:type` catch-all's shape, with no `entries` at all — so this
+  // comparison could not have passed no matter how the bodies were compared.
+  it('answers the same body as GET /meta — the two paths are one handler', async () => {
+    const [viaTypes, viaBase] = await Promise.all([
+      stack.apiAs(token, 'GET', '/meta/types'),
+      stack.apiAs(token, 'GET', '/meta'),
+    ]);
+    expect(viaTypes.status).toBe(200);
+    expect(viaBase.status).toBe(200);
+    expect(await viaTypes.json()).toEqual(await viaBase.json());
+  }, 30_000);
+
+  // The disguise, pinned: an unknown type answers the catch-all's shape, and
+  // `/meta/types` must NOT look like that. Without this, a future registration
+  // that puts `/meta/types` back under `/meta/:type` would still return 200 and
+  // every assertion above would fail with a confusing "entries is empty".
+  it('is not the /meta/:type catch-all wearing a 200', async () => {
+    const bogus = await stack.apiAs(token, 'GET', '/meta/zzz_not_a_type');
+    expect(bogus.status).toBe(200);
+    expect(await bogus.json()).toEqual({ type: 'zzz_not_a_type', items: [] });
+
+    const real = await stack.apiAs(token, 'GET', '/meta/types');
+    const body = (await real.json()) as Record<string, unknown>;
+    expect(body.items).toBeUndefined();
+    expect(Array.isArray(body.entries)).toBe(true);
+  }, 30_000);
 });
