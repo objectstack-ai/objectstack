@@ -250,6 +250,12 @@ export class SharingRuleService implements ISharingRuleService {
    * a cross-tenant read of a platform-global row. A same-named POST therefore
    * still creates an org-stamped row of the tenant's own, and
    * {@link findRuleRowByName} prefers it.
+   *
+   * [#7761] It IS applied to {@link getRule}'s by-**id** branch, which the
+   * second paragraph above records as the one read that still worked while
+   * everything else was over-scoped. That was never a feature: unfiltered
+   * meant an org admin could resolve — and, through {@link deleteRule},
+   * destroy — another organization's rule from its id alone.
    */
   private adminOrgScope(where: Record<string, unknown>, orgId: string | null | undefined): Record<string, unknown> {
     if (!orgId) return where;
@@ -280,8 +286,20 @@ export class SharingRuleService implements ISharingRuleService {
     if (!idOrName) return null;
     // `organizationId` is not on the envelope — see defineRule().
     const orgId = (context as any)?.organizationId ?? context?.tenantId;
+    // [#7761] The by-id branch carries the SAME tenant scope as the by-name
+    // path — it used to be a bare `{id: idOrName}`, resolved under SYSTEM_CTX
+    // so nothing downstream re-scoped it. An org-scoped sharing admin holding
+    // another organization's opaque `srule_…` id could therefore read that
+    // org's rule, `evaluate` it, and — because {@link deleteRule} resolves
+    // through here — DELETE it along with every `sys_record_share` grant it
+    // had materialised, i.e. silently revoke another tenant's record access.
+    // `manage_sharing` is an org-level capability (`scope: 'org'` in the spec's
+    // capability registry) and an id is not a tenant boundary: ids leak through
+    // logs, exports, support tickets and the evaluate response's `{ruleId}`.
+    // A platform-global (`organization_id = null`) row stays reachable, for
+    // symmetry with the by-name path — see {@link adminOrgScope}.
     const byId = await this.engine.find('sys_sharing_rule', {
-      where: { id: idOrName },
+      where: this.adminOrgScope({ id: idOrName }, orgId),
       limit: 1,
       context: SYSTEM_CTX,
     });
