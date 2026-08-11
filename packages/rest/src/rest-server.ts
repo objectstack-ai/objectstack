@@ -4592,7 +4592,7 @@ export class RestServer {
                 path: `${metaPath}/:type`,
                 handler: async (req: any, res: any) => {
                     try {
-                        // [#6877] Four single-valued parameters on this list
+                        // [#6877] Five single-valued parameters on this list
                         // route, declared together at the top so the gate cannot
                         // be missed by whichever branch reads its parameter
                         // several hundred lines down: `?object=` (the view
@@ -4602,7 +4602,18 @@ export class RestServer {
                         // `?include=` (repeated, it stopped equalling
                         // `'content'`, so a caller who asked for doc bodies got
                         // the slimmed list back with a 200).
-                        if (refuseRepeatedQueryParams(req, res, ['package', 'preview', 'object', 'include'])) return;
+                        //
+                        // [#7566] `?id=` joined them when the app branch below
+                        // started honouring it. It is declared HERE, with the
+                        // rest, rather than beside the filter that reads it, for
+                        // the reason this block exists: a filter that arrives as
+                        // `['crm','account']` and is compared against one app
+                        // name matches nothing, and an empty app list is exactly
+                        // the plausible-looking wrong answer #7566 was filed
+                        // against. Refused, not resolved — see
+                        // `query-multiplicity.ts` for why picking one of two
+                        // conflicting intents is worse than a 400.
+                        if (refuseRepeatedQueryParams(req, res, ['package', 'preview', 'object', 'include', 'id'])) return;
                         const packageId = req.query?.package || undefined;
                         const environmentId = isScoped ? req.params?.environmentId : undefined;
                         const p = await this.resolveProtocol(environmentId, req);
@@ -4714,6 +4725,82 @@ export class RestServer {
                                         ? filtered
                                         : { ...(raw as any), items: filtered };
                                 }
+                            }
+                        }
+
+                        // [#7566] `GET /meta/app?id=<app>` — the app-list filter,
+                        // which until now was accepted and then dropped.
+                        //
+                        // Nothing on this route had ever read `id`: the block
+                        // above narrows the list by PERMISSION and the branches
+                        // around it by `?object=` / `?include=` / `?package=`, so
+                        // `?id=crm` and `?id=not_an_app` produced the same three
+                        // apps, byte for byte. A caller cannot tell a working
+                        // filter from a dropped one — a client that asks for one
+                        // app and renders `items[0]` gets a plausible, wrong
+                        // answer, and a bogus id can never come back empty.
+                        //
+                        // ⚠️ Runs AFTER the RBAC filter above, on `visible`
+                        // rather than on `items`. The two orders produce the same
+                        // SET (both are pure filters), but not the same
+                        // disclosure: narrowing first would hand `?id=<an
+                        // unpublished app>` a one-element list to gate, and any
+                        // future non-total gate — one that strips a field instead
+                        // of dropping the document — would then be answering
+                        // about an app the caller may not observe at all
+                        // (ADR-0045 §3). Permission decides what exists for this
+                        // caller; the filter narrows what they asked for within
+                        // it, never the reverse.
+                        //
+                        // The match is on `name`, the App document's identity —
+                        // `AppSchema.name`, "App unique machine name", the same
+                        // key `GET /meta/app/:name` addresses and the same key
+                        // the metadata store merges overlays on. `AppSchema`
+                        // declares no `id` of its own (`id` appears on nav items
+                        // and areas, never on the app), so there is no second
+                        // identity to disagree with.
+                        //
+                        // A filter that matches nothing answers `200` with an
+                        // EMPTY list, not a 404 — measured against this route's
+                        // siblings, not chosen: `?package=<no such package>` and
+                        // `/meta/view?object=<no such object>` both serve an
+                        // empty list here, and the only meta 404 is the
+                        // single-item address `GET /meta/:type/:name`. An empty
+                        // list is the honest answer to "which apps have this id",
+                        // and it is already observably different from the defect,
+                        // which answered with all of them.
+                        //
+                        // Empty and absent spellings still mean "no filter", the
+                        // same falsy gate `?package=` on this route has always
+                        // used. The repeated spelling was refused at the top of
+                        // the handler (#6877), so what arrives here is a string.
+                        //
+                        // Its own block rather than a line inside the branch
+                        // above, because the two answer different questions:
+                        // that branch is guarded on a resolved `ctx?.userId` and
+                        // decides what this caller may observe, while narrowing
+                        // to the app you named is not a privilege and must not
+                        // acquire that guard's conditions.
+                        const appIdFilter = RestServer.metaTypeSingular(req.params.type) === 'app'
+                            ? req.query?.id
+                            : undefined;
+                        if (typeof appIdFilter === 'string' && appIdFilter !== '') {
+                            const raw = visible as unknown;
+                            // Only the two shapes this route serves are narrowed
+                            // — a bare array or the `{ items: [] }` envelope.
+                            // Anything else is left alone rather than replaced
+                            // with an invented empty envelope: a filter must not
+                            // be the thing that changes the response's shape.
+                            const list: any[] | null = Array.isArray(raw)
+                                ? (raw as any[])
+                                : (raw && typeof raw === 'object' && Array.isArray((raw as any).items))
+                                    ? ((raw as any).items as any[])
+                                    : null;
+                            if (list) {
+                                const matched = list.filter(
+                                    (a: any) => a && typeof a === 'object' && a.name === appIdFilter,
+                                );
+                                visible = Array.isArray(raw) ? matched : { ...(raw as any), items: matched };
                             }
                         }
 
