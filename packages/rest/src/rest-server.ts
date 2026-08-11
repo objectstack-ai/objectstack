@@ -5989,7 +5989,15 @@ export class RestServer {
                             : undefined;
                         const schema = (ql as any)?.registry?.getObject?.(name);
                         if (!schema) {
-                            res.status(404).json({ error: 'Object not found' });
+                            // `{ error: { code, message } }`, the envelope
+                            // `BaseResponseSchema` declares — not the bare
+                            // `{ error: 'string' }` the dispatcher branch this
+                            // mirrors emits. `pnpm check:route-envelope`
+                            // ratchets both non-conforming shapes DOWN only, so
+                            // a new route arrives conforming or not at all.
+                            res.status(404).json({
+                                error: { code: 'NOT_FOUND', message: 'Object not found' },
+                            });
                             return;
                         }
                         // Dynamic import, matching the dispatcher branch this
@@ -6006,8 +6014,10 @@ export class RestServer {
                         }
                         if (typeof legalNextStates !== 'function') {
                             res.status(501).json({
-                                error: 'State-machine introspection is not available in this runtime',
-                                code: 'NOT_IMPLEMENTED',
+                                error: {
+                                    code: 'NOT_IMPLEMENTED',
+                                    message: 'State-machine introspection is not available in this runtime',
+                                },
                             });
                             return;
                         }
@@ -6061,8 +6071,10 @@ export class RestServer {
                         const svc = await this.resolveMetadataService(environmentId, req);
                         if (typeof (svc as any)?.getPublished !== 'function') {
                             res.status(501).json({
-                                error: 'metadata.getPublished() is not available in this kernel',
-                                code: 'NOT_IMPLEMENTED',
+                                error: {
+                                    code: 'NOT_IMPLEMENTED',
+                                    message: 'metadata.getPublished() is not available in this kernel',
+                                },
                             });
                             return;
                         }
@@ -6073,7 +6085,9 @@ export class RestServer {
                         // `getPublished`'s documented fallback, and it is a
                         // different fact from "no such item".
                         if (data === undefined) {
-                            res.status(404).json({ error: 'Not found' });
+                            res.status(404).json({
+                                error: { code: 'NOT_FOUND', message: 'Not found' },
+                            });
                             return;
                         }
                         res.json(data);

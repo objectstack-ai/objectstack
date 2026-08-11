@@ -61,11 +61,16 @@ import showcaseStack from '@objectstack/example-showcase';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { StorageServicePlugin } from '@objectstack/service-storage';
 
-import { ROUTE_LEDGER } from '../../../runtime/src/route-ledger';
-import { REST_ROUTE_LEDGER } from '../../../rest/src/rest-route-ledger';
-import { STORAGE_ROUTE_LEDGER } from '../../../services/service-storage/src/storage-route-ledger';
-import { I18N_ROUTE_LEDGER } from '../../../services/service-i18n/src/i18n-route-ledger';
-import { SETTINGS_ROUTE_LEDGER } from '../../../services/service-settings/src/settings-route-ledger';
+// `.js` on the relative source imports: without it `moduleResolution: nodenext`
+// does not resolve them. These are compiled as relative SOURCE files (never as
+// package entry points) because each ledger is package-internal — the guard's
+// data, not public API — which is the same access the sibling ledger guards
+// take.
+import { ROUTE_LEDGER } from '../../../runtime/src/route-ledger.js';
+import { REST_ROUTE_LEDGER } from '../../../rest/src/rest-route-ledger.js';
+import { STORAGE_ROUTE_LEDGER } from '../../../services/service-storage/src/storage-route-ledger.js';
+import { I18N_ROUTE_LEDGER } from '../../../services/service-i18n/src/i18n-route-ledger.js';
+import { SETTINGS_ROUTE_LEDGER } from '../../../services/service-settings/src/settings-route-ledger.js';
 
 /** One ledger row, normalized to a wire pattern this gate can probe. */
 interface LedgerRow {
@@ -224,11 +229,22 @@ describe('route ledger ↔ live mount parity (#7526)', () => {
         continue;
       }
       if (resolved.pattern !== expected) {
+        // Two different diseases with the same symptom, and naming which one
+        // it is saves the reader the trip: either nobody registered the
+        // pattern and a broader sibling is answering in its place, or someone
+        // registered it too late and the sibling wins on order. The fix
+        // differs (write the registration / move it up), so the message must.
+        const registered = mounted.some((m) => m.method === row.method && m.pattern === expected);
         failures.push(
-          `${row.ledger}: ${row.raw} — MOUNTED BUT UNREACHABLE. `
-          + `${row.method} ${probePath(row.pattern)} is answered by \`${resolved.pattern}\`, not \`${expected}\`. `
-          + 'A literal route registered AFTER a catch-all sibling is shadowed by it — '
-          + 'register it before, or say which pattern serves it with `servedBy`.',
+          registered
+            ? `${row.ledger}: ${row.raw} — MOUNTED BUT UNREACHABLE. `
+              + `\`${expected}\` IS registered, but ${row.method} ${probePath(row.pattern)} is answered by `
+              + `\`${resolved.pattern}\` — a first-match router gives the path to whichever registration came `
+              + 'first. Move it ahead of that sibling.'
+            : `${row.ledger}: ${row.raw} — LEDGERED BUT NOT MOUNTED, and DISGUISED. `
+              + `Nothing registers \`${expected}\`; ${row.method} ${probePath(row.pattern)} is swallowed by `
+              + `\`${resolved.pattern}\`, so the caller gets that route's answer — a plausible response rather `
+              + 'than a 404. Register it ahead of that sibling, or say which pattern serves it with `servedBy`.',
         );
       }
     }
