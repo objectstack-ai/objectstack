@@ -1762,6 +1762,49 @@ const step17: MigrationStep = {
         + 'gated by this refusal, so repair stays possible).',
     },
     {
+      id: 'apimethod-enum-shrink',
+      surface: 'data.object.enable.apiMethods (the eight legacy non-primitive values)',
+      replacement:
+        'the six primitives only — `get` / `list` / `create` / `update` / `delete` / `bulk`: '
+        + 'replace each legacy value with the primitives it derives from, de-duplicate, and '
+        + 'delete the key entirely if the result names all six',
+      reason:
+        'The authored `enable.apiMethods` enum is now exactly the six primitives. The eight '
+        + 'legacy values — `upsert`, `aggregate`, `history`, `search`, `restore`, `purge`, '
+        + '`import`, `export` — are no longer authorable, because they are DERIVED effective '
+        + 'operations resolved by the server\'s single derivation table, and an enum that lets an '
+        + 'author name both a primitive and something derived from it has two spellings for one '
+        + 'fact. The FROM → TO is a table rather than a rename: `upsert` → `create` + `update`; '
+        + '`import` → `create` + `update`; `export`, `aggregate` and `search` → `list`; '
+        + '`history` → `get`; and `restore` / `purge` map to NOTHING — they never derived, '
+        + 'because `enable.trash` was retired in #2377, so the value is deleted outright. That '
+        + 'last row is why this is a semantic entry and not a mechanical conversion, and the '
+        + 'reason is a security one: the mapping WIDENS. An allowlist naming `history` was '
+        + 'granting read of one record\'s audit trail; rewritten to `get` it grants ordinary '
+        + 'record reads, and an allowlist naming `search` becomes a grant of full `list`. A '
+        + 'transform that applied the table silently would broaden real API permissions without '
+        + 'anyone reading the diff, so the rewrite is delegated to the author with the widening '
+        + 'flagged. The reporter codemod exists for exactly that shape: `node '
+        + 'scripts/codemod/apimethods-legacy-to-primitives.mjs` scans, reports the exact '
+        + 'replacement per site, and FLAGS the allowlists the mapping would widen so the edit '
+        + 'stays reviewable — it reports, it does not rewrite. Stored metadata keeps parsing '
+        + '(permanent tolerance, narrowing only), so nothing breaks at rest; what changes is what '
+        + 'an author may newly write. Registered by the #6350 stock reconciliation; #3543 (P2 of '
+        + '#3391) predates the #6148 completeness gate. ADR-0087, #3543 (backfilled #6350).',
+      acceptanceCriteria:
+        'No authored `enable.apiMethods` array names a legacy value; `objectstack validate` '
+        + 'passes. Run the reporter codemod first and read its widening flags before applying '
+        + 'anything — ⚠️ the migration is only correct if each widened grant was INTENDED. For '
+        + 'every object where `history` became `get` or `search` became `list`, confirm the '
+        + 'broader operation is one the API should genuinely expose; where it is not, the answer '
+        + 'is not a different value in this enum but a permission set that withholds the '
+        + 'operation. Where the six primitives are all present, prefer deleting the key: that is '
+        + 'equivalent to default-open and it tracks future primitives, whereas a hand-listed six '
+        + 'silently stops granting anything added later. `restore` / `purge` are deleted with no '
+        + 'replacement — if trash-like behaviour was being relied on, that capability left in '
+        + '#2377 and this entry is not where it returns.',
+    },
+    {
       id: 'auth-config-unadvertised-reserved-features',
       surface: 'api.authConfig.features.passkeys / api.authConfig.features.magicLink',
       replacement: '(removed — no replacement flag; the capabilities are not advertised)',
@@ -1834,6 +1877,50 @@ const step17: MigrationStep = {
         + 'under `BatchOperationResultSchema` with those keys present.',
     },
     {
+      id: 'client-delete-result-success',
+      surface: 'client.DeleteDataResult.deleted (the return of `client.data.delete()`)',
+      replacement: '`success` — `r.deleted` → `r.success`. Same call, same wire body, declared name',
+      reason:
+        '`DeleteDataResult` carried the comment `Spec: DeleteDataResponseSchema` above a '
+        + 'declaration that contradicted it: the interface declared `deleted: boolean` while '
+        + '`DeleteDataResponseSchema` declares `{ object, id, success }`. `deleted` has never '
+        + 'been declared by any schema and no server path has ever returned it on '
+        + '`/data/:object/:id`. Both delete surfaces — `client.data.delete()` and the '
+        + 'project-scoped `client.project(id).data.delete()` — are pure `unwrapResponse` / '
+        + '`_unwrap` passthroughs, so the interface is a CLAIM about the wire, never a rewrite of '
+        + 'it, and the claim was false in the one direction that matters: the compiler endorsed '
+        + 'the wrong spelling. `if (r.deleted)` compiled, read `undefined` at runtime, and the '
+        + 'branch was never taken; `if (r.success)` was rejected by the compiler and correct on '
+        + 'the wire. So this rename REVEALS a defect rather than breaking working code — every '
+        + 'reader of the old key was already reading `undefined`, on every deployment and not '
+        + 'just some, because the protocol path has always answered `success`. It is registered '
+        + 'as a semantic entry rather than a mechanical conversion for the reason the rewrite '
+        + 'itself does not capture: the key is one token, but a call site that branched on '
+        + '`r.deleted` has been taking the FALSE branch unconditionally since it was written, and '
+        + 'whatever that branch did — or skipped — is what actually has to be re-read. There is '
+        + 'no authored source for the chain to rewrite either; this is a published TypeScript '
+        + 'surface whose enforced channel is tsc at the call site, and for an untyped JS caller '
+        + 'there is no constrained channel at all, which is why the ledger entry is the only '
+        + 'notification that reaches them. ⛔ Do not write `r.success ?? r.deleted`: there is one '
+        + 'producer shape, and a consumer accepting two spellings is what contract-first exists '
+        + 'to prevent (the same ruling #5581 applied on the producer side). No deprecated '
+        + '`deleted?: boolean` transition key ships, for the same reason — a transition period is '
+        + 'for keys that WORKED, and this one never did. Registered by the #6350 stock '
+        + 'reconciliation. ADR-0087, #5638 (backfilled #6350).',
+      acceptanceCriteria:
+        'No code reads `.deleted` off a `client.data.delete()` / `client.project(id).data.'
+        + 'delete()` result; `tsc` names every site for a typed caller, and an untyped JS caller '
+        + 'must be swept by hand because nothing will report it. Nothing about the request, the '
+        + 'route, the status codes or the error shapes changes, and no server needs upgrading — '
+        + 'the value you may now read is the one that was already arriving. ⚠️ The real work is '
+        + 'behavioural: every `if (r.deleted)` has been false since it was written, so re-read '
+        + 'what each of those branches was supposed to do. Post-delete cleanup, cache '
+        + 'invalidation, audit writes and UI refreshes guarded that way have never run, and '
+        + 'switching to `r.success` turns them ON for the first time — verify that is what you '
+        + 'want rather than assuming it restores prior behaviour. Any test that passed while '
+        + 'asserting on `deleted` was asserting on `undefined` and needs rewriting, not renaming.',
+    },
+    {
       id: 'dashboard-widget-compareto-offset',
       surface: "dashboard.widgets[].compareTo: { offset: '7d' | '1M' | … } (every duration except '1y')",
       replacement: "compareTo: { kind: 'previousPeriod' } plus an explicit window on the widget's own `filter`",
@@ -1892,6 +1979,51 @@ const step17: MigrationStep = {
         + 'through the export surface. Drivers and test doubles no longer implement the '
         + 'method — one left behind still compiles and is simply never reached, so removing '
         + 'it is cleanup rather than a break, while a CALLER of it no longer type-checks.',
+    },
+    {
+      id: 'data-driver-query-omit-object',
+      surface:
+        'contracts.IDataDriver query parameter — find / findOne / count / updateMany / '
+        + 'deleteMany / explain',
+      replacement:
+        '`DriverQuery` (`Omit<QueryAST, "object">`): delete the redundant `object:` key from the '
+        + 'query literal at the call site — the object name is already the FIRST argument',
+      reason:
+        'Every one of these methods takes the object name as its first argument, and then '
+        + 'required a `QueryAST` that lists `object` as mandatory — the same fact demanded twice, '
+        + 'with two places for it to disagree. The layers above had already paid for that '
+        + 'ambiguity: the objectql engine deliberately writes its key order as `{ ...query, '
+        + 'object }` so a smuggled `query.object` cannot override the resolved name, and the wire '
+        + 'layer spends a named 400 (`QUERY_OBJECT_MISMATCH`) refusing the inconsistency. The '
+        + 'driver side paid in blanket casts: a direct caller holding only a `where` could not '
+        + 'name the type, wrote `as any`, and switched off checking for `where` / `orderBy` / '
+        + '`fields` along with it — 20 such sites measured in cloud#1053, and cloud#1030\'s '
+        + '`$like` reached runtime through exactly that hole. This is a TS contract surface with '
+        + 'no authored source for the chain to rewrite, which is why it is a semantic entry and '
+        + 'not a D2 conversion; for a typed caller the compiler names every site (TS2353 '
+        + '`\'object\' does not exist in type \'DriverQuery\'`), and for an untyped JS caller '
+        + 'there is no constrained channel at all, which is exactly why this ledger entry must '
+        + 'exist. Neither side is forced to move: a caller holding a `QueryAST` VALUE passes it '
+        + 'unchanged (excess properties are only rejected on fresh literals), and an '
+        + 'implementation still declaring `query: QueryAST` keeps compiling under parameter '
+        + 'bivariance. What an implementation may no longer do is READ `query.object` — callers '
+        + 'are now entitled to omit it. Registered by the #6350 stock reconciliation. #5181 was '
+        + 'the audit\'s CONTROL sample, drawn to show that not every flagged candidate is an '
+        + 'omission, and it was one: the seven `IDataDriver` hits in the ledger are all prose '
+        + 'inside other entries, and the only subject-level hit on this interface is '
+        + '`data-driver-find-stream-retired` — a DIFFERENT member. Two later, smaller driver '
+        + 'call-parameter changes (#6321, #6083) both registered, and both cite #5181 as '
+        + 'background; the larger sibling they derive from never got its own entry. ADR-0087, '
+        + '#5181 (backfilled #6350).',
+      acceptanceCriteria:
+        'No `IDataDriver` call site passes an inline literal carrying `object:` — `driver.find('
+        + '"account", { object: "account", where: … })` becomes `driver.find("account", { where: '
+        + '… })`. `tsc` is the verify loop for typed callers and reports every remaining site by '
+        + 'name; an untyped JS caller must be swept by hand, because nothing will report it. Any '
+        + 'driver IMPLEMENTATION that read `query.object` is rewritten to use the object-name '
+        + 'argument instead — that read now yields `undefined` whenever a caller exercises its '
+        + 'new right to omit the key, and it fails at runtime rather than at compile time, so it '
+        + 'is the one change on this surface a type check cannot find for you.',
     },
     {
       id: 'data-engine-batch-retired',
@@ -2389,6 +2521,53 @@ const step17: MigrationStep = {
         + 'table. The surviving layers still parse unchanged — a connector declaring '
         + '`syncConfig` and an import declaring `mapping.transform` both behave exactly as they '
         + 'did in 16.x.',
+    },
+    {
+      id: 'export-axis-opt-in',
+      surface:
+        'security.permissionSet.objects[].allowExport (ABSENT — a permission set that never '
+        + 'declared the key)',
+      replacement:
+        'an explicit `allowExport: true` on the object entry (or the `*` wildcard) of every '
+        + 'permission set whose holders are meant to keep exporting',
+      reason:
+        'A secure-default FLIP, not a shape change — the same class as '
+        + '`rest-requireauth-default-flip` (ADR-0056 D2, protocol 12) and '
+        + '`action-descriptor-resume-authority-default-flip`, and it is registered for the same '
+        + 'reason those are: the metadata is UNCHANGED and still parses, so no gate anywhere will '
+        + 'tell an upgrader that what it MEANS has inverted. Before 17, `allowExport` unset '
+        + 'inherited read; from 17 it denies. Reading a record and taking a bulk '
+        + 'machine-readable copy of the whole table are different privileges — Salesforce '
+        + '"Export Reports", Dynamics "Export to Excel", NetSuite "Export Lists" and SAP `S_GUI` '
+        + '61 all separate them — and the axis now says so. This cannot be a mechanical '
+        + 'conversion in either direction: writing `allowExport: true` wherever the key is absent '
+        + 'would preserve today\'s behaviour while silently defeating the entire point of the '
+        + 'flip, and writing `false` would revoke a capability the deployment may legitimately '
+        + 'want. Whether a given set\'s holders SHOULD be able to take a bulk copy is exactly the '
+        + 'segregation-of-duties judgement the axis exists to make explicit, and it belongs to '
+        + 'the operator. Two details decide who is actually affected: package-shipped sets are '
+        + 're-seeded on upgrade, so the built-ins are handled — `admin_full_access` and '
+        + '`organization_admin` now carry the grant explicitly — while ENVIRONMENT-AUTHORED sets '
+        + 'are not and must be edited by hand. `member_default` deliberately does NOT carry the '
+        + 'grant, so ordinary authenticated users lose export until an admin grants it; that is '
+        + 'the point of the flip, not an oversight. Merge semantics are unchanged and '
+        + 'most-permissive, exactly like the CRUD bits: any set granting `true` grants export, '
+        + 'and `false` is authoring intent rather than a veto, because permission sets are '
+        + 'additive capability containers (ADR-0090). The super-user bits no longer confer it: '
+        + '`viewAllRecords` / `modifyAllRecords` are "may see all data", not "may take a bulk '
+        + 'copy". Registered by the #6350 stock reconciliation; #3544 / #3710 predate the #6148 '
+        + 'completeness gate. ADR-0087, #3544 / #3710 (backfilled #6350).',
+      acceptanceCriteria:
+        'Every environment-authored permission set has been READ and decided, not just parsed: '
+        + 'each object entry whose holders should keep exporting carries `allowExport: true`, and '
+        + 'each one that should not is knowingly left without it. The verify loop is behavioural, '
+        + 'because nothing fails at parse time — sign in as a holder of each affected set and '
+        + 'confirm an export either succeeds or is refused as intended, including the report '
+        + 'export path, which this change brought under the same axis. ⚠️ Silence is not success '
+        + 'here: a deployment that upgrades without editing anything is VALID metadata whose '
+        + 'ordinary users have quietly lost export, and the first sign will be a user report '
+        + 'rather than an error. Check `member_default` explicitly — it is the set most likely to '
+        + 'have been carrying export by inheritance.',
     },
     {
       id: 'export-field-meta-constraints-retired',
@@ -3121,6 +3300,47 @@ const step17: MigrationStep = {
         + 'fails to parse with the removal prescription naming that door.',
     },
     {
+      id: 'record-details-sections-object-form',
+      surface: 'ui.RecordDetailsProps.sections (the `record:details` page component)',
+      replacement:
+        'an OBJECT array — `sections: [{ label, columns, fields: [...] }]` — replacing the '
+        + 'string-ID list; `label` gives the heading, `columns` its grid width, `name` makes the '
+        + 'heading translatable, and the new sibling `hideFields` omits named fields from the body',
+      reason:
+        '`record:details` declared `sections` as a list of section IDs — `["overview", '
+        + '"financials"]` — a shape nothing produced and nothing consumed, while every real page '
+        + 'authored the object form. This is authorable metadata on the publish/parse path, so it '
+        + 'is the D2 class exactly; it is registered as a SEMANTIC step rather than a mechanical '
+        + 'conversion because a string ID carries no field list and the chain cannot invent one — '
+        + 'only the author knows which fields the section named `overview` was meant to render. '
+        + 'The measurement that made the type change safe is also what makes the prescription '
+        + 'unambiguous: the ID-list form had zero read paths and zero producers. objectui\'s '
+        + '`RecordDetailsRenderer` maps every entry as an object (`s.name` / `s.label` / `s.title` '
+        + '/ `s.fields`) with no string branch at all — a string entry spreads into a character '
+        + 'map and renders nothing; `@object-ui/types`\' `RecordDetailsComponentProps` mirror '
+        + 'already declared `Array<{ name?, label?, fields, ... }>`; the Studio block designer can '
+        + 'only author `{ label, columns, fields }`; `packages/lint` has modelled it as '
+        + '`nestedSections` all along; and every page in this repo — three showcase pages plus the '
+        + '`sys_user` platform page — authors the object form. So the break lands only on stored '
+        + 'metadata written against a declaration nothing ever honoured, and it lands at publish '
+        + 'time rather than rewriting data at rest. The same change DECLARED `hideFields`, which '
+        + 'the `sys_user` platform page had been authoring undeclared. Registered by the #6350 '
+        + 'stock reconciliation: #5611 predates the #6148 completeness gate, so nothing asked it '
+        + 'what it had done about the ledger, and the sibling key on the same def — '
+        + '`ui/RecordDetailsProps:layout`, retired by #6350\'s neighbour — carries a tombstone '
+        + 'while this face carried none. ADR-0087, #5611 (backfilled #6350).',
+      acceptanceCriteria:
+        'Every `record:details` component in authored metadata spells `sections` as an object '
+        + 'array: each entry names the fields it renders (`fields: [...]`), optionally with '
+        + '`label` / `name` / `columns`. `objectstack validate` passes and each detail page '
+        + 'renders the same sections, in the same order, with the same fields as before the '
+        + 'upgrade — a page whose sections silently render EMPTY is the signature of an ID list '
+        + 'left in place. A section that existed only as an ID, with no field list recoverable '
+        + 'from the page it belonged to, is a judgement for the author: name the fields it was '
+        + 'meant to show, or delete the entry. Fields previously hidden by a convention outside '
+        + 'the schema move onto the declared `hideFields`.',
+    },
+    {
       id: 'rest-server-openapi31-block-removed',
       surface: 'restServer.openApi31',
       replacement:
@@ -3151,6 +3371,46 @@ const step17: MigrationStep = {
         + '`OpenApiWebhookEvent(Schema)` from `@objectstack/spec/api` (TS2305 after upgrade). '
         + 'The served /openapi.json is byte-identical before and after — the block never '
         + 'reached it.',
+    },
+    {
+      id: 'runtime-httpserver-wrapper-retired',
+      surface: 'runtime.HttpServer (the exported delegating wrapper class)',
+      replacement:
+        'register an `IHttpServer` ADAPTER INSTANCE directly as the `http.server` service — '
+        + '`HonoHttpServer` or whatever adapter the host already builds — instead of wrapping one',
+      reason:
+        '`@objectstack/runtime` exported an `HttpServer` class that took an `IHttpServer` in its '
+        + 'constructor, declared `implements IHttpServer`, and forwarded only the contract\'s '
+        + 'REQUIRED members (`get` / `post` / `put` / `delete` / `patch` / `use` / `listen` / '
+        + '`close`). It forwarded none of the OPTIONAL ones — `getPort?()`, `getRawApp?()`, '
+        + '`setFallbackHandler?()`. `packages/spec/src/contracts/http-server.ts` instructs '
+        + 'consumers to feature-detect exactly those members with `typeof server.X === '
+        + '"function"` and to degrade when absent, so wrapping a capable adapter made every '
+        + 'probe answer false and the capability vanish with the adapter underneath providing it '
+        + 'the whole time. The sharpest consequence is worth writing down before anyone reaches '
+        + 'for a wrapper of the same shape: a host that wrapped `HonoHttpServer` and registered '
+        + 'the wrapper as `http.server` would answer 404 to every endpoint its metadata declared, '
+        + 'because `setFallbackHandler` — since #5111 the ONLY entry path for declarative `apis:` '
+        + 'endpoints — was never forwarded. This is a TS/API contract surface: an HTTP server '
+        + 'adapter is CODE, never stack metadata, so there is no authored source for the chain to '
+        + 'rewrite and deliberately no schema tombstone — nothing ever ran an adapter through a '
+        + '`.parse()`. That is precisely why this entry must exist: for an untyped JS host the '
+        + 'ledger is the only notification channel there is, and for a typed one tsc reports at '
+        + 'the construction site. Same disposition, and the same reason, as '
+        + '`storage-service-list-retired` (#5540) and `data-driver-find-stream-retired` (#4484). '
+        + 'Registered by the #6350 stock reconciliation, not by the original change: #5122 landed '
+        + 'before the #6148 completeness gate existed, so nothing ever asked it what it had done '
+        + 'about the ledger. ADR-0049 / ADR-0087, #5122 (backfilled #6350).',
+      acceptanceCriteria:
+        'No code constructs `new HttpServer(...)` from `@objectstack/runtime`, and no import of '
+        + 'the name resolves — the export is gone, so a typed caller fails to compile at the '
+        + 'construction site. A host that was wrapping an adapter registers the ADAPTER INSTANCE '
+        + 'as `http.server` instead, and then proves the capability came back: `getPort()` returns '
+        + 'the real bound port after `listen(0)`, `getRawApp()` returns the framework-native app, '
+        + 'and a declarative `apis:` endpoint declared in metadata answers its route rather than '
+        + '404 — the last of which is the failure a wrapper produced silently. An adapter that '
+        + 'genuinely needs to intercept calls implements `IHttpServer` in full, forwarding the '
+        + 'optional members too, rather than declaring `implements` and dropping them.',
     },
     {
       id: 'sharing-execution-context-retired',
@@ -3202,6 +3462,98 @@ const step17: MigrationStep = {
         + 'passes the context it was HANDED, unchanged, rather than a literal it assembled — '
         + 'and that any gate of yours reading `posture`, `accessible_org_ids`, `org_user_ids` '
         + 'or `tabPermissions` now reads them declared, with no `as any` in the path.',
+    },
+    {
+      id: 'sharing-rule-recipient-reconcile',
+      surface:
+        'security.sharingRule.sharedWith.type `group` / `guest`, and owner-type rules '
+        + '(`type: owner` + `ownedBy`)',
+      replacement:
+        '`group` → `team` (the enforced runtime vocabulary); `guest` → delete the rule and expose '
+        + 'the records through a public form or a share link; `type: owner` → rewrite as a '
+        + '`type: criteria` rule. `business_unit` is newly authorable for the single-unit case',
+      reason:
+        'The authoring `ShareRecipientType` enum had drifted behind both the ADR-0090 D3 rename '
+        + 'and the enforced runtime, in both directions at once. It still offered the pre-rename '
+        + '`group`, which the seed path silently SKIPPED, while omitting two recipients the '
+        + 'runtime and bootstrap already enforced (`team` via `sys_team` / `sys_team_member`, and '
+        + '`business_unit`). It also offered `guest`, which had no runtime recipient mapping at '
+        + 'all. Each of those is a rule that validated and then materialised nothing — the '
+        + 'ADR-0078 shape, and on a SECURITY surface, where the failure is silent under-sharing: '
+        + 'the author sees a valid rule and believes a set of people can reach the records, and '
+        + 'no error ever contradicts them. Owner-type rules go for a different and sharper '
+        + 'reason: they depend on live team / position membership, which the static materialiser '
+        + 'cannot track, so they could not be made to work by fixing a name. They return as an '
+        + 'enforced form only if membership-reactive re-materialisation is designed. This is a '
+        + 'semantic entry rather than a mechanical conversion because only one of the three '
+        + 'rewrites is a rename: `group` → `team` is mechanical, but `guest` and `type: owner` '
+        + 'have no target — the author has to decide who was actually meant to reach those '
+        + 'records and say so in a form the runtime enforces, and a transform that guessed would '
+        + 'be inventing an access grant. After this change every authorable recipient and rule '
+        + 'type on the SharingRule surface is enforced; the `queue` recipient stays '
+        + 'runtime-reserved and deliberately non-authorable (there is no `sys_queue` yet). Note '
+        + 'the two neighbouring conversions cover DIFFERENT faces of this schema and not this '
+        + 'one: `sharing-recipient-role-to-position` is the ADR-0090 role → position rename and '
+        + '`sharing-rule-access-level-full-to-edit` is the access-level vocabulary. Registered by '
+        + 'the #6350 stock reconciliation. ADR-0078 / ADR-0090 D3 / ADR-0087, #1878 (backfilled '
+        + '#6350).',
+      acceptanceCriteria:
+        'No sharing rule names `group` or `guest`, and none carries `type: owner`; stale '
+        + 'definitions now FAIL parse with the valid options listed, so the sweep is "fix until '
+        + 'nothing raises". ⚠️ Parsing clean is the weaker half — verify the SHARES, because a '
+        + 'rule that was silently materialising nothing looked exactly like one that worked. For '
+        + 'every rule that named `group`, confirm the `sys_team` it now resolves to has the '
+        + 'membership you expected, and that records reach the people the rule was written for. '
+        + 'Each former `guest` rule needs an explicit decision about anonymous access — a public '
+        + 'form grant or a share link, or knowingly no access at all — and each former owner-type '
+        + 'rule needs a `criteria` predicate that names the same population, checked against a '
+        + 'representative record. Where a single business unit was meant, use `business_unit`; '
+        + '`unit_and_subordinates` is the subtree and grants strictly more.',
+    },
+    {
+      id: 'sort-node-direction-rejected',
+      surface: 'data.query.orderBy[].direction (SortNode)',
+      replacement:
+        '`order` — `orderBy: [{ field: "updated_at", order: "desc" }]`. One word, same values '
+        + '(`asc` / `desc`)',
+      reason:
+        '`SortNodeSchema` was a plain `z.object`, so zod\'s default `.strip` applied and a sort '
+        + 'node spelling its direction `direction` lost the key silently. Measured on `main` '
+        + 'before the change: `SortNodeSchema.parse({ field: "updated_at", direction: "desc" })` '
+        + 'returned `{ field: "updated_at", order: "asc" }` — the key discarded and `order` '
+        + 'falling back to its `asc` default, so the sort ran in the OPPOSITE direction and the '
+        + 'request succeeded. Paired with `limit`, which is how a caller asks for "the latest N", '
+        + 'that is not a reordered page but a DIFFERENT SET OF ROWS, returned under an ordinary '
+        + '200 with nothing in the response to distinguish it from the answer that was asked for. '
+        + '`direction` is not a typo: it is the live vocabulary of a neighbouring contract, '
+        + '`IReportService.orderBy`, and `plugin-auth/objectql-adapter.ts` already translated '
+        + 'between the two by hand — a translation known to be necessary and enforced nowhere, '
+        + 'the ADR-0049 shape. Both doors closed in one change: `SortNodeSchema` is now a '
+        + '`strictObject` carrying `aliases: { direction: "order" }`, and `normalizeSortNodes` '
+        + 'in `metadata-protocol` refuses `{ field, direction }` with `400 INVALID_SORT`. The '
+        + 'alias is deliberate rather than left to the edit-distance fallback, because no edit '
+        + 'distance bridges `direction` → `order` and a bare "unrecognized key" would leave the '
+        + 'caller exactly where the silent strip did. This is registered as a semantic entry '
+        + 'rather than a mechanical conversion for one reason worth stating: the rewrite itself '
+        + 'is trivially mechanical, but a stored `direction: "asc"` is ambiguous evidence — the '
+        + 'author may have written it meaning ascending and been silently GIVEN ascending, so '
+        + 'the visible behaviour never contradicted them, and only they can say whether the '
+        + 'sort they have been reading was the sort they asked for. Registered by the #6350 stock '
+        + 'reconciliation: the in-code alias tombstone shipped with #4721, but the ledger half '
+        + 'never did, and a retirement needs both — the tombstone is the proof the removal was '
+        + 'declared, the ledger entry is what `spec-changes.json`, the upgrade guide and '
+        + '`os migrate meta` project to consumers. ADR-0049 / ADR-0087, #4721 (backfilled #6350).',
+      acceptanceCriteria:
+        'No authored `orderBy` entry — in metadata, in a saved view\'s `sort[]`, or in a REST / '
+        + 'RPC request body — spells the key `direction`. The upgrade\'s own verify loop is that '
+        + 'the failure is now LOUD: a stale `direction` raises a named parse error (or `400 '
+        + 'INVALID_SORT` at ingress) quoting `order`, so a sweep is "fix until nothing raises" '
+        + 'rather than a search. ⚠️ Check the RESULTS, not just the parse: every list, report and '
+        + 'paged query that carried `direction: "desc"` has been silently serving ASCENDING order '
+        + 'and, wherever it was paired with `limit`, a different set of rows. After the rename '
+        + 'those pages change what they return — that is the defect being corrected, not a '
+        + 'regression, and any downstream expectation baked against the old output has to be '
+        + 're-read rather than restored.',
     },
     {
       id: 'spec-type-alias-input-suffix-retired',
@@ -3323,6 +3675,51 @@ const step17: MigrationStep = {
         + 'against each other in `storage-adapter-list.conformance.test.ts` rather than left '
         + 'to diverge. What changed for an upgrader is only the destination: prefer the '
         + 'records you wrote, and reach for the restored member when there are none.',
+    },
+    {
+      id: 'tool-requires-confirmation-retired',
+      surface: 'ai.tool.requiresConfirmation',
+      replacement:
+        'put the operation behind an ACTION and set `ai.requiresConfirmation: true` there — that '
+        + 'is the flag the HITL approval queue actually reads, and the only path that stops '
+        + 'execution',
+      reason:
+        '`ToolSchema.requiresConfirmation` accepted `true` and no execution path ever read it: '
+        + 'not the LLM tool set (a tool reaches the model as name / description / parameters '
+        + 'only), not `ToolRegistry.execute`, not `POST /ai/tools/:name/execute`, and not the MCP '
+        + 'bridge, which derives `destructiveHint` from a hardcoded name list. Setting it on a '
+        + 'destructive tool produced NO PAUSE. For an ordinary dead property that is untidy; for '
+        + 'a SAFETY property it is false compliance, the case ADR-0049 exists for — an author '
+        + 'gates a destructive tool, sees the flag accepted, and ships believing a human is in '
+        + 'the loop. It is made worse by the near-miss: `action.ai.requiresConfirmation` carries '
+        + 'the same name and DOES work, so the mistake reads as correct in review. This is '
+        + 'registered as a semantic entry rather than a mechanical conversion because the rewrite '
+        + 'is not a rename at all — the replacement lives on a different metadata object at a '
+        + 'different layer, and deciding which action should carry the gate (or whether the '
+        + 'operation should be an action at all) is a judgement the chain cannot make. Deleting '
+        + 'the key mechanically would be the worst possible transform here: it would leave the '
+        + 'metadata parsing green while silently completing the removal of a safety gate the '
+        + 'author believed was in place. `ToolSchema` was made `.strict()` in the same change, '
+        + 'which is load-bearing rather than tidying — removing a key from a non-strict schema '
+        + 'swaps one silent no-op for another, so the retired key now REJECTS and the parse error '
+        + 'carries the prescription, that being the one channel every consumer bumping '
+        + '`@objectstack/spec` is guaranteed to hit. Registered by the #6350 stock '
+        + 'reconciliation: the `retiredKey()` tombstone shipped with #3715 and still stands in '
+        + '`ai/tool.zod.ts`, but the ledger half never did. A retirement needs both — the '
+        + 'tombstone is the proof the removal was declared, this entry is what `spec-changes.json`'
+        + ', the upgrade guide and `os migrate meta` project to consumers. ADR-0033 §2 / '
+        + 'ADR-0049 / ADR-0087, #3715 (backfilled #6350).',
+      acceptanceCriteria:
+        'No tool definition carries `requiresConfirmation`; the key now raises a located parse '
+        + 'error naming the replacement, so the sweep is "fix until nothing raises". ⚠️ The '
+        + 'load-bearing half is what happens NEXT, and no gate can check it for you: for every '
+        + 'tool that carried the flag, decide whether that operation genuinely needs a human in '
+        + 'the loop. If it does, move it behind an action carrying `ai.requiresConfirmation: '
+        + 'true` and prove the pause exists — invoke it and observe the approval queue hold it, '
+        + 'rather than assuming the declaration. If it does not, delete the key knowingly. '
+        + 'Deleting it without that decision leaves exactly the state the retirement exists to '
+        + 'end: a destructive tool nobody is approving, now without even the false flag to show '
+        + 'that somebody once meant to.',
     },
     {
       id: 'ui-interaction-config-family-retired',

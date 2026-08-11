@@ -38,3 +38,5 @@ validates and then silently does nothing (ADR-0078).
   rows by field values (see the migrated examples:
   `share_open_tasks_with_manager` in app-showcase,
   `share_active_leads_with_manager` in app-crm), or use a scope-depth grant.
+
+<!-- adr-0087: registered sharing-rule-recipient-reconcile -->

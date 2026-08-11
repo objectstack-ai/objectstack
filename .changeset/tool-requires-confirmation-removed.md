@@ -48,3 +48,5 @@ liveness-ledger entry, and the generated reference-doc row.
 objectui's `ToolPreview.tsx` reads the field via `!!d.requiresConfirmation`, so it
 degrades to "not shown" with no error; removing that badge is a follow-up in that
 repo.
+
+<!-- adr-0087: registered tool-requires-confirmation-retired -->
