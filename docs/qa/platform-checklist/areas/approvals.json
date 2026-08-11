@@ -8,7 +8,7 @@
       "title": "Per-group sign-off (会签) needs one approval from EACH group",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "browser",
       "personas": ["approver holding exactly one group (e.g. manager)", "second approver holding the other group (e.g. finance/auditor)"],
@@ -19,7 +19,8 @@
           "seed-approval-demo.ts wiring: dev admin holds manager/finance/legal/exec but NOT auditor, so the manager group resolves to the admin and the finance group to Ada Auditor only; EXP-2001 ($1,500) sits under the $5,000 committee threshold so the quorum flow does not also open on it; submitter is Mei Phone (usr_showcase_phone_demo)"
         ],
         "knownGaps": [
-          "Ada Auditor exists as a routable sys_user row only — better-auth sign-in for her needs an account provisioned at runtime (seed-approval-demo.ts: 'sign-in still needs a better-auth account'); the finance-group decision therefore needs either a provisioned Ada account or the server-granted admin override (can_override) — the run record must state which path was used"
+          "Ada Auditor exists as a routable sys_user row only — better-auth sign-in for her needs an account provisioned at runtime (seed-approval-demo.ts: 'sign-in still needs a better-auth account'); the finance-group decision therefore needs either a provisioned Ada account or the server-granted admin override (can_override) — the run record must state which path was used",
+          "provisioning that account needs more than a password hash: better-auth 1.7.0-rc.2 requires the credential account's issuer to equal local:credential (packages/plugins/plugin-auth/src/backfill-account-issuer.ts, CREDENTIAL_ISSUER). Without that one field, sign-in fails INVALID_EMAIL_OR_PASSWORD behind a misleading 'User not found' warn — the user exists and the hash is right, so the warn sends you looking in exactly the wrong place. With it set, prefer the real Ada session over the admin override (#7517)"
         ]
       },
       "steps": [
@@ -84,7 +85,8 @@
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial import from the #3358 evidence run (decisive oracle: group drops but request stays pending)", "ref": "#3358" },
         { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 3, "date": "2026-08-10", "change": "entry path refreshed: the inbox is opened through the account app's Approvals nav entry (component route) rather than the bare /system/approvals deep link, so the item exercises the path a real user takes after #7213", "ref": "#7331" }
+        { "revision": 3, "date": "2026-08-10", "change": "entry path refreshed: the inbox is opened through the account app's Approvals nav entry (component route) rather than the bare /system/approvals deep link, so the item exercises the path a real user takes after #7213", "ref": "#7331" },
+        { "revision": 4, "date": "2026-08-11", "change": "knownGaps records the better-auth issuer=local:credential provisioning detail — the one field that decides whether Ada can be driven as a real second session or the run falls back to the admin override; it used to be rediscovered every sweep, behind a 'User not found' warn that points at the wrong cause", "ref": "#7530" }
       ]
     },
     {
@@ -241,7 +243,7 @@
       "title": "A submitter who is not an approver sees no approver buttons",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "browser",
       "personas": ["submitter holding NO approver position on their own pending request"],
@@ -250,7 +252,8 @@
         "requires": ["one pending request routed to a position its submitter does not hold"],
         "knownGaps": [
           "stock seeds route every request to positions the admin holds, so the admin is an approver on all of them (#3358) — needs one request addressed away from the signed-in persona",
-          "the natural persona exists since #3411 — Mei Phone (usr_showcase_phone_demo) submits EXP-2001/EXP-DEMO and holds no approver position — but she is a sys_user row only: signing in as her needs a better-auth account provisioned at runtime (seed-approval-demo.ts)"
+          "the natural persona exists since #3411 — Mei Phone (usr_showcase_phone_demo) submits EXP-2001/EXP-DEMO and holds no approver position — but she is a sys_user row only: signing in as her needs a better-auth account provisioned at runtime (seed-approval-demo.ts)",
+          "provisioning that account needs more than a password hash: better-auth 1.7.0-rc.2 requires the credential account's issuer to equal local:credential (packages/plugins/plugin-auth/src/backfill-account-issuer.ts, CREDENTIAL_ISSUER). Without that one field, sign-in fails INVALID_EMAIL_OR_PASSWORD behind a misleading 'User not found' warn — the user exists and the hash is right, so the warn sends you looking in exactly the wrong place. With it set this item's blocker is payable at runtime rather than blocked(fixture) (#7517)"
         ]
       },
       "blocked": { "by": "fixture", "ref": "#3358 (needs a request routed to a position the viewing submitter does not hold)" },
@@ -300,7 +303,8 @@
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial import from #3358; upgraded the oracle from DOM-only to both-sides (UI absence + server rejection)", "ref": "#3358" },
         { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 3, "date": "2026-08-10", "change": "entry path refreshed to the account app's Approvals nav entry (component route) after #7213/#7234", "ref": "#7331" }
+        { "revision": 3, "date": "2026-08-10", "change": "entry path refreshed to the account app's Approvals nav entry (component route) after #7213/#7234", "ref": "#7331" },
+        { "revision": 4, "date": "2026-08-11", "change": "knownGaps records the better-auth issuer=local:credential provisioning detail — with it, Mei's sign-in is provisionable at runtime and this item's standing fixture blocker becomes payable instead of permanent", "ref": "#7530" }
       ]
     },
     {
@@ -308,18 +312,22 @@
       "title": "An approval notification deep-links straight into the request drawer",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "browser",
       "personas": ["any pending approver"],
       "fixtures": {
         "app": "showcase",
-        "requires": ["at least one pending request whose open notified the signed-in approver (the three seeded demo requests suffice)"]
+        "requires": ["at least one pending request on which the signed-in approver can be notified through the REMIND or REASSIGN path — POST /api/v1/approvals/requests/:id/remind (or /reassign {to}) is what actually mints the deep-linked notification; the three seeded demo requests suffice as the request source"],
+        "knownGaps": [
+          "opening a request notifies NOBODY on this build — there is no approval.opened topic. The topics that emit are approval.{reminder,reassigned,returned,request_info,comment,ooo_substituted,ooo_skipped,escalated,sla_breached} (packages/plugins/plugin-approvals/src/approval-service.ts), so an item that waits for an open-time notification waits forever; drive remind/reassign instead (#7517)"
+        ]
       },
       "steps": [
         "boot showcase isolated (dogfood §0); sign in as the dev admin (a pending approver on the seeded requests)",
-        "read the bell notification for a pending approval and record its actionUrl — it must carry /system/approvals?request=<id> (#2678 P1.5)",
-        "cold-load that exact URL in a fresh page (no prior navigation); wait for settle; screenshot with the URL visible",
+        "mint the notification: POST /api/v1/approvals/requests/:id/remind on a pending request (or /:id/reassign {to: <self>}) — opening a request emits nothing, the remind/reassign path is what notifies",
+        "read the resulting notification row and record its actionUrl — it must carry /system/approvals?request=<id> (#2678 P1.5; ApprovalService.notify rewrites the bare /system/approvals into the deep link centrally, so every emitting topic inherits it)",
+        "cold-load that exact URL in a fresh page (no prior navigation); wait for settle; capture the drawer that opens",
         "GET /api/v1/approvals/requests/:id and cross-check the drawer's request identity and status against the read",
         "repeat the cold load a second time on a fresh page (the hydration-race counter)",
         "negative probe: cold-load /system/approvals?request=<nonexistent-id> and screenshot the result",
@@ -335,8 +343,8 @@
         {
           "clause": "the ?request= URL opens the request drawer directly on a cold load — verified twice on fresh loads",
           "oracle": "screenshot",
-          "verify": "fresh navigation renders the drawer for that exact request both times (verify twice on fresh loads)",
-          "evidence": "two screenshots with the URL visible"
+          "verify": "fresh navigation renders the drawer for that exact request both times. Identify WHICH request the drawer resolved to by field-matching it against GET /api/v1/approvals/requests/:id (identity, status, pending slate) — NOT by reading the address bar: the console CONSUMES the query param, so by the time the drawer is open and capturable the URL no longer shows it",
+          "evidence": "two drawer captures, each paired with the API read of the id it was cold-loaded with"
         },
         {
           "clause": "the drawer shows the SAME request the API returns for that id — identity, status, pending slate",
@@ -364,12 +372,14 @@
       "source": [
         "#3358 §1",
         "#7213", "#7233",
-        "objectui apps/console/src/pages/system/ApprovalsInboxPage.tsx (#2678 P1.5 — 'notifications carry /system/approvals?request=<id>')"
+        "objectui apps/console/src/pages/system/ApprovalsInboxPage.tsx (#2678 P1.5 — 'notifications carry /system/approvals?request=<id>')",
+        "packages/plugins/plugin-approvals/src/approval-service.ts (ApprovalService.notify — the central /system/approvals → ?request=<id> rewrite; the emitting topic set, which has no approval.opened member)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial import from #3358 (verified twice on fresh loads)", "ref": "#3358" },
         { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 3, "date": "2026-08-10", "change": "added the route-parity clause: after #7213 the same ?request= link must open the drawer on BOTH /system/approvals (what notifications carry) and the component route the account app mounts", "ref": "#7331" }
+        { "revision": 3, "date": "2026-08-10", "change": "added the route-parity clause: after #7213 the same ?request= link must open the drawer on BOTH /system/approvals (what notifications carry) and the component route the account app mounts", "ref": "#7331" },
+        { "revision": 4, "date": "2026-08-11", "change": "fixtures re-anchored on the remind/reassign path — the old requires rested on a request's OPEN notifying somebody, and no approval.opened topic exists; and the cold-load clause's evidence restated observably (drawer field-matched against the API instead of 'screenshots with the URL visible', which the console's consumption of the query param makes unmeetable)", "ref": "#7530" }
       ]
     },
     {
@@ -377,7 +387,7 @@
       "title": "Every approval action executes its REST route and produces the expected state transition plus a timeline entry",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["dev admin (pending approver on the seeded requests; submitter of the invoice request)"],
@@ -394,7 +404,7 @@
         "approve: POST /api/v1/approvals/requests/:id/approve {comment} on the EXP-DEMO request; re-read status + run",
         "reject: raise a fresh budget-approval request (PATCH a project budget to e.g. 200000); POST /:id/reject {comment}; re-read — the flow resumes down its reject edge",
         "revise: raise another budget-approval request; POST /:id/revise {comment} as the pending manager — re-read status; GET the flow run (parked at the approval_revise node 'wait_revision')",
-        "resubmit: POST /:id/resubmit {comment} as the submitter — re-read: pending again, round 2, fresh slate; then drive revise→resubmit→revise again and attempt a THIRD revise (maxRevisions: 2 — it must auto-reject)",
+        "resubmit: POST /:id/resubmit {comment} as the submitter — then re-read BOTH sides: GET /:id (the resubmitted request, which stays returned) and GET /api/v1/approvals/requests?status=pending filtered to the same object/record, which now carries a DIFFERENT id — the round-N+1 request the approval node minted on re-entry; then drive revise→resubmit→revise again and attempt a THIRD revise (maxRevisions: 2 — it must auto-reject)",
         "recall: raise one more pending request; POST /:id/recall as the submitter; re-read",
         "reassign: on a pending request POST /:id/reassign {to: <userId>, comment}; re-read pending_approvers",
         "remind: POST /:id/remind on the admin-submitted invoice request; then POST it again immediately (throttle probe)",
@@ -417,15 +427,27 @@
           "evidence": "before/after request + run reads"
         },
         {
-          "clause": "revise (send-back) moves pending→returned and parks the run at the service-owned approval_revise node; resubmit moves returned→pending as round 2 with a fresh approver slate",
+          "clause": "revise (send-back) moves pending→returned and parks the run at the service-owned approval_revise node",
           "oracle": "api",
-          "verify": "after revise: status=returned, run paused at 'wait_revision'; after resubmit: status=pending, slate repopulated; the resubmit is refused for anyone but the submitter",
-          "evidence": "reads after each move"
+          "verify": "after revise: status=returned, run paused at 'wait_revision'",
+          "evidence": "request + run reads after the send-back"
+        },
+        {
+          "clause": "resubmit MINTS A NEW request for the next round — it does not move the returned one back to pending: the run resumes down the resubmit back-edge into the approval node, whose executor opens a round-N+1 request with a fresh approver slate",
+          "oracle": "api",
+          "verify": "after the submitter's resubmit, list the requests on the same object/record (or the same flow_run_id + flow_node_id): a NEW row exists with status=pending and a different id, and its pending_approvers are freshly resolved. The resubmit is refused for anyone but the submitter",
+          "evidence": "the resubmit response + the request list before/after, showing the new pending id"
+        },
+        {
+          "clause": "the resubmitted request is TERMINAL at returned — the original row is never revived, so round history is readable as one row per round",
+          "oracle": "api",
+          "verify": "GET /:id on the request that was resubmitted still reads status=returned (never pending) after the new round opened; the round count is the number of returned siblings on the same flow_run_id + flow_node_id — which is exactly what the maxRevisions guard counts",
+          "evidence": "post-resubmit read of the ORIGINAL id + the returned-sibling list"
         },
         {
           "clause": "the maxRevisions guard holds: the third send-back auto-rejects instead of looping forever",
           "oracle": "api",
-          "verify": "after two revise/resubmit rounds, the next revise finalizes the request rejected (maxRevisions: 2 on manager_review)",
+          "verify": "after two revise/resubmit rounds, the next revise finalizes the request it was issued against — the round-3 request — as rejected instead of returning it (maxRevisions: 2 on manager_review; the guard counts the returned siblings on the same flow_run_id + flow_node_id)",
           "evidence": "the third-revise response + final read"
         },
         {
@@ -457,11 +479,13 @@
         "#3358 §1 (the action-table evidence this matrix grounds in)",
         "packages/rest/src/rest-route-ledger.ts (approve/reject/recall/revise/resubmit/reassign/remind/request-info/comment + GET /:id/actions)",
         "packages/rest/src/rest-server.ts (flowMoveRoute: revise=pending approver, resubmit=submitter; threadRoute access per action; recall submitter-only)",
+        "packages/plugins/plugin-approvals/src/approval-service.ts (ApprovalService.resubmit — 'traversal walks the declared back-edge into the approval node, whose executor opens the round-N+1 request'; the resubmitted row's status is never rewritten. sendBack counts prior rounds as returned siblings on flow_run_id + flow_node_id)",
         "packages/spec/src/contracts/approval-service.ts (APPROVAL_STATUSES: pending|approved|rejected|recalled|returned)",
         "examples/app-showcase/src/automation/flows/index.ts (BudgetApprovalFlow — ADR-0044 revise loop, maxRevisions 2, exec step without a revise edge, lockRecord pair)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "initial — decision-action matrix derived from the approvals REST route ledger and the ADR-0044 revise/resubmit flow shape", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-07", "change": "initial — decision-action matrix derived from the approvals REST route ledger and the ADR-0044 revise/resubmit flow shape", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-11", "change": "corrected the resubmit transition the item asserted: it does NOT move the original returned→pending — the approval node's re-entry mints a round-N+1 request while the original stays terminally returned (source-confirmed as by design). Split the old combined revise/resubmit clause into three (revise parks · resubmit mints · original stays returned) and sharpened the maxRevisions verify to name which request the auto-reject lands on. Fixes the sole reason #7517 scored this item PARTIAL", "ref": "#7530" }
       ]
     },
     {
@@ -530,7 +554,7 @@
       "title": "A decision's typed outputs route the next stage: expression approvers resolve from the previous decision at node entry",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["dev admin (org-membership owner — the stage-1 approver of the dynamic-approval demo)"],
@@ -539,6 +563,9 @@
         "requires": [
           "showcase_dynamic_approval (#3447 P2): stage 1 routes to org_membership_level 'owner' with a REQUIRED decisionOutput next_reviewers (typed user multi picker); stage 2 resolves an expression approver over vars from that output, with onEmptyApprovers: 'fail'",
           "trigger: retitle a showcase_announcement (an otherwise approval-free object, so this demo never collides with the expense/invoice/project approval dedupe)"
+        ],
+        "knownGaps": [
+          "the run's variables are NOT readable while the run is paused — structural, not a data gap: the engine's suspend path records the paused log WITHOUT a variables key (packages/services/service-automation/src/engine.ts, both `status: 'paused'` recordLog calls) and there is no side door. So the vars round-trip is asserted through its RESOLUTION (stage-2 pending_approvers) rather than by reading the snapshot. A product-side ask — run-detail carrying a suspended-run variables snapshot — would let this be read directly; until such a surface exists, do not score the item PARTIAL for the unreadable snapshot (#7517)"
         ]
       },
       "steps": [
@@ -549,7 +576,8 @@
         "gate probe: attempt to approve WITHOUT filling next_reviewers; record the refusal",
         "approve WITH next_reviewers=[the admin] via the dialog; capture the decision POST body",
         "GET the requests list again — the stage-2 co-sign request must now exist; read its pending_approvers",
-        "GET /api/v1/automation/showcase_dynamic_approval/runs/:runId — the run's variables carry the stage-1 outputs; decide stage 2 and confirm the run completes"
+        "cardinality/order probe (the vars oracle): re-run the whole chain on a SECOND announcement picking TWO reviewers, and read the new stage-2 request's pending_approvers — 1 pick must yield 1, 2 picks must yield 2, in the picked order. This is the readable proxy for 'the outputs rode the run variables'; the run's variables themselves are not exposed while it is paused (see knownGaps)",
+        "decide stage 2 and confirm the run transitions paused→completed"
       ],
       "acceptance": [
         {
@@ -571,10 +599,10 @@
           "evidence": "decision POST body + stage-2 request read"
         },
         {
-          "clause": "the decision outputs ride the flow run's variables (the vars.* the stage-2 expression reads), observable on the run detail",
+          "clause": "the decision outputs really ride the flow run into the stage-2 expression (the vars.* it reads) — proven by VARYING the pick: N picked reviewers resolve to exactly N stage-2 pending_approvers, in the picked order",
           "oracle": "api",
-          "verify": "run read between the stages: the stage-1 outputs present in the run variables snapshot",
-          "evidence": "run-detail read"
+          "verify": "drive the chain twice, once picking one reviewer and once picking two: the stage-2 request's pending_approvers count and order track the pick each time (1 → 1, 2 → 2, same order). ⛔ Do NOT prescribe reading the run's variables snapshot — a paused run's detail carries no variables key at all on this build (see knownGaps), so an item that demands it can only ever score PARTIAL. The resolution IS the oracle: only the stage-1 outputs carried on the run can make the expression approver resolve the picked set",
+          "evidence": "the two decision POST bodies + the two stage-2 request reads"
         },
         {
           "clause": "deciding stage 2 completes the run end to end",
@@ -590,10 +618,12 @@
       "source": [
         "examples/app-showcase/src/automation/flows/dynamic-approval.flow.ts (#3447 P2)",
         "packages/spec/src/automation/approval.zod.ts (DecisionOutputDefSchema — typed pickers, required-to-approve objectui#2955; expression approvers + resolveAs)",
-        "examples/app-showcase/src/automation/flows/approver-bindings.flow.ts (#3508 — the degraded-to-free-text failure the typed control fixes)"
+        "examples/app-showcase/src/automation/flows/approver-bindings.flow.ts (#3508 — the degraded-to-free-text failure the typed control fixes)",
+        "packages/services/service-automation/src/engine.ts (the two `status: 'paused'` recordLog calls — the suspend path records no variables, which is why the vars clause needs a functional oracle)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "initial — covers the #3447 dynamic-routing chain (typed decision outputs → vars → expression approvers) with the required-output gate", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-07", "change": "initial — covers the #3447 dynamic-routing chain (typed decision outputs → vars → expression approvers) with the required-output gate", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-11", "change": "the vars clause now names an oracle that is actually readable: stage-2 pending_approvers cardinality + order across a 1-pick and a 2-pick run, instead of 'the outputs present in the run variables snapshot' — a paused run's detail carries no variables key at all (structural), which was the sole reason #7517 scored this item PARTIAL. Gap recorded in knownGaps rather than left to be rediscovered", "ref": "#7530" }
       ]
     },
     {
@@ -601,30 +631,32 @@
       "title": "An active out-of-office delegation reroutes an individually-routed approver to the delegate; expiring the window hands the slot back",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "mixed",
-      "personas": ["dev admin (the DELEGATE B — signed in, so they can actually decide the rerouted request)", "a routable non-admin delegator A (sys_user row, e.g. Mei Phone usr_showcase_phone_demo)"],
+      "personas": ["dev admin — the DELEGATOR A: the delegation row is written BY them FOR them (sys_approval_delegation is self-service-only, so the delegator must be whoever is authenticated)", "a SECOND REAL runtime account — the DELEGATE B (Ada Auditor usr_showcase_auditor_demo, provisioned as a real login per knownGaps), who holds their own bearer token and decides the rerouted request as themselves"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "a flow with an INDIVIDUALLY-routed approver — OOO delegation only applies to type user / field / manager (ApprovalService.expandApprovers), NOT position. No ACTIVE seeded showcase flow routes individually (they all route by position), so author a scratch autolaunched flow in a WRITABLE package with a single approval node config.approvers=[{type:'user', value:'<A>'}], shaped after examples/app-showcase/src/automation/flows/approver-bindings.flow.ts (the record-backed approver specimen)",
-          "delegator A = a routable sys_user row that is NOT the signed-in admin (Mei Phone usr_showcase_phone_demo); delegate B = the dev admin"
+          "a flow with an INDIVIDUALLY-routed approver — OOO delegation only applies to type user / field / manager (ApprovalService.expandApprovers), NOT position. No ACTIVE seeded showcase flow routes individually (they all route by position), so author a scratch autolaunched flow in a WRITABLE package with a single approval node config.approvers=[{type:'user', value:'<A = the signed-in admin's sys_user id>'}], shaped after examples/app-showcase/src/automation/flows/approver-bindings.flow.ts (the record-backed approver specimen)",
+          "delegator A = the SIGNED-IN dev admin (so the delegation is a self-service write); delegate B = a second real runtime account with its own credentials and bearer token — Ada Auditor (usr_showcase_auditor_demo / auditor.demo@example.com), provisioned as a real login per the knownGap below"
         ],
         "knownGaps": [
-          "the delegate must be the SIGNED-IN admin (B) so the rerouted request is decidable without provisioning a second better-auth account — the same sign-in gap approvals.per-group-signoff records for Ada; routing the scratch flow at a non-admin A and delegating A→admin sidesteps it",
+          "⛔ the delegation CANNOT be set up as a third party on behalf of another delegator: sys_approval_delegation is self-service-only and there is no admin exemption (#4839 — bindDelegationWriteGuard rejects a foreign delegator_id with FORBIDDEN, and an absent one is stamped to the caller). Combined with the seeded demo personas having no auth account of their own, the 'admin delegates on behalf of Mei' shape this item used to prescribe is not constructible by ANYBODY. The run drives the mirror image instead — the admin delegates their OWN slot to a real second account — which is also the stronger test, because the delegate decides under a genuinely separate identity and the audit's no-laundering clause becomes falsifiable (#7517)",
+          "provisioning a seeded demo persona as a real login needs more than a password hash: better-auth 1.7.0-rc.2 requires the credential account's issuer to equal local:credential (packages/plugins/plugin-auth/src/backfill-account-issuer.ts, CREDENTIAL_ISSUER). Without that one field, sign-in fails INVALID_EMAIL_OR_PASSWORD behind a misleading 'User not found' warn — the user exists and the hash is right, so the warn sends you looking in exactly the wrong place. With it set, B is constructible: drive the real second account rather than recording blocked(fixture) (#7517)",
           "authoring the scratch flow needs a writable/scratch package — the showcase ships read-only"
         ]
       },
       "steps": [
-        "boot showcase isolated (dogfood §0); sign in as the dev admin (the delegate B)",
-        "in a writable/scratch package author + register (POST /api/v1/automation) an autolaunched flow with a single approval node whose approvers=[{type:'user', value:'<A = Mei's sys_user id>'}], behavior first_response",
+        "boot showcase isolated (dogfood §0); provision B as a real login (see knownGaps: the credential account's issuer must be local:credential) and hold B's bearer token separately from the admin's",
+        "sign in as the dev admin (the delegator A)",
+        "in a writable/scratch package author + register (POST /api/v1/automation) an autolaunched flow with a single approval node whose approvers=[{type:'user', value:'<A = the admin's sys_user id>'}], behavior first_response",
         "baseline (no delegation): trigger the flow (POST /api/v1/automation/<flow>/trigger); GET /api/v1/approvals/requests?status=pending, find the new request, GET /:id — pending_approvers must be [A]; GET /:id/actions shows NO ooo_substitute row",
-        "create an ACTIVE delegation: POST /api/v1/data/sys_approval_delegation {delegator_id:'<A>', delegate_id:'<admin/B>', valid_from:<now-1h ISO>, valid_until:<now+24h ISO>, reason:'Annual leave'}",
+        "create an ACTIVE delegation AS A (self-service): POST /api/v1/data/sys_approval_delegation {delegate_id:'<B>', valid_from:<now-1h ISO>, valid_until:<now+24h ISO>, reason:'Annual leave'} — omit delegator_id and the guard stamps the caller; passing a delegator_id that is not the caller is refused (see the negative below)",
         "trigger the flow AGAIN; GET the new request /:id — pending_approvers must now be [B], not [A]; GET /:id/actions — one row action='ooo_substitute' whose comment names 'A → B'",
-        "read the delegate's inbox/notifications — a topic approval.ooo_substituted notification addressed to B, actionUrl /system/approvals (#1322 M4)",
-        "decide as B: POST /api/v1/approvals/requests/:id/approve; GET /:id/actions — the approve row's actor is B (the delegate acts under their OWN identity — nothing impersonated as A)",
-        "expire the window: PATCH the delegation valid_until to a past instant (or DELETE it); trigger the flow ONCE more; GET the newest request /:id — pending_approvers is [A] again and its /actions carries NO ooo_substitute row"
+        "read B's inbox/notifications — a topic approval.ooo_substituted notification addressed to B, actionUrl /system/approvals?request=<id> (#1322 M4)",
+        "decide as B, WITH B'S OWN BEARER TOKEN (not the admin's, and not an override): POST /api/v1/approvals/requests/:id/approve; GET /:id/actions — the approve row's actor is B (the delegate acts under their OWN identity — nothing impersonated as A)",
+        "expire the window: as A, PATCH the delegation valid_until to a past instant (or DELETE it); trigger the flow ONCE more; GET the newest request /:id — pending_approvers is [A] again and its /actions carries NO ooo_substitute row"
       ],
       "acceptance": [
         {
@@ -648,8 +680,8 @@
         {
           "clause": "the delegate decides under their OWN identity — the audit stays honest, nothing is impersonated as the delegator",
           "oracle": "api",
-          "verify": "B's /approve succeeds and finalizes the request; the recorded approve action's actor_id is B, never A (the delegate becomes a real pending approver, ApprovalService docstring)",
-          "evidence": "decision POST + the approve action row"
+          "verify": "B's /approve, sent with B'S OWN bearer token, succeeds and finalizes the request; the recorded approve action's actor_id is B, never A (the delegate becomes a real pending approver, ApprovalService docstring). Driving this decision as the admin — or through can_override — does not satisfy the clause: it is the separate identity that makes 'never laundered onto the delegator' falsifiable at all",
+          "evidence": "decision POST (B's token) + the approve action row"
         },
         {
           "clause": "the window is enforced at RESOLUTION time (isGrantActive, ADR-0091 D2), not by a job: after the window expires a fresh request routes back to A with no substitution",
@@ -661,17 +693,21 @@
       "negative": [
         "an approval action attributed to A while B was the one who clicked is a FAIL — the delegate acts under their own identity and the audit must not launder the decision back onto the out-of-office user",
         "a request that still reroutes to B after the window has expired (or before valid_from) is a FAIL — validity is a half-open [from, until) window enforced at resolution, never a background job that could lag",
-        "a delegation on a POSITION-routed slot that reroutes is out of contract — OOO applies only to individually-routed (user/field/manager) approvers; a per-group/position node must be unaffected"
+        "a delegation on a POSITION-routed slot that reroutes is out of contract — OOO applies only to individually-routed (user/field/manager) approvers; a per-group/position node must be unaffected",
+        "a POST of sys_approval_delegation naming a delegator_id other than the caller must be REFUSED (FORBIDDEN, statusCode 403 — bindDelegationWriteGuard, #4839): a forged delegation is how one member would reroute another's approvals to themselves, and there is no admin exemption. An accepted foreign-delegator write is a FAIL"
       ],
       "traps": ["wrong-persona", "seed-data-thin"],
       "source": [
         "packages/plugins/plugin-approvals/src/sys-approval-delegation.object.ts (#1322 M1 — self-service OOO rule, half-open UTC window, resolution-time enforcement)",
         "packages/plugins/plugin-approvals/src/approval-service.ts (applyOooDelegation + lookupActiveDelegation — individually-routed only; M4 ooo_substitute audit row + approval.ooo_substituted / approval.ooo_skipped notifications)",
         "@objectstack/core isGrantActive (ADR-0091 D2 half-open validity predicate)",
-        "examples/app-showcase/src/automation/flows/approver-bindings.flow.ts (the {type:'user'|'manager'|'field'} approver specimens the scratch flow is shaped after)"
+        "examples/app-showcase/src/automation/flows/approver-bindings.flow.ts (the {type:'user'|'manager'|'field'} approver specimens the scratch flow is shaped after)",
+        "packages/plugins/plugin-approvals/src/lifecycle-hooks.ts (bindDelegationWriteGuard — self-service-only, no admin exemption since #4839; the reason the old third-party persona shape was unconstructible)",
+        "examples/app-showcase/src/security/seed-approval-demo.ts (AUDITOR_DEMO_USER — the second real persona B is provisioned from)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-08", "change": "initial — pins the #1322 OOO delegation reroute: active A→B window reroutes an individually-routed slot to B (audited + notified, decided under B's own identity); expiry hands it back to A at resolution time", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-08", "change": "initial — pins the #1322 OOO delegation reroute: active A→B window reroutes an individually-routed slot to B (audited + notified, decided under B's own identity); expiry hands it back to A at resolution time", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-11", "change": "persona shape rewritten around what is constructible: the old fixture had the admin write a delegation on behalf of a non-admin delegator, which sys_approval_delegation's self-service-only guard refuses from everybody (#4839) and which the named delegator could not do either (no auth account). Now A = the signed-in admin delegating their OWN slot and B = a second REAL runtime account deciding with its own bearer token — the mirror image #7517 actually drove, and the stronger test. Added the foreign-delegator refusal as a negative and the better-auth issuer provisioning detail to knownGaps", "ref": "#7530" }
       ]
     },
     {

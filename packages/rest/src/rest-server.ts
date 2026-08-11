@@ -565,6 +565,58 @@ const UNCLASSIFIED_FAULT = (): { status: number; body: Record<string, unknown> }
 });
 
 /**
+ * [#7543] Does an unwrapped sandbox message name a JS RUNTIME fault rather than
+ * a business refusal the hook body deliberately reported?
+ *
+ * The two sandbox-unwrap branches below exist for ONE shape: a hook or action
+ * body that runs `throw new Error('删除被阻断：仍有未结清的发票')`, i.e. an
+ * author writing a business rule whose message IS the remedy. They answer 400
+ * with that message verbatim and deliberately no `code` (see each branch).
+ *
+ * A body that instead CRASHES — `ctx.input.title.trim()` where `title` is the
+ * number `12345` — also arrives as a thrown error, so it entered the same
+ * branch and its raw `TypeError: not a function` went out as the client-facing
+ * message of a 400 with no `code`. That is two contract breaks at once: an
+ * internal runtime fault echoed verbatim, and a body outside the ledgered
+ * envelope (a client keying on `code` gets nothing).
+ *
+ * The classification this restores is NOT new policy — it is the ruling
+ * {@link UNCLASSIFIED_FAULT} already records one door down, which names this
+ * exact case ("or a plain handler bug (`TypeError: x is not a function`) …
+ * server faults that a caller cannot fix and a caller SHOULD retry"). The
+ * sandbox unwraps simply sit ABOVE that branch and were intercepting the crash
+ * before it could reach the answer the file had already settled on. Same
+ * separation `quickjs-runner`'s own `sandboxFault` path draws (#4431/#3951):
+ * the sandbox REFUSING is a fault, and so is the body FAULTING — only the
+ * body's deliberate `throw` is an answer addressed to the caller.
+ *
+ * **Matched by constructor name, not by phrasing.** These eight are the ECMA-262
+ * native error constructors (plus SpiderMonkey's `InternalError`, which QuickJS
+ * also raises for stack exhaustion); the sandbox stringifies a thrown error as
+ * `<name>: <message>`, so the name is structural evidence rather than a keyword
+ * heuristic over prose. `Error:` is deliberately absent — a plain `Error` is the
+ * documented way to author a refusal, and `userFacingMessage` strips that prefix
+ * upstream anyway.
+ *
+ * **Deliberate, accepted cost:** a body that expresses a business rule as
+ * `throw new RangeError('数量超出范围')` now gets the sanitised 500 instead of
+ * its own words. That authoring style is not the documented one, and erring
+ * toward "a native error name means a crash" is the fail-safe direction — the
+ * opposite default is what shipped `TypeError: not a function` to a client.
+ *
+ * The words are not lost: 500 is outside `isExpectedDataStatus`, so
+ * `handleRouteError` prints `[REST] Unhandled error` with the whole error, and
+ * `sendError`'s `logWithheldServerFault` (#5437) covers the routes that bypass
+ * it — the same operator path {@link UNCLASSIFIED_FAULT} relies on.
+ */
+const NATIVE_ERROR_NAME_RE =
+    /^(?:Type|Reference|Range|Syntax|URI|Eval|Internal|Aggregate)Error(?::|$)/;
+
+function isScriptFaultMessage(message: string): boolean {
+    return NATIVE_ERROR_NAME_RE.test(message.trim());
+}
+
+/**
  * [#5462] Does a driver's missing-relation message name the very object this
  * request asked for?
  *
@@ -810,6 +862,11 @@ export function mapDataError(error: any, object?: string): { status: number; bod
     // bundled in deployed consoles) prepend any `code` to the human-readable
     // message, which would reintroduce the English noise this branch removes.
     if (typeof error?.innerMessage === 'string' && error.innerMessage) {
+        // [#7543] …but only when the body REPORTED something. A body that
+        // CRASHED arrives here too, and its `TypeError: not a function` is an
+        // internal fault, not a business message — see
+        // {@link isScriptFaultMessage}.
+        if (isScriptFaultMessage(error.innerMessage)) return UNCLASSIFIED_FAULT();
         return {
             status: 400,
             body: {
@@ -1040,14 +1097,21 @@ export function mapDataError(error: any, object?: string): { status: number; bod
     // Fallback for the same sandbox wrapper when the SandboxError instance
     // (and its `innerMessage`) was lost crossing a rethrow/serialization
     // boundary: strip the debug wrapper from the raw message. A leading
-    // default `Error: ` name is dropped; non-default names (`TypeError: …`)
-    // are kept — they signal a genuine script bug rather than a deliberately
-    // thrown business rule, which is useful context.
+    // default `Error: ` name is dropped.
+    //
+    // [#7543] A non-default name (`TypeError: …`) used to be KEPT here and
+    // shipped as the 400's message "as useful context". It is useful context —
+    // for an OPERATOR, in the log, which is where it still goes. On the wire it
+    // was a raw runtime fault presented to a client as their own mistake. This
+    // door and the `innerMessage` door above produce byte-identical bodies, so
+    // they must classify identically or the fix would depend on whether the
+    // SandboxError instance happened to survive the rethrow.
     const sandboxWrapper = /^(?:hook|action) '[^']*' threw:\s*(.+)$/s.exec(raw);
     if (sandboxWrapper) {
         const msg = sandboxWrapper[1].startsWith('Error: ')
             ? sandboxWrapper[1].slice('Error: '.length)
             : sandboxWrapper[1];
+        if (isScriptFaultMessage(msg)) return UNCLASSIFIED_FAULT();
         return {
             status: 400,
             body: {
@@ -4592,7 +4656,7 @@ export class RestServer {
                 path: `${metaPath}/:type`,
                 handler: async (req: any, res: any) => {
                     try {
-                        // [#6877] Four single-valued parameters on this list
+                        // [#6877] Five single-valued parameters on this list
                         // route, declared together at the top so the gate cannot
                         // be missed by whichever branch reads its parameter
                         // several hundred lines down: `?object=` (the view
@@ -4602,7 +4666,18 @@ export class RestServer {
                         // `?include=` (repeated, it stopped equalling
                         // `'content'`, so a caller who asked for doc bodies got
                         // the slimmed list back with a 200).
-                        if (refuseRepeatedQueryParams(req, res, ['package', 'preview', 'object', 'include'])) return;
+                        //
+                        // [#7566] `?id=` joined them when the app branch below
+                        // started honouring it. It is declared HERE, with the
+                        // rest, rather than beside the filter that reads it, for
+                        // the reason this block exists: a filter that arrives as
+                        // `['crm','account']` and is compared against one app
+                        // name matches nothing, and an empty app list is exactly
+                        // the plausible-looking wrong answer #7566 was filed
+                        // against. Refused, not resolved — see
+                        // `query-multiplicity.ts` for why picking one of two
+                        // conflicting intents is worse than a 400.
+                        if (refuseRepeatedQueryParams(req, res, ['package', 'preview', 'object', 'include', 'id'])) return;
                         const packageId = req.query?.package || undefined;
                         const environmentId = isScoped ? req.params?.environmentId : undefined;
                         const p = await this.resolveProtocol(environmentId, req);
@@ -4714,6 +4789,82 @@ export class RestServer {
                                         ? filtered
                                         : { ...(raw as any), items: filtered };
                                 }
+                            }
+                        }
+
+                        // [#7566] `GET /meta/app?id=<app>` — the app-list filter,
+                        // which until now was accepted and then dropped.
+                        //
+                        // Nothing on this route had ever read `id`: the block
+                        // above narrows the list by PERMISSION and the branches
+                        // around it by `?object=` / `?include=` / `?package=`, so
+                        // `?id=crm` and `?id=not_an_app` produced the same three
+                        // apps, byte for byte. A caller cannot tell a working
+                        // filter from a dropped one — a client that asks for one
+                        // app and renders `items[0]` gets a plausible, wrong
+                        // answer, and a bogus id can never come back empty.
+                        //
+                        // ⚠️ Runs AFTER the RBAC filter above, on `visible`
+                        // rather than on `items`. The two orders produce the same
+                        // SET (both are pure filters), but not the same
+                        // disclosure: narrowing first would hand `?id=<an
+                        // unpublished app>` a one-element list to gate, and any
+                        // future non-total gate — one that strips a field instead
+                        // of dropping the document — would then be answering
+                        // about an app the caller may not observe at all
+                        // (ADR-0045 §3). Permission decides what exists for this
+                        // caller; the filter narrows what they asked for within
+                        // it, never the reverse.
+                        //
+                        // The match is on `name`, the App document's identity —
+                        // `AppSchema.name`, "App unique machine name", the same
+                        // key `GET /meta/app/:name` addresses and the same key
+                        // the metadata store merges overlays on. `AppSchema`
+                        // declares no `id` of its own (`id` appears on nav items
+                        // and areas, never on the app), so there is no second
+                        // identity to disagree with.
+                        //
+                        // A filter that matches nothing answers `200` with an
+                        // EMPTY list, not a 404 — measured against this route's
+                        // siblings, not chosen: `?package=<no such package>` and
+                        // `/meta/view?object=<no such object>` both serve an
+                        // empty list here, and the only meta 404 is the
+                        // single-item address `GET /meta/:type/:name`. An empty
+                        // list is the honest answer to "which apps have this id",
+                        // and it is already observably different from the defect,
+                        // which answered with all of them.
+                        //
+                        // Empty and absent spellings still mean "no filter", the
+                        // same falsy gate `?package=` on this route has always
+                        // used. The repeated spelling was refused at the top of
+                        // the handler (#6877), so what arrives here is a string.
+                        //
+                        // Its own block rather than a line inside the branch
+                        // above, because the two answer different questions:
+                        // that branch is guarded on a resolved `ctx?.userId` and
+                        // decides what this caller may observe, while narrowing
+                        // to the app you named is not a privilege and must not
+                        // acquire that guard's conditions.
+                        const appIdFilter = RestServer.metaTypeSingular(req.params.type) === 'app'
+                            ? req.query?.id
+                            : undefined;
+                        if (typeof appIdFilter === 'string' && appIdFilter !== '') {
+                            const raw = visible as unknown;
+                            // Only the two shapes this route serves are narrowed
+                            // — a bare array or the `{ items: [] }` envelope.
+                            // Anything else is left alone rather than replaced
+                            // with an invented empty envelope: a filter must not
+                            // be the thing that changes the response's shape.
+                            const list: any[] | null = Array.isArray(raw)
+                                ? (raw as any[])
+                                : (raw && typeof raw === 'object' && Array.isArray((raw as any).items))
+                                    ? ((raw as any).items as any[])
+                                    : null;
+                            if (list) {
+                                const matched = list.filter(
+                                    (a: any) => a && typeof a === 'object' && a.name === appIdFilter,
+                                );
+                                visible = Array.isArray(raw) ? matched : { ...(raw as any), items: matched };
                             }
                         }
 
