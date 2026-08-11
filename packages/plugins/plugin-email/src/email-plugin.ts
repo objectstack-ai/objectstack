@@ -17,8 +17,8 @@ import {
   type EmailPersistence,
   type EmailQueueDelivery,
   type TemplateLoader,
-  type EmailTemplateRow,
 } from './email-service.js';
+import { createSysEmailTemplateLoader } from './template-loader.js';
 import {
   makeTransport,
   SmtpTransport,
@@ -544,19 +544,11 @@ export class EmailServicePlugin implements Plugin {
           },
         };
 
-      const templateLoader: TemplateLoader = {
-        async load(name, locale) {
-          const where: Record<string, unknown> = { name };
-          if (locale) where.locale = locale;
-          const rows = await (engine as any).find('sys_email_template', {
-            where,
-            limit: 1,
-            context: SYSTEM_CTX,
-          });
-          const row = Array.isArray(rows) ? rows[0] : (rows as any)?.data?.[0];
-          return (row as EmailTemplateRow) || null;
-        },
-      };
+      // Locale resolution lives in its own module (#7731) — the inline version
+      // here queried `{ name }` unordered with `limit: 1` whenever no locale
+      // was passed, which answered an i18n bundle with whatever row the driver
+      // yielded first instead of the documented en-US default.
+      const templateLoader: TemplateLoader = createSysEmailTemplateLoader(engine as any);
 
       // Mutate the existing service instance so consumers that already
       // captured a reference (e.g. AuthManager) see the upgrade.

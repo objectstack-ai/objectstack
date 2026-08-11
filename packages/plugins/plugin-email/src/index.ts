@@ -16,7 +16,18 @@
 
 export { EmailServicePlugin, resolveDurableQueue, resolveAttachmentStore } from './email-plugin.js';
 export type { EmailServicePluginOptions } from './email-plugin.js';
-export { LogTransport, normalizeMessage, formatAddress, EMAIL_SEND_QUEUE } from './email-service.js';
+export {
+  LogTransport,
+  normalizeMessage,
+  formatAddress,
+  EMAIL_SEND_QUEUE,
+  DEFAULT_TEMPLATE_LOCALE,
+} from './email-service.js';
+export {
+  createSysEmailTemplateLoader,
+  type TemplateLoaderEngine,
+  type CreateTemplateLoaderOptions,
+} from './template-loader.js';
 export type {
   EmailServiceOptions,
   TemplateLoader,
