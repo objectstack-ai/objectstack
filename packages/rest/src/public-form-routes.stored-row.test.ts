@@ -44,8 +44,24 @@
  * That is a deliberate scope line, not an oversight.
  */
 import { describe, expect, it, vi } from 'vitest';
+// The producer's OWN write-verb dispatch decisions (#4550 delete / #5480
+// update), so this fake cannot accept a call ObjectQL itself refuses — a double
+// LOOSER than the real engine is a defect generator, which is how #4434 shipped
+// a dead REST route with a green suite. That failure mode is this very card's
+// subject, so the gate is defending the thing being fixed here.
+//
+// From `@objectstack/metadata-core` and NOT `@objectstack/objectql`: objectql
+// depends in this direction, and that reverse edge is a cycle turbo refuses.
+import {
+    assertEngineDeleteDispatch,
+    assertEngineUpdateDispatch,
+} from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
-import { RestServer } from './rest-server';
+// `.js` extension required under `moduleResolution: nodenext`. Without it the
+// import does not resolve, `RestServer` becomes `any`, and every callback over
+// it reports TS7006 — one broken extension reading as two type errors in this
+// package's TEST_DEBT re-measure.
+import { RestServer } from './rest-server.js';
 
 // ─── the real save path ──────────────────────────────────────────────────────
 
@@ -64,8 +80,14 @@ function stubEngine() {
                 rows.push({ id: `r_${nextId}`, ...data });
                 return { id: `r_${nextId}` };
             },
-            async update() { return { id: null }; },
-            async delete() { return { deleted: 0 }; },
+            async update(_table: string, data: Record<string, any>, options: Record<string, any>) {
+                assertEngineUpdateDispatch(data, options);
+                return { id: null };
+            },
+            async delete(_table: string, options: Record<string, any>) {
+                assertEngineDeleteDispatch(options);
+                return { deleted: 0 };
+            },
             registry: { registerItem: () => {}, registerObject: () => {}, listItems: () => [] },
         } as any,
     };
