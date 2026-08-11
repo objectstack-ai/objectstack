@@ -1104,8 +1104,10 @@ open 计数),把分诊轮淹掉。
 - **Maintainer confirm (`needs-user-decision`)**: design cards, feature/
   contract-shape proposals, multi-week programs needing appetite and
   sequencing, anything touching stored-data migration shape or removing a
-  shipped capability. The label alone is the inbox entry; the deep three-axis
-  analysis is written when the card is actually taken up.
+  shipped capability. The label is the inbox entry, and the card carries the
+  **required four-lens block from filing time** — one line per lens, spec in
+  step 8(维护者 2026-08-11 接受,#7498;⛔ 不留待有人接手再补)。The deep
+  per-option analysis is still written when the card is taken up.
 - **Hold (`finding`)**: observation-class findings — dormant code,
   unexercised drift, cosmetic polish; real, but nothing a user hits today.
   The label keeps the record **inside the state machine** (a comment thread
@@ -1425,12 +1427,20 @@ v17 安全批的两半),#5492 自己又挡着 #5493。
 - **扇出是算出来的,不是声明的**:对开着的 `pm:blocked` issue 建一次 `Blocked-by: #N`
   的**反向索引** —— 解锁扫描本来就要做这一遍读,增量成本为零。
 - **选择优先级**:`priority:p0` 插队 > **扇出 ≥ 2 的上游单** > `target:` 板上项 >
-  普通队列项。
+  **被任一开卡 `Blocked-by:` 点名的上游单**(扇出 ≥ 1;维护者 2026-08-11 裁定,
+  记录在 #7498)> 普通队列项。点名关系在**选择时**从可 grep 的 `Blocked-by:` 行
+  现算 —— 即上面那份反向索引,解锁扫描每次关单本来就在读;推导所得,⛔ 不落任何
+  存储标签(下一条)。
 - ⛔ **优先是排序,不是豁免**:同文件串行、认领协议、批次独立性一条不减。
 - ⛔ **不要为此发明新标签**。`pm:blocking` 之类需要一个生产者,而没有读者的标签
   必然烂(「a label exists iff something reads it」)。扇出可以从协议已经在维护的
   数据里推出来,推它就只有一个真相源,也就不会漂移;顺带把激励摆正了 —— 解别人
-  锁的活先做,吞吐是复利。
+  锁的活先做,吞吐是复利。**已议已拒,留档给后来者(维护者 2026-08-11,#7498
+  第二裁)**:给被依赖卡打一揽子 `priority:*` / `pm:unblocks` 标签的方案被否 ——
+  「被依赖」是推导出来、会随上游关单衰变的属性(正是 `target:v17` 裁决拒绝过的
+  渐变烂形状);无读者的标签被状态模型禁止;发版关键链已由 `target:v17` 的
+  contract-first 传播规则覆盖。`pm:unblocks` 变体仅当被依赖卡群远超今日 ~6 张时
+  重议。
 
 **解锁那一刻,两类断言同时最不可信 —— 反向索引的同一遍读要连带查这两件事。**
 `Blocked-by:` 卡描述的是**立单时**的缺陷,在阻塞期间被冻住;而按构造,**关掉上游的
@@ -2066,7 +2076,7 @@ to `mode:subagent`).
 2. **派发词必须带自驱条款(回合终点约束)。** 云会话是对话形态 —— 回合结束
    就停下等输入,不像 subagent 一口气跑完;不写这条,dev 会在中期汇报或提问
    处停摆,而 PM 只能靠 poke 唤醒。条款原文形:⛔ 不为提问/中期汇报结束回合;
-   开放选择按裁决与三轴自裁记入终报 open_questions;合法回合终点只有
+   开放选择按裁决与三轴/四棱自裁记入终报 open_questions;合法回合终点只有
    (a) 推送完成 + 终报 JSON 作为最后一条消息,或 (b) 硬阻塞详报。
 3. **交付通道:自开 PR + 订阅唤醒是正道,降级通道只属于 trigger 流。**
    初版条款以为云会话一律没有 GitHub API 工具 —— 对 `create_session` 卡是
@@ -2766,16 +2776,10 @@ not wait for them. Named non-escalation classes (act immediately):
 2. **把裁决挂在一个具名、可证伪的前提上**,并在派发令里要求 dev **先验证前提再动手**,
 3. **显式禁令**:「前提不成立就报 fork,⛔ 不许硬做,也不许悄悄退回另一个选项。」
 
-实例:#5373 给了 A/B/C 三条路,正文写「这是本面数据表示的公开形状,请 PM/维护者裁」——
-按上面的门槛读,它像要升级的那一类。实际裁了 **B**,前提是「这个三元组现在是纯内部表示」。
-dev 用五项检查验证了它,其中一条是**反向证据**:`spec/src/api/analytics.test.ts` 与
-`runtime/src/http-dispatcher.test.ts` 各有一条测试断言 cube 风格的 `filters` 数组会被
-**拒收** —— 直接证明该三元组没有线上格式。最终 PR 未触碰一个 spec 字节。
-
-值得单列的原因:它让 PM 在信息不全时**做决定而不靠猜** —— 决定自带检验。既不是「自己拍
-了算」(那要赌前提),也不是「升级」(那要占用维护者时间去回答一个代码可以回答的问题)。
-第 3 条最容易被省掉,而省掉它就退化成最坏形态:前提不成立时 dev 自行改选,那正是**无人
-裁决**的状态,且没有任何读数会显示它发生过。
+值得单列的原因:它让 PM 在信息不全时**做决定而不靠猜** —— 决定自带检验;第 3 条
+最容易被省掉,省掉它就退化成最坏形态:前提不成立时 dev 自行改选,即**无人裁决**态。
+实例(#5373 裁 B、dev 以反向证据验证前提、最终 PR 零 spec 字节)全文见
+`references/incidents.md` §「第三档带前提裁决实例」。
 
 **两条元判据 —— 一整族近似单默认不进决策箱(维护者 2026-08-07 决策箱第 2 轮拍板)。**
 上面的「不升级四类」说的是**单张单**自带裁决;这两条说的是**一族形状相同的单**不必逐张
@@ -2785,20 +2789,18 @@ dev 用五项检查验证了它,其中一条是**反向证据**:`spec/src/api/an
 - **静默丢弃的声明,默认并入既有拒收集。** 适用判据:一个**已声明的键**在组件的某一支上
   被**静默忽略**,而更早的裁决已把同一个键在**兄弟支**上定成**响亮的编写期错误**。此时
   新支**默认并入既有拒收集** —— 复用母单的裁决直接入队派发,⛔ 不为它另开决策箱槽位;
-  只有两支之间存在**真实语义差异**时才重开。出处:#5714 把 `pool`-on-sqlite 裁成编写期
-  错误之后,#5931(`memory` 支)仍占了一个槽位,而它只是那条裁决的一词之差的外延;同族
-  重复整周都在发生。⚠️ **边界必须与本条同段读,否则这条捷径会被用过头**:继承的是**裁决
-  连同它的理由**,不是「拒收」两个字 —— 母单的理由**被实测为分支特有**时本条不适用。
-  #5739(维度侧)的理由是「拒收会连带拒掉今天已经能跑的查询」,该理由在**度量面上被
-  证伪**,所以 #5918 另裁一次是对的。判法固定:把母单的理由拿到新支上复核一遍,理由不
-  成立就回正常升级路径,别让「同一个键」这个表面相似度替你做判断。
+  只有两支之间存在**真实语义差异**时才重开。⚠️ **边界必须与本条同段读**:继承的是
+  **裁决连同它的理由**,不是「拒收」两个字 —— 母单的理由**被实测为分支特有**时本条
+  不适用;判法固定:把母单的理由拿到新支上复核一遍,理由不成立就回正常升级路径。
+  正反出处(#5714→#5931 同族重复;#5739 理由被证伪、#5918 另裁是对的)全文见
+  `references/incidents.md` §「决策继承正反例」。
 - **一个操作两个实现,默认治理侧胜出。** 适用判据:同一个操作存在两处实现,且两处行为
   不一致。**带治理的那一侧**(权限闸、用户同意、去重、审计留痕)是**默认幸存者**,另一侧
   **改绑到它并删除** —— 不是两侧对齐,也不是保留双写。反向裁只在**产品语义明确要求**时
-  成立,且必须把那条语义写进裁决正文,而不是默认成立后再补理由。出处:cloud#896
-  (hostname)即此形定案;cloud#1147 的三个待答问题(重装 = UPSERT、卸载 = 软停用、外部
-  词表 = manifest id)按本条全部落在治理侧;objectstack#4636 的 B 选项是同一形状。留着
-  未治理的那一侧等于给权限闸留一条旁路,而「声明即强制」要堵的正是那条旁路。
+  成立,且必须把那条语义写进裁决正文,而不是默认成立后再补理由。留着未治理的那一侧
+  等于给权限闸留一条旁路,而「声明即强制」要堵的正是那条旁路。定案与三例
+  (cloud#896、cloud#1147、objectstack#4636)见 `references/incidents.md`
+  §「治理侧胜出三例」。
 
 Whenever a dev returns `needs_decision` that passes the bar above, an issue
 is too vague to dispatch, or rework has failed twice:
@@ -2837,14 +2839,11 @@ is too vague to dispatch, or rework has failed twice:
      还是投机性的能力面?判据来源要求**实测**——谁在写这个键、谁在读这个
      能力、示例应用(showcase / CRM)与真实部署里的用法;「读起来像有用」
      不作数。**创业阶段聚焦原则**(维护者 2026-08-04 指示:「我们是一个
-     创业项目,应该先专注于核心能力」):能力扩张默认从紧——新能力 / 新
-     词表 / 新配置面需要真实业务拉动才立项;无拉动的声明面按
-     implementation-first 处置(退役,或停车、词表随未来实现回归)。已发布
-     但零消费的「能力」**不因沉没成本获得豁免**:#5021(主题排版 9 组)、
-     #4988(交互配置 22 站点)、#4834(plugin-runtime 五 schema)是先例。
-     这条轴会**改变结论**,不是陪衬,正反两例都有:#5021 因无业务拉动裁
-     退役,#4936 则因 showcase 自证了业务方向而裁「响亮拒绝而非退役」——
-     只看后两条轴,这两单会得出同一个答案,那是错的。
+     创业项目,应该先专注于核心能力」):能力扩张默认从紧,无拉动的声明面
+     按 implementation-first 处置(退役,或停车、词表随未来实现回归),
+     已发布但零消费的「能力」**不因沉没成本获得豁免**。这条轴会**改变
+     结论**,不是陪衬 —— 正反先例(#5021 / #4936)全文见
+     `references/incidents.md` §「业务需求轴改判正反两例」。
    - **项目长远合理性** — 哪个方案符合北极星方向与可持续架构(Prime
      Directive #5 no workarounds、#8 North Star、#12 contract-first),
      而不是眼下最省事;临时补丁式的选项要明说其长期代价。
@@ -2855,6 +2854,19 @@ is too vague to dispatch, or rework has failed twice:
      绝不让 AI 能声明一个运行时不兑现的能力。
    推荐意见必须基于这三条轴给出理由;三轴冲突时如实呈现权衡,交维护者
    拍板。
+   **四棱卡面块 —— 落卡与升级的必备件(维护者 2026-08-11 接受,#7498)。**
+   每张 `needs-user-decision` 卡必须带一个四行分析块,每棱一行,step-0
+   落卡与 step-8 升级同一要求,⛔ 不留待维护者到场再补:
+   ① **platform long-term coherence** —— 每个选项缩小还是扩大特例/契约增生;
+   ② **measured business pull** —— 今天谁撞上;零拉动选项默认 defer/remove;
+   ③ **AI-agent error-resistance** —— 哪个选项最难被 AI 作者/消费者误用
+   (闭合枚举优于自由结构、响亮拒绝优于静默容忍、不许伪造成功);
+   ④ **startup scope discipline** —— remove 优于 declare-and-maintain,
+   每个已声明的键都是永久义务。
+   四棱是上面三条评估轴的**卡面序列化**,同一个框架,⛔ 不是第二套:②↔轴一、
+   ①↔轴二、③↔轴三,④ 把轴一内嵌的创业阶段聚焦原则升为必答行。实证:
+   2026-08-11 四棱复审改判存量决策账本 ~30 张中的 4 张(#7485、#7243、
+   objectui#4165、objectui#3804)。
 4. If the session is interactive, additionally raise it via `AskUserQuestion`;
    the labeled issue remains the durable record either way. **Never** answer
    a product/architecture question on the maintainer's behalf.
@@ -2873,6 +2885,10 @@ area; that is the loop working, not failing):
 
 - **dispatchable inventory** — open `pm:queue` unassigned, and its trend;
 - **decision inbox** — `needs-user-decision` count awaiting the maintainer;
+  分诊座位的轮次简报还要**点名带开放下游依赖的决策卡**(从 step 3 那份
+  `Blocked-by:` 反向索引现算;首例 #7496 ← objectui#4190)—— 维护者的注意力
+  是稀缺资源,这个旗标就是决策侧的优先级标记(维护者 2026-08-11,#7498;
+  当日已以座位贴 #6015 常设指令先行生效,此处使其长期化);
 - **finding median age** — aging findings mean the 发现分诊轮 is overdue;
 - **release blockers** — open `target:<major>` count and trend,取 objectstack
   与 objectui **两条查询之和**(归零 = **两张板都空** = 可发版,单看 objectstack
