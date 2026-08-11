@@ -3252,6 +3252,61 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#7559] ADR-0005 / #3115 — resolve the org scope an item's lineage
+     * ACTUALLY lives in, for a caller whose active org may not be that scope.
+     *
+     * This is the read-side half of the rule {@link SysMetadataRepository.listDrafts}
+     * states on the write side: a non-null-org caller sees BOTH its own overlay
+     * rows and the env-wide (`organization_id IS NULL`) ones, "so consumers that
+     * then act on a draft MUST route the write to THIS scope, not the caller's
+     * active org, or they 404 on the env-wide row they can never match".
+     * {@link publishPackageDrafts} learned it — it promotes each draft through
+     * `getOverlayRepo(d.organizationId)` and captures `prevVersion` from the
+     * row in the draft's OWN scope. The two revert callers did not, and read
+     * back under `getOverlayRepo(request.organizationId)` instead.
+     *
+     * Measured on `origin/main` (#7559): an env-wide `view` published twice from
+     * a console request carrying an active org lands its `sys_metadata` and
+     * `sys_metadata_history` rows at `organization_id = NULL` while the commit
+     * records `prevVersion: 2`; `revertCommit` with that same active org then
+     * asks `sys_metadata_history` for `(organization_id='org_x', version=2)`,
+     * matches nothing, and answers `VERSION_NOT_FOUND: No history row at
+     * version 2` — over a row `GET …/history` lists. Same input with no active
+     * org succeeds, and an org-scoped item reverted by its own org succeeds:
+     * the disagreement is `organization_id` alone.
+     *
+     * NOT the `package_id` scoping #6215 fixed — that one is a step later, in
+     * {@link SysMetadataRepository.restoreVersion}'s `put()` parent lookup, and
+     * is intact and uninvolved here (the history table carries no `package_id`
+     * column at all).
+     *
+     * Precedence is the ADR-0005 overlay order — the caller's own org shadows
+     * env-wide — so an org that has its own overlay row reverts THAT row, and
+     * only an org with no overlay of its own falls through to the env-wide
+     * lineage it was already publishing into. When neither scope has a lineage
+     * the caller's own scope is returned unchanged, so a genuinely absent item
+     * still fails in the scope the caller asked about.
+     *
+     * Deliberately NO `catch`: a driver failure here must fail the revert, not
+     * resolve to a scope nobody verified (AGENTS.md read-seam invention rule).
+     */
+    private async resolveMetaItemOrgScope(
+        singularType: string,
+        name: string,
+        requestOrgId: string | null,
+    ): Promise<string | null> {
+        if (requestOrgId === null) return null;
+        const inOrg = await this.engine.findOne('sys_metadata_history', {
+            where: { organization_id: requestOrgId, type: singularType, name },
+        });
+        if (inOrg) return requestOrgId;
+        const inEnv = await this.engine.findOne('sys_metadata_history', {
+            where: { organization_id: null, type: singularType, name },
+        });
+        return inEnv ? null : requestOrgId;
+    }
+
+    /**
      * One-time guard for ensuring the overlay-uniqueness UNIQUE INDEXes exist
      * on `sys_metadata`. ADR-0005 (revised 2026-05) + ADR-0048: per-env DBs
      * replace the old "per-project" isolation, so `environment_id` is no longer
@@ -12025,7 +12080,6 @@ export class ObjectStackProtocolImplementation implements
             throw err;
         }
         const items = this.parseCommitItems(row.items);
-        const repo = this.getOverlayRepo(orgId);
         // #4556 — threaded into repo.put/delete → `recorded_by`; NULL when the
         // revert carries no human actor.
         const actor = request.actor ?? null;
@@ -12035,7 +12089,22 @@ export class ObjectStackProtocolImplementation implements
         // Reverse apply order so artifacts that depend on others (e.g. a view on
         // a new object) are removed before the thing they reference.
         for (const it of [...items].reverse()) {
-            const ref = { type: it.type, name: it.name, org: orgId ?? 'env' } as unknown as Parameters<typeof repo.get>[0];
+            // [#7559] PER ITEM, and from the ROW rather than from the request —
+            // the same shape {@link publishPackageDrafts} already uses when it
+            // promotes each draft in the draft's OWN scope and captures
+            // `prevVersion` there. A batch legitimately mixes an env-wide
+            // artifact with an org overlay, so a hoisted `orgId` has to pick one
+            // and be wrong about the other — which is exactly how a commit whose
+            // items are env-wide answered `VERSION_NOT_FOUND` for every item
+            // when reverted by a caller with an active org. See
+            // {@link resolveMetaItemOrgScope} for the measurement.
+            const itemOrgId = await this.resolveMetaItemOrgScope(
+                PLURAL_TO_SINGULAR[it.type] ?? it.type,
+                it.name,
+                orgId,
+            );
+            const repo = this.getOverlayRepo(itemOrgId);
+            const ref = { type: it.type, name: it.name, org: itemOrgId ?? 'env' } as unknown as Parameters<typeof repo.get>[0];
             try {
                 const current = await repo.get(ref, { state: 'active' });
                 if (!it.existedBefore) {
@@ -12133,7 +12202,11 @@ export class ObjectStackProtocolImplementation implements
                     // all three of its own call sites. The gate moved to the
                     // choke point every caller shares; the pin below this
                     // comment is unchanged and still covers the batch path.
-                    await this.restoreArtifactRegistryView(it.type, it.name, orgId);
+                    // [#7559] The ITEM's resolved scope, not the request's — the
+                    // #6602 gate this parameter carries asks "is this row
+                    // env-wide?", and an env-wide row reverted by an org-scoped
+                    // caller skipped the heal entirely while answering success.
+                    await this.restoreArtifactRegistryView(it.type, it.name, itemOrgId);
                     reverted.push({ type: it.type, name: it.name, action: 'removed' });
                 } else if (it.prevVersion !== null && it.prevVersion !== undefined) {
                     // Edited an existing artifact → restore the pre-commit body.
@@ -12179,7 +12252,7 @@ export class ObjectStackProtocolImplementation implements
                     // fallible query downstream of a write that already succeeded —
                     // the shape that ends in a `catch {}` swallowing a real outage
                     // (#4867). Per ITEM, because a batch mixes bindings.
-                    const restorePackageId = await this.resolveOverlayPackageBinding(it.type, it.name, orgId);
+                    const restorePackageId = await this.resolveOverlayPackageBinding(it.type, it.name, itemOrgId);
                     const restored = await repo.restoreVersion(ref, it.prevVersion, {
                         actor,
                         source: 'protocol.revertCommit',
@@ -12215,7 +12288,10 @@ export class ObjectStackProtocolImplementation implements
                         // is refused by {@link hydrateOverlayIntoRegistry} and never
                         // reaches the registry every org in this process shares —
                         // inherited, not re-decided here.
-                        organizationId: orgId,
+                        // [#7559] …and now that is what it actually IS. This line
+                        // said "the row's OWN scope" while passing the REQUEST's
+                        // org; the resolution above is what makes the comment true.
+                        organizationId: itemOrgId,
                     });
                     reverted.push({ type: it.type, name: it.name, action: 'restored' });
                 }
@@ -12356,7 +12432,18 @@ export class ObjectStackProtocolImplementation implements
         });
         if (_rollbackLockErr) throw _rollbackLockErr;
         await this.ensureOverlayIndex();
-        const orgId = request.organizationId ?? null;
+        // [#7559] The scope the item's lineage actually lives in, not the
+        // caller's active org. Measured on `origin/main`: an env-wide `view`
+        // rolled back by a caller with an active org threw `VERSION_NOT_FOUND`
+        // (404) at exactly the version its own history endpoint lists, while
+        // the identical call with no active org succeeded — the same
+        // disagreement {@link revertCommit} showed, one caller over. See
+        // {@link resolveMetaItemOrgScope}.
+        const orgId = await this.resolveMetaItemOrgScope(
+            singularType,
+            request.name,
+            request.organizationId ?? null,
+        );
         const repo = this.getOverlayRepo(orgId);
         const artifactBacked = this.isArtifactBacked(singularType, request.name);
         const intent: 'override-artifact' | 'runtime-only' = artifactBacked

@@ -1487,6 +1487,52 @@ describe('HttpDispatcher', () => {
             expect(mockMetadata.revertPackage).toHaveBeenCalledWith('com.acme.crm');
         });
 
+        // [#7559] ADR-0112 — a route that cannot serve the request answers a
+        // DECLARED 4xx, not a 500. The QA run saw a flat 500 from
+        // `POST /packages/:id/revert`.
+        //
+        // WHERE THAT 500 CAME FROM, measured rather than assumed: NOT from the
+        // route. `handlePackagesRequest` wraps its whole body in one
+        // `try { … } catch (e) { errorFromThrown(e, 500) }`, so the throw was
+        // always classified — `errorFromThrown` reads `status`/`code` off the
+        // error and falls back to 500 only when it finds neither, and
+        // `MetadataManager.revertPackage` threw bare `Error`s carrying neither.
+        // The whole defect is upstream, in the thrown shape; the first reading
+        // of this card (add a per-route `catch`) would have changed nothing,
+        // and reverse verification is what caught it — with the manager fixed
+        // and the route untouched, these cases already pass.
+        //
+        // So this pins the CHAIN, which is the part a manager-only unit test
+        // cannot see: a declared refusal survives the dispatcher as its own
+        // status AND code rather than being flattened. Both are asserted —
+        // status alone is green against a 404 with an empty envelope, code
+        // alone against a 500 that happens to carry one.
+        it.each([
+            ['RESOURCE_NOT_FOUND', 404, "No metadata items found for package 'com.acme.crm'"],
+            ['RESOURCE_CONFLICT', 409, "Package 'com.acme.crm' has never been published"],
+        ])('POST /packages/:id/revert answers %s / %i, not 500', async (code, status, message) => {
+            const refusal = new Error(message) as Error & { code?: string; status?: number };
+            refusal.code = code as string;
+            refusal.status = status as number;
+            const mockMetadata = { revertPackage: vi.fn().mockRejectedValue(refusal) };
+            const mockRegistry = {
+                getAllPackages: vi.fn().mockReturnValue([]),
+                enablePackage: vi.fn(),
+                disablePackage: vi.fn(),
+            };
+            (kernel as any).getService = vi.fn().mockImplementation((name: string) => {
+                if (name === 'metadata') return Promise.resolve(mockMetadata);
+                if (name === 'objectql') return Promise.resolve({ registry: mockRegistry });
+                return null;
+            });
+
+            const result = await dispatcher.handlePackages('/com.acme.crm/revert', 'POST', {}, {}, PKG_ADMIN());
+
+            expect(result.handled).toBe(true);
+            expect(result.response?.status).toBe(status);
+            expect(result.response?.body?.error?.code).toBe(code);
+        });
+
         it('should return 503 for publish when metadata service unavailable', async () => {
             const mockRegistry = {
                 getAllPackages: vi.fn().mockReturnValue([]),

@@ -1758,14 +1758,43 @@ export class MetadataManager implements IMetadataService {
       }
     }
 
+    // [#7559] ADR-0112 — both refusals below carry a DECLARED `code` + `status`.
+    // They are the ordinary answers to an ordinary request (revert a package id
+    // that this environment has nothing for, or has never published), and a
+    // route that cannot serve the request must answer a declared 4xx.
+    //
+    // This is the WHOLE cause of the 500 the QA run saw from
+    // `POST /packages/:id/revert`, measured rather than assumed: that route's
+    // handler already wraps its entire body in one
+    // `try { … } catch (e) { errorFromThrown(e, 500) }`, and `errorFromThrown`
+    // reads `status` / `code` off the error — falling back to 500 only when it
+    // finds neither, which is exactly what a bare `Error` offers. Nothing was
+    // wrong with the route; the thrown shape was. (The first reading of #7559
+    // was that the route needed its own `catch`; reverse verification showed
+    // that change was inert, so it is not in this fix.)
+    //
+    // Both codes come from the ADR-0112 STANDARD catalog rather than the
+    // extension ledger: the ledger's own rule is that a generic condition (not
+    // found / conflict) uses the standard catalog instead of registering a
+    // synonym.
     if (packageItems.length === 0) {
-      throw new Error(`No metadata items found for package '${packageId}'`);
+      const err = new Error(
+        `No metadata items found for package '${packageId}'`,
+      ) as Error & { code?: string; status?: number };
+      err.code = 'RESOURCE_NOT_FOUND';
+      err.status = 404;
+      throw err;
     }
 
     // Check that at least one item has a published snapshot
     const hasPublished = packageItems.some(item => item.data.publishedDefinition !== undefined);
     if (!hasPublished) {
-      throw new Error(`Package '${packageId}' has never been published`);
+      const err = new Error(
+        `Package '${packageId}' has never been published`,
+      ) as Error & { code?: string; status?: number };
+      err.code = 'RESOURCE_CONFLICT';
+      err.status = 409;
+      throw err;
     }
 
     for (const item of packageItems) {
