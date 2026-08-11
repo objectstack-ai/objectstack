@@ -21,7 +21,7 @@
 // (revert the fix → these tests go red) mean anything.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { assertEngineDeleteDispatch } from '@objectstack/objectql';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { AuthManager } from './auth-manager';
 
 const SECRET = 'test-secret-at-least-32-chars-long!!';
@@ -109,7 +109,12 @@ const createMemoryEngine = () => {
     async count(name: string, q: any = {}) {
       return rows(name).filter((r) => matches(r, q.where)).length;
     },
-    async update(name: string, patch: any) {
+    async update(name: string, patch: any, options?: any) {
+      // Pinned to ObjectQL.update's own dispatch predicate, for the same reason
+      // `delete` below is: this fake carries the ADOPTION write, so a fake looser
+      // than the real engine would let a by-id update that ObjectQL refuses look
+      // like a working adoption. `adopt-membership.ts` dispatches by scalar id.
+      assertEngineUpdateDispatch(patch, options);
       const row = rows(name).find((r) => r.id === patch.id);
       if (!row) return null;
       assertMemberUnique(name, { ...row, ...patch }, row.id);
