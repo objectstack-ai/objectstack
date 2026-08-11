@@ -1713,10 +1713,37 @@ export const RejectAiPendingActionResponseSchema = lazySchema(() => z.object({
 
 export const GetLocalesRequestSchema = lazySchema(() => z.object({}));
 
+/**
+ * `GET /api/v1/i18n/locales` — the available locale set.
+ *
+ * `label` is the locale CODE, echoed back. Every descriptor on every serving
+ * surface comes from one helper — `toLocaleDescriptors`
+ * (`system/i18n-resolver.ts`), shared by the runtime dispatcher's `/i18n`
+ * domain and `service-i18n`'s autonomous route — and it sets `label` to the
+ * code, because nothing in the tree carries a locale name to set it from.
+ *
+ * This describe used to read "Display name of the locale" while no producer
+ * ever wrote one: the declared-not-enforced shape ADR-0049 is about, one field
+ * wide. A client that trusted it rendered `th` where `ไทย` belongs — which is
+ * what objectui#4039 hit, and why the console routes around the field
+ * entirely: its language menu reads `code` alone off this body and names
+ * locales from its own built-in table plus `Intl.DisplayNames`
+ * (`apps/console/src/loadLocales.ts`). So #7634 made the declaration state the
+ * convention it actually ships, and `i18n-resolver.test.ts` pins both halves —
+ * the values the producer emits, and this text promising them.
+ *
+ * Naming a locale for a UI stays the client's job: `Intl.DisplayNames` is in
+ * every runtime that matters, and *which* language to name it in (its own, or
+ * the requester's `Accept-Language`) is a caller's choice the server cannot
+ * make for it. Serving real names would put CLDR data behind an endpoint for
+ * something every client can already compute, and no consumer asks for it.
+ */
 export const GetLocalesResponseSchema = lazySchema(() => z.object({
   locales: z.array(z.object({
     code: z.string().describe('BCP-47 locale code (e.g., en-US, zh-CN)'),
-    label: z.string().describe('Display name of the locale'),
+    label: z.string().describe(
+      'Locale label. Equals `code` on every serving surface today — the client names locales for its UI (#7634)',
+    ),
     isDefault: z.boolean().default(false).describe('Whether this is the default locale'),
   })).describe('Available locales'),
 }));
