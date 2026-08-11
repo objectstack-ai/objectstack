@@ -54,10 +54,12 @@
 // #3249).
 
 import { describe, it, expect } from 'vitest';
+import type { EngineQueryOptions } from '@objectstack/spec/data';
+import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { ObjectQL } from './engine.js';
 
 /** A normal, non-system caller with an active org — the #7738 repro identity. */
-const MEMBER = { userId: 'u_member', tenantId: 'org_msoroxgurm6423gz' } as any;
+const MEMBER: ExecutionContext = { userId: 'u_member', tenantId: 'org_msoroxgurm6423gz' };
 
 interface ObservedCall {
   object: string;
@@ -109,6 +111,9 @@ const EXTERNAL_OBJECT = {
   },
 } as any;
 
+/** The owning package every object below is registered under (`registerObject` arg 2). */
+const PACKAGE_ID = 'com.example.showcase';
+
 /** An ordinary managed object. Its wall must not move. */
 const MANAGED_OBJECT = {
   name: 'showcase_account',
@@ -127,8 +132,8 @@ async function makeEngine(opts: { posture?: string } = {}) {
   engine.registerDriver(makeDriver('memory', observed), true);
   engine.registerDriver(makeDriver('showcase_external', observed));
   await engine.init();
-  engine.registry.registerObject(EXTERNAL_OBJECT);
-  engine.registry.registerObject(MANAGED_OBJECT);
+  engine.registry.registerObject(EXTERNAL_OBJECT, PACKAGE_ID);
+  engine.registry.registerObject(MANAGED_OBJECT, PACKAGE_ID);
   if (opts.posture) engine.setTenancyPostureProvider(() => opts.posture);
   return { engine, observed };
 }
@@ -158,12 +163,12 @@ describe('#7738 premise — the platform injects its tenant column into a federa
  * to the remote.
  */
 const READ_DOORS = [
-  { name: 'find', driverMethod: 'find', run: (e: ObjectQL, o: string, ctx: any) => e.find(o, {}, { context: ctx } as any) },
+  { name: 'find', driverMethod: 'find', run: (e: ObjectQL, o: string, ctx: ExecutionContext) => e.find(o, {}, { context: ctx }) },
   // `findOne` refuses a predicate-free query (#4419), so it carries one. The
   // caller's own `where` is orthogonal to the wall this file measures.
-  { name: 'findOne', driverMethod: 'findOne', run: (e: ObjectQL, o: string, ctx: any) => e.findOne(o, { where: { region: 'EU' } }, { context: ctx } as any) },
-  { name: 'count', driverMethod: 'count', run: (e: ObjectQL, o: string, ctx: any) => e.count(o, {}, { context: ctx } as any) },
-  { name: 'aggregate', driverMethod: 'find', run: (e: ObjectQL, o: string, ctx: any) => e.aggregate(o, { aggregations: [{ function: 'count', field: 'id', alias: 'n' }] } as any, { context: ctx } as any) },
+  { name: 'findOne', driverMethod: 'findOne', run: (e: ObjectQL, o: string, ctx: ExecutionContext) => e.findOne(o, { where: { region: 'EU' } }, { context: ctx }) },
+  { name: 'count', driverMethod: 'count', run: (e: ObjectQL, o: string, ctx: ExecutionContext) => e.count(o, {}, { context: ctx }) },
+  { name: 'aggregate', driverMethod: 'find', run: (e: ObjectQL, o: string, ctx: ExecutionContext) => e.aggregate(o, { aggregations: [{ function: 'count', field: 'id', alias: 'n' }] }, { context: ctx }) },
 ] as const;
 
 describe('#7738 — a federated read carries NO org-scope predicate', () => {
@@ -189,7 +194,7 @@ describe('#7738 — a federated read carries NO org-scope predicate', () => {
     await engine.find(
       'showcase_ext_customer',
       {},
-      { context: { ...MEMBER, accessible_org_ids: ['org_a', 'org_b'] } } as any,
+      { context: { ...MEMBER, accessible_org_ids: ['org_a', 'org_b'] } },
     );
     const call = observed.find((c) => c.object === 'showcase_ext_customer' && c.method === 'find');
     expect(call!.options?.tenantId ?? undefined).toBeUndefined();
@@ -220,7 +225,7 @@ describe('#7738 non-regression — an ORDINARY object is still org-scoped', () =
     await engine.find(
       'showcase_account',
       {},
-      { context: { ...MEMBER, accessible_org_ids: ['org_a', 'org_b'] } } as any,
+      { context: { ...MEMBER, accessible_org_ids: ['org_a', 'org_b'] } },
     );
     const call = observed.find((c) => c.object === 'showcase_account' && c.method === 'find');
     expect(call!.options?.tenantId).toBe('org_msoroxgurm6423gz');
@@ -231,7 +236,7 @@ describe('#7738 non-regression — an ORDINARY object is still org-scoped', () =
     // The write half of the same wall (`injectTenantOnInsert`) reads the same
     // `DriverOptions.tenantId`. The read-path exemption must not reach it.
     const { engine, observed } = await makeEngine();
-    await engine.insert('showcase_account', { name: 'A-1' }, { context: MEMBER } as any);
+    await engine.insert('showcase_account', { name: 'A-1' }, { context: MEMBER });
     const call = observed.find((c) => c.object === 'showcase_account' && c.method === 'create');
     expect(call!.options?.tenantId).toBe('org_msoroxgurm6423gz');
   });
@@ -245,8 +250,8 @@ describe('#7738 non-regression — an ORDINARY object is still org-scoped', () =
       name: 'sys_license_probe',
       tenancy: { enabled: false },
       fields: { name: { type: 'text' } },
-    } as any);
-    await engine.find('sys_license_probe', {}, { context: MEMBER } as any);
+    } as any, PACKAGE_ID);
+    await engine.find('sys_license_probe', {}, { context: MEMBER });
     const call = observed.find((c) => c.object === 'sys_license_probe' && c.method === 'find');
     expect(call!.options?.tenantId ?? undefined).toBeUndefined();
   });
@@ -264,8 +269,18 @@ describe('#7738 — an explicitly-passed tenantId is still deliberate caller int
     // remote that the engine has no standing to contradict. This is also
     // exactly how the older `tenancy.enabled: false` exemption behaves, so the
     // two stay one shape rather than two.
+    //
+    // `tenantId` is a RUNTIME passthrough key, not a declared one:
+    // `EngineQueryOptionsSchema` does not carry it, so the input is
+    // deliberately off-contract at the type level and says so with
+    // `as unknown as` rather than erasing the bag to `any` — that names the
+    // contract being bypassed and leaves the rest of the call checked (#4918).
     const { engine, observed } = await makeEngine();
-    await engine.find('showcase_ext_customer', { tenantId: 'org_explicit' } as any, { context: MEMBER } as any);
+    await engine.find(
+      'showcase_ext_customer',
+      { tenantId: 'org_explicit' } as unknown as EngineQueryOptions,
+      { context: MEMBER },
+    );
     const call = observed.find((c) => c.object === 'showcase_ext_customer' && c.method === 'find');
     expect(call!.options?.tenantId ?? undefined).toBe('org_explicit');
   });
