@@ -241,7 +241,7 @@ const result = AIChatWindowProps.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **title** | `string \| Record<string, string>` | ✅ | Page title |
+| **title** | `string \| Record<string, string>` | optional | Page title. Omit to let the renderer derive the heading from the record (the default for record pages) — set explicitly on non-record pages (dashboard, landing) with no record to derive from. |
 | **subtitle** | `string \| Record<string, string>` | optional | Page subtitle |
 | **icon** | `never` | optional | [REMOVED] `page:header` property `icon` was removed in @objectstack/spec 17.0.0 (#6946, ADR-0087 D2) — no renderer ever read it: objectui resolves `icon` only per header action (`action.icon`), never off the header's own props bag, and the component registry never published it as an input, so an authored value was accepted and dropped. Delete the key. The header's own identity is drawn by the record chrome (`recordChrome`, on by default) and each action carries its own `icon`. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **breadcrumb** | `boolean` | ✅ | Show breadcrumb |

@@ -37,9 +37,16 @@
  * which we swallow.
  */
 
-const SYS = { isSystem: true } as const;
+/**
+ * The identities this bootstrap provisions now live in `demo-personas.ts`,
+ * because the SEED needs them too: the fields that feed the notify path
+ * (`showcase_task.assignee`, `showcase_project.owner`) must name identities
+ * this file really creates, or a reassignment writes an inbox row addressed to
+ * nobody (#7746). One registry, two consumers — so the two cannot drift apart.
+ */
+import { ADMIN_EMAIL, PHONE_DEMO_USER, AUDITOR_DEMO_USER } from './demo-personas.js';
 
-const ADMIN_EMAIL = 'admin@objectos.ai';
+const SYS = { isSystem: true } as const;
 
 /**
  * Positions the admin is granted so they resolve as an approver on the demos.
@@ -51,26 +58,6 @@ const ADMIN_EMAIL = 'admin@objectos.ai';
  * the position values authored in `automation/flows`.
  */
 const ADMIN_APPROVAL_POSITIONS = ['manager', 'finance', 'legal', 'exec'] as const;
-
-/** A phone-based demo persona (§6 "phone sign-in surfaces"). */
-const PHONE_DEMO_USER = {
-  id: 'usr_showcase_phone_demo',
-  name: 'Mei Phone (demo)',
-  email: 'phone.demo@example.com',
-  phone_number: '+8613800138000',
-} as const;
-
-/**
- * A second persona holding ONLY `auditor`, which is the position behind the
- * `finance` group of the per-group (会签) demo. It has to be a *different* user
- * from the admin: with one user in both groups a single decision would satisfy
- * both tallies at once, and "one approval per group" would never be observable.
- */
-const AUDITOR_DEMO_USER = {
-  id: 'usr_showcase_auditor_demo',
-  name: 'Ada Auditor (demo)',
-  email: 'auditor.demo@example.com',
-} as const;
 
 interface ApprovalDemoContext {
   ql: {

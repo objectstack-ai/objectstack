@@ -432,33 +432,41 @@ describe('RangeOperatorSchema', () => {
     });
 
     /**
-     * ## `NormalizedFilterSchema` cannot go red on this, and that is NOT this
-     * ruling's doing — measured, and pinned so the next reader does not mistake
-     * the green for enforcement.
+     * ## The whole-filter face now goes red on this too — #7711 closed the union's catch-all
      *
-     * A `$and` member is `z.union([z.record(z.string(), FieldOperatorsSchema),
-     * NormalizedFilterSchema])`. When the record branch rejects a field
-     * condition, the SECOND branch is a non-strict `z.object({ $and, $or, $not
-     * })` with every key optional — which accepts any object whatsoever. So the
-     * whole-filter face admits every field-condition shape, and the control
-     * below shows it does so for a comparand nobody has ever declared valid.
-     * The enforcement that this ruling moves lives one level down, in
-     * `FieldOperatorsSchema`, which the tests above assert directly. Filed
-     * separately as its own finding; asserting a red here would have been a
-     * fabricated pin.
+     * This case was written by #7596 as the OPPOSITE pin: both inputs parsed
+     * GREEN through `NormalizedFilterSchema`, and it said so on purpose, so the
+     * green would not be read as enforcement. The reason was structural — a
+     * `$and` member was `z.union([z.record(z.string(), FieldOperatorsSchema),
+     * NormalizedFilterSchema])` against a NON-strict group whose every key is
+     * optional, and "all three of my optional keys are absent" is true of any
+     * object at all. When the record branch rejected a field condition, the
+     * group branch accepted the very same value.
+     *
+     * #7711 made that branch `.strict()` and ruled `$`-prefixed keys out of the
+     * field-condition branch, so a member the record branch refuses now has
+     * nowhere to land. The case is kept in place, flipped rather than deleted:
+     * the two `FieldOperatorsSchema` assertions below are unchanged (that level
+     * always rejected both), and the pair above them is what moved — which is
+     * exactly the evidence that the two faces now agree.
      */
-    it('the whole-filter face is loose about field conditions — pre-existing, control included', () => {
+    it('the whole-filter face refuses these field conditions too — #7711 (was green pre-#7711)', () => {
       const withReference = NormalizedFilterSchema.safeParse({
         $and: [{ amount: { $between: [{ $field: 'budget' }, 100] } }],
       });
       const alreadyInvalidComparand = NormalizedFilterSchema.safeParse({
         $and: [{ close_date: { $null: 'not-a-boolean' } }],
       });
-      // Both green, for the same structural reason — the second has nothing to
-      // do with #7596 and was green before it.
-      expect(withReference.success).toBe(true);
-      expect(alreadyInvalidComparand.success).toBe(true);
-      // And the level that DOES judge comparands rejects both.
+      // Both red now, for the same structural reason they were both green
+      // before: one union branch used to accept whatever the other refused.
+      expect(withReference.success).toBe(false);
+      expect(alreadyInvalidComparand.success).toBe(false);
+      // Message-bearing, and it names the member position rather than the
+      // generic "Invalid input" zod gives an unexplained union.
+      expect(withReference.error?.issues[0]?.code).toBe('invalid_union');
+      expect(withReference.error?.issues[0]?.message).toContain('Not a valid $and member');
+      expect(alreadyInvalidComparand.error?.issues[0]?.message).toContain('#7711');
+      // And the level that DOES judge comparands rejects both — unchanged.
       expect(FieldOperatorsSchema.safeParse({ $between: [{ $field: 'budget' }, 100] }).success)
         .toBe(false);
       expect(FieldOperatorsSchema.safeParse({ $null: 'not-a-boolean' }).success).toBe(false);
@@ -1206,8 +1214,123 @@ describe('NormalizedFilterSchema', () => {
         deleted: { $eq: true }
       }
     };
-    
+
     expect(() => NormalizedFilterSchema.parse(filter)).not.toThrow();
+  });
+
+  // ==========================================================================
+  // #7711 — the union's group branch is no longer a catch-all.
+  //
+  // Every member below parsed GREEN before this change, measured on main @
+  // `8669e5d`: a member is `z.union([<field condition>, NormalizedFilterSchema])`
+  // and the second branch was a non-strict `z.object({ $and, $or, $not })` with
+  // every key optional, so it accepted any object whatsoever — including the
+  // ones the first branch had just refused. The whole-filter face therefore
+  // validated the logical SKELETON and nothing else, and no comparand shape it
+  // declared could make it fail.
+  //
+  // The green was also LOSSY, which is what these cases pin on the accept side
+  // as well: the catch-all returned `{}` for the member it admitted, so the
+  // parse output no longer carried the condition it was asked about.
+  // ==========================================================================
+  describe('#7711 — a member the field-condition branch refuses has nowhere to land', () => {
+    /** The card's clean control: `$null` has never been anything but a boolean. */
+    it('rejects a $and member whose operator map FieldOperatorsSchema refuses', () => {
+      const result = NormalizedFilterSchema.safeParse({
+        $and: [{ c: { $null: 'not-a-boolean' } }],
+      });
+      expect(result.success).toBe(false);
+      expect(result.error?.issues[0]?.code).toBe('invalid_union');
+      expect(result.error?.issues[0]?.path).toEqual(['$and', 0]);
+      expect(result.error?.issues[0]?.message).toContain('Not a valid $and member');
+      // Message-bearing per lane convention: it names what was rejected and
+      // what the two valid member shapes are.
+      expect(result.error?.issues[0]?.message).toContain('"c"');
+      expect(result.error?.issues[0]?.message).toContain('FieldOperatorsSchema');
+      expect(result.error?.issues[0]?.message).toContain('$and / $or / $not');
+      // The other face always said no — that disagreement is the defect.
+      expect(FieldOperatorsSchema.safeParse({ $null: 'not-a-boolean' }).success).toBe(false);
+    });
+
+    it('rejects the same shape in $or and in the $not operand', () => {
+      const inOr = NormalizedFilterSchema.safeParse({ $or: [{ c: { $between: [1, 2, 3] } }] });
+      const inNot = NormalizedFilterSchema.safeParse({ $not: { c: { $null: 'nope' } } });
+      expect(inOr.success).toBe(false);
+      expect(inNot.success).toBe(false);
+      expect(inOr.error?.issues[0]?.message).toContain('Not a valid $or member');
+      expect(inNot.error?.issues[0]?.message).toContain('Not a valid $not operand');
+      expect(FieldOperatorsSchema.safeParse({ $between: [1, 2, 3] }).success).toBe(false);
+    });
+
+    it('rejects a bad member nested inside a legitimate group', () => {
+      const result = NormalizedFilterSchema.safeParse({
+        $and: [{ $or: [{ c: { $null: 'nope' } }] }],
+      });
+      expect(result.success).toBe(false);
+    });
+
+    /**
+     * The `$not`-as-a-field-name leak, and why the field-condition branch has to
+     * refuse `$`-keys rather than the group branch merely being `.strict()`.
+     * `FieldOperatorsSchema` is not `.strict()`, so `{ c: … }` read as an
+     * OPERATOR MAP has every key stripped and returns `{}` — which made
+     * `{ $not: <anything> }` parse as a field condition named `$not`.
+     */
+    it('does not let a $not group be read as a field named "$not"', () => {
+      const result = NormalizedFilterSchema.safeParse({
+        $and: [{ $not: { c: { $null: 'nope' } } }],
+      });
+      expect(result.success).toBe(false);
+      expect(result.error?.issues[0]?.message).toContain('Not a valid $and member');
+    });
+
+    it('rejects members that are not field conditions at all', () => {
+      // Arbitrary keys — the shape the catch-all could never refuse.
+      expect(NormalizedFilterSchema.safeParse({ $and: [{ hello: 'world' }] }).success).toBe(false);
+      // Implicit equality is AUTHORING sugar; this AST is post-normalization,
+      // so `{ age: 18 }` is `{ age: { $eq: 18 } }` by the time it gets here.
+      expect(NormalizedFilterSchema.safeParse({ $and: [{ age: 18 }] }).success).toBe(false);
+      // A group key and a field key at one level. Pre-#7711 this parsed to
+      // `{ $and: [{ $or: [] }] }` — the field condition dropped on the floor —
+      // so no mixed member ever survived a round-trip to begin with.
+      expect(NormalizedFilterSchema.safeParse({ $and: [{ $or: [], c: { $eq: 1 } }] }).success)
+        .toBe(false);
+    });
+
+    it('rejects unknown keys at the top level', () => {
+      const bogusCombinator = NormalizedFilterSchema.safeParse({ $nand: [] });
+      expect(bogusCombinator.success).toBe(false);
+      expect(bogusCombinator.error?.issues[0]?.code).toBe('unrecognized_keys');
+      // A field condition is not a top-level normalized filter either; the AST's
+      // root is a group. Pre-#7711 this parsed to `{}`.
+      expect(NormalizedFilterSchema.safeParse({ c: { $null: 'nope' } }).success).toBe(false);
+    });
+
+    /**
+     * The empty combinators are boolean IDENTITIES under the #5322 ruling
+     * documented on `FilterConditionSchema`, not malformed members. `{}` reaches
+     * the field-condition branch as an empty record, which is what lets the
+     * group branch be `.strict()` without touching any of them.
+     */
+    it('leaves the #5322 empty-combinator identities accepted', () => {
+      for (const identity of [{}, { $and: [] }, { $or: [] }, { $or: [{}] }, { $not: {} }]) {
+        expect(NormalizedFilterSchema.safeParse(identity).success).toBe(true);
+      }
+    });
+
+    /**
+     * The accept side of the same fix. The catch-all did not merely admit these
+     * shapes' bad siblings — it ERASED the member it admitted, so a `$not`
+     * subtree came back as `{}`. Judged by the right branch, the parse output
+     * now carries what went in.
+     */
+    it('preserves a nested group in the parse output instead of erasing it', () => {
+      const input = { $and: [{ $not: { deleted: { $eq: true } } }] };
+      const result = NormalizedFilterSchema.safeParse(input);
+      expect(result.success).toBe(true);
+      // Pre-#7711 this was `{ $and: [{ $not: {} }] }` — green, and empty.
+      expect(result.data).toEqual(input);
+    });
   });
 });
 
