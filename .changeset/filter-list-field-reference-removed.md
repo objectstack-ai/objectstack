@@ -66,6 +66,8 @@ or a `$between` endpoint now fails validation instead of parsing. It never
 produced a correct answer on any backend, so no behaviour that worked stops
 working: rewrite it as a scalar comparison, per the message above.
 
+<!-- adr-0087: not-required (no-migration-prescription) No key is retired ($in/$nin/$between all remain with their arity intact), so there is no old shape to convert to a new one; no lossless transform exists, because a { $field } endpoint has no literal equivalent and rewriting it to two ordering bounds would invent behaviour rather than preserve it (the removed shape answered nothing in memory and 400 on both SQL faces, so any conversion producing rows changes every existing answer); and a whole-repo sweep measured zero templates, seeds, example apps or stored metadata carrying the shape. Nothing mechanical to prescribe and nothing to prescribe it to. -->
+
 **ADR-0087 conversion: not required**, and the reason is not blast radius alone.
 
 - **No key is retired.** `$in`, `$nin` and `$between` all remain, with their
