@@ -7442,6 +7442,74 @@ export class ObjectStackProtocolImplementation implements
         return { results, succeeded, failed };
     }
 
+    /**
+     * [#7539] Reconciles a STOPPED loop's outcome with the request it answers,
+     * shared by the ordinary (committed) response of all three bulk-write
+     * surfaces.
+     *
+     * Without `continueOnError` a failure ends the run — the declared default
+     * (`BatchOptionsSchema.continueOnError`: *"If true (and atomic=false),
+     * continue processing remaining records after errors"*), and ADR-0119 D4
+     * left it deliberately untouched ("non-atomic batches behave exactly as
+     * before"). Stopping was never the bug. Reporting the stop was: the three
+     * builders read `total` from the REQUEST (`records.length`) while `results`,
+     * `succeeded` and `failed` came from a loop that had stopped early, so an
+     * un-attempted record was invisible **twice over** — it produced no
+     * `results[]` entry and was counted in neither bucket. The only trace of it
+     * was `succeeded + failed != total`: an arithmetic mismatch no client
+     * should have to notice, let alone interpret.
+     *
+     * So every record gets a row saying what happened to it, and the counters
+     * add up. The classification is the one the ATOMIC arm has emitted since
+     * #4793 — `NOT_ATTEMPTED` as `errors[0].code`, registered in the ADR-0112
+     * ledger, the message carrying the human-readable cause and the causal row
+     * index — because "never ran" means the same thing to a client whether the
+     * batch stopped to roll back or stopped because it was told to. The message
+     * additionally names `continueOnError`, since on THIS arm the caller's next
+     * action is a flag rather than a fixed row.
+     *
+     * `failed` therefore counts every row that is not a success, exactly as
+     * {@link buildRolledBackBatchResponse} already does, keeping ONE reading of
+     * the envelope across both arms: `succeeded` and `failed` partition
+     * `results`, and `succeeded + failed === total === results.length`. A new
+     * `notAttempted` envelope field would have bought the same information at
+     * the price of two different meanings for `failed` on two arms of one
+     * endpoint — which is the kind of drift that separated the rows from the
+     * counters here in the first place.
+     *
+     * A no-op when the loop ran to completion: every all-success path, every
+     * `continueOnError` run, and the atomic arm's `onCommit`, which by
+     * construction only ever sees `failed === 0`.
+     */
+    private reconcileStoppedBatch(
+        records: ReadonlyArray<{ id?: string }>,
+        outcome: BatchDataLoopOutcome,
+    ): BatchDataLoopOutcome {
+        if (outcome.results.length >= records.length) return outcome;
+
+        const causeIndex = outcome.results.findIndex(r => !r.success);
+        const cause = causeIndex >= 0 ? outcome.results[causeIndex]?.errors?.[0]?.message : undefined;
+
+        const results = outcome.results.slice();
+        for (let index = results.length; index < records.length; index++) {
+            results.push({
+                // Echoed back so a caller can retry exactly the skipped rows.
+                id: records[index]?.id,
+                success: false,
+                index,
+                errors: [{
+                    code: 'NOT_ATTEMPTED' as const,
+                    message: `record ${causeIndex} failed — ${cause ?? 'unknown error'}; the batch stopped there. `
+                        + 'Set options.continueOnError to process the remaining records.',
+                }],
+            });
+        }
+
+        // Every padded row is a non-success, so this stays a PARTITION of
+        // `results` rather than a second tally free to drift from it.
+        return { results, succeeded: outcome.succeeded, failed: results.length - outcome.succeeded };
+    }
+
     /** The ordinary (committed) batch response — every row reports what it did. */
     private buildBatchDataResponse(
         operation: BatchUpdateRequest['operation'],
@@ -7449,7 +7517,7 @@ export class ObjectStackProtocolImplementation implements
         options: BatchUpdateRequest['options'],
         outcome: BatchDataLoopOutcome,
     ): BatchUpdateResponse {
-        const { results, succeeded, failed } = outcome;
+        const { results, succeeded, failed } = this.reconcileStoppedBatch(records, outcome); // [#7539]
         return {
             success: failed === 0,
             operation,
@@ -7729,7 +7797,11 @@ export class ObjectStackProtocolImplementation implements
         records: UpdateManyDataRequest['records'],
         outcome: BatchDataLoopOutcome,
     ): BatchUpdateResponse {
-        const { results, succeeded, failed } = outcome;
+        // [#7539] Same under-report as `batchData`, ten lines away — the card's
+        // "per-object bulk counters under-report whenever a row fails without
+        // `continueOnError`". Fixed through the one shared reconciler, because
+        // a second copy is how these three drifted apart before (#4620).
+        const { results, succeeded, failed } = this.reconcileStoppedBatch(records, outcome);
         return {
             success: failed === 0,
             operation: 'update',
@@ -7889,7 +7961,10 @@ export class ObjectStackProtocolImplementation implements
 
     /** The ordinary (committed) `deleteMany` response — every id reports what it did. */
     private buildDeleteManyResponse(ids: unknown[], outcome: BatchDataLoopOutcome): BatchUpdateResponse {
-        const { results, succeeded, failed } = outcome;
+        // [#7539] Same reconciliation as the other two faces; `ids` are mapped
+        // to the `{ id }` row shape the atomic arm already hands the rollback
+        // builder, so a skipped id comes back echoed and retryable.
+        const { results, succeeded, failed } = this.reconcileStoppedBatch(ids.map((id) => ({ id: String(id) })), outcome);
         return {
             success: failed === 0,
             operation: 'delete',

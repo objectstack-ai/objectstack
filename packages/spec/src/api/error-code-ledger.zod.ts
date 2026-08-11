@@ -264,7 +264,7 @@ export const ERROR_CODE_LEDGER = {
     'METADATA_CONFLICT',
     'NAMESPACE_PREFIX',           // name violates the package namespace-prefix rule
     'NO_DRAFT',
-    'NOT_ATTEMPTED',              // atomic data-batch row never ran — an earlier row's failure aborted the batch (#4793)
+    'NOT_ATTEMPTED',              // data-batch row never ran — an earlier row's failure stopped the batch, to roll back (atomic, #4793) or because continueOnError was unset (#7539)
     'NOT_CREATABLE',
     'NOT_OVERRIDABLE',
     'OBJECT_OVERLAY_PACKAGE_MISMATCH',  // [ADR-0029 D9.9] object overlay row bound to a package that does not own the object

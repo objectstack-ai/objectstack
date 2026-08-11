@@ -78,7 +78,11 @@ export const BatchOptionsSchema = lazySchema(() => z.object({
     + '`capabilities.transactionalBatch` on /discovery first. Takes precedence over continueOnError. '
     + 'Default false: sequential best-effort.'),
   returnRecords: z.boolean().optional().default(false).describe('If true, return full record data in response'),
-  continueOnError: z.boolean().optional().default(false).describe('If true (and atomic=false), continue processing remaining records after errors'),
+  continueOnError: z.boolean().optional().default(false).describe(
+    'If true (and atomic=false), continue processing remaining records after errors. '
+    + 'Default false: the first failure ENDS the run — records before it stay written (nothing is rolled '
+    + 'back on this arm), and every record after it is reported `errors[0].code` NOT_ATTEMPTED rather than '
+    + 'omitted, so `results` always covers all `total` records and `succeeded + failed === total` (#7539).'),
   // `validateOnly` promised a dry-run — "validate records without persisting" —
   // but no batch surface ever read it (`updateManyData` / `deleteManyData` /
   // `batchData` all persist regardless). A caller sending `validateOnly: true`
@@ -193,7 +197,10 @@ export const BatchOperationResultSchema = lazySchema(() => z.object({
   errors: z.array(ApiErrorSchema).optional().describe(
     'Array of errors if operation failed. Branch on `errors[0].code` — an atomic batch that rolled back '
     + 'marks rows that were written then undone with code ROLLED_BACK and rows never reached with '
-    + 'NOT_ATTEMPTED, while the causal row keeps its own error (#4793).'),
+    + 'NOT_ATTEMPTED, while the causal row keeps its own error (#4793). A NON-atomic batch that stopped '
+    + '(the `continueOnError: false` default) marks its un-attempted tail with the same NOT_ATTEMPTED code '
+    + '— rows before the failure stay written and keep reporting success, since nothing was rolled back '
+    + '(#7539).'),
   data: RecordDataSchema.optional().describe('Full record data (if returnRecords=true)'),
   index: z.number().optional().describe('Index of the record in the request array'),
   droppedFields: z.array(DroppedFieldsEventSchema).optional().describe(
