@@ -72,7 +72,7 @@ const result = PackageInstallationSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **organizationId** | `string` | ✅ | Organization ID |
 | **region** | `string` | optional | Deployment region preference |
-| **plan** | `Enum<'free' \| 'starter' \| 'pro' \| 'enterprise' \| 'custom'>` | ✅ | Tenant plan tier |
+| **plan** | `string` | ✅ | Tenant plan tier |
 | **storageLimitMb** | `integer` | optional | Storage limit in megabytes |
 | **metadata** | `Record<string, any>` | optional | Custom tenant metadata |
 
@@ -102,7 +102,7 @@ const result = PackageInstallationSchema.parse(data);
 | **organizationId** | `string` | ✅ | Current organization ID |
 | **organizationSlug** | `string` | optional | Organization slug |
 | **databaseUrl** | `string` | ✅ | Tenant database URL |
-| **plan** | `Enum<'free' \| 'starter' \| 'pro' \| 'enterprise' \| 'custom'>` | ✅ | Tenant plan tier |
+| **plan** | `string` | ✅ | Tenant plan tier |
 | **metadata** | `Record<string, any>` | optional | Custom tenant metadata |
 
 
@@ -121,7 +121,7 @@ const result = PackageInstallationSchema.parse(data);
 | **authToken** | `string` | ✅ | Encrypted tenant-specific auth token |
 | **status** | `Enum<'provisioning' \| 'active' \| 'suspended' \| 'archived' \| 'failed'>` | ✅ | Database status |
 | **region** | `string` | ✅ | Deployment region |
-| **plan** | `Enum<'free' \| 'starter' \| 'pro' \| 'enterprise' \| 'custom'>` | ✅ | Tenant plan tier |
+| **plan** | `string` | ✅ | Tenant plan tier |
 | **storageLimitMb** | `integer` | ✅ | Storage limit in megabytes |
 | **createdAt** | `string` | ✅ | Database creation timestamp |
 | **updatedAt** | `string` | ✅ | Last update timestamp |
@@ -157,16 +157,6 @@ const result = PackageInstallationSchema.parse(data);
 
 
 ---
-
-## TenantPlan
-
-### Allowed Values
-
-* `free`
-* `starter`
-* `pro`
-* `enterprise`
-* `custom`
 
 
 ---
