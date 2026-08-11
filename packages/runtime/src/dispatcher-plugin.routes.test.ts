@@ -59,6 +59,27 @@ describe('createDispatcherPlugin — HTTP route registration', () => {
     expect(routes).toContain('POST /api/v1/keys');
   });
 
+  // Regression (#7649): /mcp/skill was mounted for GET ONLY. The route serves
+  // GET and nothing else, so that looked right — but the dispatcher owns a 405
+  // branch for the other verbs ("Method not allowed — use GET", built through
+  // `buildApiError` since #3842), and an unmounted verb never reaches it: Hono
+  // sends it to `notFound`, where the adapter's `unmatchedResponse()` answers
+  // 405 with its own hand-rolled `{error, code, message, method, path, allowed}`
+  // body. Same status, different envelope, and the domain branch dead code.
+  // Mounting the verbs is what routes the mismatch to the branch that exists.
+  // The envelope itself is pinned end-to-end in
+  // `mcp-skill-method-not-allowed.hono.integration.test.ts` — a status-only
+  // assertion cannot see this defect.
+  it('mounts /mcp/skill for the same verbs as /mcp so a method mismatch reaches the dispatcher 405', async () => {
+    const { server, routes } = makeFakeServer();
+    const plugin = createDispatcherPlugin({ prefix: '/api/v1', securityHeaders: false });
+    await plugin.start?.(makeCtx(server));
+
+    expect(routes).toContain('GET /api/v1/mcp/skill');
+    expect(routes).toContain('POST /api/v1/mcp/skill');
+    expect(routes).toContain('DELETE /api/v1/mcp/skill');
+  });
+
   // Regression (framework #2217 seam #2): /ready shipped with a dispatch()
   // branch but NO server.<verb>() registration, so it 404'd over HTTP before
   // reaching the handler — the same class of bug as /mcp and /keys. /health and
