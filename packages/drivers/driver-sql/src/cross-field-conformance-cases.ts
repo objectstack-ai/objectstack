@@ -441,9 +441,20 @@ export const CROSS_FIELD_REFUSALS: readonly CrossFieldRefusalCase[] = [
   // `resolveValue` returns an array unchanged, so `$in`/`$nin` compare against
   // the raw reference OBJECT (never equal to a stored value) and `$between`
   // orders against it. There is therefore no correct in-memory semantics for
-  // SQL to be equivalent TO — refusing is the only answer that is not a guess,
-  // and the spec's declaration of `FieldReferenceSchema` in the `$between`
-  // endpoints is filed as its own finding rather than being resolved here.
+  // SQL to be equivalent TO — refusing is the only answer that is not a guess.
+  //
+  // #7596 closed the other half: the spec no longer DECLARES these positions.
+  // `FieldReferenceSchema` is out of both `$between` endpoint unions and
+  // `$in`/`$nin` rule the member out by name (maintainer ruling 2026-08-11,
+  // ADR-0049 declared = enforced), so an authored filter is now refused at the
+  // schema door with a message naming the scalar-comparison alternative.
+  //
+  // These four cases stay, verbatim and unweakened. The schema door is not on
+  // every path to a driver — `find()` takes a `where` object that no face
+  // re-validates against `FieldOperatorsSchema` (see #7596's report), and a
+  // permission filter assembled in code never passes it at all. A driver that
+  // trusted the declaration would answer these shapes with a silent zero-row
+  // result, which is exactly what #5041 found here in the first place.
   {
     name: 'a $field member of an $in list is refused',
     filter: { amount: { $in: [{ $field: 'budget' }, 1] } },

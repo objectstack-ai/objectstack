@@ -221,6 +221,41 @@ export class SharingRuleService implements ISharingRuleService {
     return rowFromRule(newRow);
   }
 
+  /**
+   * [#7676] Tenant scope for a sharing-rule ADMIN read: "this org ∪
+   * platform-global".
+   *
+   * `organization_id = null` on `sys_sharing_rule` means "owned by no
+   * organization" — a row written by the package/app seeder
+   * (`bootstrapDeclaredSharingRules`, which defines under `SYSTEM_CTX` and so
+   * stamps `organization_id: null`) before any org id exists. A strict
+   * `organization_id = <request org>` equality made every such row invisible to
+   * the admin API while enforcement kept reading them under `SYSTEM_CTX`: on a
+   * stock boot `GET /api/v1/sharing/rules` answered `{data: []}` over four
+   * active seeded rules, by-name GET and evaluate 404'd `RULE_NOT_FOUND`, and
+   * only the org-unfiltered by-id branch of {@link getRule} still worked. Rules
+   * that grant access but cannot be listed, inspected or deactivated are the
+   * worst half of both properties.
+   *
+   * Widening the READ leaks nothing across tenants: another org's row still
+   * fails the match, and a null-org row is platform-global by construction —
+   * every org already receives the grants it materialises. This is the same
+   * predicate, for the same reason, that `sys_business_unit` approver expansion
+   * settled on in #3807 and that `sys_metadata`'s pending-draft listing uses.
+   *
+   * ⚠️ It is deliberately NOT applied to {@link defineRule}'s existence lookup.
+   * That lookup decides UPSERT-or-insert, so widening it would let one org's
+   * admin overwrite the label, criteria, recipient and access level of a row
+   * every OTHER org reads — a cross-tenant WRITE, which is a different act from
+   * a cross-tenant read of a platform-global row. A same-named POST therefore
+   * still creates an org-stamped row of the tenant's own, and
+   * {@link findRuleRowByName} prefers it.
+   */
+  private adminOrgScope(where: Record<string, unknown>, orgId: string | null | undefined): Record<string, unknown> {
+    if (!orgId) return where;
+    return { ...where, $or: [{ organization_id: orgId }, { organization_id: null }] };
+  }
+
   async listRules(
     filter: { object?: string; activeOnly?: boolean },
     context: ExecutionContext,
@@ -231,9 +266,8 @@ export class SharingRuleService implements ISharingRuleService {
     if (filter.activeOnly) where.active = true;
     // `organizationId` is not on the envelope — see defineRule().
     const orgId = (context as any)?.organizationId ?? context?.tenantId;
-    if (orgId) where.organization_id = orgId;
     const rows = await this.engine.find('sys_sharing_rule', {
-      where,
+      where: this.adminOrgScope(where, orgId),
       orderBy: [{ field: 'name', order: 'asc' }],
       limit: 1000,
       context: SYSTEM_CTX,
@@ -252,13 +286,32 @@ export class SharingRuleService implements ISharingRuleService {
       context: SYSTEM_CTX,
     });
     if (Array.isArray(byId) && byId[0]) return rowFromRule(byId[0]);
-    const byName = await this.engine.find('sys_sharing_rule', {
-      where: orgId ? { name: idOrName, organization_id: orgId } : { name: idOrName },
-      limit: 1,
-      context: SYSTEM_CTX,
-    });
-    if (Array.isArray(byName) && byName[0]) return rowFromRule(byName[0]);
+    const byName = await this.findRuleRowByName(idOrName, orgId);
+    if (byName) return rowFromRule(byName);
     return null;
+  }
+
+  /**
+   * [#7676] Resolve a rule by NAME for an admin read: this org first, the
+   * platform-global (`organization_id IS NULL`) row second.
+   *
+   * Two sequenced lookups rather than one `$or` with `limit: 1`, because when
+   * BOTH rows exist the answer must be the caller's own: a single disjunctive
+   * query with a row cap picks whichever row the driver happened to reach
+   * first, so an org that had authored its own `share_red_projects_with_execs`
+   * could get the platform row back on one dialect and its own on another.
+   * Preference is a decision, so it is written as one.
+   *
+   * No `orgId` (SYSTEM_CTX — boot seeding, hooks, backfills) keeps the
+   * unfiltered by-name lookup it has always had.
+   */
+  private async findRuleRowByName(name: string, orgId: string | null | undefined): Promise<any | null> {
+    const first = async (where: Record<string, unknown>): Promise<any | null> => {
+      const rows = await this.engine.find('sys_sharing_rule', { where, limit: 1, context: SYSTEM_CTX });
+      return Array.isArray(rows) && rows[0] ? rows[0] : null;
+    };
+    if (!orgId) return first({ name });
+    return (await first({ name, organization_id: orgId })) ?? (await first({ name, organization_id: null }));
   }
 
   async deleteRule(idOrName: string, context: ExecutionContext): Promise<void> {

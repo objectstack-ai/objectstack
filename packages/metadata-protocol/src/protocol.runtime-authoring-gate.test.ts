@@ -497,27 +497,73 @@ describe('#6710 — gate activation is keyed on the declared authoring channel',
         expect(shouted[0]).toContain('approval-expression-invalid');
     });
 
-    it('does not disturb the OTHER gates that legitimately read environmentId', async () => {
-        // #6710 re-keys ONE activation. The #3050 authoring gate keeps its own
-        // `environmentId !== undefined` scope check, and it must stay keyed
-        // there — that gate really is about row scope. Declaring the
-        // package-author channel must not switch it on for a control-plane
-        // kernel, and must not switch it off for a tenant one.
+    // [#7674] REPLACED, not re-spelled. The case that stood here asserted the
+    // opposite invariant — "the #3050 authoring gate keeps its own
+    // `environmentId !== undefined` scope check, and it must stay keyed there"
+    // — and that sentence was the defect, written down as a pin. #6710 retired
+    // the proxy for the #4463 gate and left its sibling on it, so the ADR-0090
+    // D11 object posture gate (`owd_widening_forbidden` / `owd_external_wider`)
+    // ran on NO host-config deployment: `new ObjectQLPlugin()` leaves
+    // `environmentId` undefined and serves an end-user `PUT /api/v1/meta/*`.
+    // The old case could not see that, because it drove the control-plane row
+    // (undefined) only through the `package-author` channel — the one column
+    // where both keys agree.
+    //
+    // The four-cell matrix below is what makes the two keys distinguishable.
+    // Note the one cell whose verdict FLIPS: `('env_test', 'package-author')`
+    // was gated and is not any more. That is #6710's direction applied
+    // honestly rather than half-applied — a kernel that claims to BE the
+    // package author is treated as one by both doors, and package authoring is
+    // gated at build time instead (`validateSecurityPosture` is `CLI_ONLY` in
+    // `AUTHORING_RULES`, and R1's own message prescribes exactly that route:
+    // "widen it in the package source and publish through the package
+    // pipeline"). No assembly in this repo declares that channel today; only
+    // the genuine control plane may.
+    it.each([
+        { envId: undefined, channel: undefined, gated: true, why: 'THE DEFECT: the host-config assembler — `new ObjectQLPlugin()`, no environment id, undeclared channel ⇒ the fail-safe default' },
+        { envId: 'env_test', channel: undefined, gated: true, why: 'the ordinary tenant kernel, unchanged' },
+        { envId: undefined, channel: 'package-author' as const, gated: false, why: 'the genuine control-plane bootstrap kernel' },
+        { envId: 'env_test', channel: 'package-author' as const, gated: false, why: 'a declared package author that also carries a row scope — the cell that flips' },
+    ])('#3050 gate: environmentId=$envId channel=$channel ⇒ gated=$gated ($why)', async ({ envId, channel, gated }) => {
+        const seen: string[] = [];
+        const { protocol } = makeProtocolOn(envId, channel);
+        protocol.registerAuthoringGate('flow', (ctx: { type: string; name: string }) => {
+            seen.push(`${ctx.type}/${ctx.name}`);
+        });
+
+        // A body the #4463 rules ACCEPT, so what this matrix measures is the
+        // #3050 dispatch alone: a broken body would be refused upstream on the
+        // two `'environment'` rows and the gate would never be reached, which
+        // would make the two keys look identical again.
+        await protocol.saveMetaItem({ type: 'flow', name: 'leave_approval', item: validApprovalFlow() });
+
+        expect(seen).toEqual(gated ? ['flow/leave_approval'] : []);
+    });
+
+    it('the #3050 gate and the #4463 gate now read ONE key, and `environmentId` keeps only row scope', async () => {
+        // The positive statement of the matrix above: the two doors that ask
+        // "is this an author publishing?" can no longer disagree, which is the
+        // property whose absence let #7674 outlive #6710 by one gate.
         const seen: string[] = [];
         const gate = (ctx: { type: string; name: string }) => { seen.push(`${ctx.type}/${ctx.name}`); };
 
-        const cp = makeProtocolOn(undefined, 'package-author');
-        cp.protocol.registerAuthoringGate('flow', gate);
-        await cp.protocol.saveMetaItem({ type: 'flow', name: 'leave_approval', item: validApprovalFlow() });
-        expect(seen, 'the #3050 gate stays OFF where environmentId is undefined').toEqual([]);
+        // Host config: #4463 refuses the broken body (422) AND #3050 would have
+        // run — the write never reaches persistence either way, and both gates
+        // are live on the topology that had neither.
+        const host = makeProtocolOn(undefined);
+        host.protocol.registerAuthoringGate('flow', gate);
+        const err = await host.protocol
+            .saveMetaItem({ type: 'flow', name: 'leave_approval', item: brokenApprovalFlow() })
+            .catch((e: any) => e);
+        expect(err.status).toBe(422);
+        expect(err.code).toBe('INVALID_METADATA');
+        expect(flowRows(host.rows), 'refused before persistence').toEqual([]);
 
-        const tenant = makeProtocolOn('env_test', 'package-author');
-        tenant.protocol.registerAuthoringGate('flow', gate);
-        await tenant.protocol.saveMetaItem({ type: 'flow', name: 'leave_approval', item: brokenApprovalFlow() });
-        expect(
-            seen,
-            'the #3050 gate stays ON where environmentId is set, even though the '
-            + '#4463 gate was waived by the channel declaration — two gates, two keys',
-        ).toEqual(['flow/leave_approval']);
+        // …and the same host config, given a body the rules accept, runs the
+        // #3050 gate and stores the row. "Gated" must not mean "refuses
+        // everything".
+        await host.protocol.saveMetaItem({ type: 'flow', name: 'leave_approval', item: validApprovalFlow() });
+        expect(seen).toEqual(['flow/leave_approval']);
+        expect(flowRows(host.rows)).toHaveLength(1);
     });
 });
