@@ -58,6 +58,45 @@ export interface II18nService {
     setDefaultLocale?(locale: string): void;
 
     /**
+     * Narrow what `getLocales()` reports to the locales the APP declared
+     * (`i18n.supportedLocales` on the stack artifact).
+     *
+     * [#7679] `getLocales()` on its own can only report what is LOADED, and
+     * what is loaded is not the app's decision: every platform plugin pushes
+     * its own `en/zh-CN/ja-JP/es-ES` bundle at `kernel:ready`, so a showcase
+     * declaring `['en','zh-CN']` advertised four locales on
+     * `GET /i18n/locales`. A picker built from that route then offers locales
+     * in which only `sys_*` metadata is translated — a guaranteed
+     * mixed-language session for everything the app owns.
+     *
+     * The declared set is only visible at the runtime app-plugin layer, which
+     * is why it arrives here by injection rather than being read: this is the
+     * same threading `setDefaultLocale` already gets from
+     * `AppPlugin.loadTranslations`.
+     *
+     * Implementations MUST apply this as a filter at READ time, not as a prune
+     * of what is stored. Bundles keep arriving after the app plugin has run
+     * (the platform plugins' `kernel:ready` push), so a one-shot prune would
+     * narrow only whatever happened to be loaded first. Narrowing is about
+     * what is REPORTED; the extra bundles stay loaded and stay servable.
+     *
+     * Semantics implementations must honour, both covered by tests:
+     * - Absent, empty, or a non-array → NO narrowing. An app that declares
+     *   nothing keeps today's behaviour (report every loaded locale);
+     *   narrowing it to zero or to the default alone would silently regress
+     *   every app that never opted in.
+     * - A declared locale with no loaded bundle is still REPORTED
+     *   (declared-but-unserved), not silently intersected away. The
+     *   declaration is the app's statement of intent, and a client that is
+     *   handed a quietly shortened list has no way to see the gap. It also
+     *   keeps the answer independent of plugin load order, which an
+     *   intersection cannot be.
+     *
+     * @param locales - Declared BCP-47 locale codes, or `undefined` to clear
+     */
+    setSupportedLocales?(locales: readonly string[] | undefined): void;
+
+    /**
      * Field labels for one object in one locale, keyed by field name.
      *
      * [#4127] A provider-supplied SHORTCUT, not the source of truth. Both

@@ -379,9 +379,27 @@ function newId(): string {
 }
 
 /**
+ * The locale a template resolves to when the caller names none.
+ *
+ * Declared, not inferred: `SendTemplateInput.locale` (spec contract),
+ * `EmailTemplateDefinitionSchema.locale` and the `sys_email_template` object
+ * doc all say the service falls back to `en-US`. #7731 is what happened while
+ * one seam of the chain answered "whichever row the driver yields first"
+ * instead — a no-locale send rendered zh-CN out of an en-US + zh-CN bundle.
+ */
+export const DEFAULT_TEMPLATE_LOCALE = 'en-US';
+
+/**
  * Loader for sys_email_template rows. Injected by EmailServicePlugin
  * on `kernel:ready`. Returns the best-matching row for `(name, locale)`
  * or `null` when none exists / inactive.
+ *
+ * `locale` set → an EXACT match for that locale, or `null`; the en-US fallback
+ * lives in {@link EmailService.sendTemplate}'s ladder rather than in the
+ * loader, so a replacement loader cannot relocate the documented default.
+ * `locale` undefined → the loader's own deterministic best answer for the name
+ * (see `createSysEmailTemplateLoader`), which `sendTemplate` consults only as a
+ * last resort, when the bundle carries no en-US row at all.
  */
 export interface TemplateLoader {
   load(name: string, locale: string | undefined): Promise<EmailTemplateRow | null>;
@@ -1108,7 +1126,8 @@ export class EmailService implements IEmailService {
 
   /**
    * Render a named template from sys_email_template and deliver via
-   * send(). Looks up `(name, locale)` then falls back to `(name, 'en-US')`.
+   * send(). Looks up `(name, locale)` then falls back to
+   * `(name, {@link DEFAULT_TEMPLATE_LOCALE})`.
    */
   async sendTemplate(input: SendTemplateInput): Promise<SendEmailResult> {
     if (!input?.template) {
@@ -1118,13 +1137,27 @@ export class EmailService implements IEmailService {
     if (!loader) {
       throw new Error('TEMPLATE_NOT_FOUND: no templateLoader configured on EmailService');
     }
+    // Locale ladder (#7731). The old first rung passed `undefined` to the
+    // loader whenever the caller named no locale, which is not a request for
+    // en-US — it is a request for *any* row, and that is exactly what came
+    // back (zh-CN, out of an en-US + zh-CN bundle, on two fresh boots). No
+    // locale means the DOCUMENTED default, so ask for it by name.
     const preferred = input.locale && String(input.locale).trim();
-    let row = await loader.load(input.template, preferred || undefined);
-    if (!row && preferred && preferred !== 'en-US') {
-      row = await loader.load(input.template, 'en-US');
+    const wanted = preferred || DEFAULT_TEMPLATE_LOCALE;
+    let row = await loader.load(input.template, wanted);
+    if (!row && wanted !== DEFAULT_TEMPLATE_LOCALE) {
+      row = await loader.load(input.template, DEFAULT_TEMPLATE_LOCALE);
+    }
+    if (!row && !preferred) {
+      // A bundle with no en-US row at all. A caller that never named a locale
+      // did get *some* row here before (a zh-CN-only tenant is the realistic
+      // case) and hard-failing it now would swap one bug for an outage — so
+      // fall through to the loader's own no-locale answer, which is
+      // deterministic by contract rather than driver row order.
+      row = await loader.load(input.template, undefined);
     }
     if (!row) {
-      throw new Error(`TEMPLATE_NOT_FOUND: ${input.template} (locale=${preferred || 'en-US'})`);
+      throw new Error(`TEMPLATE_NOT_FOUND: ${input.template} (locale=${wanted})`);
     }
     if (row.active === false) {
       throw new Error(`TEMPLATE_INACTIVE: ${input.template}`);

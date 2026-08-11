@@ -3,6 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   EXTERNAL_ERROR_CODES,
+  EXTERNAL_ERROR_HTTP_STATUS,
   renderDiffMessage,
   ExternalSchemaMismatchError,
   ExternalWriteForbiddenError,
@@ -15,6 +16,63 @@ describe('External error codes (ADR-0015)', () => {
     expect(EXTERNAL_ERROR_CODES.schemaMismatch).toBe('EXTERNAL_SCHEMA_MISMATCH');
     expect(EXTERNAL_ERROR_CODES.writeForbidden).toBe('EXTERNAL_WRITE_FORBIDDEN');
     expect(EXTERNAL_ERROR_CODES.schemaModeViolation).toBe('EXTERNAL_SCHEMA_MODE_VIOLATION');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#7739] The status half of the contract.
+//
+// A code with no status is a code no HTTP exit can put on the wire: every exit
+// in this repo resolves `status` → `statusCode` and, finding neither, answers
+// the terminal sanitised 500 that has no `code` at all. So these assertions are
+// not decoration on the table — they are what makes the ledgered codes
+// REACHABLE by a client.
+// ---------------------------------------------------------------------------
+
+describe('[#7739] EXTERNAL_ERROR_HTTP_STATUS', () => {
+  it('covers every code in the family — no gate can leak as a bare 500', () => {
+    // The `satisfies Record<ExternalErrorCode, number>` makes a missing entry a
+    // compile error; this is the runtime twin, so a code added to the map but
+    // not to `EXTERNAL_ERROR_CODES` (or vice versa) is caught by `pnpm test`
+    // too. Sorted comparison: the map is keyed by VALUE, the codes object by
+    // name.
+    expect(Object.keys(EXTERNAL_ERROR_HTTP_STATUS).sort()).toEqual(
+      Object.values(EXTERNAL_ERROR_CODES).sort(),
+    );
+  });
+
+  it('reports the two POLICY refusals as 403, not as a client-syntax error', () => {
+    // 403 rather than 400/422: the request is well-formed and would succeed
+    // unchanged once the opt-in flags are set — nothing for the caller to fix
+    // in the payload. Rather than 409: no state the caller can reconcile and
+    // retry.
+    expect(EXTERNAL_ERROR_HTTP_STATUS.EXTERNAL_WRITE_FORBIDDEN).toBe(403);
+    expect(EXTERNAL_ERROR_HTTP_STATUS.EXTERNAL_SCHEMA_MODE_VIOLATION).toBe(403);
+  });
+
+  it('reports a schema divergence as 503 — a deployment state, not the caller', () => {
+    // Same reading `ERR_DATASOURCE_UNAVAILABLE` gets: nothing about the request
+    // is wrong, only an operator can reconcile metadata with the remote table,
+    // and it may clear. A 4xx here would tell the caller to fix something they
+    // do not control.
+    expect(EXTERNAL_ERROR_HTTP_STATUS.EXTERNAL_SCHEMA_MISMATCH).toBe(503);
+  });
+
+  it('every status is inside the 400-599 band each HTTP exit reads', () => {
+    // Outside that band `declaredHttpStatus` (rest) and its siblings treat the
+    // declaration as absent, which would silently restore the 500 leak.
+    for (const status of Object.values(EXTERNAL_ERROR_HTTP_STATUS)) {
+      expect(status).toBeGreaterThanOrEqual(400);
+      expect(status).toBeLessThan(600);
+    }
+  });
+
+  it('each error instance carries its family status as `status`', () => {
+    // `status` (not `statusCode`) because that is the spelling BOTH doors read:
+    // `resolveErrorResponse` is deliberately `status`-only (#7525).
+    expect(new ExternalWriteForbiddenError().status).toBe(403);
+    expect(new ExternalSchemaModeViolationError().status).toBe(403);
+    expect(new ExternalSchemaMismatchError('warehouse', 'wh_order', []).status).toBe(503);
   });
 });
 
