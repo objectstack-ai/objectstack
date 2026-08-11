@@ -12114,7 +12114,42 @@ export class ObjectStackProtocolImplementation implements
     }>> {
         try {
             const where: Record<string, unknown> = { package_id: request.packageId };
-            if (request.organizationId) where.organization_id = request.organizationId;
+            // [#7779] Surface BOTH org-scoped and env-wide (`organization_id IS
+            // NULL`) commit rows to an org-scoped caller — the same defect and
+            // the same remedy as the sibling {@link deletePackage} read one
+            // function above (#7705), and as {@link
+            // SysMetadataRepository.listDrafts} (#3115) in this package.
+            //
+            // Env-wide commit rows are not hypothetical: {@link
+            // recordPackageCommit} stores `organization_id: request.
+            // organizationId ?? null`, and the ONLY door into a publish — the
+            // dispatcher's `POST /packages/:id/publish-drafts` — forwards an
+            // org only when `resolveActiveOrganizationId` yields one. That
+            // resolver answers `undefined` for a session with no active
+            // organization AND for every failure on the auth seam (it is
+            // `catch`-wrapped). So a publish made before an org was selected —
+            // or during a transient auth blip — lands its commit env-wide,
+            // permanently, and the strict equality then hid it from every
+            // org-scoped read of that package's timeline.
+            //
+            // This is NOT merely an observability miss. {@link
+            // rollbackToPackageCommit} derives the set of commits to undo from
+            // this list, so an invisible commit was silently never reverted:
+            // measured pre-fix, a rollback past an env-wide commit answered
+            // `{success: true, revertedCommits: []}` while that commit's
+            // changes stayed live.
+            //
+            // The no-org branch is deliberately NOT narrowed to
+            // `organization_id IS NULL`, exactly as #7705 left its own: a
+            // caller with no active org reads the package's whole timeline,
+            // and restricting it to env-wide rows would hide every org-scoped
+            // commit instead — the same bug pointed the other way.
+            if (request.organizationId) {
+                where.$or = [
+                    { organization_id: request.organizationId },
+                    { organization_id: null },
+                ];
+            }
             const rows = (await this.engine.find('sys_metadata_commit', {
                 where,
                 ...(request.limit ? { limit: request.limit } : {}),
