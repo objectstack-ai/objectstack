@@ -26,6 +26,7 @@ import type {
     RealtimeEventHandler,
     RealtimeEventPayload,
 } from '@objectstack/spec/contracts';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { MemoryHttpOutbox, HttpDispatcher, type FetchImpl } from '@objectstack/service-messaging';
 import { AutoEnqueuer } from './auto-enqueuer.js';
 
@@ -51,14 +52,29 @@ class FakeRealtime implements IRealtimeService {
     }
 }
 
-/** Just enough engine to serve the `sys_webhook` subscription cache. */
+/**
+ * Just enough engine to serve the `sys_webhook` subscription cache.
+ *
+ * The write verbs open with the PRODUCER's own dispatch predicates
+ * (`assertEngineUpdateDispatch` / `assertEngineDeleteDispatch` from
+ * `@objectstack/metadata-core`) rather than accepting anything, because a
+ * double looser than the real engine turns a green suite into no suite at all
+ * on exactly the call shapes `ObjectQL` refuses (#4434) — the failure this
+ * file's own subject is a cousin of. `check:engine-double-contract` pins it.
+ */
 function makeEngine(rows: any[]): IDataEngine {
     return {
         async find() { return rows; },
         async findOne() { return rows[0] ?? null; },
         async insert(_n: string, d: any) { return d; },
-        async update() { return { affected: 0 }; },
-        async delete() { return { affected: 0 }; },
+        async update(_n: string, data: any, options?: any) {
+            assertEngineUpdateDispatch(data, options);
+            return { affected: 0 };
+        },
+        async delete(_n: string, options?: any) {
+            assertEngineDeleteDispatch(options);
+            return { affected: 0 };
+        },
         async count() { return rows.length; },
         async aggregate() { return []; },
     } as unknown as IDataEngine;

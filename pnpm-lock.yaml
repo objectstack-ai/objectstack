@@ -1772,6 +1772,9 @@ importers:
         specifier: workspace:*
         version: link:../../spec
     devDependencies:
+      '@objectstack/metadata-core':
+        specifier: workspace:*
+        version: link:../../metadata-core
       '@types/node':
         specifier: ^26.1.2
         version: 26.1.2
