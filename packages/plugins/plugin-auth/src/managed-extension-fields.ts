@@ -58,6 +58,15 @@ export const MANAGED_EXTENSION_FIELDS: Readonly<Record<string, ReadonlySet<strin
     'parent_organization_id',
     'sort_order',
   ]),
+  sys_api_key: new Set([
+    // #7727 — the revoke/restore lifecycle flag. `sys_api_key` is
+    // `managedBy: 'better-auth'` (which is what puts it under the D2 guard),
+    // but the table is hand-rolled ObjectStack: `packages/core/src/security/
+    // api-key.ts` mints and verifies it and better-auth's `apiKey` plugin is
+    // not loaded, so EVERY column here is an extension field. `revoked` is
+    // the only one a generic write surface may touch — see the editable map.
+    'revoked',
+  ]),
   sys_invitation: new Set([
     // ADR-0105 D8 — placement intent. NOT generically editable (absent from
     // the editable map below): these decide RBAC placement, so they are set
@@ -86,6 +95,17 @@ export const MANAGED_EXTENSION_EDITABLE_FIELDS: Readonly<Record<string, Readonly
     'parent_organization_id',
     'sort_order',
   ]),
+  // #7727 — revoking a leaked API key is a product operation, and before this
+  // entry no product route performed it: `sys_api_key`'s own row actions
+  // declare a PATCH, the object's method gate answered 405, and behind that
+  // the guard had no whitelist to consult, so the 403 was equally certain.
+  // Scoping the opening to this ONE column is the point — `key` stays
+  // unwritable (a rotated hash would silently mint a key nobody holds),
+  // `user_id` stays unwritable (re-owning a key is privilege transfer), and
+  // `expires_at` stays on the mint path. Enforcement of the flag already
+  // works: the verifier filters `revoked: false` and re-checks the row, so a
+  // flipped bit takes effect on the very next `x-api-key` call.
+  sys_api_key: new Set(['revoked']),
 };
 
 /** The extension fields declared on `object`, or an empty set. */

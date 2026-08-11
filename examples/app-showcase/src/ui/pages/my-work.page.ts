@@ -44,12 +44,19 @@ export const MyWorkPage = definePage({
         },
         { type: 'element:divider', properties: {} },
         // Personal work queue — records owned by the signed-in user.
+        // `filter`, SINGULAR: that is the key `object-grid` both publishes and
+        // reads (objectui `plugin-grid/src/index.tsx` declares
+        // `{ name: 'filter', … }`; `ObjectGrid.tsx` reads `schema.filter` and
+        // lowers it through `toFilterNode` to `$filter`). The plural spelling
+        // this line used to carry has ZERO read points in the renderer, so it
+        // was accepted and then dropped — the queue silently listed every row
+        // (objectstack#7750).
         {
           type: 'object-grid',
           properties: {
             objectName: 'showcase_task',
             columns: ['title', 'project', 'status', 'priority', 'due_date'],
-            filters: [['owner_id', '=', '{current_user_id}']],
+            filter: [['owner_id', '=', '{current_user_id}']],
           },
         },
       ],

@@ -1087,7 +1087,11 @@ function lookupObjectFieldAttr(
 export interface LocaleDescriptor {
   /** BCP-47 locale code. */
   code: string;
-  /** Display name. Falls back to the code — nothing in the tree carries one. */
+  /**
+   * Locale label — the CODE, echoed back, not a display name. Nothing in the
+   * tree carries a locale name to set it from, and naming a locale for a UI is
+   * the client's job (#7634); `GetLocalesResponseSchema` declares it that way.
+   */
   label: string;
   /** Whether this is the stack's default locale. */
   isDefault: boolean;
@@ -1108,7 +1112,15 @@ export interface LocaleDescriptor {
  *
  * `label` is the code: no locale display-name source exists in the tree, and
  * the schema requires the field. Inventing one here (an ICU display-name
- * table) would be a product decision, not an implementation detail.
+ * table) would be a product decision, not an implementation detail — and one
+ * nothing pulls for: the only real consumer of this body, the console's
+ * language menu, reads `code` alone and names locales itself (objectui#4039,
+ * `apps/console/src/loadLocales.ts`).
+ *
+ * `GetLocalesResponseSchema` used to describe the field as a display name
+ * anyway — declared ≠ enforced, one field wide. #7634 made the declaration say
+ * what this produces instead; the `label === code` convention is pinned in the
+ * tests below, on both sides.
  */
 export function toLocaleDescriptors(
   codes: readonly string[] | undefined,
