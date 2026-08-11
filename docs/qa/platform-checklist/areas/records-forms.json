@@ -1441,7 +1441,7 @@
       },
       "source": [
         "packages/spec/src/ui/action.zod.ts:565 (ACTION_LOCATIONS — the canonical 6-value enum, single source of truth; `global_nav` was the 7th until #6888 retired it — no product surface rendered it)",
-        "examples/app-showcase/src/ui/actions/index.ts (per-location fixture fleet + the record:quick_actions filter note + the two headless `locations: []` declarations). NOTE: RecalcSelectionAction's TSDoc there still narrates the pre-objectui#3142 'missing/empty locations → every location' rule — stale prose, filed separately; the declaration it explains (record_more) is correct either way",
+        "examples/app-showcase/src/ui/actions/index.ts (per-location fixture fleet + the record:quick_actions filter note + the two headless `locations: []` declarations)",
         "packages/lint/src/validate-action-locations.ts (the `action-no-placement` rule — this repo's codification of the current contract: an action with no `locations` renders nowhere and is therefore inert, while `locations: []` is the deliberate headless declaration and is NOT flagged)",
         "objectui: packages/types/src/ui-action.ts `actionRendersAt` (the single placement predicate — a membership test, so an undeclared or empty `locations` matches nothing) + packages/.../action-bar.tsx, its consumer since objectui#3142",
         "cross-ref: bulk dispatch-count semantics live in records-forms.list-view-capabilities (bulk-actions variant); param dialogs in records-forms.action-param-widgets"
