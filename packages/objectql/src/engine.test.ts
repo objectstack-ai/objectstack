@@ -1785,6 +1785,147 @@ describe('ObjectQL Engine', () => {
             expect(expandCall[1]).not.toHaveProperty('top');
         });
 
+        describe('[#7537] nested `fields` that omits the join key', () => {
+            // The nested projection is forwarded to the sub-read and the lookup
+            // map is keyed on `rec.id`, so a projection that did not name `id`
+            // produced rows with no `id`, an EMPTY map, and an injection that
+            // fell through `recordMap.get(...) ?? val` — writing the original FK
+            // back. `200`, and the field still holds a valid-looking id.
+            //
+            // That spelling is PRESCRIBED VERBATIM by two retirement messages
+            // (`FIELD_NODE_OBJECT_FORM_REMOVED`, `QUERY_JOINS_REMOVED`), so it
+            // is made to work rather than refused: `id` is forced into the
+            // sub-read and stripped from the emitted record when unrequested.
+            //
+            // These mocks return exactly the requested columns — what a
+            // projection-honouring driver does (`SqlDriver`:
+            // `builder.select(query.fields)`). The real-driver end of this pins
+            // at `runtime/src/expand-nested-fields-join-key.integration.test.ts`.
+            const registerTaskUser = () => {
+                vi.mocked(SchemaRegistry.getObject).mockImplementation((name) => {
+                    if (name === 'task') return {
+                        name: 'task',
+                        fields: {
+                            assignee: { type: 'lookup', reference: 'user' },
+                            title: { type: 'text' },
+                        },
+                    } as any;
+                    if (name === 'user') return {
+                        name: 'user',
+                        fields: { name: { type: 'text' }, email: { type: 'text' } },
+                    } as any;
+                    return undefined;
+                });
+            };
+
+            it('forces the join key into the sub-read projection and expands', async () => {
+                registerTaskUser();
+                vi.mocked(mockDriver.find)
+                    .mockResolvedValueOnce([
+                        { id: 't1', title: 'Task 1', assignee: 'u1' },
+                        { id: 't2', title: 'Task 2', assignee: 'u2' },
+                    ])
+                    // A projection-honouring driver, given `['name','id']`.
+                    .mockResolvedValueOnce([
+                        { name: 'Alice', id: 'u1' },
+                        { name: 'Bob', id: 'u2' },
+                    ]);
+
+                const result = await engine.find('task', {
+                    expand: { assignee: { object: 'user', fields: ['name'] } },
+                });
+
+                // The sub-read asked for the join key even though the caller did not.
+                const expandCall = vi.mocked(mockDriver.find).mock.calls[1];
+                expect((expandCall[1] as any).fields).toEqual(['name', 'id']);
+
+                // SUBSTANCE: the nested value is the related record projected to
+                // `name` — not the raw FK, and not carrying the machinery column.
+                expect(result[0].assignee).toEqual({ name: 'Alice' });
+                expect(result[1].assignee).toEqual({ name: 'Bob' });
+                expect(result[0].assignee).not.toHaveProperty('id');
+                expect(result[0].assignee).not.toHaveProperty('email');
+            });
+
+            it('leaves the projection untouched when the caller already asked for `id`', async () => {
+                registerTaskUser();
+                vi.mocked(mockDriver.find)
+                    .mockResolvedValueOnce([{ id: 't1', title: 'Task 1', assignee: 'u1' }])
+                    .mockResolvedValueOnce([{ id: 'u1', name: 'Alice' }]);
+
+                const result = await engine.find('task', {
+                    expand: { assignee: { object: 'user', fields: ['id', 'name'] } },
+                });
+
+                const expandCall = vi.mocked(mockDriver.find).mock.calls[1];
+                expect((expandCall[1] as any).fields).toEqual(['id', 'name']);
+                expect(result[0].assignee).toEqual({ id: 'u1', name: 'Alice' });
+            });
+
+            it('strips the join key from a MULTIPLE (array-valued) expansion too', async () => {
+                vi.mocked(SchemaRegistry.getObject).mockImplementation((name) => {
+                    if (name === 'task') return {
+                        name: 'task',
+                        fields: { watchers: { type: 'lookup', reference: 'user', multiple: true } },
+                    } as any;
+                    if (name === 'user') return { name: 'user', fields: { name: { type: 'text' } } } as any;
+                    return undefined;
+                });
+
+                vi.mocked(mockDriver.find)
+                    .mockResolvedValueOnce([{ id: 't1', watchers: ['u1', 'u2'] }])
+                    .mockResolvedValueOnce([
+                        { name: 'Alice', id: 'u1' },
+                        { name: 'Bob', id: 'u2' },
+                    ]);
+
+                const result = await engine.find('task', {
+                    expand: { watchers: { object: 'user', fields: ['name'] } },
+                });
+
+                expect(result[0].watchers).toEqual([{ name: 'Alice' }, { name: 'Bob' }]);
+            });
+
+            it('keeps the join key available to a RECURSIVE nested expand, then strips it', async () => {
+                // The recursion rebuilds the map keyed on `rec.id`, so the strip
+                // must happen after it — a strip done at sub-read time would
+                // break the inner level exactly the way the outer one was broken.
+                vi.mocked(SchemaRegistry.getObject).mockImplementation((name) => {
+                    if (name === 'task') return {
+                        name: 'task',
+                        fields: { assignee: { type: 'lookup', reference: 'user' } },
+                    } as any;
+                    if (name === 'user') return {
+                        name: 'user',
+                        fields: { name: { type: 'text' }, team: { type: 'lookup', reference: 'team' } },
+                    } as any;
+                    if (name === 'team') return { name: 'team', fields: { label: { type: 'text' } } } as any;
+                    return undefined;
+                });
+
+                vi.mocked(mockDriver.find)
+                    .mockResolvedValueOnce([{ id: 't1', assignee: 'u1' }])
+                    // user sub-read, projection ['name','team','id']
+                    .mockResolvedValueOnce([{ name: 'Alice', team: 'g1', id: 'u1' }])
+                    // team sub-read, projection ['label','id']
+                    .mockResolvedValueOnce([{ label: 'Core', id: 'g1' }]);
+
+                const result = await engine.find('task', {
+                    expand: {
+                        assignee: {
+                            object: 'user',
+                            fields: ['name', 'team'],
+                            expand: { team: { object: 'team', fields: ['label'] } },
+                        },
+                    },
+                });
+
+                expect(result[0].assignee).toEqual({ name: 'Alice', team: { label: 'Core' } });
+                expect(result[0].assignee).not.toHaveProperty('id');
+                expect(result[0].assignee.team).not.toHaveProperty('id');
+            });
+        });
+
         it('should expand master_detail fields', async () => {
             vi.mocked(SchemaRegistry.getObject).mockImplementation((name) => {
                 if (name === 'order_item') return {
