@@ -240,8 +240,10 @@ export type SkillTriggerCondition = z.input<typeof SkillTriggerConditionSchema>;
  * capability is gated at the AGENT level (`agent.access` / `agent.permissions`,
  * both enforced at the chat route), and each tool enforces its own authz when
  * invoked. A `permissions` key authored on a skill is unknown to this schema
- * and silently stripped at parse time — it grants and restricts nothing
- * (ADR-0049: no unenforced security-shaped fields). Do not author one.
+ * and is REJECTED outright at parse time, with a located message keyed on
+ * `permissions` (see `guidance.permissions` below) pointing the author at the
+ * agent-level gate instead (ADR-0049: no unenforced security-shaped fields).
+ * Do not author one.
  *
  * @example
  * ```ts
