@@ -892,6 +892,116 @@ function isCodeArtifactBody(item: unknown): boolean {
   return !isTenantAuthored(it);
 }
 
+// ============================================================================
+// i18n bundles — metadata types whose identity is (name, <discriminator>)
+// ============================================================================
+
+/**
+ * [#7730] Metadata types whose IDENTITY is a pair, not a name.
+ *
+ * `registerItem` keys every item by `name` (composite `<packageId>:<name>` when
+ * a package ships it). For most types that IS the identity. `email_template`
+ * declares otherwise: `EmailTemplateDefinitionSchema` states that "multiple
+ * rows with the same `name` but different `locale` form an i18n bundle; the
+ * service picks the best match for the recipient's locale, falling back to
+ * `en-US`" (`packages/spec/src/system/email-template.zod.ts`), and its header
+ * says a template "is resolved by `(name, locale)`". A name-only key cannot
+ * hold that: the second locale collided with the first and overwrote it
+ * through the `[Registry] Overwriting …` path, so a stack authoring en-US and
+ * zh-CN copies materialized ONE row into `sys_email_template` — declared, not
+ * enforced.
+ *
+ * The discriminator is declared PER TYPE rather than duck-typed off a `locale`
+ * property, because the key computation is generic to every registered
+ * metadata type: reading whatever `item.locale` happened to be set would
+ * silently re-key any other type that grows a locale-ish field, which is a much
+ * larger contract change than the one this table makes. `email_template` is the
+ * only type on `main` whose schema declares a top-level `locale` that is part
+ * of its identity (`grep '  locale:' packages/spec/src/**\/*.zod.ts` — the
+ * other hits are SCIM users, execution context, discovery and translation
+ * payloads, none of which is a registered metadata type).
+ *
+ * `canonical` is the bundle member a bare-name read resolves to. It mirrors the
+ * schema's own `locale` default and `sendTemplate`'s documented fallback, and
+ * `registry-i18n-bundle-key.test.ts` pins the two together so this copy cannot
+ * drift from the spec.
+ */
+export const ITEM_KEY_DISCRIMINATORS: Readonly<Record<string, { field: string; canonical: string }>> = {
+  email_template: { field: 'locale', canonical: 'en-US' },
+};
+
+/**
+ * Separator between an item's name and its bundle discriminator inside a
+ * storage key: `pkg:auth.welcome@zh-CN`.
+ *
+ * `@` is unambiguous here in both directions. A discriminated type's `name` can
+ * never contain it (`EmailTemplateDefinitionSchema` pins dotted snake_case),
+ * and a scoped package id that does (`@acme/crm:auth.welcome@zh-CN`) is still
+ * parsed correctly because {@link bundleBaseKey} only looks for the separator
+ * AFTER the last `:`.
+ */
+const BUNDLE_KEY_SEPARATOR = '@';
+
+/** The discriminator value an item declares, trimmed; `''` when it declares none. */
+function discriminatorValue(item: unknown, field: string): string {
+  const holder = item as Record<string, any> | null | undefined;
+  const raw = holder?.[field] ?? holder?.content?.[field];
+  return typeof raw === 'string' ? raw.trim() : '';
+}
+
+/** `pkg:auth.welcome` + `zh-CN` → `pkg:auth.welcome@zh-CN`. */
+function withDiscriminator(baseKey: string, value: string): string {
+  return `${baseKey}${BUNDLE_KEY_SEPARATOR}${value}`;
+}
+
+/**
+ * Strip a storage key's bundle suffix: `pkg:auth.welcome@zh-CN` →
+ * `pkg:auth.welcome`. Keys of undiscriminated types come back unchanged, and so
+ * does a scoped package id's own `@` (the search starts after the last `:`).
+ */
+function bundleBaseKey(key: string): string {
+  const at = key.indexOf(BUNDLE_KEY_SEPARATOR, key.lastIndexOf(':') + 1);
+  return at === -1 ? key : key.slice(0, at);
+}
+
+/** One member of an i18n bundle, as stored. */
+type BundleEntry = { key: string; item: any };
+
+/**
+ * The members of `(type, name)`'s bundle, grouped by the SAME precedence tiers
+ * {@link SchemaRegistry.getItem} applies to an undiscriminated type — so
+ * bundling changes WHICH ROWS EXIST, never which layer wins:
+ *
+ *   - `bare`  — bare-key group (`name@<loc>`): the ADR-0005 runtime/DB overlay
+ *   - `local` — the `currentPackageId` composite group (ADR-0048 prefer-local)
+ *   - `other` — every other composite group, in Map insertion order
+ *
+ * Within a tier the `canonical` member is first, then insertion order — so a
+ * bare-name read of a bundle is decided by the spec's declared fallback locale
+ * rather than by which locale the author happened to declare first.
+ */
+function collectBundle(
+  collection: Map<string, any>,
+  name: string,
+  disc: { field: string; canonical: string },
+  currentPackageId?: string,
+): { bare: BundleEntry[]; local: BundleEntry[]; other: BundleEntry[] } {
+  const bare: BundleEntry[] = [];
+  const local: BundleEntry[] = [];
+  const other: BundleEntry[] = [];
+  const localBase = currentPackageId ? `${currentPackageId}:${name}` : undefined;
+  for (const [key, item] of collection) {
+    const base = bundleBaseKey(key);
+    if (base === name) bare.push({ key, item });
+    else if (base.endsWith(`:${name}`)) (localBase && base === localBase ? local : other).push({ key, item });
+  }
+  const canonicalFirst = (entries: BundleEntry[]) => {
+    const idx = entries.findIndex((e) => discriminatorValue(e.item, disc.field) === disc.canonical);
+    return idx <= 0 ? entries : [entries[idx], ...entries.filter((_, i) => i !== idx)];
+  };
+  return { bare: canonicalFirst(bare), local: canonicalFirst(local), other: canonicalFirst(other) };
+}
+
 export class SchemaRegistry {
   // ==========================================
   // Logging control
@@ -1822,8 +1932,21 @@ export class SchemaRegistry {
       );
     }
 
+    // [#7730] The key carries the item's IDENTITY. For most types that is the
+    // name alone; a discriminated type (see ITEM_KEY_DISCRIMINATORS) is keyed
+    // by the pair its spec declares, so the members of an i18n bundle coexist
+    // instead of the second one overwriting the first. An item that declares no
+    // discriminator is keyed as the CANONICAL member — the same row the schema
+    // default produces — so `{ name }` and `{ name, locale: 'en-US' }` remain
+    // one item and a re-register stays idempotent.
+    const disc = ITEM_KEY_DISCRIMINATORS[type];
+    const withDisc = (base: string) =>
+      disc ? withDiscriminator(base, discriminatorValue(item, disc.field) || disc.canonical) : base;
+
+    // The bare (overlay) slot for this item — see the artifact-vs-DB warning below.
+    const bareKey = withDisc(baseName);
     // Use composite key (packageId:name) when packageId is provided
-    const storageKey = packageId ? `${packageId}:${baseName}` : baseName;
+    const storageKey = packageId ? withDisc(`${packageId}:${baseName}`) : bareKey;
 
     if (collection.has(storageKey)) {
       this.log(`[Registry] Overwriting ${type}: ${storageKey}`);
@@ -1862,8 +1985,12 @@ export class SchemaRegistry {
     // ADR-0005 behavior, but the silent shadowing can surprise package
     // authors and operators. Log a single warning so the situation is
     // discoverable in startup logs.
-    if (packageId && collection.has(baseName)) {
-      const dbOnly = collection.get(baseName) as any;
+    // [#7730] `bareKey` rather than `baseName`: for a discriminated type the
+    // overlay slot this warning asks about is the bundle member with the SAME
+    // discriminator (`auth.welcome@zh-CN`), not the name on its own — which is
+    // a key no discriminated item is ever stored under.
+    if (packageId && collection.has(bareKey)) {
+      const dbOnly = collection.get(bareKey) as any;
       if (dbOnly && !dbOnly._packageId) {
         console.warn(
           `[Registry] Collision: ${type}/${baseName} ships from package ` +
@@ -1907,6 +2034,32 @@ export class SchemaRegistry {
       console.warn(`[Registry] Attempted to unregister non-existent ${type}: ${name}`);
       return;
     }
+
+    // [#7730] A discriminated type's name addresses a BUNDLE, so a withdrawal
+    // by name takes the whole bundle — the same shape as the consumer side,
+    // where `deactivateDeclaredEmailTemplate` sweeps `sys_email_template` by
+    // name across locales because a delete event carries no locale. Removing
+    // one member would leave the rest registered and re-seedable, i.e. an
+    // undeletable template. The GROUP is chosen exactly as before (the bare
+    // group if it exists, else the first composite group in insertion order),
+    // so this does not start deleting a second package's same-named item.
+    const disc = ITEM_KEY_DISCRIMINATORS[type];
+    if (disc) {
+      const { bare, local, other } = collectBundle(collection, name, disc);
+      const group = bare.length > 0 ? bare : [...local, ...other];
+      if (group.length === 0) {
+        console.warn(`[Registry] Attempted to unregister non-existent ${type}: ${name}`);
+        return;
+      }
+      const groupBase = bundleBaseKey(group[0].key);
+      for (const { key } of group) {
+        if (bundleBaseKey(key) !== groupBase) continue;
+        collection.delete(key);
+        this.log(`[Registry] Unregistered ${type}: ${key}`);
+      }
+      return;
+    }
+
     if (collection.has(name)) {
       collection.delete(name);
       this.log(`[Registry] Unregistered ${type}: ${name}`);
@@ -1948,6 +2101,20 @@ export class SchemaRegistry {
 
     const collection = this.metadata.get(type);
     if (!collection) return undefined;
+
+    // [#7730] A discriminated type's name addresses a BUNDLE, so every tier
+    // below is a group rather than a single key. The tiers themselves are
+    // unchanged (overlay → prefer-local → first composite); within a tier the
+    // canonical member wins, which is the locale `sendTemplate` falls back to.
+    // A caller that needs a specific member reads the bundle from
+    // `listItems(type)` and picks on the discriminator — this API takes a name
+    // and can only answer about the name.
+    const disc = ITEM_KEY_DISCRIMINATORS[type];
+    if (disc) {
+      const { bare, local, other } = collectBundle(collection, name, disc, currentPackageId);
+      return ([...bare, ...local, ...other][0]?.item as T) ?? undefined;
+    }
+
     // A bare-key entry (a runtime/DB overlay rehydrated by restoreMetadataFromDb)
     // intentionally shadows the packaged composite item — ADR-0005 overlay
     // precedence (a customization wins over its package default). This is
@@ -2009,6 +2176,24 @@ export class SchemaRegistry {
     }
     const collection = this.metadata.get(type);
     if (!collection) return undefined;
+
+    // [#7730] Bundle-aware form of the three tiers below, for a type whose
+    // identity is (name, discriminator). Same order — prefer-local composite,
+    // then any composite, then the bare-key fallback with its package check —
+    // over bundle GROUPS instead of single keys, with the canonical member
+    // first inside each group.
+    const disc = ITEM_KEY_DISCRIMINATORS[type];
+    if (disc) {
+      const { bare, local, other } = collectBundle(collection, name, disc, currentPackageId);
+      for (const { item } of [...local, ...other]) {
+        if (isCodeArtifactBody(item)) return item as T;
+      }
+      for (const { item } of bare) {
+        if (isCodeArtifactBody(item) && (!currentPackageId || item._packageId === currentPackageId)) return item as T;
+      }
+      return undefined;
+    }
+
     // ADR-0048 prefer-local: when the caller resolves within a package, the
     // artifact owned by that package wins over a first-match composite scan,
     // so two installed packages shipping the same name don't resolve by Map
@@ -2059,7 +2244,28 @@ export class SchemaRegistry {
    */
   removeRuntimeShadow(type: string, name: string): boolean {
     const collection = this.metadata.get(type);
-    if (!collection || !collection.has(name)) return false;
+    if (!collection) return false;
+
+    // [#7730] For a discriminated type the shadow sits at `name@<discriminator>`
+    // — nothing is ever stored under the plain name — so the plain-key test
+    // would silently answer "no shadow" for every email template. The overlay
+    // layer is keyed by name alone (`sys_metadata` is unique on type+name+org),
+    // so the shadow group is swept as one, exactly as the delete event
+    // addresses it.
+    const disc = ITEM_KEY_DISCRIMINATORS[type];
+    if (disc) {
+      const { bare, local, other } = collectBundle(collection, name, disc);
+      if (bare.length === 0) return false;
+      const artifact = [...local, ...other].find(({ item }) => item?._packageId && item._packageId !== 'sys_metadata');
+      if (!artifact) return false;
+      for (const { key } of bare) {
+        collection.delete(key);
+        this.log(`[Registry] Removed runtime shadow ${type}: ${key} (artifact ${artifact.item._packageId} restored)`);
+      }
+      return true;
+    }
+
+    if (!collection.has(name)) return false;
     for (const [key, item] of collection) {
       if (key !== name && key.endsWith(`:${name}`)) {
         const it = item as any;
@@ -2112,7 +2318,27 @@ export class SchemaRegistry {
    */
   removeOverlayEntry(type: string, name: string): boolean {
     const collection = this.metadata.get(type);
-    if (!collection || !collection.has(name)) return false;
+    if (!collection) return false;
+
+    // [#7730] Same relocation as {@link removeRuntimeShadow}: a discriminated
+    // type's overlay slot is `name@<discriminator>`, so the plain-key read
+    // finds nothing and the deleted overlay would keep being served for the
+    // life of the process — the very residue #5079 removed. The refusal is
+    // still per entry: a bundle member that IS a packaged artifact stays.
+    const disc = ITEM_KEY_DISCRIMINATORS[type];
+    if (disc) {
+      const { bare } = collectBundle(collection, name, disc);
+      let removed = false;
+      for (const { key, item } of bare) {
+        if (isCodeArtifactBody(item)) continue;
+        collection.delete(key);
+        this.log(`[Registry] Removed overlay entry ${type}: ${key} (no layer serves it any more)`);
+        removed = true;
+      }
+      return removed;
+    }
+
+    if (!collection.has(name)) return false;
     const plain = collection.get(name) as any;
     if (plain && plain._packageId && plain._packageId !== 'sys_metadata' && !isTenantAuthored(plain)) {
       return false;
