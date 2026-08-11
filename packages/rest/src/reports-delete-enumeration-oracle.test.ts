@@ -33,7 +33,7 @@
 // equality tests RED and leaves the owner's-own-delete test GREEN.
 
 import { describe, it, expect, vi } from 'vitest';
-import { RestServer } from './rest-server';
+import { RestServer } from './rest-server.js';
 
 // ---------------------------------------------------------------------------
 // Harness
