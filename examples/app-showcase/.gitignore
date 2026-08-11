@@ -8,5 +8,8 @@ playwright-report/
 # through pnpm's nesting (a script in /tmp cannot). Runners delete these when
 # they finish, but a run in flight legitimately has them on disk — ignoring the
 # pattern keeps `git status` honest for the other agents sharing this checkout.
-.qa-*.cjs
-.qa-*.mjs
+#
+# Match the whole `.qa-*` namespace, not just two script extensions: a runner
+# that needs a spec + a playwright config writes a DIRECTORY (`.qa-st1/`), and a
+# file-only pattern leaves it showing up as untracked in everyone else's tree.
+.qa-*
