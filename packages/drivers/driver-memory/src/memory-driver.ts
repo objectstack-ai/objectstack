@@ -6,6 +6,10 @@ import type { DriverOptions } from '@objectstack/spec/data';
 // strings, so the fold has to live in the pattern source. See its docblock for
 // why an `i` flag is the wrong tool.
 import { canonicalAstOperator, asciiCaseInsensitiveRegexSource } from '@objectstack/spec/data';
+// [#7536] `$like`/`$ilike`'s pattern language, from the spec's one definition —
+// the same translation `formula` evaluates and the same pattern `driver-sql`
+// hands to LIKE/GLOB, so this face cannot answer a pattern differently.
+import { hasDanglingLikeEscape, likePatternToRegexSource } from '@objectstack/spec/data';
 import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
 import { Logger, createLogger, nextUtcCalendarDay } from '@objectstack/core';
 import { Query, Aggregator } from 'mingo';
@@ -20,6 +24,9 @@ import {
   unknownFieldOperatorError,
   unknownLogicalOperatorError,
   unsupportedFilterError,
+  // [#7536] The `$like`/`$ilike` comparand refusals, beside their siblings.
+  likePatternComparandError,
+  danglingLikeEscapeError,
 } from './filter-refusal.js';
 import {
   coerceTemporalValue,
@@ -772,7 +779,8 @@ export class InMemoryDriver implements IDataDriver {
     // `VALID_AST_OPERATORS` accepts `>`, `gt`, `greater_than`, `greaterthan` and
     // `after` for the same thing. A private alias list here is what let this
     // driver and driver-sql accept different vocabularies. #3948.
-    switch (canonicalAstOperator(operator)) {
+    const canonical = canonicalAstOperator(operator);
+    switch (canonical) {
       case '=': case '==':
         return { [field]: store(value) };
       case '!=': case '<>':
@@ -796,8 +804,24 @@ export class InMemoryDriver implements IDataDriver {
         return { [field]: { $in: store(value) } };
       case 'nin': case 'not_in': case 'notin': case 'not in':
         return { [field]: { $nin: store(value) } };
-      case 'contains': case 'like': case 'ilike':
+      case 'contains':
         return { [field]: { $regex: new RegExp(this.escapeRegex(value), 'i') } };
+      // [#7536] `like` / `ilike` are NOT `contains`, and sharing this arm with
+      // it was the memory-face twin of the wire defect #7536 closed: the
+      // comparand was regex-ESCAPED (so a caller's `%` matched a literal percent
+      // sign) and matched as a SUBSTRING (so a wildcard-free pattern matched
+      // anywhere in the value). Both readings answer a query nobody wrote.
+      //
+      // Now the same pattern translation the `$`-spelling takes one method over,
+      // so this driver answers one filter one way whichever door it came
+      // through (#3948).
+      case 'like': case 'ilike': {
+        if (typeof value !== 'string') throw likePatternComparandError(field, canonical, value);
+        if (hasDanglingLikeEscape(value)) throw danglingLikeEscapeError(field, canonical, value);
+        return {
+          [field]: { $regex: new RegExp(likePatternToRegexSource(value, canonical === 'ilike')) },
+        };
+      }
       case 'notcontains': case 'not_contains':
         return { [field]: { $not: { $regex: new RegExp(this.escapeRegex(value), 'i') } } };
       case 'startswith': case 'starts_with':
@@ -985,6 +1009,30 @@ export class InMemoryDriver implements IDataDriver {
         // tracks on this face, not the behaviour to extend.
         case '$icontains':
           regexConditions.push({ $regex: new RegExp(asciiCaseInsensitiveRegexSource(val)) });
+          break;
+        // [#7536] `$like` / `$ilike` — the caller's OWN pattern, anchored to the
+        // whole value. `likePatternToRegexSource` is the spec's one translation
+        // of that language, the same one `formula` evaluates and the same
+        // pattern `driver-sql` hands to `LIKE` / `GLOB`.
+        //
+        // Two things this arm must NOT copy from its neighbours above. It does
+        // not `escapeRegex` the comparand — a `%` here is the caller's wildcard,
+        // and escaping it back into a literal IS the wire defect #7536 closed,
+        // reproduced one layer down. And it does not pass the `i` flag: the
+        // `$ilike` fold is ASCII-only and lives in the pattern source, for the
+        // reason the `$icontains` arm above spells out at length.
+        case '$like':
+        case '$ilike':
+          // The comparand's shape was settled by `assertFieldConstraintShape`
+          // on the whole tree before this ran (the #5324/#5328 discipline every
+          // arm here follows), so `val` is a string with no dangling escape.
+          // The re-check is the totality floor a translator owes itself, the
+          // same one `driver-sql`'s emitter keeps beside its own gate.
+          if (typeof val !== 'string') throw likePatternComparandError(field, op, val, path);
+          if (hasDanglingLikeEscape(val)) throw danglingLikeEscapeError(field, op, val, path);
+          regexConditions.push({
+            $regex: new RegExp(likePatternToRegexSource(val, op === '$ilike')),
+          });
           break;
         case '$between': {
           // [#5328] The arm used to be CONDITIONAL — a comparand that was not a

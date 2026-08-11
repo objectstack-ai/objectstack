@@ -13,10 +13,13 @@
  *   gate and `service-analytics`' coverage test DERIVE from. An entry here is a
  *   claim that backends implement the operator.
  *
- * The two surfaces AGREE today, and the staging that made them disagree is
- * over: #6520 added `$icontains` to `FILTER_OPERATORS` in the same PR that gave
- * every JS evaluation face an arm, which is the only order in which that name
- * could be added at all. Measured on the branch that added it EARLY (#5701):
+ * The two surfaces disagree by exactly {@link STAGED_AHEAD_OF_BACKENDS}, and
+ * they disagree DELIBERATELY. `$icontains`' staging is over — #6520 added it to
+ * `FILTER_OPERATORS` in the same PR that gave every JS evaluation face an arm,
+ * which is the only order in which that name could be added at all — and
+ * #7536's `$like`/`$ilike` are staged the same way, answered by the SQL family
+ * and `formula` while the remaining faces refuse them loudly. Measured on the
+ * branch that added `$icontains` EARLY (#5701):
  * driver-memory's gate stopped refusing it and
  * `match({ name: 'zzz' }, { name: { $icontains: 'acme' } })` returned `true` —
  * the predicate silently dropped, every row matched. That is the widening #3948
@@ -39,6 +42,25 @@ import {
 
 const declaredKeys = () => Object.keys(FieldOperatorsSchema.shape).sort();
 
+/**
+ * [#7536] The operators declared ahead of their backends, and the issue that
+ * clears each. Adding a name here is the deliberate act the assertion below
+ * demands — it is not a way to silence the check, because the equality still
+ * fails the moment a name is declared and NOT recorded, or recorded and no
+ * longer staged.
+ *
+ * `$like` / `$ilike`: declared by `StringOperatorSchema` and answered by the
+ * SQL family (driver-sql, driver-sqlite-wasm, driver-turso on both transports)
+ * and by `@objectstack/formula`. `driver-memory`, `driver-mongodb`, objectql
+ * `having` and `service-analytics` refuse them loudly in the ADR-0112
+ * envelope, which is what keeping them OUT of `FILTER_OPERATORS` buys:
+ * driver-memory's shape gate derives from that array, so membership would flip
+ * its refusal into a DROPPED predicate (measured for `$icontains` in #5701 —
+ * `match()` returned `true` for a non-matching record). Cleared by giving the
+ * remaining faces arms in one PR, the #6520 direction.
+ */
+const STAGED_AHEAD_OF_BACKENDS = ['$ilike', '$like'];
+
 describe('the declaration surface and the enforcement surface', () => {
   it('differ by EXACTLY the operators staged ahead of their backends', () => {
     const declared = new Set(declaredKeys());
@@ -57,7 +79,7 @@ describe('the declaration surface and the enforcement surface', () => {
         + 'in ONE PR — spec word list, driver-memory (query path, reference matcher, analytics '
         + 'face), driver-mongodb, service-analytics (3 compilers), objectql `having`, formula — '
         + 'then empty this list. #6520 is the worked example of the clearing direction.',
-    ).toEqual([]);
+    ).toEqual(STAGED_AHEAD_OF_BACKENDS);
   });
 
   it('has no operator enforced that is not declared', () => {

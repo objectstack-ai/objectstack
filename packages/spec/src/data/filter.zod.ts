@@ -460,6 +460,39 @@ export const StringOperatorSchema = lazySchema(() => z.object({
     + 'both transports); #6520 lowered it on every JS evaluation face, so it is '
     + 'portable across every backend the platform ships.]'
   ),
+
+  /**
+   * [#7536] Whole-string SQL `LIKE` pattern match — the comparand IS the
+   * pattern, and the CALLER binds the wildcards. The operator every `like`
+   * spelling of the AST vocabulary lowers to; unlike the `$contains` family
+   * above, nothing here is escaped or wrapped on the comparand's behalf.
+   */
+  $like: z.string().optional().describe(
+    'Whole-string pattern match with CALLER-bound wildcards: "%" matches any '
+    + 'sequence (including empty), "_" matches exactly one character, and a '
+    + 'backslash escapes the character after it ("\\%", "\\_", "\\\\") so it '
+    + 'matches literally. The pattern must cover the WHOLE value — a pattern '
+    + 'with no wildcards is an exact comparison, NOT a substring search; write '
+    + '$contains for containment. A pattern ending in a lone unpaired backslash '
+    + 'is refused (INVALID_FILTER). Comparison is case-SENSITIVE, same contract '
+    + 'as $contains (#4706 Q2 = A); $ilike is the case-insensitive twin. '
+    + '[#7536 declared it and lowered it on the SQL family; the JS evaluation '
+    + 'faces refuse it loudly until their follow-up lands — see '
+    + 'FILTER_OPERATORS for the staging.]'
+  ),
+
+  /**
+   * [#7536] `$like`'s case-insensitive twin — same pattern language, folding
+   * ASCII case only (the #4706 Q1 = A domain `$icontains` pinned).
+   */
+  $ilike: z.string().optional().describe(
+    'Whole-string pattern match like $like — "%" / "_" wildcards bound by the '
+    + 'caller, backslash escapes — but ignoring ASCII case (A-Z against a-z) '
+    + 'and ONLY ASCII case: "café" does NOT match "CAFÉ", the same #4706 Q1 = A '
+    + 'boundary $icontains declares, because SQLite\'s fold is ASCII-only and '
+    + 'three of the five backends are SQLite underneath. [#7536; staged with '
+    + '$like — see FILTER_OPERATORS.]'
+  ),
 }));
 
 // ============================================================================
@@ -572,6 +605,163 @@ export function asciiCaseInsensitiveRegexSource(comparand: string): string {
 }
 
 // ============================================================================
+// The `$like` pattern language — ONE definition for every face (#7536)
+// ============================================================================
+
+/**
+ * [#7536] Does this `$like`/`$ilike` pattern end in a LONE, unpaired backslash?
+ *
+ * Such a pattern is REFUSED everywhere rather than given a meaning, because the
+ * backends could not be made to agree on one: Postgres raises `LIKE pattern
+ * must not end with escape character` at query time, while a JS translation
+ * would have to invent an answer ("literal backslash"? "dropped"?) that SQL
+ * then contradicts. A shape that cannot mean one thing on every backend is
+ * refused at the door — the same direction #5041/#5234 settled for
+ * uncompilable comparands. The check is shared so the refusal fires on the
+ * SAME patterns at every face; each face wraps it in its own ADR-0112
+ * `INVALID_FILTER` envelope.
+ */
+export function hasDanglingLikeEscape(pattern: string): boolean {
+  let backslashes = 0;
+  for (let i = pattern.length - 1; i >= 0 && pattern[i] === '\\'; i--) backslashes++;
+  return backslashes % 2 === 1;
+}
+
+/**
+ * [#7536] A `$like`/`$ilike` pattern as a regular-expression SOURCE with the
+ * SAME meaning — the one translation every JS evaluation face must share, for
+ * the reason {@link foldAsciiCase} gives: a translation written per package
+ * agrees with the spec on the day it is typed and never again.
+ *
+ * The pattern language, translated element by element:
+ *
+ * - `%` → `[\s\S]*` — any sequence, including empty and including newlines
+ *   (SQL `LIKE` has no "dot-all" concept; `%` crosses line boundaries).
+ * - `_` → `[\s\S]` — exactly one character, any character.
+ * - `\x` → the character `x`, literally, whatever `x` is — this is how a
+ *   caller matches a literal `%`, `_` or `\`. (Postgres and MySQL read an
+ *   escaped ordinary character the same way.)
+ * - every other character → itself, regex-escaped, and — when `foldAscii` is
+ *   set ($ilike) — an ASCII letter becomes its two-member character class
+ *   (`[Aa]`), the {@link asciiCaseInsensitiveRegexSource} fold, so the fold
+ *   lives in the pattern and callers pass NO regex flags (an `i` flag folds
+ *   Unicode, which is the #4706 Q1 = A boundary violation).
+ * - the whole source is anchored `^…$`: `LIKE` matches the WHOLE value, so a
+ *   wildcard-free pattern is an exact comparison, not a substring search.
+ *
+ * Throws a plain `Error` on a dangling trailing escape — gate with
+ * {@link hasDanglingLikeEscape} first to refuse in your own envelope; the
+ * throw here is the backstop that keeps a missed gate from minting a pattern
+ * with an invented meaning.
+ */
+export function likePatternToRegexSource(pattern: string, foldAscii = false): string {
+  if (hasDanglingLikeEscape(pattern)) {
+    throw new Error(
+      `LIKE pattern ${JSON.stringify(pattern)} ends with a lone unpaired backslash; ` +
+        'write "\\\\\\\\" to match a literal backslash.',
+    );
+  }
+  let out = '^';
+  for (let i = 0; i < pattern.length; i++) {
+    let ch = pattern[i];
+    let literal = false;
+    if (ch === '\\') {
+      // Guarded above: a trailing `\` cannot reach here.
+      ch = pattern[++i];
+      literal = true;
+    }
+    if (!literal && ch === '%') {
+      out += '[\\s\\S]*';
+      continue;
+    }
+    if (!literal && ch === '_') {
+      out += '[\\s\\S]';
+      continue;
+    }
+    const code = ch.charCodeAt(0);
+    if (foldAscii && code >= ASCII_UPPER_FIRST && code <= ASCII_UPPER_LAST) {
+      out += `[${ch}${String.fromCharCode(code + ASCII_CASE_DELTA)}]`;
+    } else if (
+      foldAscii
+      && code >= ASCII_UPPER_FIRST + ASCII_CASE_DELTA
+      && code <= ASCII_UPPER_LAST + ASCII_CASE_DELTA
+    ) {
+      out += `[${String.fromCharCode(code - ASCII_CASE_DELTA)}${ch}]`;
+    } else {
+      out += /[\\^$.*+?()[\]{}|/]/.test(ch) ? `\\${ch}` : ch;
+    }
+  }
+  return `${out}$`;
+}
+
+/**
+ * [#7536] Does `value` match the `$like`/`$ilike` `pattern`? The predicate for
+ * every face that holds both strings in JS — the {@link likePatternToRegexSource}
+ * translation, evaluated. `foldAscii` selects the `$ilike` fold (ASCII only).
+ */
+export function matchesLikePattern(value: string, pattern: string, foldAscii = false): boolean {
+  return new RegExp(likePatternToRegexSource(pattern, foldAscii)).test(value);
+}
+
+/**
+ * [#7536] A `$like`/`$ilike` pattern as an equivalent SQLite **GLOB** pattern.
+ *
+ * ## Why the SQLite family cannot just pass the pattern to `LIKE`
+ *
+ * `$like` is case-SENSITIVE (the #4706 Q2 = A contract its `$contains` sibling
+ * already answers), and SQLite's `LIKE` folds ASCII case unconditionally.
+ * #6518 measured every way out of that and landed on `GLOB`, which is
+ * case-exact by definition: `PRAGMA case_sensitive_like` is CONNECTION-global,
+ * so one query would redefine every other query on the connection, and
+ * `CAST(col AS BLOB) LIKE ?` was measured to match NOTHING. Three of the five
+ * backends are SQLite underneath (driver-sql on better-sqlite3,
+ * driver-sqlite-wasm, driver-turso on both transports), so without this
+ * translation `$like` would mean one thing on Postgres and another on SQLite —
+ * the divergence #6518 closed for `$contains`, re-opened one operator over.
+ *
+ * `GLOB` has a DIFFERENT pattern language, which is the whole reason this is a
+ * translation and not an escape:
+ *
+ * | LIKE | GLOB | note |
+ * |---|---|---|
+ * | `%` | `*` | any sequence, including empty |
+ * | `_` | `?` | exactly one character |
+ * | `\x` | `x`, escaped | the caller's literal, whatever `x` is |
+ * | `*` `?` `[` | `[*]` `[?]` `[[]` | GLOB's OWN metacharacters, which are ORDINARY characters to LIKE — this is the direction a hand-written escape forgets, and forgetting it is the `%`-matches-every-row bypass (#5567) wearing GLOB's clothes |
+ * | `]` | `]` | needs no escape: every `[` above becomes a class that closes itself, so no unclosed class survives for a later `]` to terminate |
+ *
+ * Shared from the spec rather than written per driver for the reason
+ * {@link foldAsciiCase} gives: `driver-sql`'s emitter and `driver-turso`'s
+ * remote transport compile the same operator independently, and a translation
+ * written twice agrees on the day it is typed and never again.
+ *
+ * Throws on a dangling trailing escape, exactly like
+ * {@link likePatternToRegexSource} — gate with {@link hasDanglingLikeEscape}.
+ */
+export function likePatternToGlobPattern(pattern: string): string {
+  if (hasDanglingLikeEscape(pattern)) {
+    throw new Error(
+      `LIKE pattern ${JSON.stringify(pattern)} ends with a lone unpaired backslash; ` +
+        'write "\\\\\\\\" to match a literal backslash.',
+    );
+  }
+  const globEscape = (ch: string) => (/[*?[]/.test(ch) ? `[${ch}]` : ch);
+  let out = '';
+  for (let i = 0; i < pattern.length; i++) {
+    const ch = pattern[i];
+    if (ch === '\\') {
+      // Guarded above: a trailing `\` cannot reach here.
+      out += globEscape(pattern[++i]);
+      continue;
+    }
+    if (ch === '%') { out += '*'; continue; }
+    if (ch === '_') { out += '?'; continue; }
+    out += globEscape(ch);
+  }
+  return out;
+}
+
+// ============================================================================
 // 3.5 Special Operators
 // ============================================================================
 
@@ -634,6 +824,11 @@ export const FieldOperatorsSchema = lazySchema(() => z.object({
   $startsWith: z.string().optional(),
   $endsWith: z.string().optional(),
   $icontains: z.string().optional(),
+  // Pattern-matching pair (#7536): the comparand IS a LIKE pattern, wildcards
+  // bound by the CALLER — see {@link StringOperatorSchema} for the language.
+  // `$ilike` folds ASCII case only, `$like` is case-exact.
+  $like: z.string().optional(),
+  $ilike: z.string().optional(),
 
   // Special
   $null: z.boolean().optional(),
@@ -1009,7 +1204,17 @@ const AST_OPERATOR_MAP = {
   'contains': '$contains',
   'notcontains': '$notContains',
   'not_contains': '$notContains',
-  'like': '$contains',
+  // [#7536] `like`/`ilike` lower to their OWN operators, not `$contains`.
+  // The former `'like': '$contains'` entry silently rewrote what the query
+  // means: `$contains` LIKE-escapes the comparand and wraps it in `%…%`, so a
+  // caller's own wildcards bound as literals (`%Industries` matched nothing)
+  // and a wildcard-free comparand became a substring match nobody asked for.
+  // `canonicalAstOperator` below always exempted these two spellings for
+  // exactly that reason; the lowering the wire path takes now agrees with it.
+  // (`ilike` had NO entry at all, so `isFilterAST` refused it — it enters the
+  // vocabulary here with its lowering, per the #3948 single-table rule.)
+  'like': '$like',
+  'ilike': '$ilike',
   'startswith': '$startsWith',
   'starts_with': '$startsWith',
   'endswith': '$endsWith',
@@ -1066,6 +1271,7 @@ const CANONICAL_INFIX: Record<string, string> = {
   '$in': 'in', '$nin': 'nin', '$contains': 'contains',
   '$notContains': 'not_contains', '$startsWith': 'starts_with',
   '$endsWith': 'ends_with', '$between': 'between',
+  '$like': 'like', '$ilike': 'ilike',
 };
 
 export function canonicalAstOperator(op: string): string {
@@ -1081,11 +1287,12 @@ export function canonicalAstOperator(op: string): string {
   ) {
     return 'is_not_null';
   }
-  // `like`/`ilike` share the `$contains` lowering but are NOT substring matches
-  // at the driver: driver-sql passes them to SQL verbatim, so the caller binds
-  // the wildcards. Folding them onto `contains` would silently wrap the value in
-  // `%…%` and change what the query means.
-  if (lower === 'like' || lower === 'ilike') return lower;
+  // `like`/`ilike` used to need a hand-written exemption here: they SHARED the
+  // `$contains` lowering while not being substring matches, so the generic
+  // round-trip below would have folded them onto `contains` and silently
+  // wrapped the value in `%…%`. #7536 gave them their own lowerings
+  // (`$like`/`$ilike`), so the generic path now answers `like`/`ilike` by
+  // construction — the exemption is retired, not the rule it protected.
   const dollar = astOperatorLowering(lower);
   if (!dollar) return lower;
   return CANONICAL_INFIX[dollar] ?? lower;
@@ -1464,6 +1671,31 @@ export const FilterArraySchema: z.ZodType<FilterArray, FilterArray> = z.lazy(() 
  * every face can answer it. That pin now asserts an EMPTY difference between the
  * declaration and enforcement surfaces, so a name added to one and not the other
  * fails in either direction.
+ *
+ * ## `$like` / `$ilike` are STAGED here, on purpose (#7536)
+ *
+ * They are declared by {@link StringOperatorSchema} and
+ * {@link FieldOperatorsSchema} and deliberately ABSENT from this array, which
+ * is the staging direction the `$icontains` paragraph above prescribes — and
+ * for exactly the mechanism it measured. Membership here is what makes
+ * `driver-memory`'s `SUPPORTED_FIELD_OPERATORS` ACCEPT a name; adding `$like`
+ * before that driver's matcher has an arm would turn its loud refusal into a
+ * dropped predicate, i.e. every row.
+ *
+ * What is implemented today, and what refuses:
+ *
+ * | face | `$like` / `$ilike` |
+ * |---|---|
+ * | `driver-sql` (and `driver-sqlite-wasm`, which inherits its compiler) | ANSWERS — `LIKE` / `GLOB` per dialect, caller-bound wildcards |
+ * | `driver-turso` — local (inherits `SqlDriver`) and remote (its own compiler) | ANSWERS on both transports |
+ * | `@objectstack/formula` `matchesFilterCondition` | ANSWERS — {@link matchesLikePattern}, so a write-side `check` agrees with the read-side SQL |
+ * | `driver-memory`, `driver-mongodb`, `objectql` `having`, `service-analytics` | REFUSE, loudly, in the ADR-0112 `INVALID_FILTER` envelope — because THIS array does not name the operator |
+ *
+ * That split is the point rather than a gap: #7536 exists because a `like`
+ * predicate was being SILENTLY given `$contains`' meaning, and a face that
+ * quietly answers a different question is strictly worse than one that
+ * refuses. Clearing the staging means arms on the remaining faces in ONE PR,
+ * the #6520 direction — tracked as the follow-up filed on #7536.
  *
  * Retired operators (`$regex`, `$options`) are not here either, and never were.
  * Their prescriptions live in {@link RETIRED_FILTER_OPERATORS}.

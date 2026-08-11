@@ -22,7 +22,10 @@
 // [#6520] `$icontains`' ASCII-only fold, defined once in the spec and shared by
 // every JS evaluation face — see `foldAsciiCase`'s docblock for why it is not
 // re-implemented per package.
-import { reduceFilterVerdict, asciiCaseInsensitiveContains } from '@objectstack/spec/data';
+// [#7536] `$like`/`$ilike`'s pattern language, likewise the spec's one
+// definition — shared with this package's query path, `formula`, and the SQL
+// family's emitters.
+import { reduceFilterVerdict, asciiCaseInsensitiveContains, matchesLikePattern } from '@objectstack/spec/data';
 
 import { assertFilterConditionShape } from './filter-refusal.js';
 
@@ -235,6 +238,27 @@ function checkCondition(value: any, condition: any): boolean {
             case '$icontains':
                 if (typeof value !== 'string' || typeof target !== 'string'
                     || !asciiCaseInsensitiveContains(value, target)) return false;
+                break;
+            // [#7536] `$like` / `$ilike` — the caller's own pattern, anchored to
+            // the WHOLE value. `matchesLikePattern` is the spec's shared
+            // translation: the same one this driver's live query path binds as a
+            // regex, and the same pattern `driver-sql` hands to LIKE/GLOB — so
+            // the two faces of this package cannot answer one pattern two ways
+            // (the divergence #5374 fixed for `$contains` in this same file).
+            //
+            // A malformed pattern cannot reach here — `filter-refusal.ts`
+            // refuses a dangling trailing escape on the shape walk, before
+            // evaluation starts. The guard stays because `match()` is also
+            // called directly by driver doubles, and a total function must stay
+            // total.
+            case '$like':
+            case '$ilike':
+                if (typeof value !== 'string' || typeof target !== 'string') return false;
+                try {
+                    if (!matchesLikePattern(value, target, op === '$ilike')) return false;
+                } catch {
+                    return false;
+                }
                 break;
             case '$null':
                 // $null: true → value must be null/undefined; $null: false → value must not be null/undefined

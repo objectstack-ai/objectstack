@@ -473,13 +473,21 @@ const filter = createFilter()
   .greaterThan('revenue', 10000)      // field > value
   .lessThanOrEqual('age', 100)        // field <= value
   .in('category', ['A', 'B', 'C'])   // field IN (...)
-  .like('name', '%Corp%')             // field LIKE pattern
-  .contains('name', 'Corp')           // LIKE %Corp%
-  .startsWith('name', 'Acme')         // LIKE Acme%
+  .like('name', '%Corp%')             // pattern match — the wildcards are YOURS
+  .ilike('name', '%corp%')            // same, ignoring ASCII case
+  .contains('name', 'Corp')           // literal substring — no wildcards involved
+  .startsWith('name', 'Acme')         // literal prefix
   .isNull('deleted_at')               // field IS NULL
   .between('created_at', '2024-01', '2024-12')
   .build();
 ```
+
+`like` / `ilike` take a **pattern**: `%` matches any sequence, `_` matches
+exactly one character, and a backslash escapes either. The pattern is matched
+against the whole value, so `like('name', 'Corp')` is an exact comparison — for
+a substring search use `contains`, whose argument is plain text and needs no
+escaping. `like` / `ilike` are executed by the SQL backends; the others refuse
+them with `invalid_filter`.
 
 ---
 

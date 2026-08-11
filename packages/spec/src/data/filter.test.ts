@@ -1093,9 +1093,20 @@ describe('parseFilterAST', () => {
     expect(parseFilterAST(['role', 'not_in', ['guest']])).toEqual({ role: { $nin: ['guest'] } });
   });
 
-  it('should convert contains/like operator', () => {
+  it('should convert contains operator', () => {
     expect(parseFilterAST(['name', 'contains', 'John'])).toEqual({ name: { $contains: 'John' } });
-    expect(parseFilterAST(['name', 'like', 'John'])).toEqual({ name: { $contains: 'John' } });
+  });
+
+  // [#7536] `like` used to be asserted here as a SECOND spelling of `contains`,
+  // which is the defect rather than the contract: `$contains` wraps its
+  // comparand in `%…%`, so folding `like` onto it made a caller's wildcards
+  // bind as literals and a wildcard-free pattern become a substring match. The
+  // pair now lowers to its own operators; the full repro table, the pattern
+  // language and the nested positions live in
+  // `filter-like-wire-lowering.test.ts`.
+  it('should convert like/ilike to their OWN operators, not to contains', () => {
+    expect(parseFilterAST(['name', 'like', 'John'])).toEqual({ name: { $like: 'John' } });
+    expect(parseFilterAST(['name', 'ilike', 'john'])).toEqual({ name: { $ilike: 'john' } });
   });
 
   it('should convert notcontains/not_contains operator', () => {
@@ -1288,7 +1299,7 @@ describe('isFilterAST', () => {
 describe('VALID_AST_OPERATORS', () => {
   it('should contain all standard comparison operators', () => {
     const expected = ['=', '==', '!=', '<>', '>', '>=', '<', '<=', 'in', 'nin', 'not_in',
-      'contains', 'notcontains', 'not_contains', 'like', 'startswith', 'starts_with', 'endswith', 'ends_with',
+      'contains', 'notcontains', 'not_contains', 'like', 'ilike', 'startswith', 'starts_with', 'endswith', 'ends_with',
       'between', 'is_null', 'is_not_null'];
     for (const op of expected) {
       expect(VALID_AST_OPERATORS.has(op)).toBe(true);

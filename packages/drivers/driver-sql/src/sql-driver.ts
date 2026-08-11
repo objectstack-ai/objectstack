@@ -36,6 +36,12 @@ import { isNowDefaultToken, isRuntimeDefaultToken } from '@objectstack/spec/data
 // sentence about `$regex` are five sentences that drift apart. This driver
 // prints `why` VERBATIM.
 import { RETIRED_FILTER_OPERATORS } from '@objectstack/spec/data';
+// [#7536] `$like`/`$ilike`'s pattern language, defined once in the spec: the
+// dangling-escape gate every face refuses on, and the LIKE→GLOB translation the
+// SQLite dialects need because GLOB is the only case-exact pattern operator
+// SQLite has and it does not speak `%`/`_`. `driver-turso`'s remote transport
+// compiles the same operator independently and calls the same two functions.
+import { hasDanglingLikeEscape, likePatternToGlobPattern } from '@objectstack/spec/data';
 import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import { StorageNameMapping } from '@objectstack/spec/system';
@@ -914,6 +920,49 @@ function icontainsComparandError(field: string, value: unknown, path: string): E
 }
 
 /**
+ * [#7536] `$like` / `$ilike` received a comparand that is not a string.
+ *
+ * The declared comparand is `z.string()`, and the coercion the emitter would
+ * otherwise apply is worse here than at `$icontains`: a `$like` comparand is a
+ * PATTERN, so `String(value)` does not merely invent text, it invents WILDCARDS
+ * — `String({})` is `[object Object]`, whose `[` opens a GLOB character class
+ * on the SQLite dialects. An empty string is deliberately NOT refused (see the
+ * gate's own note): `LIKE ''` matches only the empty string, which constrains
+ * plenty.
+ */
+function likePatternComparandError(field: string, op: string, value: unknown, path: string): Error {
+  return unsupportedFilterError(
+    `Operator "${op}" on field "${field}" at ${path} requires a string comparand, received ` +
+      `${describeFilterOperand(value)} (${safeShapePreview(value)}). "${op}" takes a PATTERN — ` +
+      `"%" matches any sequence, "_" matches one character, and a backslash escapes either — so ` +
+      `a non-string comparand cannot be coerced without inventing wildcards the caller never ` +
+      `wrote. For a literal substring search write "$contains", whose comparand IS text.`,
+  );
+}
+
+/**
+ * [#7536] A `$like` / `$ilike` pattern ending in a lone unpaired backslash.
+ *
+ * Refused rather than given a meaning because no meaning survives all five
+ * backends: Postgres raises `LIKE pattern must not end with escape character`
+ * at query time, SQLite's GLOB has no escape character at all and would read
+ * the backslash as an ordinary one, and the JS faces would have to invent a
+ * third answer. A shape that cannot mean one thing everywhere is refused at the
+ * door — the direction #5041 / #5234 already settled for comparands this driver
+ * cannot compile faithfully. `hasDanglingLikeEscape` is the spec's shared test,
+ * so every face refuses the SAME patterns.
+ */
+function danglingLikeEscapeError(field: string, op: string, pattern: string, path: string): Error {
+  return unsupportedFilterError(
+    `Operator "${op}" on field "${field}" at ${path} has a pattern ending in a lone unpaired ` +
+      `backslash (${JSON.stringify(pattern)}). A backslash escapes the character after it, so a ` +
+      `trailing one escapes nothing and the backends disagree about what it means — Postgres ` +
+      `rejects the pattern outright, SQLite's GLOB has no escape character to reject. Write ` +
+      `"\\\\\\\\" to match a literal backslash, or drop the trailing one.`,
+  );
+}
+
+/**
  * [#5041] The referenced field name when `value` is a Filter Protocol FIELD
  * REFERENCE (`{ $field: 'other_column' }` — spec `FieldReferenceSchema` in
  * `data/filter.zod.ts`), else `null`.
@@ -979,6 +1028,12 @@ function crossFieldComparisonError(field: string, op: string, ref: string, index
 const SCALAR_COMPARAND_OPERATORS: ReadonlySet<string> = new Set([
   '$eq', '$ne', '$gt', '$gte', '$lt', '$lte',
   '=', '==', '!=', '<>', '>', '>=', '<', '<=', 'like', 'ilike',
+  // [#7536] The `$`-forms of the two infix spellings already here. They are
+  // SCALAR rather than {@link TEXT_PATTERN_OPERATORS} for the reason that set's
+  // note gives: their comparand ARRIVES as the pattern, so nothing wraps or
+  // escapes it and the question to ask of the value is "can this be bound",
+  // which is this set's question.
+  '$like', '$ilike',
 ]);
 
 /**
@@ -1005,13 +1060,26 @@ function isBindableComparand(value: unknown): boolean {
  * first set except a binary buffer is also in the second, but the reason is not
  * the same reason, and the messages a caller needs differ.
  *
- * `like` / `ilike` are absent on purpose: they arrive already carrying a
- * pattern and compile through the scalar bind arm, which already refuses an
- * object.
+ * `like` / `ilike` (and, since #7536, their `$like` / `$ilike` spellings) are
+ * absent on purpose: they arrive already carrying a pattern and compile
+ * through the scalar bind arm, which already refuses an object.
  */
 const TEXT_PATTERN_OPERATORS: ReadonlySet<string> = new Set([
   '$contains', '$notContains', '$startsWith', '$endsWith', '$icontains',
 ]);
+
+/**
+ * [#7536] The two operators whose comparand IS a `LIKE` pattern — the caller's
+ * own wildcards, neither escaped nor wrapped.
+ *
+ * Kept as a named set beside {@link TEXT_PATTERN_OPERATORS} rather than folded
+ * into it because the two families ask OPPOSITE things of the same string: a
+ * `$contains` comparand is text that must be made literal (every `%` escaped),
+ * while a `$like` comparand is a pattern that must be left alone (every `%` is
+ * the caller's wildcard). Running one through the other's rule is precisely the
+ * defect #7536 closes.
+ */
+const LIKE_PATTERN_OPERATORS: ReadonlySet<string> = new Set(['$like', '$ilike']);
 
 /**
  * [#5234] Operators for which an ARRAY is the legitimate comparand, so it is
@@ -1484,6 +1552,80 @@ function textMatchPredicate(
   const column = fold ? 'LOWER(??)' : '??';
   const comparand = fold ? 'LOWER(?)' : '?';
   return { sql: `${column} ${keyword} ${comparand} ESCAPE ?`, bindings };
+}
+
+/**
+ * [#7536] The one place a `$like` / `$ilike` PATTERN becomes SQL.
+ *
+ * The sibling of {@link textMatchPredicate}, and deliberately a second function
+ * rather than a flag on it, because the comparand travels in the opposite
+ * direction through both of that function's jobs:
+ *
+ * | | `$contains` family ({@link textMatchPredicate}) | `$like` / `$ilike` (here) |
+ * |---|---|---|
+ * | the comparand is | TEXT to match literally | a PATTERN the caller wrote |
+ * | `%` / `_` in it | escaped, so they are ordinary characters | the caller's WILDCARDS, left alone |
+ * | wildcards | added by the shape (`%v%`, `v%`, `%v`) | already in the pattern; none added |
+ * | anchoring | substring / prefix / suffix | the WHOLE value, which is what `LIKE` means |
+ *
+ * The dialect matrix is #6518's, unchanged and for its reasons — `$like` is
+ * case-SENSITIVE (#4706 Q2 = A, the contract its `$contains` sibling answers),
+ * and `$ilike` folds ASCII and nothing else (Q1 = A):
+ *
+ * - **SQLite → `GLOB`**, over {@link likePatternToGlobPattern}'s translation of
+ *   the pattern. `LIKE` there folds ASCII unconditionally and cannot be told
+ *   not to per statement, so a case-exact pattern match has to change operator
+ *   — and changing operator changes the pattern LANGUAGE, which is why the
+ *   translation is a shared spec function instead of an escape call.
+ * - **Postgres → `LIKE`**, pattern bound verbatim with the bound `ESCAPE`, since
+ *   `LIKE` is already case-exact there. The `$ilike` fold is `translate()` over
+ *   the 26 ASCII letters — deliberately NOT Postgres's own `ILIKE`, which folds
+ *   using the database collation and therefore matches `CAFÉ` against `café`,
+ *   the over-fold #6518 measured and the Q1 = A boundary this must not cross.
+ *   The pattern's `%`, `_` and `\` are not ASCII letters, so `translate()`
+ *   passes them through untouched — the fold cannot corrupt the wildcards.
+ * - **MySQL → `LIKE` over `CAST(… AS BINARY)`**, byte-wise and so case-exact
+ *   whatever the column collation says; `$ilike` adds
+ *   {@link mysqlAsciiLowerBinary} on both sides. Not executed here for the same
+ *   reason its sibling records: no MySQL server is provisionable in this
+ *   container, so the cell is a declared skip rather than a claimed pass.
+ * - **`'unknown'` → plain `LIKE` / `LOWER()`**, the only shape that still RUNS
+ *   on a client this driver does not model. Same residue the conformance ledger
+ *   names for the `$contains` family.
+ */
+function likePatternPredicate(
+  dialect: SqlDialectName,
+  field: string,
+  pattern: string,
+  fold: boolean,
+): { sql: string; bindings: unknown[] } {
+  if (dialect === 'sqlite') {
+    // GLOB takes no ESCAPE clause, so this arm binds two values, not three.
+    const column = fold ? 'lower(??)' : '??';
+    const comparand = fold ? 'lower(?)' : '?';
+    return {
+      sql: `${column} GLOB ${comparand}`,
+      bindings: [field, likePatternToGlobPattern(pattern)],
+    };
+  }
+
+  const bindings = [field, pattern, LIKE_ESCAPE_CHARACTER];
+
+  if (dialect === 'postgres') {
+    const asciiLower = (expr: string) =>
+      fold ? `translate(${expr}, '${ASCII_UPPER_LETTERS}', '${ASCII_LOWER_LETTERS}')` : expr;
+    return { sql: `${asciiLower('??')} LIKE ${asciiLower('?')} ESCAPE ?`, bindings };
+  }
+
+  if (dialect === 'mysql') {
+    const caseExact = (expr: string) =>
+      fold ? mysqlAsciiLowerBinary(expr) : `CAST(${expr} AS BINARY)`;
+    return { sql: `${caseExact('??')} LIKE ${caseExact('?')} ESCAPE ?`, bindings };
+  }
+
+  const column = fold ? 'LOWER(??)' : '??';
+  const comparand = fold ? 'LOWER(?)' : '?';
+  return { sql: `${column} LIKE ${comparand} ESCAPE ?`, bindings };
 }
 
 /**
@@ -1999,6 +2141,27 @@ function classifyFilterKey(key: string, value: unknown, here: string): FilterVer
     (typeof value.$icontains !== 'string' || value.$icontains === '')
   ) {
     throw icontainsComparandError(key, value.$icontains, `${here}.$icontains`);
+  }
+
+  // [#7536] `$like` / `$ilike` carry a PATTERN, gated on this same walk and for
+  // the same evaluation-order reason as the three above.
+  //
+  // Note what is NOT refused: an EMPTY pattern. `$icontains: ''` is refused
+  // because every row contains the empty substring, so it constrains nothing —
+  // but `LIKE ''` matches only the empty string, which is a narrow and perfectly
+  // well-formed predicate. Copying the sibling's rule here would refuse a
+  // legitimate query.
+  if (isFilterNode(value)) {
+    for (const op of LIKE_PATTERN_OPERATORS) {
+      if (!Object.prototype.hasOwnProperty.call(value, op)) continue;
+      const pattern = (value as Record<string, unknown>)[op];
+      if (typeof pattern !== 'string') {
+        throw likePatternComparandError(key, op, pattern, `${here}.${op}`);
+      }
+      if (hasDanglingLikeEscape(pattern)) {
+        throw danglingLikeEscapeError(key, op, pattern, `${here}.${op}`);
+      }
+    }
   }
 
   // A field key always contributes a predicate.
@@ -8378,6 +8541,28 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
+   * [#7536] Emit `$like` / `$ilike` — the caller's own pattern, against the
+   * whole column value.
+   *
+   * The sibling of {@link SqlDriver.applyLike} and deliberately not a flag on
+   * it: see {@link likePatternPredicate} for the table of what the two do
+   * oppositely. This is the arm the wire could not reach between #5158 and
+   * #7536, because the spec folded every `like` spelling onto `$contains`
+   * before a driver ever saw it.
+   */
+  private applyLikePattern(
+    builder: any,
+    method: string,
+    field: string,
+    pattern: string,
+    fold: boolean,
+  ): void {
+    const rawMethod = method.startsWith('or') ? 'orWhereRaw' : 'whereRaw';
+    const { sql, bindings } = likePatternPredicate(this.dialectName, field, pattern, fold);
+    builder[rawMethod](sql, bindings);
+  }
+
+  /**
    * Compiles a Filter Protocol condition onto `builder`.
    *
    * `logicalOp` controls only how this condition attaches to `builder`
@@ -8631,6 +8816,24 @@ export class SqlDriver implements IDataDriver {
             case '$endsWith':
               this.applyLike(builder, method, field, opValue, 'ends');
               break;
+            // [#7536] The pattern pair. NOT `applyLike`: that method escapes the
+            // comparand and wraps it in the shape's wildcards, which is the
+            // exact rewrite these two operators exist to avoid. The wildcards
+            // are the CALLER's, the match is against the WHOLE value, and
+            // `reduceFilterKey` has already refused a non-string pattern and a
+            // dangling trailing escape — so `opValue` is a compilable pattern
+            // by the time it reaches here.
+            //
+            // `opValue` rather than `coerced`: `coerceFilterValue` canonicalises
+            // a comparand against the column's TYPE (dates, booleans, numbers),
+            // and a pattern is not a value of that type — coercing it would
+            // rewrite the pattern text.
+            case '$like':
+              this.applyLikePattern(builder, method, field, opValue as string, false);
+              break;
+            case '$ilike':
+              this.applyLikePattern(builder, method, field, opValue as string, true);
+              break;
             case '$between': {
               const arr = Array.isArray(coerced) ? coerced : [];
               if (arr.length !== 2) {
@@ -8671,7 +8874,7 @@ export class SqlDriver implements IDataDriver {
               throw unsupportedFilterError(
                 `Unsupported filter operator "${op}" on field "${field}". Supported operators: ` +
                   `$eq, $ne, $gt, $gte, $lt, $lte, $in, $nin, $between, $contains, $notContains, ` +
-                  `$startsWith, $endsWith, $icontains, $null, $exists.`,
+                  `$startsWith, $endsWith, $icontains, $like, $ilike, $null, $exists.`,
               );
             }
           }
