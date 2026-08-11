@@ -42,7 +42,7 @@ export const TestAssertionTypeSchema = lazySchema(() => z.enum([
 ]).describe('Comparison operator for test assertions'));
 
 export const TestAssertionSchema = lazySchema(() => z.object({
-  field: z.string().describe('Field path in the result to check (e.g. "body.data.0.status")'),
+  field: z.string().describe('Field path in the result to check, resolved against the parsed response body root — no "body." prefix (e.g. "data.0.status")'),
   operator: TestAssertionTypeSchema.describe('Comparison operator to use'),
   expectedValue: z.unknown().describe('Expected value to compare against')
 }).describe('A test assertion that validates the result of a test action'));
@@ -55,7 +55,7 @@ export const TestStepSchema = lazySchema(() => z.object({
   action: TestActionSchema.describe('The action to execute in this step'),
   assertions: z.array(TestAssertionSchema).optional().describe('Assertions to validate after the action completes'),
   // Capture outputs to variables for subsequent steps
-  capture: z.record(z.string(), z.string()).optional().describe('Map result fields to context variables: { "newId": "body.id" }')
+  capture: z.record(z.string(), z.string()).optional().describe('Map result fields to context variables, paths resolved against the response body root (e.g. { "newId": "data.id" })')
 }).describe('A single step in a test scenario, consisting of an action and optional assertions'));
 
 export const TestScenarioSchema = lazySchema(() => z.object({

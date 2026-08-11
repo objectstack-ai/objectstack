@@ -32,7 +32,12 @@
  * their sources ("watch hints"). That derivation is honest but heuristic:
  *
  *   - a MATCHED check is one whose own source names a directory/file that
- *     covers the input path — high-signal, paste it into the dispatch prompt;
+ *     covers the input path — high-signal, paste it into the dispatch prompt.
+ *     It is printed as the RUNNABLE invocation (`pnpm --filter <pkg> run
+ *     check:x` for a package-scoped gate, `pnpm check:x` for a root-scoped
+ *     one), not as the bare script name: the bare name sends a dev to the root
+ *     `package.json`, where a package-scoped gate is absent and therefore reads
+ *     as nonexistent (#7440);
  *   - a check with NO discoverable path hints is listed once in the
  *     "repo-wide / undetermined" bucket. It is NOT known to be irrelevant —
  *     many gates read the whole tree (check:nul-bytes) or a convention rather
@@ -97,6 +102,22 @@ export function extractWatchHints(scriptSource) {
     hints.add(s.replace(/\/+$/, ''));
   }
   return [...hints];
+}
+
+/**
+ * Render an invocation a dev can paste and run, from the same parse the
+ * workflow line produced. The script NAME alone is not runnable for a
+ * package-scoped check: `check:doc-formula-expressions` lives in
+ * `@objectstack/lint`, not in the root `package.json`, so a dev who searched
+ * the obvious place found nothing and concluded the gate did not exist — twice,
+ * in independent sessions, within one hour (#7440, PR #7416 / #7417). The
+ * `--filter` package is the one piece of provenance this tool parsed and then
+ * dropped, and it is the piece needed to run the thing.
+ */
+export function runnableInvocation({ check, filter, direct }) {
+  if (direct) return `node ${check}`; // already a script path, never a pnpm script
+  if (filter) return `pnpm --filter ${filter} run ${check}`;
+  return `pnpm ${check}`;
 }
 
 /**
@@ -175,7 +196,7 @@ function derive(paths) {
     console.log('Local gates for this card (paste into the dispatch prompt):');
     for (const [check, { entry, hits }] of [...matched].sort()) {
       const via = hits.map((h) => `${h.path} ⇢ '${h.hint}'`).join('; ');
-      console.log(`  - ${check}   [${[...entry.workflows].join(', ')}]   matched via ${via}`);
+      console.log(`  - ${runnableInvocation(entry)}   [${[...entry.workflows].join(', ')}]   matched via ${via}`);
     }
   } else {
     console.log('No check family names the given paths in its own source.');
@@ -212,6 +233,14 @@ function selfTest() {
   t('extracts filtered check with its package', invs.some((i) => i.check === 'check:authorable-surface' && i.filter === '@objectstack/spec'));
   t('extracts direct node scripts/check-*.mjs', invs.some((i) => i.check === 'scripts/check-nul-bytes.mjs' && i.direct));
   t('ignores non-check runs', !invs.some((i) => String(i.check).includes('build')));
+
+  // #7440: the printed line must be runnable as-is. The three shapes come from
+  // the same three fixtures above, so the sample workflow and the print site
+  // cannot drift apart.
+  const inv = (name) => invs.find((i) => i.check === name);
+  t('prints a package-scoped check as its full --filter invocation', runnableInvocation(inv('check:authorable-surface')) === 'pnpm --filter @objectstack/spec run check:authorable-surface');
+  t('prints a root-scoped check unchanged', runnableInvocation(inv('check:engine-double-contract')) === 'pnpm check:engine-double-contract');
+  t('prints a direct script as a node invocation', runnableInvocation(inv('scripts/check-nul-bytes.mjs')) === 'node scripts/check-nul-bytes.mjs');
 
   const scripts = { 'check:foo': 'node scripts/check-foo.mjs --self-test && node scripts/check-foo.mjs' };
   t('resolves script file from package.json', resolveCheckToFiles('check:foo', scripts).join() === 'scripts/check-foo.mjs');

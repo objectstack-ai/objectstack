@@ -77,8 +77,11 @@ describe('[#5347] driver-mongodb refuses a non-boolean $null comparand', () => {
       expect(err.status).toBe(400);
       expect(err.message).toContain(DRIVER_SQL_LEADING_SENTENCE('stage'));
       expect(err.message).toContain('filter.stage.$null');
-      // #3867 — the `[mongodb]` prefix this package's other refusal still
-      // carries (#5346) must not appear on a refusal added today.
+      // #3867 — the `[mongodb]` prefix must not appear on a client-visible
+      // refusal. When this pin was written it read "the prefix this package's
+      // OTHER refusal still carries (#5346)"; #5702 routed that arm through the
+      // shared constructor and #5346 is closed, so no refusal in this package
+      // carries one any more.
       expect(err.message).not.toContain('[mongodb]');
     });
   }

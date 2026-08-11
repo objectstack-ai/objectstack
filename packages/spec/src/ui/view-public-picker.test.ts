@@ -22,6 +22,11 @@
  *    time instead of silently clamped/sliced at request time. This is a
  *    security-relevant surface (it opens an UNAUTHENTICATED search), so the
  *    schema is deliberately the narrow mirror of the route's reads.
+ *
+ * [#7485] The mirror is now exact in both directions: the route's fifth read
+ * (`picker.sort`) was RETIRED rather than declared, so the four keys above are
+ * the whole contract and the `sort` pin below states "not declarable AND not
+ * read" instead of "undeclared, pending a ruling".
  */
 
 import { describe, expect, it } from 'vitest';
@@ -156,18 +161,28 @@ describe('#7467 the block admits nothing the route does not enforce', () => {
         expect(r.success).toBe(false);
     });
 
-    it('picker.sort is NOT declarable — undeclared reads stay loud until ruled on', () => {
-        // The route also reads `picker.sort` (rest-server.ts, the lookup
+    it('[#7485] picker.sort is NOT declarable AND not read — the route no longer has a fifth key', () => {
+        // The route USED to read `picker.sort` (rest-server.ts, the lookup
         // handler's findData call) — a fifth read the #7467 card's enumeration
-        // does not include. The ruling bounds this change to the four keys
-        // above, so `sort` stays undeclared and a form authoring one is a
-        // parse error rather than a silently-admitted key; recorded as a
-        // follow-up finding on the card. If a later ruling declares it, this
-        // pin is the reminder to encode its shape from the route's actual read.
+        // did not include, which left `sort` enforced by the route and
+        // authorable nowhere. #7485 closed that mirror-gap by REMOVAL: the
+        // maintainer ruled retire-the-read over declare-the-key, so the route
+        // now always sorts by `[{ field: displayFields[0], order: 'asc' }]` and
+        // this rejection is no longer a deferred decision — it is the whole
+        // contract. `sort` is not declarable because nothing reads it.
+        //
+        // Both halves are pinned: this one, and the route side in
+        // `packages/rest/src/public-form-lookup-picker.test.ts` (a stored row
+        // carrying `sort` is ignored, and the composed query still gets the
+        // fixed default). Declaring the key again means re-running the fork on
+        // #7485 — and re-teaching the route to read it, which is the harder half.
         const r = ViewMetadataSchema.safeParse(viewItem({
             field: 'owner',
             publicPicker: { sort: [{ field: 'name', order: 'asc' }] },
         }));
         expect(r.success).toBe(false);
+        const issues = (r as any).error?.issues ?? [];
+        expect(JSON.stringify(issues)).toContain('unrecognized_keys');
+        expect(JSON.stringify(issues)).toContain('sort');
     });
 });

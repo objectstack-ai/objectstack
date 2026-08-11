@@ -257,9 +257,14 @@ sections: [{
 | `filter` | Static pre-filter rows (same `{ field, operator, value }` dialect as list-view filters), ANDed ahead of the visitor's search. |
 | `object` | The object to search; omit to let the server resolve it from the field definition. |
 
-The block admits exactly what the route enforces — an unknown subkey, a 6th
-display field, or `maxResults: 51` is a **parse error at authoring time**, not
-a silently-adjusted request.
+Those four keys are the whole block. It admits exactly what the route enforces
+— an unknown subkey, a 6th display field, or `maxResults: 51` is a **parse
+error at authoring time**, not a silently-adjusted request.
+
+Result **ordering is fixed**: the first `displayFields` entry, ascending. It is
+not configurable — `publicPicker.sort` is an unknown subkey, and #7485 retired
+the route's read of one — so a picker's rows arrive in one predictable order
+whatever the target object's own default ordering is.
 
 ```bash
 curl 'http://localhost:3000/api/v1/forms/contact-us/lookup/owner?q=ada'

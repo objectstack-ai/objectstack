@@ -55,6 +55,17 @@ export {
   registerSettingsRoutes,
   type SettingsRoutesOptions,
 } from './settings-routes.js';
+// #7522 — the REST read mask for encrypted settings, plus the two halves of the
+// boundary it defines. Published because a client has to be able to RECOGNISE a
+// masked read: the console renders "configured" from it and echoes it back
+// unchanged on save, and comparing against a string hard-coded in the console is
+// exactly the drift this export prevents. The SERVICE layer is unaffected — it
+// still hands real plaintext to in-process consumers; see the module header.
+export {
+  SETTINGS_SECRET_MASK,
+  redactSecretValues,
+  dropEchoedSecretMasks,
+} from './settings-secret-redaction.js';
 export {
   settingsObjects,
   settingsPluginManifestHeader,

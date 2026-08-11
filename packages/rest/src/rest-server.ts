@@ -8012,7 +8012,16 @@ export class RestServer {
                             offset: 0,
                             filters,
                             select: ['id', ...displayFields],
-                            sort: picker.sort ?? [{ field: displayFields[0], order: 'asc' }],
+                            // [#7485] Ordering is FIXED — first display field,
+                            // ascending. This used to read `picker.sort`, a key
+                            // `FormFieldPublicPickerSchema` (#7467) deliberately
+                            // never declared: enforced by the route, authorable
+                            // nowhere. The maintainer ruled retire-the-read over
+                            // declare-the-key — zero measured pull for a
+                            // permanently-maintained public key on an
+                            // UNAUTHENTICATED surface. A pre-schema stored row
+                            // still carrying `sort` is IGNORED, not an error.
+                            sort: [{ field: displayFields[0], order: 'asc' }],
                         },
                         ...(environmentId ? { environmentId } : {}),
                         context,
