@@ -484,6 +484,7 @@
     "SEARCH_AUTO_EXCLUDED_FIELDS": "src/data/search-fields.ts#SEARCH_AUTO_EXCLUDED_FIELDS (const)",
     "SEARCH_AUTO_EXCLUDED_TYPES": "src/data/search-fields.ts#SEARCH_AUTO_EXCLUDED_TYPES (const)",
     "SEARCH_VIRTUAL_TYPES": "src/data/search-fields.ts#SEARCH_VIRTUAL_TYPES (const)",
+    "SECRET_MASK": "src/data/secret-mask.ts#SECRET_MASK (const)",
     "SINGLE_OPTION_TYPES": "src/data/field-value.zod.ts#SINGLE_OPTION_TYPES (const)",
     "SQLDialect": "src/data/driver-sql.zod.ts#SQLDialect (type)",
     "SQLDialectSchema": "src/data/driver-sql.zod.ts#SQLDialectSchema (const)",

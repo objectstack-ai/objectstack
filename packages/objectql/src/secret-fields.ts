@@ -38,8 +38,17 @@ export const SECRET_REF_PREFIX = 'secret:';
  * Value returned in place of a secret field on a normal read. Indicates
  * "a secret is set" without leaking the handle id or the plaintext. A field
  * with no stored secret resolves to `null` instead.
+ *
+ * Declared in `@objectstack/spec` and re-exported here (#7572), because the
+ * same mask is the contract on a second surface this package cannot see: the
+ * settings REST read boundary in `@objectstack/service-settings`, which is
+ * deliberately framework-agnostic and does not depend on objectql. Two
+ * byte-identical literals bound by convention were what #7572 removed — the
+ * re-export keeps this package's public API unchanged while leaving exactly one
+ * definition. ⛔ Do not restate the literal here; edit it in
+ * `spec/src/data/secret-mask.ts`, where it is pinned.
  */
-export const SECRET_MASK = '••••••••';
+export { SECRET_MASK } from '@objectstack/spec/data';
 
 /** Wrap a `sys_secret` handle id as the opaque ref persisted on the row. */
 export function makeSecretRef(handleId: string): string {
