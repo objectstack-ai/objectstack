@@ -25,6 +25,12 @@ import {
 // `OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES` — same value it read before,
 // no re-ruling of the package cohort as a side effect of #7020.
 import { OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES } from '@objectstack/metadata-core';
+// [#7560] ADR-0070's read-only-package rule — the SAME predicate the metadata
+// authoring path asks before refusing a write INTO a platform package
+// (`saveMetaItem` → `WRITABLE_PACKAGE_REQUIRED`). Imported, never re-spelled:
+// this defect existed precisely because the lifecycle routes had no copy of it,
+// and a second copy would be the next place it drifts.
+import { isWritablePackage } from '@objectstack/metadata-protocol';
 import { organizationIdForMetaWrite } from '../meta-write-org-scope.js';
 import { setPackageDisabled } from '../package-state-store.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
@@ -107,8 +113,73 @@ function requireReadCapability(deps: DomainHandlerDeps, context: HttpProtocolCon
 }
 
 /**
+ * ADR-0070 READ-ONLY gate for the destructive `/packages` LIFECYCLE routes
+ * (#7560).
+ *
+ * This is a **second, independent** check from the two gates above, on a
+ * different axis, and collapsing the two is what produced the defect. #7033 /
+ * PR #7083 decided *who may call* these routes — writes need `manage_metadata`,
+ * reads the ADR-0106 D4 set, plus a domain-wide anonymous floor. This decides
+ * *what the route may do once the caller is allowed*: an authorized admin could
+ * still `PATCH /packages/<platform pkg>/disable` → 200 and
+ * `DELETE /packages/<platform pkg>` → 200, and the package really left the
+ * running registry listing. One API call took platform functionality out of a
+ * live deployment; `DELETE` came back on restart (the packages are code-loaded),
+ * `disable` did NOT — {@link setPackageDisabled} persists the disable to
+ * `<OS_HOME>/package-state/<env>.json`, which the registry re-reads at boot, so
+ * a disabled platform package stays disabled across restarts.
+ *
+ * The predicate is {@link isWritablePackage} from `@objectstack/metadata-protocol`
+ * — the ADR-0070 rule the authoring path already enforces, referenced rather
+ * than re-spelled. The refusal is that path's refusal too: `422` /
+ * `WRITABLE_PACKAGE_REQUIRED`, the code registered for exactly this condition
+ * ("the package is read-only — provided by code or an installed app"). No new
+ * vocabulary is invented here; the sentence is lifecycle-specific because the
+ * authoring one ("switch to a writable package in the package selector") names
+ * a remedy that makes no sense for a delete.
+ *
+ * ⛔ Deliberately NOT caller-sensitive — there is no `isSystem` bypass, unlike
+ * {@link requireManageMetadata}. Read-only is a property of the PACKAGE. Engine
+ * self-invocation has no business uninstalling a code package over HTTP, and
+ * internal teardown calls `registry.uninstallPackage` directly without passing
+ * through any of these gates.
+ *
+ * Callers MUST run this BEFORE mutating — the same "delete first, refuse
+ * second is the worst shape here" ordering the write gate records. Returns a
+ * refusal result to short-circuit on, or `null` to proceed.
+ *
+ * A package id that resolves to nothing is treated as WRITABLE, so an unknown
+ * id still falls through to the route's own 404 rather than being re-labelled
+ * 422 (and so this gate never becomes an existence oracle of its own).
+ */
+function requireWritablePackage(
+    deps: DomainHandlerDeps,
+    engine: unknown,
+    id: string,
+    /** Verb for the message, e.g. `'disable'` / `'delete'`. */
+    action: string,
+): HttpDispatcherResult | null {
+    if (isWritablePackage(engine, id)) return null;
+    return {
+        handled: true,
+        response: deps.error(
+            `[writable_package_required] Cannot ${action} package '${id}': it is read-only `
+            + `(provided by code or an installed app). Packages the deployment ships are managed by `
+            + `the deployment, not over this API — ${action} a package you own, or duplicate this one `
+            + `into a writable base (POST /packages/${encodeURIComponent(id)}/duplicate) and change that.`,
+            422,
+            {
+                code: 'WRITABLE_PACKAGE_REQUIRED',
+                packageId: id,
+                docs: 'docs/adr/0070-package-first-authoring.md',
+            },
+        ),
+    };
+}
+
+/**
  * Handles Package Management requests
- * 
+ *
  * REST Endpoints:
  * - GET    /packages          → list all installed packages
  * - GET    /packages/:id      → get a specific package
@@ -242,6 +313,11 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         if (parts.length === 2 && parts[1] === 'disable' && m === 'PATCH') {
             const denied = requireManageMetadata(deps, _context); if (denied) return denied;
             const id = decodeURIComponent(parts[0]);
+            // [#7560] ADR-0070: a platform package is not the operator's to
+            // switch off. BEFORE `disablePackage`, and before
+            // `setPackageDisabled` writes the choice to disk — a disable that
+            // lands is not undone by a restart, it is REPLAYED by one.
+            const readOnly = requireWritablePackage(deps, qlService, id, 'disable'); if (readOnly) return readOnly;
             const pkg = registry.disablePackage(id);
             if (!pkg) return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
             try {
@@ -687,6 +763,11 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         if (parts.length === 1 && m === 'DELETE') {
             const denied = requireManageMetadata(deps, _context); if (denied) return denied;
             const id = decodeURIComponent(parts[0]);
+            // [#7560] ADR-0070: refuse BEFORE `uninstallPackage`, which is the
+            // call that removed a platform package from the running registry
+            // listing (and with it every object the package registers) until
+            // the next restart.
+            const readOnly = requireWritablePackage(deps, qlService, id, 'delete'); if (readOnly) return readOnly;
             const registryRemoved = registry.uninstallPackage(id);
 
             // Persisted removal (AI/runtime packages live in sys_metadata, not

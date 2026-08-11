@@ -12,6 +12,9 @@ import { readEnvWithDeprecation, resolveTenancyPosture } from '@objectstack/type
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import type { MetadataHostEngine } from './host-engine.js';
 import { evaluateRuntimeAuthoringGate } from './runtime-authoring-gate.js';
+// [#7560] ADR-0070's read-only-package rule, shared with the `/packages`
+// lifecycle gate in `@objectstack/runtime` — see `./package-writability.js`.
+import { isWritablePackage as isWritablePackageShared } from './package-writability.js';
 import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
 // [#6418] `sys_metadata`'s overlay-uniqueness indexes: probe-first DDL plus the
 // ADR-0120 D4 reporting that replaced this file's empty `catch` blocks.
@@ -8283,35 +8286,20 @@ export class ObjectStackProtocolImplementation implements
 
     /**
      * True when `packageId` is a **writable base** — a DB-backed package an
-     * org or the AI may author *new* metadata into (ADR-0070 D2). The two
-     * read-only kinds return `false`:
+     * org or the AI may author *new* metadata into (ADR-0070 D2).
      *
-     *   • **Booted code packages** — they register a manifest into the engine
-     *     at startup (`registerApp` → `engine.manifests`); their items are
-     *     code-shipped artifacts. Only `allowOrgOverride` overlays are allowed
-     *     (ADR-0005), never fresh authored items.
-     *   • **Installed / platform packages** — manifest `scope` is `system` or
-     *     `cloud` (marketplace / platform-delivered).
-     *
-     * A project-scoped DB package, or a bare ADR-0048 *authoring-workspace* id
-     * with no registered manifest, is writable.
-     *
-     * NOTE: the code-package signal is the engine manifest map ONLY — we
-     * deliberately do NOT fall back to "owns ≥1 registered object" (the old
-     * `isLoadedPackage` heuristic). A writable base accrues registered objects
-     * once its drafts publish, and that must never flip the base to read-only
-     * — that is the exact #2252 read-only-after-publish trap this ADR removes.
+     * [#7560] The rule itself moved to {@link isWritablePackage} in
+     * `./package-writability.js` because it gained a SECOND caller: the
+     * `/packages` lifecycle routes, which must refuse to disable or delete a
+     * read-only package the same way this path refuses to author into one. Two
+     * hand-kept copies of "which packages are read-only" is precisely the drift
+     * that let `DELETE /packages/:id` remove a platform package from a live
+     * deployment while `saveMetaItem` was refusing to add one field to it. This
+     * method stays as the in-class spelling; the shared function is the
+     * definition, and its doc comment carries the reasoning.
      */
     private isWritablePackage(packageId: string | null | undefined): boolean {
-        if (!packageId) return false;
-        const engine = this.engine as any;
-        // Booted code package → read-only artifact source.
-        if (engine?.manifests?.has?.(packageId)) return false;
-        // Installed / platform package → read-only by manifest scope.
-        const scope = engine?.registry?.getPackage?.(packageId)?.manifest?.scope;
-        if (scope === 'system' || scope === 'cloud') return false;
-        // Project-scoped base, or unregistered authoring-workspace id → writable.
-        return true;
+        return isWritablePackageShared(this.engine, packageId);
     }
 
     /**

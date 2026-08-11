@@ -181,6 +181,13 @@ export const ERROR_CODE_LEDGER = {
     'SIGN_IN_REQUIRED',
     'UNSUPPORTED',
     'VALIDATION_FAILED',
+    // [#7560] ADR-0070: the `/packages` LIFECYCLE routes (`PATCH /:id/disable`,
+    // `DELETE /:id`) refuse a read-only — code- or platform-provided — package.
+    // Second EMITTER of the code `@objectstack/metadata-protocol` already
+    // registers for the authoring half (`saveMetaItem`); one condition, one
+    // vocabulary. Per this file's header, a code emitted by several packages is
+    // listed once per emitting package — provenance, not identity.
+    'WRITABLE_PACKAGE_REQUIRED',
     'WRONG_PASSWORD',
   ],
   '@objectstack/service-storage': [
