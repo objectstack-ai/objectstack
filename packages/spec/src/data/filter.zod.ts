@@ -415,14 +415,18 @@ export const RangeOperatorSchema = lazySchema(() => z.object({
  *
  * The `$contains`-family alignment the ruling above requires is likewise part
  * done rather than pending: #6518 made that family case-EXACT across the SQL
- * dialects, while `driver-memory`'s query path and `driver-mongodb` still fold
- * the whole Unicode range — the two rows #6682 tracks.
+ * dialects and #6682 did the same on `driver-mongodb` (the hardcoded
+ * `$options: 'i'` is off all four arms, and that driver's every face — query,
+ * count, write and the aggregation `$match` — routes through the one
+ * `translateFilter`, so there is no second answer). `driver-memory`'s query and
+ * analytics faces still fold the whole Unicode range while its reference
+ * matcher does not — the one row #6682 still tracks, and the one package that
+ * answers this operator two ways.
  *
  * `FILTER_TEXT_CASES` (`filter-text-conformance.ts`) is the standard that
  * measures all of the above, and the driver-conformance ledger still carries a
- * DEBT row for `driver-memory` and `driver-mongodb` — on requirement 2 alone
- * now, since #6520 closed requirement 1 on both — so what is open stays counted
- * rather than assumed.
+ * DEBT row for `driver-memory` — on requirement 2 alone now, since #6520 closed
+ * requirement 1 — so what is open stays counted rather than assumed.
  *
  * @see FILTER_TEXT_CASES — the conformance standard for every operator here.
  * @see RETIRED_FILTER_OPERATORS — why `$regex` is not in this list.
