@@ -2158,6 +2158,30 @@ export class SchemaRegistry {
   }
 
   /**
+   * [#7557] Whether `name` addresses an object whose OWNING package is
+   * disabled — the object-shaped question {@link isPackageDisabled} cannot
+   * answer on its own, because an object's `_packageId` is a decoration
+   * applied by {@link getAllObjects} and is absent from a bare
+   * {@link getObject} read.
+   *
+   * Name resolution deliberately reuses {@link resolveObjectKey}, the same
+   * name→FQN half the READ path uses. That is the #6808 lesson applied to
+   * enforcement: a gate that resolved names its own way could refuse an entry
+   * `getObject` never serves — or, worse, wave through the one it does. One
+   * resolution, so the read and the refusal cannot disagree about which
+   * contributor entry a bare name addresses.
+   *
+   * Asks about the OWNER (`ownership: 'own'`), not about every contributor: an
+   * overlay contributed by a disabled package must not take the object it
+   * decorates offline with it.
+   */
+  isObjectPackageDisabled(name: string): boolean {
+    const fqn = this.resolveObjectKey(name);
+    if (fqn === undefined) return false;
+    return this.isPackageDisabled(this.getObjectOwner(fqn)?.packageId);
+  }
+
+  /**
    * Get all registered metadata types (Kinds)
    */
   getRegisteredTypes(): string[] {

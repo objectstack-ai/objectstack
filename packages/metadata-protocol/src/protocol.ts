@@ -4324,14 +4324,28 @@ export class ObjectStackProtocolImplementation implements
         // MetadataService merges above can re-introduce them (e.g. an app/view
         // persisted in sys_metadata). Re-apply the filter on the final merged
         // set so a disabled package's metadata stops surfacing in the console.
-        // Never filter `package` (the Packages page must list disabled packages
-        // to re-enable them) nor `object`/`objects` (filtering objects would
-        // break data queries that depend on their schema).
-        if (
-            request.type !== 'package' &&
-            request.type !== 'object' &&
-            request.type !== 'objects'
-        ) {
+        //
+        // Never filter `package`: the Packages page must list disabled packages
+        // to re-enable them, so filtering it would make disable irreversible.
+        //
+        // [#7557] `object` USED to be exempt here too, on the reasoning that
+        // "filtering objects would break data queries that depend on their
+        // schema". That conflated two different readers. Data queries resolve
+        // schema through `registry.getObject` / `listItems('object')` — the
+        // registry primitives, which this filter does not touch and which
+        // deliberately keep serving a disabled package's objects so migrations,
+        // cross-package references and the runtime authoring gate (`protocol.ts`
+        // resolution context) still see a complete object universe. NOTHING
+        // resolves a query's schema through `getMetaItems`, which is the API
+        // READ surface. So the exemption bought no safety and cost the
+        // enforcement: `/meta/objects` kept listing a disabled package's objects
+        // while its nav and views correctly vanished.
+        //
+        // The data plane is refused separately and loudly, in
+        // `assertObjectRegistered` (`OBJECT_PACKAGE_DISABLED`) — absence here
+        // and refusal there are the two halves of one answer, pinned together
+        // by `protocol.package-disable-enforcement.test.ts`.
+        if (request.type !== 'package') {
             items = (items as any[]).filter(
                 (it) => !this.engine.registry.isPackageDisabled((it as any)?._packageId),
             );
@@ -5192,7 +5206,44 @@ export class ObjectStackProtocolImplementation implements
             }
             return;
         }
-        if (registry.getObject(object)) return;
+        if (registry.getObject(object)) {
+            // [#7557] Registered is not the same as SERVING. A disabled package
+            // keeps its objects registered on purpose — disable is reversible
+            // and destroys no data, and the schema stays resolvable for the
+            // machinery that needs it (the runtime authoring gate resolves its
+            // object universe through `listItems('object')`, migrations and
+            // cross-package references through `getObject`). What must stop is
+            // the API serving its rows, which until now it did: nav and views
+            // dropped on disable while `GET /data/<object>` still answered 200
+            // with every row.
+            //
+            // Refused LOUDLY rather than by silent absence. The 404 status
+            // matches the closest sibling in this codebase — `OBJECT_API_DISABLED`
+            // for `enable.apiEnabled: false` (rest-server.ts) — so "this object
+            // exists but is switched off" keeps ONE status across both switches,
+            // and it keeps the data plane consistent with the metadata listing,
+            // which now drops the object too (`getMetaItems`). The distinct code
+            // is what makes it loud: a bare `OBJECT_NOT_FOUND` sends a caller —
+            // an AI agent especially — hunting for a typo or re-creating an
+            // object that is merely switched off, while this one names the cause
+            // and therefore the fix (re-enable the package).
+            //
+            // Optional-called: registry doubles across the test suites implement
+            // `isPackageDisabled` but not this, and a host whose registry cannot
+            // answer must not have every read refused.
+            if (typeof registry.isObjectPackageDisabled === 'function'
+                && registry.isObjectPackageDisabled(object)) {
+                const disabled: any = new Error(
+                    `Object '${object}' belongs to a disabled package and is not being served. `
+                    + 'Re-enable the package to restore access.',
+                );
+                disabled.code = 'OBJECT_PACKAGE_DISABLED';
+                disabled.status = 404;
+                disabled.object = object;
+                throw disabled;
+            }
+            return;
+        }
         const err: any = new Error(`Object '${object}' not found`);
         err.code = 'OBJECT_NOT_FOUND';
         err.status = 404;
