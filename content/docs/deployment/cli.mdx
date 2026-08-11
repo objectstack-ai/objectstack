@@ -1017,7 +1017,17 @@ os test                               # Default: qa/*.test.json
 os test qa/my-test.json               # Specific test file
 os test --url http://localhost:4000    # Custom server URL
 os test --token my-api-key            # With authentication
+os test 'qa/**/*.test.json'           # Recursive — quote it, or the shell expands it first
 ```
+
+The pattern accepts `*` (one path segment) and `**` (any number of segments);
+every other character is matched literally. A **wildcard** never descends into
+`node_modules`, `.git`, `dist` or `build`: a wildcard is a search of your own
+sources, and a suite found in a dependency or in build output is one `os test`
+would otherwise load and **run against your server**. Naming such a directory
+still reaches it — `packages/*/dist/*.test.json` walks `dist` because you asked
+for `dist`. Matches run in sorted order, so a suite runs in the same position on
+every machine.
 
 Each file is validated against `TestSuiteSchema` **before it runs**. A suite that
 does not match is refused at load time, naming the file and every offending path,
