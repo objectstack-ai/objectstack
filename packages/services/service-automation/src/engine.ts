@@ -689,6 +689,21 @@ export interface StepLogEntry {
     /** Which region kind the step ran in: `loop-body` | `parallel-branch` | `try` | `catch`. */
     regionKind?: string;
     /**
+     * #7546: zero-based `try_catch` attempt this step ran in — `0` is the first
+     * try, `1` the first retry. Set only on `try`-region steps, and only by a
+     * container that actually retries, so its presence is itself the signal
+     * that a retry ladder ran.
+     *
+     * Not new vocabulary: `retryAttempt` has been declared on the spec's
+     * `ExecutionStepLogSchema` since the schema was written, with exactly this
+     * meaning ("Retry attempt number (0 = first try)") and — until now — no
+     * producer anywhere in the engine. Surfacing failed attempts (#7546) is
+     * what finally gives the declared key a writer, which is the direction
+     * declared-=-enforced asks for: consume the existing declaration rather
+     * than invent a second spelling beside it.
+     */
+    retryAttempt?: number;
+    /**
      * #4354: records this step read / wrote, copied from
      * {@link NodeExecutionResult.metrics}. Folded into the run summary.
      */
@@ -5362,9 +5377,27 @@ export class AutomationEngine implements IAutomationService {
      * so the calling container node can fold them into the parent run log via
      * `NodeExecutionResult.childSteps`. Tagging only fills fields left undefined,
      * so when regions nest, each step keeps its **innermost** container's
-     * `parentNodeId` / `iteration` / `regionKind`. On failure the region throws
-     * as before (preserving `try_catch` retry semantics); a failed attempt's
-     * partial steps are not surfaced.
+     * `parentNodeId` / `iteration` / `regionKind` / `retryAttempt`.
+     *
+     * #7546: a region that FAILS still throws — the `try_catch` retry/throw
+     * semantics are untouched — but its partial steps are no longer discarded.
+     * They are tagged exactly like a successful region's and handed to the
+     * caller through the `partialSteps` sink before the throw propagates, so a
+     * container that recovers from the failure can still fold them into the run
+     * log. Until this, a caught failure left NO trace at all: the container's
+     * own step read `success`, nothing carried `regionKind: 'try'`, nothing
+     * carried `status: 'failure'`, and an operator could not tell what failed,
+     * how many attempts ran, or which node threw — the only evidence a failure
+     * had happened was the catch region's side effects. The steps always
+     * existed (a failing node pushes its own `failure` step into the region's
+     * array before it throws); they were simply dropped on the floor when the
+     * region unwound.
+     *
+     * A sink rather than a return value because the failure path's contract is
+     * still "throw": handing the steps back through the exception would either
+     * change what callers catch or require a bespoke error type, and both are
+     * larger seams than an out-parameter the two callers that want it opt into.
+     * Callers that do not pass a sink (`loop`, `parallel`) are unaffected.
      *
      * Durable pause (`suspend`) inside a region is not supported in this
      * iteration — it is converted into a clear error (mirrors the `subflow`
@@ -5374,7 +5407,8 @@ export class AutomationEngine implements IAutomationService {
         region: FlowRegionParsed,
         variables: Map<string, unknown>,
         context: AutomationContext,
-        grouping?: { parentNodeId: string; iteration?: number; regionKind?: string },
+        grouping?: { parentNodeId: string; iteration?: number; regionKind?: string; retryAttempt?: number },
+        partialSteps?: StepLogEntry[],
     ): Promise<StepLogEntry[]> {
         const entryId = findRegionEntry(region);
         const entry = region.nodes.find(n => n.id === entryId);
@@ -5384,9 +5418,31 @@ export class AutomationEngine implements IAutomationService {
         // A synthetic flow view — executeNode/traverseNext only read `nodes`/`edges`.
         const subFlow = { nodes: region.nodes, edges: region.edges ?? [] } as unknown as FlowParsed;
         const regionSteps: StepLogEntry[] = [];
+        // Tag this region's steps with their immediate container. Innermost wins:
+        // a step that already carries a `parentNodeId` (set by a nested region)
+        // is left untouched. Shared by the success and failure paths (#7546) so
+        // a failed attempt's steps are indistinguishable in SHAPE from a
+        // successful one's — they differ only in their own `status`.
+        const tag = (): void => {
+            if (!grouping) return;
+            for (const step of regionSteps) {
+                if (step.parentNodeId === undefined) {
+                    step.parentNodeId = grouping.parentNodeId;
+                    if (grouping.iteration !== undefined) step.iteration = grouping.iteration;
+                    if (grouping.regionKind !== undefined) step.regionKind = grouping.regionKind;
+                    if (grouping.retryAttempt !== undefined) step.retryAttempt = grouping.retryAttempt;
+                }
+            }
+        };
         try {
             await this.executeNode(entry, subFlow, variables, context, regionSteps);
         } catch (err) {
+            // #7546: surface what the failed attempt DID get through before
+            // rethrowing. Tagged first so the caller receives finished records,
+            // and pushed into the caller's sink rather than returned because
+            // this path's contract is (still) to throw.
+            tag();
+            partialSteps?.push(...regionSteps);
             if (isSuspendSignal(err)) {
                 throw new Error(
                     `durable pause inside a structured region (node '${err.nodeId}') is not supported`,
@@ -5394,18 +5450,7 @@ export class AutomationEngine implements IAutomationService {
             }
             throw err;
         }
-        // Tag this region's steps with their immediate container. Innermost wins:
-        // a step that already carries a `parentNodeId` (set by a nested region)
-        // is left untouched.
-        if (grouping) {
-            for (const step of regionSteps) {
-                if (step.parentNodeId === undefined) {
-                    step.parentNodeId = grouping.parentNodeId;
-                    if (grouping.iteration !== undefined) step.iteration = grouping.iteration;
-                    if (grouping.regionKind !== undefined) step.regionKind = grouping.regionKind;
-                }
-            }
-        }
+        tag();
         return regionSteps;
     }
 
