@@ -63,7 +63,7 @@ A test assertion that validates the result of a test action
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **field** | `string` | ✅ | Field path in the result to check (e.g. "body.data.0.status") |
+| **field** | `string` | ✅ | Field path in the result to check, resolved against the parsed response body root — no "body." prefix (e.g. "data.0.status") |
 | **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'is_null' \| 'not_null' \| 'gt' \| 'gte' \| 'lt' \| 'lte' \| 'error'>` | ✅ | Comparison operator to use |
 | **expectedValue** | `any` | ✅ | Expected value to compare against |
 
@@ -126,7 +126,7 @@ A single step in a test scenario, consisting of an action and optional assertion
 | **description** | `string` | optional | Human-readable description of what this step tests |
 | **action** | `{ type: Enum<'create_record' \| 'update_record' \| 'delete_record' \| 'read_record' \| … +4 more>; target: string; payload?: Record<string, any>; user?: string }` | ✅ | The action to execute in this step |
 | **assertions** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'is_null' \| 'not_null' \| … +5 more>; expectedValue: any }[]` | optional | Assertions to validate after the action completes |
-| **capture** | `Record<string, string>` | optional | Map result fields to context variables: `{ "newId": "body.id" }` |
+| **capture** | `Record<string, string>` | optional | Map result fields to context variables, paths resolved against the response body root (e.g. `{ "newId": "data.id" }`) |
 
 
 ---

@@ -26,6 +26,7 @@ import {
   SECURITY_MASTER_DETAIL_UNGRANTED,
   SECURITY_GRANT_EXPIRED_AT_AUTHORING,
   SECURITY_DELEGATION_MISSING_REASON,
+  SECURITY_CBP_NO_RELATION,
 } from './validate-security-posture.js';
 
 const rulesOf = (stack: Record<string, unknown>) =>
@@ -36,14 +37,28 @@ describe('validateSecurityPosture (ADR-0090 D7)', () => {
     const findings = validateSecurityPosture({
       objects: [
         { name: 'leave_request', label: 'Leave Request', sharingModel: 'private', fields: { title: { name: 'title', label: 'Title' } } },
-        { name: 'leave_item', label: 'Leave Item', sharingModel: 'controlled_by_parent' },
+        // [#7503] This fixture used to declare `controlled_by_parent` with NO
+        // fields at all — i.e. the clean-stack fixture of the security linter
+        // was itself an instance of the defect `security-controlled-by-parent-
+        // no-relation` now reports (runtime: 422 on write, deny on read). It is
+        // a detail object, so it is given the master_detail it always implied.
+        {
+          name: 'leave_item', label: 'Leave Item', sharingModel: 'controlled_by_parent',
+          fields: { request: { name: 'request', type: 'master_detail', reference: 'leave_request', required: true } },
+        },
         { name: 'sys_internal', label: 'Internal' }, // system prefix — exempt from OWD rules
       ],
       permissions: [
         {
           name: 'hr_user',
           label: 'HR User',
-          objects: { leave_request: { allowRead: true, allowCreate: true, readScope: 'unit' } },
+          objects: {
+            leave_request: { allowRead: true, allowCreate: true, readScope: 'unit' },
+            // The detail now carries a master_detail (above), so it needs its
+            // own object-level CRUD grant or `security-master-detail-ungranted`
+            // fires — gate ① is never derived from the master (ADR-0055).
+            leave_item: { allowRead: true, allowCreate: true },
+          },
         },
       ],
       positions: [{ name: 'hr_specialist', label: 'HR Specialist' }],
@@ -363,6 +378,130 @@ describe('validateSecurityPosture · master-detail detail ungranted (framework#2
   });
 });
 
+// ── Rule: security-controlled-by-parent-no-relation (#7503 / #7474) ───
+//
+// The accept bar is the rule's own probe, and it is FOUR fixtures, not one: the
+// defect shape must be reported, and each of the THREE shapes the runtime
+// `resolveCbpRelation` actually resolves must be silent — one negative control
+// per fallback step, because a rule that only mirrors step 1 would report two
+// perfectly working objects. The three steps (security-plugin.ts):
+//   1. a required `master_detail`   2. ANY `master_detail`   3. a required `lookup`
+// each additionally requiring a `reference` target — mirrored by the fourth
+// fixture pair below (a relation naming nothing resolves nothing).
+describe('validateSecurityPosture · controlled_by_parent with no relation (#7503)', () => {
+  const cbpOnly = (stack: Record<string, unknown>) =>
+    validateSecurityPosture(stack).filter((f) => f.rule === SECURITY_CBP_NO_RELATION);
+
+  /** A cbp object carrying exactly the fields under test, plus its master. */
+  const cbpStack = (fields: unknown): Record<string, unknown> => ({
+    objects: [
+      { name: 'work_order', label: 'Work Order', sharingModel: 'private', fields: { name: { name: 'name', label: 'Name' } } },
+      { name: 'work_order_item', label: 'Work Order Item', sharingModel: 'controlled_by_parent', fields },
+    ],
+  });
+
+  // ── POSITIVE CONTROL — the rule must be able to SEE before any silence
+  // below is worth believing (a rule wired to nothing is silent on everything).
+  it('errors on a controlled_by_parent object with no relation at all', () => {
+    const findings = cbpOnly(cbpStack({ note: { name: 'note', type: 'text', label: 'Note' } }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      severity: 'error',
+      rule: SECURITY_CBP_NO_RELATION,
+      where: 'object "work_order_item"',
+      path: 'objects[1].sharingModel',
+    });
+    expect(findings[0].message).toContain('controlled_by_parent');
+    expect(findings[0].message).toContain('422');
+    expect(findings[0].hint).toContain('master_detail');
+  });
+
+  it('errors when the object declares no fields key whatsoever', () => {
+    expect(cbpOnly(cbpStack(undefined))).toHaveLength(1);
+  });
+
+  // ── NEGATIVE CONTROLS — one per fallback step of `resolveCbpRelation` ──
+  it('stays silent on step 1: a REQUIRED master_detail', () => {
+    expect(
+      cbpOnly(cbpStack({ order: { name: 'order', type: 'master_detail', reference: 'work_order', required: true } })),
+    ).toEqual([]);
+  });
+
+  it('stays silent on step 2: ANY master_detail (not marked required)', () => {
+    expect(
+      cbpOnly(cbpStack({ order: { name: 'order', type: 'master_detail', reference: 'work_order' } })),
+    ).toEqual([]);
+  });
+
+  it('stays silent on step 3: a REQUIRED lookup', () => {
+    expect(
+      cbpOnly(cbpStack({ order: { name: 'order', type: 'lookup', reference: 'work_order', required: true } })),
+    ).toEqual([]);
+  });
+
+  // The step-3 predicate is `lookup AND required` — an optional lookup is NOT a
+  // fourth resolution step at runtime, so it must still be reported. This is the
+  // "plausible thing for an agent to write" shape #7503 names: cbp next to a
+  // lookup someone forgot to mark required.
+  it('errors on an OPTIONAL lookup — the runtime does not resolve one', () => {
+    expect(cbpOnly(cbpStack({ order: { name: 'order', type: 'lookup', reference: 'work_order' } }))).toHaveLength(1);
+  });
+
+  // `pick` requires `pred(f) && ref(f)`: a relation naming no target resolves
+  // nothing, on every one of the three steps.
+  it.each([
+    ['required master_detail', { name: 'order', type: 'master_detail', required: true }],
+    ['bare master_detail', { name: 'order', type: 'master_detail' }],
+    ['required lookup', { name: 'order', type: 'lookup', required: true }],
+  ])('errors when the %s names no reference target', (_label, field) => {
+    expect(cbpOnly(cbpStack({ order: field }))).toHaveLength(1);
+  });
+
+  it('picks up a later relation when an earlier one names no target', () => {
+    expect(
+      cbpOnly(
+        cbpStack({
+          broken: { name: 'broken', type: 'master_detail', required: true },
+          order: { name: 'order', type: 'master_detail', reference: 'work_order', required: true },
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  it('detects the defect in the array field form too', () => {
+    expect(cbpOnly(cbpStack([{ name: 'note', type: 'text', label: 'Note' }]))).toHaveLength(1);
+    expect(
+      cbpOnly(cbpStack([{ name: 'order', type: 'master_detail', reference: 'work_order', required: true }])),
+    ).toEqual([]);
+  });
+
+  // Not scoped to `controlled_by_parent`'s absence of a relation in general:
+  // an object with any OTHER sharing model owes no derivation and is silent
+  // however few relations it has.
+  it.each(['private', 'public_read', 'public_read_write'])(
+    'stays silent for a relation-less object whose sharingModel is %s',
+    (model) => {
+      expect(
+        cbpOnly({ objects: [{ name: 'standalone', label: 'S', sharingModel: model, fields: { a: { name: 'a', type: 'text' } } }] }),
+      ).toEqual([]);
+    },
+  );
+
+  // Unlike the D1 unset-OWD rule, system objects are NOT exempt: the runtime
+  // refusal (`assertControlledByParentWrite` / `computeControlledByParentFilter`)
+  // does not exempt them, and the defect is intrinsic to the declaration.
+  it('reports system objects too — the runtime refusal does not exempt them', () => {
+    expect(
+      cbpOnly({
+        objects: [
+          { name: 'sys_thing_audit', sharingModel: 'controlled_by_parent', fields: { a: { name: 'a', type: 'text' } } },
+          { name: 'thing_internal', isSystem: true, sharingModel: 'controlled_by_parent', fields: { a: { name: 'a', type: 'text' } } },
+        ],
+      }),
+    ).toHaveLength(2);
+  });
+});
+
 describe('validateSecurityPosture · book audience (ADR-0046 §6.7 / ADR-0090)', () => {
   it('flags the reserved word in book names and labels', () => {
     const findings = validateSecurityPosture({
@@ -589,7 +728,11 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
   },
   // `reference_to` is absent — the other half of the #5017 fix.
   { receiver: 'def', expected: ['reference'], declaredBy: 'FieldSchema', keys: () => Object.keys(FieldSchema.shape) },
-  { receiver: 'f', expected: ['label', 'name', 'type'], declaredBy: 'FieldSchema', keys: () => Object.keys(FieldSchema.shape) },
+  // `required` joined this list with #7503: `resolveCbpRelation` mirrors the
+  // runtime's three-step fallback, whose steps 1 and 3 are predicated on it.
+  { receiver: 'f', expected: ['label', 'name', 'required', 'type'], declaredBy: 'FieldSchema', keys: () => Object.keys(FieldSchema.shape) },
+  // [#7503] The field `resolveCbpRelation` settled on — a FieldSchema record.
+  { receiver: 'found', expected: ['name', 'type'], declaredBy: 'FieldSchema', keys: () => Object.keys(FieldSchema.shape) },
   {
     receiver: 'p',
     expected: ['allowCreate', 'allowDelete', 'allowEdit', 'allowRead', 'modifyAllRecords', 'readScope', 'viewAllRecords'],
@@ -676,6 +819,7 @@ describe('validateSecurityPosture — reads only keys the spec declares (meta-te
     const PLUMBING = new Set([
       'findings', 'objects', 'permissionSets', 'privateObjects', 'grantedObjects', 'stackSetNames',
       'records', 'reason', 'until', 'setName', 'flsKey', 'opts', 'path', 'i', 'e', 'fields', 'crm_opportunity',
+      'entries', // #7503: the rule's own field list — `.find`, a JS method.
     ]);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
   });
@@ -787,6 +931,7 @@ const RULE_IDS: Record<string, string> = {
   SECURITY_FLS_UNQUALIFIED_KEY,
   SECURITY_GRANT_EXPIRED_AT_AUTHORING,
   SECURITY_DELEGATION_MISSING_REASON,
+  SECURITY_CBP_NO_RELATION,
 };
 
 const TEXT_FIELD = { a: { type: 'text', label: 'A' } } as const;
@@ -838,6 +983,12 @@ const REACHABILITY_CORPUS: Array<{ label: string; stack: Record<string, unknown>
     },
   },
   {
+    label: 'cbp-no-relation',
+    stack: {
+      objects: [objectFixture({ name: 'line_item', sharingModel: 'controlled_by_parent' })],
+    },
+  },
+  {
     label: 'grant-expired-at-authoring',
     stack: { data: [{ object: 'sys_user_position', records: [{ user_id: 'u1', position: 'p', valid_until: '2020-01-01T00:00:00Z' }] }] },
   },
@@ -853,7 +1004,7 @@ describe('validateSecurityPosture — every branch is reachable without an undec
   });
 
   it('maps every `findings.push` site in the source', () => {
-    expect(pushedRuleIds()).toHaveLength(15);
+    expect(pushedRuleIds()).toHaveLength(16);
   });
 
   it('reaches every `findings.push` site from that corpus', () => {

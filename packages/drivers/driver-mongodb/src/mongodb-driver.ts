@@ -509,7 +509,18 @@ export class MongoDBDriver implements IDataDriver {
     const pipeline = buildAggregationPipeline({
       where: query.where,
       aggregations,
-      groupBy: (query as any).groupBy,
+      // [#6850] Was `(query as any).groupBy`. `DriverQuery` declares this key as
+      // `GroupByNode[]` — a union of a bare field name and a structured
+      // `{ field, dateGranularity?, alias? }` node — and this cast is what kept
+      // the declaration from ever meeting the builder's `string[]` annotation at
+      // `tsc`, so a structured node stringified into a `"[object Object]"`
+      // `$group._id` rather than failing to compile. Both sides now spell the
+      // declared type, so the next drift between them is a type error.
+      //
+      // The `aggregations` read above keeps its cast for now: it also carries
+      // the undeclared `query.aggregate` limb that #6321 deleted from the SQL
+      // faces, which is a separate convergence and not this card.
+      groupBy: query.groupBy,
       orderBy: query.orderBy as Array<{ field: string; order?: string }>,
       limit: query.limit,
       offset: query.offset,
