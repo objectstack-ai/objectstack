@@ -20,7 +20,7 @@
 // the library does around our write.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { assertEngineDeleteDispatch } from '@objectstack/objectql';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { runWithEndpointContext } from '@better-auth/core/context';
 import { AuthManager } from './auth-manager';
 import { BETTER_AUTH_MOUNTED_SURFACE } from './auth-route-ledger';
@@ -40,10 +40,15 @@ import {
  * through the same library and a second, more forgiving fake would be able to
  * disagree with it.
  *
- * `delete` is pinned to ObjectQL's own dispatch predicate
- * ({@link assertEngineDeleteDispatch}) rather than being a free-form filter:
- * several tests below turn on a delete NOT happening, and a fake that accepted
- * a malformed delete would report that as success.
+ * `delete` AND `update` are both pinned to ObjectQL's own dispatch predicates
+ * ({@link assertEngineDeleteDispatch} / {@link assertEngineUpdateDispatch})
+ * rather than being free-form filters. Both fire for real here: several tests
+ * turn on a delete NOT happening, and the whole fix is an `update` the real
+ * engine has to accept — a fake looser than `ObjectQLEngine.update` could green
+ * a tombstone write the engine would refuse. (`session-of-record.test.ts`'s
+ * copy of this fake still carries the #5480 `update` DEBT entry in
+ * `scripts/engine-double-contract.baseline.json`; a new double does not get to
+ * inherit it.)
  */
 const createMemoryEngine = () => {
   const tables = new Map<string, any[]>();
@@ -103,8 +108,14 @@ const createMemoryEngine = () => {
     async count(name: string, q: any = {}) {
       return rows(name).filter((r) => matches(r, q.where)).length;
     },
-    async update(name: string, patch: any) {
-      const row = rows(name).find((r) => r.id === patch.id);
+    async update(name: string, patch: any, options?: any) {
+      const dispatch = assertEngineUpdateDispatch(patch, options);
+      if (dispatch.kind === 'multi') {
+        const hit = rows(name).filter((r) => matches(r, options?.where));
+        for (const row of hit) Object.assign(row, patch);
+        return hit.length;
+      }
+      const row = rows(name).find((r) => r.id === dispatch.id);
       if (!row) return null;
       Object.assign(row, patch);
       return { ...row };
