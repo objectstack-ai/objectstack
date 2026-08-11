@@ -15,10 +15,17 @@
  * right" into "the pattern selects the right rows".
  *
  * This file deliberately drives the shared text fixture's ROWS rather than
- * naming that case-set's marker export: doing the latter would flip this
- * driver's conformance cell to covered while requirement 2 (the `$contains`
- * family's hardcoded `$options: 'i'`) is still open — #6682 — and an entry for a
- * covered cell fails the gate's RECONCILED invariant.
+ * naming that case-set's marker export: doing the latter would have flipped
+ * this driver's conformance cell to covered while requirement 2 (the
+ * `$contains` family's hardcoded `$options: 'i'`) was still open — #6682 — and
+ * an entry for a covered cell fails the gate's RECONCILED invariant.
+ *
+ * [#6682] That requirement is answered now, and the marker is imported by
+ * `mongodb-filter-text-conformance.test.ts`, which is what CONSUMED counts and
+ * where the ledger row used to be. This file stays as it is rather than being
+ * folded into that one: it asserts the emitted PATTERN (`[Aa][Cc]…`, which the
+ * case-set cannot express — it speaks in row ids), and the spelled-out cases
+ * here are the ASCII-boundary reasoning in the form the #6520 card left it.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -47,15 +54,25 @@ describe('[#6520] $icontains translates to an ASCII-only case-insensitive $regex
   });
 
   /**
-   * The contrast that makes the row above meaningful: the four case-EXACT
-   * operators still carry the hardcoded `$options: 'i'` this driver has always
-   * had. That is a DEFECT (#6682 — those four must be case-sensitive), pinned
-   * here as the current state so that "fixed the family" and "broke
-   * `$icontains`" cannot be confused for one another.
+   * The contrast that makes the row above meaningful, FLIPPED by #6682.
+   *
+   * This assertion used to pin the DEFECT — the four case-EXACT operators
+   * carrying the hardcoded `$options: 'i'` this driver had always had — so that
+   * "fixed the family" and "broke `$icontains`" could not be confused for one
+   * another. The family is fixed now, so the pin asserts the ruled answer
+   * rather than being deleted: `$contains` emits a bare pattern, `$icontains`
+   * emits the ASCII class expansion, and the two remain visibly DIFFERENT
+   * spellings — which is what this row has always guarded. Neither is
+   * `$options: 'i'`, the retired spelling this driver refuses on input (#5702).
    */
-  it('does not disturb the $contains family — still `$options: i` (the open #6682 defect)', () => {
+  it('the $contains family is case-SENSITIVE beside it — a bare pattern, no $options (#6682)', () => {
     expect(translateFilter({ name: { $contains: 'acme' } })).toEqual({
-      name: { $regex: 'acme', $options: 'i' },
+      name: { $regex: 'acme' },
+    });
+    // …and the two arms have NOT collapsed into one answer: `$icontains` still
+    // folds ASCII case, `$contains` no longer folds anything.
+    expect(translateFilter({ name: { $icontains: 'acme' } })).toEqual({
+      name: { $regex: '[Aa][Cc][Mm][Ee]' },
     });
   });
 

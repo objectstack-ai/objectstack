@@ -276,7 +276,7 @@
       "title": "Every demonstrable flow node type authors in the designer, executes in a run, and surfaces its step in run logs",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -323,7 +323,8 @@
         "approval chain: PATCH a showcase_expense_report to submitted (approval via showcase_expense_signoff); PATCH a showcase_project budget above 100000 to open showcase_budget_approval, then POST /api/v1/approvals/requests/:id/revise so the run parks at the approval_revise node",
         "webhook chain: POST /api/v1/automation/hooks/showcase_inbound_task_webhook/intake with a valid x-objectstack-signature HMAC (secret 'showcase-webhook-secret') to exercise create_record",
         "for EACH variant: GET the owning flow's runs (GET /api/v1/automation/<name>/runs + /runs/:runId) and locate a step whose nodeType equals the variant; record run id, step status, and — for suspending types — the paused-then-resumed transition",
-        "screenshot the Runs panel of one composite run (showcase_project_escalation or showcase_fan_out_notify) showing the container-nested steps"
+        "screenshot the Runs panel of one composite run (showcase_project_escalation or showcase_fan_out_notify) showing the container-nested steps",
+        "unknown-type probe (the late-binding contract, ruled status quo in #7545): POST /api/v1/automation a flow whose one non-start node carries type 'bogus_node' — capture the HTTP status and the server log record the registration emits, then POST /api/v1/automation/<that flow>/trigger and read GET /api/v1/automation/<that flow>/runs/:runId"
       ],
       "acceptance": [
         {
@@ -355,10 +356,16 @@
           "oracle": "api",
           "verify": "spot-check one body step per container kind for parentNodeId + regionKind (deep coverage lives in automation.flow-run-step-nesting)",
           "evidence": "tagged step excerpts"
+        },
+        {
+          "clause": "an UNKNOWN node type is late-bound, not refused — and a run reads that as PASS BY DESIGN (maintainer ruling on #7545, 2026-08-11: registration-time soft-fail on an unknown node type is the intended posture, 'deliberate late binding with a declaration — not tolerance masking an error'). The contract has four parts and ALL FOUR must hold: (1) POST /api/v1/automation with type 'bogus_node' answers 200 and really registers the flow; (2) the registration emits a located WARN whose message carries the load-bearing phrase 'no registered executor or descriptor' and names the offending flow, with unknownTypes + the FULL knownTypes vocabulary in the record's structured meta slot (#6654 — both lists ride meta, never the message text); (3) triggering that flow answers success:false carrying the NO_EXECUTOR-class message \"No executor registered for node type 'bogus_node'\"; (4) the run is recorded status 'failed', with the offending step status 'failure' and error.code 'NO_EXECUTOR'. Rationale, do not re-litigate: ADR-0018 §M1 has registerFlow() soft-validate node types against the live registry ('warn, don't hard-fail') so a flow authored against a currently-absent plugin still registers, and #4771 is the ordering incident that seam protects — the check fires only once sealNodeTypeVocabulary() has closed the vocabulary, and only for an ENABLED flow",
+          "oracle": "api",
+          "verify": "from the unknown-type probe step, cite all four: the 200 + the stored flow read-back; the WARN record (message phrase + meta.unknownTypes + meta.knownTypes); the trigger response success:false + its message; and the run detail status 'failed' with the NO_EXECUTOR step. The 200 at registration is the EXPECTED answer and is never on its own a finding — the finding is any of the other three parts missing",
+          "evidence": "registration status + WARN log record (message and meta) + trigger response + run-detail excerpt"
         }
       ],
       "negative": [
-        "registering a flow with an unregistered node type (e.g. type 'bogus_node') must be REFUSED at registerFlow / POST /api/v1/automation — the type is validated against the live action registry (ADR-0018), and silent acceptance of an inert node is the #1887 failure shape"
+        "the unknown-type probe going SILENT is the FAIL this clause guards — registration answering 200 with no WARN at all, or a WARN that drops the phrase 'no registered executor or descriptor' / omits meta.unknownTypes / omits the full meta.knownTypes vocabulary, is the #1887 silent-inert-node failure shape. So is the run side going quiet: a trigger answering success:true, a run not recorded 'failed', or a failed run whose step carries no NO_EXECUTOR error code. ⛔ The 200 itself is NOT a finding — #7545 ruled the registration-time soft-fail intended (ADR-0018 §M1, #4771); a run reporting FAIL on the 200 alone is misreading this item"
       ],
       "traps": [
         "wrong-panel",
@@ -375,7 +382,10 @@
         "packages/spec/src/automation/approval.zod.ts (APPROVAL_NODE_TYPE, APPROVAL_REVISE_NODE_TYPE)",
         "examples/app-showcase/src/coverage.ts (flowNodeTypes + FLOW_NODE_WAIVERS)",
         "examples/app-showcase/src/automation/flows/index.ts",
-        "packages/runtime/src/route-ledger.ts (GET /automation/actions, POST /automation/:name/trigger, GET /automation/:name/runs)"
+        "packages/runtime/src/route-ledger.ts (GET /automation/actions, POST /automation/:name/trigger, GET /automation/:name/runs)",
+        "docs/adr/0018-unified-node-action-registry.md §M1 (registerFlow() soft-validates node types against the live registry — 'warn, don't hard-fail')",
+        "packages/services/service-automation/src/engine.ts (registerFlow's ADR-0018 §M1 comment + the post-seal warn branch; warnUnknownNodeTypes's message and its unknownTypes/knownTypes meta; the NO_EXECUTOR step error in executeNode)",
+        "#7545 (maintainer ruling 2026-08-11 — status quo upheld: soft-fail at registration is the intended posture, so 200-on-unknown-type is pass-by-design)"
       ],
       "history": [
         {
@@ -389,6 +399,12 @@
           "date": "2026-08-08",
           "change": "pinned enumSource for the variants-freshness ratchet — spec enum drift is caught by the manual check on this item directly",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 3,
+          "date": "2026-08-11",
+          "change": "recorded the #7545 ruling: the unknown-node-type clause demanded a registration-time REFUSAL the platform never promised, so run #7516 read a by-design 200 as a FAIL. The clause now asserts the real four-part late-binding contract (200 + located WARN with unknownTypes/knownTypes in meta + trigger success:false with NO_EXECUTOR + run 'failed') as pass-by-design, and the negative names silence — not the 200 — as the failure shape",
+          "ref": "#7545 (ADR-0018 §M1, #4771; QA run #7516)"
         }
       ],
       "enumSource": {

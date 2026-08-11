@@ -51,13 +51,18 @@
  *   which is what `scripts/check-driver-conformance.mjs` counts as coverage.
  * - `driver-memory` and `driver-mongodb` ANSWER `$icontains` since #6520 — on
  *   all three of driver-memory's faces — with the same ASCII-only fold, so the
- *   first four rows of this table are satisfied everywhere. They still fold the
- *   `$contains` family over the whole Unicode range (#6682), which is why each
- *   still carries a measured DEBT row in that same gate's ledger rather than
- *   importing this table: coverage is judged by IMPORT, and a cell that answers
- *   one requirement and not the other must not claim the whole set. The ledger
- *   is RECONCILED against the imports on every run, so read the open set THERE
- *   rather than trusting a count written in prose here.
+ *   first four rows of this table are satisfied everywhere.
+ * - `driver-mongodb` answers the `$contains` family case-exactly since #6682,
+ *   and its suite (`mongodb-filter-text-conformance.test.ts`) imports this
+ *   whole table — every row, rejections included — so its DEBT row is gone.
+ * - `driver-memory` still folds the `$contains` family over the whole Unicode
+ *   range on its query and analytics faces while its reference matcher does
+ *   not (#6682), which is why it still carries a measured DEBT row in that
+ *   gate's ledger rather than importing this table: coverage is judged by
+ *   IMPORT, and a cell that answers one requirement and not the other must not
+ *   claim the whole set. The ledger is RECONCILED against the imports on every
+ *   run, so read the open set THERE rather than trusting a count written in
+ *   prose here.
  *
  * Rule 2 above still governs the open cells: the rows join a driver's suite
  * in the PR that closes its gap, not before.
@@ -84,7 +89,7 @@
  * @see https://github.com/objectstack-ai/objectstack/issues/5701 (this table)
  * @see https://github.com/objectstack-ai/objectstack/issues/5702 (the SQL family — landed)
  * @see https://github.com/objectstack-ai/objectstack/issues/6520 ($icontains on the JS faces — landed)
- * @see https://github.com/objectstack-ai/objectstack/issues/6682 (the $contains family on memory + mongodb — open)
+ * @see https://github.com/objectstack-ai/objectstack/issues/6682 (the $contains family — mongodb landed, memory open)
  */
 
 import type { FilterCondition } from './filter.zod';
@@ -249,16 +254,17 @@ export const FILTER_TEXT_CASES: readonly FilterTextCase[] = [
   // are #5702\'s work" was the score when these rows landed and has since split
   // (re-measured 2026-08, #6993, by executing each face): #6518 made the SQL
   // family case-exact (GLOB on the SQLite dialects), so those three drivers
-  // answer these rows today, while mongo\'s `$options: 'i'` is STILL hardcoded
-  // (`translateFilter` lowers `$contains` to `$regex` + `$options: 'i'`) and
-  // driver-memory\'s query path still folds Unicode — that remainder is #6682\'s
-  // work now, not #5702\'s. (`formula` and driver-memory\'s reference matcher
-  // measured case-exact both then and now.)
+  // answer these rows today, and #6682 took mongo\'s hardcoded `$options: 'i'`
+  // off all four arms, so `translateFilter` now lowers `$contains` to a bare
+  // `$regex` and that driver answers them too. driver-memory\'s query and
+  // analytics faces still fold Unicode — that remainder is #6682\'s open half,
+  // not #5702\'s. (`formula` and driver-memory\'s reference matcher measured
+  // case-exact both then and now.)
   {
     name: '$contains is case-SENSITIVE — a lower-case comparand misses the upper-case row',
     filter: { name: { $contains: 'acme' } },
     expected: ['2'],
-    note: 'Row 1 (ACME Corp) must NOT match. SQLite\'s LIKE folds ASCII — the defect #6518 replaced with GLOB on the SQLite dialects; a backend returning both here has regressed to it (driver-memory / driver-mongodb still fold — #6682).',
+    note: 'Row 1 (ACME Corp) must NOT match. SQLite\'s LIKE folds ASCII — the defect #6518 replaced with GLOB on the SQLite dialects; a backend returning both here has regressed to it (driver-memory still folds — #6682).',
   },
   {
     name: '$contains is case-SENSITIVE — an upper-case comparand misses the lower-case row',

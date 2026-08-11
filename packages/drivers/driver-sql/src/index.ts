@@ -37,12 +37,14 @@ export type {
 // which is the argument `@objectstack/spec/data` makes for exporting its own
 // conformance corpora. Test-only DATA — no runtime path in this package reads it.
 export {
+  CROSS_FIELD_AUTHORED_CASES,
   CROSS_FIELD_CASES,
   CROSS_FIELD_OBJECT_FIELDS,
   CROSS_FIELD_REFUSALS,
   CROSS_FIELD_ROWS,
 } from './cross-field-conformance-cases.js';
 export type {
+  CrossFieldAuthoredCase,
   CrossFieldCase,
   CrossFieldRefusalCase,
   CrossFieldRow,

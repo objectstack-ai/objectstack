@@ -137,9 +137,12 @@ interface AggregationNode {
 }
 // `distinct?: boolean` was REMOVED in protocol 17 (#6815) — see the callout above.
 
-// FieldNode — one entry of the select list. A field name, optionally dotted to
-// reach through a relationship ('owner.name'). Related *records* come from
-// `expand`, not from inside this list.
+// FieldNode — one entry of the select list. One of the queried object's OWN
+// column names. The type is `string`, so a dotted path ('owner.name') still
+// PARSES, but it resolves nothing: no driver ever implemented dotted
+// projection, and the ingress refuses it (400 INVALID_FIELD, #7532). Related
+// data — whole records and single related columns alike — comes from `expand`,
+// not from inside this list.
 //
 // The `{ field, fields, alias }` nested-select member this union used to carry
 // was REMOVED in protocol 17 (#4196): nothing produced it and nothing read
@@ -336,12 +339,13 @@ metacharacters — `{ name: { $icontains: 'a.b' } }` matches `a.b` and not `axb`
 
   One half of the case rules above is still landing: `$contains` /
   `$startsWith` / `$endsWith` / `$notContains` are case-**sensitive** by ruling and
-  are so on the SQL family, but the in-memory driver's query path and MongoDB still
-  fold them over the whole Unicode range —
-  [#6682](https://github.com/objectstack-ai/objectstack/issues/6682). Until that
-  lands, prefer `$icontains` when you *want* a fold rather than relying on
-  `$contains` being loose on those two backends. The shared standard both halves
-  are measured against is `FILTER_TEXT_CASES` (`@objectstack/spec/data`).
+  are so on the SQL family and on MongoDB —
+  [#6682](https://github.com/objectstack-ai/objectstack/issues/6682) removed the
+  hardcoded `$options: 'i'` that had folded them there. The in-memory driver's
+  query and analytics faces still fold over the whole Unicode range. Until that
+  half lands, prefer `$icontains` when you *want* a fold rather than relying on
+  `$contains` being loose on that backend. The shared standard both halves are
+  measured against is `FILTER_TEXT_CASES` (`@objectstack/spec/data`).
 </Callout>
 
 ### `$regex` — removed
@@ -704,6 +708,12 @@ The nested `where` is **AND-merged** with the batch `$in` the engine uses to loa
 records, so a related record is attached only when it also matches your filter. A foreign
 key whose target is filtered out is left as the raw id (unresolved) rather than dropped.
 
+The nested `fields` is a **projection of the related record**, and you do not have to name
+`id` in it to make the expansion work. `id` is the join key the batch `$in` re-attaches by,
+so the engine adds it to its own sub-read and strips it back out when you did not ask for
+it — the attached record carries exactly the columns you listed. Name `id` explicitly when
+you want it (e.g. to link to the related record).
+
 <Callout type="warn">
 **Per-parent shaping (`limit` / `offset` / `orderBy`) is not honored on the expand path.**
 The engine batch-loads every parent's related records in a single `$in` query and then
@@ -954,13 +964,15 @@ a user typing `acme` does not find `ACME Corp`. Only `select` / `status` option
 *labels* are matched case-insensitively by the expansion itself.
 
 <Callout type="warn">
-  **Measured today, and it does not match that rule yet.** The `$contains` alignment
-  is [#5702](https://github.com/objectstack-ai/objectstack/issues/5702), so until it
-  lands the answer is still the driver's: `SqlDriver` compiles a parameterised
-  `LIKE '%…%'` and the dialect decides (SQLite folds ASCII, Postgres does not),
-  `driver-mongodb` folds the full Unicode range through a hardcoded `$options: 'i'`,
-  and `driver-memory`'s query path matches with a case-insensitive regex. Which
-  driver you run therefore still changes which rows a search returns. Whether the
+  **Measured today: one driver still does not match that rule.** The `$contains`
+  alignment landed in two steps —
+  [#6518](https://github.com/objectstack-ai/objectstack/issues/6518) made `SqlDriver`
+  case-exact per dialect (`GLOB` on the SQLite dialects, `LIKE` unchanged on
+  Postgres, `LIKE` over a binary cast on MySQL), and
+  [#6682](https://github.com/objectstack-ai/objectstack/issues/6682) removed
+  `driver-mongodb`'s hardcoded `$options: 'i'`. `driver-memory`'s query path still
+  matches with a case-insensitive regex, so running your tests on the in-memory
+  double can still return rows a SQL or MongoDB deployment would not. Whether the
   expansion should emit `$icontains` instead of `$contains` — i.e. whether search is
   case-insensitive by definition — is a separate question that rides with that issue,
   because it can only be answered once both operators mean one thing everywhere.
@@ -1003,9 +1015,30 @@ as a single-table query. The key is tombstoned — authoring it is a `tsc` error
 query that still carries it (even as an empty array) fails to parse with the upgrade
 prescription. The `JoinNode` / `JoinType` / `JoinStrategy` exports left with it.
 
-Use `expand` (§4) for relationship loading — the live spelling for related records —
-a dotted `fields` path (`'owner.name'`) for a single related column, or two queries
-joined in application code.
+Use `expand` (§4) for relationship loading — the live spelling for related records,
+and for single related columns too, since its nested `QueryAST` both filters (`where`)
+and selects (`fields`) the related record's columns. Otherwise, two queries joined in
+application code.
+
+**A dotted `fields` path is not the alternative.** `'owner.name'` still *parses* —
+`FieldNode` is `string`, a shape check — but no driver ever resolved one, and the
+ingress refuses it with `400 INVALID_FIELD` (#7532). Where the value is wanted on the
+queried object itself, denormalise it onto that object (a stored field, written when
+the source changes) — the same remedy the sort axis prescribes (#6924).
+
+<Callout type="warn">
+**`expand` needs the foreign key in the projection.** The relation is carried by the
+FK column, so a narrowed projection that projects it away leaves expansion nothing to
+resolve:
+
+```typescript
+{ fields: ['title'],                expand: { project_id: { object: 'project' } } }
+// -> nothing to resolve; no related record comes back
+
+{ fields: ['title', 'project_id'],  expand: { project_id: { object: 'project' } } }
+// -> works
+```
+</Callout>
 
 ### Window Functions — removed from the request surface (#4286)
 

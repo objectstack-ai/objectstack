@@ -29,8 +29,9 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { matchesFilterCondition } from '@objectstack/formula';
-import type { FilterCondition } from '@objectstack/spec/data';
+import { parseFilterAST, type FilterCondition } from '@objectstack/spec/data';
 import {
+  CROSS_FIELD_AUTHORED_CASES,
   CROSS_FIELD_CASES,
   CROSS_FIELD_OBJECT_FIELDS,
   CROSS_FIELD_REFUSALS,
@@ -91,6 +92,25 @@ describe('[#5222] driver-sqlite-wasm — cross-field `$field` push-down conforma
       expect(await sqlIds(testCase.filter), `wasm push-down disagreed${note}`).toEqual(expected);
     });
   }
+
+  describe('[#7597] the AUTHORING arm — the array sugar a client actually sends', () => {
+    // Run here as well as on `driver-sql` for the reason the whole corpus is
+    // shared: this driver inherits that compiler but executes through its own
+    // sql.js dialect, and the lowered `$eq` reference has to mean the same
+    // rows on both. See the corpus header for the defect it pins.
+    for (const authoredCase of CROSS_FIELD_AUTHORED_CASES) {
+      it(`${authoredCase.name} — lowers as declared, same rows on both paths`, async () => {
+        const note = authoredCase.note ? `\n${authoredCase.note}` : '';
+        const lowered = parseFilterAST(authoredCase.authored);
+        expect(lowered, `parseFilterAST lowered the authored array to an unexpected shape${note}`)
+          .toEqual(authoredCase.loweredTo);
+
+        const expected = [...authoredCase.expected].sort();
+        expect(memoryIds(lowered), `in-memory evaluator disagreed${note}`).toEqual(expected);
+        expect(await sqlIds(lowered), `wasm push-down disagreed${note}`).toEqual(expected);
+      });
+    }
+  });
 
   describe('the refusal arm — narrowed, never removed (ADR-0112 envelope)', () => {
     for (const refusal of CROSS_FIELD_REFUSALS) {

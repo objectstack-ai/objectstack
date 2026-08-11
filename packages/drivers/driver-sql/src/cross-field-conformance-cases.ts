@@ -237,6 +237,96 @@ export const CROSS_FIELD_CASES: readonly CrossFieldCase[] = [
 ] as const;
 
 /**
+ * [#7597] The AUTHORING arm: the same conformance obligation, entered through
+ * the array sugar a caller actually writes rather than through the lowered
+ * `FilterCondition` object.
+ *
+ * ## Why the corpus needed a second entrance
+ *
+ * Every case above is a hand-written `FilterCondition`. That is the shape a
+ * DRIVER sees, and it is not the shape anyone AUTHORS: the ObjectUI client, the
+ * `FilterBuilder` and every stored view carry the array triple
+ * `['amount', '=', { $field: 'budget' }]`, which `parseFilterAST`
+ * (`@objectstack/spec`, the single lowering sink per #5158) turns into one of
+ * the objects above. A corpus that only enters at the object skips that sink —
+ * and the sink is exactly where #7597 was: the four EQUALITY spellings dropped
+ * the operator, because implicit equality (`{ field: comparand }`) is right for
+ * a literal and produces `{ amount: { $field: 'budget' } }` for a reference —
+ * a field spec whose only key is `$field`, which no backend reads as an
+ * equality. `['amount', '>', ref]` kept its operator and worked; `['amount',
+ * '=', ref]` silently matched nothing. One intent, two spellings, two fates.
+ *
+ * So these cases assert TWO things per row, and the pair is the point:
+ * `loweredTo` pins what the sink produces (a lowering regression fails here,
+ * in the conformance suite, rather than in a spec unit test nobody reads
+ * beside the driver), and `expected` holds the lowered filter to the same
+ * both-paths-same-rows rule as every case above.
+ *
+ * The `>` control rides along deliberately: it is the spelling that ALWAYS
+ * worked, so a run where the equality rows pass and the control fails means
+ * the harness moved, not the fix.
+ */
+export interface CrossFieldAuthoredCase {
+  name: string;
+  /** The authored filter ARRAY, exactly as a client sends it. */
+  authored: unknown;
+  /** What `parseFilterAST` must lower it to. */
+  loweredTo: unknown;
+  /** Ids of matching rows, ascending — for the LOWERED filter, on both paths. */
+  expected: string[];
+  note?: string;
+}
+
+/**
+ * The four `$eq` spellings `AST_OPERATOR_MAP` carries (`=`, `==`, `equals`,
+ * `eq`), which is the whole set the sink folds into implicit equality — all
+ * four were bare before #7597, so all four are pinned.
+ */
+const EQUALITY_SPELLINGS: readonly string[] = ['=', '==', 'equals', 'eq'];
+
+export const CROSS_FIELD_AUTHORED_CASES: readonly CrossFieldAuthoredCase[] = [
+  // ── The equality spellings, on each storage class ────────────────────────
+  //
+  // Replicated across the three class pairs for the same reason the object
+  // cases are: the lowering is class-blind, so a class-dependent answer here
+  // would be a driver fact showing up in an authoring test.
+  ...CLASS_PAIRS.flatMap(({ label, target, ref }) =>
+    EQUALITY_SPELLINGS.map((op) => ({
+      name: `['${target}', '${op}', { $field: '${ref}' }] on the ${label} pair`,
+      authored: [target, op, { $field: ref }],
+      loweredTo: { [target]: { $eq: { $field: ref } } },
+      expected: ['3', '6'],
+      note: 'The `$eq` row set of the object corpus above — row 3 (equal) and row 6 (both NULL, which the memory evaluator matches and the emitted SQL is written TOTAL to match too).',
+    })),
+  ),
+
+  // ── The control: the spelling that never lost its operator ───────────────
+  {
+    name: "['amount', '>', { $field: 'budget' }] still lowers to $gt",
+    authored: ['amount', '>', { $field: 'budget' }],
+    loweredTo: { amount: { $gt: { $field: 'budget' } } },
+    expected: ['1'],
+    note: 'Untouched by #7597 and asserted anyway: if this moves, the harness moved rather than the lowering.',
+  },
+
+  // ── The sugar's own structures, carrying a reference leaf ────────────────
+  {
+    name: 'a legacy flat array ANDs an equality reference with a literal',
+    authored: [['amount', '=', { $field: 'budget' }], ['stage', '=', 'mid']],
+    loweredTo: { $and: [{ amount: { $eq: { $field: 'budget' } } }, { stage: 'mid' }] },
+    expected: ['3'],
+    note: 'Row 6 drops out on the literal conjunct — which also pins that the LITERAL comparand keeps its implicit-equality lowering (`{ stage: "mid" }`, not `{ stage: { $eq: "mid" } }`). The fix branches on the comparand, not on the operator.',
+  },
+  {
+    name: 'an explicit `or` node carries an equality reference branch',
+    authored: ['or', ['amount', '=', { $field: 'budget' }], ['stage', '=', 'lost']],
+    loweredTo: { $or: [{ amount: { $eq: { $field: 'budget' } } }, { stage: 'lost' }] },
+    expected: ['2', '3', '6'],
+    note: 'The lowering is applied at the comparison leaf, so nesting cannot route around it.',
+  },
+] as const;
+
+/**
  * The refusal arm — the boundary of v1, and the half of this issue that is a
  * SECURITY surface rather than a capability one.
  *

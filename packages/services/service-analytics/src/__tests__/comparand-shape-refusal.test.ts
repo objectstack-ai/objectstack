@@ -126,9 +126,28 @@ describe('[#5234] the analytics `where` door refuses an uncompilable comparand',
     it('`{$field: …}` is refused here, converging with `driver-sql`', () => {
       // Not a special case: a field reference is an object, and this door had no
       // opinion about objects at all. `driver-sql` has refused it since #5041.
+      //
+      // ⚠️ [#7598] The convergence claim was re-measured after #5222 gave
+      // `driver-sql` a real cross-field compiler, because that change was assumed
+      // to have made this comment stale. It did NOT, for THIS case: #5222's
+      // boundary admits the six scalar comparison operators and leaves the LIKE
+      // family in its refusal arm (`$contains against a field reference is
+      // refused` — a column-side LIKE pattern cannot be metacharacter-escaped
+      // portably, and an unescaped one is the `%`-matches-every-row bypass). So
+      // this pin still converges, verbatim, and is deliberately unchanged.
+      //
+      // What #5222 DID open is a position neither predicate in
+      // `comparand-shape.ts` is ever asked about — the whole comparand of a
+      // scalar comparison, which was BOUND rather than refused. That cell is
+      // pinned in `cross-field-reference-refusal.test.ts` against the shared
+      // corpus, not here, because it is a different question about a different
+      // position.
       const err = refusalOf(() => tree({ name: { $contains: { $field: 'status' } } }));
       expect(err.code).toBe('INVALID_FILTER');
       expect(err.message).toContain('$field');
+      // The wording stays the LIKE-family one — the #7598 gate deliberately does
+      // not reach this operator, so a reader can tell the two refusals apart.
+      expect(err.message).toContain('StringOperatorSchema');
     });
   });
 
@@ -160,8 +179,21 @@ describe('[#5234] the analytics `where` door refuses an uncompilable comparand',
     it('`{$eq: {…}}` is deliberately UNTOUCHED — a separate account', () => {
       // #5526 pinned `toSqlBindValue({a:1})` → `'{"a":1}'`. Refusing it is the
       // analytics-side half of #5041, which this change does not open.
+      //
+      // ⚠️ [#7598] Still true, and now load-bearing in a second way: the
+      // field-reference gate added there covers this very operator, so this case
+      // is what proves the gate keys on the SHAPE `{$field: <string>}` and not on
+      // "an object comparand". A gate that had widened to every object would turn
+      // this row red — which is why the row is worth keeping rather than being
+      // folded into the block above.
       expect(tree({ name: { $eq: { a: 1 } } })).toEqual({
         kind: 'leaf', member: 'name', operator: 'equals', values: [{ a: 1 }],
+      });
+      // The same distinction one step finer: `$field` present but NOT a string is
+      // the ordinary object account too, exactly as on `driver-sql`, whose
+      // `fieldReferenceOf` requires `typeof ref === 'string'`.
+      expect(tree({ name: { $eq: { $field: 5 } } })).toEqual({
+        kind: 'leaf', member: 'name', operator: 'equals', values: [{ $field: 5 }],
       });
     });
   });

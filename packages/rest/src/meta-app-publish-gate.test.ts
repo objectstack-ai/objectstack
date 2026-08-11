@@ -95,11 +95,11 @@ function setup(perms: string[]) {
     return { rest, protocol };
 }
 
-async function getList(rest: any, type = 'app') {
+async function getList(rest: any, type = 'app', query: Record<string, unknown> = {}) {
     const route = rest.getRoutes().find((r: any) => r.method === 'GET' && r.path === '/api/v1/meta/:type');
     if (!route) throw new Error('meta/:type route not registered');
     const res = makeRes();
-    await route.handler({ method: 'GET', params: { type }, query: {}, body: {}, headers: {} }, res);
+    await route.handler({ method: 'GET', params: { type }, query, body: {}, headers: {} }, res);
     return res;
 }
 
@@ -181,5 +181,150 @@ describe('#4829 — `GET /meta/app` gates on `_unpublished`, never on `hidden`',
         const allowed = await getItem(setup(['studio.access']).rest, 'production_management');
         expect(allowed.statusCode).toBe(200);
         expect(allowed.body?.item?.name).toBe('production_management');
+    });
+});
+
+// ── #7566 ───────────────────────────────────────────────────────────────────
+//
+// `GET /api/v1/meta/app?id=…` accepted the parameter and then dropped it: the
+// SAME apps came back for every value, including one that names no app. The
+// acceptance criterion is therefore a BODY fact, not a status code — a route
+// that 200s either way is exactly what the reporter saw. Every case below
+// asserts the app names in the response.
+//
+// The defect's cost is that a caller cannot tell a working filter from a
+// dropped one: a client that asks for one app and renders `items[0]` gets a
+// plausible, wrong answer, and a bogus id can never come back empty.
+//
+// This file already owns `GET /meta/app`'s list body (the #4829 gate above),
+// and the filter has to COMPOSE with that gate rather than sit beside it — an
+// `?id=` naming an unpublished app must still be withheld from a non-builder —
+// so the cases live here with the fixture that has an unpublished app in it.
+
+describe('#7566 — `GET /meta/app?id=` narrows the list instead of being dropped', () => {
+    it('a MATCHING id returns exactly that app', async () => {
+        const { rest } = setup(['manage_users']);
+        const res = await getList(rest, 'app', { id: 'crm' });
+
+        expect(res.statusCode).toBe(200);
+        expect(namesFrom(res.body)).toEqual(['crm']);
+        // The stated failure mode: the unasked-for apps are gone. Before this
+        // change the assertion below is what failed — `account` came back too.
+        expect(namesFrom(res.body)).not.toContain('account');
+    });
+
+    it('a NON-MATCHING id returns an empty list — a 200, not a 404, and not every app', async () => {
+        const { rest } = setup(['manage_users']);
+        const res = await getList(rest, 'app', { id: 'no_such_app' });
+
+        // Empty-vs-404 is measured off this route's siblings, not chosen: the
+        // list route serves an empty list for `?package=<no such package>` and
+        // for `/meta/view?object=<no such object>`, and the only 404 on the meta
+        // surface is the single-item address `GET /meta/:type/:name` (pinned
+        // above). A list filter that matched nothing is a list of nothing.
+        expect(res.statusCode).toBe(200);
+        expect(namesFrom(res.body)).toEqual([]);
+        expect(res.body?.error).toBeUndefined();
+    });
+
+    it('an ABSENT id still returns the whole published set (the preservation half)', async () => {
+        const { rest } = setup(['manage_users']);
+
+        expect(namesFrom((await getList(rest, 'app')).body).sort()).toEqual(['account', 'crm']);
+        // `?id=` (empty) is the "no filter" spelling an unset `<select>` submits
+        // — the same falsy gate `?package=` on this route has always used. It
+        // must not become a new 400 or an empty list.
+        expect(namesFrom((await getList(rest, 'app', { id: '' })).body).sort())
+            .toEqual(['account', 'crm']);
+    });
+
+    it('a MALFORMED id — supplied twice — is refused with 400, not silently resolved', async () => {
+        const { rest } = setup(['manage_users']);
+        const res = await getList(rest, 'app', { id: ['crm', 'account'] });
+
+        // Two conflicting intents in one well-formed request. Picking one is a
+        // wrong answer delivered as a success, and `String(['crm','account'])`
+        // would have made it the single app name `'crm,account'` — a name no app
+        // has, so the filter would silently empty. ADR-0112 nested envelope with
+        // the standard catalog's 400 member, the same answer this route already
+        // gives for a repeated `?package=` / `?object=` / `?include=` (#6877).
+        expect(res.statusCode).toBe(400);
+        expect(res.body?.error?.code).toBe('VALIDATION_ERROR');
+        expect(res.body?.error?.message).toContain('"id"');
+        // Refused means refused: no app list rode along with the error.
+        expect(res.body?.items).toBeUndefined();
+        expect(Array.isArray(res.body)).toBe(false);
+    });
+
+    it('a one-element array is ONE occurrence and still filters', async () => {
+        // `?id=crm` reaches some adapters as `['crm']`; that is one occurrence
+        // encoded differently, not a repetition, so it must narrow rather than
+        // 400 — and it must not survive as an array into the comparison, where
+        // `['crm'] === 'crm'` is false and the filter would empty.
+        const { rest } = setup(['manage_users']);
+        const res = await getList(rest, 'app', { id: ['crm'] });
+
+        expect(res.statusCode).toBe(200);
+        expect(namesFrom(res.body)).toEqual(['crm']);
+    });
+
+    it('the PLURAL spelling filters identically — `/meta/apps?id=`', async () => {
+        // Prime Directive #3 makes plural the canonical REST spelling, and every
+        // other per-type filter on this handler keys off the singular through
+        // `metaTypeSingular`. A filter that only ran on `/meta/app` would be the
+        // #6238-class spelling hole one parameter over.
+        const { rest } = setup(['manage_users']);
+
+        expect(namesFrom((await getList(rest, 'apps', { id: 'crm' })).body)).toEqual(['crm']);
+        expect(namesFrom((await getList(rest, 'apps', { id: 'no_such_app' })).body)).toEqual([]);
+    });
+
+    it('composes WITH the publish gate — `?id=<unpublished>` stays withheld from a non-builder', async () => {
+        // The filter narrows within what the caller may observe, never around
+        // it. ADR-0045 §3 says an unpublished app is externally unobservable, so
+        // naming it must answer the same empty list as naming a nonexistent one
+        // — the two are indistinguishable to a non-builder by design.
+        const denied = await getList(setup(['manage_users']).rest, 'app', { id: 'production_management' });
+        expect(denied.statusCode).toBe(200);
+        expect(namesFrom(denied.body)).toEqual([]);
+        expect(JSON.stringify(denied.body)).not.toContain('secret_production_line');
+
+        // …and a builder, who may observe it, gets it — narrowed to just it.
+        const allowed = await getList(setup(['studio.access']).rest, 'app', { id: 'production_management' });
+        expect(namesFrom(allowed.body)).toEqual(['production_management']);
+    });
+
+    it('does not depend on what the caller holds — a caller with NO permissions filters too', async () => {
+        // The permission filter above lives in a branch of its own, guarded by
+        // a resolved `ctx?.userId`. The `id` filter is deliberately NOT inside
+        // that branch: narrowing to the app you named is not a privilege, and a
+        // caller holding nothing asked the same question as an admin.
+        //
+        // (An anonymous caller is not the case to state this with: the
+        // anonymous-deny gate refuses `GET /meta/:type` with 401 before the
+        // handler body runs at all, unconditionally since #3963 — measured, not
+        // assumed. The least-privileged caller who reaches the filter is this
+        // one.)
+        const { rest } = setup([]);
+
+        expect(namesFrom((await getList(rest, 'app', { id: 'account' })).body)).toEqual(['account']);
+        expect(namesFrom((await getList(rest, 'app', { id: 'no_such_app' })).body)).toEqual([]);
+        // Unfiltered, the same caller still receives everything the gate lets
+        // through — the filter is what changed, not the gate.
+        expect(namesFrom((await getList(rest, 'app')).body).length).toBeGreaterThan(1);
+    });
+
+    it('is scoped to `app` — another type\'s list is not narrowed by `?id=`', async () => {
+        // Deliberately not generalised: #7566 is filed on the app list, and
+        // teaching every meta type an `id` filter in the same change would be
+        // surface expansion with nothing measured behind it. `?id=` on another
+        // type keeps being ignored exactly as before.
+        const { rest, protocol } = setup(['manage_users']);
+        protocol.getMetaItems = vi.fn(async ({ type }: any) =>
+            String(type ?? '') === 'view' ? [{ name: 'all_leads' }, { name: 'my_leads' }] : []);
+
+        const res = await getList(rest, 'view', { id: 'all_leads' });
+        expect(res.statusCode).toBe(200);
+        expect(namesFrom(res.body)).toEqual(['all_leads', 'my_leads']);
     });
 });

@@ -27,3 +27,5 @@ await driver.find('account', { where: { status: 'open' } });
 `QueryAST` 的 zod 形状（`data/query.zod.ts` 的 `BaseQuerySchema`）**没有动**：`object` 在引擎与 hook 那一层是被读的，改的只是驱动契约的参数类型。`expand` 条目里的 `object` 同样保留 —— 那里它命名的是**关联对象**，没有任何实参携带这个事实，不是冗余。
 
 标 major 是因为这是**源码级破坏性**变更（调用点字面量），运行时行为零变化。注意 `check:api-surface` 只看得见新增的 `DriverQuery` 导出、看不见参数类型的收窄（它记录导出存在与否，不记录签名），所以这条迁移说明是该变更唯一的下游载体。
+
+<!-- adr-0087: registered data-driver-query-omit-object -->

@@ -59,6 +59,29 @@
  * both predicates against a mirrored copy of the driver's expressions over a
  * shared value table. A THIRD hand-copy is the thing to refuse: import from one
  * of the two, or add a consumer to that test.
+ *
+ * ## ⚠️ [#7598] What the mirror does NOT cover: a position no gate ever reached
+ *
+ * `{ $field: 'col' }` is the shape the two predicates above are most often
+ * assumed to handle, and they do not — not because they drifted, but because
+ * they are only ASKED about two of the positions a comparand can sit in. Both
+ * still classify a reference object exactly as `driver-sql`'s twins do (an
+ * object is neither bindable nor renderable), and both doors call them for the
+ * LIKE family and for `$in`/`$nin`/`$between` MEMBERS only. The whole comparand
+ * of a scalar comparison — `{ amount: { $gt: { $field: 'budget' } } }` — was
+ * asked of neither, so it was BOUND: measured on `origin/main` (`5823d593d`),
+ * the read-scope door compiled `"t"."amount" > ?` with the reference OBJECT in
+ * the bind list and the analytics `where` door compiled the same predicate with
+ * the JSON TEXT `{"$field":"budget"}`. Nothing refused, nothing logged, and the
+ * predicate compares a column against a value no row can hold.
+ *
+ * That is why this file gained a THIRD question — {@link isFieldReference} —
+ * rather than a widened answer to the first two: the defect was never a
+ * misclassification, so tightening `isBindableComparand` would have changed
+ * cells that were already right (and broken the mirror) while leaving the
+ * unasked position unasked. See {@link fieldReferenceComparandMessage} for what
+ * the two doors now say there, and why they say it instead of compiling the
+ * comparison the SQL drivers compile since #5222.
  */
 
 /**
@@ -102,6 +125,62 @@ export function isRenderableTextComparand(value: unknown): boolean {
 }
 
 /**
+ * [#7598] Is this comparand a `{ $field: 'col' }` reference — the shape
+ * `FieldReferenceSchema` declares and `compileCelToFilter` really produces for a
+ * field-to-field comparison in a CEL permission / RLS rule?
+ *
+ * Character for character `driver-sql`'s module-private `fieldReferenceOf`
+ * (`sql-driver.ts`), read as a boolean: a plain object, not an array, carrying a
+ * `$field` whose value is a STRING. Two deliberate consequences of mirroring
+ * that spelling rather than inventing a third:
+ *
+ *   - **Extra keys do not disqualify it.** `{ $field: 'budget', extra: 1 }` IS a
+ *     reference on all three faces, because `@objectstack/formula`'s
+ *     `resolveValue` reads `'$field' in raw` and ignores the remainder. A
+ *     narrower reading here would let the remainder be re-bound as a literal on
+ *     one face and resolved on another — the split this whole file exists to
+ *     close (#5222 measured the same cell driver-side and moved its own test).
+ *   - **A non-string `$field` is NOT one.** `{ $field: 5 }` falls through to the
+ *     ordinary object-comparand account — `driver-sql` binds it as JSON there
+ *     and so does this package (#5234 left `{$eq: {…}}` alone on purpose). That
+ *     cell is untouched here; changing it would be a different ruling, not a
+ *     rider on this one.
+ *
+ * ⚠️ `@objectstack/formula` is the WIDER of the two (`'$field' in raw`, any
+ * value type). The driver's spelling is mirrored because this file's contract is
+ * to be a value-for-value mirror of `driver-sql`, and because the wider reading
+ * would refuse a shape the drivers bind — a new divergence in a change that
+ * exists to remove one.
+ */
+export function isFieldReference(value: unknown): value is { $field: string } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  return typeof (value as Record<string, unknown>).$field === 'string';
+}
+
+/**
+ * [#7598] The comparison operators whose whole comparand `driver-sql` compiles
+ * into a same-table column-to-column comparison since #5222 — and exactly the
+ * positions where a `{ $field }` silently BOUND on this package's two doors.
+ *
+ * A mirror of `driver-sql`'s module-private `CROSS_FIELD_COMPARISON_OPERATORS`,
+ * held by `__tests__/cross-field-reference-refusal.test.ts` rather than by this
+ * comment: that suite drives the SHARED corpus (`CROSS_FIELD_CASES`, exported
+ * from `@objectstack/driver-sql` precisely so a second face can be held to the
+ * same table), so an operator the driver starts or stops compiling shows up as a
+ * corpus case this package answers differently.
+ *
+ * Every OTHER position a reference can occupy was already refused on both doors
+ * and is deliberately left alone, wording included — the LIKE family through
+ * {@link isRenderableTextComparand}, `$in` / `$nin` members through
+ * {@link isBindableComparand}, and a bare `{ field: { $field: … } }` as an
+ * unsupported operator. Those refusals CONVERGE with `driver-sql`, which refuses
+ * the same positions in its own #5222 refusal arm; only this set diverged.
+ */
+export const CROSS_FIELD_COMPARISON_OPERATORS: ReadonlySet<string> = new Set([
+  '$eq', '$ne', '$gt', '$gte', '$lt', '$lte',
+]);
+
+/**
  * The Filter Protocol operators whose comparand becomes the text of a `LIKE`
  * pattern — the ones every compiler in this package routes through
  * {@link likePattern}.
@@ -141,6 +220,65 @@ export function unrenderableTextComparandMessage(op: string, field: string, valu
     `declares it a string (StringOperatorSchema); a string, number, boolean, null or Date is ` +
     `accepted. Refusing rather than stringifying it: String({}) is "[object Object]", so the ` +
     `pattern that ran would be one nobody wrote — and a row storing that literal text matches it.`
+  );
+}
+
+/**
+ * [#7598] The sentence both doors say about a `{ $field }` comparand they do not
+ * compile — shared for the same reason {@link unrenderableTextComparandMessage}
+ * is, and with the same split: one diagnosis, two envelopes.
+ *
+ * ## What it has to say that the other two do not
+ *
+ * The other refusals in this file answer a shape that is wrong everywhere. This
+ * one answers a shape that is RIGHT somewhere: since #5222 `driver-sql` and
+ * `driver-sqlite-wasm` compile exactly this comparand into a same-table
+ * column-to-column comparison, and `@objectstack/formula`'s
+ * `matchesFilterCondition` has always resolved it in memory. So the author is
+ * not told "this is nonsense" — they are told WHICH face declined and why, which
+ * is the difference between an authoring mistake and a platform boundary.
+ *
+ * It also names what used to happen, because that is the part a reader cannot
+ * reconstruct: the reference was BOUND. The predicate was syntactically perfect,
+ * the query ran, and a column was compared against a value no row can hold — no
+ * error, no log line, an empty chart or a read scope quietly answering the wrong
+ * row set. That is the #3650 / #5234 class, and naming it is what stops the next
+ * reader from "restoring" the old tolerance as a convenience.
+ *
+ * ## Why the reason is a MISSING ENUMERATION and not a missing emitter
+ *
+ * The SQL is trivial — two identifiers and an operator. What these two compilers
+ * do not have is the four things #5222's maintainer rulings (2026-08-06) require
+ * before a name may enter a SQL identifier position: the object's DECLARED field
+ * set, its declared TYPES (for the same-comparison-class rule), its
+ * tenant-isolation column (forbidden on both sides), and whether the table is
+ * federated. `driver-sql` reads all four out of its own `initObjects` capture;
+ * `StrategyContext` (`@objectstack/spec/contracts`) exposes none of them, so
+ * these compilers cannot enforce the rulings and refuse rather than ship a
+ * weaker port of them. Implementing it here is therefore a `packages/spec`
+ * surface question first — tracked on #7598.
+ */
+export function fieldReferenceComparandMessage(
+  op: string,
+  field: string,
+  ref: string,
+  position?: string,
+): string {
+  return (
+    `"${op}" on "${field}"${position ? ` (${position})` : ''} compares against the field reference ` +
+    `{ "$field": "${ref}" }, which this compiler does not compile into a column-to-column ` +
+    `comparison. Refusing rather than binding it: the reference object used to become the BOUND ` +
+    `VALUE of the comparison, so the emitted predicate compared "${field}" against the reference ` +
+    `itself — a value no row can hold — and returned a wrong row set with nothing to read. ` +
+    `@objectstack/spec declares this shape (FieldReferenceSchema) and it IS executed elsewhere: ` +
+    `@objectstack/formula resolves it per record in memory, and driver-sql / driver-sqlite-wasm ` +
+    `compile it to a same-table column comparison for the six scalar operators since #5222. It is ` +
+    `refused HERE because the #5222 rulings admit a referenced column name into SQL only after ` +
+    `checking it against the object's declared fields, their declared types, and its ` +
+    `tenant-isolation column — none of which this compiler can see (StrategyContext exposes no ` +
+    `such hook), so enforcing them is impossible and skipping them would open a comparison ` +
+    `surface onto the tenant boundary. Compare against a literal value here, or route the query ` +
+    `through the ObjectQL engine path, whose driver does the enforcing (#7598).`
   );
 }
 

@@ -255,7 +255,7 @@ sections: [{
 | `displayFields` | Fields projected into each result row (plus `id`); the visitor's `q` is `contains`-matched against the **first** entry. At most 5; omitted → `['name']`. |
 | `maxResults` | Rows per request, integer 1–50 (default 20). 50 is a hard server ceiling; there is **no pagination** on this surface (`offset` is pinned to 0), so a leaked endpoint cannot enumerate the table. |
 | `filter` | Static pre-filter rows (same `{ field, operator, value }` dialect as list-view filters), ANDed ahead of the visitor's search. |
-| `object` | The object to search; omit to let the server resolve it from the field definition. |
+| `object` | The object to search. Optional — omit it and the server resolves the target from the field's own definition on the parent object (its `reference`, or a legacy `referenceTo` / `target` / `options.objectName` on a pre-fold stored row). Declare it only to search something other than what the field points at. |
 
 Those four keys are the whole block. It admits exactly what the route enforces
 — an unknown subkey, a 6th display field, or `maxResults: 51` is a **parse
@@ -282,7 +282,7 @@ Errors:
 | `400 INVALID_REQUEST` | missing / blank slug or field |
 | `403 LOOKUP_NOT_PUBLIC` | the field has no `publicPicker` block — the deliberate loud default (#3022); also any server-managed anchor (`owner_id`, `organization_id`, …), which never gets a picker even if one is declared |
 | `404 FORM_NOT_FOUND` | slug not registered on any `sharing.allowAnonymous: true` view |
-| `500 LOOKUP_TARGET_MISSING` | the referenced object could not be resolved — declare `publicPicker.object` |
+| `500 LOOKUP_TARGET_MISSING` | the referenced object could not be resolved from either `publicPicker.object` or the field definition — the field names no target object at all (or its object metadata is unreachable). Until #7486 this also fired for a perfectly well-formed field, because the fallback read only the legacy spellings and not the canonical `reference`; declaring `object` was the workaround and is no longer needed. |
 
 ### Auth model
 

@@ -109,7 +109,12 @@ function compile(route: string, prefix: string, source: string): Pattern[] {
 }
 
 const PATTERNS: Pattern[] = [
-  ...ROUTE_LEDGER.map((r) => r.route).filter((r) => !UNUSABLE_ROWS.has(r)).flatMap((r) => compile(r, '/api/v1', 'dispatcher')),
+  // `absolute` rows carry their own wire path and must NOT be prefixed —
+  // `/.well-known/*` lives at the site root by definition, and prefixing it
+  // here would compile a pattern nothing serves, i.e. certify a URL that does
+  // not exist (#7526).
+  ...ROUTE_LEDGER.filter((r) => !UNUSABLE_ROWS.has(r.route))
+    .flatMap((r) => compile(r.route, r.absolute ? '' : '/api/v1', 'dispatcher')),
   ...REST_ROUTE_LEDGER.map((r) => r.route).flatMap((r) => compile(r, '', 'rest')),
   ...STORAGE_ROUTE_LEDGER.map((r) => r.route).flatMap((r) => compile(r, '', 'storage')),
   ...I18N_ROUTE_LEDGER.map((r) => r.route).flatMap((r) => compile(r, '', 'i18n')),

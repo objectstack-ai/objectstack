@@ -565,6 +565,58 @@ const UNCLASSIFIED_FAULT = (): { status: number; body: Record<string, unknown> }
 });
 
 /**
+ * [#7543] Does an unwrapped sandbox message name a JS RUNTIME fault rather than
+ * a business refusal the hook body deliberately reported?
+ *
+ * The two sandbox-unwrap branches below exist for ONE shape: a hook or action
+ * body that runs `throw new Error('删除被阻断：仍有未结清的发票')`, i.e. an
+ * author writing a business rule whose message IS the remedy. They answer 400
+ * with that message verbatim and deliberately no `code` (see each branch).
+ *
+ * A body that instead CRASHES — `ctx.input.title.trim()` where `title` is the
+ * number `12345` — also arrives as a thrown error, so it entered the same
+ * branch and its raw `TypeError: not a function` went out as the client-facing
+ * message of a 400 with no `code`. That is two contract breaks at once: an
+ * internal runtime fault echoed verbatim, and a body outside the ledgered
+ * envelope (a client keying on `code` gets nothing).
+ *
+ * The classification this restores is NOT new policy — it is the ruling
+ * {@link UNCLASSIFIED_FAULT} already records one door down, which names this
+ * exact case ("or a plain handler bug (`TypeError: x is not a function`) …
+ * server faults that a caller cannot fix and a caller SHOULD retry"). The
+ * sandbox unwraps simply sit ABOVE that branch and were intercepting the crash
+ * before it could reach the answer the file had already settled on. Same
+ * separation `quickjs-runner`'s own `sandboxFault` path draws (#4431/#3951):
+ * the sandbox REFUSING is a fault, and so is the body FAULTING — only the
+ * body's deliberate `throw` is an answer addressed to the caller.
+ *
+ * **Matched by constructor name, not by phrasing.** These eight are the ECMA-262
+ * native error constructors (plus SpiderMonkey's `InternalError`, which QuickJS
+ * also raises for stack exhaustion); the sandbox stringifies a thrown error as
+ * `<name>: <message>`, so the name is structural evidence rather than a keyword
+ * heuristic over prose. `Error:` is deliberately absent — a plain `Error` is the
+ * documented way to author a refusal, and `userFacingMessage` strips that prefix
+ * upstream anyway.
+ *
+ * **Deliberate, accepted cost:** a body that expresses a business rule as
+ * `throw new RangeError('数量超出范围')` now gets the sanitised 500 instead of
+ * its own words. That authoring style is not the documented one, and erring
+ * toward "a native error name means a crash" is the fail-safe direction — the
+ * opposite default is what shipped `TypeError: not a function` to a client.
+ *
+ * The words are not lost: 500 is outside `isExpectedDataStatus`, so
+ * `handleRouteError` prints `[REST] Unhandled error` with the whole error, and
+ * `sendError`'s `logWithheldServerFault` (#5437) covers the routes that bypass
+ * it — the same operator path {@link UNCLASSIFIED_FAULT} relies on.
+ */
+const NATIVE_ERROR_NAME_RE =
+    /^(?:Type|Reference|Range|Syntax|URI|Eval|Internal|Aggregate)Error(?::|$)/;
+
+function isScriptFaultMessage(message: string): boolean {
+    return NATIVE_ERROR_NAME_RE.test(message.trim());
+}
+
+/**
  * [#5462] Does a driver's missing-relation message name the very object this
  * request asked for?
  *
@@ -810,6 +862,11 @@ export function mapDataError(error: any, object?: string): { status: number; bod
     // bundled in deployed consoles) prepend any `code` to the human-readable
     // message, which would reintroduce the English noise this branch removes.
     if (typeof error?.innerMessage === 'string' && error.innerMessage) {
+        // [#7543] …but only when the body REPORTED something. A body that
+        // CRASHED arrives here too, and its `TypeError: not a function` is an
+        // internal fault, not a business message — see
+        // {@link isScriptFaultMessage}.
+        if (isScriptFaultMessage(error.innerMessage)) return UNCLASSIFIED_FAULT();
         return {
             status: 400,
             body: {
@@ -1040,14 +1097,21 @@ export function mapDataError(error: any, object?: string): { status: number; bod
     // Fallback for the same sandbox wrapper when the SandboxError instance
     // (and its `innerMessage`) was lost crossing a rethrow/serialization
     // boundary: strip the debug wrapper from the raw message. A leading
-    // default `Error: ` name is dropped; non-default names (`TypeError: …`)
-    // are kept — they signal a genuine script bug rather than a deliberately
-    // thrown business rule, which is useful context.
+    // default `Error: ` name is dropped.
+    //
+    // [#7543] A non-default name (`TypeError: …`) used to be KEPT here and
+    // shipped as the 400's message "as useful context". It is useful context —
+    // for an OPERATOR, in the log, which is where it still goes. On the wire it
+    // was a raw runtime fault presented to a client as their own mistake. This
+    // door and the `innerMessage` door above produce byte-identical bodies, so
+    // they must classify identically or the fix would depend on whether the
+    // SandboxError instance happened to survive the rethrow.
     const sandboxWrapper = /^(?:hook|action) '[^']*' threw:\s*(.+)$/s.exec(raw);
     if (sandboxWrapper) {
         const msg = sandboxWrapper[1].startsWith('Error: ')
             ? sandboxWrapper[1].slice('Error: '.length)
             : sandboxWrapper[1];
+        if (isScriptFaultMessage(msg)) return UNCLASSIFIED_FAULT();
         return {
             status: 400,
             body: {
@@ -2142,6 +2206,43 @@ export class RestServer {
                 const svc = await this.metadataServiceProvider(envId);
                 if (isEndpointMatchAuthority(svc)) return svc;
             } catch { /* an unreachable provider is an ABSENT authority */ }
+        }
+        return undefined;
+    }
+
+    /**
+     * Resolve the `metadata` service for this request — the whole occupant of
+     * the slot, unfiltered.
+     *
+     * The same two-step chain {@link resolveEndpointMatchAuthority} walks
+     * (per-request kernel, then the single-kernel provider `rest-api-plugin`
+     * wires), separated out because that method narrows its answer to the ONE
+     * capability it needs and returns `undefined` for a service that lacks it.
+     * A caller after a different optional member (`getPublished`, #7526) must
+     * not have "the service is absent" and "the service does not do that"
+     * collapsed into one answer before it sees them.
+     *
+     * `undefined` means nothing in the chain answered. Deciding what an absent
+     * service means for a given surface is the call site's business.
+     */
+    private async resolveMetadataService(environmentId?: string, req?: any): Promise<unknown | undefined> {
+        let envId: string | undefined;
+        try {
+            envId = await this.resolveRequestEnvironmentId(environmentId, req);
+        } catch { /* fall through to the single-kernel provider */ }
+
+        if (envId && envId !== 'platform' && this.kernelManager) {
+            try {
+                const kernel = await this.kernelManager.getOrCreate(envId);
+                const svc = await kernel.getServiceAsync<unknown>('metadata');
+                if (svc) return svc;
+            } catch { /* fall through */ }
+        }
+        if (this.metadataServiceProvider) {
+            try {
+                const svc = await this.metadataServiceProvider(envId);
+                if (svc) return svc;
+            } catch { /* an unreachable provider is an absent service */ }
         }
         return undefined;
     }
@@ -4321,24 +4422,57 @@ export class RestServer {
         const isScoped = basePath.includes('/environments/:environmentId');
 
         // GET /meta - List all metadata types
+        //
+        // Also mounted at `/meta/types`, the spelling the dispatcher's `/meta`
+        // branch has always implemented (`parts[0] === 'types'`) and the
+        // spelling `route-ledger.ts` has always declared. ONE handler, two
+        // paths, deliberately: the dispatcher's two branches return the same
+        // `protocol.getMetaTypes()` body, so a second REST handler would be a
+        // second thing to keep true.
         if (metadata.endpoints.types !== false) {
+            const listMetaTypes = async (req: any, res: any) => {
+                try {
+                    const environmentId = isScoped ? req.params?.environmentId : undefined;
+                    const p = await this.resolveProtocol(environmentId, req);
+                    const types = await p.getMetaTypes();
+                    const translated = await this.translateMetaTypesResponse(req, environmentId, types);
+                    res.header('Vary', 'Accept-Language');
+                    res.json(translated);
+                } catch (error: any) {
+                    handleRouteError(res, error);
+                }
+            };
             this.routeManager.register({
                 method: 'GET',
                 path: metaPath,
-                handler: async (req: any, res: any) => {
-                    try {
-                        const environmentId = isScoped ? req.params?.environmentId : undefined;
-                        const p = await this.resolveProtocol(environmentId, req);
-                        const types = await p.getMetaTypes();
-                        const translated = await this.translateMetaTypesResponse(req, environmentId, types);
-                        res.header('Vary', 'Accept-Language');
-                        res.json(translated);
-                    } catch (error: any) {
-                        handleRouteError(res, error);
-                    }
-                },
+                handler: listMetaTypes,
                 metadata: {
                     summary: 'List all metadata types',
+                    tags: ['metadata'],
+                },
+            });
+
+            // GET /meta/types — REGISTERED BEFORE `/meta/:type`, and that is
+            // the entire fix (#7526).
+            //
+            // The branch existed in the dispatcher and the row existed in the
+            // ledger; the REST mount is a THIRD place and nobody wrote it here.
+            // So `/meta/types` fell into the `:type` catch-all below and
+            // answered `{"type":"types","items":[]}` — byte-shaped like
+            // `/meta/zzz_not_a_type`, a 200 no client can tell from "that type
+            // is empty". Hono is first-match-wins (MEASURED, not assumed —
+            // `plugin-hono-server`'s `mounted-route-introspection.test.ts`
+            // registers a literal and a `:param` sibling in both orders and
+            // pins that the later one never runs), so moving this below
+            // `/meta/:type` silently re-breaks it — the same shape that already
+            // put `diagnostics` / `_drafts` / `_migrate-stored` above it. The
+            // order is pinned by `meta-route-registration-order.test.ts`.
+            this.routeManager.register({
+                method: 'GET',
+                path: `${metaPath}/types`,
+                handler: listMetaTypes,
+                metadata: {
+                    summary: 'List all metadata types (explicit `/types` spelling)',
                     tags: ['metadata'],
                 },
             });
@@ -4522,7 +4656,7 @@ export class RestServer {
                 path: `${metaPath}/:type`,
                 handler: async (req: any, res: any) => {
                     try {
-                        // [#6877] Four single-valued parameters on this list
+                        // [#6877] Five single-valued parameters on this list
                         // route, declared together at the top so the gate cannot
                         // be missed by whichever branch reads its parameter
                         // several hundred lines down: `?object=` (the view
@@ -4532,7 +4666,18 @@ export class RestServer {
                         // `?include=` (repeated, it stopped equalling
                         // `'content'`, so a caller who asked for doc bodies got
                         // the slimmed list back with a 200).
-                        if (refuseRepeatedQueryParams(req, res, ['package', 'preview', 'object', 'include'])) return;
+                        //
+                        // [#7566] `?id=` joined them when the app branch below
+                        // started honouring it. It is declared HERE, with the
+                        // rest, rather than beside the filter that reads it, for
+                        // the reason this block exists: a filter that arrives as
+                        // `['crm','account']` and is compared against one app
+                        // name matches nothing, and an empty app list is exactly
+                        // the plausible-looking wrong answer #7566 was filed
+                        // against. Refused, not resolved — see
+                        // `query-multiplicity.ts` for why picking one of two
+                        // conflicting intents is worse than a 400.
+                        if (refuseRepeatedQueryParams(req, res, ['package', 'preview', 'object', 'include', 'id'])) return;
                         const packageId = req.query?.package || undefined;
                         const environmentId = isScoped ? req.params?.environmentId : undefined;
                         const p = await this.resolveProtocol(environmentId, req);
@@ -4644,6 +4789,82 @@ export class RestServer {
                                         ? filtered
                                         : { ...(raw as any), items: filtered };
                                 }
+                            }
+                        }
+
+                        // [#7566] `GET /meta/app?id=<app>` — the app-list filter,
+                        // which until now was accepted and then dropped.
+                        //
+                        // Nothing on this route had ever read `id`: the block
+                        // above narrows the list by PERMISSION and the branches
+                        // around it by `?object=` / `?include=` / `?package=`, so
+                        // `?id=crm` and `?id=not_an_app` produced the same three
+                        // apps, byte for byte. A caller cannot tell a working
+                        // filter from a dropped one — a client that asks for one
+                        // app and renders `items[0]` gets a plausible, wrong
+                        // answer, and a bogus id can never come back empty.
+                        //
+                        // ⚠️ Runs AFTER the RBAC filter above, on `visible`
+                        // rather than on `items`. The two orders produce the same
+                        // SET (both are pure filters), but not the same
+                        // disclosure: narrowing first would hand `?id=<an
+                        // unpublished app>` a one-element list to gate, and any
+                        // future non-total gate — one that strips a field instead
+                        // of dropping the document — would then be answering
+                        // about an app the caller may not observe at all
+                        // (ADR-0045 §3). Permission decides what exists for this
+                        // caller; the filter narrows what they asked for within
+                        // it, never the reverse.
+                        //
+                        // The match is on `name`, the App document's identity —
+                        // `AppSchema.name`, "App unique machine name", the same
+                        // key `GET /meta/app/:name` addresses and the same key
+                        // the metadata store merges overlays on. `AppSchema`
+                        // declares no `id` of its own (`id` appears on nav items
+                        // and areas, never on the app), so there is no second
+                        // identity to disagree with.
+                        //
+                        // A filter that matches nothing answers `200` with an
+                        // EMPTY list, not a 404 — measured against this route's
+                        // siblings, not chosen: `?package=<no such package>` and
+                        // `/meta/view?object=<no such object>` both serve an
+                        // empty list here, and the only meta 404 is the
+                        // single-item address `GET /meta/:type/:name`. An empty
+                        // list is the honest answer to "which apps have this id",
+                        // and it is already observably different from the defect,
+                        // which answered with all of them.
+                        //
+                        // Empty and absent spellings still mean "no filter", the
+                        // same falsy gate `?package=` on this route has always
+                        // used. The repeated spelling was refused at the top of
+                        // the handler (#6877), so what arrives here is a string.
+                        //
+                        // Its own block rather than a line inside the branch
+                        // above, because the two answer different questions:
+                        // that branch is guarded on a resolved `ctx?.userId` and
+                        // decides what this caller may observe, while narrowing
+                        // to the app you named is not a privilege and must not
+                        // acquire that guard's conditions.
+                        const appIdFilter = RestServer.metaTypeSingular(req.params.type) === 'app'
+                            ? req.query?.id
+                            : undefined;
+                        if (typeof appIdFilter === 'string' && appIdFilter !== '') {
+                            const raw = visible as unknown;
+                            // Only the two shapes this route serves are narrowed
+                            // — a bare array or the `{ items: [] }` envelope.
+                            // Anything else is left alone rather than replaced
+                            // with an invented empty envelope: a filter must not
+                            // be the thing that changes the response's shape.
+                            const list: any[] | null = Array.isArray(raw)
+                                ? (raw as any[])
+                                : (raw && typeof raw === 'object' && Array.isArray((raw as any).items))
+                                    ? ((raw as any).items as any[])
+                                    : null;
+                            if (list) {
+                                const matched = list.filter(
+                                    (a: any) => a && typeof a === 'object' && a.name === appIdFilter,
+                                );
+                                visible = Array.isArray(raw) ? matched : { ...(raw as any), items: matched };
                             }
                         }
 
@@ -6007,6 +6228,159 @@ export class RestServer {
                 tags: ['metadata'],
             },
         });
+
+        // GET /meta/objects/:name/state/:field?from=:state — ADR-0020 D3.3
+        // legal-next-state introspection. [#7526]
+        //
+        // Ledgered since #3563 (`route-ledger.ts`, `meta.getLegalNextStates`)
+        // and implemented in the dispatcher's `/meta` branch — but REST's ~17
+        // `/meta` routes topped out at THREE path segments and this one needs
+        // four, so no registration here could ever deliver it and it answered
+        // Hono's `notFound`, byte-identical to an unmounted path.
+        //
+        // Registered BEFORE the compound `/:type/:section/:name/published`
+        // twin below, which it collides with on exactly one shape:
+        // `/meta/objects/x/state/published`. Two literal segments (`objects`,
+        // `state`) beat one, so the FSM reading wins that path — a field
+        // literally named `published` is the ambiguity, and answering it as
+        // "the published version of the compound name objects/x/state" would
+        // be the less likely of the two by a wide margin.
+        //
+        // `/object` as well as `/objects`: `metadata-protocol` folds the two
+        // spellings (#4432) and the dispatcher branch accepts both, so the
+        // REST mount that replaces it must not be pickier than what it
+        // replaces.
+        for (const objectsSegment of ['objects', 'object']) {
+            this.routeManager.register({
+                method: 'GET',
+                path: `${metaPath}/${objectsSegment}/:name/state/:field`,
+                handler: async (req: any, res: any) => {
+                    try {
+                        const environmentId = isScoped ? req.params?.environmentId : undefined;
+                        const name = String(req.params?.name ?? '');
+                        const field = String(req.params?.field ?? '');
+                        // [#6877 shape] `?from=` narrows to ONE current state;
+                        // an array would reach `legalNextStates` as a
+                        // stringified pair and match no transition key.
+                        if (refuseRepeatedQueryParams(req, res, ['from'])) return;
+                        const from = req.query?.from !== undefined ? String(req.query.from) : undefined;
+                        const ql = this.objectQLProvider
+                            ? await this.objectQLProvider(environmentId).catch(() => undefined)
+                            : undefined;
+                        const schema = (ql as any)?.registry?.getObject?.(name);
+                        if (!schema) {
+                            // `{ error: { code, message } }`, the envelope
+                            // `BaseResponseSchema` declares — not the bare
+                            // `{ error: 'string' }` the dispatcher branch this
+                            // mirrors emits. `pnpm check:route-envelope`
+                            // ratchets both non-conforming shapes DOWN only, so
+                            // a new route arrives conforming or not at all.
+                            res.status(404).json({
+                                error: { code: 'NOT_FOUND', message: 'Object not found' },
+                            });
+                            return;
+                        }
+                        // Dynamic import, matching the dispatcher branch this
+                        // mirrors: `@objectstack/objectql` is a devDependency
+                        // here, so a deployment serving REST without the data
+                        // engine must degrade rather than fail to load.
+                        let legalNextStates:
+                            | ((s: { validations?: unknown[] } | null | undefined, f: string, c: string) => string[] | null)
+                            | undefined;
+                        try {
+                            ({ legalNextStates } = await import('@objectstack/objectql'));
+                        } catch {
+                            legalNextStates = undefined;
+                        }
+                        if (typeof legalNextStates !== 'function') {
+                            res.status(501).json({
+                                error: {
+                                    code: 'NOT_IMPLEMENTED',
+                                    message: 'State-machine introspection is not available in this runtime',
+                                },
+                            });
+                            return;
+                        }
+                        // `next: null` = no FSM governs the field; `next: []` =
+                        // a declared dead end. Same three-valued answer the
+                        // dispatcher gives, because a UI asking "where can this
+                        // record go" must be able to tell those apart.
+                        const next = from === undefined ? null : legalNextStates(schema, field, from);
+                        res.json({ object: name, field, from: from ?? null, next });
+                    } catch (error: any) {
+                        handleRouteError(res, error);
+                    }
+                },
+                metadata: {
+                    summary: 'List the legal next states declared by an object field\'s state machine',
+                    tags: ['metadata'],
+                },
+            });
+        }
+
+        // GET /meta/:type/:name/published — ADR-0033 published snapshot. [#7526]
+        //
+        // Ledgered since #3563 (`meta.getPublished`) and implemented in the
+        // dispatcher, but never mounted here — so the request fell into the
+        // compound-name route below with `section=:name, name='published'`,
+        // which answered a protection-envelope stub. Identical before and
+        // after publish, identical for a name that does not exist: a route
+        // that structurally could not 404.
+        //
+        // Both arities, mirroring the `getItem` / `saveItem` twins: the SDK
+        // documents `getPublished('lead', 'views/all_leads')`, and a compound
+        // name is how every other read on this surface addresses a
+        // sub-resource. REGISTERED BEFORE `/:type/:section/:name` — the
+        // three-segment form collides with it exactly the way `/history` and
+        // `/audit` do, and Hono is first-match-wins.
+        for (const publishedPath of [
+            `${metaPath}/:type/:name/published`,
+            `${metaPath}/:type/:section/:name/published`,
+        ]) {
+            this.routeManager.register({
+                method: 'GET',
+                path: publishedPath,
+                handler: async (req: any, res: any) => {
+                    try {
+                        const environmentId = isScoped ? req.params?.environmentId : undefined;
+                        const type = String(req.params?.type ?? '');
+                        const section = req.params?.section;
+                        const name = section
+                            ? `${section}/${req.params?.name ?? ''}`
+                            : String(req.params?.name ?? '');
+                        const svc = await this.resolveMetadataService(environmentId, req);
+                        if (typeof (svc as any)?.getPublished !== 'function') {
+                            res.status(501).json({
+                                error: {
+                                    code: 'NOT_IMPLEMENTED',
+                                    message: 'metadata.getPublished() is not available in this kernel',
+                                },
+                            });
+                            return;
+                        }
+                        const data = await (svc as any).getPublished(type, name);
+                        // The 404 this route could never produce before. An
+                        // item that exists but was never published still
+                        // answers 200 with its current definition — that is
+                        // `getPublished`'s documented fallback, and it is a
+                        // different fact from "no such item".
+                        if (data === undefined) {
+                            res.status(404).json({
+                                error: { code: 'NOT_FOUND', message: 'Not found' },
+                            });
+                            return;
+                        }
+                        res.json(data);
+                    } catch (error: any) {
+                        handleRouteError(res, error);
+                    }
+                },
+                metadata: {
+                    summary: 'Get the published version of a metadata item',
+                    tags: ['metadata'],
+                },
+            });
+        }
 
         // GET /meta/:type/:section/:name - Get specific item with compound name
         // Compound names express sub-resources of a type (e.g. a view of an
@@ -8100,7 +8474,22 @@ export class RestServer {
                             const items: any[] = Array.isArray(r?.items) ? r.items : Array.isArray(r) ? r : [];
                             const obj = items.find((o: any) => o?.name === match.object);
                             const def = obj?.fields?.[fieldName];
-                            referenceTo = def?.referenceTo ?? def?.target ?? def?.options?.objectName;
+                            // [#7486] `reference` FIRST — it is the canonical
+                            // key on `FieldSchema`, and `data/field.zod.ts`
+                            // folds `relatedTo` / `referenceTo` / `target` /
+                            // `targetObject` / `lookupObject` all onto it at
+                            // parse. Reading only the legacy spellings meant a
+                            // well-formed object schema carried NONE of them,
+                            // the chain resolved `undefined`, and the route
+                            // answered 500 — making `publicPicker.object`
+                            // de-facto required while the schema and docs
+                            // present it as an optional override. The legacy
+                            // spellings stay after it for stored pre-fold rows,
+                            // which never went through the alias table.
+                            referenceTo = def?.reference
+                                ?? def?.referenceTo
+                                ?? def?.target
+                                ?? def?.options?.objectName;
                         } catch {/* ignore */}
                     }
                     if (!referenceTo) {

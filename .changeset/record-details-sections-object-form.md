@@ -54,3 +54,5 @@ of silently stripping a live page's hidden-field list.
 `fields` (required), `label`, `columns` (1-4), and `name` — the i18n anchor that
 resolves `objects.<object>._sections.<name>.label`, which `packages/lint`'s
 `translation-section-name-missing` rule tells authors to add.
+
+<!-- adr-0087: registered record-details-sections-object-form -->

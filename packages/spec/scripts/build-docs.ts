@@ -837,9 +837,27 @@ PAGES_BY_CATEGORY.forEach((zodFileSchemas, category) => {
 
   // Generate Category Meta. Group into fumadocs `---Section---` separators when the
   // category has a SECTION_GROUPS entry; otherwise a flat sorted list (see #1880).
+  const pages = buildCategoryPages(category, Array.from(zodFileSchemas.keys()));
+
+  // A category that published no page gets no `meta.json` — and so no directory
+  // at all — the same way §2.5 below skips the `index.mdx` of one. What this
+  // guard removes is a folder holding a single `{ "pages": [] }`: no page, no
+  // `index.mdx`, and no entry in the root `meta.json`, so it is unroutable, and
+  // invisible to the link checker. Its one measurable effect was that anyone
+  // enumerating the tree counted one category more than exists — which is how
+  // #7303 came to be filed.
+  //
+  // `contracts/` is the case: it holds TypeScript service interfaces rather than
+  // `.zod.ts` schemas, so `gen:schema` creates `json-schema/contracts/` and
+  // leaves it empty; unlike `conversions`/`migrations` (no schema directory at
+  // all, so `groupSchemasByPage` skips them outright) it reaches this loop with
+  // zero pages. The guard is on the pages, not on that asymmetry, so any future
+  // category in either shape lands the same way.
+  if (pages.length === 0) return;
+
   const meta = {
     title: CATEGORIES[category],
-    pages: buildCategoryPages(category, Array.from(zodFileSchemas.keys()))
+    pages
   };
   emit(path.join(categoryDir, 'meta.json'), JSON.stringify(meta, null, 2));
 });

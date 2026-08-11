@@ -2,6 +2,8 @@
 
 import { defineConnector, type Connector } from '@objectstack/spec/integration';
 
+import { resolveShowcaseSelfUrl } from '../self-url.js';
+
 /**
  * Declarative `connectors:` — the collection now holds BOTH kinds (ADR-0097):
  *
@@ -50,11 +52,16 @@ export const StatusApiConnector = defineConnector({
     'connector_action and appears in GET /connectors.',
   provider: 'rest',
   providerConfig: {
-    // Points at the running server itself (the showcase dev port is 3000), so
-    // the dispatch is observable with no external dependency. Kept a literal
-    // because metadata files don't read env — the env-driven `rest` plugin
-    // connector in objectstack.config.ts is the tunable one.
-    baseUrl: 'http://127.0.0.1:3000',
+    // Points at the running server itself, so the dispatch is observable with
+    // no external dependency. Resolved from the environment (#7538) via the
+    // same helper objectstack.config.ts's `rest` plugin uses, so the two
+    // self-URL sources cannot diverge: SHOWCASE_SELF_URL, else the CLI's own
+    // OS_PORT / PORT, else http://127.0.0.1:3000. A literal here made every
+    // self-ping flow fail `fetch failed` on any instance not listening on 3000
+    // — and metadata modules DO read env: this file is evaluated by whichever
+    // process loads objectstack.config.ts (see ../self-url.ts for when that is
+    // boot time vs build time).
+    baseUrl: resolveShowcaseSelfUrl(),
   },
   auth: { type: 'none' },
 });
@@ -85,8 +92,13 @@ export const StatusOpenApiConnector = defineConnector({
     // holds objectstack.config.ts (the CLI passes it as the automation
     // service's packageRoot). Inline documents and http(s) URLs stay valid.
     spec: './src/system/connectors/status-openapi.json',
-    // Same self-pointing literal rationale as StatusApiConnector above.
-    baseUrl: 'http://127.0.0.1:3000',
+    // Same env-resolved self URL as StatusApiConnector above (#7538). This
+    // OVERRIDES the document's own `servers[0].url` — createOpenApiConnector
+    // resolves `config.baseUrl ?? document.servers?.[0]?.url`
+    // (packages/connectors/connector-openapi/src/openapi-connector.ts) — so the
+    // static literal in status-openapi.json stays a documentation default and
+    // is not what the dispatch actually uses.
+    baseUrl: resolveShowcaseSelfUrl(),
   },
   auth: { type: 'none' },
 });

@@ -58,3 +58,5 @@ and re-audited every time `IHttpServer` gains an optional member — it gained o
 as recently as #5080. The 2026-08-06 maintainer ruling took the #4939
 (`ApiRegistry`) precedent instead — retiring a part that was never assembled
 beats repairing it — under ADR-0049's remove side.
+
+<!-- adr-0087: registered runtime-httpserver-wrapper-retired -->

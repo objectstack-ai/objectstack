@@ -63,3 +63,5 @@ nonsenseKey: 1 }).success === true`). That is tracked in the #4001 campaign map
 for its own batch, not smuggled in here.
 
 Related: #4674, #4720, #4363, #4371, #4001, ADR-0049.
+
+<!-- adr-0087: registered sort-node-direction-rejected -->

@@ -2646,10 +2646,20 @@ describe('mapDataError — schema/constraint envelopes', () => {
     expect(r.body.code).toBeUndefined();
   });
 
-  it('keeps non-default error names when stripping the wrapper (genuine script bugs stay identifiable)', () => {
+  // [#7543] REVERSED. This case used to assert the opposite — that a non-default
+  // error name was KEPT on the wire so "genuine script bugs stay identifiable".
+  // Identifiable to WHOM is the question it did not ask: an operator reads the
+  // log (500 is outside `isExpectedDataStatus`, so `handleRouteError` still
+  // prints the whole error), while the client got a raw `TypeError` presented as
+  // their own mistake, in a 400 with no `code`. A crashing body is a server
+  // fault — the ruling `UNCLASSIFIED_FAULT`'s own docblock (#5489) already
+  // records for this exact text. Full coverage of the crash-vs-refusal
+  // classification lives in `rest-hook-script-fault-envelope.test.ts`.
+  it('sanitises a crashing hook body instead of shipping its runtime fault', () => {
     const r = mapDataError(new Error("hook 'pm_ref_base' threw: TypeError: cannot read properties of undefined"), 'pm_base');
-    expect(r.status).toBe(400);
-    expect(r.body.error).toBe('TypeError: cannot read properties of undefined');
+    expect(r.status).toBe(500);
+    expect(r.body.code).toBe('INTERNAL_ERROR');
+    expect(String(r.body.error)).not.toContain('TypeError');
   });
 
   it("unwraps an action body's wrapper the same way", () => {
