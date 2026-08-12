@@ -9106,7 +9106,9 @@ export class ObjectQL implements IObjectQLEngine {
       //                     by `targets(objectName)` inside the handler)
       //   * `service-storage` file-reference-lifecycle before+afterDelete
       //                     (filters by `activeFileFields(object)` inside)
-      //   * `plugin-audit`  captureBefore / writeAudit before+afterDelete,
+      //   * `plugin-audit`  writeAudit  afterDelete only — #6656 retired
+      //                     `captureBefore`, which was its `beforeDelete` half,
+      //                     so it holds term 2 open and no longer term 1;
       //                     global MINUS `excludeObjects: AUDIT_EXCLUDED_OBJECTS`
       //                     (#5860) — the one that narrows at the ENGINE face,
       //                     so `hookMatchesObject` can subtract it and an
