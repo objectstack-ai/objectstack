@@ -247,7 +247,18 @@ const MODULES = {
     // 77 → 75 (#7981): registerSecurityEndpoints' two `handleError` arms moved
     // off the `{ code, error }` sibling-code literal onto the shared
     // `respondError` helper, banking that progress per the ratchet's own rule.
-    siblingCode: 75,
+    //
+    // 75 → 73 (#8073): the ADJACENT registrar, `registerSecurityExplainEndpoints`,
+    // followed — its two 500 arms (`EXPLAIN_FAILED`, `DELEGABLE_SCOPE_FAILED`)
+    // now emit through the shared `sendError` from `@objectstack/types`.
+    // Measured: merge-base (6ceffe0ac) siblingCode=75, branch head=73; the two
+    // vanished sites are merge-base lines 9332/9390, both inside that function,
+    // and every surviving site maps 1:1 onto a head line by the edit's own line
+    // shift. `stringError` is unmoved at 44 by construction: both arms carried a
+    // COMPUTED message (`msg.slice(0, 500)`), which that counter cannot see —
+    // the six flat `{ code, message }` arms converted alongside them were never
+    // counted by either dialect, having no `error` key at all.
+    siblingCode: 73,
   },
 };
 

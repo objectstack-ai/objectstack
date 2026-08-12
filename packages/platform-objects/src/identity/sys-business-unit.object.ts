@@ -14,7 +14,8 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * structure works identically regardless of value.
  *
  * Drives:
- *   - `recipient_type='business_unit'` sharing rules
+ *   - `recipient_type='unit_and_subordinates'` sharing rules (subtree walk);
+ *     `business_unit` expands only the one named unit's members
  *   - `bu:` approver prefix in the approval engine
  *   - Report rollups and manager chains in CRM/PM apps
  *

@@ -1,5 +1,11 @@
 import { defineConfig, devices } from '@playwright/test';
 
+// Ambient `process` with `env` — types/node-shim.d.ts declares the global as
+// `{ cwd(): string }` only, so each module that reads env widens it locally.
+// Declared above the block comment below so that comment stays attached to the
+// first emitted statement.
+declare const process: { env: Record<string, string | undefined> };
+
 /**
  * Showcase smoke — drives the console (served by the backend at /_console)
  * across every nav surface. `webServer` boots the real backend so CI only needs

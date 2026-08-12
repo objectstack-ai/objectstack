@@ -877,7 +877,19 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                         { field: '(body)', code: 'invalid_type', message: 'expected a flow definition object' },
                     ]);
                 }
-                automationService.registerFlow(name, definition);
+                // [#8123] Same class as POST /: the engine's verdict on the
+                // definition is served as a 400, not a 500 — reusing the
+                // same route-agnostic `flowDefinitionRefusal` helper POST
+                // uses above, so the two doors cannot disagree about the
+                // class of an identical refusal (#8055 wired POST only).
+                try {
+                    automationService.registerFlow(name, definition);
+                } catch (e) {
+                    return {
+                        handled: true,
+                        response: deps.errorFromThrown(flowDefinitionRefusal(e), VALIDATION_FAILED_STATUS),
+                    };
+                }
                 return { handled: true, response: deps.success(definition) };
             }
         }
