@@ -50,7 +50,7 @@ export default defineConfig({
     // string literal in the expression: from the template form that is the
     // whole template body, which contains no `/src/` segment, so a config that
     // aliases every namespace correctly still reads to the gate as aliasing
-    // nothing. Filed as #<FINDING> — it is why both of those packages still
+    // nothing. Filed as #8020 — it is why both of those packages still
     // carry a `['@objectstack/objectql', '@objectstack/spec']` registry entry
     // they have in fact already half-fixed. In this spelling the gate's
     // simulated resolution lands on `spec/src/<ns>/index.ts`, which is what
