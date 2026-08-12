@@ -35,15 +35,20 @@ refused write that named a read-only base says so:
 this is the code selection inside the refusal branch, not a new gate. That
 distinction is load-bearing rather than cautious — an ADR-0005 org overlay names
 the read-only package it customizes *by construction*, so a package door that
-refused would close the overlay model itself. In particular the documented
-`OS_METADATA_WRITABLE` hatch is untouched: an env-hatch write into a read-only
-package (`OS_METADATA_WRITABLE=permission` + a `permission` set belonging to a
-read-only package) still succeeds, and is now pinned by a test — whether that
-hatch or Studio's badge is the correct semantics is a separate maintainer
-decision (#8146) and must move deliberately, not as a side effect of this fix.
-Writes that name no base keep the previous `NOT_OVERRIDABLE` / `NOT_CREATABLE`
-codes verbatim, and the DELETE verb is unchanged (#6960 moved that side on
-purpose; `DeleteOptions` names no package).
+refused would close the overlay model itself. Writes that name no base keep the
+previous `NOT_OVERRIDABLE` / `NOT_CREATABLE` codes verbatim, and the DELETE verb
+is unchanged (#6960 moved that side on purpose; `DeleteOptions` names no
+package).
+
+The `OS_METADATA_WRITABLE` hatch is likewise untouched — structurally, because
+its limb returns before the new door. That is **not** an endorsement: the
+maintainer ruling of 2026-08-12 on #8146 holds that a hatch write into a
+read-only package should REFUSE, and the test covering it is labelled a
+characterization pin of today's behaviour so the #8146 fix must invert it rather
+than pass it silently. Re-measured on current `main` at that ruling's request:
+it still reproduces, and the row lands bound INTO the read-only package
+(`package_id = com.example.showcase`) rather than as the per-org override the
+variable's own documentation describes.
 
 Reachability, stated so it is not mistaken for more than it is: this refusal is
 what answers on the host-config topology (`environmentId` undefined — the CLI's

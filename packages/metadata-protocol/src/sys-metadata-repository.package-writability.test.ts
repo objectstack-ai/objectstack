@@ -33,9 +33,11 @@
  *  - **no allow decision moves** — this is a code SELECTION inside the refusal
  *    branch. An ADR-0005 overlay names the read-only package it customizes by
  *    construction, so a package door that refused would close the overlay
- *    model; and `OS_METADATA_WRITABLE` must keep unlocking exactly what it
- *    unlocked before, because the hatch-vs-Studio-badge question is a separate
- *    maintainer decision (#8146) that this card must not pre-empt.
+ *    model. `OS_METADATA_WRITABLE` is untouched for the same structural reason
+ *    (its limb returns before the door), and its case here is a CHARACTERIZATION
+ *    pin, not an endorsement: the 2026-08-12 ruling on #8146 says today's
+ *    answer is a bug, and that case is named and documented so the fix must
+ *    invert it rather than quietly pass it. See the case for the re-measurement.
  *  - **delete is untouched** — #6960 moved the delete side deliberately and
  *    warns against symmetrising; `DeleteOptions` carries no `packageId`.
  */
@@ -255,14 +257,32 @@ describe('#7682 — the refusal discriminates on package writability', () => {
       expect(Array.from(engine.rows.values())[0]).toMatchObject({ package_id: READ_ONLY_PKG });
     });
 
-    it('[ruling] OS_METADATA_WRITABLE still unlocks a write into a READ-ONLY package', async () => {
-      // The card's measured hatch case, at the layer that answers it:
-      // `OS_METADATA_WRITABLE=permission` + a `permission` set belonging to the
-      // read-only showcase package → the write SUCCEEDS. #7682's second half
-      // (does the hatch or Studio's "Read-only" badge win?) is filed as #8146
-      // and is the maintainer's to rule; this pin is what keeps that ruling
-      // free to move the behaviour DELIBERATELY later, instead of it drifting
-      // as a side effect of the code-selection fix.
+    it('[CONTESTED — #8146 ruled this a BUG] OS_METADATA_WRITABLE currently unlocks a write into a READ-ONLY package', async () => {
+      // ⛔ NOT an assertion that this behaviour is correct. Read the name.
+      //
+      // This is a CHARACTERIZATION pin of what `main` does today, and the
+      // maintainer ruling of 2026-08-12 on #8146 (option B: "the server should
+      // refuse — the badge is telling the truth") says today's answer is a bug:
+      // the hatch is TYPE-level by its own shipped documentation
+      // (`content/docs/deployment/environment-variables.mdx`, `OS_METADATA_WRITABLE`
+      // — "treats them as `allowOrgOverride: true`"), so it has nothing to say
+      // about the package dimension.
+      //
+      // It is kept, rather than deleted, because it is the tripwire: whoever
+      // implements #8146 must INVERT this case, and a suite that simply went
+      // quiet about the hatch would let that land without anyone re-reading
+      // what the hatch is for. Re-measured on current `main` at the request of
+      // that ruling (the original measurement was against two-week-old
+      // builds): it still reproduces, end to end through `saveMetaItem` on the
+      // host-config topology — `success: true`, and the row lands with
+      // `package_id = com.example.showcase`, i.e. bound INTO the read-only
+      // package rather than as the per-org override the documentation
+      // describes.
+      //
+      // #7682's own fix does not touch this path: the hatch limb returns
+      // before the package door, exactly as it did before. Which is the point
+      // — the change under test neither preserves nor moves this deliberately;
+      // it is orthogonal to it.
       process.env.OS_METADATA_WRITABLE = 'permission';
       resetEnvWritableMetadataTypes();
 
@@ -278,8 +298,10 @@ describe('#7682 — the refusal discriminates on package writability', () => {
     });
 
     it('without the hatch, that same permission write is refused by the package door', async () => {
-      // The other side of the pin above: the hatch is doing the work, not an
-      // accident of `permission` being overlay-capable.
+      // The other side of the case above: the hatch is doing the work, not an
+      // accident of `permission` being overlay-capable. This one IS an
+      // assertion of correctness — with no hatch, the read-only base is what
+      // the refusal names, which is #7682's whole point.
       const err = await putWith(repo, {
         type: 'permission', name: 'showcase_contributor', intent: 'override-artifact', packageId: READ_ONLY_PKG,
       });
