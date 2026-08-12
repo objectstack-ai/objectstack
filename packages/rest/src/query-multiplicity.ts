@@ -1,5 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { RPC_QUERY_ALIAS_SLOTS } from '@objectstack/spec/data';
+
 /**
  * Query-parameter MULTIPLICITY, for every REST handler in this package (#6877).
  *
@@ -144,4 +146,111 @@ export function refuseRepeatedQueryParams(
     query[name] = read.value as string;
   }
   return false;
+}
+
+/**
+ * Every WIRE spelling of the ONE filter slot, as `GET /data/:object` receives
+ * it (#7390).
+ *
+ * The canonical key and its schema-declared alias are read off the spec's own
+ * table — `RPC_QUERY_ALIAS_SLOTS`, "the ONE place the alias to canonical
+ * mapping is declared" — so a spelling added there reaches this gate without
+ * anybody remembering to copy it.
+ *
+ * `filters` and `$filter` are named here instead, because they are wire-only:
+ * no schema declares them, and `metadata-protocol` extends that same spec
+ * table with them for exactly that reason. Deriving them was not an option —
+ * `@objectstack/metadata-protocol` is a dev-only dependency of this package,
+ * so no runtime import of its table exists. Gating fewer than all four would
+ * leave three quarters of one slot misdiagnosed, which is the defect, not a
+ * narrower version of the fix. `filterSlotSpellingsAreComplete` in
+ * `rest-server-repeated-filter-param.test.ts` pins the composition so a spec
+ * table that loses `where` goes red here rather than silently ungating a
+ * spelling.
+ */
+export const FILTER_SLOT_QUERY_PARAMS: readonly string[] = (() => {
+  const slot = RPC_QUERY_ALIAS_SLOTS.find((s) => s.canonical === 'where');
+  return [...(slot ? [slot.canonical, ...slot.aliases] : []), 'filters', '$filter'];
+})();
+
+/**
+ * The one refusal message for a repeated filter parameter.
+ *
+ * It names REPETITION, and that is the whole point of #7390 rather than a
+ * wording preference. Until this gate existed the same request was answered by
+ * `malformedFilterArrayError` in the normalizer — a 400 whose text told the
+ * caller their filter was *malformed*, listing the AST operator vocabulary,
+ * when every filter they sent was well-formed and the mistake was sending two.
+ * A caller reading that message re-checks their syntax, which is the one thing
+ * that cannot help them.
+ *
+ * It also does not offer a resolution, because there is none to offer
+ * (maintainer ruling, 2026-08-11): last-wins and AND-merge were both rejected
+ * as silent selection among duplicates.
+ */
+export function repeatedFilterParamMessage(name: string, count: number): string {
+  return `Repeated "${name}" query parameter — send exactly one. It was supplied ${count} times. `
+    + 'A repeated filter is neither merged nor resolved by precedence: either would apply a '
+    + 'filter you did not express.';
+}
+
+/**
+ * Refuse a repeated filter parameter on a QUERYSTRING ingress (#7390).
+ *
+ * ## Why this rule cannot live in the shared normalizer
+ *
+ * `metadata-protocol`'s list-query normalizer serves two ingresses through one
+ * door — `GET /data/:object`, where a repeat arrives as `string[]`, and
+ * `POST /data/:object/query`, whose body is arbitrary JSON — and a filter AST
+ * *is* an array (`['status','=','open']`). So the two are byte-identical
+ * there, which is precisely why #7386's arity gate had to leave this slot
+ * alone ({@link https://github.com/objectstack-ai/objectstack/issues/7390}).
+ * On a querystring the ambiguity does not exist: an array on the filter slot
+ * is a repeated parameter and can be nothing else. This layer is the only one
+ * that knows it is looking at a querystring, so the judgement is made here and
+ * the normalizer stays free of the heuristic (`an array of strings each
+ * parseable as JSON is probably a repetition`) that #4181 and #4121 spent
+ * effort removing.
+ *
+ * ## Why it THROWS instead of responding
+ *
+ * Its sibling {@link refuseRepeatedQueryParams} writes the ADR-0112 NESTED
+ * body itself, which is right for the `/meta` family it guards. The data
+ * routes speak the FLAT `mapDataError` envelope (`{ error, code, object }`),
+ * and that is the envelope this route's OTHER filter refusals already arrive
+ * in — `unusableFilterError` and `malformedFilterArrayError` both throw
+ * `400` / `INVALID_FILTER` and are shaped by the handler's own catch. So this
+ * gate throws the same shape from inside the same `try`: one slot, one wire
+ * code, one body shape, whether the filter was unreadable or sent twice.
+ * Responding here instead would author a second dialect for one condition.
+ *
+ * `INVALID_FILTER` is a STANDARD-catalog code (`spec/src/api/errors.zod.ts`),
+ * not a new one — nothing in `packages/spec` moves for this.
+ *
+ * A one-element array is one occurrence encoded by an adapter, and is unwrapped
+ * rather than refused — the same count-not-shape rule this module's header
+ * states, and the reason a `['{"a":1}']` from a repeat-preserving adapter stops
+ * being read as a malformed AST too.
+ *
+ * @param query the handler's `req.query` (`any`-shaped; `rest-server.ts` types
+ *              its handlers that way). Non-object values are left alone.
+ * @throws a `400` / `INVALID_FILTER` error when a filter spelling was supplied
+ *         more than once.
+ */
+export function assertFilterParamSuppliedOnce(query: unknown): void {
+  if (!query || typeof query !== 'object') return;
+  const bag = query as Record<string, unknown>;
+  for (const name of FILTER_SLOT_QUERY_PARAMS) {
+    const raw = bag[name];
+    if (!Array.isArray(raw)) continue;
+    const read = readSingleQueryValue(raw as string[]);
+    if (!read.ok) {
+      const err: any = new Error(repeatedFilterParamMessage(name, read.count));
+      err.status = 400;
+      err.code = 'INVALID_FILTER';
+      err.param = name;
+      throw err;
+    }
+    bag[name] = read.value as string;
+  }
 }
