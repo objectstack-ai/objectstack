@@ -71,8 +71,12 @@ function makeRecordingDriver() {
                 if (!(v as any).$in.map(String).includes(String(row[k]))) return false;
                 continue;
             }
-            if (v && typeof v === 'object' && '$contains' in (v as any)) {
-                const needle = String((v as any).$contains).toLowerCase();
+            // [#7641] `$icontains` — what `$search` compiles to. This arm folded
+            // both sides while keyed on `$contains`, so the double already
+            // answered case-insensitively under the case-SENSITIVE operator's
+            // name; only the key moved.
+            if (v && typeof v === 'object' && '$icontains' in (v as any)) {
+                const needle = String((v as any).$icontains).toLowerCase();
                 if (!String(row[k] ?? '').toLowerCase().includes(needle)) return false;
                 continue;
             }
