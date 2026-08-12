@@ -9,6 +9,7 @@ import {
     isMcpServerEnabled,
     looksLikeInternalErrorLeak,
     isUniqueViolationError,
+    uniqueViolationColumn,
     matchMissingColumnOfRelation,
     declaresServerFault,
     INTERNAL_ERROR_MESSAGE,
@@ -1072,21 +1073,61 @@ export function mapDataError(error: any, object?: string): { status: number; bod
     // this file would have been the fifth private vocabulary, which is the
     // defect #6250 is named for.
     //
-    // **The body says nothing the driver said.** The message is a fixed
-    // sentence and the only interpolated value is the object name the ROUTE
-    // supplied. That is load-bearing, not incidental: MySQL's text embeds the
-    // offending USER DATA (`Duplicate entry 'acme@example.com' …`) and
-    // Postgres' embeds the index and column names, so echoing the driver here
-    // would trade a status-code bug for an information-disclosure one. Pinned
-    // in `rest-unique-violation-dialects.test.ts`. The full text still reaches
-    // the operator: `handleRouteError` / `logWithheldServerFault` log the
-    // original error untouched.
+    // **The body still says nothing the driver said.** The message is fixed
+    // text and the only interpolated values are the object name the ROUTE
+    // supplied and — since #7821 — the conflicting FIELD, and that second one
+    // is safe for the same reason the first is: it does not come from the
+    // driver's prose, it comes from `uniqueViolationColumn`, which hands back
+    // only a bare `[A-Za-z_][A-Za-z0-9_$]*` identifier it could determine is a
+    // COLUMN. The withholding this branch exists to enforce is unchanged:
+    // MySQL's text embeds the offending USER DATA (`Duplicate entry
+    // 'acme@example.com' …`) and Postgres' embeds the index name, and neither
+    // can reach the wire — `uniqueViolationColumn` refuses index names outright
+    // and the table qualifier is stripped (`sys_user.email` → `email`). Pinned,
+    // per dialect, in `rest-unique-violation-dialects.test.ts`. The full text
+    // still reaches the operator: `handleRouteError` / `logWithheldServerFault`
+    // log the original error untouched.
+    //
+    // **[#7821] Why `field` at all — parity, not a new feature.** The bulk /
+    // import path has named the colliding column since #6544
+    // (`sanitizeRowError` → `uniqueViolationColumn` → "A record with this
+    // `email` already exists."), while this branch — holding the same error
+    // object, one import away from the same helper — answered "a value". So the
+    // platform gave two different answers to one constraint depending only on
+    // whether the write arrived one row at a time or in a batch, and a client
+    // that wanted to render its own localized message could not name the field
+    // either, because the body carried no `field`. Both halves are fixed here:
+    // the wire gets `field`, and the default sentence reaches parity.
+    //
+    // ⚠️ The bulk path is deliberately NOT touched. Convergence is upward only:
+    // it already names the field and must keep naming it exactly as it does.
+    //
+    // **Passing the error OBJECT, not `error.message`, is the point.**
+    // `sanitizeRowError` only ever holds a string, so it reads the message
+    // channel alone. This site has the whole error, and `uniqueViolationColumn`
+    // additionally reads `detail` and one step of `cause` — which is where the
+    // column actually is for the Postgres driver we ship: node-postgres keeps
+    // its `DETAIL: Key (email)=(…)` line on `error.detail` and off the message.
+    // Measured on `origin/main`: that shape resolves `email` from the object and
+    // `undefined` from `err.message`.
+    //
+    // **When it cannot tell, it says nothing.** `uniqueViolationColumn` returns
+    // `undefined` for an index name (MySQL's `for key 'idx_email_unique'`,
+    // SQLite's `index 'x'`), for a composite key, and for any dialect it does
+    // not parse — and then this branch emits the unnamed sentence and NO `field`
+    // key at all. That degradation is the contract, not a fallback: a wrong
+    // field name is worse than none, because it sends the user to correct an
+    // input that was never the problem.
     if (isUniqueViolationError(error)) {
+        const field = uniqueViolationColumn(error);
         return {
             status: 409,
             body: {
-                error: 'A record with this value already exists',
+                error: field
+                    ? `A record with this ${field} already exists`
+                    : 'A record with this value already exists',
                 code: 'UNIQUE_VIOLATION',
+                ...(field ? { field } : {}),
                 ...(object ? { object } : {}),
             },
         };
