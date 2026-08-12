@@ -160,15 +160,39 @@ describe('MemberSchema', () => {
 
 describe('InvitationStatus', () => {
   it('should accept valid invitation statuses', () => {
-    const statuses = ['pending', 'accepted', 'rejected', 'expired'];
+    const statuses = ['pending', 'accepted', 'rejected', 'expired', 'canceled'];
 
     statuses.forEach((status) => {
       expect(() => InvitationStatus.parse(status)).not.toThrow();
     });
   });
 
+  // [#7726] The vocabulary itself, spelled out: `canceled` was missing here
+  // while `cancel-invitation` wrote it, so an invitation the platform had
+  // canceled failed its own contract. A value list is the one thing a
+  // "parses without throwing" loop cannot pin — it stays green when the enum
+  // is widened by accident just as readily as on purpose.
+  it('declares exactly the five shipped statuses, in order', () => {
+    expect(InvitationStatus.options).toEqual([
+      'pending',
+      'accepted',
+      'rejected',
+      'expired',
+      'canceled',
+    ]);
+  });
+
   it('should reject invalid status', () => {
     expect(() => InvitationStatus.parse('invalid')).toThrow();
+  });
+
+  it('still refuses an out-of-vocabulary value after the widening', () => {
+    // Asserted on the issue rather than on the throw: widening an enum is
+    // exactly the change that can slip into `z.string()` and keep every
+    // `toThrow()` test green by no longer rejecting anything at all.
+    const result = InvitationStatus.safeParse('cancelled'); // en-GB spelling — not the value
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0]?.code).toBe('invalid_value');
   });
 });
 
@@ -206,11 +230,14 @@ describe('InvitationSchema', () => {
   });
 
   it('should accept all valid statuses', () => {
-    const statuses: Array<'pending' | 'accepted' | 'rejected' | 'expired'> = [
+    const statuses: Array<'pending' | 'accepted' | 'rejected' | 'expired' | 'canceled'> = [
       'pending',
       'accepted',
       'rejected',
       'expired',
+      // [#7726] The row `cancel-invitation` actually leaves behind — this is
+      // the case `InvitationSchema` used to reject.
+      'canceled',
     ];
 
     statuses.forEach((status) => {

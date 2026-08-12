@@ -689,6 +689,21 @@ export interface StepLogEntry {
     /** Which region kind the step ran in: `loop-body` | `parallel-branch` | `try` | `catch`. */
     regionKind?: string;
     /**
+     * #7546: zero-based `try_catch` attempt this step ran in — `0` is the first
+     * try, `1` the first retry. Set only on `try`-region steps, and only by a
+     * container that actually retries, so its presence is itself the signal
+     * that a retry ladder ran.
+     *
+     * Not new vocabulary: `retryAttempt` has been declared on the spec's
+     * `ExecutionStepLogSchema` since the schema was written, with exactly this
+     * meaning ("Retry attempt number (0 = first try)") and — until now — no
+     * producer anywhere in the engine. Surfacing failed attempts (#7546) is
+     * what finally gives the declared key a writer, which is the direction
+     * declared-=-enforced asks for: consume the existing declaration rather
+     * than invent a second spelling beside it.
+     */
+    retryAttempt?: number;
+    /**
      * #4354: records this step read / wrote, copied from
      * {@link NodeExecutionResult.metrics}. Folded into the run summary.
      */
@@ -797,7 +812,37 @@ interface ExecutionLogEntry {
     completedAt?: string;
     durationMs?: number;
     trigger: { type: string; userId?: string; object?: string; recordId?: string };
+    // ↑ built by `buildRunTrigger` at EVERY site — see its doc comment for why
+    // that is a chokepoint rather than eight object literals.
     steps: StepLogEntry[];
+    /**
+     * #7639: the run's variable map, written at the two `paused` sites only —
+     * the point-in-time snapshot the run suspended holding, and the SAME object
+     * handed to {@link AutomationEngine.persistSuspendedRun}.
+     *
+     * Not new vocabulary. `ExecutionLogSchema` has declared
+     * `variables` ("Final state of flow variables") since the schema was
+     * written, and this interface has declared it for as long — with no
+     * producer anywhere, so the key `GET /automation/:name/runs/:runId`
+     * publishes was never populated by anything. That is the same
+     * declared-with-no-writer shape as `StepLogEntry.retryAttempt` (#7546):
+     * consume the existing declaration rather than invent a second spelling.
+     *
+     * Why `paused` and not every status: a paused run is the one an operator
+     * cannot otherwise inspect. A terminal run has already produced its
+     * `output`, and its step log says what ran; a run stopped at an approval or
+     * a screen has produced neither, so "what did the previous node actually
+     * resolve, and why did the next one route the way it did?" was answerable
+     * only by inference. Widening to `completed`/`failed` would be a disclosure
+     * change with no card behind it — those runs keep exactly the fields they
+     * had.
+     *
+     * SNAPSHOT, not a live read: taken at the suspend, never refreshed. The map
+     * itself is dead by then (the run unwound; resume rebuilds a fresh one from
+     * the continuation), so there is nothing later to diverge from — and
+     * because the continuation gets this very object, the snapshot an operator
+     * reads is by construction the state the run will resume from.
+     */
     variables?: Record<string, unknown>;
     output?: unknown;
     error?: string;
@@ -808,6 +853,47 @@ interface ExecutionLogEntry {
      * are persisted.
      */
     summary?: FlowRunSummary;
+}
+
+/**
+ * Build a run's trigger attribution block from its {@link AutomationContext} —
+ * **the one place `ExecutionLogEntry.trigger` is constructed** (#7533).
+ *
+ * It is a chokepoint rather than an object literal per call site because the
+ * literal was copied eight times (three on the `execute` path, three on
+ * `resume`, one on `failSuspendedRun`, one on `cancelRun`) and every copy
+ * populated `type` / `userId` / `object` and silently omitted `recordId`. The
+ * field was declared in `ExecutionLogSchema` from the start and never written
+ * by anything, so a `record_change` run — the platform's most common kind —
+ * could not be correlated back to the record that caused it: "which record
+ * provoked this run?" and "which runs did this record provoke?" were both
+ * unanswerable from the run log. Eight literals is eight chances to omit the
+ * next field too; one function is one.
+ *
+ * `recordId` is read off `context.record.id` rather than a context field of its
+ * own: `record` is the declared carrier of the triggering row
+ * ({@link AutomationContext.record}, populated by the record-change trigger's
+ * `buildContext`) and `id` is the platform primary key. Empty-string and
+ * nullish ids are dropped rather than persisted, mirroring
+ * {@link AutomationEngine.expandDeclaredLookups}'s guard on the same read — a
+ * blank `recordId` would read as an attribution the row does not have.
+ */
+function buildRunTrigger(
+    context: AutomationContext | undefined,
+): { type: string; userId?: string; object?: string; recordId?: string } {
+    const rawId = (context?.record as Record<string, unknown> | undefined)?.id;
+    const recordId =
+        typeof rawId === 'string'
+            ? rawId || undefined
+            : typeof rawId === 'number'
+                ? String(rawId)
+                : undefined;
+    return {
+        type: context?.event ?? 'manual',
+        userId: context?.userId,
+        object: context?.object,
+        recordId,
+    };
 }
 
 /**
@@ -983,6 +1069,26 @@ export interface RunRecord {
     nodeId?: string;
     organizationId?: string | null;
     userId?: string | null;
+    /**
+     * Trigger attribution — **why** this run ran (#7533), flattened here the
+     * same way `userId` already is (it, too, is a field of the run's trigger
+     * block). Persisted as `sys_automation_run` COLUMNS so the durable history
+     * answers the two questions the in-memory log answers:
+     *
+     *   - `triggerType` — 'record-after-update' / 'schedule' / 'api' / … Before
+     *     this existed the terminal row carried no trigger information at all,
+     *     so a scheduled run, a webhook intake and a record change became
+     *     indistinguishable rows the moment the process restarted: the durable
+     *     copy of the history was strictly LESS informative than the volatile
+     *     one.
+     *   - `triggerObject` / `triggerRecordId` — the record that caused the run.
+     *
+     * All optional: rows written before #7533 have none, and absent must read
+     * as "not recorded", never as "no trigger".
+     */
+    triggerType?: string;
+    triggerObject?: string;
+    triggerRecordId?: string;
     /**
      * Bounded per-node step log (see {@link AutomationEngine.compactStepsForHistory}),
      * so "which node blew up?" survives a restart. Optional — history rows
@@ -2540,7 +2646,20 @@ export class AutomationEngine implements IAutomationService {
             startedAt: r.startedAt,
             completedAt: r.finishedAt,
             durationMs: r.durationMs,
-            trigger: { type: '', userId: r.userId ?? undefined },
+            // #7533 — the persisted trigger attribution, so a run rehydrated
+            // after a restart still says what fired it and (for a record
+            // change) which record. `type` falls back to `''` ONLY for rows
+            // written before those columns existed: the field is required by
+            // `ExecutionLogSchema`, and `''` is the same "not recorded" this
+            // method already returned for every row. It is a legacy-row
+            // default, not an alias — a row written today always carries a
+            // real type.
+            trigger: {
+                type: r.triggerType ?? '',
+                userId: r.userId ?? undefined,
+                object: r.triggerObject,
+                recordId: r.triggerRecordId,
+            },
             steps: r.steps ?? [],
             error: r.error,
             // #4354 — the PERSISTED summary, never re-folded from `r.steps`:
@@ -2900,11 +3019,7 @@ export class AutomationEngine implements IAutomationService {
                 startedAt,
                 completedAt: new Date().toISOString(),
                 durationMs,
-                trigger: {
-                    type: context?.event ?? 'manual',
-                    userId: context?.userId,
-                    object: context?.object,
-                },
+                trigger: buildRunTrigger(context),
                 steps,
                 output,
             });
@@ -2924,13 +3039,19 @@ export class AutomationEngine implements IAutomationService {
             // caller can later `resume()` it. This is NOT a failure.
             if (isSuspendSignal(err)) {
                 const durationMs = Date.now() - startTime;
+                // #7639 — ONE snapshot expression feeding BOTH consumers: the
+                // continuation the run will resume from, and the `paused` log
+                // entry run-detail serves. Same object, so what an operator
+                // reads can never disagree with what the run holds. See
+                // {@link ExecutionLogEntry.variables} for why the log carries it.
+                const variablesSnapshot = Object.fromEntries(variables);
                 await this.persistSuspendedRun({
                     runId,
                     flowName,
                     flowVersion: flow.version,
                     nodeId: err.nodeId,
                     nodeType: err.nodeType,
-                    variables: Object.fromEntries(variables),
+                    variables: variablesSnapshot,
                     steps,
                     context: runContext,
                     startedAt,
@@ -2945,12 +3066,9 @@ export class AutomationEngine implements IAutomationService {
                     status: 'paused',
                     startedAt,
                     durationMs,
-                    trigger: {
-                        type: context?.event ?? 'manual',
-                        userId: context?.userId,
-                        object: context?.object,
-                    },
+                    trigger: buildRunTrigger(context),
                     steps,
+                    variables: variablesSnapshot,
                 });
                 return {
                     success: true,
@@ -2973,11 +3091,7 @@ export class AutomationEngine implements IAutomationService {
                 startedAt,
                 completedAt: new Date().toISOString(),
                 durationMs,
-                trigger: {
-                    type: context?.event ?? 'manual',
-                    userId: context?.userId,
-                    object: context?.object,
-                },
+                trigger: buildRunTrigger(context),
                 steps,
                 error: errorMessage,
             });
@@ -3657,11 +3771,7 @@ export class AutomationEngine implements IAutomationService {
                     startedAt: run.startedAt,
                     completedAt: new Date().toISOString(),
                     durationMs,
-                    trigger: {
-                        type: context.event ?? 'manual',
-                        userId: context.userId,
-                        object: context.object,
-                    },
+                    trigger: buildRunTrigger(context),
                     steps,
                     output,
                 });
@@ -3691,11 +3801,18 @@ export class AutomationEngine implements IAutomationService {
                 // Re-suspended at a downstream node: persist a fresh continuation.
                 if (isSuspendSignal(err)) {
                     const durationMs = Date.now() - run.startTime;
+                    // #7639 — the re-suspend half of the same rule as the
+                    // initial-execution site above: one snapshot, both consumers.
+                    // A multi-stage approval re-pauses HERE on every stage but the
+                    // first, so covering only the other site would leave every
+                    // stage after stage 1 — the ones an operator actually needs to
+                    // inspect — unreadable.
+                    const variablesSnapshot = Object.fromEntries(variables);
                     await this.persistSuspendedRun({
                         ...run,
                         nodeId: err.nodeId,
                         nodeType: err.nodeType,
-                        variables: Object.fromEntries(variables),
+                        variables: variablesSnapshot,
                         steps,
                         correlation: err.correlation,
                         screen: err.screen,
@@ -3707,12 +3824,9 @@ export class AutomationEngine implements IAutomationService {
                         status: 'paused',
                         startedAt: run.startedAt,
                         durationMs,
-                        trigger: {
-                            type: context.event ?? 'manual',
-                            userId: context.userId,
-                            object: context.object,
-                        },
+                        trigger: buildRunTrigger(context),
                         steps,
+                        variables: variablesSnapshot,
                     });
                     return { success: true, status: 'paused', runId, durationMs, screen: err.screen };
                 }
@@ -3727,11 +3841,7 @@ export class AutomationEngine implements IAutomationService {
                     startedAt: run.startedAt,
                     completedAt: new Date().toISOString(),
                     durationMs,
-                    trigger: {
-                        type: context.event ?? 'manual',
-                        userId: context.userId,
-                        object: context.object,
-                    },
+                    trigger: buildRunTrigger(context),
                     steps,
                     error: errorMessage,
                 });
@@ -3957,11 +4067,7 @@ export class AutomationEngine implements IAutomationService {
             startedAt: run.startedAt,
             completedAt: new Date().toISOString(),
             durationMs: Date.now() - run.startTime,
-            trigger: {
-                type: run.context?.event ?? 'manual',
-                userId: run.context?.userId,
-                object: run.context?.object,
-            },
+            trigger: buildRunTrigger(run.context),
             steps: run.steps,
             error,
         });
@@ -4039,11 +4145,7 @@ export class AutomationEngine implements IAutomationService {
             startedAt: run.startedAt,
             completedAt: new Date().toISOString(),
             durationMs: Date.now() - run.startTime,
-            trigger: {
-                type: run.context?.event ?? 'manual',
-                userId: run.context?.userId,
-                object: run.context?.object,
-            },
+            trigger: buildRunTrigger(run.context),
             steps: run.steps,
             error: reason,
         });
@@ -4244,6 +4346,14 @@ export class AutomationEngine implements IAutomationService {
                 durationMs: entry.durationMs,
                 error: entry.error,
                 userId: entry.trigger?.userId,
+                // #7533 — the rest of the trigger block, not just its userId.
+                // The information exists at this exact point (the in-memory log
+                // entry one line up carries it); it was simply not copied onto
+                // the record handed to the store, which is where the durable
+                // history lost the answer to "what fired this run?".
+                triggerType: entry.trigger?.type || undefined,
+                triggerObject: entry.trigger?.object,
+                triggerRecordId: entry.trigger?.recordId,
                 nodeId: lastStep?.nodeId,
                 steps: this.compactStepsForHistory(entry.steps),
                 summary: entry.summary,
@@ -5310,9 +5420,27 @@ export class AutomationEngine implements IAutomationService {
      * so the calling container node can fold them into the parent run log via
      * `NodeExecutionResult.childSteps`. Tagging only fills fields left undefined,
      * so when regions nest, each step keeps its **innermost** container's
-     * `parentNodeId` / `iteration` / `regionKind`. On failure the region throws
-     * as before (preserving `try_catch` retry semantics); a failed attempt's
-     * partial steps are not surfaced.
+     * `parentNodeId` / `iteration` / `regionKind` / `retryAttempt`.
+     *
+     * #7546: a region that FAILS still throws — the `try_catch` retry/throw
+     * semantics are untouched — but its partial steps are no longer discarded.
+     * They are tagged exactly like a successful region's and handed to the
+     * caller through the `partialSteps` sink before the throw propagates, so a
+     * container that recovers from the failure can still fold them into the run
+     * log. Until this, a caught failure left NO trace at all: the container's
+     * own step read `success`, nothing carried `regionKind: 'try'`, nothing
+     * carried `status: 'failure'`, and an operator could not tell what failed,
+     * how many attempts ran, or which node threw — the only evidence a failure
+     * had happened was the catch region's side effects. The steps always
+     * existed (a failing node pushes its own `failure` step into the region's
+     * array before it throws); they were simply dropped on the floor when the
+     * region unwound.
+     *
+     * A sink rather than a return value because the failure path's contract is
+     * still "throw": handing the steps back through the exception would either
+     * change what callers catch or require a bespoke error type, and both are
+     * larger seams than an out-parameter the two callers that want it opt into.
+     * Callers that do not pass a sink (`loop`, `parallel`) are unaffected.
      *
      * Durable pause (`suspend`) inside a region is not supported in this
      * iteration — it is converted into a clear error (mirrors the `subflow`
@@ -5322,7 +5450,8 @@ export class AutomationEngine implements IAutomationService {
         region: FlowRegionParsed,
         variables: Map<string, unknown>,
         context: AutomationContext,
-        grouping?: { parentNodeId: string; iteration?: number; regionKind?: string },
+        grouping?: { parentNodeId: string; iteration?: number; regionKind?: string; retryAttempt?: number },
+        partialSteps?: StepLogEntry[],
     ): Promise<StepLogEntry[]> {
         const entryId = findRegionEntry(region);
         const entry = region.nodes.find(n => n.id === entryId);
@@ -5332,9 +5461,31 @@ export class AutomationEngine implements IAutomationService {
         // A synthetic flow view — executeNode/traverseNext only read `nodes`/`edges`.
         const subFlow = { nodes: region.nodes, edges: region.edges ?? [] } as unknown as FlowParsed;
         const regionSteps: StepLogEntry[] = [];
+        // Tag this region's steps with their immediate container. Innermost wins:
+        // a step that already carries a `parentNodeId` (set by a nested region)
+        // is left untouched. Shared by the success and failure paths (#7546) so
+        // a failed attempt's steps are indistinguishable in SHAPE from a
+        // successful one's — they differ only in their own `status`.
+        const tag = (): void => {
+            if (!grouping) return;
+            for (const step of regionSteps) {
+                if (step.parentNodeId === undefined) {
+                    step.parentNodeId = grouping.parentNodeId;
+                    if (grouping.iteration !== undefined) step.iteration = grouping.iteration;
+                    if (grouping.regionKind !== undefined) step.regionKind = grouping.regionKind;
+                    if (grouping.retryAttempt !== undefined) step.retryAttempt = grouping.retryAttempt;
+                }
+            }
+        };
         try {
             await this.executeNode(entry, subFlow, variables, context, regionSteps);
         } catch (err) {
+            // #7546: surface what the failed attempt DID get through before
+            // rethrowing. Tagged first so the caller receives finished records,
+            // and pushed into the caller's sink rather than returned because
+            // this path's contract is (still) to throw.
+            tag();
+            partialSteps?.push(...regionSteps);
             if (isSuspendSignal(err)) {
                 throw new Error(
                     `durable pause inside a structured region (node '${err.nodeId}') is not supported`,
@@ -5342,18 +5493,7 @@ export class AutomationEngine implements IAutomationService {
             }
             throw err;
         }
-        // Tag this region's steps with their immediate container. Innermost wins:
-        // a step that already carries a `parentNodeId` (set by a nested region)
-        // is left untouched.
-        if (grouping) {
-            for (const step of regionSteps) {
-                if (step.parentNodeId === undefined) {
-                    step.parentNodeId = grouping.parentNodeId;
-                    if (grouping.iteration !== undefined) step.iteration = grouping.iteration;
-                    if (grouping.regionKind !== undefined) step.regionKind = grouping.regionKind;
-                }
-            }
-        }
+        tag();
         return regionSteps;
     }
 
@@ -5849,11 +5989,7 @@ export class AutomationEngine implements IAutomationService {
                 startedAt,
                 completedAt: new Date().toISOString(),
                 durationMs,
-                trigger: {
-                    type: context?.event ?? 'manual',
-                    userId: context?.userId,
-                    object: context?.object,
-                },
+                trigger: buildRunTrigger(context),
                 steps,
                 output,
             });
@@ -5872,11 +6008,7 @@ export class AutomationEngine implements IAutomationService {
                 startedAt,
                 completedAt: new Date().toISOString(),
                 durationMs,
-                trigger: {
-                    type: context?.event ?? 'manual',
-                    userId: context?.userId,
-                    object: context?.object,
-                },
+                trigger: buildRunTrigger(context),
                 steps,
                 error: errorMessage,
             });

@@ -118,7 +118,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       approval_reject: {
         label: "Rechazar",
-        confirmText: "¿Rechazar esta solicitud? Un rechazo es definitivo para todos los aprobadores.",
+        description: "¿Rechazar esta solicitud? Un rechazo es definitivo para todos los aprobadores.",
         successMessage: "Rechazada.",
         params: {
           comment: {
@@ -171,7 +171,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       approval_recall: {
         label: "Retirar",
-        confirmText: "¿Retirar esta solicitud? Los aprobadores ya no podrán actuar sobre ella y el registro se desbloqueará.",
+        description: "¿Retirar esta solicitud? Los aprobadores ya no podrán actuar sobre ella y el registro se desbloqueará.",
         successMessage: "Retirada.",
         params: {
           comment: {

@@ -1087,7 +1087,11 @@ function lookupObjectFieldAttr(
 export interface LocaleDescriptor {
   /** BCP-47 locale code. */
   code: string;
-  /** Display name. Falls back to the code — nothing in the tree carries one. */
+  /**
+   * Locale label — the CODE, echoed back, not a display name. Nothing in the
+   * tree carries a locale name to set it from, and naming a locale for a UI is
+   * the client's job (#7634); `GetLocalesResponseSchema` declares it that way.
+   */
   label: string;
   /** Whether this is the stack's default locale. */
   isDefault: boolean;
@@ -1108,7 +1112,15 @@ export interface LocaleDescriptor {
  *
  * `label` is the code: no locale display-name source exists in the tree, and
  * the schema requires the field. Inventing one here (an ICU display-name
- * table) would be a product decision, not an implementation detail.
+ * table) would be a product decision, not an implementation detail — and one
+ * nothing pulls for: the only real consumer of this body, the console's
+ * language menu, reads `code` alone and names locales itself (objectui#4039,
+ * `apps/console/src/loadLocales.ts`).
+ *
+ * `GetLocalesResponseSchema` used to describe the field as a display name
+ * anyway — declared ≠ enforced, one field wide. #7634 made the declaration say
+ * what this produces instead; the `label === code` convention is pinned in the
+ * tests below, on both sides.
  */
 export function toLocaleDescriptors(
   codes: readonly string[] | undefined,
@@ -1116,6 +1128,48 @@ export function toLocaleDescriptors(
 ): LocaleDescriptor[] {
   if (!codes) return [];
   return codes.map((code) => ({ code, label: code, isDefault: code === defaultLocale }));
+}
+
+/**
+ * Normalize an app's declared `i18n.supportedLocales` into the value an
+ * `II18nService` stores for `setSupportedLocales` — or `undefined`, meaning
+ * "no narrowing".
+ *
+ * [#7679] Shared for the same reason `toLocaleDescriptors` above is: BOTH
+ * providers of the `i18n` slot implement `setSupportedLocales`
+ * (`createMemoryI18n` in core, `FileI18nAdapter` in service-i18n) and either
+ * one can be the thing mounting `GET /i18n/locales`. Two copies of "what
+ * counts as a declaration" is how the same route came to answer in two shapes
+ * before (#3636), one narrowing rule over.
+ *
+ * `undefined` — no narrowing — is returned for every input that is not a
+ * declaration of at least one usable code:
+ * - absent / not an array: the app opted into nothing, so it keeps reporting
+ *   every loaded locale. Narrowing an undeclared app to zero (or to its
+ *   default alone) would silently regress every app that predates #7679.
+ * - an array that yields no usable code (empty, or nothing but blanks and
+ *   non-strings): read as an authoring accident rather than as "serve no
+ *   locales at all". An empty report breaks every picker built on this route,
+ *   and `TranslationConfigSchema` requires `supportedLocales` when `i18n` is
+ *   declared at all — so the empty array is not a shape the spec asks anyone
+ *   to write.
+ *
+ * Otherwise: the declared codes, trimmed, de-duplicated, in DECLARED order.
+ * Order is preserved because it is authored — a picker rendering the list in
+ * the order the app wrote it is the useful default, and the loaded-key order
+ * it replaces was an insertion-order accident of plugin registration.
+ */
+export function normalizeSupportedLocales(
+  locales: readonly string[] | undefined,
+): string[] | undefined {
+  if (!Array.isArray(locales)) return undefined;
+  const seen = new Set<string>();
+  for (const raw of locales) {
+    if (typeof raw !== 'string') continue;
+    const code = raw.trim();
+    if (code) seen.add(code);
+  }
+  return seen.size > 0 ? [...seen] : undefined;
 }
 
 /**

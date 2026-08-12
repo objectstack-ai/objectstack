@@ -34,9 +34,8 @@ import {
   serializeImportBaseline,
   type CategorySurface,
 } from './lib/docs-import-surface';
-import { escapeMdxDescription } from './lib/escape-mdx';
 import { renderFileDescription } from './lib/file-description';
-import { anchorFor, formatPropertyType, formatType, type TypeContext } from './lib/format-type';
+import { anchorFor } from './lib/format-type';
 import { createSink } from './lib/generated-output';
 import {
   blurbCoverage,
@@ -53,6 +52,7 @@ import {
   type ZodFileInput,
 } from './lib/schema-index';
 import { schemaNameFromExportKey } from './lib/schema-name';
+import { renderSchemaSection } from './lib/schema-section';
 import { API_SURFACE_DIR_NAME, readApiSurfaceFrom } from './lib/sharded-artifacts';
 
 const SCHEMA_DIR = path.resolve(__dirname, '../json-schema');
@@ -365,112 +365,16 @@ function sourcePathToDocsRoute(target: string): string | null {
 // is a page-level fact, and every use of it (title, source link, card) lives in
 // `generateZodFileMarkdown` around this call. Underscored rather than dropped so
 // this touches one line of a renderer PR #6377 is editing (#5475).
+//
+// The section itself is rendered by `lib/schema-section.ts`, extracted at #7658
+// for the reason `lib/format-type.ts` was at #4912: this file is a top-level
+// script with side effects, so the only way to assert on a section used to be to
+// run the whole generator and grep the emitted `.mdx` — and the defect #7658
+// fixed was a section rendered as the EMPTY STRING, i.e. precisely the output
+// grepping emitted pages cannot see. `scripts/schema-section.test.ts` pins it
+// directly now.
 function generateMarkdown(schemaName: string, schema: any, category: string, _zodFile: string) {
-  const defs = schema.definitions || schema.$defs || {};
-  let mainDef = defs[schemaName];
-
-  // If the schema name isn't in definitions, check if the root schema itself
-  // has type/properties/enum (JSON Schema 2020-12 puts content at root level)
-  if (!mainDef && (schema.properties || schema.enum || schema.anyOf || schema.oneOf)) {
-    mainDef = schema;
-  }
-
-  // Last resort: use first definition entry
-  if (!mainDef) {
-    mainDef = Object.values(defs)[0];
-  }
-
-  if (!mainDef) return '';
-
-  let md = '';
-  
-  // Add schema heading
-  md += `## ${schemaName}\n\n`;
-  
-  // Description text is made MDX-safe by `lib/escape-mdx.ts` — extracted so the
-  // escaping can be pinned directly instead of by grepping emitted `.mdx`.
-
-  // Add description with better formatting
-  if (mainDef.description) {
-    md += `${escapeMdxDescription(mainDef.description)}\n\n`;
-  }
-
-  const typeCtx: TypeContext = { defs, currentSchema: schemaName, schemaHref: schemaHrefFrom(category) };
-
-  const renderProperties = (props: any, required: Set<string> = new Set()) => {
-      // Vocabularies too wide for their own table cell. Collected while the
-      // table is built and printed as `### Allowed Values` bullets right after
-      // it, so the complete list never leaves the page the cell sits on
-      // (#6225) — the same rendering a hoisted `type: 'string'` + `enum` schema
-      // has always got, now reachable from a property position too.
-      const relocated: Array<{ key: string; members: string[] }> = [];
-      let t = `### Properties\n\n`;
-      t += `| Property | Type | Required | Description |\n`;
-      t += `| :--- | :--- | :--- | :--- |\n`;
-      for (const [key, prop] of Object.entries(props) as [string, any][]) {
-          const { cell, allowedValues } = formatPropertyType(prop, typeCtx);
-          if (allowedValues) relocated.push({ key, members: allowedValues });
-          // Backslashes first, then pipes — same order as `desc` below, and for
-          // the same reason: escaping pipes first lets a literal backslash in
-          // the input pair with the escape and free the pipe again.
-          const typeStr = cell
-            .replace(/\\/g, '\\\\')
-            .replace(/\|/g, '\\|');
-          const isReq = required.has(key) ? '✅' : 'optional';
-          // Escape for the GFM table cell last: backslashes first (so an existing
-          // `\|` in a description can't decay into an escaped backslash + live
-          // pipe), then pipes — an unescaped `|` (even inside a code span)
-          // splits the cell.
-          const desc = escapeMdxDescription((prop.description || '').replace(/\n/g, ' '))
-            .replace(/\\/g, '\\\\')
-            .replace(/\|/g, '\\|');
-          t += `| **${key}** | \`${typeStr}\` | ${isReq} | ${desc} |\n`;
-      }
-      t += '\n';
-      // Qualified by schema AND property: `api/errors.mdx` carries a wide
-      // `code` on both `EnhancedApiError` and `FieldError`, so a heading naming
-      // only the property would give one page two identical anchors.
-      for (const { key, members } of relocated) {
-          t += `### Allowed Values: \`${schemaName}.${key}\`\n\n`;
-          t += members.map(m => `* \`${m}\``).join('\n');
-          t += `\n\n`;
-      }
-      return t;
-  };
-
-  if (mainDef.type === 'object' && mainDef.properties) {
-    md += renderProperties(mainDef.properties, new Set(mainDef.required || []));
-    
-  } else if (mainDef.type === 'string' && mainDef.enum) {
-    md += `### Allowed Values\n\n`;
-    md += mainDef.enum.map((e: string) => `* \`${e}\``).join('\n');
-    md += `\n\n`;
-
-  } else if (mainDef.anyOf || mainDef.oneOf) {
-     md += `### Union Options\n\nThis schema accepts one of the following structures:\n\n`;
-     const variants = mainDef.anyOf || mainDef.oneOf;
-     variants.forEach((variant: any, index: number) => {
-         const variantTitle = variant.title || `Option ${index + 1}`;
-         md += `#### ${variantTitle}\n\n`;
-         if (variant.description) md += `${escapeMdxDescription(variant.description)}\n\n`;
-         
-         if (variant.type === 'object' && variant.properties) {
-              if (variant.properties.type && variant.properties.type.const) {
-                  md += `**Type:** \`${variant.properties.type.const}\`\n\n`;
-              }
-              md += renderProperties(variant.properties, new Set(variant.required || []));
-         } else if (variant.enum) {
-              md += `Allowed Values: ${variant.enum.map((e:string) => `\`${e}\``).join(', ')}\n\n`;
-         } else if (variant.$ref) {
-              md += `Reference: ${formatType(variant, typeCtx)}\n\n`;
-         } else {
-             md += `Type: \`${formatType(variant, typeCtx)}\`\n\n`;
-         }
-         md += `---\n\n`; 
-     });
-  }
-
-  return md;
+  return renderSchemaSection(schemaName, schema, { schemaHref: schemaHrefFrom(category) });
 }
 
 function generateZodFileMarkdown(zodFile: string, schemas: Array<{name: string, content: any}>, category: string): string {
@@ -837,9 +741,27 @@ PAGES_BY_CATEGORY.forEach((zodFileSchemas, category) => {
 
   // Generate Category Meta. Group into fumadocs `---Section---` separators when the
   // category has a SECTION_GROUPS entry; otherwise a flat sorted list (see #1880).
+  const pages = buildCategoryPages(category, Array.from(zodFileSchemas.keys()));
+
+  // A category that published no page gets no `meta.json` — and so no directory
+  // at all — the same way §2.5 below skips the `index.mdx` of one. What this
+  // guard removes is a folder holding a single `{ "pages": [] }`: no page, no
+  // `index.mdx`, and no entry in the root `meta.json`, so it is unroutable, and
+  // invisible to the link checker. Its one measurable effect was that anyone
+  // enumerating the tree counted one category more than exists — which is how
+  // #7303 came to be filed.
+  //
+  // `contracts/` is the case: it holds TypeScript service interfaces rather than
+  // `.zod.ts` schemas, so `gen:schema` creates `json-schema/contracts/` and
+  // leaves it empty; unlike `conversions`/`migrations` (no schema directory at
+  // all, so `groupSchemasByPage` skips them outright) it reaches this loop with
+  // zero pages. The guard is on the pages, not on that asymmetry, so any future
+  // category in either shape lands the same way.
+  if (pages.length === 0) return;
+
   const meta = {
     title: CATEGORIES[category],
-    pages: buildCategoryPages(category, Array.from(zodFileSchemas.keys()))
+    pages
   };
   emit(path.join(categoryDir, 'meta.json'), JSON.stringify(meta, null, 2));
 });

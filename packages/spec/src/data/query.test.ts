@@ -126,7 +126,13 @@ describe('QuerySchema - Basic', () => {
  * the parse error is the channel an upgrading consumer actually hits.
  */
 describe('FieldNode — the nested-select object form is REMOVED (#4196)', () => {
-  it('accepts a field name, and a dotted path through a relationship', () => {
+  // The dotted half is a NON-NARROWING guard, not a feature pin (#7601): the
+  // refusal of dotted projections (#7532) is a SEMANTIC verdict at the ingress
+  // gate (`assertProjectionFieldsExist`, `400 INVALID_FIELD`), where the field
+  // map is available to judge against — so `FieldNodeSchema` stays `z.string()`
+  // and every input valid before #7601 still parses byte-identically after it.
+  // Parsing is not resolving: no driver ever resolved a dotted projection.
+  it('accepts a field name, and still parses a dotted string (shape, not semantics)', () => {
     expect(FieldNodeSchema.parse('name')).toBe('name');
     expect(FieldNodeSchema.parse('owner.name')).toBe('owner.name');
     expect(() => QuerySchema.parse({

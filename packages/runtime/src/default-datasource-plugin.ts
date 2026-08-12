@@ -242,6 +242,27 @@ export class DefaultDatasourcePlugin implements Plugin {
    * metadata service implements either method, in this repo or its history's
    * reach, so the probe never fired and the branch advertised parity it never
    * delivered. registerInMemory IS the datasource-visibility path.
+   *
+   * [#7561] `config` is stamped EMPTY, and deliberately so. `DatasourceSchema`
+   * requires it (`config: z.record(…)`, not optional), and omitting it made
+   * `/meta` re-parse this row into `_diagnostics: { valid: false, errors:
+   * [{ path: 'config', code: 'invalid_type' }] }` — the second of the two error
+   * shapes behind the 94/94-INVALID diagnostics baseline, alongside the
+   * `fields.__search` stamp. The fix belongs at this producer, not in the
+   * schema: a real datasource document genuinely needs its connection config,
+   * so widening the spec would trade one honest verdict for a permanently
+   * weaker one.
+   *
+   * Empty rather than `this.def.config` because this registration is a
+   * deliberately NON-SECRET projection. The host's real config carries
+   * connection credentials (`user` / `password` for postgres/mongo), and
+   * `DatasourceSchema` itself refuses an inlined `password` — publishing it
+   * here would put those credentials on `GET /api/v1/meta/datasources` for
+   * every metadata reader. `{}` states exactly what this row has always
+   * carried: the datasource EXISTS with this driver and label, and its
+   * connection details are not surfaced through metadata. No information is
+   * lost versus the omitted key — only the spelling changes, to the one the
+   * contract accepts.
    */
   private async registerVisibility(ctx: PluginContext): Promise<void> {
     try {
@@ -251,6 +272,7 @@ export class DefaultDatasourcePlugin implements Plugin {
           name: 'default',
           label: this.def.label ?? 'Default',
           driver: this.def.driver,
+          config: {},
           origin: 'code',
         });
       }

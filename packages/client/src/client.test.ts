@@ -1015,25 +1015,58 @@ describe('FilterBuilder enhancements', () => {
         expect(f[2]).toEqual(['age', '<=', 65]);
     });
 
-    it('should add contains filter', () => {
+    // [#7536] These three used to build a `like` tuple by gluing wildcards onto
+    // the caller's value (`['name', 'like', '%alice%']`), which was wrong in two
+    // directions at once. While the wire folded `like` onto `$contains` — which
+    // LIKE-ESCAPES its comparand — the glued `%` came back as a literal percent
+    // sign, so `.contains('name','alice')` searched for the text `%alice%` and
+    // matched only rows containing percent signs. And once `like` reaches the
+    // driver as a real pattern, the glue becomes the OTHER bug: a `%` or `_`
+    // inside the caller's own value would silently become a wildcard. Naming the
+    // operator that means what the method says removes both.
+    it('should add contains filter as the literal-text operator', () => {
         const f = createFilter<{ name: string }>()
             .contains('name', 'alice')
             .build();
-        expect(f).toEqual(['name', 'like', '%alice%']);
+        expect(f).toEqual(['name', 'contains', 'alice']);
+    });
+
+    it('should not let the caller\'s own wildcards leak into a contains filter', () => {
+        // The regression this shape prevents: `50%` is TEXT here, not a pattern.
+        const f = createFilter<{ name: string }>()
+            .contains('name', '50%')
+            .build();
+        expect(f).toEqual(['name', 'contains', '50%']);
     });
 
     it('should add startsWith filter', () => {
         const f = createFilter<{ name: string }>()
             .startsWith('name', 'A')
             .build();
-        expect(f).toEqual(['name', 'like', 'A%']);
+        expect(f).toEqual(['name', 'starts_with', 'A']);
     });
 
     it('should add endsWith filter', () => {
         const f = createFilter<{ email: string }>()
             .endsWith('email', '.com')
             .build();
-        expect(f).toEqual(['email', 'like', '%.com']);
+        expect(f).toEqual(['email', 'ends_with', '.com']);
+    });
+
+    it('should pass a like() pattern through UNCHANGED — the wildcards are the caller\'s', () => {
+        // The one method that always meant "pattern", and the one the wire
+        // lowering broke: `%Industries` matched nothing before #7536.
+        const f = createFilter<{ name: string }>()
+            .like('name', '%Industries')
+            .build();
+        expect(f).toEqual(['name', 'like', '%Industries']);
+    });
+
+    it('should add ilike filter for a case-insensitive pattern', () => {
+        const f = createFilter<{ name: string }>()
+            .ilike('name', '%industries')
+            .build();
+        expect(f).toEqual(['name', 'ilike', '%industries']);
     });
 
     it('should add exists filter', () => {

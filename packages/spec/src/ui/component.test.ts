@@ -43,8 +43,28 @@ describe('PageHeaderProps', () => {
     expect(result.actions).toHaveLength(2);
   });
 
-  it('should reject header without title', () => {
-    expect(() => PageHeaderProps.parse({})).toThrow();
+  // #7702, maintainer ruling 2026-08-11: `title` is OPTIONAL. The platform's
+  // own synthesizer (objectui `buildDefaultHeader`) emits every seeded
+  // `page:header` with no `title` — the renderer falls through to the
+  // record-derived heading. `PageHeaderProps.safeParse` on that exact
+  // emission shape must succeed; it used to fail with `title: Invalid input`.
+  it('accepts a header without title — the synthesized shape (#7702)', () => {
+    // objectui `buildDefaultHeader`'s real emission: `{ type: 'page:header',
+    // recordChrome, ...(actions?) }` — no `title` key at all.
+    const result = PageHeaderProps.parse({ recordChrome: true });
+    expect(result.title).toBeUndefined();
+    expect(result.recordChrome).toBe(true);
+  });
+
+  it('accepts a completely empty header — every field optional or defaulted', () => {
+    const result = PageHeaderProps.parse({});
+    expect(result.title).toBeUndefined();
+    expect(result.breadcrumb).toBe(true);
+  });
+
+  it('still validates a present title as an I18nLabel', () => {
+    expect(() => PageHeaderProps.parse({ title: 42 })).toThrow();
+    expect(PageHeaderProps.parse({ title: 'My Page' }).title).toBe('My Page');
   });
 });
 

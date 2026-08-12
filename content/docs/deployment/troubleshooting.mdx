@@ -125,7 +125,8 @@ The custom error map provides "Did you mean?" suggestions for common typos.
 ```
 $eq, $ne, $gt, $gte, $lt, $lte,
 $in, $nin, $between,
-$contains, $notContains, $startsWith, $endsWith,
+$contains, $notContains, $startsWith, $endsWith, $icontains,
+$like, $ilike,
 $null, $exists,
 $and, $or, $not
 ```
@@ -135,10 +136,27 @@ Common mistakes:
 |:---|:---|
 | `$equal` | `$eq` |
 | `$notEqual` | `$ne` |
-| `$like` | `$contains` |
 | `$greaterThan` | `$gt` |
 | `$isNull` | `$null` |
 | `$notIn` | `$nin` |
+| `$regex` | `$icontains` |
+
+`$like` is **not** a misspelling of `$contains` — the two mean different things,
+and picking the wrong one gives a silently wrong answer rather than an error:
+
+- `$contains` takes **text**, matched literally as a substring. A `%` or `_` in
+  the comparand is an ordinary character.
+- `$like` takes a **pattern**, matched against the whole value, with the
+  wildcards you write: `%` is any sequence, `_` is exactly one character, and a
+  backslash escapes either. A pattern with no wildcards is an exact comparison,
+  not a substring search.
+
+`$ilike` is `$like`'s case-insensitive twin, and `$icontains` is `$contains`'s.
+Both fold ASCII case only, so `café` does not match `CAFÉ`.
+
+`$like` / `$ilike` are executed by the SQL family (`driver-sql`,
+`driver-sqlite-wasm`, `driver-turso`). The other backends refuse them with this
+same `invalid_filter` error — write `$contains` there.
 
 ---
 

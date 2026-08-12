@@ -275,8 +275,12 @@ describe('bootstrapDeclaredWebhooks', () => {
 
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toBe('https://hooks.example/task');
-    // headers + secret came from the definition_json envelope the bridge wrote.
+    // Headers come from the definition_json envelope the bridge wrote. The
+    // signing secret does NOT (#7799) — it goes to the `signing_secret` column,
+    // which this fake engine (no encrypted-field channel) stores verbatim, so
+    // the enqueuer reads it back from there.
     expect(calls[0].signingSecret).toBe('shh');
+    expect(engine.rows['sys_webhook'][0].definition_json).not.toContain('shh');
     expect(calls[0].headers).toEqual({ 'X-Env': 'prod' });
     await ae.stop();
   });

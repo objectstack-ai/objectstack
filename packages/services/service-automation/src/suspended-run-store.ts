@@ -265,6 +265,12 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
       node_id: record.nodeId ?? null,
       status: record.status,
       user_id: record.userId ?? null,
+      // #7533 — trigger attribution. Terminal rows never carried any: the
+      // in-memory run knew its kind and this mapping dropped it, so a restart
+      // turned every history row into "a run happened" with no "why".
+      trigger_type: record.triggerType ?? null,
+      trigger_object: record.triggerObject ?? null,
+      trigger_record_id: record.triggerRecordId ?? null,
       started_at: record.startedAt,
       start_time: record.startTime ?? null,
       finished_at: record.finishedAt ?? now,
@@ -370,6 +376,13 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
       nodeId: row.node_id ?? undefined,
       organizationId: row.organization_id ?? null,
       userId: row.user_id ?? undefined,
+      // #7533 — read the trigger columns back. `?? undefined` (not `?? ''`):
+      // a pre-#7533 row genuinely has no recorded trigger, and the engine's
+      // `runRecordToLogEntry` is the single place that decides how an absent
+      // one renders.
+      triggerType: row.trigger_type ?? undefined,
+      triggerObject: row.trigger_object ?? undefined,
+      triggerRecordId: row.trigger_record_id ?? undefined,
       steps: parseJson<RunRecord['steps']>(row.steps_json, undefined),
       // #4354 — rehydrate from `summary_json`, never re-fold `steps_json`: those
       // steps are compacted (200 max), so recomputing would report a
@@ -382,6 +395,13 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
   private serialize(run: SuspendedRun): Record<string, unknown> {
     const ctx = (run.context ?? {}) as Record<string, unknown>;
     const org = ctx.organizationId ?? ctx.tenantId ?? null;
+    // #7533 — the same three trigger columns the terminal path writes. A paused
+    // row is a `sys_automation_run` row too, and leaving them null here would
+    // make "which runs did this record provoke?" answer for finished runs while
+    // silently omitting the ones still in flight — the worst shape for that
+    // query, because a partial answer reads as a complete one. `context_json`
+    // does carry this for paused rows, but a JSON blob is not a filter.
+    const rawRecordId = (ctx.record as Record<string, unknown> | undefined)?.id;
     return {
       id: run.runId,
       organization_id: org,
@@ -394,6 +414,14 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
       status: 'paused',
       correlation: run.correlation ?? null,
       user_id: ctx.userId ?? null,
+      trigger_type: ctx.event ?? null,
+      trigger_object: ctx.object ?? null,
+      trigger_record_id:
+        typeof rawRecordId === 'string'
+          ? rawRecordId || null
+          : typeof rawRecordId === 'number'
+            ? String(rawRecordId)
+            : null,
       variables_json: JSON.stringify(run.variables ?? {}),
       steps_json: JSON.stringify(run.steps ?? []),
       context_json: JSON.stringify(run.context ?? {}),

@@ -1487,6 +1487,52 @@ describe('HttpDispatcher', () => {
             expect(mockMetadata.revertPackage).toHaveBeenCalledWith('com.acme.crm');
         });
 
+        // [#7559] ADR-0112 — a route that cannot serve the request answers a
+        // DECLARED 4xx, not a 500. The QA run saw a flat 500 from
+        // `POST /packages/:id/revert`.
+        //
+        // WHERE THAT 500 CAME FROM, measured rather than assumed: NOT from the
+        // route. `handlePackagesRequest` wraps its whole body in one
+        // `try { … } catch (e) { errorFromThrown(e, 500) }`, so the throw was
+        // always classified — `errorFromThrown` reads `status`/`code` off the
+        // error and falls back to 500 only when it finds neither, and
+        // `MetadataManager.revertPackage` threw bare `Error`s carrying neither.
+        // The whole defect is upstream, in the thrown shape; the first reading
+        // of this card (add a per-route `catch`) would have changed nothing,
+        // and reverse verification is what caught it — with the manager fixed
+        // and the route untouched, these cases already pass.
+        //
+        // So this pins the CHAIN, which is the part a manager-only unit test
+        // cannot see: a declared refusal survives the dispatcher as its own
+        // status AND code rather than being flattened. Both are asserted —
+        // status alone is green against a 404 with an empty envelope, code
+        // alone against a 500 that happens to carry one.
+        it.each([
+            ['RESOURCE_NOT_FOUND', 404, "No metadata items found for package 'com.acme.crm'"],
+            ['RESOURCE_CONFLICT', 409, "Package 'com.acme.crm' has never been published"],
+        ])('POST /packages/:id/revert answers %s / %i, not 500', async (code, status, message) => {
+            const refusal = new Error(message) as Error & { code?: string; status?: number };
+            refusal.code = code as string;
+            refusal.status = status as number;
+            const mockMetadata = { revertPackage: vi.fn().mockRejectedValue(refusal) };
+            const mockRegistry = {
+                getAllPackages: vi.fn().mockReturnValue([]),
+                enablePackage: vi.fn(),
+                disablePackage: vi.fn(),
+            };
+            (kernel as any).getService = vi.fn().mockImplementation((name: string) => {
+                if (name === 'metadata') return Promise.resolve(mockMetadata);
+                if (name === 'objectql') return Promise.resolve({ registry: mockRegistry });
+                return null;
+            });
+
+            const result = await dispatcher.handlePackages('/com.acme.crm/revert', 'POST', {}, {}, PKG_ADMIN());
+
+            expect(result.handled).toBe(true);
+            expect(result.response?.status).toBe(status);
+            expect(result.response?.body?.error?.code).toBe(code);
+        });
+
         it('should return 503 for publish when metadata service unavailable', async () => {
             const mockRegistry = {
                 getAllPackages: vi.fn().mockReturnValue([]),
@@ -2135,6 +2181,14 @@ describe('HttpDispatcher', () => {
     // ═══════════════════════════════════════════════════════════════
 
     describe('GET /metadata/_drafts', () => {
+        // [ADR-0106 D5(4) / #6599] `_drafts` is authoring-gated: a pending object
+        // draft carries its full `fields`, so the route 403s a non-author rather
+        // than serve it. These plumbing cases therefore run as an AUTHOR
+        // (`studio.access` — one of the D4 exemptions); the non-author refusal
+        // itself is pinned just below, and the full per-caller matrix lives in
+        // the shared ADR-0106 case table (`domains/meta-object-fls.test.ts`).
+        const AUTHOR = { userId: 'u1', systemPermissions: ['studio.access'] };
+
         it('routes to protocol.listDrafts with packageId + type and returns drafts', async () => {
             const listDrafts = vi.fn().mockResolvedValue({
                 drafts: [{ type: 'object', name: 'course', packageId: 'app.edu', updatedAt: 't1', updatedBy: 'ai' }],
@@ -2144,7 +2198,7 @@ describe('HttpDispatcher', () => {
                 return null;
             });
 
-            const result = await dispatcher.handleMetadata('_drafts', { request: {}, executionContext: { userId: 'u1' } } as any, 'GET', undefined, {
+            const result = await dispatcher.handleMetadata('_drafts', { request: {}, executionContext: { ...AUTHOR } } as any, 'GET', undefined, {
                 packageId: 'app.edu',
                 type: 'object',
             });
@@ -2163,7 +2217,7 @@ describe('HttpDispatcher', () => {
                 return null;
             });
 
-            const result = await dispatcher.handleMetadata('_drafts', { request: {}, executionContext: { userId: 'u1' } } as any, 'GET', undefined, {});
+            const result = await dispatcher.handleMetadata('_drafts', { request: {}, executionContext: { ...AUTHOR } } as any, 'GET', undefined, {});
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(501);
         });
@@ -2176,9 +2230,26 @@ describe('HttpDispatcher', () => {
                 return null;
             });
 
-            await dispatcher.handleMetadata('_drafts', { request: {}, executionContext: { userId: 'u1' } } as any, 'GET', undefined, {});
+            await dispatcher.handleMetadata('_drafts', { request: {}, executionContext: { ...AUTHOR } } as any, 'GET', undefined, {});
             expect(listDrafts).toHaveBeenCalledTimes(1);
             expect(getMetaItems).not.toHaveBeenCalled();
+        });
+
+        it('[#6599] 403s a non-author BEFORE the protocol is resolved (gate-first)', async () => {
+            // The gate must refuse without ever touching listDrafts, so the
+            // 501-vs-200 answer cannot be used to probe kernel support.
+            const listDrafts = vi.fn().mockResolvedValue({ drafts: [] });
+            (kernel as any).getService = vi.fn().mockImplementation((name: string) => {
+                if (name === 'protocol') return Promise.resolve({ listDrafts });
+                return null;
+            });
+
+            const result = await dispatcher.handleMetadata('_drafts', { request: {}, executionContext: { userId: 'u1' } } as any, 'GET', undefined, {});
+
+            // ADR-0112 envelope: code AND status, not just "it 403s".
+            expect(result.response?.status).toBe(403);
+            expect((result.response as any)?.body?.error?.code).toBe('PERMISSION_DENIED');
+            expect(listDrafts).not.toHaveBeenCalled();
         });
     });
 
@@ -2953,6 +3024,57 @@ describe('HttpDispatcher', () => {
                 }
             }
         });
+
+        // ── `search`: the one slot of the #4318 shape it did not reach (#7939) ──
+        //
+        // `svcAvailable(undefined, undefined, searchSvc)` defaulted an unmarked
+        // occupant to `handlerReady: true` — a lie by this very map's own
+        // contract (stated above `svcAvailable`'s definition): the dispatcher
+        // has NO `/search` route (no `route-ledger.ts` entry, no branch here,
+        // `route` is always `undefined`), so "the handler is ready" cannot be
+        // true. Latent until now because `CORE_SERVICE_PROVIDER['search']` is
+        // `null` — nothing registers this slot anywhere — so the fixture below
+        // fills it explicitly; without that the assertion would be vacuous.
+        it('reports an unmarked search occupant with no route and handlerReady false, not true (#7939)', async () => {
+            const searchSvc = { /* real, unmarked ISearchService-shaped occupant */
+                index: vi.fn(), remove: vi.fn(), search: vi.fn(),
+            };
+            (kernel as any).getService = vi.fn().mockImplementation((n: string) => (n === 'search' ? searchSvc : null));
+            (kernel as any).services = new Map([['search', searchSvc]]);
+
+            const info = await dispatcher.getDiscoveryInfo('/api/v1');
+            // Cast like the #4318 cache/queue/job tests above: `svcInProcess`'s
+            // return type carries no `route` key at all (route-less by
+            // construction), so a direct `info.services.search.route` read
+            // does not typecheck against the narrowed union.
+            const reported = (info.services as Record<string, any>).search;
+            expect(reported.enabled, 'services.search.enabled').toBe(true);
+            expect(reported.status, 'services.search.status').toBe('available');
+            expect(reported.handlerReady, 'services.search.handlerReady').toBe(false);
+            expect(reported.route, 'services.search.route').toBeUndefined();
+            // The remedy string is search's OWN wording, not the shared
+            // cache/queue/job "Kernel-internal service" sentence — a search
+            // engine is an external occupant with no dispatcher surface, not a
+            // kernel-managed one, so reusing that sentence would misdescribe it.
+            expect(reported.message, 'services.search.message').not.toContain('Kernel-internal');
+            expect(reported.message, 'services.search.message').toMatch(/no HTTP route/i);
+            expect(reported.message, 'services.search.message').toContain('capabilities.search');
+        });
+
+        it('reports a self-describing search occupant (e.g. a dev stub) with its own status, still handlerReady false (#7939)', async () => {
+            const stubSearch = {
+                __serviceInfo: { status: 'stub', message: 'Development stub — no real search backend' },
+                index: vi.fn(), remove: vi.fn(), search: vi.fn(),
+            };
+            (kernel as any).getService = vi.fn().mockImplementation((n: string) => (n === 'search' ? stubSearch : null));
+            (kernel as any).services = new Map([['search', stubSearch]]);
+
+            const info = await dispatcher.getDiscoveryInfo('/api/v1');
+            expect(info.services.search.enabled).toBe(true);
+            expect(info.services.search.status).toBe('stub');
+            expect(info.services.search.handlerReady).toBe(false);
+            expect(info.services.search.message).toContain('no real search backend');
+        });
     });
 
     // ═══════════════════════════════════════════════════════════════
@@ -3072,12 +3194,19 @@ describe('HttpDispatcher', () => {
             const stub = stubbed({ chat: vi.fn(), listModels: vi.fn() });
             serveOnly('ai', stub);
 
-            const chat = await dispatcher.handleAI('/ai/chat', 'POST', { messages: [] }, {}, { request: {} });
+            // [#7653] Authenticated — the same principal the `/notifications`
+            // stub-slot case above passes, and for the same reason. What this
+            // test pins is that a STUB slot degrades like an empty one; the
+            // anonymous gate is a separate axis, and since #7653 it is consulted
+            // before these capability answers, so an empty context would now
+            // measure the 401 instead of the degradation.
+            const authed = { request: {}, executionContext: { userId: 'usr_1' } };
+            const chat = await dispatcher.handleAI('/ai/chat', 'POST', { messages: [] }, {}, authed);
             expect(chat.handled).toBe(true);
             expect(chat.response?.status).toBe(501);
             expect(stub.chat).not.toHaveBeenCalled();
 
-            const agents = await dispatcher.handleAI('/ai/agents', 'GET', undefined, {}, { request: {} });
+            const agents = await dispatcher.handleAI('/ai/agents', 'GET', undefined, {}, authed);
             expect(agents.handled).toBe(true);
             expect(agents.response?.status).toBe(200);
             // #4053 enveloped this body while #4058 was in flight. The courtesy

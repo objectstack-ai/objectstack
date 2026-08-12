@@ -121,16 +121,33 @@ Two things live **outside** `config`, because they are not driver-specific:
 
 - **Pool sizing** — the `pool` block on the datasource (`min`, `max`,
   `idleTimeoutMillis`, `connectionTimeoutMillis`), honoured by the pooled
-  drivers: `postgres` and `mysql` pass it to Knex, `mongo` maps `min` / `max`
-  onto the client's `minPoolSize` / `maxPoolSize`. Declaring it on a **sqlite**
-  or **sqlite-wasm** datasource is rejected — by the Setup wizard when you save,
-  and by the boot when a declared datasource carries one: a SQLite connection
-  strategy is owned by the driver (one connection per database, because a second
-  connection to `:memory:` opens a separate, empty one), so a pool declared
-  there could never take effect. It used to be dropped in silence — an `app-crm`
-  datasource asking for `max: 5` measurably ran on one connection
-  ([#5714](https://github.com/objectstack-ai/objectstack/issues/5714)). The fix
-  is to delete the block; it is a no-op on SQLite either way.
+  drivers: `postgres` and `mysql` pass all four to Knex, and `mongodb` maps
+  `min` / `max` — and only those two — onto the client's `minPoolSize` /
+  `maxPoolSize`. Everywhere else the block is an **authoring error**, rejected by
+  the Setup wizard when you save and by the boot when a declared datasource
+  carries one, rather than dropped:
+
+  | Driver | Verdict on `pool` |
+  | --- | --- |
+  | `postgres`, `mysql` | all four keys honoured |
+  | `mongodb` | `min` / `max` honoured; `idleTimeoutMillis` and `connectionTimeoutMillis` **rejected by name** |
+  | `sqlite`, `sqlite-wasm` | whole block **rejected** |
+  | `memory` | whole block **rejected** |
+  | `turso` / `libsql` | whole block **rejected** |
+
+  Each arm says why in its own terms. A SQLite connection strategy is owned by
+  the driver (one connection per database, because a second connection to
+  `:memory:` opens a separate, empty one); `memory` opens no connection at all;
+  neither libSQL transport pools — a `file:` url runs that same local SQLite
+  engine and a `libsql://` url is a remote request transport capped by
+  `config.concurrency`. Every one of these used to be dropped in silence: an
+  `app-crm` datasource asking for `max: 5` measurably ran on one connection
+  ([#5714](https://github.com/objectstack-ai/objectstack/issues/5714)), and a
+  mongo datasource asking for `max: 20, idleTimeoutMillis: 30000` got the first
+  and lost the second without a word
+  ([#7243](https://github.com/objectstack-ai/objectstack/issues/7243)) — the
+  half-honoured case, which is the hardest to notice. The fix is always to
+  delete the rejected keys; they were reaching nothing either way.
 - **TLS certificates** — the `ssl` block on the datasource (`enabled`,
   `rejectUnauthorized`, `ca`, `cert`, `key`). Inside `config`, `ssl` is the
   on/off boolean shorthand.

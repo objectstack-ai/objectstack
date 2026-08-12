@@ -6,9 +6,14 @@ import type { DriverOptions } from '@objectstack/spec/data';
 // strings, so the fold has to live in the pattern source. See its docblock for
 // why an `i` flag is the wrong tool.
 import { canonicalAstOperator, asciiCaseInsensitiveRegexSource } from '@objectstack/spec/data';
+// [#7536] `$like`/`$ilike`'s pattern language, from the spec's one definition —
+// the same translation `formula` evaluates and the same pattern `driver-sql`
+// hands to LIKE/GLOB, so this face cannot answer a pattern differently.
+import { hasDanglingLikeEscape, likePatternToRegexSource } from '@objectstack/spec/data';
 import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
 import { Logger, createLogger, nextUtcCalendarDay } from '@objectstack/core';
 import { Query, Aggregator } from 'mingo';
+import { assertSingleTenantPosture, assertObjectsNotTenantScoped } from './memory-tenancy-guard.js';
 import { getValueByPath } from './memory-matcher.js';
 import {
   assertFilterConditionShape,
@@ -20,6 +25,9 @@ import {
   unknownFieldOperatorError,
   unknownLogicalOperatorError,
   unsupportedFilterError,
+  // [#7536] The `$like`/`$ilike` comparand refusals, beside their siblings.
+  likePatternComparandError,
+  danglingLikeEscapeError,
 } from './filter-refusal.js';
 import {
   coerceTemporalValue,
@@ -149,6 +157,14 @@ export class InMemoryDriver implements IDataDriver {
   private persistenceAdapter: PersistenceAdapterInterface | null = null;
 
   constructor(config?: InMemoryDriverConfig) {
+    // #6915 — this driver has NO row-level tenant isolation, so it refuses a
+    // multi-tenant deployment outright rather than serving it unisolated.
+    // Construction is the earliest seam and the one behind no escape hatch:
+    // `connect()` re-checks (and is what aborts kernel bootstrap with this
+    // message), but `ObjectQLEngine.init()` downgrades a connect rejection to a
+    // warning under `OS_ALLOW_DRIVER_CONNECT_FAILURE=1`, which would boot
+    // unisolated again. See `memory-tenancy-guard.ts`.
+    assertSingleTenantPosture();
     this.config = config || {};
     this.logger = config?.logger || createLogger({ level: 'info', format: 'pretty' });
     this.logger.debug('InMemory driver instance created');
@@ -191,6 +207,12 @@ export class InMemoryDriver implements IDataDriver {
   // ===================================
 
   async connect() {
+    // #6915 — re-checked here (not just in the constructor) because a host may
+    // flip the posture between construction and connect, and because a rejection
+    // from here is what `ObjectQLEngine.init()` turns into a `DriverConnectError`
+    // that aborts kernel bootstrap (framework#3741).
+    assertSingleTenantPosture();
+
     // Initialize persistence adapter if configured
     await this.initPersistence();
 
@@ -772,7 +794,8 @@ export class InMemoryDriver implements IDataDriver {
     // `VALID_AST_OPERATORS` accepts `>`, `gt`, `greater_than`, `greaterthan` and
     // `after` for the same thing. A private alias list here is what let this
     // driver and driver-sql accept different vocabularies. #3948.
-    switch (canonicalAstOperator(operator)) {
+    const canonical = canonicalAstOperator(operator);
+    switch (canonical) {
       case '=': case '==':
         return { [field]: store(value) };
       case '!=': case '<>':
@@ -796,14 +819,37 @@ export class InMemoryDriver implements IDataDriver {
         return { [field]: { $in: store(value) } };
       case 'nin': case 'not_in': case 'notin': case 'not in':
         return { [field]: { $nin: store(value) } };
-      case 'contains': case 'like': case 'ilike':
-        return { [field]: { $regex: new RegExp(this.escapeRegex(value), 'i') } };
+      // [#6682] The `$contains` family is case-SENSITIVE (#4706 Q2 = A), here
+      // and on every other spelling of it in this file. The `i` flag these four
+      // arms used to carry was the FULL Unicode fold — wider even than the
+      // ASCII-only boundary `$icontains` is held to (Q1 = A) — so a filter
+      // returned rows it excludes, which on an RLS read scope is over-reach
+      // rather than a loose filter (#3948). `escapeRegex` stays: the comparand
+      // was always literal, and that half was never the defect.
+      case 'contains':
+        return { [field]: { $regex: new RegExp(this.escapeRegex(value)) } };
+      // [#7536] `like` / `ilike` are NOT `contains`, and sharing this arm with
+      // it was the memory-face twin of the wire defect #7536 closed: the
+      // comparand was regex-ESCAPED (so a caller's `%` matched a literal percent
+      // sign) and matched as a SUBSTRING (so a wildcard-free pattern matched
+      // anywhere in the value). Both readings answer a query nobody wrote.
+      //
+      // Now the same pattern translation the `$`-spelling takes one method over,
+      // so this driver answers one filter one way whichever door it came
+      // through (#3948).
+      case 'like': case 'ilike': {
+        if (typeof value !== 'string') throw likePatternComparandError(field, canonical, value);
+        if (hasDanglingLikeEscape(value)) throw danglingLikeEscapeError(field, canonical, value);
+        return {
+          [field]: { $regex: new RegExp(likePatternToRegexSource(value, canonical === 'ilike')) },
+        };
+      }
       case 'notcontains': case 'not_contains':
-        return { [field]: { $not: { $regex: new RegExp(this.escapeRegex(value), 'i') } } };
+        return { [field]: { $not: { $regex: new RegExp(this.escapeRegex(value)) } } };
       case 'startswith': case 'starts_with':
-        return { [field]: { $regex: new RegExp(`^${this.escapeRegex(value)}`, 'i') } };
+        return { [field]: { $regex: new RegExp(`^${this.escapeRegex(value)}`) } };
       case 'endswith': case 'ends_with':
-        return { [field]: { $regex: new RegExp(`${this.escapeRegex(value)}$`, 'i') } };
+        return { [field]: { $regex: new RegExp(`${this.escapeRegex(value)}$`) } };
       // Null / empty predicates. These are in `VALID_AST_OPERATORS` and were
       // absent here, so every one of them fell to `default: return null` and was
       // dropped — `is_null` narrowed nothing instead of matching null rows.
@@ -957,34 +1003,65 @@ export class InMemoryDriver implements IDataDriver {
     for (const op of Object.keys(ops)) {
       const val = ops[op];
       switch (op) {
+        // [#6682] Case-SENSITIVE, the same four arms as the AST spelling one
+        // method up (`convertConditionToMongo`) and for the same reason — see
+        // the note there. The comparand stays `escapeRegex`-literal; only the
+        // Unicode-folding `i` flag is gone.
         case '$contains':
-          regexConditions.push({ $regex: new RegExp(this.escapeRegex(val), 'i') });
+          regexConditions.push({ $regex: new RegExp(this.escapeRegex(val)) });
           break;
         case '$notContains':
-          result.$not = { $regex: new RegExp(this.escapeRegex(val), 'i') };
+          result.$not = { $regex: new RegExp(this.escapeRegex(val)) };
           break;
         case '$startsWith':
-          regexConditions.push({ $regex: new RegExp(`^${this.escapeRegex(val)}`, 'i') });
+          regexConditions.push({ $regex: new RegExp(`^${this.escapeRegex(val)}`) });
           break;
         case '$endsWith':
-          regexConditions.push({ $regex: new RegExp(`${this.escapeRegex(val)}$`, 'i') });
+          regexConditions.push({ $regex: new RegExp(`${this.escapeRegex(val)}$`) });
           break;
         // [#6520] `$icontains` — case-insensitive over ASCII and NOTHING else.
         //
-        // Note what this arm does NOT do, because every neighbour above does it:
-        // it never passes the `i` flag. That flag is the FULL Unicode fold, so
-        // it would match `CAFÉ` against `café` — the answer the SQL family
-        // cannot give (SQLite folds ASCII only) and therefore the one the
-        // protocol forbids (#4706 Q1 = A). The fold instead lives in the pattern
-        // SOURCE, one `[Aa]` class per ASCII letter, built by the spec's shared
-        // `asciiCaseInsensitiveRegexSource` — the same source `driver-mongodb`
-        // binds, so the two document-shaped faces fold identically.
+        // Note what this arm does NOT do: it never passes the `i` flag. That
+        // flag is the FULL Unicode fold, so it would match `CAFÉ` against
+        // `café` — the answer the SQL family cannot give (SQLite folds ASCII
+        // only) and therefore the one the protocol forbids (#4706 Q1 = A). The
+        // fold instead lives in the pattern SOURCE, one `[Aa]` class per ASCII
+        // letter, built by the spec's shared `asciiCaseInsensitiveRegexSource` —
+        // the same source `driver-mongodb` binds, so the two document-shaped
+        // faces fold identically.
         //
-        // The neighbours' `i` flags are NOT a precedent to copy here: they are
-        // the `$contains` family folding Unicode, which is the open defect #6682
-        // tracks on this face, not the behaviour to extend.
+        // [#6682] The neighbours above carried that flag until this operator's
+        // sibling family was made case-exact; the two are still not the same
+        // mechanism, and this arm's pattern-source fold is the only one on this
+        // face that survives. A bare `new RegExp(v)` beside a bare
+        // `new RegExp(escapeRegex(v))` is the shape to keep: this arm folds in
+        // the SOURCE, the family does not fold at all.
         case '$icontains':
           regexConditions.push({ $regex: new RegExp(asciiCaseInsensitiveRegexSource(val)) });
+          break;
+        // [#7536] `$like` / `$ilike` — the caller's OWN pattern, anchored to the
+        // whole value. `likePatternToRegexSource` is the spec's one translation
+        // of that language, the same one `formula` evaluates and the same
+        // pattern `driver-sql` hands to `LIKE` / `GLOB`.
+        //
+        // Two things this arm must NOT copy from its neighbours above. It does
+        // not `escapeRegex` the comparand — a `%` here is the caller's wildcard,
+        // and escaping it back into a literal IS the wire defect #7536 closed,
+        // reproduced one layer down. And it does not pass the `i` flag: the
+        // `$ilike` fold is ASCII-only and lives in the pattern source, for the
+        // reason the `$icontains` arm above spells out at length.
+        case '$like':
+        case '$ilike':
+          // The comparand's shape was settled by `assertFieldConstraintShape`
+          // on the whole tree before this ran (the #5324/#5328 discipline every
+          // arm here follows), so `val` is a string with no dangling escape.
+          // The re-check is the totality floor a translator owes itself, the
+          // same one `driver-sql`'s emitter keeps beside its own gate.
+          if (typeof val !== 'string') throw likePatternComparandError(field, op, val, path);
+          if (hasDanglingLikeEscape(val)) throw danglingLikeEscapeError(field, op, val, path);
+          regexConditions.push({
+            $regex: new RegExp(likePatternToRegexSource(val, op === '$ilike')),
+          });
           break;
         case '$between': {
           // [#5328] The arm used to be CONDITIONAL — a comparand that was not a
@@ -1172,6 +1249,28 @@ export class InMemoryDriver implements IDataDriver {
               return valid.reduce((max, v) => (v > max ? v : max), valid[0]);
           }
 
+          // [#6814] Distinct NON-NULL values — what `COUNT(DISTINCT col)`
+          // computes on SQLite, PostgreSQL and MySQL alike, what objectql's
+          // fallback computes (`in-memory-aggregation.ts`, the same expression
+          // written the same way on purpose) and what `AGGREGATION_CASES` says
+          // (2 over `AGGREGATION_ROWS`).
+          //
+          // This arm was ABSENT, so a function the Query Protocol declares and
+          // every SQL face lowers (#6409) fell to `default: return null` and
+          // `aggregate()` resolved with `{ n: null }` — no error, no log, no
+          // refusal. A wrong ANSWER rather than a wrong number, and the
+          // `default:`-arm shape the `aggregation-lockstep` guard exists to stop
+          // one layer up, reached here through a different door (#4157).
+          //
+          // The null exclusion is the half a `new Set(values).size` would miss:
+          // it answers one HIGHER on any nullable column (3 where the standard
+          // says 2), which is exactly the divergence #6814's driver-mongodb half
+          // fixed on `$addToSet`. `undefined` is excluded beside `null` for the
+          // same reason the neighbours above exclude it — a missing key and an
+          // explicit null are one state in SQL, and this store has both.
+          case 'count_distinct':
+              return new Set(values.filter(v => v !== null && v !== undefined)).size;
+
           default:
               return null;
       }
@@ -1193,6 +1292,9 @@ export class InMemoryDriver implements IDataDriver {
   // ===================================
 
   async syncSchema(object: string, schema: any, options?: DriverOptions) {
+    // #6915 — metadata-level half of the tenancy guard: an object asking for
+    // row-level isolation cannot get it here, so the table is never allocated.
+    assertObjectsNotTenantScoped([{ object, schema }]);
     if (!this.db[object]) {
       this.db[object] = [];
       this.tablesCreatedHere.add(object);
@@ -1284,15 +1386,27 @@ export class InMemoryDriver implements IDataDriver {
    *
    * Same reasoning as {@link filterComparandStorageForm} one method up, on the
    * other half of what a `contains` predicate needs. This driver's rule is
-   * `escapeRegex` + the `i` flag ({@link normalizeFieldOperators}): the comparand
-   * is a LITERAL substring, matched case-insensitively. The analytics face has to
+   * `escapeRegex` and NO flags ({@link normalizeFieldOperators}): the comparand
+   * is a LITERAL substring, matched case-EXACTLY. The analytics face has to
    * build a `$regex` too, and every byte of that rule it re-derives is a way for
    * the two faces to answer one `where` differently — which is what happened
    * before this method existed. That face emitted a bare `{$regex: value}`:
    *   - unescaped, so `{name: {$contains: 'a.p'}}` matched `alpha` through the
    *     regex `.`, where `find()` matched nothing; and
-   *   - case-SENSITIVE, so `{name: {$contains: 'ALPHA'}}` matched nothing where
-   *     `find()` matched the row.
+   *   - case-SENSITIVE, where `find()` folded and matched more rows.
+   *
+   * [#6682] That second divergence is now closed from the OTHER side, and this
+   * method is where it closed: the rule lost its `i` flag rather than the
+   * analytics face gaining one. `find()` was the face that was wrong — the `i`
+   * flag folded the whole Unicode range, so the `$contains` family returned rows
+   * the filter excludes (#4706 Q2 = A), and this driver's own reference matcher
+   * (`memory-matcher.ts`, `String.includes`) had been answering case-exactly the
+   * whole time. One operator, one answer, three faces (#5374).
+   *
+   * Note what does NOT come through here: `$icontains`. Its ASCII-only fold
+   * lives in the pattern SOURCE (`asciiCaseInsensitiveRegexSource`), which the
+   * analytics face binds directly — so this method is the `$contains` family's
+   * rule alone, and taking the flag off it cannot move the ASCII boundary.
    *
    * Returning the built `RegExp` rather than a source string is deliberate: a
    * string leaves the flags for the caller to re-choose, which is the half that
@@ -1302,7 +1416,7 @@ export class InMemoryDriver implements IDataDriver {
    * — so it exposes the convention without exposing the filter pipeline.
    */
   filterSubstringPattern(value: unknown): RegExp {
-    return new RegExp(this.escapeRegex(value as string), 'i');
+    return new RegExp(this.escapeRegex(value as string));
   }
 
   /**

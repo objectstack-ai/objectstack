@@ -37,6 +37,7 @@
     "sql.js": "^1.14.1"
   },
   "devDependencies": {
+    "@objectstack/formula": "workspace:*",
     "@types/node": "^26.1.2",
     "@types/sql.js": "^1.4.11",
     "typescript": "^6.0.3",

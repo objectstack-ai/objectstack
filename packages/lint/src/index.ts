@@ -179,6 +179,7 @@ export {
   validatePredicatePathRefs,
   PREDICATE_PATH_UNRESOLVED,
   PREDICATE_PATH_UNROOTED,
+  PREDICATE_RHS_PATH_SHAPED,
 } from './validate-predicate-path-refs.js';
 export type {
   PredicatePathFinding,
@@ -233,6 +234,7 @@ export {
   SECURITY_FLS_UNQUALIFIED_KEY,
   SECURITY_GRANT_EXPIRED_AT_AUTHORING,
   SECURITY_DELEGATION_MISSING_REASON,
+  SECURITY_CBP_NO_RELATION,
 } from './validate-security-posture.js';
 export type { SecurityFinding, SecuritySeverity } from './validate-security-posture.js';
 

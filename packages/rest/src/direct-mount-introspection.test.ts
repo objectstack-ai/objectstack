@@ -19,11 +19,22 @@
  *   mounted     ⇒ enumerable, and documented
  *   not mounted ⇒ absent from both
  *
- * The second direction has a real trigger: the package registrar is gated on
- * the `package` service, so a deployment without it serves no `packages.*`
- * route — and must not document one. The federation registrar is NOT gated (it
+ * The second direction has a real trigger: three of the four package routes are
+ * gated on the `package` service, so a deployment without it serves none of
+ * them — and must not document them. The federation registrar is NOT gated (it
  * mounts always and answers 503 per request), so "mounted" is unconditional
  * there and the document says so.
+ *
+ * [#7563] `POST /packages/publish` joined the unconditional cohort, and for a
+ * reason the second direction is about rather than an exception to it: leaving
+ * it unmounted did NOT produce the 404 this rule assumes. Nothing else serves
+ * that verb+path, so the dispatcher's `/packages/:id` matched it with
+ * `id = "publish"` and the router answered 405 built from THAT route's method
+ * set. "Not mounted ⇒ absent from the document" is honest only while "not
+ * mounted" also means "not answered"; where it cannot, the route mounts and
+ * 404s for itself. The three gated routes have dispatcher twins at their own
+ * patterns and so keep the original treatment — that split is pinned in
+ * `package-publish-mount.test.ts`.
  *
  * Both are driven through the REAL composition: `mountAndRecordDirectRoutes`
  * for the server-level facts, and `createRestApiPlugin().start()` for the
@@ -101,7 +112,11 @@ function createCtx(services: Record<string, unknown>) {
 
 /** The ledger's own list of the nine, split by registrar. */
 const LEDGER_DIRECT_MOUNT = REST_ROUTE_LEDGER.filter((e) => e.source === 'direct-mount').map((e) => e.route);
-const PACKAGE_ROUTES = LEDGER_DIRECT_MOUNT.filter((r) => r.includes('/packages'));
+const ALL_PACKAGE_ROUTES = LEDGER_DIRECT_MOUNT.filter((r) => r.includes('/packages'));
+/** [#7563] Mounted on every boot — no dispatcher twin to fall back to. */
+const PUBLISH_ROUTE = 'POST /api/v1/packages/publish';
+/** The `package`-service-gated three, each shadowing a dispatcher twin. */
+const PACKAGE_ROUTES = ALL_PACKAGE_ROUTES.filter((r) => r !== PUBLISH_ROUTE);
 const FEDERATION_ROUTES = LEDGER_DIRECT_MOUNT.filter((r) => r.includes('/external'));
 
 /** `VERB /path` for every route the server reports as mounted. */
@@ -155,7 +170,7 @@ function documented(body: any, route: string): boolean {
 describe('#5822 — a registrar describes exactly what it mounted', () => {
   it('package routes: the returned array matches the registration calls, one for one', () => {
     const server = createMockServer();
-    const returned = registerPackageRoutes(server as any, packageServiceStub() as any, '/api/v1');
+    const returned = registerPackageRoutes(server as any, () => packageServiceStub() as any, '/api/v1');
 
     const mounted: string[] = [];
     for (const verb of ['get', 'post', 'put', 'patch', 'delete'] as const) {
@@ -263,7 +278,15 @@ describe('#5822 — mounted direct-mount routes are enumerable and documented', 
 // ---------------------------------------------------------------------------
 
 describe('#5822 — an unmounted registrar is reported by nothing', () => {
-  it('a boot without the `package` service enumerates and documents no packages route', async () => {
+  it('the publish row this file splits out is a row the ledger really has', () => {
+    // Without this, renaming the route in the ledger would quietly move it into
+    // PACKAGE_ROUTES and make the gated-cohort cases below assert the opposite
+    // of what they are named after.
+    expect(ALL_PACKAGE_ROUTES).toContain(PUBLISH_ROUTE);
+    expect(PACKAGE_ROUTES).toHaveLength(ALL_PACKAGE_ROUTES.length - 1);
+  });
+
+  it('a boot without the `package` service enumerates and documents no service-backed packages route', async () => {
     const { rest, server } = bootWith({});
     const keys = mountedKeys(rest);
     for (const route of PACKAGE_ROUTES) {
@@ -278,6 +301,17 @@ describe('#5822 — an unmounted registrar is reported by nothing', () => {
     for (const route of PACKAGE_ROUTES) {
       expect(documented(body, route), `${route} is not mounted but is documented`).toBe(false);
     }
+  });
+
+  it('…but publish IS mounted, enumerable and documented on that same boot (#7563)', async () => {
+    // The counterpart the header explains: this route has no dispatcher twin,
+    // so being absent handed the path to `/packages/:id` and a 405 built from
+    // its verbs. Mounted, it answers its own 404 — and a document that names it
+    // is describing a route that really is there.
+    const { rest, server } = bootWith({});
+    expect(mountedKeys(rest)).toContain(PUBLISH_ROUTE);
+    expect(server.post.mock.calls.map((args: unknown[]) => args[0])).toContain('/api/v1/packages/publish');
+    expect(documented(await serveOpenApi(server), PUBLISH_ROUTE)).toBe(true);
   });
 
   it('the federation routes are still there — they mount unconditionally', async () => {
@@ -317,10 +351,11 @@ describe('#5822 — the REST plugin records what it mounts', () => {
     }
   });
 
-  it('publishes the five, and only the five, when it is not', async () => {
+  it('publishes the five federation routes plus publish, and nothing else, when it is not', async () => {
     const { server } = await bootPlugin({});
     const body = await serveOpenApi(server);
     for (const route of FEDERATION_ROUTES) expect(documented(body, route)).toBe(true);
+    expect(documented(body, PUBLISH_ROUTE), `${PUBLISH_ROUTE} mounts unconditionally (#7563)`).toBe(true);
     for (const route of PACKAGE_ROUTES) expect(documented(body, route)).toBe(false);
   });
 });

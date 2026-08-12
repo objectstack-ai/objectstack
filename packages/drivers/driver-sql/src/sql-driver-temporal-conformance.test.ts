@@ -115,7 +115,7 @@ const timeShape = (name: string) => ({
 
 /** Row ids a filter reaches, sorted — the one thing every cell must agree on. */
 async function matchedIds(driver: SqlDriver, table: string, where: unknown): Promise<string[]> {
-  const rows = await driver.find(table, { object: table, where } as any);
+  const rows = await driver.find(table, { where } as any);
   return (rows as any[]).map((r) => r.id).sort();
 }
 

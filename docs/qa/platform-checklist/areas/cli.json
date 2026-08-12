@@ -1,14 +1,14 @@
 {
   "$comment": "Standing platform test checklist — area ledger. Hand-edited, append-only; validated by scripts/check-platform-checklist.mjs (pnpm check:platform-checklist). Authoring rules: docs/qa/platform-checklist/README.md · execution protocol: RUNNER.md.",
   "area": "cli",
-  "title": "CLI — os dev/build/migrate/verify boot & exit-code contracts, scaffold first-run, flag/command error UX",
+  "title": "CLI — os dev/build/migrate/verify/test boot, load, execution & exit-code contracts, scaffold first-run, flag/command error UX",
   "items": [
     {
       "id": "cli.dev-boot-contract",
       "title": "os dev boots to healthy with a loginable seeded admin, honest DB selection, reported port shifts, and a staleness warning",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P0",
       "surface": "cli",
       "personas": ["operator (local shell)"],
@@ -25,7 +25,8 @@
         "stop; in a scratch dir with NO objectstack.config.ts and no --artifact, run `os dev; echo $?` and capture the message",
         "back in the app dir with the server DOWN, touch a src file so it is newer than dist/objectstack.json, boot WITHOUT --compile, and capture the staleness warning block",
         "with instance A still running, boot instance B on the same requested port and capture the '↪ server bound to port <actual> (requested <requested>)' line",
-        "run once with NONE of --database/--fresh/env-db set and record the printed Database line (must be the project-anchored file:<cwd>/.objectstack/data/dev.db); then run with `--fresh` and record the '🧪 Fresh OS_HOME' tempdir line and its deletion on exit",
+        "run once with NONE of --database/--fresh/env-db set and no config-declared default datasource, and record the printed Database line (must be the project-anchored UNIFIED default file:<cwd>/.objectstack/data/objectstack.db); then run with `--fresh` and record the '🧪 Fresh OS_HOME' tempdir line (its DB is the SAME unified filename under the ephemeral home) and its deletion on exit",
+        "legacy compat-read: in a scratch project whose .objectstack/data holds a legacy dev.db and NO objectstack.db, boot with nothing chosen and capture both the Database line (must resolve to the legacy file — never a fresh empty objectstack.db beside it) and the one loud notice line naming that file and how to converge on the unified name",
         "capture `echo $?` after every terminated invocation"
       ],
       "acceptance": [
@@ -42,9 +43,9 @@
           "evidence": "the two auth responses"
         },
         {
-          "clause": "DB selection honors the resolveDefaultDevDbUrl matrix: with nothing chosen, dev defaults to the PERSISTENT project-anchored sqlite file (.objectstack/data/dev.db) — never the serve default of :memory: that wipes work on restart",
+          "clause": "DB selection honors the ONE shared resolution matrix (#6469 resolveProjectDatabaseUrl, which dev maps its flags onto via resolveDevDatabase and start/migrate resolve through too): with nothing chosen, dev defaults to the PERSISTENT project-anchored sqlite file — the unified <state dir>/data/objectstack.db, i.e. .objectstack/data/objectstack.db under the project — never the historical serve default of :memory: that wipes work on restart",
           "oracle": "log",
-          "verify": "the printed Database key-value per variant matches the matrix (default file path; -d url; --fresh tempdir; env url; memory driver imposes no file default)",
+          "verify": "the printed Database key-value per variant matches the matrix, tier for tier (explicit -d url; env url; memory driver imposes no file default; config-declared default datasource; legacy dev.db/standalone.db compat-read WITH its notice line; otherwise the unified objectstack.db default) — and dev carries no fallback filename of its own",
           "evidence": "the per-variant Database boot lines"
         },
         {
@@ -73,31 +74,37 @@
         }
       ],
       "negative": [
-        "a dev boot that wipes an existing dev DB when the user chose nothing (a regression to the :memory: serve default) is the FAIL the persistent default exists for",
+        "a dev boot that wipes an existing dev DB when the user chose nothing (a regression to the historical :memory: serve default) is the FAIL the persistent default exists for",
+        "a boot that silently opens a fresh empty objectstack.db beside an existing legacy dev.db — or reads the legacy file WITHOUT printing the notice — is a FAIL: the compat-read exists so an established dev environment never looks like data loss",
         "an auto-shifted port that is not reported (URL printed for the requested port while the server bound elsewhere) is a FAIL"
       ],
       "variants": [
-        "default: file:<cwd>/.objectstack/data/dev.db (persistent, imposed only when nothing else chosen)",
+        "unified default: file:<cwd>/.objectstack/data/objectstack.db (persistent, imposed only when nothing else chosen)",
         "--database <url> (explicit; no default imposed)",
-        "--fresh (ephemeral tempdir OS_HOME; implies --seed-admin)",
-        "OS_DATABASE_URL / DATABASE_URL env (env wins over the default)",
-        "--database-driver memory / OS_DATABASE_DRIVER=memory (explicit in-memory; no file default)"
+        "--fresh (ephemeral tempdir OS_HOME; same unified filename under it; implies --seed-admin)",
+        "OS_DATABASE_URL / DATABASE_URL / TURSO_DATABASE_URL env (env wins over the default)",
+        "--database-driver memory / OS_DATABASE_DRIVER=memory (explicit in-memory; no file default)",
+        "config-declared default datasource (the project config's default home wins over the unified default)",
+        "legacy compat-read: an existing dev.db / standalone.db when no objectstack.db exists (resolved WITH one loud notice line; probe order objectstack.db → dev.db → standalone.db)"
       ],
       "traps": ["stale-dist", "stale-console-bundle", "shared-browser-tab"],
       "source": [
-        "packages/cli/src/commands/dev.ts (resolveDefaultDevDbUrl matrix; --fresh coverage note #5594; seed-admin idempotency contract; IPC bound-port report; #5148 staleness warning + rebuild-restart coordinator)",
+        "packages/cli/src/commands/dev.ts (resolveDevDatabase — dev's ONE resolution seam onto the shared matrix, carrying no fallback filename of its own; the persistent-default rationale; --fresh coverage note #5594; seed-admin idempotency contract; IPC bound-port report; #5148 staleness warning + rebuild-restart coordinator)",
+        "packages/runtime/src/resolve-project-database.ts (#6469 resolveProjectDatabaseUrl — the shared priority matrix explicit → env → memory driver → config-declared default datasource → unified <state dir>/data/objectstack.db, the state-dir order homeDir/OS_HOME/<projectRoot>/.objectstack/~/.objectstack, and the legacy dev.db/standalone.db compat-read with its loud notice)",
+        "packages/cli/src/commands/unified-db-resolution.pin.test.ts (pins dev/start/migrate all resolving through that one seam)",
         ".claude/skills/dogfood-verification/SKILL.md §0–§1 (port isolation, health probe, fixed admin creds, /_console layout)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "new area item: the os dev boot contract read directly out of dev.ts (DB-selection matrix as variants, seed idempotency, port-shift reporting, #5148 staleness warning, #5594 fresh-isolation carve-out) plus the dogfood skill's boot shapes", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-07", "change": "new area item: the os dev boot contract read directly out of dev.ts (DB-selection matrix as variants, seed idempotency, port-shift reporting, #5148 staleness warning, #5594 fresh-isolation carve-out) plus the dogfood skill's boot shapes", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-11", "change": "text refresh only, no property change: the DB-selection clause, step, variants and sources named the retired resolveDefaultDevDbUrl helper and the .objectstack/data/dev.db default, both superseded by #6469's unified <state dir>/data/objectstack.db resolved through the shared resolveProjectDatabaseUrl (dev's seam is now resolveDevDatabase). Re-derived from dev.ts + resolve-project-database.ts: added the config-datasource and legacy compat-read tiers as variants, a step and negative for the legacy dev.db notice, and the pin test to sources. The load-bearing assertion is UNCHANGED in substance — nothing-chosen still defaults to a PERSISTENT project-anchored sqlite file, never :memory:", "ref": "#7650" }
       ]
     },
     {
       "id": "cli.build-own-contract",
-      "title": "os build's own contract: exit 0/1 only, located errors for schema and author-time rule failures, artifact + stats output, warnings never flip the exit",
+      "title": "os build's own contract: no computed value in the exit slot, located errors for schema and author-time rule failures, artifact + stats output, warnings never flip the exit",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "build",
       "personas": ["operator (local shell)"],
@@ -114,6 +121,8 @@
         "break an author-time rule: author a flow whose Approval node approver expression does not parse (the #4409 worked example that once built green while os lint rejected it) and run `os build; echo $?`",
         "re-run both failing builds with --json and capture the failure payloads",
         "restore the config, add one UNDECLARED authoring key (the #3786 advisory class) and run `os build; echo $?` — the warning prints, the build passes",
+        "the exit-slot pair: make the config throw at LOAD time and run BOTH `os build; echo $?` (human path — expect oclif's ExitError 2 out of compile.ts's this.error() catch) and `os build --json; echo $?` (expect 1 via emitJson) — the pair that separates the framework's error exit from the #4873 leak",
+        "repeat one successful run and one failing run verbatim and compare the two exit codes each time — a code that MOVES between identical runs is the #4873 signature, and only a repeat can see it",
         "confirm `os build` and `os compile` produce identical behavior on the same input (build is the documented alias)"
       ],
       "acceptance": [
@@ -142,10 +151,10 @@
           "evidence": "the paired --json payloads"
         },
         {
-          "clause": "exit codes are exactly 0 or 1 (the CliExitCode union) — never a count, never a duration",
+          "clause": "#4873 exit-code honesty: the exit code is a STATUS, never a computed value — no duration, count or finding total ever reaches the exit-code slot. The legitimate exits are 0 and 1 through the CliExitCode union (every emitJson/emitText caller, i.e. both --json paths here), plus oclif's ExitError 2 when the human path (the run without --json) ends in this.error(): a config-load-time throw exiting 2 is the framework's error exit and is NOT a violation of this clause — cli.flag-command-error-ux pins that same 2 as the correct oclif error code, and the two items must not disagree",
           "oracle": "build",
-          "verify": "echo $? across all runs is only ever 0 or 1 (the type that pins the #4873 class for every emitJson caller)",
-          "evidence": "the collected exit codes"
+          "verify": "every observed exit is 0, 1, or an oclif 2 from a this.error() path, AND none of them varies with the run: the #4873 shape is a value that TRACKS something (timer.elapsed() in emitJson's positional exit slot made a fully successful run exit 531 & 0xFF = 19, a different nonzero every time). Repeat one success and one failure to show the codes are stable; a nonzero that is neither 1 nor an oclif error exit, or any code that changes between two identical runs, FAILS",
+          "evidence": "the collected exit codes with the --json and human paths labelled separately, plus the repeat runs showing each code is stable"
         },
         {
           "clause": "advisories never flip the exit: the undeclared-authoring-key build warns visibly AND exits 0 — both sides of the warn/fail line",
@@ -156,16 +165,20 @@
       ],
       "negative": [
         "exit 0 with no artifact written, or nonzero on the clean config, is a FAIL",
+        "an exit code that tracks a computed value — a duration, a count, a finding total — is the #4873 leak this item's exit clause exists for: a SUCCESSFUL run exiting nonzero, or any code that differs between two identical runs, FAILS. Oclif's fixed ExitError 2 on a this.error() path is NOT that leak and must not be filed as one (that reading is what collided with cli.flag-command-error-ux, reconciled in #7648)",
         "the DEEP gate content (date-arithmetic formula errors, retired-key tombstones) is api-backend.formula-gates / api-backend.enforce-or-remove-authoring-gates — cite pinned passes there; this item owns only the build's OWN exit/error/output contract"
       ],
       "traps": ["stale-dist"],
       "source": [
-        "packages/cli/src/commands/compile.ts (the full gate pipeline: Zod parse, #4409 author-time rule registry, #3786 unknown-key advisory, --json shapes, #3782 conversion-notice parity) + build.ts (alias)",
-        "packages/cli/src/utils/format.ts (CliExitCode = 0 | 1 — the narrowed exit-code slot)",
+        "packages/cli/src/commands/compile.ts (the full gate pipeline: Zod parse, #4409 author-time rule registry, #3786 unknown-key advisory, --json shapes, #3782 conversion-notice parity; the human-path catches ending in this.error() — oclif's ExitError 2 — while the --json branch answers through emitJson + this.exit(1)) + build.ts (alias)",
+        "packages/cli/src/utils/format.ts (CliExitCode = 0 | 1 — the narrowed emitJson/emitText exit slot, NOT a bound on oclif's own error exit)",
+        "packages/cli/src/utils/format.exit-code.test.ts (the #4873 pin: the defect was an argument in the wrong slot — timer.elapsed() landing in emitJson's positional exit code — and a number can no longer reach it at all)",
+        "cli.flag-command-error-ux (the sibling item that owns oclif's exit 2 — cross-referenced so the two never re-collide)",
         "api-backend.formula-gates, api-backend.enforce-or-remove-authoring-gates (gate content — cross-referenced, not duplicated)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "new item: the build command's own contract (exit-code discipline, located schema + rule errors, --json parity, advisory both-sides) read from compile.ts, with the gate-content items cross-referenced instead of re-proven", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-07", "change": "new item: the build command's own contract (exit-code discipline, located schema + rule errors, --json parity, advisory both-sides) read from compile.ts, with the gate-content items cross-referenced instead of re-proven", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-11", "change": "narrowed the exit-code clause to the #4873 duration-leak it exists to pin. As phrased ('exactly 0 or 1') it also forbade oclif's standard ExitError 2, which compile.ts's human-path this.error() catches legitimately produce on a config-load-time throw — so it contradicted cli.flag-command-error-ux, which asserts that same 2 is correct, and a run reported the collision as a product violation (#7648). The clause now pins what #4873 was: a computed value (duration/count) reaching the exit slot, detectable as a nonzero on success or a code that moves between identical runs; 0/1 via CliExitCode and oclif's fixed 2 on the human path are named as legitimate. Still load-bearing — a duration in the exit slot FAILS it — with a repeat-run step and a negative added to keep it falsifiable, and the CliExitCode source note corrected to say it narrows the emitJson/emitText slot, not oclif's error exit", "ref": "#7648" }
       ]
     },
     {
@@ -412,6 +425,131 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item: the published first-run experience mirrored step-for-step from scaffold-e2e.yml, template matrix as variants, RC-window protocol refusal recorded as gate-working instead of failure", "ref": "claude/platform-test-checklist-ocwugl" }
+      ]
+    },
+    {
+      "id": "cli.qa-suite-execution",
+      "title": "os test: a Quality Protocol suite is validated at LOAD, executed against a booted app, and its verdict is the exit code — capture/interpolation thread state, an unevaluable assertion FAILS",
+      "since": "v17",
+      "status": "active",
+      "revision": 2,
+      "priority": "P1",
+      "surface": "cli",
+      "personas": ["operator (local shell)", "suite author (writes qa/*.test.json)"],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a free non-default port and an ephemeral boot: `pnpm dev -- --fresh -p <port>` from the repo root (showcase + --seed-admin; dogfood skill §0)",
+          "a session token for the data steps — POST /api/v1/auth/sign-in/email with the seeded admin (admin@objectos.ai / admin123) and read `.token`; pass it as `os test --token <token>` (the CLI sends it as `Authorization: Bearer`)",
+          "the shipped fixture suite examples/app-showcase/qa/platform-smoke.test.json — the repo's only Quality Protocol suite, authored so `os test`'s DEFAULT glob (`qa/*.test.json`) finds it from that directory with no argument",
+          "a scratch directory with its own qa/ for the negative and variant probes — deliberately broken suites are STAGED per run, never committed, so the repo's own suite stays green"
+        ],
+        "knownGaps": [
+          "`run_script` has no adapter branch and fails by name (`Unsupported action type in HttpAdapter: run_script`) — the variant sweep records ONE refusal and that is the honest verdict, not a fixture gap to work around. The other seven members execute since #7848; the five record-shaped ones did not until then (see `negative`), so a sweep transcript predating that fix shows five 404s and is not comparable",
+          "the record action types address the Data Protocol at its DEFAULT mount only (`{apiPath}{crud.dataPrefix}` = `/api/v1/data`). A deployment that sets `api.apiPath` or `crud.dataPrefix` moves the mount out from under them; the fixture boot uses stock config, so this does not bite here — a run against a re-prefixed host must write those steps as `api_call`",
+          "no scenario SELECTION exists: `os test` has exactly two flags (--url, --token), `scenario.tags` filters nothing and `scenario.requires` is never checked (packages/spec/liveness/qa.json rows `tags`/`requires`), so the whole glob always runs and a suite cannot declare a precondition it will be skipped for"
+        ]
+      },
+      "steps": [
+        "boot the app: from the repo root `pnpm dev -- --fresh -p <port>`; poll `curl -s -m3 -o /dev/null -w '%{http_code}' http://localhost:<port>/api/v1/health` until 200",
+        "mint a token: `curl -s -X POST http://localhost:<port>/api/v1/auth/sign-in/email -H 'Content-Type: application/json' -H 'Origin: http://localhost:<port>' -d '{\"email\":\"admin@objectos.ai\",\"password\":\"admin123\"}'` and read `.token`",
+        "the green path on the DEFAULT glob: `cd examples/app-showcase && os test --url http://localhost:<port> --token <token>; echo $?` — capture the whole transcript including the `Found N test suites.` line and the summary",
+        "prove the teardown ran: list `GET /api/v1/data/showcase_category` before and after and confirm the row the run created is gone (the run leaves the fixture exactly as it found it)",
+        "prove the run repeats: execute the same command a second time and confirm it is green again with no leftover row — a suite that only passes once is a suite whose teardown is decorative",
+        "stage the negative probes in a scratch dir's qa/: (a) a suite with `steps` misspelled as `stpes`, (b) a suite asserting `data.status equals degraded` against /api/v1/health, (c) a suite asserting `contains` over `data.nope`, a path the health response does not carry. Run `os test 'qa/*.test.json' --url http://localhost:<port>; echo $?` and capture all three refusals in one transcript",
+        "prove the malformed suite never ran: the server log carries no request attributable to it, and the transcript shows the two OTHER staged suites still executing after the refusal",
+        "teardown-after-failure: stage a scenario that creates a record, captures its id, then fails a deliberate assertion, with a teardown that deletes `{{id}}`; run it and confirm via the API that the record is gone despite the red verdict",
+        "variant sweep: stage one scenario per TestActionTypeSchema member (8) and run them in one suite; record each member's own verdict and the exact error text of every refusal — no member inferred from a sibling",
+        "zero-match glob: `os test 'qa/nothing-matches-*.test.json' --url http://localhost:<port>; echo $?` and record BOTH the message and the exit code",
+        "glob discipline (#7363): `os test 'qa/**/*.test.json'` from the app dir — it must complete in seconds and find the same suite, never the multi-minute walk that preceded the lazy resolver",
+        "persona check: re-run the green suite with NO --token and record which scenario survives (health) and which fails (the data roundtrip, HTTP 401)"
+      ],
+      "acceptance": [
+        {
+          "clause": "the green path closes: every scenario reports ✅ with its scenarioId and a duration, the summary reads `SUCCESS: All N scenarios passed.`, and the process exits 0",
+          "oracle": "log",
+          "verify": "the transcript shows one ✅ line per scenario and `echo $?` prints 0 — AND the evidence quotes the `Found N test suites.` line with N > 0, because a run that discovered nothing also exits 0 (see `negative`)",
+          "evidence": "the full os test transcript + exit code"
+        },
+        {
+          "clause": "state threads through the run: a step's `capture` writes into the scenario context and `{{var}}` interpolation reads it back into a LATER step's action, so the read-back step addresses the record the create step actually made",
+          "oracle": "api",
+          "verify": "the roundtrip scenario passes AND the id it captured is confirmed independently — list/GET the object over the API and match the record the run created; a green scenario whose URL still contains the literal `{{categoryId}}` would be interpolation dead and the step failing for the wrong reason",
+          "evidence": "the scenario transcript + the independent API read of the same id"
+        },
+        {
+          "clause": "a false assertion FAILS the scenario and the run: the scenario is ❌, the failing step is named, the message names the field, the expected and the actual value, and the process exits 1",
+          "oracle": "log",
+          "verify": "the staged `equals degraded` probe prints `Assertion failed: data.status expected degraded, got ok` under `Step Failed: <step name>`; `echo $?` prints 1",
+          "evidence": "the probe transcript + exit code"
+        },
+        {
+          "clause": "#7256 — an assertion the engine CANNOT evaluate fails, it does not pass: `contains` against a path the response does not carry names the runtime type it found and says which of the fixture or the assertion is the suspect",
+          "oracle": "log",
+          "verify": "the `contains` over `data.nope` probe fails with `cannot be evaluated by 'contains' … got undefined` plus the `is_null` hint — a ✅ here is the exact silent-pass regression the clause exists for",
+          "evidence": "the probe transcript"
+        },
+        {
+          "clause": "#6247 — load-site enforcement holds: a document TestSuiteSchema rejects is refused BEFORE execution, naming the file, every offending path, the expected shape and the doc reference; it counts as one failed suite; the rest of the glob still runs; the run exits 1",
+          "oracle": "log",
+          "verify": "the malformed probe prints `<file> is not a valid Quality Protocol suite (TestSuiteSchema)` with `✗ scenarios.0.steps: …`, the two sibling suites still execute after it, and the summary counts it as failed — never `SUCCESS` and never a TypeError attributed to the runner",
+          "evidence": "the three-suite transcript + exit code"
+        },
+        {
+          "clause": "teardown runs even after a failed step, so a red run does not leave the fixture dirty — and a passing teardown never rescues an already-failed scenario",
+          "oracle": "api",
+          "verify": "after the staged fail-then-teardown scenario the record created in step 1 is absent from the object listing, while the scenario's verdict stays ❌",
+          "evidence": "the scenario verdict + the before/after listings"
+        },
+        {
+          "clause": "every one of the 8 TestActionTypeSchema members carries its OWN recorded verdict — executed and asserted, or refused with a named error — and none is inferred from a sibling",
+          "oracle": "log",
+          "verify": "the sweep transcript shows all 8 scenario ids with their individual outcomes; refusals are quoted verbatim (the adapter's `Unsupported action type in HttpAdapter: <type>` and any HTTP error) rather than summarised as 'the record actions don't work'",
+          "evidence": "the 8-scenario sweep transcript"
+        },
+        {
+          "clause": "#7363 glob discipline: the default `qa/*.test.json` resolves relative to the invocation directory, a `**` pattern completes in seconds, and matches run in sorted order",
+          "oracle": "log",
+          "verify": "the bare `os test` from examples/app-showcase finds the shipped suite with no argument; the quoted `qa/**/*.test.json` run finds the same suite and returns in seconds — the pre-#7363 resolver died at exit 134 after ~7 minutes on this monorepo",
+          "evidence": "both transcripts with wall-clock timings"
+        }
+      ],
+      "negative": [
+        "a zero-match glob prints `Found 0 test suites.` + `No test files found matching: <pattern>` and exits **0** — a green exit from a run that loaded no suite. Since #7848 that is a DECLARED posture (stated in `--help`, opt out with `--fail-on-empty`, which exits 1) rather than an accident, but the default is unchanged and so is the trap: a CI job wired to `os test` with a typo'd path still reports success forever unless it passes the flag. A run record that ticks this item without quoting a `Found N test suites.` line with N > 0 is the false positive this item exists to prevent",
+        "a malformed suite that REACHES the runner — reported passed having executed nothing, or dying as a TypeError inside runSuite with no file named — is the #6247 regression",
+        "a `contains` against a path the result does not carry reporting ✅ is the #7256 regression",
+        "the five record-shaped action types (`create_record`, `read_record`, `update_record`, `delete_record`, `query_records`) **round-trip** against a stock server, and an **HTTP 404** from any of them is now the regression this clause names. They answered 404 until #7848 — `HttpTestAdapter` built `${baseUrl}/api/data/:object` where the server serves `{apiPath}/data/:object` with `apiPath` = `/api/v1`, and `update_record` issued PUT where the route is PATCH. Both are fixed and the prefix is derived from `RestApiConfigSchema` + `CrudEndpointsConfigSchema` rather than written down, so this cannot regress by a literal drifting. Re-measured 2026-08-12 on showcase, one scenario per member with no shared setup: 7 of 8 execute and assert, `run_script` refuses by name",
+        "satisfying this item by executing the unit pins in `source` instead of driving a booted app is not a run: those pins cover the load boundary, the glob resolver and one assertion operator, and none of them proves a suite reaches a real server — which is why this item carries no `automated` entry"
+      ],
+      "variants": [
+        "api_call — the only action type that reaches the real API surface (target is a path or absolute URL; `payload.method`/`payload.body` shape the request)",
+        "wait — local, no HTTP; resolves `{ waited: <ms> }` from `payload.duration`",
+        "create_record — POST {apiPath}/data/:object → 201 `{ object, id, record }` (404 before #7848)",
+        "read_record — GET {apiPath}/data/:object/:id → `{ object, id, record }`; the id comes from `payload.id`",
+        "update_record — PATCH {apiPath}/data/:object/:id with `payload.id` peeled off the body (it addresses the record, it is not a column write); issued PUT to a route that has no PUT sibling before #7848",
+        "delete_record — DELETE {apiPath}/data/:object/:id → `{ object, id, success }`",
+        "query_records — POST {apiPath}/data/:object/query with the QueryAST as the body → `{ object, records }`",
+        "run_script — declared in the enum with NO adapter branch: `Unsupported action type in HttpAdapter: run_script` (loud, recorded in packages/spec/liveness/qa.json)"
+      ],
+      "enumSource": {
+        "file": "packages/spec/src/qa/testing.zod.ts",
+        "export": "TestActionTypeSchema",
+        "expect": 8
+      },
+      "traps": ["dispatcher-vs-hono-route", "stale-dist", "wrong-persona"],
+      "source": [
+        "packages/cli/src/commands/test.ts (the shipped `os test`: the #7363 lazy segment-directed glob with its prune list, `loadTestSuite`'s #6247 boundary parse, the per-scenario report, and the exit 0/1 summary)",
+        "packages/core/src/qa/runner.ts (scenario sequencing, `capture` + `{{var}}` interpolation, the assertion operators, setup/teardown semantics, the #7256 unevaluable-`contains` fix)",
+        "packages/core/src/qa/http-adapter.ts (the action-type switch — its case labels ARE the enum values; the record routes derive their prefix from RestApiConfigSchema + CrudEndpointsConfigSchema rather than spelling `/api/v1/data` out, #7848)",
+        "packages/spec/src/qa/testing.zod.ts (TestSuiteSchema — the shape enforced at load; TestActionTypeSchema pinned above)",
+        "packages/spec/liveness/qa.json (the ADR-0049 ledger whose existence this item is coverage.json's mapping for — its dead `tags`/`requires` rows are why no scenario selection exists)",
+        "packages/cli/test/qa-suite-schema-load.test.ts, packages/cli/test/resolve-glob-lazy-walk.test.ts, packages/core/src/qa/runner.test.ts (the three unit pins — cited so a run knows what is already covered, NOT a substitute for driving a booted app)",
+        "content/docs/deployment/cli.mdx §os test (the documented command contract)",
+        "examples/app-showcase/qa/platform-smoke.test.json (the fixture suite this item drives)"
+      ],
+      "history": [
+        { "revision": 1, "date": "2026-08-11", "change": "new item: the `qa` capability's coverage.json mapping, authored rather than waived (#7347 triage ruling). `os test` is a shipped, documented CLI command, so the honest mapping is a surface:cli item that authors a real qa/*.test.json suite and drives it against a booted app — the fixture suite examples/app-showcase/qa/platform-smoke.test.json lands with this item and is the repo's first Quality Protocol suite. Every clause was measured on showcase before it was written: the green path, capture/interpolation, the #6247 load refusal, the #7256 unevaluable-contains failure, teardown-after-failure, the 8-member action-type sweep and the #7363 glob. `since: v17` records the release in which the surface became GOVERNED (liveness ledger seeded + TestSuiteSchema enforced at the load site, #6247 / PR #7255); the command itself predates it. No `automated` entry: the three unit pins cover pieces, none of them proves a suite reaches a real server", "ref": "#7347" },
+        {"revision": 2, "date": "2026-08-12", "change": "the adapter was repaired, which this item's own `negative` clause declared to be a revision rather than a silent green (#7848). Item 1: the five record-shaped action types now round-trip against a stock server — the `${baseUrl}/api/data/:object` literal became a prefix DERIVED from the two schemas RestServer itself resolves from (RestApiConfigSchema `apiPath ?? {basePath}/{version}` + CrudEndpointsConfigSchema.dataPrefix), and `update_record` PATCHes where it used to PUT a route that has no PUT sibling. Re-measured on a booted showcase, one scenario per member with NO shared setup so no member's verdict is inferred from a sibling: 7 of 8 execute and assert, `run_script` still refuses by name. The `negative` clause is inverted accordingly — a 404 from a record action type is the regression now — and the knownGap it rested on is replaced by the narrower one that survives: the record types address the DEFAULT mount only, so a host that moves it with `api.apiPath`/`crud.dataPrefix` still needs `api_call`. Item 2: a zero-match glob still exits 0, deliberately (a repo that legitimately ships no suites must not start failing CI), but the posture is now DECLARED — stated in `--help`, opt out with the new `--fail-on-empty`, and `Found N test suites.` is emitted on EVERY run including `Found 0 test suites.`, which is the line this item's first acceptance clause already asks a run record to quote", "ref": "#7848"}
       ]
     },
     {

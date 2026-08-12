@@ -421,3 +421,109 @@ describe('ObjectStoreSuspendedRunStore — run-history retention + durable detai
         expect(kept[kept.length - 1].nodeId).toBe('last'); // the tail survives
     });
 });
+
+// ─── Trigger attribution columns (#7533) ─────────────────────────────────────
+//
+// The defect was information dropped ON THE WAY TO THE ROW, so these assertions
+// read the persisted CELL (`engine.rows.get(...)`) and not just what
+// `loadTerminal` hands back — a mapper that never wrote the column but happened
+// to reconstruct the value would pass the second and fail the first. They live
+// in this file, against this file's fake engine, deliberately: it is the double
+// that owns the `sys_automation_run` row shape.
+describe('ObjectStoreSuspendedRunStore — trigger attribution columns (#7533)', () => {
+    it('writes trigger kind, object and record id as COLUMNS on a terminal row', async () => {
+        const engine = createFakeEngine();
+        const store = new ObjectStoreSuspendedRunStore(engine, createTestLogger());
+        await store.recordTerminal(terminalRecord(1, {
+            triggerType: 'record-after-update',
+            triggerObject: 'crm_deal',
+            triggerRecordId: 'deal_42',
+        }));
+
+        // The persisted cells — what an operator's `WHERE trigger_record_id =`
+        // actually filters on. Buried in a JSON blob these would be readable
+        // and unqueryable, which is the distinction #4354 drew for the count
+        // columns two groups up.
+        const row = engine.rows.get('run_r1');
+        expect(row.trigger_type).toBe('record-after-update');
+        expect(row.trigger_object).toBe('crm_deal');
+        expect(row.trigger_record_id).toBe('deal_42');
+    });
+
+    it('round-trips them back through loadTerminal', async () => {
+        const engine = createFakeEngine();
+        const store = new ObjectStoreSuspendedRunStore(engine, createTestLogger());
+        await store.recordTerminal(terminalRecord(2, {
+            triggerType: 'schedule',
+        }));
+
+        const back = (await store.loadTerminal('r2'))!;
+        expect(back.triggerType).toBe('schedule');
+        // Absent stays absent — never coerced to '' on the way out.
+        expect(back.triggerObject).toBeUndefined();
+        expect(back.triggerRecordId).toBeUndefined();
+    });
+
+    it('writes NULL — not empty string — for a record-less trigger kind', async () => {
+        const engine = createFakeEngine();
+        const store = new ObjectStoreSuspendedRunStore(engine, createTestLogger());
+        await store.recordTerminal(terminalRecord(3, { triggerType: 'schedule' }));
+
+        const row = engine.rows.get('run_r3');
+        expect(row.trigger_type).toBe('schedule');
+        expect(row.trigger_record_id).toBeNull();
+        expect(row.trigger_object).toBeNull();
+    });
+
+    it('a pre-#7533 record (no trigger fields) writes nulls and reads back undefined', async () => {
+        const engine = createFakeEngine();
+        const store = new ObjectStoreSuspendedRunStore(engine, createTestLogger());
+        await store.recordTerminal(terminalRecord(4));
+
+        expect(engine.rows.get('run_r4').trigger_type).toBeNull();
+        const back = (await store.loadTerminal('r4'))!;
+        expect(back.triggerType).toBeUndefined();
+    });
+
+    it('a PAUSED row carries the columns too, from the run context', async () => {
+        // A suspended run is a `sys_automation_run` row as well. Leaving these
+        // null on paused rows would make "which runs did this record provoke?"
+        // answer for finished runs and silently omit the in-flight ones — a
+        // partial answer that reads as a complete one.
+        const engine = createFakeEngine();
+        const store = new ObjectStoreSuspendedRunStore(engine, createTestLogger());
+        const run = baseRun();
+        run.context = {
+            event: 'record-after-create', object: 'crm_deal',
+            record: { id: 'd1', amount: 100 }, userId: 'u1',
+        } as never;
+
+        await store.save(run);
+
+        const row = engine.rows.get('run_abc');
+        expect(row.status).toBe('paused');
+        expect(row.trigger_type).toBe('record-after-create');
+        expect(row.trigger_object).toBe('crm_deal');
+        expect(row.trigger_record_id).toBe('d1');
+    });
+
+    it('the columns let the runs of a flow be filtered by the record that caused them', async () => {
+        // The reverse-correlation read, exercised through the engine's own
+        // `find` rather than asserted as a shape: two runs of one flow, two
+        // records, one filter.
+        const engine = createFakeEngine();
+        const store = new ObjectStoreSuspendedRunStore(engine, createTestLogger());
+        await store.recordTerminal(terminalRecord(5, {
+            triggerType: 'record-after-update', triggerObject: 'crm_deal', triggerRecordId: 'deal_A',
+        }));
+        await store.recordTerminal(terminalRecord(6, {
+            triggerType: 'record-after-update', triggerObject: 'crm_deal', triggerRecordId: 'deal_B',
+        }));
+
+        const hits = await engine.find('sys_automation_run', {
+            where: { trigger_object: 'crm_deal', trigger_record_id: 'deal_B' },
+        });
+        expect(hits).toHaveLength(1);
+        expect(hits[0].id).toBe('run_r6');
+    });
+});

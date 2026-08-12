@@ -222,6 +222,80 @@ export interface IHttpServer {
     getPort?(): number;
 
     /**
+     * The LIVE mount table: every `(method, pattern)` pair registered on THIS
+     * server, in registration order.
+     *
+     * ## Why this is on the contract (#7526)
+     *
+     * Four route ledgers in this repo DECLARE what each surface serves, and
+     * every guard built on them (#3563 / #3587 / #3636 / #3642) reads the union
+     * of those declarations as if it were an OBSERVATION of what is mounted.
+     * It is not. `GET /meta/objects/:name/state/:field` sat in
+     * `route-ledger.ts` while no registrar mounted it, so the SDK guard passed
+     * it and the route 404'd at runtime — and the same build shipped two more
+     * of the same defect. A declaration cannot audit itself; something has to
+     * report what the server really did. That is this member.
+     *
+     * ## Contract
+     *
+     * - Every pattern a consumer registered through {@link get} / {@link post}
+     *   / {@link put} / {@link delete} / {@link patch} appears, spelled exactly
+     *   as it was passed (adapters must not normalize it into a private
+     *   dialect) — a caller compares these strings against its own route table.
+     * - The order is REGISTRATION order, which for first-match routers is also
+     *   priority order. Do not sort it.
+     * - Routes an adapter mounts on its framework-native handle behind
+     *   {@link getRawApp} are outside this table by construction, and so are
+     *   {@link use} middleware and the {@link setFallbackHandler} seam: this
+     *   answers "what routes did I register", not "what paths might respond".
+     * - The returned array is the caller's; mutating it must not affect the
+     *   server.
+     *
+     * Optional and feature-detected, like {@link getRawApp} — an adapter that
+     * keeps no record simply omits it. A consumer that needs the answer for
+     * correctness must FAIL when it is absent, never skip: a parity gate that
+     * quietly passes because it could not look is the failure it exists to
+     * catch.
+     */
+    getMountedRoutes?(): ReadonlyArray<{ method: string; pattern: string }>;
+
+    /**
+     * Which registered route actually ANSWERS a concrete request — the
+     * router's own verdict, not a re-implementation of its matching.
+     *
+     * ## Why registration is not reachability (#7526)
+     *
+     * On a first-match router, a literal route registered AFTER a catch-all
+     * sibling that also matches its path is mounted and unreachable. Measured
+     * against Hono: with `GET /api/v1/meta/:type` registered first, a later
+     * `GET /api/v1/meta/types` never runs — `/meta/types` answers from
+     * `:type`, with a plausible 200 that no client can tell from an empty
+     * result. So {@link getMountedRoutes} containing a pattern is NECESSARY
+     * and not SUFFICIENT evidence that the pattern serves; a consumer probes a
+     * concrete path through this member and checks it gets back the pattern it
+     * expected.
+     *
+     * ## Contract
+     *
+     * - `path` is a concrete request path (`/api/v1/meta/types`), not a
+     *   pattern. The return value IS a pattern — one of the entries
+     *   {@link getMountedRoutes} reports, `===`-comparable to it.
+     * - The verdict must come from the same routing machinery that serves
+     *   traffic. An adapter that answers from a private copy of the rules can
+     *   drift from itself, which is this member's whole subject.
+     * - `undefined` means no registered route matches, i.e. the request would
+     *   reach the adapter's unmatched-request answer (404/405). It does NOT
+     *   mean "unknown": an adapter that cannot ask its router omits the member
+     *   rather than returning `undefined`.
+     * - Read-only. Resolving a route must not run its handler or any
+     *   middleware.
+     *
+     * Optional and feature-detected, with the same fail-don't-skip rule as
+     * {@link getMountedRoutes}.
+     */
+    resolveMountedRoute?(method: string, path: string): { method: string; pattern: string } | undefined;
+
+    /**
      * The underlying framework's own app object (Hono's `Hono`, Express's
      * `Express`, …) — THE deliberate framework-specific escape hatch on this
      * otherwise framework-agnostic contract.

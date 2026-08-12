@@ -2,6 +2,67 @@
   "$comment": "Standing platform test checklist — area ledger. Hand-edited, append-only; validated by scripts/check-platform-checklist.mjs (pnpm check:platform-checklist). Authoring rules: docs/qa/platform-checklist/README.md · execution protocol: RUNNER.md.",
   "area": "attachments-storage",
   "title": "Attachments & storage — presigned/chunked upload, signed-URL downloads, parent-derived access, sys_file lifecycle",
+  "fixtures": {
+    "$comment": "AREA-LEVEL standing fixtures. An item opts in with fixtures.provisioning = { use: \"<key>\", why: \"…\" }; the recipe is written ONCE here so four items do not carry four drifting copies of the same twenty-call sequence. Recipes are runtime-provisioned (no repo file is touched, nothing to seed, nothing to un-seed beyond the teardown line) and every call below is grounded in framework source at the cited file:line — replay them literally, and if one 4xxs, re-read the citation before assuming the recipe rotted.",
+    "qa-scratch-authz": {
+      "title": "Scratch authz parents (qa_vault / qa_shared / qa_nofiles) + two real member personas",
+      "why": "Stock showcase has NO private files-enabled parent: its only `enable.files` object is showcase_project, which is public_read_write AND readable through the showcase `everyone` baseline. Without this recipe the entire authz core of this area — the 403 deny side of download-authz-both-sides, the invisible-parent case of read-inherits-parent-rls, and the read-but-not-edit split of attach-requires-parent-edit — is blocked(fixture) on every run. Run #7635 closed the gap at runtime and scored those items instead of blocking them; this block is that provisioning made permanent and replayable.",
+      "provenance": "run #7635 (framework 92f26f75) → #7670",
+      "app": "showcase",
+      "requires": [
+        "an admin session that holds the `manage_metadata` capability — PUT /api/v1/meta/:type/:name is capability-gated per ADR-0066 D1 (#6603), so a bare authenticated session is NOT enough (packages/rest/src/rest-route-ledger.ts, the `PUT /api/v1/meta/:type/:name` row)",
+        "system-context write access for the persona bindings (the sys_user_permission_set insert, exactly as showcase-permission-zoo.dogfood.test.ts does it — the same pattern access-security.json's items already use)",
+        "an isolated boot (own port + file DB, dogfood skill §0) — this recipe authors metadata into the running app"
+      ],
+      "sequence": [
+        {
+          "step": 1,
+          "call": "POST /api/v1/packages",
+          "body": { "manifest": { "id": "com.objectstack.qa.attachments", "name": "QA attachments fixture", "version": "1.0.0", "type": "app" }, "enableOnInstall": true },
+          "expect": "2xx with the installed package echoed back. A re-run against a live DB 409s on the duplicate id — send `overwrite: true` deliberately rather than adding it by reflex (the guard exists so a second install never silently clobbers the first).",
+          "source": "POST /api/v1/packages is the dispatcher install route (packages/rest/src/rest-route-ledger.ts:312 note; client `packages.install`); the body shape { manifest, enableOnInstall?, overwrite? } is URL- and body-pinned in packages/client/src/client.test.ts:2144-2166"
+        },
+        {
+          "step": 2,
+          "call": "PUT /api/v1/meta/objects/qa_vault?package=com.objectstack.qa.attachments",
+          "body": { "name": "qa_vault", "label": "QA Vault", "sharingModel": "private", "enable": { "files": true }, "fields": { "name": { "type": "text", "label": "Name", "required": true } } },
+          "expect": "2xx. This is THE object the area was missing: private OWD (owner-only) AND attachments-enabled, so a member who is not the owner genuinely cannot read the parent and the 403 deny side becomes provable.",
+          "source": "`sharingModel` is a TOP-LEVEL object key, enum ['private','public_read','public_read_write','controlled_by_parent'] (packages/spec/src/data/object.zod.ts:1827; ADR-0090 D4 — legacy aliases removed). `enable.files` is the #2727 attachments opt-in, default false (object.zod.ts:281). `?package=` is read as `query.package` and threaded to saveMetaItem as packageId (packages/runtime/src/domains/meta.ts:262,319)"
+        },
+        {
+          "step": 3,
+          "call": "PUT /api/v1/meta/objects/qa_shared?package=com.objectstack.qa.attachments",
+          "body": { "name": "qa_shared", "label": "QA Shared", "sharingModel": "public_read", "enable": { "files": true }, "fields": { "name": { "type": "text", "label": "Name", "required": true } } },
+          "expect": "2xx. The entitled-member contrast: every member reads the parent, only the owner writes it — so a 403 here would be a real finding rather than a fixture artifact.",
+          "source": "same citations as step 2"
+        },
+        {
+          "step": 4,
+          "call": "PUT /api/v1/meta/objects/qa_nofiles?package=com.objectstack.qa.attachments",
+          "body": { "name": "qa_nofiles", "label": "QA No Files", "sharingModel": "public_read", "fields": { "name": { "type": "text", "label": "Name", "required": true } } },
+          "expect": "2xx. `enable.files` is OMITTED deliberately (it defaults to false) — this is the FILES_DISABLED probe target, purpose-built rather than borrowed from showcase_account, so the negative keeps holding if showcase ever enables files on its own objects.",
+          "source": "packages/spec/src/data/object.zod.ts:281 — enable.files defaults to false; 'true surfaces the panel and permits attachments targeting this object; otherwise creation is rejected'"
+        },
+        {
+          "step": 5,
+          "call": "sign up two fresh members (unique emails, e.g. qa-vault-a@verify.test / qa-vault-b@verify.test) and resolve their sys_user ids with a system-context read",
+          "expect": "two real principals with their own bearer tokens — NOT admin-impersonation. A guard checked as admin proves nothing (RUNNER.md trap `wrong-persona`).",
+          "source": "the house pattern already used by access-security.json (its items provision members as 'fresh sign-ups' whose sys_user ids are resolved system-side)"
+        },
+        {
+          "step": 6,
+          "call": "bind each persona by inserting a sys_user_permission_set row in system context",
+          "expect": "persona A = read-but-NOT-edit on the scratch objects (the attach-requires-parent-edit split); persona B = no grant beyond the everyone baseline (the parent-invisible persona). Prove the split INDEPENDENTLY before scoring any storage clause: read the parent as each persona and confirm the intended visibility, so a later 403 is attributable to the storage gate rather than to a mis-bound persona.",
+          "source": "sys_user_permission_set insert in system context, mirroring showcase-permission-zoo.dogfood.test.ts — the binding shape access-security.json's permission-set items already replay. NOTE (ADR-0090 D5): every authenticated member ALSO holds the everyone baseline additively, so persona B's effective access is the UNION of its grants and that baseline — compute the union before calling a read 'invisible'."
+        }
+      ],
+      "teardown": "DELETE /api/v1/packages/com.objectstack.qa.attachments (client `packages.uninstall`, ledgered at rest-route-ledger.ts:317) — or simply discard the isolated file DB, which is the cheaper path and the one an isolated boot makes free.",
+      "knownGaps": [
+        "The SDK helper `meta.saveItem(type, name, item)` does NOT send the `?package=` query — it PUTs the bare path (packages/client/src/index.ts:701-707). Steps 2-4 must therefore be issued as raw HTTP with the query string appended, or the scratch objects land outside the package and the teardown above will not take them with it.",
+        "Field-level detail of the two personas' permission sets (which verbs each set grants) is recorded here as intent, not as a verbatim payload: run #7635 provisioned them through a runtime permission-set/position binding whose exact set body was not captured in the run record. Replay step 6 by the stated OUTCOME (read-not-edit for A, baseline-only for B) and verify it directly, rather than trusting a payload nobody pinned."
+      ]
+    }
+  },
   "items": [
     {
       "id": "attachments-storage.presigned-upload-roundtrip",
@@ -80,7 +141,7 @@
       "title": "Gated downloads: 401 anonymous, 403 parent-invisible, signed URL for the entitled — per gating class (attachments-scope / field-owned / public_read opt-out / ungated)",
       "since": "v15.1",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin (uploader/owner)", "signed-up member who cannot read the parent record", "anonymous"],
@@ -89,9 +150,13 @@
         "requires": [
           "a committed attachments-scope file attached to a parent record, and a field-owned file (e.g. a receipt uploaded into showcase_invoice_line.receipt — ref_object/ref_id stamped per ADR-0104 D3 wave 2)"
         ],
+        "provisioning": {
+          "use": "qa-scratch-authz",
+          "why": "qa_vault (private + files) is the invisible parent both 403 clauses need, qa_shared is the entitled contrast, and the two personas are the non-admin principals the deny side must be checked as. Without the recipe both deny clauses are blocked(fixture) on stock seeds."
+        },
         "knownGaps": [
-          "stock showcase's only files-enabled object (showcase_project) is public_read_write, so no stock parent is invisible to any member — the 403 deny side is proven by the pinned dogfood fixture (att_secret, private owner-scoped: fixtures/attachments-fixture.ts) or a scratch private parent, not on stock seeds",
-          "no stock seed mints an acl='public_read' attachments file (the anonymous-embed opt-out) — author one via a system write or accept the unit-test coverage in storage-routes.test.ts for that variant"
+          "CLOSED by the qa-scratch-authz recipe (#7670): stock showcase's only files-enabled object (showcase_project) is public_read_write, so no stock parent is invisible to any member. The 403 deny side is otherwise reachable only through the pinned dogfood fixture (att_secret, private owner-scoped: fixtures/attachments-fixture.ts). Run the recipe; fall back to the dogfood pin only if it cannot be provisioned, and record which one the verdict rests on.",
+          "no stock seed mints an acl='public_read' attachments file (the anonymous-embed opt-out) — author one via a system write on a qa_vault-attached file (the recipe gives you the parent; the acl flip is still a system write) or accept the unit-test coverage in storage-routes.test.ts for that variant"
         ]
       },
       "steps": [
@@ -148,7 +213,8 @@
         "objectui packages/app-shell/src/views/RecordAttachmentsPanel.tsx (friendly denial copy, objectui#2532)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "new item enumerating the download gating classes straight from authorizeDownload's source (attachments-scope / field-owned / public_read opt-out) with the exact deny codes and TTL contrast", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-07", "change": "new item enumerating the download gating classes straight from authorizeDownload's source (attachments-scope / field-owned / public_read opt-out) with the exact deny codes and TTL contrast", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-11", "change": "opted into the new area-level qa-scratch-authz provisioning recipe (#7670): the standing 'no private files-enabled parent on stock showcase' gap that would force blocked(fixture) on both 403 clauses is now payable at runtime instead of being rediscovered every sweep. knownGaps records it as CLOSED-by-recipe with the dogfood pin as the named fallback, and asks the run to say which of the two its verdict rests on", "ref": "#7670" }
       ]
     },
     {
@@ -156,7 +222,7 @@
       "title": "sys_attachment reads inherit parent visibility: a restricted member sees neither rows nor counts for invisible parents",
       "since": "v15.1",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": ["member who can read the parent record", "member who cannot read the parent record"],
@@ -165,8 +231,13 @@
         "requires": [
           "attachments on a parent record that is INVISIBLE to one persona and visible to the other"
         ],
+        "provisioning": {
+          "use": "qa-scratch-authz",
+          "why": "the whole item turns on a parent one persona cannot read; qa_vault (private + files) is that parent, and persona B is the restricted member. On stock seeds there is no such pair."
+        },
         "knownGaps": [
-          "stock showcase's files-enabled parent (showcase_project) is public_read_write — every member sees every project, so the invisible-parent case is not demonstrable on stock seeds; the pinned dogfood matrix proves it on its own private fixture (att_secret). A stock-seed demonstration needs a private files-enabled object added to the showcase"
+          "CLOSED by the qa-scratch-authz recipe (#7670): stock showcase's files-enabled parent (showcase_project) is public_read_write — every member sees every project, so the invisible-parent case is not demonstrable on stock seeds, and the pinned dogfood matrix proves it only on its own private fixture (att_secret). The recipe provisions the private files-enabled parent at runtime; landing one in the showcase seeds proper would retire this gap entirely, and remains the better long-term fix.",
+          "the READ_SCAN_LIMIT fail-closed branch (clause 4) needs a broad read past the 2000-candidate cap — run #7635 reached it by bulking to 2100 join rows on the scratch parent. Budget for that write volume, or the clause degrades to 'the warning never appeared', which is indistinguishable from a silent leak."
         ]
       },
       "steps": [
@@ -215,7 +286,8 @@
         "packages/services/service-storage/src/attachment-read-visibility.test.ts"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "new item grounded in the read-visibility middleware source (count-parity rationale, fail-closed sentinel and scan cap) and the dogfood matrix clause (c)", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-07", "change": "new item grounded in the read-visibility middleware source (count-parity rationale, fail-closed sentinel and scan cap) and the dogfood matrix clause (c)", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-11", "change": "opted into the area-level qa-scratch-authz provisioning recipe (#7670) — the invisible-parent pair this item is entirely about is now provisionable at runtime rather than blocked on stock seeds. Added the scan-cap volume note run #7635 paid for (2100 join rows to reach READ_SCAN_LIMIT), so clause 4 is not silently degraded to an unreached branch next run", "ref": "#7670" }
       ]
     },
     {
@@ -223,7 +295,7 @@
       "title": "Attaching requires EDIT on the parent record; deleting requires uploader-or-parent-editor; unscoped multi-delete is refused outright",
       "since": "v15.1",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": ["member with EDIT on the parent", "member with READ but not EDIT on the parent", "member who uploaded the attachment", "member who is neither uploader nor parent editor"],
@@ -232,6 +304,13 @@
         "requires": [
           "a files-enabled parent readable-but-not-editable by one persona (the dogfood matrix builds this with its own fixture; on stock showcase, projects are public_read_write so any member can edit — the read-not-edit split needs the fixture or a sharing tweak)",
           "plugin-sharing present (canEdit is the authority; without it the gate degrades to parent READ visibility by design)"
+        ],
+        "provisioning": {
+          "use": "qa-scratch-authz",
+          "why": "persona A is provisioned read-but-NOT-edit precisely for the attach gate (the whole point of clause 0: read inherits parent READ, attach requires parent EDIT — two different gates), and qa_nofiles is the purpose-built FILES_DISABLED probe target for the last clause."
+        },
+        "knownGaps": [
+          "the FILES_DISABLED clause currently probes showcase_account, which is files-disabled only incidentally — if the showcase ever enables files on it, the clause goes green for the wrong reason. The recipe's qa_nofiles exists to be probed instead; prefer it, and treat showcase_account as the fallback."
         ]
       },
       "steps": [
@@ -286,7 +365,8 @@
         "packages/qa/dogfood/test/attachments-permission-matrix.dogfood.test.ts (items 3, a, f; FILES_DISABLED)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "new item from the access-hook source: EDIT-not-read attach gate, server stamping, delete authorization matrix and the #4757 unscoped-delete refusal, each with its exact deny code", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-07", "change": "new item from the access-hook source: EDIT-not-read attach gate, server stamping, delete authorization matrix and the #4757 unscoped-delete refusal, each with its exact deny code", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-11", "change": "opted into the area-level qa-scratch-authz provisioning recipe (#7670): persona A is provisioned read-but-not-edit for the attach gate, and qa_nofiles is named as the purpose-built FILES_DISABLED probe target instead of showcase_account, which is files-disabled only incidentally and would go green for the wrong reason if the showcase ever enabled files on it. Clause 3's stale-@objectstack/core pin problem from run #7635 is deliberately NOT touched here — it is owned by #7668", "ref": "#7670" }
       ]
     },
     {
@@ -438,7 +518,7 @@
       "title": "Chunked uploads are resumable; abandoned sessions are reaped and their backend multipart uploads ABORTED before the row (the only pointer) is deleted",
       "since": "v15.1",
       "status": "active",
-      "revision": 1,
+      "revision": 3,
       "priority": "P2",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai)"],
@@ -448,17 +528,20 @@
           "the four chunked routes at the default base: POST /upload/chunked, PUT /upload/chunked/:uploadId/chunk/:chunkIndex, POST /upload/chunked/:uploadId/complete, GET /upload/chunked/:uploadId/progress"
         ],
         "knownGaps": [
-          "the billable-stranded-parts consequence (S3 keeps initiated-but-uncompleted multipart parts invisible until AbortMultipartUpload) is only observable against a real S3 backend — stock local-adapter runs prove the session-row lifecycle and that the guard invokes abortChunkedUpload; the S3 key re-seeding path (setUploadKey on a cold sweep) is pinned by unit tests in attachment-lifecycle.test.ts, not demonstrable on local"
+          "the billable-stranded-parts consequence (S3 keeps initiated-but-uncompleted multipart parts invisible until AbortMultipartUpload) is only observable against a real S3 backend — stock local-adapter runs prove the session-row lifecycle and that the guard invokes abortChunkedUpload; the S3 key re-seeding path (setUploadKey on a cold sweep) is pinned by unit tests in attachment-lifecycle.test.ts, not demonstrable on local",
+          "'completing' is a genuinely transient status: the complete route writes it, then overwrites it with 'completed' (success) or 'failed' (#7667) in the same request. A scan of settled rows will never show it, and that is correct — it is observable only mid-request or on a row whose process died between the two writes, so a run that cannot produce it is not a defect"
         ]
       },
       "steps": [
-        "POST /api/v1/storage/upload/chunked { filename, mimeType, size, chunkSize } and capture { uploadId, fileId }",
+        "POST /api/v1/storage/upload/chunked { filename, mimeType, totalSize, chunkSize } and capture { uploadId, fileId } — the init route's required trio is filename/mimeType/`totalSize` (a body spelling `size` is refused 400 INVALID_REQUEST), and `chunkSize` is floored at 5 MiB, so a smaller requested value silently yields a different totalChunks than the caller computed (storage-routes.ts:274-281)",
         "PUT one chunk, then GET /upload/chunked/<uploadId>/progress and record uploadedChunks/percentComplete/status ('in_progress') — progress is the first step of the SDK's resumeUpload",
         "complete a full session on a second upload and verify its sys_upload_session row reaches status 'completed'",
         "abandon the first session mid-flight; backdate its expires_at past the 1d TTL (system write) and trigger the lifecycle sweep",
         "verify the abandoned session's row is reaped AND the storage adapter's abortChunkedUpload was invoked for its backend_upload_id (dogfood suite instruments this)",
         "verify the completed session's row is reaped by the 7d terminal-status retention WITHOUT an abort attempt (an abort on a finalized multipart would NoSuchUpload-error and wedge the reap)",
-        "simulate an abort failure (test seam) and verify the row is VETOED — kept so backend_upload_id survives for the retry"
+        "simulate an abort failure (test seam) and verify the row is VETOED — kept so backend_upload_id survives for the retry",
+        "drive 'failed' (#7667): open a third session and POST its /complete with a backend completion that throws (test seam / an eTag list the backend rejects) — the route answers 500 and the sys_upload_session row must read 'failed', NOT the 'completing' it stopped at before #7667; the same uploadId re-completed successfully afterwards must overwrite it with 'completed' (failed records an attempt, it does not lock the session)",
+        "drive 'expired' (#7667): backdate a live session's expires_at (system write) WITHOUT running the sweep, then (a) PUT a chunk → 410 UPLOAD_SESSION_EXPIRED and the row reads 'expired' with uploaded_chunks unchanged, (b) GET /progress → 200 with status 'expired' (progress REPORTS the expiry rather than refusing it — 'expired' is a declared member of UploadProgressSchema.status and the SDK's resumeUpload polls it first)"
       ],
       "acceptance": [
         {
@@ -488,8 +571,14 @@
         {
           "clause": "every sys_upload_session status enum variant (in_progress / completing / completed / failed / expired) is reachable and terminal ones fall under the 7d retention backstop",
           "oracle": "api",
-          "verify": "status reads across the scenarios cover the enum; retention onlyWhen matches {status: {$in: [completed, failed, expired]}}",
+          "verify": "status reads across the scenarios cover the enum; retention onlyWhen matches {status: {$in: [completed, failed, expired]}}. Each terminal member has a NAMED producer in storage-routes.ts since #7667 — 'completed' on a finished assembly, 'failed' in the completion route's catch, 'expired' when a chunk/complete/progress call is handed a session past its own expires_at — so a scan that finds only ['in_progress','completed'] now means a producer regressed, not that the enum over-declares ('completing' excepted, see knownGaps)",
           "evidence": "per-variant status reads"
+        },
+        {
+          "clause": "a session past its own expires_at stops accepting bytes: chunk PUT and complete answer 410 UPLOAD_SESSION_EXPIRED and the row is durably stamped 'expired' (#7667)",
+          "oracle": "api",
+          "verify": "the two writes are refused with that code, the row reads 'expired' afterwards, and uploaded_chunks did not move; a session still inside its deadline is unaffected",
+          "evidence": "410 bodies + the sys_upload_session row read"
         }
       ],
       "negative": [
@@ -503,18 +592,23 @@
         "packages/services/service-storage/src/attachment-lifecycle.ts (createUploadSessionReapGuard — abort-before-reap contract, completed/no-backend confirm branches, veto-on-failure)",
         "packages/services/service-storage/src/objects/system-upload-session.object.ts (status enum = the variants list; ttl expires_at+1d, retention 7d terminal statuses)",
         "packages/services/service-storage/src/storage-route-ledger.ts (upload-chunked family)",
+        "packages/services/service-storage/src/storage-routes.ts:274-281 (POST /upload/chunked init contract: filename/mimeType/totalSize required, else 400 INVALID_REQUEST; chunkSize = Math.max(reqChunkSize ?? 5242880, 5242880), i.e. a 5 MiB floor)",
+        "packages/services/service-storage/src/storage-routes.ts (expireIfPastDeadline / markSessionFailed — the #7667 producers for 'expired' and 'failed'; chunk + complete refuse 410 UPLOAD_SESSION_EXPIRED, progress reports the status)",
+        "packages/spec/src/api/storage.zod.ts (UploadProgressSchema.status — the client-facing declaration the enum must stay in step with)",
         "docs/plans/release-15.1-test-plan.md §C4 (#2970 item 4)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "new item: chunked-session lifecycle + multipart-abort guard from the reap-guard source, variants pinned to the sys_upload_session status enum; S3-only consequences honestly recorded as a known gap", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-07", "change": "new item: chunked-session lifecycle + multipart-abort guard from the reap-guard source, variants pinned to the sys_upload_session status enum; S3-only consequences honestly recorded as a known gap", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-11", "change": "step-text correction from run #7635: the chunked-init step said `size`, but the route destructures `totalSize` and 400s INVALID_REQUEST without it — a runner following the old text could not open a session at all. Step now names totalSize and the 5 MiB chunkSize floor (which silently rewrites totalChunks when a caller asks for less), with storage-routes.ts:274-281 added to source as the grounding. Clause 4's failed/expired enforce-or-remove finding from the same run is deliberately NOT touched here — it is owned by #7667", "ref": "#7671" },
+        { "revision": 3, "date": "2026-08-11", "change": "closes the clause-5 finding revision 2 deferred: 'failed' and 'expired' were declared, reaped on, and published by UploadProgressSchema with NO producer, so run #7635's scan could only ever return ['in_progress','completed']. #7667 took the ENFORCE branch of ADR-0049 (removal would have forked the object from the spec's progress contract), so both statuses now have named writers — two steps added to drive them, a new acceptance clause for the 410 UPLOAD_SESSION_EXPIRED refusal, and the transient 'completing' recorded as a knownGap instead of an unreachable-variant FAIL", "ref": "#7667" }
       ]
     },
     {
       "id": "attachments-storage.inline-grid-receipt-cells",
-      "title": "Per-line Receipt upload cells in the invoice inline grid: auto-derived file column, real upload control, resolved file object in the atomic batch",
+      "title": "Per-line Receipt upload cells in the invoice inline grid: auto-derived file column, real upload control, opaque sys_file reference in the atomic batch",
       "since": "v15.1",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "browser",
       "personas": ["seeded admin (admin@objectos.ai)"],
@@ -532,8 +626,9 @@
         "materialize a row: pick 'Widget A' in the product lookup, set Qty 1",
         "upload a small PNG into the row's Receipt cell and wait for the file chip carrying the file name",
         "fill the header (name INV-QA-<ts>, pick an account, status draft) and submit while capturing the POST /api/v1/batch request",
-        "inspect the batch's showcase_invoice_line operation: the receipt value must be a RESOLVED stored-file object, and its url an absolute http(s) URL",
-        "re-open the created invoice and confirm the line's receipt renders as a chip/thumbnail, not a text value"
+        "inspect the batch's showcase_invoice_line operation: the receipt value must be the bare opaque `sys_file` id string (ADR-0104 D3 stored form) — NOT a resolved {name, url} object, and NOT a data:/blob: placeholder",
+        "read the referenced sys_file row as admin and confirm the field-ownership stamp fired: status 'committed' with ref_object='showcase_invoice_line', ref_id=<the created line's id>, ref_field='receipt', acl='private'",
+        "re-open the created invoice and confirm the line's receipt renders as a chip/thumbnail, not a text value — the {id, name, size, mimeType, url} shape the UI reads is the ADR-0104 EXPANDED form, derived at read time from the sys_file row, never the stored value"
       ],
       "acceptance": [
         {
@@ -555,15 +650,16 @@
           "evidence": "upload trace + chip screenshot"
         },
         {
-          "clause": "the atomic /api/v1/batch carries the line with receipt as a resolved stored-file object (absolute url), not a blob or text placeholder — and the create round-trips",
+          "clause": "the atomic /api/v1/batch carries the line's receipt as the ADR-0104 D3 stored form — the bare opaque `sys_file` id, a managed ACL-gated reference — not a data:/blob: placeholder and not a resolved {name, url} object (the inline blob is retired from the WRITE path; the resolved shape exists only as the read/expand form)",
           "oracle": "network",
-          "verify": "the captured batch's showcase_invoice_line operation has receipt.name (or original_name) containing the picked filename and an http(s) url; the batch answers success",
-          "evidence": "the batch payload + response"
+          "verify": "the captured batch's showcase_invoice_line operation has receipt === an opaque id string that resolves to a sys_file row whose status is 'committed' and whose field-ownership stamp reads ref_object='showcase_invoice_line' / ref_id=<the created line> / ref_field='receipt' / acl='private'; the batch answers success",
+          "evidence": "the batch payload + response + the sys_file row read"
         }
       ],
       "negative": [
         "a text input where the upload cell should be is the exact #2360 failure — FAIL",
-        "a batch that persists a data:/blob: placeholder instead of a stored-file reference is a FAIL even if the grid looked right (ADR-0104: an inline blob is not a managed file)"
+        "a batch that persists a data:/blob: placeholder instead of a stored-file reference is a FAIL even if the grid looked right (ADR-0104: an inline blob is not a managed file)",
+        "⛔ NOT a failure: a batch carrying the bare id instead of {name, url}. That is the shipped contract (ADR-0104 D3), and reading it as a defect is exactly the checklist-vs-product drift #7669 corrected — clause text that predates an ADR must be restated, never scored against the product"
       ],
       "traps": ["automation-input", "hydration-race", "stale-console-bundle"],
       "automated": { "kind": "e2e", "ref": "objectui: e2e/live/grid-file-upload.spec.ts" },
@@ -571,10 +667,14 @@
         "docs/plans/release-15.1-test-plan.md §C2 (#3051 + objectui#2585)",
         "objectui e2e/live/grid-file-upload.spec.ts (the live pin: auto-column, input-not-text, chip, batch payload shape)",
         "examples/app-showcase/src/data/objects/invoice.object.ts (showcase_invoice_line.receipt = Field.file, objectui#2360 note)",
+        "docs/adr/0104-field-runtime-value-shape-contract.md:211-224 — D3 'File-as-reference: field values point into sys_file': the STORED form is an opaque fileId string (the inline {url, name, size} blob is retired from the write path); the {id, name, size, mimeType, url} FileValueSchema is the EXPANDED form produced at read time, whose url is 'derived, never stored'; field-referenced files get parent-derived read checks",
+        "packages/services/service-storage/src/storage-routes.ts:250-252 — /upload/complete returns fileId, documented as 'the opaque sys_file id — the value a file field stores as a reference (ADR-0104 D3)'",
+        "ADR-0104 D3's parent-derived read gating for field-owned files is exercised by attachments-storage.download-authz-both-sides (which carries the non-entitled personas). Cross-reference, do not duplicate",
         "ADR-0059 — the FORM-side Confirm-disabled-while-uploading guard is records-forms.upload-guard-blocks-confirm; this item owns the storage/persistence side. Cross-reference, do not duplicate"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "new item transcribed from the live e2e pin (grid-file-upload.spec.ts) with seeded names verified (Widget A / showcase_invoice_line.receipt); ADR-0059 form-side guard cross-referenced to records-forms instead of duplicated", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-07", "change": "new item transcribed from the live e2e pin (grid-file-upload.spec.ts) with seeded names verified (Widget A / showcase_invoice_line.receipt); ADR-0059 form-side guard cross-referenced to records-forms instead of duplicated", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-11", "change": "clause 3 restated against ADR-0104 D3 after run #7635 scored it `partial` on a product that is CORRECT: the clause demanded a resolved stored-file object with receipt.name and an absolute http(s) url, but D3 makes the stored form the bare opaque sys_file id and the resolved shape the read/expand form only — so the item was asserting a contract the ADR had already retired from the write path. The clause now asserts the opaque id plus the field-ownership stamp (ref_object/ref_id/ref_field/acl) that proves the reference is managed rather than a placeholder, the step text and title follow, a negative pins the drift itself so a future run does not re-score the shipped shape as a defect, and source cites the ADR + the storage-routes.ts line documenting the id. Checklist mirrors the product; no product change", "ref": "#7669" }
       ]
     }
   ]

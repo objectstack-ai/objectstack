@@ -9,6 +9,7 @@ import { MCP_AGENT_PERMISSION_SET_RESTRICTED } from '@objectstack/spec/ai';
 // for one defect class is what that module exists to prevent.
 import { renderOperationMessage } from '@objectstack/spec/system';
 import { PermissionEvaluator, crudBucketForOperation } from './permission-evaluator.js';
+import { composeHumanBaselinePermissionSets, PLATFORM_BASELINE_PERMISSION_SET } from './app-default-permission-set.js';
 import { DelegatedAdminGate } from './delegated-admin-gate.js';
 import {
   INVITATION_PLACEMENT_SERVICE,
@@ -49,6 +50,7 @@ import { RLSCompiler, RLS_DENY_FILTER } from './rls-compiler.js';
 import { computeTenantLayer0Filter, andComposeLayers } from './tenant-layer.js';
 import { isPlatformTenantPolicy, isAuthoredTenantPolicy } from './platform-tenant-policies.js';
 import { isPlatformOwnershipFloorPolicy } from './platform-ownership-policies.js';
+import { hasPhantomTenantAnchor } from './federated-phantom-anchors.js';
 import {
   normalizeTenancyPosture,
   postureEnforcesWall,
@@ -162,6 +164,19 @@ interface ObjectSecurityMeta {
   isPrivate: boolean;
   tenancyDisabled: boolean;
   isBetterAuthManaged: boolean;
+  /**
+   * [#7835] The object is FEDERATED (ADR-0015 `external`) and its
+   * `organization_id` is the anchor the REGISTRY injected, not a column the
+   * author declared — so the column exists in the registered schema and in no
+   * backing store, because `syncObjectSchema` issues no DDL for a federated
+   * object. Layer 0 reads this to answer "is this a tenant object?" truthfully;
+   * see `federated-phantom-anchors.ts` for the provenance test and for why the
+   * question is provenance rather than `external != null`.
+   *
+   * `false` on every local object and on a federated object that declares a
+   * real remote `organization_id` — both keep the tenant wall exactly as it is.
+   */
+  tenantAnchorIsPhantom: boolean;
   requiredPermissions: NormalizedRequiredPermissions;
   fieldRequiredPermissions: Record<string, string[]>;
   /**
@@ -320,11 +335,18 @@ export interface SecurityPluginOptions {
    */
   defaultPermissionSets?: PermissionSet[];
   /**
-   * Permission set name applied as an implicit baseline whenever an
-   * authenticated request has no resolved permission sets (and no positions
-   * that map to one). This guarantees baseline tenant/owner RLS for
-   * every logged-in user even before an admin assigns explicit
-   * profiles. Set to `null` to disable.
+   * Permission set name applied as an implicit ADDITIVE baseline on every
+   * authenticated human request (ADR-0090 D5: `baseline ∪ explicit, always`).
+   * This guarantees baseline tenant/owner RLS for every logged-in user even
+   * before an admin assigns explicit profiles.
+   *
+   * [#7555] Naming a set here ADDS it to the baseline; it does not REPLACE the
+   * platform baseline (`member_default`), which composes in alongside it — see
+   * {@link composeHumanBaselinePermissionSets}. An app declaring `isDefault`
+   * therefore keeps the built-in Account destinations working for its members
+   * instead of silently costing them the whole platform floor.
+   *
+   * Set to `null` to disable the baseline entirely — the platform one included.
    *
    * @default 'member_default'
    */
@@ -424,7 +446,7 @@ export class SecurityPlugin implements Plugin {
    * Services init() registers on every path (ADR-0116, #4131) — lets the
    * kernel name this plugin when a consumer requires one before it inits.
    */
-  providesServices = ['security.permissions', 'security.rls', 'security.fieldMasker', 'security.bootstrapPermissionSets', 'security.fallbackPermissionSet'];
+  providesServices = ['security.permissions', 'security.rls', 'security.fieldMasker', 'security.bootstrapPermissionSets', 'security.fallbackPermissionSet', 'security.baselinePermissionSets'];
   type = 'standard';
   version = '1.0.0';
   dependencies = ['com.objectstack.engine.objectql'];
@@ -434,6 +456,17 @@ export class SecurityPlugin implements Plugin {
   private fieldMasker = new FieldMasker();
   private readonly bootstrapPermissionSets: PermissionSet[];
   private readonly fallbackPermissionSet: string | null;
+  /**
+   * [#7555, ADR-0090 D5] The HUMAN baseline, as the list of set names it is:
+   * {@link fallbackPermissionSet} COMPOSED WITH the platform baseline
+   * (`member_default`), deduped — `[]` when the baseline is disabled (`null`).
+   *
+   * `fallbackPermissionSet` stays the single name the app/deployment DECLARED
+   * (that is what the `security.fallbackPermissionSet` service means, and what
+   * consumers key attribution on); this is what actually RESOLVES per request.
+   * Agents never see it — ADR-0090 D10 gives them a restricted ceiling instead.
+   */
+  private readonly baselinePermissionSets: string[];
   /**
    * Runtime probe — set in `start()` from
    * `ctx.getService('org-scoping')`. When `false`, the PLATFORM's own
@@ -522,8 +555,11 @@ export class SecurityPlugin implements Plugin {
         // ADR-0056 D7: an app may declare its default profile via `isDefault: true`
         // on a permission set; it becomes the fallback for users with no explicit
         // grants. Falls back to the built-in `member_default` when none is declared.
-        ? (this.bootstrapPermissionSets.find((p) => (p as { isDefault?: boolean }).isDefault)?.name ?? 'member_default')
+        ? (this.bootstrapPermissionSets.find((p) => (p as { isDefault?: boolean }).isDefault)?.name ?? PLATFORM_BASELINE_PERMISSION_SET)
         : options.fallbackPermissionSet;
+    // [#7555] …and the baseline that actually resolves is that name COMPOSED
+    // with the platform's own, never one displacing the other (ADR-0090 D5).
+    this.baselinePermissionSets = composeHumanBaselinePermissionSets(this.fallbackPermissionSet);
   }
 
   async init(ctx: PluginContext): Promise<void> {
@@ -541,6 +577,14 @@ export class SecurityPlugin implements Plugin {
     // the platform-objects package directly.
     ctx.registerService('security.bootstrapPermissionSets', this.bootstrapPermissionSets);
     ctx.registerService('security.fallbackPermissionSet', this.fallbackPermissionSet);
+    // [#7555] The baseline as it actually RESOLVES — the declared name composed
+    // with the platform's own (ADR-0090 D5). `security.fallbackPermissionSet`
+    // above keeps meaning "the single name this deployment declared", so
+    // existing consumers keep their `string | null` contract; a consumer that
+    // wants the effective baseline (`/auth/me/permissions`, REST) reads THIS
+    // one and falls back to `[fallbackPermissionSet]` on a stack too old to
+    // register it.
+    ctx.registerService('security.baselinePermissionSets', this.baselinePermissionSets);
 
     ctx.getService<{ register(m: any): void }>('manifest').register({
       ...securityPluginManifestHeader,
@@ -724,6 +768,17 @@ export class SecurityPlugin implements Plugin {
             objects: parseJson(r.object_permissions, {}),
             fields: parseJson(r.field_permissions, {}),
             systemPermissions: parseJson(r.system_permissions, []),
+            // [#7616] Hydrate the tab column too. Nothing on the DATA plane
+            // reads `tabPermissions` (the evaluator never mentions it), so this
+            // is inert for enforcement — but `resolvePermissionSetsForContext`
+            // is published on the `security` service as returning the sets
+            // WHOLE, and a loader that dropped this column would make that
+            // declaration false for every DB-authored set: the UI-plane copy in
+            // `/me/apps` reads exactly `tab_permissions` off the same row.
+            // Declared ≠ delivered is the failure this contract exists to
+            // prevent, so the column is loaded where the promise is made. The
+            // row is already fetched in full — no extra query, one JSON parse.
+            tabPermissions: parseJson(r.tab_permissions, {}),
             // [ADR-0090 D12] Hydrate the delegated-admin scope so the gate can
             // resolve a DB-authored delegate's authority. Null column → absent.
             ...(r.admin_scope ? { adminScope: parseJson(r.admin_scope, undefined) } : {}),
@@ -856,6 +911,32 @@ export class SecurityPlugin implements Plugin {
           const sets = await this.resolvePermissionSetsForContext(context);
           return sets.map((s) => s.name);
         },
+        // [#7616] The same resolution, returned WHOLE — `objects`, `fields`,
+        // `systemPermissions`, `tabPermissions`, in resolution order. The names
+        // above answer an AUDIENCE question; a consumer that must MERGE the
+        // caller's grants (the object/field map `/auth/me/permissions` serves,
+        // the capability + tab surface `/me/apps` filters its app list with)
+        // cannot reach any of those four columns from a name, so both endpoints
+        // re-implement this resolution locally instead — one rule in three
+        // copies, which has already drifted from the enforcement path three
+        // times (#7608, #7555, #6334), each divergence found only after it
+        // reached a user.
+        //
+        // Exposed HERE, on the registered literal, and not merely as a public
+        // class member: `plugin-hono-server` must never take a runtime
+        // dependency on this plugin (it is optional in the stacks those
+        // endpoints serve — the `!evaluator` degraded branches are exactly its
+        // absence), so the service locator is the only seam that can carry the
+        // delegation. A method the class declares but the literal does not
+        // expose is unreachable across that seam, which is the precise failure
+        // this addition exists to prevent.
+        //
+        // The class method stays private on purpose: this literal is the
+        // supported surface, and routing every cross-package caller through it
+        // is what keeps the published contract and the enforcement path the
+        // same code rather than two that agree today.
+        resolvePermissionSetsForContext: (context?: any): Promise<PermissionSet[]> =>
+          this.resolvePermissionSetsForContext(context),
         // [ADR-0090 D6] First-class access explanation. Same code paths as
         // the middleware (resolution/evaluator/RLS compiler) — explained by
         // construction. Explaining ANOTHER user requires `manage_users`.
@@ -906,7 +987,7 @@ export class SecurityPlugin implements Plugin {
           this.getMetadataReadableFields(object, context),
       });
       ctx.registerService('security', registeredSecurityService);
-      ctx.logger.info('[security] registered "security" service (getReadFilter, getReadableFields, getMetadataReadableFields, canExport, checkAuthoredRowWrite, explain, audience-binding suggestions) — ADR-0021 D-C / ADR-0090 D5/D6/D9 / ADR-0106 D7 / #3544 / #3547 / #5493');
+      ctx.logger.info('[security] registered "security" service (getReadFilter, getReadableFields, getMetadataReadableFields, canExport, checkAuthoredRowWrite, resolvePermissionSetNames, resolvePermissionSetsForContext, explain, audience-binding suggestions) — ADR-0021 D-C / ADR-0090 D5/D6/D9 / ADR-0106 D7 / #3544 / #3547 / #5493 / #7616');
     } catch (e) {
       ctx.logger.warn?.('[security] failed to register "security" service', {
         error: (e as Error).message,
@@ -1161,29 +1242,65 @@ export class SecurityPlugin implements Plugin {
         );
       }
 
-      // [#2850] $expand sub-read gate relaxation. The engine's expand path
-      // re-enters `find` for a referenced object carrying `__expandRead` (a
-      // server-set marker; `executionContext` is never client-built). For a
-      // PUBLIC referenced object — covered by the '*' wildcard grant and thus
-      // already broadly readable — applying the object-level CRUD /
-      // requiredPermissions gate to the EXPANSION would only surface "never
-      // designed for expand" modeling gaps (over-blocking a legitimate
-      // status/owner lookup) without adding protection, since the row is
-      // already visible. So waive those two throw-gates for PUBLIC expand
-      // sub-reads only. RLS injection (step 3) and FLS masking (step 4) still
-      // run, and a PRIVATE referenced object keeps the FULL gate — expansion
-      // may reveal only rows the caller could have read directly.
-      const expandSkipCrud =
-        opCtx.operation === 'find' &&
-        opCtx.context?.__expandRead === true &&
-        !secMeta.isPrivate;
+      // [#2850 / #7626] $expand sub-reads take the FULL gate — there is no
+      // waiver here any more, and the deletion is the fix.
+      //
+      // #2850 routed the engine's expand path back through this middleware
+      // (`find` re-entered for the referenced object carrying `__expandRead`, a
+      // server-set marker `executionContext` never takes from a client), which
+      // is what put the referenced object's RLS and FLS on the expansion at
+      // all. That part stands. What it also added was a relaxation:
+      //
+      //     operation === 'find' && __expandRead && !secMeta.isPrivate
+      //         → skip the CRUD + requiredPermissions throw-gates
+      //
+      // …justified as "a PUBLIC referenced object is covered by the '*'
+      // wildcard grant and thus already broadly readable, so gating the
+      // EXPANSION adds no protection and only surfaces never-designed-for-
+      // expand modeling gaps". Neither half of that premise held (#7626):
+      //
+      //   1. `secMeta.isPrivate` reads `access.default` (ADR-0066 D2 — whether
+      //      a `'*'` wildcard COVERS the object), which is a different axis
+      //      from the `sharingModel` OWD an object declares to scope its ROWS.
+      //      `showcase_contact` declares `sharingModel: 'private'` and no
+      //      `access` block, so it read as "public" and the waiver fired for it
+      //      — as it did for every object that leaves `access` unset, which is
+      //      almost all of them.
+      //   2. "already broadly readable" was never CHECKED. The waiver asks
+      //      nothing about the caller's grants, so it fired hardest for the
+      //      caller who holds NONE — #2850's own pin waives the gate for a
+      //      permission set with `objects: {}`. Where the premise is true the
+      //      waiver is inert (the CRUD gate would pass anyway); its only
+      //      non-vacuous effect is on callers the gate meant to refuse.
+      //
+      // Measured on the real showcase app: a `contributor`-only session 403'd
+      // on `GET /data/showcase_contact/:id` received the same contact FULLY
+      // materialised — all 18 fields, `email` included — through
+      // `?$expand=contact` on an invoice it legitimately owns. Both gates were
+      // bypassed at once, because step 2.6 below stashes `__readScope` from
+      // `getEffectiveScope`, which answers `'org'` when NO set grants the op
+      // (safe only because the caller is denied separately — and the waiver is
+      // what stopped them being denied). So the skipped CRUD check also handed
+      // plugin-sharing an org-wide read depth and dissolved the OWD row scope.
+      //
+      // Removing it restores one rule for every referenced object, the rule
+      // #2850 already applied to the private half: an expansion may reveal only
+      // rows the caller could have read directly. Nothing over-blocks a
+      // legitimate lookup — `expandRelatedRecords` catches the refusal and
+      // retains the bare FK id (its documented graceful degradation), so a
+      // caller who cannot read the referenced object gets the id it already
+      // had, not an error on the parent read.
+      //
+      // `__expandRead` itself stays: it is the marker the storage/comment
+      // access hooks strip as a privileged widening input, and `core`'s
+      // operation-private-keys list is what keeps it unforgeable from the wire.
 
       // 1.5. [ADR-0066 D3/⑤] requiredPermissions AND-gate — a capability
       //      prerequisite checked BEFORE the CRUD grant (ADR §Precedence): a
       //      caller missing any required capability is denied regardless of how
       //      permissive their grants are. Per-operation (⑤): only the caps for
       //      THIS operation's CRUD class (plus any all-operations caps) apply.
-      if (permissionSets.length > 0 && !expandSkipCrud) {
+      if (permissionSets.length > 0) {
         const required = requiredCapsForOperation(secMeta.requiredPermissions, opCtx.operation);
         if (required.length > 0) {
           const held = this.permissionEvaluator.getSystemPermissions(permissionSets);
@@ -1241,7 +1358,7 @@ export class SecurityPlugin implements Plugin {
       }
 
       // 2. CRUD permission check
-      if (permissionSets.length > 0 && !expandSkipCrud) {
+      if (permissionSets.length > 0) {
         const allowed = this.permissionEvaluator.checkObjectPermission(
           opCtx.operation,
           opCtx.object,
@@ -1360,9 +1477,13 @@ export class SecurityPlugin implements Plugin {
       // engine with `{ id } AND <writeFilter>`; a `find` does not re-enter this
       // block, so there is no recursion, and read-side RLS/tenant scoping
       // compose naturally. A `null` result means the row is either gone or
-      // RLS-hidden → deny. When `computeRlsFilter` returns `null` (no policy
-      // applies — e.g. an admin set with no RLS, or `modifyAllRecords`) the
-      // check is skipped and behaviour is unchanged.
+      // RLS-hidden → deny. When `computeRlsFilter` returns `null` the check
+      // is skipped — but since #7665 that is a far smaller class than "no
+      // WRITE policy applies": an empty write-class collection now derives
+      // its scope from the caller's SELECT narrowing inside
+      // `computeLayeredRlsFilter`, so the skip happens only when the caller's
+      // READABLE set is unbounded too (an admin set with no RLS at all, or a
+      // posture-permitting superuser bypass).
       //
       // [#5492] The filter is composed BY PROVENANCE. Two of the policies that
       // can land in it are the platform's OWN ownership floor
@@ -1520,8 +1641,12 @@ export class SecurityPlugin implements Plugin {
 
       // 2.8. ADR-0055 — controlled-by-parent WRITE: a detail write (insert/update/
       // delete) requires edit access to its master. The detail itself carries no
-      // authored RLS, so the #1994 pre-image check above is a no-op for it; this
-      // closes the by-id write path by checking the master instead.
+      // authored RLS (nothing to derive from either, #7665), so the #1994
+      // pre-image check above is a no-op for it; this closes the by-id write
+      // path by checking the master instead — and the master's own write
+      // filter, since #7665, derives from its SELECT narrowing when no
+      // write-class policy applies, so a select-only master gates its details
+      // by visibility too.
       if (
         ['insert', 'update', 'delete', 'transfer', 'restore', 'purge'].includes(opCtx.operation) &&
         permissionSets.length > 0 &&
@@ -1774,19 +1899,29 @@ export class SecurityPlugin implements Plugin {
                 if (single && isScalarId(row.owner_id)) {
                   const targetId = this.extractSingleId(opCtx);
                   if (targetId != null && this.ql) {
-                    try {
-                      // Read the pre-image under the CALLER's context (NOT
-                      // isSystem): a form echo only makes sense for a row the
-                      // caller can already see. This threads the caller's open
-                      // transaction (an in-tx echo isn't spuriously denied) AND
-                      // closes the owner-enumeration oracle a system read would
-                      // open (a caller who can't read the row gets null → deny,
-                      // indistinguishable from a non-owner).
-                      const pre = await this.getCallerPreImage(opCtx, targetId);
-                      unchanged = !!pre && pre.owner_id != null && String(pre.owner_id) === String(row.owner_id);
-                    } catch {
-                      unchanged = false; // fail closed
-                    }
+                    // Read the pre-image under the CALLER's context (NOT
+                    // isSystem): a form echo only makes sense for a row the
+                    // caller can already see. This threads the caller's open
+                    // transaction (an in-tx echo isn't spuriously denied) AND
+                    // closes the owner-enumeration oracle a system read would
+                    // open (a caller who can't read the row gets null → deny,
+                    // indistinguishable from a non-owner).
+                    //
+                    // [#7505] A throw here is NOT evidence about ownership, so
+                    // it no longer collapses into `unchanged = false`. That
+                    // catch predates the probe distinguishing "row absent"
+                    // from "could not be read": with both facts arriving as
+                    // `null` it was the only available fail-closed answer, and
+                    // it answered a store outage with `403 changing record
+                    // ownership` — a refusal an SDK also treats as terminal.
+                    // The fault now propagates (the write is still refused —
+                    // this throws before `next()`), so the caller learns the
+                    // store is down instead of that it tried to steal a
+                    // record. The oracle is untouched: an absent row, and a
+                    // row the caller cannot read, both still come back `null`
+                    // and still deny below.
+                    const pre = await this.getCallerPreImage(opCtx, targetId);
+                    unchanged = !!pre && pre.owner_id != null && String(pre.owner_id) === String(row.owner_id);
                   }
                 }
                 if (!unchanged) denyOwnerWrite(`changing record ownership on ${opCtx.operation}`);
@@ -2275,8 +2410,8 @@ export class SecurityPlugin implements Plugin {
         } catch (e) {
           ctx.logger.warn('[security] built-in role seeding failed', { error: (e as Error).message });
         }
-        // [ADR-0090 D5] Bind the configured baseline set to the `everyone`
-        // audience anchor (idempotent). This makes the CLI/dev fallback
+        // [ADR-0090 D5] Bind the configured baseline set(s) to the `everyone`
+        // audience anchor (idempotent). This makes the CLI/dev baseline
         // (`fallbackPermissionSet` — the app's `isDefault` set) visible as an
         // ordinary position binding: same table, same audit path, same explain
         // surface as any admin-authored default grant. The binding is validated
@@ -2285,31 +2420,40 @@ export class SecurityPlugin implements Plugin {
         // `bootstrapBuiltinRoles` (which seeds the `everyone` anchor) and before
         // `syncAudienceBindingSuggestions` (so the app's own fallback set is
         // already bound and never generates a redundant pending suggestion).
+        //
+        // [#7555] Every name in the COMPOSED baseline is bound, not just the
+        // declared one — the join table takes many rows per position, and the
+        // explain surface's whole job is to answer "what does a new member get"
+        // truthfully. Binding only the app's set while `member_default` also
+        // resolves at request time would make `security/explain` report a
+        // narrower default than the runtime actually applies. The refusal is
+        // PER SET: a high-privilege name is skipped loudly and the rest still
+        // bind (the D5/D9 anchor gate is untouched, and each set faces it).
         try {
-          if (this.fallbackPermissionSet) {
-            const boot = this.bootstrapPermissionSets.find((p) => p.name === this.fallbackPermissionSet);
+          for (const baselineName of this.baselinePermissionSets) {
+            const boot = this.bootstrapPermissionSets.find((p) => p.name === baselineName);
             const offending = boot ? describeHighPrivilegeBits(boot) : null;
             if (offending) {
               ctx.logger.warn('[security] refusing to bind fallback set to everyone — high-privilege bits', {
-                set: this.fallbackPermissionSet, offending,
+                set: baselineName, offending,
               });
-            } else {
-              const everyoneRows = await ql.find('sys_position', { where: { name: 'everyone' }, limit: 1, context: { isSystem: true } });
-              const everyone: any = Array.isArray(everyoneRows) && everyoneRows[0] ? everyoneRows[0] : null;
-              const setRows = await ql.find('sys_permission_set', { where: { name: this.fallbackPermissionSet }, limit: 1, context: { isSystem: true } });
-              const set: any = Array.isArray(setRows) && setRows[0] ? setRows[0] : null;
-              if (everyone?.id && set?.id) {
-                const existing = await ql.find('sys_position_permission_set', {
-                  where: { position_id: everyone.id, permission_set_id: set.id }, limit: 1, context: { isSystem: true },
-                });
-                if (!(Array.isArray(existing) && existing[0])) {
-                  await ql.insert('sys_position_permission_set', {
-                    id: `pps_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
-                    position_id: everyone.id,
-                    permission_set_id: set.id,
-                  }, { context: { isSystem: true } });
-                  ctx.logger.info('[security] baseline set bound to everyone anchor (ADR-0090 D5)', { set: this.fallbackPermissionSet });
-                }
+              continue;
+            }
+            const everyoneRows = await ql.find('sys_position', { where: { name: 'everyone' }, limit: 1, context: { isSystem: true } });
+            const everyone: any = Array.isArray(everyoneRows) && everyoneRows[0] ? everyoneRows[0] : null;
+            const setRows = await ql.find('sys_permission_set', { where: { name: baselineName }, limit: 1, context: { isSystem: true } });
+            const set: any = Array.isArray(setRows) && setRows[0] ? setRows[0] : null;
+            if (everyone?.id && set?.id) {
+              const existing = await ql.find('sys_position_permission_set', {
+                where: { position_id: everyone.id, permission_set_id: set.id }, limit: 1, context: { isSystem: true },
+              });
+              if (!(Array.isArray(existing) && existing[0])) {
+                await ql.insert('sys_position_permission_set', {
+                  id: `pps_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+                  position_id: everyone.id,
+                  permission_set_id: set.id,
+                }, { context: { isSystem: true } });
+                ctx.logger.info('[security] baseline set bound to everyone anchor (ADR-0090 D5)', { set: baselineName });
               }
             }
           }
@@ -2574,7 +2718,7 @@ export class SecurityPlugin implements Plugin {
           fp = this.foldFieldRequiredPermissions(fp, fieldRequired, sets as any);
           return fp as any;
         },
-        fallbackPermissionSet: this.fallbackPermissionSet,
+        baselinePermissionSets: this.baselinePermissionSets,
         // ── record-grained deps (only consulted when recordId is present) ──
         computeLayeredRlsFilter: (sets, o, engineOp, c) => this.computeLayeredRlsFilter(sets as any, o, engineOp, c),
         fetchRecord: async (o: string, rid: string) => {
@@ -3268,15 +3412,27 @@ export class SecurityPlugin implements Plugin {
     // user's own baseline still applies on the OTHER side of the intersection
     // (resolved from `onBehalfOf` via a context without this flag).
     const isAgent = context?.principalKind === 'agent';
-    const baseline = isAgent ? MCP_AGENT_PERMISSION_SET_RESTRICTED : this.fallbackPermissionSet;
-    // [ADR-0090 D5] Baseline is ADDITIVE, always (for humans): the configured
-    // baseline set applies to every authenticated request IN ADDITION to
-    // whatever else resolved. The former "only when the user has nothing else"
-    // conditional was the fallback CLIFF — receiving your first explicit grant
-    // silently cost you the entire baseline. Agents skip this additive step
-    // (their ceiling is closed, not floored) — see above.
-    if (!isAgent && context?.userId && baseline && !requested.includes(baseline)) {
-      requested.push(baseline);
+    // [#7555] The human side is a LIST, and the agent side deliberately is not:
+    // the agent's ceiling is EXACTLY the restricted set, and composing the
+    // platform baseline into it is precisely the widening D10 forbids. The two
+    // branches produce arrays only so the code below reads once.
+    const baseline: string[] = isAgent
+      ? [MCP_AGENT_PERMISSION_SET_RESTRICTED]
+      : this.baselinePermissionSets;
+    // [ADR-0090 D5] Baseline is ADDITIVE, always (for humans): the baseline
+    // set(s) apply to every authenticated request IN ADDITION to whatever else
+    // resolved. The former "only when the user has nothing else" conditional
+    // was the fallback CLIFF — receiving your first explicit grant silently
+    // cost you the entire baseline. Agents skip this additive step (their
+    // ceiling is closed, not floored) — see above.
+    // [#7555] The same cliff had a second spelling the list closes: an app
+    // declaring an `isDefault` set REPLACED `member_default` here, so every
+    // member of that app lost the platform floor (and with it every built-in
+    // Account destination) the moment the app declared a posture of its own.
+    if (!isAgent && context?.userId) {
+      for (const name of baseline) {
+        if (!requested.includes(name)) requested.push(name);
+      }
     }
     let permissionSets = await this.permissionEvaluator.resolvePermissionSets(
       requested,
@@ -3293,10 +3449,10 @@ export class SecurityPlugin implements Plugin {
     if (
       permissionSets.length === 0 &&
       context?.userId &&
-      baseline
+      baseline.length > 0
     ) {
       permissionSets = await this.permissionEvaluator.resolvePermissionSets(
-        [baseline],
+        baseline,
         this.metadata,
         this.bootstrapPermissionSets,
         this.dbLoader,
@@ -3307,9 +3463,19 @@ export class SecurityPlugin implements Plugin {
   }
 
   /**
-   * [ADR-0106 D7] Resolve the configured fallback permission set on its own —
-   * the second step `/auth/me/permissions` takes when a caller's own names
-   * resolve to nothing (`resolved.length === 0 && fallbackName`).
+   * [ADR-0106 D7] Resolve the configured baseline permission set(s) on their
+   * own — the deployment's answer to "what does a caller with NO resolved sets
+   * of their own see".
+   *
+   * [#7616] This used to describe itself as "the second step
+   * `/auth/me/permissions` takes when a caller's own names resolve to nothing
+   * (`resolved.length === 0 && fallbackName`)". That step no longer exists:
+   * PR #7615 (#7608, ADR-0090 D5) deleted it, because the `resolved.length === 0`
+   * guard WAS the fallback cliff D5 abolishes — a member's first explicit grant
+   * silently cost them the entire baseline. That endpoint now folds the
+   * baseline into the FIRST resolution, additively and unconditionally, so a
+   * second call over a subset of the same names could add nothing. Only the
+   * cross-reference was stale; this method's own behaviour never depended on it.
    *
    * Distinct from the post-resolution fallback inside
    * {@link resolvePermissionSetsForContext}, which is gated on `context.userId`
@@ -3318,13 +3484,25 @@ export class SecurityPlugin implements Plugin {
    * principal at all, so that a guest-facing deployment's metadata exposure is
    * a permission-set decision rather than an accidental everything-default.
    *
-   * Returns `[]` when no fallback set is configured or it does not resolve.
+   * [#7555] Reads the COMPOSED baseline, deliberately — D7 warrants it. This
+   * method exists to answer "what does this deployment's baseline disclose",
+   * and its whole justification is being *the same* baseline resolution the
+   * data plane performs (the composed `security.baselinePermissionSets`); one
+   * plane composing while the other displaced would put the two planes in
+   * disagreement about what the baseline even is, which is the drift D7 is
+   * written to avoid. On every deployment that declares no app baseline the
+   * list is exactly `['member_default']` and nothing changes; on one that does,
+   * exposure becomes platform ∪ app — both deliberate permission-set decisions,
+   * which is the bar D7 sets, rather than an app declaration silently NARROWING
+   * a guest's schema view relative to a deployment that declared nothing.
+   *
+   * Returns `[]` when no baseline is configured or none of it resolves.
    */
   private async resolveFallbackPermissionSets(): Promise<PermissionSet[]> {
-    const fallback = this.fallbackPermissionSet;
-    if (!fallback) return [];
+    const fallback = this.baselinePermissionSets;
+    if (fallback.length === 0) return [];
     return this.permissionEvaluator.resolvePermissionSets(
-      [fallback],
+      fallback,
       this.metadata,
       this.bootstrapPermissionSets,
       this.dbLoader,
@@ -3460,9 +3638,15 @@ export class SecurityPlugin implements Plugin {
       const packageWhere = writeWhere && typeof writeWhere === 'object'
         ? { $and: [writeWhere, { managed_by: 'package' }] }
         : { managed_by: 'package' };
+      // [#7505] No `.catch(() => null)`: a fault here is not "no package row
+      // matched". Swallowed, it stood this guard down for the duration of a
+      // store outage and let the admin-door write through — the same collapse
+      // `readRowById` carried on the by-id branch just below, and this gate
+      // must not answer one way for a single id and the opposite for a filter.
+      // The fault propagates, so the write is refused and the caller sees the
+      // outage.
       const hitsPackageRow = await this.ql
-        .findOne('sys_permission_set', { where: packageWhere, context: { isSystem: true } })
-        .catch(() => null);
+        .findOne('sys_permission_set', { where: packageWhere, context: { isSystem: true } });
       if (hitsPackageRow) {
         throw new PermissionDeniedError(
           `[Security] Access denied: this '${op}' on 'sys_permission_set' targets one or more package-managed ` +
@@ -3566,9 +3750,11 @@ export class SecurityPlugin implements Plugin {
         writeWhere && typeof writeWhere === 'object'
           ? { $and: [writeWhere, { managed_by: { $in: managedValues } }] }
           : { managed_by: { $in: managedValues } };
+      // [#7505] No `.catch(() => null)` — see the sibling gate: a swallowed
+      // fault made this asset guard answer "nothing managed matched" and admit
+      // the write. Fail-closed: propagate.
       const hitsManagedRow = await this.ql
-        .findOne(opCtx.object, { where: managedWhere, context: { isSystem: true } })
-        .catch(() => null);
+        .findOne(opCtx.object, { where: managedWhere, context: { isSystem: true } });
       if (hitsManagedRow) {
         throw new PermissionDeniedError(
           `[Security] Access denied: this '${op}' on '${opCtx.object}' targets one or more ${spec.pluralNoun} ` +
@@ -3612,21 +3798,64 @@ export class SecurityPlugin implements Plugin {
   }
 
   /**
-   * By-id row read with the standard FAIL-CLOSED contract (missing engine,
-   * null id, or a thrown read → `null`), shared by every provenance / pre-image
-   * gate. Centralising the read SHAPE keeps a future change (soft-delete filter,
-   * field projection) from drifting across the ~5 call sites that used to
-   * inline it (#3018 review — Reuse). A `null` return always DENIES downstream;
-   * it never bypasses a gate.
+   * By-id row read shared by every provenance / pre-image gate. Centralising
+   * the read SHAPE keeps a future change (soft-delete filter, field
+   * projection) from drifting across the ~5 call sites that used to inline it
+   * (#3018 review — Reuse).
+   *
+   * ## `null` means ABSENT, and only absent (#7505)
+   *
+   * This probe used to answer `null` for three different facts — the row does
+   * not exist, the engine threw (driver down, table missing, timeout), and no
+   * engine is wired — and every caller read all three as "no such row". Its
+   * own contract note claimed a `null` "always DENIES downstream"; that was
+   * true of one caller and false of the other three, in two opposite ways:
+   *
+   *   - `assertControlledByParentWrite` answered `404 RECORD_NOT_FOUND` — an
+   *     SDK treats that as TERMINAL (drop the id, do not retry) when the
+   *     truthful answer was a transient outage it should have backed off on;
+   *   - the two admin-door provenance gates
+   *     (`assertPackageManagedWriteGate`, `assertSystemRowWriteGate`) read
+   *     `null` as "this row is not package/platform-managed" and let the write
+   *     THROUGH — fail-OPEN, the whole guard silently stood down for the
+   *     duration of a store fault.
+   *
+   * Maintainer ruling of 2026-08-11 on #7505: FAIL-CLOSED. An engine fault
+   * PROPAGATES out of this probe instead of being flattened, so the write is
+   * refused and the caller is told what actually happened. The error is
+   * re-thrown exactly as thrown — objectql's `DatasourceUnavailableError`
+   * keeps its `ERR_DATASOURCE_UNAVAILABLE` code and both transports map that
+   * to `503` (`rest-server.ts`'s `mapDataError`) — because this gate is not
+   * the producer of that condition and has nothing to add to it. Wrapping it
+   * in a security code would relabel a dependency outage as an authorization
+   * event and would register a second spelling of an existing ADR-0112 ledger
+   * entry under a package that does not own it.
+   *
+   * Every call site therefore sees exactly two outcomes: a row, or `null` for
+   * a row that is genuinely absent. Steady-state behaviour is unchanged
+   * everywhere; only the fault path moved.
+   *
+   * The probe reads under whatever context the caller passes — `isSystem` for
+   * the provenance / existence gates, the CALLER's context for the pre-image —
+   * and that choice is the caller's, not this method's.
    */
   private async readRowById(object: string, id: unknown, context: any): Promise<Record<string, unknown> | null> {
-    if (id == null || typeof this.ql?.findOne !== 'function') return null;
-    try {
-      const row = await this.ql.findOne(object, { where: { id }, context });
-      return row && typeof row === 'object' ? (row as Record<string, unknown>) : null;
-    } catch {
-      return null;
+    // Not a read at all: there is no id to look one up by. Every call site
+    // already screens this; the guard is defence, and `null` is honest here
+    // because nothing was ever asked of the store.
+    if (id == null) return null;
+    if (typeof this.ql?.findOne !== 'function') {
+      // The third collapsed fact, and it is not absence either: the probe
+      // could not run. Unreachable in a real deployment — `start()` registers
+      // no security middleware at all without a query engine, so no gate can
+      // reach this line — but a non-conforming engine double must fail closed
+      // rather than manufacture a 404 for a row nobody looked for.
+      throw new Error(
+        `[Security] Cannot verify record '${String(id)}' on '${object}': no query engine is available to read it.`,
+      );
     }
+    const row = await this.ql.findOne(object, { where: { id }, context });
+    return row && typeof row === 'object' ? (row as Record<string, unknown>) : null;
   }
 
   /**
@@ -3636,6 +3865,12 @@ export class SecurityPlugin implements Plugin {
    * this collapses the two reads into one. Safe: no write to the row happens
    * between the gates (the driver write runs after the whole middleware pass),
    * so the pre-image is stable within the operation.
+   *
+   * [#7505] `null` here means the row is absent OR invisible to the caller —
+   * both of which DENY at every consumer, and are deliberately
+   * indistinguishable (the owner-enumeration oracle). A store fault is neither:
+   * it propagates. Nothing is memoized on the fault path, so a retry within the
+   * same operation re-probes rather than caching an outage as a verdict.
    */
   private async getCallerPreImage(opCtx: any, id: unknown): Promise<Record<string, unknown> | null> {
     if (id == null) return null;
@@ -3759,7 +3994,54 @@ export class SecurityPlugin implements Plugin {
     // longer skip the tenant wall (that is Layer 0's own exemption, below).
     let layer1: Record<string, unknown> | null = null;
     if (!(posturePermits && superuserBypass)) {
-      const collected = this.collectRLSPolicies(permissionSets, object, operation, (context?.positions ?? []) as string[]);
+      let collected = this.collectRLSPolicies(permissionSets, object, operation, (context?.positions ?? []) as string[]);
+      // [#7665] The write-visibility floor: a write target must be inside the
+      // caller's READABLE set. When NO policy of the write class applies to
+      // this (principal, object, operation) — nothing authored for the class,
+      // and the platform ownership floor outside its `positions` domain — the
+      // write class used to compile to a null Layer 1, and every write-side
+      // row gate composed from it became a no-op at once: the by-id pre-image
+      // gate (step 2.7), the controlled_by_parent master check, and the bulk
+      // write AST injection. QA #7637 measured the result on the stock
+      // showcase (select-only narrowing, `contributor` position, OWD
+      // `public_read_write`): a contributor PATCHed by id records they could
+      // not read — on the master AND on a controlled_by_parent detail — while
+      // the read side correctly hid them.
+      //
+      // So an empty write-class collection now DERIVES the write scope from
+      // the caller's SELECT narrowing — the same policies, compiled by the
+      // same compiler, that the read path enforces. "You cannot mutate what
+      // you cannot see" then holds by construction, and the explain engine
+      // reports the same narrowing for update/delete that it reports for
+      // read, instead of "No RLS policy applies".
+      //
+      // Deliberately NOT derived:
+      //   - when ANY write-class policy applies (an authored predicate, or
+      //     the in-domain platform floor): those paths keep their exact
+      //     semantics, including every widening direction #7401 / #6736
+      //     track — #7665 criterion 5 (derive ONLY when no update-scope
+      //     predicate exists). `checkAuthoredRowWrite` is additionally
+      //     protected by its own authored-set pre-check, so a derived scope
+      //     can never masquerade as an authored admission (#5493 / #7281);
+      //   - for `insert` — there is no pre-existing row to be visible (a
+      //     controlled_by_parent detail INSERT is still gated through its
+      //     master's derived scope by step 2.8);
+      //   - when the caller holds the read-side superuser bypass on a
+      //     posture-permitting object — their readable set is unbounded, so
+      //     the readability requirement imposes nothing. This is the mirror
+      //     of the read path's own Layer-1 short-circuit above, so the
+      //     derived write scope can never be NARROWER than the read scope it
+      //     is derived from.
+      if (
+        collected.length === 0 &&
+        (operation === 'update' || operation === 'delete') &&
+        !(
+          posturePermits &&
+          this.permissionEvaluator.hasSuperuserReadBypass(object, permissionSets, { isPrivate: meta.isPrivate })
+        )
+      ) {
+        collected = this.collectRLSPolicies(permissionSets, object, 'select', (context?.positions ?? []) as string[]);
+      }
       // [#5492] Provenance composition: the caller (the by-id write pre-image
       // gate) has already asked the declared write authority — `ISharingService`
       // — and received a positive `allow`. Its answer REPLACES the platform's own
@@ -3806,7 +4088,25 @@ export class SecurityPlugin implements Plugin {
       // [ADR-0105 D2] The `group` wall's predicate. Resolved by
       // `resolveAuthzContext` and carried on the context — never re-derived here.
       accessibleOrgIds: context?.accessible_org_ids,
-      objectHasOrgIdField: objectFields ? objectFields.has('organization_id') : undefined,
+      // [#7835] A FEDERATED object's `organization_id` may be the registry's
+      // injected anchor rather than a remote column — present in the field set,
+      // absent from the store the query actually runs against (the platform
+      // issues no DDL for `external` objects). Answering "yes, tenant object"
+      // there AND-composes `organization_id = <org>` onto a federated read,
+      // where it isolates nothing and — on SQLite — degrades to a constant-false
+      // string comparison: 0 rows, no error, HTTP 200. This is the
+      // plugin-security sibling of #7738 / PR #7833, which withheld
+      // `DriverOptions.tenantId` for the same objects one layer down; that fix
+      // cannot reach a `where` predicate composed into the AST.
+      //
+      // Only the PLATFORM's anchor is discounted (provenance, per
+      // `federated-phantom-anchors.ts`): a federated object that DECLARES a real
+      // remote `organization_id` keeps its wall, and every local object is
+      // untouched. `undefined` (schema unresolvable) still means "assume tenant
+      // object" — the fail-toward-isolation default is unchanged.
+      objectHasOrgIdField: objectFields
+        ? objectFields.has('organization_id') && !meta.tenantAnchorIsPhantom
+        : undefined,
       tenancyDisabled,
       posturePermitsCrossTenant: posturePermits,
       isPlatformAdmin,
@@ -4072,6 +4372,12 @@ export class SecurityPlugin implements Plugin {
    *     ({@link DetailRecordNotFoundError})
    *   - the detail's master reference is empty → `422 MISSING_REQUIRED_FIELD`
    *     ({@link MasterReferenceMissingError})
+   *
+   * [#7505] A seventh outcome is not a leg of this gate at all: if the store
+   * cannot be read, the engine's own error propagates (typically
+   * `ERR_DATASOURCE_UNAVAILABLE` → `503`) and this gate answers nothing. It
+   * used to answer the 404 above, because the existence probe flattened a
+   * fault into "absent" — the one thing an outage must never be reported as.
    */
   private async assertControlledByParentWrite(
     permissionSets: PermissionSet[],
@@ -4131,6 +4437,15 @@ export class SecurityPlugin implements Plugin {
     const masterWriteFilter = await this.computeRlsFilter(permissionSets, rel.master, 'update', context);
     if (masterWriteFilter) {
       let visible: unknown = null;
+      // [#7505] This catch STAYS, and the difference from the existence probe
+      // above is the whole per-caller distinction the ruling asks for. That
+      // probe asks "does this row exist" — a question an outage leaves
+      // unanswered, and answering it "no" is a lie with a terminal 404 on it.
+      // This one asks "is the master VISIBLE to you under your own write
+      // policy" — a question whose fail-closed default IS "not visible", which
+      // is what the 403 below says. The ruling names this probe (and the
+      // sharing half beneath it) as the house fail-closed posture to match,
+      // not as a site to change.
       try {
         visible = await this.ql.findOne(rel.master, {
           where: { $and: [{ id: masterId }, masterWriteFilter] },
@@ -4262,6 +4577,9 @@ export class SecurityPlugin implements Plugin {
       // exemption; their `_self` carve-outs are their Layer 1 scoping, and Layer
       // 0 stays inert on a column-less table), so it can never leak to non-admins.
       isBetterAuthManaged: (obj as any)?.managedBy === 'better-auth',
+      // [#7835] Federated object carrying the registry's INJECTED
+      // `organization_id` — a column the platform provisions no storage for.
+      tenantAnchorIsPhantom: hasPhantomTenantAnchor(obj),
       requiredPermissions: normalizeRequiredPermissions((obj as any)?.requiredPermissions),
       fieldRequiredPermissions,
       unresolved: !obj,

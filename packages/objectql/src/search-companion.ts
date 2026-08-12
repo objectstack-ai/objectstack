@@ -128,8 +128,31 @@ export function resolveSearchCompanionSources(schema: CompanionObjectMeta | unde
  * it never appears in auto-generated views/forms, is excluded from the
  * `$search` auto-default (hidden fields are skipped) and from `$searchFields`
  * overrides (the override intersects with the allowed set), and non-system
- * callers cannot forge it on update (#2948 readonly write guard). It IS
- * `index`ed — every search touches it.
+ * callers cannot forge it on update (#2948 readonly write guard).
+ *
+ * [#7561] It carries NO index — and the stamp that claimed otherwise is gone.
+ * This block used to append `index: true` and the paragraph above used to read
+ * "It IS `index`ed — every search touches it". Both were false, in the #6810
+ * shape one field over (`applySystemFields` stamping `indexed` on
+ * `organization_id`): `index` was removed from `FieldSchema` in the 16.x line
+ * (#2377, ADR-0049) because a field-level index flag built no index, and
+ * `FieldSchema` is a `strictObject`, so the key was rejected BY NAME. The
+ * companion is provisioned BEFORE the document is stored and `/meta` re-parses
+ * the served body, so the stamp put `_diagnostics: { valid: false, errors:
+ * [{ path: 'fields.__search', code: 'unrecognized_keys' }] }` on every object
+ * the platform provisions a companion for — a defect the platform reported
+ * about its own column, on a document no author wrote or could fix.
+ *
+ * Unlike #6810 the index is NOT re-declared in the object's `indexes[]`, and
+ * that is a measured difference rather than an omission. #6810's predicate is
+ * `organization_id = ?` — equality, which a B-tree serves. This column's ONLY
+ * reader is `buildSearchFilter`, which emits `{ __search: { $contains: term } }`
+ * (`search-filter.ts`) — a leading-wildcard `LIKE '%term%'` that no B-tree can
+ * answer, and `IndexSchema` spells nothing else (`name` / `fields` / `unique`;
+ * no trigram/GIN method). Declaring one would buy write amplification on every
+ * row for a read path that cannot use it. If the companion ever warrants a
+ * real substring index, it needs an `IndexSchema` that can express one — a
+ * separate change, not a dead index declared here.
  *
  * Objects that opt out of search entirely (`searchable: false`, ADR-0061 D2)
  * are skipped: a companion no query will ever read is dead weight.
@@ -152,7 +175,6 @@ export function provisionSearchCompanion<T extends CompanionObjectMeta>(schema: 
         readonly: true,
         system: true,
         searchable: false,
-        index: true,
         description:
           `Search-normalized forms of the display/name field (normalizers: ${SEARCH_COMPANION_NORMALIZERS.join(', ')}) — ` +
           'e.g. full pinyin + initials for CJK names. Maintained by plugin-pinyin-search; never hand-edited. See #2486.',
@@ -176,4 +198,61 @@ export function containsCJK(value: unknown): boolean {
  */
 export function isCompanionMatchableTerm(term: string): boolean {
   return /[a-z]/i.test(term) && !CJK_RE.test(term);
+}
+
+/**
+ * Did the caller NAME the companion column in its projection? (#7642)
+ *
+ * The strip below is a DEFAULT-projection rule, so it has to be able to tell
+ * "the caller asked for everything" from "the caller asked for this column".
+ * Read the caller's ORIGINAL `fields`, never the planned one: when a formula
+ * field is in play `planFormulaProjection` rewrites `ast.fields` to every
+ * stored column on the schema — companion included — so a post-planning read
+ * would report "explicitly requested" for a query that named only `name`.
+ */
+export function isSearchCompanionRequested(fields: unknown): boolean {
+  return Array.isArray(fields) && fields.includes(SEARCH_COMPANION_FIELD);
+}
+
+/**
+ * Remove the companion column from records on their way OUT of the engine
+ * (#7642).
+ *
+ * The column is declared `hidden` + `readonly` + `system` + `searchable:
+ * false`, and those flags are all real — they keep it out of auto-views, out
+ * of the `$search` auto-default and out of `$searchFields` overrides (which
+ * refuse it with a 400 "is hidden"). None of them is a PROJECTION rule,
+ * though: no read path narrowed the default projection, the drivers answer an
+ * absent `fields` with `SELECT *`, and so every record body — query results,
+ * GET by id, `/search` hits, the 201 create body — carried `__search`.
+ *
+ * ## Why this is not gated on the schema declaring the column
+ *
+ * It cannot be. The symptom outlives the switch: `OS_SEARCH_PINYIN_ENABLED=false`
+ * stops {@link provisionSearchCompanion} from DECLARING the field, but the
+ * physical column stays in the table (ADR-0045 migrations are additive), the
+ * stored values stay in it, and `SELECT *` keeps returning them. A strip that
+ * asked `schema.fields.__search` first would therefore go silent in exactly
+ * the deployment that reported the bug. The key on the ROW is the only
+ * reliable signal, and deleting an absent key costs nothing.
+ *
+ * ## Scope — `__search` only
+ *
+ * Deliberately this one column, not "hidden system columns" as a class.
+ * Hidden system columns DO come back generally (`organization_id` is the
+ * obvious one), but they are load-bearing in client payloads today; removing
+ * them is a contract decision, not a defect fix. See #7642.
+ *
+ * Mutates in place, like {@link ObjectQL.maskSecretFields} — the driver
+ * contract already forbids handing back live references into the backing
+ * store (`MemoryDriver.find` spells this out), so the row being mutated is
+ * the caller's copy.
+ */
+export function stripSearchCompanion(records: unknown): void {
+  if (records == null) return;
+  const rows: unknown[] = Array.isArray(records) ? records : [records];
+  for (const row of rows) {
+    if (!row || typeof row !== 'object') continue;
+    delete (row as Record<string, unknown>)[SEARCH_COMPANION_FIELD];
+  }
 }

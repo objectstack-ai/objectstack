@@ -709,6 +709,18 @@ export function createDefaultDatasourceDriverFactory(
         // `options` (the MongoClient passthrough) and the datasource's `pool`
         // block reach the client since #4410 — the driver has always read
         // `options` / `minPoolSize` / `maxPoolSize`; only `url` was ever passed.
+        //
+        // `min` / `max` are the ONLY keys taken out of the block, and that is
+        // now enforced rather than merely true: `pool.idleTimeoutMillis` and
+        // `pool.connectionTimeoutMillis` used to be dropped here in silence —
+        // half a block honoured, which reads to the author as a whole one — and
+        // since #7243 the guard at the top of `create()` rejects them by name
+        // (`POOL_UNREAD_KEYS_BY_DRIVER`). Wiring them onto the MongoClient's
+        // `maxIdleTimeMS` / `connectTimeoutMS` was the option NOT taken
+        // (maintainer ruling 2026-08-11): no measured consumer asked for them.
+        // Adding a key here therefore means deleting it from that table in the
+        // same change — the pin in `datasource-pool-support.test.ts` reads this
+        // arm's source and fails if the two disagree.
         const pool = (spec.pool ?? {}) as Record<string, unknown>;
         const driver = new MongoDBDriver({
           url: buildMongoUrl(spec),
@@ -744,6 +756,17 @@ export function createDefaultDatasourceDriverFactory(
         // DEPENDS on this package, so importing it would invert the dependency,
         // and declaring a second same-named class is precisely the identity
         // hazard #6268 closed (`serve.ts` decides fatality with `instanceof`).
+        //
+        // `spec.pool` is not read here and never was: `TursoDriverConfig` has
+        // no `min` / `max` — a `file:` url runs the local better-sqlite3 engine
+        // (one connection per database, the very engine the sqlite arms are
+        // rejected for) and a `libsql://` url is a request transport capped by
+        // `config.concurrency`, not a pool. It used to be dropped in silence;
+        // since #7243 the guard at the top of `create()` rejects it whole-arm,
+        // which is why this arm needs no pool handling of its own rather than
+        // merely having none. Whole-arm and NOT forked by url mode: maintainer
+        // ruling 2026-08-11 — both modes reach the same verdict, so a fork would
+        // buy branching and no author-visible difference.
         let TursoDriver: any;
         try {
           ({ TursoDriver } = await import('@objectstack/driver-turso' as any));

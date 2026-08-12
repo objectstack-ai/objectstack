@@ -127,6 +127,40 @@ export const SysAutomationRun = ObjectSchema.create({
       group: 'State',
     }),
 
+    // ── Trigger attribution (#7533) ────────────────────────────────────────
+    // COLUMNS for the same reason `selected_count` / `acted_count` are (#4354),
+    // and the reason is sharper here: both questions this answers are QUERIES,
+    // not readings of a single row. "Which runs did this record provoke?" is a
+    // filter on `trigger_object` + `trigger_record_id`; "was last night's
+    // failure storm scheduled or record-driven?" is a group-by on
+    // `trigger_type`. Folded into `context_json` they would be legible one row
+    // at a time and unqueryable in aggregate — and `context_json` is not even
+    // written on terminal history rows, which is how the durable copy of the
+    // run log ended up strictly less informative than the in-memory one.
+    trigger_type: Field.text({
+      label: 'Trigger Type',
+      required: false,
+      maxLength: 255,
+      description: 'What fired this run — the runtime trigger event (record-after-update / schedule / api / time_relative / manual / …). Null on rows written before #7533, which is NOT the same as "no trigger": every run has one.',
+      group: 'Trigger',
+    }),
+
+    trigger_object: Field.text({
+      label: 'Trigger Object',
+      required: false,
+      maxLength: 255,
+      description: 'Object whose record fired this run. Null for kinds that carry no record (schedule, api without a record context).',
+      group: 'Trigger',
+    }),
+
+    trigger_record_id: Field.text({
+      label: 'Trigger Record',
+      required: false,
+      maxLength: 255,
+      description: 'Id of the record that fired this run — the correlation from a run back to its cause, and the reason the run log is usable as an audit trail for record_change flows. Null for record-less trigger kinds and for rows written before #7533.',
+      group: 'Trigger',
+    }),
+
     variables_json: Field.textarea({
       label: 'Variables',
       required: false,
@@ -247,6 +281,11 @@ export const SysAutomationRun = ObjectSchema.create({
     { fields: ['status', 'created_at'] },
     // Look up a suspended run by the pausing node's correlation key.
     { fields: ['correlation'] },
+    // "Which runs did this record provoke?" (#7533) — the reverse-correlation
+    // read an audit of a suspicious record starts from. Object first: it is the
+    // lower-cardinality prefix, and it also serves the object-only scan
+    // ("everything automation did to crm_deal").
+    { fields: ['trigger_object', 'trigger_record_id'] },
   ],
 
   enable: {

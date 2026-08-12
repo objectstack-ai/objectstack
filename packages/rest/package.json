@@ -35,6 +35,7 @@
     "@objectstack/metadata": "workspace:*",
     "@objectstack/metadata-protocol": "workspace:*",
     "@objectstack/objectql": "workspace:*",
+    "@objectstack/plugin-security": "workspace:*",
     "@objectstack/service-analytics": "workspace:*",
     "@types/node": "^26.1.2",
     "typescript": "^6.0.3",

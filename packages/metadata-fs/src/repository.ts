@@ -94,8 +94,6 @@ export class FileSystemRepository implements MetadataRepository {
   private readonly heads = new Map<string, string>();
   /** Next seq counter, hydrated from the log on `start()`. */
   private nextSeq = 1;
-  /** Paths we wrote ourselves; suppress the resulting chokidar event. */
-  private readonly selfWrites = new Set<string>();
   private watcher: FSWatcher | null = null;
   private started = false;
 
@@ -297,17 +295,15 @@ export class FileSystemRepository implements MetadataRepository {
       // First write of the process materializes the root (#7000).
       await this.ensureRoot();
       await fs.mkdir(typeDir(this.layout, ref.type), { recursive: true });
-      this.selfWrites.add(file);
-      try {
-        await writeJsonAtomic(file, spec);
-      } finally {
-        // Hold the suppression until chokidar has had a chance to emit;
-        // we keep it in selfWrites for one debounce tick.
-        setTimeout(() => this.selfWrites.delete(file), 200);
-      }
+      await writeJsonAtomic(file, spec);
       // The watcher must not depend on its own directory scan to notice a
       // path we created ourselves (#7282). See `trackWrittenPath`.
       this.trackWrittenPath(file);
+      // Publishing the new head here is what suppresses the watcher event this
+      // write is about to produce — see `handleFsChange` (#7335). It runs in
+      // the same continuation as the `rename` above, and `awaitWriteFinish`
+      // holds any event for a further `stabilityThreshold`, so the index is
+      // always current by the time an event for this path can be delivered.
       this.heads.set(key, hash);
 
       const evt: MetadataEvent = {
@@ -352,13 +348,24 @@ export class FileSystemRepository implements MetadataRepository {
       const file = itemPath(this.layout, ref.type, ref.name);
       // A delete appends a tombstone to the change log, so it is a write too.
       await this.ensureRoot();
-      this.selfWrites.add(file);
+      // Retire the head BEFORE touching the disk, not after (#7335).
+      //
+      // `awaitWriteFinish` only debounces `add`/`change`; chokidar emits
+      // `unlink` with no stability delay at all, so — unlike `put()` — this
+      // face has no cushion between the disk mutation and the event it
+      // produces. Clearing the index first makes `handleFsChange`'s
+      // `if (!currentHead) return` a total suppression for our own removal
+      // rather than a race against the poll callback.
+      this.heads.delete(key);
       try {
         if (existsSync(file)) await fs.unlink(file);
-      } finally {
-        setTimeout(() => this.selfWrites.delete(file), 200);
+      } catch (err) {
+        // The disk still holds the item, so the index must too — otherwise a
+        // failed delete would leave the repository claiming a file it can
+        // still read. Restores exactly the pre-call state before rethrowing.
+        if (currentHead !== null) this.heads.set(key, currentHead);
+        throw err;
       }
-      this.heads.delete(key);
       const seq = this.nextSeq++;
       const ts = this.now().toISOString();
       const evt: MetadataEvent = {
@@ -506,8 +513,55 @@ export class FileSystemRepository implements MetadataRepository {
     this.watcher = w;
   }
 
+  /**
+   * Translate a watcher event into a `MetadataEvent`, or drop it.
+   *
+   * ## Self-writes are suppressed by content identity, never by a clock (#7335)
+   *
+   * This used to open with `if (this.selfWrites.has(absPath)) return;` — a
+   * `Set` that `put()`/`delete()` added the path to and a `setTimeout(…, 200)`
+   * cleared. That check discarded **every** event for a recently-written path
+   * without ever looking at what the watcher had actually observed, which is
+   * the whole defect: with `usePolling`, chokidar compares state once per
+   * `interval`, so our write and an external edit landing between two ticks
+   * are delivered as **one** event carrying the *external* content. Dropping
+   * it on a wall clock destroyed the only notification that edit would ever
+   * produce.
+   *
+   * Measured on `origin/main` @ `69fde55`, 40 iterations, poll phase
+   * randomised so the delivery lag samples `[0, interval)` uniformly:
+   *
+   *   delivery lag < 200ms  →  7 runs  →  external edit SWALLOWED, every time
+   *   delivery lag > 200ms  →  33 runs →  external edit delivered, every time
+   *
+   * A perfect split on the wall-clock boundary, and the reason earlier
+   * instrumentation saw 0/360: a *fixed* pre-edit sleep phase-locks the poll,
+   * pinning the lag (measured: 519–585ms across 25 runs) safely outside the
+   * window. Nothing about the window was rare — it was unsampled.
+   *
+   * What remains is the check that was already doing the real work one step
+   * down, and it needs no timer because it compares the content the watcher
+   * **read** against the index:
+   *
+   *   - `add`/`change` — `currentHead === hash` drops the event when the bytes
+   *     on disk are the bytes we last published. `put()` sets that head in the
+   *     same continuation as its `rename`, and `awaitWriteFinish` holds the
+   *     event for a further `stabilityThreshold`, so it is never late.
+   *   - `unlink` — `!currentHead` drops the event when the index already
+   *     agrees the item is gone. `delete()` retires the head *before* it
+   *     unlinks, precisely because this face gets no `awaitWriteFinish` delay.
+   *
+   * Both faces are pinned together in `test/self-write-suppression.test.ts`.
+   *
+   * Note the deliberate limit: identity is judged on what round-trips through
+   * the file, so a spec whose in-memory form does not (a `Date`, which
+   * canonicalises to `{}` in memory but to an ISO string once written and
+   * re-read) is republished as an external `update`. That predates this change
+   * and is independent of it — such a spec already fails `put().version ===
+   * get().hash`, and the 200ms window never covered it either, expiring some
+   * 360ms before the event it would have had to catch.
+   */
   private async handleFsChange(absPath: string, kind: 'add' | 'change' | 'unlink'): Promise<void> {
-    if (this.selfWrites.has(absPath)) return; // Suppress our own writes.
     const parsed = parseItemPath(this.layout, absPath);
     if (!parsed) return;
     const ref: MetaRef = {

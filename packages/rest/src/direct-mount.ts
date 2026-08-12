@@ -46,10 +46,14 @@
  *
  *  - **mounted ⇒ enumerable.** The array that mounted the routes is the array
  *    that is returned; a registrar cannot mount a route it does not describe.
- *  - **not mounted ⇒ not enumerable.** A registrar that is never called returns
- *    nothing, so a boot without `packageService` reports no `packages.*` route
- *    and publishes none. The service gate stays where it was — at the
- *    composition step — and the record follows it.
+ *  - **not mounted ⇒ not enumerable.** A route the registrar leaves out is not
+ *    in the array it returns, so a boot without `packageService` reports the
+ *    three `package`-service-backed `packages.*` routes nowhere and publishes
+ *    none of them. The service gate stays where it was and the record follows
+ *    it. Since #7563 the gate covers three of the four rather than all four:
+ *    `POST /packages/publish` mounts unconditionally (it has no dispatcher twin
+ *    to fall back to, so leaving it unowned produced another route's 405 rather
+ *    than a 404) — see `package-routes.ts`.
  *
  * One deliberate asymmetry: if the host server throws part-way through mounting,
  * the exception propagates and the caller records NOTHING, even though some rows

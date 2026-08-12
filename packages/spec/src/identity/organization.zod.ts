@@ -80,11 +80,19 @@ export const MemberSchema = lazySchema(() => z.object({
   userId: z.string().describe('User ID'),
   
   /**
-   * Member's role within the organization
-   * Common roles: 'owner', 'admin', 'member', 'guest'
-   * Can be customized per application
+   * Member's role within the organization.
+   *
+   * The vocabulary is CLOSED (ADR-0108): `owner`, `admin`, `delegated_admin`,
+   * `member` — `BUILTIN_MEMBERSHIP_ROLES` / `BUILTIN_MEMBERSHIP_ROLE_OPTIONS`
+   * in `./membership-role.js`, which is what `sys_member.role` and
+   * `sys_invitation.role` register as their select options. Nothing widens the
+   * list at boot, and a name outside it is refused at the door
+   * (`ROLE_NOT_FOUND`) rather than stored — a stack that needs another
+   * business role declares a `position`, not a role. Typed `z.string()` here
+   * because the wire shape mirrors better-auth's own column, not because the
+   * set is open.
    */
-  role: z.string().describe('Member role (e.g., owner, admin, member, guest)'),
+  role: z.string().describe('Member role (owner, admin, delegated_admin, member — ADR-0108 closed vocabulary)'),
   
   /**
    * Member creation timestamp
@@ -101,8 +109,22 @@ export type Member = z.input<typeof MemberSchema>;
 
 /**
  * Invitation Status Enum
+ *
+ * [#7726] `canceled` is the ISSUER-side terminal state, and it is a shipped
+ * value rather than a speculative one: better-auth's organization plugin
+ * writes it on `POST /organization/cancel-invitation` (reachable from the
+ * `cancel_invitation` action on `sys_invitation`, and from the client SDK's
+ * `organizations.invitations.cancel`), and again when
+ * `cancelPendingInvitationsOnReInvite` supersedes a pending row. It is
+ * distinct from `rejected`, which the INVITEE writes.
+ *
+ * The vocabulary is therefore the union of two upstreams and must stay so:
+ * better-auth contributes `canceled` but has no `expired`, while expiry is
+ * ObjectStack's own (`expiresAt`). `sys_invitation.status` binds its select
+ * options to this enum — see `sys-invitation.status-vocabulary.test.ts`,
+ * which fails loudly if either side grows alone.
  */
-export const InvitationStatus = z.enum(['pending', 'accepted', 'rejected', 'expired']);
+export const InvitationStatus = z.enum(['pending', 'accepted', 'rejected', 'expired', 'canceled']);
 
 export type InvitationStatus = z.input<typeof InvitationStatus>;
 
@@ -127,10 +149,13 @@ export const InvitationSchema = lazySchema(() => z.object({
   email: z.string().email().describe('Invitee email address'),
   
   /**
-   * Role the invitee will receive upon accepting
-   * Common roles: 'admin', 'member', 'guest'
+   * Role the invitee will receive upon accepting.
+   *
+   * Same closed vocabulary as {@link MemberSchema}'s `role` (ADR-0108):
+   * `owner`, `admin`, `delegated_admin`, `member`. A name outside it is
+   * refused at the door (`ROLE_NOT_FOUND`) before any invitation row exists.
    */
-  role: z.string().describe('Role to assign upon acceptance'),
+  role: z.string().describe('Role to assign upon acceptance (owner, admin, delegated_admin, member — ADR-0108 closed vocabulary)'),
   
   /**
    * Invitation status

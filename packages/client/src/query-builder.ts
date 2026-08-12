@@ -83,7 +83,19 @@ export class FilterBuilder<T = any> {
   }
 
   /**
-   * LIKE filter: field LIKE pattern
+   * LIKE filter: `field LIKE pattern`, with the wildcards YOU write.
+   *
+   * `%` matches any sequence, `_` matches exactly one character, and a
+   * backslash escapes either. The pattern must cover the WHOLE value, so a
+   * pattern with no wildcards is an exact comparison — use {@link contains}
+   * for a substring search.
+   *
+   * [#7536] This is the method that did not work. The wire lowering folded
+   * every `like` spelling onto `$contains`, so the pattern was LIKE-escaped and
+   * wrapped in `%…%`: `.like('name', '%Industries')` matched NOTHING (the `%`
+   * bound as a literal percent sign) and `.like('name', 'Industries')` returned
+   * a substring match indistinguishable from `.contains(...)`. It now reaches
+   * the driver as a real pattern.
    */
   like<K extends keyof T>(field: K, pattern: string): this {
     this.conditions.push([field as string, 'like', pattern]);
@@ -115,26 +127,65 @@ export class FilterBuilder<T = any> {
   }
 
   /**
-   * CONTAINS filter: field contains value (case-insensitive LIKE %value%)
+   * CONTAINS filter: the field's text contains `value`, compared
+   * case-SENSITIVELY and LITERALLY.
+   *
+   * [#7536] These three methods used to build a `like` tuple by gluing
+   * wildcards onto the caller's value — `[field, 'like', '%' + value + '%']` —
+   * and that was wrong in two directions at once, both of them silent:
+   *
+   * - The wire folded `like` onto `$contains`, which LIKE-escapes its comparand.
+   *   So the glued `%` was escaped back into a literal percent sign and
+   *   `.contains('name', 'Corp')` searched for the text `%Corp%` — matching only
+   *   rows that literally contain percent signs.
+   * - Once `like` reaches the driver as a real pattern (this issue's fix), the
+   *   glue becomes the OTHER bug: a caller's own `%` or `_` inside `value`
+   *   would silently become a wildcard, so `.startsWith('name', 'a_b')` would
+   *   also match `axb`.
+   *
+   * Both disappear by naming the operator that means what these methods say.
+   * `contains` / `starts_with` / `ends_with` are declared for exactly this, and
+   * their comparand is TEXT — matched literally, with no escaping burden on the
+   * caller. Note the case: the `$contains` family is case-SENSITIVE by contract
+   * (#4706 Q2 = A), which this method's docblock used to claim otherwise; for a
+   * caller-written pattern use {@link like}, and for case-insensitive matching
+   * use {@link ilike}.
    */
   contains<K extends keyof T>(field: K, value: string): this {
-    this.conditions.push([field as string, 'like', `%${value}%`]);
+    this.conditions.push([field as string, 'contains', value]);
     return this;
   }
 
   /**
-   * STARTS WITH filter: field starts with value (LIKE value%)
+   * ILIKE filter: `field ILIKE pattern` — {@link like}'s case-insensitive twin.
+   *
+   * Same pattern language and the same caller-bound wildcards; the fold is
+   * ASCII-only (`A-Z` against `a-z`), so `café` does NOT match `CAFÉ`. That
+   * boundary is the protocol's (#4706 Q1 = A), because SQLite folds ASCII only
+   * and three of the five backends are SQLite underneath.
+   */
+  ilike<K extends keyof T>(field: K, pattern: string): this {
+    this.conditions.push([field as string, 'ilike', pattern]);
+    return this;
+  }
+
+  /**
+   * STARTS WITH filter: the field's text starts with `value`, compared
+   * case-SENSITIVELY and LITERALLY. See {@link contains} for why this no longer
+   * builds a `like` pattern.
    */
   startsWith<K extends keyof T>(field: K, value: string): this {
-    this.conditions.push([field as string, 'like', `${value}%`]);
+    this.conditions.push([field as string, 'starts_with', value]);
     return this;
   }
 
   /**
-   * ENDS WITH filter: field ends with value (LIKE %value)
+   * ENDS WITH filter: the field's text ends with `value`, compared
+   * case-SENSITIVELY and LITERALLY. See {@link contains} for why this no longer
+   * builds a `like` pattern.
    */
   endsWith<K extends keyof T>(field: K, value: string): this {
-    this.conditions.push([field as string, 'like', `%${value}`]);
+    this.conditions.push([field as string, 'ends_with', value]);
     return this;
   }
 

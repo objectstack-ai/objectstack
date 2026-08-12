@@ -89,7 +89,57 @@ describe('sys_approval_request declared actions', () => {
 
   it('recall stays available while a returned request is still the submitter\'s to abandon', () => {
     expect(vis('approval_recall')).toContain('record.status == "returned"');
-    expect(byName('approval_recall').confirmText).toBeTruthy();
+  });
+
+  // ── One decision, one dialog (#7278) ──────────────────────────────
+  // The console action runner chains confirm THEN param collection, both
+  // awaited, so an action declaring `confirmText` *and* `params` shows two
+  // sequential dialogs for a single decision — and the first one already reads
+  // as "the action ran". The maintainer's 2026-08-10 ruling on #7278: carry the
+  // confirm question in the action's top-level `description` (#7367), which the
+  // param dialog renders under its title, and drop `confirmText`. Nothing is
+  // sent until that one dialog's own Confirm.
+  //
+  // These pin the WORDING, not just the shape: the previous round rejected
+  // dropping `confirmText` outright precisely because it would have deleted the
+  // finality warning from the most irreversible surface in the product.
+  it('the confirm question rides `description`, not `confirmText`, so one decision opens one dialog (#7278)', () => {
+    const reject = byName('approval_reject');
+    expect(reject.confirmText).toBeUndefined();
+    expect(reject.description).toBe(
+      'Reject this request? A rejection is final for every approver.',
+    );
+    // the finality warning is the half that must survive the move
+    expect(reject.description).toContain('final for every approver');
+
+    const recall = byName('approval_recall');
+    expect(recall.confirmText).toBeUndefined();
+    expect(recall.description).toBe(
+      'Recall this request? Approvers can no longer act on it and the record is unlocked.',
+    );
+    expect(recall.description).toContain('can no longer act on it');
+  });
+
+  it('no declared action pairs `confirmText` with `params` (#7278 ruling, object-wide)', () => {
+    const doubled = actions
+      .filter((a) => a.confirmText && Array.isArray(a.params) && a.params.length > 0)
+      .map((a) => a.name);
+    expect(
+      doubled,
+      'these actions would open a confirm dialog and then a param dialog for one decision — '
+        + 'move the question to the action\'s top-level `description` (#7278). '
+        + 'NB: the top-level key, never `ai.description` (the LLM-facing tool contract).',
+    ).toEqual([]);
+  });
+
+  it('the confirm question is human dialog copy, never armed as an AI tool description', () => {
+    // `ActionAiSchema.description` is the LLM-facing contract (min 40 chars,
+    // required when `ai.exposed`) — the same name one level down. Putting the
+    // question there would arm a tool description while the dialog fell back to
+    // its generic line.
+    for (const name of ['approval_reject', 'approval_recall']) {
+      expect(byName(name).ai?.description, `${name}.ai.description`).toBeUndefined();
+    }
   });
 
   it('reassign collects the new approver via a field-backed sys_user picker keyed as `to`', () => {

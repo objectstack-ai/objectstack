@@ -79,3 +79,5 @@ passing through Zod; the parse-time strip warning carries no object name).
 primitives = default-open). Read-only and deny-all whitelists are unchanged;
 the seven `[]` declarations are deliberately KEPT as defense-in-depth alongside
 `apiEnabled: false`.
+
+<!-- adr-0087: registered apimethod-enum-shrink -->

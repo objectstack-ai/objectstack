@@ -64,3 +64,5 @@ any of them exists in this repo, objectui, or the example apps. `.strict()` is a
 property of a parse; there is no parse. Retiring them or giving them a carrier is
 ADR-0049 enforce-or-remove, tracked in #4988 — not a breaking change to spend
 here.
+
+<!-- adr-0087: registered authoring-schemas-strict-unknown-keys -->

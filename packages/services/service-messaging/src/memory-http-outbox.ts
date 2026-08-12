@@ -2,6 +2,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { hashPartition } from './backoff.js';
+import { deliveryBody, signBody } from './http-sender.js';
 import {
     HttpRedeliverError,
     type EnqueueHttpInput,
@@ -17,6 +18,11 @@ import {
  * Mirrors `MemoryWebhookOutbox`: atomic-claim semantics come for free from the
  * single-threaded event loop operating on one `Map`. Two instances do NOT share
  * state — pass the same instance to both dispatchers to simulate one DB.
+ *
+ * Signs at enqueue and drops the secret exactly like {@link SqlHttpOutbox}
+ * (#7722) — the rows a test inspects here have the same shape as the ones the
+ * SQL outbox persists, so a test cannot pass on a row that production wouldn't
+ * write.
  */
 export class MemoryHttpOutbox implements IHttpOutbox {
     private readonly rows = new Map<string, HttpDelivery>();
@@ -39,7 +45,9 @@ export class MemoryHttpOutbox implements IHttpOutbox {
             url: input.url,
             method: input.method ?? 'POST',
             headers: input.headers,
-            signingSecret: input.signingSecret,
+            signature: input.signingSecret
+                ? signBody(deliveryBody(input.payload), input.signingSecret)
+                : undefined,
             timeoutMs: input.timeoutMs,
             payload: input.payload,
             status: 'pending',

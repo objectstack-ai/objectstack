@@ -169,6 +169,69 @@ describe('SetOperatorSchema', () => {
     expect(() => SetOperatorSchema.parse({ $in: [1, 2, 3] })).not.toThrow();
     expect(() => SetOperatorSchema.parse({ $in: ['a', 'b', 'c'] })).not.toThrow();
   });
+
+  // ==========================================================================
+  // #7596 — a `{ $field }` MEMBER is ruled out, by name and with an
+  // actionable message.
+  //
+  // `$in` / `$nin` were `z.array(z.any())`, so a reference parsed here while no
+  // backend resolved it: `matches-filter.ts` `resolveValue` returns an array
+  // unchanged, so the raw reference OBJECT was `looseEq`-compared and matched
+  // nothing (and the `$nin` direction lost an exclusion), while both SQL faces
+  // refused the position loudly. Maintainer ruling 2026-08-11: REMOVE —
+  // declared = enforced (ADR-0049).
+  //
+  // These assert the MESSAGE, not just the verdict: the whole point of refusing
+  // at the schema door rather than leaving the position undeclared is that the
+  // author is told which position works instead. A refusal that cannot go red
+  // on a missing prescription is not coverage of this ruling.
+  // ==========================================================================
+
+  describe('$field members are refused (#7596)', () => {
+    it('refuses a $field member of $in, naming the index and the alternative', () => {
+      const result = SetOperatorSchema.safeParse({ $in: ['won', { $field: 'budget' }] });
+      expect(result.success).toBe(false);
+      const issue = result.error?.issues[0];
+      expect(issue?.path).toEqual(['$in', 1]);
+      expect(issue?.message).toContain('$in member at index 1');
+      expect(issue?.message).toContain('$eq/$ne/$gt/$gte/$lt/$lte');
+      expect(issue?.message).toContain('#7596');
+    });
+
+    it('refuses a $field member of $nin — the direction that WIDENS a scope', () => {
+      const result = SetOperatorSchema.safeParse({ $nin: [{ $field: 'budget' }] });
+      expect(result.success).toBe(false);
+      const issue = result.error?.issues[0];
+      expect(issue?.path).toEqual(['$nin', 0]);
+      expect(issue?.message).toContain('$nin member at index 0');
+    });
+
+    it('reports every offending member, not only the first', () => {
+      const result = SetOperatorSchema.safeParse({
+        $in: [{ $field: 'a' }, 'won', { $field: 'b' }],
+      });
+      expect(result.success).toBe(false);
+      expect(result.error?.issues.map(i => i.path)).toEqual([['$in', 0], ['$in', 2]]);
+    });
+
+    it('leaves every other member shape open — the list is field-AGNOSTIC', () => {
+      // The check removes ONE shape. A plain object member is still a legal
+      // membership value (a JSON column stores documents), and narrowing the
+      // member type would refuse working filters this schema cannot judge.
+      expect(SetOperatorSchema.safeParse({ $in: [{ nested: 1 }, null, 3, new Date()] }).success)
+        .toBe(true);
+      expect(SetOperatorSchema.safeParse({ $in: [] }).success).toBe(true);
+    });
+
+    it('is matched by the enforced copy — FieldOperatorsSchema', () => {
+      expect(FieldOperatorsSchema.safeParse({ $in: [{ $field: 'budget' }] }).success).toBe(false);
+      expect(FieldOperatorsSchema.safeParse({ $nin: [{ $field: 'budget' }] }).success).toBe(false);
+      // Positive control: the same lists without the reference still parse, so
+      // the red above is the member and not the surrounding shape.
+      expect(FieldOperatorsSchema.safeParse({ $in: [2, 1] }).success).toBe(true);
+      expect(FieldOperatorsSchema.safeParse({ $nin: [2, 1] }).success).toBe(true);
+    });
+  });
 });
 
 describe('RangeOperatorSchema', () => {
@@ -241,17 +304,14 @@ describe('RangeOperatorSchema', () => {
         $between: [new Date('2026-01-01'), '2026-12-31'],
       }).success).toBe(true);
       expect(RangeOperatorSchema.safeParse({
-        $between: ['2026-01-01', { $field: 'contract.end_date' }],
+        $between: ['2026-01-01', new Date('2026-12-31')],
       }).success).toBe(true);
     });
 
-    it('still accepts numbers, Dates and field references — widening is additive', () => {
+    it('still accepts numbers and Dates — widening is additive', () => {
       expect(RangeOperatorSchema.safeParse({ $between: [18, 65] }).success).toBe(true);
       expect(RangeOperatorSchema.safeParse({
         $between: [new Date('2024-01-01'), new Date('2024-12-31')],
-      }).success).toBe(true);
-      expect(RangeOperatorSchema.safeParse({
-        $between: [{ $field: 'a.min' }, { $field: 'a.max' }],
       }).success).toBe(true);
     });
 
@@ -293,6 +353,136 @@ describe('RangeOperatorSchema', () => {
       expect(NormalizedFilterSchema.safeParse({
         $and: [{ close_date: { $between: ['2026-01-01', '2026-12-31'] } }],
       }).success).toBe(true);
+    });
+  });
+
+  // ==========================================================================
+  // #7596 — a `{ $field }` ENDPOINT is ruled out, in both endpoint unions and
+  // in both copies of the schema.
+  //
+  // Both endpoints declared `FieldReferenceSchema` and no backend ever resolved
+  // one: `matches-filter.ts` `resolveValue` returns an array unchanged, so the
+  // raw reference OBJECT became an ordering bound, and both SQL faces refused
+  // the position with `INVALID_FILTER` / 400. Maintainer ruling 2026-08-11:
+  // REMOVE — declared = enforced (ADR-0049).
+  //
+  // The tests above this block asserted the ACCEPTANCE of exactly these shapes
+  // (#6571 pinned `['2026-01-01', { $field: 'contract.end_date' }]` and
+  // `[{ $field: 'a.min' }, { $field: 'a.max' }]`); they are flipped here rather
+  // than deleted, so the removal is pinned in the same place the declaration
+  // was.
+  // ==========================================================================
+
+  describe('$field endpoints are refused (#7596)', () => {
+    it('refuses a $field LOWER bound, naming index 0 and the alternative', () => {
+      const result = RangeOperatorSchema.safeParse({
+        $between: [{ $field: 'a.min' }, '2026-12-31'],
+      });
+      expect(result.success).toBe(false);
+      const issue = result.error?.issues[0];
+      expect(issue?.path).toEqual(['$between', 0]);
+      expect(issue?.message).toContain('$between endpoint at index 0');
+      expect(issue?.message).toContain('$eq/$ne/$gt/$gte/$lt/$lte');
+      expect(issue?.message).toContain('#7596');
+    });
+
+    it('refuses a $field UPPER bound, naming index 1', () => {
+      const result = RangeOperatorSchema.safeParse({
+        $between: ['2026-01-01', { $field: 'contract.end_date' }],
+      });
+      expect(result.success).toBe(false);
+      expect(result.error?.issues[0]?.path).toEqual(['$between', 1]);
+      expect(result.error?.issues[0]?.message).toContain('$between endpoint at index 1');
+    });
+
+    it('refuses a range whose BOTH endpoints are references', () => {
+      const result = RangeOperatorSchema.safeParse({
+        $between: [{ $field: 'a.min' }, { $field: 'a.max' }],
+      });
+      expect(result.success).toBe(false);
+      expect(result.error?.issues.map(i => i.path)).toEqual([['$between', 0], ['$between', 1]]);
+    });
+
+    /**
+     * The endpoint shapes that were ALREADY invalid keep zod's own wording and
+     * its `invalid_union` verdict — the `$field` message replaces the generic
+     * text for one shape and for no other. Without this the refusal could be
+     * passing by blanketing every rejection with one message.
+     */
+    it('does not repaint the refusals that were already there', () => {
+      const boolMax = RangeOperatorSchema.safeParse({ $between: ['2026-01-01', true] });
+      expect(boolMax.success).toBe(false);
+      expect(boolMax.error?.issues[0]?.path).toEqual(['$between', 1]);
+      expect(boolMax.error?.issues[0]?.message).not.toContain('#7596');
+
+      // An object that is NOT a reference is refused as it always was: this
+      // check reads the SHAPE, and `{ nope: 1 }` never carried a `$field` key.
+      const objectMin = RangeOperatorSchema.safeParse({ $between: [{ nope: 1 }, '2026-12-31'] });
+      expect(objectMin.success).toBe(false);
+      expect(objectMin.error?.issues[0]?.message).not.toContain('#7596');
+    });
+
+    it('is matched by the enforced copy — FieldOperatorsSchema', () => {
+      expect(FieldOperatorsSchema.safeParse({ $between: [{ $field: 'a' }, 100] }).success)
+        .toBe(false);
+      expect(FieldOperatorsSchema.safeParse({ $between: [0, { $field: 'a' }] }).success)
+        .toBe(false);
+      // Positive control: the same range with literal bounds still parses.
+      expect(FieldOperatorsSchema.safeParse({ $between: [0, 100] }).success).toBe(true);
+    });
+
+    /**
+     * ## The whole-filter face now goes red on this too — #7711 closed the union's catch-all
+     *
+     * This case was written by #7596 as the OPPOSITE pin: both inputs parsed
+     * GREEN through `NormalizedFilterSchema`, and it said so on purpose, so the
+     * green would not be read as enforcement. The reason was structural — a
+     * `$and` member was `z.union([z.record(z.string(), FieldOperatorsSchema),
+     * NormalizedFilterSchema])` against a NON-strict group whose every key is
+     * optional, and "all three of my optional keys are absent" is true of any
+     * object at all. When the record branch rejected a field condition, the
+     * group branch accepted the very same value.
+     *
+     * #7711 made that branch `.strict()` and ruled `$`-prefixed keys out of the
+     * field-condition branch, so a member the record branch refuses now has
+     * nowhere to land. The case is kept in place, flipped rather than deleted:
+     * the two `FieldOperatorsSchema` assertions below are unchanged (that level
+     * always rejected both), and the pair above them is what moved — which is
+     * exactly the evidence that the two faces now agree.
+     */
+    it('the whole-filter face refuses these field conditions too — #7711 (was green pre-#7711)', () => {
+      const withReference = NormalizedFilterSchema.safeParse({
+        $and: [{ amount: { $between: [{ $field: 'budget' }, 100] } }],
+      });
+      const alreadyInvalidComparand = NormalizedFilterSchema.safeParse({
+        $and: [{ close_date: { $null: 'not-a-boolean' } }],
+      });
+      // Both red now, for the same structural reason they were both green
+      // before: one union branch used to accept whatever the other refused.
+      expect(withReference.success).toBe(false);
+      expect(alreadyInvalidComparand.success).toBe(false);
+      // Message-bearing, and it names the member position rather than the
+      // generic "Invalid input" zod gives an unexplained union.
+      expect(withReference.error?.issues[0]?.code).toBe('invalid_union');
+      expect(withReference.error?.issues[0]?.message).toContain('Not a valid $and member');
+      expect(alreadyInvalidComparand.error?.issues[0]?.message).toContain('#7711');
+      // And the level that DOES judge comparands rejects both — unchanged.
+      expect(FieldOperatorsSchema.safeParse({ $between: [{ $field: 'budget' }, 100] }).success)
+        .toBe(false);
+      expect(FieldOperatorsSchema.safeParse({ $null: 'not-a-boolean' }).success).toBe(false);
+    });
+
+    /**
+     * The capability this ruling does NOT touch: #5222's cross-field comparison
+     * is the SCALAR comparand, and it is also what the refusal above prescribes.
+     * If this went red the refusal message would be sending authors nowhere.
+     */
+    it('leaves the four ORDERING slots taking a reference — #5222, and the prescribed alternative', () => {
+      expect(ComparisonOperatorSchema.safeParse({ $gt: { $field: 'budget' } }).success).toBe(true);
+      expect(FieldOperatorsSchema.safeParse({
+        $gte: { $field: 'a.min' }, $lte: { $field: 'a.max' },
+      }).success).toBe(true);
+      expect(FieldOperatorsSchema.safeParse({ $eq: { $field: 'budget' } }).success).toBe(true);
     });
   });
 });
@@ -1024,8 +1214,123 @@ describe('NormalizedFilterSchema', () => {
         deleted: { $eq: true }
       }
     };
-    
+
     expect(() => NormalizedFilterSchema.parse(filter)).not.toThrow();
+  });
+
+  // ==========================================================================
+  // #7711 — the union's group branch is no longer a catch-all.
+  //
+  // Every member below parsed GREEN before this change, measured on main @
+  // `8669e5d`: a member is `z.union([<field condition>, NormalizedFilterSchema])`
+  // and the second branch was a non-strict `z.object({ $and, $or, $not })` with
+  // every key optional, so it accepted any object whatsoever — including the
+  // ones the first branch had just refused. The whole-filter face therefore
+  // validated the logical SKELETON and nothing else, and no comparand shape it
+  // declared could make it fail.
+  //
+  // The green was also LOSSY, which is what these cases pin on the accept side
+  // as well: the catch-all returned `{}` for the member it admitted, so the
+  // parse output no longer carried the condition it was asked about.
+  // ==========================================================================
+  describe('#7711 — a member the field-condition branch refuses has nowhere to land', () => {
+    /** The card's clean control: `$null` has never been anything but a boolean. */
+    it('rejects a $and member whose operator map FieldOperatorsSchema refuses', () => {
+      const result = NormalizedFilterSchema.safeParse({
+        $and: [{ c: { $null: 'not-a-boolean' } }],
+      });
+      expect(result.success).toBe(false);
+      expect(result.error?.issues[0]?.code).toBe('invalid_union');
+      expect(result.error?.issues[0]?.path).toEqual(['$and', 0]);
+      expect(result.error?.issues[0]?.message).toContain('Not a valid $and member');
+      // Message-bearing per lane convention: it names what was rejected and
+      // what the two valid member shapes are.
+      expect(result.error?.issues[0]?.message).toContain('"c"');
+      expect(result.error?.issues[0]?.message).toContain('FieldOperatorsSchema');
+      expect(result.error?.issues[0]?.message).toContain('$and / $or / $not');
+      // The other face always said no — that disagreement is the defect.
+      expect(FieldOperatorsSchema.safeParse({ $null: 'not-a-boolean' }).success).toBe(false);
+    });
+
+    it('rejects the same shape in $or and in the $not operand', () => {
+      const inOr = NormalizedFilterSchema.safeParse({ $or: [{ c: { $between: [1, 2, 3] } }] });
+      const inNot = NormalizedFilterSchema.safeParse({ $not: { c: { $null: 'nope' } } });
+      expect(inOr.success).toBe(false);
+      expect(inNot.success).toBe(false);
+      expect(inOr.error?.issues[0]?.message).toContain('Not a valid $or member');
+      expect(inNot.error?.issues[0]?.message).toContain('Not a valid $not operand');
+      expect(FieldOperatorsSchema.safeParse({ $between: [1, 2, 3] }).success).toBe(false);
+    });
+
+    it('rejects a bad member nested inside a legitimate group', () => {
+      const result = NormalizedFilterSchema.safeParse({
+        $and: [{ $or: [{ c: { $null: 'nope' } }] }],
+      });
+      expect(result.success).toBe(false);
+    });
+
+    /**
+     * The `$not`-as-a-field-name leak, and why the field-condition branch has to
+     * refuse `$`-keys rather than the group branch merely being `.strict()`.
+     * `FieldOperatorsSchema` is not `.strict()`, so `{ c: … }` read as an
+     * OPERATOR MAP has every key stripped and returns `{}` — which made
+     * `{ $not: <anything> }` parse as a field condition named `$not`.
+     */
+    it('does not let a $not group be read as a field named "$not"', () => {
+      const result = NormalizedFilterSchema.safeParse({
+        $and: [{ $not: { c: { $null: 'nope' } } }],
+      });
+      expect(result.success).toBe(false);
+      expect(result.error?.issues[0]?.message).toContain('Not a valid $and member');
+    });
+
+    it('rejects members that are not field conditions at all', () => {
+      // Arbitrary keys — the shape the catch-all could never refuse.
+      expect(NormalizedFilterSchema.safeParse({ $and: [{ hello: 'world' }] }).success).toBe(false);
+      // Implicit equality is AUTHORING sugar; this AST is post-normalization,
+      // so `{ age: 18 }` is `{ age: { $eq: 18 } }` by the time it gets here.
+      expect(NormalizedFilterSchema.safeParse({ $and: [{ age: 18 }] }).success).toBe(false);
+      // A group key and a field key at one level. Pre-#7711 this parsed to
+      // `{ $and: [{ $or: [] }] }` — the field condition dropped on the floor —
+      // so no mixed member ever survived a round-trip to begin with.
+      expect(NormalizedFilterSchema.safeParse({ $and: [{ $or: [], c: { $eq: 1 } }] }).success)
+        .toBe(false);
+    });
+
+    it('rejects unknown keys at the top level', () => {
+      const bogusCombinator = NormalizedFilterSchema.safeParse({ $nand: [] });
+      expect(bogusCombinator.success).toBe(false);
+      expect(bogusCombinator.error?.issues[0]?.code).toBe('unrecognized_keys');
+      // A field condition is not a top-level normalized filter either; the AST's
+      // root is a group. Pre-#7711 this parsed to `{}`.
+      expect(NormalizedFilterSchema.safeParse({ c: { $null: 'nope' } }).success).toBe(false);
+    });
+
+    /**
+     * The empty combinators are boolean IDENTITIES under the #5322 ruling
+     * documented on `FilterConditionSchema`, not malformed members. `{}` reaches
+     * the field-condition branch as an empty record, which is what lets the
+     * group branch be `.strict()` without touching any of them.
+     */
+    it('leaves the #5322 empty-combinator identities accepted', () => {
+      for (const identity of [{}, { $and: [] }, { $or: [] }, { $or: [{}] }, { $not: {} }]) {
+        expect(NormalizedFilterSchema.safeParse(identity).success).toBe(true);
+      }
+    });
+
+    /**
+     * The accept side of the same fix. The catch-all did not merely admit these
+     * shapes' bad siblings — it ERASED the member it admitted, so a `$not`
+     * subtree came back as `{}`. Judged by the right branch, the parse output
+     * now carries what went in.
+     */
+    it('preserves a nested group in the parse output instead of erasing it', () => {
+      const input = { $and: [{ $not: { deleted: { $eq: true } } }] };
+      const result = NormalizedFilterSchema.safeParse(input);
+      expect(result.success).toBe(true);
+      // Pre-#7711 this was `{ $and: [{ $not: {} }] }` — green, and empty.
+      expect(result.data).toEqual(input);
+    });
   });
 });
 
@@ -1093,9 +1398,20 @@ describe('parseFilterAST', () => {
     expect(parseFilterAST(['role', 'not_in', ['guest']])).toEqual({ role: { $nin: ['guest'] } });
   });
 
-  it('should convert contains/like operator', () => {
+  it('should convert contains operator', () => {
     expect(parseFilterAST(['name', 'contains', 'John'])).toEqual({ name: { $contains: 'John' } });
-    expect(parseFilterAST(['name', 'like', 'John'])).toEqual({ name: { $contains: 'John' } });
+  });
+
+  // [#7536] `like` used to be asserted here as a SECOND spelling of `contains`,
+  // which is the defect rather than the contract: `$contains` wraps its
+  // comparand in `%…%`, so folding `like` onto it made a caller's wildcards
+  // bind as literals and a wildcard-free pattern become a substring match. The
+  // pair now lowers to its own operators; the full repro table, the pattern
+  // language and the nested positions live in
+  // `filter-like-wire-lowering.test.ts`.
+  it('should convert like/ilike to their OWN operators, not to contains', () => {
+    expect(parseFilterAST(['name', 'like', 'John'])).toEqual({ name: { $like: 'John' } });
+    expect(parseFilterAST(['name', 'ilike', 'john'])).toEqual({ name: { $ilike: 'john' } });
   });
 
   it('should convert notcontains/not_contains operator', () => {
@@ -1288,7 +1604,7 @@ describe('isFilterAST', () => {
 describe('VALID_AST_OPERATORS', () => {
   it('should contain all standard comparison operators', () => {
     const expected = ['=', '==', '!=', '<>', '>', '>=', '<', '<=', 'in', 'nin', 'not_in',
-      'contains', 'notcontains', 'not_contains', 'like', 'startswith', 'starts_with', 'endswith', 'ends_with',
+      'contains', 'notcontains', 'not_contains', 'like', 'ilike', 'startswith', 'starts_with', 'endswith', 'ends_with',
       'between', 'is_null', 'is_not_null'];
     for (const op of expected) {
       expect(VALID_AST_OPERATORS.has(op)).toBe(true);

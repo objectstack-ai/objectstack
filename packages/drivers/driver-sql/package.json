@@ -46,6 +46,7 @@
     }
   },
   "devDependencies": {
+    "@objectstack/formula": "workspace:*",
     "@types/node": "^26.1.2",
     "better-sqlite3": "^13.0.2",
     "typescript": "^6.0.3",

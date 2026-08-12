@@ -330,9 +330,12 @@ Five mechanisms — four CI-time, one runtime — make the security posture a
   retired OWD aliases, an external dial wider than internal, `'*'` wildcards
   carrying View/Modify All outside the platform admin set, high-privilege
   `isDefault` (everyone-suggested) sets, the reserved word "role" in
-  security identifiers, and the ADR-0091 grant-lifecycle rules (a seed grant
-  already expired at authoring time; a delegation row missing its mandatory
-  `reason`) — every error rule mirrors a runtime gate.
+  security identifiers, a `controlled_by_parent` object with no relation the
+  platform can derive access from (ADR-0055: no required `master_detail`, no
+  `master_detail` at all, and no required `lookup` — so the runtime denies
+  every read and refuses every write), and the ADR-0091 grant-lifecycle rules
+  (a seed grant already expired at authoring time; a delegation row missing
+  its mandatory `reason`) — every error rule mirrors a runtime gate.
 - **Runtime OWD posture gate** (#3050, `objectPostureGate` in
   `@objectstack/plugin-security`, registered on the metadata protocol's
   pre-persistence `registerAuthoringGate` seam): the two OWD rules the CLI

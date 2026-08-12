@@ -42,3 +42,5 @@ The error carries the fix; FROM → TO mappings baked in include:
   bindings (`sys_position_permission_set` / `sys_user_position`), never
   authored on the position; `parent` is rejected with the flatness rule
   (ADR-0090 D3 — hierarchy is the business-unit tree, not a position tree).
+
+<!-- adr-0087: registered authoring-schemas-strict-unknown-keys -->

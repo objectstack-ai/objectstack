@@ -197,7 +197,12 @@ describe('[#4435] deleteManyData reports per id, not per request', () => {
   it('a missing id stops the run without continueOnError, as a failure always has', async () => {
     const { p, del } = makeProtocol({ b: { id: 'b' } });
     const res: any = await p.deleteManyData({ object: 'task', ids: ['a', 'b'] } as any);
-    expect(res).toMatchObject({ success: false, succeeded: 0, failed: 1 });
+    // [#7539] Still stops after `a` (one delete attempted) — but `b` is now
+    // reported NOT_ATTEMPTED rather than silently dropped, so `succeeded +
+    // failed === total` instead of the old `0 + 1 != 2`.
+    expect(res).toMatchObject({ success: false, succeeded: 0, failed: 2, total: 2 });
+    expect(res.results).toHaveLength(2);
+    expect(res.results[1].errors[0].code).toBe('NOT_ATTEMPTED');
     expect(del).toHaveBeenCalledTimes(1);
   });
 });

@@ -50,6 +50,18 @@
  * filter. The read scope answers `READ_SCOPE_COMPILE_FAILED` / 500 fail-closed —
  * a policy produced it, and #5367 ruled that route withholds its message. One
  * sentence, two envelopes; `comparand-shape.ts` owns the sentence.
+ *
+ * # [#7693] The family's fifth member
+ *
+ * The LIKE-family loops below drive `TEXT_PATTERN_OPERATORS` by name, and they
+ * used to name FOUR operators. `$icontains` arrived after this fence (#6520)
+ * and got the read-scope door's `assertRenderableText` call but not the entry
+ * in that set, so `{name: {$icontains: {foo: 1}}}` reproduced row 2 of the
+ * table above exactly — `%[object Object]%` on the `where` door, REFUSED on the
+ * read-scope one — one operator with two answers inside one package. #7693
+ * added the entry; the loops now name all five, and the `where`-door arm of the
+ * `$icontains` row is the case that only passes because of it (the read-scope
+ * arm was already green and is here as the no-regression control).
  */
 
 import { describe, it, expect } from 'vitest';
@@ -107,7 +119,8 @@ describe('[#5234] the analytics `where` door refuses an uncompilable comparand',
   });
 
   describe('shape 2 — a LIKE-family comparand with no faithful text rendering', () => {
-    for (const op of ['$contains', '$notContains', '$startsWith', '$endsWith'] as const) {
+    // [#7693] `$icontains` is the fifth member — see this file's header.
+    for (const op of ['$contains', '$notContains', '$startsWith', '$endsWith', '$icontains'] as const) {
       it(`\`${op}\` refuses an object comparand`, () => {
         const err = refusalOf(() => tree({ name: { [op]: { foo: 1 } } }));
         expect(err.code, op).toBe('INVALID_FILTER');
@@ -126,9 +139,28 @@ describe('[#5234] the analytics `where` door refuses an uncompilable comparand',
     it('`{$field: …}` is refused here, converging with `driver-sql`', () => {
       // Not a special case: a field reference is an object, and this door had no
       // opinion about objects at all. `driver-sql` has refused it since #5041.
+      //
+      // ⚠️ [#7598] The convergence claim was re-measured after #5222 gave
+      // `driver-sql` a real cross-field compiler, because that change was assumed
+      // to have made this comment stale. It did NOT, for THIS case: #5222's
+      // boundary admits the six scalar comparison operators and leaves the LIKE
+      // family in its refusal arm (`$contains against a field reference is
+      // refused` — a column-side LIKE pattern cannot be metacharacter-escaped
+      // portably, and an unescaped one is the `%`-matches-every-row bypass). So
+      // this pin still converges, verbatim, and is deliberately unchanged.
+      //
+      // What #5222 DID open is a position neither predicate in
+      // `comparand-shape.ts` is ever asked about — the whole comparand of a
+      // scalar comparison, which was BOUND rather than refused. That cell is
+      // pinned in `cross-field-reference-refusal.test.ts` against the shared
+      // corpus, not here, because it is a different question about a different
+      // position.
       const err = refusalOf(() => tree({ name: { $contains: { $field: 'status' } } }));
       expect(err.code).toBe('INVALID_FILTER');
       expect(err.message).toContain('$field');
+      // The wording stays the LIKE-family one — the #7598 gate deliberately does
+      // not reach this operator, so a reader can tell the two refusals apart.
+      expect(err.message).toContain('StringOperatorSchema');
     });
   });
 
@@ -160,8 +192,21 @@ describe('[#5234] the analytics `where` door refuses an uncompilable comparand',
     it('`{$eq: {…}}` is deliberately UNTOUCHED — a separate account', () => {
       // #5526 pinned `toSqlBindValue({a:1})` → `'{"a":1}'`. Refusing it is the
       // analytics-side half of #5041, which this change does not open.
+      //
+      // ⚠️ [#7598] Still true, and now load-bearing in a second way: the
+      // field-reference gate added there covers this very operator, so this case
+      // is what proves the gate keys on the SHAPE `{$field: <string>}` and not on
+      // "an object comparand". A gate that had widened to every object would turn
+      // this row red — which is why the row is worth keeping rather than being
+      // folded into the block above.
       expect(tree({ name: { $eq: { a: 1 } } })).toEqual({
         kind: 'leaf', member: 'name', operator: 'equals', values: [{ a: 1 }],
+      });
+      // The same distinction one step finer: `$field` present but NOT a string is
+      // the ordinary object account too, exactly as on `driver-sql`, whose
+      // `fieldReferenceOf` requires `typeof ref === 'string'`.
+      expect(tree({ name: { $eq: { $field: 5 } } })).toEqual({
+        kind: 'leaf', member: 'name', operator: 'equals', values: [{ $field: 5 }],
       });
     });
   });
@@ -193,7 +238,9 @@ describe('[#5234] the read-scope lowering refuses the same two shapes, fail-clos
     expect(err.message).toContain('index 0');
   });
 
-  for (const op of ['$contains', '$notContains', '$startsWith', '$endsWith'] as const) {
+  // [#7693] `$icontains` was ALREADY refused on this door — it is in the loop as
+  // the no-regression control for the entry added on the other one.
+  for (const op of ['$contains', '$notContains', '$startsWith', '$endsWith', '$icontains'] as const) {
     it(`\`${op}\` refuses an object comparand instead of binding '%[object Object]%'`, () => {
       const err = refusalOf(() => scope({ name: { [op]: { foo: 1 } } }));
       expect(err.code, op).toBe('READ_SCOPE_COMPILE_FAILED');

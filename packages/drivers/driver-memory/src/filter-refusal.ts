@@ -31,6 +31,9 @@
  */
 
 import { FILTER_OPERATORS, LOGICAL_OPERATORS, RETIRED_FILTER_OPERATORS } from '@objectstack/spec/data';
+// [#7536] The `$like` pattern language's shared gate, so this driver refuses
+// the same malformed patterns as every other face.
+import { hasDanglingLikeEscape } from '@objectstack/spec/data';
 import { StandardErrorCode } from '@objectstack/spec/api';
 
 /**
@@ -182,6 +185,33 @@ export function emptyFieldConstraintError(field: string, path: string): Error {
  * entry in `FILTER_OPERATORS` is a claim that this driver evaluates it, and this
  * file will make that claim on the spec's behalf whether or not it is true.
  *
+ * ## [#7536] `$like` / `$ilike` arrive here EXPLICITLY, which is the other risk
+ *
+ * They are the mirror image of the paragraph above: declared by
+ * `StringOperatorSchema`, deliberately staged OUT of `FILTER_OPERATORS` (see its
+ * note) because `driver-mongodb`, objectql's `having` and `service-analytics`
+ * have no arm for them — and added to this set BY HAND, because this driver
+ * does. The precedent is `driver-turso`'s remote transport, whose
+ * `SUPPORTED_FILTER_OPERATORS` has carried `...FILTER_OPERATORS, '$icontains'`
+ * since #5702 for exactly this situation: a backend that implements one more
+ * operator than the shared allowlist says so LOCALLY, rather than pushing the
+ * allowlist ahead of the backends that cannot follow.
+ *
+ * Why this driver implements rather than refuses, when two of its siblings
+ * refuse: it is the in-memory DOUBLE. An application whose tests run here and
+ * whose production runs SQL would otherwise get a 400 in test for a filter that
+ * works in production — which is the same "one filter, two answers" divergence
+ * #6520 closed, wearing a refusal instead of a wrong row set. It is also the
+ * one driver holding the `VALID_AST_OPERATORS` expressibility invariant
+ * (`memory-filter-ast-vocabulary.test.ts`, #3948): every operator the protocol
+ * PARSES must survive to a matched row here.
+ *
+ * The ordering rule from the `$icontains` paragraph applies unchanged and was
+ * followed: both arms (`memory-driver.ts`'s query path and `memory-matcher.ts`)
+ * landed in the same commit as this widening. A name added here with no arm
+ * behind it is the #5701 measurement — gate stops refusing, matcher has no
+ * case, predicate silently DROPPED, every row matches.
+ *
  * Everything else is refused. That includes the mingo operators this driver used
  * to hand through by accident (`$elemMatch`, `$size`, `$type`, `$mod`, `$where`,
  * `$expr`, field-level `$not`) — none of them is in the Filter Protocol, none is
@@ -189,6 +219,8 @@ export function emptyFieldConstraintError(field: string, path: string): Error {
  */
 export const SUPPORTED_FIELD_OPERATORS: ReadonlySet<string> = new Set<string>([
   ...FILTER_OPERATORS,
+  '$like',
+  '$ilike',
 ]);
 
 /** The vocabulary as it appears in a refusal message, in declaration order. */
@@ -643,6 +675,22 @@ function assertFieldConstraintShape(
     if (op === '$icontains' && (typeof spec[op] !== 'string' || spec[op] === '')) {
       throw icontainsComparandError(field, spec[op], `${path}.$icontains`);
     }
+    // [#7536] `$like` / `$ilike` carry a PATTERN. Two rules, both of them
+    // driver-sql's word for word so a suite that swaps this driver for SQL sees
+    // the same refusal for the same input.
+    //
+    // Note what is deliberately NOT refused: an EMPTY pattern. `$icontains: ''`
+    // is refused just above because every row contains the empty substring —
+    // but `LIKE ''` matches only the empty string, a narrow and well-formed
+    // predicate. Copying the neighbour's rule would refuse a legitimate query.
+    if (op === '$like' || op === '$ilike') {
+      if (typeof spec[op] !== 'string') {
+        throw likePatternComparandError(field, op, spec[op], `${path}.${op}`);
+      }
+      if (hasDanglingLikeEscape(spec[op] as string)) {
+        throw danglingLikeEscapeError(field, op, spec[op] as string, `${path}.${op}`);
+      }
+    }
   }
   // [#5702] The `$options`-without-`$regex` companion check that stood here is
   // GONE. It was needed while `$options` was an allowlisted MODIFIER — a key the
@@ -667,6 +715,53 @@ function assertFieldConstraintShape(
  *   constrains nothing. A dropped predicate WIDENS a result set, and on an RLS
  *   read scope that is a permission bypass rather than a degraded filter.
  */
+/**
+ * [#7536] `$like` / `$ilike` received a comparand that is not a string.
+ *
+ * `driver-sql`'s `likePatternComparandError`, word for word, for the reason its
+ * `$icontains` neighbour gives. Coercion is worse for a pattern than for text:
+ * `String({})` is `[object Object]`, and once that reaches the SQL family's
+ * SQLite arm its `[` OPENS a GLOB character class — so the query would run a
+ * PATTERN nobody wrote rather than merely compare text nobody wrote.
+ */
+export function likePatternComparandError(
+  field: string,
+  op: string,
+  value: unknown,
+  path = 'filter',
+): Error {
+  return unsupportedFilterError(
+    `Operator "${op}" on field "${field}" at ${path} requires a string comparand, received ` +
+      `${JSON.stringify(value) ?? String(value)}. "${op}" takes a PATTERN — "%" matches any ` +
+      `sequence, "_" matches one character, and a backslash escapes either — so a non-string ` +
+      `comparand cannot be coerced without inventing wildcards the caller never wrote. For a ` +
+      `literal substring search write "$contains", whose comparand IS text.`,
+  );
+}
+
+/**
+ * [#7536] A `$like` / `$ilike` pattern ending in a lone unpaired backslash.
+ *
+ * Refused rather than given a meaning because no meaning survives every
+ * backend: Postgres rejects such a pattern outright, SQLite's GLOB has no
+ * escape character at all, and a JS translation would have to invent a third
+ * answer. `hasDanglingLikeEscape` is the spec's shared test, so every face
+ * refuses the SAME patterns.
+ */
+export function danglingLikeEscapeError(
+  field: string,
+  op: string,
+  pattern: string,
+  path = 'filter',
+): Error {
+  return unsupportedFilterError(
+    `Operator "${op}" on field "${field}" at ${path} has a pattern ending in a lone unpaired ` +
+      `backslash (${JSON.stringify(pattern)}). A backslash escapes the character after it, so a ` +
+      `trailing one escapes nothing and the backends disagree about what it means. Write ` +
+      `"\\\\\\\\" to match a literal backslash, or drop the trailing one.`,
+  );
+}
+
 function icontainsComparandError(field: string, value: unknown, path: string): Error {
   const shown = typeof value === 'string' ? `""` : JSON.stringify(value) ?? String(value);
   return unsupportedFilterError(

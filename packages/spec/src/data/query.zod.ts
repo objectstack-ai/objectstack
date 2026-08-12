@@ -277,9 +277,10 @@ export const AggregationNodeSchema = lazySchema(() => z.object({
 // `JoinNodeBaseSchema`, `JoinNodeSchema` and the `JoinNode`/`JoinNodeInput`
 // types — was deleted together with the `query.joins` tombstone below: no
 // engine or driver ever read a query's `joins`, and an exported schema with no
-// consumer reads as a capability (the #3950 precedent). Related records are
-// read through `expand`; a single related column is a dotted `fields` path
-// (`fields: ['owner.name']`).
+// consumer reads as a capability (the #3950 precedent). Related records — and
+// single related columns, via the nested query's own `fields` — are read
+// through `expand`. NOT through a dotted `fields` path: no driver ever resolved
+// one, and the ingress refuses it (`400 INVALID_FIELD`, #7532).
 
 // ─── Window functions: REMOVED (#4286, ADR-0049) ─────────────────────────────
 // The window cluster — `WindowFunction`, `WindowSpecSchema`,
@@ -295,9 +296,13 @@ export const AggregationNodeSchema = lazySchema(() => z.object({
 /**
  * One entry of a select list: a field name.
  *
- * The whole vocabulary is a column (`'name'`) or a dotted path the engine
- * resolves through a relationship field (`'owner.name'`). Related *records* are
- * selected with {@link QueryAST.expand}, not from inside this list.
+ * The whole vocabulary is one of the queried object's OWN columns (`'name'`).
+ * The type is `string`, so a dotted path (`'owner.name'`) still PARSES — that
+ * is a shape check — but it resolves nothing: no driver ever implemented dotted
+ * projection, and the ingress refuses it semantically
+ * (`assertProjectionFieldsExist`, `400 INVALID_FIELD`, #7532). Related data —
+ * whole records and single related columns alike — comes from
+ * {@link QueryAST.expand}, not from inside this list.
  *
  * The TYPE half of {@link FieldNodeSchema} — it used to be that schema's
  * recursion annotation, back when the union carried a second
@@ -318,10 +323,14 @@ const FIELD_NODE_OBJECT_FORM_REMOVED =
   + 'ever produced it and nothing ever read `.fields`/`.alias`: every consumer on this path '
   + 'treats the list as `string[]`, so the object form was dropped by the SQL and memory drivers, '
   + 'projected as a column literally named "[object Object]" by MongoDB, and refused as an unknown '
-  + 'field by the REST ingress. Select related records with `expand` — '
-  + "`expand: { owner: { object: 'user', fields: ['name'] } }` — or name a single related column "
-  + "with a dotted path (`fields: ['owner.name']`). `alias` has no replacement here; an aliased "
-  + 'projection is an `aggregations` or `windowFunctions` entry, which carry their own `alias`.';
+  + 'field by the REST ingress. Select related data with `expand` — '
+  + "`expand: { owner_id: { object: 'user', fields: ['name'] } }` — whose nested query names the "
+  + 'related columns you want. A dotted `fields` path is NOT the replacement: no driver ever '
+  + 'resolved one and the ingress refuses it (`400 INVALID_FIELD`, #7532). Keep the foreign-key '
+  + "column in your own projection (`fields: ['title', 'owner_id']`) — the relation is carried by "
+  + 'that key, so projecting it away leaves expansion nothing to resolve. `alias` has no '
+  + 'replacement here; an aliased projection is an `aggregations` or `windowFunctions` entry, '
+  + 'which carry their own `alias`.';
 
 /**
  * Field Selection Node
@@ -356,9 +365,12 @@ const QUERY_JOINS_REMOVED =
   '`query.joins` was removed in @objectstack/spec 17 (#4286, ADR-0049) — no engine or driver '
   + 'ever read it: a query carrying `joins` behaved exactly as if the key were absent, while '
   + 'its name squatted on the reserved REST parameter set. Delete the key. Related records are '
-  + "read through `expand` — `expand: { owner: { object: 'user', fields: ['name'] } }` — which "
-  + 'the engine resolves via batch $in queries, and a single related column is a dotted '
-  + "`fields` path (`fields: ['owner.name']`).";
+  + "read through `expand` — `expand: { owner_id: { object: 'user', fields: ['name'] } }` — which "
+  + 'the engine resolves via batch $in queries, and whose nested query selects the related '
+  + "record's own columns. Keep the foreign key in your own projection (`fields: ['title', "
+  + "'owner_id']`): the relation is carried by that column, so projecting it away leaves "
+  + 'expansion nothing to resolve. A dotted `fields` path is NOT a replacement — no driver ever '
+  + 'resolved one and the ingress refuses it (`400 INVALID_FIELD`, #7532).';
 
 /**
  * Exported (unlike the two above) because `EngineQueryOptionsSchema`
@@ -481,7 +493,7 @@ const BaseQuerySchema = z.object({
   object: z.string().describe('Object name (e.g. account)'),
   
   /** Select Clause */
-  fields: z.array(FieldNodeSchema).optional().describe('Fields to retrieve — field names, optionally dotted to reach through a relationship (`owner.name`). Related *records* are selected with `expand`, not from inside this list.'),
+  fields: z.array(FieldNodeSchema).optional().describe("Fields to retrieve — names of the queried object's OWN columns. A dotted path (`owner.name`) is not a projection: no driver resolves one, and the ingress refuses it with `400 INVALID_FIELD` (#7532). Related data is read with `expand`, whose nested QueryAST both filters (`where`) and selects (`fields`) the related record's columns. The projection must RETAIN the foreign-key column: `fields: ['title']` with `expand: 'project_id'` resolves nothing, because the relation is carried by that key — add `'project_id'` and it works. Where the value is wanted on the queried object itself, denormalise it onto that object (a stored field, written when the source changes), the same remedy the sort axis prescribes (#6924)."),
   
   /** Where Clause (Filtering) */
   where: FilterConditionSchema.optional().describe('Filtering criteria (WHERE)'),

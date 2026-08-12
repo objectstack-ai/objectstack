@@ -916,14 +916,38 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             // Public SKILL.md download (env-customized portable Agent Skill).
             // Separate registration: `/mcp` above is an exact-path mount, so
             // the sub-path needs its own route to be reachable over HTTP.
-            server.get(`${prefix}/mcp/skill`, async (req: any, res: any) => {
-                try {
-                    const result = await dispatcher.dispatch('GET', '/mcp/skill', req.body, req.query, { request: req });
-                    sendResult(result, res);
-                } catch (err: any) {
-                    errorResponse(err, res);
-                }
-            });
+            //
+            // [#7649] Mounted for the SAME method set as `/mcp` above rather
+            // than GET alone, even though GET is the only method this route
+            // SERVES. The domain owns a 405 branch for the rest
+            // (`handleMcpSkillRequest`: "Method not allowed — use GET", body
+            // built through `buildApiError` per #3842) — but a branch can only
+            // answer a mismatch that REACHES the dispatcher. With GET as the
+            // sole registration, Hono routed `POST /api/v1/mcp/skill` to
+            // `notFound`, where the adapter's `unmatchedResponse()` answered
+            // with its own `{error, code, message, method, path, allowed}`
+            // shape: a second, non-standard 405 envelope on the wire, and the
+            // domain branch dead code on this adapter. Registering the verbs
+            // hands the mismatch to the branch that already exists.
+            //
+            // The method set tracks `/mcp`'s deliberately: `server.get/post/
+            // delete` are also the three verbs the observability Proxy above
+            // instruments, so a PUT/PATCH mount here would be both wider than
+            // the sibling route and silently un-instrumented.
+            const mountMcpSkill = (method: 'GET' | 'POST' | 'DELETE') => {
+                const register = method === 'GET' ? server.get : method === 'DELETE' ? server.delete : server.post;
+                register.call(server, `${prefix}/mcp/skill`, async (req: any, res: any) => {
+                    try {
+                        const result = await dispatcher.dispatch(method, '/mcp/skill', req.body, req.query, { request: req });
+                        sendResult(result, res);
+                    } catch (err: any) {
+                        errorResponse(err, res);
+                    }
+                });
+            };
+            mountMcpSkill('GET');
+            mountMcpSkill('POST');
+            mountMcpSkill('DELETE');
 
             server.post(`${prefix}/keys`, async (req: any, res: any) => {
                 try {
@@ -1106,6 +1130,47 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 server!.post(`${base}/automation`, async (req: any, res: any) => {
                     try {
                         const result = await dispatcher.dispatch('POST', '/automation', req.body, req.query, { request: req });
+                        sendResult(result, res);
+                    } catch (err: any) {
+                        errorResponse(err, res);
+                    }
+                });
+
+                // [#7526] `/actions`, `/connectors`, `/_status` — REGISTERED
+                // BEFORE `/automation/:name`, which is the whole point.
+                //
+                // `domains/automation.ts` has always ordered these three ahead
+                // of its `/:name → getFlow` catch-all, and its module doc says
+                // in as many words that the order is load-bearing. That care
+                // was spent inside `dispatch()`, on a path no request took:
+                // this bridge is the only thing that mounts `/automation`, and
+                // it mounted `/:name` and never these — so `GET
+                // /api/v1/automation/actions` resolved to `getFlow('actions')`
+                // and answered a flow-not-found where the ledger promises the
+                // action-descriptor palette. Found by the live-mount parity
+                // gate this issue added, as three more instances of the class
+                // it was built for.
+                server!.get(`${base}/automation/actions`, async (req: any, res: any) => {
+                    try {
+                        const result = await dispatcher.dispatch('GET', '/automation/actions', undefined, req.query, { request: req });
+                        sendResult(result, res);
+                    } catch (err: any) {
+                        errorResponse(err, res);
+                    }
+                });
+
+                server!.get(`${base}/automation/connectors`, async (req: any, res: any) => {
+                    try {
+                        const result = await dispatcher.dispatch('GET', '/automation/connectors', undefined, req.query, { request: req });
+                        sendResult(result, res);
+                    } catch (err: any) {
+                        errorResponse(err, res);
+                    }
+                });
+
+                server!.get(`${base}/automation/_status`, async (req: any, res: any) => {
+                    try {
+                        const result = await dispatcher.dispatch('GET', '/automation/_status', undefined, req.query, { request: req });
                         sendResult(result, res);
                     } catch (err: any) {
                         errorResponse(err, res);

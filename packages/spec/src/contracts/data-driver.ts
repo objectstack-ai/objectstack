@@ -18,7 +18,8 @@ import type { QueryAST } from '../data/query.zod.js';
  * was paid for in blanket casts instead: a direct caller holding only a `where`
  * could not name a type for it, reached for `as any`, and lost `where`'s type
  * checking along with the object name — which is how an operator the filter
- * dialect does not have (`$like`) survived compilation and reached the runtime
+ * dialect did not have (`$like`, undeclared then; #7536 has since made it a
+ * real one) survived compilation and reached the runtime
  * (objectstack#5181, cloud#1053, cloud#1030).
  *
  * What this deliberately does NOT drop is the `object` inside an `expand`

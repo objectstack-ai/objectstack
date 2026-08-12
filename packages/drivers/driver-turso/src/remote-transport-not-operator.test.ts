@@ -368,9 +368,16 @@ describe('RemoteTransport $not (#1076)', () => {
         /compiles to NO predicate/,
       );
       // #1004: an unknown operator.
+      //
+      // [#7536] The exemplar used to be `$like`, and that stopped being a valid
+      // choice: `$like` is now a DECLARED operator this transport compiles, so
+      // the assertion was pinning a refusal that must no longer happen.
+      // `$sounds_like` is this repo's standing stand-in for a spelling the
+      // protocol does not have and will not grow — the same name `sql-driver.ts`
+      // reaches for when it needs one.
       await expect(
-        t.find('deal', { where: { $not: { stage: { $like: 'w%' } } } } as unknown as QueryAST),
-      ).rejects.toThrow(/Unsupported filter operator "\$like"/);
+        t.find('deal', { where: { $not: { stage: { $sounds_like: 'w%' } } } } as unknown as QueryAST),
+      ).rejects.toThrow(/Unsupported filter operator "\$sounds_like"/);
       // #1058: an unbindable comparand.
       await expect(
         t.find('deal', { where: { $not: { amount: { $gt: { $field: 'budget' } } } } } as unknown as QueryAST),

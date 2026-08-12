@@ -255,6 +255,35 @@ interface ListCacheEntry {
    * this rather than having to guess.
    */
   degraded: boolean;
+  /**
+   * [#6504] The messages of the loaders that could not be read, in the order
+   * they failed — empty whenever `degraded` is false.
+   *
+   * Memoized with the entry rather than recomputed, so a consumer served from
+   * the cache learns the same thing as one served by the read that filled it.
+   * Without this the cache could say *that* the answer is partial but never
+   * *why*, which is the half `listDiagnosed` needs to be as informative as
+   * `getDiagnosed` already is.
+   */
+  errors: string[];
+}
+
+/**
+ * [#6504] What one `list()` read actually produced: the best-effort set, plus
+ * whether assembling it lost a loader.
+ *
+ * The return of {@link MetadataManager.readListUncached}, the value shared
+ * through `inflightListReads`, and — minus the cache bookkeeping — what
+ * {@link MetadataManager.listDiagnosed} hands to a caller. One shape for all
+ * three on purpose: the verdict used to be dropped at each hop outward
+ * (`readListUncached` computed it, the in-flight promise kept only `items`,
+ * `list()` returned only that), and a single carried record is what makes
+ * losing it again take an edit rather than an omission.
+ */
+interface ListReadResult {
+  items: unknown[];
+  degraded: boolean;
+  errors: string[];
 }
 
 export interface MetadataManagerOptions extends MetadataManagerConfig {
@@ -302,16 +331,40 @@ export class MetadataManager implements IMetadataService {
   // above. The concurrent half is delivered by `inflightListReads` below, which
   // is why the two fields are one policy and are documented together.
   //
-  // [#5184] That hazard is NOT historical — it was re-verified on the current
-  // driver stack before this policy was chosen. `DatabaseLoader._find()` still
-  // issues `engine.find('sys_metadata', …)` without threading the caller's
-  // transaction, and `driver-sql` still treats SQLite as a single-connection
-  // pool (`activeTransactions`, `assertBareKnexSafe` — the latter a dev/test
-  // guard that is a no-op in production, so production still waits the timeout
-  // out). `plugin-audit`'s `captureBefore` threads the transaction by hand for
-  // exactly this reason. Hence the policy below keeps caching degraded reads
-  // rather than skipping them: "don't cache a degraded read" would trade one
-  // 30s silent window for a fresh 60s stall per call.
+  // [#5184; re-measured under #7708 on 2026-08-11] That hazard is NOT
+  // historical — and the re-measurement NARROWED it rather than retiring it.
+  // Measured on the current stack: real `ObjectQL` + real `SqlDriver`
+  // (better-sqlite3), a real `DatabaseLoader.list()` with the loader's own
+  // cache off, `knex.client.pool.max === 1` confirmed for the SQLite dialect
+  // and `acquireConnectionTimeout` left at the knex default of 60s.
+  //
+  //   • Transaction opened DIRECTLY on the driver (`driver.beginTransaction()`)
+  //     → the read STALLS for the full timeout and then throws knex's "Timeout
+  //     acquiring a connection" (measured: 60_085ms). `DatabaseLoader._find()`
+  //     forwards no options, so nothing threads the caller's transaction, and
+  //     `driver-sql` still models SQLite as a single-connection pool
+  //     (`activeTransactions`, `assertBareKnexSafe` — the latter a dev/test
+  //     guard that is a no-op in production, so production still waits the
+  //     timeout out). `list()` catches that throw and degrades, which is
+  //     precisely the entry whose TTL this policy is choosing.
+  //   • Transaction opened through `engine.transaction()` / `ScopedContext`
+  //     → returns immediately (measured: 12ms, with `activeTransactions === 1`
+  //     and the driver observably receiving the handle on the call). Those
+  //     publish the transaction into the engine's ambient `txStore` (ADR-0034)
+  //     and `buildDriverOptions` threads it onto the read for the loader.
+  //
+  // So the stall shape is live but CONDITIONAL: it needs an open transaction
+  // that the engine's ambient store cannot see. `SqlDriver.ensureSequencesTable()`
+  // is the live witness that this is worth designing against — it takes
+  // `parentTrx` and runs its DDL on the caller's transaction for exactly this
+  // reason, with `assertBareKnexSafe` as the tripwire for callers that forget;
+  // `sql-driver-sqlite-tx-guard.test.ts` pins both halves. (Until #7708 the
+  // witness cited here was `plugin-audit`'s `captureBefore`, retired by #6656.
+  // It was REPLACED rather than dropped: the example died, the hazard did not.)
+  //
+  // Hence the policy below keeps caching degraded reads rather than skipping
+  // them: "don't cache a degraded read" would trade one 30s silent window for
+  // a fresh 60s stall per call on every caller in the first bullet.
   //
   // [#5184] WHAT IS ACTUALLY CACHED, AND FOR HOW LONG — this paragraph is the
   // contract, and it describes `cacheListResult()` / `readCachedList()` below.
@@ -410,8 +463,17 @@ export class MetadataManager implements IMetadataService {
    * only, so a fresh read that already replaced it keeps its slot. Nothing
    * accumulates — a wave of callers arriving after settle finds the cache the
    * settle just wrote, and once that lapses it starts one new read.
+   *
+   * [#6504] The shared value is the whole {@link ListReadResult}, not just
+   * `items`. "Sharers share the outcome" above is stated about the answer *and*
+   * its degraded verdict, and while the promise carried only `items` that was
+   * true of `list()` alone: a {@link listDiagnosed} caller joining an in-flight
+   * read had no way to reach the verdict that read had already computed, and
+   * would have had to either re-walk the loaders (defeating this map) or invent
+   * a second, unmemoized answer. `list()` narrows to `.items` at its own return
+   * instead, so every sharer still receives the same array instance.
    */
-  private readonly inflightListReads = new Map<string, Promise<unknown[]>>();
+  private readonly inflightListReads = new Map<string, Promise<ListReadResult>>();
 
   // [#5108] Loader names whose read failure has already been reported at
   // `error` by `list()`. AGENTS.md → "Degradation log levels": say it once, at
@@ -880,12 +942,59 @@ export class MetadataManager implements IMetadataService {
    * `listCache`.
    */
   async list(type: string): Promise<unknown[]> {
+    return (await this.readList(type)).items;
+  }
+
+  /**
+   * `list`, plus whether the answer can be trusted as complete.
+   *
+   * [#6504] The plural counterpart of {@link getDiagnosed}, and the same defect
+   * one read over: `readListUncached` has computed this verdict since #5184 and
+   * `list()` spent it entirely on a cache TTL, so a consumer receiving a short
+   * set could not ask whether it was short because that is all anyone declared
+   * or because a loader was down. {@link reportLoaderReadFailure}'s own message
+   * says what that costs — "every list served from now on is a PARTIAL set
+   * presented as a complete one, and the server keeps reporting healthy" — and
+   * until this member existed that sentence was addressed to a log reader only,
+   * because no caller had a way to ask.
+   *
+   * Sharper than the singular case rather than merely analogous: `list` is the
+   * read whose answer carries a **count**, and a consumer restating
+   * `items.length` as "this environment contains N items" makes a positive,
+   * numeric claim about what an author declared out of a read that partly did
+   * not happen.
+   *
+   * Reads through exactly the same cache and single-flight machinery `list()`
+   * does — same entry, same TTLs, same in-flight join — so asking for the
+   * verdict costs no extra loader walk, and `list()` and
+   * `listDiagnosed().items` cannot drift: they are the same read, narrowed at
+   * different points. `degraded` is true when at least one loader threw while
+   * this set was assembled; unlike {@link getDiagnosed} it does NOT additionally
+   * require that nothing answered, because a plural read that lost one loader is
+   * partial even when the others answered plenty — which is the whole fact.
+   */
+  async listDiagnosed(type: string): Promise<ListReadResult> {
+    const { items, degraded, errors } = await this.readList(type);
+    return { items, degraded, errors };
+  }
+
+  /**
+   * The cached / single-flight read behind {@link list} and
+   * {@link listDiagnosed}.
+   *
+   * [#6504] Extracted so the two members are one read seen at two widths rather
+   * than two implementations that have to be kept in agreement — the shape
+   * `get`/`getDiagnosed` pay for with a duplicated body and a test pinning them
+   * to each other. Everything below is unchanged in behaviour from when it was
+   * inlined in `list()`; only the verdict now survives the return.
+   */
+  private async readList(type: string): Promise<ListReadResult> {
     // Short-TTL cache: see the field comment on `listCache` for what is
     // cached and for how long. Every completed read is memoized; a read that
     // lost a loader is memoized as `degraded` and expires ~15× sooner.
     const cached = this.readCachedList(type);
     if (cached) {
-      return cached.items;
+      return cached;
     }
 
     // [#5253] Cold cache, but not necessarily a cold read: join the walk
@@ -898,7 +1007,7 @@ export class MetadataManager implements IMetadataService {
     // Registering the read is what permits it to memoize its own result —
     // `invalidateListCache()` retracts the registration, and both the cache
     // write and the cleanup below act only while the slot is still ours.
-    const shared: Promise<unknown[]> = this.readListUncached(type).then(({ items, degraded }) => {
+    const shared: Promise<ListReadResult> = this.readListUncached(type).then((result) => {
       // [#5184] The degraded verdict of a SHARED read is the degraded verdict
       // of the read: sharing must not become a back door that lands a
       // known-partial answer on the 30s healthy TTL. Every sharer received
@@ -906,9 +1015,9 @@ export class MetadataManager implements IMetadataService {
       // [#5253] Skipped when an invalidation crossed this read, so a write
       // that landed mid-read is never re-buried under the pre-write answer.
       if (this.inflightListReads.get(type) === shared) {
-        this.cacheListResult(type, items, degraded);
+        this.cacheListResult(type, result);
       }
-      return items;
+      return result;
     });
     this.inflightListReads.set(type, shared);
 
@@ -935,7 +1044,7 @@ export class MetadataManager implements IMetadataService {
    * result may be memoized depends on what happened to the read's registration
    * while it ran, which only `list()` can see.
    */
-  private async readListUncached(type: string): Promise<{ items: unknown[]; degraded: boolean }> {
+  private async readListUncached(type: string): Promise<ListReadResult> {
     const items = new Map<string, unknown>();
 
     // From in-memory registry
@@ -950,7 +1059,14 @@ export class MetadataManager implements IMetadataService {
     // particular read lost a loader, so the memoized answer carries the fact
     // that it is known-partial instead of being indistinguishable from a
     // complete one.
+    // [#6504] `errors` records WHICH loaders were lost and why. The messages
+    // were already being produced here and handed only to the logger — which
+    // speaks once per outage episode, so a consumer arriving mid-outage finds
+    // nothing to read. Collected per read (not once per episode) because this
+    // describes THIS answer, and it is what {@link listDiagnosed} reports
+    // alongside the set.
     let degraded = false;
+    const errors: string[] = [];
     for (const loader of this.loaders.values()) {
       try {
         const loaderItems = await loader.loadMany(type);
@@ -963,11 +1079,12 @@ export class MetadataManager implements IMetadataService {
         this.reportLoaderReadRecovered(loader.contract.name);
       } catch (e) {
         degraded = true;
+        errors.push(`${loader.contract.name}: ${e instanceof Error ? e.message : String(e)}`);
         this.reportLoaderReadFailure(loader.contract.name, type, e);
       }
     }
 
-    return { items: Array.from(items.values()), degraded };
+    return { items: Array.from(items.values()), degraded, errors };
   }
 
   /**
@@ -1039,9 +1156,14 @@ export class MetadataManager implements IMetadataService {
    * one thing this cache used to throw away. A result assembled while a loader
    * was unreadable is stored, but stored *as* what it is, so it expires on the
    * degraded TTL and any reader can tell it apart from a complete answer.
+   *
+   * [#6504] Takes the whole read result rather than its parts for the same
+   * reason: a signature that spreads the verdict across positional arguments is
+   * one a later caller can quietly fill with `false`, which is how the verdict
+   * was lost on the way out in the first place.
    */
-  private cacheListResult(type: string, items: unknown[], degraded: boolean): void {
-    this.listCache.set(type, { ts: Date.now(), items, degraded });
+  private cacheListResult(type: string, result: ListReadResult): void {
+    this.listCache.set(type, { ts: Date.now(), ...result });
   }
 
   /**
@@ -1758,14 +1880,43 @@ export class MetadataManager implements IMetadataService {
       }
     }
 
+    // [#7559] ADR-0112 — both refusals below carry a DECLARED `code` + `status`.
+    // They are the ordinary answers to an ordinary request (revert a package id
+    // that this environment has nothing for, or has never published), and a
+    // route that cannot serve the request must answer a declared 4xx.
+    //
+    // This is the WHOLE cause of the 500 the QA run saw from
+    // `POST /packages/:id/revert`, measured rather than assumed: that route's
+    // handler already wraps its entire body in one
+    // `try { … } catch (e) { errorFromThrown(e, 500) }`, and `errorFromThrown`
+    // reads `status` / `code` off the error — falling back to 500 only when it
+    // finds neither, which is exactly what a bare `Error` offers. Nothing was
+    // wrong with the route; the thrown shape was. (The first reading of #7559
+    // was that the route needed its own `catch`; reverse verification showed
+    // that change was inert, so it is not in this fix.)
+    //
+    // Both codes come from the ADR-0112 STANDARD catalog rather than the
+    // extension ledger: the ledger's own rule is that a generic condition (not
+    // found / conflict) uses the standard catalog instead of registering a
+    // synonym.
     if (packageItems.length === 0) {
-      throw new Error(`No metadata items found for package '${packageId}'`);
+      const err = new Error(
+        `No metadata items found for package '${packageId}'`,
+      ) as Error & { code?: string; status?: number };
+      err.code = 'RESOURCE_NOT_FOUND';
+      err.status = 404;
+      throw err;
     }
 
     // Check that at least one item has a published snapshot
     const hasPublished = packageItems.some(item => item.data.publishedDefinition !== undefined);
     if (!hasPublished) {
-      throw new Error(`Package '${packageId}' has never been published`);
+      const err = new Error(
+        `Package '${packageId}' has never been published`,
+      ) as Error & { code?: string; status?: number };
+      err.code = 'RESOURCE_CONFLICT';
+      err.status = 409;
+      throw err;
     }
 
     for (const item of packageItems) {

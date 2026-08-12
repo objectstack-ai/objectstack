@@ -18,9 +18,9 @@
  *
  *   repo   objectstack-ai/objectui
  *   path   packages/i18n/src/pickLocalized.ts
- *   rev    origin/main 50fa3766ebb2ebf2ec78c5d13b1d627e6a91696f
- *   blob   9e5d92ae2efe9be62d4d010cb0a26e598211f3ec
- *   last touched by objectui#3278 (2026-08-03)
+ *   rev    origin/main d8d0d665dceba53dada4994f1eeef9f83bf1cf91
+ *   blob   30fcb0a86343b9b937432a1b2ea89e0a78321f46
+ *   last touched by objectui PR #4359 / objectui#3907 (2026-08-11)
  *
  * Copied rather than imported because `@objectstack/spec` must not take a
  * workspace dependency on objectui — spec sits UNDER objectui in the dependency
@@ -59,19 +59,26 @@ function pickLocalizedReference(value: unknown, language: string | undefined | n
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
   if (typeof value === 'object') {
     const o = value as Record<string, unknown>;
+    // Own properties only, and only `string` values, on every limb
+    // (objectui#3907) — see `readReference` below.
+    const readReference = (key: string): string | undefined => {
+      if (!Object.prototype.hasOwnProperty.call(o, key)) return undefined;
+      const entry = o[key];
+      return typeof entry === 'string' ? entry : undefined;
+    };
     const lang = (language || 'en').trim();
     const base = lang.split('-')[0];
     // Runtime language is often a bare base code ('zh') while metadata authors
     // write full BCP-47 tags ('zh-CN') — upgrade to any key sharing the base.
-    const regional = Object.keys(o).find((k) => k.split('-')[0] === base && typeof o[k] === 'string');
+    const regional = Object.keys(o).find((k) => k.split('-')[0] === base && readReference(k) !== undefined);
     const pick =
-      o[lang] ??
-      o[base] ??
-      (regional !== undefined ? o[regional] : undefined) ??
-      o.default ??
-      o.en ??
-      Object.values(o).find((v) => typeof v === 'string');
-    return pick == null ? '' : String(pick);
+      readReference(lang) ??
+      readReference(base) ??
+      (regional !== undefined ? readReference(regional) : undefined) ??
+      readReference('default') ??
+      readReference('en') ??
+      Object.values(o).find((v): v is string => typeof v === 'string');
+    return pick == null ? '' : pick;
   }
   return String(value);
 }
@@ -162,6 +169,107 @@ const PARITY_VECTORS: readonly ParityVector[] = [
   // The miss cases. The reference spells "nothing was picked" as `''`.
   { limb: 'miss empty map', label: {}, locale: 'zh-CN', pick: '' },
   { limb: 'miss absent label', label: undefined, locale: 'zh-CN', pick: '' },
+
+  // Converged as of objectui#3907 (PR objectui#4359) — before that PR these 18
+  // vectors were the ONLY inputs that told the two implementations apart (see
+  // the module doc's "Rule departures" section). Mirrored from objectui's
+  // `plugin-list/src/__tests__/i18nLabel-resolver-parity.test.ts` `CONVERGED`
+  // table, reused here per objectstack#7864 as the sync's acceptance fixture.
+  // A guard makes its limb MISS, not abort — the chain falls through to the
+  // next limb exactly as an absent entry would.
+  {
+    limb: 'converged: locale names an Object.prototype member ⇒ miss, falls through to en',
+    label: { en: 'Sales' },
+    locale: 'constructor',
+    pick: 'Sales',
+  },
+  { limb: 'converged: prototype member "toString" ⇒ miss, falls through to en', label: { en: 'Sales' }, locale: 'toString', pick: 'Sales' },
+  { limb: 'converged: prototype member "valueOf" ⇒ miss, falls through to en', label: { en: 'Sales' }, locale: 'valueOf', pick: 'Sales' },
+  {
+    limb: 'converged: prototype member "hasOwnProperty" ⇒ miss, falls through to en',
+    label: { en: 'Sales' },
+    locale: 'hasOwnProperty',
+    pick: 'Sales',
+  },
+  {
+    limb: 'converged: prototype member "isPrototypeOf" ⇒ miss, falls through to en',
+    label: { en: 'Sales' },
+    locale: 'isPrototypeOf',
+    pick: 'Sales',
+  },
+  {
+    limb: 'converged: prototype member "propertyIsEnumerable" ⇒ miss, falls through to en',
+    label: { en: 'Sales' },
+    locale: 'propertyIsEnumerable',
+    pick: 'Sales',
+  },
+  {
+    limb: 'converged: prototype member "toLocaleString" ⇒ miss, falls through to en',
+    label: { en: 'Sales' },
+    locale: 'toLocaleString',
+    pick: 'Sales',
+  },
+  {
+    limb: 'converged: no `en` either ⇒ falls all the way to the last-resort limb',
+    label: { ja: '営業' },
+    locale: 'constructor',
+    pick: '営業',
+  },
+  { limb: 'converged: empty map + prototype-named locale ⇒ a genuine miss', label: {}, locale: 'constructor', pick: '' },
+  {
+    limb: 'converged: an OWN key really named like a prototype member is still the author\'s key',
+    label: { constructor: 'Ctor', en: 'Sales' },
+    locale: 'constructor',
+    pick: 'Ctor',
+  },
+  {
+    limb: 'converged: non-string value on limb 1 (exact tag) ⇒ miss',
+    label: { 'zh-CN': { nested: 'x' }, en: 'Sales' } as unknown as I18nLabel,
+    locale: 'zh-CN',
+    pick: 'Sales',
+  },
+  {
+    limb: 'converged: non-string value on limb 2 (base) ⇒ miss',
+    label: { zh: { nested: 'x' }, en: 'Sales' } as unknown as I18nLabel,
+    locale: 'zh-CN',
+    pick: 'Sales',
+  },
+  {
+    limb: 'converged: non-string value on limb 4 (default) ⇒ miss',
+    label: { default: { nested: 'x' }, ja: '営業' } as unknown as I18nLabel,
+    locale: 'fr',
+    pick: '営業',
+  },
+  {
+    limb: 'converged: non-string value on limb 5 (en) ⇒ miss',
+    label: { en: { nested: 'x' }, ja: '営業' } as unknown as I18nLabel,
+    locale: 'fr',
+    pick: '営業',
+  },
+  {
+    limb: 'converged: a number value ⇒ miss',
+    label: { en: 42, ja: '営業' } as unknown as I18nLabel,
+    locale: 'fr',
+    pick: '営業',
+  },
+  {
+    limb: 'converged: a null value ⇒ miss',
+    label: { en: null, ja: '営業' } as unknown as I18nLabel,
+    locale: 'fr',
+    pick: '営業',
+  },
+  {
+    limb: 'converged: nothing usable anywhere ⇒ a genuine miss',
+    label: { en: { nested: 'x' } } as unknown as I18nLabel,
+    locale: 'fr',
+    pick: '',
+  },
+  {
+    limb: 'converged: an empty string value still HITS and stops the chain',
+    label: { en: '', 'zh-CN': '销售' },
+    locale: 'en',
+    pick: '',
+  },
 ];
 
 describe('resolveI18nLabel — rule parity with objectui pickLocalized (#6765 / #6761 ruling B)', () => {
@@ -223,47 +331,50 @@ describe('resolveI18nLabel — the producer-facing return shape', () => {
   });
 });
 
-describe('resolveI18nLabel — the two deliberate departures from the reference', () => {
-  // Both are documented on the resolver's module doc. They are pinned here with
-  // BOTH answers so the divergence stays MEASURED: if a later change makes the
-  // two agree again, these tests go red and say so, rather than quietly
-  // becoming decoration.
+describe('resolveI18nLabel — the rule departures converged with objectui#3907; one departure survives', () => {
+  // Before objectui#3907 (landed as objectui PR #4359) this module's rule
+  // documented two DELIBERATE narrowings of the reference. #4359 landed the
+  // same two guards upstream, so the copied reference now answers identically
+  // to `resolveI18nLabel` on both. Pinned here with BOTH sides so the
+  // convergence stays MEASURED: if a later change on either side reopens the
+  // gap, these tests go red and say so, rather than quietly rotting back into
+  // decoration. See `PARITY_VECTORS`' "converged:" rows above for the fuller
+  // 18-vector sweep mirrored from objectui's own parity suite.
 
-  it('reads own properties only — a locale naming an Object.prototype member is a miss', () => {
+  it('reads own properties only, now on BOTH sides — a locale naming an Object.prototype member misses and falls through', () => {
     const label: I18nLabel = { en: 'Owner' };
 
-    // The reference resolves `map['constructor']` up the prototype chain and
-    // renders the function's source text as the label. Filed as objectui#3907.
-    expect(pickLocalizedReference(label, 'constructor')).toContain('function Object');
-
-    // Here it is simply not a key, so the chain continues to `en`. No BCP-47
-    // tag is an `Object.prototype` member, so no in-contract input can tell the
-    // two implementations apart — but on a server the locale can arrive in an
-    // `Accept-Language` header, which is why this one is hardened.
+    // Before objectui#3907 the reference resolved `map['constructor']` up the
+    // prototype chain and rendered the function's source text as the label.
+    // A guard makes its limb MISS; it does not abort — the chain now falls
+    // through to `en` on both sides, converged by objectui PR #4359.
+    expect(pickLocalizedReference(label, 'constructor')).toBe('Owner');
     expect(resolveI18nLabel(label, 'constructor')).toBe('Owner');
     expect(resolveI18nLabel(label, 'toString')).toBe('Owner');
   });
 
-  it('treats a non-string value as absent on EVERY limb, not just limbs 3 and 6', () => {
+  it('treats a non-string value as absent on EVERY limb, now on BOTH sides', () => {
     // Off-spec: `InlineLocaleMapSchema` is `z.record(<tag>, z.string())`, so no
     // in-contract map can hold this. The cast is what makes that explicit.
     const offSpec = { 'zh-CN': { nested: 'x' }, en: 'Owner' } as unknown as I18nLabel;
 
-    // The reference filters by `typeof === 'string'` on limbs 3 and 6 but not
-    // on 1/2/4/5, so an exact-tag hit short-circuits and gets stringified.
-    expect(pickLocalizedReference(offSpec, 'zh-CN')).toBe('[object Object]');
-
-    // PD#12: the producer is wrong; the consumer must not coerce `[object
-    // Object]` onto a screen. The filter is uniform, so the limb is a miss and
-    // the chain continues.
+    // Before objectui#3907 the reference filtered by `typeof === 'string'` on
+    // limbs 3 and 6 but not on 1/2/4/5, so an exact-tag hit short-circuited
+    // and got stringified as `[object Object]`. The filter is uniform on both
+    // sides now, so the limb is a miss and the chain continues to `en`.
+    expect(pickLocalizedReference(offSpec, 'zh-CN')).toBe('Owner');
     expect(resolveI18nLabel(offSpec, 'zh-CN')).toBe('Owner');
   });
 
-  it('refuses an off-contract scalar rather than stringifying it', () => {
-    // `pickLocalized` accepts `unknown` and stringifies numbers/booleans. This
-    // resolver's parameter is the declared `I18nLabel`, so the shapes below are
-    // type errors — the `@ts-expect-error` directives immediately after are the
-    // real guard. This asserts the runtime half: no coerced `'42'` label.
+  it('refuses an off-contract scalar rather than stringifying it — the one departure objectui#3907 did NOT touch', () => {
+    // `pickLocalized` accepts `unknown` and stringifies numbers/booleans
+    // (`pickLocalized(42, 'en')` is `'42'`). This resolver's parameter is the
+    // declared `I18nLabel`, so the shapes below are type errors — the
+    // `@ts-expect-error` directives immediately after are the real guard.
+    // This asserts the runtime half: no coerced `'42'` label. objectui#3907 /
+    // PR objectui#4359 hardened the MAP limbs only; it never touched this
+    // top-level VALUE-parameter case, so it is the one departure that
+    // survives the sync (objectstack#7864).
     // @ts-expect-error a number is not an `I18nLabel` — off-spec input is refused, not coerced
     expect(resolveI18nLabel(42, 'en')).toBeUndefined();
     // @ts-expect-error a boolean is not an `I18nLabel`

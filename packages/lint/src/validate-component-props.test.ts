@@ -170,6 +170,26 @@ describe('validateComponentProps — value verdicts', () => {
   });
 
   /**
+   * #7702 — `PageHeaderProps.title` used to be required while the platform's
+   * own synthesizer (objectui `buildDefaultHeader`) emits every seeded
+   * `page:header` with NO `title` at all: `{ type: 'page:header', recordChrome
+   * }`. `validateComponentProps` (this rule) would therefore flag the
+   * platform's own default header as `component-props-invalid` on every
+   * synthesized record page. Maintainer ruling 2026-08-11: `title` is
+   * optional. This pins the exact synthesized shape as clean — no `invalid`
+   * finding for a missing `title`, ever.
+   */
+  it('does not flag the synthesized page:header (no title) as invalid (#7702)', () => {
+    const findings = validateComponentProps(
+      stackWith([{ type: 'page:header', properties: { recordChrome: true } }]),
+    );
+    expect(
+      invalid(findings).filter((f) => f.path.endsWith('.properties.title')),
+    ).toEqual([]);
+    expect(findings).toEqual([]);
+  });
+
+  /**
    * `ElementDataSourceSchema` is the component-node binding that "overrides
    * page-level object context", and objectui's element renderers read it FIRST
    * (`ds.object ?? props.object`). A component that binds through it has not

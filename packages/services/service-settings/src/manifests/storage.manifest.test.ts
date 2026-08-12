@@ -52,23 +52,32 @@ describe('storageSettingsManifest', () => {
 
 describe('storageTestActionHandler (fallback)', () => {
   it('rejects local adapter without local_root', async () => {
-    const r = await storageTestActionHandler({ values: { adapter: 'local' }, ctx: {} as any });
+    const r = await storageTestActionHandler({
+      namespace: 'storage',
+      actionId: 'test',
+      values: { adapter: 'local' },
+      ctx: {},
+    });
     expect(r.ok).toBe(false);
     expect(r.severity).toBe('error');
   });
 
   it('accepts local adapter when local_root is set', async () => {
     const r = await storageTestActionHandler({
+      namespace: 'storage',
+      actionId: 'test',
       values: { adapter: 'local', local_root: './uploads' },
-      ctx: {} as any,
+      ctx: {},
     });
     expect(r.ok).toBe(true);
   });
 
   it('rejects s3 adapter when credentials are missing', async () => {
     const r = await storageTestActionHandler({
+      namespace: 'storage',
+      actionId: 'test',
       values: { adapter: 's3', s3_bucket: 'x' },
-      ctx: {} as any,
+      ctx: {},
     });
     expect(r.ok).toBe(false);
     expect(r.message).toMatch(/s3_region|s3_access_key_id|s3_secret_access_key/);
@@ -76,6 +85,8 @@ describe('storageTestActionHandler (fallback)', () => {
 
   it('accepts a fully-specified s3 config', async () => {
     const r = await storageTestActionHandler({
+      namespace: 'storage',
+      actionId: 'test',
       values: {
         adapter: 's3',
         s3_bucket: 'b',
@@ -83,7 +94,7 @@ describe('storageTestActionHandler (fallback)', () => {
         s3_access_key_id: 'A',
         s3_secret_access_key: 'S',
       },
-      ctx: {} as any,
+      ctx: {},
     });
     expect(r.ok).toBe(true);
   });

@@ -6,6 +6,12 @@ import stack from '../objectstack.config.js';
 import { PLATFORM_CAPABILITY_NAMES } from '@objectstack/spec/security';
 import { FILE_REFERENCE_TYPES, valueSchemaFor } from '@objectstack/spec/data';
 import { healthFor, sweepProjectHealth, bindShowcaseJobRuntime } from '../src/automation/jobs/index.js';
+import {
+  ADMIN_EMAIL,
+  PHONE_DEMO_USER,
+  AUDITOR_DEMO_USER,
+  PROVISIONED_USER_EMAILS,
+} from '../src/security/demo-personas.js';
 
 /**
  * #4774 / #4888 / #4891 — the showcase's DECLARED-BUT-INERT wirings.
@@ -400,5 +406,129 @@ describe('seed values satisfy the ADR-0104 stored contract (#4774 ④ / #4891)',
     expect(task?.fields?.cover?.type).toBe('image');
     const bound = JSON.stringify((stack as { views?: unknown }).views ?? []).includes('"coverField":"cover"');
     expect(bound, 'no task view binds gallery.coverField to `cover`').toBe(true);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// 5. Seed values — a notify recipient must name a PROVISIONED identity (#7746)
+// ───────────────────────────────────────────────────────────────────────────
+/**
+ * The same bug class as §4, one layer further out: a seed value that is
+ * shape-valid, silently accepted, and wrong only where something downstream
+ * consumes it.
+ *
+ * `RecipientResolver` (ADR-0030 P1) resolves an email-shaped recipient against
+ * `sys_user` and, on a MISS, keeps the string VERBATIM as the recipient id. So
+ * seeding `assignee: 'ada@example.com'` — an address that is no `sys_user` —
+ * does not fail: the stock reassignment demo persists a `sys_inbox_message`
+ * whose `user_id` is that literal text, a row no authenticated user can read.
+ * Nothing in the boot warning block says so; the QA run that found it (#7690)
+ * only noticed because it had to sign up its own personas to test notify.
+ *
+ * The recipient FIELDS are derived from the flows rather than listed here, so a
+ * new notify node pulls its object/field into this guard automatically.
+ */
+describe('seeded notify recipients resolve to a real user (#7746)', () => {
+  const objects = ((stack as { objects?: unknown[] }).objects ?? []) as Array<{ name: string }>;
+  const seeds = ((stack as { data?: unknown[] }).data ?? []) as Array<{
+    object: string;
+    externalId?: string | string[];
+    records?: Array<Record<string, unknown>>;
+  }>;
+  const flows = ((stack as { flows?: unknown[] }).flows ?? []) as Array<Record<string, unknown>>;
+
+  /**
+   * `showcase_invoice.owner` is the ONE recipient field left addressed to
+   * non-users, knowingly. It is the fixture for the ADR-0055
+   * controlled-by-parent isolation demo, where an operator SIGNS UP as
+   * `ada@example.com` to observe the row scoping (and
+   * `showcase-invoice-seed-isolation.dogfood.test.ts` pins those owners). The
+   * personas this guard allows hold no credential, so repointing invoices at
+   * them would delete that demo rather than fix it — see `demo-personas.ts`.
+   * Reported on #7746 as the remaining instance, not silently swept in.
+   */
+  const KNOWN_EXEMPT = new Set(['showcase_invoice.owner']);
+
+  /** `<object>` → the fields its flows hand to a `notify` node as recipients. */
+  function recipientFieldsByObject(): Map<string, Set<string>> {
+    const byObject = new Map<string, Set<string>>();
+    for (const flow of flows) {
+      const nodes = (flow.nodes ?? []) as Array<{ type?: string; config?: Record<string, unknown> }>;
+      const object = nodes.find((n) => n?.type === 'start')?.config?.objectName;
+      if (typeof object !== 'string') continue;
+      // Stringify the WHOLE flow: notify nodes also live nested inside branch
+      // bodies (`showcase_project_escalation`), which a top-level scan misses.
+      const json = JSON.stringify(flow);
+      for (const [, group] of json.matchAll(/"recipients":\s*(\[[^\]]*\]|"[^"]*")/g)) {
+        for (const [, field] of group.matchAll(/\{record\.(\w+)\}/g)) {
+          if (!byObject.has(object)) byObject.set(object, new Set());
+          byObject.get(object)!.add(field);
+        }
+      }
+    }
+    return byObject;
+  }
+
+  it('derives recipient fields from the flows (guard is not vacuous)', () => {
+    const byObject = recipientFieldsByObject();
+    // The stock reassignment demo is the whole reason this guard exists — if it
+    // stops being discovered, the guard has gone blind rather than clean.
+    expect([...(byObject.get('showcase_task') ?? [])]).toContain('assignee');
+    expect([...(byObject.get('showcase_project') ?? [])]).toContain('owner');
+  });
+
+  it('every recipient field is a real field on its object', () => {
+    // A recipient naming a field that does not exist renders empty and notifies
+    // nobody — the inert-wiring shape this file exists to catch.
+    const offenders: string[] = [];
+    for (const [object, fields] of recipientFieldsByObject()) {
+      const declared = objects.find((o) => o.name === object) as
+        | { fields?: Record<string, unknown> }
+        | undefined;
+      if (!declared?.fields) continue;
+      for (const field of fields) {
+        if (!(field in declared.fields)) offenders.push(`${object}.${field}`);
+      }
+    }
+    expect(offenders, `notify recipient names an undeclared field: ${offenders.join(', ')}`).toEqual([]);
+  });
+
+  it('no seeded recipient value is an email the app never provisions', () => {
+    const byObject = recipientFieldsByObject();
+    const allowed = new Set<string>(PROVISIONED_USER_EMAILS);
+    const offenders: string[] = [];
+    for (const seed of seeds) {
+      const fields = byObject.get(seed.object);
+      if (!fields) continue;
+      for (const record of seed.records ?? []) {
+        for (const field of fields) {
+          const value = record[field];
+          // Only email-SHAPED values are judged. A bare id or an unset field is
+          // outside this rule: the resolver only does the lookup that can miss
+          // when the value looks like an address.
+          if (typeof value !== 'string' || !value.includes('@')) continue;
+          if (allowed.has(value)) continue;
+          if (KNOWN_EXEMPT.has(`${seed.object}.${field}`)) continue;
+          const idKey = Array.isArray(seed.externalId) ? seed.externalId[0] : seed.externalId;
+          offenders.push(`${seed.object}.${field}='${value}' ('${String(record[idKey ?? 'name'] ?? '?')}')`);
+        }
+      }
+    }
+    expect(
+      offenders,
+      `seeded notify recipient(s) are not a provisioned sys_user — the inbox row would be unreadable: ${offenders.join(', ')}`,
+    ).toEqual([]);
+  });
+
+  it('every allowed email is one the app actually provisions', () => {
+    // The allow-list is only as good as its agreement with the bootstrap that
+    // creates the rows. Both read the same registry; this pins that they do.
+    expect(PROVISIONED_USER_EMAILS).toContain(ADMIN_EMAIL);
+    expect(PROVISIONED_USER_EMAILS).toContain(PHONE_DEMO_USER.email);
+    expect(PROVISIONED_USER_EMAILS).toContain(AUDITOR_DEMO_USER.email);
+    const provisioner = readFileSync(`${SRC_ROOT}/security/seed-approval-demo.ts`, 'utf8');
+    expect(provisioner, 'the approval demo no longer provisions the persona rows').toContain(
+      'ensureDemoUser',
+    );
   });
 });

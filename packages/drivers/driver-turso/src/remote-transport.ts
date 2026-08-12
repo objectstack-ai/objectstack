@@ -15,6 +15,11 @@
 import type { Client, InStatement, ResultSet } from '@libsql/client';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import { FILTER_OPERATORS, LOGICAL_OPERATORS, RETIRED_FILTER_OPERATORS } from '@objectstack/spec/data';
+// [#7536] `$like`/`$ilike`'s pattern language, from the spec's one definition —
+// the dangling-escape gate and the LIKE→GLOB translation. Shared with
+// `SqlDriver`'s local emitter so this transport and its local twin cannot fork
+// on what a pattern means (the fork `turso-local-remote-*` suites exist to catch).
+import { hasDanglingLikeEscape, likePatternToGlobPattern } from '@objectstack/spec/data';
 // The DECLARED aggregate vocabulary (#5907) — read from the spec so this
 // transport's "the protocol has no such function" refusal cannot drift from what
 // `AggregationNodeSchema.function` admits, nor from the local driver's twin.
@@ -68,6 +73,13 @@ const SUPPORTED_FILTER_OPERATORS = [
   '$startsWith',
   '$endsWith',
   '$icontains',
+  // [#7536] The pattern pair, declared by `StringOperatorSchema` and compiled
+  // here. They must be listed for the same reason `$icontains` is: this
+  // transport's LOCAL twin (`TursoDriver extends SqlDriver`) compiles them, and
+  // a transport that refused what its own local mode answers is the local/remote
+  // fork `turso-local-remote-*` parity suites exist to prevent.
+  '$like',
+  '$ilike',
   '$null',
   '$exists',
 ] as const;
@@ -110,6 +122,12 @@ const NODE_COMBINATORS: ReadonlySet<string> = new Set<string>(LOGICAL_OPERATORS)
 const MISPLACED_FIELD_OPERATORS: ReadonlySet<string> = new Set<string>([
   ...FILTER_OPERATORS,
   '$icontains',
+  // [#7536] Staged out of `FILTER_OPERATORS` exactly like `$icontains`, and
+  // compiled here exactly like it — so a node-position `$like` really is a
+  // MISPLACED field operator, and must get that repair rather than "names
+  // nothing this protocol declares".
+  '$like',
+  '$ilike',
 ]);
 
 /**
@@ -2012,6 +2030,24 @@ export class RemoteTransport {
             case '$endsWith':
               this.pushLike(clauses, args, column, this.serializeComparand(object, key, op, opValue), 'ends');
               break;
+            // [#7536] `$like` / `$ilike` — the caller's OWN pattern, matched
+            // against the whole value. Deliberately NOT `pushLike`: that method
+            // escapes the comparand and wraps it in a shape's wildcards, which
+            // is the rewrite these two operators exist to avoid. They go through
+            // {@link RemoteTransport.pushLikePattern} instead, which shares the
+            // spec's LIKE→GLOB translation with the local twin so both
+            // transports answer one pattern language.
+            case '$like':
+            case '$ilike': {
+              if (typeof opValue !== 'string') {
+                throw this.likePatternComparand(object, key, op, opValue);
+              }
+              if (hasDanglingLikeEscape(opValue)) {
+                throw this.danglingLikeEscape(object, key, op, opValue);
+              }
+              this.pushLikePattern(clauses, args, column, opValue, op === '$ilike');
+              break;
+            }
             // ── Existence ────────────────────────────────────────────────
             // `{ $null: true }` → IS NULL, `{ $null: false }` → IS NOT NULL;
             // `$exists` is its inverse. Both compare the presence of a value,
@@ -2188,6 +2224,77 @@ export class RemoteTransport {
     const predicate = `${lhs} ${negate ? 'NOT GLOB' : 'GLOB'} ${rhs}`;
     clauses.push(nullSafe ? this.nullSafeNegative(column, predicate) : predicate);
     args.push(pattern);
+  }
+
+  /**
+   * [#7536] Append one parameterized `$like` / `$ilike` predicate.
+   *
+   * The sibling of {@link RemoteTransport.pushLike}, and a separate method for
+   * the reason that one's docblock makes unavoidable: `pushLike` ESCAPES the
+   * comparand's metacharacters and WRAPS it in the shape's wildcards, because
+   * its operators take text. `$like` takes a pattern, so both of those steps
+   * are exactly wrong here — the `%` and `_` in it are the caller's wildcards,
+   * and the match is against the whole value, not a substring of it.
+   *
+   * `GLOB` for the same reason the sibling emits it (#6518): libSQL is SQLite,
+   * SQLite's `LIKE` folds ASCII case unconditionally, and `$like` is
+   * case-SENSITIVE by contract. Because GLOB speaks a different pattern
+   * language, the comparand is TRANSLATED rather than escaped —
+   * `likePatternToGlobPattern` is the spec's one definition of that
+   * translation, shared with `SqlDriver`'s local emitter so the two transports
+   * cannot answer one pattern two ways.
+   *
+   * `fold` wraps BOTH operands in `lower()`, the `$ilike` fold: folding only the
+   * pattern would compare a folded needle against a raw column and match just
+   * the rows that were already lower-case. `lower()` on SQLite folds ASCII only,
+   * which IS the contract (#4706 Q1 = A) rather than a limitation.
+   */
+  private pushLikePattern(
+    clauses: string[],
+    args: any[],
+    column: string,
+    pattern: string,
+    fold: boolean,
+  ): void {
+    const lhs = fold ? `lower(${column})` : column;
+    const rhs = fold ? 'lower(?)' : '?';
+    clauses.push(`${lhs} GLOB ${rhs}`);
+    args.push(likePatternToGlobPattern(pattern));
+  }
+
+  /**
+   * [#7536] The error for a `$like` / `$ilike` comparand that is not a string.
+   *
+   * The remote twin of `driver-sql`'s `likePatternComparandError`. Coercion is
+   * worse here than for the text operators: `String({})` is `[object Object]`,
+   * whose `[` OPENS a GLOB character class, so the query would run a pattern the
+   * caller never wrote instead of merely comparing text they never wrote.
+   */
+  private likePatternComparand(object: string, field: string, op: string, value: unknown): Error {
+    return invalidFilterError(
+      `[RemoteTransport] Operator "${op}" on '${object}.${field}' requires a string comparand. ` +
+        `Received ${typeof value} (${preview(value)}). "${op}" takes a PATTERN — "%" matches any ` +
+        `sequence, "_" matches one character, a backslash escapes either — so a non-string ` +
+        `comparand cannot be coerced without inventing wildcards. For a literal substring search ` +
+        `write "$contains", whose comparand IS text. @objectstack/spec StringOperatorSchema ` +
+        `declares ${op} as a string.`,
+    );
+  }
+
+  /**
+   * [#7536] The error for a `$like` / `$ilike` pattern ending in a lone
+   * unpaired backslash — refused because no meaning survives every backend
+   * (Postgres rejects such a pattern outright; GLOB has no escape character at
+   * all). `hasDanglingLikeEscape` is the spec's shared test, so this transport
+   * refuses the same patterns as its local twin and the JS faces.
+   */
+  private danglingLikeEscape(object: string, field: string, op: string, pattern: string): Error {
+    return invalidFilterError(
+      `[RemoteTransport] Operator "${op}" on '${object}.${field}' has a pattern ending in a lone ` +
+        `unpaired backslash (${JSON.stringify(pattern)}). A backslash escapes the character after ` +
+        `it, so a trailing one escapes nothing and the backends disagree about what it means. ` +
+        `Write "\\\\\\\\" to match a literal backslash, or drop the trailing one.`,
+    );
   }
 
   /**

@@ -125,8 +125,11 @@ function makeStubDriver() {
                 if (!v.every((arm) => matchesWhere(row, arm))) return false;
                 continue;
             }
-            // [#4254] `$or` + `$contains` are the shape the engine expands
-            // `search` into (an `$or` of case-insensitive `$contains`, ADR-0061).
+            // [#4254] `$or` + `$icontains` are the shape the engine expands
+            // `search` into (an `$or` of case-insensitive `$icontains`,
+            // ADR-0061). [#7641] It read "`$contains`" until the compiler moved
+            // onto the operator that actually folds — `$contains` is
+            // contractually case-SENSITIVE (#4706 Q2 = A).
             // Without them the driver would MATCH EVERY ROW for any search, and
             // the "searchFields really narrows the row set" controls below would
             // hold vacuously against a search that never filtered anything.
@@ -139,9 +142,12 @@ function makeStubDriver() {
                 if (!(v as any).$in.map(String).includes(String(row[k]))) return false;
                 continue;
             }
-            if (v && typeof v === 'object' && '$contains' in (v as any)) {
+            // [#7641] Keyed on `$icontains` since the compiler emits it. The
+            // body is unchanged — it already folded both sides, which is
+            // `$icontains`' semantics wearing `$contains`' name.
+            if (v && typeof v === 'object' && '$icontains' in (v as any)) {
                 const haystack = String(row[k] ?? '').toLowerCase();
-                if (!haystack.includes(String((v as any).$contains).toLowerCase())) return false;
+                if (!haystack.includes(String((v as any).$icontains).toLowerCase())) return false;
                 continue;
             }
             const expected = (v && typeof v === 'object' && '$eq' in (v as any)) ? (v as any).$eq : v;
@@ -901,13 +907,137 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
         })).rejects.toMatchObject({ status: 400, code: 'INVALID_FIELD', param: 'fields' });
     });
 
-    it('a dotted path is still accepted — the replacement the rejection prescribes', async () => {
-        // The string form covers the readable half of what the object form
-        // claimed: the head segment is validated here, the tail resolved
-        // downstream. The rejection above points at this and at `expand`.
+    it('[#7532] a dotted path is REFUSED — it was never resolved, only widened', async () => {
+        // This test used to assert the OPPOSITE ("a dotted path is still
+        // accepted — the replacement the rejection prescribes"), on the
+        // reasoning that the head segment is validated here and the tail
+        // resolved downstream. The tail is resolved NOWHERE: measured on a real
+        // `SqlDriver` (better-sqlite3), a dotted projection comes back
+        // byte-identical to no projection at all, because the path reaches the
+        // driver as a column name, matches none, and the #3821 ladder retries
+        // `select('*')`. What this test protected was therefore not a narrower
+        // projection with a resolved relation — it was EVERY field.
+        //
+        // The shape rejection above no longer points here; it points at
+        // `expand` alone, and its hint was corrected to match.
         await expect(protocol.findData({
             object: 'showcase_task', query: { select: 'parent_id.title' },
-        })).resolves.toBeDefined();
+        })).rejects.toMatchObject({ status: 400, code: 'INVALID_FIELD', param: 'select' });
+    });
+
+    // ─────────────────────────────────────────────────────────────
+    // [#7532] DOTTED PROJECTION — the leg #4226's head-segment check
+    // did not cover. Controls first, then the rejections.
+    // ─────────────────────────────────────────────────────────────
+
+    // GUARD (green before and after): the plain spelling still narrows, and
+    // narrows to EXACTLY these keys. An over-return defect passes any assertion
+    // written as "does not contain X", so the whole point of this axis has to
+    // be pinned as an equality on the key SET or it pins nothing.
+    it('[#7532 GUARD] a plain projection still narrows to exactly the named columns', async () => {
+        const r: any = await protocol.findData({
+            object: 'showcase_task', query: { fields: ['title', 'status'] },
+        });
+        expect(Object.keys(r.records[0]).sort()).toEqual(['status', 'title']);
+    });
+
+    it('[#7532 GUARD] the same plain control through the GET door', async () => {
+        const r: any = await protocol.findData({
+            object: 'showcase_task', query: { $select: 'title,status' },
+        });
+        expect(Object.keys(r.records[0]).sort()).toEqual(['status', 'title']);
+    });
+
+    // GUARD: #4226's own verdict is untouched — an unknown PLAIN column is
+    // still the 400 it has been since that card. If this ever goes red the
+    // change below stopped being additive.
+    it('[#7532 GUARD] an unknown plain column is still refused (#4226 intact)', async () => {
+        await expect(protocol.findData({
+            object: 'showcase_task', query: { fields: ['no_such_field'] },
+        })).rejects.toMatchObject({ status: 400, code: 'INVALID_FIELD', field: 'no_such_field' });
+    });
+
+    // BOTH DOORS. The card measured `POST /query` body `fields` and
+    // `GET ?$select=` widening identically; both fold into `fields` through
+    // `WIRE_QUERY_ALIAS_SLOTS` before the gate, and both are pinned here so a
+    // future change that closes one and not the other cannot pass.
+    it.each([
+        ['POST /query body fields', { fields: ['title', 'project_id.name'] }],
+        ['GET ?$select=', { $select: 'title,project_id.name' }],
+        ['GET ?select=', { select: 'title,project_id.name' }],
+        ['fields as a comma string', { fields: 'title,project_id.name' }],
+    ])('a dotted projection is refused, not answered with every field — %s', async (_label, query) => {
+        await expect(protocol.findData({ object: 'showcase_task', query }))
+            .rejects.toMatchObject({
+                status: 400,
+                code: 'INVALID_FIELD',
+                field: 'project_id.name',
+                object: 'showcase_task',
+            });
+    });
+
+    it('a projection that is ONLY a dotted path is refused too', async () => {
+        // The card's worst shape: every entry unresolvable, so the projection
+        // emptied and fell all the way back to `*`.
+        await expect(protocol.findData({
+            object: 'showcase_task', query: { fields: ['project_id.name'] },
+        })).rejects.toMatchObject({ status: 400, code: 'INVALID_FIELD', field: 'project_id.name' });
+    });
+
+    it('the refusal names the relationship it tried to cross and sends the caller to `expand`', async () => {
+        // A refusal that does not say where to go next is how #6924 described
+        // the SORT axis' dead end. `expand` is the sanctioned door for related
+        // data on this axis, so the message must name it.
+        await expect(protocol.findData({
+            object: 'showcase_task', query: { fields: ['project_id.name'] },
+        })).rejects.toThrow(/relationship 'project_id'.*expand/s);
+    });
+
+    it('a dotted path whose head is NOT a relationship gets the other message', async () => {
+        // `title` is a real column, so this clears the unknown check — but it
+        // is text, not a reference, so "follows the relationship" would be a
+        // lie and `expand` would be the wrong prescription.
+        await expect(protocol.findData({
+            object: 'showcase_task', query: { fields: ['title.something'] },
+        })).rejects.toMatchObject({
+            status: 400, code: 'INVALID_FIELD', field: 'title.something',
+        });
+        await expect(protocol.findData({
+            object: 'showcase_task', query: { fields: ['title.something'] },
+        })).rejects.toThrow(/dotted path.*whole columns/s);
+    });
+
+    // GUARD: precedence. An UNKNOWN head is still reported as the unknown-name
+    // verdict (with its did-you-mean), not as the dotted one — the same
+    // `unknown` > `dotted` order the sort axis applies. Green before and after:
+    // this shape was already a 400, and this pins that the new branch did not
+    // steal it.
+    it('[#7532 GUARD] an unknown HEAD is still the unknown-field verdict, not the dotted one', async () => {
+        await expect(protocol.findData({
+            object: 'showcase_task', query: { fields: ['no_such.name'] },
+        })).rejects.toMatchObject({
+            status: 400, code: 'INVALID_FIELD', field: 'no_such.name',
+        });
+        await expect(protocol.findData({
+            object: 'showcase_task', query: { fields: ['no_such.name'] },
+        })).rejects.toThrow(/Unknown field/);
+    });
+
+    // GUARD: the door the refusal points at actually works. A rejection that
+    // prescribes `expand` is only honest if `expand` delivers the related
+    // column — otherwise this card just closed the last route to it.
+    it('[#7532 GUARD] `expand` still delivers the related record the refusal prescribes', async () => {
+        // Exactly what a caller following the refusal writes: keep the
+        // reference COLUMN in the projection and expand it. Projecting it away
+        // (`fields: ['title']` alone) leaves expansion nothing to resolve — the
+        // relation is carried by the foreign key, so a narrowed projection must
+        // retain it. Measured while writing this test, and worth pinning: it is
+        // the one sharp edge in the remedy this card now prescribes.
+        const r: any = await protocol.findData({
+            object: 'showcase_task', query: { fields: ['title', 'project_id'], expand: 'project_id' },
+        });
+        expect(Object.keys(r.records[0]).sort()).toEqual(['project_id', 'title']);
+        expect(r.records[0].project_id).toMatchObject({ id: 'p1', name: 'Apollo' });
     });
 
     it('the system columns the registry injected still project', async () => {

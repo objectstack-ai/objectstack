@@ -735,7 +735,24 @@ enforce-or-remove): authoring it is now a parse error rather than a silent no-op
 
 **Constraint Violations:**
 Database constraint failures are surfaced as structured errors. For example, a
-unique-constraint violation returns HTTP 409:
+unique-constraint violation returns HTTP 409, naming the conflicting field when
+the database determinably reports one:
+
+```json
+{
+  "error": "A record with this email already exists",
+  "code": "UNIQUE_VIOLATION",
+  "field": "email",
+  "object": "account"
+}
+```
+
+<Callout type="info">
+`field` is **best-effort and optional**. It is present only when the driver's
+error determinably names a *column*; when it names an index instead (MySQL's
+`for key 'idx_email_unique'` always does), when the constraint is a **composite**
+key, or when the message cannot be parsed, the response omits `field` entirely
+and falls back to the unnamed sentence:
 
 ```json
 {
@@ -744,6 +761,13 @@ unique-constraint violation returns HTTP 409:
   "object": "account"
 }
 ```
+
+That degradation is deliberate — a wrong field name would send the user to
+correct an input that was never the problem. **Key on `code`, not on the
+message**, and treat `field` as an enhancement: it is present when the platform
+can prove it, absent when it cannot, and never guessed. The response body never
+echoes the driver's own text, the offending value, or the index name.
+</Callout>
 
 Cascade behavior on delete (cascade / restrict / set-null) is governed by each
 relationship field's configuration in the object schema, enforced by the
@@ -761,7 +785,7 @@ POST /api/v1/batch
 ```
 
 The typed SDK surface for this route is
-[`client.data.batchTransaction(operations)`](/docs/api/client-sdk#clientdata--crud-operations).
+[`client.data.batchTransaction(operations)`](/docs/api/client-sdk#clientdata--crud--batch).
 
 Each operation specifies an `action` (`create`, `update`, or `delete`), the
 target `object`, and the relevant `data` / `id`. A field value of

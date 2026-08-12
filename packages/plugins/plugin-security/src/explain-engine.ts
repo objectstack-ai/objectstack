@@ -174,8 +174,17 @@ export interface ExplainEngineDeps {
     object: string,
     fieldRequiredPermissions: Record<string, string[]>,
   ) => Record<string, { readable?: boolean; editable?: boolean }>;
-  /** Configured additive baseline set name (default member_default), for attribution. */
-  fallbackPermissionSet: string | null;
+  /**
+   * Configured additive baseline set NAMES (default `['member_default']`), for
+   * attribution.
+   *
+   * [#7555] A list, not a name: the baseline is the app-declared set COMPOSED
+   * with the platform's `member_default`, so a report that attributed only one
+   * of them would label the other "resolved" — the vaguest bucket `viaOf` has,
+   * on the grant most likely to be the answer to "why can this member read
+   * anything at all".
+   */
+  baselinePermissionSets: string[];
 
   // ── [C2 / ADR-0095] Record-grained deps. All OPTIONAL: absent → the engine
   // stays object-level and byte-compatible. Present → the sharing / rls / owd /
@@ -866,7 +875,7 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
   }
   const positions: string[] = context?.positions ?? [];
   const viaOf = (name: string): string => {
-    if (name === deps.fallbackPermissionSet) return 'additive baseline (ADR-0090 D5)';
+    if (deps.baselinePermissionSets.includes(name)) return 'additive baseline (ADR-0090 D5)';
     if (positions.includes(name)) return `position:${name}`;
     if ((context?.permissions ?? []).includes(name)) return 'direct grant';
     return 'resolved';

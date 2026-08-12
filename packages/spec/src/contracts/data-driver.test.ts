@@ -256,10 +256,17 @@ describe('IDataDriver', () => {
       // fix than it delivers: `where` is `FilterCondition`, whose index
       // signature is `[key: string]: any` because ANY field name is a legal key.
       // An operator the dialect does not have is therefore still not a type
-      // error — `$like` (cloud#1030) reaches the runtime filter compiler and is
-      // rejected there, not here. Removing the cast does not close that door;
-      // only a closed operator vocabulary would, which is a separate change.
-      const unknownOperator: DriverQuery = { where: { name: { $like: 'acme%' } } };
+      // error — it reaches the runtime filter compiler and is rejected there,
+      // not here. Removing the cast does not close that door; only a closed
+      // operator vocabulary would, which is a separate change.
+      //
+      // [#7536] The exemplar was `$like` (the operator cloud#1030 measured
+      // reaching the runtime). It is a DECLARED operator now, so it no longer
+      // illustrates "an operator the dialect does not have" — the point stands,
+      // the example had to move to a spelling that is still undeclared. The
+      // history is untouched: `$like` is what cloud#1030 caught, back when it
+      // was not in the protocol.
+      const unknownOperator: DriverQuery = { where: { name: { $sounds_like: 'acme%' } } };
       expect(unknownOperator.where).toBeTruthy();
     });
   });

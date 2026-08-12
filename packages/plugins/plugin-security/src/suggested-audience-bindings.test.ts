@@ -101,13 +101,98 @@ describe('syncAudienceBindingSuggestions (ADR-0090 D5/D9)', () => {
     expect(ql.tables.sys_audience_binding_suggestion).toHaveLength(1);
   });
 
-  it('skips a set that is already bound to the anchor (e.g. the boot baseline)', async () => {
+  // [#7677] The boot baseline auto-bind (security-plugin) runs BEFORE the first
+  // sync, so on stock every app-declared `isDefault` set is already bound by the
+  // time this reconciler first sees it. Skipping those left the whole surface
+  // empty on stock — the declaration was only ever surfaced after an admin
+  // deleted the binding by hand. It is now recorded in the state it is actually
+  // in: confirmed (observed), never pending — a bound declaration is not
+  // awaiting a decision.
+  it('records an already-bound set as confirmed/observed (the boot baseline) rather than skipping it', async () => {
     const ql = makeQl([CRM_PACKAGE]);
     ql.tables.sys_permission_set.push({ id: 'ps_1', name: 'crm_readonly', package_id: 'com.example.crm' });
     ql.tables.sys_position_permission_set.push({ id: 'pps_1', position_id: 'pos_everyone', permission_set_id: 'ps_1' });
+
     const out = await syncAudienceBindingSuggestions(ql);
+
+    expect(out.created).toBe(1);
+    const rows = ql.tables.sys_audience_binding_suggestion;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      package_id: 'com.example.crm',
+      permission_set_name: 'crm_readonly',
+      anchor: 'everyone',
+      status: 'confirmed',
+    });
+    // Observed, NOT resolved through the prompt — the object schema defines an
+    // empty `resolved_by` on a confirmed row as exactly that.
+    expect(rows[0].resolved_by).toBeUndefined();
+    expect(rows[0].resolved_at).toBeTruthy();
+  });
+
+  it('is idempotent for an already-bound set — a second sync creates nothing and does not duplicate', async () => {
+    const ql = makeQl([CRM_PACKAGE]);
+    ql.tables.sys_permission_set.push({ id: 'ps_1', name: 'crm_readonly', package_id: 'com.example.crm' });
+    ql.tables.sys_position_permission_set.push({ id: 'pps_1', position_id: 'pos_everyone', permission_set_id: 'ps_1' });
+    await syncAudienceBindingSuggestions(ql);
+
+    const out2 = await syncAudienceBindingSuggestions(ql);
+
+    expect(out2.created).toBe(0);
+    expect(out2.confirmedObserved).toBe(0);
+    expect(out2.pruned).toBe(0);
+    expect(ql.tables.sys_audience_binding_suggestion).toHaveLength(1);
+    expect(ql.tables.sys_audience_binding_suggestion[0].status).toBe('confirmed');
+  });
+
+  it('surfaces the stock isDefault declaration through the list endpoint (#7677)', async () => {
+    // Stock: the app's isDefault set exists AND the boot auto-bind already
+    // bound it to `everyone`. The list must not be empty.
+    const ql = makeQl([CRM_PACKAGE]);
+    ql.tables.sys_permission_set.push({ id: 'ps_1', name: 'crm_readonly', package_id: 'com.example.crm' });
+    ql.tables.sys_position_permission_set.push({ id: 'pps_1', position_id: 'pos_everyone', permission_set_id: 'ps_1' });
+    const deps = makeDeps(ql);
+
+    const { suggestions, synced } = await listAudienceBindingSuggestions(deps, ADMIN_CTX, {});
+
+    expect(synced.created).toBe(1);
+    expect(suggestions).toHaveLength(1);
+    expect(suggestions[0]).toMatchObject({
+      permission_set_name: 'crm_readonly',
+      anchor: 'everyone',
+      status: 'confirmed',
+    });
+
+    // Second call: nothing created, no duplicate row.
+    const again = await listAudienceBindingSuggestions(deps, ADMIN_CTX, {});
+    expect(again.synced.created).toBe(0);
+    expect(again.suggestions).toHaveLength(1);
+
+    // The console panel lists `status=pending` as the actionable prompt set —
+    // a satisfied declaration must not appear there (never nag).
+    const prompts = await listAudienceBindingSuggestions(deps, ADMIN_CTX, { status: 'pending' });
+    expect(prompts.suggestions).toHaveLength(0);
+  });
+
+  it('still creates a PENDING row when the declaration is unbound (the discriminating step)', async () => {
+    // The card's discriminator: with no binding row, the declaration surfaces
+    // as an actionable PENDING suggestion, and it is confirmable end to end.
+    const ql = makeQl([CRM_PACKAGE]);
+    ql.tables.sys_permission_set.push({ id: 'ps_1', name: 'crm_readonly', package_id: 'com.example.crm' });
+    const deps = makeDeps(ql);
+
+    const { suggestions, synced } = await listAudienceBindingSuggestions(deps, ADMIN_CTX, {});
+    expect(synced.created).toBe(1);
+    expect(suggestions[0].status).toBe('pending');
+
+    // …and the pending→confirmed (observed) transition still fires when the
+    // binding is observed again.
+    ql.tables.sys_position_permission_set.push({ id: 'pps_1', position_id: 'pos_everyone', permission_set_id: 'ps_1' });
+    const out = await syncAudienceBindingSuggestions(ql);
+    expect(out.confirmedObserved).toBe(1);
     expect(out.created).toBe(0);
-    expect(ql.tables.sys_audience_binding_suggestion).toHaveLength(0);
+    expect(ql.tables.sys_audience_binding_suggestion).toHaveLength(1);
+    expect(ql.tables.sys_audience_binding_suggestion[0].status).toBe('confirmed');
   });
 
   it('marks a pending suggestion confirmed when the binding appears out-of-band', async () => {

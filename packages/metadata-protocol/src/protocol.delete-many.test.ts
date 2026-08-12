@@ -129,13 +129,21 @@ describe('deleteManyData — partial-failure semantics (#3897)', () => {
     const res: any = await p.deleteManyData({ object: 'invoice', ids: ['a', 'b', 'c'] } as any);
 
     expect(del).toHaveBeenCalledTimes(2);
-    expect(res).toMatchObject({ success: false, total: 3, succeeded: 1, failed: 1 });
+    // [#7539] The STOP is unchanged — two deletes attempted, `c` untouched.
+    // What changed is the REPORT: `c` is accounted for instead of dropped, and
+    // `failed` counts every non-success row, so the counters reconcile against
+    // `total`. This line used to read `failed: 1` against `total: 3`.
+    expect(res).toMatchObject({ success: false, total: 3, succeeded: 1, failed: 2 });
+    expect(res.results).toHaveLength(3);
+    expect(res.succeeded + res.failed).toBe(res.total);
     expect(res.results[1]).toEqual({
       id: 'b', success: false, index: 1,
       // A thrown error with no code of its own maps to the unclassified-500
       // row form; the message survives verbatim (#4793).
       errors: [{ code: 'INTERNAL_ERROR', message: 'RLS: not visible' }],
     });
+    expect(res.results[2]).toMatchObject({ id: 'c', success: false, index: 2 });
+    expect(res.results[2].errors[0].code).toBe('NOT_ATTEMPTED');
   });
 
   it('continueOnError keeps going and still marks the batch unsuccessful', async () => {

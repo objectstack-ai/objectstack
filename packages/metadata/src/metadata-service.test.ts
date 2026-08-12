@@ -909,16 +909,29 @@ describe('MetadataManager — IMetadataService Contract', () => {
       expect(reverted.metadata).toEqual(reverted.publishedDefinition);
     });
 
-    it('should throw for non-existent package', async () => {
-      await expect(manager.revertPackage('nonexistent')).rejects.toThrow('No metadata items found');
+    // [#7559] Both refusals assert `code` AND `status`, not just the message.
+    // `rejects.toThrow('…')` was green against the naked `Error` these sites
+    // used to throw — the throw was never the defect; the missing ADR-0112
+    // envelope was, and it is what made `POST /packages/:id/revert` answer 500
+    // for two perfectly ordinary refusals.
+    it('should refuse a non-existent package with RESOURCE_NOT_FOUND / 404', async () => {
+      await expect(manager.revertPackage('nonexistent')).rejects.toMatchObject({
+        code: 'RESOURCE_NOT_FOUND',
+        status: 404,
+        message: expect.stringContaining('No metadata items found'),
+      });
     });
 
-    it('should throw for never-published package', async () => {
+    it('should refuse a never-published package with RESOURCE_CONFLICT / 409', async () => {
       await manager.register('object', 'new_item', {
         name: 'new_item', packageId: 'com.acme.new',
       });
 
-      await expect(manager.revertPackage('com.acme.new')).rejects.toThrow('has never been published');
+      await expect(manager.revertPackage('com.acme.new')).rejects.toMatchObject({
+        code: 'RESOURCE_CONFLICT',
+        status: 409,
+        message: expect.stringContaining('has never been published'),
+      });
     });
   });
 

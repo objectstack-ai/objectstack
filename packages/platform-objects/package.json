@@ -72,6 +72,8 @@
     "@objectstack/spec": "workspace:*"
   },
   "devDependencies": {
+    "@objectstack/core": "workspace:*",
+    "@objectstack/formula": "workspace:*",
     "@types/node": "^26.1.2",
     "tsup": "^8.5.1",
     "typescript": "^6.0.3",

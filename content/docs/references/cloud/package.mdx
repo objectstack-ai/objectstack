@@ -91,8 +91,20 @@ Register a new package in the Control Plane
 
 ---
 
+## PackageCategory
+
+Package category for marketplace discovery (e.g. "crm", "hr", "finance", "devtools")
+
+**Type:** `string`
+
 
 ---
+
+## PackageLocale
+
+BCP-47 locale tag
+
+**Type:** `string`
 
 
 ---
@@ -127,6 +139,12 @@ Per-locale overrides for a package listing
 
 
 ---
+
+## PackageTranslations
+
+Locale-keyed overrides; missing keys fall back to base columns
+
+**Type:** `Record<string, { displayName?: string; description?: string; readme?: string; tagline?: string; … }>`
 
 
 ---

@@ -59,6 +59,48 @@
  * both predicates against a mirrored copy of the driver's expressions over a
  * shared value table. A THIRD hand-copy is the thing to refuse: import from one
  * of the two, or add a consumer to that test.
+ *
+ * ## ⚠️ [#7598] What the mirror does NOT cover: a position no gate ever reached
+ *
+ * `{ $field: 'col' }` is the shape the two predicates above are most often
+ * assumed to handle, and they do not — not because they drifted, but because
+ * they are only ASKED about two of the positions a comparand can sit in. Both
+ * still classify a reference object exactly as `driver-sql`'s twins do (an
+ * object is neither bindable nor renderable), and both doors call them for the
+ * LIKE family and for `$in`/`$nin`/`$between` MEMBERS only. The whole comparand
+ * of a scalar comparison — `{ amount: { $gt: { $field: 'budget' } } }` — was
+ * asked of neither, so it was BOUND: measured on `origin/main` (`5823d593d`),
+ * the read-scope door compiled `"t"."amount" > ?` with the reference OBJECT in
+ * the bind list and the analytics `where` door compiled the same predicate with
+ * the JSON TEXT `{"$field":"budget"}`. Nothing refused, nothing logged, and the
+ * predicate compares a column against a value no row can hold.
+ *
+ * That is why this file gained a THIRD question — {@link isFieldReference} —
+ * rather than a widened answer to the first two: the defect was never a
+ * misclassification, so tightening `isBindableComparand` would have changed
+ * cells that were already right (and broken the mirror) while leaving the
+ * unasked position unasked.
+ *
+ * ## …and what the answer to that question is now — maintainer ruling 2026-08-12
+ *
+ * #7694 stopped the bind by REFUSING the shape on both doors, as the shipped
+ * interim while the routing question sat with the maintainer. The ruling (Q1 =
+ * B) replaced that with routing: `NativeSQLStrategy.canHandle` DECLINES a query
+ * whose `where` or read scope carries a scalar reference, the query falls
+ * through to the ObjectQL/engine path, and `driver-sql` compiles the comparison
+ * under the four #5222 rulings using the `initObjects` metadata it owns. The
+ * capability is therefore AVAILABLE on the analytics face, and the four security
+ * rulings live in exactly one place — the option-A alternative (a
+ * `StrategyContext` enumeration hook plus a second copy of those rulings here)
+ * was rejected precisely because a guard that exists twice is a guard that will
+ * disagree with itself.
+ *
+ * What this file contributes to that is {@link findCrossFieldComparand}, the
+ * routing predicate, alongside the two refusal sentences that survive it:
+ * {@link fieldReferenceComparandMessage} for the `/analytics/sql` echo, which
+ * cannot honestly RENDER a predicate it does not emit, and
+ * {@link fieldReferenceBetweenBoundMessage} for a `$between` endpoint, which no
+ * backend serves and which #7596 removed from the spec.
  */
 
 /**
@@ -102,6 +144,131 @@ export function isRenderableTextComparand(value: unknown): boolean {
 }
 
 /**
+ * [#7598] Is this comparand a `{ $field: 'col' }` reference — the shape
+ * `FieldReferenceSchema` declares and `compileCelToFilter` really produces for a
+ * field-to-field comparison in a CEL permission / RLS rule?
+ *
+ * Character for character `driver-sql`'s module-private `fieldReferenceOf`
+ * (`sql-driver.ts`), read as a boolean: a plain object, not an array, carrying a
+ * `$field` whose value is a STRING. Two deliberate consequences of mirroring
+ * that spelling rather than inventing a third:
+ *
+ *   - **Extra keys do not disqualify it.** `{ $field: 'budget', extra: 1 }` IS a
+ *     reference on all three faces, because `@objectstack/formula`'s
+ *     `resolveValue` reads `'$field' in raw` and ignores the remainder. A
+ *     narrower reading here would let the remainder be re-bound as a literal on
+ *     one face and resolved on another — the split this whole file exists to
+ *     close (#5222 measured the same cell driver-side and moved its own test).
+ *   - **A non-string `$field` is NOT one.** `{ $field: 5 }` falls through to the
+ *     ordinary object-comparand account — `driver-sql` binds it as JSON there
+ *     and so does this package (#5234 left `{$eq: {…}}` alone on purpose). That
+ *     cell is untouched here; changing it would be a different ruling, not a
+ *     rider on this one.
+ *
+ * ⚠️ `@objectstack/formula` is the WIDER of the two (`'$field' in raw`, any
+ * value type). The driver's spelling is mirrored because this file's contract is
+ * to be a value-for-value mirror of `driver-sql`, and because the wider reading
+ * would refuse a shape the drivers bind — a new divergence in a change that
+ * exists to remove one.
+ */
+export function isFieldReference(value: unknown): value is { $field: string } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  return typeof (value as Record<string, unknown>).$field === 'string';
+}
+
+/**
+ * [#7598] The comparison operators whose whole comparand `driver-sql` compiles
+ * into a same-table column-to-column comparison since #5222 — and exactly the
+ * positions where a `{ $field }` silently BOUND on this package's two doors.
+ *
+ * A mirror of `driver-sql`'s module-private `CROSS_FIELD_COMPARISON_OPERATORS`,
+ * held by `__tests__/cross-field-reference-refusal.test.ts` rather than by this
+ * comment: that suite drives the SHARED corpus (`CROSS_FIELD_CASES`, exported
+ * from `@objectstack/driver-sql` precisely so a second face can be held to the
+ * same table), so an operator the driver starts or stops compiling shows up as a
+ * corpus case this package answers differently.
+ *
+ * Every OTHER position a reference can occupy was already refused on both doors
+ * and is deliberately left alone, wording included — the LIKE family through
+ * {@link isRenderableTextComparand}, `$in` / `$nin` members through
+ * {@link isBindableComparand}, and a bare `{ field: { $field: … } }` as an
+ * unsupported operator. Those refusals CONVERGE with `driver-sql`, which refuses
+ * the same positions in its own #5222 refusal arm; only this set diverged.
+ */
+export const CROSS_FIELD_COMPARISON_OPERATORS: ReadonlySet<string> = new Set([
+  '$eq', '$ne', '$gt', '$gte', '$lt', '$lte',
+]);
+
+/**
+ * [#7598, maintainer ruling 2026-08-12 Q1 = B] The first `{ $field }` reference
+ * sitting in a position `driver-sql` COMPILES since #5222 — or `null`.
+ *
+ * ## What this is FOR, which is not what the two predicates above are for
+ *
+ * {@link isBindableComparand} and {@link isRenderableTextComparand} answer
+ * "may this ONE value reach that ONE position". This walks a WHOLE filter —
+ * an analytics `where` (already lowered by `lowerAnalyticsWhere`, so the
+ * authored array sugar arrives here as a `FilterCondition`) or an RLS read
+ * scope — and answers a routing question instead: **does serving this query
+ * require the cross-field capability?** `NativeSQLStrategy.canHandle` reads it
+ * to DECLINE, so the query falls through to the ObjectQL/engine path, where
+ * `driver-sql` compiles the comparison and enforces the four #5222 rulings
+ * with the `initObjects` metadata it owns. See that method for the ruling.
+ *
+ * ## Why only the six scalar operators, when the ruling says "carries `$field`"
+ *
+ * Every OTHER position a reference can occupy is refused IDENTICALLY on both
+ * sides of the routing decision — the LIKE family and `$in` / `$nin` members
+ * through this file's two predicates here and through `driver-sql`'s own #5222
+ * refusal arm, a `$between` endpoint through
+ * `filter-normalizer.ts`'s surviving gate, a bare `{ field: { $field: … } }` as
+ * an unsupported operator. Declining for those would swap one refusal for
+ * another refusal a package further away, trading this package's precise
+ * wording for the driver's without changing a single outcome. The scalar
+ * comparands are the whole of what routing BUYS, so they are the whole of what
+ * it tests.
+ *
+ * The walk is structural and total: it descends into `$and` / `$or` arrays,
+ * `$not` operands, nested relation objects and any other nesting, because a
+ * reference three combinators deep still needs the engine path. It is
+ * deliberately blind to whether the referenced column is DECLARED, is the
+ * tenant column, or has a comparable type — those are the four rulings, they
+ * live in exactly one place (`driver-sql`), and re-asking them here is the
+ * duplicated-guard the ruling rejected as option A.
+ */
+export function findCrossFieldComparand(
+  filter: unknown,
+): { op: string; field: string; ref: string } | null {
+  return findIn(filter, '');
+}
+
+function findIn(
+  node: unknown,
+  field: string,
+): { op: string; field: string; ref: string } | null {
+  if (!node || typeof node !== 'object') return null;
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const hit = findIn(child, field);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  if (node instanceof Date || ArrayBuffer.isView(node)) return null;
+  for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+    if (CROSS_FIELD_COMPARISON_OPERATORS.has(key) && isFieldReference(value)) {
+      return { op: key, field, ref: value.$field };
+    }
+    // A `$`-prefixed key is an operator or a combinator, so the FIELD in scope
+    // does not change; anything else names a field (or a nested relation
+    // member) and becomes the new scope. Only used for the message.
+    const hit = findIn(value, key.startsWith('$') ? field : key);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+/**
  * The Filter Protocol operators whose comparand becomes the text of a `LIKE`
  * pattern — the ones every compiler in this package routes through
  * {@link likePattern}.
@@ -110,9 +277,29 @@ export function isRenderableTextComparand(value: unknown): boolean {
  * it: `MONGO_TO_CUBE_OP` has no entry and `read-scope-sql` refuses it by name.
  * (`driver-sql` DOES list it, because the better-auth adapter emits it there for
  * a substring search.)
+ *
+ * [#7693] `$icontains` belongs here for the same reason its four siblings do,
+ * and was missing for the ordinary reason a set goes stale: the operator
+ * arrived AFTER the fence. #6520 added it to `MONGO_TO_CUBE_OP` and gave
+ * `read-scope-sql`'s arm its `assertRenderableText` call, but not this entry —
+ * so the analytics `where` door, this set's only reader, applied NO
+ * comparand-shape gate to it at all. Measured on `origin/main` @ `b54aaab`:
+ *
+ * | door | `{name: {$icontains: {foo: 1}}}` |
+ * |---|---|
+ * | analytics `where` | compiled — `NativeSQLStrategy` bound `'%[object Object]%'` into its `LIKE` |
+ * | `read-scope-sql` | REFUSED (`READ_SCOPE_COMPILE_FAILED` / 500) |
+ *
+ * One operator, two answers inside one package — #5234's defect verbatim, at
+ * the operator its fence was never extended to. The ASCII fold `$icontains`
+ * adds rides ON TOP of the pattern text (`likeShape` maps it to `'contains'`
+ * on both executing compilers), so the question this set asks of a comparand
+ * is the same question and the answer had no business differing. `driver-sql`'s
+ * own `TEXT_PATTERN_OPERATORS` has listed it since #6520; this entry closes the
+ * third and last face, after #7158 closed the objectql `having` one.
  */
 export const TEXT_PATTERN_OPERATORS: ReadonlySet<string> = new Set([
-  '$contains', '$notContains', '$startsWith', '$endsWith',
+  '$contains', '$notContains', '$startsWith', '$endsWith', '$icontains',
 ]);
 
 /** A short, non-throwing rendering of an offending comparand for a message. */
@@ -141,6 +328,114 @@ export function unrenderableTextComparandMessage(op: string, field: string, valu
     `declares it a string (StringOperatorSchema); a string, number, boolean, null or Date is ` +
     `accepted. Refusing rather than stringifying it: String({}) is "[object Object]", so the ` +
     `pattern that ran would be one nobody wrote — and a row storing that literal text matches it.`
+  );
+}
+
+/**
+ * [#7598] What `read-scope-sql` says about a `{ $field }` comparand it cannot
+ * lower — the ONE surviving caller of this sentence after the 2026-08-12 ruling,
+ * and the reason it now reads as a RENDERING boundary rather than a capability
+ * one.
+ *
+ * ## What changed under the ruling, and why the wording had to follow
+ *
+ * Until that ruling this sentence was said by both doors and meant "the platform
+ * will not serve this here". It no longer means that. Q1 = B routes a query
+ * whose `where` or read scope carries a reference to the ObjectQL/engine path,
+ * where `driver-sql` compiles the comparison and enforces the four #5222 rulings
+ * with metadata it owns — so `/analytics/query` SERVES these queries and returns
+ * rows. What is left is `compileScopedFilterToSql`, and the caller that still
+ * reaches it with such a scope is `ObjectQLStrategy.generateSql`: the
+ * `/analytics/sql` ECHO, a display string for an execution it does not perform.
+ * There is no honest rendering of a total column-to-column predicate available
+ * to that renderer, and the ruling's answer for the echo was explicit —
+ * 「一致的响亮答案,不半渲染」 (one consistent, loud answer; no half-rendering).
+ *
+ * So the message tells a reader three things it could not tell them before: the
+ * query itself is fine, the ECHO is what declined, and the rows are one call
+ * away on `/analytics/query`. Telling them instead to "compare against a literal"
+ * would send them to repair a rule that works.
+ *
+ * It still names what USED to happen, because that is the part a reader cannot
+ * reconstruct: the reference was BOUND. The predicate was syntactically perfect,
+ * the query ran, and a column was compared against a value no row can hold — no
+ * error, no log line, an admin's read scope quietly answering the wrong row set.
+ * That is the #3650 / #5234 class, and naming it is what stops the next reader
+ * from "restoring" the old tolerance as a convenience.
+ *
+ * ⛔ `position` is no longer passed by any caller for a `$between` endpoint —
+ * that arm says {@link fieldReferenceBetweenBoundMessage} instead, because it is
+ * refused permanently and everywhere rather than declined by one renderer. The
+ * parameter stays for a caller that needs to locate a reference inside a nested
+ * scope.
+ */
+export function fieldReferenceComparandMessage(
+  op: string,
+  field: string,
+  ref: string,
+  position?: string,
+): string {
+  return (
+    `"${op}" on "${field}"${position ? ` (${position})` : ''} compares against the field reference ` +
+    `{ "$field": "${ref}" }, which this compiler does not lower into a column-to-column ` +
+    `comparison. Refusing rather than binding it: the reference object used to become the BOUND ` +
+    `VALUE of the comparison, so the emitted predicate compared "${field}" against the reference ` +
+    `itself — a value no row can hold — and a read scope built from it answered the wrong row set ` +
+    `with nothing to read. ⚠️ This is NOT the platform declining the rule. @objectstack/spec ` +
+    `declares this shape (FieldReferenceSchema), @objectstack/formula resolves it per record in ` +
+    `memory, driver-sql / driver-sqlite-wasm compile it to a same-table column comparison for the ` +
+    `six scalar operators since #5222, and since the 2026-08-12 ruling on #7598 the analytics ` +
+    `native-SQL strategy DECLINES such a query so it routes to the ObjectQL engine path and runs ` +
+    `there — the driver enforcing declared-only enumeration, the tenant-isolation ban and the ` +
+    `comparison class with metadata it owns. What refuses here is this SQL lowering, whose only ` +
+    `remaining caller is the /analytics/sql display echo; it has no faithful rendering of the ` +
+    `predicate the engine path actually runs, and half-rendering one would describe a query that ` +
+    `returns different rows. Run the query itself (/analytics/query) to get its rows (#7598).`
+  );
+}
+
+/**
+ * [#7598] A `{ $field }` in a `$between` ENDPOINT — a separate sentence from
+ * {@link fieldReferenceComparandMessage} because it is a separate condition,
+ * and #5240's rule cuts the other way here: two shapes with two repairs must
+ * not share one wording.
+ *
+ * The scalar comparands above are SERVED, one path over. A `$between` endpoint
+ * is not served anywhere and is not going to be: `driver-sql` and
+ * `driver-sqlite-wasm` refuse it (`CROSS_FIELD_REFUSALS` pins both endpoints),
+ * the memory evaluator has no reading of it either — `resolveValue` returns an
+ * array unchanged, so the bounds are ordered against the raw reference OBJECT —
+ * and #7596 removed the position from `FieldReferenceSchema` outright under
+ * ADR-0049 declared = enforced (maintainer ruling 2026-08-11). Pointing that
+ * author at the engine path would point them at another refusal.
+ *
+ * It matters most on THIS door, which is why the arm exists here at all: the
+ * analytics `where` lowering splits `$between` into a `gte` leaf and an `lte`
+ * leaf, so an endpoint reference would reach the driver wearing an operator
+ * #5222 COMPILES — succeeding on the analytics face alone, in defiance of both
+ * the driver corpus and the schema. See `filter-normalizer.ts`'s
+ * `assertNoFieldReferenceComparand`.
+ */
+export function fieldReferenceBetweenBoundMessage(
+  op: string,
+  field: string,
+  ref: string,
+  index: number,
+): string {
+  return (
+    `"${op}" on "${field}" has the field reference { "$field": "${ref}" } at index ${index} of its ` +
+    `[min, max] bounds. A range BOUND may not be a field reference on any backend: driver-sql and ` +
+    `driver-sqlite-wasm refuse both endpoints (#5222), @objectstack/formula does not resolve a ` +
+    `reference inside a list either — it orders the bounds against the raw reference object, which ` +
+    `no value compares meaningfully to — and @objectstack/spec no longer declares the position at ` +
+    `all (#7596 removed FieldReferenceSchema from the $between endpoint union, ADR-0049 declared = ` +
+    `enforced). Refusing rather than lowering it: this compiler splits $between into its two ` +
+    `bounds, so the reference would arrive at the driver under a "$gte" / "$lte" the author never ` +
+    `wrote — a position the SQL drivers DO compile — and the range would quietly succeed here ` +
+    `while the identical filter is refused everywhere else. Use a literal bound, or spell the ` +
+    `comparison you meant as a scalar one ({ "${field}": { "$gte": { "$field": "${ref}" } } }), ` +
+    `which IS served — on the ObjectQL engine path, where the driver enforces the #5222 rulings ` +
+    `(#7598).`
   );
 }
 

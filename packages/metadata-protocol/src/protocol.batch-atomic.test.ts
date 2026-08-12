@@ -255,10 +255,19 @@ describe('batchData non-atomic — unchanged (ADR-0119 D4 regression net)', () =
 
         expect(t.engine.transaction).not.toHaveBeenCalled();
         expect(res.succeeded).toBe(1);
-        expect(res.failed).toBe(1);
         expect(res.results[0].success).toBe(true);   // committed, and honestly reported
         expect(res.results[1].success).toBe(false);
-        expect(res.results).toHaveLength(2);          // stops without continueOnError
+        // Still stops without `continueOnError` — two inserts, never three.
+        expect(t.insert).toHaveBeenCalledTimes(2);
+        // [#7539] But the STOP is now reported rather than inferred from a
+        // counter mismatch. This block used to assert `failed: 1` and
+        // `results.length === 2` against `total: 3` — the truncated `results`
+        // array and the `succeeded + failed != total` arithmetic that were the
+        // card's entire symptom.
+        expect(res.failed).toBe(2);
+        expect(res.results).toHaveLength(3);
+        expect(res.succeeded + res.failed).toBe(res.total);
+        expect(res.results[2].errors[0].code).toBe('NOT_ATTEMPTED');
     });
 
     it('atomic: false is best-effort, not a refusal, even on a non-transactional engine', async () => {

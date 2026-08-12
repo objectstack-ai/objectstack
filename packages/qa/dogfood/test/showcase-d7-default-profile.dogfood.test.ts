@@ -24,10 +24,17 @@
 // 403 there too — it held identically either way, so it could not tell "the
 // declared default is in force" from "no default is in force at all", which is
 // the one thing this file exists to tell. The surviving discriminator runs the
-// other way round: name an object ONLY the built-in baseline grants. The same
-// run settles the risk that would have killed that idea — a NAMED fallback set
-// REPLACES `member_default` rather than merging additively on top of it, so
+// other way round: name an object ONLY the built-in baseline grants, so
 // `sys_user_preference` is 200 if and only if the built-in baseline governs.
+//
+// [#7555] The `sys_user_preference=403` in rows 2 and 3 above was the DEFECT,
+// not the contract. Those rows measured a named fallback set DISPLACING
+// `member_default`, and #7555 measured what that costs a real member: all 10
+// built-in Account nav entries served, 7/7 of the objects behind them 403. The
+// baseline now COMPOSES (ADR-0090 D5, "baseline ∪ explicit, always"), so rows 2
+// and 3 read `sys_user_preference=200` and the file's pair is red in both
+// directions still — announcement for the declared half, preference for the
+// platform half.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack from '@objectstack/example-showcase';
@@ -41,9 +48,12 @@ const stackPerms = ((showcaseStack as { permissions?: unknown[] }).permissions ?
 const appDefault = appDefaultPermissionSetName(stackPerms);
 const declaredDefault = stackPerms.find((p) => p?.name === appDefault) as unknown;
 
+const SYS = { isSystem: true } as const;
+
 describe('showcase: app-declared default profile, CLI-wired (ADR-0056 D7)', () => {
   let stack: VerifyStack;
   let memberToken: string;
+  let ql: any;
 
   beforeAll(async () => {
     // The full CLI boot loads stack permission sets into the metadata service, so
@@ -59,6 +69,7 @@ describe('showcase: app-declared default profile, CLI-wired (ADR-0056 D7)', () =
     });
     await stack.signIn();
     memberToken = await stack.signUp('d7-showcase-member@verify.test');
+    ql = await stack.kernel.getServiceAsync('objectql');
   }, 60_000);
 
   afterAll(async () => { await stack?.stop(); });
@@ -72,14 +83,46 @@ describe('showcase: app-declared default profile, CLI-wired (ADR-0056 D7)', () =
     expect(r.status, 'declared default grants announcement read').toBe(200);
   });
 
-  it('and NOT by the built-in member_default baseline (its own explicit grant is absent)', async () => {
+  it('AND by the built-in member_default baseline — the two COMPOSE (#7555)', async () => {
     // `sys_user_preference` is granted by `member_default` and by nothing else
     // here (`default-permission-sets.ts`: allowRead/allowCreate/allowEdit, with a
     // `sys_user_preference_self` RLS carve-out), and `showcase_member_default`
     // names no `sys_*` object at all. So it is 200 exactly when the built-in
     // baseline governs — which is the discrimination `showcase_contact` lost when
     // #5491 removed the wildcard that used to make a denial informative.
+    //
+    // [#7555] The DIRECTION flipped, the discriminator did not. This case used
+    // to demand `not.toBe(200)`, pinning "a NAMED fallback set REPLACES
+    // `member_default`" — the exact defect #7555 reports: every member of an app
+    // that declares a default lost the whole platform floor, so all 10 built-in
+    // Account nav entries were served and 7/7 of the objects behind them 403'd.
+    // ADR-0090 D5 rules the baseline additive ("baseline ∪ explicit, always"),
+    // so the platform set must still govern alongside the declared one, and this
+    // object is still the one that says whether it does.
     const r = await stack.apiAs(memberToken, 'GET', '/data/sys_user_preference');
-    expect(r.status, 'the built-in baseline is REPLACED by the declared default, not merged with it').not.toBe(200);
+    expect(r.status, 'the platform baseline COMPOSES with the declared default, it is not replaced by it').toBe(200);
+  });
+
+  it('and the explain surface tells the same story: BOTH sets are bound to the everyone anchor (#7555)', async () => {
+    // The runtime composing while the anchor carried only the app's set would
+    // make `security/explain` — and the Setup UI reading the same join table —
+    // report a narrower default than every request actually applies. The join
+    // table takes many rows per position; the boot binding writes one per
+    // baseline name.
+    const everyone = await ql.findOne('sys_position', { where: { name: 'everyone' }, context: SYS });
+    expect(everyone?.id, 'everyone anchor seeded').toBeTruthy();
+    const bound: string[] = [];
+    for (const name of ['showcase_member_default', 'member_default']) {
+      const set = await ql.findOne('sys_permission_set', { where: { name }, context: SYS });
+      if (!set?.id) continue;
+      const row = await ql.findOne('sys_position_permission_set', {
+        where: { position_id: everyone.id, permission_set_id: set.id }, context: SYS,
+      });
+      if (row) bound.push(name);
+    }
+    expect(bound, 'everyone ← app baseline AND platform baseline').toEqual([
+      'showcase_member_default',
+      'member_default',
+    ]);
   });
 });

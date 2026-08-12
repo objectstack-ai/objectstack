@@ -346,7 +346,7 @@ describe.skipIf(!sharedMongod)('[#5239] a real mongod returns the identity row s
   });
 
   const ids = async (where: unknown): Promise<string[]> => {
-    const rows = await driver.find('deal', { object: 'deal', where } as never);
+    const rows = await driver.find('deal', { where } as never);
     return (rows as Record<string, unknown>[]).map((r) => String(r.id)).sort();
   };
 

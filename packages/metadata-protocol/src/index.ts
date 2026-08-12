@@ -63,6 +63,13 @@ export type { MetadataDiagnostics } from './metadata-diagnostics.js';
 
 export type { MetadataHostEngine } from './host-engine.js';
 
+// [#7560] ADR-0070's read-only-package rule. The authoring path (`saveMetaItem`
+// → `WRITABLE_PACKAGE_REQUIRED`) and the `/packages` lifecycle gate in
+// `@objectstack/runtime` (`PATCH /:id/disable`, `DELETE /:id`) both ask it, so
+// "which packages are read-only" has ONE definition rather than two that drift.
+export { isWritablePackage, READ_ONLY_PACKAGE_SCOPES } from './package-writability.js';
+export type { PackageWritabilityEngine } from './package-writability.js';
+
 // #4556 — the `sys_metadata_history.recorded_by` sentinel → NULL conversion,
 // as an ADR-0119 D2 migration plan. Run by `os migrate recorded-by`.
 export {

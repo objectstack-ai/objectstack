@@ -276,7 +276,7 @@
       "title": "Every demonstrable flow node type authors in the designer, executes in a run, and surfaces its step in run logs",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -323,7 +323,8 @@
         "approval chain: PATCH a showcase_expense_report to submitted (approval via showcase_expense_signoff); PATCH a showcase_project budget above 100000 to open showcase_budget_approval, then POST /api/v1/approvals/requests/:id/revise so the run parks at the approval_revise node",
         "webhook chain: POST /api/v1/automation/hooks/showcase_inbound_task_webhook/intake with a valid x-objectstack-signature HMAC (secret 'showcase-webhook-secret') to exercise create_record",
         "for EACH variant: GET the owning flow's runs (GET /api/v1/automation/<name>/runs + /runs/:runId) and locate a step whose nodeType equals the variant; record run id, step status, and — for suspending types — the paused-then-resumed transition",
-        "screenshot the Runs panel of one composite run (showcase_project_escalation or showcase_fan_out_notify) showing the container-nested steps"
+        "screenshot the Runs panel of one composite run (showcase_project_escalation or showcase_fan_out_notify) showing the container-nested steps",
+        "unknown-type probe (the late-binding contract, ruled status quo in #7545): POST /api/v1/automation a flow whose one non-start node carries type 'bogus_node' — capture the HTTP status and the server log record the registration emits, then POST /api/v1/automation/<that flow>/trigger and read GET /api/v1/automation/<that flow>/runs/:runId"
       ],
       "acceptance": [
         {
@@ -355,10 +356,16 @@
           "oracle": "api",
           "verify": "spot-check one body step per container kind for parentNodeId + regionKind (deep coverage lives in automation.flow-run-step-nesting)",
           "evidence": "tagged step excerpts"
+        },
+        {
+          "clause": "an UNKNOWN node type is late-bound, not refused — and a run reads that as PASS BY DESIGN (maintainer ruling on #7545, 2026-08-11: registration-time soft-fail on an unknown node type is the intended posture, 'deliberate late binding with a declaration — not tolerance masking an error'). The contract has four parts and ALL FOUR must hold: (1) POST /api/v1/automation with type 'bogus_node' answers 200 and really registers the flow; (2) the registration emits a located WARN whose message carries the load-bearing phrase 'no registered executor or descriptor' and names the offending flow, with unknownTypes + the FULL knownTypes vocabulary in the record's structured meta slot (#6654 — both lists ride meta, never the message text); (3) triggering that flow answers success:false carrying the NO_EXECUTOR-class message \"No executor registered for node type 'bogus_node'\"; (4) the run is recorded status 'failed', with the offending step status 'failure' and error.code 'NO_EXECUTOR'. Rationale, do not re-litigate: ADR-0018 §M1 has registerFlow() soft-validate node types against the live registry ('warn, don't hard-fail') so a flow authored against a currently-absent plugin still registers, and #4771 is the ordering incident that seam protects — the check fires only once sealNodeTypeVocabulary() has closed the vocabulary, and only for an ENABLED flow",
+          "oracle": "api",
+          "verify": "from the unknown-type probe step, cite all four: the 200 + the stored flow read-back; the WARN record (message phrase + meta.unknownTypes + meta.knownTypes); the trigger response success:false + its message; and the run detail status 'failed' with the NO_EXECUTOR step. The 200 at registration is the EXPECTED answer and is never on its own a finding — the finding is any of the other three parts missing",
+          "evidence": "registration status + WARN log record (message and meta) + trigger response + run-detail excerpt"
         }
       ],
       "negative": [
-        "registering a flow with an unregistered node type (e.g. type 'bogus_node') must be REFUSED at registerFlow / POST /api/v1/automation — the type is validated against the live action registry (ADR-0018), and silent acceptance of an inert node is the #1887 failure shape"
+        "the unknown-type probe going SILENT is the FAIL this clause guards — registration answering 200 with no WARN at all, or a WARN that drops the phrase 'no registered executor or descriptor' / omits meta.unknownTypes / omits the full meta.knownTypes vocabulary, is the #1887 silent-inert-node failure shape. So is the run side going quiet: a trigger answering success:true, a run not recorded 'failed', or a failed run whose step carries no NO_EXECUTOR error code. ⛔ The 200 itself is NOT a finding — #7545 ruled the registration-time soft-fail intended (ADR-0018 §M1, #4771); a run reporting FAIL on the 200 alone is misreading this item"
       ],
       "traps": [
         "wrong-panel",
@@ -375,7 +382,10 @@
         "packages/spec/src/automation/approval.zod.ts (APPROVAL_NODE_TYPE, APPROVAL_REVISE_NODE_TYPE)",
         "examples/app-showcase/src/coverage.ts (flowNodeTypes + FLOW_NODE_WAIVERS)",
         "examples/app-showcase/src/automation/flows/index.ts",
-        "packages/runtime/src/route-ledger.ts (GET /automation/actions, POST /automation/:name/trigger, GET /automation/:name/runs)"
+        "packages/runtime/src/route-ledger.ts (GET /automation/actions, POST /automation/:name/trigger, GET /automation/:name/runs)",
+        "docs/adr/0018-unified-node-action-registry.md §M1 (registerFlow() soft-validates node types against the live registry — 'warn, don't hard-fail')",
+        "packages/services/service-automation/src/engine.ts (registerFlow's ADR-0018 §M1 comment + the post-seal warn branch; warnUnknownNodeTypes's message and its unknownTypes/knownTypes meta; the NO_EXECUTOR step error in executeNode)",
+        "#7545 (maintainer ruling 2026-08-11 — status quo upheld: soft-fail at registration is the intended posture, so 200-on-unknown-type is pass-by-design)"
       ],
       "history": [
         {
@@ -389,6 +399,12 @@
           "date": "2026-08-08",
           "change": "pinned enumSource for the variants-freshness ratchet — spec enum drift is caught by the manual check on this item directly",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 3,
+          "date": "2026-08-11",
+          "change": "recorded the #7545 ruling: the unknown-node-type clause demanded a registration-time REFUSAL the platform never promised, so run #7516 read a by-design 200 as a FAIL. The clause now asserts the real four-part late-binding contract (200 + located WARN with unknownTypes/knownTypes in meta + trigger success:false with NO_EXECUTOR + run 'failed') as pass-by-design, and the negative names silence — not the 200 — as the failure shape",
+          "ref": "#7545 (ADR-0018 §M1, #4771; QA run #7516)"
         }
       ],
       "enumSource": {
@@ -501,10 +517,10 @@
     },
     {
       "id": "automation.flow-error-handling",
-      "title": "A failing node inside try_catch is handled (catch region, $error binding); outside it fails the run loudly",
+      "title": "A failing node inside try_catch is handled (catch region, $error binding) and the failed attempt is still recorded; outside it fails the run loudly",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -520,7 +536,7 @@
       "steps": [
         "boot showcase isolated (dogfood §0); sign in as the dev admin",
         "handled case: POST a showcase_task and PATCH status→'done' — showcase_resilient_sync runs, its try-region http node fails against the unroutable host, retries, then the catch region runs",
-        "GET /api/v1/automation/showcase_resilient_sync/runs/:runId — record overall status, the try step's status/error/regionKind, the catch step's status/regionKind, and the run duration",
+        "GET /api/v1/automation/showcase_resilient_sync/runs/:runId — record the overall status, the try_catch container step's own status, EVERY step carrying regionKind='try' (nodeId, status, error, retryAttempt) in log order, the catch step's status/regionKind, and the run duration",
         "re-read the task over /api/v1/data/showcase_task/:id — sync_status and sync_error",
         "unhandled case: POST /api/v1/automation a minimal autolaunched probe flow (start → http POST to the same unroutable URL, NOT wrapped in try_catch → end) in the scratch package; trigger it via POST /api/v1/automation/<probe>/trigger",
         "GET the probe run: overall status and the run-level error",
@@ -529,22 +545,28 @@
       ],
       "acceptance": [
         {
-          "clause": "handled: the run completes (status=completed) — the failure was absorbed by the container, not the run",
+          "clause": "handled: the run completes (status=completed) — the failure was absorbed by the container, not the run — and the try_catch container's OWN step reads status='success'",
           "oracle": "api",
-          "verify": "run detail: status=completed; the http step inside the try region records status=failure with regionKind='try'; the catch-region update_record step records status=success with regionKind='catch'",
+          "verify": "run detail: status=completed; the step whose nodeType is 'try_catch' carries status='success'. ⛔ That 'success' is BY DESIGN and is never on its own a finding: #7546 weighed giving a recovered container a distinct status (a 'recovered' vocabulary, the card's Option C) and did NOT adopt it — the container's contract is 'the error was handled', and the forensic detail lives in the step log underneath it, which is what the next clause asserts",
           "evidence": "run-detail read"
+        },
+        {
+          "clause": "the failed try attempt is RECORDED, not discarded: every attempt of the try region that failed contributes its steps to the same flat run log, tagged parentNodeId=<the try_catch node id> and regionKind='try', with the throwing node's own step carrying status='failure' and a populated error {code,message} — and all of them ordered BEFORE the catch region's steps. An operator reading the run log alone can therefore answer all three of WHAT failed (the error on the failing step), WHICH node threw (that step's nodeId), and HOW MANY attempts ran (the next clause). Maintainer ruling on #7546, 2026-08-11: 'surface the failed try-region's steps … so an operator can see what failed, how many attempts ran, and which node threw', implemented over the existing #1479 childSteps splice with the retry/throw semantics of try_catch unchanged",
+          "oracle": "api",
+          "verify": "in the run detail, the steps carrying regionKind='try' are present and non-empty; the one for the unroutable http node has status='failure' with error.message naming the connection failure; its index in the step array is lower than the catch step's. NOTE the version boundary: this contract begins with #7546 — a run captured against a framework build that predates it will legitimately show NO regionKind='try' step on a caught failure, which is the old behaviour being replaced, not a fresh defect. Record the framework revision with the result",
+          "evidence": "ordered step-log excerpt showing each regionKind='try' failure step and the following regionKind='catch' step"
+        },
+        {
+          "clause": "the retry ladder is countable from the log, not merely inferable from elapsed time: with a retry policy declared, each try attempt's steps carry a zero-based retryAttempt, so the number of distinct retryAttempt values equals maxRetries+1 when every attempt failed",
+          "oracle": "api",
+          "verify": "collect retryAttempt across the regionKind='try' steps: for showcase_resilient_sync (retry.maxRetries=3) expect the four values 0,1,2,3, each with status='failure'. Corroborate — do not substitute — with the duration oracle: the run/step duration is at least the first backoff delay (>= ~1s per backoffMs:1000). The duration alone was this item's only retry evidence before #7546 and was explicitly recorded as a weak oracle; the counter is now the primary one and the duration is the cross-check",
+          "evidence": "retryAttempt values from the run detail + durationMs"
         },
         {
           "clause": "the caught error binds to $error and lands in data: the task carries sync_status='failed' and a non-empty sync_error message",
           "oracle": "api",
           "verify": "task read after the run: sync_status='failed', sync_error interpolated from {$error.message}",
           "evidence": "task read"
-        },
-        {
-          "clause": "the retry policy actually ran before the catch: the failure is not instantaneous",
-          "oracle": "api",
-          "verify": "the run/step duration is at least the first backoff delay (>= ~1s per backoffMs:1000), evidencing at least one retry before the catch — note this oracle's weakness (duration, not a retry counter) in the evidence",
-          "evidence": "durationMs from the run detail"
         },
         {
           "clause": "unhandled: the probe run terminates status=failed with the run-level error populated",
@@ -555,7 +577,7 @@
         {
           "clause": "both failures surface in the designer Runs panel: the failed step marked with its error message, catch-body steps nested under the container",
           "oracle": "screenshot",
-          "verify": "Runs panel screenshots for both runs — the panel renders run/step errors (string run-level, {code,message} step-level) and nests region steps",
+          "verify": "Runs panel screenshots for both runs — the panel renders run/step errors (string run-level, {code,message} step-level) and nests region steps; the handled run's panel now also shows the failed try attempts nested under the container alongside the catch body",
           "evidence": "two Runs panel screenshots"
         },
         {
@@ -567,7 +589,9 @@
       ],
       "negative": [
         "an unhandled node failure that leaves its run status=completed, or leaves the run-level error empty, is a FAIL — a dead outbound call reporting success is the inert-automation failure shape (#1887)",
-        "a catch region that runs when the try did NOT fail is a FAIL of the container semantics — check the catch steps are absent from a successful run"
+        "a catch region that runs when the try did NOT fail is a FAIL of the container semantics — check the catch steps are absent from a successful run",
+        "a caught failure that leaves NO forensic trace is the FAIL this item's core clause guards, and it is the exact shape #7546 fixed: a run log of only [start, <container>(success), <catch step>] — nothing carrying regionKind='try', nothing carrying status='failure' — makes a caught failure indistinguishable from a clean run that merely touched the catch path, so the only evidence of failure is the catch's own side effects. Silence here is a regression of #7546, not a cosmetic gap",
+        "⛔ the try_catch container step reading status='success' after it caught a failure is NOT a finding — #7546 ruled on exactly that and kept it; re-filing it re-litigates a closed decision"
       ],
       "traps": [
         "wrong-panel",
@@ -576,9 +600,13 @@
       "source": [
         "examples/app-showcase/src/automation/flows/index.ts (ResilientSyncFlow, ADR-0031 try/catch/retry; canonical retry keys #4661)",
         "packages/spec/src/automation/control-flow.zod.ts (TryCatchConfigSchema)",
-        "packages/spec/src/automation/execution.zod.ts (ExecutionStatus 'failed'; step status/error; regionKind)",
+        "packages/spec/src/automation/execution.zod.ts (ExecutionStatus 'failed'; step status/error; regionKind; retryAttempt — declared since the schema was written, given its first producer by #7546)",
+        "packages/services/service-automation/src/engine.ts (runRegion's partialSteps sink — the failed attempt's tagged steps handed to the caller before the throw propagates; StepLogEntry.retryAttempt)",
+        "packages/services/service-automation/src/builtin/try-catch-node.ts (failed attempts accumulated across the retry ladder and folded into childSteps ahead of the surviving region's steps)",
+        "packages/services/service-automation/src/builtin/try-catch-failed-attempt-steps.test.ts (the #7546 unit pins, including 'a recovered container still reports success')",
         "objectui packages/app-shell/src/views/metadata-admin/previews/FlowRunsPanel.tsx (run-level string error vs step-level {code,message})",
-        "packages/runtime/src/route-ledger.ts (POST /automation — automation.create)"
+        "packages/runtime/src/route-ledger.ts (POST /automation — automation.create)",
+        "#7546 (maintainer ruling 2026-08-11 — surface the failed try-region's steps; Option C's 'recovered' container status NOT adopted)"
       ],
       "history": [
         {
@@ -586,6 +614,12 @@
           "date": "2026-08-07",
           "change": "initial — splits handled (try_catch) vs unhandled failure into one contrast item with API + panel + log oracles",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-11",
+          "change": "recorded the #7546 ruling. The handled-case clause asserted that the try-region's failing step appears with regionKind='try' — a contract the engine had never promised, so QA run #7516 read a by-design silence as a FAIL. Rather than weaken the clause to match the engine, the ruling implemented it: failed try attempts are now surfaced. The clause set is re-cut accordingly — container 'success' pinned as by-design (Option C's 'recovered' status was considered and rejected), the failed-attempt steps promoted to their own clause with the ordering requirement, and the retry evidence upgraded from the weak duration oracle to a retryAttempt count with duration as cross-check. The negative now names post-#7546 silence as the regression shape and forbids re-filing the container's 'success'",
+          "ref": "#7546 (ruling 2026-08-11; QA run #7516; #1479 splice plumbing)"
         }
       ]
     },

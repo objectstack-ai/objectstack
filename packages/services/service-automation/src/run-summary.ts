@@ -22,6 +22,25 @@ import type { StepLogEntry } from './engine.js';
  * metrics, so nothing is double-counted. Per-node entries fold across
  * executions: a body node that ran 30 times is ONE entry with `runs: 30`.
  *
+ * #7546 added a fourth source of body steps — the FAILED attempts of a
+ * `try_catch` try region, which used to be discarded — and the fold needs no
+ * special case for them, which is worth stating because the obvious worry is
+ * that it does. A try-region node that failed twice before succeeding now folds
+ * to `runs: 3, failures: 2, status: 'failure'`, and every one of those numbers
+ * is the truth: the node really did execute three times and really did fail
+ * twice. That is the same "worst outcome wins, `runs`/`failures` carry the
+ * nuance" rule a `loop` body has always folded under (see below) — a retry
+ * ladder is just another way for one node to run more than once. The node-level
+ * `failure` does NOT propagate to the run, whose status is decided elsewhere
+ * from the run's own outcome, so a container that recovered still yields a
+ * completed run.
+ *
+ * The `selected` / `acted` metrics get strictly MORE accurate, not less: a node
+ * that wrote rows and then threw carries its counts on its `failure` step
+ * (#4354), so a partial write inside an abandoned attempt now reaches the run's
+ * totals instead of vanishing — and a partial write that really happened is
+ * exactly what `acted` is supposed to count.
+ *
  * `subflow` is the one exception, and it is deliberate: a child run's steps live
  * in the child's own log, so the `subflow` node reports the child's totals as
  * its own metrics. The parent therefore answers "what did this run cause",

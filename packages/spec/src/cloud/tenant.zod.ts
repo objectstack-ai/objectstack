@@ -30,15 +30,31 @@ export const TenantDatabaseStatusSchema = lazySchema(() => z.enum([
 export type TenantDatabaseStatus = z.input<typeof TenantDatabaseStatusSchema>;
 
 /**
- * Tenant Plan Tier
+ * Tenant Plan Identifier
+ *
+ * An **opaque** plan/tier identifier (ruling: cloud#1216, executed on the
+ * spec side by objectstack#7513). The vocabulary — which strings exist, what
+ * each one unlocks — is control-plane **config owned by the cloud
+ * distribution**, not protocol: this schema does not enumerate it and never
+ * has runtime knowledge of it. Widened from a closed 5-value enum
+ * (`free`/`starter`/`pro`/`enterprise`/`custom`) after measuring that no
+ * reader outside the cloud distribution branches on the value — framework
+ * and console treat it as a pass-through string; only the cloud
+ * distribution's own entitlement modules (e.g. `isFreePlan`,
+ * `planAllowsAiStudio`) interpret specific values, and they own that
+ * interpretation independently of this schema.
+ *
+ * Convention (not enforced here): an empty or unrecognized value is treated
+ * as the free tier by cloud-side readers. Spec accepts any string, including
+ * the empty one — the free-tier fallback is the cloud distribution's
+ * normalization, not a spec-level default.
  */
-export const TenantPlanSchema = lazySchema(() => z.enum([
-  'free',
-  'starter',
-  'pro',
-  'enterprise',
-  'custom',
-]));
+export const TenantPlanSchema = lazySchema(() => z.string().describe(
+  'Opaque plan/tier identifier. The vocabulary is control-plane config owned by the '
+  + 'cloud distribution, not protocol — this schema accepts any string and does not '
+  + 'enumerate valid values. Convention: an empty or unrecognized value is treated as '
+  + 'the free tier by cloud-side readers (not enforced by this schema).',
+));
 
 export type TenantPlan = z.input<typeof TenantPlanSchema>;
 

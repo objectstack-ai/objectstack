@@ -303,10 +303,18 @@ describe('many-data non-atomic — unchanged (#4620 regression net)', () => {
 
         expect(t.engine.transaction).not.toHaveBeenCalled();
         expect(t.rows.get('a')).toEqual({ id: 'a', title: 'a-new' }); // committed, and kept
-        expect(res).toMatchObject({ success: false, operation: 'update', total: 3, succeeded: 1, failed: 1 });
-        expect(res.results).toHaveLength(2); // stops without continueOnError
+        // [#7539] The run still STOPS at `b` — `c` is never written (asserted
+        // below). What changed is that the response now says so: a row for `c`
+        // and counters that reconcile, where this used to report `failed: 1`
+        // against `total: 3` with `c` missing from `results` entirely.
+        expect(res).toMatchObject({ success: false, operation: 'update', total: 3, succeeded: 1, failed: 2 });
+        expect(res.results).toHaveLength(3);
+        expect(res.succeeded + res.failed).toBe(res.total);
         expect(res.results[0]).toMatchObject({ id: 'a', success: true, index: 0 });
         expect(res.results[1]).toMatchObject({ id: 'b', success: false, index: 1, errors: [{ message: 'update exploded' }] });
+        expect(res.results[2]).toMatchObject({ id: 'c', success: false, index: 2 });
+        expect(res.results[2].errors[0].code).toBe('NOT_ATTEMPTED');
+        expect(t.rows.get('c')).toEqual({ id: 'c', title: 'c-old' }); // stops without continueOnError
     });
 
     it('updateManyData continueOnError still processes every row', async () => {

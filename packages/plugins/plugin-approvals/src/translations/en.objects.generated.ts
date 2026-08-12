@@ -118,7 +118,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       approval_reject: {
         label: "Reject",
-        confirmText: "Reject this request? A rejection is final for every approver.",
+        description: "Reject this request? A rejection is final for every approver.",
         successMessage: "Rejected.",
         params: {
           comment: {
@@ -171,7 +171,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       approval_recall: {
         label: "Recall",
-        confirmText: "Recall this request? Approvers can no longer act on it and the record is unlocked.",
+        description: "Recall this request? Approvers can no longer act on it and the record is unlocked.",
         successMessage: "Recalled.",
         params: {
           comment: {

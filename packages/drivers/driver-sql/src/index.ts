@@ -24,6 +24,32 @@ export type {
   SqlWindowFunctionQuery,
 } from './sql-driver.js';
 
+// [#5222] The cross-field `{ $field }` push-down conformance corpus: one
+// filter, run through the in-memory evaluator AND through a SQL driver, must
+// return the same rows.
+//
+// Exported rather than kept module-private for two reasons. `driver-sqlite-wasm`
+// inherits this driver's compiler but executes through its own sql.js dialect,
+// so it runs the same corpus from its own package — and a relative import
+// across the package boundary is not available to it (`rootDir`), so a shared
+// corpus has to be a real export or a second copy. And a third-party driver
+// author extending `SqlDriver` can check a new backend against the same table,
+// which is the argument `@objectstack/spec/data` makes for exporting its own
+// conformance corpora. Test-only DATA — no runtime path in this package reads it.
+export {
+  CROSS_FIELD_AUTHORED_CASES,
+  CROSS_FIELD_CASES,
+  CROSS_FIELD_OBJECT_FIELDS,
+  CROSS_FIELD_REFUSALS,
+  CROSS_FIELD_ROWS,
+} from './cross-field-conformance-cases.js';
+export type {
+  CrossFieldAuthoredCase,
+  CrossFieldCase,
+  CrossFieldRefusalCase,
+  CrossFieldRow,
+} from './cross-field-conformance-cases.js';
+
 // Managed-schema drift / reconcile (#2186), incl. the index dimension (#3728)
 export {
   applyIndexKeyParts,

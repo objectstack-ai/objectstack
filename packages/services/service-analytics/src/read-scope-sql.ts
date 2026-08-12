@@ -4,7 +4,11 @@ import type { FilterCondition } from '@objectstack/spec/data';
 import type { RegisteredErrorCode } from '@objectstack/spec/api';
 import { likePattern, LIKE_ESCAPE_CHAR, asciiLowerSqlExpr } from './like-pattern.js';
 import {
+  CROSS_FIELD_COMPARISON_OPERATORS,
+  fieldReferenceBetweenBoundMessage,
+  fieldReferenceComparandMessage,
   isBindableComparand,
+  isFieldReference,
   isRenderableTextComparand,
   unbindableListMemberMessage,
   unrenderableTextComparandMessage,
@@ -203,6 +207,52 @@ import {
  * `looksLikeInternalErrorLeak` too — FALSE, like the other eleven — so it is
  * withheld from the response BY DECLARATION and teaches no sniffing list a new
  * phrase.
+ *
+ * ## A `{ $field }` comparand is refused, not bound (#7598)
+ *
+ * THIRTEEN refusing sites, and {@link assertNoFieldReferenceComparand} is the
+ * thirteenth's — the first whose shape is not wrong everywhere, only
+ * uncompilable HERE. #5222 taught `driver-sql` / `driver-sqlite-wasm` to compile
+ * `{ amount: { $gt: { $field: 'budget' } } }` into a same-table column-to-column
+ * comparison, under four maintainer rulings (same-table only, declared-only
+ * enumeration, tenant-isolation column forbidden on both sides, same comparison
+ * class). This compiler was measured in the same family and answered a fifth way
+ * again: it BOUND the reference object, so an admin's RLS predicate compared a
+ * column against a value no row can hold — see that function for the measured
+ * table and for why the four rulings cannot be enforced from here at all
+ * (`StrategyContext` exposes neither an object's declared field set nor its
+ * tenant-isolation column, so the enumeration the rulings turn on does not
+ * exist on this side).
+ *
+ * ⚠️ [UPDATED — maintainer ruling 2026-08-12, #7598 Q1 = B] When this section
+ * was written the refusal was the whole answer, and it said so: "it does not
+ * make the capability available". **It does now, by getting out of the way.**
+ * `NativeSQLStrategy.canHandle` DECLINES a query whose read scope carries a
+ * reference, so the query falls through to the ObjectQL/engine path — where
+ * `ObjectQLStrategy` ANDs the scope into the `FilterCondition` it hands
+ * `engine.aggregate`, the reference reaches `driver-sql` intact, and the driver
+ * compiles it under all four #5222 rulings using its own `initObjects`
+ * metadata. A field-to-field RLS rule is therefore SERVED on the analytics
+ * face, and the security rules live in exactly one place rather than two.
+ *
+ * What that leaves for the gate below is a narrower but still live job:
+ * `applyReadScope` (`native-sql-strategy.ts`) no longer reaches it — the
+ * decline runs first — but `ObjectQLStrategy.generateSql` does. That is the
+ * `/analytics/sql` ECHO, a display string for an execution it does not perform,
+ * and it has no faithful rendering of the total column-to-column predicate the
+ * engine path runs. The ruling answered that face explicitly —
+ * 「一致的响亮答案,不半渲染」 (one consistent, loud answer; no half-rendering) —
+ * so the refusal here IS the echo's decline. `compileScopedFilterToSql` is also
+ * a public export of this package (`index.ts`), so the gate additionally holds
+ * for any consumer outside these two.
+ *
+ * ⛔ The ENVELOPE is untouched, and deliberately: Q2 = A kept the #5367 ruling
+ * verbatim — `READ_SCOPE_COMPILE_FAILED` / 500 with the message withheld. No new
+ * ADR-0112 code for the unsupported-rule class (option C was declined for zero
+ * measured pull; #5367 recorded that no consumer reads a code on this path), and
+ * no 4xx (option B reintroduces both defects #5367 closed). The paragraph above
+ * beginning "⚠️ Deliberately NOT a 4xx of any flavour" is that ruling's own text
+ * and is not to be rewritten.
  */
 
 const IDENT = /^[a-z_][a-z0-9_]*$/i;
@@ -361,6 +411,17 @@ function compileField(field: string, value: unknown, qAlias: string, params: unk
   // domains are disjoint by construction (`assertDefinedComparands` skips these
   // two operators by name), so neither can shadow the other's message.
   assertBooleanFlagComparands(field, value);
+
+  // [#7598] …and the comparand that is neither a position nor a domain problem
+  // but a CAPABILITY one: a `{ $field }` reference the SQL drivers compile since
+  // #5222 and this compiler cannot. Third call rather than a widened first, for
+  // the reason the second one is separate — the three gates gate different
+  // things, and their triggers are disjoint by construction (a reference is
+  // never `undefined`, and `$null` / `$exists` are outside this gate's operator
+  // set), so none can shadow another's message. Runs AFTER both, so a
+  // `{ $gt: undefined }` keeps being an undefined comparand rather than becoming
+  // "not a field reference".
+  assertNoFieldReferenceComparand(field, value);
 
   // Scalar / null → implicit equality.
   if (value === null) return `${col} IS NULL`;
@@ -748,6 +809,103 @@ function assertBooleanFlagComparands(field: string, spec: unknown): void {
     if (!Object.prototype.hasOwnProperty.call(spec, op)) continue;
     if (typeof spec[op] === 'boolean') continue;
     throw nonBooleanFlagComparandError(op, field, `"${field}".${op}`);
+  }
+}
+
+/**
+ * [#7598] A `{ $field: 'col' }` reference in a comparand position this compiler
+ * BOUND instead of refusing — the THIRTEENTH refusing site, and the first one
+ * whose shape is executed correctly somewhere else.
+ *
+ * ## The measured cell, on `origin/main` (`5823d593d`), alias `person`
+ *
+ * | read scope | compiled to | bind list |
+ * |---|---|---|
+ * | `{ amount: { $gt: { $field: 'budget' } } }` | `"person"."amount" > ?`  | `[{"$field":"budget"}]` |
+ * | `{ amount: { $eq: { $field: 'budget' } } }` | `"person"."amount" = ?`  | `[{"$field":"budget"}]` |
+ *
+ * The reference OBJECT goes into the bind list verbatim — `applyReadScope`
+ * (`native-sql-strategy.ts`) pushes `scopeParams[i]` into the driver's array
+ * while it renumbers `?` → `$N`, exactly as #6125 measured for `undefined`. What
+ * the driver then does with a plain object is its own business: JSON text on the
+ * `toSqlBindValue` drivers, a bare `Undefined binding(s)`-class crash on the ones
+ * that refuse to guess. Either way an admin's RLS predicate compared a column
+ * against a value no row can hold, silently. In a module whose contract is
+ * "a read-scope predicate must never be silently dropped" a predicate that is
+ * silently MEANINGLESS is the same defect one step further on — and unlike
+ * #6125's cell it is not reliably fail-closed, because the comparison it
+ * degrades to depends on the driver rather than on the scope.
+ *
+ * ## Which positions this gate covers, and why the others keep their wording
+ *
+ * ONLY the positions that were BOUND: the whole comparand of the six scalar
+ * comparison operators ({@link CROSS_FIELD_COMPARISON_OPERATORS}) and the two
+ * `$between` endpoints. Everything else a reference can occupy already refused
+ * here BEFORE this change, with a diagnosis of its own, and each of those
+ * refusals converges with `driver-sql`'s own #5222 refusal arm — so widening
+ * this gate over them would restate a rule that is already right in a second
+ * wording (#5240, read in the direction that matters: a second sentence for a
+ * shape refused either way only sends the operator to the wrong repair):
+ *
+ *   - the LIKE family → {@link assertRenderableText} ("matches against the TEXT
+ *     of a pattern"), and `driver-sql` refuses a reference there too — a
+ *     column-side LIKE pattern cannot be metacharacter-escaped portably;
+ *   - `$in` / `$nin` members → {@link assertCompilableMembers} ("cannot be bound
+ *     as a SQL parameter"), and `driver-sql` refuses those members as well,
+ *     because the memory evaluator does not resolve a reference inside a list
+ *     either;
+ *   - a bare `{ field: { $field: … } }` → `unsupported operator "$field"` from
+ *     {@link compileOperator}'s default arm.
+ *
+ * `$between` is in the covered set even though {@link assertCompilableMembers}
+ * would also refuse its endpoints, because this gate runs FIRST and the truer
+ * diagnosis wins: "a range bound may not be a field reference on any backend"
+ * tells the policy author what to write, where "cannot be bound as a SQL
+ * parameter" describes a consequence of the shape rather than the shape. The two
+ * covered positions now say DIFFERENT sentences, because the 2026-08-12 ruling
+ * made them different conditions — see {@link fieldReferenceComparandMessage}
+ * (a rendering boundary on a rule the platform SERVES) versus
+ * {@link fieldReferenceBetweenBoundMessage} (a position refused everywhere, and
+ * removed from the spec by #7596).
+ *
+ * ## What reaches this gate after the 2026-08-12 ruling
+ *
+ * Not `applyReadScope`. `NativeSQLStrategy.canHandle` declines a query whose
+ * read scope carries a scalar reference before that method runs, so the scope
+ * is served on the engine path instead (module header). What DOES reach it is
+ * `ObjectQLStrategy.generateSql` — the `/analytics/sql` echo — plus any external
+ * consumer of the `compileScopedFilterToSql` export. The gate is therefore the
+ * echo's decline, which is what the ruling asked that face for.
+ *
+ * ## Envelope: unchanged, deliberately (#5367 ruling 2026-08-06, re-affirmed as
+ * #7598 Q2 = A on 2026-08-12)
+ *
+ * `READ_SCOPE_COMPILE_FAILED` / 500, like the other twelve. The two arguments
+ * #5367 gave apply to this shape verbatim rather than by analogy: the producer
+ * is an ADMIN-authored sharing rule / permission set and its CEL lowering —
+ * `compileCelToFilter` is exactly what emits `{ $field: path }` — so a 4xx would
+ * bill the caller for a document they cannot author, and a 4xx echoes the
+ * message, which here names the POLICY's field names. #7598 put the question to
+ * the maintainer and it was answered A: keep #5367 as it stands, add no new
+ * ADR-0112 code for the unsupported-rule class (option C had zero measured pull
+ * — #5367 recorded that no consumer reads a code on this path — and a zero-pull
+ * vocabulary is recorded, not built), and do not move to 4xx.
+ */
+function assertNoFieldReferenceComparand(field: string, spec: unknown): void {
+  if (!isFilterNode(spec)) return;
+  for (const [op, opValue] of Object.entries(spec)) {
+    if (CROSS_FIELD_COMPARISON_OPERATORS.has(op) && isFieldReference(opValue)) {
+      throw readScopeCompileError(
+        `[read-scope-sql] ${fieldReferenceComparandMessage(op, field, opValue.$field)}`,
+      );
+    }
+    if (op !== '$between' || !Array.isArray(opValue)) continue;
+    opValue.forEach((member, index) => {
+      if (!isFieldReference(member)) return;
+      throw readScopeCompileError(
+        `[read-scope-sql] ${fieldReferenceBetweenBoundMessage(op, field, member.$field, index)}`,
+      );
+    });
   }
 }
 

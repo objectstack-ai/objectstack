@@ -273,6 +273,19 @@ const CASE_SETS = [
 //   TEMPORAL_CASES,            opt-in only — `mongodb-temporal-conformance.test.ts`
 //   TEMPORAL_TIME_CASES        has no server-free half.
 //
+// Two markers joined that column after the day it was measured, and both joined
+// it SERVER-FREE, which is the shape this note asks for rather than a way around
+// it — the driver's answer to each is a pure translation, so a suite that
+// evaluates the emitted document tests the driver and not MongoDB:
+//
+//   AGGREGATION_CASES          [#6850/#6814] `mongodb-aggregation-translation.
+//                              test.ts` runs the case-set by default. The
+//                              real-mongod half is absent, recorded on #6814.
+//   FILTER_TEXT_CASES          [#6682] `mongodb-filter-text-conformance.test.ts`
+//                              runs the case-set by default, rejection rows
+//                              included. The real-mongod half is absent,
+//                              recorded on #6682.
+//
 // Why: on a cold binary cache two vitest workers downloaded the same ~123 MB
 // archive and the loser's `rename` blew up an all-green run as an unhandled
 // rejection, ejecting unrelated PRs from the merge queue. The maintainer retired
@@ -280,16 +293,29 @@ const CASE_SETS = [
 // investment is frozen (#5499). Un-freezing it is what should re-run these cells
 // in CI; until then, this note is the honest state of the mongo column.
 
-// ## FILTER_TEXT_CASES: two DEBT rows left of the five #5701 opened
+// ## FILTER_TEXT_CASES: ONE DEBT row left of the five #5701 opened
 //
 // The ledger was EMPTY (see the note above) until `FILTER_TEXT_CASES` arrived.
 // Those five rows were not a regression in coverage: the case-set is the
 // CONTRACT half of the #4706 ruling, landed deliberately ahead of every
 // implementation, and one row per driver is what made "ahead of" a counted fact
 // instead of an assumption. #5702 cleared two of the three requirements; #6518
-// cleared the third on the SQL family and DELETED its three rows. What remains
-// is the #5499 frozen family — driver-memory and driver-mongodb — where the
-// freeze, not the difficulty, is why the cells are open.
+// cleared the third on the SQL family and DELETED its three rows.
+//
+// [#6682] `driver-mongodb`'s row is GONE too — the maintainer unfroze that
+// package on 2026-08-11 (#5499), requirement 2 landed there (the hardcoded
+// `$options: 'i'` is off all four `$contains`-family arms), and
+// `mongodb-filter-text-conformance.test.ts` imports the marker and drives all
+// SEVENTEEN cases including every rejection row. Measured rather than argued:
+// on `origin/main` @ `744b8f5` that suite failed exactly the five
+// case-sensitivity rows and passed the other twelve, so the fix was the whole
+// remaining gap and nothing else was quietly widened to reach green. It is the
+// SERVER-FREE half #5517 requires — this package's real-mongod suites are
+// opt-in, so a suite needing a server would not run in CI — and it evaluates
+// the emitted documents rather than pinning their spelling.
+//
+// What remains is `driver-memory`, still in the #5499 frozen family, where the
+// freeze rather than the difficulty is why the cell is open.
 //
 // What the case-set demands, and where each requirement stands:
 //
@@ -315,11 +341,21 @@ const CASE_SETS = [
 //      `LIKE` is already case-exact), and `LIKE` over `CAST(… AS BINARY)` on
 //      MySQL (whose answer otherwise follows the column's collation). turso's
 //      remote transport carries the twin in `pushLike`, and the two are held to
-//      the same rows by `turso-local-remote-text-parity.test.ts`. **STILL OPEN
-//      on driver-memory and driver-mongodb**, which fold the full Unicode range
-//      on their live query paths — and on driver-memory the REFERENCE matcher
-//      answers the same operator case-sensitively, so that package disagrees
-//      with itself. Both are the #5499 frozen family; tracked as #6682.
+//      the same rows by `turso-local-remote-text-parity.test.ts`. **DONE on
+//      driver-mongodb too** (#6682): `translateFieldOperators` no longer sets
+//      `$options: 'i'` on any of the four arms, and because every face of that
+//      driver — `find`/`count`/`update`/`delete` and the aggregation `$match`
+//      — routes through the one `translateFilter`, there is no second answer to
+//      align. **DONE on driver-memory too** (#6682, the last cell): the `i`
+//      flag came off all NINE sites — the AST spelling's four arms
+//      (`convertConditionToMongo`), the `$`-spelling's four
+//      (`normalizeFieldOperators`) and `filterSubstringPattern`, the #5374
+//      shared rule the ANALYTICS face borrows rather than re-derives, so that
+//      face moved with the query path in the direction #5374 was built for. The
+//      reference matcher (`String.prototype.includes`) was case-exact all along
+//      and is untouched — it was the face that had been RIGHT, which is why the
+//      package disagreed with itself until this landed. Requirement 2 is now
+//      answered on all five drivers.
 //
 //      Two faces #6518 measured and did NOT have to change, recorded because
 //      "not mentioned" reads as "not checked": `formula`'s `matchesFilter` and
@@ -370,96 +406,34 @@ const CASE_SETS = [
 // the emitted pipeline through an in-process evaluator; the real-mongod half
 // is still absent and is recorded as such on #6814 rather than implied here.
 //
-// `driver-memory`'s row stands. The 2026-08-11 ruling lifted the freeze for
-// `driver-mongodb` alone, so that cell — a missing `count_distinct` arm and the
-// two-face divergence beside it — stays open by the same decision as before,
-// and #6814 stays OPEN for it.
+// [#6814] `driver-memory`'s cell is now cleared too — the maintainer lifted the
+// rest of the #5499 freeze later the same day, and
+// `memory-aggregation-conformance.test.ts` replaced the row. This driver runs
+// in process, so that suite is a REAL execution of the case-set through BOTH
+// doors of the data face (`find()` and `aggregate(AST)`, the one objectql's
+// engine uses) — no server-free half to model.
+//
+// What the row predicted held, and it under-read the ANALYTICS face. The row
+// said that face "DOES implement `count_distinct`"; executing it showed the
+// implementation stopped half way. `buildAggregator` emitted `{ $addToSet }`
+// with the comment "Will need post-processing for count" and no post-processing
+// existed, so the measure answered the raw ARRAY of values — `['won','lost',
+// null]` — under a field `measureTypeToFieldType` describes as `number`. So the
+// package answered one declared function THREE ways: `null` on the data face,
+// an array on the analytics face, and the standard's number nowhere. Both are
+// fixed here; the array is sized excluding null, which is the same
+// null-exclusion the driver-mongodb half made on `$addToSet` (#7550).
+//
+// The ledger is now EMPTY, which is the state its header calls the intended
+// steady one. Read the open set from a run, not from this prose.
 
-const LEDGER = [
-  {
-    driver: 'driver-memory',
-    marker: 'FILTER_TEXT_CASES',
-    kind: 'DEBT',
-    why:
-      'Re-measured after #6518, which cleared requirement 2 on the SQL family and NOT here — this package is '
-      + 'in the #5499 frozen family, so the freeze rather than the difficulty is why the cell is open. '
-      + 'Requirement 3 is DONE (#5702): `$regex`/`$options` are no longer in `SUPPORTED_FIELD_OPERATORS`, the '
-      + 'matcher\'s `$regex` arm (the only live regex evaluator in the repo, and the one that answered an '
-      + 'ILLEGAL pattern with `false`) is deleted, and both faces refuse them with the spec prescription '
-      + 'naming `$icontains`. Requirement 2 is still the one row where "which face" changes the answer — do '
-      + 'NOT take a single reading here. The QUERY path (`find()` -> `normalizeFieldOperators`, and the '
-      + 'analytics face via `filterSubstringPattern`) lowers `$contains` to `new RegExp(escapeRegex(v), "i")`: '
-      + 'literal comparand (requirement 2\'s escaping half holds) but case-INSENSITIVE over the whole Unicode '
-      + 'range, which fails requirement 2 and overshoots requirement 1\'s ASCII boundary. The reference '
-      + 'matcher (`memory-matcher.ts` `match()`, the record-at-a-time evaluator `filter-logic-conformance.ts` '
-      + 'counts as a backend) uses String.prototype.includes and is case-SENSITIVE — i.e. this package '
-      + 'answers one `$contains` two ways today, the divergence class #5374 fixed between the other two '
-      + 'faces. Whichever suite clears this cell has to pick one and align both: tracked as #6682, which is '
-      + 'the successor #6518 left behind for exactly this pair of packages. Requirement 1 is DONE here '
-      + 'since #6520: all THREE of this package\'s faces answer `$icontains` with the spec\'s shared '
-      + 'ASCII-only fold — the query path and the analytics face bind a pattern from '
-      + '`asciiCaseInsensitiveRegexSource` (no `i` flag, which folds Unicode), the reference matcher calls '
-      + '`asciiCaseInsensitiveContains`, and the NON-EMPTY-string comparand rule is driver-sql\'s word for '
-      + 'word. So this row now carries ONE open requirement, not two. It still cannot go: coverage is '
-      + 'judged by importing the WHOLE case-set, so a cell answering one requirement and not the other must '
-      + 'not import it — #6520\'s suites drive `FILTER_TEXT_ROWS` and spell their own `$icontains` cases '
-      + 'rather than naming the marker, which would flip this cell to covered and fail RECONCILED while '
-      + 'requirement 2 is open.',
-    issue: 'https://github.com/objectstack-ai/objectstack/issues/6682',
-  },
-  {
-    driver: 'driver-mongodb',
-    marker: 'FILTER_TEXT_CASES',
-    kind: 'DEBT',
-    why:
-      'Re-measured after #6518, which cleared requirement 2 on the SQL family and NOT here — #5499 freezes '
-      + 'this package, so the cell stays open by decision rather than by difficulty. Still the FURTHEST from '
-      + 'the ruling, but the ENVELOPE half is closed (#5702): that arm used to throw a bare '
-      + "`new Error('[mongodb] unsupported filter operator …')` — no `code`, no `status` — three lines from "
-      + 'this file\'s own `unsupportedFilterError` helper, which sets `INVALID_FILTER` / 400 and which three '
-      + 'other refusals here already used. It now routes through the helper, and a RETIRED spelling '
-      + 'additionally gets the spec prescription naming `$icontains`, so requirement 3 is DONE (mongo was '
-      + 'already the only backend REFUSING `$regex`; what was missing was the shape of the refusal). '
-      + 'Requirement 2 is inverted here and requirement 1\'s ASCII boundary violated in the same expression: '
-      + '`translateFieldOperators` lowers `$contains`/`$startsWith`/`$endsWith`/`$notContains` to `$regex` '
-      + 'with a HARDCODED `$options: "i"` — tracked as #6682, the successor #6518 left behind for this pair '
-      + 'of frozen packages. `escapeRegex` does escape metacharacters, so the literal-comparand cases hold. '
-      + 'Requirement 1 is DONE here since #6520: `translateFieldOperators` has a `$icontains` arm, and it is '
-      + 'the ONE arm in that family that does not set `$options: "i"` — the fold lives in the pattern '
-      + '(`asciiCaseInsensitiveRegexSource`, one `[Aa]` class per ASCII letter), because mongo\'s `i` flag '
-      + 'folds the whole Unicode range and would fail the CAFÉ rows. The non-empty-string comparand rule '
-      + 'sits on the validating WALK beside `$null`\'s, not in the emitter, so it cannot be skipped by a '
-      + 'boolean identity settling the enclosing node. So this row now carries ONE open requirement, not '
-      + 'two. It still cannot go: '
-      + 'coverage is judged by importing the whole case-set, so a half-answered cell must not import it. Note '
-      + 'this package is in the #5499 frozen family: its real-mongod suites are opt-in, so whatever clears '
-      + 'this cell needs a server-free half like `mongodb-filter-logic-translation.test.ts` has.',
-    issue: 'https://github.com/objectstack-ai/objectstack/issues/6682',
-  },
-  {
-    driver: 'driver-memory',
-    marker: 'AGGREGATION_CASES',
-    kind: 'DEBT',
-    why:
-      'Measured on this branch by reading `MemoryDriver.computeAggregate` (`memory-driver.ts`): it has arms '
-      + 'for count/sum/avg/min/max and then `default: return null`. There is NO `count_distinct` arm, so an '
-      + 'aggregation the Query Protocol declares — and that every SQL face now lowers (#6409) — resolves with '
-      + '`{ n: null }`: no error, no log, no refusal. The case-set says 2 over `AGGREGATION_ROWS`. That is a '
-      + 'wrong ANSWER rather than a wrong number, and it is the `default:`-arm shape the '
-      + '`aggregation-lockstep` guard exists to stop one layer up, reached here through a different door. '
-      + 'The package is partial in the way #6409\'s ruling described: its ANALYTICS face '
-      + '(`memory-analytics.ts`) DOES implement `count_distinct`, so this package answers one declared '
-      + 'function two ways depending on which face you enter — the divergence class #5374 fixed for '
-      + '`$contains` in this same package. #5499 freezes it, so the cell is open by decision, not by '
-      + 'difficulty: the fix is one arm beside its neighbours. Tracked as #6814. '
-      + '[#6401] Re-measured when the case-set gained its `groupByAlias` axis: on THAT axis this driver '
-      + 'AGREES. `performAggregation`\'s `normalizeGroupBy` (`memory-driver.ts:1066-1068`) already returns '
-      + '`{ field, alias: node.alias ?? node.field }` and projects the group value under `alias` — the answer '
-      + '#6401 converged the three SQL faces onto. It had reached it independently, so the enforce leg needed '
-      + 'NO mechanical alignment here. The cell stays open on `count_distinct` alone.',
-    issue: 'https://github.com/objectstack-ai/objectstack/issues/6814',
-  },
-];
+// The intended steady state, reached on 2026-08-11: every (driver x case-set)
+// cell is covered by an imported case-set, and nothing is deferred. Keep it
+// that way by writing the suite, not by adding a row — a DEBT entry is a
+// MEASURED, tracked exception the maintainer has agreed to, never the cheaper
+// half of "enroll the driver".
+const LEDGER = [];
+
 
 // ── Discovery ───────────────────────────────────────────────────────────────
 

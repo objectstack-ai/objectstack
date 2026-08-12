@@ -39,7 +39,13 @@
  *    was that a spec-DECLARED operator (`$icontains`) got the silent `false`.
  *    Every operator in `FILTER_OPERATORS` now has an arm in {@link evalOp}, so
  *    the silent answer is reachable only for a name the protocol does not
- *    declare or has retired.
+ *    declare or has retired. [#7536] That claim is maintained rather than
+ *    merely inherited: `$like` / `$ilike` are DECLARED by
+ *    `StringOperatorSchema` while deliberately staged out of
+ *    `FILTER_OPERATORS`, and they got arms here in the PR that declared them —
+ *    the test is "can an author write it", not "is it in the allowlist", and by
+ *    that test a silent `false` for `$like` would have been the same defect
+ *    under a new name.
  *
  * What stays open, deliberately and on the record: a RETIRED spelling
  * (`$regex` / `$options`) still gets the silent `false` here while the other five
@@ -65,6 +71,11 @@ import type { FilterCondition } from '@objectstack/spec/data';
 // and the same predicate compiled to SQL by `read-scope-sql.ts` fold the same
 // domain.
 import { nextUtcCalendarDay, utcInstantMs, asciiCaseInsensitiveContains } from '@objectstack/spec/data';
+// [#7536] `$like`/`$ilike`'s pattern language, likewise defined once in the
+// spec: this face evaluates the pattern in JS, `driver-sql` compiles the same
+// one to `LIKE`/`GLOB`, and a translation written twice would agree on the day
+// it was typed and never again.
+import { matchesLikePattern } from '@objectstack/spec/data';
 import { StandardErrorCode } from '@objectstack/spec/api';
 
 /**
@@ -233,6 +244,36 @@ function evalOp(actual: unknown, op: string, raw: unknown, record: Record<string
     case '$icontains':
       return typeof actual === 'string' && typeof v === 'string' && v !== ''
         && asciiCaseInsensitiveContains(actual, v);
+    /**
+     * [#7536] `$like` / `$ilike` — the caller's own SQL `LIKE` pattern, matched
+     * against the WHOLE value. `matchesLikePattern` is the spec's one
+     * translation of that pattern language, the same one `driver-sql` and
+     * `driver-turso` compile to `LIKE` / `GLOB`.
+     *
+     * Answered here rather than left to the `default: return false` below, and
+     * that is a decision this face had to make rather than inherit. The silent
+     * default is fail-CLOSED and correct for a spelling the protocol does not
+     * have — but `$like` IS declared now, and a declared operator that silently
+     * denies is the defect the #6993 census measured for `$icontains`: an RLS
+     * write-side `check` written with `$like` would deny every write while the
+     * read scope's SQL happily matched rows. One predicate, two answers, across
+     * the write gate and the read gate — the #3948 shape.
+     *
+     * A malformed pattern (a dangling trailing escape) makes
+     * `matchesLikePattern` throw. It is caught and answered FALSE here, not
+     * propagated: this evaluator is total by contract (its header's
+     * "unknown-operator posture"), and on a write-side `check` the fail-closed
+     * answer is the safe one. The driver faces refuse that same pattern loudly
+     * at authoring time, which is where a caller can act on it.
+     */
+    case '$like':
+    case '$ilike':
+      if (typeof actual !== 'string' || typeof v !== 'string') return false;
+      try {
+        return matchesLikePattern(actual, v, op === '$ilike');
+      } catch {
+        return false;
+      }
     case '$notContains': return !(typeof actual === 'string' && typeof v === 'string' && actual.includes(v));
     case '$startsWith': return typeof actual === 'string' && typeof v === 'string' && actual.startsWith(v);
     case '$endsWith': return typeof actual === 'string' && typeof v === 'string' && actual.endsWith(v);

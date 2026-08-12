@@ -175,12 +175,25 @@ export const ERROR_CODE_LEDGER = {
     'EXPIRED_OR_REVOKED',         // share link
     'INVALID_OR_EXPIRED',         // share-link token
     'NEEDS_PASSWORD',             // share link requires a password
+    // [#7557] `DELETE /packages/:id` on the DISPATCHER door — per-item failures
+    // used to ride inside a 200 with a hardcoded `success: true`. Second
+    // EMITTER of the code `@objectstack/rest` already registers for the
+    // direct-mount door of the same route; the two doors now state the same
+    // failure the same way. Provenance, not identity (see above).
+    'PACKAGE_DELETE_PARTIAL',
     'PROJECT_MEMBERSHIP_REQUIRED',
     'RECORD_GONE',                // share link resolves but the record was deleted
     'ROUTE_NOT_FOUND',
     'SIGN_IN_REQUIRED',
     'UNSUPPORTED',
     'VALIDATION_FAILED',
+    // [#7560] ADR-0070: the `/packages` LIFECYCLE routes (`PATCH /:id/disable`,
+    // `DELETE /:id`) refuse a read-only — code- or platform-provided — package.
+    // Second EMITTER of the code `@objectstack/metadata-protocol` already
+    // registers for the authoring half (`saveMetaItem`); one condition, one
+    // vocabulary. Per this file's header, a code emitted by several packages is
+    // listed once per emitting package — provenance, not identity.
+    'WRITABLE_PACKAGE_REQUIRED',
     'WRONG_PASSWORD',
   ],
   '@objectstack/service-storage': [
@@ -196,6 +209,7 @@ export const ERROR_CODE_LEDGER = {
     'INTERNAL',
     'INVALID_REQUEST',
     'INVALID_RESUME_TOKEN',
+    'UPLOAD_SESSION_EXPIRED',     // chunk/complete against a session past its own expires_at (#7667)
     'UPLOAD_SESSION_NOT_FOUND',
   ],
   '@objectstack/service-i18n': [
@@ -264,11 +278,12 @@ export const ERROR_CODE_LEDGER = {
     'METADATA_CONFLICT',
     'NAMESPACE_PREFIX',           // name violates the package namespace-prefix rule
     'NO_DRAFT',
-    'NOT_ATTEMPTED',              // atomic data-batch row never ran — an earlier row's failure aborted the batch (#4793)
+    'NOT_ATTEMPTED',              // data-batch row never ran — an earlier row's failure stopped the batch, to roll back (atomic, #4793) or because continueOnError was unset (#7539)
     'NOT_CREATABLE',
     'NOT_OVERRIDABLE',
     'OBJECT_OVERLAY_PACKAGE_MISMATCH',  // [ADR-0029 D9.9] object overlay row bound to a package that does not own the object
-    'ROLLED_BACK',                // atomic data-batch row was written, then undone by the batch rollback (#4793)
+    'OBJECT_PACKAGE_DISABLED',    // [#7557] object is registered but its owning package is disabled — data plane refuses rather than serving rows
+    'ROLLED_BACK',             // atomic data-batch row was written, then undone by the batch rollback (#4793)
     'UNSUPPORTED_QUERY_PARAM',
     'VALIDATION_FAILED',
     'VERSION_NOT_FOUND',
@@ -364,6 +379,13 @@ export const ERROR_CODE_LEDGER = {
     'RECORD_LOCKED',
   ],
   '@objectstack/plugin-security': [
+    // [#7474] `controlled_by_parent` declared with no `master_detail` relation.
+    // Second EMITTER of the code — `@objectstack/metadata-protocol` already
+    // registers for the metadata publish path (`saveMetaItem`); one condition,
+    // one vocabulary. Per this file's header, a code emitted by several
+    // packages is listed once per emitting package — provenance, not identity
+    // (see above; #7504).
+    'INVALID_METADATA',
     'SUGGESTION_NOT_FOUND',
     'SUGGESTION_STATE',           // suggestion exists but is not in a confirmable/dismissable state
   ],

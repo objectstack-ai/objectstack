@@ -113,11 +113,111 @@ function metadataUnavailableSentence(subject: string, withheld: string): string 
   );
 }
 
+/**
+ * [#6504] The sentence for "a listing that is known to be SHORT" — the plural
+ * counterpart of {@link metadataUnavailableSentence}, and deliberately not the
+ * same sentence.
+ *
+ * The singular one says nothing is being served, because on that surface
+ * nothing is. Here the best-effort set IS served: a partial listing is still
+ * the most useful true thing this surface has, and withholding it would turn a
+ * diagnosis fix into a functional regression. What is withheld is the
+ * **completeness claim** on top of it — which is the entire defect — so the
+ * sentence states the direction of the error (`at least`, never exactly) and
+ * names the count as *served*, never as a total.
+ */
+function metadataPartialListingSentence(plural: string, served: number): string {
+  return (
+    `The metadata service could not be fully read, so this listing of ${plural} is known to be INCOMPLETE. `
+    + `${served} ${served === 1 ? 'is' : 'are'} being served and the total is withheld — `
+    + `this environment declares at least that many ${plural}, possibly more. `
+    + 'Retry once the metadata service is reachable.'
+  );
+}
+
 /** What {@link diagnosedGet} and {@link diagnoseEmptyRead} report. */
 interface DiagnosedRead {
   data: unknown;
   degraded: boolean;
   errors: string[];
+}
+
+/** What {@link diagnosedList} reports — {@link DiagnosedRead} for a plural read. */
+interface DiagnosedListRead {
+  items: unknown[];
+  degraded: boolean;
+  errors: string[];
+}
+
+/**
+ * [#6504] List one metadata type, keeping the ADR-0110 D3 verdict instead of
+ * flattening an outage into an array indistinguishable from a small
+ * environment.
+ *
+ * `IMetadataService.listDiagnosed` is **optional** for the reason
+ * `getDiagnosed` is (#5840): a service that predates it cannot report the
+ * distinction, so it is read exactly as before and reports nothing degraded.
+ * Same probe-and-fall-back shape as {@link diagnosedGet}, one read over.
+ *
+ * Unlike its singular twin this one is defensive about `items` as well as the
+ * verdict — `list` may resolve nullish on an implementation that predates the
+ * non-null guarantee, which is why the call site being replaced carried its own
+ * `?? []`.
+ */
+async function diagnosedList(
+  metadataService: IMetadataService,
+  type: string,
+): Promise<DiagnosedListRead> {
+  if (typeof metadataService.listDiagnosed === 'function') {
+    const diagnosed = await metadataService.listDiagnosed(type);
+    return {
+      items: Array.isArray(diagnosed?.items) ? diagnosed.items : [],
+      degraded: diagnosed?.degraded === true,
+      errors: Array.isArray(diagnosed?.errors) ? diagnosed.errors : [],
+    };
+  }
+  return { items: (await metadataService.list(type)) ?? [], degraded: false, errors: [] };
+}
+
+/**
+ * [#6504] The verdict for a listing that did NOT go through `list` — used by
+ * the `objectstack://objects` resource, whose resolver is `listObjects()`.
+ *
+ * The plural instance of {@link diagnoseEmptyRead}'s decision, taken on the
+ * same ground and for the same reason: `listObjects` is its own member of
+ * `IMetadataService` and declares **no equivalence** to `list('object')`, so
+ * presuming one at a consumer would be the private dialect Prime Directive #12
+ * forbids. The resolver is therefore left untouched and only the *question*
+ * "could this answer be trusted as complete?" is asked of the member declared
+ * to answer it.
+ *
+ * Two differences from the singular probe, both deliberate:
+ *
+ * - It runs on **every** answer, not only an empty one. The defect this closes
+ *   is a non-empty-but-short list rendered with a confident count, so "the
+ *   answer looks fine" is exactly the case that needs asking.
+ * - That costs a second read per call in principle and nothing in practice on
+ *   the implementation that ships: `MetadataManager.listObjects()` is
+ *   `list('object')`, and `list`/`listDiagnosed` share one cache entry and one
+ *   single-flight slot, so the probe lands on the entry the resolver just
+ *   filled. On a host where the two resolve different sets the verdict
+ *   describes the loader set rather than that host's own listing — which
+ *   withholds a completeness claim it might have been entitled to, and never
+ *   manufactures one it is not. That is the same conservative direction
+ *   {@link diagnoseEmptyRead} accepts.
+ */
+async function diagnoseListRead(
+  metadataService: IMetadataService,
+  type: string,
+): Promise<{ degraded: boolean; errors: string[] }> {
+  if (typeof metadataService.listDiagnosed !== 'function') {
+    return { degraded: false, errors: [] };
+  }
+  const diagnosed = await metadataService.listDiagnosed(type);
+  return {
+    degraded: diagnosed?.degraded === true,
+    errors: Array.isArray(diagnosed?.errors) ? diagnosed.errors : [],
+  };
 }
 
 /**
@@ -393,6 +493,88 @@ export async function buildObjectSchemaResource(
 }
 
 /**
+ * [#6504] Resolve the `objectstack://objects` answer for one call.
+ *
+ * Extracted from the resource handler for the reason
+ * {@link buildAgentPromptResult} was: the handler is registered on a private
+ * `McpServer`, so driving it over a transport would test the SDK rather than
+ * this decision.
+ *
+ * **This surface MIS-DESCRIBES, and that is why it is treated differently from
+ * the skill bridge in {@link MCPServerRuntime.bridgePrompts}.** It renders the
+ * listing as `{ objects, totalCount }`, and `totalCount` is a positive, numeric
+ * claim about what this environment declares. During a loader outage the claim
+ * is simply false — an MCP client is told, with a number, that the environment
+ * contains fewer objects than it does — and nothing in the payload lets it tell
+ * that from a genuinely small environment.
+ *
+ * The fix withholds the CLAIM, not the data:
+ *
+ * - **healthy** — `{ objects, totalCount }`, byte-identical to before. A count
+ *   from a complete read is a fact this surface was always right to state.
+ * - **degraded** — the same `objects` (the best-effort set is still the most
+ *   useful true thing here), and `totalCount` is **absent**. In its place:
+ *   `partial: true`, `returnedCount`, and the `code`/`status` envelope the
+ *   sibling resource already carries, so a client can branch structurally.
+ *
+ * Dropping the key rather than reporting a smaller number is the point. A
+ * client reading `body.totalCount` gets `undefined` — which fails, or renders
+ * as nothing, or throws — where a plausible-looking integer would have been
+ * believed. The absent key is the loud version of "we do not know the total";
+ * `returnedCount` says the one thing that IS known, in a name that cannot be
+ * mistaken for a total.
+ *
+ * Unchanged in the other direction: this is a diagnosis fix, so a degraded read
+ * still serves every object it could reach. Withholding them would be a new
+ * functional regression rather than the removal of a false statement.
+ */
+export async function buildObjectListResource(
+  metadataService: IMetadataService,
+  logger?: Logger,
+): Promise<ObjectSchemaResourceResult> {
+  const objects = await metadataService.listObjects();
+  const summary = ((objects ?? []) as ObjectDef[]).map(o => ({
+    name: o.name,
+    label: o.label ?? o.name,
+    fieldCount: o.fields ? Object.keys(o.fields).length : 0,
+  }));
+
+  // Asked on every answer, not just an empty one — a short list rendered with a
+  // confident count is exactly the case that looks fine. See {@link diagnoseListRead}.
+  const { degraded, errors } = await diagnoseListRead(metadataService, 'object');
+
+  if (degraded) {
+    logger?.warn(
+      '[MCP] object listing served WITHOUT a total — the metadata service could not be fully read, so '
+        + 'this listing is known-partial and any count taken from it would understate the environment. '
+        + 'The caller was told SERVICE_UNAVAILABLE and given the objects that could be read '
+        + '(unchanged: the reachable set is still served). '
+        + 'Fix: check the loaders behind the metadata service (datasource connection, credentials, table).',
+      { returnedCount: summary.length, errors },
+    );
+  }
+
+  const body = degraded
+    ? {
+        objects: summary,
+        partial: true,
+        returnedCount: summary.length,
+        warning: metadataPartialListingSentence('objects', summary.length),
+        code: METADATA_UNAVAILABLE_CODE,
+        status: 503,
+      }
+    : { objects: summary, totalCount: summary.length };
+
+  return {
+    contents: [{
+      uri: 'objectstack://objects',
+      mimeType: 'application/json',
+      text: JSON.stringify(body, null, 2),
+    }],
+  };
+}
+
+/**
  * MCPServerRuntime — Bridges ObjectStack kernel services to the Model Context Protocol.
  *
  * Responsibilities:
@@ -588,22 +770,10 @@ export class MCPServerRuntime {
         description: 'List all data objects (tables) in the ObjectStack instance',
         mimeType: 'application/json',
       },
-      async () => {
-        const objects = await metadataService.listObjects();
-        const summary = (objects as ObjectDef[]).map(o => ({
-          name: o.name,
-          label: o.label ?? o.name,
-          fieldCount: o.fields ? Object.keys(o.fields).length : 0,
-        }));
-
-        return {
-          contents: [{
-            uri: 'objectstack://objects',
-            mimeType: 'application/json',
-            text: JSON.stringify({ objects: summary, totalCount: summary.length }, null, 2),
-          }],
-        };
-      },
+      async () =>
+        // [#6504] The completeness of the count lives in the builder — see
+        // {@link buildObjectListResource}.
+        buildObjectListResource(metadataService, logger),
     );
     resourceCount++;
 
@@ -749,8 +919,36 @@ export class MCPServerRuntime {
     logger?.info('[MCP] Agent prompts bridged');
 
     // ── Skill metadata → MCP prompts (#3905) ──
+    // [#6504] This consumer is a SNAPSHOT, not a mis-describing surface, and is
+    // treated accordingly — the per-consumer discipline PR #6051 established,
+    // applied rather than a blanket rule. Unlike `objectstack://objects` it
+    // publishes no count and makes no completeness claim to any client: what a
+    // degraded read costs here is that skills a loader could not be reached for
+    // are silently not registered as prompts. There is nobody to tell — the
+    // reply this read shapes is the SDK's own `prompts/list`, whose shape this
+    // file does not own, and inventing a placeholder prompt to carry the news
+    // would put a fabricated entry in a list whose entire purpose is to say
+    // what exists.
+    //
+    // So the verdict goes to the operator, at `warn`: a functional degradation
+    // (the prompt surface is visibly smaller than it should be), not a
+    // durability one, which is the level AGENTS.md → "Degradation log levels"
+    // prescribes. What makes it worth saying at all is the snapshot's LIFETIME:
+    // the stdio transport takes this list once at bridge time, so an outage
+    // during boot leaves the prompt surface short until the server is
+    // restarted, long after the loader heals. The HTTP transport rebuilds per
+    // request and self-heals — the line says which one the reader is looking at.
+    let skillListVerdict: { degraded: boolean; errors: string[] } = { degraded: false, errors: [] };
     const skillBridge: McpSkillBridge = {
-      listSkills: async () => (await metadataService.list('skill')) ?? [],
+      listSkills: async () => {
+        // The verdict of the READ, recorded as the read happens. `listSkills`
+        // is also the per-call re-read behind each registered prompt's body, so
+        // this is deliberately last-read-wins rather than boot-only: the
+        // snapshot check below runs immediately after its own call.
+        const read = await diagnosedList(metadataService, 'skill');
+        skillListVerdict = { degraded: read.degraded, errors: read.errors };
+        return read.items;
+      },
     };
 
     let skills: Awaited<ReturnType<typeof listSkillPrompts>>;
@@ -762,6 +960,23 @@ export class MCPServerRuntime {
       const message = err instanceof Error ? err.message : String(err);
       logger?.warn(`[MCP] Could not read skill metadata for the prompt surface: ${message}`);
       return;
+    }
+
+    // [#6504] The read ANSWERED, and the answer is known-short. Before this the
+    // two outcomes were indistinguishable from here: `list('skill')` resolves
+    // an array whether every loader answered or one of them was down, so a
+    // partial prompt surface was bridged with the same single `info` line a
+    // complete one gets.
+    if (skillListVerdict.degraded) {
+      logger?.warn(
+        '[MCP] skill prompt list is INCOMPLETE — the metadata service could not be fully read, so skills '
+          + 'held by the unreadable loader(s) are missing from this surface. They are missing, NOT undeclared: '
+          + 'an MCP client listing prompts now sees fewer than this environment declares. '
+          + 'The stdio transport takes this list once at bridge time, so it stays short until the server is '
+          + 'restarted, even after the loader recovers; the HTTP transport rebuilds per request and self-heals. '
+          + 'Fix: check the loaders behind the metadata service (datasource connection, credentials, table).',
+        { readable: skills.length, errors: skillListVerdict.errors },
+      );
     }
 
     let bridged = 0;
@@ -807,6 +1022,35 @@ export class MCPServerRuntime {
     if (this.config.transport === 'stdio') {
       this.transport = new StdioServerTransport();
       await this.mcpServer.connect(this.transport);
+      // [#7645] The transport now OWNS this process's stdin — so make sure it
+      // is actually flowing. `StdioServerTransport.start()` only attaches a
+      // `data` listener, and Node auto-switches a stream to flowing mode on
+      // that listener ONLY while `readableFlowing` is still `null`. Once
+      // something has explicitly called `pause()`, the flag is `false` and a
+      // later `data` listener does NOT resume it: the listener is attached,
+      // `bytesRead` stays 0, and the server is started-but-permanently-deaf.
+      //
+      // That is not hypothetical. Under `objectstack serve`, oclif's argument
+      // parser reads stdin for any positional arg the user did not supply
+      // (`tryStdin` → `createInterface({input: process.stdin})`, aborted after
+      // 10 ms), and `Interface.close()` calls `stdin.pause()`. `serve` declares
+      // an optional `config` positional, so `os serve --dev` (no path) left
+      // stdin paused and EVERY `initialize` / `tools/list` / `resources/read`
+      // timed out with zero bytes on stdout — while the same command WITH the
+      // path (parser never touches stdin) answered fine. Measured both ways.
+      //
+      // The resume lives here rather than in the CLI because the pause is not
+      // oclif-specific: any host that touched stdin before `start()` (a
+      // readline prompt, a supervisor, an embedding process) leaves it paused,
+      // and every one of them yields the same silent deafness. This is the one
+      // place that knows a long-lived stdio transport was just attached.
+      //
+      // Resumed AFTER `connect()` on purpose: `connect()` attaches the
+      // transport's `data` listener, so no byte can flow before there is a
+      // reader for it.
+      if (typeof process !== 'undefined' && typeof process.stdin?.resume === 'function') {
+        process.stdin.resume();
+      }
       this.started = true;
       logger?.info(`[MCP] Server started (transport: stdio, name: ${this.config.name})`);
     } else {

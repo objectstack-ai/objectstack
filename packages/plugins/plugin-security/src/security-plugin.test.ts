@@ -937,14 +937,24 @@ describe('SecurityPlugin', () => {
       await expect(harness.run(opCtx)).rejects.toMatchObject({ name: 'PermissionDeniedError' });
     });
 
-    // ── [#2850] $expand RLS/FLS bypass — sub-read gate relaxation ────────────
+    // ── [#2850 / #7626] $expand sub-read — the gate is NOT relaxed ───────────
     // The engine's expand path re-enters `find` for the referenced object with
-    // a server-set `__expandRead` marker. For a PUBLIC referenced object the
-    // object-level CRUD / requiredPermissions gate is waived (the row is already
-    // broadly readable, so applying it would over-block a common status/owner
-    // lookup) — but RLS + FLS still run. A PRIVATE referenced object keeps the
-    // full gate: expansion may reveal only rows the caller could read directly.
-    it('[#2850] __expandRead WAIVES the CRUD gate for a PUBLIC referenced object', async () => {
+    // a server-set `__expandRead` marker, which is what puts that object's RLS
+    // + FLS on the expansion (#2850). #2850 also waived the object-level CRUD /
+    // requiredPermissions gate whenever `access.default !== 'private'` — an
+    // axis almost no object declares, and one it never paired with a check that
+    // the caller actually held a covering grant. #7626 measured what that cost
+    // on the running app (a `contributor`-only session read a private,
+    // admin-owned contact it was 403'd from, in full, via `?$expand=contact`)
+    // and deleted the waiver. One rule now, for public and private alike:
+    // expansion may reveal only rows the caller could have read directly.
+    //
+    // These are the UNIT half. They cannot be the whole regression story and
+    // deliberately are not: the pin that stayed green through the disclosure
+    // was exactly this shape. The end-to-end, two-persona proof — admin sees
+    // the expansion, the denied persona does not, through every expand door —
+    // lives in `packages/qa/dogfood/test/showcase-expand-crud-gate.dogfood.test.ts`.
+    it('[#7626] __expandRead does NOT waive the CRUD gate for a caller holding no grant', async () => {
       const noGrantSet: PermissionSet = {
         name: 'member_default', label: 'Member', objects: {},
       } as any;
@@ -962,11 +972,38 @@ describe('SecurityPlugin', () => {
       });
       // Control: a DIRECT read with no grant on the object is denied.
       await expect(harness.run(base())).rejects.toMatchObject({ name: 'PermissionDeniedError' });
-      // The SAME read tagged as an expand sub-read is allowed — the gate is waived
-      // for the (public) referenced object.
+      // The SAME read tagged as an expand sub-read is denied TOO. Before #7626
+      // this resolved — the object declares no `access` block, so it read as
+      // "public, already broadly readable" and the gate was skipped for a
+      // caller whose permission set grants literally nothing.
       const expandCtx = base();
       expandCtx.context.__expandRead = true;
-      await expect(harness.run(expandCtx)).resolves.toBeDefined();
+      await expect(harness.run(expandCtx)).rejects.toMatchObject({ name: 'PermissionDeniedError' });
+    });
+
+    it('[#7626] __expandRead does NOT waive the requiredPermissions AND-gate', async () => {
+      // The other throw-gate the waiver covered. `requiredPermissions` is an
+      // access-NARROWING declaration (ADR-0049), so a sub-read is the last
+      // place it may be skipped — the same stance the `unresolved` fail-closed
+      // above takes for the very same field.
+      const memberOnly: PermissionSet = {
+        name: 'member_default', label: 'Member',
+        objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
+      } as any;
+      const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
+      const harness = makeMiddlewareCtx({
+        permissionSets: [memberOnly],
+        objectFields: ['id', 'organization_id', 'signed_token'],
+        schemaExtra: { requiredPermissions: ['manage_platform_settings'] },
+        orgScoping: true,
+      });
+      await plugin.init(harness.ctx);
+      await plugin.start(harness.ctx);
+      const opCtx: any = {
+        object: 'task', operation: 'find', ast: { where: undefined },
+        context: { userId: 'u1', tenantId: 'org-1', positions: [], permissions: [], __expandRead: true },
+      };
+      await expect(harness.run(opCtx)).rejects.toMatchObject({ name: 'PermissionDeniedError' });
     });
 
     it('[#2850] __expandRead does NOT waive the gate for a PRIVATE referenced object', async () => {
@@ -993,7 +1030,7 @@ describe('SecurityPlugin', () => {
       await expect(harness.run(opCtx)).rejects.toMatchObject({ name: 'PermissionDeniedError' });
     });
 
-    it('[#2850] __expandRead still injects RLS on the expand sub-read (only the CRUD gate is waived)', async () => {
+    it('[#2850] __expandRead still injects RLS on the expand sub-read (the referenced object is scoped, not merely gated)', async () => {
       const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' });
       const harness = makeMiddlewareCtx({
         permissionSets: [tenantPolicySet],
@@ -1006,8 +1043,9 @@ describe('SecurityPlugin', () => {
         context: { userId: 'u1', tenantId: 'org-1', positions: [], permissions: [], __expandRead: true },
       };
       await harness.run(opCtx);
-      // The tenant wall is still AND-injected — waiving the CRUD gate on an
-      // expand sub-read does NOT waive row-level scoping on the referenced object.
+      // The tenant wall is still AND-injected: `__expandRead` marks the sub-read
+      // for the layers that strip it as a privileged input, it never loosens
+      // row-level scoping on the referenced object.
       expect(opCtx.ast.where).toEqual({ $and: [{ organization_id: 'org-1' }, { organization_id: 'org-1' }] });
     });
 

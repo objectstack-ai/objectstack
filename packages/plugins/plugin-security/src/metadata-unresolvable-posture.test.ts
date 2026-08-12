@@ -195,7 +195,7 @@ describe('[#3545] unresolvable object metadata — security posture fails closed
         },
         computeRlsFilter: async () => null,
         getFieldMask: () => ({}),
-        fallbackPermissionSet: 'member_default',
+        baselinePermissionSets: ['member_default'],
       }) as any;
 
     const ctx = { userId: 'u1', positions: ['everyone'], permissions: [] };

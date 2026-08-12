@@ -4,11 +4,15 @@ import {
     IHttpServer, resolveAuthzContext, resolveLocalizationContext, isAuthGateAllowlisted,
     assembleExecutionContext, normalizeAuthGate, type AuthGate,
     shouldDenyAnonymous, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS,
+    // [#7678] ADR-0090 D5/D9 suggested-binding `?status=` vocabulary — the one
+    // owner, shared with the runtime dispatcher's `/security` domain.
+    isAudienceBindingSuggestionStatus, unknownAudienceBindingSuggestionStatusMessage,
 } from '@objectstack/core';
 import {
     isMcpServerEnabled,
     looksLikeInternalErrorLeak,
     isUniqueViolationError,
+    uniqueViolationColumn,
     matchMissingColumnOfRelation,
     declaresServerFault,
     INTERNAL_ERROR_MESSAGE,
@@ -26,6 +30,7 @@ import {
     ObjectSchemaMaskEvaluationError,
     applyObjectSchemaMask,
     foldVisibilityFingerprintIntoEtag,
+    isObjectSchemaMaskExempt,
     isObjectSchemaMaskingEnabled,
     normalizeIfNoneMatch,
     resolveObjectSchemaMaskPosture,
@@ -40,6 +45,10 @@ import { RouteManager, type RouteEntry } from './route-manager.js';
 // single-valued; genuinely multi-valued ones (`select`, `expand`, `objects`,
 // `fields`, `searchFields`, `approverId`) are deliberately never listed.
 import { refuseRepeatedQueryParams } from './query-multiplicity.js';
+// [#7527] The other half of the same discipline: a parameter this route does
+// not KNOW is refused rather than dropped. See `query-allowlist.ts` for why an
+// ignored filter is the one wrong answer a caller cannot detect.
+import { refuseUnknownQueryParams } from './query-allowlist.js';
 import type { DirectMountedRoute, MountedRouteSource } from './direct-mount.js';
 import { RestServerConfig, RestApiConfig, CrudEndpointsConfig, MetadataEndpointsConfig, BatchEndpointsConfig, RouteGenerationConfig } from '@objectstack/spec/api';
 import { DataProtocol, MetadataProtocol } from '@objectstack/spec/api';
@@ -561,6 +570,58 @@ const UNCLASSIFIED_FAULT = (): { status: number; body: Record<string, unknown> }
 });
 
 /**
+ * [#7543] Does an unwrapped sandbox message name a JS RUNTIME fault rather than
+ * a business refusal the hook body deliberately reported?
+ *
+ * The two sandbox-unwrap branches below exist for ONE shape: a hook or action
+ * body that runs `throw new Error('删除被阻断：仍有未结清的发票')`, i.e. an
+ * author writing a business rule whose message IS the remedy. They answer 400
+ * with that message verbatim and deliberately no `code` (see each branch).
+ *
+ * A body that instead CRASHES — `ctx.input.title.trim()` where `title` is the
+ * number `12345` — also arrives as a thrown error, so it entered the same
+ * branch and its raw `TypeError: not a function` went out as the client-facing
+ * message of a 400 with no `code`. That is two contract breaks at once: an
+ * internal runtime fault echoed verbatim, and a body outside the ledgered
+ * envelope (a client keying on `code` gets nothing).
+ *
+ * The classification this restores is NOT new policy — it is the ruling
+ * {@link UNCLASSIFIED_FAULT} already records one door down, which names this
+ * exact case ("or a plain handler bug (`TypeError: x is not a function`) …
+ * server faults that a caller cannot fix and a caller SHOULD retry"). The
+ * sandbox unwraps simply sit ABOVE that branch and were intercepting the crash
+ * before it could reach the answer the file had already settled on. Same
+ * separation `quickjs-runner`'s own `sandboxFault` path draws (#4431/#3951):
+ * the sandbox REFUSING is a fault, and so is the body FAULTING — only the
+ * body's deliberate `throw` is an answer addressed to the caller.
+ *
+ * **Matched by constructor name, not by phrasing.** These eight are the ECMA-262
+ * native error constructors (plus SpiderMonkey's `InternalError`, which QuickJS
+ * also raises for stack exhaustion); the sandbox stringifies a thrown error as
+ * `<name>: <message>`, so the name is structural evidence rather than a keyword
+ * heuristic over prose. `Error:` is deliberately absent — a plain `Error` is the
+ * documented way to author a refusal, and `userFacingMessage` strips that prefix
+ * upstream anyway.
+ *
+ * **Deliberate, accepted cost:** a body that expresses a business rule as
+ * `throw new RangeError('数量超出范围')` now gets the sanitised 500 instead of
+ * its own words. That authoring style is not the documented one, and erring
+ * toward "a native error name means a crash" is the fail-safe direction — the
+ * opposite default is what shipped `TypeError: not a function` to a client.
+ *
+ * The words are not lost: 500 is outside `isExpectedDataStatus`, so
+ * `handleRouteError` prints `[REST] Unhandled error` with the whole error, and
+ * `sendError`'s `logWithheldServerFault` (#5437) covers the routes that bypass
+ * it — the same operator path {@link UNCLASSIFIED_FAULT} relies on.
+ */
+const NATIVE_ERROR_NAME_RE =
+    /^(?:Type|Reference|Range|Syntax|URI|Eval|Internal|Aggregate)Error(?::|$)/;
+
+function isScriptFaultMessage(message: string): boolean {
+    return NATIVE_ERROR_NAME_RE.test(message.trim());
+}
+
+/**
  * [#5462] Does a driver's missing-relation message name the very object this
  * request asked for?
  *
@@ -583,6 +644,63 @@ const UNCLASSIFIED_FAULT = (): { status: number; body: Record<string, unknown> }
  * match: the fail-loud direction is what this issue asked for, and there is no
  * producer of the bare `table not found` phrasing in this repo to regress.
  */
+/**
+ * [#7525] The HTTP status a producer DECLARED for this error, or `undefined`
+ * when it declared none — read over BOTH spellings the repo's producers use,
+ * `status` first and `statusCode` second.
+ *
+ * **This is the seam the hook-refusal defect lived on.** `mapDataError`'s
+ * passthrough asked `typeof error.status === 'number'` and nothing else, while
+ * an engine lifecycle hook that refuses a write declares its status as
+ * `statusCode`:
+ *
+ * ```ts
+ * // plugin-approvals/src/lifecycle-hooks.ts
+ * err.code = 'RECORD_LOCKED'; err.statusCode = 409;   // a pending lockRecord approval
+ * err.code = 'FORBIDDEN';     err.statusCode = 403;   // a forged delegation row
+ * ```
+ *
+ * So the refusal never reached the passthrough at all: it fell past every
+ * structured branch, matched no message heuristic, and left through
+ * `UNCLASSIFIED_FAULT` as `500 INTERNAL_ERROR` with no `code` — for a
+ * deliberate, well-understood business refusal, on every direct `/api/v1/data`
+ * caller. #5582 widened that same passthrough's *range* (4xx -> 400-599) and is
+ * not the fix here; the status was being dropped one question earlier, at
+ * "did the producer declare one".
+ *
+ * **Why the boundary rather than the two hooks.** `status` -> `statusCode` -> default
+ * is already what EVERY other HTTP exit in this repo reads — `runtime`'s
+ * `HttpDispatcher.errorFromThrown` (#3867), `dispatcher-plugin.errorResponseBase`,
+ * `endpoint-executor`, `domains/actions`, `plugin-hono-server`'s user endpoints.
+ * `mapDataError` was the one exit that read a single spelling, which is why one
+ * thrown error came back as `403` through a dispatcher route and as `500`
+ * through `/api/v1/data`. Teaching the two approvals hooks to spell it `status`
+ * would fix two producers and leave the boundary answering 500 for the next
+ * one — including `runtime`'s own `action-execution.ts`, which throws
+ * `{ statusCode: 503 | 501 | 400 }`, and `metadata-protocol`'s
+ * `{ statusCode: 404 }`. The producers are well-behaved; the exit was strict
+ * about a spelling nobody standardised.
+ *
+ * ⚠️ Deliberately NOT the same question as {@link declaresServerFault}, whose
+ * `status`-only read is UNCHANGED and stays that way (#5811): that predicate is
+ * a *disclosure* rule — "may this message be withheld" — and was ruled to not
+ * depend on which spelling a producer reached for. This is *status resolution*,
+ * the read that has always been two-spelling everywhere else.
+ *
+ * The band is the same 400-599 {@link resolveErrorResponse} opens, so a
+ * nonsense status is not a declaration. A non-numeric `status` falls through to
+ * `statusCode` rather than blocking it, which is what makes better-auth's
+ * `APIError` (`{ statusCode: 403, status: 'FORBIDDEN' }` — the status field is a
+ * STRING there) resolve to the status it meant instead of to nothing.
+ */
+function declaredHttpStatus(error: any): number | undefined {
+    const declared =
+        (typeof error?.status === 'number' ? error.status : undefined) ??
+        (typeof error?.statusCode === 'number' ? error.statusCode : undefined);
+    if (declared === undefined || !(declared >= 400 && declared < 600)) return undefined;
+    return declared;
+}
+
 function missingRelationIsObject(raw: string, object: string | undefined): boolean {
     if (!object) return false;
     const named =
@@ -749,6 +867,11 @@ export function mapDataError(error: any, object?: string): { status: number; bod
     // bundled in deployed consoles) prepend any `code` to the human-readable
     // message, which would reintroduce the English noise this branch removes.
     if (typeof error?.innerMessage === 'string' && error.innerMessage) {
+        // [#7543] …but only when the body REPORTED something. A body that
+        // CRASHED arrives here too, and its `TypeError: not a function` is an
+        // internal fault, not a business message — see
+        // {@link isScriptFaultMessage}.
+        if (isScriptFaultMessage(error.innerMessage)) return UNCLASSIFIED_FAULT();
         return {
             status: 400,
             body: {
@@ -843,7 +966,13 @@ export function mapDataError(error: any, object?: string): { status: number; bod
     // fires precisely when a response dropped the error's own message — so the
     // 502/503 band that `isExpectedRouteError` keeps quiet still leaves the
     // operator a line carrying the full original error.
-    if (typeof error?.status === 'number' && error.status >= 400 && error.status < 600) {
+    //
+    // [#7525] The gate is {@link declaredHttpStatus} rather than an in-line read
+    // of `error.status`: the same 400-599 band, asked over both spellings a
+    // producer may have declared it in. See that docblock for why an engine
+    // hook's refusal never reached this branch at all.
+    const declaredStatus = declaredHttpStatus(error);
+    if (declaredStatus !== undefined) {
         // [#5582] A declared server fault: keep the status, keep the
         // machine-readable `code`, drop the prose. Byte-identical to
         // {@link resolveErrorResponse}'s 5xx arm — one condition, one wire
@@ -869,12 +998,26 @@ export function mapDataError(error: any, object?: string): { status: number; bod
         // would put a code on the wire the producer never wrote — while
         // re-deriving the status from the message text is the defect this
         // branch exists to remove.
-        if (error.status >= 500) {
+        //
+        // [#7525] It is asked over the RESOLVED status — `declaresServerFault({
+        // status: declaredStatus, code: error?.code })` — not over the raw
+        // error, and the two arguments are the predicate's entire input, so
+        // nothing about its verdict is loosened. Asking it over the raw error
+        // instead would split this branch against itself: a producer declaring
+        // `{ statusCode: 503, code: 'SERVICE_UNAVAILABLE' }` would take the 5xx
+        // arm (the status resolved) and then be told it declared no server
+        // fault (the `status` field being absent), shipping a 503 with its
+        // ADR-0112 code silently dropped. The predicate's OWN read stays
+        // `status`-only for its own callers — this is one call site handing it
+        // the status this boundary just resolved.
+        if (declaredStatus >= 500) {
             return {
-                status: error.status,
+                status: declaredStatus,
                 body: {
                     error: INTERNAL_ERROR_MESSAGE,
-                    ...(declaresServerFault(error) ? { code: error.code as string } : {}),
+                    ...(declaresServerFault({ status: declaredStatus, code: error?.code })
+                        ? { code: error.code as string }
+                        : {}),
                 },
             };
         }
@@ -888,7 +1031,7 @@ export function mapDataError(error: any, object?: string): { status: number; bod
             ? truncateClientMessage(error.message)
             : 'Request failed';
         return {
-            status: error.status,
+            status: declaredStatus,
             body: {
                 error: msg,
                 ...(typeof error?.code === 'string' && error.code ? { code: error.code } : {}),
@@ -933,21 +1076,61 @@ export function mapDataError(error: any, object?: string): { status: number; bod
     // this file would have been the fifth private vocabulary, which is the
     // defect #6250 is named for.
     //
-    // **The body says nothing the driver said.** The message is a fixed
-    // sentence and the only interpolated value is the object name the ROUTE
-    // supplied. That is load-bearing, not incidental: MySQL's text embeds the
-    // offending USER DATA (`Duplicate entry 'acme@example.com' …`) and
-    // Postgres' embeds the index and column names, so echoing the driver here
-    // would trade a status-code bug for an information-disclosure one. Pinned
-    // in `rest-unique-violation-dialects.test.ts`. The full text still reaches
-    // the operator: `handleRouteError` / `logWithheldServerFault` log the
-    // original error untouched.
+    // **The body still says nothing the driver said.** The message is fixed
+    // text and the only interpolated values are the object name the ROUTE
+    // supplied and — since #7821 — the conflicting FIELD, and that second one
+    // is safe for the same reason the first is: it does not come from the
+    // driver's prose, it comes from `uniqueViolationColumn`, which hands back
+    // only a bare `[A-Za-z_][A-Za-z0-9_$]*` identifier it could determine is a
+    // COLUMN. The withholding this branch exists to enforce is unchanged:
+    // MySQL's text embeds the offending USER DATA (`Duplicate entry
+    // 'acme@example.com' …`) and Postgres' embeds the index name, and neither
+    // can reach the wire — `uniqueViolationColumn` refuses index names outright
+    // and the table qualifier is stripped (`sys_user.email` → `email`). Pinned,
+    // per dialect, in `rest-unique-violation-dialects.test.ts`. The full text
+    // still reaches the operator: `handleRouteError` / `logWithheldServerFault`
+    // log the original error untouched.
+    //
+    // **[#7821] Why `field` at all — parity, not a new feature.** The bulk /
+    // import path has named the colliding column since #6544
+    // (`sanitizeRowError` → `uniqueViolationColumn` → "A record with this
+    // `email` already exists."), while this branch — holding the same error
+    // object, one import away from the same helper — answered "a value". So the
+    // platform gave two different answers to one constraint depending only on
+    // whether the write arrived one row at a time or in a batch, and a client
+    // that wanted to render its own localized message could not name the field
+    // either, because the body carried no `field`. Both halves are fixed here:
+    // the wire gets `field`, and the default sentence reaches parity.
+    //
+    // ⚠️ The bulk path is deliberately NOT touched. Convergence is upward only:
+    // it already names the field and must keep naming it exactly as it does.
+    //
+    // **Passing the error OBJECT, not `error.message`, is the point.**
+    // `sanitizeRowError` only ever holds a string, so it reads the message
+    // channel alone. This site has the whole error, and `uniqueViolationColumn`
+    // additionally reads `detail` and one step of `cause` — which is where the
+    // column actually is for the Postgres driver we ship: node-postgres keeps
+    // its `DETAIL: Key (email)=(…)` line on `error.detail` and off the message.
+    // Measured on `origin/main`: that shape resolves `email` from the object and
+    // `undefined` from `err.message`.
+    //
+    // **When it cannot tell, it says nothing.** `uniqueViolationColumn` returns
+    // `undefined` for an index name (MySQL's `for key 'idx_email_unique'`,
+    // SQLite's `index 'x'`), for a composite key, and for any dialect it does
+    // not parse — and then this branch emits the unnamed sentence and NO `field`
+    // key at all. That degradation is the contract, not a fallback: a wrong
+    // field name is worse than none, because it sends the user to correct an
+    // input that was never the problem.
     if (isUniqueViolationError(error)) {
+        const field = uniqueViolationColumn(error);
         return {
             status: 409,
             body: {
-                error: 'A record with this value already exists',
+                error: field
+                    ? `A record with this ${field} already exists`
+                    : 'A record with this value already exists',
                 code: 'UNIQUE_VIOLATION',
+                ...(field ? { field } : {}),
                 ...(object ? { object } : {}),
             },
         };
@@ -959,14 +1142,21 @@ export function mapDataError(error: any, object?: string): { status: number; bod
     // Fallback for the same sandbox wrapper when the SandboxError instance
     // (and its `innerMessage`) was lost crossing a rethrow/serialization
     // boundary: strip the debug wrapper from the raw message. A leading
-    // default `Error: ` name is dropped; non-default names (`TypeError: …`)
-    // are kept — they signal a genuine script bug rather than a deliberately
-    // thrown business rule, which is useful context.
+    // default `Error: ` name is dropped.
+    //
+    // [#7543] A non-default name (`TypeError: …`) used to be KEPT here and
+    // shipped as the 400's message "as useful context". It is useful context —
+    // for an OPERATOR, in the log, which is where it still goes. On the wire it
+    // was a raw runtime fault presented to a client as their own mistake. This
+    // door and the `innerMessage` door above produce byte-identical bodies, so
+    // they must classify identically or the fix would depend on whether the
+    // SandboxError instance happened to survive the rethrow.
     const sandboxWrapper = /^(?:hook|action) '[^']*' threw:\s*(.+)$/s.exec(raw);
     if (sandboxWrapper) {
         const msg = sandboxWrapper[1].startsWith('Error: ')
             ? sandboxWrapper[1].slice('Error: '.length)
             : sandboxWrapper[1];
+        if (isScriptFaultMessage(msg)) return UNCLASSIFIED_FAULT();
         return {
             status: 400,
             body: {
@@ -1254,6 +1444,13 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
     // status-passthrough: `mapDataError` owns its canonical envelope
     // (`OBJECT_NOT_FOUND`), and short-circuiting here would ship a second wire
     // code for the same condition depending on which route caught it.
+    //
+    // [#7525] Deliberately still a `status`-only read HERE. An error that
+    // declares its status as `statusCode` instead is not skipped — it falls to
+    // `mapDataError` below, whose {@link declaredHttpStatus} gate reads both
+    // spellings and answers with the same status/code/withhold rules this arm
+    // applies. So the two doors already agree on the wire answer, and this one
+    // is not duplicating the two-spelling read to say so.
     const passThroughStatus = error?.code !== 'OBJECT_NOT_FOUND'
         && typeof error?.status === 'number' && error.status >= 400 && error.status < 600;
     if (passThroughStatus) {
@@ -1535,6 +1732,28 @@ export function apiAccessDenialFromEnable(
         },
     };
 }
+
+/**
+ * [#7527] The closed query-parameter set of `GET {basePath}/approvals/requests`.
+ *
+ * Measured from the handler's own reads, not from the card or the docs: the
+ * five filters (`object`, `recordId`, `status`, `approverId`, `submitterId`),
+ * the free-text `q`, the paging pair (`limit`, `offset`), and the snake_case
+ * alias spellings the handler honours for the three camelCase filters. A name
+ * outside this set is refused with a located `400` instead of being dropped.
+ *
+ * Exported so the pin tests assert against THIS array rather than a
+ * hand-copied second list that can drift away from what the route accepts.
+ */
+export const APPROVAL_REQUEST_LIST_PARAMS: readonly string[] = [
+    'object',
+    'recordId', 'record_id',
+    'status',
+    'approverId', 'approver_id',
+    'submitterId', 'submitter_id',
+    'q',
+    'limit', 'offset',
+];
 
 /** Platform object backing async import jobs (see sys-import-job.object.ts). */
 const IMPORT_JOB_OBJECT = 'sys_import_job';
@@ -2037,6 +2256,43 @@ export class RestServer {
     }
 
     /**
+     * Resolve the `metadata` service for this request — the whole occupant of
+     * the slot, unfiltered.
+     *
+     * The same two-step chain {@link resolveEndpointMatchAuthority} walks
+     * (per-request kernel, then the single-kernel provider `rest-api-plugin`
+     * wires), separated out because that method narrows its answer to the ONE
+     * capability it needs and returns `undefined` for a service that lacks it.
+     * A caller after a different optional member (`getPublished`, #7526) must
+     * not have "the service is absent" and "the service does not do that"
+     * collapsed into one answer before it sees them.
+     *
+     * `undefined` means nothing in the chain answered. Deciding what an absent
+     * service means for a given surface is the call site's business.
+     */
+    private async resolveMetadataService(environmentId?: string, req?: any): Promise<unknown | undefined> {
+        let envId: string | undefined;
+        try {
+            envId = await this.resolveRequestEnvironmentId(environmentId, req);
+        } catch { /* fall through to the single-kernel provider */ }
+
+        if (envId && envId !== 'platform' && this.kernelManager) {
+            try {
+                const kernel = await this.kernelManager.getOrCreate(envId);
+                const svc = await kernel.getServiceAsync<unknown>('metadata');
+                if (svc) return svc;
+            } catch { /* fall through */ }
+        }
+        if (this.metadataServiceProvider) {
+            try {
+                const svc = await this.metadataServiceProvider(envId);
+                if (svc) return svc;
+            } catch { /* an unreachable provider is an absent service */ }
+        }
+        return undefined;
+    }
+
+    /**
      * Say — once per server — that no endpoint matcher is reachable, so the
      * endpoint faces cannot promise they describe only served routes.
      *
@@ -2221,7 +2477,19 @@ export class RestServer {
         // blocked from protected resources, while the core allow-list keeps auth
         // + remediation reachable. Runs before the anonymous check.
         const gate = context?.authGate;
-        if (gate && req?.method !== 'OPTIONS' && !isAuthGateAllowlisted(req?.path)) {
+        // Exemption requires a REAL, non-empty path — mirrors the sibling seam
+        // (`shouldDenyAnonymous`, core/src/security/anonymous-deny.ts:122).
+        //
+        // ⚠️ `isAuthGateAllowlisted(undefined)` returns `true` (it treats "no
+        // path" as allow-listed). Passed the raw value, a request whose `path`
+        // is absent or empty read as allow-listed on EVERY route, so the gate
+        // did not fire for a session policy says must be blocked — fail-OPEN by
+        // omission. No shipped transport reaches here without a `path` (the
+        // hono adapter sets it at all three request-construction sites), so this
+        // is the default being made safe, not a live bypass being closed (#7432).
+        const pathExempt =
+            typeof req?.path === 'string' && req.path.length > 0 && isAuthGateAllowlisted(req.path);
+        if (gate && req?.method !== 'OPTIONS' && !pathExempt) {
             res.status(403).json({ error: { code: gate.code, message: gate.message } });
             return true;
         }
@@ -2456,6 +2724,69 @@ export class RestServer {
     resolvePackageRouteExecutionContext(req: any): Promise<any | undefined> {
         const environmentId = req?.params?.environmentId ?? undefined;
         return this.resolveExecCtx(environmentId, req).catch(() => undefined);
+    }
+
+    /**
+     * [#7749] The acting identity recorded on a metadata WRITE — the single
+     * producer for every `/meta` route that stamps an `actor` (save, delete,
+     * publish, rollback, compound save).
+     *
+     * ## What was wrong
+     *
+     * All five sites resolved the actor inline as
+     *
+     * ```
+     * req.headers['x-actor'] ?? req.headers['X-Actor'] ?? req.user?.id ?? req.userId
+     * ```
+     *
+     * and NOTHING on this transport ever sets `req.user` or `req.userId` —
+     * this server resolves identity through {@link resolveExecCtx} (better-auth
+     * → `resolveAuthzContext`), which puts it on the returned ExecutionContext,
+     * never back onto the raw request. So a bearer-authenticated admin's PUT
+     * yielded `undefined`, and the protocol's own defaults took over: the audit
+     * row recorded the sentinel `'system'` (`recordMetadataAudit`:
+     * `actor ?? 'system'`) and the history row recorded `NULL` (#4556:
+     * `actor ?? null`). The trail could not answer "who changed this" for any
+     * client that did not know to hand-set a non-standard header.
+     *
+     * The two dead limbs are not widened here with a third — that would leave
+     * the same "a value everything reads and nothing writes" shape one level
+     * down. They are replaced by the identity resolution this server actually
+     * performs, the SAME one the route's own `manage_metadata` capability gate
+     * reads a few lines earlier, so the caller a write is ATTRIBUTED to can
+     * never drift from the caller it was AUTHORIZED against. `resolveExecCtx`
+     * is memoized per request, so the three routes that already resolved a
+     * context for their gate pay nothing extra for this.
+     *
+     * ## Precedence — deliberately unchanged (#7749)
+     *
+     * `X-Actor` still outranks the authenticated identity, exactly as the
+     * expression above read. That ordering was masked while the other limbs
+     * were always `undefined`; it becomes load-bearing the moment this method
+     * produces one. Whether an authenticated caller may keep attributing a
+     * metadata write to somebody else by sending a header is a security
+     * semantics question for the audit contract, not something to settle as a
+     * side effect of fixing the producer — so it is measured and reported on
+     * the issue rather than quietly reordered here.
+     *
+     * Anonymous / internal writes are unaffected: no resolved principal → no
+     * context → `undefined` → the protocol's `'system'` / `NULL` defaults still
+     * apply. A machine write is never stamped with a real user.
+     */
+    private async resolveMetaWriteActor(
+        environmentId: string | undefined,
+        req: any,
+    ): Promise<string | undefined> {
+        const header = req?.headers?.['x-actor'] ?? req?.headers?.['X-Actor'];
+        // A well-formed header wins, as before. A PRESENT-but-unusable header
+        // (repeated → array, or empty) falls through to the session rather than
+        // suppressing attribution: recording the real caller beats recording
+        // `'system'` for a malformed request, and it keeps "no usable header →
+        // the authenticated identity" a single rule.
+        if (typeof header === 'string' && header) return header;
+        const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
+        const userId = (ctx as any)?.userId;
+        return typeof userId === 'string' && userId ? userId : undefined;
     }
 
     /**
@@ -3790,6 +4121,25 @@ export class RestServer {
                             + '{ $ref: <opIndex> } parent references (#1604 / ADR-0034).',
                     };
 
+                    // [#7541] Global search — the same two-layer AND, for the
+                    // same reason. The protocol answered whether IT can serve a
+                    // search (`typeof searchAll === 'function'`, the predicate
+                    // `registerSearchEndpoints` 501s on); this server answers
+                    // whether it MOUNTED the route at all (`api.enableSearch`,
+                    // the flag gated in registerRoutes). A deployment that opts
+                    // out gets a 404, so advertising the protocol's `true`
+                    // unqualified would re-open the declared ≠ enforced gap one
+                    // layer up from the one this issue closed. Neither half is a
+                    // fallback for a wrong bit: each layer states the fact only
+                    // it knows, and `enabled` is their conjunction.
+                    //
+                    // The flag is read with the mount's own `?? true` spelling
+                    // rather than the equivalent `!== false` — same predicate,
+                    // same characters, so the two cannot be edited apart.
+                    caps.search = {
+                        enabled: !!caps.search?.enabled && (this.config.api.enableSearch ?? true),
+                    };
+
                     // Attach scoping metadata so clients can detect dual-mode routing.
                     (discovery as any).scoping = {
                         enabled: this.config.api.enableProjectScoping,
@@ -4192,24 +4542,57 @@ export class RestServer {
         const isScoped = basePath.includes('/environments/:environmentId');
 
         // GET /meta - List all metadata types
+        //
+        // Also mounted at `/meta/types`, the spelling the dispatcher's `/meta`
+        // branch has always implemented (`parts[0] === 'types'`) and the
+        // spelling `route-ledger.ts` has always declared. ONE handler, two
+        // paths, deliberately: the dispatcher's two branches return the same
+        // `protocol.getMetaTypes()` body, so a second REST handler would be a
+        // second thing to keep true.
         if (metadata.endpoints.types !== false) {
+            const listMetaTypes = async (req: any, res: any) => {
+                try {
+                    const environmentId = isScoped ? req.params?.environmentId : undefined;
+                    const p = await this.resolveProtocol(environmentId, req);
+                    const types = await p.getMetaTypes();
+                    const translated = await this.translateMetaTypesResponse(req, environmentId, types);
+                    res.header('Vary', 'Accept-Language');
+                    res.json(translated);
+                } catch (error: any) {
+                    handleRouteError(res, error);
+                }
+            };
             this.routeManager.register({
                 method: 'GET',
                 path: metaPath,
-                handler: async (req: any, res: any) => {
-                    try {
-                        const environmentId = isScoped ? req.params?.environmentId : undefined;
-                        const p = await this.resolveProtocol(environmentId, req);
-                        const types = await p.getMetaTypes();
-                        const translated = await this.translateMetaTypesResponse(req, environmentId, types);
-                        res.header('Vary', 'Accept-Language');
-                        res.json(translated);
-                    } catch (error: any) {
-                        handleRouteError(res, error);
-                    }
-                },
+                handler: listMetaTypes,
                 metadata: {
                     summary: 'List all metadata types',
+                    tags: ['metadata'],
+                },
+            });
+
+            // GET /meta/types — REGISTERED BEFORE `/meta/:type`, and that is
+            // the entire fix (#7526).
+            //
+            // The branch existed in the dispatcher and the row existed in the
+            // ledger; the REST mount is a THIRD place and nobody wrote it here.
+            // So `/meta/types` fell into the `:type` catch-all below and
+            // answered `{"type":"types","items":[]}` — byte-shaped like
+            // `/meta/zzz_not_a_type`, a 200 no client can tell from "that type
+            // is empty". Hono is first-match-wins (MEASURED, not assumed —
+            // `plugin-hono-server`'s `mounted-route-introspection.test.ts`
+            // registers a literal and a `:param` sibling in both orders and
+            // pins that the later one never runs), so moving this below
+            // `/meta/:type` silently re-breaks it — the same shape that already
+            // put `diagnostics` / `_drafts` / `_migrate-stored` above it. The
+            // order is pinned by `meta-route-registration-order.test.ts`.
+            this.routeManager.register({
+                method: 'GET',
+                path: `${metaPath}/types`,
+                handler: listMetaTypes,
+                metadata: {
+                    summary: 'List all metadata types (explicit `/types` spelling)',
                     tags: ['metadata'],
                 },
             });
@@ -4277,6 +4660,37 @@ export class RestServer {
                 handler: async (req: any, res: any) => {
                     try {
                         const environmentId = isScoped ? req.params?.environmentId : undefined;
+                        // [ADR-0106 D5(4) / #6599] `_drafts` is an AUTHORING
+                        // surface — the console's pending-changes view and
+                        // draft-aware package reads — not a general read. A
+                        // pending object draft carries its full `fields` map, so
+                        // serving it unfiltered leaks every hidden field's
+                        // label, type, options, formula and `requiredPermissions`
+                        // to any authenticated caller, which is the disclosure
+                        // ADR-0106 closes one route over. The other `/meta`
+                        // exits MASK per field; this one GATES per caller, on the
+                        // SAME `systemPermissions` judgement D4 uses for its
+                        // read exemption (`isObjectSchemaMaskExempt`) — a caller
+                        // who could not see a field on `/meta/object` has no
+                        // authoring reason to see the draft that carries it. The
+                        // gate is intentionally independent of the D8 field-mask
+                        // escape hatch: opting out of per-field masking is not
+                        // consent to expose pending drafts to non-authors.
+                        //
+                        // Gate FIRST — before resolving the protocol — so an
+                        // unauthorized caller cannot use the 501-vs-200 answer to
+                        // probe which kernels support drafts (same posture as
+                        // `_migrate-stored` below).
+                        const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
+                        if (!isObjectSchemaMaskExempt(ctx)) {
+                            res.status(403).json({
+                                error: {
+                                    code: 'FORBIDDEN',
+                                    message: 'Reading pending metadata drafts requires an authoring capability (studio.access, setup.access or manage_metadata).',
+                                },
+                            });
+                            return;
+                        }
                         const p = await this.resolveProtocol(environmentId, req);
                         if (typeof (p as any).listDrafts !== 'function') {
                             res.status(501).json({
@@ -4393,7 +4807,7 @@ export class RestServer {
                 path: `${metaPath}/:type`,
                 handler: async (req: any, res: any) => {
                     try {
-                        // [#6877] Four single-valued parameters on this list
+                        // [#6877] Five single-valued parameters on this list
                         // route, declared together at the top so the gate cannot
                         // be missed by whichever branch reads its parameter
                         // several hundred lines down: `?object=` (the view
@@ -4403,7 +4817,18 @@ export class RestServer {
                         // `?include=` (repeated, it stopped equalling
                         // `'content'`, so a caller who asked for doc bodies got
                         // the slimmed list back with a 200).
-                        if (refuseRepeatedQueryParams(req, res, ['package', 'preview', 'object', 'include'])) return;
+                        //
+                        // [#7566] `?id=` joined them when the app branch below
+                        // started honouring it. It is declared HERE, with the
+                        // rest, rather than beside the filter that reads it, for
+                        // the reason this block exists: a filter that arrives as
+                        // `['crm','account']` and is compared against one app
+                        // name matches nothing, and an empty app list is exactly
+                        // the plausible-looking wrong answer #7566 was filed
+                        // against. Refused, not resolved — see
+                        // `query-multiplicity.ts` for why picking one of two
+                        // conflicting intents is worse than a 400.
+                        if (refuseRepeatedQueryParams(req, res, ['package', 'preview', 'object', 'include', 'id'])) return;
                         const packageId = req.query?.package || undefined;
                         const environmentId = isScoped ? req.params?.environmentId : undefined;
                         const p = await this.resolveProtocol(environmentId, req);
@@ -4515,6 +4940,82 @@ export class RestServer {
                                         ? filtered
                                         : { ...(raw as any), items: filtered };
                                 }
+                            }
+                        }
+
+                        // [#7566] `GET /meta/app?id=<app>` — the app-list filter,
+                        // which until now was accepted and then dropped.
+                        //
+                        // Nothing on this route had ever read `id`: the block
+                        // above narrows the list by PERMISSION and the branches
+                        // around it by `?object=` / `?include=` / `?package=`, so
+                        // `?id=crm` and `?id=not_an_app` produced the same three
+                        // apps, byte for byte. A caller cannot tell a working
+                        // filter from a dropped one — a client that asks for one
+                        // app and renders `items[0]` gets a plausible, wrong
+                        // answer, and a bogus id can never come back empty.
+                        //
+                        // ⚠️ Runs AFTER the RBAC filter above, on `visible`
+                        // rather than on `items`. The two orders produce the same
+                        // SET (both are pure filters), but not the same
+                        // disclosure: narrowing first would hand `?id=<an
+                        // unpublished app>` a one-element list to gate, and any
+                        // future non-total gate — one that strips a field instead
+                        // of dropping the document — would then be answering
+                        // about an app the caller may not observe at all
+                        // (ADR-0045 §3). Permission decides what exists for this
+                        // caller; the filter narrows what they asked for within
+                        // it, never the reverse.
+                        //
+                        // The match is on `name`, the App document's identity —
+                        // `AppSchema.name`, "App unique machine name", the same
+                        // key `GET /meta/app/:name` addresses and the same key
+                        // the metadata store merges overlays on. `AppSchema`
+                        // declares no `id` of its own (`id` appears on nav items
+                        // and areas, never on the app), so there is no second
+                        // identity to disagree with.
+                        //
+                        // A filter that matches nothing answers `200` with an
+                        // EMPTY list, not a 404 — measured against this route's
+                        // siblings, not chosen: `?package=<no such package>` and
+                        // `/meta/view?object=<no such object>` both serve an
+                        // empty list here, and the only meta 404 is the
+                        // single-item address `GET /meta/:type/:name`. An empty
+                        // list is the honest answer to "which apps have this id",
+                        // and it is already observably different from the defect,
+                        // which answered with all of them.
+                        //
+                        // Empty and absent spellings still mean "no filter", the
+                        // same falsy gate `?package=` on this route has always
+                        // used. The repeated spelling was refused at the top of
+                        // the handler (#6877), so what arrives here is a string.
+                        //
+                        // Its own block rather than a line inside the branch
+                        // above, because the two answer different questions:
+                        // that branch is guarded on a resolved `ctx?.userId` and
+                        // decides what this caller may observe, while narrowing
+                        // to the app you named is not a privilege and must not
+                        // acquire that guard's conditions.
+                        const appIdFilter = RestServer.metaTypeSingular(req.params.type) === 'app'
+                            ? req.query?.id
+                            : undefined;
+                        if (typeof appIdFilter === 'string' && appIdFilter !== '') {
+                            const raw = visible as unknown;
+                            // Only the two shapes this route serves are narrowed
+                            // — a bare array or the `{ items: [] }` envelope.
+                            // Anything else is left alone rather than replaced
+                            // with an invented empty envelope: a filter must not
+                            // be the thing that changes the response's shape.
+                            const list: any[] | null = Array.isArray(raw)
+                                ? (raw as any[])
+                                : (raw && typeof raw === 'object' && Array.isArray((raw as any).items))
+                                    ? ((raw as any).items as any[])
+                                    : null;
+                            if (list) {
+                                const matched = list.filter(
+                                    (a: any) => a && typeof a === 'object' && a.name === appIdFilter,
+                                );
+                                visible = Array.isArray(raw) ? matched : { ...(raw as any), items: matched };
                             }
                         }
 
@@ -5493,9 +5994,9 @@ export class RestServer {
                     const parentVersion = typeof ifMatchHeader === 'string'
                         ? ifMatchHeader.replace(/^"|"$/g, '') // strip ETag-style quotes
                         : undefined;
-                    const actorHeader = req.headers?.['x-actor'] ?? req.headers?.['X-Actor']
-                        ?? req.user?.id ?? req.userId;
-                    const actor = typeof actorHeader === 'string' ? actorHeader : undefined;
+                    // [#7749] Header, else the request's authenticated identity — one
+                    // producer, shared by every `/meta` write (see resolveMetaWriteActor).
+                    const actor = await this.resolveMetaWriteActor(environmentId, req);
                     // Phase 3a-destructive: `?force=true` opts past the
                     // destructive-change safety check. Accept any truthy
                     // string ('true', '1', 'yes') for resilience.
@@ -5606,15 +6107,16 @@ export class RestServer {
                     // Mirror saveMetaItem's OCC + actor plumbing (ADR-0008
                     // PR-10d wiring): `If-Match` pins the expected current
                     // version so concurrent edits get a 409 instead of a
-                    // silent reset; `X-Actor` (or req.user) flows into the
-                    // history tombstone row.
+                    // silent reset; `X-Actor` — or, since #7749, the request's
+                    // authenticated identity — flows into the history
+                    // tombstone row.
                     const ifMatchHeader = req.headers?.['if-match'] ?? req.headers?.['If-Match'];
                     const parentVersion = typeof ifMatchHeader === 'string'
                         ? ifMatchHeader.replace(/^"|"$/g, '')
                         : undefined;
-                    const actorHeader = req.headers?.['x-actor'] ?? req.headers?.['X-Actor']
-                        ?? req.user?.id ?? req.userId;
-                    const actor = typeof actorHeader === 'string' ? actorHeader : undefined;
+                    // [#7749] Header, else the request's authenticated identity — one
+                    // producer, shared by every `/meta` write (see resolveMetaWriteActor).
+                    const actor = await this.resolveMetaWriteActor(environmentId, req);
 
                     // [#6877] `?state=` and the destructive `?dropStorage=`
                     // both fail SAFE on an array today (the comparisons stop
@@ -5757,9 +6259,9 @@ export class RestServer {
                         });
                         return;
                     }
-                    const actorHeader = req.headers?.['x-actor'] ?? req.headers?.['X-Actor']
-                        ?? req.user?.id ?? req.userId;
-                    const actor = typeof actorHeader === 'string' ? actorHeader : undefined;
+                    // [#7749] Header, else the request's authenticated identity — one
+                    // producer, shared by every `/meta` write (see resolveMetaWriteActor).
+                    const actor = await this.resolveMetaWriteActor(environmentId, req);
                     const body = (req.body && typeof req.body === 'object') ? req.body : {};
                     const message = typeof body.message === 'string' ? body.message : undefined;
                     const result = await (p as any).publishMetaItem({
@@ -5811,9 +6313,9 @@ export class RestServer {
                         });
                         return;
                     }
-                    const actorHeader = req.headers?.['x-actor'] ?? req.headers?.['X-Actor']
-                        ?? req.user?.id ?? req.userId;
-                    const actor = typeof actorHeader === 'string' ? actorHeader : undefined;
+                    // [#7749] Header, else the request's authenticated identity — one
+                    // producer, shared by every `/meta` write (see resolveMetaWriteActor).
+                    const actor = await this.resolveMetaWriteActor(environmentId, req);
                     const message = typeof body.message === 'string' ? body.message : undefined;
                     const result = await (p as any).rollbackMetaItem({
                         type: req.params.type,
@@ -5878,6 +6380,159 @@ export class RestServer {
                 tags: ['metadata'],
             },
         });
+
+        // GET /meta/objects/:name/state/:field?from=:state — ADR-0020 D3.3
+        // legal-next-state introspection. [#7526]
+        //
+        // Ledgered since #3563 (`route-ledger.ts`, `meta.getLegalNextStates`)
+        // and implemented in the dispatcher's `/meta` branch — but REST's ~17
+        // `/meta` routes topped out at THREE path segments and this one needs
+        // four, so no registration here could ever deliver it and it answered
+        // Hono's `notFound`, byte-identical to an unmounted path.
+        //
+        // Registered BEFORE the compound `/:type/:section/:name/published`
+        // twin below, which it collides with on exactly one shape:
+        // `/meta/objects/x/state/published`. Two literal segments (`objects`,
+        // `state`) beat one, so the FSM reading wins that path — a field
+        // literally named `published` is the ambiguity, and answering it as
+        // "the published version of the compound name objects/x/state" would
+        // be the less likely of the two by a wide margin.
+        //
+        // `/object` as well as `/objects`: `metadata-protocol` folds the two
+        // spellings (#4432) and the dispatcher branch accepts both, so the
+        // REST mount that replaces it must not be pickier than what it
+        // replaces.
+        for (const objectsSegment of ['objects', 'object']) {
+            this.routeManager.register({
+                method: 'GET',
+                path: `${metaPath}/${objectsSegment}/:name/state/:field`,
+                handler: async (req: any, res: any) => {
+                    try {
+                        const environmentId = isScoped ? req.params?.environmentId : undefined;
+                        const name = String(req.params?.name ?? '');
+                        const field = String(req.params?.field ?? '');
+                        // [#6877 shape] `?from=` narrows to ONE current state;
+                        // an array would reach `legalNextStates` as a
+                        // stringified pair and match no transition key.
+                        if (refuseRepeatedQueryParams(req, res, ['from'])) return;
+                        const from = req.query?.from !== undefined ? String(req.query.from) : undefined;
+                        const ql = this.objectQLProvider
+                            ? await this.objectQLProvider(environmentId).catch(() => undefined)
+                            : undefined;
+                        const schema = (ql as any)?.registry?.getObject?.(name);
+                        if (!schema) {
+                            // `{ error: { code, message } }`, the envelope
+                            // `BaseResponseSchema` declares — not the bare
+                            // `{ error: 'string' }` the dispatcher branch this
+                            // mirrors emits. `pnpm check:route-envelope`
+                            // ratchets both non-conforming shapes DOWN only, so
+                            // a new route arrives conforming or not at all.
+                            res.status(404).json({
+                                error: { code: 'NOT_FOUND', message: 'Object not found' },
+                            });
+                            return;
+                        }
+                        // Dynamic import, matching the dispatcher branch this
+                        // mirrors: `@objectstack/objectql` is a devDependency
+                        // here, so a deployment serving REST without the data
+                        // engine must degrade rather than fail to load.
+                        let legalNextStates:
+                            | ((s: { validations?: unknown[] } | null | undefined, f: string, c: string) => string[] | null)
+                            | undefined;
+                        try {
+                            ({ legalNextStates } = await import('@objectstack/objectql'));
+                        } catch {
+                            legalNextStates = undefined;
+                        }
+                        if (typeof legalNextStates !== 'function') {
+                            res.status(501).json({
+                                error: {
+                                    code: 'NOT_IMPLEMENTED',
+                                    message: 'State-machine introspection is not available in this runtime',
+                                },
+                            });
+                            return;
+                        }
+                        // `next: null` = no FSM governs the field; `next: []` =
+                        // a declared dead end. Same three-valued answer the
+                        // dispatcher gives, because a UI asking "where can this
+                        // record go" must be able to tell those apart.
+                        const next = from === undefined ? null : legalNextStates(schema, field, from);
+                        res.json({ object: name, field, from: from ?? null, next });
+                    } catch (error: any) {
+                        handleRouteError(res, error);
+                    }
+                },
+                metadata: {
+                    summary: 'List the legal next states declared by an object field\'s state machine',
+                    tags: ['metadata'],
+                },
+            });
+        }
+
+        // GET /meta/:type/:name/published — ADR-0033 published snapshot. [#7526]
+        //
+        // Ledgered since #3563 (`meta.getPublished`) and implemented in the
+        // dispatcher, but never mounted here — so the request fell into the
+        // compound-name route below with `section=:name, name='published'`,
+        // which answered a protection-envelope stub. Identical before and
+        // after publish, identical for a name that does not exist: a route
+        // that structurally could not 404.
+        //
+        // Both arities, mirroring the `getItem` / `saveItem` twins: the SDK
+        // documents `getPublished('lead', 'views/all_leads')`, and a compound
+        // name is how every other read on this surface addresses a
+        // sub-resource. REGISTERED BEFORE `/:type/:section/:name` — the
+        // three-segment form collides with it exactly the way `/history` and
+        // `/audit` do, and Hono is first-match-wins.
+        for (const publishedPath of [
+            `${metaPath}/:type/:name/published`,
+            `${metaPath}/:type/:section/:name/published`,
+        ]) {
+            this.routeManager.register({
+                method: 'GET',
+                path: publishedPath,
+                handler: async (req: any, res: any) => {
+                    try {
+                        const environmentId = isScoped ? req.params?.environmentId : undefined;
+                        const type = String(req.params?.type ?? '');
+                        const section = req.params?.section;
+                        const name = section
+                            ? `${section}/${req.params?.name ?? ''}`
+                            : String(req.params?.name ?? '');
+                        const svc = await this.resolveMetadataService(environmentId, req);
+                        if (typeof (svc as any)?.getPublished !== 'function') {
+                            res.status(501).json({
+                                error: {
+                                    code: 'NOT_IMPLEMENTED',
+                                    message: 'metadata.getPublished() is not available in this kernel',
+                                },
+                            });
+                            return;
+                        }
+                        const data = await (svc as any).getPublished(type, name);
+                        // The 404 this route could never produce before. An
+                        // item that exists but was never published still
+                        // answers 200 with its current definition — that is
+                        // `getPublished`'s documented fallback, and it is a
+                        // different fact from "no such item".
+                        if (data === undefined) {
+                            res.status(404).json({
+                                error: { code: 'NOT_FOUND', message: 'Not found' },
+                            });
+                            return;
+                        }
+                        res.json(data);
+                    } catch (error: any) {
+                        handleRouteError(res, error);
+                    }
+                },
+                metadata: {
+                    summary: 'Get the published version of a metadata item',
+                    tags: ['metadata'],
+                },
+            });
+        }
 
         // GET /meta/:type/:section/:name - Get specific item with compound name
         // Compound names express sub-resources of a type (e.g. a view of an
@@ -6010,9 +6665,9 @@ export class RestServer {
                     const parentVersion = typeof ifMatchHeader === 'string'
                         ? ifMatchHeader.replace(/^"|"$/g, '')
                         : undefined;
-                    const actorHeader = req.headers?.['x-actor'] ?? req.headers?.['X-Actor']
-                        ?? req.user?.id ?? req.userId;
-                    const actor = typeof actorHeader === 'string' ? actorHeader : undefined;
+                    // [#7749] Header, else the request's authenticated identity — one
+                    // producer, shared by every `/meta` write (see resolveMetaWriteActor).
+                    const actor = await this.resolveMetaWriteActor(environmentId, req);
 
                     // [#6877] The `typeof` guard below dropped a repeated
                     // `?package=` to `undefined`, i.e. wrote the row as an
@@ -7971,7 +8626,22 @@ export class RestServer {
                             const items: any[] = Array.isArray(r?.items) ? r.items : Array.isArray(r) ? r : [];
                             const obj = items.find((o: any) => o?.name === match.object);
                             const def = obj?.fields?.[fieldName];
-                            referenceTo = def?.referenceTo ?? def?.target ?? def?.options?.objectName;
+                            // [#7486] `reference` FIRST — it is the canonical
+                            // key on `FieldSchema`, and `data/field.zod.ts`
+                            // folds `relatedTo` / `referenceTo` / `target` /
+                            // `targetObject` / `lookupObject` all onto it at
+                            // parse. Reading only the legacy spellings meant a
+                            // well-formed object schema carried NONE of them,
+                            // the chain resolved `undefined`, and the route
+                            // answered 500 — making `publicPicker.object`
+                            // de-facto required while the schema and docs
+                            // present it as an optional override. The legacy
+                            // spellings stay after it for stored pre-fold rows,
+                            // which never went through the alias table.
+                            referenceTo = def?.reference
+                                ?? def?.referenceTo
+                                ?? def?.target
+                                ?? def?.options?.objectName;
                         } catch {/* ignore */}
                     }
                     if (!referenceTo) {
@@ -8848,8 +9518,26 @@ export class RestServer {
                     // [#6877] Both are `String(array)` joins — `?status=a&status=b`
                     // filtered on the single status `'a,b'` and returned nothing.
                     if (refuseRepeatedQueryParams(req, res, ['status', 'packageId'])) return;
+                    // [#7678] …and a single well-formed but UNKNOWN `?status=`
+                    // did the same thing one layer on: the service's contract
+                    // declares exactly three values, anything else matched no
+                    // row, and the caller got 200 with an empty list — which
+                    // reads as "there are no suggestions" rather than "your
+                    // filter was not a status". The runtime dispatcher's twin of
+                    // this route had refused it since #4127; this live route
+                    // never did. Same predicate, imported — not a second copy of
+                    // the vocabulary.
+                    const status = req.query?.status ? String(req.query.status) : undefined;
+                    if (status !== undefined && !isAudienceBindingSuggestionStatus(status)) {
+                        return res.status(400).json({
+                            error: {
+                                code: 'VALIDATION_ERROR',
+                                message: unknownAudienceBindingSuggestionStatusMessage(status),
+                            },
+                        });
+                    }
                     const result = await svc.listAudienceBindingSuggestions(context ?? {}, {
-                        status: req.query?.status ? String(req.query.status) : undefined,
+                        status,
                         packageId: req.query?.packageId ? String(req.query.packageId) : undefined,
                     });
                     res.json({ data: result });
@@ -9036,9 +9724,33 @@ export class RestServer {
                     if (this.enforceAuth(req, res, context)) return;
                     const svc = await resolveService(environmentId);
                     if (!svc) return respond501(res);
+                    // [#7523] Deny-as-404, with the two deny arms collapsed onto ONE
+                    // response. `deleteReport()` is silently idempotent for an id that
+                    // does not exist but throws REPORT_NOT_FOUND for a report the
+                    // caller does not own — two shapes that used to reach the caller
+                    // as 204-vs-500 and let an authenticated prober read another
+                    // owner's report ids straight off the status code. Splitting them
+                    // 204-vs-404 would only re-dress the same oracle, so both arms are
+                    // answered here, before the delete fires, by the one call the
+                    // surface already keeps blind to the difference: `getReport()`
+                    // returns null for an unknown id AND for another owner's id
+                    // alike (#2980). The response is emitted by `handleValidation`
+                    // from a synthesised REPORT_NOT_FOUND, i.e. the exact code path
+                    // the thrown arm takes below — one emitter, so status and body
+                    // cannot drift apart.
+                    const visible = await svc.getReport(req.params.id, context ?? {});
+                    if (!visible) {
+                        handleValidation(res, new Error(`REPORT_NOT_FOUND: ${req.params.id}`));
+                        return;
+                    }
                     await svc.deleteReport(req.params.id, context ?? {});
                     res.status(204).end();
                 } catch (error: any) {
+                    // REPORT_NOT_FOUND → 404, VALIDATION_FAILED → 400. Reached only
+                    // when an IReportService gates in `deleteReport()` without also
+                    // blinding `getReport()`; routing it through the same helper keeps
+                    // that implementation's arms indistinguishable too.
+                    if (handleValidation(res, error)) return;
                     logError('[REST] Delete report error:', error);
                     res.status(500).json({ code: 'REPORT_DELETE_FAILED', error: String(error?.message ?? error).slice(0, 500) });
                 }
@@ -9142,6 +9854,24 @@ export class RestServer {
                     if (this.enforceAuth(req, res, context)) return;
                     const svc = await resolveService(environmentId);
                     if (!svc) return respond501(res);
+                    // [#7603] Both deny arms — an unknown scheduleId and another
+                    // owner's — reach the caller as the one 404 emitted by the
+                    // single `handleValidation` call below, because
+                    // `unscheduleReport` is contracted to throw the SAME
+                    // `REPORT_NOT_FOUND: <scheduleId>` for both, before the delete
+                    // fires. It used to resolve silently for the unknown id, which
+                    // landed here as a 204 and let a prober read another owner's
+                    // schedule ids off the status code (#7523's oracle, in the
+                    // 404-vs-204 costume its card warned about).
+                    //
+                    // Unlike the sibling `DELETE /reports/:id`, this route cannot
+                    // pre-empt the two arms itself: that one collapses them with
+                    // `getReport()`, already blind to the difference (#2980),
+                    // whereas the caller here presents a scheduleId and
+                    // `IReportService` exposes no by-id schedule read to be blind
+                    // with — `listSchedules` is keyed by reportId. So the blinding
+                    // is the service's obligation (stated on the contract), and the
+                    // route's job is to keep ONE emitter for whatever it throws.
                     await svc.unscheduleReport(req.params.scheduleId, context ?? {});
                     res.status(204).end();
                 } catch (error: any) {
@@ -9233,6 +9963,15 @@ export class RestServer {
                         res.json({ data: [] });
                         return;
                     }
+                    // [#7527] The closed parameter set for this route, measured
+                    // from what the handler below actually reads. A name outside
+                    // it is REFUSED, never dropped: `?assignedToMe=true` used to
+                    // answer 200 with the whole list, and an ignored filter is
+                    // indistinguishable from one that matched everything. Paging
+                    // (`limit`/`offset`) and the snake_case alias spellings are
+                    // in the set because the handler honours them — a whitelist
+                    // built from the filters alone would break paging.
+                    if (refuseUnknownQueryParams(req, res, APPROVAL_REQUEST_LIST_PARAMS)) return;
                     // [#6877] `approverId` / `approver_id` are the model case
                     // for the multi-valued side and are therefore NOT listed:
                     // the block immediately below reads their array arm ON

@@ -129,6 +129,20 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
 
   // ── metadata ──────────────────────────────────────────────────────────────
   { route: 'GET /api/v1/meta', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getTypes' },
+  // [#7526] The same `listMetaTypes` closure as the row above, at the spelling
+  // the dispatcher branch and `route-ledger.ts` have always used. It is
+  // `server-only` for the reason that ledger's row gives — Studio tooling
+  // calls this path directly and the SDK goes to `GET /meta` — and NOT `gap`:
+  // the gap ratchet is pinned at zero and a new `gap` row needs its own
+  // reviewed decision, which mounting a route the SDK already reaches by
+  // another path does not carry.
+  //
+  // MUST stay registered before `GET /api/v1/meta/:type`. It was absent
+  // entirely until #7526, so `/meta/types` answered from the `:type` catch-all
+  // with `{"type":"types","items":[]}` — a 200 indistinguishable from
+  // `/meta/zzz_not_a_type`.
+  { route: 'GET /api/v1/meta/types', family: 'metadata', source: 'route-manager', disposition: 'server-only',
+    note: 'richer types listing consumed by Studio tooling directly; the SDK reads the same body from GET /meta (meta.getTypes). Mirrors the `GET /meta/types` row in runtime/src/route-ledger.ts' },
   { route: 'GET /api/v1/meta/diagnostics', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getDiagnostics' },
   { route: 'GET /api/v1/meta/_drafts', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.listDrafts' },
   { route: 'POST /api/v1/meta/_migrate-stored', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.migrateStored',
@@ -168,6 +182,25 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
     note: 'per-item ADR-0033 publish; packages.publishDrafts remains the package-scoped flow' },
   { route: 'POST /api/v1/meta/:type/:name/rollback', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.rollbackItem' },
   { route: 'GET /api/v1/meta/:type/:name/diff', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.diffItem' },
+  // [#7526] The two routes that were ledgered in `runtime/src/route-ledger.ts`
+  // and implemented in the dispatcher, but which no registrar ever mounted —
+  // so the SDK guard (#3642) certified them off a DECLARATION while they died
+  // at runtime. Both are `route-manager` mounts here now.
+  //
+  // Order is load-bearing and pinned by `meta-route-registration-order.test.ts`:
+  // the `/state/:field` pair precedes the compound `/published` twin (they
+  // collide only on a field literally named `published`), and BOTH `/published`
+  // rows precede `GET /api/v1/meta/:type/:section/:name` — a three-segment
+  // literal registered after that catch-all is mounted and unreachable.
+  { route: 'GET /api/v1/meta/objects/:name/state/:field', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getLegalNextStates',
+    note: 'ADR-0020 D3.3 legal-next-state introspection. `next: null` = no state_machine governs the field, `next: []` = a declared dead end; the SDK spells the segment `objects`' },
+  { route: 'GET /api/v1/meta/object/:name/state/:field', family: 'metadata', source: 'route-manager', disposition: 'server-only',
+    note: 'singular-spelling alias of the row above — metadata-protocol folds object/objects (#4432) and the dispatcher branch this mount replaces accepted both, so the replacement is not pickier than what it replaced. The SDK calls the plural only' },
+  { route: 'GET /api/v1/meta/:type/:name/published', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getPublished',
+    note: 'ADR-0033 published snapshot; 404s for a name that does not exist, which the pre-#7526 fall-through into the compound-name route structurally could not do (it answered a protection-envelope stub identical before publish and for a bogus name)' },
+  { route: 'GET /api/v1/meta/:type/:section/:name/published', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getPublished',
+    note: 'compound-name arity of the row above — the SDK documents getPublished(\'lead\', \'views/all_leads\'), the same unencoded pass-through getItem/saveItem carry' },
+
   { route: 'GET /api/v1/meta/:type/:section/:name', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getItem',
     note: 'compound names pass through getItem unencoded (URL-pinned in client.test.ts); only deleteItem encodes' },
   { route: 'PUT /api/v1/meta/:type/:section/:name', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.saveItem',
@@ -186,6 +219,42 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   { route: 'DELETE /api/v1/data/:object/:id', family: 'crud', source: 'route-manager', disposition: 'sdk', client: 'data.delete' },
 
   // ── data actions (clone / import / import jobs / export) ──────────────────
+  //
+  // THERE IS NO ACTION-INVOKE ROUTE IN THIS FAMILY, AND ITS ABSENCE IS
+  // DELIBERATE (#7680). This family is the built-in DATA operations only. No
+  // route on this server invokes a declared object/record action: not
+  // `POST /api/v1/data/:object/actions/:name`, nor `/api/v1/actions/:name`,
+  // `/api/v1/action/:name`, `/api/v1/objects/:object/actions/:name`. A QA probe
+  // (#7637) measured all four spellings 404 against a booted showcase, which is
+  // the state this table records — a missing row here, not a missing entry.
+  //
+  // WHERE `requiredPermissions` IS ACTUALLY ENFORCED. ADR-0066 D4's capability
+  // gate is `actionPermissionError` (packages/runtime/src/action-execution.ts),
+  // and every caller that reaches it does so on a PLATFORM path: the runtime
+  // dispatcher's `/actions` domain (runtime/src/domains/actions.ts, which
+  // dispatches through `ql.executeAction`) and the MCP `run_action` bridge
+  // (runtime/src/domains/mcp.ts). Those routes are ledgered in
+  // `packages/runtime/src/route-ledger.ts`, not here. Read
+  // `actionPermissionError`'s own docstring with that split in mind: the "REST
+  // `/actions/...` route" it names is the DISPATCHER's HTTP surface, not a
+  // route `@objectstack/rest` mounts. So "`requiredPermissions` is not enforced
+  // over REST" is not a defect on this build — it is a surface that does not
+  // exist, and a 404 from the probes above is evidence of nothing else.
+  //
+  // IF YOU ARE THE AUTHOR ADDING AN ACTION-INVOKE ROUTE HERE: server-side
+  // `requiredPermissions` enforcement is a DAY-ONE requirement of that route,
+  // not a follow-up you file behind it. `Action.requiredPermissions` is
+  // authored metadata the Console ALSO gates on client-side; a REST invoke door
+  // that ships without calling the same gate resurrects precisely the
+  // client-side fail-open #3923 reported — the action greyed out in the UI and
+  // wide open on the wire, which is the worst of both, because the UI's refusal
+  // reads as proof the rule is being kept. Call `actionPermissionError` rather
+  // than re-deriving the check: it is single-sourced so that every invoke
+  // surface enforces the SAME declaration, and a second implementation is a
+  // second thing to drift. Then ledger the new route with that gate named in
+  // its `note`, and re-point the platform-checklist item that this comment's
+  // counterpart clause sends to the platform path
+  // (`access-security.capability-declaration-lifecycle`).
   { route: 'POST /api/v1/data/:object/:id/clone', family: 'data-actions', source: 'route-manager', disposition: 'sdk', client: 'data.clone' },
   { route: 'POST /api/v1/data/:object/import', family: 'data-actions', source: 'route-manager', disposition: 'sdk', client: 'data.import' },
   { route: 'POST /api/v1/data/:object/import/jobs', family: 'data-actions', source: 'route-manager', disposition: 'sdk', client: 'data.createImportJob' },
@@ -274,9 +343,9 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   { route: 'POST /api/v1/data/:object/updateMany', family: 'batch', source: 'route-manager', disposition: 'sdk', client: 'data.updateMany' },
   { route: 'POST /api/v1/data/:object/deleteMany', family: 'batch', source: 'route-manager', disposition: 'sdk', client: 'data.deleteMany' },
 
-  // ── packages (direct-mount registrar, service-gated) ──────────────────────
+  // ── packages (direct-mount registrar; the three `:id` rows service-gated) ──
   { route: 'POST /api/v1/packages/publish', family: 'packages', source: 'direct-mount', disposition: 'server-only',
-    note: 'marketplace registry publish ({manifest, metadata}) — publisher tooling, not app-SDK surface. Moved off the bare POST /packages in #3610: that verb+path is the dispatcher install route, and REST registering it first swallowed every packages.install call with a 400.' },
+    note: 'marketplace registry publish ({manifest, metadata}) — publisher tooling, not app-SDK surface. Moved off the bare POST /packages in #3610: that verb+path is the dispatcher install route, and REST registering it first swallowed every packages.install call with a 400. Mounted UNCONDITIONALLY since #7563 — it has no dispatcher twin, so while it was service-gated the path was absorbed by /packages/:id and answered 405 with THAT route\'s Allow set; it now resolves the `package` service per request and answers an honest 404 on a deployment that composes none.' },
   { route: 'GET /api/v1/packages', family: 'packages', source: 'direct-mount', disposition: 'sdk', client: 'packages.list',
     note: 'shadows the dispatcher twin (registered first); merges registry + database packages' },
   { route: 'GET /api/v1/packages/:id', family: 'packages', source: 'direct-mount', disposition: 'sdk', client: 'packages.get',

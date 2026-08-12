@@ -241,7 +241,7 @@ Execute a batch operation (create / update / upsert / delete) on multiple record
 
 **Response**: `BatchUpdateResponse` with `succeeded`, `failed`, `total`, and a per-record `results` array. Each entry in `results` has `id`, `success`, `index` (the row's position in the request array), an optional `errors` array (`ApiError[]` — read `errors[0].message`, branch on `errors[0].code`), and optional `data` (the full record, present when `returnRecords` is `true`).
 
-`options.atomic` defaults to `false` (sequential best-effort, stopping at the first failure). Set it to `true` and the whole batch runs inside one transaction: the first failure rolls back every prior write, and the response reports `succeeded: 0` — each row's `errors[0].code` says what happened: `ROLLED_BACK` (written, then undone), the causal row's own error code, or `NOT_ATTEMPTED` (never reached). A deployment whose driver cannot roll back rejects an atomic request with `501 NOT_IMPLEMENTED` instead of running it best-effort — probe `capabilities.transactionalBatch` on `/discovery` first. `atomic` takes precedence over `continueOnError`.
+`options.atomic` defaults to `false`: sequential best-effort that stops at the first failure. Records written before the failure stay written — nothing is rolled back on this arm — and every record after it is reported with `errors[0].code` `NOT_ATTEMPTED` rather than omitted, so `results` always covers all `total` records and `succeeded + failed === total` (#7539). Send `continueOnError: true` to process the remaining records instead of stopping. Set `atomic` to `true` and the whole batch runs inside one transaction: the first failure rolls back every prior write, and the response reports `succeeded: 0` — each row's `errors[0].code` says what happened: `ROLLED_BACK` (written, then undone), the causal row's own error code, or `NOT_ATTEMPTED` (never reached). A deployment whose driver cannot roll back rejects an atomic request with `501 NOT_IMPLEMENTED` instead of running it best-effort — probe `capabilities.transactionalBatch` on `/discovery` first. `atomic` takes precedence over `continueOnError`.
 
 ### `POST /data/:object/createMany`
 
@@ -284,7 +284,9 @@ selects rows, so no body key can widen the delete into a filter.
 deleted one at a time by primary key, so each honours `deleteBehavior`
 (`cascade` / `set_null` / `restrict`) on relations pointing at it. The run stops
 at the first failure; `continueOnError: true` processes the remaining ids and
-reports the failures instead.
+reports the failures instead. Either way every id gets a `results` entry — the
+ids a stopped run never reached carry `errors[0].code` `NOT_ATTEMPTED`, so the
+counters reconcile against `total` (#7539).
 
 `options.atomic: true` is honoured here the same way as on `/batch` (#4620): the
 whole id list runs inside one transaction, the first failure rolls back every

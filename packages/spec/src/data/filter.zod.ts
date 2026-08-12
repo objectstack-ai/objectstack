@@ -41,9 +41,11 @@ import { z } from 'zod';
  * uniform across evaluation paths, and a producer must know which path its
  * filter will run on:
  *
- * - **In-memory evaluation — supported.** `matchesFilter`
- *   (`@objectstack/formula`, `matches-filter.ts`) resolves the reference
- *   against the record, dot-paths included.
+ * - **In-memory evaluation — supported, in SCALAR positions only.**
+ *   `matchesFilter` (`@objectstack/formula`, `matches-filter.ts`) resolves the
+ *   reference against the record, dot-paths included, when the reference is the
+ *   WHOLE comparand. It does **not** descend into a list — see the LIST
+ *   positions carve-out below.
  * - **SQL push-down — refused, loudly.** `@objectstack/driver-sql` (and
  *   `driver-sqlite-wasm`, which inherits its filter compiler) does not compile
  *   a field reference to a column-to-column comparison. Rather than bind the
@@ -59,8 +61,37 @@ import { z } from 'zod';
  * the two open semantic questions ride with it — dot-path relation references,
  * and the validation boundary for the referenced column name.
  *
+ * ## LIST positions are NOT part of this declaration (#7596, ruled 2026-08-11)
+ *
+ * A reference may be the whole comparand of a scalar comparison. It may **not**
+ * be a member of an `$in` / `$nin` list, nor an endpoint of a `$between` range.
+ * Those positions were declared here — both `$between` endpoints carried
+ * `FieldReferenceSchema`, and `$in` / `$nin` admitted anything — and **no**
+ * backend ever resolved them:
+ *
+ * - **The memory evaluator returns a list unresolved, structurally.**
+ *   `matches-filter.ts` `resolveValue` reads `$field` only off a non-array
+ *   object (`!Array.isArray(raw) && '$field' in raw`), and `evalOp` resolves the
+ *   whole comparand and never its members. So `$in` / `$nin` compare the raw
+ *   reference OBJECT with `looseEq` against a stored value — never equal — and
+ *   a `$between` endpoint becomes an ordering bound that is an object. Both fail
+ *   SILENTLY: the `$in` direction matches nothing, and the `$nin` direction
+ *   loses an exclusion the author wrote, which on an RLS `check` widens a scope.
+ * - **Both SQL faces already refuse them**, by name and by index (#5041 installed
+ *   the refusal, #5222 deliberately kept it: there is no correct in-memory
+ *   semantics for SQL to be conformance-equivalent TO).
+ *
+ * So the declaration was honoured by nobody and refused by two backends —
+ * ADR-0049's enforce-or-remove shape at a declared position. The maintainer
+ * ruled REMOVE rather than implement: member resolution has zero measured
+ * consumers, and per-member OR-expansion carries NULL and type-affinity
+ * questions #5222 declined to guess at. The positions now refuse at the SCHEMA
+ * door too, with a message naming the working alternative — see
+ * {@link SetOperatorSchema} and {@link RangeOperatorSchema}.
+ *
  * @see https://github.com/objectstack-ai/objectstack/issues/5041 (refusal)
  * @see https://github.com/objectstack-ai/objectstack/issues/5222 (SQL support)
+ * @see https://github.com/objectstack-ai/objectstack/issues/7596 (list positions removed)
  */
 import { lazySchema } from '../shared/lazy-schema';
 export const FieldReferenceSchema = lazySchema(() => z.object({
@@ -215,14 +246,103 @@ export const ComparisonOperatorSchema = lazySchema(() => z.object({
 // ============================================================================
 
 /**
+ * [#7596] Is `value` shaped like a {@link FieldReferenceSchema} reference?
+ *
+ * SHAPE only, and deliberately so — the referenced name is not consulted. The
+ * point is to recognise what the author WROTE so the refusal can name it, which
+ * has to happen for any `{ $field: … }`, not only for one whose referent would
+ * have resolved. It mirrors `matches-filter.ts` `resolveValue`'s own test
+ * (a non-array object carrying a `$field` key) so that "the shape the evaluator
+ * would have looked for" and "the shape refused here" cannot drift apart.
+ */
+function isFieldReferenceShape(value: unknown): boolean {
+  return !!value && typeof value === 'object' && !Array.isArray(value) && '$field' in value;
+}
+
+/**
+ * [#7596] The author-facing refusal for a `{ $field }` reference in a LIST
+ * position — every `$in` / `$nin` member, and both `$between` endpoints.
+ *
+ * One builder for all four positions because it is one ruling; `position`
+ * carries the only part that differs, and it names the INDEX for the reason
+ * `crossFieldComparisonError` (`@objectstack/driver-sql`) names it: the index is
+ * the only thing distinguishing the bad member from its legitimate neighbours.
+ *
+ * ## Why the message says what it says
+ *
+ * The schema door and the driver door answer the same author, so they must not
+ * contradict each other. The SQL drivers' wording ends with two escapes —
+ * "compare against a literal value here, or evaluate the rule in memory
+ * (matchesFilter)" — and the SECOND one is not available at a list position:
+ * the memory evaluator does not resolve list members either, it just fails
+ * silently instead of loudly. Repeating it here would send an author to the one
+ * path whose answer is a wrong row set rather than an error. So this message
+ * keeps the literal-value escape, replaces the in-memory escape with the
+ * position that genuinely works (the reference as the WHOLE comparand of a
+ * scalar comparison, which #5222 compiles), and states the ruling that removed
+ * the position so the change is attributable from the error alone.
+ */
+function listPositionFieldReferenceMessage(position: string): string {
+  return (
+    `A { "$field": … } reference is not a valid ${position}. No evaluation path resolves a field `
+    + 'reference inside a list: the in-memory evaluator (matchesFilter) leaves the list '
+    + 'unresolved and compares the raw reference OBJECT, so it silently matches nothing, and '
+    + 'both SQL drivers refuse the position with INVALID_FILTER / 400. Write a literal value '
+    + 'here, or move the reference to a scalar comparison operator '
+    + '($eq/$ne/$gt/$gte/$lt/$lte), whose WHOLE comparand a { $field } reference may be. '
+    + 'Ruled 2026-08-11 on #7596: declared = enforced (ADR-0049).'
+  );
+}
+
+/**
+ * [#7596] `$in` / `$nin`, with the `{ $field }` member ruled out by name.
+ *
+ * The members stay `z.any()`: a set-membership list is genuinely heterogeneous
+ * (a `lookup` id, an ISO day, a number), and this schema is field-AGNOSTIC — it
+ * never sees which column the list applies to, so narrowing the member type
+ * would refuse working filters, exactly the finding `RangeOperatorSchema`'s
+ * "why a BARE string" section records for the sibling slot. What IS removable
+ * is the one shape no backend implements, so it is removed as a check rather
+ * than as a type change: everything else keeps parsing, `{ $field }` is refused
+ * with the message it needs, and the generated JSON Schema still describes the
+ * list as the open one it is.
+ */
+const setMembershipSchema = (op: '$in' | '$nin') =>
+  z.array(z.any()).superRefine((members, ctx) => {
+    members.forEach((member, index) => {
+      if (!isFieldReferenceShape(member)) return;
+      ctx.addIssue({
+        code: 'custom',
+        path: [index],
+        message: listPositionFieldReferenceMessage(`${op} member at index ${index}`),
+      });
+    });
+  });
+
+/** The `describe()` both `$in` and `$nin` carry, stating the one ruled-out member shape. */
+const SET_MEMBER_DESCRIPTION =
+  'Membership list. Members are literal values of any type the column stores. A '
+  + '{ $field } reference is NOT a member shape: no backend resolves one inside a list '
+  + '(#7596) — put it in a scalar comparison ($eq/$ne/$gt/$gte/$lt/$lte) instead.';
+
+/**
  * Set operators for membership checks.
+ *
+ * ## A `{ $field }` member is refused (#7596, ruled 2026-08-11)
+ *
+ * `$in` / `$nin` admit any member type EXCEPT a {@link FieldReferenceSchema}
+ * reference, which no evaluation path resolves — the reasoning is recorded on
+ * `FieldReferenceSchema` itself, and the refusal wording on
+ * {@link listPositionFieldReferenceMessage}. The `$nin` direction is the one
+ * that mattered: an unresolved member drops an EXCLUSION the author wrote,
+ * which widens the result set rather than emptying it.
  */
 export const SetOperatorSchema = lazySchema(() => z.object({
   /** In list - SQL: IN (?, ?, ?) | MongoDB: $in */
-  $in: z.array(z.any()).optional(),
-  
+  $in: setMembershipSchema('$in').optional().describe(SET_MEMBER_DESCRIPTION),
+
   /** Not in list - SQL: NOT IN (...) | MongoDB: $nin */
-  $nin: z.array(z.any()).optional(),
+  $nin: setMembershipSchema('$nin').optional().describe(SET_MEMBER_DESCRIPTION),
 }));
 
 /**
@@ -234,9 +354,11 @@ export const SetOperatorSchema = lazySchema(() => z.object({
  * sentence is in {@link RangeOperatorSchema}'s docblock.
  */
 const RANGE_ENDPOINT_DESCRIPTION =
-  'Closed interval [min, max]. Each endpoint is a number, a Date, a string, or '
-  + 'a { $field } reference — the SAME union the ordering comparisons take, '
-  + 'because a range IS its two ordering bounds. STRING is the form the '
+  'Closed interval [min, max]. Each endpoint is a number, a Date, or a string. '
+  + 'A { $field } reference is NOT an endpoint shape: no backend resolves one '
+  + 'inside a list (#7596) — put it in a scalar comparison '
+  + '($gt/$gte/$lt/$lte), which does compile to a column-to-column bound. '
+  + 'STRING is the form the '
   + 'platform itself produces: the date-macro resolver walks INTO arrays, so '
   + '{ $between: ["{current_year_start}", "{current_year_end}"] } resolves to '
   + 'two strings. The guaranteed spellings are an ISO calendar day '
@@ -253,7 +375,26 @@ const RANGE_ENDPOINT_DESCRIPTION =
  * Range operator for interval checks (closed interval).
  * SQL: BETWEEN ? AND ? | MongoDB: $gte AND $lte
  *
- * Supported endpoint types: **Number, Date, ISO/clock STRING, FieldReference**.
+ * Supported endpoint types: **Number, Date, ISO/clock STRING**.
+ *
+ * ## A `{ $field }` endpoint is refused (#7596, ruled 2026-08-11)
+ *
+ * Both endpoint unions carried `FieldReferenceSchema` until this ruling, and no
+ * backend ever resolved one: `matches-filter.ts` leaves a list unresolved and
+ * orders against the raw reference OBJECT, while both SQL faces refuse the
+ * position loudly. ADR-0049's enforce-or-remove shape, resolved by REMOVAL —
+ * the reasoning is recorded on {@link FieldReferenceSchema}, the wording on
+ * `listPositionFieldReferenceMessage`.
+ *
+ * The reference stays legal in the four ORDERING slots
+ * ({@link ComparisonOperatorSchema}) — that is #5222's shipped capability, and
+ * it is also the alternative this refusal prescribes. "A range IS its two
+ * ordering bounds" therefore stops being true of the COMPARAND union at exactly
+ * one member: `$gt` takes a reference because a scalar comparison compiles to a
+ * column-to-column bound; a `$between` endpoint does not, because nothing
+ * resolves a member of a list. An author wanting a column-to-column range
+ * writes the two bounds separately (`{ $gte: { $field: 'a' }, $lte: { $field: 'b' } }`),
+ * which every face already answers.
  *
  * ## Why `string` is in BOTH endpoint unions (#6571)
  *
@@ -313,12 +454,36 @@ const RANGE_ENDPOINT_DESCRIPTION =
  * either — an inverted `[max, min]` range is a well-formed filter that matches
  * nothing, at every backend.
  */
+/**
+ * [#7596] One `$between` endpoint, with the `{ $field }` shape ruled out.
+ *
+ * ## Why the refusal rides on the union's `error` and not on a `superRefine`
+ *
+ * Measured on zod 4.4.3: a check attached to the TUPLE does not run once an
+ * ELEMENT has failed, so a tuple-level refinement could never see the endpoint
+ * it was written to explain — the author would get zod's bare
+ * `invalid_union` / "Invalid input" and nothing else. The union's own `error`
+ * callback runs exactly when the union rejects and sees the offending input, so
+ * it replaces that generic text with {@link listPositionFieldReferenceMessage}
+ * for this one shape and returns `undefined` for every other rejection, leaving
+ * zod's default wording — and, importantly, the issue's `code` and `path` —
+ * untouched for the endpoint shapes that were already invalid.
+ *
+ * `index` is baked in per endpoint rather than read from the issue: at the time
+ * the union reports, the path is still relative to the union itself and the
+ * tuple has not yet prefixed the position.
+ */
+const rangeEndpointSchema = (index: 0 | 1) =>
+  z.union([z.number(), z.date(), z.string()], {
+    error: (issue) =>
+      isFieldReferenceShape(issue.input)
+        ? listPositionFieldReferenceMessage(`$between endpoint at index ${index}`)
+        : undefined,
+  });
+
 export const RangeOperatorSchema = lazySchema(() => z.object({
   /** Between (inclusive) - takes [min, max] array */
-  $between: z.tuple([
-    z.union([z.number(), z.date(), z.string(), FieldReferenceSchema]),
-    z.union([z.number(), z.date(), z.string(), FieldReferenceSchema])
-  ]).optional()
+  $between: z.tuple([rangeEndpointSchema(0), rangeEndpointSchema(1)]).optional()
     .describe(`Between (inclusive). ${RANGE_ENDPOINT_DESCRIPTION}`),
 }));
 
@@ -353,7 +518,7 @@ export const RangeOperatorSchema = lazySchema(() => z.object({
  * | surface | `$contains` case behaviour | mechanism |
  * |---|---|---|
  * | `formula` `matchesFilterCondition` | SENSITIVE | `actual.includes(v)` |
- * | `driver-memory` — query path and analytics face | INSENSITIVE, full Unicode | `new RegExp(escapeRegex(v), 'i')` |
+ * | `driver-memory` — query path and analytics face | INSENSITIVE, full Unicode | `new RegExp(escapeRegex(v), 'i')` — the last one standing; #6682 closed it (see "Implementation status" below) |
  * | `driver-memory` — reference matcher (`memory-matcher`) | SENSITIVE | `value.includes(target)` |
  * | `driver-mongodb` | INSENSITIVE, full Unicode | hardcoded `$options: 'i'` |
  * | `driver-sql` family | the DIALECT's | `LIKE '%v%'` — ASCII-insensitive on SQLite (so also turso and sqlite-wasm), sensitive on Postgres, collation-dependent on MySQL |
@@ -413,16 +578,21 @@ export const RangeOperatorSchema = lazySchema(() => z.object({
  * `matches-filter.ts`; what #6520 changed is that no operator this array
  * DECLARES is answered that way any more.
  *
- * The `$contains`-family alignment the ruling above requires is likewise part
- * done rather than pending: #6518 made that family case-EXACT across the SQL
- * dialects, while `driver-memory`'s query path and `driver-mongodb` still fold
- * the whole Unicode range — the two rows #6682 tracks.
+ * The `$contains`-family alignment the ruling above requires is now DONE on
+ * every backend: #6518 made that family case-EXACT across the SQL dialects,
+ * #6682 did the same on `driver-mongodb` (the hardcoded `$options: 'i'` is off
+ * all four arms, and that driver's every face — query, count, write and the
+ * aggregation `$match` — routes through the one `translateFilter`, so there is
+ * no second answer) and then on `driver-memory`, whose query path and analytics
+ * face lost the `i` flag their shared rule carried (`filterSubstringPattern`).
+ * That last one closed the package that answered this operator two ways: its
+ * reference matcher had been case-exact all along, so the fix moved the two
+ * that were wrong onto the one that was right.
  *
  * `FILTER_TEXT_CASES` (`filter-text-conformance.ts`) is the standard that
- * measures all of the above, and the driver-conformance ledger still carries a
- * DEBT row for `driver-memory` and `driver-mongodb` — on requirement 2 alone
- * now, since #6520 closed requirement 1 on both — so what is open stays counted
- * rather than assumed.
+ * measures all of the above, and every driver now IMPORTS it — the
+ * driver-conformance ledger is empty. Read the open set from a run of that gate
+ * rather than from this paragraph.
  *
  * @see FILTER_TEXT_CASES — the conformance standard for every operator here.
  * @see RETIRED_FILTER_OPERATORS — why `$regex` is not in this list.
@@ -459,6 +629,42 @@ export const StringOperatorSchema = lazySchema(() => z.object({
     + 'lowered it on the SQL family (driver-sql, driver-sqlite-wasm, driver-turso on '
     + 'both transports); #6520 lowered it on every JS evaluation face, so it is '
     + 'portable across every backend the platform ships.]'
+  ),
+
+  /**
+   * [#7536] Whole-string SQL `LIKE` pattern match — the comparand IS the
+   * pattern, and the CALLER binds the wildcards. The operator every `like`
+   * spelling of the AST vocabulary lowers to; unlike the `$contains` family
+   * above, nothing here is escaped or wrapped on the comparand's behalf.
+   */
+  $like: z.string().optional().describe(
+    'Whole-string pattern match with CALLER-bound wildcards: "%" matches any '
+    + 'sequence (including empty), "_" matches exactly one character, and a '
+    + 'backslash escapes the character after it ("\\%", "\\_", "\\\\") so it '
+    + 'matches literally. The pattern must cover the WHOLE value — a pattern '
+    + 'with no wildcards is an exact comparison, NOT a substring search; write '
+    + '$contains for containment. A pattern ending in a lone unpaired backslash '
+    + 'is refused (INVALID_FILTER). Comparison is case-SENSITIVE, same contract '
+    + 'as $contains (#4706 Q2 = A); $ilike is the case-insensitive twin. '
+    + '[#7536. Answered by the SQL family (driver-sql, driver-sqlite-wasm, '
+    + 'driver-turso on both transports), by driver-memory and by '
+    + '@objectstack/formula. driver-mongodb, objectql `having` and '
+    + 'service-analytics REFUSE it in the INVALID_FILTER envelope rather than '
+    + 'approximating it — see FILTER_OPERATORS for why it is staged out of that '
+    + 'allowlist.]'
+  ),
+
+  /**
+   * [#7536] `$like`'s case-insensitive twin — same pattern language, folding
+   * ASCII case only (the #4706 Q1 = A domain `$icontains` pinned).
+   */
+  $ilike: z.string().optional().describe(
+    'Whole-string pattern match like $like — "%" / "_" wildcards bound by the '
+    + 'caller, backslash escapes — but ignoring ASCII case (A-Z against a-z) '
+    + 'and ONLY ASCII case: "café" does NOT match "CAFÉ", the same #4706 Q1 = A '
+    + 'boundary $icontains declares, because SQLite\'s fold is ASCII-only and '
+    + 'three of the five backends are SQLite underneath. [#7536; staged with '
+    + '$like — see FILTER_OPERATORS.]'
   ),
 }));
 
@@ -572,6 +778,163 @@ export function asciiCaseInsensitiveRegexSource(comparand: string): string {
 }
 
 // ============================================================================
+// The `$like` pattern language — ONE definition for every face (#7536)
+// ============================================================================
+
+/**
+ * [#7536] Does this `$like`/`$ilike` pattern end in a LONE, unpaired backslash?
+ *
+ * Such a pattern is REFUSED everywhere rather than given a meaning, because the
+ * backends could not be made to agree on one: Postgres raises `LIKE pattern
+ * must not end with escape character` at query time, while a JS translation
+ * would have to invent an answer ("literal backslash"? "dropped"?) that SQL
+ * then contradicts. A shape that cannot mean one thing on every backend is
+ * refused at the door — the same direction #5041/#5234 settled for
+ * uncompilable comparands. The check is shared so the refusal fires on the
+ * SAME patterns at every face; each face wraps it in its own ADR-0112
+ * `INVALID_FILTER` envelope.
+ */
+export function hasDanglingLikeEscape(pattern: string): boolean {
+  let backslashes = 0;
+  for (let i = pattern.length - 1; i >= 0 && pattern[i] === '\\'; i--) backslashes++;
+  return backslashes % 2 === 1;
+}
+
+/**
+ * [#7536] A `$like`/`$ilike` pattern as a regular-expression SOURCE with the
+ * SAME meaning — the one translation every JS evaluation face must share, for
+ * the reason {@link foldAsciiCase} gives: a translation written per package
+ * agrees with the spec on the day it is typed and never again.
+ *
+ * The pattern language, translated element by element:
+ *
+ * - `%` → `[\s\S]*` — any sequence, including empty and including newlines
+ *   (SQL `LIKE` has no "dot-all" concept; `%` crosses line boundaries).
+ * - `_` → `[\s\S]` — exactly one character, any character.
+ * - `\x` → the character `x`, literally, whatever `x` is — this is how a
+ *   caller matches a literal `%`, `_` or `\`. (Postgres and MySQL read an
+ *   escaped ordinary character the same way.)
+ * - every other character → itself, regex-escaped, and — when `foldAscii` is
+ *   set ($ilike) — an ASCII letter becomes its two-member character class
+ *   (`[Aa]`), the {@link asciiCaseInsensitiveRegexSource} fold, so the fold
+ *   lives in the pattern and callers pass NO regex flags (an `i` flag folds
+ *   Unicode, which is the #4706 Q1 = A boundary violation).
+ * - the whole source is anchored `^…$`: `LIKE` matches the WHOLE value, so a
+ *   wildcard-free pattern is an exact comparison, not a substring search.
+ *
+ * Throws a plain `Error` on a dangling trailing escape — gate with
+ * {@link hasDanglingLikeEscape} first to refuse in your own envelope; the
+ * throw here is the backstop that keeps a missed gate from minting a pattern
+ * with an invented meaning.
+ */
+export function likePatternToRegexSource(pattern: string, foldAscii = false): string {
+  if (hasDanglingLikeEscape(pattern)) {
+    throw new Error(
+      `LIKE pattern ${JSON.stringify(pattern)} ends with a lone unpaired backslash; ` +
+        'write "\\\\\\\\" to match a literal backslash.',
+    );
+  }
+  let out = '^';
+  for (let i = 0; i < pattern.length; i++) {
+    let ch = pattern[i];
+    let literal = false;
+    if (ch === '\\') {
+      // Guarded above: a trailing `\` cannot reach here.
+      ch = pattern[++i];
+      literal = true;
+    }
+    if (!literal && ch === '%') {
+      out += '[\\s\\S]*';
+      continue;
+    }
+    if (!literal && ch === '_') {
+      out += '[\\s\\S]';
+      continue;
+    }
+    const code = ch.charCodeAt(0);
+    if (foldAscii && code >= ASCII_UPPER_FIRST && code <= ASCII_UPPER_LAST) {
+      out += `[${ch}${String.fromCharCode(code + ASCII_CASE_DELTA)}]`;
+    } else if (
+      foldAscii
+      && code >= ASCII_UPPER_FIRST + ASCII_CASE_DELTA
+      && code <= ASCII_UPPER_LAST + ASCII_CASE_DELTA
+    ) {
+      out += `[${String.fromCharCode(code - ASCII_CASE_DELTA)}${ch}]`;
+    } else {
+      out += /[\\^$.*+?()[\]{}|/]/.test(ch) ? `\\${ch}` : ch;
+    }
+  }
+  return `${out}$`;
+}
+
+/**
+ * [#7536] Does `value` match the `$like`/`$ilike` `pattern`? The predicate for
+ * every face that holds both strings in JS — the {@link likePatternToRegexSource}
+ * translation, evaluated. `foldAscii` selects the `$ilike` fold (ASCII only).
+ */
+export function matchesLikePattern(value: string, pattern: string, foldAscii = false): boolean {
+  return new RegExp(likePatternToRegexSource(pattern, foldAscii)).test(value);
+}
+
+/**
+ * [#7536] A `$like`/`$ilike` pattern as an equivalent SQLite **GLOB** pattern.
+ *
+ * ## Why the SQLite family cannot just pass the pattern to `LIKE`
+ *
+ * `$like` is case-SENSITIVE (the #4706 Q2 = A contract its `$contains` sibling
+ * already answers), and SQLite's `LIKE` folds ASCII case unconditionally.
+ * #6518 measured every way out of that and landed on `GLOB`, which is
+ * case-exact by definition: `PRAGMA case_sensitive_like` is CONNECTION-global,
+ * so one query would redefine every other query on the connection, and
+ * `CAST(col AS BLOB) LIKE ?` was measured to match NOTHING. Three of the five
+ * backends are SQLite underneath (driver-sql on better-sqlite3,
+ * driver-sqlite-wasm, driver-turso on both transports), so without this
+ * translation `$like` would mean one thing on Postgres and another on SQLite —
+ * the divergence #6518 closed for `$contains`, re-opened one operator over.
+ *
+ * `GLOB` has a DIFFERENT pattern language, which is the whole reason this is a
+ * translation and not an escape:
+ *
+ * | LIKE | GLOB | note |
+ * |---|---|---|
+ * | `%` | `*` | any sequence, including empty |
+ * | `_` | `?` | exactly one character |
+ * | `\x` | `x`, escaped | the caller's literal, whatever `x` is |
+ * | `*` `?` `[` | `[*]` `[?]` `[[]` | GLOB's OWN metacharacters, which are ORDINARY characters to LIKE — this is the direction a hand-written escape forgets, and forgetting it is the `%`-matches-every-row bypass (#5567) wearing GLOB's clothes |
+ * | `]` | `]` | needs no escape: every `[` above becomes a class that closes itself, so no unclosed class survives for a later `]` to terminate |
+ *
+ * Shared from the spec rather than written per driver for the reason
+ * {@link foldAsciiCase} gives: `driver-sql`'s emitter and `driver-turso`'s
+ * remote transport compile the same operator independently, and a translation
+ * written twice agrees on the day it is typed and never again.
+ *
+ * Throws on a dangling trailing escape, exactly like
+ * {@link likePatternToRegexSource} — gate with {@link hasDanglingLikeEscape}.
+ */
+export function likePatternToGlobPattern(pattern: string): string {
+  if (hasDanglingLikeEscape(pattern)) {
+    throw new Error(
+      `LIKE pattern ${JSON.stringify(pattern)} ends with a lone unpaired backslash; ` +
+        'write "\\\\\\\\" to match a literal backslash.',
+    );
+  }
+  const globEscape = (ch: string) => (/[*?[]/.test(ch) ? `[${ch}]` : ch);
+  let out = '';
+  for (let i = 0; i < pattern.length; i++) {
+    const ch = pattern[i];
+    if (ch === '\\') {
+      // Guarded above: a trailing `\` cannot reach here.
+      out += globEscape(pattern[++i]);
+      continue;
+    }
+    if (ch === '%') { out += '*'; continue; }
+    if (ch === '_') { out += '?'; continue; }
+    out += globEscape(ch);
+  }
+  return out;
+}
+
+// ============================================================================
 // 3.5 Special Operators
 // ============================================================================
 
@@ -610,22 +973,25 @@ export const FieldOperatorsSchema = lazySchema(() => z.object({
   $lt: z.union([z.number(), z.date(), z.string(), FieldReferenceSchema]).optional(),
   $lte: z.union([z.number(), z.date(), z.string(), FieldReferenceSchema]).optional(),
   
-  // Set & Range
-  $in: z.array(z.any()).optional(),
-  $nin: z.array(z.any()).optional(),
+  // Set. Members are open (`z.any()`) EXCEPT the one shape no backend resolves:
+  // a `{ $field }` reference, ruled out by name in #7596. Built from the same
+  // `setMembershipSchema` factory the documentation copy uses — the two copies
+  // share the code rather than a description of it, so this pair cannot drift.
+  $in: setMembershipSchema('$in').optional().describe(SET_MEMBER_DESCRIPTION),
+  $nin: setMembershipSchema('$nin').optional().describe(SET_MEMBER_DESCRIPTION),
   // Range. `string` is in BOTH endpoint unions for the reason
   // {@link RangeOperatorSchema} gives at length (#6571): the date-macro resolver
   // walks into arrays, so a token range resolves to two ISO/clock STRINGS, and
-  // this package's own `temporal-conformance.ts` corpus spells that shape. This
-  // copy is the ENFORCED one — `NormalizedFilterSchema` validates against it and
-  // the exported `FieldOperators` is inferred from it — so it must not drift
-  // from the documentation copy above. #5685 landed the sibling ordering slots
-  // in the documentation copy first and left the reachable surface still
-  // rejecting the platform's own output; both spellings move together.
-  $between: z.tuple([
-    z.union([z.number(), z.date(), z.string(), FieldReferenceSchema]),
-    z.union([z.number(), z.date(), z.string(), FieldReferenceSchema])
-  ]).optional(),
+  // this package's own `temporal-conformance.ts` corpus spells that shape.
+  // `FieldReferenceSchema` is NOT in them, for the reason the same docblock
+  // gives (#7596): nothing resolves a reference inside a list. This copy is the
+  // ENFORCED one — `NormalizedFilterSchema` validates against it and the
+  // exported `FieldOperators` is inferred from it — so it must not drift from
+  // the documentation copy above. #5685 landed the sibling ordering slots in the
+  // documentation copy first and left the reachable surface still rejecting the
+  // platform's own output; both spellings move together, which is why the
+  // endpoint is one shared `rangeEndpointSchema` factory here too.
+  $between: z.tuple([rangeEndpointSchema(0), rangeEndpointSchema(1)]).optional(),
 
   // String-specific. Case-SENSITIVE, except `$icontains` which folds ASCII case
   // only — see {@link StringOperatorSchema} for the contract and its boundary.
@@ -634,6 +1000,11 @@ export const FieldOperatorsSchema = lazySchema(() => z.object({
   $startsWith: z.string().optional(),
   $endsWith: z.string().optional(),
   $icontains: z.string().optional(),
+  // Pattern-matching pair (#7536): the comparand IS a LIKE pattern, wildcards
+  // bound by the CALLER — see {@link StringOperatorSchema} for the language.
+  // `$ilike` folds ASCII case only, `$like` is case-exact.
+  $like: z.string().optional(),
+  $ilike: z.string().optional(),
 
   // Special
   $null: z.boolean().optional(),
@@ -899,6 +1270,77 @@ export type NormalizedFilter = {
 };
 
 /**
+ * [#7711] The only keys a normalized LOGICAL GROUP may carry.
+ *
+ * Written out as a value rather than derived from the schema because the
+ * field-condition branch needs it too — it is what tells a field NAME from a
+ * combinator, and a normalized field condition never spells either.
+ */
+const NORMALIZED_LOGICAL_KEYS = ['$and', '$or', '$not'] as const;
+
+/**
+ * [#7711] The author-facing refusal for a `$and` / `$or` member, or a `$not`
+ * operand, that is neither a field condition nor a logical group.
+ *
+ * It names the offending keys because that is the only part a reader cannot
+ * reconstruct: the two valid member shapes are fixed, the input's own keys are
+ * what decided which branch it was judged by and why that branch said no.
+ */
+function normalizedMemberMessage(position: string, input: unknown): string {
+  const isPlainObject = !!input && typeof input === 'object' && !Array.isArray(input);
+  const found = !isPlainObject
+    ? `got ${Array.isArray(input) ? 'an array' : input === null ? 'null' : typeof input}`
+    : `got an object with key(s) ${Object.keys(input as Record<string, unknown>)
+        .map((key) => JSON.stringify(key)).join(', ')}`;
+  return (
+    `Not a valid ${position} — ${found}. A ${position} is either a FIELD CONDITION `
+    + '({ "field": { "$op": value } }, whose keys are field names and whose operator map '
+    + 'must satisfy FieldOperatorsSchema — comparand shapes included), or a nested LOGICAL '
+    + `GROUP carrying only ${NORMALIZED_LOGICAL_KEYS.join(' / ')} and nothing else. `
+    + 'Ruled on #7711: declared = enforced (ADR-0049).'
+  );
+}
+
+/**
+ * [#7711] A field condition, with `$`-prefixed keys ruled out.
+ *
+ * The refusal is what DISCRIMINATES the member union. Without it a member is
+ * judged by whichever branch happens to answer first, and `{ $not: … }` answers
+ * on this one: `$not` reads as a field NAME, its operand reads as an operator
+ * map, and `FieldOperatorsSchema` — not `.strict()`, by the design its own
+ * docblock argues — strips every key of it and returns `{}`. So a whole negated
+ * subtree used to parse green *as a field condition* and come back erased.
+ * A normalized field condition's keys are field names (`amount`,
+ * `account.name`); none of them starts with `$`.
+ */
+const normalizedFieldConditionSchema = () =>
+  z.record(z.string(), FieldOperatorsSchema).refine(
+    (condition) => !Object.keys(condition).some((key) => key.startsWith('$')),
+    {
+      message: 'A field condition\'s keys are field names, never $-prefixed operators (#7711).',
+      // `abort` so this branch cannot become the union's spokesman. Measured on
+      // zod 4.4.3: a union whose other options all abort returns a lone
+      // CONTINUABLE failure verbatim, which made `{ $not: { c: <bad> } }` — a
+      // legitimate group shape with a bad operand — report "keys are field
+      // names", blaming `$not` for being spelled at all. Aborting keeps the
+      // union's own `error` in charge of every rejection.
+      abort: true,
+    },
+  );
+
+/**
+ * [#7711] One `$and` / `$or` member, or the `$not` operand.
+ *
+ * `position` only shapes the refusal text; the two accepted shapes are the same
+ * in all three slots, which is why they are built here once rather than spelled
+ * out per key as they were before.
+ */
+const normalizedMemberSchema = (position: string) =>
+  z.union([normalizedFieldConditionSchema(), NormalizedFilterSchema], {
+    error: (issue) => normalizedMemberMessage(position, issue.input),
+  });
+
+/**
  * Zod schema for the normalized filter AST.
  *
  * Every key is recursive, so there is no non-recursive half to infer from and
@@ -911,30 +1353,55 @@ export type NormalizedFilter = {
  * rather than authored, and carries no `.default()` or `.transform()`, so input
  * and output are the same type. Leaving `Input` at its `unknown` default would
  * make `z.input` of anything embedding it `unknown` for no reason.
+ *
+ * ## The group branch is `.strict()`, and the field branch refuses `$`-keys (#7711)
+ *
+ * Each member used to be `z.union([z.record(z.string(), FieldOperatorsSchema),
+ * NormalizedFilterSchema])` against a NON-strict group whose every key is
+ * optional — and "all three of my optional keys are absent" is true of any
+ * object whatsoever. So the second branch was a catch-all: whenever the record
+ * branch REJECTED a field condition, the group branch accepted the very same
+ * value, and this face answered `true` for comparands no backend resolves.
+ * Measured on `main` @ `8669e5d`, all green before: `{ $and: [{ c: { $null:
+ * 'not-a-boolean' } } ] }`, `{ $and: [{ c: { $between: [1, 2, 3] } }] }`,
+ * `{ $and: [{ hello: 'world' }] }` — while `FieldOperatorsSchema`, which this
+ * schema is documented as validating against, refuses each one.
+ *
+ * The green was also LOSSY, which is the part that decided the fix over the
+ * alternative of deleting the "ENFORCED" claim from the two comments above:
+ * a value admitted by the catch-all came back parsed to `{}`, so the accepted
+ * output no longer contained the condition it was asked about. That is what
+ * makes the mixed shape the strictness might have cost — a group key and a
+ * field key at one level, `{ $or: [], c: { $eq: 1 } }` — a non-loss: it parsed
+ * to `{ $or: [] }`, the field condition dropped on the floor, so no mixed
+ * member ever survived a round-trip to begin with. Nothing legitimate spells it,
+ * and the normalizer's own output is `$and`/`$or`/`$not` groups over
+ * single-purpose field conditions.
+ *
+ * What stays accepted, deliberately: `{}` at any position, and the empty
+ * combinators — `{}`, `{ $and: [] }`, `{ $or: [] }`, `{ $or: [{}] }`,
+ * `{ $not: {} }` are boolean identities under the #5322 ruling documented on
+ * {@link FilterConditionSchema}, not malformed members, and each still parses.
+ * `{}` reaches the field-condition branch as an empty record, so the group
+ * branch is free to be strict without touching them.
+ *
+ * Scope, stated because the neighbouring face reads similar: this narrows the
+ * NORMALIZED AST only. {@link FilterConditionSchema} — the AUTHORING face every
+ * driver, `read-scope-sql` and `cel-to-filter` actually consume — is untouched
+ * and still admits sugar (implicit equality, relation nesting) by design, so no
+ * request path's row set can move with this. At the time of the change nothing
+ * in the repo called `.parse` / `.safeParse` on this schema outside this
+ * package's own tests (swept with `FilterConditionSchema`'s 20+ call sites as
+ * the positive control), so the narrowing has no measured internal caller.
  */
 export const NormalizedFilterSchema: z.ZodType<NormalizedFilter, NormalizedFilter> = z.lazy(() =>
   z.object({
-    $and: z.array(
-      z.union([
-        // Field condition: { field: { $op: value } }
-        z.record(z.string(), FieldOperatorsSchema),
-        // Nested logical group
-        NormalizedFilterSchema,
-      ])
-    ).optional(),
-    
-    $or: z.array(
-      z.union([
-        z.record(z.string(), FieldOperatorsSchema),
-        NormalizedFilterSchema,
-      ])
-    ).optional(),
-    
-    $not: z.union([
-      z.record(z.string(), FieldOperatorsSchema),
-      NormalizedFilterSchema,
-    ]).optional(),
-  })
+    $and: z.array(normalizedMemberSchema('$and member')).optional(),
+
+    $or: z.array(normalizedMemberSchema('$or member')).optional(),
+
+    $not: normalizedMemberSchema('$not operand').optional(),
+  }).strict()
 );
 
 // ============================================================================
@@ -1009,7 +1476,17 @@ const AST_OPERATOR_MAP = {
   'contains': '$contains',
   'notcontains': '$notContains',
   'not_contains': '$notContains',
-  'like': '$contains',
+  // [#7536] `like`/`ilike` lower to their OWN operators, not `$contains`.
+  // The former `'like': '$contains'` entry silently rewrote what the query
+  // means: `$contains` LIKE-escapes the comparand and wraps it in `%…%`, so a
+  // caller's own wildcards bound as literals (`%Industries` matched nothing)
+  // and a wildcard-free comparand became a substring match nobody asked for.
+  // `canonicalAstOperator` below always exempted these two spellings for
+  // exactly that reason; the lowering the wire path takes now agrees with it.
+  // (`ilike` had NO entry at all, so `isFilterAST` refused it — it enters the
+  // vocabulary here with its lowering, per the #3948 single-table rule.)
+  'like': '$like',
+  'ilike': '$ilike',
   'startswith': '$startsWith',
   'starts_with': '$startsWith',
   'endswith': '$endsWith',
@@ -1066,6 +1543,7 @@ const CANONICAL_INFIX: Record<string, string> = {
   '$in': 'in', '$nin': 'nin', '$contains': 'contains',
   '$notContains': 'not_contains', '$startsWith': 'starts_with',
   '$endsWith': 'ends_with', '$between': 'between',
+  '$like': 'like', '$ilike': 'ilike',
 };
 
 export function canonicalAstOperator(op: string): string {
@@ -1081,11 +1559,12 @@ export function canonicalAstOperator(op: string): string {
   ) {
     return 'is_not_null';
   }
-  // `like`/`ilike` share the `$contains` lowering but are NOT substring matches
-  // at the driver: driver-sql passes them to SQL verbatim, so the caller binds
-  // the wildcards. Folding them onto `contains` would silently wrap the value in
-  // `%…%` and change what the query means.
-  if (lower === 'like' || lower === 'ilike') return lower;
+  // `like`/`ilike` used to need a hand-written exemption here: they SHARED the
+  // `$contains` lowering while not being substring matches, so the generic
+  // round-trip below would have folded them onto `contains` and silently
+  // wrapped the value in `%…%`. #7536 gave them their own lowerings
+  // (`$like`/`$ilike`), so the generic path now answers `like`/`ilike` by
+  // construction — the exemption is retired, not the rule it protected.
   const dollar = astOperatorLowering(lower);
   if (!dollar) return lower;
   return CANONICAL_INFIX[dollar] ?? lower;
@@ -1141,6 +1620,22 @@ export function isFilterAST(filter: unknown): boolean {
 // ============================================================================
 
 /**
+ * [#7597] Is this comparand a Filter Protocol FIELD REFERENCE — the
+ * {@link FieldReferenceSchema} shape `{ $field: 'other_column' }`?
+ *
+ * The `$field` value must be a STRING, which is what the schema declares. The
+ * predicate deliberately matches `driver-sql`'s `fieldReferenceOf`: a comparand
+ * whose `$field` is not a string is not a field reference on any path, so it
+ * keeps the literal lowering below and is refused downstream as the
+ * uncompilable object it is — rather than being promoted here into a `$eq` the
+ * drivers would then have to un-recognise.
+ */
+function isFieldReferenceComparand(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  return typeof (value as Record<string, unknown>).$field === 'string';
+}
+
+/**
  * Convert a single AST comparison node `[field, operator, value]` to a FilterCondition object.
  */
 function convertComparison(node: [string, string, unknown]): FilterCondition {
@@ -1150,8 +1645,35 @@ function convertComparison(node: [string, string, unknown]): FilterCondition {
   // Special case: equality shorthand. `equals`/`eq` are the view vocabulary's
   // spellings of the same thing and must produce the same output, or one filter
   // would compile two different ways depending on how the author spelled it.
+  //
+  // [#7597] …with ONE comparand excepted: a `{ $field }` reference. The
+  // implicit-equality form `{ field: comparand }` says "equals" only because a
+  // LITERAL sitting in a field's value position means equality. A field
+  // reference sitting there produces `{ amount: { $field: 'budget' } }` — an
+  // object whose only key starts with `$`, which every consumer reads as an
+  // OPERATOR SPEC named `$field`, not as a comparand. Nothing implements that
+  // operator: the in-memory evaluator (`matches-filter.ts` `evalField` →
+  // `evalOp`) has no arm for it and answers its fail-closed `false`, so the
+  // filter silently matched NO record, while `['amount', '>', ref]` — which
+  // keeps its operator — worked on both paths. Two spellings of one intent,
+  // two fates, and the losing one is silent.
+  //
+  // So the reference comparand is lowered to the EXPLICIT `$eq` spelling, which
+  // is the spelling both evaluation paths already implement (the memory
+  // evaluator resolves the reference in `resolveValue`; `driver-sql` compiles it
+  // to a column-to-column comparison, #5222). This is a change to what the ARRAY
+  // SUGAR produces and nothing else — a hand-authored bare
+  // `{ field: { $field: … } }` FilterCondition keeps exactly today's fate
+  // (memory fail-closed `false`; SQL's refusal naming `$eq`), because the
+  // evaluator's unknown-operator posture is #6520's decision and stands.
+  //
+  // All four `$eq` spellings of {@link AST_OPERATOR_MAP} are covered — the
+  // condition below is that key set, and `filter.test.ts` pins the two lists
+  // together so a fifth spelling cannot enter the map and miss this branch.
   if (op === '=' || op === '==' || op === 'equals' || op === 'eq') {
-    return { [field]: value } as FilterCondition;
+    return isFieldReferenceComparand(value)
+      ? ({ [field]: { $eq: value } } as FilterCondition)
+      : ({ [field]: value } as FilterCondition);
   }
 
   // Null / empty predicates — direction comes from the operator NAME, not the
@@ -1464,6 +1986,32 @@ export const FilterArraySchema: z.ZodType<FilterArray, FilterArray> = z.lazy(() 
  * every face can answer it. That pin now asserts an EMPTY difference between the
  * declaration and enforcement surfaces, so a name added to one and not the other
  * fails in either direction.
+ *
+ * ## `$like` / `$ilike` are STAGED here, on purpose (#7536)
+ *
+ * They are declared by {@link StringOperatorSchema} and
+ * {@link FieldOperatorsSchema} and deliberately ABSENT from this array, which
+ * is the staging direction the `$icontains` paragraph above prescribes — and
+ * for exactly the mechanism it measured. Membership here is what makes
+ * `driver-memory`'s `SUPPORTED_FIELD_OPERATORS` ACCEPT a name; adding `$like`
+ * before that driver's matcher has an arm would turn its loud refusal into a
+ * dropped predicate, i.e. every row.
+ *
+ * What is implemented today, and what refuses:
+ *
+ * | face | `$like` / `$ilike` |
+ * |---|---|
+ * | `driver-sql` (and `driver-sqlite-wasm`, which inherits its compiler) | ANSWERS — `LIKE` / `GLOB` per dialect, caller-bound wildcards |
+ * | `driver-turso` — local (inherits `SqlDriver`) and remote (its own compiler) | ANSWERS on both transports |
+ * | `driver-memory` — query path and reference matcher | ANSWERS — it widens its own `SUPPORTED_FIELD_OPERATORS` by hand, the way `driver-turso`'s remote transport has carried `$icontains` since #5702. It is the in-memory DOUBLE: an app whose tests run there and whose production runs SQL must not get a 400 for a filter that works |
+ * | `@objectstack/formula` `matchesFilterCondition` | ANSWERS — {@link matchesLikePattern}, so a write-side `check` agrees with the read-side SQL |
+ * | `driver-mongodb`, `objectql` `having`, `service-analytics` | REFUSE, loudly, in the ADR-0112 `INVALID_FILTER` envelope — they derive acceptance from THIS array, which does not name the operator |
+ *
+ * That split is the point rather than a gap: #7536 exists because a `like`
+ * predicate was being SILENTLY given `$contains`' meaning, and a face that
+ * quietly answers a different question is strictly worse than one that
+ * refuses. Clearing the staging means arms on the remaining faces in ONE PR,
+ * the #6520 direction — tracked as the follow-up filed on #7536.
  *
  * Retired operators (`$regex`, `$options`) are not here either, and never were.
  * Their prescriptions live in {@link RETIRED_FILTER_OPERATORS}.

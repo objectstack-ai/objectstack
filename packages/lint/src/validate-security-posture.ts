@@ -19,14 +19,17 @@
  * | security-master-detail-ungranted(warn)  | framework#2700 os-tianshun-mtc#43|
  * | security-grant-expired-at-authoring(err)| ADR-0091 D2 resolution filtering|
  * | security-delegation-missing-reason(err) | ADR-0091 D3 dual audit          |
+ * | security-cbp-no-relation      (error)   | #7503 (runtime refusal #7474)   |
  *
  * Per ADR-0049 discipline these are NOT advisory security: every `error` rule
  * mirrors a runtime enforcement point (D1 fail-closed OWD default, D4 zod
  * enum + fail-closed evaluator, D5/D9 anchor binding gate, D3 rename wave) —
- * the lint moves the failure from runtime-deny to author-time fix-it. The lone
- * `warning` (master-detail-ungranted) likewise mirrors a runtime gate — the
- * object-level CRUD check (ADR-0055) — but stays advisory: it flags a *likely*
- * misconfiguration whose per-permission-set nuance it cannot fully adjudicate.
+ * the lint moves the failure from runtime-deny to author-time fix-it. The
+ * non-`error` rules are the ones with NO hard runtime refusal behind them:
+ * master-detail-ungranted mirrors a runtime gate (the ADR-0055 object-level
+ * CRUD check) but flags a *likely* misconfiguration whose per-permission-set
+ * nuance it cannot fully adjudicate; book-audience-unknown-set and
+ * private-no-readscope flag intent mismatches, not guaranteed denials.
  *
  * Pure `(stack) => Finding[]`; accepts the NORMALIZED stack input (works both
  * pre- and post-zod-parse, so `os lint` catches what the zod gate would
@@ -68,6 +71,7 @@ export const SECURITY_MASTER_DETAIL_UNGRANTED = 'security-master-detail-ungrante
 export const SECURITY_FLS_UNQUALIFIED_KEY = 'security-fls-unqualified-key';
 export const SECURITY_GRANT_EXPIRED_AT_AUTHORING = 'security-grant-expired-at-authoring';
 export const SECURITY_DELEGATION_MISSING_REASON = 'security-delegation-missing-reason';
+export const SECURITY_CBP_NO_RELATION = 'security-controlled-by-parent-no-relation';
 
 export type SecuritySeverity = 'error' | 'warning' | 'info';
 
@@ -174,6 +178,42 @@ function firstMasterDetailField(obj: AnyRec): { name: string; parent?: string } 
 }
 
 /**
+ * [#7503] The relation a `controlled_by_parent` object derives its access from,
+ * or `undefined` when the platform has nothing to derive from.
+ *
+ * A point-for-point mirror of `resolveCbpRelation` in
+ * `packages/plugins/plugin-security/src/security-plugin.ts` — the SAME
+ * three-step fallback, in the same order, with the same "must also carry a
+ * reference target" condition folded into each step (`pick` there requires
+ * `pred(f) && ref(f)`, so a `master_detail` naming no target resolves nothing):
+ *
+ *   1. a `required` `master_detail` with a reference, else
+ *   2. ANY `master_detail` with a reference, else
+ *   3. a `required` `lookup` with a reference.
+ *
+ * `required` is read for truthiness, not `=== true`, because the runtime does
+ * (`f?.required`) — mirroring the gate means mirroring its coercions too.
+ *
+ * The one DELIBERATE divergence is the reference spelling. The runtime accepts
+ * `reference ?? reference_to ?? referenceTo`; `refOf` here accepts only
+ * `reference`, the sole spelling `FieldSchema` declares. The aliases do not
+ * parse (strict schema, #5017), so for any stack an author can ship the two
+ * agree; re-introducing the alias fallback here would restore precisely the
+ * inert branch #5017 removed, and on the pre-parse path the schema already
+ * names the real defect (the alias key) rather than this rule guessing past it.
+ */
+function resolveCbpRelation(obj: AnyRec): { field: string; type: string; master: string } | undefined {
+  const entries = asArray(obj.fields);
+  const pick = (pred: (f: AnyRec) => boolean) => entries.find((f) => pred(f) && refOf(f));
+  const found =
+    pick((f) => f.type === 'master_detail' && !!f.required) ??
+    pick((f) => f.type === 'master_detail') ??
+    pick((f) => f.type === 'lookup' && !!f.required);
+  if (!found) return undefined;
+  return { field: String(found.name ?? '?'), type: String(found.type), master: refOf(found) as string };
+}
+
+/**
  * Does a per-object permission entry open the object-level CRUD gate at all?
  * Any of the four CRUD bits, or a super-user bypass (View/Modify All Data),
  * counts — this mirrors the runtime `checkObjectPermission` gate (ADR-0066 D2):
@@ -250,6 +290,44 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
           hint: `Use one of: ${CANONICAL_OWD.join(', ')}.`,
         });
       }
+    }
+
+    // ── [#7503] controlled_by_parent with nothing to derive access FROM ──
+    // The object says "my access comes from my master" and names no master.
+    // Both runtime halves of ADR-0055 already refuse this shape, and neither
+    // is a judgement call the linter has to second-guess:
+    //   - writes → 422 INVALID_METADATA (`MasterDetailRelationMissingError`,
+    //     the #7474 split — a metadata defect, explicitly NOT an access verdict)
+    //   - reads  → `computeControlledByParentFilter` returns RLS_DENY_FILTER,
+    //     so every read is denied too (defense-in-depth, whose own comment says
+    //     "spec validation should prevent authoring it" — this rule is that).
+    // So it is `error`, not advisory: it mirrors a hard runtime enforcement
+    // point exactly (the ADR-0090 D7 / ADR-0049 criterion at the head of this
+    // file), and the defect is a self-contained property of the object document
+    // — no per-permission-set nuance to adjudicate, no legitimate reading.
+    //
+    // NOT exempted for system objects, unlike the D1 unset-OWD rule above: the
+    // runtime refusal does not exempt them either, and an object declaring a
+    // derivation it cannot perform is broken on its own terms, independent of
+    // who may author it.
+    if (owd === 'controlled_by_parent' && !resolveCbpRelation(obj)) {
+      findings.push({
+        severity: 'error',
+        rule: SECURITY_CBP_NO_RELATION,
+        where: `object "${objName}"`,
+        path: `${objPath}.sharingModel`,
+        message:
+          `"${objName}" declares sharingModel 'controlled_by_parent' but has no relation the platform ` +
+          `can derive access from. ADR-0055 resolves the master through a required master_detail, then ` +
+          `any master_detail, then a required lookup — each of which must also name a reference target — ` +
+          `and this object matches none of the three. At runtime every read is DENIED and every write is ` +
+          `refused with 422 INVALID_METADATA (#7474), so the object is unusable rather than merely locked down.`,
+        hint:
+          `Add the master relation this object is derived from, e.g. fields.parent: ` +
+          `{ type: 'master_detail', reference: '<master_object>', required: true }. If the object has no ` +
+          `master, its baseline is its own decision — use sharingModel: 'private' (owner + shares), ` +
+          `'public_read', or 'public_read_write'.`,
+      });
     }
 
     // D11: external dial present on any object (system included) must obey

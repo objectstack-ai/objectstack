@@ -79,6 +79,40 @@ export type RouteDisposition =
 export interface RouteLedgerEntry {
   /** `VERB /cleanPath/:param` (or `* /prefix/**` for wildcard families). */
   route: string;
+  /**
+   * `true` when {@link route} is already an ABSOLUTE wire path and must NOT
+   * have the `/api/v1` prefix prepended to it.
+   *
+   * Every other row here is a dispatcher-internal `cleanPath`, and both
+   * consumers (`client-url-conformance.test.ts` and the live-mount parity
+   * gate) reconstruct the wire path by prepending the prefix. `/.well-known/*`
+   * is mounted at the site root by definition — a well-known URI under a
+   * versioned API prefix is not a well-known URI — so prefixing it would
+   * compile a pattern nothing serves. Rather than let a guard carry a quietly
+   * wrong pattern (the #5078 failure), the row says so and the guards honour
+   * it. [#7526]
+   */
+  absolute?: boolean;
+  /**
+   * The mounted pattern that ANSWERS this row, when the row deliberately
+   * describes a SPECIALIZATION of a broader mount rather than a pattern of its
+   * own.
+   *
+   * One row uses it: `POST /actions/global/:action` names the global-action
+   * calling convention the SDK's `actions.invokeGlobal` builds, and it is
+   * served by `POST /actions/:object/:action` with `:object` bound to the
+   * literal `global`. There is no `/actions/global/:action` registration and
+   * there should not be one.
+   *
+   * This is NOT an escape hatch for "the route is missing". The live-mount
+   * parity gate does not take the field's word for anything — it probes a
+   * concrete path and asserts the LIVE ROUTER answers with exactly this
+   * pattern, so a wrong `servedBy` fails as loudly as a missing route. What the
+   * field buys is that the shadowing becomes a written, reviewable claim
+   * instead of an unexplained mismatch a future reader would "fix" by deleting
+   * the row. [#7526]
+   */
+  servedBy?: string;
   /** Owning domain — a registry prefix (e.g. `/automation`) or legacy-chain prefix. */
   domain: string;
   disposition: RouteDisposition;
@@ -169,9 +203,23 @@ export const LEGACY_CHAIN_PREFIXES = [
  */
 export const NON_DISPATCH_MOUNT_PREFIXES = [
   '/apps',
+  // [#7526] `GET /.well-known/objectstack` — the platform's own discovery
+  // document, mounted by `dispatcher-plugin.ts` straight on the host
+  // `IHttpServer` and UNCONDITIONALLY owned by this plugin (no other
+  // registrar may claim it; the `${prefix}/discovery` twin next to it IS
+  // ceded to `@objectstack/rest`, this one never is). It was reachable,
+  // documented and in NO ledger until the live-mount parity gate read it off
+  // a booted server — the plain unledgered-mount case, and it sat directly
+  // beside the routes this list already exists to name.
+  '/.well-known/objectstack',
 ] as const;
 
 export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
+  // ── well-known ────────────────────────────────────────────────────────────
+  { route: 'GET /.well-known/objectstack', domain: '/.well-known/objectstack', absolute: true,
+    disposition: 'server-only',
+    note: 'RFC 8615 discovery document at the SITE ROOT (hence `absolute`), answering the same getDiscoveryInfo() body as GET /api/v1/discovery. Dispatcher-owned unconditionally — unlike the /discovery twin, which is ceded when @objectstack/rest is mounted. Consumed by tooling probing an unknown host, not by the SDK, which connects through /discovery' },
+
   // ── ops probes ────────────────────────────────────────────────────────────
   { route: 'GET /health', domain: '/health', disposition: 'server-only', note: 'liveness probe for orchestrators, not app traffic' },
   { route: 'GET /ready', domain: '/ready', disposition: 'server-only', note: 'readiness probe for orchestrators, not app traffic' },
@@ -317,7 +365,17 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
   { route: 'POST /actions/:object/:action', domain: '/actions', disposition: 'sdk', client: 'actions.invoke' },
   { route: 'POST /actions/:object/:action/:recordId', domain: '/actions', disposition: 'sdk', client: 'actions.invoke',
     note: 'client sends recordId in the body — both server shapes honor it' },
-  { route: 'POST /actions/global/:action', domain: '/actions', disposition: 'sdk', client: 'actions.invokeGlobal' },
+  { route: 'POST /actions/global/:action', domain: '/actions', disposition: 'sdk', client: 'actions.invokeGlobal',
+    servedBy: '/api/v1/actions/:object/:action',
+    note: '[#7526] a CALLING CONVENTION, not a registration: `global` is bound to `:object` on the row above, and handleActionsRequest routes that literal to the global-action table. Written as `servedBy` because the live-mount gate found no `/actions/global/:action` pattern and the honest answer is which pattern answers it — the gate re-derives that from the live router rather than believing this string' },
+  // [#7526] The OBJECT-LESS shape, mounted since #3913 and ledgered by
+  // nothing until the parity gate read it off a booted server. The empty
+  // segment is deliberate and load-bearing: it is the URL an SDK with no
+  // object to name emits, `:object` cannot match an empty segment, and
+  // before #3913 it fell to Hono's `notFound`. Ugly on the wire and correct;
+  // what was wrong was that no ledger said it existed.
+  { route: 'POST /actions//:action', domain: '/actions', disposition: 'sdk', client: 'actions.invokeGlobal',
+    note: 'the object-less spelling of the global-action call (#3913) — same handler and same `global` key as the row above, reached without naming an object' },
 
   // ── apps (declarative endpoints — the mount seam, NOT a dispatch() route) ──
   // Read this row literally; it describes what is WIRED, not what is planned.

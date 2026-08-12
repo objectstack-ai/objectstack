@@ -822,7 +822,9 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // in ONE edit, on the maintainer's 2026-08-10 ruling, sequenced after #4717's
   // `advisories` channel landed (PR #7435). Before that move a `view` written
   // through Studio / REST `/meta` / MCP — the only door most tenants have, and
-  // the door AI authors use — was judged by NONE of the family's six rule ids.
+  // the door AI authors use — was judged by NONE of the family's rule ids (six
+  // at the time of the move; seven since #7659 added
+  // `predicate-rhs-path-shaped` inside the second entry).
   //
   // They move together on purpose, and the two entries carry one comment because
   // they are one wall: #7214's implementer wired its own rule here alone and then
@@ -870,6 +872,17 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // object's addressable path set is NOT closed (lookup traversal, system
   // columns, formula outputs), and an `error` gate over an open set generates
   // false build errors. See the rule's module note.
+  //
+  // #7659 adds a THIRD id here, `predicate-rhs-path-shaped`, which is not a
+  // resolution question at all: the metadata-admin renderer resolves paths only
+  // on the LEFT of `==` / `!=` and hands the right side to its literal parser,
+  // so `data.a == data.b` resolves both sides cleanly, passes the two rules
+  // above, and still compares against the string "data.b" — a constant verdict.
+  // It carries `error` on a dotted chain (no reading under which it worked) and
+  // `warning` on a bare word (`status == active` compares as the text today, so
+  // refusing it would fail a build over metadata that renders correctly). The
+  // per-finding severity is what gates, exactly as `lintFlowPatterns` has worked
+  // since #3760; the entry's `gating` tier is unchanged because it already was.
   {
     name: 'validatePredicatePathRefs',
     tier: 'gating',
@@ -1056,6 +1069,64 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // a runtime enforcement point (fail-closed OWD default, canonical enum, anchor
   // binding gate, vocabulary freeze), moving the failure from a runtime deny to
   // an author-time fix-it. Per ADR-0049 this is not advisory security.
+  //
+  // [#7576] The `surfaceReason` below is MEASURED. Its predecessor was not, and
+  // was false in both halves — it read: "Already gated at this surface by a
+  // DIFFERENT mechanism: plugin-security registers an ADR-0094 authoring gate on
+  // `object` (`registerAuthoringGate`) that enforces the same OWD posture rules
+  // on every runtime write. Running the linter here as well would double-report
+  // one refusal in two vocabularies."
+  //
+  //  - COVERAGE. `object-posture-gate.ts` reads exactly `sharingModel` and
+  //    `externalSharingModel` through a local `OWD_WIDTH`, and never touches
+  //    `fields`, `permissions`, `books` or `data`. Of the THIRTEEN rule ids this
+  //    block carries it covers ONE — `security-external-wider-than-internal`
+  //    (its R2). The gate's other half, R1 (env-tighten-only, ADR-0086 D1),
+  //    corresponds to no lint rule at all, so it is not coverage in the other
+  //    direction either. Twelve rules were enforced at no runtime door while
+  //    this field said they were.
+  //  - DOUBLE-REPORTING. It cannot happen, and not by luck: `saveMetaItem` runs
+  //    `assertRuntimeAuthoringRules` (this table, 422 `invalid_metadata`) BEFORE
+  //    `runAuthoringGate` (the ADR-0094 gate, 403 `owd_external_wider`), and
+  //    both refuse by THROWING. The first to fire ends the write, so an author
+  //    sees one refusal, never two. The stated cost of moving was imaginary; the
+  //    reason it has not moved is the measured one below.
+  //
+  // Why the move is not taken HERE, measured rather than assumed (#7576 stage 1):
+  //
+  //  - The four shipped stacks (showcase, CRM, todo, the `blank` template — 30
+  //    objects, 10 permission sets, 1 book, 12 positions, 3 apps, 24 seeds) are
+  //    CLEAN of `error` findings at both surfaces. No shipped app trips.
+  //  - The PLATFORM's own runtime write path does. Declaring `object` here makes
+  //    `security-owd-unset` refuse any object published without an OWD, and that
+  //    is the shape the runtime create door actually emits: it turns 26 writes
+  //    into 422s across 8 files of `@objectstack/metadata-protocol`'s own suite,
+  //    and `METADATA_CREATE_SEEDS.object` — the authoritative minimal create body
+  //    — carries no `sharingModel` either. That is a strictness rollout
+  //    (#4001 pattern), not a registry-honesty fix, and its repair sites are in
+  //    packages this card may not edit.
+  //  - `permission` and `book` fail for a different, structural reason. The gate
+  //    carries `objects` as resolution context and nothing else
+  //    (`RuntimeStackContext`), so the three cross-collection rules judge a
+  //    snapshot missing the collection they compare against. Measured: one
+  //    simulated runtime write per shipped permission set produces 38
+  //    `security-master-detail-ungranted` warnings where the same rule over the
+  //    whole stack produces 4 — with one set in the snapshot, every detail
+  //    object the tenant's OTHER sets grant reads as ungranted.
+  //    `security-private-no-readscope` and `security-book-audience-unknown-set`
+  //    fail identically. That is RUNTIME_NEEDS_FULL_SNAPSHOT (#4463 P2), and it
+  //    is a snapshot change in the protocol package, not a `runtimeTypes` edit.
+  //
+  // The residue that IS ready: the two ADR-0091 seed rules
+  // (`security-grant-expired-at-authoring`, `security-delegation-missing-reason`)
+  // read only `stack.data[]` and cross the wall together as a whole sub-family,
+  // with zero measured trips. `runtime-gate.ts`'s `seed` stack key was corrected
+  // to `data` under this card so that slice is a one-line `runtimeTypes` edit
+  // when the rollout card takes it. `security-role-word` is deliberately NOT in
+  // that slice: it judges six collections, and wiring the two that need no
+  // snapshot would split ONE rule id across the wall — a door where a position
+  // named `sales_role` is refused and an object named `sales_role` is not, which
+  // is the #7220 failure this table already refuses to build.
   {
     name: 'validateSecurityPosture',
     tier: 'gating',
@@ -1063,10 +1134,18 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     commands: ALL,
     source: 'packages/lint/src/validate-security-posture.ts',
     surfaces: CLI_ONLY,
-    surfaceReason: 'Already gated at this surface by a DIFFERENT mechanism: plugin-security registers an ADR-0094 '
-      + 'authoring gate on `object` (`registerAuthoringGate`) that enforces the same OWD posture rules on '
-      + 'every runtime write. Running the linter here as well would double-report one refusal in two '
-      + 'vocabularies. Consolidating the two onto this table is P2 (#4463), and is a merge, not a hole.',
+    surfaceReason:
+      'MEASURED, not inherited (#7576). The ADR-0094 `object` posture gate covers 1 of this block\'s 13 '
+      + 'rule ids (`security-external-wider-than-internal`, its R2) — the previous reason claimed all of '
+      + 'them, and its double-reporting worry was unreal: the two gates both THROW and this table runs '
+      + 'first, so a write earns one refusal either way. The move is blocked by two other things. (a) '
+      + 'Declaring `object` makes `security-owd-unset` refuse every OWD-less runtime object publish — 26 '
+      + 'refusals across 8 files of metadata-protocol\'s own suite, and `METADATA_CREATE_SEEDS.object` '
+      + 'carries no `sharingModel` — so it is a strictness rollout (#4001), not a wiring fix. (b) '
+      + '`permission` / `book` need a second collection the per-write snapshot does not carry, and were '
+      + 'measured inventing findings without it (38 vs 4 over the shipped corpus) — '
+      + 'RUNTIME_NEEDS_FULL_SNAPSHOT, #4463 P2. The four shipped stacks themselves are clean at both '
+      + 'surfaces; the ADR-0091 seed pair is snapshot-ready and crosses as a whole sub-family when (a) does.',
     run: (stack) => validateSecurityPosture(stack),
   },
   // ADR-0105 D6 — the org tree is a REPORTING dimension. An RLS policy or

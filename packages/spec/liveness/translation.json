@@ -60,6 +60,25 @@
       "evidence": "packages/spec/src/system/i18n-resolver.ts:636",
       "note": "translatePage: label/description/title/subtitle (title falls back to label; header copy keyed by page name because page:header instances carry no stable id)."
     },
+    "flows": {
+      "status": "planned",
+      "verifiedAt": "2026-08-11",
+      "authorWarn": true,
+      "authorHint": "No shipped screen-flow runner reads this group yet — until the objectui half of #7646 lands, a `type: 'screen'` flow renders the strings authored on the flow (`config.title`, `fields[].label`, `fields[].placeholder`) in every locale.",
+      "children": {
+        "label": {
+          "status": "planned",
+          "verifiedAt": "2026-08-11",
+          "note": "Overlays `Flow.label`. Same `planned` verdict as its container and for the same reason — declared here, read by no shipped runner yet — but declared per key rather than inherited: the two halves resolve through DIFFERENT consumers when the runner lands (the launcher/wizard header reads the flow label, the screen renderer reads `screens`), so they can go `live` on different days and a blanket verdict would hide the first flip."
+        },
+        "screens": {
+          "status": "planned",
+          "verifiedAt": "2026-08-11",
+          "note": "Per-screen heading + per-field copy, keyed by `FlowNode.id` / `ScreenFieldConfig.name` — the identifiers the client already holds as `ScreenSpec.nodeId` / `ScreenFieldSpec.name`. `planned` with its container: the screen-flow runner half is a downstream objectui card. Deeper conventions (`screens.<id>.title`, `screens.<id>.fields.<name>.{label,placeholder}`) are governed by that runner, not by ledger rows — the one-drill-level boundary this ledger's type note states."
+        }
+      },
+      "note": "[#7646] Contract-first spec half of the screen-flow localization split, and `planned` is the honest status rather than `live` or `dead`: `dead` means declared with no consumer and no plan, while this group was ruled into the vocabulary by the maintainer specifically so the runner half could be built against it (the same ruling fixes the boundary — runner chrome, Cancel/Submit, stays in the console's own message catalog, NOT here). Addressing is measured against what the runner already holds: `flows.<Flow.name>.screens.<FlowNode.id>` — the node id reaches the client verbatim as `ScreenSpec.nodeId` (packages/spec/src/contracts/automation-service.ts:138), which is also what correlates a resume back to its pause point — and `.fields.<ScreenFieldConfig.name>` (packages/spec/src/automation/builtin-node-config.zod.ts:382, forwarded as `ScreenFieldSpec.name`). Key face measured against `ScreenFieldConfigSchema`, not mirrored from the report: `label` + `placeholder` are declared, `help` is NOT — the screen field has no help-shaped key at all, so declaring it would parse clean and translate nothing, the ADR-0078 shape #6080 kept out of the page-component face; it rides `guidance` on the field surface instead, alongside `options`, which cannot be addressed by a value-keyed map because `ScreenFieldConfig.options[].value` is unconstrained. Flip to `live` with an objectui screen-flow-runner evidence pointer when the downstream consumer card lands; the resolver-side helper (a `FLOW_SCREEN_COPY_KEYS` sibling of `PAGE_COMPONENT_COPY_KEYS` in packages/spec/src/system/i18n-resolver.ts) is deliberately NOT in this change — #7634 was in flight on that file."
+    },
     "settings": {
       "status": "live",
       "verifiedAt": "2026-08-01",

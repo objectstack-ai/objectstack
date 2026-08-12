@@ -53,3 +53,13 @@ export * from './injected-system-columns.js';
 // outlet, or the mask is decoration") is only true if they all run the same
 // projection rather than a copy each.
 export * from './object-schema-fls.js';
+
+// [#7730 / #7774] The i18n-bundle DISCRIMINATOR table — which metadata types
+// are identified by `(name, <field>)` rather than by `name` alone — sunk here
+// by the same criterion as the governance table above. `@objectstack/objectql`
+// (the SchemaRegistry, #7730) and `@objectstack/metadata-protocol` (the
+// unscoped `/meta` list merge, #7774) both key metadata by name, objectql
+// depends on metadata-protocol, and a bundle that survives one layer's key but
+// not the other's is still collapsed. `objectql` re-exports
+// `ITEM_KEY_DISCRIMINATORS` from `registry.ts`, so its surface is unchanged.
+export * from './item-key-discriminators.js';

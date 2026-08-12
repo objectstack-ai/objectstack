@@ -14,6 +14,7 @@
     "CronExpressionInput": "src/shared/expression.zod.ts#CronExpressionInput (type)",
     "CronExpressionInputSchema": "src/shared/expression.zod.ts#CronExpressionInputSchema (const)",
     "EXTERNAL_ERROR_CODES": "src/shared/external-errors.ts#EXTERNAL_ERROR_CODES (const)",
+    "EXTERNAL_ERROR_HTTP_STATUS": "src/shared/external-errors.ts#EXTERNAL_ERROR_HTTP_STATUS (const)",
     "EventName": "src/shared/identifiers.zod.ts#EventName (type)",
     "EventNameSchema": "src/shared/identifiers.zod.ts#EventNameSchema (const)",
     "Expression": "src/shared/expression.zod.ts#Expression (type)",

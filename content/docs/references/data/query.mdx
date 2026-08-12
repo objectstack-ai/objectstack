@@ -67,6 +67,10 @@ const result = AggregationFunction.parse(data);
 
 ---
 
+## FieldNode
+
+**Type:** `string`
+
 
 ---
 
@@ -122,7 +126,7 @@ Type: `string`
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object name (e.g. account) |
-| **fields** | `string[]` | optional | Fields to retrieve — field names, optionally dotted to reach through a relationship (`owner.name`). Related *records* are selected with `expand`, not from inside this list. |
+| **fields** | `string[]` | optional | Fields to retrieve — names of the queried object's OWN columns. A dotted path (`owner.name`) is not a projection: no driver resolves one, and the ingress refuses it with `400 INVALID_FIELD` (#7532). Related data is read with `expand`, whose nested QueryAST both filters (`where`) and selects (`fields`) the related record's columns. The projection must RETAIN the foreign-key column: `fields: ['title']` with `expand: 'project_id'` resolves nothing, because the relation is carried by that key — add `'project_id'` and it works. Where the value is wanted on the queried object itself, denormalise it onto that object (a stored field, written when the source changes), the same remedy the sort axis prescribes (#6924). |
 | **where** | `any` | optional | Filtering criteria (WHERE) |
 | **search** | `string \| { query: string; fields?: string[]; fuzzy: boolean; operator: Enum<'and' \| 'or'>; … }` | optional | Full-text search — the query text (canonical, ADR-0061 D1), or a structured FullTextSearch configuration |
 | **searchFields** | `string[]` | optional | Narrow the search to these fields (server-intersected with the allowed searchable set — can only narrow, never widen; ADR-0061 D1) |
@@ -131,7 +135,7 @@ Type: `string`
 | **offset** | `number` | optional | Records to skip (OFFSET) |
 | **top** | `number` | optional | Alias for limit (OData compatibility) |
 | **cursor** | `never` | optional | [REMOVED] `query.cursor` was removed in @objectstack/spec 17 (#4286, ADR-0049) — no driver ever implemented keyset pagination, so the cursor was accepted and ignored and every page came back identical (a caller looping "until hasMore is false" never terminates). Delete the key; `QueryBuilder.cursor()` was removed with it. Express the keyset as an ordinary `where` predicate on your sort key — `where: { created_at: { $gt: last.created_at } }` with the matching `orderBy` — which every driver executes with canonicalised comparands. A first-class cursor, if ever built, will be a response-minted opaque token, not this caller-built record. |
-| **joins** | `never` | optional | [REMOVED] `query.joins` was removed in @objectstack/spec 17 (#4286, ADR-0049) — no engine or driver ever read it: a query carrying `joins` behaved exactly as if the key were absent, while its name squatted on the reserved REST parameter set. Delete the key. Related records are read through `expand` — `expand: { owner: { object: 'user', fields: ['name'] } }` — which the engine resolves via batch $in queries, and a single related column is a dotted `fields` path (`fields: ['owner.name']`). |
+| **joins** | `never` | optional | [REMOVED] `query.joins` was removed in @objectstack/spec 17 (#4286, ADR-0049) — no engine or driver ever read it: a query carrying `joins` behaved exactly as if the key were absent, while its name squatted on the reserved REST parameter set. Delete the key. Related records are read through `expand` — `expand: { owner_id: { object: 'user', fields: ['name'] } }` — which the engine resolves via batch $in queries, and whose nested query selects the related record's own columns. Keep the foreign key in your own projection (`fields: ['title', 'owner_id']`): the relation is carried by that column, so projecting it away leaves expansion nothing to resolve. A dotted `fields` path is NOT a replacement — no driver ever resolved one and the ingress refuses it (`400 INVALID_FIELD`, #7532). |
 | **aggregations** | `{ function: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>; field?: string; alias: string; filter?: any }[]` | optional | Aggregation functions |
 | **groupBy** | `(string \| { field: string; dateGranularity?: Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>; alias?: string })[]` | optional | GROUP BY targets (strings or `{field, dateGranularity?}` objects for date bucketing) |
 | **having** | `any` | optional | HAVING — filter over the AGGREGATED rows (aggregation aliases + groupBy projections); applied engine-side after aggregation |

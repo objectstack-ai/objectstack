@@ -94,3 +94,5 @@ Direction A from the issue — giving the form arm a required floor — remains
 deliberately **not** taken. It needs Studio's flattened round-trip bodies
 measured first, or it 422s writes the platform itself makes; the ruling on #5599
 deferred it as a possible second tightening on top of this one.
+
+<!-- adr-0087: registered authoring-schemas-strict-unknown-keys -->

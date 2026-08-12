@@ -276,6 +276,15 @@ export const SysApprovalRequest = ObjectSchema.create({
     {
       name: 'approval_reject',
       label: 'Reject',
+      // The confirm question lives HERE, not in `confirmText`: this action
+      // collects params, so the console would otherwise chain a confirm dialog
+      // and then the param dialog for one decision — and the first one already
+      // reads as "the action ran" (#7278, maintainer ruling 2026-08-10). The
+      // param dialog renders this as its description, and nothing is POSTed
+      // until its own Confirm: one condition, one wording, one dialog.
+      // NB: the top-level action `description` (#7367), never `ai.description`
+      // — that one is the LLM-facing tool contract and is not shown to anyone.
+      description: 'Reject this request? A rejection is final for every approver.',
       icon: 'x-circle',
       // Destructive decision — rendered in the console's danger styling so it
       // reads as the irreversible action it is (objectui#2762 P1-5).
@@ -288,7 +297,6 @@ export const SysApprovalRequest = ObjectSchema.create({
         { name: 'attachments', label: 'Attachments', type: 'file', multiple: true, required: false },
       ],
       visible: 'record.viewer.can_act || record.viewer.can_override',
-      confirmText: 'Reject this request? A rejection is final for every approver.',
       locations: ['record_section', 'list_item'],
       successMessage: 'Rejected.',
       refreshAfter: true,
@@ -374,6 +382,9 @@ export const SysApprovalRequest = ObjectSchema.create({
     {
       name: 'approval_recall',
       label: 'Recall',
+      // Confirm question as the param dialog's description, not `confirmText`
+      // — same one-decision-one-dialog rule as `approval_reject` above (#7278).
+      description: 'Recall this request? Approvers can no longer act on it and the record is unlocked.',
       icon: 'undo-2',
       type: 'api',
       method: 'POST',
@@ -384,7 +395,6 @@ export const SysApprovalRequest = ObjectSchema.create({
       // Recall applies while the request is live for the submitter — pending
       // (withdraw) or returned (abandon the revision instead of resubmitting).
       visible: '(record.status == "pending" || record.status == "returned") && record.viewer.is_submitter',
-      confirmText: 'Recall this request? Approvers can no longer act on it and the record is unlocked.',
       locations: ['record_section'],
       successMessage: 'Recalled.',
       refreshAfter: true,

@@ -27,6 +27,7 @@ import { describe, it, expect } from 'vitest';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import type { PermissionSet } from '@objectstack/spec/security';
 import { PermissionEvaluator } from './permission-evaluator.js';
+import { RLSCompiler, RLS_DENY_FILTER } from './rls-compiler.js';
 import { defaultPermissionSets, BETTER_AUTH_MANAGED_OBJECTS } from './objects/default-permission-sets.js';
 
 const evaluator = new PermissionEvaluator();
@@ -148,6 +149,85 @@ describe('[#5491] what the baseline still declares, it still enforces', () => {
       expect(perm.viewAllRecords ?? false).toBe(false);
       expect(perm.modifyAllRecords ?? false).toBe(false);
     }
+  });
+});
+
+// [#7344] Maintainer ruling (2026-08-11): extend `member_default` with
+// owner-scoped READ grants for `sys_inbox_message` and
+// `sys_notification_receipt`, RLS-scoped to the caller. `sys_activity` is
+// deliberately NOT included — it is not a per-user-scoped shape.
+//
+// The measured defect: the Account app declares a Notifications nav entry with
+// `requiresObject: 'sys_inbox_message'` and no `requiredPermissions`, so every
+// authenticated member can reach the app but no shipped set named the object —
+// `[Security] Access denied: operation 'find' on object 'sys_inbox_message'`.
+//
+// This mirrors the `sys_user_preference` precedent above: an explicit object
+// grant PLUS a `_self` RLS policy, because the grant alone would be org-wide.
+// Both halves are asserted here — the read bit is worthless if the scoping is
+// missing, and the scoping is what makes the grant safe to ship on the
+// `everyone` anchor.
+const INBOX_OBJECTS = ['sys_inbox_message', 'sys_notification_receipt'] as const;
+
+const MEMBER = { userId: 'u_member', tenantId: 'org_1', positions: ['org_member'] } as any;
+const rls = new RLSCompiler();
+
+/** The policies `member_default` contributes for one object × operation. */
+const policiesFor = (object: string, operation: string) =>
+  (MEMBER_DEFAULT.rowLevelSecurity ?? []).filter(
+    (p: any) => (p.object === object || p.object === '*') && (p.operation === operation || p.operation === 'all'),
+  );
+
+describe('[#7344] the personal inbox is readable by a member, scoped to their own rows', () => {
+  it.each(INBOX_OBJECTS)('%s: the baseline NAMES it, so a member with no app profile can read', (object) => {
+    expect(allows('find', [MEMBER_DEFAULT], object)).toBe(true);
+  });
+
+  it.each(INBOX_OBJECTS)('%s: the grant is READ-ONLY — the writer is the inbox channel, not the member', (object) => {
+    expect(allows('insert', [MEMBER_DEFAULT], object), `${object} insert`).toBe(false);
+    expect(allows('update', [MEMBER_DEFAULT], object), `${object} update`).toBe(false);
+    expect(allows('delete', [MEMBER_DEFAULT], object), `${object} delete`).toBe(false);
+  });
+
+  it.each(INBOX_OBJECTS)('%s: a read is RLS-narrowed to the caller — another user\'s rows are unreachable', (object) => {
+    const policies = policiesFor(object, 'select');
+    expect(policies.map((p: any) => p.name)).toEqual([`${object}_self`]);
+    const filter = rls.compileFilter(policies as any, MEMBER);
+    // The scoping is a positive `user_id` equality, not a fail-closed sentinel:
+    // the member sees their own rows and ONLY their own. A row belonging to
+    // another user cannot satisfy this filter, which is the "cannot read another
+    // user's rows" half of the ruling.
+    expect(filter).not.toBeNull();
+    expect(filter).not.toEqual(RLS_DENY_FILTER);
+    expect(filter).toEqual({ user_id: 'u_member' });
+  });
+
+  it.each(INBOX_OBJECTS)('%s: an anonymous/unidentified caller fails CLOSED, not open', (object) => {
+    // No `current_user.id` to compile against ⇒ the sentinel, i.e. zero rows.
+    expect(rls.compileFilter(policiesFor(object, 'select') as any, {} as any)).toEqual(RLS_DENY_FILTER);
+  });
+
+  it('`sys_activity` is deliberately NOT granted — the ruling excludes it', () => {
+    // Named as an explicit negative so a future "while we are here" sweep has to
+    // argue with the ruling rather than quietly widen past it. It is not a
+    // per-user-scoped shape; a separate question if it ever matters.
+    for (const { operation } of AXES) {
+      expect(allows(operation, [MEMBER_DEFAULT], 'sys_activity'), `sys_activity ${operation}`).toBe(false);
+    }
+    const names = (MEMBER_DEFAULT.rowLevelSecurity ?? []).map((p: any) => p.name);
+    expect(names).not.toContain('sys_activity_self');
+  });
+
+  it('the additions stay anchor-safe and explicit (no wildcard crept in with them)', () => {
+    for (const object of INBOX_OBJECTS) {
+      const perm = (MEMBER_DEFAULT.objects as any)[object];
+      expect(perm, `${object} is named`).toBeTruthy();
+      expect(perm.allowDelete ?? false).toBe(false);
+      expect(perm.allowExport ?? false).toBe(false);
+      expect(perm.viewAllRecords ?? false).toBe(false);
+      expect(perm.modifyAllRecords ?? false).toBe(false);
+    }
+    expect(Object.keys(MEMBER_DEFAULT.objects ?? {})).not.toContain('*');
   });
 });
 

@@ -16,6 +16,15 @@ import { Dashboard } from '@objectstack/spec/ui';
  *   2. Security KPIs       — login / permission / config audit counts
  *   3. Distribution charts — audit events by action + by user
  *   4. Recent audit events table
+ *
+ * This is a MIXED board, and the split decides who the date bar applies to
+ * (#7531, #7613). Row 1 is INVENTORY — "how much of this exists right now" —
+ * so a count there must not move when the date bar moves. Rows 2-4 are
+ * ACTIVITY over `sys_audit_log`, which the date bar exists to scope (see the
+ * Row 3 note). The `globalFilters` entry below is broadcast into EVERY
+ * widget's analytics query (#2501), so an inventory tile has to say so: it
+ * opts out with `filterBindings: { created_at: false }`. All four Row 1 tiles
+ * now do — #7531 fixed the first two, #7613 the two that were left.
  */
 export const SystemOverviewDashboard = Dashboard.create({
   name: 'system_overview',
@@ -34,6 +43,16 @@ export const SystemOverviewDashboard = Dashboard.create({
       title: 'Total Users',
       type: 'metric',
       layout: { x: 0, y: 0, w: 3, h: 2 },
+      // #7531 — a TOTAL must not move when the date bar moves. The dashboard's
+      // `created_at` global filter is broadcast into every widget's analytics
+      // query (#2501), so before this opt-out the tile reported "users created
+      // in the last 7 days" under a label that says "Total". On a fresh
+      // datastore the two coincide — every user IS recent — which is exactly
+      // why it reads as correct in a demo and as catastrophic user loss on any
+      // instance older than the window. The date bar belongs to the audit rows
+      // below (see the Row 3 note); reaching `sys_user.created_at` was
+      // bare-field fan-out, not this tile's intent.
+      filterBindings: { created_at: false },
       colorVariant: 'teal',
       description: 'Total registered users in the system',
     },
@@ -49,6 +68,13 @@ export const SystemOverviewDashboard = Dashboard.create({
       // overview doesn't dangle a metric the admin can't act on.
       requiresService: 'org-scoping',
       layout: { x: 3, y: 0, w: 3, h: 2 },
+      // #7613 — the same #2501 fan-out as Total Users above, on the same row.
+      // `sys_organization.created_at` exists, so the date bar landed on it and
+      // the tile reported "organizations created in the last 7 days" under a
+      // description that says "Total organizations on the platform". An
+      // organization founded last year has not stopped existing because the
+      // date bar says `last_7_days`.
+      filterBindings: { created_at: false },
       colorVariant: 'orange',
       description: 'Total organizations on the platform',
     },
@@ -58,6 +84,24 @@ export const SystemOverviewDashboard = Dashboard.create({
       title: 'Active Sessions',
       type: 'metric',
       layout: { x: 6, y: 0, w: 3, h: 2 },
+      // #7531 — "Active Sessions" counted EVERY `sys_session` row: the dataset
+      // is a bare count and the widget carried no predicate, so a signed-out or
+      // long-expired session was still reported as active. `sys_session` can
+      // express "active" exactly (ADR-0069 D4): a session is live while it has
+      // not been revoked and has not yet expired.
+      //
+      // `{now}` is a declared date macro (`date-macros.zod.ts`) resolved
+      // per-request by `resolveFilterTokens`, which the analytics dataset
+      // executor applies to a widget's `filter` (its `runtimeFilter`) — so this
+      // is a live predicate, not the unsubstituted `NOW() - INTERVAL` shape the
+      // Row 3 note warns about.
+      filter: { revoked_at: null, expires_at: { $gt: '{now}' } },
+      // …and "currently active" is a statement about NOW, not about a window:
+      // an old session that is still live is still active. Same #2501 fan-out
+      // as Total Users above — without this opt-out the tile would report
+      // "sessions CREATED in the last 7 days that are active", which is neither
+      // the old number nor the labelled one.
+      filterBindings: { created_at: false },
       colorVariant: 'blue',
       description: 'Number of currently active user sessions',
     },
@@ -70,7 +114,17 @@ export const SystemOverviewDashboard = Dashboard.create({
       // Hide this widget gracefully in single-environment runtimes.
       requiresObject: 'sys_package_installation',
       layout: { x: 9, y: 0, w: 3, h: 2 },
+      // Which installations count: the ones that are actually installed. This
+      // predicate is the tile's own, and it is ORTHOGONAL to the opt-out below
+      // — the two answer different questions and both stand.
       filter: { status: 'installed' },
+      // #7613 — and how many of them count: all of them. Same #2501 fan-out as
+      // the two tiles above; `sys_package_installation.created_at` exists, so
+      // without this the tile reported installations CREATED in the last 7 days
+      // that are installed, which is neither the labelled quantity nor a useful
+      // one. "Active package installations across projects" is a stock, and a
+      // package installed a year ago is still installed today.
+      filterBindings: { created_at: false },
       colorVariant: 'success',
       description: 'Active package installations across projects',
     },
