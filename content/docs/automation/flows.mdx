@@ -734,7 +734,7 @@ instead:
 | `http`, `GET`/`HEAD`/`OPTIONS` | `acted: 0` — a read can never write |
 | `http`, mutating method, response OK | `acted: 1` |
 | `http`, mutating method, rejected / timed out | `unmeasured` — a 500 can arrive after the write landed |
-| `http`, `durable: true` | `acted: 1` — the outbox row is a real, durable effect |
+| `http`, `durable: true` | `unmeasured` — the outbox row is a real, durable effect, but a *pending* one: the dispatcher decides the outcome (including `dead`) after the run has settled, so counting it would let the summary claim a callout that `sys_http_delivery` records as dead-lettered |
 | `connector_action` | `unmeasured` |
 | `script`, function declared pure (the default) | nothing — a registered function is **contractually pure**: data I/O stays on the flow graph, so every write it causes is a downstream node that counts itself |
 | `script`, function declared `effect: 'writes'` | `unmeasured` — the function said it writes where the platform cannot see, so the run says the count is incomplete |

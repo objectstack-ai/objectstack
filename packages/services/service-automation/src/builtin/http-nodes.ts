@@ -135,8 +135,34 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
                             payload: body ?? {},
                         });
                         // #4354 — the outbox row IS a durable effect this run
-                        // caused, even though the upstream call happens later.
-                        return { success: true, output: { deliveryId, enqueued: true }, metrics: { acted: 1 } };
+                        // caused, but it is NOT a countable one (#7882). What
+                        // `enqueueHttp` returns is the id of a `pending` row;
+                        // the dispatcher decides the real outcome afterwards,
+                        // and that outcome includes dead-lettering the callout
+                        // entirely. Counting the enqueue as `acted` made the run
+                        // summary assert a delivery that `sys_http_delivery`
+                        // recorded as `dead` — the same overstatement #7747
+                        // fixed at the `notify` node.
+                        //
+                        // The honest answer when the run settles is "an effect I
+                        // cannot count yet", which is exactly `unmeasuredEffect`
+                        // — and pointedly NOT a bare `acted: 0`, which would
+                        // claim the run did nothing (`connector.zod.ts:613`) and
+                        // trip the broken-sweep alert on every healthy durable
+                        // callout. That alert is `selected > 0 AND acted = 0 AND
+                        // unmeasured = 0`, so a pending delivery suppresses it
+                        // without asserting success.
+                        //
+                        // Waiting for the real outcome is not on the table: the
+                        // whole point of `durable: true` is that the flow does
+                        // NOT block on the callout. The inline path below keeps
+                        // its measured `acted` — its outcome IS terminal by the
+                        // time it returns.
+                        return {
+                            success: true,
+                            output: { deliveryId, enqueued: true },
+                            metrics: { unmeasuredEffect: true },
+                        };
                     } catch (err) {
                         return { success: false, error: `http (durable) failed to enqueue: ${(err as Error).message}` };
                     }
