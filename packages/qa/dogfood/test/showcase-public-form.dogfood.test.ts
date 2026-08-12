@@ -9,6 +9,12 @@
 // anonymous submit proves the route works under SECURE-BY-DEFAULT auth, with
 // NO `guest_portal` profile, authorized solely by the declaration-derived
 // `publicFormGrant` (create + read-back on `showcase_inquiry` ONLY).
+//
+// ADR-0056 D10 — the authz-conformance matrix row this file is the cited proof
+// for; `authz-conformance.test.ts` asserts the pairing is mutual (#7976). The
+// row's own evidence is the #3022 case: a forged owner_id / organization_id on
+// the anonymous submit never lands on the row.
+// authz-row: public-form-managed-anchors
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack from '@objectstack/example-showcase';

@@ -7,6 +7,10 @@
 // every read/write to the owner purely from the OWD baseline + the auto-stamped
 // `owner_id`. This is the canonical "declare one word, get owner isolation"
 // capability — proven end-to-end through the real HTTP stack.
+//
+// ADR-0056 D10 — the authz-conformance matrix row this file is the cited proof
+// for; `authz-conformance.test.ts` asserts the pairing is mutual (#7976).
+// authz-row: owd-private
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';

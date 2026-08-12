@@ -28,6 +28,16 @@
 // half, so the proof file once again covers everything the matrix row claims
 // it covers.
 //
+// ADR-0056 D10 — the authz-conformance matrix rows this file is the cited proof
+// for; `authz-conformance.test.ts` asserts the pairing is mutual (#7976). One
+// per SURFACE, each with its own anonymous-401 cases below. It deliberately does
+// NOT claim `anonymous-deny`: the REST `/data` cases here are the cross-surface
+// contrast, and that row's cited proof is showcase-anonymous-deny.dogfood.test.ts.
+// authz-row: anonymous-deny-meta
+// authz-row: anonymous-deny-actions
+// authz-row: anonymous-deny-automation
+// authz-row: anonymous-deny-packages
+//
 // The value this boot adds OVER #5569's own runtime integration test
 // (`dispatcher-plugin.anonymous-gate.integration.test.ts`) is precisely the
 // comparison that test documented it could NOT make: it boots a LiteKernel that

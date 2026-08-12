@@ -34,6 +34,10 @@
 // The pair below is therefore red in both directions: the first case goes red if
 // the declared default is not in force, the second if it DISPLACES the built-in
 // one instead of composing with it.
+//
+// ADR-0056 D10 — the authz-conformance matrix row this file is the cited proof
+// for; `authz-conformance.test.ts` asserts the pairing is mutual (#7976).
+// authz-row: default-profile
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack from '@objectstack/example-showcase';
