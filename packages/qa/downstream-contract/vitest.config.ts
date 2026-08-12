@@ -43,18 +43,16 @@ export default defineConfig({
     // `system` / `ui`) and every other one they might reach tomorrow. One rule
     // for all namespaces cannot go stale the way a hand-maintained list does.
     //
-    // ⚠️ The replacement is spelled `path.join(<packages>, 'spec/src/$1/…')`
-    // and NOT as the template literal `${path.resolve(…, '../../spec/src')}/$1/
-    // index.ts` that `service-knowledge` and `plugin-audit` use, because
-    // `check:test-source-alias` reads an alias replacement by taking the LAST
-    // string literal in the expression: from the template form that is the
-    // whole template body, which contains no `/src/` segment, so a config that
-    // aliases every namespace correctly still reads to the gate as aliasing
-    // nothing. Filed as #8020 — it is why both of those packages still
-    // carry a `['@objectstack/objectql', '@objectstack/spec']` registry entry
-    // they have in fact already half-fixed. In this spelling the gate's
-    // simulated resolution lands on `spec/src/<ns>/index.ts`, which is what
-    // Vite really produces — the gate's verdict here is true, not lucky.
+    // The replacement is spelled `path.join(<packages>, 'spec/src/$1/…')`
+    // rather than as a template literal. Both spellings read correctly to
+    // `check:test-source-alias` as of #8020 / PR #8107 — before that fix the
+    // gate took an alias replacement to be the LAST string literal in the
+    // expression, which from a template body contains no `/src/` segment, so a
+    // config aliasing every namespace correctly still read to the gate as
+    // aliasing nothing. That was found under this card and fixed on its own,
+    // ahead of this one landing; the spelling here is kept because it states
+    // the produced path directly, and the gate's simulated resolution lands on
+    // `spec/src/<ns>/index.ts` — what Vite really produces.
     alias: [
       {
         find: /^@objectstack\/spec\/([a-z-]+)$/,

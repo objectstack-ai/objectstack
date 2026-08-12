@@ -46,8 +46,9 @@ the standing guard on a dual instance.
 The alias uses the anchored regex / array form (the object form matches by prefix and
 would resolve `@objectstack/spec/ui` to `spec/src/index.ts/ui`, ENOTDIR), with the
 replacement spelled `path.join(<packages>, 'spec/src/$1/index.ts')` rather than as a
-template literal — `check:test-source-alias` reads a replacement by its last string
-literal and cannot see through the template form (#8020).
+template literal. Both spellings read correctly to `check:test-source-alias` as of
+\#8020 / PR #8107, which was found under this card and fixed on its own ahead of this
+one landing.
 
 Adjacent exposure found while measuring and deliberately left for its own card: the
 package's other half, `typecheck`, still resolves spec types through `dist/*.d.ts`, so a
