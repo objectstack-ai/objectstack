@@ -3822,11 +3822,19 @@ export class AuthManager {
       const hdr = (k: string): string =>
         ((ctx?.headers?.get?.(k) ?? ctx?.request?.headers?.get?.(k)) as string) || '';
       let token: string | undefined;
+      // `session.token` stores the UNSIGNED value, but a credential reaches us
+      // in either spelling: `bearer()` hands clients the SIGNED `<token>.<sig>`
+      // in `set-auth-token` (and accepts both back), while the cookie always
+      // carries the signed form. Strip the signature on BOTH branches — the
+      // cookie branch always did, and a bearer branch that did not silently
+      // resolved nothing for the exact credential the documented API lane hands
+      // out, which is indistinguishable from "not signed in".
+      const unsigned = (v: string): string => v.split('.')[0];
       const bm = /^Bearer\s+(.+)$/i.exec(hdr('authorization'));
-      if (bm?.[1]) token = bm[1].trim();
+      if (bm?.[1]) token = unsigned(bm[1].trim());
       if (!token) {
         const cm = /(?:^|;\s*)(?:__Secure-|__Host-)?better-auth\.session_token=([^;]+)/.exec(hdr('cookie'));
-        if (cm?.[1]) token = decodeURIComponent(cm[1]).split('.')[0];
+        if (cm?.[1]) token = unsigned(decodeURIComponent(cm[1]));
       }
       if (token) {
         const sess: any = await (ctx as any).context.adapter.findOne({
@@ -4448,12 +4456,27 @@ export class AuthManager {
    * `/change-password` the caller is authenticated (session); for
    * `/reset-password` the user is carried by the reset token's verification
    * value (the same lookup better-auth's own handler uses).
+   *
+   * [#8049] `/change-password` goes through {@link resolveActor}, the shared
+   * hook-order-independent resolver — NOT a bare `getSessionFromCtx`. That call
+   * reads the session COOKIE, and better-auth orders `options.hooks.before`
+   * (this hook) ahead of every plugin before-hook, including `bearer()`'s —
+   * which is precisely what converts `Authorization: Bearer` into that cookie.
+   * So on the bearer lane the cookie does not exist yet and the bare call
+   * resolves null, while better-auth's own password write (running after the
+   * conversion) succeeds: a 200 with nothing stamped.
+   *
+   * This is one resolution site on purpose. THREE behaviours hang off the id it
+   * returns — the `password_changed_at` / `must_change_password` stamp, ADR-0069
+   * D1's password-reuse REJECTION, and the history append — so a lane this
+   * cannot see is not merely a lane that stays flagged: it is a lane where a
+   * declared security control silently does not run. Resolving the principal
+   * correctly here fixes all three at once; a second stamp site would fix the
+   * visible one and leave the control transport-dependent.
    */
   private async resolvePasswordChangeUserId(ctx: any): Promise<string | undefined> {
     if (ctx?.path === '/change-password') {
-      const { getSessionFromCtx } = await import('better-auth/api');
-      const sess: any = await getSessionFromCtx(ctx).catch(() => null);
-      return sess?.user?.id ?? sess?.session?.userId ?? undefined;
+      return (await this.resolveActor(ctx))?.userId;
     }
     if (ctx?.path === '/reset-password') {
       const token = typeof ctx?.body?.token === 'string' ? ctx.body.token : '';
