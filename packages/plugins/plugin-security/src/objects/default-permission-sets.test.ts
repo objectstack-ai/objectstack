@@ -94,3 +94,61 @@ describe('default permission sets carry the managed denies (static baseline)', (
     expect(Object.keys(admin.objects)).toEqual(['*']);
   });
 });
+
+/**
+ * [#8095] The `sys_invitation` row scope — a DELETION TRIPWIRE, not the proof.
+ *
+ * The proof that the narrowing works lives over HTTP, in
+ * `packages/qa/dogfood/test/invitation-ledger-row-scope.dogfood.test.ts`: an
+ * assertion whose expectation and reality both come from this module cannot
+ * fail, so nothing here is evidence that a member is actually narrowed. What
+ * this block does buy is the one thing the HTTP fixture cannot — it names the
+ * predicate and the sets it must appear in, so removing a carve-out (or adding
+ * a managed object to `BETTER_AUTH_MANAGED_OBJECTS` and assuming the blanket
+ * read is safe for it) fails HERE, in the file being edited, instead of in a
+ * suite the author may not run.
+ *
+ * The predicate is written out rather than imported for the same reason.
+ */
+describe('sys_invitation is row-scoped to its addressee (#8095)', () => {
+  const SELF_PREDICATE = 'email == current_user.email';
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const policiesFor = (setName: string, object: string): any[] =>
+    (setByName(setName)?.rowLevelSecurity ?? []).filter((p: any) => p.object === object);
+
+  it.each(['member_default', 'viewer_readonly'])(
+    '%s scopes sys_invitation to the addressee — the blanket managed read is NOT the whole story',
+    (setName) => {
+      // The object-level read bit stays open: it is what makes the invitee's OWN
+      // row reachable, and closing it would break the accept flow rather than
+      // narrow it. The narrowing is the row predicate.
+      expect(setByName(setName).objects.sys_invitation.allowRead).toBe(true);
+
+      const scoped = policiesFor(setName, 'sys_invitation');
+      expect(scoped.map((p) => p.name)).toEqual(['sys_invitation_self']);
+      expect(scoped[0].using).toBe(SELF_PREDICATE);
+      // Read the operation off THIS policy. The same-named carve-outs across
+      // these sets do not all agree (`sys_api_key_self` is spelled three times
+      // at two different operations), so a sibling's value is not evidence.
+      expect(scoped[0].operation).toBe('select');
+      expect(scoped[0].enabled).not.toBe(false);
+    },
+  );
+
+  it('organization_admin keeps the ORG-wide ledger — the ruling narrowed members, not admins', () => {
+    // The other half of the ruling. Owner/admin reach the full ledger two ways:
+    // `organization_admin`'s wildcard `viewAllRecords` short-circuits Layer 1 on
+    // a better-auth-managed object, and the wall-less
+    // `organization_admin_no_bypass` variant (which drops that bit) still
+    // carries this policy. Policies OR-combine across resolved sets, so
+    // `member_default`'s self-scope can never subtract from it.
+    for (const setName of ['organization_admin', 'organization_admin_no_bypass']) {
+      const scoped = policiesFor(setName, 'sys_invitation');
+      expect(scoped.map((p) => p.name), `${setName} sys_invitation policies`).toEqual([
+        'sys_invitation_org',
+      ]);
+      expect(scoped[0].using).toBe('organization_id == current_user.organization_id');
+    }
+  });
+});

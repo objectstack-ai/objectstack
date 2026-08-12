@@ -23,6 +23,18 @@ import {
  * permission sets keep their `*` wildcard so they can rescue data
  * directly when needed.
  *
+ * ⚠️ "Subject to the rest of the RLS chain" is the load-bearing half, and it is
+ * a BLANKET grant — read this list as 22 objects whose object-level read bit is
+ * open, each narrowed (or not) by whatever `rowLevelSecurity` its holder set
+ * declares for it. An object named here with NO `_self` / `_org` policy in
+ * `member_default` is org-wide readable by every authenticated member. That is
+ * intended for the staff-directory shapes (`sys_member`, `sys_user` via
+ * `sys_user_org_members`) and was NOT intended for `sys_invitation`
+ * (maintainer ruling 2026-08-12) — see `sys_invitation_self` below. Do not
+ * "fix" a future instance of this class by editing the blanket: dropping
+ * `allowRead` here retires the read on all 22 at once, and it would take the
+ * invitee's own row with it. The per-object row scope is the narrow instrument.
+ *
  * This is the COMPILE-TIME BASELINE. At `kernel:ready` it is unioned with the
  * live registry by `applyManagedWriteDenies` (see `managed-object-write-denies.ts`),
  * which injects a deny entry for every registered `managedBy: 'better-auth'`
@@ -597,6 +609,59 @@ const baseDefaultPermissionSets: PermissionSet[] = [
         operation: 'select',
         using: 'user_id == current_user.id',
       },
+      // [#8095] The invitation ledger is ADMINISTRATIVE INTENT, not a staff
+      // directory — row-scoped to the addressee.
+      //
+      // `sys_invitation` is in BETTER_AUTH_MANAGED_OBJECTS, so the blanket above
+      // grants read on it; this set declared NO policy for the object, and an
+      // object with no applicable policy compiles to a null Layer 1 — i.e. no
+      // row filter at all (`RLSCompiler.compileFilter` returns null on an empty
+      // applicable set). Measured live: a plain `member` of an org got
+      // `200, total: 2` on `GET /api/v1/data/sys_invitation` — byte-identical to
+      // what the org OWNER sees, including other people's email addresses, the
+      // role each is about to be granted, the inviter and the expiry. Pending
+      // invitees are not members and never consented to a directory listing, and
+      // "who is about to become an admin" is the wrong thing to broadcast.
+      //
+      // Maintainer ruling (2026-08-12): narrow the read to owner/admin, PLUS a
+      // row-scope carve-out so an invitee still sees THEIR OWN invitation. Both
+      // halves are load-bearing and this policy is both of them at once:
+      //   - NARROWING — for a rank-and-file member this is now the only
+      //     applicable policy, so the readable set is exactly `{their own row}`;
+      //   - CARVE-OUT — the accept flow's surfaces are record-scoped
+      //     (`sys_invitation`'s `accept_invitation` / `reject_invitation` row
+      //     actions declare `visible: record.email == ctx.user.email`), so an
+      //     invitee who cannot READ their row cannot act on it. Narrowing
+      //     without this predicate would break acceptance while looking like a
+      //     permissions fix.
+      // Owner/admin are unaffected: they hold `organization_admin`, whose
+      // wildcard `viewAllRecords` short-circuits Layer 1 on a better-auth-managed
+      // object, and whose `sys_invitation_org` policy (`organization_id ==
+      // current_user.organization_id`) carries the full ledger in the wall-less
+      // `organization_admin_no_bypass` variant where the bypass is absent.
+      // Policies OR-combine across resolved sets, so this predicate can only
+      // widen — never narrow — what an admin already sees.
+      //
+      // `email` (not `user_id`): an invitation predates the account it invites,
+      // so the addressee is identified by address. `current_user.email` is the
+      // auth-enforced, unique-by-construction identity `RLSUserContext` exposes
+      // for exactly this (the display `name` is deliberately not exposed). When
+      // it cannot be resolved the policy compiles to nothing and the single
+      // applicable policy yields `RLS_DENY_FILTER` — zero rows, fail-closed.
+      //
+      // `select` (not `all`), matching `sys_inbox_message_self` above: every
+      // write on this table is denied at the object layer by the managed-object
+      // block, refused again by the ADR-0092 D2 identity write guard, and
+      // answered 405 by `apiMethods: ['get', 'list']` before either. The #7665
+      // derive-from-select rule additionally lends this predicate to the write
+      // classes should a write bit ever be granted, so `all` would buy nothing
+      // and would overstate what the policy is for.
+      {
+        name: 'sys_invitation_self',
+        object: 'sys_invitation',
+        operation: 'select',
+        using: 'email == current_user.email',
+      },
     ],
   }),
   PermissionSetSchema.parse({
@@ -697,6 +762,24 @@ const baseDefaultPermissionSets: PermissionSet[] = [
         object: 'sys_oauth_consent',
         operation: 'select',
         using: 'user_id == current_user.id',
+      },
+      // [#8095] Same row scope as `member_default`'s `sys_invitation_self`, and
+      // it must be repeated here rather than inherited: this set is resolved
+      // INSTEAD of the member baseline for a read-only principal, and its `'*'`
+      // wildcard read is if anything wider — carrying no `viewAllRecords`, it
+      // does NOT take the Layer 1 short-circuit, so without a policy of its own
+      // a viewer would read the whole org's invitation ledger that a member can
+      // no longer see. `select` here matches this set's own convention (every
+      // carve-out above is `select`; `viewer_readonly` grants no write bit at
+      // all) and happens to agree with `member_default`'s — which is NOT a rule
+      // to generalise from: the `sys_api_key_self` carve-out is spelled three
+      // times across these sets at two different `operation` values. Read the
+      // `operation` on each policy; never infer it from a same-named sibling.
+      {
+        name: 'sys_invitation_self',
+        object: 'sys_invitation',
+        operation: 'select',
+        using: 'email == current_user.email',
       },
     ],
   }),
