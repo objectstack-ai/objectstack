@@ -77,7 +77,9 @@ interface Row {
     metadata: string;
 }
 
-function row(partial: Partial<Row> & { name: string; type: string; metadata: unknown }): Row {
+function row(
+    partial: Omit<Partial<Row>, 'metadata'> & { name: string; type: string; metadata: unknown },
+): Row {
     return {
         id: `row_${partial.type}_${partial.name}_${partial.organization_id ?? 'env'}`,
         organization_id: null,
