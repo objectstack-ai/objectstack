@@ -202,8 +202,22 @@ describe('HttpDispatcher extracted domains (PR-2)', () => {
         expect(notification.markRead).toHaveBeenCalledWith('u1', ['n1']);
     });
 
-    it('/security responds 503 when no security service is wired (legacy in-handler semantics)', async () => {
-        const result = await makeDispatcher().dispatch('GET', '/security/suggested-bindings', undefined, {}, {} as any);
+    it('/security still answers 503 from inside the handler when no service is wired, for an authenticated caller (#7911: the anonymous-deny gate now runs BEFORE this, not after)', async () => {
+        // Direct delegate call for the same reason as the notifications case
+        // above: dispatch() re-resolves identity from the (mock, auth-less)
+        // kernel and would overwrite the seeded executionContext with an
+        // anonymous one, and an anonymous caller no longer reaches this probe
+        // at all post-#7911 (see the anonymous-denial test right below). This
+        // test's job is narrower than that: prove the in-handler 503 path
+        // (`!service || typeof service.listAudienceBindingSuggestions !==
+        // 'function'`) still exists once an authenticated caller has cleared
+        // the gate -- the negative pin proving #7911 was a hoist, not a
+        // deletion. Before #7911 the 503 sat AHEAD of the gate and this test
+        // reached it anonymously by accident of the harness ("legacy
+        // in-handler semantics"); now it sits after the gate, so the test
+        // authenticates deliberately instead of relying on that accident.
+        const context: any = { executionContext: { userId: 'admin-1' } };
+        const result = await makeDispatcher().handleSecurity('/suggested-bindings', 'GET', undefined, {}, context);
         expect(result.handled).toBe(true);
         expect(result.response?.status).toBe(503);
     });
