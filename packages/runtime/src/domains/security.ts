@@ -22,29 +22,10 @@
 
 import {
     shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
+    isAudienceBindingSuggestionStatus, unknownAudienceBindingSuggestionStatusMessage,
 } from '@objectstack/core';
-import type { AudienceBindingSuggestionFilter } from '@objectstack/spec/contracts';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
-
-type SuggestionStatus = NonNullable<AudienceBindingSuggestionFilter['status']>;
-
-/**
- * [#4127 batch 3] The accepted `?status=` values, keyed BY the contract type so
- * the correspondence is mechanical: adding a status to
- * `AudienceBindingSuggestionFilter` leaves a key missing here and renaming one
- * leaves a key excess, and either way this fails to compile. A plain
- * `['pending', …]` array would have silently drifted, which is the failure mode
- * this whole work line exists to remove.
- */
-const SUGGESTION_STATUSES: Record<SuggestionStatus, true> = {
-    pending: true,
-    confirmed: true,
-    dismissed: true,
-};
-
-const isSuggestionStatus = (value: string): value is SuggestionStatus =>
-    Object.prototype.hasOwnProperty.call(SUGGESTION_STATUSES, value);
 
 export function createSecurityDomain(deps: DomainHandlerDeps): DomainRoute {
     return {
@@ -113,14 +94,18 @@ export async function handleSecurityRequest(
             // which reads as "there are no suggestions" rather than "your filter
             // was not a status". Rejecting is the honest answer, and the only
             // one that keeps the call inside the contract.
+            //
+            // [#7678] The predicate and its wording moved to
+            // `@objectstack/core`'s security barrel unchanged: the LIVE REST
+            // route (`rest-server.ts` → `registerSecurityEndpoints`) is a second
+            // seam onto this same service call and was still forwarding
+            // `?status=` unvalidated, so the empty-list arm described above was
+            // reachable there. One owner, two callers — not two copies.
             const rawStatus = query?.status ? String(query.status) : undefined;
-            if (rawStatus !== undefined && !isSuggestionStatus(rawStatus)) {
+            if (rawStatus !== undefined && !isAudienceBindingSuggestionStatus(rawStatus)) {
                 return {
                     handled: true,
-                    response: deps.error(
-                        `Unknown status filter '${rawStatus}' — expected one of: ${Object.keys(SUGGESTION_STATUSES).join(', ')}`,
-                        400,
-                    ),
+                    response: deps.error(unknownAudienceBindingSuggestionStatusMessage(rawStatus), 400),
                 };
             }
             const packageId = query?.packageId ? String(query.packageId) : undefined;
