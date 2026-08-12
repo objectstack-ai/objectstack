@@ -2,6 +2,15 @@
 
 export * from './query.zod';
 export * from './filter.zod';
+// The comparand-type door (#7872) — the accepted literal comparand set
+// (`string | number | bigint | boolean | null | Date`, the measured superset
+// of #7956's divergence matrix), the walk `parseFilterAST` and the engine's
+// lowering seam enforce it with, and the sentence the SQL family's refusals
+// quote instead of hand-copying. Everything outside the set is refused with
+// the `INVALID_FILTER` / 400 envelope at the compile face, so the frozen
+// drivers (#5499) inherit one answer instead of crashing (memory × BigInt) or
+// letting the BSON encoder edit the query (mongo × undefined → match-all).
+export * from './filter-comparand-type';
 // Canonical conformance cases for the filter logical combinators — the shared
 // standard the five independent FilterCondition backends are each checked
 // against, so they cannot drift apart again (#3774; the fifth — MongoDB's
@@ -22,6 +31,13 @@ export * from './filter-verdict';
 // explicitly out of that table's scope, and this one needs an `expectRejection`
 // discriminant it deliberately never grew (#5701).
 export * from './filter-text-conformance';
+// Canonical conformance cases for the comparand-type door (#7872) — each of
+// the six accepted types compiles on every driver path, and each refused type
+// gets the loud INVALID_FILTER refusal at the door, the two worst measured
+// cells (mongo × undefined silent-edit, memory × BigInt crash) included. A
+// sibling of the text table for the same reason that table is a sibling of the
+// logic table: comparand TYPE is its own axis, out of both of their scopes.
+export * from './filter-comparand-type-conformance';
 export * from './temporal-conformance';
 // Canonical conformance cases for deterministic paged reads — the standard
 // every driver's `find()` is held to whenever `limit`/`offset` slice the result

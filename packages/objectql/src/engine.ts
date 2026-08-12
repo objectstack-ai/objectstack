@@ -28,7 +28,12 @@ import type { ValidateDataIssue, ValidateDataResponse } from '@objectstack/spec/
 import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken, isNowDefaultToken } from '@objectstack/spec/data';
 // [#5158] Door 2's lowering sink — the SAME pair the protocol face (Door 1)
 // runs, so `FilterArray` has exactly one lowering in the product.
-import { isFilterAST, parseFilterAST, VALID_AST_OPERATORS } from '@objectstack/spec/data';
+import {
+  isFilterAST,
+  parseFilterAST,
+  normalizeFilterComparandTypes,
+  VALID_AST_OPERATORS,
+} from '@objectstack/spec/data';
 // [#5574] D6, executable. The ceiling and the refusal message live in
 // `packages/spec/src/data/bulk-write-hook-conformance.ts` so BOTH phases and
 // both verbs enforce one definition; the engine raises, the contract decides.
@@ -626,6 +631,19 @@ function lowerWhereFilterArray<T extends object | undefined>(
     // one either way — it reads the lowered condition, which is what both doors
     // produce.
     assertListComparandShapes(object, operation, where);
+    // [#7872] The comparand-type door, on the OBJECT form. `parseFilterAST`
+    // runs the same walk on everything it lowers or passes through, but
+    // NEITHER door routes an object-form filter through it — Door 1 gates on
+    // `isFilterAST` first and Door 2 is this very branch — so without this
+    // call the dominant form would bypass the door entirely (the #7956
+    // divergence matrix arrived through it). Shape gate first (#5869 keeps
+    // its pinned wording for the list-operator shapes), type door second;
+    // the walk is copy-on-write, so the common path allocates nothing and a
+    // narrowed bigint replaces the bag rather than editing the caller's.
+    const normalized = normalizeFilterComparandTypes(where, `${operation}('${object}')`);
+    if (normalized !== where) {
+      return { ...(bag as Record<string, unknown>), where: normalized } as T;
+    }
     return bag;
   }
 

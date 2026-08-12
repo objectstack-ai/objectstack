@@ -36,6 +36,13 @@ import { isNowDefaultToken, isRuntimeDefaultToken } from '@objectstack/spec/data
 // sentence about `$regex` are five sentences that drift apart. This driver
 // prints `why` VERBATIM.
 import { RETIRED_FILTER_OPERATORS } from '@objectstack/spec/data';
+// [#7872] The shared comparand-type door: the accepted six-type SET (this
+// driver's own allowlists delegate their membership to it) and the sentence
+// its refusals quote, so the set has one home instead of a copy per driver.
+import {
+  isAcceptedFilterComparand,
+  ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE,
+} from '@objectstack/spec/data';
 // [#7536] `$like`/`$ilike`'s pattern language, defined once in the spec: the
 // dangling-escape gate every face refuses on, and the LIKE→GLOB translation the
 // SQLite dialects need because GLOB is the only case-exact pattern operator
@@ -1177,12 +1184,22 @@ const SCALAR_COMPARAND_OPERATORS: ReadonlySet<string> = new Set([
  * is not a primitive, a `Date` or a binary buffer is a shape better-sqlite3
  * refuses outright and the other dialects mangle. (`ArrayBuffer.isView` covers
  * `Buffer`, which is a `Uint8Array`.)
+ *
+ * [#7872] The type membership is the shared comparand-type door's now
+ * (`isAcceptedFilterComparand`, `@objectstack/spec/data`) — this list and
+ * `RemoteTransport.serializeComparand`'s reached the identical six types twice
+ * independently, which is the measured fact the door was ruled from, so the SET
+ * is sourced there rather than duplicated here. Two driver-local extras stay,
+ * each recorded: `undefined` answers TRUE only because the #6050 walk refuses
+ * every undefined comparand FIRST with its purpose-written message, so this arm
+ * is unreachable on the filter path and flipping it would only swap which error
+ * fires for a direct caller; `ArrayBuffer.isView` is this driver's own bindable
+ * (blob columns) that the engine-level door does not admit — it remains
+ * reachable from direct driver calls, which is also where it was ever usable.
  */
 function isBindableComparand(value: unknown): boolean {
-  if (value === null || value === undefined) return true;
-  const kind = typeof value;
-  if (kind === 'string' || kind === 'number' || kind === 'bigint' || kind === 'boolean') return true;
-  return value instanceof Date || ArrayBuffer.isView(value);
+  if (value === undefined) return true;
+  return isAcceptedFilterComparand(value) || ArrayBuffer.isView(value);
 }
 
 /**
@@ -1240,10 +1257,10 @@ const LIST_COMPARAND_OPERATORS: ReadonlySet<string> = new Set(['$in', '$nin', '$
  * close one. See {@link unrenderableTextComparandError} for the rest.
  */
 function isRenderableTextComparand(value: unknown): boolean {
-  if (value === null || value === undefined) return true;
-  const kind = typeof value;
-  if (kind === 'string' || kind === 'number' || kind === 'bigint' || kind === 'boolean') return true;
-  return value instanceof Date;
+  // [#7872] The six-type membership is the shared door's; `undefined` stays a
+  // recorded local admission (see the paragraph above — the #6050 walk refuses
+  // it first, so the arm is unreachable on the filter path).
+  return value === undefined || isAcceptedFilterComparand(value);
 }
 
 /**
@@ -1335,8 +1352,8 @@ function assertCompilableComparand(field: string, op: string, value: unknown): v
   throw unsupportedFilterError(
     `Operator "${op}" on field "${field}" requires a single comparable value, but received ` +
       `${Array.isArray(value) ? 'an array' : `an object (${safeShapePreview(value)})`}, which cannot be ` +
-      `bound as a SQL parameter. Use a string, number, boolean, null, Date or binary value; ` +
-      `for a list use $in/$nin, and for a range use $between.`,
+      `bound as a SQL parameter. Use ${ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE} (or a binary ` +
+      `value); for a list use $in/$nin, and for a range use $between.`,
   );
 }
 
@@ -1359,9 +1376,9 @@ function unbindableListMemberError(field: string, op: string, value: unknown, in
   return unsupportedFilterError(
     `Operator "${op}" on field "${field}" has a value at index ${index} of its list that cannot be ` +
       `bound as a SQL parameter: ${safeShapePreview(value)}. Every member of an $in/$nin/$between ` +
-      `list is a comparand in its own right — use a string, number, boolean, null, Date or binary ` +
-      `value. Refusing rather than binding it: the member can equal no stored value, so the list ` +
-      `silently loses that entry (and a $nin loses the exclusion the caller wrote).`,
+      `list is a comparand in its own right — use ${ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE} ` +
+      `(or a binary value). Refusing rather than binding it: the member can equal no stored value, ` +
+      `so the list silently loses that entry (and a $nin loses the exclusion the caller wrote).`,
   );
 }
 
@@ -1387,10 +1404,10 @@ function unrenderableTextComparandError(field: string, op: string, value: unknow
   return unsupportedFilterError(
     `Operator "${op}" on field "${field}" matches against the TEXT of a pattern, but received ` +
       `${Array.isArray(value) ? 'an array' : 'an object'} (${safeShapePreview(value)}). The spec ` +
-      `declares this comparand a string (filter.zod.ts StringOperatorSchema); a string, number, ` +
-      `boolean, null or Date is accepted. Refusing rather than stringifying it: String({}) is ` +
-      `"[object Object]", so the pattern that ran was one the caller never wrote — valid SQL, ` +
-      `and a row storing that literal text would have matched it.`,
+      `declares this comparand a string (filter.zod.ts StringOperatorSchema); ` +
+      `${ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE} is accepted. Refusing rather than stringifying ` +
+      `it: String({}) is "[object Object]", so the pattern that ran was one the caller never ` +
+      `wrote — valid SQL, and a row storing that literal text would have matched it.`,
   );
 }
 
