@@ -72,6 +72,16 @@ import {
     effectiveOperationsArray,
     DATA_ACTION_TO_API_OPERATION,
 } from '@objectstack/spec/data';
+// [#8013] The SHARED envelope writer (#3973), aliased: this module already has a
+// module-scope `sendError` of its own — the sanitizing responder that maps a
+// THROWN error onto a status — and the two are not interchangeable. This one
+// emits the declared `{ success: false, error: { code, message } }` for a refusal
+// the handler DECIDED, with `code` typed to the closed ADR-0112 vocabulary rather
+// than `string`. Adding a call site here moves no `check:route-envelope` count:
+// the body literal lives in `@objectstack/types` (the pinned `SHARED_BUILDER`),
+// and this file is audited `dialectOnly` for the two non-conforming dialects it
+// still emits — which this deliberately is not.
+import { sendError as sendEnvelopeError } from '@objectstack/types';
 
 /**
  * The protocol slice the REST layer actually consumes (ADR-0076 D9 / #2462
@@ -3211,7 +3221,59 @@ export class RestServer {
      * is why this used to sniff the shape. There is one shape now.
      */
     private filterAppForUser(item: any, sysPerms: Set<string>, serviceGate?: (name: string) => boolean): any | null {
-        if (!item || typeof item !== 'object') return item;
+        return this.filterAppForUserWithReason(item, sysPerms, serviceGate).app;
+    }
+
+    /**
+     * {@link filterAppForUser}, plus WHICH gate withheld the app.
+     *
+     * The gate above collapses three different refusals into one `null`, and for
+     * the LIST route that is exactly right — every one of them means "not in
+     * your list". The by-name route is where they stop being the same answer
+     * (#8013).
+     *
+     * ## Why the caller needs the reason
+     *
+     * `GET /meta/app/<name>` answered a 404-equivalent for all three, so an
+     * app the session may never use and an app that does not exist were
+     * BYTE-IDENTICAL on the wire. The console has nothing to branch on, so it
+     * renders its only copy for an absent app — "it may still be publishing" —
+     * over a permanent authorization denial. Measured cost (objectui#4252): two
+     * acceptance-test batches spent chasing a "platform defect" that was a
+     * missing permission-set binding.
+     *
+     * ## Only ONE of the three converts, and that is the whole design
+     *
+     * The maintainer ruling (2026-08-12) licenses an explicit denial for
+     * `permission` alone. The other two keep answering absence, for reasons
+     * that are not stylistic:
+     *
+     *  - `unpublished` — ADR-0045 §3 says an unpublished app is *externally
+     *    unobservable*, not merely unlisted. A 403 confirms existence, which is
+     *    precisely what that contract withholds; `meta-app-publish-gate.test.ts`
+     *    has pinned the 404-over-403 choice since #4829 and it stands.
+     *  - `service` — an absent optional kernel service (ADR-0057 D10) is a
+     *    deployment fact about the platform, not a statement about this caller.
+     *    Nothing is denied TO the session, so there is no denial to report.
+     *
+     * That partition is the security boundary of #8013, and it cuts one way
+     * only: a denial for `permission` makes an app the caller may not use
+     * observable BY NAME, which the ruling accepts because a by-name probe
+     * already implies the name. Widening it to a name that resolves to nothing
+     * would make every app name on the platform enumerable — a different and
+     * unruled change. Hence `withheld` is set from the branch that fired, never
+     * inferred from `app == null` at the call site.
+     *
+     * Ordering is load-bearing for the same reason: `unpublished` is judged
+     * FIRST, so an app that is both unpublished and permission-gated reports
+     * `unpublished` and stays absent. ADR-0045 §3 wins over the disclosure.
+     */
+    private filterAppForUserWithReason(
+        item: any,
+        sysPerms: Set<string>,
+        serviceGate?: (name: string) => boolean,
+    ): { app: any | null; withheld?: 'unpublished' | 'permission' | 'service' } {
+        if (!item || typeof item !== 'object') return { app: item };
         // ADR-0045 §3 (as revised 2026-08, #4829) — the publish gate. An
         // UNPUBLISHED app is externally unobservable, not merely unlisted: only
         // builders (studio/setup access) receive it at all, for direct-URL
@@ -3229,20 +3291,20 @@ export class RestServer {
         // system. A hidden app is fully routable and permission-checked here;
         // only `_unpublished` withholds it.
         if (item._unpublished === true && !sysPerms.has('studio.access') && !sysPerms.has('setup.access')) {
-            return null;
+            return { app: null, withheld: 'unpublished' };
         }
         const reqApp = Array.isArray(item.requiredPermissions) ? item.requiredPermissions : [];
         if (reqApp.length > 0 && !reqApp.every((p: string) => sysPerms.has(p))) {
-            return null;
+            return { app: null, withheld: 'permission' };
         }
         // ADR-0057 D10 — capability gate: hide when the named kernel service is
         // absent. Fail-open when the gate can't be probed (serviceGate undefined).
         if (typeof item.requiresService === 'string' && serviceGate && serviceGate(item.requiresService) === false) {
-            return null;
+            return { app: null, withheld: 'service' };
         }
         const nav = Array.isArray(item.navigation) ? item.navigation : null;
         const areas = Array.isArray(item.areas) ? item.areas : null;
-        if (!nav && !areas) return item;
+        if (!nav && !areas) return { app: item };
 
         const filterNav = (entries: any[]): any[] => {
             const out: any[] = [];
@@ -3347,9 +3409,11 @@ export class RestServer {
         };
 
         return {
-            ...item,
-            ...(nav ? { navigation: filterNav(nav) } : {}),
-            ...(areas ? { areas: filterAreas(areas) } : {}),
+            app: {
+                ...item,
+                ...(nav ? { navigation: filterNav(nav) } : {}),
+                ...(areas ? { areas: filterAreas(areas) } : {}),
+            },
         };
     }
 
@@ -5849,8 +5913,42 @@ export class RestServer {
                                     );
                                     const registered = await this.resolveRegisteredServices((ctx as any).__kernel, [visible]);
                                     const serviceGate = registered ? (n: string) => registered.has(n) : undefined;
-                                    visible = this.filterAppForUser(visible, sysPerms, serviceGate);
+                                    const gated = this.filterAppForUserWithReason(visible, sysPerms, serviceGate);
+                                    visible = gated.app;
                                     if (visible == null) {
+                                        // [#8013] A PERMISSION denial is reported as
+                                        // one — everything else keeps answering
+                                        // absence. See
+                                        // {@link filterAppForUserWithReason} for why
+                                        // only this one of the three gates converts,
+                                        // and why the reason comes from the branch
+                                        // that fired rather than from `null`.
+                                        //
+                                        // The condition is generic, so it takes the
+                                        // ADR-0112 STANDARD catalog code rather than
+                                        // a bespoke synonym — 403 `PERMISSION_DENIED`,
+                                        // which is also what
+                                        // `standardErrorCodeForHttpStatus(403)`
+                                        // answers. objectui#4252 branches on exactly
+                                        // this `code`.
+                                        //
+                                        // Written through the shared `sendError`
+                                        // (`@objectstack/types`), aliased because this
+                                        // module has a local function of that name.
+                                        // That builder emits the DECLARED envelope
+                                        // `{ success: false, error: { code, message } }`,
+                                        // so the console reads `body.error.code` — the
+                                        // same accessor as the absence answer below,
+                                        // rather than a second dialect to special-case.
+                                        if (gated.withheld === 'permission') {
+                                            sendEnvelopeError(
+                                                res,
+                                                403,
+                                                'PERMISSION_DENIED',
+                                                `You do not have permission to open the '${req.params.name}' app.`,
+                                            );
+                                            return;
+                                        }
                                         res.status(404).json({
                                             error: { code: 'RESOURCE_NOT_FOUND', message: 'Metadata item not found or access denied.' },
                                         });

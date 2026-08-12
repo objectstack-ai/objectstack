@@ -114,9 +114,33 @@ describe('[#5491] what the baseline still declares, it still enforces', () => {
   it('better-auth identity tables stay WRITE-DENIED (the door is better-auth, not CRUD)', () => {
     for (const object of BETTER_AUTH_MANAGED_OBJECTS) {
       expect(allows('insert', [MEMBER_DEFAULT], object), `${object} insert`).toBe(false);
-      expect(allows('update', [MEMBER_DEFAULT], object), `${object} update`).toBe(false);
+      // [#8053] `sys_api_key` is the ONE update exception: a member revokes
+      // their own personal key. It is not a hole in the "door is better-auth"
+      // rule — that table is hand-rolled ObjectStack (better-auth's `apiKey`
+      // plugin is not loaded), and the write is narrowed to the owner's rows by
+      // the `sys_api_key_self` RLS policy and to `revoked` by ADR-0092 D2's
+      // column whitelist. Neither narrowing is expressible as a permission-set
+      // boolean, which is why this axis has to be asserted per object here.
+      expect(allows('update', [MEMBER_DEFAULT], object), `${object} update`).toBe(
+        object === 'sys_api_key',
+      );
       expect(allows('delete', [MEMBER_DEFAULT], object), `${object} delete`).toBe(false);
     }
+  });
+
+  it('[#8053] the update exception is `sys_api_key` alone, and it does not leak onto the other axes', () => {
+    // Stated positively and separately so the loop above cannot be "fixed" by
+    // widening the condition: every other managed table must still refuse
+    // update, and `sys_api_key` itself must still refuse insert and delete.
+    const alsoUpdatable = BETTER_AUTH_MANAGED_OBJECTS.filter(
+      (o) => o !== 'sys_api_key' && allows('update', [MEMBER_DEFAULT], o),
+    );
+    expect(alsoUpdatable, 'no other managed identity table may become updatable').toEqual([]);
+
+    expect(allows('update', [MEMBER_DEFAULT], 'sys_api_key')).toBe(true);
+    expect(allows('insert', [MEMBER_DEFAULT], 'sys_api_key'), 'minting stays POST /keys').toBe(false);
+    expect(allows('delete', [MEMBER_DEFAULT], 'sys_api_key'), 'rows retire by revoking').toBe(false);
+    expect(allows('find', [MEMBER_DEFAULT], 'sys_api_key')).toBe(true);
   });
 
   it('self-service preferences survive the wildcard removal as an EXPLICIT grant', () => {

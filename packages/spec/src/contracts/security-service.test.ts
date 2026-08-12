@@ -16,14 +16,82 @@ import type {
  * column set or blanks one out.
  */
 
-/** Minimal stub implementing the full surface. */
+/**
+ * The REQUIRED members of `ISecurityService`, kept exhaustive BY THE COMPILER
+ * rather than by whoever edits the interface next.
+ *
+ * Both directions are closed, and each closes a failure this file has actually
+ * suffered. `satisfies readonly RequiredMember[]` rejects an OPTIONAL member
+ * listed as required — the tempting way to silence a red without implementing
+ * anything. `UnlistedRequiredMember` below rejects a required member left OUT —
+ * the drift that let this list sit three members behind the interface, unseen,
+ * because the compile-time half that would have caught it was itself suppressed
+ * by a `test-typecheck-debt.json` entry.
+ */
+type RequiredMember = {
+  // `-?` strips optionality, then `object extends Pick<T, K>` is true exactly
+  // when K was optional — so the union is the required members.
+  [K in keyof ISecurityService]-?: object extends Pick<ISecurityService, K> ? never : K;
+}[keyof ISecurityService];
+
+const REQUIRED_MEMBERS = [
+  'getReadFilter',
+  'getReadableFields',
+  'canExport',
+  'hasWriteBypass',
+  'resolveWriteScope',
+  'resolvePermissionSetNames',
+  'explain',
+  'describeDelegableScope',
+  'listAudienceBindingSuggestions',
+  'confirmAudienceBindingSuggestion',
+  'dismissAudienceBindingSuggestion',
+] as const satisfies readonly RequiredMember[];
+
+/** Empty exactly when every required member is listed above. */
+type UnlistedRequiredMember = Exclude<RequiredMember, (typeof REQUIRED_MEMBERS)[number]>;
+
+/**
+ * Minimal stub implementing the full surface.
+ *
+ * The literal is the OTHER exhaustiveness gate, and the load-bearing one: a
+ * required member added to `ISecurityService` and not added here makes the
+ * spread type carry it as optional, which does not satisfy the annotated return
+ * type (TS2322). Every value below is the method's own documented fail-closed
+ * answer, so the stub is a contract-honest minimal implementation rather than a
+ * cast — a reader consulting this file for the surface gets the safe default of
+ * each method, not a placeholder that would be wrong in production.
+ */
 function makeService(overrides: Partial<ISecurityService> = {}): ISecurityService {
   return {
     getReadFilter: async () => undefined,
     getReadableFields: async () => [],
     canExport: async () => true,
+    // [ADR-0111 D2] Fails CLOSED. This is the EXPLICIT `modifyAllRecords` bit
+    // only, and a stub resolving no permission set holds no such bit — the same
+    // `false` plugin-security returns for a principal-less context, an
+    // on-behalf-of context, and any resolution failure.
+    hasWriteBypass: async () => false,
+    // [ADR-0111 D1 DEPTH] Fails CLOSED to the NARROWEST scope. Deliberately not
+    // `'org'`: there `'org'` means EITHER a genuine Modify-All holder OR the
+    // fail-OPEN "no permission set mentions this object" default, so it is the
+    // one value the contract says a caller may not trust on its own — a stub
+    // answering it would hand every reader of this file that ambiguity as the
+    // apparent default.
+    resolveWriteScope: async () => 'own',
     resolvePermissionSetNames: async () => [],
     explain: async () => ({}) as any,
+    // [ADR-0090 D12 / ADR-0105 D8] Fails CLOSED, and "no delegated authority"
+    // is a REAL answer rather than a missing one: `isTenantAdmin: false` plus
+    // three empty lists — byte-for-byte the literal plugin-security returns
+    // when no delegated-admin gate is wired, so a consumer renders an empty
+    // picker instead of a permissive one.
+    describeDelegableScope: async () => ({
+      isTenantAdmin: false,
+      scopes: [],
+      placeableBusinessUnitIds: [],
+      assignablePositions: [],
+    }),
     listAudienceBindingSuggestions: async () => ({
       suggestions: [],
       synced: { created: 0, confirmedObserved: 0, pruned: 0 },
@@ -35,20 +103,28 @@ function makeService(overrides: Partial<ISecurityService> = {}): ISecurityServic
 }
 
 describe('Security Service Contract', () => {
-  it('a full implementation satisfies the surface', () => {
+  it('a full implementation satisfies the surface — and the member list is exhaustive in BOTH directions', () => {
     const service = makeService();
-    for (const m of [
-      'getReadFilter',
-      'getReadableFields',
-      'canExport',
-      'resolvePermissionSetNames',
-      'explain',
-      'listAudienceBindingSuggestions',
-      'confirmAudienceBindingSuggestion',
-      'dismissAudienceBindingSuggestion',
-    ] as const) {
+    for (const m of REQUIRED_MEMBERS) {
       expect(typeof service[m]).toBe('function');
     }
+
+    // The half a runtime loop over a hand-written array cannot state: the array
+    // is not missing anything. A required member added to `ISecurityService`
+    // and left out of `REQUIRED_MEMBERS` makes `UnlistedRequiredMember`
+    // non-empty and this line stops compiling. Suppressing it is not a way out
+    // — this file carries no entry in `test-typecheck-debt.json`, so its budget
+    // is zero and the gate goes red on the first error.
+    const everyRequiredMemberIsListed: [UnlistedRequiredMember] extends [never] ? true : never = true;
+    expect(everyRequiredMemberIsListed).toBe(true);
+
+    // …and the opposite direction, which is the cheap way to make a red go away
+    // without implementing anything: an OPTIONAL member is not a required one
+    // and may not be listed as though it were. Never invoked — its only job is
+    // to make the COMPILER prove the point.
+    // @ts-expect-error `checkAuthoredRowWrite` is OPTIONAL — not a required member
+    const notRequired: RequiredMember = 'checkAuthoredRowWrite';
+    expect(notRequired).toBe('checkAuthoredRowWrite');
   });
 
   it('canExport: an access-narrowing answer — false denies, and absence is feature-detectable', async () => {
