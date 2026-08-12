@@ -23,6 +23,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import type { EngineQueryOptions } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
 
 const deal = {
@@ -109,7 +110,7 @@ describe('[#7872] the comparand-type door at the engine collection point', () =>
     engine = new ObjectQL();
     engine.registerDriver(rec.driver, true);
     await engine.init();
-    engine.registry.registerObject(deal);
+    engine.registry.registerObject(deal, 'test');
     await engine.insert('deal', { id: 'd1', stage: 'won', amount: 10, owner_id: 'u1' });
     await engine.insert('deal', { id: 'd2', stage: 'lost', amount: 20, owner_id: 'u2' });
     reads.length = 0;
@@ -130,7 +131,10 @@ describe('[#7872] the comparand-type door at the engine collection point', () =>
     ['a plain object in a scalar slot', { amount: { $eq: { v: 10 } } }],
     ['an oversized bigint', { amount: { $eq: 2n ** 53n + 1n } }],
   ])('refuses %s with the envelope, and NO driver read runs', async (_label, where) => {
-    const err = await refusalOf(engine.find('deal', { where } as any));
+    // NOT erased: `FilterCondition`'s index signature admits these values, so
+    // the call type-checks as written — that a type-legal filter still has to
+    // be refused at runtime is exactly why the door exists (#5869's note).
+    const err = await refusalOf(engine.find('deal', { where }));
     expect(err).not.toBeNull();
     expect(err).toMatchObject({ status: 400, code: 'INVALID_FILTER' });
     // The engine's wording contract: the refusal names the entry point…
@@ -141,13 +145,13 @@ describe('[#7872] the comparand-type door at the engine collection point', () =>
   });
 
   it('covers every engine verb that collects a filter — read and write sides', async () => {
-    const where = { stage: undefined } as any;
+    const where = { stage: undefined };
     for (const call of [
       () => engine.find('deal', { where }),
       () => engine.findOne('deal', { where }),
       () => engine.count('deal', { where }),
-      () => engine.update('deal', { stage: 'x' }, { where, multi: true } as any),
-      () => engine.delete('deal', { where, multi: true } as any),
+      () => engine.update('deal', { stage: 'x' }, { where, multi: true }),
+      () => engine.delete('deal', { where, multi: true }),
     ]) {
       const err = await refusalOf(call());
       expect(err).not.toBeNull();
@@ -160,7 +164,12 @@ describe('[#7872] the comparand-type door at the engine collection point', () =>
   // ── the ARRAY form inherits the door through parseFilterAST ─────────────
 
   it('refuses a bad comparand arriving in a FilterArray triple', async () => {
-    const err = await refusalOf(engine.find('deal', { where: ['stage', '=', new Map()] } as any));
+    // The cast names the contract being bypassed: `FilterArray` is INPUT-ONLY
+    // sugar `EngineQueryOptions.where` deliberately excludes (#5285), and this
+    // case exists to prove the lowered triple inherits the door.
+    const err = await refusalOf(
+      engine.find('deal', { where: ['stage', '=', new Map()] } as unknown as EngineQueryOptions),
+    );
     expect(err).toMatchObject({ status: 400, code: 'INVALID_FILTER' });
     expect(reads).toHaveLength(0);
   });
@@ -168,7 +177,7 @@ describe('[#7872] the comparand-type door at the engine collection point', () =>
   // ── bigint: accepted, narrowed, copy-on-write ───────────────────────────
 
   it('narrows an exact-range bigint before the driver — the memory crash cell dies here', async () => {
-    const rows = await engine.find('deal', { where: { amount: { $gt: BigInt(15) } } } as any);
+    const rows = await engine.find('deal', { where: { amount: { $gt: BigInt(15) } } });
     expect(rows.map((r: any) => r.id)).toEqual(['d2']);
     const seen = reads[0]?.ast?.where?.amount?.$gt;
     expect(seen).toBe(15);
@@ -177,12 +186,12 @@ describe('[#7872] the comparand-type door at the engine collection point', () =>
 
   it('the narrowing is copy-on-write — the caller’s bag is not edited under them', async () => {
     const where = { amount: { $gt: BigInt(15) } };
-    await engine.find('deal', { where } as any);
+    await engine.find('deal', { where });
     expect(typeof where.amount.$gt).toBe('bigint');
   });
 
   it('a clean object filter still reaches the driver untouched', async () => {
-    await engine.find('deal', { where: { stage: 'won', amount: { $gt: 5 } } } as any);
+    await engine.find('deal', { where: { stage: 'won', amount: { $gt: 5 } } });
     expect(reads[0]?.ast?.where).toEqual({ stage: 'won', amount: { $gt: 5 } });
   });
 });
