@@ -376,7 +376,7 @@ successMessage: Customer deleted.
 refreshAfter: true
 ```
 
-- `confirmText` — message shown in a confirm dialog before the action runs.
+- `confirmText` — message shown in a confirm dialog before the action runs. **Param-LESS actions only.** On a registered action, pairing it with a non-empty `params` is *refused* at authoring time (#7428): the runner chains confirmation *then* param collection, so the pair opens two dialogs for one decision and the first already reads as "the action ran" while nothing has been sent. When the action collects params, put the question on `description` instead — the param dialog renders it under its title, so the user gets one dialog with the question intact. Not `ai.description`, which is the LLM-facing tool contract. (A view's `bulkActionDefs` are a different surface, where the pair renders a single dialog and stays correct.)
 - `successMessage` — toast shown after a successful run. When omitted the UI shows a generic "Action completed" toast, so set this for any action whose outcome isn't self-evident.
 - `errorMessage` — toast shown when the action fails; overrides the raw server error with author-controlled copy.
 - `undoable` — marks a single-record update action as offering an **Undo** affordance in the success toast, which restores the record's prior field values. The action runtime snapshots the record before the update and only builds the undo operation when this flag is set, so an action that omits it gets no Undo. Single-record updates only: there is nothing to snapshot when the action isn't scoped to one record.
@@ -480,7 +480,10 @@ ai:
   type: api
   method: POST
   target: /api/v1/auth/admin/oauth2/toggle-disabled
-  confirmText: Disable this OAuth application? Existing integrations will stop working immediately.
+  # The confirm question rides `description`, not `confirmText`: this action
+  # collects params, and pairing the two keys is refused (#7428) because it
+  # would open two dialogs for one decision.
+  description: Disable this OAuth application? Existing integrations will stop working immediately.
   params:
     - { name: client_id, field: client_id, defaultFromRow: true, required: true }
 ```
@@ -497,7 +500,11 @@ ai:
   type: api
   method: POST
   target: /api/v1/auth/sys-oauth-application/rotate-secret
-  confirmText: Rotate this application's client secret? The current secret stops working immediately.
+  # Three dialogs collapse to two, and the survivors are the two the user needs:
+  # ONE param dialog (question + `client_id`), then the post-run `resultDialog`
+  # that reveals the new secret. A post-run reveal is not a second pre-run
+  # decision, so it is not part of the pair `description` replaces (#7428).
+  description: Rotate this application's client secret? The current secret stops working immediately, and the new one is shown only once.
   params:
     - { name: client_id, field: client_id, defaultFromRow: true, required: true }
   resultDialog:

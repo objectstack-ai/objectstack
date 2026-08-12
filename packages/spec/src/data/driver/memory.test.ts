@@ -295,6 +295,23 @@ describe('FilePersistenceConfigSchema', () => {
     expect(config.type).toBe('file');
     expect(config.path).toBeUndefined();
   });
+
+  // #4001 batch B: this shape was a bare `z.object` — an unrecognised key was
+  // silently stripped and the file adapter came up on its defaults with no
+  // signal at all. `.strict()` makes that loud.
+  it('rejects an unrecognised key instead of silently stripping it', () => {
+    const result = FilePersistenceConfigSchema.safeParse({
+      type: 'file',
+      path: '/data/store.json',
+      filepath: '/data/other.json', // typo'd key, not a real field
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error!.issues[0]!.message).toContain(
+      "this memory datasource's file persistence config",
+    );
+    expect(result.error!.issues[0]!.message).toContain('filepath');
+  });
 });
 
 describe('LocalStoragePersistenceConfigSchema', () => {
@@ -316,6 +333,20 @@ describe('LocalStoragePersistenceConfigSchema', () => {
     expect(config.type).toBe('local');
     expect(config.key).toBeUndefined();
   });
+
+  // #4001 batch B — see the FilePersistenceConfigSchema case above.
+  it('rejects an unrecognised key instead of silently stripping it', () => {
+    const result = LocalStoragePersistenceConfigSchema.safeParse({
+      type: 'local',
+      storageKey: 'myapp:db', // typo'd key, not a real field
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error!.issues[0]!.message).toContain(
+      "this memory datasource's localStorage persistence config",
+    );
+    expect(result.error!.issues[0]!.message).toContain('storageKey');
+  });
 });
 
 describe('CustomPersistenceConfigSchema', () => {
@@ -331,6 +362,58 @@ describe('CustomPersistenceConfigSchema', () => {
     expect(typeof config.adapter.load).toBe('function');
     expect(typeof config.adapter.save).toBe('function');
     expect(typeof config.adapter.flush).toBe('function');
+  });
+
+  // #4001 batch B — see the FilePersistenceConfigSchema case above.
+  it('rejects an unrecognised key instead of silently stripping it', () => {
+    const result = CustomPersistenceConfigSchema.safeParse({
+      adapter: {
+        load: async () => null,
+        save: async () => {},
+        flush: async () => {},
+      },
+      options: { retries: 3 }, // not a real field on this shape
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error!.issues[0]!.message).toContain(
+      "this memory datasource's custom-adapter persistence config",
+    );
+    expect(result.error!.issues[0]!.message).toContain('options');
+  });
+});
+
+describe('PersistenceAdapterSchema', () => {
+  it('should accept a valid adapter (load/save/flush)', () => {
+    const config = PersistenceAdapterSchema.parse({
+      load: async () => null,
+      save: async () => {},
+      flush: async () => {},
+    });
+
+    expect(typeof config.load).toBe('function');
+    expect(typeof config.save).toBe('function');
+    expect(typeof config.flush).toBe('function');
+  });
+
+  // #4001 batch B: this shape was a bare `z.object` — an unrecognised key
+  // (e.g. a typo'd lifecycle method) was silently stripped instead of being
+  // reported, so a custom adapter missing `flush` because the author wrote
+  // `close` instead got a clean parse and a driver that never persisted on
+  // shutdown.
+  it('rejects an unrecognised key instead of silently stripping it', () => {
+    const result = PersistenceAdapterSchema.safeParse({
+      load: async () => null,
+      save: async () => {},
+      flush: async () => {},
+      close: async () => {}, // not a real field on this shape
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error!.issues[0]!.message).toContain(
+      "this memory datasource's custom persistence adapter",
+    );
+    expect(result.error!.issues[0]!.message).toContain('close');
   });
 });
 
@@ -365,6 +448,20 @@ describe('AutoPersistenceConfigSchema', () => {
       type: 'auto',
       autoSaveInterval: 50, // Below minimum of 100
     })).toThrow();
+  });
+
+  // #4001 batch B — see the FilePersistenceConfigSchema case above.
+  it('rejects an unrecognised key instead of silently stripping it', () => {
+    const result = AutoPersistenceConfigSchema.safeParse({
+      type: 'auto',
+      interval: 5000, // meant `autoSaveInterval`, not a real field
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error!.issues[0]!.message).toContain(
+      "this memory datasource's auto-detect persistence config",
+    );
+    expect(result.error!.issues[0]!.message).toContain('interval');
   });
 });
 
