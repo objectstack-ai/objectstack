@@ -12,6 +12,10 @@ import type {
 // has declared for every one of these context parameters since #6523 (the
 // #6206 ruling: no per-site subset contracts).
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+// [#7795] The built-in platform-operator position (ADR-0068 D2) — one of the
+// two spellings of platform authority the ruling names; see
+// {@link SharingRuleService.assertCanDeletePlatformGlobalRule}.
+import { BUILTIN_IDENTITY_PLATFORM_ADMIN } from '@objectstack/spec/identity';
 import type { SharingEngine } from './sharing-service.js';
 import type { SharingService } from './sharing-service.js';
 import { normalizeAccessLevel, normalizeStoredAccessLevel } from './access-level.js';
@@ -113,6 +117,111 @@ export class SharingRuleService implements ISharingRuleService {
     if (caps.includes('manage_sharing') || caps.includes('manage_platform_settings')) return;
     throw new Error(
       'PERMISSION_DENIED: sharing-rule administration requires the manage_sharing capability (ADR-0111 D6)',
+    );
+  }
+
+  /**
+   * [#7795] DELETING a platform-global (`organization_id = null`) rule requires
+   * PLATFORM authority. Org-scoped `manage_sharing` does not authorize it.
+   *
+   * Maintainer ruling, 2026-08-12 (方向 B), quoted verbatim and untranslated:
+   *
+   * > **裁定:方向 B —— read/evaluate 保持开放,delete 需要平台级权限。**
+   * >
+   * > - `deleteRule` 对 `organization_id = null` 的行,要求调用者持有平台级权限
+   * >   (`manage_platform_settings` 或 `platform_admin` 位置);仅持 org 级
+   * >   `manage_sharing` 者拒绝。
+   * > - 错误面用 **403 `PERMISSION_DENIED`**,不是 404 —— 该行是有意可见的,
+   * >   404 会撒谎。
+   * > - #7760 开放的能力(列出、查看、评估种子规则)全部保持不动。
+   *
+   * ## Why only DELETE, and only this row class
+   *
+   * `manage_sharing` is declared `scope: 'org'` in the spec's capability
+   * registry, but a null-org rule belongs to no organization: its criteria
+   * query runs unscoped under {@link SYSTEM_CTX}, so {@link deleteRule}'s
+   * grant purge revokes EVERY tenant's `sys_record_share` rows, not just the
+   * caller's. That is the one act on this surface an org-level capability
+   * should not reach, and the two measurements the ruling rests on say why —
+   * both re-verified against this build before the guard was written:
+   *
+   * 1. **The delete is a revocation wearing removal's clothes.**
+   *    `bootstrapDeclaredSharingRules` re-seeds declared rules on every boot,
+   *    and {@link defineRule}'s existence lookup under a null org is `{name}` —
+   *    which matches nothing once the row is deleted, so the insert branch
+   *    mints a fresh `uid('srule')`. Measured: the rule returns after a
+   *    restart under a DIFFERENT id, with its grants re-materialised. The
+   *    profile of an outage, not of an administrative change.
+   * 2. **The safe lever is unavailable while the destructive one is not.**
+   *    An org admin cannot deactivate this row: `defineRule`'s existence
+   *    lookup is deliberately strict (`{name, organization_id: orgId}`, held
+   *    that way by #7676 so one org cannot upsert over a row other orgs read),
+   *    so `active: false` from an org admin creates a SECOND, org-stamped row
+   *    and leaves the shared one running. Measured: two rows, the null-org one
+   *    still `active: true`. Scoped + reversible refused, cross-tenant +
+   *    irreversible-until-reboot permitted — the inverse of the safe
+   *    arrangement, and closing the destructive lever is the structural fix.
+   *
+   * ## Two spellings of platform authority, and why BOTH are accepted
+   *
+   * They are not synonyms — they are two independent channels by which the
+   * SAME underlying grant (an unscoped `admin_full_access`) reaches an
+   * `ExecutionContext`:
+   *
+   * - `manage_platform_settings` — a `scope: 'platform'` CAPABILITY, arriving
+   *   on `context.systemPermissions`. `admin_full_access` carries it;
+   *   `organization_admin` deliberately withholds it (it gets only
+   *   `manage_org_users` / `setup.access` / `setup.write`), which is exactly
+   *   what makes it a discriminator between a platform operator and a tenant
+   *   admin — the same reasoning plugin-security's
+   *   `PLATFORM_ADMIN_ONLY_CAPABILITIES` probe encodes.
+   * - `platform_admin` — a built-in POSITION (ADR-0068 D2), arriving on
+   *   `context.positions`, DERIVED by the shared resolver from the unscoped
+   *   `admin_full_access` user grant (never a stored boolean).
+   *
+   * A context built by the shared authz resolver carries both. A HAND-BUILT
+   * context — the population ADR-0096 D3 is still eliminating, and which
+   * plugin-security's probe comment names the sharing service as part of —
+   * may carry only one. Accepting either is therefore the fail-safe reading of
+   * a ruling that names both, and refusing on the absence of both cannot
+   * silently over-refuse a genuine platform operator.
+   *
+   * ## The error surface is 403 `PERMISSION_DENIED`, deliberately not 404
+   *
+   * The row is DELIBERATELY visible: #7760 opened listing, reading and
+   * evaluating seeded rules to org admins on purpose, and this guard leaves
+   * all three untouched. A 404 here would be the platform lying about a row
+   * the caller could list and read one call earlier. The message prefix is
+   * what `rest-server.ts`'s sharing-rule `handleError` maps to HTTP 403 +
+   * `{code: 'PERMISSION_DENIED'}`, which is also the pairing the spec's own
+   * `HttpStatusErrorCodeMap[403]` records. ⛔ Do not "harden" this into a 404
+   * or a silent no-op — both re-open the lie this shape exists to avoid.
+   *
+   * Placed AFTER {@link getRule} resolves, so a row the caller cannot see at
+   * all keeps its existing silent-no-op behaviour rather than gaining a new
+   * refusal that would disclose the row's existence.
+   *
+   * ⚠️ Recorded consequence, accepted by the ruling: with delete closed, an org
+   * admin has NO lever at all over a platform-global rule. The ruling
+   * explicitly declines to pre-build a per-org suppression mechanism
+   * (「⛔ 不做 D」) absent measured demand — do not add one here.
+   */
+  private assertCanDeletePlatformGlobalRule(row: SharingRuleRow, context: ExecutionContext): void {
+    // Only the platform-global class is gated — an org's own rows are
+    // untouched, and so is every read verb.
+    if (row.organization_id != null) return;
+    // Boot seeding, hooks, backfills and the plugin machinery, as everywhere else.
+    if (context?.isSystem) return;
+    const caps = Array.isArray(context?.systemPermissions) ? context.systemPermissions : [];
+    if (caps.includes('manage_platform_settings')) return;
+    const positions = Array.isArray(context?.positions) ? context.positions : [];
+    if (positions.includes(BUILTIN_IDENTITY_PLATFORM_ADMIN)) return;
+    throw new Error(
+      'PERMISSION_DENIED: deleting a platform-global sharing rule requires platform authority — ' +
+        'the manage_platform_settings capability or the platform_admin position. Org-scoped ' +
+        'manage_sharing does not authorize it, because this rule belongs to no organization and ' +
+        'deleting it revokes every tenant’s grants under it (#7795). It remains listable, ' +
+        'readable and evaluable.',
     );
   }
 
@@ -336,6 +445,9 @@ export class SharingRuleService implements ISharingRuleService {
     this.assertCanManageRules(context); // [ADR-0111 D6]
     const row = await this.getRule(idOrName, context);
     if (!row) return;
+    // [#7795] A platform-global row is visible to an org admin by design
+    // (#7760) but is NOT theirs to destroy — 403, never 404.
+    this.assertCanDeletePlatformGlobalRule(row, context);
     // Drop materialised grants first so we don't orphan them.
     //
     // [#4434] This used to be a predicate-shaped `engine.delete` on
