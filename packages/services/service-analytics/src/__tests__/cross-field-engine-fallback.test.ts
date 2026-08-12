@@ -346,6 +346,38 @@ describe('[#7598] cross-field `$field` on the analytics face — served via the 
     });
   });
 
+  // ── The one deployment where declining leaves nowhere to go ───────────────
+
+  it('a host with NO aggregate bridge gets a diagnostic naming the reference, not a driver hunt', async () => {
+    // The configuration this change creates: `nativeSql` advertised WITHOUT
+    // `objectqlAggregate`, so the decline has no lower-priority strategy to
+    // fall to. Not reachable from `AnalyticsServicePlugin` — its default
+    // capabilities derive both flags from the bridges it wired, and it
+    // auto-wires the aggregate bridge from the engine — so this is a host that
+    // overrode `queryCapabilities` by hand. It still deserves to be told which
+    // of its queries is affected and why, rather than a bare "no strategy can
+    // handle this cube" that reads like a broken driver.
+    const nativeOnly = new AnalyticsService({
+      cubes: [CUBE],
+      queryCapabilities: () => ({ nativeSql: true, objectqlAggregate: false, inMemory: false }),
+      executeRawSql: async () => [],
+    });
+    const run = (where?: unknown) =>
+      nativeOnly.query({
+        cube: 'deals', dimensions: ['id'], measures: ['n'],
+        ...(where ? { where } : {}),
+      } as AnalyticsQuery);
+
+    const err = await errorFrom(() => run({ amount: { $gt: { $field: 'budget' } } }));
+    expect(err.message).toContain('budget');
+    expect(err.message).toContain('executeAggregate');
+    expect(err.message).toContain('#7598');
+
+    // …and the narrowness control, which is the half that makes the sentence
+    // trustworthy: a literal filter on the SAME deployment still runs.
+    await expect(run({ amount: { $gt: 5 } })).resolves.toBeDefined();
+  });
+
   // ── `/analytics/sql` — the echo declines, loudly, with no half-rendering ───
 
   describe('the `/analytics/sql` echo declines rather than half-rendering', () => {
