@@ -41,6 +41,10 @@
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { SqlDriver } from '@objectstack/driver-sql';
+// The producer's OWN dispatch predicate: a double that opens its write verbs
+// with this cannot accept a call the real engine refuses
+// (`check:engine-double-contract`).
+import { assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { ShareLinkService } from './share-link-service.js';
 import { SysShareLink } from './objects/sys-share-link.object.js';
 
@@ -112,7 +116,15 @@ async function boot(article: any = ARTICLE) {
     find: (object: string, query: any) => driver.find(object, query),
     findOne: (object: string, query: any) => driver.findOne(object, query),
     insert: (object: string, data: any) => driver.create(object, data),
-    update: (object: string, data: any) => driver.update(object, data.id, data),
+    // Opened with ObjectQL's OWN dispatch predicate rather than a hand-mirrored
+    // id check, so this facade cannot accept an update the real engine refuses
+    // (`check:engine-double-contract`). `by-id` is the only branch reachable
+    // here — `resolveToken`'s usage stamp is the sole update the service makes.
+    update: (object: string, data: any, options?: any) => {
+      const dispatch = assertEngineUpdateDispatch(data, options);
+      if (dispatch.kind !== 'by-id') throw new Error(`unexpected dispatch: ${dispatch.kind}`);
+      return driver.update(object, dispatch.id as string, data);
+    },
   };
   const service = new ShareLinkService({ engine: engine as any });
   return { driver, service };
