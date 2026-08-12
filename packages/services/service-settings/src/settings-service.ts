@@ -45,6 +45,20 @@ import {
 const DEFAULT_OBJECT = 'sys_setting';
 
 /**
+ * The execution context `SettingsService`'s own row writes run under (#8030).
+ *
+ * `sys_setting` is a platform-owned table with platform-owned columns
+ * (`value_enc`, `updated_by` are declared `readonly: true`), and this service
+ * is the only writer of them — after its own capability, lock and validation
+ * gates. See {@link SettingsService.upsertRow} for the full argument and for
+ * why the field stays `readonly` for everybody else.
+ *
+ * Frozen so a downstream engine adapter cannot mutate the service's posture by
+ * writing into the bag it was handed.
+ */
+const SETTINGS_SYSTEM_WRITE_CONTEXT = Object.freeze({ isSystem: true as const });
+
+/**
  * Value-bearing specifier types — drives which entries we expect to
  * find in the K/V store. Keeps the resolver in sync with the spec
  * without importing the (large) Zod enum at runtime.
@@ -1338,7 +1352,7 @@ export class SettingsService {
         }
       }
 
-      await this.upsertRow({
+      const previousEnc = await this.upsertRow({
         namespace,
         key,
         scope,
@@ -1349,6 +1363,13 @@ export class SettingsService {
         updated_at: new Date().toISOString(),
         updated_by: ctx.userId ?? null,
       });
+
+      // The handle the row USED to point at is now unreferenced — destroy the
+      // ciphertext it names (#8030). Ordered after the repoint on purpose, and
+      // never allowed to fail the write; see `reapRotatedSecret`. Not gated on
+      // `isEncrypted`: a key that STOPS being encrypted (a manifest edit) orphans
+      // its handle in exactly the same way, and the helper is self-guarding.
+      await this.reapRotatedSecret(previousEnc, storedEnc);
 
       if (this.audit) {
         await this.audit.record({
@@ -1854,7 +1875,41 @@ export class SettingsService {
     );
   }
 
-  private async upsertRow(row: SettingsRow): Promise<void> {
+  /**
+   * Write one settings row, INSERT-or-UPDATE, and report the `value_enc` the
+   * row held **before** the write (`null` when there was no row, or the row
+   * carried no handle).
+   *
+   * ### Why the update is a SYSTEM write (#8030)
+   *
+   * `sys_setting.value_enc` and `sys_setting.updated_by` are declared
+   * `readonly: true` (`packages/platform-objects/src/system/sys-setting.object.ts`),
+   * and the engine STRIPS author-declared read-only columns from a
+   * **non-system** caller's UPDATE payload (`stripReadonlyFields`, gated on
+   * `if (!opCtx.context?.isSystem)` in `packages/objectql/src/engine.ts`). The
+   * INSERT path is deliberately exempt from that strip (#3413) — which is
+   * exactly why the FIRST write of a secret landed correctly and every later
+   * one silently did not: a rotation inserted a fresh `sys_secret` row, got its
+   * 200 with a redacted echo and an advanced `updated_at`, and left
+   * `value_enc` pointing at the ORIGINAL handle. The leaked credential an
+   * admin had just "rotated" was still the one in force.
+   *
+   * `SettingsService` is a privileged writer: it has already run the
+   * manifest's read/write capability gate (`assertPermitted`), the env-lock
+   * and upper-scope-lock pre-flight, and `validatePatch` before anything
+   * reaches here, and the columns in question are ones IT owns rather than
+   * ones a caller forged. So the write is elevated — the same posture, and for
+   * the same measured reason, as the roll-up recompute's elevation in
+   * `ObjectQL.recomputeSummaries` (#7673): a platform-owned read-only column
+   * whose only writer is the platform must be written as the platform.
+   *
+   * ⚠️ The elevation is deliberately scoped to THIS call and NOT to the field
+   * declaration: `value_enc` stays `readonly: true`, so an external caller
+   * reaching `sys_setting` directly still cannot repoint a secret handle. That
+   * flag is a security control, and removing it is the wrong direction on this
+   * defect.
+   */
+  private async upsertRow(row: SettingsRow): Promise<string | null> {
     if (this.engine) {
       const where: Record<string, unknown> = {
         namespace: row.namespace,
@@ -1872,15 +1927,17 @@ export class SettingsService {
         ...bypass,
       } as any);
       if (existing[0]) {
+        const previousEnc = (existing[0] as { value_enc?: unknown }).value_enc;
         await this.engine.update(this.objectName, {
           where,
           data: { ...row },
+          context: SETTINGS_SYSTEM_WRITE_CONTEXT,
           ...bypass,
         } as any);
-      } else {
-        await this.engine.insert(this.objectName, { ...row }, bypass as any);
+        return typeof previousEnc === 'string' && previousEnc !== '' ? previousEnc : null;
       }
-      return;
+      await this.engine.insert(this.objectName, { ...row }, bypass as any);
+      return null;
     }
     const idx = this.memory.findIndex(
       (r) =>
@@ -1889,8 +1946,59 @@ export class SettingsService {
         r.scope === row.scope &&
         (r.user_id ?? null) === (row.user_id ?? null),
     );
-    if (idx >= 0) this.memory[idx] = row;
-    else this.memory.push(row);
+    if (idx >= 0) {
+      const previousEnc = this.memory[idx].value_enc;
+      this.memory[idx] = row;
+      return typeof previousEnc === 'string' && previousEnc !== '' ? previousEnc : null;
+    }
+    this.memory.push(row);
+    return null;
+  }
+
+  /**
+   * Delete the `sys_secret` row a rotated-away handle pointed at (#8030).
+   *
+   * Reaping rather than accepting the orphans is the security answer, not a
+   * tidiness one: the whole point of rotating a leaked SMTP password or
+   * provider API key is that the old value stops existing. An orphan row is a
+   * decryptable copy of the credential the admin just retired, sitting in
+   * `sys_secret` under the same data key, reachable by anyone who can read the
+   * table — and it accumulates one row per rotation forever (the filer measured
+   * 7 → 8 → 9 across three writes), so the exposure grows with exactly the
+   * hygiene we ask operators to practise.
+   *
+   * Nothing else can reference the handle: ids are minted per `encrypt()` call,
+   * `sys_setting.value_enc` is the only column that holds one, and the audit
+   * trail records digests (`sha256:…`) rather than handles — so it stays
+   * readable after the ciphertext is gone.
+   *
+   * **Best-effort, and deliberately after the repoint.** The write has already
+   * committed by the time this runs; a store that cannot delete (the port's
+   * `delete` is optional, so pre-existing fakes and the legacy inline-crypto
+   * path simply have none) or a delete that throws must never turn a
+   * SUCCESSFUL rotation into an error — the new secret is already in force,
+   * which is the property that matters.
+   */
+  private async reapRotatedSecret(previousEnc: string | null, nextEnc: string | null): Promise<void> {
+    if (!previousEnc || previousEnc === nextEnc) return;
+    // Handles only. The legacy inline-crypto path stores the ciphertext ITSELF
+    // in `value_enc`, and there is no `sys_secret` row to reap for it.
+    if (!previousEnc.startsWith('sec_')) return;
+    const del = this.secretStore?.delete;
+    if (!del) return;
+    try {
+      await del.call(this.secretStore, previousEnc);
+    } catch (err: any) {
+      // Loud, because the operator's mental model after a rotation is "the old
+      // credential is gone" and this is the one branch where it is not.
+      const message =
+        `[SettingsService] rotated secret '${previousEnc}' could not be deleted from ` +
+        `sys_secret — the rotation itself SUCCEEDED (the new value is in force), but the ` +
+        `previous ciphertext is still stored and remains decryptable. ` +
+        `Reason: ${err?.message ?? err}`;
+      if (this.logger?.error) this.logger.error(message);
+      else console.error(message);
+    }
   }
 
   private async materialiseRow(row: SettingsRow): Promise<unknown> {

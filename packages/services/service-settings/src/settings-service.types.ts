@@ -92,6 +92,24 @@ export interface SettingsEngine {
       where: Record<string, unknown>;
       data: Record<string, unknown>;
       bypassTenantAudit?: boolean;
+      /**
+       * Execution context for the write, forwarded VERBATIM to the data
+       * engine's `options.context` (#8030).
+       *
+       * `SettingsService` sends `{ isSystem: true }` here for its own row
+       * writes, because `sys_setting.value_enc` and `updated_by` are declared
+       * `readonly: true` and the engine strips author-declared read-only
+       * columns from a NON-system caller's UPDATE payload
+       * (`stripReadonlyFields`). Without it a secret rotation inserts the new
+       * ciphertext, answers 200 with a correctly redacted body, and leaves
+       * `value_enc` pointing at the OLD handle — the rotated-away credential
+       * stays in force.
+       *
+       * ⛔ An adapter over `IDataEngine` MUST forward this. Dropping it
+       * restores the defect silently, with every visible signal still saying
+       * the write landed.
+       */
+      context?: Record<string, unknown>;
     },
   ): Promise<any>;
   delete?(objectName: string, opts: { where: Record<string, unknown> }): Promise<any>;
@@ -147,6 +165,21 @@ export interface SettingsSecretStore {
     version?: number;
     ciphertext?: string;
   }): Promise<void>;
+  /**
+   * Destroy the row a rotated-away handle names (#8030) — OPTIONAL.
+   *
+   * Called after a write has repointed `sys_setting.value_enc`, so the row
+   * being deleted is unreferenced by construction. The point is security, not
+   * housekeeping: a rotation exists to make the previous credential stop
+   * existing, and an orphan `sys_secret` row is a decryptable copy of exactly
+   * the value the admin retired — one more per rotation, forever.
+   *
+   * Optional so that a store which genuinely cannot delete (and every
+   * pre-existing test double) keeps working: absence means the orphans are
+   * accepted, and the rotation itself still lands. A throw is swallowed and
+   * reported — it must never turn a successful rotation into an error.
+   */
+  delete?(id: string): Promise<void>;
 }
 
 /**

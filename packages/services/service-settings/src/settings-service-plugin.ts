@@ -304,6 +304,21 @@ export class SettingsServicePlugin implements Plugin {
           { bypassTenantAudit: true },
         );
       },
+      async delete(id) {
+        // [#8030] The rotated-away ciphertext. `sys_setting.value_enc` has
+        // already been repointed by the time this runs, so the row is
+        // unreferenced — see `SettingsService.reapRotatedSecret` for why
+        // leaving it is a security problem rather than untidiness.
+        //
+        // System-elevated for the same reason the settings row update is:
+        // `sys_secret` is a platform-owned table and this is the platform
+        // deleting its own row, after the caller's write already passed the
+        // settings service's capability and lock gates.
+        await eng.delete(
+          'sys_secret',
+          { where: { id }, bypassTenantAudit: true, context: { isSystem: true } },
+        );
+      },
     };
   }
 
@@ -354,8 +369,25 @@ export class SettingsServicePlugin implements Plugin {
  * supplies a non-id where clause (composite-key tables), we fall back
  * to `multi: true` so the engine routes through `driver.updateMany`
  * instead of throwing.
+ *
+ * ### `context` is load-bearing, on BOTH branches (#8030)
+ *
+ * `SettingsService` sends `{ isSystem: true }` with its row writes because
+ * `sys_setting.value_enc` / `updated_by` are declared `readonly: true` and the
+ * engine strips author-declared read-only columns from a NON-system caller's
+ * UPDATE payload. This adapter is the only thing between that declaration and
+ * the engine, so a branch that forgets to forward `options.context` restores
+ * the defect in full: the rotation writes a new `sys_secret` row, answers 200
+ * with a redacted echo, advances `updated_at` — and leaves `value_enc` on the
+ * OLD handle, so the credential the admin just rotated away is still live.
+ *
+ * Both branches forward it, and the settings row write in practice takes the
+ * `multi` one (its `where` is the composite `(namespace, key, scope, user_id)`,
+ * never an `id`) — so the by-id branch is the one that would rot unnoticed.
+ * Exported for that reason: `settings-secret-rotation.test.ts` drives the real
+ * engine through this adapter on both.
  */
-function wrapEngineAsSettingsEngine(engine: IDataEngine): SettingsEngine {
+export function wrapEngineAsSettingsEngine(engine: IDataEngine): SettingsEngine {
   const eng: any = engine;
   return {
     async find(objectName, opts) {
@@ -365,12 +397,16 @@ function wrapEngineAsSettingsEngine(engine: IDataEngine): SettingsEngine {
       return eng.insert(objectName, data, opts);
     },
     async update(objectName, opts) {
-      const { where, data, bypassTenantAudit } = opts as {
+      const { where, data, bypassTenantAudit, context } = opts as {
         where: Record<string, unknown>;
         data: Record<string, unknown>;
         bypassTenantAudit?: boolean;
+        context?: Record<string, unknown>;
       };
-      const driverOpts = bypassTenantAudit ? { bypassTenantAudit: true } : undefined;
+      const driverOpts = {
+        ...(bypassTenantAudit ? { bypassTenantAudit: true } : {}),
+        ...(context ? { context } : {}),
+      };
       const id = (where as any)?.id;
       if (id !== undefined && id !== null) {
         return eng.update(objectName, { id, ...data }, driverOpts);
@@ -378,7 +414,7 @@ function wrapEngineAsSettingsEngine(engine: IDataEngine): SettingsEngine {
       return eng.update(objectName, data, {
         where,
         multi: true,
-        ...(driverOpts ?? {}),
+        ...driverOpts,
       });
     },
   };
