@@ -3090,8 +3090,11 @@ export class AuthManager {
     // costs nothing: the scope starts empty, the before-hook drops a resolver
     // in, and the session is looked up only if some write asks. Attribution
     // only — the authorization subject of those writes is unchanged (system).
-    const runHandler = (): Promise<Response> =>
-      runWithAuthActorScope(() =>
+    // `await`, not a bare return: both scope helpers are generic over their
+    // callback, so the composed call is typed `Promise< Promise< Response > >`.
+    // The previous single call site flattened it with the `await` below.
+    const runHandler = async (): Promise<Response> =>
+      await runWithAuthActorScope(() =>
         runWithRequestState(new WeakMap(), () => auth.handler(request)),
       );
 
