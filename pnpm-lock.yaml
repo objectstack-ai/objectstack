@@ -857,6 +857,9 @@ importers:
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec
+      '@objectstack/types':
+        specifier: workspace:*
+        version: link:../../types
       mingo:
         specifier: ^7.2.2
         version: 7.2.2
