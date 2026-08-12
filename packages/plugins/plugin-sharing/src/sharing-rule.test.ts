@@ -1436,3 +1436,265 @@ describe('[#7795] deleting a platform-global rule requires platform authority', 
     expect(res.grantsRevoked).toBe(0);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────
+// [#8158] An authenticated `manage_sharing` holder whose session resolves NO
+// organization is REFUSED — it used to get the system read scope.
+//
+// `adminOrgScope`, `getRule` and `findRuleRowByName` each opened with the same
+// `if (!orgId)` shape, answering unfiltered. That branch exists for
+// `SYSTEM_CTX` (boot seeding, hooks, backfills) but was reached on the ABSENCE
+// OF AN ORG ID rather than on system-ness, while the ADR-0111 D6 gate admits
+// any caller holding the org-scoped `manage_sharing` capability. So an
+// authenticated, non-system caller with neither `organizationId` nor
+// `tenantId` read EVERY tenant's rules, resolved any of them by id or name,
+// and — through `evaluateRule`, which reconciles `sys_record_share` — wrote
+// across tenants.
+//
+// ## Anti-vacuity
+//
+// The fixture seeds TWO organizations, each with its own rule, plus the
+// platform-global seed. A single-tenant fixture would pass on the BROKEN build
+// (nothing else to leak), so every refusal below is paired with a positive
+// half naming the OTHER tenant's row, and the two org-bound personas assert
+// their EXACT visible set.
+//
+// ## Ablation (predicted in advance, before running it)
+//
+// Restore `if (!orgId) return where` / `if (!orgId) return first({name})` and
+// drop the scope assertion, and:
+//   - every `ORG_LESS_*` refusal test flips red — the calls resolve instead of
+//     throwing (and the leak assertions show org2's row in the answer);
+//   - the SYSTEM and PLATFORM tests stay GREEN — they take the unfiltered
+//     branch either way, which is what makes them the boot-seeding /
+//     platform-operator regression guard rather than restatements of the fix;
+//   - the ORG-BOUND exact-set tests stay GREEN — they were never routed
+//     through the fall-open branch.
+// ─────────────────────────────────────────────────────────────────────
+
+describe('[#8158] a non-system caller with NO organization does not get the system read scope', () => {
+  let engine: ReturnType<typeof makeEngine>;
+  let rules: SharingRuleService;
+
+  /**
+   * THE EXPOSED PERSONA: authenticated, holds the org-scoped `manage_sharing`
+   * capability (so it clears the ADR-0111 D6 gate and reaches the scope
+   * decision), and carries NEITHER `organizationId` NOR `tenantId` — the shape
+   * `resolveAuthzContext` produces for a session with no `activeOrganizationId`
+   * whose permission-set grant resolved anyway.
+   */
+  const ORG_LESS_SHARING_ADMIN = { userId: 'mallory', systemPermissions: ['manage_sharing'] } as any;
+  /** The same session shape with an explicitly null org — a hand-built context. */
+  const ORG_LESS_NULL_ORG = {
+    userId: 'mallory', organizationId: null, tenantId: null,
+    systemPermissions: ['manage_sharing'], positions: [],
+  } as any;
+  /** Org-bound, `organizationId` spelling (what the older fixtures build). */
+  const ORG1_ADMIN = { userId: 'a1', organizationId: 'org1', systemPermissions: ['manage_sharing'] } as any;
+  /**
+   * Org-bound, `tenantId` spelling — what `resolveAuthzContext` ACTUALLY
+   * stamps over HTTP (`ctx.tenantId = session.activeOrganizationId`). Both
+   * spellings must resolve, or the guard would refuse every real REST caller.
+   */
+  const ORG2_ADMIN = { userId: 'a2', tenantId: 'org2', systemPermissions: ['manage_sharing'] } as any;
+  /** Boot seeding / hooks / backfills: no org, but SYSTEM. Unfiltered, as always. */
+  const BOOT = { isSystem: true, positions: [], permissions: [] } as any;
+  /** Platform authority with no active org, spelling 1: the `scope: 'platform'` capability. */
+  const ORG_LESS_PLATFORM_CAP = {
+    userId: 'ops', systemPermissions: ['manage_sharing', 'manage_platform_settings'],
+  } as any;
+  /** Platform authority with no active org, spelling 2: the ADR-0068 D2 position. */
+  const ORG_LESS_PLATFORM_POSITION = {
+    userId: 'root', systemPermissions: ['manage_sharing'], positions: ['platform_admin'],
+  } as any;
+  /** No capability at all — the OLDER gate must still fire first. */
+  const ORG_LESS_NOBODY = { userId: 'nobody', systemPermissions: [] } as any;
+
+  const SEEDED = 'share_red_projects_with_execs';
+  let seededId = '';
+  let org1RuleId = '';
+  let org2RuleId = '';
+
+  const grantsOf = (ruleId: string): Row[] =>
+    (engine._tables.sys_record_share ?? []).filter((g) => g.source === 'rule' && g.source_id === ruleId);
+  const namesOf = (rows: { name: string }[]): string[] => rows.map((r) => r.name).sort();
+
+  /** The leading ADR-0112 token of a refusal — see the #7795 block's copy. */
+  const refusalCodeOf = async (call: Promise<unknown>): Promise<string> => {
+    try {
+      await call;
+    } catch (err: any) {
+      return String(err?.message ?? err ?? '').split(':')[0].trim();
+    }
+    throw new Error('expected the call to be REFUSED, but it resolved successfully');
+  };
+
+  beforeEach(async () => {
+    engine = makeEngine();
+    engine._tables.project = [
+      { id: 'p_red', status: 'red', owner_id: 'someone' },
+      { id: 'p_green', status: 'green', owner_id: 'someone' },
+    ];
+    rules = new SharingRuleService({ engine: engine as any, sharing: new SharingService({ engine: engine as any }) });
+
+    seededId = (await rules.defineRule({
+      name: SEEDED, label: 'Red projects → execs', object: 'project',
+      criteria: { status: 'red' }, recipientType: 'user', recipientId: 'exec',
+      managedBy: 'package',
+    } as any, BOOT)).id;
+    org1RuleId = (await rules.defineRule({
+      name: 'org1_rule', label: 'Org1 own', object: 'project',
+      criteria: { status: 'red' }, recipientType: 'user', recipientId: 'alice',
+    } as any, ORG1_ADMIN)).id;
+    org2RuleId = (await rules.defineRule({
+      name: 'org2_rule', label: 'Org2 own', object: 'project',
+      criteria: { status: 'green' }, recipientType: 'user', recipientId: 'bob',
+    } as any, ORG2_ADMIN)).id;
+    // Live grants on the OTHER tenant's rule, materialised under BOOT so the
+    // fixture never leans on the gate it measures. Without them, "the refusal
+    // wrote nothing" could pass over a rule that had nothing to disturb.
+    await rules.evaluateRule(org2RuleId, BOOT);
+  });
+
+  it('PRECONDITION: two organizations, two rules, one platform-global row, live grants', () => {
+    const rows = engine._tables.sys_sharing_rule;
+    expect(rows).toHaveLength(3);
+    expect(rows.find((r) => r.id === seededId)?.organization_id).toBeNull();
+    expect(rows.find((r) => r.id === org1RuleId)?.organization_id).toBe('org1');
+    // The `tenantId`-spelled persona stamps its org just like the other
+    // spelling — if this were null the whole two-tenant premise would be gone.
+    expect(rows.find((r) => r.id === org2RuleId)?.organization_id).toBe('org2');
+    expect(grantsOf(org2RuleId)).toHaveLength(1);
+    // The exposed persona really does clear the ADR-0111 D6 gate, or every
+    // refusal below would be measuring the OLDER guard.
+    expect(ORG_LESS_SHARING_ADMIN.systemPermissions).toContain('manage_sharing');
+    expect(ORG_LESS_SHARING_ADMIN.organizationId).toBeUndefined();
+    expect(ORG_LESS_SHARING_ADMIN.tenantId).toBeUndefined();
+    expect(ORG_LESS_SHARING_ADMIN.isSystem).toBeUndefined();
+  });
+
+  // ── the refusal (each paired with the row it used to leak) ───────────
+
+  it('listRules is refused — it used to return BOTH tenants’ rules', async () => {
+    const code = await refusalCodeOf(rules.listRules({}, ORG_LESS_SHARING_ADMIN));
+    expect(code).toBe('PERMISSION_DENIED');
+    // Sourced from the platform's own pairing rather than restated (#7795).
+    expect(HttpStatusErrorCodeMap[403]).toBe(code);
+    expect(code).not.toBe('RULE_NOT_FOUND');
+    // The rows it used to answer with are really there to be leaked — this is
+    // what a single-tenant fixture could not say.
+    expect(namesOf(await rules.listRules({}, BOOT))).toEqual(['org1_rule', 'org2_rule', SEEDED].sort());
+  });
+
+  it('the message names the missing organization, not the missing capability', async () => {
+    // The two refusals on this surface are both PERMISSION_DENIED; only the
+    // message tells an operator which one they hit, and therefore what to fix.
+    await expect(rules.listRules({}, ORG_LESS_SHARING_ADMIN)).rejects.toThrow(/active organization/);
+  });
+
+  it('an explicitly NULL org is the same case as an absent one', async () => {
+    expect(await refusalCodeOf(rules.listRules({}, ORG_LESS_NULL_ORG))).toBe('PERMISSION_DENIED');
+  });
+
+  it('getRule is refused BY ID — the other tenant’s row stays unreachable', async () => {
+    expect(await refusalCodeOf(rules.getRule(org2RuleId, ORG_LESS_SHARING_ADMIN))).toBe('PERMISSION_DENIED');
+    // …and the id really does resolve for someone, so this is a refusal and
+    // not a miss.
+    expect((await rules.getRule(org2RuleId, BOOT))?.organization_id).toBe('org2');
+  });
+
+  it('getRule is refused BY NAME — findRuleRowByName is the third door', async () => {
+    // The by-name path is a separate `if (!orgId)` site: a fix confined to
+    // `adminOrgScope` leaves this one open, and `getRule` falls through to it
+    // whenever the by-id query misses — which is what a by-name request is.
+    expect(await refusalCodeOf(rules.getRule('org2_rule', ORG_LESS_SHARING_ADMIN))).toBe('PERMISSION_DENIED');
+    expect((await rules.getRule('org2_rule', BOOT))?.id).toBe(org2RuleId);
+  });
+
+  it('evaluateRule is refused — the cross-tenant WRITE never runs', async () => {
+    const before = JSON.stringify(engine._tables.sys_record_share ?? []);
+    expect(await refusalCodeOf(rules.evaluateRule(org2RuleId, ORG_LESS_SHARING_ADMIN))).toBe('PERMISSION_DENIED');
+    expect(await refusalCodeOf(rules.evaluateRule('org2_rule', ORG_LESS_SHARING_ADMIN))).toBe('PERMISSION_DENIED');
+    // The harm in this defect is the grant reconciliation, so the assertion is
+    // on the grant TABLE, not on the thrown shape.
+    expect(JSON.stringify(engine._tables.sys_record_share ?? [])).toBe(before);
+  });
+
+  it('deleteRule is refused — the other tenant’s rule AND its grants survive', async () => {
+    expect(await refusalCodeOf(rules.deleteRule(org2RuleId, ORG_LESS_SHARING_ADMIN))).toBe('PERMISSION_DENIED');
+    expect(engine._tables.sys_sharing_rule.find((r) => r.id === org2RuleId)).toBeTruthy();
+    expect(grantsOf(org2RuleId)).toHaveLength(1);
+  });
+
+  it('defineRule is refused — no accidental platform-global rule', async () => {
+    // An org-less caller stamps `organization_id: null`, i.e. a rule whose
+    // grants reach EVERY tenant and which #7795 then forbids them to delete.
+    expect(await refusalCodeOf(rules.defineRule({
+      name: 'mallory_rule', label: 'Mallory', object: 'project',
+      criteria: { status: 'red' }, recipientType: 'user', recipientId: 'mallory',
+    } as any, ORG_LESS_SHARING_ADMIN))).toBe('PERMISSION_DENIED');
+    expect(engine._tables.sys_sharing_rule).toHaveLength(3);
+  });
+
+  it('the ADR-0111 D6 capability gate still fires FIRST', async () => {
+    // Ordering pin: an org-less caller with no capability must hear about the
+    // capability, not about the organization — both are PERMISSION_DENIED and
+    // the messages are what keep them apart.
+    await expect(rules.listRules({}, ORG_LESS_NOBODY)).rejects.toThrow(/manage_sharing capability/);
+  });
+
+  // ── the permitted side: system + platform keep the unfiltered read ───
+
+  it('a SYSTEM context still reads every tenant, unfiltered — list, by id, by name', async () => {
+    expect(namesOf(await rules.listRules({}, BOOT))).toEqual(['org1_rule', 'org2_rule', SEEDED].sort());
+    expect((await rules.getRule(org2RuleId, BOOT))?.name).toBe('org2_rule');
+    expect((await rules.getRule('org1_rule', BOOT))?.id).toBe(org1RuleId);
+  });
+
+  it('a SYSTEM context still SEEDS platform-global rows (boot seeding unbroken)', async () => {
+    // `bootstrapDeclaredSharingRules` runs on every boot with exactly this
+    // context; a guard that refused it would take the deployment down rather
+    // than leak anything.
+    const row = await rules.defineRule({
+      name: 'seeded_on_boot', label: 'Seeded', object: 'project',
+      criteria: { status: 'red' }, recipientType: 'user', recipientId: 'exec',
+      managedBy: 'package',
+    } as any, BOOT);
+    expect(row.organization_id).toBeNull();
+    expect(await rules.evaluateRule('seeded_on_boot', BOOT)).toMatchObject({ matchedRecords: 1 });
+  });
+
+  it('a PLATFORM operator with no active org still reads every tenant — both spellings', async () => {
+    // The card's own reading: a platform operator on this path is harmless,
+    // they hold platform authority whether or not an org is selected. This is
+    // also the shape a single-tenant deployment has BEFORE its default org is
+    // bootstrapped, so refusing it would be a functional regression.
+    expect(namesOf(await rules.listRules({}, ORG_LESS_PLATFORM_CAP)))
+      .toEqual(['org1_rule', 'org2_rule', SEEDED].sort());
+    expect(namesOf(await rules.listRules({}, ORG_LESS_PLATFORM_POSITION)))
+      .toEqual(['org1_rule', 'org2_rule', SEEDED].sort());
+    expect((await rules.getRule(org2RuleId, ORG_LESS_PLATFORM_CAP))?.name).toBe('org2_rule');
+    expect((await rules.getRule('org2_rule', ORG_LESS_PLATFORM_POSITION))?.id).toBe(org2RuleId);
+  });
+
+  // ── the anti-vacuity control: scoped ≠ single-tenant ─────────────────
+
+  it('each org-bound admin sees EXACTLY its own org ∪ platform-global', async () => {
+    // The pair that distinguishes "scoped correctly" from "there was only one
+    // tenant's data anyway": two personas, two disjoint answers, one shared
+    // platform-global row, over the same three-row table.
+    expect(namesOf(await rules.listRules({}, ORG1_ADMIN))).toEqual(['org1_rule', SEEDED].sort());
+    expect(namesOf(await rules.listRules({}, ORG2_ADMIN))).toEqual(['org2_rule', SEEDED].sort());
+    expect(await rules.getRule('org2_rule', ORG1_ADMIN)).toBeNull();
+    expect(await rules.getRule(org1RuleId, ORG2_ADMIN)).toBeNull();
+  });
+
+  it('the tenantId spelling is honoured — the org-bound REST caller is not refused', async () => {
+    // `resolveAuthzContext` stamps `tenantId`, never `organizationId`. If the
+    // guard read only the latter, every real HTTP caller would hit the new
+    // refusal and this whole surface would 403 in production.
+    await expect(rules.listRules({}, ORG2_ADMIN)).resolves.toBeTruthy();
+    expect((await rules.getRule(org2RuleId, ORG2_ADMIN))?.name).toBe('org2_rule');
+    expect((await rules.evaluateRule(org2RuleId, ORG2_ADMIN)).ruleId).toBe(org2RuleId);
+  });
+});
