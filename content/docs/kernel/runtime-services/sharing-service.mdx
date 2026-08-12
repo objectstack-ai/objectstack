@@ -60,7 +60,7 @@ mask AND-ed with object CRUD, not a fourth `access_level`.
 - `PERMISSION_DENIED` (403) — the caller does not hold `canManageShares` on the record (ADR-0111 D1).
 - `NOT_FOUND` (404) — the record is missing **or not visible to the caller** (indistinguishable by design), or a `revoke` share id does not exist / does not belong to the `scope` record.
 - `CONFLICT` (409) — `revoke` on a rule-materialised share (`source != 'manual'`); the next rule reconciliation would silently re-grant it. Deactivate or edit the sharing rule instead.
-- `SHARING_NOT_ENABLED` (422) — `grant` on an object the sharing gates never consult (public sharing model, no `owner_id` field, a bypass object, or `controlled_by_parent`).
+- `SHARING_NOT_ENABLED` (422) — `grant` on an object the sharing gates never consult (public sharing model, no `owner_id` field, a bypass object, `controlled_by_parent`, or a **federated** object whose `owner_id` is the platform's injected anchor rather than a real remote column — the platform provisions no storage for a federated object, so the gates read that column off a table that has not got it and can never admit).
 
 ## Enforcement is automatic — do not re-check it in a hook
 
