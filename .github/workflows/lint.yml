@@ -161,6 +161,14 @@ jobs:
       - name: PM skill line ratchet
         run: pnpm check:pm-skill-ratchet
 
+      # pm-skill issue-ID lint (maintainer ruling 2026-08-12): operative
+      # agent-protocol text (.claude/skills/pm-dispatch/** and
+      # .claude/agents/os-dev.md) carries lessons self-contained — no issue-ID
+      # citations; rulings keep date + verbatim quote. The script header is
+      # authoritative, including the one self-expiring legacy waiver.
+      - name: PM skill issue-ID lint
+        run: pnpm check:pm-skill-id-lint
+
       # Docs/skills authoring guard (#2035 / ADR-0059): TS code blocks in
       # Markdown/MDX are not type-checked or ESLinted, so skills/ and
       # content/docs/ can drift back to teaching the bare `: Page = {}` literal
