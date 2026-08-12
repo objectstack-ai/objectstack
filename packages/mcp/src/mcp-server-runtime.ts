@@ -1022,6 +1022,35 @@ export class MCPServerRuntime {
     if (this.config.transport === 'stdio') {
       this.transport = new StdioServerTransport();
       await this.mcpServer.connect(this.transport);
+      // [#7645] The transport now OWNS this process's stdin — so make sure it
+      // is actually flowing. `StdioServerTransport.start()` only attaches a
+      // `data` listener, and Node auto-switches a stream to flowing mode on
+      // that listener ONLY while `readableFlowing` is still `null`. Once
+      // something has explicitly called `pause()`, the flag is `false` and a
+      // later `data` listener does NOT resume it: the listener is attached,
+      // `bytesRead` stays 0, and the server is started-but-permanently-deaf.
+      //
+      // That is not hypothetical. Under `objectstack serve`, oclif's argument
+      // parser reads stdin for any positional arg the user did not supply
+      // (`tryStdin` → `createInterface({input: process.stdin})`, aborted after
+      // 10 ms), and `Interface.close()` calls `stdin.pause()`. `serve` declares
+      // an optional `config` positional, so `os serve --dev` (no path) left
+      // stdin paused and EVERY `initialize` / `tools/list` / `resources/read`
+      // timed out with zero bytes on stdout — while the same command WITH the
+      // path (parser never touches stdin) answered fine. Measured both ways.
+      //
+      // The resume lives here rather than in the CLI because the pause is not
+      // oclif-specific: any host that touched stdin before `start()` (a
+      // readline prompt, a supervisor, an embedding process) leaves it paused,
+      // and every one of them yields the same silent deafness. This is the one
+      // place that knows a long-lived stdio transport was just attached.
+      //
+      // Resumed AFTER `connect()` on purpose: `connect()` attaches the
+      // transport's `data` listener, so no byte can flow before there is a
+      // reader for it.
+      if (typeof process !== 'undefined' && typeof process.stdin?.resume === 'function') {
+        process.stdin.resume();
+      }
       this.started = true;
       logger?.info(`[MCP] Server started (transport: stdio, name: ${this.config.name})`);
     } else {
