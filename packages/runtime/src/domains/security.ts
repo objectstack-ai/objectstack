@@ -64,16 +64,20 @@ export async function handleSecurityRequest(
     query: any,
     context: HttpProtocolContext,
 ): Promise<HttpDispatcherResult> {
-    // [#4127 batch 3] The `as any` was the only thing between this call and
-    // `ISecurityService`. The contract was written, `plugin-security` registers
-    // the slot, and all three methods used below were already declared — the
-    // slot name simply was not in the ledger, so nothing connected them.
-    const service = await deps.resolveService(context, 'security', context.environmentId);
-    if (!service || typeof service.listAudienceBindingSuggestions !== 'function') {
-        return { handled: true, response: deps.error('Security service not available', 503) };
-    }
-
     const ec = context.executionContext;
+    // [#7911] ANONYMOUS BASELINE — decided here, ahead of the capability probe
+    // below. This gate used to sit ~20 lines lower, AFTER `resolveService`'s
+    // "Security service not available" 503, which meant an empty or
+    // non-duck-typing `security` slot answered an unauthenticated caller with
+    // a capability disclosure (503) instead of the admin-surface refusal
+    // (401). `/security` stands on the same anonymous-deny floor as `/data`,
+    // `/meta`, `/actions` and `/automation` (ADR-0056 D2 → #3963) — see
+    // `domains/automation.ts`, which already gates ahead of its own
+    // `capabilityUnavailable` for the same reason, and `domains/ai.ts`
+    // (#7653/#7910), the sibling inversion this hoist mirrors. No route-level
+    // `auth: false` opt-out exists on this domain, so there is a single
+    // consult site and no loop to re-enter.
+    //
     // Admin surface — anonymous is denied UNCONDITIONALLY (#2567, #3963):
     // even before the opt-out was retired this seam never honoured it, so an
     // anonymous caller could never list or confirm audience bindings. Shares
@@ -88,12 +92,22 @@ export async function handleSecurityRequest(
     // SecurityContext, …)`, non-optional precisely because a WRITE needs a
     // caller identity, unlike the optional one on the read — could not be seen
     // to hold even though it did. Checking `ec` directly makes the invariant
-    // legible to the compiler and to the next reader.
+    // legible to the compiler and to the next reader. The hoist changes WHEN
+    // this decides, not WHAT — the arm itself is unchanged.
     if (!ec || shouldDenyAnonymous({ userId: ec.userId, isSystem: ec.isSystem })) {
         return {
             handled: true,
             response: deps.error(ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS, { code: ANONYMOUS_DENY_CODE }),
         };
+    }
+
+    // [#4127 batch 3] The `as any` was the only thing between this call and
+    // `ISecurityService`. The contract was written, `plugin-security` registers
+    // the slot, and all three methods used below were already declared — the
+    // slot name simply was not in the ledger, so nothing connected them.
+    const service = await deps.resolveService(context, 'security', context.environmentId);
+    if (!service || typeof service.listAudienceBindingSuggestions !== 'function') {
+        return { handled: true, response: deps.error('Security service not available', 503) };
     }
 
     const m = method.toUpperCase();
