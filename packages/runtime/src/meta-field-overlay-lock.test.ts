@@ -118,6 +118,7 @@ const VIEW = {
     name: 'showcase_task.in_progress',
     label: 'In Progress',
     object: 'showcase_task',
+    viewKind: 'list', // [#7741] the inline arm requires the object binding pair
     columns: [{ field: 'title', label: 'Title' }],
     _packageId: 'com.example.showcase',
 };
