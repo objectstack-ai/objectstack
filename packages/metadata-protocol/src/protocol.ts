@@ -4117,6 +4117,53 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#7556] Resolve an OBJECT body that came from the MetadataService into the
+     * object's resolved schema, by folding the registry's `extend` contributors
+     * onto it.
+     *
+     * The two readers of a single object — this file's by-name read and its
+     * layered view — consult {@link readItemFromMetadataService} BEFORE the
+     * SchemaRegistry, because that service is the HMR-fresh copy. For every
+     * other metadata type that ordering is free. For `object` it is not: an
+     * object's resolved schema is DEFINED (ADR-0029 D9.2 / D9.6) as a base layer
+     * with its `extend` contributors folded on, and the MetadataService copy is
+     * only the base layer. A deployment that ingests a compiled artifact
+     * (`artifactSource`, i.e. every sealed/served runtime) registers `objects`
+     * and `objectExtensions` into that service as SEPARATE collections, so the
+     * body this method receives is the owner's declaration with no extender in
+     * it. Serving it unfolded is what made the showcase's three
+     * `objectExtensions` fields readable through `GET /meta/object`, writable
+     * through the data API, and absent from `GET /meta/object/:name` — the read
+     * the edit and new forms derive from.
+     *
+     * The list read needs no counterpart: it reads `registry.listItems`, whose
+     * object branch resolves through the same fold, so it was never wrong.
+     * This method exists to make the two AGREE at their one point of
+     * divergence, not to give the by-name route a rule of its own.
+     *
+     * Applied ONLY to a MetadataService body. A registry-sourced body has
+     * already been folded, and the fold concatenates `validations`/`indexes`
+     * (see {@link SchemaRegistry.foldObjectExtendersOnto}), so applying it twice
+     * would duplicate both.
+     */
+    private foldObjectExtendersFromRegistry(type: string, name: string, body: unknown): unknown {
+        const singular = PLURAL_TO_SINGULAR[type] ?? type;
+        if (singular !== 'object') return body;
+        if (body === null || typeof body !== 'object') return body;
+        const registry = (this.engine as any)?.registry;
+        // Partial registry doubles in tests predate this method; a host that
+        // cannot fold answers exactly as it did before.
+        if (!registry || typeof registry.foldObjectExtendersOnto !== 'function') return body;
+        try {
+            return registry.foldObjectExtendersOnto(name, body);
+        } catch {
+            // The fold is a read over in-memory contributors; a failure here
+            // must not turn a served schema into a 5xx.
+            return body;
+        }
+    }
+
+    /**
      * [#5840] Read ONE item from the `metadata` service, keeping the ADR-0110
      * D3 verdict instead of flattening it into `undefined`.
      *
@@ -4754,7 +4801,12 @@ export class ObjectStackProtocolImplementation implements
                     request.packageId,
                 );
                 if (fromService.data !== undefined && fromService.data !== null) {
-                    item = fromService.data;
+                    // [#7556] A layer, not a resolved schema — see
+                    // {@link foldObjectExtendersFromRegistry}. No-op for every
+                    // type but `object`, and for an object nothing extends.
+                    item = this.foldObjectExtendersFromRegistry(
+                        request.type, request.name, fromService.data,
+                    );
                 } else if (fromService.degraded) {
                     serviceDegraded = fromService;
                 }
@@ -4967,7 +5019,15 @@ export class ObjectStackProtocolImplementation implements
                 request.packageId,
             );
             if (fromService.data !== undefined && fromService.data !== null) {
-                code = fromService.data;
+                // [#7556] The CODE layer of an object is D9.6's "owner's
+                // declaration with its extenders folded on", so the
+                // MetadataService copy is its base, not the layer itself.
+                // `effective` is `overlay ?? code`, so an object with no
+                // overlay row — the ordinary shape — is corrected by this
+                // single fold on both layers the diagnostic reports.
+                code = this.foldObjectExtendersFromRegistry(
+                    request.type, request.name, fromService.data,
+                );
             } else if (fromService.degraded) {
                 // [#5840] Kept, not swallowed — acted on after the registry
                 // fallback below, which may still produce a real code layer.
