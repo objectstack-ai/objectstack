@@ -3,6 +3,7 @@
 "@objectstack/core": patch
 "@objectstack/metadata-protocol": patch
 "@objectstack/runtime": patch
+"@objectstack/plugin-audit": patch
 ---
 
 fix(objectql): a by-id `update()`/`delete()` against a nonexistent record answers 404 `RECORD_NOT_FOUND` instead of a 400 from further down the pipeline (#7867)
@@ -65,6 +66,13 @@ registrants (plugin-sharing, service-storage, plugin-auth, plugin-audit), so on
 any kernel that loads them the demand was already true for every object and the
 narrowing skipped nothing. The read is genuinely new only for a bare
 `@objectstack/objectql/core` embedder — which is buying a 404 it did not have.
+
+Three read-count pins measured the old skip and now measure the read, each
+recording what changed and why at its own site: #5284's and #5929's in
+`packages/objectql`, and #5860's `sys_job_queue` case in `@objectstack/plugin-audit`.
+The DISPATCH half all three are actually about — the per-object `hasHooksFor`
+question, the `excludeObjects` subtraction, and the retired
+`sys_fetch_previous_*` builtins — is untouched and still pinned.
 
 **Scope.** By-id only. A `multi: true` predicate write matching zero rows still
 resolves "0 rows affected" — the same line both sibling paths draw.
