@@ -74,7 +74,21 @@ const TYPE_TO_STACK_KEY: Readonly<Record<string, string>> = {
   dashboard: 'dashboards',
   agent: 'agents',
   hook: 'hooks',
-  seed: 'seeds',
+  // [#7576] `data`, NOT `seeds`. The metadata TYPE is `seed`; the stack KEY that
+  // holds seeds is `data` (`ObjectStackDefinitionSchema.data: z.array(SeedSchema)`)
+  // — a stack has no `seeds` key at all, and `PLURAL_TO_SINGULAR` declares no
+  // mapping onto one either.
+  //
+  // The wrong spelling was INERT rather than harmless, and it is the #4449 shape
+  // one surface over: the wiring guard asks only that a declared type HAS a
+  // mapping, never that the mapping names a key some rule reads. So it would
+  // have stayed green while the gate built `{ objects, seeds: [item] }` for
+  // every seed write and every rule reading `stack.data` saw nothing — wired,
+  // and running on nothing, with `rulesRun` reporting the rules as having run.
+  // Nothing declares `seed` in `runtimeTypes` today, so correcting it changes no
+  // behaviour now; it is corrected here, with the measurement that found it
+  // (#7576), rather than left for the rollout card to trip over.
+  seed: 'data',
 };
 
 /** Everything the gate needs from the host runtime to build a snapshot. */
