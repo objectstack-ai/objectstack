@@ -175,6 +175,78 @@ export interface BootOptions {
    */
   multiTenant?: boolean | 'posture-only';
   /**
+   * Bind the harness admin to a real organization, so the execution context
+   * every request of theirs resolves CARRIES an `organizationId`. Default
+   * `false`.
+   *
+   * Mechanically it is one flip: `AuthPlugin`'s ADR-0081 D1 default-org
+   * bootstrap (`autoDefaultOrganization`), which the harness otherwise pins
+   * OFF (see the AuthPlugin registration below). The bootstrap mints a
+   * `sys_organization` and binds the platform admin to it as `owner`; the
+   * `session.create.before` hook then stamps that org onto the session as
+   * `activeOrganizationId`, which is the ONE wire field
+   * `resolveAuthzContext` reads into `tenantId` → `ExecutionContext`. Same
+   * path `objectstack dev` / `serve` give a real single-tenant deployment —
+   * nothing here is simulated.
+   *
+   * ## What it buys
+   *
+   * Application-level `organization_id`-scoped READS engage their filter,
+   * because they read the org id off the resolved context directly. Before
+   * this flag, no fixture in the open core could reach that branch over HTTP:
+   * `bootStack`'s admin resolved org-less, so a filtered read returned
+   * whatever the UNfiltered one did and a test asserting on the difference
+   * asserted nothing (#7762). `sys_sharing_rule` listing (#7676),
+   * `sys_business_unit` approver expansion (#3807) and `sys_metadata`
+   * pending-draft listing are the same shape.
+   *
+   * ## ⛔ It performs NO tenant isolation whatsoever
+   *
+   * It stamps the CALLER's org; it does not stand up an organization wall.
+   * With no `org-scoping` service registered — and this flag registers none —
+   * `SecurityPlugin` STRIPS the wildcard `organization_id` RLS policies that
+   * ship in the default permission sets (`collectRLSPolicies`; see the
+   * `multiTenant` doc block above). So a fixture asserting "tenant B cannot
+   * read tenant A's rows" and booting this way would assert nothing and pass:
+   * the #4700 constant-false capability probe wearing the opposite mask, and
+   * the precise trap this option's NAME is chosen to stay clear of.
+   *
+   * Cross-tenant isolation has exactly one honest proof in this repo:
+   * `multiTenant: true` with the real `@objectstack/organizations` installed
+   * (which is why those gates SKIP here instead of pretending — see
+   * `test/enterprise-organizations.ts`).
+   *
+   * The tenancy POSTURE is likewise untouched, and that is not an accident of
+   * this implementation but a property of the seam: `TenancyService`'s
+   * `probeIsolation` is `() => !!ctx.getService('org-scoping')`
+   * (`plugin-auth/src/auth-plugin.ts`), so the effective posture derives from
+   * SERVICE REGISTRATION only and reads nothing about what any context
+   * carries. `harness.org-context.test.ts` pins `posture` and `degraded`
+   * identical with the flag off vs on.
+   *
+   * ## Composition with `multiTenant`: it does NOT compose — the boot REFUSES
+   *
+   * `bootStack(app, { orgContext: true, multiTenant: … })` throws, for both
+   * spellings, rather than booting something that silently means less than it
+   * reads:
+   *
+   *  - with `multiTenant: true`, the enterprise `@objectstack/organizations`
+   *    package OWNS the org bootstrap and already binds the admin — this flag
+   *    would be a second, competing owner of one invariant;
+   *  - with `multiTenant: 'posture-only'`, it would be a NO-OP that looks like
+   *    a feature. That mode requests the `isolated` posture, and the open
+   *    default-org bootstrap deliberately abstains under every WALLED posture
+   *    (`postureEnforcesWall`, ADR-0081 D1) — the open package never
+   *    bootstraps an organization for a deployment whose multi-organization
+   *    runtime it does not provide. The admin would resolve org-less while the
+   *    fixture read as org-bound: vacuity, which is the whole defect class
+   *    #7762 exists to close.
+   *
+   * A posture-gated seam that ALSO needs an org-bound caller therefore has no
+   * harness answer today; it needs the real enterprise package.
+   */
+  orgContext?: boolean;
+  /**
    * Root directory of the **host app** being verified — the one whose
    * `node_modules` carries the optional packages it declares (currently the
    * enterprise `@objectstack/organizations` that `multiTenant` needs).
@@ -254,6 +326,24 @@ export async function bootStack(
 ): Promise<VerifyStack> {
   process.env.NODE_ENV = 'development';
 
+  // [#7762] `orgContext` and `multiTenant` are two owners of one invariant —
+  // refuse the combination rather than boot the weaker of them silently. See
+  // BootOptions.orgContext ("Composition with `multiTenant`") for why each
+  // spelling is refused; the `'posture-only'` half is the load-bearing one,
+  // because there the flag would be a pure no-op that still reads as coverage.
+  if (opts.orgContext && opts.multiTenant) {
+    throw new Error(
+      `verify: orgContext:true does not compose with multiTenant:${JSON.stringify(opts.multiTenant)}. ` +
+        (opts.multiTenant === 'posture-only'
+          ? "'posture-only' requests the `isolated` posture, and the open default-org bootstrap abstains " +
+            'under every walled posture (ADR-0081 D1) — the admin would resolve org-less while the fixture ' +
+            'read as org-bound. Drop one of the two options; a posture-gated seam that also needs an ' +
+            'org-bound caller needs the real @objectstack/organizations package.'
+          : 'the enterprise @objectstack/organizations package owns the org bootstrap under multiTenant:true ' +
+            'and already binds the admin. Drop orgContext.'),
+    );
+  }
+
   // [ADR-0105 D1] `multiTenant: true` REQUESTS the hard organization wall —
   // posture `isolated`, what `OS_MULTI_ORG_ENABLED=true` historically meant.
   // Since #3559 a walled posture is an explicit operator request resolved from
@@ -323,9 +413,15 @@ export async function bootStack(
   // closed, and a stack's declared `position` / `permission` names are
   // positions, not org roles. `membership-role-vocabulary.dogfood.test.ts`
   // boots through this harness and asserts exactly that.
+  //
+  // [#7762] `opts.orgContext` is the one thing that turns that bootstrap back
+  // on — the harness's ONLY way to mint an admin whose resolved execution
+  // context carries an `organizationId`. It is the SAME bootstrap `objectstack
+  // dev`/`serve` run, not a harness-local imitation, and it lights up no
+  // organization wall (see BootOptions.orgContext). Default stays `false`.
   await kernel.use(new AuthPlugin({
     secret: opts.authSecret ?? DEFAULT_AUTH_SECRET,
-    autoDefaultOrganization: false,
+    autoDefaultOrganization: !!opts.orgContext,
   }));
 
   // ADR-0062 — datasource connection service (registers 'datasource-connection'),
@@ -487,6 +583,41 @@ export async function bootStack(
   const api = (path: string, init?: RequestInit) => raw(`${API_PREFIX}${path}`, init);
 
   const admin = opts.admin ?? { email: DEFAULT_ADMIN_EMAIL, password: DEFAULT_ADMIN_PASSWORD };
+
+  // [#7762] The vacuity guard for `orgContext`. `ensureDefaultOrganization` is
+  // deliberately best-effort — it swallows every failure so a login can never
+  // break on org bookkeeping — which means a fixture that asked for an
+  // org-bound admin and silently got an org-LESS one is exactly the shape this
+  // option exists to abolish. So the boot asserts the bind rather than
+  // assuming it: no `sys_member` row for the harness admin, no stack.
+  if (opts.orgContext) {
+    const sys = { isSystem: true } as const;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const engine = await kernel.getServiceAsync<any>('objectql');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rowsOf = (r: any): any[] => (Array.isArray(r) ? r : Array.isArray(r?.records) ? r.records : []);
+    const users = rowsOf(
+      await engine?.find('sys_user', { where: { email: admin.email }, limit: 1, context: sys }),
+    );
+    const adminUserId: string | undefined = users[0]?.id;
+    const members = adminUserId
+      ? rowsOf(await engine.find('sys_member', { where: { user_id: adminUserId }, limit: 1, context: sys }))
+      : [];
+    if (!members[0]?.organization_id) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (kernel as any).shutdown?.().catch?.(() => {});
+      throw new Error(
+        `verify: orgContext:true did not bind the harness admin (${admin.email}) to an organization. ` +
+          (adminUserId
+            ? 'The user exists but holds no sys_member row, so their sessions would carry no ' +
+              'activeOrganizationId and every org-scoped assertion in this fixture would be vacuous.'
+            : 'No sys_user row resolved for that address — check `opts.admin` against the app the ' +
+              "harness actually seeded, since the default-org bootstrap targets the platform admin.") +
+          ' (ADR-0081 D1 `ensureDefaultOrganization` is best-effort by design; this is the harness ' +
+          'refusing to hand back a stack that quietly means less than it reads.)',
+      );
+    }
+  }
 
   const signIn = async (
     email: string = admin.email,

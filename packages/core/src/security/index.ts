@@ -137,6 +137,16 @@ export {
 // ADR-0091 D1/D2 — grant validity windows, the shared resolution-time predicate.
 export { isGrantActive, isGrantExpired, type GrantValidityWindow } from './grant-validity.js';
 
+// [#7678] ADR-0090 D5/D9 — the audience-binding suggestion `?status=` vocabulary,
+// shared by the runtime dispatcher's `/security` domain and the live REST route.
+export {
+  AUDIENCE_BINDING_SUGGESTION_STATUSES,
+  AUDIENCE_BINDING_SUGGESTION_STATUS_VALUES,
+  isAudienceBindingSuggestionStatus,
+  unknownAudienceBindingSuggestionStatusMessage,
+  type AudienceBindingSuggestionStatus,
+} from './audience-binding-suggestion-status.js';
+
 // #7284 — the `__` operation-private-key convention, the CONSUMER half of the
 // ExecutionContext lifecycle `assemble-execution-context.ts` opens. One owner
 // for the rule three packages had hand-copied (#7141 / #7145 / #7204).

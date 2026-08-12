@@ -5,6 +5,16 @@ import { describe, it, expect } from 'vitest';
 // this file). `@objectstack/driver-turso` is an OPTIONAL peer of the CLI — this
 // import is erased, so nothing here requires it at runtime.
 import type { TursoDriverConfig } from '@objectstack/driver-turso';
+// #7314: the shared libSQL config builder both loaders call, and the class both
+// now raise. Imported from `@objectstack/service-datasource` — the lowest package
+// of the three, and the only import direction the dependency graph allows.
+import {
+  buildTursoDriverConfig,
+  resolveTursoUrl,
+  TURSO_DRIVER_CONFIG_KEYS,
+  MissingDriverPackageError as OpenCoreMissingDriverPackageError,
+  type TursoDriverConfigInput,
+} from '@objectstack/service-datasource';
 import {
   inferDriverTypeFromUrl,
   resolveDriverType,
@@ -411,6 +421,73 @@ describe('loadTursoDriverFactory: the optional driver package (#5602)', () => {
   });
 });
 
+// #7314 — the CONFIG half of the convergence, pinned from the only package that
+// can see both sides.
+//
+// Two loaders build the libSQL driver — `@objectstack/runtime`'s host loader for
+// a host's `default` datasource, `@objectstack/service-datasource`'s open-core
+// arm for every other door — and each used to hand-list the keys it read. The
+// lists drifted: nine keys in the open-core arm, `url` and `authToken` in the
+// host loader, so an encrypted or embedded-replica `default` silently lost
+// `encryptionKey` / `syncUrl` / `sync` / `concurrency` / `timeout` / `mode` and
+// got them back the moment it was renamed. Both now build through
+// `buildTursoDriverConfig`, so they cannot disagree with EACH OTHER.
+//
+// This file pins the remaining gap: whether that one builder still agrees with
+// the DRIVER. `@objectstack/driver-turso` is deliberately not resolvable from
+// `@objectstack/runtime` or `@objectstack/service-datasource` (that is what
+// "optional" means, and the open-core missing-package pin depends on it staying
+// so), while the CLI carries it as a dev dependency for exactly this check. The
+// assertions are compile-time — `packages/cli`'s `typecheck` compiles this file
+// — because a key the driver added and the builder never read is a defect with
+// no runtime symptom at all: the config constructs, the driver connects, and the
+// setting is simply absent.
+describe('#7314 — the shared libSQL config builder against the real TursoDriverConfig', () => {
+  /** Compile-time `T must be never`; the alias is only satisfiable when it is. */
+  type AssertNever<T extends never> = T;
+  /** A key the DRIVER accepts that the shared builder does not read. */
+  type UnreadByBuilder = Exclude<keyof Omit<TursoDriverConfig, 'client'>, keyof TursoDriverConfigInput>;
+  /**
+   * A key the builder emits that the driver does not declare. `schemaMode` is
+   * excluded on purpose: ADR-0015 ownership is honoured by the `SqlDriver` base
+   * `TursoDriver` extends, not declared on `TursoDriverConfig` itself.
+   */
+  type UnknownToDriver = Exclude<keyof TursoDriverConfigInput, keyof TursoDriverConfig | 'schemaMode'>;
+
+  it('reads every authorable key of the driver config, and emits none it does not know', () => {
+    // `client` is excluded from the driver side: a pre-built `@libsql/client`
+    // instance is a host-composition escape hatch, never authorable config.
+    const unreadByBuilder: AssertNever<UnreadByBuilder>[] = [];
+    const unknownToDriver: AssertNever<UnknownToDriver>[] = [];
+    expect([...unreadByBuilder, ...unknownToDriver]).toEqual([]);
+  });
+
+  it('produces a config the real driver accepts, carrying every declared key', () => {
+    const spec = {
+      name: 'default',
+      driver: 'turso',
+      schemaMode: 'external',
+      config: {
+        url: 'libsql://my-db.turso.io',
+        authToken: 'jwt-token',
+        encryptionKey: 'aes-256-key',
+        concurrency: 7,
+        syncUrl: 'libsql://replica.turso.io',
+        sync: { intervalSeconds: 30, onConnect: false },
+        timeout: 9000,
+        mode: 'replica',
+      },
+    } as const;
+    const built = buildTursoDriverConfig(spec, resolveTursoUrl(spec));
+    const pinned: TursoDriverConfig = built;
+
+    expect(pinned.encryptionKey).toBe('aes-256-key');
+    expect(pinned.syncUrl).toBe('libsql://replica.turso.io');
+    expect(pinned.sync).toEqual({ intervalSeconds: 30, onConnect: false });
+    expect(Object.keys(built).sort()).toEqual([...TURSO_DRIVER_CONFIG_KEYS].sort());
+  });
+});
+
 // #6268 — the loader has ONE owner (`@objectstack/runtime`), and this file's
 // exports are that owner's declarations rather than hand-aligned copies.
 //
@@ -444,6 +521,15 @@ describe('#6268 — one loader, one class identity across cli and runtime', () =
     // …and the demonstration that a message assertion could NOT have caught a
     // broken identity: a twin declared right here carries the same message and
     // the same fields, and passes every assertion except the one above.
+    //
+    // #7314 revisited this declaration and KEPT it. It is not a stand-in for a
+    // class that could not be reached — the real one is imported at the top of
+    // this file and asserted identical two cases up — it is the NEGATIVE CONTROL
+    // that gives the positive assertion its meaning: without something that
+    // matches on message and name and still fails `instanceof`, nothing here
+    // shows that the passing assertion is testing identity rather than wording.
+    // Deleting it "in favour of the real import" would have removed the only
+    // evidence that the pin has teeth.
     class MissingDriverPackageErrorTwin extends Error {
       constructor(readonly installCommand: string, message: string) {
         super(message);
@@ -458,6 +544,13 @@ describe('#6268 — one loader, one class identity across cli and runtime', () =
     expect(twin.name).toBe((err as Error).name);
     expect(twin.installCommand).toBe(TURSO_DRIVER_INSTALL_COMMAND);
     expect(twin instanceof MissingDriverPackageError).toBe(false);
+    // …and the twin fails the OPEN-CORE binding too (#7314). The class moved
+    // down into `@objectstack/service-datasource` so the open-core loader could
+    // raise it; the seam now has three bindings and one class object, and the
+    // twin must be outside all of them.
+    expect(twin instanceof OpenCoreMissingDriverPackageError).toBe(false);
+    expect(err).toBeInstanceOf(OpenCoreMissingDriverPackageError);
+    expect(MissingDriverPackageError).toBe(OpenCoreMissingDriverPackageError);
   });
 
   it('and the reverse: the CLI loader raises an error the runtime binding matches', async () => {

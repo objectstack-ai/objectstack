@@ -53,6 +53,9 @@ import type {
   DatasourceDriverHandle,
 } from './contracts/index.js';
 import { assertDatasourcePoolSupported } from './datasource-pool-support.js';
+import { resolveDatasourceSchemaMode } from './datasource-schema-mode.js';
+import { buildTursoDriverConfig, resolveTursoUrl } from './turso-driver-config.js';
+import { MissingDriverPackageError } from './missing-driver-package-error.js';
 import type { SqliteAbsentFileMode } from '@objectstack/driver-sql';
 
 /**
@@ -78,12 +81,10 @@ function resolveKind(driverId: string): ResolvedKind | undefined {
  *
  * Declared as constants rather than left inline so the pin test asserts the
  * COMMAND rather than a sentence shape, and so a host that wants to render the
- * remedy itself has one place to read it from. `@objectstack/runtime` currently
- * declares its own equal pair (`TURSO_DRIVER_PACKAGE` /
- * `TURSO_DRIVER_INSTALL_COMMAND` in `turso-driver-factory.ts`); converging the
- * two onto these is a runtime-lane change — runtime already depends on this
- * package, so that import direction is the legal one, while the reverse is not
- * (#7314).
+ * remedy itself has one place to read it from. `@objectstack/runtime`'s host
+ * loader (`turso-driver-factory.ts`) declared its own equal pair until #7314 and
+ * now re-exports these — runtime depends on this package, so that import
+ * direction is the legal one, while the reverse is not.
  */
 export const TURSO_DRIVER_PACKAGE = '@objectstack/driver-turso';
 
@@ -604,16 +605,12 @@ export function createDefaultDatasourceDriverFactory(
       // through, so it is where "declared = honoured" is actually guaranteed.
       assertDatasourcePoolSupported({ driver: spec.driver, pool: spec.pool, name: spec.name });
 
-      // ADR-0015's ownership mode. `spec.schemaMode` — the datasource's own
-      // declared key — is FIRST since #4410; before that the first two arms
-      // were all there was, and neither could ever hold it: `external` is the
-      // federation-settings block (no `schemaMode` key), and nothing wrote the
-      // `config` copy. So `schemaMode: 'external'` on a datasource reached the
-      // driver as `undefined` and a database ObjectStack is a guest in was
-      // treated as managed — DDL ungated at the driver.
-      const schemaMode = spec.schemaMode
-        ?? (spec.external as { schemaMode?: string } | undefined)?.schemaMode
-        ?? ((spec.config as Record<string, unknown> | undefined)?.schemaMode as string | undefined);
+      // ADR-0015's ownership mode. The three-source fallback moved to
+      // `resolveDatasourceSchemaMode` in #7314 — unchanged in behaviour, but it
+      // now has a second caller (the shared libSQL config builder, which
+      // `@objectstack/runtime`'s host loader also uses) and an inline read would
+      // have been hand-copied into it.
+      const schemaMode = resolveDatasourceSchemaMode(spec);
       // Host-composition passthroughs (#3826): the CLI's declared `default`
       // definition carries the dev loosen-only self-heal (#2186) and the wasm
       // persistence mode in `config`. Connection builders ignore both keys, so
@@ -750,12 +747,22 @@ export function createDefaultDatasourceDriverFactory(
         //
         // The missing-package message states the install command, the
         // consequence and the refusal — the same quality of answer the host
-        // loader has given since #5602, which this arm did not (#7314). The
-        // typed `MissingDriverPackageError` the host raises is deliberately NOT
-        // mirrored here: that class lives in `@objectstack/runtime`, which
-        // DEPENDS on this package, so importing it would invert the dependency,
-        // and declaring a second same-named class is precisely the identity
-        // hazard #6268 closed (`serve.ts` decides fatality with `instanceof`).
+        // loader has given since #5602, which this arm did not (#7314).
+        //
+        // It is now also the SAME CLASS. `MissingDriverPackageError` used to be
+        // declared in `@objectstack/runtime`, which DEPENDS on this package, so
+        // this arm could neither import it (dependency inversion) nor declare
+        // its own (the identity hazard #6268 closed — `serve.ts` decides boot
+        // fatality with `instanceof`). #7314 moved the one class DOWN to
+        // `missing-driver-package-error.ts` here; runtime re-exports it from its
+        // old home, so both loaders now raise an error that satisfies the same
+        // `instanceof` no matter which door the request came through.
+        //
+        // The CONFIG READ is single-sourced too, and that was the half a user
+        // could hit: this arm read nine keys while the host loader read `url`
+        // and `authToken`, so an encrypted or embedded-replica `default`
+        // silently lost `encryptionKey` / `syncUrl` / `sync` / `concurrency` /
+        // `timeout` / `mode`. Both now call `buildTursoDriverConfig`.
         //
         // `spec.pool` is not read here and never was: `TursoDriverConfig` has
         // no `min` / `max` — a `file:` url runs the local better-sqlite3 engine
@@ -771,9 +778,14 @@ export function createDefaultDatasourceDriverFactory(
         try {
           ({ TursoDriver } = await import('@objectstack/driver-turso' as any));
         } catch (err: any) {
-          throw new Error(missingTursoDriverMessage({ datasource: spec.name, cause: err }));
+          throw new MissingDriverPackageError({
+            driverType: 'turso',
+            packageName: TURSO_DRIVER_PACKAGE,
+            installCommand: TURSO_DRIVER_INSTALL_COMMAND,
+            message: missingTursoDriverMessage({ datasource: spec.name, cause: err }),
+          });
         }
-        const url = typeof cfg.url === 'string' ? cfg.url.trim() : '';
+        const url = resolveTursoUrl(spec);
         if (!url) {
           // `TursoConfigSchema.url` is required, so the authoring and wizard
           // gates already refuse this. A stored row written before #6345 had no
@@ -784,19 +796,10 @@ export function createDefaultDatasourceDriverFactory(
             + 'config (e.g. libsql://my-db.turso.io or file:./data/objectstack.db).',
           );
         }
-        const driver = new TursoDriver({
-          url,
-          ...(typeof cfg.authToken === 'string' && cfg.authToken ? { authToken: cfg.authToken } : {}),
-          ...(typeof cfg.encryptionKey === 'string' && cfg.encryptionKey
-            ? { encryptionKey: cfg.encryptionKey }
-            : {}),
-          ...(typeof cfg.concurrency === 'number' ? { concurrency: cfg.concurrency } : {}),
-          ...(typeof cfg.syncUrl === 'string' && cfg.syncUrl ? { syncUrl: cfg.syncUrl } : {}),
-          ...(cfg.sync && typeof cfg.sync === 'object' ? { sync: cfg.sync } : {}),
-          ...(typeof cfg.timeout === 'number' ? { timeout: cfg.timeout } : {}),
-          ...(typeof cfg.mode === 'string' ? { mode: cfg.mode } : {}),
-          ...(schemaMode ? { schemaMode } : {}),
-        });
+        // `schemaMode` is read by the builder (from all three of its sources),
+        // not taken from the local `schemaMode` above — one read, so the host
+        // loader cannot be handed a narrower one.
+        const driver = new TursoDriver(buildTursoDriverConfig(spec, url));
         return toHandle(driver, () => sqlServerVersion(driver, 'sqlite'));
       }
 

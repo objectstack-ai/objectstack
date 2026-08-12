@@ -44,20 +44,32 @@ describe('sms settings manifest', () => {
 
 describe('smsTestActionHandler (fallback)', () => {
   it('accepts the log provider', async () => {
-    const r = await smsTestActionHandler({ values: { provider: 'log' }, ctx: {} as any });
+    const r = await smsTestActionHandler({
+      namespace: 'sms',
+      actionId: 'test',
+      values: { provider: 'log' },
+      ctx: {},
+    });
     expect(r.ok).toBe(true);
   });
 
   it('requires aliyun credentials', async () => {
-    const r = await smsTestActionHandler({ values: { provider: 'aliyun' }, ctx: {} as any });
+    const r = await smsTestActionHandler({
+      namespace: 'sms',
+      actionId: 'test',
+      values: { provider: 'aliyun' },
+      ctx: {},
+    });
     expect(r.ok).toBe(false);
     expect(r.message).toMatch(/AccessKey/);
   });
 
   it('requires a twilio sender', async () => {
     const r = await smsTestActionHandler({
+      namespace: 'sms',
+      actionId: 'test',
       values: { provider: 'twilio', twilio_account_sid: 'AC1', twilio_auth_token: 't' },
-      ctx: {} as any,
+      ctx: {},
     });
     expect(r.ok).toBe(false);
     expect(r.message).toMatch(/From number|Messaging Service/);

@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
+import { z } from 'zod';
 import {
   DashboardSchema,
   DashboardWidgetSchema,
@@ -325,6 +326,60 @@ describe('Dashboard presentation sub-schemas', () => {
     expect(named.name).toBe('region');
     // name stays optional — runtime defaults it to `field`.
     expect(GlobalFilterSchema.parse({ field: 'region' }).name).toBeUndefined();
+  });
+
+  describe('GlobalFilterSchema.object — i18n label-resolution key (#7804)', () => {
+    it('accepts a string object name and threads it through unchanged', () => {
+      const f = GlobalFilterSchema.parse({ field: 'sales_channel', type: 'select', object: 'opportunity' });
+      expect(f.object).toBe('opportunity');
+    });
+
+    it('is optional — absent stays absent, no default materializes', () => {
+      const f = GlobalFilterSchema.parse({ field: 'sales_channel', type: 'select' }) as Record<string, unknown>;
+      expect(f.object).toBeUndefined();
+      expect('object' in f).toBe(false);
+    });
+
+    it('rejects a non-string value', () => {
+      expect(() => GlobalFilterSchema.parse({ field: 'x', object: 123 } as any)).toThrow();
+      expect(() => GlobalFilterSchema.parse({ field: 'x', object: true } as any)).toThrow();
+      expect(() => GlobalFilterSchema.parse({ field: 'x', object: null } as any)).toThrow();
+    });
+
+    it('is independent of optionsFrom.object — the two may name different objects', () => {
+      // A filter targeting `opportunity.owner` with its dropdown options
+      // sourced from `user` — the label-resolution object and the
+      // options-source object are deliberately allowed to differ.
+      const f = GlobalFilterSchema.parse({
+        field: 'owner',
+        type: 'lookup',
+        object: 'opportunity',
+        optionsFrom: { object: 'user', valueField: 'id', labelField: 'name' },
+      });
+      expect(f.object).toBe('opportunity');
+      expect(f.optionsFrom?.object).toBe('user');
+    });
+
+    it('does not disturb GlobalFilterSchema unknown-key strictness', () => {
+      const res = GlobalFilterSchema.safeParse({ field: 'x', object: 'opportunity', bogusKey: true } as any);
+      expect(res.success).toBe(false);
+      if (!res.success) {
+        const unknown = res.error.issues.find((i) => i.code === 'unrecognized_keys');
+        expect(unknown).toBeDefined();
+        expect(unknown!.message).toContain('bogusKey');
+      }
+    });
+
+    it('declares a string JSON-Schema slot, not required', () => {
+      const js = z.toJSONSchema(GlobalFilterSchema as unknown as z.ZodType, {
+        unrepresentable: 'any',
+        io: 'input',
+      }) as any;
+      const prop = js.properties?.object;
+      expect(prop).toBeDefined();
+      expect(prop.type).toBe('string');
+      expect(js.required ?? []).not.toContain('object');
+    });
   });
 
   it('DashboardWidgetSchema.filterBindings — field override / opt-out (framework#2501)', () => {

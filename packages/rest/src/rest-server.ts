@@ -4,6 +4,9 @@ import {
     IHttpServer, resolveAuthzContext, resolveLocalizationContext, isAuthGateAllowlisted,
     assembleExecutionContext, normalizeAuthGate, type AuthGate,
     shouldDenyAnonymous, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS,
+    // [#7678] ADR-0090 D5/D9 suggested-binding `?status=` vocabulary — the one
+    // owner, shared with the runtime dispatcher's `/security` domain.
+    isAudienceBindingSuggestionStatus, unknownAudienceBindingSuggestionStatusMessage,
 } from '@objectstack/core';
 import {
     isMcpServerEnabled,
@@ -41,7 +44,10 @@ import { RouteManager, type RouteEntry } from './route-manager.js';
 // read points. Each handler below declares WHICH of its parameters are
 // single-valued; genuinely multi-valued ones (`select`, `expand`, `objects`,
 // `fields`, `searchFields`, `approverId`) are deliberately never listed.
-import { refuseRepeatedQueryParams } from './query-multiplicity.js';
+// [#7390] The filter slot is the one arity judgement the shared normalizer
+// structurally cannot make (a filter AST IS an array), so the querystring
+// ingress — the only layer that knows it is one — makes it instead.
+import { refuseRepeatedQueryParams, assertFilterParamSuppliedOnce } from './query-multiplicity.js';
 // [#7527] The other half of the same discipline: a parameter this route does
 // not KNOW is refused rather than dropped. See `query-allowlist.ts` for why an
 // ignored filter is the one wrong answer a caller cannot detect.
@@ -6755,14 +6761,39 @@ export class RestServer {
                         const context = await this.resolveExecCtx(environmentId, req);
                         if (this.enforceAuth(req, res, context)) return;
                         if (await this.enforceApiAccess(req, res, p, environmentId, 'list')) return;
-                        // [#6877] Deliberately NOT gated here. This route hands
-                        // the WHOLE query record to `findData`, whose normalizer
+                        // [#6877] Still NOT arity-gated as a whole, for the
+                        // reason it never was: this route hands the WHOLE query
+                        // record to `findData`, whose normalizer
                         // (`metadata-protocol`) owns every parameter's arity — the
                         // `$`-alias table, the implicit field-equality bucket, and
                         // the `$select`/`$expand`/`$searchFields` params that are
                         // legitimately multi-valued. Declaring an arity list here
                         // would be this file guessing at another package's
-                        // contract. Filed separately; see the report on #6877.
+                        // contract.
+                        //
+                        // [#7390] ONE slot is the exception, and structurally so
+                        // rather than by taste. A filter AST *is* an array
+                        // (`['status','=','open']`), so #7386's arity gate cannot
+                        // read `Array.isArray` as evidence of repetition on the
+                        // filter slot: the normalizer serves this querystring and
+                        // `POST /data/:object/query`'s arbitrary-JSON body through
+                        // one door and cannot tell them apart. THIS layer can — on
+                        // a querystring an array is a repeated parameter and can be
+                        // nothing else — so the filter slot's arity is judged here,
+                        // and only here, leaving the normalizer free of a heuristic.
+                        //
+                        // Refused, never resolved (maintainer ruling 2026-08-11 on
+                        // #7390): last-wins and AND-merge are each a silent choice
+                        // between two intents a caller actually expressed. Before
+                        // this line the common shape was answered with the WRONG
+                        // diagnosis — `malformedFilterArrayError`, telling a caller
+                        // whose filters were both well-formed to check their AST
+                        // syntax — and the rarer `?filter=status&filter=%3D&filter=open`
+                        // spelled a valid AST and returned 200 with a filter nobody
+                        // expressed. It throws rather than responding so both keep
+                        // the envelope this route's other filter refusals already
+                        // use; see the helper for why.
+                        assertFilterParamSuppliedOnce(req.query);
                         const result = await p.findData({
                             object: req.params.object,
                             query: req.query,
@@ -9515,8 +9546,26 @@ export class RestServer {
                     // [#6877] Both are `String(array)` joins — `?status=a&status=b`
                     // filtered on the single status `'a,b'` and returned nothing.
                     if (refuseRepeatedQueryParams(req, res, ['status', 'packageId'])) return;
+                    // [#7678] …and a single well-formed but UNKNOWN `?status=`
+                    // did the same thing one layer on: the service's contract
+                    // declares exactly three values, anything else matched no
+                    // row, and the caller got 200 with an empty list — which
+                    // reads as "there are no suggestions" rather than "your
+                    // filter was not a status". The runtime dispatcher's twin of
+                    // this route had refused it since #4127; this live route
+                    // never did. Same predicate, imported — not a second copy of
+                    // the vocabulary.
+                    const status = req.query?.status ? String(req.query.status) : undefined;
+                    if (status !== undefined && !isAudienceBindingSuggestionStatus(status)) {
+                        return res.status(400).json({
+                            error: {
+                                code: 'VALIDATION_ERROR',
+                                message: unknownAudienceBindingSuggestionStatusMessage(status),
+                            },
+                        });
+                    }
                     const result = await svc.listAudienceBindingSuggestions(context ?? {}, {
-                        status: req.query?.status ? String(req.query.status) : undefined,
+                        status,
                         packageId: req.query?.packageId ? String(req.query.packageId) : undefined,
                     });
                     res.json({ data: result });
