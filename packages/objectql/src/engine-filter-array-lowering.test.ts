@@ -511,13 +511,30 @@ describe('Door 2 lowers FilterArray to FilterCondition before the driver (#5158)
     expect(lastWhere()).toEqual(where);
   });
 
-  it('does not descend into a deep-equality comparand that merely LOOKS like an operator map', async () => {
-    // `{ $eq: {...} }` holds DATA. A gate that walked into it would refuse a
-    // stored document whose own key happens to be `$in` — a stricter contract
-    // than any backend applies.
+  it('a deep-equality comparand that LOOKS like an operator map is refused as a TYPE, never misread as operators (#7872)', async () => {
+    // HISTORY: until #7872 this case pinned pass-through — `{ $eq: {...} }`
+    // held DATA, and only driver-memory / driver-mongodb gave it deep-equality
+    // semantics while the SQL family refused it ("cannot be bound"). The
+    // #7872 ruling closed that divergence in the SQL family's direction: a
+    // plain object in a scalar operator slot is outside the accepted
+    // comparand-type set and is refused at the door. What SURVIVES of the old
+    // pin is its actual concern — the gate must not walk INTO the object and
+    // misread a data key that happens to be spelled `$in` as a malformed list
+    // operator. So: refused, with the comparand-TYPE envelope naming the
+    // OUTER slot, and never with #5869's "requires an ARRAY" shape wording
+    // about the inner key.
     const where = { stage: { $eq: { $in: 'not-an-operator-here' } } };
-    await engine.find('deal', { where });
-    expect(lastWhere()).toEqual(where);
+    const err = await engine.find('deal', { where })
+      .then(() => null, (e: any) => e);
+    expect(err).not.toBeNull();
+    expect(err).toMatchObject({ status: 400, code: 'INVALID_FILTER' });
+    // The refusal is about the OUTER comparand's type…
+    expect(err.message).toContain('where.stage.$eq');
+    expect(err.message).toContain('a plain object');
+    // …and not a second opinion about the inner `$in` key.
+    expect(err.message).not.toContain('requires an ARRAY');
+    // No driver ran.
+    expect(reads).toHaveLength(0);
   });
 
   it('a scalar on a NON-collection operator is untouched', async () => {
