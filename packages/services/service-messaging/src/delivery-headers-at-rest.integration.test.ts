@@ -47,7 +47,7 @@
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { createHmac } from 'node:crypto';
-import { ObjectQL } from '@objectstack/objectql';
+import { ObjectQL, assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import type { IDataEngine } from '@objectstack/spec/contracts';
 import { SqlHttpOutbox } from './sql-http-outbox.js';
@@ -281,7 +281,14 @@ describe('sys_http_delivery — authored headers vs the data API (#8118)', () =>
             find: (o: string, q: unknown) => (eng as any).find(o, q),
             findOne: (o: string, q: unknown) => (eng as any).findOne(o, q),
             insert: (o: string, d: unknown) => (eng as any).insert(o, d),
-            update: (o: string, d: unknown, q: unknown) => (eng as any).update(o, d, q),
+            update: (o: string, d: unknown, q: unknown) => {
+                // Engine-double contract: this fake's update() must be exactly
+                // as strict as ObjectQL.update's dispatch — it delegates to the
+                // real engine, but the pin is asserted up front so the gate can
+                // see it (check:engine-double-contract).
+                assertEngineUpdateDispatch(d as any, q as any);
+                return (eng as any).update(o, d, q);
+            },
             getSchema: (o: string) => (eng as any).getSchema(o),
         } as unknown as IDataEngine;
         const blindOutbox = new SqlHttpOutbox(noAccessor, { partitionCount: 1 });
