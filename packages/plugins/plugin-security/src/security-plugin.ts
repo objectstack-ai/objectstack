@@ -46,7 +46,7 @@ import { bootstrapBuiltinRoles } from './bootstrap-builtin-positions.js';
 import { bootstrapSystemCapabilities } from './bootstrap-system-capabilities.js';
 import { normalizeManagedByVocab } from './normalize-managed-by.js';
 import { bootstrapDeclaredCapabilities } from './bootstrap-declared-capabilities.js';
-import { RLSCompiler, RLS_DENY_FILTER } from './rls-compiler.js';
+import { RLSCompiler, RLS_DENY_FILTER, policyDeclaresClause } from './rls-compiler.js';
 import { computeTenantLayer0Filter, andComposeLayers } from './tenant-layer.js';
 import { isPlatformTenantPolicy, isAuthoredTenantPolicy } from './platform-tenant-policies.js';
 import { isPlatformOwnershipFloorPolicy } from './platform-ownership-policies.js';
@@ -3058,12 +3058,29 @@ export class SecurityPlugin implements Plugin {
       // the same collection the compiler consumes, filtered by the same
       // provenance predicate, so the two cannot disagree about what "authored"
       // means.
+      //
+      // [#8059] The pre-check asks for an authored policy that ADMITS ROWS —
+      // one carrying a `using` scope predicate. A `check`-only policy declares
+      // no row scope at all (ADR-0058 D4: post-image validation), so it can
+      // admit nothing, and the verdict for a caller holding only check-only
+      // policies is `abstain` — which is the verdict this method already
+      // returned before #8059 and must keep returning after it. It got there
+      // by a route the fix removes: a check-only policy compiles to no `using`
+      // filter, so Layer 1 was null and the `layer1 == null → abstain` rule
+      // below fired. Site 1 now DERIVES a Layer 1 from the caller's select
+      // narrowing in exactly that case, so without this clause the derived
+      // readable-set scope would start answering `admit` — and `admit` is what
+      // the by-id widener uses to WIDEN. That is precisely the masquerade the
+      // doc comment above promises cannot happen (#5493 / #7281), so the
+      // promise is now kept by an explicit test rather than by the accident of
+      // a null Layer 1. Nothing narrows here: `abstain` changes nothing on its
+      // own, and the pre-image gate still refuses on its own terms.
       const authored = this.collectRLSPolicies(
         permissionSets,
         object,
         operation,
         (context?.positions ?? []) as string[],
-      ).filter((p) => !isPlatformOwnershipFloorPolicy(p));
+      ).filter((p) => !isPlatformOwnershipFloorPolicy(p) && policyDeclaresClause(p, 'using'));
       if (authored.length === 0) return 'abstain';
 
       const { layer0, layer1 } = await this.computeLayeredRlsFilter(
@@ -4032,8 +4049,28 @@ export class SecurityPlugin implements Plugin {
       //     of the read path's own Layer-1 short-circuit above, so the
       //     derived write scope can never be NARROWER than the read scope it
       //     is derived from.
+      //
+      // [#8059 site 1] The trigger asks whether a write-scope PREDICATE
+      // applies — NOT whether the applicable set is merely non-empty. Those
+      // read the same only while every write-class policy carries a `using`.
+      // A policy declaring `check` alone gates nothing about WHICH existing
+      // row may be targeted (it validates the post-image, ADR-0058 D4), yet
+      // it is fully applicable on object + `positions` + operation, so the
+      // emptiness test counted it and switched the derivation off. The
+      // collected policy then compiled to no row filter — it carries no
+      // `using` for the compiler to read — so Layer 1 was null exactly as it
+      // was before #7665, and every write-side row gate composed from it went
+      // back to being a no-op. Measured on the stock showcase: a contributor
+      // GET-404s `showcase_invoice` and PATCHes it by id, 200, row changed,
+      // because `invoice_owner_immutable` is `operation: 'update'` with
+      // `check` only. #7665 criterion 5 is a statement about PREDICATES, and
+      // this is it, spelled the way the criterion reads.
+      //
+      // The predicate test is a superset of the old emptiness test (an empty
+      // collection carries no `using` either), so every path #7665 pinned is
+      // reached on exactly the same inputs as before.
       if (
-        collected.length === 0 &&
+        !collected.some((p) => policyDeclaresClause(p, 'using')) &&
         (operation === 'update' || operation === 'delete') &&
         !(
           posturePermits &&
@@ -4137,9 +4174,25 @@ export class SecurityPlugin implements Plugin {
     ) {
       return null;
     }
-    const withCheck = this.collectRLSPolicies(permissionSets, object, operation).filter(
-      (p) => typeof (p as { check?: string }).check === 'string' && (p as { check?: string }).check!.trim() !== '',
-    );
+    // [#8059 site 2] `heldPositions` is threaded through, exactly as every
+    // other `collectRLSPolicies` call site threads it. Omitting it did not
+    // widen the check — it DELETED it: `getApplicablePolicies` evaluates the
+    // ADR-0090 P2 applicability domain against the positions it is given, so
+    // with `[]` every policy declaring `positions` failed the domain test and
+    // was filtered out of the post-image check FOR EVERY CALLER, holder and
+    // non-holder alike. A position-scoped `check` clause was therefore inert
+    // (ADR-0049 enforce-or-remove; the same class #3539 closed for org-scoped
+    // policies) — the showcase's `invoice_owner_immutable` among them, which
+    // is why the by-id write measured in #8059 was not stopped on the way out
+    // either once site 1 had let it past the row gate. The domain still
+    // decides: a non-holder is outside it and the policy still does not apply
+    // to them.
+    const withCheck = this.collectRLSPolicies(
+      permissionSets,
+      object,
+      operation,
+      (context?.positions ?? []) as string[],
+    ).filter((p) => policyDeclaresClause(p, 'check'));
     if (withCheck.length === 0) return null;
     return this.rlsCompiler.compileFilter(withCheck, context, 'check');
   }

@@ -82,8 +82,35 @@ function isEmptyMembershipFilter(filter: Record<string, unknown>): boolean {
 }
 
 /**
+ * [#8059] Does this policy actually DECLARE the given clause?
+ *
+ * The two clauses answer different questions and are not interchangeable
+ * (ADR-0058 D4): `using` is the ROW-SCOPE predicate — which EXISTING rows a
+ * read or a write may target — while `check` is POST-IMAGE validation of the
+ * new/changed row. A policy may declare either, or both.
+ *
+ * This is the single definition of "declares a clause", and it is deliberately
+ * the same test {@link RLSCompiler.compileFilter} applies per policy when it
+ * skips a policy carrying no predicate for the clause being compiled. Callers
+ * that need to reason about a policy's shape BEFORE compiling — "is any row
+ * scope actually being enforced for this write class?" — must ask here rather
+ * than re-deriving it, because a second, drifting answer to that question is
+ * exactly what #8059 measured: a `check`-only policy was counted as an
+ * applicable write-class policy, the #7665 write-scope derivation was
+ * suppressed on that basis, and the write class then compiled to no row filter
+ * at all — a caller who could not READ a record could PATCH it by id.
+ */
+export function policyDeclaresClause(
+  policy: RowLevelSecurityPolicy,
+  clause: 'using' | 'check',
+): boolean {
+  const predicate = (policy as { using?: string; check?: string })[clause];
+  return typeof predicate === 'string' && predicate.trim() !== '';
+}
+
+/**
  * RLSCompiler
- * 
+ *
  * Compiles Row-Level Security policy expressions into query filters.
  * Converts `using` / `check` expressions into ObjectQL-compatible filter conditions.
  */
