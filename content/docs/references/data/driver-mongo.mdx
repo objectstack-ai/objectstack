@@ -46,7 +46,7 @@ MongoDB Connection Configuration
 | **host** | `string` | ✅ | Host address |
 | **port** | `integer` | ✅ | Port number |
 | **username** | `string` | optional | Authentication user |
-| **password** | `string` | optional | Authentication password (prefer external.credentialsRef) |
+| **password** | `never` | optional | Set through the connection form's secret field or `external.credentialsRef` — encrypted into `sys_secret`, never stored in `config` (#7990) |
 | **authSource** | `string` | optional | Authentication database |
 | **options** | `Record<string, any>` | optional | Extra MongoClient options (replicaSet, tls, timeouts, …) |
 

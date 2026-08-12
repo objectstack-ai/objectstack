@@ -17,8 +17,13 @@ import { TursoConfigSchema, TursoDriverSpec } from './turso.zod';
 
 describe('TursoConfigSchema', () => {
   it('accepts the shapes the driver actually connects with', () => {
+    // `{ url, authToken }` left this list in #7990: an inline `authToken` is
+    // refused at authoring (driver-credential-refusal.test.ts pins it). The
+    // remote-with-credential shape is authored as `{ url }` +
+    // `external.credentialsRef`; the boot hosts' env-resolved token never
+    // passes through this schema.
     for (const config of [
-      { url: 'libsql://my-db.turso.io', authToken: 'jwt' },
+      { url: 'libsql://my-db.turso.io' },
       { url: 'file:./data/objectstack.db' },
       { url: ':memory:' },
       { url: 'file:./local.db', syncUrl: 'libsql://my-db.turso.io', sync: { intervalSeconds: 60 } },
@@ -38,11 +43,17 @@ describe('TursoConfigSchema', () => {
 
   // The exact failure this contract was written for: `token` is the plausible
   // spelling, `authToken` is the real one, and before #6345 the misspelling was
-  // accepted in silence and the connection attempted unauthenticated.
-  it('rejects `token` with a rename hint pointing at `authToken`', () => {
+  // accepted in silence and the connection attempted unauthenticated. Until
+  // #7990 the fix was a rename hint onto `authToken`; now that `authToken` is
+  // itself unwritable the same spelling gets the credential refusal directly —
+  // a rename hint would send the author into a second rejection.
+  it('rejects `token` with the inline-credential refusal, not a rename hint', () => {
     const result = TursoConfigSchema.safeParse({ url: 'libsql://x.turso.io', token: 'jwt' });
     expect(result.success).toBe(false);
-    expect(JSON.stringify(result.error?.issues)).toContain('authToken');
+    const issues = JSON.stringify(result.error?.issues);
+    expect(issues).toContain('credentialsRef');
+    expect(issues).toContain('sys_secret');
+    expect(issues).not.toContain('Did you mean');
   });
 
   it('rejects `sync` without `syncUrl` — on its own it configures nothing', () => {
@@ -79,8 +90,13 @@ describe('turso is a known driver to the config registry now (#6345)', () => {
   // parse onto its own issue list, so the flip reaches authored metadata.
   it('DatasourceSchema now judges a turso datasource config', () => {
     expect(DatasourceSchema.safeParse({
-      name: 'edge', driver: 'turso', config: { url: 'libsql://x.turso.io', authToken: 'jwt' },
+      name: 'edge', driver: 'turso', config: { url: 'libsql://x.turso.io' },
     }).success).toBe(true);
+    // An inline `authToken` is refused (#7990), re-pathed under the config slot
+    // it was written in — driver-credential-refusal.test.ts pins the message.
+    expect(DatasourceSchema.safeParse({
+      name: 'edge', driver: 'turso', config: { url: 'libsql://x.turso.io', authToken: 'jwt' },
+    }).success).toBe(false);
     expect(DatasourceSchema.safeParse({
       name: 'edge', driver: 'turso', config: { token: 'jwt' },
     }).success).toBe(false);

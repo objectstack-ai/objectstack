@@ -23,13 +23,14 @@ describe('PostgresConfigSchema', () => {
   });
 
   it('should accept config with all fields', () => {
+    // `password` is deliberately absent: inline credentials are refused since
+    // #7990 — the refusal itself is pinned in driver-credential-refusal.test.ts.
     const config = PostgresConfigSchema.parse({
       url: 'postgresql://localhost/mydb',
       database: 'production',
       host: 'db.example.com',
       port: 5433,
       username: 'app_user',
-      password: 'secret',
       schema: 'app_schema',
       ssl: true,
       applicationName: 'objectstack',
@@ -162,11 +163,15 @@ describe('PostgresConfigSchema', () => {
   });
 
   it('should accept config with environment variable patterns', () => {
+    // NOTE (#7990 census): nothing in the runtime resolves `${…}` placeholders
+    // in datasource config — these strings reach the client verbatim. The test
+    // pins only that placeholder-shaped strings parse for NON-credential keys;
+    // `password` is refused whatever its value (including a placeholder),
+    // because the key itself is the cleartext sink.
     const config = PostgresConfigSchema.parse({
       database: '${DB_NAME}',
       host: '${DB_HOST}',
       username: '${DB_USER}',
-      password: '${DB_PASSWORD}',
     });
 
     expect(config.database).toBe('${DB_NAME}');

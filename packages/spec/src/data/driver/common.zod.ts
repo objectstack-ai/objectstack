@@ -83,6 +83,57 @@ export const SSL_DETAIL_BELONGS_ON_DATASOURCE =
   + '`ssl: { enabled: true, rejectUnauthorized: false, ca: … }` next to `driver`. Inside `config`, '
   + '`ssl` is the on/off shorthand only.';
 
+/**
+ * Refusal prescription for an inline credential written into driver config
+ * (#7990, maintainer-ruled Option A 2026-08-12: per-artefact contract closure).
+ *
+ * Why the KEY is refused, not just discouraged: a datasource artefact is
+ * persisted whole into `sys_metadata`, and `sys_metadata` declares
+ * `apiMethods: ['get','list']` — so an inline credential is cleartext at rest,
+ * readable through the ordinary data API. The two mechanisms this prescription
+ * names are the ones that already exist and already win over an inline value
+ * at connect time (`DatasourceConnectionService` resolves
+ * `external.credentialsRef` and injects the secret into the driver factory).
+ *
+ * Used both as the `z.never` error of a {@link refusedInlineCredentialKey}
+ * (the declared key) and as the `guidance` entry for the key's former alias
+ * spellings (`passwd`/`pwd`/`token`/`jwt`) — an alias row pointing at an
+ * unwritable key would be the `triggerPhrase → triggerPhrases` two-step
+ * rejection `shared/strict-object.ts` documents.
+ */
+export const INLINE_CREDENTIAL_REFUSED = (key: string): string =>
+  `\`${key}\` is a credential and is not accepted inline in driver config (#7990): the `
+  + 'datasource is persisted whole into `sys_metadata`, which is served back by the ordinary '
+  + 'data API, so an inline credential lands in cleartext at rest. Bind the secret instead: '
+  + "the Setup → Datasources connection form's secret field hands it to the datasource secret "
+  + 'binder, which encrypts it into `sys_secret` and stores only an opaque handle at '
+  + '`external.credentialsRef` — or reference the secrets store directly with '
+  + '`external.credentialsRef`. The resolved secret is injected at connect time and always '
+  + 'wins over anything embedded in `config`.';
+
+/**
+ * A driver-config credential key, declared but UNWRITABLE (#7990).
+ *
+ * Same construction as `shared/retired-key.ts`'s `retiredKey()` — `z.never()`
+ * emits as `{ "not": {} }`, so the authorable-surface ratchet reads the key as
+ * `[RETIRED]` and `tsc` types it `never` — but hand-rolled here for the one
+ * thing `retiredKey()` cannot carry: the `.meta({ format: 'password' })`
+ * projection. The Studio connection form (objectui
+ * `DatasourceResourcePage.tsx`) renders its SECRET input from exactly that
+ * marker and routes the value to the top-level `secret` — the datasource
+ * secret binder's door, not `config` — so the marker must survive the
+ * refusal or the wizard loses the very input the refusal diverts authors to.
+ * The parse and the form cannot disagree: they read one schema.
+ */
+export function refusedInlineCredentialKey(key: string, formTitle: string) {
+  return z.never({ error: () => INLINE_CREDENTIAL_REFUSED(key) }).optional()
+    .describe(
+      "Set through the connection form's secret field or `external.credentialsRef` — "
+      + 'encrypted into `sys_secret`, never stored in `config` (#7990)',
+    )
+    .meta({ title: formTitle, format: 'password' });
+}
+
 /** Options every driver-config JSON-Schema projection is built with. */
 const TO_JSON_SCHEMA = {
   target: 'draft-2020-12',
