@@ -37,7 +37,7 @@ const result = InvitationSchema.parse(data);
 | **id** | `string` | ✅ | Unique invitation identifier |
 | **organizationId** | `string` | ✅ | Organization ID |
 | **email** | `string` | ✅ | Invitee email address |
-| **role** | `string` | ✅ | Role to assign upon acceptance |
+| **role** | `string` | ✅ | Role to assign upon acceptance (owner, admin, delegated_admin, member — ADR-0108 closed vocabulary) |
 | **status** | `Enum<'pending' \| 'accepted' \| 'rejected' \| 'expired' \| 'canceled'>` | ✅ | Invitation status |
 | **expiresAt** | `string` | ✅ | Invitation expiry timestamp |
 | **inviterId** | `string` | ✅ | User ID of the inviter |
@@ -69,7 +69,7 @@ const result = InvitationSchema.parse(data);
 | **id** | `string` | ✅ | Unique member identifier |
 | **organizationId** | `string` | ✅ | Organization ID |
 | **userId** | `string` | ✅ | User ID |
-| **role** | `string` | ✅ | Member role (e.g., owner, admin, member, guest) |
+| **role** | `string` | ✅ | Member role (owner, admin, delegated_admin, member — ADR-0108 closed vocabulary) |
 | **createdAt** | `string` | ✅ | Member creation timestamp |
 | **updatedAt** | `string` | ✅ | Last update timestamp |
 
