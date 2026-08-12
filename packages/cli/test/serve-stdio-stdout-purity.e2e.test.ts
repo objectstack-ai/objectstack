@@ -273,6 +273,10 @@ describe('#7915: a stdio MCP boot writes nothing but protocol frames to stdout',
       );
     });
 
+    // Let the stream settle: the reply is detected on a regex, which can match
+    // before the frame's trailing newline has been delivered.
+    await new Promise((r) => setTimeout(r, 750));
+
     const stdout = booted.stdout();
     const stderr = booted.stderr();
     const seen = `\n--- stdout ---\n${stdout.slice(0, 4000)}\n--- stderr (tail) ---\n${stderr.slice(-2000)}`;
@@ -281,8 +285,14 @@ describe('#7915: a stdio MCP boot writes nothing but protocol frames to stdout',
     // Every line the child has written to stdout since it was spawned —
     // banner, boot progress and kernel log included, had any of them gone
     // there — read exactly as a client's ReadBuffer reads them.
+    //
+    // The last element of the split is dropped either way: it is the empty
+    // string after a trailing newline, or a line the pipe has not finished
+    // delivering. A chunk boundary is not evidence of anything, and every line
+    // that matters is followed by another.
     const nonFrameLines = stdout
       .split('\n')
+      .slice(0, -1)
       .filter((line) => line.length > 0)
       .filter((line) => parseFrame(line) === undefined);
     expect(
