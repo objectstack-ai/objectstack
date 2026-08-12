@@ -20,16 +20,24 @@ export {
   runRlsProofs,
   formatRlsReport,
   provisionRlsProbePersona,
+  provisionRlsPositionPersona,
+  declaredPositionNames,
   rlsProbePermissionSet,
   rlsProbeSecurity,
+  rlsPositionProbeEmail,
   RLS_PROBE_EMAIL,
 } from './rls.js';
 export type {
   RlsReport,
   RlsResult,
   RlsStatus,
+  RlsSummary,
   RlsProbeDescriptor,
   RlsProbePersona,
+  RlsPositionPersona,
+  RlsPositionPersonaInput,
+  RlsPositionRun,
+  RlsPositionCoverage,
   RlsProofOptions,
 } from './rls.js';
 

@@ -86,10 +86,34 @@ await stack.stop();
 | `rls-consistent` | member can't read **and** can't write — good |
 | `rls-hole` | member can't read **yet** wrote it by id — RLS bypass **(failure)** |
 | `member-visible` | member *can* read it — not a cross-owner scenario (inconclusive) |
+| `probe-blocked` | the **object** gate refused the persona, so record scope was never consulted — never a pass (inconclusive) |
 
 `member-visible` everywhere usually means the app is single-tenant; pass
 `--multi-tenant` (or `{ multiTenant: true }`) to register org-scoping so tenant
 isolation policies actually apply.
+
+### Personas: who the invariant is run as
+
+The invariant is run once per **persona**, and a report separates them because
+they prove different things:
+
+- The **base probe persona** authors its own capability (object read+edit on every
+  declared object, plus an owner-scoped `select` narrowing). It proves the
+  *platform's* by-id write gate — a refusal is attributable to the record gate
+  rather than to the object gate.
+- One **position persona per position the app declares** (`config.positions`,
+  read from the app — never a list kept here). Each holds that position and
+  nothing else, so its whole capability is what the app itself binds to the
+  position. This is what exercises narrowing authored with `positions: [...]`,
+  which is invisible to the base persona: a policy gated on a position the caller
+  does not hold is never applicable to it.
+
+`RlsReport.summary` is the base persona; `positionRuns[]` carries one entry per
+position; `totals` sums them all (unit: one *object × persona* probe) and is what
+a CI gate should read. `positionCoverage` reports the reach honestly: `declared`
+vs `ran`, plus `notRun` for any declared position whose persona could not be
+provisioned, and a `note` when the app declares no positions at all — "nothing to
+run" must never read like "nothing to find".
 
 ## API
 
@@ -110,6 +134,12 @@ for owner-scoped fixtures), `multiTenant`.
   fails the run, even though the app behaves as designed. The report shows the
   exact `wrote → read` diff so it's diagnosable; letting an app declare such
   fields so the verifier can allow them is a planned enhancement.
+- **A position persona holds the bare position, unanchored.** Narrowing that
+  gates on a position held *together with* something else — a business-unit
+  anchor, an organization membership, a sharing-rule grant — is still out of
+  reach, and a position bound to a view-all set reads every row by design and so
+  reports `member-visible`. Coverage is therefore reported per position; the
+  fan-out is never N× the reach.
 - **The auto-derived sweep is coarser than a hand-written matrix.** It exercises
   one synthesized record per object and skips fields it can't synthesize
   (required lookups / master-detail, media, computed). It's a broad runtime

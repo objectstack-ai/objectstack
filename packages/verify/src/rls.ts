@@ -40,16 +40,47 @@
 // from NOT-PROVEN ones (`member-visible` / `probe-blocked` / `skipped`) in both
 // the structured summary and the formatted output.
 //
-// ⛔ What this runner still cannot reach, stated so its green is not over-read:
-// an object whose narrowing is authored on a POSITION the probe does not hold
-// (the showcase's `positions: ['contributor']` rules) is unnarrowed for this
-// persona, so the probe reads every row and the object reports `member-visible`
-// — honest, but not a proof. Reaching those needs a per-declared-position
-// persona; tracked as a follow-on.
+// ## [#7978] Position-authored narrowing — the class the base persona cannot reach
+//
+// The persona above holds NO positions by construction, so an app policy carrying
+// `positions: [...]` is never APPLICABLE to it (`getApplicablePolicies` filters by
+// the caller's positions): the object reads `member-visible`, and the app's own
+// narrowing goes unexercised while only the platform gate underneath it is proven.
+// That is precisely the authoring shape the real #7665 defect wore — the ordinary
+// `showcase_contributor` persona, a `contributor` POSITION plus the matching set,
+// against `positions: ['contributor']` rules.
+//
+// So a run now FANS OUT: one persona per position the app DECLARES
+// (`declaredPositionNames`, read from `config.positions` — never a transcribed
+// list, so a position added next month is covered without touching this file),
+// each holding that position and nothing else, i.e. exactly the capability the app
+// itself binds to it. The same invariant then runs unchanged for each.
+//
+// Three properties of the fan-out are deliberate:
+//   • Probe TARGETS are established once and shared by every persona, so a
+//     position costs 4 HTTP calls per object rather than re-deriving and
+//     re-creating a record per persona.
+//   • Each persona mutates with a DISTINCT marker, so "did the row change" stays
+//     attributable to the persona that wrote it — and a SHORT one, because a probe
+//     field's `maxLength` would truncate a long marker into a false negative.
+//   • A position that yields no verdict is REPORTED, never dropped: an app
+//     declaring no positions says so (`positionCoverage.note`), and a declared
+//     position whose persona could not be provisioned lands in
+//     `positionCoverage.notRun`. Neither contributes to `proven`.
+//
+// ⛔ What is STILL out of reach, stated so this green is not over-read either:
+// narrowing that gates on a position held TOGETHER WITH some other condition — a
+// business-unit anchor, an organization membership, a sharing-rule grant — since
+// these personas hold the bare position, unanchored. And a position bound to a
+// VAMA-carrying set (`showcase_auditor`, `showcase_ops`) reads every row by
+// design, so it reports `member-visible`: honest, and not a proof. Per-position
+// coverage is reported per position for exactly that reason — the fan-out must
+// never be read as N× the reach.
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { SecurityPlugin, securityDefaultPermissionSets, appSecurityPluginOptions } from '@objectstack/plugin-security';
+import { AUDIENCE_ANCHOR_POSITIONS } from '@objectstack/spec/identity';
 import type { PermissionSet } from '@objectstack/spec/security';
 
 import type { VerifyStack } from './harness.js';
@@ -58,10 +89,58 @@ import { deriveCrudCases, fillRelationalRefs } from './derive.js';
 const PROBE_TYPES = new Set(['text', 'textarea', 'string']);
 const MUTATION = 'rls-mutated-by-B';
 
+/**
+ * The marker a POSITION persona writes. Distinct per persona so a changed row is
+ * attributable to the persona that changed it — and deliberately SHORT: a probe
+ * field declaring a small `maxLength` truncates a long marker, the ground-truth
+ * re-read then fails to match, and a real hole reads as "row unchanged". A false
+ * negative in this runner is the one outcome worse than no runner at all.
+ */
+function positionMutation(index: number): string {
+  return `rls-mut-p${index + 1}`;
+}
+
 /** Default identity of the object-granted probe persona (`provisionRlsProbePersona`). */
 export const RLS_PROBE_EMAIL = 'verify-rls-probe@objectstack.test';
 const RLS_PROBE_PASSWORD = 'Rls-Probe-Pass-123';
 const RLS_PROBE_PERMISSION_SET = 'verify_rls_probe';
+const RLS_POSITION_PROBE_PASSWORD = 'Rls-Position-Probe-123';
+
+/** Identity of the persona minted for one declared position. */
+export function rlsPositionProbeEmail(position: string): string {
+  return `verify-rls-pos-${String(position).toLowerCase().replace(/[^a-z0-9._-]+/g, '-')}@objectstack.test`;
+}
+
+/**
+ * Machine names of the positions the app DECLARES (`config.positions`), in
+ * declaration order, deduplicated.
+ *
+ * ⛔ DERIVED, never transcribed. A hand-written roster is how a verifier quietly
+ * stops covering the position someone adds next month — it keeps passing, over a
+ * surface it no longer looks at. Reading the app's own declaration is also what
+ * makes the fan-out app-agnostic: it is the same premise the rest of this runner
+ * stands on (derive from metadata, interpret nothing).
+ *
+ * The two built-in AUDIENCE ANCHORS (`everyone`, `guest`) are excluded: no app
+ * declares them (ADR-0090 D5/D9), every authenticated member already holds
+ * `everyone` — so the base persona above covers it — and `guest` is the anonymous
+ * audience, which no signed-up persona can hold at all. Filtering them here means
+ * an app that mistakenly declares one still gets a truthful run instead of a
+ * persona whose position assignment can never take effect.
+ */
+export function declaredPositionNames(config: any): string[] {
+  const anchors = AUDIENCE_ANCHOR_POSITIONS as readonly string[];
+  const seen = new Set<string>();
+  const names: string[] = [];
+  for (const declared of (config?.positions ?? []) as any[]) {
+    const name = typeof declared === 'string' ? declared : declared?.name;
+    if (typeof name !== 'string' || name.length === 0) continue;
+    if (anchors.includes(name) || seen.has(name)) continue;
+    seen.add(name);
+    names.push(name);
+  }
+  return names;
+}
 
 export type RlsStatus =
   /** PROVEN: the probe could not read the row and could not mutate it. */
@@ -101,6 +180,54 @@ export interface RlsProbeDescriptor {
   degraded?: string;
 }
 
+export interface RlsSummary {
+  objects: number;
+  consistent: number;
+  holes: number;
+  memberVisible: number;
+  probeBlocked: number;
+  skipped: number;
+  /** Objects on which the by-id-write class was actually exercised. */
+  proven: number;
+  /** Objects the run did not exercise (`memberVisible + probeBlocked + skipped`). */
+  unproven: number;
+}
+
+/** One persona's full pass over the app's objects. */
+export interface RlsPositionRun {
+  /** The declared position this persona holds — and holds alone. */
+  position: string;
+  probe: RlsProbeDescriptor;
+  results: RlsResult[];
+  unproven: Array<{ object: string; status: RlsStatus; detail?: string }>;
+  summary: RlsSummary;
+}
+
+/**
+ * What the position fan-out actually covered — reported so a skip can never read
+ * as a pass (#7685's rule, applied to the fan-out itself, #7978).
+ */
+export interface RlsPositionCoverage {
+  /** Positions the app DECLARES (`declaredPositionNames`) — the intended reach. */
+  declared: string[];
+  /** Positions a persona actually probed with. */
+  ran: string[];
+  /**
+   * Declared positions with no verdict, and why. A provisioning failure lands
+   * here rather than vanishing: the run proved strictly less than its numbers
+   * suggest, and callers surface it (`objectstack verify` counts it as a hard
+   * failure, exactly as it counts a degraded base persona).
+   */
+  notRun: Array<{ position: string; reason: string }>;
+  /**
+   * Set ONLY when the app declares no positions at all. "No position personas to
+   * run" is a distinct statement from "the position personas found nothing" —
+   * without it, an app with zero positions would silently read like an app whose
+   * position-authored narrowing had been proven.
+   */
+  note?: string;
+}
+
 export interface RlsReport {
   app: string;
   /** Which persona drove the by-id probes. */
@@ -112,18 +239,33 @@ export interface RlsReport {
    * filter a consumer has to remember to apply.
    */
   unproven: Array<{ object: string; status: RlsStatus; detail?: string }>;
-  summary: {
-    objects: number;
-    consistent: number;
-    holes: number;
-    memberVisible: number;
-    probeBlocked: number;
-    skipped: number;
-    /** Objects on which the by-id-write class was actually exercised. */
-    proven: number;
-    /** Objects the run did not exercise (`memberVisible + probeBlocked + skipped`). */
-    unproven: number;
-  };
+  /**
+   * The BASE (verifier-authored) persona's pass. Position personas each carry
+   * their own summary in `positionRuns`; `totals` is the whole run.
+   */
+  summary: RlsSummary;
+  /** [#7978] One entry per declared position a persona was provisioned for. */
+  positionRuns: RlsPositionRun[];
+  /** [#7978] Intended vs achieved position reach. */
+  positionCoverage: RlsPositionCoverage;
+  /**
+   * [#7978] Every persona's verdicts summed — base + each position run. The unit
+   * is one (object × persona) PROBE, not one object, so `totals.objects` exceeds
+   * the app's object count whenever the fan-out ran. This is what a caller reads
+   * to decide whether the run found holes: a hole a position persona found is
+   * exactly as real as one the base persona found.
+   */
+  totals: RlsSummary;
+}
+
+/** A provisioned persona holding exactly one declared position. */
+export interface RlsPositionPersonaInput {
+  /** The declared position machine name this persona holds. */
+  position: string;
+  /** Bearer token for the persona. */
+  token: string;
+  /** Human label (an email) for the report. */
+  label: string;
 }
 
 export interface RlsProofOptions {
@@ -134,6 +276,20 @@ export interface RlsProofOptions {
    * precisely the state this runner must not report as a pass.
    */
   probe?: RlsProbeDescriptor;
+  /**
+   * [#7978] Personas holding one declared position each
+   * (`provisionRlsPositionPersona`). Provisioning is the CALLER's job — it needs
+   * a live stack and writes RBAC rows — while the reach they were SUPPOSED to
+   * cover is derived here from the config, so a caller that provisions fewer
+   * personas than the app declares shows up as `positionCoverage.notRun` rather
+   * than as a quietly narrower run.
+   */
+  positionPersonas?: RlsPositionPersonaInput[];
+  /**
+   * Positions whose persona could not be provisioned, with the reason. Reported,
+   * never swallowed — see {@link RlsPositionCoverage.notRun}.
+   */
+  positionFailures?: Array<{ position: string; error: string }>;
 }
 
 /** The identity + token of an object-granted probe persona. */
@@ -341,6 +497,92 @@ export async function provisionRlsProbePersona(
   };
 }
 
+/** The identity + token of a persona holding exactly one declared position. */
+export interface RlsPositionPersona {
+  position: string;
+  token: string;
+  email: string;
+  userId: string;
+}
+
+/**
+ * [#7978] Sign up a persona and give it ONE declared position — nothing else.
+ *
+ * Deliberately the opposite construction from {@link provisionRlsProbePersona}:
+ * that one authors its own capability so the PLATFORM's by-id-write gate is
+ * reachable; this one authors NOTHING. Its whole capability is whatever the app
+ * binds to the position (`sys_position_permission_set` → the app's own permission
+ * sets, narrowing and all), which is what makes it a probe of the APP's authored
+ * policy rather than of a policy the verifier invented. It also reproduces
+ * #7665's persona exactly: a bare `contributor` on the showcase is the shape that
+ * defect wore.
+ *
+ * The assignment is one `sys_user_position` row — the platform's source of truth
+ * for "who holds which position" (ADR-0057 D4 / ADR-0090 D3), keyed by the
+ * position's MACHINE NAME, which is how `ctx.positions` is keyed downstream.
+ * Written under a system context through ObjectQL for the same reason the base
+ * persona's grants are: provisioning is test SETUP, and routing it through the
+ * data door would make the proof depend on whether this deployment lets an admin
+ * POST RBAC rows — a second thing that can fail for reasons unrelated to RLS.
+ *
+ * ⚠️ The row is deliberately UNANCHORED (`business_unit_id: null`): a BU anchor
+ * would add depth-scoped visibility on top of the position and the verdict would
+ * no longer be attributable to the position-gated policy alone.
+ *
+ * Throws when the stack has no ObjectQL engine or the user cannot be resolved.
+ * Callers must NOT swallow that: report the position as not-run
+ * (`RlsPositionCoverage.notRun`) so the missing reach is visible.
+ */
+export async function provisionRlsPositionPersona(
+  stack: VerifyStack,
+  position: string,
+  opts: { email?: string; password?: string } = {},
+): Promise<RlsPositionPersona> {
+  const email = opts.email ?? rlsPositionProbeEmail(position);
+  const password = opts.password ?? RLS_POSITION_PROBE_PASSWORD;
+
+  await stack.signUp(email, password);
+
+  const ql = await stack.kernel.getServiceAsync<any>('objectql');
+  if (!ql || typeof ql.find !== 'function' || typeof ql.insert !== 'function') {
+    throw new Error(
+      `verify: cannot provision the RLS position persona for '${position}' — no ObjectQL engine on ` +
+        'this stack. Without the position assignment the app\'s position-gated policies are not ' +
+        'applicable to the persona, so the app-authored narrowing is unreachable (#7978).',
+    );
+  }
+  const sysCtx = { context: { isSystem: true } };
+
+  const users = rowsOf(await ql.find('sys_user', { where: { email }, limit: 1 }, sysCtx));
+  const userId = users[0]?.id;
+  if (!userId) {
+    throw new Error(
+      `verify: cannot provision the RLS position persona for '${position}' — no sys_user row for ${email}.`,
+    );
+  }
+
+  await ql.insert(
+    'sys_user_position',
+    {
+      id: genId('up'),
+      user_id: userId,
+      position,
+      business_unit_id: null,
+      organization_id: null,
+      granted_by: null,
+      reason: `Ephemeral persona minted by \`objectstack verify --rls\`: holds '${position}' and nothing else, so the app's own position-gated RLS narrowing is exercised (#7978).`,
+    },
+    sysCtx,
+  );
+
+  // Re-sign-in after the assignment exists, for the same reason the base persona
+  // does: a session minted before the row is exactly the shape that makes a
+  // provisioning bug look like an enforcement result.
+  const token = await stack.signIn(email, password);
+
+  return { position, token, email, userId: String(userId) };
+}
+
 /** The id of an existing row of `object`, read as admin, or null. */
 async function firstExistingId(stack: VerifyStack, adminToken: string, object: string): Promise<string | null> {
   const res = await stack.apiAs(adminToken, 'GET', `/data/${object}?$top=1`);
@@ -355,27 +597,52 @@ async function firstExistingId(stack: VerifyStack, adminToken: string, object: s
   return id ? String(id) : null;
 }
 
-export async function runRlsProofs(
+/**
+ * A probe target: the row every persona runs the invariant against, plus the
+ * plain-text field they mutate.
+ *
+ * [#7978] Establishing these ONCE is what keeps the position fan-out affordable:
+ * the admin creates (or adopts) one row per object for the whole run, and each
+ * persona then costs 4 HTTP calls per object instead of re-deriving and
+ * re-creating a record of its own. It is also more honest — every persona is
+ * judged against the same ground truth rather than a row of its own that some
+ * app-level validation may have shaped differently.
+ */
+interface ProbeTarget {
+  object: string;
+  id: string;
+  /** Plain-text field the personas mutate. */
+  field: string;
+  origin: NonNullable<RlsResult['target']>;
+  /** Detail suffix recording an adopted target. */
+  via: string;
+}
+
+/** Either an object that never got a target (recorded once, replayed per persona) or one that did. */
+type ProbeCase = { object: string; skipped: RlsResult } | { object: string; target: ProbeTarget };
+
+async function establishProbeTargets(
   stack: VerifyStack,
   adminToken: string,
-  memberToken: string,
   config: any,
-  opts: RlsProofOptions = {},
-): Promise<RlsReport> {
+): Promise<ProbeCase[]> {
   const cases = deriveCrudCases(config);
-  const results: RlsResult[] = [];
+  const out: ProbeCase[] = [];
   // Admin-created (or adopted) ids, threaded so a detail's required relation
   // points at a real master (topological order created it first) — lets the
   // #1994 invariant reach relationship-dense objects, not just the leaves.
   const createdIds = new Map<string, string>();
 
   for (const c of cases) {
-    if (c.blocked) { results.push({ object: c.object, status: 'skipped', detail: c.blocked }); continue; }
+    const skip = (detail: string): void => {
+      out.push({ object: c.object, skipped: { object: c.object, status: 'skipped', detail } });
+    };
+    if (c.blocked) { skip(c.blocked); continue; }
 
     // A plain-text field to mutate (avoid email/url/phone — their format checks
     // would reject the probe for a benign reason, masking the RLS signal).
     const probe = (c.asserts ?? []).find((a) => PROBE_TYPES.has(a.type));
-    if (!probe) { results.push({ object: c.object, status: 'skipped', detail: 'no plain-text probe field' }); continue; }
+    if (!probe) { skip('no plain-text probe field'); continue; }
 
     let resolved = fillRelationalRefs(c, createdIds);
     if (resolved.missing) {
@@ -392,12 +659,12 @@ export async function runRlsProofs(
       }
       if (adopted) resolved = fillRelationalRefs(c, createdIds);
     }
-    if (resolved.missing) { results.push({ object: c.object, status: 'skipped', detail: resolved.missing }); continue; }
+    if (resolved.missing) { skip(resolved.missing); continue; }
 
     // Admin (owner) creates the record — or, when the app's own validation
     // rejects the derived body, adopt an existing row so the object is still
     // probed instead of silently dropping out of the run.
-    let target: RlsResult['target'] = 'created';
+    let target: NonNullable<RlsResult['target']> = 'created';
     let id: string | null = null;
     let createDetail = '';
     const created = await stack.apiAs(adminToken, 'POST', `/data/${c.object}`, resolved.body);
@@ -414,11 +681,37 @@ export async function runRlsProofs(
       if (existing) { id = existing; target = 'adopted'; }
     }
     if (!id) {
-      results.push({ object: c.object, status: 'skipped', detail: `${createDetail}; no existing ${c.object} row to adopt` });
+      skip(`${createDetail}; no existing ${c.object} row to adopt`);
       continue;
     }
     createdIds.set(c.object, id);
     const via = target === 'adopted' ? ` [target adopted from existing rows — ${createDetail}]` : '';
+    out.push({ object: c.object, target: { object: c.object, id, field: probe.field, origin: target, via } });
+  }
+
+  return out;
+}
+
+/**
+ * Run the #1994 invariant over every established target as ONE persona.
+ *
+ * `mutation` is that persona's marker — see {@link positionMutation}. Two
+ * personas probing the same row must write different markers, or the second
+ * would read the first's successful write as its own (a fabricated hole) and its
+ * own refused write as a change (a fabricated pass).
+ */
+async function probeAsPersona(
+  stack: VerifyStack,
+  adminToken: string,
+  personaToken: string,
+  probeCases: ProbeCase[],
+  mutation: string,
+): Promise<RlsResult[]> {
+  const results: RlsResult[] = [];
+
+  for (const probeCase of probeCases) {
+    if ('skipped' in probeCase) { results.push({ ...probeCase.skipped }); continue; }
+    const { object, id, field, origin, via } = probeCase.target;
 
     // ── Reachability, MEASURED (#7685) ────────────────────────────────────────
     // Does the object-level gate let this persona through at all? A 403 on the
@@ -426,14 +719,14 @@ export async function runRlsProofs(
     // consulted, so nothing below could ever observe the by-id-write class on
     // this object — and recording that as `rls-consistent` (which is what this
     // runner did for 11 of 13 "consistent" showcase objects) is a false pass.
-    const list = await stack.apiAs(memberToken, 'GET', `/data/${c.object}?$top=1`);
+    const list = await stack.apiAs(personaToken, 'GET', `/data/${object}?$top=1`);
     if (list.status === 403) {
       results.push({
-        object: c.object,
+        object,
         status: 'probe-blocked',
-        target,
+        target: origin,
         detail:
-          `the probe persona holds no object-level READ grant on ${c.object} (LIST 403), so the ` +
+          `the probe persona holds no object-level READ grant on ${object} (LIST 403), so the ` +
           'object gate answers before record scope — the by-id-write class was NOT exercised here. ' +
           `Not a pass.${via}`,
       });
@@ -441,7 +734,7 @@ export async function runRlsProofs(
     }
 
     // Probe: can they SEE it?
-    const bRead = await stack.apiAs(memberToken, 'GET', `/data/${c.object}/${id}`);
+    const bRead = await stack.apiAs(personaToken, 'GET', `/data/${object}/${id}`);
     let canRead = false;
     if (bRead.status === 200) {
       const rec = ((await bRead.json()) as any)?.record;
@@ -449,46 +742,50 @@ export async function runRlsProofs(
     }
 
     // Probe: try to MUTATE it by id.
-    const bWrite = await stack.apiAs(memberToken, 'PATCH', `/data/${c.object}/${id}`, { [probe.field]: MUTATION });
+    const bWrite = await stack.apiAs(personaToken, 'PATCH', `/data/${object}/${id}`, { [field]: mutation });
 
     // Ground truth: re-read as admin — did the row actually change?
-    const after = await stack.apiAs(adminToken, 'GET', `/data/${c.object}/${id}`);
-    const afterVal = (((await after.json()) as any)?.record ?? {})[probe.field];
-    const changed = afterVal === MUTATION;
+    const after = await stack.apiAs(adminToken, 'GET', `/data/${object}/${id}`);
+    const afterVal = (((await after.json()) as any)?.record ?? {})[field];
+    const changed = afterVal === mutation;
 
     if (canRead) {
       results.push({
-        object: c.object,
+        object,
         status: 'member-visible',
-        target,
+        target: origin,
         detail:
           'the probe can read this object — not a cross-owner scenario, so the by-id-write class is ' +
           `not exercised here (no record-scope narrowing reaches this persona, or read is granted)${via}`,
       });
     } else if (changed) {
       results.push({
-        object: c.object,
+        object,
         status: 'rls-hole',
-        target,
+        target: origin,
         detail: `the probe cannot read it (GET ${bRead.status}) yet MUTATED it by id (PATCH ${bWrite.status}) — by-id write bypassed RLS (#1994 class)${via}`,
       });
     } else {
       results.push({
-        object: c.object,
+        object,
         status: 'rls-consistent',
-        target,
+        target: origin,
         detail: `the probe cannot read (GET ${bRead.status}) and could not mutate (PATCH ${bWrite.status}, row unchanged)${via}`,
       });
     }
   }
 
-  const count = (s: RlsStatus) => results.filter((r) => r.status === s).length;
+  return results;
+}
+
+function summarize(results: RlsResult[]): RlsSummary {
+  const count = (s: RlsStatus): number => results.filter((r) => r.status === s).length;
   const consistent = count('rls-consistent');
   const holes = count('rls-hole');
   const memberVisible = count('member-visible');
   const probeBlocked = count('probe-blocked');
   const skipped = count('skipped');
-  const summary = {
+  return {
     objects: results.length,
     consistent,
     holes,
@@ -498,29 +795,117 @@ export async function runRlsProofs(
     proven: consistent + holes,
     unproven: memberVisible + probeBlocked + skipped,
   };
-  const unproven = results
+}
+
+function notProven(results: RlsResult[]): Array<{ object: string; status: RlsStatus; detail?: string }> {
+  return results
     .filter((r) => r.status === 'member-visible' || r.status === 'probe-blocked' || r.status === 'skipped')
     .map((r) => ({ object: r.object, status: r.status, detail: r.detail }));
+}
+
+function sumSummaries(all: RlsSummary[]): RlsSummary {
+  return all.reduce<RlsSummary>(
+    (acc, s) => ({
+      objects: acc.objects + s.objects,
+      consistent: acc.consistent + s.consistent,
+      holes: acc.holes + s.holes,
+      memberVisible: acc.memberVisible + s.memberVisible,
+      probeBlocked: acc.probeBlocked + s.probeBlocked,
+      skipped: acc.skipped + s.skipped,
+      proven: acc.proven + s.proven,
+      unproven: acc.unproven + s.unproven,
+    }),
+    { objects: 0, consistent: 0, holes: 0, memberVisible: 0, probeBlocked: 0, skipped: 0, proven: 0, unproven: 0 },
+  );
+}
+
+export async function runRlsProofs(
+  stack: VerifyStack,
+  adminToken: string,
+  memberToken: string,
+  config: any,
+  opts: RlsProofOptions = {},
+): Promise<RlsReport> {
+  const probeCases = await establishProbeTargets(stack, adminToken, config);
+
+  // The base (verifier-authored) persona — the platform half, unchanged.
+  const results = await probeAsPersona(stack, adminToken, memberToken, probeCases, MUTATION);
+  const summary = summarize(results);
+
+  // [#7978] One pass per declared position the caller could provision. Each is a
+  // separate run with its own summary: a position bound to a VAMA-carrying set
+  // reads everything and proves nothing, and rolling that into one number would
+  // claim reach the fan-out does not have.
+  const positionRuns: RlsPositionRun[] = [];
+  const personas = opts.positionPersonas ?? [];
+  for (let i = 0; i < personas.length; i += 1) {
+    const persona = personas[i];
+    const personaResults = await probeAsPersona(
+      stack, adminToken, persona.token, probeCases, positionMutation(i),
+    );
+    positionRuns.push({
+      position: persona.position,
+      probe: { label: persona.label },
+      results: personaResults,
+      unproven: notProven(personaResults),
+      summary: summarize(personaResults),
+    });
+  }
+
+  // Intended reach is DERIVED from the app, so a caller that provisioned fewer
+  // personas than the app declares reports a gap instead of a narrower run.
+  const declared = declaredPositionNames(config);
+  const ran = positionRuns.map((r) => r.position);
+  const failures = opts.positionFailures ?? [];
+  const notRun = [...new Set([...declared, ...failures.map((f) => f.position)])]
+    .filter((position) => !ran.includes(position))
+    .map((position) => ({
+      position,
+      reason:
+        failures.find((f) => f.position === position)?.error ??
+        'no persona was provisioned for this declared position — the app-authored narrowing it gates was NOT exercised',
+    }));
+
+  const positionCoverage: RlsPositionCoverage = {
+    declared,
+    ran,
+    notRun,
+    ...(declared.length === 0
+      ? { note: 'this app declares no positions — there are no position personas to run, so nothing here was proven about position-gated narrowing' }
+      : {}),
+  };
 
   return {
     app: config?.manifest?.id ?? 'app',
     probe: opts.probe ?? { label: 'unspecified persona' },
     results,
-    unproven,
+    unproven: notProven(results),
     summary,
+    positionRuns,
+    positionCoverage,
+    totals: sumSummaries([summary, ...positionRuns.map((r) => r.summary)]),
   };
+}
+
+function statusMark(status: RlsStatus): string {
+  return status === 'rls-hole' ? '✗✗'
+    : status === 'rls-consistent' ? '✓'
+      : status === 'member-visible' ? '·'
+        : status === 'probe-blocked' ? '!'
+          : '–';
+}
+
+function summaryLine(s: RlsSummary): string {
+  return (
+    `${s.proven} PROVEN (${s.consistent} consistent, ${s.holes} HOLES) · ` +
+    `${s.unproven} NOT PROVEN (${s.memberVisible} member-visible, ${s.probeBlocked} probe-blocked, ${s.skipped} skipped)`
+  );
 }
 
 export function formatRlsReport(report: RlsReport): string {
   const lines: string[] = [`\n=== objectstack verify (RLS / #1994) — ${report.app} ===`];
   for (const r of report.results) {
-    const mark =
-      r.status === 'rls-hole' ? '✗✗'
-        : r.status === 'rls-consistent' ? '✓'
-          : r.status === 'member-visible' ? '·'
-            : r.status === 'probe-blocked' ? '!'
-              : '–';
-    lines.push(`  ${mark} ${r.object}  [${r.status}] ${r.detail ?? ''}`);
+    lines.push(`  ${statusMark(r.status)} ${r.object}  [${r.status}] ${r.detail ?? ''}`);
   }
   const s = report.summary;
   const p = report.probe;
@@ -532,10 +917,7 @@ export function formatRlsReport(report: RlsReport): string {
     lines.push('     Every verdict below proves LESS than it reads: without object-level grants the');
     lines.push('     object gate answers before record scope, so the by-id-write class is unreachable.');
   }
-  lines.push(
-    `  ── ${s.proven} PROVEN (${s.consistent} consistent, ${s.holes} HOLES) · ` +
-      `${s.unproven} NOT PROVEN (${s.memberVisible} member-visible, ${s.probeBlocked} probe-blocked, ${s.skipped} skipped)`,
-  );
+  lines.push(`  ── ${summaryLine(s)}`);
   // A skip must never read as a pass (#7685). The old summary line reported
   // "0 HOLES" over a run that had actually looked at 15 of 23 objects.
   if (s.unproven > 0) {
@@ -548,6 +930,38 @@ export function formatRlsReport(report: RlsReport): string {
       '  ⛔ EVERY object was probe-blocked — the persona holds no object grants at all, so this run',
       '     established nothing. Check that the probe persona was provisioned.',
     );
+  }
+
+  // ── [#7978] Position personas ──────────────────────────────────────────────
+  // Per position, never rolled into one number: a position bound to a
+  // VAMA-carrying set reads every row and proves nothing, so a combined line
+  // would claim N× the reach the fan-out actually has.
+  const cov = report.positionCoverage;
+  lines.push(
+    `\n  ── position personas (#7978) — ${cov.ran.length} of ${cov.declared.length} declared position(s) probed`,
+  );
+  if (cov.note) lines.push(`     · ${cov.note}`);
+  for (const run of report.positionRuns) {
+    const rs = run.summary;
+    lines.push(`  ▸ ${run.position}  (${run.probe.label})  ${summaryLine(rs)}`);
+    const proven = run.results.filter((r) => r.status === 'rls-consistent').map((r) => r.object);
+    if (proven.length > 0) lines.push(`      ✓ proven: ${proven.join(', ')}`);
+    for (const r of run.results.filter((x) => x.status === 'rls-hole')) {
+      lines.push(`      ✗✗ ${r.object}  [rls-hole] ${r.detail ?? ''}`);
+    }
+    if (rs.proven === 0) {
+      lines.push(
+        `      ⚠ this persona proved NOTHING — every object was member-visible, probe-blocked or skipped.`,
+      );
+    }
+  }
+  for (const missing of cov.notRun) {
+    lines.push(`  ⛔ position '${missing.position}' was NOT probed — ${missing.reason}`);
+  }
+
+  const t = report.totals;
+  if (report.positionRuns.length > 0 || cov.notRun.length > 0) {
+    lines.push(`  ══ all personas: ${summaryLine(t)}   [unit: one object × persona probe]`);
   }
   return lines.join('\n');
 }

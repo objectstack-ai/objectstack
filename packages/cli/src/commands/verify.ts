@@ -11,10 +11,13 @@ import {
   runRlsProofs,
   formatRlsReport,
   provisionRlsProbePersona,
+  provisionRlsPositionPersona,
+  declaredPositionNames,
   rlsProbeSecurity,
   type VerifyReport,
   type RlsReport,
   type RlsProbeDescriptor,
+  type RlsPositionPersonaInput,
 } from '@objectstack/verify';
 import { loadConfig } from '../utils/config.js';
 
@@ -138,7 +141,31 @@ export default class Verify extends Command {
             degraded: `probe persona provisioning failed: ${(e as Error).message}`,
           };
         }
-        rls = await runRlsProofs(rlsStack, adminToken, probeToken, config, { probe });
+        // [#7978] The base persona holds no positions by construction, so an
+        // app policy carrying `positions: [...]` is never applicable to it and
+        // the app's OWN narrowing goes unexercised. Mint one persona per
+        // DECLARED position — derived from the config, never a list written
+        // here — so the position-gated half is probed too. Provisioning lives
+        // on this side because it needs the live stack; the runner re-derives
+        // the intended reach from the config, so a position missing from this
+        // loop reports as `positionCoverage.notRun` instead of quietly
+        // shrinking the run.
+        const positionPersonas: RlsPositionPersonaInput[] = [];
+        const positionFailures: Array<{ position: string; error: string }> = [];
+        for (const position of declaredPositionNames(config)) {
+          try {
+            const persona = await provisionRlsPositionPersona(rlsStack, position);
+            positionPersonas.push({ position, token: persona.token, label: persona.email });
+          } catch (e) {
+            positionFailures.push({ position, error: (e as Error).message });
+          }
+        }
+
+        rls = await runRlsProofs(rlsStack, adminToken, probeToken, config, {
+          probe,
+          positionPersonas,
+          positionFailures,
+        });
       } finally {
         await rlsStack.stop();
       }
@@ -147,12 +174,19 @@ export default class Verify extends Command {
     // Failure contract: a "real" runtime break the app's author must see.
     // A degraded RLS probe counts: the run reported verdicts it could not have
     // established, which is worse than no verifier at all.
+    //
+    // [#7978] `totals`, not `summary`: a hole a POSITION persona found is
+    // exactly as real as one the base persona found — reading `summary` here
+    // would run the fan-out and then throw its findings away. A declared
+    // position that could not be provisioned counts for the same reason a
+    // degraded base persona does: the run covered less than its numbers read.
     const hardFailures =
       crud.summary.createFailed +
       crud.summary.readFailed +
       crud.summary.fidelityGaps +
-      (rls?.summary.holes ?? 0) +
-      (rls?.probe.degraded ? 1 : 0);
+      (rls?.totals.holes ?? 0) +
+      (rls?.probe.degraded ? 1 : 0) +
+      (rls?.positionCoverage.notRun.length ?? 0);
 
     if (flags.json) {
       this.log(JSON.stringify({ app: crud.app, config: absolutePath, multiTenant, crud, rls, hardFailures }, null, 2));
