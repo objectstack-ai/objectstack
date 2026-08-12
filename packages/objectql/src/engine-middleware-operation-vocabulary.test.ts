@@ -45,14 +45,18 @@
 //
 // ── The two halves, and why neither alone is the pin ────────────────────────
 //
-// A. THE TYPE WELD (`_forward` / `_reverse` below) — compiler-enforced, and the
-//    half that covers the case the probe structurally cannot: a NEW engine
+// A. THE WELD (`readDispatchedUnionFromEngineSource`) — reads the union out of
+//    `engine.ts` and covers the case the probe structurally cannot: a NEW engine
 //    method (`engine.purge()`) added tomorrow. Such a method still has to reach
 //    `executeWithMiddleware`, so it still has to build an `OperationContext`, so
-//    the union has to widen — and widening it breaks `_forward` at typecheck.
-//    Measured, not assumed: widening the union alone leaves every runtime
-//    assertion in this file GREEN and turns `tsc --noEmit` RED. That asymmetry
-//    is exactly why the weld is not redundant with the probe.
+//    the union has to widen — and widening it breaks the weld.
+//
+//    ⚠️ Measured the hard way: the weld was FIRST written as type-level
+//    assignability consts, and the ablation that widened the union passed
+//    BOTH vitest and `tsc --noEmit`. Cause: this package's tsconfig excludes
+//    `**/*.test.ts`, so no type assertion in any test file here is enforced by
+//    anything. A type-level pin in a test file is decoration. Do not
+//    reintroduce one.
 //
 // B. THE BEHAVIOURAL PROBE — a REAL `ObjectQL` engine driven through every
 //    public data method, recording what middleware actually receives. This is
@@ -67,9 +71,10 @@
 // about this file's own array — without the weld, that list would be a copy
 // checked against itself, which is not evidence of anything.
 
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ObjectQL } from './engine';
-import type { OperationContext } from './engine';
 import { SchemaRegistry } from './registry';
 
 vi.mock('./registry', () => {
@@ -102,8 +107,8 @@ vi.mock('./registry', () => {
 
 /**
  * Every operation the engine can hand a middleware. Welded to
- * `OperationContext['operation']` below — edit one without the other and
- * typecheck fails.
+ * `OperationContext['operation']` by `readDispatchedUnionFromEngineSource`
+ * below — edit one without the other and this suite fails.
  */
 const DISPATCHED_OPERATIONS = [
   'find',
@@ -116,19 +121,45 @@ const DISPATCHED_OPERATIONS = [
 ] as const;
 
 type Declared = (typeof DISPATCHED_OPERATIONS)[number];
-type EngineOp = OperationContext['operation'];
 
-// ── THE WELD ───────────────────────────────────────────────────────────────
-// Mutual assignability, so the pin fails in BOTH directions:
-//   `_forward` goes red when the union GAINS a member (the #7809 case — a new
-//   verb becomes dispatchable while security's step 3 still passes it raw);
-//   `_reverse` goes red when it LOSES one (this file has gone stale).
-// Deliberately type-only: `tsc --noEmit` is the enforcing runner, and these
-// carry no runtime behaviour.
-const _forward: Declared = undefined as unknown as EngineOp;
-const _reverse: EngineOp = undefined as unknown as Declared;
-void _forward;
-void _reverse;
+/**
+ * ── THE WELD ──────────────────────────────────────────────────────────────
+ * Reads the union members straight out of `engine.ts`, so the list above is a
+ * claim about the ENGINE rather than about itself.
+ *
+ * ⚠️ This began as a pair of type-level assignability consts, which was DEAD:
+ * `packages/objectql/tsconfig.json` excludes every `.test.ts`, so `tsc --noEmit`
+ * never saw them and the ablation that widened the union passed both vitest and
+ * typecheck. The enforcing runner for anything in a test file is vitest, so the
+ * weld has to hold at RUNTIME. Hence source text.
+ *
+ * Every failure to parse THROWS rather than returning a partial list: a regex
+ * that silently matches nothing would restore exactly the can't-fail property
+ * this replaced.
+ */
+function readDispatchedUnionFromEngineSource(): string[] {
+  const enginePath = fileURLToPath(new URL('./engine.ts', import.meta.url));
+  const src = readFileSync(enginePath, 'utf8');
+
+  const iface = src.match(/export interface OperationContext\s*\{([\s\S]*?)\n\}/);
+  if (!iface) {
+    throw new Error(
+      'Could not locate `export interface OperationContext` in engine.ts. ' +
+        'The #7809 vocabulary weld cannot verify itself — fix this parse rather than deleting it.',
+    );
+  }
+  const member = iface[1].match(/\n\s*operation:\s*([^;]+);/);
+  if (!member) {
+    throw new Error(
+      'Located OperationContext but not its `operation` member. See #7809 — fix the parse.',
+    );
+  }
+  const members = [...member[1].matchAll(/'([a-zA-Z]+)'/g)].map((m) => m[1]);
+  if (members.length === 0) {
+    throw new Error(`Parsed no union members from: ${member[1]}. See #7809 — fix the parse.`);
+  }
+  return members;
+}
 
 /**
  * The verbs #7809 is about. `plugin-security`'s step-2.7 gate normalises these
@@ -225,11 +256,20 @@ describe('[#7809] engine middleware dispatch vocabulary', () => {
     vi.clearAllMocks();
   });
 
-  it('declares no destructive lifecycle verb (the weld makes this a claim about the ENGINE)', () => {
-    const overlap = (DISPATCHED_OPERATIONS as readonly string[]).filter((op) =>
+  it('the weld holds: the list above IS the engine union, read from engine.ts', () => {
+    const fromSource = readDispatchedUnionFromEngineSource();
+    expect(fromSource.slice().sort()).toEqual([...DISPATCHED_OPERATIONS].sort());
+  });
+
+  it('the engine union declares no destructive lifecycle verb', () => {
+    const fromSource = readDispatchedUnionFromEngineSource();
+    const destructive = fromSource.filter((op) =>
       (DESTRUCTIVE_LIFECYCLE_VERBS as readonly string[]).includes(op),
     );
-    expect(overlap).toEqual([]);
+    // Asserted against the SOURCE list, not against `DISPATCHED_OPERATIONS` —
+    // checking this file's own array against this file's own array would prove
+    // nothing.
+    expect(destructive).toEqual([]);
   });
 
   it('a real engine driven through every public method dispatches exactly the 7', async () => {
