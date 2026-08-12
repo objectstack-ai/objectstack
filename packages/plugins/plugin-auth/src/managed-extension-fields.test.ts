@@ -73,6 +73,29 @@
  *  - `findCollisions()` is a pure function, exercised against a SYNTHETIC
  *    registry that declares a column only a widened plugin contributes — so the
  *    red direction is pinned in-repo, not merely asserted in a PR description.
+ *
+ * ## The third axis: mapping what the widening made derivable (#7994)
+ *
+ * Widening the plugin set had a consequence #7820 did not spend: the models
+ * `twoFactor` / `jwks` / `deviceCode` started being derived, while their three
+ * objects stayed in `UNMAPPED_MANAGED_OBJECTS`. The exemptions outlived their
+ * granted reason — registered because the plugins "are not loaded by this
+ * call", which had become false — and were restated once in place on the
+ * weaker reason that the models were merely unmapped. An exemption whose
+ * justification has to be rewritten to survive is a smell, not a record.
+ *
+ * The 2026-08-12 ruling mapped all three and retired the exemptions, taking
+ * coverage from nine objects to twelve, and explicitly amended the #7820
+ * ruling's 「保持不动」 line to have scoped that card only. `sys_two_factor`
+ * and `sys_jwks` hold credential material (`secret`, `privateKey`), which is
+ * precisely the kind of column D7 exists to stop an extension field from
+ * silently taking ownership of.
+ *
+ * Its acceptance criterion is the one that matters for any coverage change,
+ * and is worth copying: not "the map has twelve entries" — a count derived
+ * from the structure it checks, which cannot fail — but a SYNTHETIC COLLISION
+ * PER TABLE that must turn this suite red, and does not when the mapping is
+ * removed. That is the last describe block but one.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -113,6 +136,17 @@ const MODEL_TO_OBJECT: Record<string, string> = {
   invitation: 'sys_invitation',
   team: 'sys_team',
   teamMember: 'sys_team_member',
+  // The three opt-in-plugin models #7770 exempted and the 2026-08-12 ruling
+  // mapped (#7994). Each is derivable only because #7820 widened the plugin
+  // set above to everything `auth-manager.ts` can assemble: `twoFactor()`,
+  // `jwt()` and `deviceAuthorization()` are the plugins that contribute them,
+  // so deleting any of those from AUTH_MANAGER_PLUGINS silently withdraws the
+  // object from the collision loop again. Both halves are pinned — the
+  // coverage assertion below, and a per-table synthetic collision at the
+  // bottom of this file.
+  twoFactor: 'sys_two_factor',
+  jwks: 'sys_jwks',
+  deviceCode: 'sys_device_code',
 };
 
 interface UnmappedManagedObject {
@@ -157,41 +191,22 @@ const UNMAPPED_MANAGED_OBJECTS: Record<string, UnmappedManagedObject> = {
     noBetterAuthColumns: true,
   },
 
-  // ── Opt-in core plugins: derived, but deliberately not mapped ─────────────
-  // #7770 registered these three because this file's getAuthTables() call did
-  // not load their plugins. #7820 widened that call to the auth manager's whole
-  // set, so the models ARE derived now — the reasons below are restated to say
-  // so rather than keep claiming an absence that stopped being true. What did
-  // NOT change is the disposition: mapping them is a coverage EXPANSION #7770
-  // deferred and the 2026-08-12 ruling kept unmoved, so `MODEL_TO_OBJECT` still
-  // does not name them and `betterAuthFieldsByObject()` still drops them.
+  // ── sys_two_factor / sys_jwks / sys_device_code are NO LONGER HERE ────────
+  // #7770 exempted all three because this file's getAuthTables() call did not
+  // load their plugins. #7820 widened the call, which made that reason false,
+  // and the exemptions survived one restatement on a weaker reason: the models
+  // were derived, merely unmapped. The 2026-08-12 ruling (#7994) ended that —
+  // 「map twoFactor / jwks / deviceCode into MODEL_TO_OBJECT, add the three
+  // COVERED_OBJECTS entries, and retire their three #7770 exemptions」 —
+  // explicitly amending the #7820 ruling's 「保持不动」 line to have scoped
+  // that card only. Coverage went 9 → 12 objects.
   //
-  // The safety note is the load-bearing half and is untouched: this costs
-  // nothing while no extension field is declared on them, and the moment one
-  // is, the "nothing is silently skipped" assertion below turns red and the
-  // mapping has to be done properly. Column-level parity for all three is
-  // covered meanwhile by `better-auth-schema-parity.test.ts`.
-  sys_two_factor: {
-    reason:
-      "Owned by better-auth's opt-in `twoFactor` plugin (model `twoFactor`). The plugin is in this "
-      + "file's getAuthTables() call since #7820, but MODEL_TO_OBJECT deliberately does not map the "
-      + 'object — mapping it is a coverage expansion, not part of that fix. No extension field is '
-      + 'declared on it.',
-  },
-  sys_device_code: {
-    reason:
-      "Owned by better-auth's opt-in `deviceAuthorization` plugin (model `deviceCode`). The plugin "
-      + "is in this file's getAuthTables() call since #7820, but MODEL_TO_OBJECT deliberately does "
-      + 'not map the object — mapping it is a coverage expansion, not part of that fix. No extension '
-      + 'field is declared on it.',
-  },
-  sys_jwks: {
-    reason:
-      "Owned by better-auth's opt-in `jwt` plugin (model `jwks`). The plugin is in this file's "
-      + 'getAuthTables() call since #7820, but MODEL_TO_OBJECT deliberately does not map the object '
-      + '— mapping it is a coverage expansion, not part of that fix. No extension field is declared '
-      + 'on it.',
-  },
+  // ⛔ Do not re-add them here to silence a failure. An exemption is what makes
+  // the collision loop skip a table, and these three hold credential-adjacent
+  // columns (`twoFactor.secret`, `jwks.privateKey`): re-exempting reopens
+  // exactly the invisible-hole shape #7770 was filed for. If the real fix is
+  // to stop deriving one of them, remove its plugin from AUTH_MANAGER_PLUGINS
+  // and say why — the coverage assertion will then demand this list change too.
 
   // ── Plugins getAuthTables() cannot ADDRESS as an ObjectStack object (#3653) ─
   // Both plugins are now in the call (#7820), so their models do appear in the
@@ -231,7 +246,7 @@ const UNMAPPED_MANAGED_OBJECTS: Record<string, UnmappedManagedObject> = {
 const MAPPED_OBJECTS: readonly string[] = Object.values(MODEL_TO_OBJECT);
 
 /**
- * The nine objects this guard has real collision coverage for, written out as
+ * The twelve objects this guard has real collision coverage for, written out as
  * a LITERAL rather than derived from `MODEL_TO_OBJECT`.
  *
  * Deriving it would have made the pin below unable to see the regression it
@@ -240,6 +255,12 @@ const MAPPED_OBJECTS: readonly string[] = Object.values(MODEL_TO_OBJECT);
  * collision loop. Measured — an ablation that removed `teamMember` left a
  * derived version of this pin green and was caught only by the accounting
  * assertion. Two independent lists, so one of them has to be wrong out loud.
+ *
+ * ⚠️ This list is a COUNT, and a count certifies nothing on its own: it says
+ * which objects the loop reaches, not that reaching them judges anything. The
+ * assertion that the three objects added in #7994 are really judged is the
+ * per-table synthetic collision at the bottom of this file, which fails the
+ * moment a mapping is deleted.
  */
 const COVERED_OBJECTS: readonly string[] = [
   'sys_user',
@@ -251,6 +272,10 @@ const COVERED_OBJECTS: readonly string[] = [
   'sys_invitation',
   'sys_team',
   'sys_team_member',
+  // #7994 — the three opt-in-plugin tables, mapped by the 2026-08-12 ruling.
+  'sys_two_factor',
+  'sys_jwks',
+  'sys_device_code',
 ];
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -472,14 +497,14 @@ describe('managed extension fields (ADR-0105 D7)', () => {
     expect(byObject.sys_user?.size ?? 0).toBeGreaterThan(0);
   });
 
-  it('keeps the nine mapped models covered, exactly (coverage cannot shrink)', () => {
+  it('keeps the twelve mapped models covered, exactly (coverage cannot shrink)', () => {
     // Two ways an object can silently withdraw from the collision loop, and
     // this pins both against the same literal: the LIBRARY stops emitting the
     // model, or the MAP stops naming it. Either is the #7770 shape arriving
     // as a regression rather than as a pre-existing absence.
     expect(
       [...MAPPED_OBJECTS].sort(),
-      'MODEL_TO_OBJECT no longer maps exactly the nine covered objects — a deleted mapping '
+      'MODEL_TO_OBJECT no longer maps exactly the twelve covered objects — a deleted mapping '
         + 'withdraws an object from the collision loop as surely as a missing one ever did.',
     ).toEqual([...COVERED_OBJECTS].sort());
     expect(
@@ -737,6 +762,88 @@ describe('the collision rule goes red on a FUTURE overlap (#7820)', () => {
     // A rule that reported everything would satisfy the three tests above while
     // making the real assertion useless.
     expect(findCollisions({ sys_user: new Set(['manager_id']) }, byObject)).toEqual([]);
+  });
+});
+
+describe('the three newly mapped tables are really judged (#7994)', () => {
+  // The 2026-08-12 ruling's acceptance criterion, stated as tests rather than
+  // as a count. "Coverage goes 9 → 12" is satisfied by the COVERED_OBJECTS pin
+  // above — but that pin only proves the collision loop REACHES these tables.
+  // What follows proves it JUDGES them: each case names a column better-auth
+  // really owns on that table at the pinned version and requires the rule to
+  // report it.
+  //
+  // These fail the moment a mapping is deleted, which is what makes them worth
+  // having: with `twoFactor` out of MODEL_TO_OBJECT, `byObject.sys_two_factor`
+  // is undefined, `findCollisions`'s `if (!owned) continue` swallows the
+  // synthetic field, the call returns `[]` and every expectation here goes red.
+  // (Verified by ablation before this landed, in both directions.)
+  //
+  // Deliberately driven through a SYNTHETIC registry rather than by adding
+  // entries to `MANAGED_EXTENSION_FIELDS`: that map is also the ADR-0092 D2
+  // write whitelist, so a column added there widens what a generic write
+  // surface may touch. On `sys_two_factor.secret` or `sys_jwks.private_key`
+  // that is a security change, and D7 coverage must never be bought with one.
+  const byObject = betterAuthFieldsByObject();
+
+  const OWNED: Array<[object_: string, snake: string, camel: string, plugin: string]> = [
+    ['sys_two_factor', 'backup_codes', 'backupCodes', 'twoFactor'],
+    ['sys_jwks', 'private_key', 'privateKey', 'jwt'],
+    ['sys_device_code', 'user_code', 'userCode', 'deviceAuthorization'],
+  ];
+
+  for (const [object_, snake, camel, plugin] of OWNED) {
+    it(`reports a synthetic collision on ${object_} (both spellings)`, () => {
+      const why =
+        `${object_} was mapped into MODEL_TO_OBJECT by the 2026-08-12 ruling so that a platform `
+        + `extension field colliding with better-auth's own column is caught here. A green result `
+        + `means the table is back OUTSIDE the collision loop — most likely its mapping was `
+        + `deleted, or the ${plugin} plugin left AUTH_MANAGER_PLUGINS so no model is derived for `
+        + `it. Either way this guard is answering about a table it is not looking at, which is the `
+        + `#7770 defect. Do NOT "fix" this by re-adding an UNMAPPED_MANAGED_OBJECTS exemption.`;
+      expect(findCollisions({ [object_]: new Set([snake]) }, byObject), why)
+        .toEqual([`${object_}.${snake}`]);
+      // better-auth authors camelCase; `toSnakeCase` records both spellings, so
+      // a registry that happened to use the library's own spelling must not
+      // slip past a snake_case-only comparison.
+      expect(findCollisions({ [object_]: new Set([camel]) }, byObject), why)
+        .toEqual([`${object_}.${camel}`]);
+    });
+  }
+
+  it('stays silent on plausible extension names these tables do NOT own', () => {
+    // Non-vacuity, per table: a rule that reported every field would satisfy
+    // the three cases above while making the real registry assertion useless.
+    // Each name below is one a future ObjectStack extension might genuinely
+    // take, and none is in better-auth's surface at the pinned version.
+    expect(findCollisions({ sys_two_factor: new Set(['mfa_policy_id']) }, byObject)).toEqual([]);
+    expect(findCollisions({ sys_jwks: new Set(['rotation_note']) }, byObject)).toEqual([]);
+    expect(findCollisions({ sys_device_code: new Set(['approved_by_id']) }, byObject)).toEqual([]);
+  });
+
+  it('derives a credential-bearing column set for each of the three', () => {
+    // The ② lens of the card: these tables are why the expansion was worth
+    // doing. If better-auth ever moves `secret` / `privateKey` / `deviceCode`
+    // off these models, the collision cases above would start passing for the
+    // wrong reason (nothing owned, nothing to collide with) — this says so
+    // first, and names the column that moved.
+    expect(byObject.sys_two_factor?.has('secret'), 'twoFactor.secret').toBe(true);
+    expect(byObject.sys_jwks?.has('private_key'), 'jwks.privateKey').toBe(true);
+    expect(byObject.sys_device_code?.has('device_code'), 'deviceCode.deviceCode').toBe(true);
+  });
+
+  it('carries no exemption for the three tables any more', () => {
+    // The ruling's second half, in-repo. The stale-entry assertion above
+    // already fails on a mapped-AND-exempt object; this states the intent
+    // directly, so the next reader sees a removal that was decided rather
+    // than an entry someone lost track of.
+    for (const object_ of ['sys_two_factor', 'sys_jwks', 'sys_device_code']) {
+      expect(
+        UNMAPPED_MANAGED_OBJECTS[object_],
+        `${object_} is exempt again. An exemption is what makes the collision loop skip a table, `
+          + `so re-adding one here silently un-does the 2026-08-12 ruling's coverage expansion.`,
+      ).toBeUndefined();
+    }
   });
 });
 

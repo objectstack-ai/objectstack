@@ -15,7 +15,9 @@ import {
 import { CoreServiceName } from '@objectstack/spec/system';
 import type { IAutomationService, ISecurityService } from '@objectstack/spec/contracts';
 import { isServiceServeable } from '../service-serveable.js';
-import { validationFailure } from '../validation-failure.js';
+import {
+    validationFailure, validationFailureDetails, fieldsFromZodIssues, VALIDATION_FAILED_STATUS,
+} from '../validation-failure.js';
 import { ExecutionStatus } from '@objectstack/spec/automation';
 import { parseEnumParam, parseIntegerParam, parseStringParam } from '../query-param.js';
 import { capabilityUnavailable } from './unavailable.js';
@@ -231,6 +233,98 @@ async function refuseUngrantedRunRead(
 }
 
 /**
+ * [#8055] A refusal thrown by `registerFlow` is the CALLER's metadata being
+ * wrong — serve it as one.
+ *
+ * Every throw `registerFlow` can raise is a verdict on the definition in the
+ * request body: `FlowSchema.parse` (a missing `label`, an unknown node key),
+ * `validateControlFlow` (a malformed ADR-0031 region), `validateNodeConfigKeys`
+ * (#4277's undeclared config key) and `validateFlowExpressions` (ADR-0032's
+ * malformed predicate). None of them carries a `.status`, so both dispatcher
+ * error exits fell back to **500 INTERNAL_ERROR** for four measured bodies
+ * (#8055) — and 500 is the one thing the answer is not. Two costs, the same
+ * pair #7535 spelled out on the sibling `/toggle` route:
+ *
+ *  - A retry-on-5xx client re-sends a request that can never succeed.
+ *  - An agent authoring a flow reads "the server broke" instead of "your
+ *    metadata is wrong". Case 4 is the sharpest: #4277 shaped that message so
+ *    an authoring agent can SELF-CORRECT ("unknown config key `x` … not
+ *    declared by this node type's configSchema … Declared here: …"), and it
+ *    arrived under a status telling the agent to try again unchanged.
+ *
+ * ⛔ This changes the CLASS and the ENVELOPE only. Which bodies are refused is
+ * decided entirely inside the engine and is not touched here — a definition
+ * that registered before still registers, and every one that was refused is
+ * still refused, with the engine's own message intact (a 400 never reaches the
+ * #3867 5xx sanitiser, so the #4277 prescription survives verbatim).
+ *
+ * ## Why the whole call, rather than a recognised subset
+ *
+ * The alternative is to reclassify only the shapes this file can name — a
+ * `ZodError`, or an engine message matched by its prose. #7535's fix rejected
+ * exactly that ("teaching a shared catch to recognise one engine's message
+ * string would make every domain's not-found depend on that prose"), and here
+ * it would also be wrong on the merits: `registerFlow` IS the parse of a
+ * caller-supplied document, so "the definition is bad" is the honest default
+ * for a refusal it raises, not a guess about which one it raised.
+ *
+ * The escape hatch is the producer's, and it is the same precedence
+ * `errorFromThrown` already applies: an error that DECLARES its own class with
+ * `.status` / `.statusCode` keeps it. Nothing in the engine declares one today,
+ * so this is not a live branch — it is the seam that keeps a future engine-side
+ * "the flow store is unreachable" (a genuine 503) from being answered as the
+ * author's fault.
+ *
+ * ## Why a `fields[]` entry with no path for the non-Zod refusals
+ *
+ * The engine's own messages LOCATE the fault in prose (`node 'n' (notify):
+ * unknown config key \`totallyBogusKey\` at config.totallyBogusKey`), and
+ * re-deriving that location by parsing the sentence is the same prose
+ * dependency rejected above. So the entry addresses the body root — the
+ * convention {@link fieldsFromZodIssues} already uses for a failure with no
+ * path to point at — and carries the engine's text as its message. `code` is
+ * `invalid_value`, the ADR-0114 catalog's "rejected for a reason no other
+ * member names".
+ *
+ * ⚠️ The Zod branch's per-issue `code` is whatever {@link fieldsFromZodIssues}
+ * produces, which today is Zod's own vocabulary rather than the ADR-0114 D3
+ * catalog. That pass-through is this package's, not this route's — `/analytics`
+ * and `/notifications` emit through the same helper — so it is filed as #8124
+ * rather than forked here into a third dialect.
+ */
+function flowDefinitionRefusal(err: any): unknown {
+    // The producer declared its class; the boundary does not overrule it.
+    if (typeof err?.status === 'number' || typeof err?.statusCode === 'number') return err;
+    // Already the house shape (a service that throws `validationFailure` itself)
+    // — re-wrapping would only duplicate the message.
+    if (validationFailureDetails(err)) return err;
+
+    // A Zod parse failure. The raw issue array must NOT reach the wire: it is
+    // Zod's internal shape on a position the house envelope owns, and
+    // `errorFromThrown` copies any `.issues` into `details` verbatim — which is
+    // precisely how `{expected:'string', code:'invalid_type', path:['nodes',0,
+    // 'label']}` was answered to a caller. Mapped to `fields[]` here, so the
+    // converted error carries no `.issues` for that branch to find.
+    const issues: unknown[] | undefined = Array.isArray(err?.issues) ? err.issues : undefined;
+    if (issues && issues.every((i: any) => Array.isArray(i?.path))) {
+        const fields = fieldsFromZodIssues(issues as Parameters<typeof fieldsFromZodIssues>[0]);
+        return validationFailure(
+            fields.length > 0
+                ? `Invalid flow definition: ${fields.map((f) => `${f.field}: ${f.message}`).join('; ')}`
+                : 'Invalid flow definition',
+            fields,
+        );
+    }
+
+    const message = typeof err?.message === 'string' && err.message.trim() !== ''
+        ? err.message
+        : 'Invalid flow definition';
+    return validationFailure(message, [
+        { field: '(body)', code: 'invalid_value', message },
+    ]);
+}
+
+/**
  * Handles Automation requests
  * path: sub-path after /automation/
  *
@@ -383,7 +477,22 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                     { field: 'name', code: body.name === undefined ? 'required' : 'invalid_type', message: 'expected a non-empty string' },
                 ]);
             }
-            automationService.registerFlow(body.name, body);
+            // [#8055] The engine's verdict on the definition is served as a
+            // 400, not a 500 — see `flowDefinitionRefusal` above for what that
+            // does and does not change. Caught and RETURNED (rather than
+            // rethrown) for the reason the resume branch below already returns
+            // its engine-originated refusals: `dispatch()` re-throws everything
+            // that is not a permission denial, so a transport calling it
+            // directly would otherwise get an exception where every other
+            // refusal on this domain hands back a response.
+            try {
+                automationService.registerFlow(body.name, body);
+            } catch (e) {
+                return {
+                    handled: true,
+                    response: deps.errorFromThrown(flowDefinitionRefusal(e), VALIDATION_FAILED_STATUS),
+                };
+            }
             return { handled: true, response: deps.success(body) };
         }
     }
