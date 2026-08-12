@@ -25,6 +25,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectQL } from './engine.js';
 import { collectInternalReadFields, SECRET_MASK } from './secret-fields.js';
+import type { ServiceObject } from '@objectstack/spec/data';
 
 // ---- minimal stub driver (equality-only WHERE) ----------------------------
 // Rows leave the driver as COPIES, as a real driver's do — see the note in
@@ -105,7 +106,7 @@ function makeStubDriver() {
  * better-auth-managed identity object. `managedBy` is set on purpose — it is
  * what makes `password` retyping inert, and the flag must work in spite of it.
  */
-const tokenObject = {
+const tokenObject: ServiceObject = {
   name: 'itest_api_key',
   label: 'API Key',
   managedBy: 'better-auth',
@@ -122,7 +123,7 @@ const tokenObject = {
 };
 
 /** No flagged field — the fast path, and the proof the flag is opt-in. */
-const plainObject = {
+const plainObject: ServiceObject = {
   name: 'itest_plain',
   label: 'Plain',
   fields: {
@@ -136,8 +137,9 @@ async function buildEngine() {
   const { driver, stores } = makeStubDriver();
   engine.registerDriver(driver, true);
   await engine.init();
-  engine.registry.registerObject(tokenObject);
-  engine.registry.registerObject(plainObject);
+  // `packageId` is required — these fixtures own their objects outright.
+  engine.registry.registerObject(tokenObject, 'internal-fields-test');
+  engine.registry.registerObject(plainObject, 'internal-fields-test');
   return { engine, stores };
 }
 
@@ -270,7 +272,7 @@ describe('#7728: the `internal` field flag omits a value from the generic data p
     });
 
     it('survives repeated reads — the strip is not cumulative on storage', async () => {
-      const created = await seed();
+      await seed();
       for (let i = 0; i < 3; i++) {
         await ctx.engine.find('itest_api_key', { where: { key: HASH } });
       }
