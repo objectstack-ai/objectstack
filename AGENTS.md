@@ -365,8 +365,9 @@ Even inside your own worktree, operate defensively:
    artifacts check clean. Sequence after a merge unchanged from §9: rebuild, then
    `check:generated --fix` — you just cannot forget it. Worth knowing:
    - **The MERGE commit itself is the one exemption, and it is a deferral, not a
-     pass** (#8047). `scripts/pm/os-regen-merge.sh` is the in-repo authority for
-     landing one of these branches, and its step 3 commits the merge **before**
+     pass** (maintainer ruling 2026-08-12). `scripts/pm/os-regen-merge.sh` is the
+     in-repo authority for landing one of these branches, and its step 3 commits
+     the merge **before**
      regenerating on purpose: the driver exits 0 while silently dropping one side, so
      only a separate regeneration commit on a known-good base lets a reviewer read
      "what main brought" apart from "what the change produces". `pre-commit` records
