@@ -1,7 +1,12 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { PermissionSetSchema, type PermissionSet } from '@objectstack/spec/security';
-import { ORGANIZATION_ADMIN, ORGANIZATION_ADMIN_NO_BYPASS } from '@objectstack/spec';
+import {
+  ORGANIZATION_ADMIN,
+  ORGANIZATION_ADMIN_NO_BYPASS,
+  BUILTIN_IDENTITY_ORG_ADMIN,
+  BUILTIN_IDENTITY_ORG_OWNER,
+} from '@objectstack/spec';
 import {
   MCP_AGENT_PERMISSION_SET_READ,
   MCP_AGENT_PERMISSION_SET_WRITE,
@@ -313,6 +318,55 @@ const baseDefaultPermissionSets: PermissionSet[] = [
         object: 'sys_invitation',
         operation: 'select',
         using: 'organization_id == current_user.organization_id',
+      },
+      // [#8095] The org-admin half of the invitation narrowing, and the reason
+      // it needs a SECOND policy rather than leaning on the one above.
+      //
+      // `member_default` now row-scopes `sys_invitation` to the addressee, and
+      // that set resolves for EVERY authenticated principal (the `everyone`
+      // anchor) — org owners and admins included. Policies OR-combine, so an
+      // admin is only unnarrowed while some policy of theirs still admits the
+      // rest of the ledger. Two mechanisms were supposed to do that, and in the
+      // DEFAULT posture neither does:
+      //   - the wildcard `viewAllRecords` short-circuit skips Layer 1 whole —
+      //     but ADR-0105 D4 withholds those bits from a wall-less deployment,
+      //     which is where `organization_admin_no_bypass` comes from;
+      //   - `sys_invitation_org` above is a PLATFORM TENANT POLICY, and
+      //     `collectRLSPolicies` strips those when org isolation is inactive
+      //     (ADR-0105 D3) — correctly, since `current_user.organization_id`
+      //     means nothing without a wall.
+      // Measured on a stock `single`-posture boot: with only the member-side
+      // scope in place, the org OWNER read ZERO invitations. The Invitations
+      // page would have gone blank for the one persona entitled to it, on the
+      // default posture, as a side effect of a member-side fix.
+      //
+      // So the admission is stated in its own right, on the axis that survives
+      // both mechanisms: `positions` (ADR-0090 P2's applicability domain — the
+      // same lever `owner_only_writes` uses to keep a members-only restriction
+      // off admins), with a predicate carrying no tenant token for the strip to
+      // key on. `id != null` is every row of this object, said plainly: the
+      // organization boundary is NOT this policy's job — Layer 0 is the tenant
+      // wall (ADR-0095 D1) and AND-composes ahead of it, so the widest this can
+      // ever reach is the admin's own organization, which is exactly what
+      // `sys_invitation_org` already declares. It is the same grant, spelled so
+      // a wall-less deployment keeps it.
+      //
+      // Why a `positions` DOMAIN rather than dropping the member-side scope's
+      // reach: the domain here only ever WIDENS, so a principal it does not
+      // match keeps the addressee scope and fails closed. Putting the domain on
+      // the narrowing instead would invert that — anyone outside the listed
+      // positions (an org-less session, a role that normalizes to neither name)
+      // would match no policy at all, and no policy means NO row filter, which
+      // is precisely the wide read #8095 is about.
+      //
+      // `delegated_admin` is deliberately absent: the ruling narrows the ledger
+      // to owner/admin, and that role normalizes to neither name.
+      {
+        name: 'sys_invitation_org_admin',
+        object: 'sys_invitation',
+        operation: 'select',
+        using: 'id != null',
+        positions: [BUILTIN_IDENTITY_ORG_OWNER, BUILTIN_IDENTITY_ORG_ADMIN],
       },
       {
         name: 'sys_team_org',
@@ -634,13 +688,17 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       //     invitee who cannot READ their row cannot act on it. Narrowing
       //     without this predicate would break acceptance while looking like a
       //     permissions fix.
-      // Owner/admin are unaffected: they hold `organization_admin`, whose
-      // wildcard `viewAllRecords` short-circuits Layer 1 on a better-auth-managed
-      // object, and whose `sys_invitation_org` policy (`organization_id ==
-      // current_user.organization_id`) carries the full ledger in the wall-less
-      // `organization_admin_no_bypass` variant where the bypass is absent.
-      // Policies OR-combine across resolved sets, so this predicate can only
-      // widen — never narrow — what an admin already sees.
+      // ⚠️ This set resolves for EVERY authenticated principal (the `everyone`
+      // anchor), so the predicate binds org owners and admins too — and the
+      // arrival of a first policy on an object that had none is a NARROWING for
+      // whoever it reaches, not a no-op. Keeping the admin whole therefore takes
+      // an explicit admission on their side: `sys_invitation_org_admin` in
+      // `organization_admin` (which the `_no_bypass` variant inherits). Read its
+      // comment before touching either one — the two mechanisms that look like
+      // they already cover the admin (the `viewAllRecords` short-circuit and
+      // `sys_invitation_org`) are BOTH absent on the default `single` posture,
+      // and with only this policy in place the org owner measurably read zero
+      // invitations.
       //
       // `email` (not `user_id`): an invitation predates the account it invites,
       // so the addressee is identified by address. `current_user.email` is the

@@ -24,8 +24,24 @@ enough for targeted social engineering.
 
 **What changed.** `member_default` and `viewer_readonly` each gain one
 row-level policy, `sys_invitation_self` (`select`,
-`email == current_user.email`). The full ledger is now owner/admin only, via
-`organization_admin` exactly as before.
+`email == current_user.email`), and `organization_admin` (with the wall-less
+`organization_admin_no_bypass` variant derived from it) gains
+`sys_invitation_org_admin` — the org-administration side of the same ledger,
+scoped by `positions` to `org_owner` / `org_admin`.
+
+The second policy is not decoration. `member_default` resolves for **every**
+authenticated principal (the `everyone` anchor), so the addressee scope reaches
+org admins too, and on the **default** `single` posture neither mechanism that
+normally keeps an admin whole is present: the wildcard
+`viewAllRecords` short-circuit is withheld from a wall-less deployment
+(ADR-0105 D4), and `sys_invitation_org` is stripped as a platform tenant policy
+when org isolation is inactive (ADR-0105 D3). Measured on a stock boot with only
+the member-side scope in place, the org **owner** read zero invitations — the
+Invitations page would have gone blank for the one persona entitled to it.
+`sys_invitation_org_admin` states the admission on the axis that survives both,
+carrying no tenant token for the strip to key on; the organization boundary
+remains Layer 0's, which AND-composes ahead of it, so its widest reach is the
+admin's own organization — exactly what `sys_invitation_org` already declared.
 
 **The invitee still sees their own invitation**, and that half is not
 incidental: the recipient-side row actions on `sys_invitation`
@@ -34,6 +50,11 @@ incidental: the recipient-side row actions on `sys_invitation`
 cannot act on it. The object-level read bit is therefore deliberately left open
 and the narrowing done at the row level — closing the object would have broken
 acceptance while looking like the same fix.
+
+**Not covered by the ruling, and therefore unchanged here:** a
+`delegated_admin` normalizes to neither `org_owner` nor `org_admin`, so that
+role now reads only its own row through the data API even though it may issue
+invitations. Filed separately rather than decided in this PR.
 
 **Unaffected.** Every better-auth organization endpoint
 (`invite-member`, `accept-invitation`, `reject-invitation`,

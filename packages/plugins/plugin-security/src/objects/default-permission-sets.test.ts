@@ -137,18 +137,31 @@ describe('sys_invitation is row-scoped to its addressee (#8095)', () => {
   );
 
   it('organization_admin keeps the ORG-wide ledger — the ruling narrowed members, not admins', () => {
-    // The other half of the ruling. Owner/admin reach the full ledger two ways:
-    // `organization_admin`'s wildcard `viewAllRecords` short-circuits Layer 1 on
-    // a better-auth-managed object, and the wall-less
-    // `organization_admin_no_bypass` variant (which drops that bit) still
-    // carries this policy. Policies OR-combine across resolved sets, so
-    // `member_default`'s self-scope can never subtract from it.
+    // The other half of the ruling, and the half that is easy to get wrong:
+    // `member_default` resolves for admins too, so the member-side scope reaches
+    // them, and the two mechanisms that look like they already protect an admin
+    // are both absent on the DEFAULT `single` posture — the `viewAllRecords`
+    // short-circuit is withheld from `organization_admin_no_bypass` (ADR-0105
+    // D4), and `sys_invitation_org` is stripped as a platform tenant policy when
+    // org isolation is inactive (ADR-0105 D3). Only `sys_invitation_org_admin`
+    // survives both, which is why it must be present on BOTH variants.
     for (const setName of ['organization_admin', 'organization_admin_no_bypass']) {
       const scoped = policiesFor(setName, 'sys_invitation');
-      expect(scoped.map((p) => p.name), `${setName} sys_invitation policies`).toEqual([
+      expect(scoped.map((p) => p.name).sort(), `${setName} sys_invitation policies`).toEqual([
         'sys_invitation_org',
+        'sys_invitation_org_admin',
       ]);
-      expect(scoped[0].using).toBe('organization_id == current_user.organization_id');
+
+      const admission = scoped.find((p) => p.name === 'sys_invitation_org_admin');
+      // No tenant token — that is what keeps the strip from taking it.
+      expect(admission.using).not.toContain('current_user.organization_id');
+      expect(admission.using).toBe('id != null');
+      // Domained to the org-administration identities, so it can only WIDEN.
+      // A principal it does not match keeps the addressee scope and fails
+      // closed; putting the domain on the narrowing instead would make "no
+      // matching position" mean "no policy" — i.e. no row filter at all.
+      expect(admission.positions.sort()).toEqual(['org_admin', 'org_owner']);
+      expect(admission.operation).toBe('select');
     }
   });
 });
