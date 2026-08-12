@@ -41,13 +41,19 @@ import { AuthManager } from './auth-manager';
 // ───────────────────────────────────────────────────────────────────────────
 
 interface MemoryRow { id: string; [column: string]: unknown }
+/**
+ * The index signature is load-bearing, not decoration: it is what makes this
+ * type assignable to `EngineDeleteDispatchInput` / `EngineUpdateDispatchInput`,
+ * so the dispatch predicates below are called with a REAL type rather than
+ * through an `as any` the query-options rule (#4918) exists to refuse.
+ */
 interface MemoryQuery {
   where?: Record<string, unknown>;
   fields?: string[];
   limit?: number;
   offset?: number;
-  orderBy?: Array<{ field: string; order?: string }>;
   multi?: boolean;
+  [option: string]: unknown;
 }
 
 /**
@@ -247,7 +253,8 @@ describe('#7735 — POST /change-email is wired, and confirmed by email', () => 
 
     await post(manager, '/change-email', cookie, { newEmail: 'new@example.com' });
 
-    const verificationUrl = (email.sent.at(-1)?.data as { verificationUrl?: string } | undefined)?.verificationUrl;
+    const lastSent = email.sent[email.sent.length - 1];
+    const verificationUrl = (lastSent?.data as { verificationUrl?: string } | undefined)?.verificationUrl;
     expect(typeof verificationUrl, 'the change-email mail must carry a verification link').toBe('string');
 
     const applied = await manager.handleRequest(new Request(verificationUrl!, { headers: { cookie } }));
