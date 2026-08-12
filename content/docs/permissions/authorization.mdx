@@ -360,7 +360,11 @@ Five mechanisms — four CI-time, one runtime — make the security posture a
   ADR-0056 D10): every authorization primitive sits in exactly one honest
   state — `enforced` (must name its enforcement site; high-risk rows must
   reference an end-to-end dogfood proof), `experimental`, or `removed`. A new
-  fail-open or a deleted proof fails CI.
+  fail-open or a deleted proof fails CI. A cited proof must also **name the rows
+  it proves** — a header `// authz-row: <id>` line — and CI asserts the pairing
+  is mutual in both directions (#7976), so a row cannot cite a test that
+  exercises a neighbouring primitive, and a shared proof file has to say which
+  rows it covers.
 - **Liveness ledger** (`packages/spec/liveness/`, ADR-0049/0054): every
   governed spec property is classified live / experimental / dead, with
   author-time warnings for declared-but-unenforced flags.
