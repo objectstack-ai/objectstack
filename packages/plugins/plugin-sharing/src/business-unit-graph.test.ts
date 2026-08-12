@@ -113,6 +113,83 @@ describe('BusinessUnitGraphService — subtree expansion', () => {
   });
 });
 
+/**
+ * [#7807] The two widths, pinned as a PAIR on one three-level tree.
+ *
+ * A division ⊃ department ⊃ office tree is the floor for this: on a two-level
+ * fixture "exactly one unit" and "unit plus its children" can agree by
+ * accident, so a two-level pin cannot tell the fixed behaviour from the
+ * defect. Each assertion below names the width it guards, because a change
+ * that narrowed BOTH kinds would satisfy the `business_unit` half while
+ * destroying the distinction the spec draws between them.
+ */
+const DIV_UNITS: UnitRow[] = [
+  { id: 'bu_div', organization_id: null, active: true },
+  { id: 'bu_dept', parent_business_unit_id: 'bu_div', organization_id: null, active: true },
+  { id: 'bu_office', parent_business_unit_id: 'bu_dept', organization_id: null, active: true },
+];
+const DIV_MEMBERS: MemberRow[] = [
+  { business_unit_id: 'bu_div', user_id: 'u_div' },
+  { business_unit_id: 'bu_dept', user_id: 'u_dept' },
+  { business_unit_id: 'bu_office', user_id: 'u_office' },
+];
+
+describe('BusinessUnitGraphService — the two widths are actually two widths (#7807)', () => {
+  const graph = () => new BusinessUnitGraphService({ engine: makeEngine(DIV_UNITS, DIV_MEMBERS) });
+
+  it('NARROW — expandUnitMembers returns only the named unit, three levels notwithstanding', async () => {
+    expect(await graph().expandUnitMembers('bu_div')).toEqual(['u_div']);
+  });
+
+  it('WIDE — expandUsers still returns the whole subtree (the control)', async () => {
+    expect((await graph().expandUsers('bu_div')).sort()).toEqual(['u_dept', 'u_div', 'u_office']);
+  });
+
+  it('the narrow width skips even a DIRECT child, not merely the grandchild', async () => {
+    const users = await graph().expandUnitMembers('bu_div');
+    expect(users).not.toContain('u_dept');
+    expect(users).not.toContain('u_office');
+  });
+
+  it('a mid-tree unit expands to its own members only', async () => {
+    expect(await graph().expandUnitMembers('bu_dept')).toEqual(['u_dept']);
+  });
+
+  it('an inactive unit contributes nobody to the narrow width either', async () => {
+    const units = DIV_UNITS.map((u) => (u.id === 'bu_div' ? { ...u, active: false } : u));
+    const g = new BusinessUnitGraphService({ engine: makeEngine(units, DIV_MEMBERS) });
+    expect(await g.expandUnitMembers('bu_div')).toEqual([]);
+  });
+
+  it('an unknown unit expands to nobody rather than to everybody', async () => {
+    expect(await graph().expandUnitMembers('bu_nope')).toEqual([]);
+    expect(await graph().expandUnitMembers('')).toEqual([]);
+  });
+
+  it('the narrow width is org-predicated exactly like the wide one', async () => {
+    const g = new BusinessUnitGraphService({
+      engine: makeEngine(DIV_UNITS, DIV_MEMBERS),
+      organizationId: 'org_a',
+    });
+    // Seeded (null-org) units are not visible to an org-scoped rule — the
+    // same `[divergence]` posture the wide width holds below.
+    expect(await g.expandUnitMembers('bu_div')).toEqual([]);
+  });
+
+  it('the two widths do NOT share a cache entry for the same unit id', async () => {
+    // Both maps are keyed by BU id. One shared map would let whichever width
+    // ran first answer for the other — the over-grant returning through the
+    // cache door.
+    const g = graph();
+    expect(await g.expandUnitMembers('bu_div')).toEqual(['u_div']);
+    expect((await g.expandUsers('bu_div')).sort()).toEqual(['u_dept', 'u_div', 'u_office']);
+    // …and in the opposite order, on a fresh instance.
+    const g2 = graph();
+    expect((await g2.expandUsers('bu_div')).sort()).toEqual(['u_dept', 'u_div', 'u_office']);
+    expect(await g2.expandUnitMembers('bu_div')).toEqual(['u_div']);
+  });
+});
+
 describe('BusinessUnitGraphService — org scoping (#3807)', () => {
   it('an org-less rule (today’s materialized shape) expands seeded units fine', async () => {
     // `expandRecipient` passes `rule.organization_id ?? null`, and every

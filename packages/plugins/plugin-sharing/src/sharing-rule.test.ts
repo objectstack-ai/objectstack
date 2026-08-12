@@ -516,11 +516,32 @@ describe('SharingRuleService', () => {
     expect(active.map(r => r.name)).toEqual(['a']);
   });
 
-  it('recipientType=business_unit expands via the BU graph (BFS)', async () => {
+  // [#7807] This pair replaces a single test that asserted
+  // `recipientType=business_unit` expanded "alice (emea_sales) + bob
+  // (emea_sales_uk descendant)" — i.e. it pinned the over-grant as if it were
+  // the contract. `business_unit` is declared as exactly one unit's members
+  // (no subtree); the subtree is `unit_and_subordinates`' own semantics
+  // (ADR-0057 D5). Both widths are asserted here on the SAME anchor so a
+  // change that collapsed them again fails as the width it broke.
+  it('recipientType=business_unit expands EXACTLY ONE unit — no subtree (#7807)', async () => {
     const r = await rules.defineRule({
       name: 'dept_rule', label: 'Dept Rule', object: 'opportunity',
       criteria: { amount: { $gte: 100000 } },
       recipientType: 'business_unit', recipientId: 'emea_sales', accessLevel: 'read',
+    }, SYS);
+    const res = await rules.evaluateRule(r.id, SYS);
+    expect(res.matchedRecords).toBe(2);          // opp1, opp2
+    expect(res.expandedUsers).toBe(1);            // alice (emea_sales) — bob is a DESCENDANT
+    expect(res.grantsCreated).toBe(2);
+    expect(engine._tables.sys_record_share).toHaveLength(2);
+    expect(new Set(engine._tables.sys_record_share.map(s => s.recipient_id))).toEqual(new Set(['alice']));
+  });
+
+  it('recipientType=unit_and_subordinates expands the whole subtree (the wider half)', async () => {
+    const r = await rules.defineRule({
+      name: 'dept_subtree_rule', label: 'Dept Subtree Rule', object: 'opportunity',
+      criteria: { amount: { $gte: 100000 } },
+      recipientType: 'unit_and_subordinates', recipientId: 'emea_sales', accessLevel: 'read',
     }, SYS);
     const res = await rules.evaluateRule(r.id, SYS);
     expect(res.matchedRecords).toBe(2);          // opp1, opp2

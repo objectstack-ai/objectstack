@@ -1,12 +1,23 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
 // ADR-0057 D6 (reconciles ADR-0056 D6 / #2077 demo) — a sharing rule whose
-// recipient is a BUSINESS UNIT widens access DOWN the hierarchy: the unit's
-// members AND every subordinate (descendant) unit's members gain access via the
-// `sys_business_unit` tree (BFS). This is the honest re-homing of the broken
-// `unit_and_subordinates` (sys_position.parent never existed) onto the working
-// business-unit tree. Proven end-to-end: the rule materialises sys_record_share
-// rows; a non-owner in the unit subtree can then read a private record.
+// recipient is `unit_and_subordinates` widens access DOWN the hierarchy: the
+// unit's members AND every subordinate (descendant) unit's members gain access
+// via the `sys_business_unit` tree (BFS). This is the honest re-homing of the
+// broken `unit_and_subordinates` (sys_position.parent never existed) onto the
+// working business-unit tree. Proven end-to-end: the rule materialises
+// sys_record_share rows; a non-owner in the unit subtree can then read a
+// private record.
+//
+// [#7807] The widening rule below used to be authored as `business_unit`, and
+// it passed — because the runtime routed BOTH recipient kinds through the same
+// subtree walk, so the narrow spelling silently over-granted. The maintainer
+// ruled (2026-08-12) to narrow the runtime to the declaration, which makes the
+// recipient kind load-bearing here rather than interchangeable: widening is
+// `unit_and_subordinates`' own semantics. The second suite pins the other half
+// end-to-end — a `business_unit` rule reaches the anchor unit and stops there —
+// because a fix that narrowed BOTH kinds would satisfy the first suite's
+// headline while destroying the distinction the spec draws.
 //
 // @proof: showcase-bu-hierarchy-sharing
 //
@@ -31,6 +42,8 @@ describe('showcase: business-unit hierarchy sharing rule (ADR-0057 D6 / #2077)',
   let ql: any;
   let ownerTok: string, mgrTok: string, contribTok: string, outsiderTok: string;
   let noteId: string;
+  /** [#7807] The note shared with the narrow `business_unit` recipient. */
+  let exactNoteId: string;
 
   beforeAll(async () => {
     // [#5491] The platform baseline no longer ships a `'*'` object grant, so a
@@ -70,22 +83,46 @@ describe('showcase: business-unit hierarchy sharing rule (ADR-0057 D6 / #2077)',
     }
 
     // Define a sharing rule: share the BU-shared note with the PARENT business
-    // unit (and, via the tree, its descendants). Recipient = business_unit.
-    // The criteria is not optional — a rule without one would share every
-    // record of the object, which defineRule now rejects (#3896).
+    // unit AND, via the tree, its descendants. Recipient =
+    // `unit_and_subordinates` — the kind whose declared semantics IS the
+    // subtree (#7807). The criteria is not optional — a rule without one would
+    // share every record of the object, which defineRule now rejects (#3896).
     const rules: any = stack.kernel.getService('sharingRules');
     await rules.defineRule({
       name: 'share_notes_with_region',
       label: 'Notes → Region (BU subtree)',
       object: 'showcase_private_note',
       criteria: { title: 'BU-shared note' },
-      recipientType: 'business_unit',
+      recipientType: 'unit_and_subordinates',
       recipientId: 'bu_h_parent',
       accessLevel: 'read',
       active: true,
     }, SYS);
     // Materialise grants for existing records.
     await rules.evaluateRule('share_notes_with_region', SYS);
+
+    // [#7807] The narrow half, on the SAME tree and the SAME members: a second
+    // note shared with `business_unit` anchored at the SAME parent unit. A
+    // separate record is required — sharing both notes through one rule pair
+    // would let the subtree rule's grants answer for the narrow one.
+    const c2 = await stack.apiAs(ownerTok, 'POST', OBJ, { title: 'BU-exact note' });
+    expect(c2.status, 'owner creates the exact-width note').toBeLessThan(300);
+    exactNoteId = (await c2.json())?.id ?? (await c2.json())?.record?.id;
+    if (!exactNoteId) {
+      const row = await ql.findOne('showcase_private_note', { where: { title: 'BU-exact note' }, context: SYS });
+      exactNoteId = row?.id;
+    }
+    await rules.defineRule({
+      name: 'share_notes_with_region_exact',
+      label: 'Notes → Region (exactly that unit)',
+      object: 'showcase_private_note',
+      criteria: { title: 'BU-exact note' },
+      recipientType: 'business_unit',
+      recipientId: 'bu_h_parent',
+      accessLevel: 'read',
+      active: true,
+    }, SYS);
+    await rules.evaluateRule('share_notes_with_region_exact', SYS);
   }, 90_000);
 
   afterAll(async () => { await stack?.stop(); });
@@ -115,5 +152,35 @@ describe('showcase: business-unit hierarchy sharing rule (ADR-0057 D6 / #2077)',
   it('an outsider (no business unit) is NOT granted access', async () => {
     const r = await stack.apiAs(outsiderTok, 'GET', `${OBJ}/${noteId}`);
     expect(r.status, 'outsider stays denied').not.toBe(200);
+  });
+
+  // ── [#7807] the narrow half of the pair ────────────────────────────────
+  //
+  // Same tree, same members, same booted stack — only the recipient KIND
+  // differs. Before #7807 every assertion in this block failed: the
+  // `business_unit` rule walked the subtree exactly like the one above.
+
+  it('materialises grants for the anchor unit ONLY (no subtree)', async () => {
+    const shares = await ql.find('sys_record_share', {
+      where: { object_name: 'showcase_private_note', record_id: exactNoteId, source: 'rule' },
+      context: SYS,
+    });
+    const recipients = (shares ?? []).map((s: any) => s.recipient_id);
+    const mgrId = (await ql.findOne('sys_user', { where: { email: 'bu-mgr@verify.test' }, context: SYS }))?.id;
+    const contribId = (await ql.findOne('sys_user', { where: { email: 'bu-contrib@verify.test' }, context: SYS }))?.id;
+    expect(recipients, 'anchor-unit member granted').toContain(mgrId);
+    expect(recipients, 'subordinate-unit member NOT granted — business_unit is exactly one unit')
+      .not.toContain(contribId);
+  });
+
+  it('a manager in the anchor unit can READ the exact-width note', async () => {
+    const r = await stack.apiAs(mgrTok, 'GET', `${OBJ}/${exactNoteId}`);
+    expect(r.status, 'anchor-unit member reads via the narrow BU share').toBe(200);
+  });
+
+  it('a contributor in a SUBORDINATE unit is DENIED the exact-width note', async () => {
+    const r = await stack.apiAs(contribTok, 'GET', `${OBJ}/${exactNoteId}`);
+    expect(r.status, 'subordinate-unit member denied — no subtree widening on business_unit')
+      .not.toBe(200);
   });
 });

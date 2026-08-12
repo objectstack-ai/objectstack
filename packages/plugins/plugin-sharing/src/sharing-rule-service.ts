@@ -709,12 +709,24 @@ export class SharingRuleService implements ISharingRuleService {
     if (rule.recipient_type === 'user') return [rule.recipient_id];
     if (rule.recipient_type === 'team') return team.expandUsers(rule.recipient_id);
     if (rule.recipient_type === 'business_unit') {
+      // [#7807] EXACTLY ONE unit's members — no subtree descent. The spec
+      // (`ShareRecipientType`), the lint red-line table and ADR-0057 D5 all
+      // declare this kind as "exactly one business unit's members (no
+      // subtree)"; this branch used to call `expandUsers`, the SAME subtree
+      // walk `unit_and_subordinates` below uses, so the two kinds differed
+      // only in their comments and a rule anchored at a division silently
+      // reached every department and office beneath it.
+      //
+      // ⛔ Do not "simplify" this back into a shared call with the branch
+      // below. The two widths are the contract: `unit_and_subordinates` is
+      // the strictly WIDER grant of the pair, and it is only wider while this
+      // one stays narrow.
       const dept = new BusinessUnitGraphService({
         engine: this.engine,
         organizationId: rule.organization_id ?? null,
         teamGraph: team,
       });
-      return dept.expandUsers(rule.recipient_id);
+      return dept.expandUnitMembers(rule.recipient_id);
     }
     if (rule.recipient_type === 'position') {
       // ADR-0090 D3 — positions are flat; expand holders via the platform
@@ -732,6 +744,9 @@ export class SharingRuleService implements ISharingRuleService {
       // re-homed onto the BUSINESS-UNIT subtree: the unit named by
       // `recipient_id` plus every descendant unit's members. The former
       // position-tree walk queried a `parent` column that never existed.
+      //
+      // This is the WIDE half of the pair (#7807) and keeps the subtree walk
+      // unchanged — `expandUsers` is the contract's descendant expansion.
       const dept = new BusinessUnitGraphService({
         engine: this.engine,
         organizationId: rule.organization_id ?? null,

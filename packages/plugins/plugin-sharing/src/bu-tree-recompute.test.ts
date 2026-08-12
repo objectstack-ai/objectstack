@@ -319,7 +319,14 @@ describe('#7729 business-unit graph writes recompute BU-tree sharing rules', () 
     expect(grantsFor('priya')).toBe(0);
   });
 
-  it('covers `business_unit` recipients too — today they walk the same subtree resolver', async () => {
+  // [#7807] narrowed `business_unit` to exactly one unit's members. This case
+  // still belongs here, and deliberately: a unit-only expansion still reads
+  // `sys_business_unit` (its own `active` flag, its tenant scope) and
+  // `sys_business_unit_member`, so a write to either table can still move who
+  // the rule reaches. The anchor below is the unit priya is a DIRECT member
+  // of, which is what makes this a test of RECOMPUTE COVERAGE rather than of
+  // the subtree walk.
+  it('covers `business_unit` recipients too — a unit-only expansion still reads both BU tables', async () => {
     engine._tables.sys_sharing_rule[0].recipient_type = 'business_unit';
     engine._tables.sys_sharing_rule[0].recipient_id = 'bu_west';
     await rules.evaluateRule(RULE, SYS);
