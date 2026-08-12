@@ -122,6 +122,7 @@ import type { ICryptoProvider, CryptoHandle } from '@objectstack/spec/contracts'
 import {
   collectSecretFields,
   collectMaskedReadFields,
+  collectInternalReadFields,
   collectCredentialFields,
   makeSecretRef,
   parseSecretRef,
@@ -4740,19 +4741,82 @@ export class ObjectQL implements IObjectQLEngine {
    * `null`. Privileged callers that genuinely need a secret's plaintext use
    * {@link resolveSecret} against the stored ref; a `password` field is stored
    * as plaintext at rest, so its cleartext is only ever reachable off this path.
+   *
+   * [#7728] Second collector branch, same choke point: a field declared
+   * `internal: true` is OMITTED rather than masked — see
+   * {@link omitInternalFields} for why the two dispositions differ.
    */
   private maskSecretFields(object: string, rows: any): void {
     if (!rows) return;
     const schema = this._registry.getObject(object);
     const maskedFields = collectMaskedReadFields(schema);
-    if (maskedFields.length === 0) return;
+    if (maskedFields.length > 0) {
+      const list = Array.isArray(rows) ? rows : [rows];
+      for (const row of list) {
+        if (!row || typeof row !== 'object') continue;
+        for (const field of maskedFields) {
+          if (!(field in row)) continue;
+          row[field] = row[field] == null ? null : SECRET_MASK;
+        }
+      }
+    }
+    // Runs AFTER the mask, so a field that is somehow both `secret`-typed and
+    // `internal` ends up omitted rather than masked — the stricter disposition
+    // wins, which is the only safe way for the two to compose.
+    this.omitInternalFields(object, rows);
+  }
+
+  /**
+   * [#7728] Drop every field declared `internal: true` from the rows the engine
+   * hands back — "the declared value is never returned on the generic data
+   * path". This is the read protection for ADR-0100's third credential channel:
+   * auth-subsystem one-way hashes stored in `text` columns, which the two
+   * type-keyed credential collectors structurally cannot reach.
+   *
+   * **OMIT, not mask** (maintainer ruling 2026-08-12 on #7728). The credential
+   * mask exists to signal "a value is set" without leaking it. The column this
+   * was minted for — `sys_api_key.key` — is `required: true`, so it is ALWAYS
+   * set: the signal carries zero bits, while still shipping a value under a
+   * field whose own description says it is "never exposed to clients". Omission
+   * also leaves that description string untouched, so the four generated
+   * translation bundles that mirror it do not churn.
+   *
+   * **`?select=` is covered by construction, and that is load-bearing.** The
+   * strip acts on the RESULT ROWS, not on the projection, so a client that
+   * spells the column out (`?select=id,key`) gets a 200 without it rather than
+   * a bypass. `select` only gates on whether a field is KNOWN
+   * (`assertProjectionFieldsExist`) and a flagged column is known, so a
+   * projection-aware strip would have shipped looking complete and still leaked
+   * to any caller who named the column — measured on the sibling column in
+   * #7823, and reproduced here on `sys_api_key.key` before the fix.
+   *
+   * **No system carve-out**, and this is where the shape deliberately diverges
+   * from its sibling {@link stripSearchCompanionFromRead}. That one keeps the
+   * `__search` companion for a system caller who names it by projection,
+   * because it has exactly one such reader whose backfill comparison would
+   * otherwise rewrite every row on every run. This flag has no such reader: the
+   * API-key verifier uses the column as a `where` FILTER and never reads it off
+   * the result (`resolveApiKeyPrincipal` takes `expires_at` / `user_id` /
+   * `organization_id` / `scopes`), and the mint path returns the plaintext it
+   * generated, not the row it inserted. An escape hatch nobody needs is a hole
+   * in a non-exposure guarantee, so there isn't one — if a legitimate system
+   * reader ever appears, it reads the column through a purpose-built privileged
+   * accessor, the way {@link resolveSecret} does for `secret`.
+   *
+   * Nothing below storage is touched. The strip runs on rows the driver has
+   * already produced, so the predicate has been evaluated and the index used
+   * before this method sees anything — which is precisely why authentication
+   * keeps working.
+   */
+  private omitInternalFields(object: string, rows: any): void {
+    if (!rows) return;
+    const schema = this._registry.getObject(object);
+    const internalFields = collectInternalReadFields(schema);
+    if (internalFields.length === 0) return;
     const list = Array.isArray(rows) ? rows : [rows];
     for (const row of list) {
       if (!row || typeof row !== 'object') continue;
-      for (const field of maskedFields) {
-        if (!(field in row)) continue;
-        row[field] = row[field] == null ? null : SECRET_MASK;
-      }
+      for (const field of internalFields) delete row[field];
     }
   }
 
@@ -7779,6 +7843,12 @@ export class ObjectQL implements IObjectQLEngine {
           // AFTER the hook dispatch, matching the read path: `afterInsert`
           // handlers still observe the whole stored row.
           stripSearchCompanion(rowCtx.result);
+          // [#7728] Same position, same reason, for `internal` fields. A write
+          // has no projection to consult here either, so the omit is
+          // unconditional. This does NOT touch the show-once mint path: that
+          // route reads only `id` off the insert result and returns the
+          // plaintext it generated itself.
+          this.omitInternalFields(object, rowCtx.result);
         }
 
         // Roll-up: recompute parent summary fields that aggregate this object.
@@ -8716,6 +8786,16 @@ export class ObjectQL implements IObjectQLEngine {
            // an affected-row COUNT (#4639), which the strip skips as a
            // non-object.
            stripSearchCompanion(hookContext.result);
+           // [#7728] …and the same for `internal` fields, on the identical
+           // argument. This is not a hypothetical symmetry: `sys_api_key` is
+           // one of the few identity objects with a write verb open
+           // (`apiMethods: ['get','list','update']`, #7727) and its declared
+           // revoke/restore row actions PATCH it, so before this line a client
+           // revoking a key got the stored hash back in the 200 body — measured,
+           // and the fourth leaking surface on the object #7728 was filed
+           // against. A predicate update resolves to an affected-row COUNT
+           // (#4639), which the omit skips as a non-object.
+           this.omitInternalFields(object, hookContext.result);
            // The record IS updated; a summary that could not recompute after
            // retries must surface, not stay silent (framework#3147).
            if (summaryFailures.length > 0) throw new SummaryRecomputeError(summaryFailures, hookContext.result);
