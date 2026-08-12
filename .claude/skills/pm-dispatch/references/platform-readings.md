@@ -43,13 +43,20 @@
   一气完成);重试对齐整点(REST core 整点重置)优于指数退避,⛔ 绝不忙轮询。
   search 与 core 是独立配额,一侧打满另一侧可作退路;REST core 在共享身份下同样
   会打满 ——「走 REST」≠「不限量」。
-- **MCP 参数两陷阱**:`list_issues` 多标签过滤是 **OR** 不是 AND(要 AND 走 REST
-  search 的 `label:a label:b`,或本地求交);`issue_write` 的 `labels` 是**整组替
-  换**不是追加 —— 不先读现值合并再写,会静默剥掉别的标签(状态机丢位);真追加走
-  REST `POST /issues/{n}/labels`;写后照标签纪律回读。
+- **MCP 参数三陷阱**:`list_issues` 多标签过滤是 **OR** 不是 AND,并集的
+  `totalCount` 读起来与队列深度一模一样,⛔ 不当队列读数 —— 探一个标签、`pm:*` 本
+  地数(要 AND 走 REST search 的 `label:a label:b`,或本地求交);`issue_write`
+  的 `labels` 是**整组替换**不是追加 —— 不先读现值合并再写,会静默剥掉别的标签
+  (状态机丢位);真追加走 REST `POST /issues/{n}/labels`;**新立卡的 labels 同样
+  会静默丢**,落成无 `pm:*` 的卡对每一张 sweep 都不可见 —— 立卡与改标签同样适用
+  「写后回读」。
 
 ## 读数陷阱
 
+- **已合并的分支被自动删除,⛔ 不能当分支探针的阳性对照**:拿它作对照得到空输出,
+  读起来像「探针工作正常、只是分支还没出现」,实际什么都没证明。可用的对照要**此
+  刻确认存在**:`git ls-remote --heads origin 'claude/*' | wc -l`(在飞车队恒
+  >0),或一个当前 open 的 PR head。
 - **读数四坑**:`cd X && cmd` 会短路(路径不存在时命令在当前仓继续执行,产出假读
   数)—— 跨仓一律 `git -C <path>`;`git grep -c <pat> | wc -l` 数的是文件数不是命
   中数;裸名 grep 被幸存家族当子串命中 —— 退役核验带引号精确名,更硬的判据是查声

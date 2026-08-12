@@ -38,6 +38,30 @@ branch-early、draft-PR 时点报告、transcript 复活与 worktree 接手协�
 roster —— `ListAgents` 列不到、`SendMessage` 直投 not-reachable 是设计而非故障(维
 护者 2026-08-11 裁定:事件驱动架构即长期方案),⛔ 不复测 roster 路径。
 
+## 云 dev 的 GitHub API 不可达 —— 发布回落协议
+
+**push 授权 ≠ API 可达,两者独立失败**:org 未接通 Claude GitHub App 时,
+`create_session` 云 dev 推分支一切正常,而 PR/评论/issue 的每一次 API 调用都被
+org 策略拦下。失败**安静且昂贵**:dev 把活干完、发布不出去、停在 need_input 等
+人 —— 实测一班五张云卡五次全中:五条分支推出、dev 侧零个 PR、其中一张在
+need_input 空等近两小时。App 未接通期间,四条硬规则:
+
+- **完整派发令随 prompt 携带;issue 评论照发,但只作公共存档**。「⛔ 不整段粘贴
+  issue 正文」的前提是 dev 读得到 GitHub —— API 不可达时前提不成立,prompt 是唯
+  一送达通道(实测 dev 报 comment text unreadable 后原地停摆)。
+- **每张云卡派发令带发布失败回落条款**:开不出 PR ⇒ ⛔ 不循环重试、⛔ 不丢弃 ——
+  完整 PR 正文、完整 `<!-- os-dev-report -->`、本应立的卡的完整文本,全部放进最
+  后一条会话消息,并写明哪些自己发成功了。
+- **PM 代开 PR 时,changeset 从 dev 分支的 diff 读**:`git diff
+  origin/main...FETCH_HEAD -- .changeset/`;⛔ 不用 `git ls-tree .changeset/ |
+  head -1` —— 它给的是字母序第一个**存量** changeset,曾对两条不同分支给出一模一
+  样的无关文本。
+- **`get_session` 的状态不是完成度**:`review_ready` / `need_input` 只说明 dev
+  停了,不说明有东西可复核 —— 分支(`ls-remote`)与 PR 独立核验。
+
+整套回落是 App 未接通期间的代偿,不是长期方案 —— **org 管理员把 Claude GitHub
+App 接到 org 上,这一节整体作废**;读到本节的维护者优先做接通,不维护绕行。
+
 ## 接手中断的 dev(worktree 接手协议)
 
 先试 SendMessage 复活(从 transcript 带全部上下文恢复),resume 不可用才接手。⛔
@@ -129,6 +153,14 @@ SendMessage 附执行姿态句(「前台(阻塞)同步执行全部步骤,中途�
     重验后逐面抄进派发令**(⛔ 不凭记忆),并带:「每一面都必须在 PR 正文有一个结
     论:已改 / 本就合规(证据)/ 明确不在范围(理由);⛔ 静默略过 —— 评审把没提到
     的面读作漏掉的面」。防的不是做错,是做对了一部分然后以为做完了。
+  - 往带 type-check DEBT/EXEMPT 台账的包新增/改写测试文件 ⇒ 派发令点名 `pnpm
+    check:type-check-debt`,并要求**先 build 依赖闭包**(不建则 exit 1 是
+    missing-module 级联,不是台账读数)—— 这类包把自己的测试排除在 tsconfig 之外
+    ,有的连 `typecheck` 脚本都没有,`pnpm typecheck` 全绿的同时测试层照样漂移
+    (一班之内三张 PR 撞同一道门)。⛔ 两个反模式一并写进派发令:不许抬台账数字放
+    行本 PR 自己新增的文件 —— 那是给自己开的许可条;不许 `--lower` 别的包的 ℹ 信
+    息行。这道门的价钱花得值:实测一张 PR 的三条「类型错误」里两条是真实 API 误用
+    (必填参数缺失),vitest 永远测不出来。
 - **Premise-first 写明**:issue 正文是线索不是规格,先对 origin/main 验前提;
   `premise_still_valid: false` + 无 PR 是合法且常常有价值的交付 —— 派发词预设
   issue 为真,就把好运行变成表面抗命。
