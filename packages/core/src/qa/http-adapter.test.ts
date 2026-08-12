@@ -65,7 +65,10 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 beforeEach(() => {
   calls = [];
-  fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+  // `input` is deliberately `unknown`: this package's tsc program has no DOM lib,
+  // so `RequestInfo` does not resolve here — and the assertions want the URL as a
+  // string anyway.
+  fetchMock = vi.fn(async (input: unknown, init?: RequestInit) => {
     calls.push({
       url: String(input),
       method: init?.method ?? 'GET',
