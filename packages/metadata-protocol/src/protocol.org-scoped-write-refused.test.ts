@@ -266,6 +266,7 @@ const VIEW = {
     name: 'org_grid',
     label: 'Org grid',
     object: 'task',
+    viewKind: 'list', // [#7741] the inline arm requires the object binding pair
     columns: [{ field: 'title', label: 'Title' }],
 };
 

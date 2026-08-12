@@ -2016,6 +2016,27 @@ const step17: MigrationStep = {
         + 'asserting on `deleted` was asserting on `undefined` and needs rewriting, not renaming.',
     },
     {
+      id: 'connector-inline-authentication-publish-refused',
+      surface: 'connector.authentication on AUTHORED entries (defineStack `connectors:`, ' +
+        '`PUT /meta/connector/:name`) — previously refused only on provider-bound instances ' +
+        '(ADR-0097 §3), now refused on catalog descriptors too',
+      replacement: 'a catalog descriptor drops `authentication` (or sets `{ type: "none" }`) ' +
+        'and documents the auth scheme in `description`; a dispatchable instance declares ' +
+        '`provider` and references its credential with `auth: { type, credentialRef }` ' +
+        '(ADR-0097 §3). Runtime `registerConnector` calls are unaffected — the runtime shape ' +
+        'still carries resolved secrets inline.',
+      reason:
+        'A published connector row lands whole in `sys_metadata`, so an inline `token` / `key` ' +
+        '/ `password` / `clientSecret` is cleartext at rest, readable through the data API ' +
+        '(#7990). No mechanical rewrite exists: whether the entry should become a `none` ' +
+        'descriptor or a provider-bound instance with a `credentialRef` — and which secret ' +
+        'store receives the credential — is a judgment about the connector, not a rename.',
+      acceptanceCriteria:
+        'Every authored connector entry parses through `DeclarativeConnectorEntrySchema`; no ' +
+        'authored entry carries a non-`none` `authentication`; formerly inline credentials are ' +
+        'reachable through `credentialRef` resolution and the connector still materializes.',
+    },
+    {
       id: 'dashboard-widget-compareto-offset',
       surface: "dashboard.widgets[].compareTo: { offset: '7d' | '1M' | … } (every duration except '1y')",
       replacement: "compareTo: { kind: 'previousPeriod' } plus an explicit window on the widget's own `filter`",
@@ -2199,6 +2220,26 @@ const step17: MigrationStep = {
         + '`after` for the surrounding state). Deleting the dead branch changes no observable '
         + 'behaviour — it never executed — so the migration is removing code that could not '
         + 'run, not rebuilding a capability.',
+    },
+    {
+      id: 'datasource-config-inline-credential-refused',
+      surface: 'datasource.config.password (postgres / mysql / mongo) and ' +
+        'datasource.config.authToken (turso)',
+      replacement: "the datasource secret binder: the Setup → Datasources connection form's " +
+        'secret field (encrypted into `sys_secret`, handle stored at `external.credentialsRef`), ' +
+        'or a direct `external.credentialsRef` secrets-store reference',
+      reason:
+        'A datasource artefact is persisted whole into `sys_metadata`, which is served back by ' +
+        'the ordinary data API — an inline credential is cleartext at rest (#7990, maintainer-' +
+        'ruled per-artefact contract closure, 2026-08-12). There is no mechanical rewrite: ' +
+        'moving the value requires ENCRYPTING it into a `sys_secret` row through a running ' +
+        "secret binder and deleting the cleartext, which a source-file transform cannot do — " +
+        'auto-deleting the key alone would silently drop a live credential instead.',
+      acceptanceCriteria:
+        'Every datasource parses with no `config.password` / `config.authToken` key; each ' +
+        'affected datasource carries `external.credentialsRef` (or has its secret bound through ' +
+        'the connection form) and still connects; no cleartext credential remains in any ' +
+        'stored `sys_metadata` row or authored source.',
     },
     {
       id: 'declarative-apis-endpoints-live',
@@ -4428,6 +4469,35 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `query-distinct-retired` / `query-window-functions-retired`, #4286).
     'data/AggregationNode:distinct',
     'data/ExternalFieldMapping:transform',
+    // #7990 — sibling of `data/PostgresConfig:password`, same ruling, same
+    // disposition: tombstoned inline credential; the secret binder /
+    // `external.credentialsRef` is the mechanism. See that entry for the reasoning
+    // and the D3 semantic entry `datasource-config-inline-credential-refused` for
+    // the hand-migration prescription.
+    'data/MongoConfig:password',
+    // #7990 — sibling of `data/PostgresConfig:password`, same ruling, same
+    // disposition: tombstoned inline credential; the secret binder /
+    // `external.credentialsRef` is the mechanism. See that entry for the reasoning
+    // and the D3 semantic entry `datasource-config-inline-credential-refused` for
+    // the hand-migration prescription.
+    'data/MysqlConfig:password',
+    // #7990 (maintainer-ruled Option A, 2026-08-12) — inline datasource credentials
+    // refused at publish. The key is tombstoned (`z.never()` with the refusal
+    // prescription), not deleted: `sys_metadata` serves rows through the ordinary
+    // data API, so an inline `config.password` was cleartext at rest. The secret
+    // belongs to the datasource secret binder (`sys_secret` +
+    // `external.credentialsRef`), which already wins over an inline value at
+    // connect time. No D2 conversion: a stored cleartext credential cannot be
+    // mechanically rewritten into an encrypted `sys_secret` row at load — see the
+    // D3 semantic entry `datasource-config-inline-credential-refused`.
+    'data/PostgresConfig:password',
+    // #7990 — the turso face of `data/PostgresConfig:password` (the credential key
+    // is `authToken`, a JWT, rather than a password — same inline-cleartext class,
+    // same ruling, same disposition). The standalone boot path is untouched:
+    // `OS_DATABASE_AUTH_TOKEN` / `TURSO_AUTH_TOKEN` are resolved by the host and
+    // handed to the driver factory directly, never through the authoring schema.
+    // See the D3 semantic entry `datasource-config-inline-credential-refused`.
+    'data/TursoConfig:authToken',
     'integration/ConnectorFieldMapping:transform',
     // #4914 — ADR-0049 enforce-or-remove on the plugin manifest's whole
     // `loading` block (maintainer ruling 2026-08-04). ONE tombstoned key here,

@@ -8,12 +8,29 @@
   `Part of #<n>`,否则合并会静默关掉一张正躺在决策箱里的卡,而
   `needs-user-decision` 的收件箱过滤只看 open issue —— 卡一关,待裁问题就此无人可
   见。翻 ready 之前亲核首行,别只信报告。
+- **`Part of` 收口的卡不会自动关,`pm:dispatched` 必须手工摘**:`Fixes` 卡由
+  GitHub 关闭时标签随卡一起离开在飞视图;`Part of` 卡合并后仍然开着,标签留在原
+  地,于是 `label:pm:dispatched is:open` 把一张没有 dev、没有分支、没有任何在飞物
+  的卡算进在飞。⇒ **PR MERGED 的同一动作里**把 `pm:dispatched` 换回 `pm:queue`
+  (或按剩余物定级),并留一条评论写明**已交付什么、还剩什么、剩下的归谁**。
+  ACCEPT 一张 `Part of` PR 的那一刻就把这步记进落地待办,⛔ 不留给「下次巡检看到再
+  说」—— 漏摘的标签让在飞视图数进一张无人认领的开卡。
+- **合并后读一次每张相关卡的 `closed_by_pull_requests`**:确认 PR 应当关的卡关
+  了,**并确认没有别的卡被一并关掉** —— 闭合关键词解析器不理会否定句(正文里「不
+  修某卡」的那句话恰恰会关掉那张卡,细则见平台读数事实表),PR body 与 commit
+  message 分开解析,只查 commit 会漏;误关的卡以 completed 状态对一切「只看
+  open」的过滤隐身,这一读是唯一能兜住它的机械检查。
 - **范围检查**(取 changed files,⛔ 不看报告自述):无 `content/docs/releases/` 改
   动、用户可见改动有 changeset、无与卡无关的文件。Tests/docs-only PR 走
   `skip-changeset` 标签,不走空 changeset(空 changeset 滞留发布);含读者可见生成
   产物时 dev 选 changeset 是对的 —— 以 PR 正文说明的理由为准,两条路都有效,别来回
   改。
-- **测试证据**要有真实命令与通过输出,不是一句 tests pass。
+- **改动触及的每个包,`private: false` 即已发布 ⇒ 核 changeset 在不在**:判据是包
+  的发布状态(读 `package.json`,十秒),不是改动大小,也不是「用户可见」的感觉判
+  断 —— 那个判断 dev 在时间压力下会乐观化。⛔ 缺了不入队 —— 合进 main 却永不发布,
+  是比不合更糟的终局:它看起来像修好了。
+- **测试证据**要有真实命令与通过输出,不是一句 tests pass。**测量类交付先看阳性对
+  照**:对照本身失败 ⇒ 该读数记 INCONCLUSIVE,⛔ 不把它的「绿」当被测风险的证据入账。
 - **CI 收敛读数只属于复核侧**(维护者 2026-08-10 裁定;dev 的契约是草稿 PR 时点交
   报,报告里 gate `in_progress` 是诚实读数、预期内常态):翻 ready / 挂 auto-merge
   / 入队前亲核门禁 job 结论 —— ESLint 与 TypeScript Type Check 两个 job 的

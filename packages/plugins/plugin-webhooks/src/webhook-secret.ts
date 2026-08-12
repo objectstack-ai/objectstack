@@ -149,11 +149,42 @@ export const __objectqlSecretWireForms = {
 /** Engines that expose the privileged dereference (ObjectQL ≥ #7799). */
 type SecretResolvingEngine = IDataEngine & {
   resolveSecretField?(object: string, recordId: string, field: string): Promise<string | null>;
+  onCryptoProviderChange?(listener: () => void): () => void;
 };
 
 /** True when this engine can dereference an encrypted field. */
 export function canResolveSecrets(engine: IDataEngine | undefined): boolean {
   return typeof (engine as SecretResolvingEngine | undefined)?.resolveSecretField === 'function';
+}
+
+/**
+ * [#8022] Subscribe to the engine's crypto-provider registration. Returns an
+ * unsubscribe function, or `undefined` when the engine has no such channel.
+ *
+ * ## Why this exists
+ * Resolving a stored key stays fail-closed (#7799) — that is not what this
+ * changes. What it changes is how long a fail-closed READ is allowed to stand
+ * when the reason for it is about to disappear. "No CryptoProvider" is not only
+ * a misconfiguration: on every host it is also a *transient boot state*, because
+ * plugins run inside `kernel:ready` and the composition root injects the
+ * provider only after `runtime.start()` returns. So the enqueuer's FIRST cache
+ * build reliably precedes the capability it needs, drops every secret-bearing
+ * subscription (correctly, on what it could see), and — before this — stayed
+ * dropped until the next periodic refresh 60s later.
+ *
+ * Feature-detected rather than required, exactly like `resolveSecretField`
+ * above, because this package deliberately takes no dependency on
+ * `@objectstack/objectql`. An engine without the channel keeps the previous
+ * behaviour — the periodic refresh remains the backstop — rather than failing
+ * to start.
+ */
+export function onCryptoProviderChange(
+  engine: IDataEngine | undefined,
+  listener: () => void,
+): (() => void) | undefined {
+  const observable = engine as SecretResolvingEngine | undefined;
+  if (typeof observable?.onCryptoProviderChange !== 'function') return undefined;
+  return observable.onCryptoProviderChange(listener);
 }
 
 /**

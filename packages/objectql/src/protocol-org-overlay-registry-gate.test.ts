@@ -114,6 +114,7 @@ const viewBody = (name: string, label: string) => ({
     name,
     label,
     object: 'showcase_task',
+    viewKind: 'list', // [#7741] the inline arm requires the object binding pair
     columns: [{ field: 'name', label: 'Name' }],
 });
 

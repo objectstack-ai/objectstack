@@ -10,8 +10,13 @@
  * blinded both). Nothing above the CLI could see it: the kernel logged
  * correctly, the sink was live, and every data-phase line streamed fine.
  *
+ * The replay stream moved in #7915: `serve` now forwards everything it and the
+ * kernel would write to stdout onto **stderr**, unconditionally, because its
+ * stdout belongs to the MCP stdio transport. What #4012 pinned is unchanged —
+ * the records must reach a terminal — so the assertions below read stderr.
+ *
  * Only a test that drives the actual command can catch that, so this one boots
- * a real stack through `bin/run-dev.js` and reads its stdout. The positive
+ * a real stack through `bin/run-dev.js` and reads its output. The positive
  * control is a config-only guarantee that a boot WARN gets emitted: a declared
  * `script` action with no `body` and no registered handler, which the ADR-0110
  * D5 inventory reports as an `unboundDeclarations` finding through
@@ -89,12 +94,12 @@ describe('os serve — boot-phase logger output (#4012)', () => {
 
       // The load-bearing assertion. Before the fix this was absent at EVERY
       // log level while thousands of data-phase lines streamed past.
-      expect(stdout, `[action-governance] missing from stdout${seen}`).toContain(
+      expect(stderr, `[action-governance] missing from stderr${seen}`).toContain(
         '[action-governance]',
       );
       // …and it names the offender, so the line is actionable rather than just
       // present.
-      expect(stdout).toContain('bootdiag_task:orphan_action');
+      expect(stderr).toContain('bootdiag_task:orphan_action');
     },
     240_000,
   );
@@ -112,8 +117,8 @@ describe('os serve — boot-phase logger output (#4012)', () => {
       });
 
       const seen = `\n--- stdout ---\n${stdout.slice(-4000)}\n--- stderr ---\n${stderr.slice(-2000)}`;
-      expect(stdout, `boot-phase kernel traces missing${seen}`).toContain('Bootstrap complete');
-      expect(stdout, `boot WARN missing at debug level${seen}`).toContain('[action-governance]');
+      expect(stderr, `boot-phase kernel traces missing${seen}`).toContain('Bootstrap complete');
+      expect(stderr, `boot WARN missing at debug level${seen}`).toContain('[action-governance]');
     },
     240_000,
   );

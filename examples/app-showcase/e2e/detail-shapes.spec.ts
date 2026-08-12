@@ -26,6 +26,13 @@ import { test, expect } from '@playwright/test';
  * symbol.
  */
 
+// Ambient `process` for the env reads below — the showcase tsconfig doesn't pull
+// in `@types/node`, and the package-global shim in test/node-shim.d.ts declares
+// only `cwd()`. Same idiom (and same reason) as the declarations in
+// objectstack.config.ts and src/system/self-url.ts: keeps `pnpm typecheck` green
+// without widening the type surface. Playwright provides the real `process`.
+declare const process: { env: Record<string, string | undefined> };
+
 const APP = process.env.SHOWCASE_APP || 'com.example.showcase';
 const API = process.env.SMOKE_API_URL || 'http://localhost:3000';
 const recordUrl = (object: string, id: string) =>

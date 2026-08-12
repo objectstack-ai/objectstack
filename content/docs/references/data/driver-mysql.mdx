@@ -47,7 +47,7 @@ MySQL / MariaDB connection configuration
 | **port** | `integer` | ✅ | Port number |
 | **database** | `string` | optional | Database name |
 | **username** | `string` | optional | Authentication user |
-| **password** | `string` | optional | Authentication password (prefer external.credentialsRef) |
+| **password** | `never` | optional | Set through the connection form's secret field or `external.credentialsRef` — encrypted into `sys_secret`, never stored in `config` (#7990) |
 | **ssl** | `boolean` | optional | Enable TLS. Certificates go in the datasource-level `ssl` block. |
 | **autoMigrate** | `Enum<'off' \| 'safe'>` | optional | Dev-only non-destructive schema self-heal (#2186) |
 

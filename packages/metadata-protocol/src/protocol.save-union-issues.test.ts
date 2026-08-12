@@ -165,7 +165,8 @@ describe('#5364 saveMetaItem 422 expands union branches', () => {
         const { protocol, rows } = makeProtocol();
 
         const result = await save(protocol, {
-            name: 'task_list', object: 'task', type: 'grid', label: 'Tasks',
+            // [#7741] carries the object binding the inline arm now requires.
+            name: 'task_list', object: 'task', viewKind: 'list', type: 'grid', label: 'Tasks',
             columns: [{ field: 'title' }],
         });
 

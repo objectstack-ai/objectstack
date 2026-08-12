@@ -186,7 +186,7 @@ function makeStubDriver() {
 
 const PKG = 'app.revertscope';
 const ORG = 'org_x';
-const viewBody = (label: string) => ({ name: 'cases', type: 'grid', label, columns: ['id'] });
+const viewBody = (label: string) => ({ name: 'cases', type: 'grid', label, columns: ['id'], object: 'case', viewKind: 'list' }); // [#7741] the inline arm requires the object binding pair
 
 describe('#7559 — the revert reads the history row under the key the writer stored it with', () => {
     let engine: ObjectQL;

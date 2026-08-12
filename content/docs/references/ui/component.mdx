@@ -249,6 +249,8 @@ const result = AIChatWindowProps.parse(data);
 | **recordChrome** | `boolean` | ✅ | Render the record chrome — the title as a record chip with its follow star and copy-id button. Set false on a non-record page (dashboard, landing) to fall back to the bare heading layout. |
 | **showStar** | `boolean` | ✅ | Show the follow (favourite) star beside the record title. Part of the record chrome — no effect when `recordChrome` is false. |
 | **showCopyId** | `boolean` | ✅ | Show the copy-record-id button beside the record title. Part of the record chrome — no effect when `recordChrome` is false. |
+| **maxVisible** | `integer` | optional | How many header actions render as inline buttons before the rest fold into the overflow menu (renderer default 3). |
+| **mobileMaxVisible** | `integer` | optional | The `maxVisible` budget on mobile viewports (renderer default 1). |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 
@@ -263,6 +265,7 @@ const result = AIChatWindowProps.parse(data);
 | **tabStyle** | `Enum<'line' \| 'card' \| 'pill'>` | optional | Tab-strip visual style: 'line' underlines the active tab, 'card' frames each tab, 'pill' renders rounded pills |
 | **type** | `never` | optional | [REMOVED] `page:tabs` property `type` was removed in @objectstack/spec 17.0.0 (#6776, ADR-0087 D2) — a props key named `type` collides with the page component's own dispatch key, so it is unauthorable in the flat and JSX carriers and was never validated in them. Rename the key to `tabStyle`; the value (`line` \| `card` \| `pill`) is unchanged. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **position** | `Enum<'top' \| 'left'>` | optional |  |
+| **alwaysShowStrip** | `boolean` | optional | Render the tab strip even when only one tab is visible (renderer default: a one-tab strip is hidden). |
 | **items** | `{ label: string \| Record<string, string>; icon?: string; visibleWhen?: string \| object; value?: string; … }[]` | ✅ |  |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
@@ -318,6 +321,8 @@ const result = AIChatWindowProps.parse(data);
 | **sections** | `{ name?: string; label?: string \| Record<string, string>; columns?: integer; fields: string[] }[]` | optional | Field groups rendered as the detail body, in order. Object form: `{ name?, label?, columns?, fields }`. |
 | **fields** | `string[]` | optional | Explicit field list to display (optional, overrides highlightFields) |
 | **hideFields** | `string[]` | optional | Field names to omit from the body — applied to `fields` and to every section's `fields` (used to dedupe fields already shown in `record:highlights` or as the page title) |
+| **inlineEdit** | `boolean` | optional | Allow inline field editing in the detail body (renderer default: on, where the object itself is editable — set `false` to force it off). |
+| **showHeader** | `boolean` | optional | Render the detail body's own heading (renderer default: off). |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
 

@@ -52,7 +52,7 @@ site — the file you read when behavior surprises you.
 | 2 | **Public-form grant** | An anonymous form submission carries a declaration-derived `publicFormGrant` authorizing ONLY create + read-back on the form's declared target object — never anything else (ADR-0056 Option A). No guest-portal configuration needed (anonymous principals hold the `guest` position). | `packages/plugins/plugin-security/src/security-plugin.ts` (ObjectQL middleware) | scope-limited allow |
 | 3 | **Object CRUD** | `allowRead/Create/Edit/Delete` (+ the destructive lifecycle class `allowTransfer/Restore/Purge`, gated ahead of the M2 operations — #1883) resolved across the caller's permission sets. | `packages/plugins/plugin-security/src/permission-evaluator.ts` `checkObjectPermission` | fail-closed 403 |
 | 4 | **OWD / sharing** | Org-wide default (`private` / `public_read` / `public_read_write` / `controlled_by_parent`; **unset or unknown ⇒ `private`, fail-closed** — ADR-0090 D1) plus the external dial (`externalSharingModel`, ADR-0090 D11), manual record shares, criteria sharing rules (owner-type rules were removed from the authoring surface in v17 rather than left declared-but-skipped — [Sharing Rules](/docs/permissions/sharing-rules#recipient-types)), business-unit hierarchy widening (ADR-0057 D5: scope-depth hierarchy lives on `sys_business_unit`, not positions). | `packages/plugins/plugin-sharing/src/sharing-service.ts` + `sharing-rule-service.ts` | fail-closed to owner-only |
-| 5 | **Row-level security** | CEL predicates (`using` read filter, `check` write post-image) compiled into the query. If **no** applicable policy compiles, the result is a deny-all sentinel (fail-closed); an uncompilable policy alongside compilable ones is excluded from the OR-union **with a logged warning** — exclusion can only narrow access, never widen it. Tenant isolation is a wildcard RLS rule AND-ed on top. | `packages/plugins/plugin-security/src/rls-compiler.ts` + `security-plugin.ts` | fail-closed |
+| 5 | **Row-level security** | CEL predicates (`using` read filter, `check` write post-image) compiled into the query. If applicable policies exist but **none of them compiles**, the result is a deny-all sentinel (fail-closed); an object with **no** applicable policy is simply unfiltered at this layer — RLS narrows what the earlier gates already allowed, it never denies on its own. An uncompilable policy alongside compilable ones is excluded from the OR-union **with a logged warning** — exclusion can only narrow access, never widen it. Tenant isolation is a wildcard RLS rule AND-ed on top. | `packages/plugins/plugin-security/src/rls-compiler.ts` + `security-plugin.ts` | fail-closed |
 | 6 | **Field-level security** | Read mask (strip non-readable fields) + write deny per `fields` rules. Caller queries that **filter, sort, group, or aggregate by** a non-readable field are rejected outright (HTTP 403, `field_predicate_denied`) — masking only the output would leave row presence as a value oracle. RLS-injected predicates are exempt (they run after the guard and may reference hidden fields like `owner_id`). | `packages/plugins/plugin-security/src/field-masker.ts` + `predicate-guard.ts` | fail-closed on predicates; see posture note below |
 
 Two orthogonal identity-layer gates run before all of this: the ADR-0069
@@ -360,7 +360,11 @@ Five mechanisms — four CI-time, one runtime — make the security posture a
   ADR-0056 D10): every authorization primitive sits in exactly one honest
   state — `enforced` (must name its enforcement site; high-risk rows must
   reference an end-to-end dogfood proof), `experimental`, or `removed`. A new
-  fail-open or a deleted proof fails CI.
+  fail-open or a deleted proof fails CI. A cited proof must also **name the rows
+  it proves** — a header `// authz-row: <id>` line — and CI asserts the pairing
+  is mutual in both directions (#7976), so a row cannot cite a test that
+  exercises a neighbouring primitive, and a shared proof file has to say which
+  rows it covers.
 - **Liveness ledger** (`packages/spec/liveness/`, ADR-0049/0054): every
   governed spec property is classified live / experimental / dead, with
   author-time warnings for declared-but-unenforced flags.

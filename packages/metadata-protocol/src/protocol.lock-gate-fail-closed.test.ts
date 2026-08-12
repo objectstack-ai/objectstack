@@ -201,7 +201,8 @@ const save = (p: ObjectStackProtocolImplementation) =>
     p.saveMetaItem({
         type: 'view',
         name: 'v1',
-        item: { name: 'v1', label: 'Edited', type: 'grid', columns: ['name'] },
+        // [#7741] carries the object binding the inline arm now requires.
+        item: { name: 'v1', label: 'Edited', type: 'grid', columns: ['name'], object: 'task', viewKind: 'list' },
     } as any);
 
 const remove = (p: ObjectStackProtocolImplementation) =>

@@ -254,7 +254,25 @@ const gateOpen = (engine: unknown, event: string, object: string): boolean =>
 // ---------------------------------------------------------------------------
 
 describe('[#5860] a SKIP_OBJECTS object no longer forces the prior-row read', () => {
-  it('single-id update() on `sys_job_queue` pays ZERO prior reads', async () => {
+  it('[#7867] single-id update() on `sys_job_queue` pays ONE prior read — for existence, not for audit', async () => {
+    // ⚠️ Asserted 0 between #5860 and #7867, and the flip is deliberate.
+    //
+    // #5860's acceptance criterion is that the per-object DEMAND GATE judges a
+    // SKIP_OBJECTS object unhooked — and that is unchanged, asserted directly
+    // by the very next case (`gateOpen(...)` is `false` for all five events)
+    // and by the "no audit row is written" case below. What changed is that the
+    // gate no longer decides whether the ENGINE LOOKS at the row.
+    //
+    // #7867 added the not-found gate the by-id write path never had: a write
+    // against an id that names no row must answer `RECORD_NOT_FOUND` rather
+    // than run on and die on whatever the pipeline complains about first.
+    // Existence is a consumer no hook registration can express and the one
+    // consumer every by-id write has, so the read is unconditional now — for
+    // `sys_job_queue` exactly as for everything else.
+    //
+    // The number still holds down what this file cares about: it is ONE — the
+    // engine's own — not the TWO an audit handler forcing its own read would
+    // cost, and the audit ledger below is still empty.
     const { engine, reads } = await boot();
     installAuditWriters(engine);
 
@@ -262,9 +280,7 @@ describe('[#5860] a SKIP_OBJECTS object no longer forces the prior-row read', ()
     const before = reads.findOneOn['sys_job_queue'] ?? 0;
     await engine.update('sys_job_queue', { status: 'running' }, { where: { id: row.id } } as any);
 
-    // Before this change: 1 — #5284's gate saw five global audit registrations
-    // and could not know the handler returns on its first line.
-    expect((reads.findOneOn['sys_job_queue'] ?? 0) - before).toBe(0);
+    expect((reads.findOneOn['sys_job_queue'] ?? 0) - before).toBe(1);
   });
 
   it('the gate itself answers `false` for every audit event on a skipped object', async () => {

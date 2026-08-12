@@ -63,7 +63,16 @@ function makeDriver() {
     connect: vi.fn().mockResolvedValue(undefined),
     disconnect: vi.fn().mockResolvedValue(undefined),
     find: vi.fn(async (_o: string, ast: any) => { seen.findAst = ast; return []; }),
-    findOne: vi.fn(async (_o: string, ast: any) => { seen.findOneAst = ast; return null; }),
+    // [#7867] Echoes back the id it was asked for, so a by-id write reaches the
+    // driver instead of dying at the not-found gate. `return null` here would
+    // make this double looser than the producer on exactly the write path the
+    // by-id case below measures; `seen.findOneAst`, which the read cases assert
+    // on, is captured exactly as before.
+    findOne: vi.fn(async (_o: string, ast: any) => {
+      seen.findOneAst = ast;
+      const id = ast?.where?.id;
+      return id === undefined || id === null ? null : { id, title: 'stored' };
+    }),
     count: vi.fn(async (_o: string, ast: any) => { seen.countAst = ast; return 0; }),
     aggregate: vi.fn(async (_o: string, ast: any) => { seen.aggregateAst = ast; return []; }),
     create: vi.fn(async (_o: string, d: any) => d),

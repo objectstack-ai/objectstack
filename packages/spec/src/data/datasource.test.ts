@@ -183,6 +183,8 @@ describe('DatasourceSchema', () => {
   });
 
   it('should accept datasource with all fields', () => {
+    // `config.password` is deliberately absent: inline credentials are refused
+    // since #7990 (pinned in driver/driver-credential-refusal.test.ts).
     const datasource = DatasourceSchema.parse({
       name: 'production_db',
       label: 'Production Database',
@@ -192,7 +194,6 @@ describe('DatasourceSchema', () => {
         port: 5432,
         database: 'production',
         username: 'app_user',
-        password: '${DB_PASSWORD}',
         ssl: true,
       },
       description: 'Main production PostgreSQL database',
@@ -204,6 +205,8 @@ describe('DatasourceSchema', () => {
   });
 
   it('should accept PostgreSQL datasource', () => {
+    // No `config.password` — inline credentials are refused since #7990
+    // (pinned in driver/driver-credential-refusal.test.ts).
     const datasource = DatasourceSchema.parse({
       name: 'postgres_db',
       driver: 'postgres',
@@ -212,7 +215,6 @@ describe('DatasourceSchema', () => {
         port: 5432,
         database: 'mydb',
         username: 'user',
-        password: 'pass',
       },
     });
 
@@ -326,6 +328,12 @@ describe('DatasourceSchema', () => {
 
 
   it('should accept datasource with environment variables in config', () => {
+    // NOTE (#7990 census): nothing in the runtime resolves `${…}` placeholders
+    // in datasource config — these strings reach the client verbatim. Only
+    // NON-credential keys keep the placeholder convention; `config.password`
+    // is refused whatever its value, placeholder included (the placeholder was
+    // stored in cleartext in `sys_metadata` exactly like a real password, and
+    // connected with the literal string as the password when unresolved).
     const datasource = DatasourceSchema.parse({
       name: 'secure_db',
       driver: 'postgres',
@@ -334,11 +342,17 @@ describe('DatasourceSchema', () => {
         port: 5432,
         database: '${DB_NAME}',
         username: '${DB_USER}',
-        password: '${DB_PASSWORD}',
       },
     });
 
-    expect(datasource.config.password).toBe('${DB_PASSWORD}');
+    expect(datasource.config.username).toBe('${DB_USER}');
+
+    const refused = DatasourceSchema.safeParse({
+      name: 'secure_db',
+      driver: 'postgres',
+      config: { database: 'prod', password: '${DB_PASSWORD}' },
+    });
+    expect(refused.success).toBe(false);
   });
 
   it('should accept datasource with complex config', () => {

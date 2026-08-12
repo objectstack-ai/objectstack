@@ -138,6 +138,8 @@ const viewBody = (name: string) => ({
   name,
   label: name,
   type: 'grid',
+  object: 'anything', // [#7741] the inline arm requires the object binding pair
+  viewKind: 'list',
   data: { provider: 'object', object: 'anything' },
   columns: ['id'],
 });

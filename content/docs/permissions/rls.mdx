@@ -15,8 +15,10 @@ Two properties define how it behaves:
 - **It's a filter, not a row hook.** Policies compile to a data filter that is
   pushed down into the query, so a restricted user's list is *narrower* — they
   don't get denied, they get fewer rows.
-- **It's fail-closed.** A policy that can't compile denies everything rather
-  than admitting anything. See [the contract](#the-fail-closed-contract).
+- **It's fail-closed — where it applies.** If policies apply and *every* one of
+  them fails to compile, the query denies everything rather than admitting
+  anything; an object with no applicable policy is left unfiltered, not hidden.
+  See [the contract](#the-fail-closed-contract).
 
 <Callout type="info">
 RLS is the expert escape hatch. Reach for it when

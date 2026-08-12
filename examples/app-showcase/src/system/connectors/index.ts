@@ -147,10 +147,18 @@ export const ErpCatalogConnector = defineConnector({
   label: 'ERP Integration (Catalog Descriptor)',
   type: 'saas',
   description:
-    'Catalog-only descriptor documenting a planned ERP integration: what it is, how it authenticates, ' +
-    'and which actions it will expose. Not dispatchable — see the connector plugins in ' +
-    'objectstack.config.ts for the live registry entries this collection does NOT feed (#2612).',
-  authentication: { type: 'api-key', key: 'SET_AT_INSTALL_TIME', headerName: 'X-API-Key' },
+    'Catalog-only descriptor documenting a planned ERP integration: what it is, how it authenticates ' +
+    '(API key in the X-API-Key header, bound at install time), and which actions it will expose. ' +
+    'Not dispatchable — see the connector plugins in objectstack.config.ts for the live registry ' +
+    'entries this collection does NOT feed (#2612).',
+  // No `authentication` block — a descriptor holds no live credentials (#7990:
+  // the publish door refuses any non-`none` `authentication`, because the row
+  // lands whole in `sys_metadata`). The auth SCHEME is prose in `description`;
+  // when this becomes a dispatchable instance it declares `provider` and
+  // references its key with `auth: { type: 'api-key', credentialRef: … }`
+  // (ADR-0097 §3). Until #7990 this entry carried
+  // `authentication: { type: 'api-key', key: 'SET_AT_INSTALL_TIME', … }` — a
+  // placeholder, but the exact inline-cleartext shape the door now refuses.
   // Descriptor-level action catalog: key + label + I/O JSON Schemas. Note the
   // deliberate absence of any execution binding (HTTP method/path) — that is
   // what keeps descriptors inert today and what ADR-0097's provider binding

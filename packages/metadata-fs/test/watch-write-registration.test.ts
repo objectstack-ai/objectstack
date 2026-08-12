@@ -128,15 +128,27 @@ describe('FileSystemRepository watcher — writes register their own path (#7282
     const iter = repo.watch({ org: 'system' }, 999)[Symbol.asyncIterator]();
     const events: MetadataEvent[] = [];
     let resolveNext: (() => void) | null = null;
-    void (async () => {
+    const nextEvent = () => new Promise<void>((res) => { resolveNext = res; });
+    // The drain loop is bound to a name and then called, rather than written as
+    // an immediately-invoked `void (async () => { … })()`. That is load-bearing
+    // for tsc, not style: for an IIFE, control-flow analysis narrows a captured
+    // `let` to its type AT THE POINT OF THE CALL — here `null`, from the
+    // initialiser above — so `resolveNext?.()` narrowed to `never` and reported
+    // TS2349 (one of the six errors this package's test layer was hiding until
+    // #7923 put it in front of tsc). A function expression that is not
+    // immediately invoked cannot be assumed to run at any particular point, so
+    // the declared `(() => void) | null` survives and the optional call is
+    // checked against what it can actually be. Runtime behaviour is identical:
+    // the loop still starts here, unawaited.
+    const drainEvents = async () => {
       for (;;) {
         const next = await iter.next();
         if (next.done) return;
         events.push(next.value as MetadataEvent);
         resolveNext?.();
       }
-    })();
-    const nextEvent = () => new Promise<void>((res) => { resolveNext = res; });
+    };
+    void drainEvents();
 
     await Promise.race([scanned, sleep(EVENT_WAIT_MS)]);
     // The walk reached the type directory, so what follows is measuring the

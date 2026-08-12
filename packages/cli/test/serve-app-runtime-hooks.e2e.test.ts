@@ -99,18 +99,18 @@ describe('os serve — an app booted from its artifact keeps its module code (#4
 
     // Sanity: the boot has to have got far enough for the inventory to run at
     // all, or "no warning" would be vacuously true.
-    expect(stdout, `serve never reached its banner${seen}`).toMatch(/Server is ready/);
+    expect(stderr, `serve never reached its banner${seen}`).toMatch(/Server is ready/);
 
     // The load-bearing assertion. Pre-fix this reported
     // `{"count":1,"actions":["hookfix_task:do_thing"]}` — declared, no handler.
-    expect(stdout, `the action's handler went unregistered${seen}`).not.toContain(
+    expect(stderr, `the action's handler went unregistered${seen}`).not.toContain(
       '[action-governance]',
     );
-    expect(stdout).not.toContain('hookfix_task:do_thing');
+    expect(stderr).not.toContain('hookfix_task:do_thing');
 
     // And the config's code was not merely tolerated in silence: nothing should
-    // report it as orphaned either.
-    expect(stdout).not.toContain('no app bundle claimed');
-    expect(stderr).not.toContain('no app bundle claimed');
+    // report it as orphaned either. One stream covers both since #7915 — every
+    // human line `serve` prints goes to stderr.
+    expect(stdout + stderr).not.toContain('no app bundle claimed');
   }, 240_000);
 });

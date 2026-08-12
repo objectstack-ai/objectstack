@@ -2,6 +2,15 @@
 //
 // The HARD, revert-provable #1994 gate.
 //
+// ADR-0056 D10 — the authz-conformance matrix rows this file is the cited proof
+// for; `authz-conformance.test.ts` asserts the pairing is mutual (#7976). BOTH
+// are claimed on their own evidence, as re-decided in PR #7975: the read side by
+// the member who cannot GET the admin note, the by-id write by the select-only
+// block below (its member set grants FULL CRUD on `rls_note`, so a refusal is
+// the record gate) asserting the PATCH is refused with the row unchanged.
+// authz-row: rls-read
+// authz-row: rls-by-id-write
+//
 // @proof: rls-by-id-write
 // ADR-0054 runtime proof for the RLS / sharing high-risk class. Referenced by the
 // liveness ledger entry `permission.rowLevelSecurity.using`

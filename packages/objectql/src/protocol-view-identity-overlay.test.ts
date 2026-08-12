@@ -217,19 +217,39 @@ describe('view overlay identity (#2555)', () => {
         expect(Array.from(rows.values()).some((r) => r.type === 'view')).toBe(true);
     });
 
-    it('write path stays a plain name-stamp when the registry has no entry to inherit from', async () => {
+    it('[#7741] write path REFUSES the adhoc PUT when the registry has no entry to inherit from', async () => {
+        // ⚠️ Deliberate inversion (ruled 2026-08-12, direction B). This test
+        // used to pin `success: true` for exactly this call — a raw config PUT
+        // on a name no registry entry shadows, persisted as a plain name-stamp
+        // with no identity. QA run #7695 measured what that row is: stored,
+        // badged `valid: true`, and served by NO object-bound read path (the
+        // switcher filters `v.viewKind && v.object`). The inline arms now
+        // require the binding pair, and with no baseline to inherit it from,
+        // the save 422s with the located guidance instead of minting the dead
+        // row. A shadowING adhoc PUT (baseline present) still saves — that is
+        // the first test in this describe.
         const { engine, rows } = makeStubEngine();
         const protocol = new ObjectStackProtocolImplementation(engine);
-        const result = await protocol.saveMetaItem({
-            type: 'view',
-            name: 'adhoc.view',
-            item: { ...personalization },
-        });
-        expect(result.success).toBe(true);
-        const row = Array.from(rows.values()).find((r) => r.type === 'view');
-        const persisted = JSON.parse(row!.metadata);
-        expect(persisted.name).toBe('adhoc.view');
-        expect('viewKind' in persisted).toBe(false);
+        let caught: any;
+        try {
+            await protocol.saveMetaItem({
+                type: 'view',
+                name: 'adhoc.view',
+                item: { ...personalization },
+            });
+        } catch (e) {
+            caught = e;
+        }
+        expect(caught).toBeTruthy();
+        // The ADR-0112 envelope, not a bare throw.
+        expect(caught.code).toBe('INVALID_METADATA');
+        expect(caught.status).toBe(422);
+        // The located prescription reaches the 422's issues.
+        const issues = JSON.stringify(caught.issues ?? []);
+        expect(issues).toContain('names no `object`');
+        expect(issues).toContain('defineView({ list: { type, data, columns,');
+        // …and nothing was stored.
+        expect(Array.from(rows.values()).filter((r) => r.type === 'view')).toHaveLength(0);
     });
 
     // ── #5599 — the write path's spec gate was bypassable by ANY body ────────

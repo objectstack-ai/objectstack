@@ -4,10 +4,12 @@ import type { Plugin, PluginContext } from '@objectstack/core';
 import { resolveAuthzContext } from '@objectstack/core';
 import { readEnvWithDeprecation, isMcpServerEnabled, resolveMcpStdioAutoStart } from '@objectstack/types';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import type { IAIService, IMetadataService } from '@objectstack/spec/contracts';
+import type { IAIService, IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
 import { MCPServerRuntime } from './mcp-server-runtime.js';
 import type { MCPServerRuntimeConfig } from './mcp-server-runtime.js';
 import type { ToolRegistry } from './types.js';
+import { createStdioDataBridge } from './stdio-data-bridge.js';
+import type { McpDataBridge } from './mcp-http-tools.js';
 import { CONNECT_AGENT_UI_BUNDLE } from './connect-ui.js';
 
 /**
@@ -175,9 +177,15 @@ export class MCPServerPlugin implements Plugin {
     let getRecord:
       | ((objectName: string, recordId: string) => Promise<Record<string, unknown> | null>)
       | undefined;
+    // [#8034] The object-tool surface for the long-lived server, bound to the
+    // same identity as `getRecord` above. Built only on the stdio path, because
+    // that is the only path with a principal to bind: no principal ⇒ no bridge
+    // ⇒ no tools registered ⇒ no `tools` capability advertised, which is the
+    // honest report rather than the empty promise this issue is about.
+    let dataBridge: McpDataBridge | undefined;
     if (shouldStart) {
       const apiKey = readEnvWithDeprecation('OS_MCP_STDIO_API_KEY', [], { silent: true });
-      let ql: { find: (object: string, opts: unknown) => Promise<unknown> } | undefined;
+      let ql: (IDataEngine & { find: (object: string, opts: unknown) => Promise<unknown> }) | undefined;
       try {
         ql = ctx.getService('objectql');
       } catch {
@@ -206,9 +214,30 @@ export class MCPServerPlugin implements Plugin {
       }
       const scopedQl = ql;
       // Re-resolve per call so a revoked/expired key stops working on the next read.
-      getRecord = async (objectName, recordId) => {
+      const resolvePrincipal = async (): Promise<ExecutionContext> => {
         const ec = await resolveStdioExecutionContext(scopedQl, apiKey);
         if (!ec) throw new Error('MCP stdio identity is no longer valid (key revoked or expired)');
+        return ec;
+      };
+      if (metadataService) {
+        dataBridge = createStdioDataBridge({
+          engine: scopedQl,
+          metadataService,
+          resolvePrincipal,
+        });
+      } else {
+        // Functional degradation, said once and naming the remedy: two of the
+        // object tools read the schema, so without a metadata service the
+        // surface cannot be served at all. Nothing is advertised in its place.
+        ctx.logger.warn(
+          '[MCP] stdio transport starting WITHOUT object tools — the metadata service is not registered, '
+            + 'so list_objects/describe_object have nothing to read and no tool surface is bridged. '
+            + 'An MCP client will see resources and prompts but no tools. '
+            + 'Fix: register the metadata service (the metadata plugin) in this assembly.',
+        );
+      }
+      getRecord = async (objectName, recordId) => {
+        const ec = await resolvePrincipal();
         const res = (await scopedQl.find(objectName, {
           where: { id: recordId },
           limit: 1,
@@ -229,6 +258,14 @@ export class MCPServerPlugin implements Plugin {
       // skill's instructions onto an MCP prompt (#3905), so the surface must be
       // complete before the transport attaches below.
       await this.runtime.bridgePrompts(metadataService);
+    }
+
+    // [#8034] BEFORE `start()`, with the resources and prompts: registering a
+    // tool is also what declares the `tools` capability, and the SDK refuses to
+    // register capabilities once a transport is attached. Every bridge on this
+    // server is complete before the transport claims stdin/stdout.
+    if (dataBridge) {
+      this.runtime.bridgeDataTools(dataBridge);
     }
 
     if (shouldStart) {

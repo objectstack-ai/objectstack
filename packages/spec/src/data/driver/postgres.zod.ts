@@ -20,7 +20,9 @@ import { strictObject } from '../../shared/strict-object';
 import {
   driverConfigJsonSchema,
   DriverSslToggleSchema,
+  INLINE_CREDENTIAL_REFUSED,
   READ_ONLY_BELONGS_ON_DATASOURCE,
+  refusedInlineCredentialKey,
   SCHEMA_MODE_BELONGS_ON_DATASOURCE,
   SqlAutoMigrateSchema,
   SSL_DETAIL_BELONGS_ON_DATASOURCE,
@@ -41,8 +43,6 @@ export const PostgresConfigSchema = lazySchema(() => strictObject(
       dbname: 'database',
       db: 'database',
       user: 'username',
-      passwd: 'password',
-      pwd: 'password',
       connectionstring: 'url',
       dsn: 'url',
       uri: 'url',
@@ -54,6 +54,13 @@ export const PostgresConfigSchema = lazySchema(() => strictObject(
       usessl: 'ssl',
     },
     guidance: {
+      // #7990 — former ALIASES of `password` (`passwd:`/`pwd:` used to rename
+      // onto it). Now that the key itself is unwritable they carry the refusal
+      // directly: an alias row pointing at a tombstoned key would send the
+      // author into a second rejection (`strict-object.ts`'s `triggerPhrase`
+      // lesson).
+      passwd: INLINE_CREDENTIAL_REFUSED('passwd'),
+      pwd: INLINE_CREDENTIAL_REFUSED('pwd'),
       pool: poolBelongsOnDatasource('pool', 'max'),
       min: poolBelongsOnDatasource('min', 'min'),
       max: poolBelongsOnDatasource('max', 'max'),
@@ -97,13 +104,14 @@ export const PostgresConfigSchema = lazySchema(() => strictObject(
   username: z.string().optional().describe('Authentication user').meta({ title: 'User' }),
 
   /**
-   * Authentication password. Prefer `external.credentialsRef` — a secret-store
-   * reference — or an environment placeholder; a datasource secret always wins
-   * over this value.
+   * Authentication password — REFUSED inline since #7990. Declared-unwritable
+   * (`z.never()`) rather than deleted so the removal is audible in `tsc` and
+   * in the parse, and so the `format: 'password'` projection keeps rendering
+   * the connection form's secret input (which routes to the secret binder —
+   * the mechanism the refusal diverts to). The resolved
+   * `external.credentialsRef` secret is injected at connect time.
    */
-  password: z.string().optional()
-    .describe('Authentication password (prefer external.credentialsRef)')
-    .meta({ title: 'Password', format: 'password' }),
+  password: refusedInlineCredentialKey('password', 'Password'),
 
   /** TLS settings, passed to `pg` verbatim. */
   ssl: DriverSslToggleSchema.optional().meta({ title: 'Use SSL/TLS' }),

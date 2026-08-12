@@ -168,7 +168,7 @@ describe('os serve — boots without a compiled artifact (#4085)', () => {
       // No artifact was built — the whole point.
       expect(existsSync(join(appDir, 'dist/objectstack.json'))).toBe(false);
 
-      expect(stdout, `serve never reported ready${seen}`).toContain('Server is ready');
+      expect(stderr, `serve never reported ready${seen}`).toContain('Server is ready');
       // The exact Phase-1 death this issue filed, in either of its spellings
       // (the misleading "is async" one and the truthful "not found" the kernel
       // now reports).
@@ -181,7 +181,7 @@ describe('os serve — boots without a compiled artifact (#4085)', () => {
       // through a connected datasource. A failure in either aborts boot before
       // the banner, so reaching this line with the app listed is the real
       // guarantee.
-      expect(stdout, `app plugin missing from the boot banner${seen}`).toMatch(
+      expect(stderr, `app plugin missing from the boot banner${seen}`).toMatch(
         /Plugins:[\s\S]*noartifact/,
       );
 
@@ -205,7 +205,7 @@ describe('os serve — boots without a compiled artifact (#4085)', () => {
       // Same premise as every boot in this file: nothing was ever compiled.
       expect(existsSync(join(defineStackDir, 'dist/objectstack.json'))).toBe(false);
 
-      expect(stdout, `serve never reported ready${seen}`).toContain('Server is ready');
+      expect(stderr, `serve never reported ready${seen}`).toContain('Server is ready');
       // The crash #3887 reported, and the truthful message the kernel replaced
       // it with — neither may return through the authored path either.
       expect(out).not.toMatch(/Service 'manifest' (is async|not found)/);
@@ -217,7 +217,7 @@ describe('os serve — boots without a compiled artifact (#4085)', () => {
       // fails HERE rather than degrading into a green run against nothing: the
       // app is named in the started plugin set, which it can only reach by
       // having been parsed, registered, and started.
-      expect(stdout, `app plugin missing from the boot banner${seen}`).toMatch(
+      expect(stderr, `app plugin missing from the boot banner${seen}`).toMatch(
         /Plugins:[\s\S]*cfgload/,
       );
 
@@ -226,7 +226,7 @@ describe('os serve — boots without a compiled artifact (#4085)', () => {
       // app's start had to find a connected driver behind that name. The banner
       // reports which one resolved, so assert it rather than leave the claim
       // resting on "boot did not throw".
-      expect(stdout, `no driver resolved for the stamped datasource${seen}`).toMatch(
+      expect(stderr, `no driver resolved for the stamped datasource${seen}`).toMatch(
         /Driver:\s+\S+/,
       );
     },
@@ -242,7 +242,7 @@ describe('os serve — boots without a compiled artifact (#4085)', () => {
       });
       const seen = `\n--- stdout ---\n${stdout}\n--- stderr ---\n${stderr}`;
 
-      expect(stdout, `bare platform never reported ready${seen}`).toContain('Server is ready');
+      expect(stderr, `bare platform never reported ready${seen}`).toContain('Server is ready');
       expect(stdout + stderr).not.toContain('rollback complete');
       // MetadataPlugin's own fatal on the absent `dist/objectstack.json`.
       expect(stdout + stderr).not.toContain('Cannot read artifact file');
@@ -303,7 +303,7 @@ describe('os serve — boots without a compiled artifact (#4085)', () => {
       const out = stdout + stderr;
 
       // A rejected app must not take the platform down…
-      expect(stdout, `platform died on an unregisterable app${seen}`).toContain('Server is ready');
+      expect(stderr, `platform died on an unregisterable app${seen}`).toContain('Server is ready');
       // …and must not be swallowed either: the operator has to learn that their
       // objects are NOT being served, and why.
       expect(out, `no warning about the skipped app${seen}`).toContain('Skipped registering the app');

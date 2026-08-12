@@ -474,13 +474,34 @@ const EXEMPT = {
 // re-ratcheted.
 //
 // THE THREE ENTRIES THAT ARRIVED WITH #7353 -- cli 188, metadata-fs 6,
-// example-showcase 4 -- are not new debt and did not slip past a ledger that is
+// example-showcase 4 -- were not new debt and did not slip past a ledger that is
 // closed to it. They are debt this gate had never been able to SEE: TESTS_COVERED
 // asked whether an `exclude` named the tests, so a package that had simply never
 // pointed `include` at its test tree answered "covered" while nothing compiled a
 // line of it. All three were in that state before this ledger existed. 198 raw
 // errors is what the blind spot was worth on the day it was measured, and the
 // only thing that changed to surface them is the question.
+//
+// TWO OF THE THREE HAVE SINCE GRADUATED (#7923), which is the point of a TEST_DEBT
+// entry: it is a holding position that makes a layer ratchet, not a destination.
+// Both were re-measured on the merged ref before repair and both matched their
+// recorded numbers exactly (metadata-fs 6, example-showcase 4), so the entries
+// were deleted against measurements rather than against hope.
+//   - `@objectstack/metadata-fs` took the sibling-config route, because its
+//     `rootDir` is `src` and its `dev` script emits (`tsc --watch`, `outDir:
+//     dist`): a package-root `rootDir` in the BUILD config would relocate
+//     `dist/index.js` and start emitting compiled tests. `tsconfig.test.json`
+//     beside it is named by the `typecheck` script -- the #5286 mechanism, the
+//     same one `packages/metadata-core` uses for the structurally identical hole.
+//   - `@objectstack/example-showcase` took the widened-`include` route (#7312's
+//     shape for app-crm / app-todo), because its `rootDir` is already `.` and
+//     nothing needed neutralising. Its glob is `e2e/**/*.spec.ts` and NOT
+//     `e2e/**/*`, holding the same line the deleted entry's note drew: the
+//     wholesale glob would pull in `e2e/global-setup.ts`, a fixture rather than a
+//     test, and bill the test layer 6 errors that are not its own. That file is
+//     still read by no tsc program and is filed rather than folded in here.
+// `@objectstack/cli` (188 raw across 56 files) is deliberately NOT part of that
+// graduation -- it is a programme rather than a sitting, and its entry stands.
 const TEST_DEBT = {
   '@objectstack/plugin-approvals': {
     errors: 547,
@@ -628,7 +649,6 @@ const TEST_DEBT = {
   '@objectstack/formula': { errors: 17, note: 'TS2591 x6 (`process`), TS2345 x3, TS2352 x3, TS1470 x2, TS2339 x2. Re-measured 17 at 5ab08428, up from 12; the TS2591 half doubled, which is the missing `types:["node"]` again rather than five new defects.' },
   '@objectstack/trigger-record-change': { errors: 9, note: 'TS2353 x9 -- still the one unknown-property shape repeated, now in four files. Re-measured 9 at 5ab08428, up from 8.' },
   '@objectstack/verify': { errors: 8, note: 'TS2835 x4, TS7006 x4. Re-measured 8 at 5ab08428, up from 6; both classes are the NodeNext pair from the top-of-ledger note.' },
-  '@objectstack/metadata-fs': { errors: 6, note: 'TS6133 x5 (declared, never read -- the root config sets `noUnusedLocals`), TS2349 x1. Include-shaped: `include: ["src/**/*"]`, no `exclude` naming tests, and all 6 test files in a sibling `test/` tree, so this was invisible to the exclude-shaped detector (#7353). 5 of the 6 are in test/contract.test.ts; the TS2349 is in test/watch-write-registration.test.ts. Measured at b9f930b, recorded exactly.' },
   '@objectstack/connector-mcp': { errors: 5, note: 'TS2339 x5. Re-measured 5 at 5ab08428, exact.' },
   '@objectstack/connector-openapi': { errors: 5, note: 'TS2339 x5. Re-measured 5 at 5ab08428, exact.' },
   '@objectstack/http-conformance': {
@@ -639,7 +659,6 @@ const TEST_DEBT = {
       + 'this package\'s own code. Raw `tsc --noEmit` counts are what every number in these ledgers means, '
       + 'so they are counted here rather than filtered out -- but they are not this package\'s debt to fix.',
   },
-  '@objectstack/example-showcase': { errors: 4, note: 'TS2339 x4. The one entry here whose hidden files are Playwright specs rather than vitest tests: `include` names `src/**/*`, `objectstack.config.ts` and `test/**/*` -- so the vitest layer is compiled and the `e2e/` tree beside it is not. Three specs, 4 errors (detail-shapes.spec.ts x2, bulk-capability-gate.spec.ts x1, showcase-smoke.spec.ts x1). Measured by adding the three spec files to `include` one at a time, NOT `e2e/**/*`, which would also have pulled in e2e/global-setup.ts and billed this layer 6 errors from a file that is not a test. Sibling to #7312, which repaired app-crm and app-todo the same way and could not move this gate\'s count because neither app had ever counted toward it.' },
   '@objectstack/platform-objects': { errors: 3, note: 'TS2339 x2, TS7006 x1. Re-measured 3 at 5ab08428, exact.' },
   '@objectstack/plugin-sharing': { errors: 3, note: 'TS6133 x2, TS18048 x1. Re-measured 3 at 5ab08428, exact.' },
   '@objectstack/service-sms': { errors: 1, note: 'TS2493 x1, in transports.test.ts. Re-measured 1 at 5ab08428 and still 1 at e8db1a230, after two more hidden test files: #5773 added sms-manifest-providers.contract.test.ts and #2814 / PR #6042 added sms-daily-quota.test.ts. The file count moved twice while the error count did not -- both new files are type-clean with the exclusion lifted.' },

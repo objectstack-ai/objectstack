@@ -193,8 +193,14 @@ describe('the gate runs before serve does ANY boot work', () => {
    * posture got as far as `Loading objectstack.config.ts…`, the whole plugin
    * slate, a persisted dev crypto key and a degraded kernel bootstrap before
    * anything refused. After it, `run()` reaches the gate and stops: the FATAL
-   * is the only thing written, and `console.log` — which is where every
-   * subsequent boot step reports — is never touched at all.
+   * is the only thing written, and the diagnostic stream — where every
+   * subsequent boot step reports — carries nothing else.
+   *
+   * That stream is **stderr** since #7915 (`serve` keeps stdout clear for the
+   * MCP stdio transport), so the capture below watches `process.stderr.write`
+   * rather than `console.log`. Watching `console.log` here would now be a
+   * phantom check: no boot step writes there any more, so the assertion could
+   * never fail, whatever the gate did.
    *
    * Note what is deliberately NOT asserted: "the port never listened". That was
    * true before the fix too (the escaping throw aborted kernel Phase 1, while
@@ -207,13 +213,19 @@ describe('the gate runs before serve does ANY boot work', () => {
     process.env.OS_TENANCY_POSTURE = 'bogus';
 
     const errors: string[] = [];
-    const logs: string[] = [];
+    const diagnostics: string[] = [];
     const errSpy = vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => {
       errors.push(a.join(' '));
     });
-    const logSpy = vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => {
-      logs.push(a.join(' '));
-    });
+    // Everything `serve` prints, at the stream: its own `printDiagnostic` lines
+    // AND anything the redirect installed at the top of `run()` forwards there.
+    const stdoutWrite = process.stdout.write;
+    const stderrSpy = vi
+      .spyOn(process.stderr, 'write')
+      .mockImplementation(((chunk: unknown) => {
+        diagnostics.push(String(chunk));
+        return true;
+      }) as typeof process.stderr.write);
     // The gate exits the PROCESS on purpose (a throw is what the broad
     // AuthPlugin catch used to swallow). Convert it to something catchable so
     // the test runner survives, and assert it was reached.
@@ -230,8 +242,12 @@ describe('the gate runs before serve does ANY boot work', () => {
       raised = err;
     } finally {
       errSpy.mockRestore();
-      logSpy.mockRestore();
+      stderrSpy.mockRestore();
       exitSpy.mockRestore();
+      // `run()` reserves stdout for the process's lifetime (#7915). Harmless in
+      // the real one-shot CLI; in a vitest worker it would outlive this case,
+      // so put the stream back.
+      process.stdout.write = stdoutWrite;
       if (savedNodeEnv === undefined) delete process.env.NODE_ENV;
       else process.env.NODE_ENV = savedNodeEnv;
     }
@@ -244,12 +260,14 @@ describe('the gate runs before serve does ANY boot work', () => {
     expect(stderr).toContain('OS_TENANCY_POSTURE="bogus"');
 
     // ── The ordering facts ────────────────────────────────────────────────
-    // serve announces the config load on stdout as its first boot step. It is
-    // absent, so the gate preceded it — and therefore preceded every plugin
-    // load, the kernel bootstrap and the listening socket that follow it.
-    expect(logs.join('\n')).not.toContain('Loading');
-    // Nothing at all reached stdout, in fact: the refusal is the whole output.
-    expect(logs).toEqual([]);
+    // serve announces the config load as its first boot step. It is absent, so
+    // the gate preceded it — and therefore preceded every plugin load, the
+    // kernel bootstrap and the listening socket that follow it.
+    expect(plain(diagnostics.join('\n'))).not.toContain('Loading');
+    // Nothing at all was printed by a boot step, in fact: the FATAL — written
+    // with `console.error`, which the spy above takes before it reaches the
+    // stream — is the whole output.
+    expect(diagnostics).toEqual([]);
 
     // The misattribution that made this issue expensive to diagnose is gone:
     // no warning blames a plugin for an environment-variable typo.

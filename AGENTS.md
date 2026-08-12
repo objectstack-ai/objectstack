@@ -602,7 +602,7 @@ export class MyPlugin implements Plugin {
 
 ## Route & surface ownership
 
-Four rules, each paid for by a real bug. They matter more than usual here because this
+Five rules, each paid for by a real bug. They matter more than usual here because this
 repo is largely written by agents, and every one of them is a trap that reads as
 reasonable code.
 
@@ -630,6 +630,49 @@ success. Prefer failing to falling back.
 SDKs, codegen and AI clients. Advertise only what is actually mounted, and mount
 everything advertised (ADR-0076 D12) — a wrong answer here propagates into everything
 built on top of it.
+
+**5. A new REST route declares its CLOSED query-parameter set on the day it lands.**
+Maintainer ruling, 2026-08-12, verbatim and untranslated:
+
+> **裁定:政策 YES —— 闭合查询参数集成为 REST ingress 政策;采纳方式为增量,⛔ 不打大包。**
+
+Open the handler with `refuseUnknownQueryParams(req, res, <EXPORTED_PARAMS>)`
+(`packages/rest/src/query-allowlist.ts` — its header is the authority on detail) so an
+unrecognised name gets a located `400` instead of being dropped. A handler that reads
+the keys it knows and ignores the rest fails **undetectably in both directions**: a
+dropped *filter* returns the full set, a dropped key inside `where` returns `200` with
+zero rows, and no status, header or field distinguishes either from a real answer — an
+AI caller cannot see it at all. This is review-enforceable: a PR adding a `GET` route
+that reads `req.query` without declaring a closed set is incomplete.
+
+Three things to get right, all of them measured rather than assumed:
+
+- ⛔ **Measure the set from the handler's ACTUAL read points, never from the docs or
+  the card.** It is not "the filters" — it is paging, ordering, format, alias spellings
+  and anything middleware reads. **Forgetting `limit` trades a silent-widening bug for
+  a loud pagination outage**, which is worse than the defect. ⚠️ **Read the helpers the
+  handler calls, not just the handler**: the export route's `?locale=` never appears in
+  its body — it is read a frame down, by `extractLocale` behind the call that localises
+  the header row — so a set measured from the handler alone would have 400'd every
+  localised export that works today. Pin **both halves** per route: a refusal pin
+  (status + nested `error.code` + **the service was never called**) beside a
+  preservation pin (**the arguments the service actually received**). Neither half is
+  optional, and a bare status assertion is not a pin — "still 200" is exactly what the
+  defect looked like, and the refusal's whole point is that the service never ran.
+- ⛔ **Routes whose parameter set is genuinely OPEN are excluded, by name.**
+  `GET /data/:object` hands its whole query to the normalizer, which lowers every
+  leftover key into an implicit field filter (`?status=open` *is* the filter) — the
+  valid names are the object's own fields, so any list here would be wrong. It is
+  already gated one layer down, against the right authority: an unknown **field** is
+  refused there with `400 INVALID_FIELD`, judged against the object's real field map
+  (the registry's, including the audit/tenant/owner columns it injects — not the
+  author's declaration). The test: *if an unrecognised name has a defined meaning on
+  this route, the set is open* — gate it where the authority for the name lives.
+- **Existing routes convert per lane, ⛔ never as one sweep** (data read routes first).
+  A broad wave with thin pins is the failure mode the ruling rejected.
+
+Recognition runs **before** the arity gate (`refuseRepeatedQueryParams`); both answer
+the same nested ADR-0112 `VALIDATION_ERROR`, so composing them adds no dialect.
 
 **Verifying any of this:** "who serves this path" is a question about the composed,
 *provisioned* runtime — not about which plugin declares it, not about registration

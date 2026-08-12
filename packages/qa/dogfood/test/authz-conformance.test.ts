@@ -15,13 +15,28 @@
 import { describe, expect, it } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { checkLedger } from '@objectstack/verify';
 import { AUTHZ_CONFORMANCE, type AuthzPrimitive } from './authz-conformance.matrix.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // packages/qa/dogfood/test → repo root.
 const REPO_ROOT = join(HERE, '../../../..');
+
+// ── #7976 — mutual row ↔ proof attribution ────────────────────────────────
+// A proof file self-declares the rows it is the proof FOR with header
+// `// authz-row: <id>` lines, and `checkLedger` asserts the pairing both ways.
+// The keyword is deliberately NOT `@proof:` — that channel carries ADR-0054
+// LIVENESS ids, a different vocabulary from matrix row ids (the same file is
+// `@proof: cbp-controlled-by-parent` and `authz-row: controlled-by-parent`), and
+// collapsing them would make one gate's rename silently re-point the other's.
+const ATTRIBUTION_MARKER = 'authz-row';
+// Scanned so a claim can never rot unnoticed: a claim living in a dogfood file
+// NO row cites is invisible to the citation walk by construction, and is exactly
+// what a renamed row or a re-pointed proof leaves behind.
+const scanProofCandidates = (): string[] =>
+  readdirSync(HERE).filter((f) => f.endsWith('.dogfood.test.ts'));
+const ATTRIBUTION = { marker: ATTRIBUTION_MARKER, scan: scanProofCandidates } as const;
 
 // ── #2567 ratchet — static enumeration of anonymous-deny HTTP entry points ──
 //
@@ -208,6 +223,8 @@ describe('ADR-0056 D10 — authorization conformance matrix', () => {
       // classified by exactly one row's `covers`, and no `covers` key may be
       // stale (no longer in source).
       discover: () => discoverAnonymousDenySurfaces(),
+      // #7976 — and the cited proofs must NAME the rows they prove.
+      attribution: ATTRIBUTION,
     });
     expect(problems, problems.join('\n')).toEqual([]);
   });
@@ -218,7 +235,12 @@ describe('ADR-0056 D10 — authorization conformance matrix', () => {
 // needs no source edits. If these ever pass vacuously, the ratchet is asleep.
 describe('#2567 — anonymous-deny surface ratchet bites', () => {
   const clone = (): AuthzPrimitive[] => JSON.parse(JSON.stringify(AUTHZ_CONFORMANCE));
-  const opts = (discover: () => Iterable<string>) => ({ proofRoot: HERE, highRisk: HIGH_RISK, discover });
+  const opts = (discover: () => Iterable<string>) => ({
+    proofRoot: HERE,
+    highRisk: HIGH_RISK,
+    discover,
+    attribution: ATTRIBUTION,
+  });
 
   it('the real matrix + real discover is sound (baseline lock)', () => {
     const problems = checkLedger(AUTHZ_CONFORMANCE, opts(() => discoverAnonymousDenySurfaces()));
@@ -302,5 +324,72 @@ describe('#2567 — anonymous-deny surface ratchet bites', () => {
       );
       expect(problems.some((p) => /STALE covers/.test(p) && p.includes(gate))).toBe(true);
     }
+  });
+});
+
+// ── #7976 — the row ↔ proof ATTRIBUTION bites ─────────────────────────────
+// Existence was the whole `proof` contract before this: a row could cite a file
+// that exercises a neighbouring primitive and stay green forever. These cases
+// drive `checkLedger` with controlled inputs (deep-cloned matrix) so they are
+// deterministic and need no source edits — the same shape as the #2567 block
+// above. If they ever pass vacuously, the attribution gate is asleep and the
+// ledger is back to vouching for citations nobody checked.
+describe('#7976 — row ↔ proof attribution is mutual', () => {
+  const clone = (): AuthzPrimitive[] => JSON.parse(JSON.stringify(AUTHZ_CONFORMANCE));
+  const opts = () => ({ proofRoot: HERE, highRisk: HIGH_RISK, attribution: ATTRIBUTION });
+
+  it('every row that cites a proof is CLAIMED by it (baseline lock)', () => {
+    // Baseline sanity: the walk has real work to do — this must never become a
+    // vacuous pass because the rows stopped carrying proofs.
+    const cited = AUTHZ_CONFORMANCE.filter((r) => r.proof);
+    expect(cited.length, 'the matrix must still cite proofs').toBeGreaterThanOrEqual(20);
+    expect(checkLedger(AUTHZ_CONFORMANCE, opts())).toEqual([]);
+  });
+
+  it('a row re-pointed at a proof that does NOT claim it fails, NAMING the row', () => {
+    // The exact defect #7976 filed: `flow-runas.dogfood.test.ts` exists, so the
+    // pre-#7976 existence check was perfectly happy with this citation.
+    const m = clone();
+    m.find((r) => r.id === 'rls-read')!.proof = 'flow-runas.dogfood.test.ts';
+    const problems = checkLedger(m, opts());
+    expect(problems.some((p) => p.startsWith('rls-read:') && /does not claim this row/.test(p))).toBe(true);
+  });
+
+  it('a shared proof file must claim BOTH rows — dropping one is not covered by the other', () => {
+    // `rls-fixture.dogfood.test.ts` proves `rls-read` AND `rls-by-id-write`
+    // (PR #7975). Borrowing the sibling's credibility is the thing that must fail.
+    const m = clone();
+    m.find((r) => r.id === 'rls-by-id-write')!.proof = 'controlled-by-parent.dogfood.test.ts';
+    const problems = checkLedger(m, opts());
+    expect(problems.some((p) => p.startsWith('rls-by-id-write:') && /does not claim this row/.test(p))).toBe(true);
+  });
+
+  it('a claim naming a row the ledger does not have is an ORPHAN', () => {
+    const m = clone().filter((r) => r.id !== 'flow-run-as');
+    const problems = checkLedger(m, opts());
+    expect(
+      problems.some((p) => p.includes('flow-runas.dogfood.test.ts') && /orphaned claim/.test(p)),
+    ).toBe(true);
+  });
+
+  it('a claim the row does not reciprocate fails (attribution is not one-way)', () => {
+    // The row still exists and its proof still exists — only the pairing broke.
+    const m = clone();
+    m.find((r) => r.id === 'flow-run-as')!.proof = undefined;
+    const problems = checkLedger(m, opts());
+    expect(problems.some((p) => /attribution is not mutual/.test(p) && p.includes('flow-run-as'))).toBe(true);
+  });
+
+  it('scanning is what catches a claim no row cites at all', () => {
+    // Without `scan`, a file nothing cites is never read — so a renamed row
+    // leaves its stale claim behind, silently. With it, the same edit is loud.
+    const m = clone();
+    m.find((r) => r.id === 'owd-private')!.proof = undefined;
+    const unscanned = checkLedger(m, { proofRoot: HERE, attribution: { marker: ATTRIBUTION_MARKER } });
+    expect(unscanned.some((p) => p.includes('showcase-private-owd.dogfood.test.ts'))).toBe(false);
+    const scanned = checkLedger(m, opts());
+    expect(
+      scanned.some((p) => p.includes('showcase-private-owd.dogfood.test.ts') && /not mutual/.test(p)),
+    ).toBe(true);
   });
 });

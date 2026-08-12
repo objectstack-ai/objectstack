@@ -8,6 +8,13 @@ export * from './error-leak.js';
 export * from './keyset-walk.js';
 export * from './module-not-found.js';
 export * from './response-envelope.js';
+// [#8016] The one rule for "what HTTP answer does a THROWN error declare?",
+// plus the validation-failure recogniser it reads. Both doors of
+// `/api/v1/packages` call it: the runtime dispatcher's `errorFromThrown` and the
+// direct-mount REST registrar, which used to answer 500 INTERNAL_ERROR for a
+// coded 4xx the dispatcher mapped correctly.
+export * from './thrown-http-error.js';
+export * from './validation-failure.js';
 // [#6615] The one home for Postgres' `«sub-object» "x" of relation "y"` phrase,
 // whose missing-COLUMN spelling contains a legal missing-TABLE phrase as a
 // substring. Three packages had each repaired that superstring hole separately.

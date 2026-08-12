@@ -178,6 +178,7 @@ const VIEW = {
     name: 'overdue_grid',
     label: 'Overdue',
     object: 'task',
+    viewKind: 'list', // [#7741] the inline arm requires the object binding pair
     columns: [{ field: 'name', label: 'Name' }],
 };
 

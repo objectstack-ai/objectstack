@@ -12,6 +12,12 @@
 // the contract end-to-end; production ships the enterprise resolver.
 //
 // @proof: showcase-scope-depth
+//
+// ADR-0056 D10 — the authz-conformance matrix row this file is the cited proof
+// for; `authz-conformance.test.ts` asserts the pairing is mutual (#7976). It
+// drives `unit`, `unit_and_below` and `own_and_reports` plus the open-edition
+// fail-closed fallback; `own` is proven by showcase-private-owd.
+// authz-row: scope-depth
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack from '@objectstack/example-showcase';

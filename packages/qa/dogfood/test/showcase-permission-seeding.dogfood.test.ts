@@ -7,6 +7,10 @@
 // package's sets, and uninstall/upgrade have a well-defined owner axis.
 // Proven on the real showcase stack, which declares `showcase_contributor`
 // and `showcase_member_default` in `src/security/`.
+//
+// ADR-0056 D10 — the authz-conformance matrix row this file is the cited proof
+// for; `authz-conformance.test.ts` asserts the pairing is mutual (#7976).
+// authz-row: declarative-permission-seeding
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack from '@objectstack/example-showcase';

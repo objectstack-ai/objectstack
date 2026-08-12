@@ -172,6 +172,149 @@ function productionOverrideWarnings(
 }
 
 /**
+ * The two codes Node's module system raises when a specifier cannot be
+ * RESOLVED — the only signal this file uses to tell "the package is not
+ * installed" apart from "the package is installed and something in it threw"
+ * (#7926).
+ *
+ * Both spellings are live because this package ships both module formats:
+ * the ESM build's `await import()` reaches the ESM loader, which raises
+ * `ERR_MODULE_NOT_FOUND`; the CJS build resolves the same call through
+ * `require()`, which raises `MODULE_NOT_FOUND`. Measured on node v22.22, both
+ * paths, rather than assumed.
+ *
+ * ⛔ Never classify on the message text instead. A message match is a guess
+ * about wording Node is free to change — the class of guess this repo removed
+ * from the query normalizer (#4181 / #4121).
+ *
+ * This is NOT in tension with the "which stage threw" classifier the
+ * organizations block below uses, and it is not a competing convention: both
+ * refuse to read a *plugin's* private refusal semantics. `ERR_MODULE_NOT_FOUND`
+ * is the module system's own verdict about resolution, which is precisely the
+ * fact being classified here; the organizations block classifies a *plugin's*
+ * refusal, about which the framework knows — and must know — nothing.
+ *
+ * One honest limit: a package that resolves but whose own dependency does not
+ * raises the same code, so the absent arm can fire for a package that is itself
+ * installed. That is why both arms print the resolver's own message — it names
+ * the specifier that actually failed, so "install X" stays actionable.
+ *
+ * The code is read through {@link errorChain}, because the failure does not
+ * always arrive bare.
+ */
+const MODULE_NOT_FOUND_CODES: readonly string[] = ['ERR_MODULE_NOT_FOUND', 'MODULE_NOT_FOUND'];
+
+/**
+ * The error and everything it was wrapped around, outermost first.
+ *
+ * Loader failures do not always arrive bare: a host that transforms modules can
+ * hand back its own `Error` with the real one on `cause`. Measured, not
+ * supposed — `@vitest/mocker`'s `createHelpfulError` does exactly this to any
+ * throw from a `vi.mock` factory, which is how this repo's own tests simulate an
+ * absent package (`dev-plugin.test.ts`). Reading only the outer error there
+ * would classify every simulated-absent package as present-but-failed.
+ *
+ * Bounded, and cycle-safe: an error chain is untrusted input.
+ */
+function errorChain(err: unknown, maxDepth = 5): unknown[] {
+  const chain: unknown[] = [];
+  let current: unknown = err;
+  while (current != null && chain.length < maxDepth) {
+    if (chain.includes(current)) break;
+    chain.push(current);
+    current = (current as { cause?: unknown }).cause;
+  }
+  return chain;
+}
+
+/**
+ * Whether `err` is the module system reporting that a specifier did not resolve.
+ *
+ * The OUTERMOST error that carries a `code` decides: a coded error is
+ * authoritative about itself, and an uncoded wrapper is transparent. So a
+ * constructor's own typed refusal is never re-read as a resolution failure just
+ * because something further down the chain happens to be one.
+ */
+function isModuleNotFound(err: unknown): boolean {
+  for (const link of errorChain(err)) {
+    const code = (link as { code?: unknown } | null | undefined)?.code;
+    if (typeof code === 'string') return MODULE_NOT_FOUND_CODES.includes(code);
+  }
+  return false;
+}
+
+/**
+ * The evidence a failed optional load carried, rendered for a log line.
+ *
+ * Printed by BOTH arms, whole chain included. The defect this replaces (#7926)
+ * was a bare `catch` that discarded the one thing capable of naming the real
+ * cause: `driver-memory` refused to construct under a multi-tenant posture with
+ * a message that named the posture, both env knobs and the remedy, and an
+ * operator saw none of it.
+ */
+function loadFailureDetail(err: unknown): string {
+  return errorChain(err)
+    .map((link) => {
+      const message = link instanceof Error ? link.message : String(link);
+      const code = (link as { code?: unknown } | null | undefined)?.code;
+      return code === undefined ? message : `code: ${String(code)} — ${message}`;
+    })
+    .join(' ← caused by: ');
+}
+
+/** One optional-service load, as its `catch` needs to describe it. */
+interface OptionalLoadSpec {
+  /** Every package the `try` block imports — named in the "IS installed" arm. */
+  packages: readonly string[];
+  /**
+   * Today's absent-case line, verbatim: same wording, same advice. An absent
+   * optional package is a normal dev-stack state and its diagnosis was already
+   * right, so nothing about it changes except that the resolver's own message
+   * now rides along.
+   */
+  absent: string;
+  /** Level for the absent case — per slot, since "absent" is normal noise. */
+  absentLevel: 'warn' | 'info' | 'debug';
+  /** What the stack does without this service, e.g. `'skipping driver'`. */
+  outcome: string;
+}
+
+/**
+ * Report a failed optional-service load, telling ABSENT apart from
+ * PRESENT-BUT-FAILED (#7926).
+ *
+ * Every optional load in `init()` used to end in a bare `catch {}` whose single
+ * act was to warn that the package was "not installed". So a package that IS
+ * installed and threw while loading or constructing — bad config, a missing
+ * peer, a deliberate refusal, a genuine bug — was reported as an absent one,
+ * and the operator went off to install something they already had. Worse, the
+ * refusal's own message was destroyed on the way: a well-written diagnosis
+ * replaced by a false one.
+ *
+ * The failed arm logs at `error` regardless of the slot's absent level: an
+ * absent optional package is ordinary, a present one that threw is a defect in
+ * *this* deployment and must not inherit the quiet level that "absent is fine"
+ * earned. Same level, and same "verbatim — the framework does not interpret it"
+ * discipline, as the child-`init()` failure loop below.
+ *
+ * What this deliberately does NOT decide: whether DevPlugin should refuse to
+ * start when a driver refuses. That is a product-shape question (#7926 scope),
+ * so both arms keep today's behaviour — log, skip the slot, boot on.
+ */
+function reportOptionalLoadFailure(ctx: PluginContext, err: unknown, spec: OptionalLoadSpec): void {
+  if (isModuleNotFound(err)) {
+    ctx.logger[spec.absentLevel](`${spec.absent} (${loadFailureDetail(err)})`);
+    return;
+  }
+  ctx.logger.error(
+    `  ✘ ${spec.packages.join(', ')} ${spec.packages.length > 1 ? 'ARE' : 'IS'} installed but failed `
+    + `to initialize — ${spec.outcome}. This is NOT a missing-package problem: the package resolved `
+    + 'here, so installing it again will not help. It reported (verbatim — the framework does not '
+    + `interpret it): ${loadFailureDetail(err)}`,
+  );
+}
+
+/**
  * Development Assembly Plugin for ObjectStack
  *
  * One plugin that wires the **real** platform stack for local development.
@@ -214,6 +357,12 @@ function productionOverrideWarnings(
  *
  * Every part is loaded via dynamic import and skipped (with a log line) when
  * its package is not installed, and can be disabled via `options.services`.
+ *
+ * A load that fails for any OTHER reason — the package is installed and threw
+ * while loading or constructing — is reported as its own outcome, at `error`,
+ * carrying the underlying `code` and `message` (#7926). Both facts used to
+ * arrive as the same "not installed" line, which sent operators to install a
+ * package they already had.
  *
  * ## Empty slots stay empty (ADR-0115)
  *
@@ -274,7 +423,10 @@ export class DevPlugin implements Plugin {
    *
    * Dynamically imports and instantiates all core plugins.
    * Uses dynamic imports so that peer dependencies remain optional —
-   * if a package isn't installed the service is silently skipped.
+   * if a package isn't installed the service is skipped with a log line
+   * naming it. A package that IS installed and fails to load or construct is
+   * a different outcome with a different message (#7926); see
+   * {@link reportOptionalLoadFailure}.
    */
   async init(ctx: PluginContext): Promise<void> {
     this.productionOverride = assertNotProduction();
@@ -302,8 +454,13 @@ export class DevPlugin implements Plugin {
         const qlPlugin = new ObjectQLPlugin();
         this.childPlugins.push(qlPlugin);
         ctx.logger.info('  ✔ ObjectQL engine enabled (data + metadata)');
-      } catch {
-        ctx.logger.warn('  ✘ @objectstack/objectql not installed — skipping data engine');
+      } catch (err) {
+        reportOptionalLoadFailure(ctx, err, {
+          packages: ['@objectstack/objectql'],
+          absent: '  ✘ @objectstack/objectql not installed — skipping data engine',
+          absentLevel: 'warn',
+          outcome: 'skipping data engine',
+        });
       }
     }
 
@@ -321,8 +478,17 @@ export class DevPlugin implements Plugin {
         const driverPlugin = new DriverPlugin(driver, 'memory');
         this.childPlugins.push(driverPlugin);
         ctx.logger.info('  ✔ InMemoryDriver enabled');
-      } catch {
-        ctx.logger.warn('  ✘ @objectstack/runtime or @objectstack/driver-memory not installed — skipping driver');
+      } catch (err) {
+        // [#7926] The measured instance of this defect: `InMemoryDriver`'s
+        // constructor refuses a non-`single` tenancy posture (#6915) with a
+        // message naming the posture, both env knobs and the `driver-sql`
+        // remedy — all of which this catch used to replace with "not installed".
+        reportOptionalLoadFailure(ctx, err, {
+          packages: ['@objectstack/runtime', '@objectstack/driver-memory'],
+          absent: '  ✘ @objectstack/runtime or @objectstack/driver-memory not installed — skipping driver',
+          absentLevel: 'warn',
+          outcome: 'skipping driver',
+        });
       }
     }
 
@@ -335,8 +501,16 @@ export class DevPlugin implements Plugin {
         const appPlugin = new AppPlugin(this.options.stack);
         this.childPlugins.push(appPlugin);
         ctx.logger.info('  ✔ App metadata loaded from stack definition');
-      } catch {
-        ctx.logger.warn('  ✘ @objectstack/runtime not installed — skipping app metadata');
+      } catch (err) {
+        // `new AppPlugin(stack)` parses the stack definition, so a malformed
+        // stack throws HERE — a construction failure with a real diagnosis,
+        // previously reported as an absent @objectstack/runtime.
+        reportOptionalLoadFailure(ctx, err, {
+          packages: ['@objectstack/runtime'],
+          absent: '  ✘ @objectstack/runtime not installed — skipping app metadata',
+          absentLevel: 'warn',
+          outcome: 'skipping app metadata',
+        });
       }
     }
 
@@ -361,10 +535,13 @@ export class DevPlugin implements Plugin {
           });
           this.childPlugins.push(i18nPlugin);
           ctx.logger.info('  ✔ I18nServicePlugin auto-registered (translations detected in stack)');
-        } catch {
-          ctx.logger.info(
-            '  ℹ @objectstack/service-i18n not installed — using core in-memory i18n fallback with locale resolution'
-          );
+        } catch (err) {
+          reportOptionalLoadFailure(ctx, err, {
+            packages: ['@objectstack/service-i18n'],
+            absent: '  ℹ @objectstack/service-i18n not installed — using core in-memory i18n fallback with locale resolution',
+            absentLevel: 'info',
+            outcome: 'falling back to the core in-memory i18n fallback with locale resolution',
+          });
         }
       }
     }
@@ -385,8 +562,13 @@ export class DevPlugin implements Plugin {
         const { StorageServicePlugin } = await import('@objectstack/service-storage') as any;
         this.childPlugins.push(new StorageServicePlugin());
         ctx.logger.info('  ✔ Storage service enabled (@objectstack/service-storage, local adapter)');
-      } catch {
-        ctx.logger.info('  ℹ @objectstack/service-storage not installed — the file-storage slot stays empty');
+      } catch (err) {
+        reportOptionalLoadFailure(ctx, err, {
+          packages: ['@objectstack/service-storage'],
+          absent: '  ℹ @objectstack/service-storage not installed — the file-storage slot stays empty',
+          absentLevel: 'info',
+          outcome: 'the file-storage slot stays empty',
+        });
       }
     }
     if (enabled('realtime')) {
@@ -394,8 +576,13 @@ export class DevPlugin implements Plugin {
         const { RealtimeServicePlugin } = await import('@objectstack/service-realtime') as any;
         this.childPlugins.push(new RealtimeServicePlugin());
         ctx.logger.info('  ✔ Realtime service enabled (@objectstack/service-realtime, in-memory adapter)');
-      } catch {
-        ctx.logger.info('  ℹ @objectstack/service-realtime not installed — the realtime slot stays empty');
+      } catch (err) {
+        reportOptionalLoadFailure(ctx, err, {
+          packages: ['@objectstack/service-realtime'],
+          absent: '  ℹ @objectstack/service-realtime not installed — the realtime slot stays empty',
+          absentLevel: 'info',
+          outcome: 'the realtime slot stays empty',
+        });
       }
     }
 
@@ -415,8 +602,13 @@ export class DevPlugin implements Plugin {
         this.childPlugins.push(authPlugin);
         authMounted = true;
         ctx.logger.info('  ✔ Auth plugin enabled (dev credentials)');
-      } catch {
-        ctx.logger.warn('  ✘ @objectstack/plugin-auth not installed — skipping auth');
+      } catch (err) {
+        reportOptionalLoadFailure(ctx, err, {
+          packages: ['@objectstack/plugin-auth'],
+          absent: '  ✘ @objectstack/plugin-auth not installed — skipping auth',
+          absentLevel: 'warn',
+          outcome: 'skipping auth',
+        });
       }
 
       // ADR-0048 — the platform apps (Setup/Account) moved out of
@@ -433,8 +625,13 @@ export class DevPlugin implements Plugin {
           const mod: any = await import(/* @vite-ignore */ spec[0]);
           this.childPlugins.push(mod[spec[1]]());
           ctx.logger.info(`  ✔ App package enabled (${spec[0]})`);
-        } catch {
-          ctx.logger.warn(`  ✘ ${spec[0]} not installed — skipping its app`);
+        } catch (err) {
+          reportOptionalLoadFailure(ctx, err, {
+            packages: [spec[0]],
+            absent: `  ✘ ${spec[0]} not installed — skipping its app`,
+            absentLevel: 'warn',
+            outcome: 'skipping its app',
+          });
         }
       }
     }
@@ -558,8 +755,13 @@ export class DevPlugin implements Plugin {
         const { SecurityPlugin } = await import('@objectstack/plugin-security') as any;
         this.childPlugins.push(new SecurityPlugin());
         ctx.logger.info(`  ✔ Security plugin enabled (RBAC, RLS, field masking; multiTenant=${multiTenant})`);
-      } catch {
-        ctx.logger.debug('  ℹ @objectstack/plugin-security not installed — skipping security');
+      } catch (err) {
+        reportOptionalLoadFailure(ctx, err, {
+          packages: ['@objectstack/plugin-security'],
+          absent: '  ℹ @objectstack/plugin-security not installed — skipping security',
+          absentLevel: 'debug',
+          outcome: 'skipping security',
+        });
       }
     }
 
@@ -572,33 +774,54 @@ export class DevPlugin implements Plugin {
         });
         this.childPlugins.push(serverPlugin);
         ctx.logger.info(`  ✔ Hono HTTP server enabled on port ${this.options.port}`);
-      } catch {
-        ctx.logger.warn('  ✘ @objectstack/plugin-hono-server not installed — skipping HTTP server');
+      } catch (err) {
+        reportOptionalLoadFailure(ctx, err, {
+          packages: ['@objectstack/plugin-hono-server'],
+          absent: '  ✘ @objectstack/plugin-hono-server not installed — skipping HTTP server',
+          absentLevel: 'warn',
+          outcome: 'skipping HTTP server',
+        });
       }
     }
 
     // 7. REST API endpoints (CRUD + metadata read/write)
     if (enabled('rest')) {
-      try {
-        const { createRestApiPlugin } = await import('@objectstack/rest') as any;
-        // [#3963] The auth-less fail-open carve-out is gone. It used to pass an
-        // EXPLICIT `requireAuth: false` when no auth was mounted, on the grounds
-        // that nobody could authenticate so the deny default would brick the
-        // playground's data API. That reasoning inverts the right conclusion: a
-        // stack with no auth has no security model, so it should not serve a data
-        // API at all — and leaving the back door here would have made the dev
-        // plugin the one surface that still opens the whole data plane.
-        if (!authMounted) {
-          throw new Error(
-            '[dev] Cannot enable the data API: no auth is mounted in this stack, so no caller could '
-            + 'ever authenticate and anonymous access to object data is always denied (#3963). '
-            + 'Install/enable plugin-auth (or the `auth` tier), or drop the REST API from this dev stack.',
-          );
+      // [#3963] The auth-less fail-open carve-out is gone. It used to pass an
+      // EXPLICIT `requireAuth: false` when no auth was mounted, on the grounds
+      // that nobody could authenticate so the deny default would brick the
+      // playground's data API. That reasoning inverts the right conclusion: a
+      // stack with no auth has no security model, so it should not serve a data
+      // API at all — and leaving the back door here would have made the dev
+      // plugin the one surface that still opens the whole data plane.
+      //
+      // [#7926] This precondition is checked BEFORE the import and is no longer
+      // expressed as a `throw` inside the load `try`. It is not a load failure:
+      // @objectstack/rest can be installed and perfectly healthy and this stack
+      // still must not serve a data API. Routed through the load `catch` it came
+      // out as `ℹ @objectstack/rest not installed`, at debug — this card's defect
+      // exactly, and the one instance of it the file produced against its OWN
+      // words rather than a package's. Only the diagnosis changed: the REST
+      // plugin is not registered either way and init still returns.
+      if (!authMounted) {
+        ctx.logger.warn(
+          '  ✘ REST API NOT enabled: no auth is mounted in this stack, so no caller could ever '
+          + 'authenticate and anonymous access to object data is always denied (#3963). This is NOT a '
+          + 'missing-package problem — @objectstack/rest was never consulted. Install/enable '
+          + 'plugin-auth (or the `auth` tier), or drop the REST API from this dev stack.',
+        );
+      } else {
+        try {
+          const { createRestApiPlugin } = await import('@objectstack/rest') as any;
+          this.childPlugins.push(createRestApiPlugin());
+          ctx.logger.info('  ✔ REST API endpoints enabled (CRUD + metadata)');
+        } catch (err) {
+          reportOptionalLoadFailure(ctx, err, {
+            packages: ['@objectstack/rest'],
+            absent: '  ℹ @objectstack/rest not installed — skipping REST endpoints',
+            absentLevel: 'debug',
+            outcome: 'skipping REST endpoints',
+          });
         }
-        this.childPlugins.push(createRestApiPlugin());
-        ctx.logger.info('  ✔ REST API endpoints enabled (CRUD + metadata)');
-      } catch {
-        ctx.logger.debug('  ℹ @objectstack/rest not installed — skipping REST endpoints');
       }
     }
 
@@ -609,8 +832,13 @@ export class DevPlugin implements Plugin {
         const dispatcherPlugin = createDispatcherPlugin();
         this.childPlugins.push(dispatcherPlugin);
         ctx.logger.info('  ✔ Dispatcher enabled (auth, GraphQL, analytics, packages, storage)');
-      } catch {
-        ctx.logger.debug('  ℹ Dispatcher not available — skipping extended API routes');
+      } catch (err) {
+        reportOptionalLoadFailure(ctx, err, {
+          packages: ['@objectstack/runtime'],
+          absent: '  ℹ Dispatcher not available — skipping extended API routes',
+          absentLevel: 'debug',
+          outcome: 'skipping extended API routes',
+        });
       }
     }
 

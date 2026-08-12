@@ -189,8 +189,14 @@ describe('#5599 a stored `view` that is not a view is no longer badged valid', (
 
     it('a legitimately-lean overlay is still valid — no collateral badge', () => {
         // The precondition asks "is this a view at all", never "is it complete".
-        expect(computeMetadataDiagnostics('view', { isPinned: true })).toEqual({ valid: true });
-        expect(computeMetadataDiagnostics('view', { hidden: true })).toEqual({ valid: true });
+        // [#7741] "lean" now still carries the object binding: the write path
+        // inherits `object`/`viewKind` from the shadowed entry (#2555), so a
+        // stored lean overlay of a REAL view looks exactly like this.
+        expect(computeMetadataDiagnostics('view', { isPinned: true, object: 'task', viewKind: 'list' })).toEqual({ valid: true });
+        expect(computeMetadataDiagnostics('view', { hidden: true, object: 'task', viewKind: 'list' })).toEqual({ valid: true });
+        // …while a stored row with NO binding is a row no object-bound read
+        // path can serve — the #7741 dead row — and is badged invalid now.
+        expect(computeMetadataDiagnostics('view', { isPinned: true })?.valid).toBe(false);
     });
 
     it('a stored row of pure identity is no longer valid either', () => {

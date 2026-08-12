@@ -52,7 +52,7 @@
       "status": "live",
       "verifiedAt": "2026-08-01",
       "evidence": "packages/spec/src/system/i18n-resolver.ts:538, :554",
-      "note": "translateDashboard: label/description plus per-widget title/description by widget id; header action labels."
+      "note": "translateDashboard: label/description plus per-widget title/description/subCaption by widget id; header action labels. `subCaption` (#7862, #5428 item 4) overlays the metric widget's `options.description` — a different authored field from `widget.description`, each on its own key — live through the same translateDashboard REST path; objectui's client-side renderer half is the downstream follow-up."
     },
     "pages": {
       "status": "live",

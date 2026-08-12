@@ -128,7 +128,7 @@ function makeStubDriver() {
 }
 
 function viewBody(label: string) {
-    return { name: 'cases', type: 'grid', label, columns: ['id'] };
+    return { name: 'cases', type: 'grid', label, columns: ['id'], object: 'case', viewKind: 'list' }; // [#7741] the inline arm requires the object binding pair
 }
 
 describe('saveMetaItem — repository write path against real ObjectQL (PR-10d.4)', () => {

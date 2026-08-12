@@ -36,6 +36,13 @@ export interface ServeRun {
  *
  * A boot that DIES still has to have said why, so an early exit resolves rather
  * than rejects — the caller's assertions read what it printed on the way down.
+ *
+ * `waitFor` is matched against **stdout and stderr together** (#7915). `serve`
+ * writes every human line — banner, boot progress, kernel logs — to stderr now,
+ * because its stdout belongs to the MCP stdio transport when one is mounted;
+ * matching stdout alone would wait for a stream that stays empty for the whole
+ * boot. Both streams are still returned separately, which is what lets
+ * `serve-stdio-stdout-purity.e2e.test.ts` assert stdout carries NOTHING else.
  */
 export function runServe(
   cwd: string,
@@ -90,10 +97,11 @@ export function runServe(
 
     child.stdout.on('data', (d) => {
       stdout += String(d);
-      if (opts.waitFor.test(stdout)) finish();
+      if (opts.waitFor.test(stdout + stderr)) finish();
     });
     child.stderr.on('data', (d) => {
       stderr += String(d);
+      if (opts.waitFor.test(stdout + stderr)) finish();
     });
     child.on('error', (err) => finish(err));
     child.on('exit', () => finish());

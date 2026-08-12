@@ -100,6 +100,7 @@
 import { validateStackExpressions } from './validate-expressions.js';
 import { validateListViewMode } from './validate-list-view-mode.js';
 import { validateFunctionalCompleteness } from './validate-functional-completeness.js';
+import { validateManagedApiMethods } from './validate-managed-api-methods.js';
 import { validateViewContainers } from './validate-view-containers.js';
 import { validateWidgetBindings } from './validate-widget-bindings.js';
 import { validateDashboardActionRefs } from './validate-dashboard-action-refs.js';
@@ -431,6 +432,31 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_ONLY,
     surfaceReason: RUNTIME_OBJECT_WRITES_P2,
     run: (stack) => validateFunctionalCompleteness(stack),
+  },
+  // [#7521, via cloud#1225] A managed object advertising a generic write verb
+  // in `enable.apiMethods` that its own resolved affordances refuse. Every key
+  // is one we know and each is individually valid, so #4001's unknown-key
+  // rejection and the Zod parse both pass it; the contradiction is only visible
+  // when the two keys are read TOGETHER, which nothing did at authoring time.
+  //
+  // `gating` because the declaration is already false when it ships: objectql's
+  // registry strips the verb at registration, so the metadata advertises an API
+  // the product does not serve. That strip has been correct and silent — a
+  // `console.warn` on every control-plane boot that went unread for the life of
+  // a real divergence (`sys_environment`/`sys_package`). This entry is the
+  // ruling's "close it where the author is"; boot stays warn-and-strip.
+  //
+  // Pre-parse: the predicate reads only authored keys, and the finding must
+  // survive an unrelated schema error elsewhere in the stack.
+  {
+    name: 'validateManagedApiMethods',
+    tier: 'gating',
+    input: 'normalized',
+    commands: ALL,
+    source: 'packages/lint/src/validate-managed-api-methods.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_OBJECT_WRITES_P2,
+    run: (stack) => validateManagedApiMethods(stack),
   },
   // A view container in `views: []` that registers zero views: nothing appears
   // in the Console, and the schema step cannot tell it from an intentionally

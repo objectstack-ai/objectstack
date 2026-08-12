@@ -575,7 +575,7 @@ describe('ADR-0029 D9.9 / #6995 — the row\'s package_id is provenance, never a
         const { protocol } = makeSession();
         const res = await protocol.saveMetaItem({
             type: 'view', name: 'shared_grid', packageId: OTHER_PKG,
-            item: { name: 'shared_grid', type: 'grid', columns: ['name'] },
+            item: { name: 'shared_grid', type: 'grid', columns: ['name'], object: 'task', viewKind: 'list' }, // [#7741] the inline arm requires the object binding pair
         });
         expect(res.success).toBe(true);
     });
