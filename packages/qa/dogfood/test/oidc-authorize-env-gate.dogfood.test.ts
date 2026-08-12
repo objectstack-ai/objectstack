@@ -297,6 +297,18 @@ describe('#8102: the D5.1 /oauth2/authorize env-access gate runs on every creden
     });
   }
 
+  it('fixture self-check: exactly ONE lane is the discriminator', () => {
+    // The file's central claim is that two of the three lanes CANNOT detect
+    // this defect and are carried as controls. If a later edit made a second
+    // lane the pin — or dropped the signed-bearer lane — the suite would still
+    // be green while proving something else, so the claim is asserted rather
+    // than only written down. (This also keeps `pinsTheDefect` a field that is
+    // read, not merely declared.)
+    expect(LANES.filter((l) => l.pinsTheDefect).map((l) => l.name)).toEqual([
+      'bearer, signed set-auth-token (THE PIN)',
+    ]);
+  });
+
   it('an UNAUTHENTICATED caller still falls through to the OP login redirect (the fail-open default is deliberate)', async () => {
     gateCalls = [];
     const res = await stack.api(`/auth/oauth2/authorize?${authorizeQuery()}`, {
