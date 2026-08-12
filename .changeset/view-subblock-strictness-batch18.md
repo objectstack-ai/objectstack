@@ -40,3 +40,5 @@ closed nested block 422s a console PUT regardless). `UserFiltersSchema`,
 `ViewItemSchema` and the private `FormFieldBase` also stay open, each for a measured reason recorded
 in the schema's own JSDoc, in `view-strictness-batch18.test.ts`, and in the `ui/` row
 of `docs/audits/2026-07-unknown-key-strictness-ledger.md`.
+
+<!-- adr-0087: registered authoring-schemas-strict-unknown-keys -->
