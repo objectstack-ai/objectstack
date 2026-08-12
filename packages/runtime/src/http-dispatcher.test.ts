@@ -3024,6 +3024,53 @@ describe('HttpDispatcher', () => {
                 }
             }
         });
+
+        // ── `search`: the one slot of the #4318 shape it did not reach (#7939) ──
+        //
+        // `svcAvailable(undefined, undefined, searchSvc)` defaulted an unmarked
+        // occupant to `handlerReady: true` — a lie by this very map's own
+        // contract (stated above `svcAvailable`'s definition): the dispatcher
+        // has NO `/search` route (no `route-ledger.ts` entry, no branch here,
+        // `route` is always `undefined`), so "the handler is ready" cannot be
+        // true. Latent until now because `CORE_SERVICE_PROVIDER['search']` is
+        // `null` — nothing registers this slot anywhere — so the fixture below
+        // fills it explicitly; without that the assertion would be vacuous.
+        it('reports an unmarked search occupant with no route and handlerReady false, not true (#7939)', async () => {
+            const searchSvc = { /* real, unmarked ISearchService-shaped occupant */
+                index: vi.fn(), remove: vi.fn(), search: vi.fn(),
+            };
+            (kernel as any).getService = vi.fn().mockImplementation((n: string) => (n === 'search' ? searchSvc : null));
+            (kernel as any).services = new Map([['search', searchSvc]]);
+
+            const info = await dispatcher.getDiscoveryInfo('/api/v1');
+            const reported = info.services.search;
+            expect(reported.enabled, 'services.search.enabled').toBe(true);
+            expect(reported.status, 'services.search.status').toBe('available');
+            expect(reported.handlerReady, 'services.search.handlerReady').toBe(false);
+            expect(reported.route, 'services.search.route').toBeUndefined();
+            // The remedy string is search's OWN wording, not the shared
+            // cache/queue/job "Kernel-internal service" sentence — a search
+            // engine is an external occupant with no dispatcher surface, not a
+            // kernel-managed one, so reusing that sentence would misdescribe it.
+            expect(reported.message, 'services.search.message').not.toContain('Kernel-internal');
+            expect(reported.message, 'services.search.message').toMatch(/no HTTP route/i);
+            expect(reported.message, 'services.search.message').toContain('capabilities.search');
+        });
+
+        it('reports a self-describing search occupant (e.g. a dev stub) with its own status, still handlerReady false (#7939)', async () => {
+            const stubSearch = {
+                __serviceInfo: { status: 'stub', message: 'Development stub — no real search backend' },
+                index: vi.fn(), remove: vi.fn(), search: vi.fn(),
+            };
+            (kernel as any).getService = vi.fn().mockImplementation((n: string) => (n === 'search' ? stubSearch : null));
+            (kernel as any).services = new Map([['search', stubSearch]]);
+
+            const info = await dispatcher.getDiscoveryInfo('/api/v1');
+            expect(info.services.search.enabled).toBe(true);
+            expect(info.services.search.status).toBe('stub');
+            expect(info.services.search.handlerReady).toBe(false);
+            expect(info.services.search.message).toContain('no real search backend');
+        });
     });
 
     // ═══════════════════════════════════════════════════════════════
