@@ -4,6 +4,9 @@ import {
     IHttpServer, resolveAuthzContext, resolveLocalizationContext, isAuthGateAllowlisted,
     assembleExecutionContext, normalizeAuthGate, type AuthGate,
     shouldDenyAnonymous, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS,
+    // [#7678] ADR-0090 D5/D9 suggested-binding `?status=` vocabulary — the one
+    // owner, shared with the runtime dispatcher's `/security` domain.
+    isAudienceBindingSuggestionStatus, unknownAudienceBindingSuggestionStatusMessage,
 } from '@objectstack/core';
 import {
     isMcpServerEnabled,
@@ -9515,8 +9518,26 @@ export class RestServer {
                     // [#6877] Both are `String(array)` joins — `?status=a&status=b`
                     // filtered on the single status `'a,b'` and returned nothing.
                     if (refuseRepeatedQueryParams(req, res, ['status', 'packageId'])) return;
+                    // [#7678] …and a single well-formed but UNKNOWN `?status=`
+                    // did the same thing one layer on: the service's contract
+                    // declares exactly three values, anything else matched no
+                    // row, and the caller got 200 with an empty list — which
+                    // reads as "there are no suggestions" rather than "your
+                    // filter was not a status". The runtime dispatcher's twin of
+                    // this route had refused it since #4127; this live route
+                    // never did. Same predicate, imported — not a second copy of
+                    // the vocabulary.
+                    const status = req.query?.status ? String(req.query.status) : undefined;
+                    if (status !== undefined && !isAudienceBindingSuggestionStatus(status)) {
+                        return res.status(400).json({
+                            error: {
+                                code: 'VALIDATION_ERROR',
+                                message: unknownAudienceBindingSuggestionStatusMessage(status),
+                            },
+                        });
+                    }
                     const result = await svc.listAudienceBindingSuggestions(context ?? {}, {
-                        status: req.query?.status ? String(req.query.status) : undefined,
+                        status,
                         packageId: req.query?.packageId ? String(req.query.packageId) : undefined,
                     });
                     res.json({ data: result });

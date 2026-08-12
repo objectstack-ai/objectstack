@@ -416,6 +416,7 @@
     "data/Field:trackHistory",
     "data/Field:type",
     "data/Field:unique",
+    "data/Field:useGrouping",
     "data/Field:visibleWhen",
     "data/Field:widget",
     "data/FieldReference:$field",

@@ -16,8 +16,22 @@ export type { CrudCase, DerivedAssert, AssertKind, RelationalRef } from './deriv
 export { runCrudVerification, formatReport } from './verify.js';
 export type { VerifyReport, ObjectVerifyResult } from './verify.js';
 
-export { runRlsProofs, formatRlsReport } from './rls.js';
-export type { RlsReport, RlsResult } from './rls.js';
+export {
+  runRlsProofs,
+  formatRlsReport,
+  provisionRlsProbePersona,
+  rlsProbePermissionSet,
+  rlsProbeSecurity,
+  RLS_PROBE_EMAIL,
+} from './rls.js';
+export type {
+  RlsReport,
+  RlsResult,
+  RlsStatus,
+  RlsProbeDescriptor,
+  RlsProbePersona,
+  RlsProofOptions,
+} from './rls.js';
 
 // ADR-0060 — reusable conformance-ledger helper (static complement to the
 // runtime harness): classify every declarable property, fail closed on drift.

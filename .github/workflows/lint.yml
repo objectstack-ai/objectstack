@@ -566,6 +566,27 @@ jobs:
       - name: Cross-package test inputs
         run: pnpm check:cross-package-test-inputs
 
+      # Tests must judge SOURCE, not a sibling's build artifact (#7668/#7849).
+      # Every publishable package resolves through `exports` to `dist/`, so a
+      # package whose tests import a workspace dep with no vitest source alias
+      # is reporting on build state. #7668 is the loud version of that (17 cases
+      # erroring on a symbol its prebuilt core predated); the version this gate
+      # is really aimed at is SILENT — a dist merely BEHIND the source runs
+      # GREEN against old behaviour, and nothing in the output says so.
+      # Demonstrated on this very repo: with `@objectstack/spec` unaliased, the
+      # frozen downstream-consumer contract — the repo's backward-compatibility
+      # gate for spec — reported 14/14 green against a spec source that rejected
+      # its own fixture outright; aliased to source, the same tree went red.
+      # Turbo's `test` dependsOn `^build` does not reach it, because the failing
+      # paths are the ones turbo does not mediate (`pnpm test` in a package,
+      # `vitest run <file>`, an editor runner, an agent in a stale tree).
+      # The registry is measured, shrink-only and audited in BOTH directions, so
+      # it cannot rot into a grandfather clause: an entry that is no longer
+      # needed fails and names itself for deletion. Static scan of test sources
+      # and vitest configs; no build needed, so it belongs in this job.
+      - name: Test-source alias gate
+        run: pnpm check:test-source-alias
+
       # #4248 packaging-hygiene guard. Without a `files` whitelist npm packs the
       # whole package directory, and 20 of the 49 publishable packages declared
       # none — so consumers installed TypeScript sources, unit tests and build

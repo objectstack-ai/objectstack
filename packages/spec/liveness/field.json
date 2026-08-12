@@ -172,6 +172,10 @@
       "status": "live",
       "note": "CAVEAT — grid formatting only; DDL never sizes."
     },
+    "useGrouping": {
+      "status": "planned",
+      "note": "[#7768] Declared 2026-08-11 — Option A of the card's fork (narrowest shape with measured pull, maintainer veto window open). Maps 1:1 to `Intl.NumberFormat`'s `useGrouping`. The runtime consumer is objectui#4033 (in flight at declaration time): its interim heuristic (`scale === 0 && no currency` ⇒ ungrouped) is explicitly documented at its own definition as \"overridden by the spec presentation hint when it lands\" — i.e. the read side is designed to pick this key up, not a speculative future phase. Not `authorWarn`'d: unlike `externalSharingModel`'s scheduled-phase precedent, an author who sets this today loses nothing and is not misled — the value becomes effective the moment the objectui consumer lands, no re-authoring needed. Re-verify to `live` once #4033 (or its successor) actually reads the key."
+    },
     "reference": {
       "status": "live",
       "evidence": "packages/objectql/src/engine.ts:1672",
