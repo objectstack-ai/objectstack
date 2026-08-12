@@ -163,10 +163,20 @@
  *     `pnpm build` filters it out) and the examples (their entry is a .ts
  *     source file, not a build artifact).
  *
- * CI IS UNAFFECTED. This is wired into the root `dev` / `dev:*` scripts only —
- * never into a workflow. CI builds before it runs anything that could trip
- * this, so the condition cannot occur there; #5726 and #5217 are both
+ * WHERE THE SCAN RUNS. The scan is wired into the root `dev` / `dev:*` scripts
+ * only — never into a workflow, and it must stay that way. CI builds before it
+ * runs anything that could trip this, so in a job that just built the scan is a
+ * tautological green, and in a job that has not built it is a hard false red
+ * about a precondition CI does not have; #5726 and #5217 are both
  * local/worktree-only shapes.
+ *
+ * WHERE THE SELF-TEST RUNS — since #8170, a different answer to a different
+ * question. `--self-test` is hermetic (synthetic workspaces in a temp dir, no
+ * network, no git, no node_modules), so lint.yml runs THAT half, on its own, by
+ * invoking this file with `node`. The `check:dev-prereqs` npm script keeps the
+ * conventional self-test-then-scan shape and is still for humans only: running
+ * it in CI would drag the scan half back in, which is the whole thing being
+ * avoided. The split is deliberate on both sides — see the step's comment.
  *
  * No env escape hatch, deliberately (check:console-sha has none either). To
  * boot a deliberately half-built workspace, call the underlying command
