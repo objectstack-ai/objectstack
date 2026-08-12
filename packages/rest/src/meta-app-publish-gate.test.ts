@@ -54,7 +54,34 @@ const CRM_APP = {
     navigation: [{ id: 'nav_leads', type: 'object', objectName: 'lead' }],
 };
 
+/**
+ * [#8013] A PUBLISHED app the session may only open with a capability it might
+ * not hold. Its `requiredPermissions` is a different layer from ADR-0045 §3's
+ * publish gate above, and the ONLY one this card converts into a denial.
+ */
+const FINANCE_APP = {
+    name: 'finance',
+    label: 'Finance',
+    requiredPermissions: ['finance.access'],
+    navigation: [{ id: 'nav_invoices', type: 'object', objectName: 'invoice' }],
+};
+
+/**
+ * [#8013] A published app gated by ADR-0057 D10 capability presence rather than
+ * by anything about the caller. Kept out of `ALL_APPS` for the same reason
+ * `FINANCE_APP` is: the #4829 / #7566 suites above pin exact name lists.
+ */
+const OPTIONAL_SERVICE_APP = {
+    name: 'telephony',
+    label: 'Telephony',
+    requiresService: 'voice',
+    navigation: [{ id: 'nav_calls', type: 'object', objectName: 'call_log' }],
+};
+
 const ALL_APPS = [ACCOUNT_APP, UNPUBLISHED_APP, CRM_APP];
+
+/** [#8013] `ALL_APPS` plus the two extra gate shapes this card partitions. */
+const GATED_APPS = [ACCOUNT_APP, UNPUBLISHED_APP, CRM_APP, FINANCE_APP, OPTIONAL_SERVICE_APP];
 
 function createMockServer() {
     return {
@@ -71,18 +98,22 @@ function makeRes() {
     return res;
 }
 
-/** @param perms system permissions the caller holds */
-function setup(perms: string[]) {
+/**
+ * @param perms system permissions the caller holds
+ * @param apps  the app corpus this server serves. Defaults to `ALL_APPS` so the
+ *   #4829 / #7566 suites keep their exact name lists; #8013 passes `GATED_APPS`.
+ */
+function setup(perms: string[], apps: any[] = ALL_APPS, serviceExists?: (name: string) => boolean) {
     const protocol: any = {
         getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '', ui: '', auth: '/auth' } }),
         getMetaTypes: vi.fn().mockResolvedValue([]),
         // Deep-clone per call: the filter must never mutate stored metadata.
         getMetaItems: vi.fn(async ({ type }: any) => {
             const t = String(type ?? '');
-            return t === 'app' || t === 'apps' ? JSON.parse(JSON.stringify(ALL_APPS)) : [];
+            return t === 'app' || t === 'apps' ? JSON.parse(JSON.stringify(apps)) : [];
         }),
         getMetaItem: vi.fn(async ({ name }: any) => {
-            const found = ALL_APPS.find((a) => a.name === name);
+            const found = apps.find((a: any) => a.name === name);
             return found ? { type: 'app', name, item: JSON.parse(JSON.stringify(found)) } : undefined;
         }),
         findData: vi.fn().mockResolvedValue([]),
@@ -91,6 +122,12 @@ function setup(perms: string[]) {
     // The RBAC filter only runs for a resolved caller; stubbing the context is
     // the established pattern in this package for exercising it by route.
     rest.resolveExecCtx = async () => ({ userId: 'u1', systemPermissions: perms });
+    // [#8013] ADR-0057 D10's gate FAILS OPEN when it cannot be probed, and the
+    // stubbed context carries no `__kernel`, so without a provider a
+    // `requiresService` app is simply served and the `service` branch never
+    // runs. Assigned rather than threaded through the constructor's 16th
+    // positional parameter.
+    if (serviceExists) rest.serviceExistsProvider = serviceExists;
     rest.registerRoutes();
     return { rest, protocol };
 }
@@ -326,5 +363,169 @@ describe('#7566 — `GET /meta/app?id=` narrows the list instead of being droppe
         const res = await getList(rest, 'view', { id: 'all_leads' });
         expect(res.statusCode).toBe(200);
         expect(namesFrom(res.body)).toEqual(['all_leads', 'my_leads']);
+    });
+});
+
+// ── #8013 ───────────────────────────────────────────────────────────────────
+//
+// `GET /meta/app/<name>` answered ONE shape for three different refusals, so an
+// app the session may never open and an app that does not exist were byte-
+// identical on the wire. The console has nothing to branch on, so it renders its
+// only copy for an absent app — "it may still be publishing" — over a permanent
+// authorization denial. Measured cost (objectui#4252): two acceptance-test
+// batches spent chasing a "platform defect" that was a missing permission-set
+// binding.
+//
+// The maintainer ruling (2026-08-12) converts exactly ONE of the three: an app
+// that EXISTS and whose `requiredPermissions` the session lacks now answers
+// `403 PERMISSION_DENIED`. The other two keep answering absence, and the cases
+// below pin that partition rather than assuming it, because it is the security
+// boundary of the change:
+//
+//   - a DENIAL makes an app's existence observable to a caller who may not use
+//     it. The ruling accepts that for a by-name probe, which already implies the
+//     name.
+//   - extending it to a name that resolves to NOTHING would make every app name
+//     on the platform enumerable. That is a different, unruled change, and the
+//     nonexistent-name cases are what stand between the two.
+//
+// So every case here asserts `status` AND `code` (ADR-0112), never "an error
+// came back" — the two answers under test are both errors, one apart.
+
+/** The declared refusal envelope, as the console will read it. */
+const refusal = (body: any) => ({ code: body?.error?.code, message: body?.error?.message });
+
+describe('#8013 — by-name: a permission denial is REPORTED, absence still is not', () => {
+    it('criterion 1: a session WITHOUT the capability gets a named 403, not an absence', async () => {
+        const { rest } = setup(['manage_users'], GATED_APPS);
+        const denied = await getItem(rest, 'finance');
+
+        // The whole point of the card: `status` AND `code`, so objectui#4252 can
+        // branch. `PERMISSION_DENIED` is the ADR-0112 STANDARD catalog member for
+        // a generic authorization refusal (and what `standardErrorCodeForHttpStatus`
+        // answers for 403) rather than a bespoke synonym.
+        expect(denied.statusCode).toBe(403);
+        expect(refusal(denied.body).code).toBe('PERMISSION_DENIED');
+        // The DECLARED envelope (`BaseResponseSchema`) — `code` and `message`
+        // nested INSIDE `error`, with the `success: false` flag. The console
+        // therefore reads `body.error.code` here and on the 404 below: one
+        // accessor for both answers, not a second dialect to special-case.
+        expect(denied.body?.success).toBe(false);
+        expect(typeof refusal(denied.body).message).toBe('string');
+        expect(refusal(denied.body).message).toContain('finance');
+
+        // Refused means refused: the document did not ride along with the
+        // refusal, and neither did the objects it would have exposed.
+        expect(denied.body?.item).toBeUndefined();
+        expect(denied.body?.data).toBeUndefined();
+        expect(JSON.stringify(denied.body ?? {})).not.toContain('invoice');
+    });
+
+    it('criterion 2: a session WITH the capability gets the app, unchanged', async () => {
+        const { rest } = setup(['finance.access'], GATED_APPS);
+        const allowed = await getItem(rest, 'finance');
+
+        expect(allowed.statusCode).toBe(200);
+        expect(allowed.body).toMatchObject({ type: 'app', name: 'finance' });
+        expect(allowed.body?.item?.name).toBe('finance');
+        // Including the navigation the denial withheld — the grant path is the
+        // half a refusal change most easily breaks.
+        expect(allowed.body?.item?.navigation?.map((n: any) => n.id)).toEqual(['nav_invoices']);
+        expect(allowed.body?.error).toBeUndefined();
+        expect(allowed.body?.success).toBeUndefined();
+    });
+
+    it('criterion 3: a NONEXISTENT app name keeps answering absence — never the denial', async () => {
+        // THE security criterion. If this ever reports `PERMISSION_DENIED`, the
+        // change has stopped being "an app you may not open says so" and become
+        // "every app name on the platform is enumerable" — including by a caller
+        // holding nothing. Asserted on the envelope, not on "still an error":
+        // both answers are errors.
+        for (const perms of [[], ['manage_users'], ['finance.access'], ['studio.access']]) {
+            const missing = await getItem(setup(perms, GATED_APPS).rest, 'no_such_app');
+
+            expect(missing.statusCode).not.toBe(403);
+            expect(refusal(missing.body).code).not.toBe('PERMISSION_DENIED');
+            expect(JSON.stringify(missing.body ?? {})).not.toContain('PERMISSION_DENIED');
+        }
+    });
+
+    it('criterion 3: …and the real producer miss is still the 404 it has always been', async () => {
+        // The fixture's `getMetaItem` answers `undefined` for an unknown name;
+        // `metadata-protocol` REJECTS with a declared `RESOURCE_NOT_FOUND` /
+        // `status: 404` (pinned in `rest-meta-outage-vs-miss.test.ts`). Both
+        // reach this route, so the criterion is stated against the production
+        // shape too rather than against the stub's alone.
+        const { rest, protocol } = setup([], GATED_APPS);
+        protocol.getMetaItem = vi.fn().mockRejectedValue(Object.assign(
+            new Error('Metadata item app/no_such_app not found'),
+            { code: 'RESOURCE_NOT_FOUND', status: 404 },
+        ));
+
+        const missing = await getItem(rest, 'no_such_app');
+
+        expect(missing.statusCode).toBe(404);
+        expect(missing.body?.code).toBe('RESOURCE_NOT_FOUND');
+        expect(missing.statusCode).not.toBe(403);
+        expect(JSON.stringify(missing.body ?? {})).not.toContain('PERMISSION_DENIED');
+    });
+
+    it('criterion 4: the LIST route is untouched — the app is absent, not flagged', async () => {
+        const { rest } = setup(['manage_users'], GATED_APPS);
+        const res = await getList(rest);
+
+        // Read the list body and assert the ABSENCE, not "the endpoint still
+        // 200s" — a leak would be a 200 too. The ruling keeps this route
+        // filtered exactly as-is so the enumeration surface is not widened past
+        // what a direct by-name probe already implies.
+        expect(res.statusCode).toBe(200);
+        expect(namesFrom(res.body)).not.toContain('finance');
+        expect(namesFrom(res.body).sort()).toEqual(['account', 'crm', 'telephony']);
+
+        // No `authorized: false` (or any sibling spelling) leaked into the list,
+        // and no trace of what the withheld app would have exposed.
+        const wire = JSON.stringify(res.body);
+        expect(wire).not.toContain('authorized');
+        expect(wire).not.toContain('PERMISSION_DENIED');
+        expect(wire).not.toContain('invoice');
+        expect(wire).not.toContain('finance');
+
+        // …and the holder still gets it, so the list is filtered rather than
+        // broken.
+        expect(namesFrom((await getList(setup(['finance.access'], GATED_APPS).rest)).body))
+            .toContain('finance');
+    });
+
+    it('the partition: an UNPUBLISHED app stays a 404 even when permissions are the reason too', async () => {
+        // ADR-0045 §3 says an unpublished app is *externally unobservable*, and a
+        // 403 confirms existence. The publish gate is judged FIRST, so an app
+        // that is both unpublished and permission-gated reports absence — the
+        // stricter contract wins over the new disclosure.
+        const bothGated = [{ ...UNPUBLISHED_APP, requiredPermissions: ['finance.access'] }];
+        const denied = await getItem(setup(['manage_users'], bothGated).rest, 'production_management');
+
+        expect(denied.statusCode).toBe(404);
+        expect(refusal(denied.body).code).toBe('RESOURCE_NOT_FOUND');
+        expect(refusal(denied.body).code).not.toBe('PERMISSION_DENIED');
+        expect(JSON.stringify(denied.body ?? {})).not.toContain('secret_production_line');
+    });
+
+    it('the partition: an app gated by an ABSENT SERVICE stays a 404 — nothing was denied to the caller', async () => {
+        // ADR-0057 D10 capability absence is a deployment fact about the
+        // platform, not a statement about this session: no permission of the
+        // caller's is missing, so there is no denial to report. It keeps
+        // answering absence.
+        const { rest } = setup(['manage_users'], GATED_APPS, () => false);
+        const denied = await getItem(rest, 'telephony');
+
+        expect(denied.statusCode).toBe(404);
+        expect(refusal(denied.body).code).toBe('RESOURCE_NOT_FOUND');
+        expect(refusal(denied.body).code).not.toBe('PERMISSION_DENIED');
+
+        // …and it is served once the service is present, so the case above is
+        // the gate firing rather than the fixture being broken.
+        const ok = await getItem(setup(['manage_users'], GATED_APPS, (n: string) => n === 'voice').rest, 'telephony');
+        expect(ok.statusCode).toBe(200);
+        expect(ok.body?.item?.name).toBe('telephony');
     });
 });
