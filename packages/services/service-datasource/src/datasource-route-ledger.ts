@@ -34,13 +34,17 @@
  * the fix. It is not: the two spellings are different mounted routes, in
  * different packages, and BOTH are live. Two of them do overlap —
  * `GET /:name/remote-tables` here and `GET /:name/external/tables` there both
- * reach `IExternalDatasourceService.listRemoteTables` (they diverge on `?schema=`,
- * which only the federation twin forwards — #7955), as do
+ * reach `IExternalDatasourceService.listRemoteTables`, as do
  * `POST /:name/object-draft` and `POST /:name/external/tables/:remote/draft`
  * over `generateObjectDraft`. That overlap is known and was deliberately
  * reconciled rather than removed: #4249 gave the two paths ONE failure contract
  * ("One operation, one failure contract now, on both paths",
- * `packages/rest/src/external-datasource-routes.ts`). A ledger describes what is
+ * `packages/rest/src/external-datasource-routes.ts`), and #7955 finished the
+ * other half of that same principle on the REQUEST path — the admin spelling
+ * had never read `?schema=`, so the filter the federation twin honoured came
+ * back silently unapplied here. Both spellings now forward it, with the same
+ * coercion, pinned across the two packages by
+ * `packages/rest/src/remote-tables-twin.equivalence.test.ts`. A ledger describes what is
  * mounted; renaming a live route to close a bookkeeping gap would be an API
  * break performed for the bookkeeping's benefit. So every row below carries the
  * spelling the mount actually uses, and the conformance test derives its
@@ -143,7 +147,7 @@ export const DATASOURCE_ROUTE_LEDGER: readonly DatasourceRouteLedgerEntry[] = [
   // Served by `external-datasource`, so a refusal is EXTERNAL_DATASOURCE_ERROR
   // and the 503 names that service rather than `datasource-admin` (#4225/#4249).
   { route: 'GET /api/v1/datasources/:name/remote-tables', family: 'datasource-introspection', disposition: 'server-only',
-    note: 'lists a datasource\'s remote tables. The #7744 row: this is the LIVE admin spelling, and it is a different mounted route from the federation twin `GET /:name/external/tables` in packages/rest, which the REST ledger carries as `datasources.external.listTables`. Both reach `listRemoteTables` and share one failure contract by design (#4249); only the federation twin forwards `?schema=`, and only it is SDK-expressed.' },
+    note: 'lists a datasource\'s remote tables, optionally narrowed by `?schema=`. The #7744 row: this is the LIVE admin spelling, and it is a different mounted route from the federation twin `GET /:name/external/tables` in packages/rest, which the REST ledger carries as `datasources.external.listTables`. Both reach `listRemoteTables`, share one failure contract by design (#4249) and — since #7955 — one request shape; only the federation twin is SDK-expressed.' },
   { route: 'POST /api/v1/datasources/:name/object-draft', family: 'datasource-introspection', disposition: 'server-only',
     note: 'generates an ObjectStack object draft for one remote table (introspect + type-map, no persistence). Federation twin: `POST /:name/external/tables/:remote/draft` — same `generateObjectDraft` operation, and the twin is the SDK-expressed one (`datasources.external.draft`).' },
   { route: 'POST /api/v1/datasources/:name/test', family: 'datasource-introspection', disposition: 'server-only',
