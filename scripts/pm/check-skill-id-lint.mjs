@@ -20,22 +20,24 @@
  * ## What it scans
  *
  * Every .md file under .claude/skills/pm-dispatch/ (the PM operating protocol,
- * including its references/) plus .claude/agents/os-dev.md (the dev-side twin).
- * The pattern is /#[0-9]{3,}/ — real issue/PR numbers in this repo are 3+ digits,
- * while placeholders (`#<n>`, `#N`, `epic:#<n>`) and small literals (`#12 #34`
- * in the argument-syntax example) stay legal.
+ * including its references/), plus .claude/agents/os-dev.md (the dev-side twin)
+ * and AGENTS.md (the repo-wide agent instruction file, rewritten to the same
+ * principles-only standard). The pattern is /#[0-9]{3,}/ — real issue/PR numbers
+ * in this repo are 3+ digits, while placeholders (`#<n>`, `#N`, `epic:#<n>`),
+ * Prime-Directive cross-references (`#14`) and small literals (`#12 #34` in the
+ * argument-syntax example) stay legal.
  *
- * ## The one legacy waiver, and how it expires by itself
+ * ## The legacy-waiver mechanism (LEGACY_EXACT), currently unused
  *
- * .claude/agents/os-dev.md is rewritten to the same standard in its OWN PR (the
- * two PRs are deliberately independent — no cross-PR ordering). Until that
- * rewrite lands, this gate would be red on either merge order. So os-dev.md
- * carries an EXACT legacy count: the file passes only when its match count is
- * exactly the recorded pre-rewrite value (untouched legacy) or exactly 0
- * (rewritten). Any other count is red — you cannot add an ID, and a partial
- * cleanup must finish the job. Once the rewrite lands the entry is dead weight
- * with zero tolerance (0 matches required); deleting the entry then is a
- * one-line cleanup, not a prerequisite.
+ * A file rewritten to this standard in a DIFFERENT PR than the one that adds it
+ * to the scan set needs merge-order independence: an EXACT legacy count lets the
+ * file pass only at its recorded pre-rewrite value (untouched legacy) or at 0
+ * (rewritten) — any other count is red, so nobody can add an ID and a partial
+ * cleanup must finish the job. os-dev.md used this for its own rewrite; its
+ * entry became dead weight once that landed (worse: it would have re-admitted
+ * exactly 81 IDs) and was deleted. AGENTS.md needs no entry — its rewrite and
+ * its scan-set addition travel in the same PR. The mechanism stays for the next
+ * split rewrite; the self-test exercises it with a synthetic entry.
  *
  * Missing file or empty read is RED, never a pass — a gate that cannot find its
  * input must fail, not skip.
@@ -49,13 +51,11 @@ import process from 'node:process';
 const REPO_ROOT = join(fileURLToPath(import.meta.url), '..', '..', '..');
 
 export const SCAN_ROOT = '.claude/skills/pm-dispatch';
-export const EXTRA_FILES = ['.claude/agents/os-dev.md'];
+export const EXTRA_FILES = ['.claude/agents/os-dev.md', 'AGENTS.md'];
 export const ID_PATTERN = /#[0-9]{3,}/g;
 
 // Exact-count legacy waiver (see header): pass iff count === legacy || count === 0.
-export const LEGACY_EXACT = new Map([
-  ['.claude/agents/os-dev.md', 81],
-]);
+export const LEGACY_EXACT = new Map([]);
 
 function mdFilesUnder(dir) {
   const out = [];
@@ -142,13 +142,17 @@ function run() {
 }
 
 function selfTest() {
+  // The waiver mechanism is tested with a synthetic entry so it stays covered
+  // while LEGACY_EXACT is empty (see header).
+  LEGACY_EXACT.set('synthetic-legacy.md', 81);
   const cases = [
     ['clean file -> green', verdictFor('x.md', 0).ok, true],
     ['one ID -> red', verdictFor('x.md', 1).ok, false],
-    ['legacy file at exact count -> green', verdictFor('.claude/agents/os-dev.md', 81).ok, true],
-    ['legacy file at zero -> green', verdictFor('.claude/agents/os-dev.md', 0).ok, true],
-    ['legacy file grew -> red', verdictFor('.claude/agents/os-dev.md', 82).ok, false],
-    ['legacy file partially cleaned -> red', verdictFor('.claude/agents/os-dev.md', 40).ok, false],
+    ['un-waived scanned files carry no waiver', LEGACY_EXACT.has('.claude/agents/os-dev.md') || LEGACY_EXACT.has('AGENTS.md'), false],
+    ['legacy file at exact count -> green', verdictFor('synthetic-legacy.md', 81).ok, true],
+    ['legacy file at zero -> green', verdictFor('synthetic-legacy.md', 0).ok, true],
+    ['legacy file grew -> red', verdictFor('synthetic-legacy.md', 82).ok, false],
+    ['legacy file partially cleaned -> red', verdictFor('synthetic-legacy.md', 40).ok, false],
     ['red message names the standard', verdictFor('x.md', 2).msg.includes('self-contained'), true],
     ['placeholders stay legal', ('#<n> #N epic:#<n> #12 #34'.match(ID_PATTERN) ?? []).length, 0],
     ['real IDs match', ('see #4650 and #12345'.match(ID_PATTERN) ?? []).length, 2],
@@ -159,6 +163,7 @@ function selfTest() {
     if (!ok) failed++;
     console.log(`  ${ok ? '✓' : '✗'} ${name}`);
   }
+  LEGACY_EXACT.delete('synthetic-legacy.md');
   if (failed) {
     console.error(`✗ check-skill-id-lint self-test: ${failed} of ${cases.length} case(s) failed.`);
     process.exit(1);
