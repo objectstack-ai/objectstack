@@ -47,13 +47,24 @@
  *
  * ## What is deliberately NOT asserted: the message
  *
- * The dispatcher withholds a 5xx message that looks like a driver/internal leak
- * (`looksLikeInternalErrorLeak`, #3867); the REST package door applies no such
- * filter and ships the thrown message verbatim. That asymmetry predates #8016
- * and is filed separately — it is a DISCLOSURE rule, not a mapping rule, so
- * pinning `status` + `code` here is the whole of what "the two doors agree"
- * means today. Asserting message parity would pin the gap shut instead of
- * leaving it visible.
+ * [#8086] The asymmetry this paragraph used to record is CLOSED, so the reason
+ * has changed and the sentence that stood here would now be false. It read:
+ * "the REST package door applies no such filter and ships the thrown message
+ * verbatim. That asymmetry predates #8016 and is filed separately." It was
+ * filed as #8086 and fixed — `sendThrownError`
+ * (`packages/rest/src/package-routes.ts`) now runs the SAME
+ * `looksLikeInternalErrorLeak` / `INTERNAL_ERROR_MESSAGE` expression the
+ * dispatcher has run since #3867, so the two doors no longer disagree about
+ * disclosure either.
+ *
+ * Message parity is still not asserted HERE, for the ordinary reason rather
+ * than as a gap left visible: disclosure is a property each boundary applies in
+ * its own envelope, and each door pins its own half against the shared
+ * predicate — this file's job is the MAPPING rule (`status` + `code`), and
+ * `packages/rest/src/package-door-5xx-message-sanitization.test.ts` is where
+ * the REST door's disclosure behaviour is pinned. Widening this file to the
+ * message would make one suite the owner of two rules that are deliberately
+ * separate.
  */
 
 import { describe, it, expect } from 'vitest';
