@@ -230,13 +230,18 @@ describe('#7915: a stdio MCP boot writes nothing but protocol frames to stdout',
   }, 60_000);
 
   it('keeps stdout free of every non-frame byte, and keeps the diagnostics on stderr', async () => {
+    // Wait for the banner's LAST line, not for `[MCP] Server started`. The
+    // transport attaches inside `runtime.start()`, which the banner follows —
+    // so this waits for both facts, where the MCP line alone would let the
+    // assertions read a boot that had not printed its banner yet (measured:
+    // that is exactly what happened on the first run of this file).
     const booted = await boot(
       {
         OS_DATABASE_URL: join(dir, 'probe.db'),
         OS_MCP_STDIO_ENABLED: 'true',
         OS_MCP_STDIO_API_KEY: apiKey,
       },
-      /\[MCP\] Server started \(transport: stdio/,
+      /Press Ctrl\+C to stop/,
     );
 
     // Speak the protocol, so the channel is exercised rather than merely quiet:
@@ -313,6 +318,11 @@ describe('#7915: a stdio MCP boot writes nothing but protocol frames to stdout',
     expect(frame!.error).toBeUndefined();
 
     // ── The negative half: moved, not silenced ─────────────────────────
+    // Purity is trivially satisfiable by silence; these say the output is on
+    // the other stream rather than gone. (`Press Ctrl+C to stop` is what the
+    // boot waited for above, so it is a tautology here — kept anyway, because
+    // it is the assertion that would have to be deleted, not merely relaxed,
+    // for the banner to disappear.)
     expect(stderr, `the startup banner vanished instead of moving to stderr${seen}`).toContain(
       'Server is ready',
     );
