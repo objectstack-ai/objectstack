@@ -354,6 +354,52 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       // but the grant itself: it is what keeps `/auth/me`, the org switcher and
       // the Account app working for a member with no application profile.
       ...denyWritesOnManagedObjects(),
+      // [#8053] The ONE override of the block just above: a member may revoke
+      // their OWN API key. #7727 opened the method gate and registered the
+      // ADR-0092 D2 column whitelist, but left this object-CRUD layer
+      // untouched, so `update` on `sys_api_key` resolved for
+      // `admin_full_access` alone — the `revoke_api_key` row action rendered in
+      // the member's own My Keys grid and answered 403 for them. A personal key
+      // "acts as you — treat it like a password", and the owner is the person
+      // who discovers it leaked; their only remedy was to find an admin.
+      //
+      // This is a restoration of declared-≠-enforced intent, not a new grant:
+      // the row action, the checklist persona and the `sys_api_key_self` policy
+      // below (which already makes the row owner-VISIBLE) all say the owner
+      // path was intended — there was simply no `allowEdit` to go with it.
+      //
+      // The opening is bounded by TWO pre-existing mechanisms, and it is
+      // deliberately not bounded by this line alone:
+      //   - WHICH ROWS: the `sys_api_key_self` RLS carve-out below
+      //     (`user_id == current_user.id`, `operation: 'all'`), enforced on
+      //     by-id writes through the security middleware's pre-image check. A
+      //     member PATCHing another user's key is still refused.
+      //   - WHICH FIELDS: ADR-0092 D2's identity write guard, whose per-object
+      //     update whitelist for this table lists `revoked` alone
+      //     (plugin-auth `MANAGED_EXTENSION_EDITABLE_FIELDS`). `key` stays
+      //     unwritable (a rotated hash mints a credential nobody holds) and
+      //     `user_id` stays unwritable (re-owning a key is privilege transfer).
+      //
+      // `allowCreate` / `allowDelete` stay false and are NOT an oversight:
+      // minting is `POST /api/v1/keys` (the only path that returns the raw
+      // secret once) and rows are retired by revoking, not deleting, so history
+      // survives. `allowDelete` also stays false because this set is bound to
+      // the `everyone` anchor and must remain anchor-safe (ADR-0090 D5).
+      //
+      // ⚠️ Not a pattern to copy across the managed list. Every OTHER
+      // better-auth table here stays write-denied because its mutations must
+      // flow through an auth endpoint; this one is a hand-rolled ObjectStack
+      // table (`packages/core/src/security/api-key.ts` mints and verifies it,
+      // better-auth's `apiKey` plugin is not loaded) whose one platform-owned
+      // column already has a registered whitelist. Widening `update` on
+      // `sys_api_key` beyond owner-scoped-plus-one-column would close #8053 and
+      // open a worse defect on a table whose rows act as the user.
+      //
+      // Being an EXPLICIT entry is what makes it survive `kernel:ready`:
+      // `applyManagedWriteDenies` injects its deny only for managed objects a
+      // target set does not already name (`name in objects` → skip), so this
+      // line is preserved rather than overwritten.
+      sys_api_key: { allowRead: true, allowCreate: false, allowEdit: true, allowDelete: false },
       // Self-service preferences. NOT a better-auth table, so it is not covered
       // by the block above, and its `sys_user_preference_self` RLS policy below
       // (`operation: 'all'`) declares exactly this intent: a member reads and
