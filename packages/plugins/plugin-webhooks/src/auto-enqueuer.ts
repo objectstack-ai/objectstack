@@ -277,6 +277,17 @@ export class AutoEnqueuer {
         this.subscriptions.clear();
         for (const [k, v] of next) this.subscriptions.set(k, v);
 
+        // [#8022] Forget rows this refresh no longer sees — deleted, or
+        // deactivated. Otherwise the set grows for the life of the process, and
+        // a webhook turned off while broken and later turned back on still
+        // broken would have its first report suppressed as a repeat.
+        if (this.droppedForSecret.size > 0) {
+            const live = new Set(rows.map((r) => String(r?.id)));
+            for (const id of this.droppedForSecret) {
+                if (!live.has(id)) this.droppedForSecret.delete(id);
+            }
+        }
+
         this.logger.debug?.('[webhook-auto-enqueuer] cache refreshed', {
             objects: this.subscriptions.size,
             rows: rows.length,
