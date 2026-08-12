@@ -147,4 +147,86 @@ describe('hashSpec', () => {
       { numRuns: 100 },
     );
   });
+
+  /**
+   * Guarantee 7 (#7856): the hash describes the bytes a value serialises to.
+   *
+   *     canonicalize(x) === canonicalize(JSON.parse(JSON.stringify(x)))
+   *
+   * Stated as a property and a table rather than as a list of golden hashes,
+   * because the defect was never about any particular value — it was about
+   * `normalise` walking own enumerable keys while the disk received
+   * `JSON.stringify`'s output. Everything with a `toJSON` diverged; `Date` is
+   * simply the instance everybody meets first.
+   */
+  describe('serialized-form identity (#7856)', () => {
+    const roundTrip = (x: unknown): unknown => JSON.parse(JSON.stringify(x));
+
+    class Money {
+      constructor(
+        private readonly cents: number,
+        private readonly currency: string,
+      ) {}
+
+      toJSON(): string {
+        return `${(this.cents / 100).toFixed(2)} ${this.currency}`;
+      }
+    }
+
+    const CASES: ReadonlyArray<{ label: string; value: unknown; canonical: string }> = [
+      {
+        label: 'Date at a key',
+        value: { createdAt: new Date('2024-01-01T00:00:00.000Z'), label: 'H' },
+        canonical: '{"createdAt":"2024-01-01T00:00:00.000Z","label":"H"}',
+      },
+      {
+        label: 'Date under an array index',
+        value: { stamps: [new Date('2020-06-01T12:00:00.000Z')] },
+        canonical: '{"stamps":["2020-06-01T12:00:00.000Z"]}',
+      },
+      {
+        label: 'class instance whose toJSON yields a string',
+        value: { amount: new Money(1250, 'USD') },
+        canonical: '{"amount":"12.50 USD"}',
+      },
+      {
+        label: 'object literal carrying its own toJSON',
+        value: { span: { toJSON: () => ({ to: 9, from: 1 }) } },
+        canonical: '{"span":{"from":1,"to":9}}',
+      },
+    ];
+
+    for (const c of CASES) {
+      it(`canonicalises to the serialised form — ${c.label}`, () => {
+        expect(canonicalize(c.value)).toBe(c.canonical);
+        expect(hashSpec(c.value)).toBe(hashSpec(roundTrip(c.value)));
+      });
+    }
+
+    it('applies toJSON once per position, never re-consulting its result', () => {
+      // `JSON.stringify` applies toJSON exactly once per position, so a result
+      // that itself carries a toJSON is serialised literally. Matching
+      // JSON.stringify IS the contract, so it is asserted against it directly.
+      const value = { wrapped: { toJSON: () => ({ inner: { toJSON: () => 'deep' } }) } };
+      expect(canonicalize(value)).toBe(JSON.stringify(roundTrip(value)));
+    });
+
+    it('leaves a graph with no toJSON byte-identical', () => {
+      // The half that makes this a fix rather than a migration: an ordinary
+      // spec's canonical form must be exactly what it has always been.
+      expect(canonicalize({ b: 1, a: [1, 2, { c: null }], d: 'x' })).toBe(
+        '{"a":[1,2,{"c":null}],"b":1,"d":"x"}',
+      );
+    });
+
+    it('property: hashing is invariant under a JSON round trip', () => {
+      fc.assert(
+        fc.property(
+          fc.dictionary(fc.string({ minLength: 1, maxLength: 6 }), fc.jsonValue()),
+          (obj) => hashSpec(obj) === hashSpec(roundTrip(obj)),
+        ),
+        { numRuns: 200 },
+      );
+    });
+  });
 });

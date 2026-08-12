@@ -28,6 +28,11 @@ import {
     // definition table — see {@link governServedItem} / {@link stripServedSystemColumns}.
     applyInjectedSystemColumns,
     stripInjectedSystemColumns,
+    // [#7774] The i18n-bundle identity table (#7730) and its reader. A type
+    // listed here is identified by `(name, <field>)`, so every merge in the
+    // unscoped `/meta` list keys on the pair — see {@link metaItemKey}.
+    ITEM_KEY_DISCRIMINATORS,
+    itemDiscriminator,
     type MetadataItem,
 } from '@objectstack/metadata-core';
 // [#5532] One vocabulary of "which driver read errors are benign", shared with
@@ -984,9 +989,52 @@ function mergeArtifactProtection(item: unknown, artifactItem: unknown): unknown 
  * `${packageId}:${name}` keys. Any list-merge that deduplicates by bare `name`
  * collapses the two packages' rows into one (last-write-wins), which is the
  * bug this key closes. A `NUL` separator keeps names containing `:` unambiguous.
+ *
+ * [#7774] `discriminator` is a third component, and it is OPTIONAL on purpose:
+ * omitting it produces the exact two-component string this function has always
+ * produced, so every type identified by `(package, name)` keeps a
+ * byte-identical key and this change's blast radius is provable rather than
+ * argued. It is supplied only for a type listed in `ITEM_KEY_DISCRIMINATORS`
+ * (`email_template` today), whose identity the spec declares as
+ * `(name, locale)` — an i18n bundle. Without it the second locale's
+ * `Map.set` overwrote the first and `GET /meta/email_template` served one
+ * member of a bundle it had every member of.
  */
-function metaItemKey(packageId: string | null | undefined, name: unknown): string {
-    return `${packageId ?? ''}\u0000${String(name)}`;
+function metaItemKey(
+    packageId: string | null | undefined,
+    name: unknown,
+    discriminator?: string,
+): string {
+    const base = `${packageId ?? ''}\u0000${String(name)}`;
+    return discriminator === undefined ? base : `${base}\u0000${discriminator}`;
+}
+
+/**
+ * [#7774] The bundle discriminator a STORED `sys_metadata` row declares, read
+ * off the row's serialized body.
+ *
+ * The row's own COLUMNS cannot answer this: `sys_metadata`'s overlay
+ * uniqueness is `(type, name, organization_id, package_id)` — declared on
+ * `idx_sys_metadata_overlay_active` in `sys-metadata.object.ts` — and the
+ * table has no locale column at all. An `email_template` overlay's locale
+ * lives inside the `metadata` JSON payload, which is where its identity is.
+ * So a row-level merge keying on columns alone cannot tell two members of one
+ * bundle apart, and the body has to be consulted.
+ *
+ * The parse is skipped entirely for an undiscriminated type (all but one
+ * today): `undefined` comes back before any JSON work, so this costs nothing
+ * on the paths it does not serve. A body that fails to parse falls back to the
+ * canonical member instead of throwing — the caller a few lines on parses it
+ * again for real, and that failure is the one that should surface.
+ */
+function storedRowDiscriminator(type: string, record: unknown): string | undefined {
+    if (!ITEM_KEY_DISCRIMINATORS[type]) return undefined;
+    const raw = (record as { metadata?: unknown } | null | undefined)?.metadata;
+    let body: unknown = raw;
+    if (typeof raw === 'string') {
+        try { body = JSON.parse(raw); } catch { body = undefined; }
+    }
+    return itemDiscriminator(type, body);
 }
 
 /**
@@ -1013,25 +1061,47 @@ function metaItemKey(packageId: string | null | undefined, name: unknown): strin
  * `transform(data, prev)` runs on each `records` body before it enters the
  * merge (view-identity healing, draft tagging); `prev` is the base row it
  * shadows at the same slot (or any same-name base row), else undefined.
+ *
+ * [#7774] The bucket is per SLOT, not per name, and for a type in
+ * `ITEM_KEY_DISCRIMINATORS` the slot is `(name, discriminator)`. This is the
+ * half of the collapse that #7774's card predicted would need no change, and
+ * it needed one: the card reasoned about the OVERLAY rows (correctly — they
+ * are unique on `type+name+organization_id+package_id` and carry no locale
+ * column), but the rows are only the higher layer. `baseItems` is the
+ * SchemaRegistry's listing, and since #7730 that listing carries every member
+ * of a bundle. Bucketed by bare name, two members of one bundle landed in one
+ * bucket and the loop below emitted exactly one row per `(bucket, package)` —
+ * so a single unrelated overlay row for the type was enough to drop a locale,
+ * and the surviving row was the overlay body regardless of which member it
+ * actually customizes. Slot-keyed, the overlay lands on its OWN member and the
+ * others are served untouched. An undiscriminated type's slot is its name, so
+ * its buckets are unchanged.
+ *
+ * @param type Canonical (singular) metadata type of every row being merged.
  */
 function mergePackageAwareOverlay(
+    type: string,
     baseItems: unknown[],
     records: Array<{ data: unknown; packageId: string | undefined }>,
     transform?: (data: any, prev: any) => any,
 ): unknown[] {
-    // Per-name, layer-ordered contributions; `pkg: undefined` = package-less.
+    // Per-SLOT, layer-ordered contributions; `pkg: undefined` = package-less.
     const buckets = new Map<string, Array<{ pkg: string | undefined; item: any }>>();
-    const order: string[] = []; // first-seen name order → stable output
-    const push = (name: string, pkg: string | undefined, item: any) => {
-        let list = buckets.get(name);
-        if (!list) { buckets.set(name, (list = [])); order.push(name); }
+    const order: string[] = []; // first-seen slot order → stable output
+    const slotOf = (item: unknown, name: unknown): string => {
+        const disc = itemDiscriminator(type, item);
+        return disc === undefined ? String(name) : `${String(name)}\u0000${disc}`;
+    };
+    const push = (slot: string, pkg: string | undefined, item: any) => {
+        let list = buckets.get(slot);
+        if (!list) { buckets.set(slot, (list = [])); order.push(slot); }
         list.push({ pkg, item });
     };
 
     for (const raw of baseItems) {
         const item = raw as any;
         if (item && typeof item === 'object' && 'name' in item) {
-            push(item.name, (item._packageId ?? undefined) as string | undefined, item);
+            push(slotOf(item, item.name), (item._packageId ?? undefined) as string | undefined, item);
         }
     }
     for (const { data, packageId } of records) {
@@ -1039,19 +1109,20 @@ function mergePackageAwareOverlay(
         if (!(body && typeof body === 'object' && 'name' in body)) continue;
         // The base row this record shadows at its own slot (for view-identity
         // healing): a same-package row, else a package-less one, else any
-        // same-name row it stands in for.
-        const list = buckets.get(body.name);
+        // same-slot row it stands in for.
+        const slot = slotOf(body, body.name);
+        const list = buckets.get(slot);
         const prev = list
             ? (list.find((c) => c.pkg === packageId)?.item
                 ?? list.find((c) => c.pkg === undefined)?.item
                 ?? list[0]?.item)
             : undefined;
-        push(body.name, packageId, transform ? transform(body, prev) : body);
+        push(slot, packageId, transform ? transform(body, prev) : body);
     }
 
     const out: unknown[] = [];
-    for (const name of order) {
-        const list = buckets.get(name)!;
+    for (const slot of order) {
+        const list = buckets.get(slot)!;
         const reals = Array.from(new Set(list.filter((c) => c.pkg !== undefined).map((c) => c.pkg)));
         if (reals.length === 0) {
             out.push(list[list.length - 1].item); // latest package-less row wins
@@ -4203,9 +4274,23 @@ export class ObjectStackProtocolImplementation implements
             // ADR-0048 (#1828) — key by (package, name), not bare name, so a
             // package A row and a package B row of the same name do not
             // collapse; org-over-env precedence still holds within each slot.
+            //
+            // [#7774] …and for a bundled type the slot is `(package, name,
+            // locale)`. Within ONE org this changes nothing — the store's own
+            // unique index is `(type, name, organization_id, package_id)`, so
+            // an org cannot hold two rows that differ only by body locale.
+            // Across the two tiers it can: an env-wide row and this org's row
+            // may customize DIFFERENT members of one bundle, and keying them
+            // together made the org's zh-CN row silently displace the
+            // env-wide en-US one. Precedence is unchanged where it was ever
+            // meaningful — an org row still overrides the env-wide row of the
+            // same member — and an undiscriminated type keeps a
+            // byte-identical key.
             const mergedMap = new Map<string, any>();
-            for (const r of envWideRecords) mergedMap.set(metaItemKey(r.package_id, r.name), r);
-            for (const r of orgRecords) mergedMap.set(metaItemKey(r.package_id, r.name), r);
+            const rowKey = (r: any): string =>
+                metaItemKey(r.package_id, r.name, storedRowDiscriminator(request.type, r));
+            for (const r of envWideRecords) mergedMap.set(rowKey(r), r);
+            for (const r of orgRecords) mergedMap.set(rowKey(r), r);
             const records = Array.from(mergedMap.values());
             if (records && records.length > 0) {
                 const isView = (PLURAL_TO_SINGULAR[request.type] ?? request.type) === 'view';
@@ -4239,8 +4324,11 @@ export class ObjectStackProtocolImplementation implements
                 // not collapsed to one. #2555 — heal identity-less view overlays
                 // from the entry they shadow (a raw-config row would otherwise
                 // drop viewKind/object and vanish the view from switcher/list
-                // consumers); the overlay's own fields still win.
-                items = mergePackageAwareOverlay(items, overlays, (data, prev) => {
+                // consumers); the overlay's own fields still win. [#7774] The
+                // merge slot carries the bundle discriminator, so an
+                // `email_template` overlay lands on its own locale member
+                // instead of flattening every member of the bundle onto it.
+                items = mergePackageAwareOverlay(request.type, items, overlays, (data, prev) => {
                     if (isView && data && typeof data === 'object') {
                         const patch = viewIdentityPatch(data as Record<string, unknown>, prev);
                         if (patch) Object.assign(data as Record<string, unknown>, patch);
@@ -4325,7 +4413,10 @@ export class ObjectStackProtocolImplementation implements
                         }
                         return { data, packageId: recPkg };
                     });
-                    items = mergePackageAwareOverlay(items, drafts, (data) => {
+                    // [#7774] Same bundle slot as the active merge above — a
+                    // draft of one locale must preview over that locale, not
+                    // over the whole bundle.
+                    items = mergePackageAwareOverlay(request.type, items, drafts, (data) => {
                         if (data && typeof data === 'object') (data as any)._draft = true;
                         return data;
                     });
@@ -4356,11 +4447,27 @@ export class ObjectStackProtocolImplementation implements
                     // Merge, avoiding duplicates. ADR-0048 (#1828) — key by
                     // (package, name), not bare name, so a runtime item from one
                     // package does not collapse a same-name item from another.
+                    //
+                    // [#7774] …and by `(package, name, locale)` for a type
+                    // whose identity the spec declares as a pair. This loop is
+                    // where the i18n bundle actually died: `items` already
+                    // held both members (the registry keeps them since #7730),
+                    // the second `set` overwrote the first, and
+                    // `GET /meta/email_template` served one locale. It only
+                    // ever ran with a `metadata` service installed AND
+                    // answering non-empty for the type — which is why the
+                    // regression was invisible to every suite that omits one.
                     const itemMap = new Map<string, any>();
+                    const entryKey = (entry: any): string =>
+                        metaItemKey(
+                            entry._packageId ?? undefined,
+                            entry.name,
+                            itemDiscriminator(request.type, entry),
+                        );
                     for (const item of items) {
                         const entry = item as any;
                         if (entry && typeof entry === 'object' && 'name' in entry) {
-                            itemMap.set(metaItemKey(entry._packageId ?? undefined, entry.name), entry);
+                            itemMap.set(entryKey(entry), entry);
                         }
                     }
                     for (const item of runtimeItems) {
@@ -4374,7 +4481,7 @@ export class ObjectStackProtocolImplementation implements
                             // view overlays disappear from list endpoints on
                             // refresh (detail endpoint kept showing the
                             // overlay because it uses a different code path).
-                            const key = metaItemKey(entry._packageId ?? undefined, entry.name);
+                            const key = entryKey(entry);
                             if (!itemMap.has(key)) {
                                 itemMap.set(key, entry);
                             }
@@ -12011,7 +12118,38 @@ export class ObjectStackProtocolImplementation implements
         if (request.organizationId) {
             const byKey = new Map<string, any>();
             for (const row of scanned) {
-                const key = `${row?.type}\u0000${row?.name}`;
+                // [#7932] …and for a bundled type the slot is
+                // `(type, name, discriminator)`. Same shape #7774 gave
+                // {@link metaItemKey}: the discriminator is appended ONLY
+                // when the type declares one, so every undiscriminated type
+                // keeps a byte-identical two-component key and this
+                // change's blast radius is provable rather than argued.
+                //
+                // Within ONE org the collapse cannot happen —
+                // `sys_metadata`'s overlay uniqueness is
+                // `(type, name, organization_id, package_id)` and the table
+                // has no locale column, so one org cannot hold two rows
+                // differing only by body locale. Across the two tiers it
+                // can, and this scan is the one place they meet: an
+                // env-wide `auth.welcome` customized in `en-US` and THIS
+                // org's `zh-CN` customization are two different members of
+                // one bundle (`EmailTemplateDefinitionSchema` resolves a
+                // template by `(name, locale)`), and keying them together
+                // let the org row displace the env-wide one — the
+                // duplicate then shipped one locale of a two-locale
+                // customization, reporting success. Precedence is unchanged
+                // where it was ever meaningful: an org row still wins over
+                // the env-wide row of the SAME member.
+                //
+                // The discriminator is read off the RAW stored body rather
+                // than the converted one, which is safe because no ADR-0087
+                // conversion entry touches `email_template` — re-checked
+                // against `packages/spec/src/conversions/registry.ts`,
+                // whose surfaces are flow/page/object/view/app/… and never
+                // this type.
+                const disc = storedRowDiscriminator(String(row?.type), row);
+                const base = `${row?.type}\u0000${row?.name}`;
+                const key = disc === undefined ? base : `${base}\u0000${disc}`;
                 const kept = byKey.get(key);
                 const keptIsEnvWide = kept != null && (kept.organization_id ?? null) === null;
                 if (kept == null || (keptIsEnvWide && (row?.organization_id ?? null) !== null)) {

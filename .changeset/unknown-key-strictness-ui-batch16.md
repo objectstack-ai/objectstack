@@ -93,3 +93,5 @@ spec `check:*` gates, `objectstack validate` on app-showcase / app-crm / app-tod
 and an ADR-0087 direct-parse probe over the three apps' **built** artifacts —
 zero `aria` slots present, with the probe's negative control proven red on a
 legacy-spelled block.
+
+<!-- adr-0087: registered authoring-schemas-strict-unknown-keys -->

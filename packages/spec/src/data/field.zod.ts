@@ -550,6 +550,45 @@ export const FieldSchema = lazySchema(() => strictObject({
   scale: z.number().optional().describe('Decimal places'),
   min: z.number().optional().describe('Minimum value'),
   max: z.number().optional().describe('Maximum value'),
+  /**
+   * Presentation hint (#7768): whether a `number` field renders with digit
+   * grouping (`Intl.NumberFormat`'s `useGrouping`, e.g. `2,026` vs `2026`).
+   * `scale` was the ONLY presentation-adjacent property `number` had, and it
+   * governs decimal places, not grouping — console renderers construct
+   * `Intl.NumberFormat` with grouping unconditionally ON, so an
+   * ordinal/identifier integer stored as `Field.number({ scale: 0, min: 1900
+   * })` (a year) renders `2,026` everywhere it is shown. Downstream apps hit
+   * this three times (hotcrm-heimao#35/#40/#59) and each time converted the
+   * field to `Field.text` to escape the comma — trading away numeric
+   * semantics (range validation, sort-as-number, arithmetic) for a display
+   * detail that had nothing to do with the field's TYPE.
+   *
+   * Three-valued, and the absent case is deliberately NOT "grouping off":
+   *   - **absent** (default state) — the author has not judged whether this
+   *     number reads as a quantity or an identifier; the RENDERER decides.
+   *     Today that is an interim heuristic (objectui#4033, e.g. `scale: 0`
+   *     + no upper bound reads as a plain count and keeps grouping, a small
+   *     bounded integer range reads as ordinal-shaped and drops it);
+   *     eventually the locale's own default. Neither contract lives here —
+   *     this key only carries the author's EXPLICIT override when they have
+   *     one, exactly like `min`/`max`/`scale` carry constraints without
+   *     asserting what an unconstrained field means.
+   *   - **`false`** — the author's explicit opt-out: this integer is an
+   *     identifier/ordinal (year, ID, zip code, quantity meant to scan
+   *     un-grouped), never grouped regardless of what the renderer's
+   *     heuristic would have guessed.
+   *   - **`true`** — the author pins grouping ON, overriding the heuristic
+   *     the other way (a large monetary-like count that should always read
+   *     with separators even if it would otherwise be judged ordinal-shaped).
+   *
+   * Maps 1:1 onto `Intl.NumberFormat`'s `useGrouping` option; the console
+   * number renderers are expected to pass it straight through. No default is
+   * declared here on purpose — unlike `autonumberFormat`'s JSON-Schema
+   * `default` annotation, there is no single grouping behavior every
+   * `number` field should present until the renderer half of this contract
+   * (objectui#4033) lands and retires the interim heuristic.
+   */
+  useGrouping: z.boolean().optional().describe('Digit-grouping presentation hint for `number` fields (#7768) — maps to `Intl.NumberFormat`\'s `useGrouping`. Absent = renderer decides (interim heuristic today, locale default eventually); `false` = author opts out of grouping (e.g. a year or other ordinal/identifier integer); `true` = author pins grouping on.'),
 
   /**
    * Media Constraints (ADR-0104 D3 wave 2)
@@ -860,6 +899,40 @@ export const FieldSchema = lazySchema(() => strictObject({
 
   /** Security & Visibility */
   hidden: z.boolean().default(false).describe('Hidden from default UI'),
+
+  /**
+   * [#7728] "The declared value is never returned on the generic data path."
+   *
+   * Opt-in, and deliberately NOT a synonym for anything already here. `hidden`
+   * is a UI contract ("Hidden from default UI") and has never governed
+   * serialization; `readonly` governs the WRITE path; `requiredPermissions`
+   * masks per CALLER, so it cannot express "nobody, ever". This flag is the
+   * read-side complement: the engine OMITS the key from the rows it hands back
+   * — on `find`, `findOne`, the 201 create body and the by-id update body, on
+   * the default projection AND when a client names the field in `?select=`.
+   *
+   * OMIT, not mask (maintainer ruling 2026-08-12). The credential mask exists
+   * to signal "a value is set" without leaking it; on a `required` column that
+   * signal carries zero bits, while still shipping a value under a field whose
+   * declaration promises none. So the property is dropped, not replaced.
+   *
+   * What it deliberately does NOT do — the flag would be unusable otherwise:
+   *  - it does not touch STORAGE or encryption (that is `Field.secret`, which
+   *    rewrites the column to a `sys_secret` ref);
+   *  - it does not touch FILTERING or indexing, so a server-side verifier can
+   *    still match on the column (`where: { key: <sha-256 hash> }`) — the strip
+   *    runs on the RESULT ROWS, after the driver has evaluated the predicate;
+   *  - it does not touch a purpose-built issue/mint route that returns the
+   *    value once at creation off the generic path.
+   *
+   * This is the read protection for ADR-0100's third credential channel —
+   * auth-subsystem one-way hashes on `text` columns, which `secret`/`password`
+   * masking cannot reach because `collectMaskedReadFields` collects by TYPE and
+   * a `text` column is never collected. ADR-0049: enforced from landing day, at
+   * `Engine.maskSecretFields`.
+   */
+  internal: z.boolean().optional().describe("[#7728] Never return this field's value on the generic data path — the engine OMITS the key from `find`/`findOne` results, the 201 create body and the by-id update body, on the default projection AND when a client names the field in `?select=`. Storage, filtering and indexing are untouched, so a server-side verifier can still match on the column and a purpose-built mint route can still return the value once at creation. The read protection for ADR-0100's third credential channel (auth-subsystem one-way hashes on `text` columns). Omission, not masking: a mask signals 'a value is set', which carries no information on a `required` column."),
+
   readonly: z.boolean().default(false).describe('Read-only — never editable in forms, AND server-enforced on BOTH write paths: a non-system write to this field is silently dropped from the payload on UPDATE (#2948/#3003) and on INSERT (#3043; a create can no longer directly seed e.g. `approval_status: "approved"`), symmetric with `readonlyWhen`. A stripped INSERT field still falls back to its `defaultValue`. Exempt from the strip on BOTH paths: `isSystem` writes (seed replay, migration). Exempt on the UPDATE path ONLY: an opt-in "historical" import (`preserveAudit`, #3493) — which admits a whitelist (the audit/timestamp family plus author-declared business `readonly` fields). On INSERT the exemption does NOT apply (#6640): a non-system create that requests `preserveAudit` still has its readonly fields stripped, and is warned loudly that the exemption is UPDATE-only — replaying archival readonly facts on create requires a system context. A normal (non-system) import is NOT system-context and still strips.'),
 
   /**

@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { z } from 'zod';
 import {
   FieldSchema,
   FieldType,
@@ -236,6 +237,75 @@ describe('FieldSchema', () => {
       };
 
       expect(() => FieldSchema.parse(numberField)).not.toThrow();
+    });
+  });
+
+  describe('useGrouping — number-field digit-grouping presentation hint (#7768)', () => {
+    it('accepts an explicit `false` (author opts out of grouping — e.g. a year)', () => {
+      const yearField: Field = {
+        name: 'founded_year',
+        label: 'Founded Year',
+        type: 'number',
+        scale: 0,
+        min: 1900,
+        useGrouping: false,
+      };
+      const result = FieldSchema.parse(yearField);
+      expect(result.useGrouping).toBe(false);
+    });
+
+    it('accepts an explicit `true` (author pins grouping on)', () => {
+      const result = FieldSchema.parse({ type: 'number', useGrouping: true });
+      expect(result.useGrouping).toBe(true);
+    });
+
+    it('is optional — absent stays absent, no default materializes', () => {
+      const result = FieldSchema.parse({ type: 'number' }) as Record<string, unknown>;
+      expect(result.useGrouping).toBeUndefined();
+      expect('useGrouping' in result).toBe(false);
+    });
+
+    it('rejects a non-boolean value', () => {
+      expect(() => FieldSchema.parse({ type: 'number', useGrouping: 'true' })).toThrow();
+      expect(() => FieldSchema.parse({ type: 'number', useGrouping: 1 })).toThrow();
+      expect(() => FieldSchema.parse({ type: 'number', useGrouping: null })).toThrow();
+    });
+
+    it('is not type-restricted at the schema level (flat on FieldSchema, like scale/min)', () => {
+      // FieldSchema does not discriminate its constraint keys by `type` — same
+      // posture as `scale`/`min`, which parse on any field type too. A type-aware
+      // "only meaningful on number/currency/percent" restriction is a renderer/lint
+      // concern, not a parse-time one.
+      expect(() => FieldSchema.parse({ type: 'text', useGrouping: false })).not.toThrow();
+    });
+
+    it('does not disturb FieldSchema unknown-key strictness (#4001)', () => {
+      expect(() => FieldSchema.parse({
+        type: 'number',
+        useGrouping: false,
+        totallyBogusKey: true,
+      } as unknown as Field)).toThrow(/Unrecognized key/);
+    });
+
+    it('Field.number(...) threads useGrouping through like scale/min (no special-casing needed)', () => {
+      const f = Field.number({ label: 'Founded Year', scale: 0, min: 1900, useGrouping: false });
+      expect(f).toEqual({ type: 'number', label: 'Founded Year', scale: 0, min: 1900, useGrouping: false });
+      expect(() => FieldSchema.parse(f)).not.toThrow();
+    });
+
+    it('declares a boolean JSON-Schema slot with NO default — absence defers to the renderer', () => {
+      const js = z.toJSONSchema(FieldSchema as unknown as z.ZodType, {
+        unrepresentable: 'any',
+        io: 'input',
+      }) as any;
+      const prop = js.properties?.useGrouping;
+      expect(prop).toBeDefined();
+      expect(prop.type).toBe('boolean');
+      // Unlike `autonumberFormat`, this key carries no JSON-Schema `default`
+      // annotation — there is no renderer-agnostic grouping behavior to declare
+      // until the objectui half (#4033) retires the interim heuristic.
+      expect(prop.default).toBeUndefined();
+      expect(js.required ?? []).not.toContain('useGrouping');
     });
   });
 

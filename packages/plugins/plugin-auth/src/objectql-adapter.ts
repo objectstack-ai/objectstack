@@ -498,9 +498,50 @@ function isEnginePolicyRefusal(err: unknown): err is { code?: string; message?: 
 }
 
 /**
+ * [#7724] A REFERENTIAL refusal — the engine's `cascadeDeleteRelations` found
+ * dependent rows it may neither cascade nor null, so it vetoed the delete
+ * (`DELETE_RESTRICTED`, 409, ADR-0112).
+ *
+ * The third shape in this file, and the one that shows why the set had to be
+ * widened rather than left at two. The two arms above both map errors raised by
+ * code that *knows about better-auth* — the record validator and this package's
+ * own policy guards. A referential restrict is raised by the ENGINE, several
+ * layers below, and carries neither signature; `rethrowAsBetterAuthError` fell
+ * through to `throw err`, better-auth's router saw an unhandled fault, and the
+ * admin caller got a **500 with an empty body** for a refusal the engine had
+ * explained in full. The client is told nothing at all — not the status, not the
+ * dependent object, not the remedy.
+ *
+ * Mapped HERE, at the adapter, rather than at the REST transport: this is the
+ * seam where an engine error crosses into better-auth, so one arm covers every
+ * better-auth endpoint that deletes through the adapter. `rest-server.ts`'s
+ * `mapDataError` already maps the same code correctly for the generic data
+ * routes and is deliberately untouched — the two transports map the one engine
+ * error independently, exactly as they already do for the two arms above.
+ *
+ * The structured half of the envelope rides along unchanged (`developerMessage`
+ * / `dependentObject` / `dependentCount`), for the reason #7307 gives at the
+ * REST mapping: dropping the remedy at the transport moves the defect rather
+ * than fixing it, and the fields disclose nothing the envelope did not carry.
+ */
+function isReferentialDeleteRestriction(
+  err: unknown,
+): err is {
+  code?: string;
+  message?: string;
+  developerMessage?: string;
+  dependentObject?: string;
+  dependentCount?: number;
+} {
+  if (!err || typeof err !== 'object') return false;
+  return (err as { code?: unknown }).code === 'DELETE_RESTRICTED';
+}
+
+/**
  * Re-throw `err` as a better-auth `APIError` when it is an ObjectQL validation
- * failure or an engine policy refusal; otherwise re-throw it verbatim. Always
- * throws — the return type is `never`.
+ * failure (400), an engine policy refusal (403) or a referential delete
+ * restriction (409); otherwise re-throw it verbatim. Always throws — the return
+ * type is `never`.
  */
 async function rethrowAsBetterAuthError(err: unknown): Promise<never> {
   if (isObjectQLValidationError(err)) {
@@ -525,15 +566,31 @@ async function rethrowAsBetterAuthError(err: unknown): Promise<never> {
       code: 'PERMISSION_DENIED',
     });
   }
+  if (isReferentialDeleteRestriction(err)) {
+    const { APIError } = await import('better-auth/api');
+    throw new APIError('CONFLICT', {
+      message:
+        typeof err.message === 'string' && err.message.trim()
+          ? err.message
+          : 'Cannot delete: dependent records exist',
+      code: 'DELETE_RESTRICTED',
+      ...(typeof err.developerMessage === 'string' && err.developerMessage.length > 0
+        ? { developerMessage: err.developerMessage }
+        : {}),
+      ...(err.dependentObject ? { dependentObject: err.dependentObject } : {}),
+      ...(typeof err.dependentCount === 'number' ? { dependentCount: err.dependentCount } : {}),
+    });
+  }
   throw err;
 }
 
 /**
  * Wrap every function-valued method of a better-auth adapter so an ObjectQL
- * `ValidationError` (400) or an engine policy refusal (403) thrown from the
- * underlying engine surfaces as a 4xx `APIError` instead of an opaque 500.
- * Non-function properties pass through untouched, and every error that carries
- * neither signature is re-thrown verbatim.
+ * `ValidationError` (400), an engine policy refusal (403) or a referential
+ * delete restriction (409, #7724) thrown from the underlying engine surfaces as
+ * a 4xx `APIError` instead of an opaque 500. Non-function properties pass
+ * through untouched, and every error that carries none of those signatures is
+ * re-thrown verbatim.
  */
 export function withValidationErrorMapping<A extends Record<string, any>>(adapter: A): A {
   const out: Record<string, any> = {};

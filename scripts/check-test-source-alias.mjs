@@ -1,0 +1,1157 @@
+#!/usr/bin/env node
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+//
+// check-test-source-alias — a unit test must be a verdict about the SOURCE in
+// the checkout, never about a sibling package's build artifact.
+//
+// ── The defect this exists to make impossible (#7668, #7778, #7849) ─────────
+//
+// Every publishable package here resolves through `exports` to `dist/`
+// (measured: 67 of 67 packages that declare an entry point at all). So when
+// `packages/services/service-storage` ran `vitest` with no config, its
+// `import { … } from '@objectstack/core'` followed the workspace link to
+// `packages/core/dist/index.js` — A BUILD ARTIFACT. Every unit pin in that
+// package was therefore reporting on build state, not on the source next to it.
+//
+// #7668 is what that cost: all 17 cases of `attachment-access-hooks.test.ts` —
+// the only executable guard on the #4757 predicate-less unscoped-multi-delete
+// refusal, which cannot be expressed over REST — errored with `TypeError:
+// withoutOperationPrivateKeys is not a function` against a tree whose prebuilt
+// core predated that export, while `packages/core/src/security/
+// operation-private-keys.ts` had been correct the whole time.
+//
+// **The loud error is the mild half.** A dist merely BEHIND rather than missing
+// the symbol lets a pin run GREEN against the dependency's old behaviour — a
+// passing test that is not testing the code in the checkout, with nothing in
+// the output saying so. That is the failure this gate is aimed at, and it is
+// why "just run the tests and see" cannot find it.
+//
+// Ordering does not reach it. `turbo.json` declares `test` dependsOn `^build`,
+// so `turbo run test` was never the failing path and needs no change. What
+// breaks are the paths turbo does not mediate — `pnpm test` inside the package,
+// `vitest run <file>`, an editor runner, or an agent working in a tree built at
+// an older commit. Those are exactly the paths a pin is re-run on WHILE someone
+// is changing the dependency, i.e. when it most needs to be telling the truth.
+// Ordering cannot fix that; taking the artifact off the resolution path can.
+//
+// ── Why a gate and not a sweep ──────────────────────────────────────────────
+//
+// #7778 added the one missing config the incident named, and said explicitly
+// that it was not sweeping. A sweep is the wrong terminal state anyway: it
+// leaves the NEXT package unguarded, and the symptom of the omission is a green
+// test, so nothing would report the gap. The invariant has to be asserted
+// mechanically or it is not asserted at all.
+//
+// ── What this checks ────────────────────────────────────────────────────────
+//
+// For every workspace package that has test files:
+//
+//   1. Walk the imports REACHABLE FROM ITS TESTS — the test files plus every
+//      intra-package file they pull in transitively — and collect the workspace
+//      packages they import **as values**. `import type` is erased before the
+//      module ever resolves, so it is not a hazard and is not counted.
+//   2. Keep only the deps that can actually go stale: the dep's own entry point
+//      resolves under `dist/`. A dep whose `exports` already point at source
+//      (the example apps' `objectstack.config.ts`) is not an artifact and needs
+//      no alias — counting it would be a false positive the registry then has
+//      to carry forever.
+//   3. Read the package's `vitest.config.*` and resolve each of those
+//      specifiers the way Vite does — entries in order, FIRST MATCH WINS,
+//      string `find` matching by PREFIX and regex `find` by `String.replace`.
+//      A dep whose winning entry lands under `src/` is safe.
+//   4. Anything left is an unaliased artifact import, and the package must be
+//      registered in `KNOWN_UNALIASED_TEST_IMPORTS` below with EXACTLY that
+//      set. Unregistered ⇒ red.
+//
+// It also checks the trap #7778's notes name, which is a live-fire correctness
+// rule rather than a style preference (rule 5 below): the OBJECT alias form
+// matches by prefix, so a bare `'@objectstack/core'` key whose replacement is a
+// FILE also swallows `@objectstack/core/logger` and resolves it to
+// `…/core/src/index.ts/logger` — `ENOTDIR`, at run time, in a config that looks
+// right. Because step 3 performs the real replacement, this gate sees the
+// resulting path and fails on any specifier whose resolution passes THROUGH a
+// file extension. Either anchor the pattern (`/^@objectstack\/core$/`, the
+// array form) or list the subpath entry ahead of the bare one.
+//
+// ── The registry, and why it is shaped like this ────────────────────────────
+//
+// `KNOWN_UNALIASED_TEST_IMPORTS` is the measured state of the repo on the day
+// this gate landed. It is **shrink-only**: entries come off as packages are
+// fixed, and a new one is not the way to make a red build green — aliasing the
+// import is. It is audited in BOTH directions, like `UNRESOLVED_ADR_CITATIONS`
+// in `check-adr-anchors.mjs`, so it cannot rot into a permanent grandfather
+// clause: a package that no longer needs its entry FAILS, naming the entry to
+// delete.
+//
+// Each entry carries the exact set of dependencies that are currently
+// unaliased, and the audit demands set EQUALITY. That is the same decision as
+// "no numeric ceiling", applied one level down. A bare list of package names
+// would license a listed package to acquire ten NEW artifact imports with
+// nothing going red — silent regression headroom, which is precisely what
+// #7888 records the type-check DEBT ledger paying for (273 raw errors of
+// licensed headroom across 9 entries, every one of them invisible). There is no
+// count anywhere in this file and no allowance to regress under: an entry
+// states which imports are unaliased today, and any drift in either direction
+// is a red gate naming the one-line edit.
+//
+// ⛔ Two things this gate deliberately does NOT do:
+//   - It does not add or edit any package's `vitest.config.*`. Remediation is
+//     per-package and lands as its own card; the point of the gate is that the
+//     list of cards is finite and cannot grow behind anyone's back.
+//   - It does not fail a package for having NO config. A package with tests
+//     that imports no stale-able workspace dep needs no alias and no config,
+//     and demanding one would be cargo cult. The predicate is the import, not
+//     the file.
+//
+// Usage:
+//   node scripts/check-test-source-alias.mjs
+//   node scripts/check-test-source-alias.mjs --list      # measured state, registry-shaped
+//   node scripts/check-test-source-alias.mjs --self-test
+
+import { readFileSync, readdirSync, statSync, existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { join, resolve, relative, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { tmpdir } from 'node:os';
+import process from 'node:process';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = resolve(HERE, '..');
+
+/**
+ * Packages whose test-reachable code imports a workspace package that resolves
+ * to `dist/`, with no vitest alias redirecting it to source — i.e. packages
+ * whose unit verdicts are currently a function of build state.
+ *
+ * MEASURED, not curated: this is what `--list` printed on the day the gate
+ * landed. Each value is the exact set of unaliased artifact imports for that
+ * package.
+ *
+ * ⛔ SHRINK-ONLY. Adding an entry, or widening one, is not how a red build gets
+ * fixed — add the alias to that package's `vitest.config.*` instead (anchored
+ * regex / array form; see the header). Entries are audited in both directions,
+ * so one that is no longer needed fails the gate and names itself for deletion.
+ */
+const KNOWN_UNALIASED_TEST_IMPORTS = {
+  '@objectstack/cli': [
+    '@objectstack/account', '@objectstack/client', '@objectstack/cloud-connection', '@objectstack/core',
+    '@objectstack/driver-sql', '@objectstack/driver-turso', '@objectstack/lint', '@objectstack/mcp',
+    '@objectstack/metadata', '@objectstack/metadata-protocol', '@objectstack/objectql',
+    '@objectstack/observability', '@objectstack/platform-objects', '@objectstack/plugin-email',
+    '@objectstack/plugin-hono-server', '@objectstack/plugin-security', '@objectstack/rest',
+    '@objectstack/runtime', '@objectstack/service-automation', '@objectstack/service-datasource',
+    '@objectstack/service-settings', '@objectstack/service-sms', '@objectstack/service-storage',
+    '@objectstack/setup', '@objectstack/spec', '@objectstack/types', '@objectstack/verify',
+  ],
+  '@objectstack/client': [
+    '@objectstack/core', '@objectstack/driver-sqlite-wasm', '@objectstack/objectql',
+    '@objectstack/plugin-hono-server', '@objectstack/runtime', '@objectstack/spec',
+  ],
+  '@objectstack/client-react': ['@objectstack/client', '@objectstack/spec'],
+  '@objectstack/cloud-connection': [
+    '@objectstack/core', '@objectstack/runtime', '@objectstack/spec', '@objectstack/types',
+  ],
+  '@objectstack/connector-mcp': ['@objectstack/core', '@objectstack/service-automation', '@objectstack/spec'],
+  '@objectstack/connector-openapi': ['@objectstack/spec'],
+  '@objectstack/connector-rest': [
+    '@objectstack/core', '@objectstack/service-automation', '@objectstack/spec',
+  ],
+  '@objectstack/connector-slack': [
+    '@objectstack/core', '@objectstack/service-automation', '@objectstack/spec',
+  ],
+  '@objectstack/core': ['@objectstack/metadata-core', '@objectstack/spec'],
+  '@objectstack/dogfood': [
+    '@objectstack/cli', '@objectstack/connector-mcp', '@objectstack/connector-openapi',
+    '@objectstack/connector-rest', '@objectstack/core', '@objectstack/driver-sql',
+    '@objectstack/driver-sqlite-wasm', '@objectstack/mcp', '@objectstack/metadata', '@objectstack/objectql',
+    '@objectstack/platform-objects', '@objectstack/plugin-audit', '@objectstack/plugin-auth',
+    '@objectstack/plugin-email', '@objectstack/plugin-security', '@objectstack/plugin-webhooks',
+    '@objectstack/service-analytics', '@objectstack/service-messaging', '@objectstack/service-storage',
+    '@objectstack/spec', '@objectstack/types', '@objectstack/verify',
+  ],
+  '@objectstack/downstream-contract': ['@objectstack/spec'],
+  '@objectstack/driver-mongodb': [
+    '@objectstack/core', '@objectstack/objectql', '@objectstack/spec', '@objectstack/types',
+  ],
+  '@objectstack/driver-sql': ['@objectstack/formula', '@objectstack/observability', '@objectstack/types'],
+  '@objectstack/driver-sqlite-wasm': [
+    '@objectstack/core', '@objectstack/driver-sql', '@objectstack/formula', '@objectstack/spec',
+  ],
+  '@objectstack/driver-turso': [
+    '@objectstack/core', '@objectstack/driver-sql', '@objectstack/spec', '@objectstack/verify',
+  ],
+  '@objectstack/example-crm': ['@objectstack/driver-sql', '@objectstack/objectql', '@objectstack/spec'],
+  '@objectstack/example-embed-objectql': [
+    '@objectstack/driver-memory', '@objectstack/objectql', '@objectstack/spec',
+  ],
+  '@objectstack/example-showcase': [
+    '@objectstack/cloud-connection', '@objectstack/connector-mcp', '@objectstack/connector-openapi',
+    '@objectstack/connector-rest', '@objectstack/connector-slack', '@objectstack/core',
+    '@objectstack/driver-sql', '@objectstack/formula', '@objectstack/objectql',
+    '@objectstack/plugin-approvals', '@objectstack/runtime', '@objectstack/service-automation',
+    '@objectstack/service-datasource', '@objectstack/service-messaging', '@objectstack/spec',
+  ],
+  '@objectstack/example-todo': [
+    '@objectstack/core', '@objectstack/driver-sqlite-wasm', '@objectstack/objectql',
+    '@objectstack/service-automation', '@objectstack/spec', '@objectstack/trigger-record-change',
+  ],
+  '@objectstack/formula': ['@objectstack/spec'],
+  '@objectstack/hono': ['@objectstack/types'],
+  '@objectstack/http-conformance': [
+    '@objectstack/core', '@objectstack/driver-sqlite-wasm', '@objectstack/objectql',
+    '@objectstack/plugin-hono-server', '@objectstack/runtime',
+  ],
+  '@objectstack/lint': ['@objectstack/formula', '@objectstack/sdui-parser', '@objectstack/spec'],
+  '@objectstack/mcp': [
+    '@objectstack/core', '@objectstack/formula', '@objectstack/spec', '@objectstack/types',
+  ],
+  '@objectstack/metadata': [
+    '@objectstack/driver-sqlite-wasm', '@objectstack/metadata-core', '@objectstack/metadata-fs',
+  ],
+  '@objectstack/metadata-core': ['@objectstack/spec'],
+  '@objectstack/metadata-fs': ['@objectstack/metadata-core'],
+  '@objectstack/metadata-protocol': [
+    '@objectstack/core', '@objectstack/formula', '@objectstack/lint', '@objectstack/metadata',
+    '@objectstack/metadata-core', '@objectstack/spec', '@objectstack/types',
+  ],
+  '@objectstack/objectql': [
+    '@objectstack/core', '@objectstack/formula', '@objectstack/metadata', '@objectstack/metadata-core',
+    '@objectstack/metadata-protocol', '@objectstack/spec', '@objectstack/types',
+  ],
+  '@objectstack/platform-objects': [
+    '@objectstack/core', '@objectstack/formula', '@objectstack/metadata-core', '@objectstack/spec',
+  ],
+  '@objectstack/plugin-approvals': [
+    '@objectstack/core', '@objectstack/driver-sql', '@objectstack/formula', '@objectstack/objectql',
+    '@objectstack/platform-objects', '@objectstack/service-automation', '@objectstack/spec',
+    '@objectstack/trigger-record-change', '@objectstack/types',
+  ],
+  '@objectstack/plugin-audit': ['@objectstack/objectql', '@objectstack/spec'],
+  '@objectstack/plugin-auth': [
+    '@objectstack/core', '@objectstack/driver-sql', '@objectstack/objectql',
+    '@objectstack/platform-objects', '@objectstack/rest', '@objectstack/spec', '@objectstack/types',
+  ],
+  '@objectstack/plugin-dev': [
+    '@objectstack/driver-memory', '@objectstack/objectql', '@objectstack/plugin-auth',
+    '@objectstack/plugin-hono-server', '@objectstack/plugin-security', '@objectstack/rest',
+    '@objectstack/runtime', '@objectstack/service-i18n', '@objectstack/service-realtime',
+    '@objectstack/service-storage',
+  ],
+  '@objectstack/plugin-email': [
+    '@objectstack/core', '@objectstack/formula', '@objectstack/objectql', '@objectstack/platform-objects',
+    '@objectstack/service-queue', '@objectstack/service-settings', '@objectstack/spec',
+  ],
+  '@objectstack/plugin-hono-server': ['@objectstack/types'],
+  '@objectstack/plugin-pinyin-search': ['@objectstack/objectql', '@objectstack/types'],
+  '@objectstack/plugin-reports': [
+    '@objectstack/core', '@objectstack/driver-sql', '@objectstack/objectql',
+    '@objectstack/platform-objects',
+  ],
+  '@objectstack/plugin-security': [
+    '@objectstack/core', '@objectstack/formula', '@objectstack/metadata-core',
+    '@objectstack/platform-objects', '@objectstack/plugin-sharing', '@objectstack/service-i18n',
+    '@objectstack/spec',
+  ],
+  '@objectstack/plugin-sharing': [
+    '@objectstack/core', '@objectstack/formula', '@objectstack/objectql', '@objectstack/platform-objects',
+    '@objectstack/spec', '@objectstack/types',
+  ],
+  '@objectstack/plugin-webhooks': [
+    '@objectstack/metadata-core', '@objectstack/objectql', '@objectstack/service-messaging',
+    '@objectstack/spec',
+  ],
+  '@objectstack/rest': [
+    '@objectstack/core', '@objectstack/driver-sql', '@objectstack/metadata', '@objectstack/metadata-core',
+    '@objectstack/metadata-protocol', '@objectstack/objectql', '@objectstack/observability',
+    '@objectstack/platform-objects', '@objectstack/plugin-security', '@objectstack/service-analytics',
+    '@objectstack/spec', '@objectstack/types',
+  ],
+  '@objectstack/runtime': [
+    '@objectstack/driver-memory', '@objectstack/driver-sql', '@objectstack/driver-sqlite-wasm',
+    '@objectstack/metadata', '@objectstack/metadata-core', '@objectstack/metadata-protocol',
+    '@objectstack/objectql', '@objectstack/observability', '@objectstack/plugin-auth',
+    '@objectstack/plugin-hono-server', '@objectstack/plugin-security', '@objectstack/plugin-sharing',
+    '@objectstack/service-analytics', '@objectstack/service-cluster', '@objectstack/service-datasource',
+    '@objectstack/service-messaging',
+  ],
+  '@objectstack/service-analytics': [
+    '@objectstack/core', '@objectstack/driver-sql', '@objectstack/driver-sqlite-wasm', '@objectstack/spec',
+    '@objectstack/types',
+  ],
+  '@objectstack/service-automation': [
+    '@objectstack/core', '@objectstack/driver-sql', '@objectstack/formula', '@objectstack/metadata-core',
+    '@objectstack/objectql', '@objectstack/plugin-security', '@objectstack/service-job',
+    '@objectstack/service-messaging', '@objectstack/spec',
+  ],
+  '@objectstack/service-cache': ['@objectstack/core', '@objectstack/observability'],
+  '@objectstack/service-cluster': ['@objectstack/spec'],
+  '@objectstack/service-cluster-redis': ['@objectstack/service-cluster'],
+  '@objectstack/service-datasource': [
+    '@objectstack/driver-memory', '@objectstack/driver-sql', '@objectstack/driver-sqlite-wasm',
+    '@objectstack/plugin-hono-server', '@objectstack/spec', '@objectstack/types',
+  ],
+  '@objectstack/service-i18n': ['@objectstack/core', '@objectstack/spec', '@objectstack/types'],
+  '@objectstack/service-job': ['@objectstack/metadata-core', '@objectstack/platform-objects'],
+  '@objectstack/service-knowledge': ['@objectstack/objectql', '@objectstack/spec'],
+  '@objectstack/service-messaging': [
+    '@objectstack/driver-sql', '@objectstack/metadata-core', '@objectstack/objectql',
+    '@objectstack/platform-objects', '@objectstack/spec', '@objectstack/types',
+  ],
+  '@objectstack/service-package': ['@objectstack/metadata-core'],
+  '@objectstack/service-queue': ['@objectstack/objectql', '@objectstack/platform-objects'],
+  '@objectstack/service-realtime': ['@objectstack/spec'],
+  '@objectstack/service-settings': [
+    '@objectstack/platform-objects', '@objectstack/spec', '@objectstack/types',
+  ],
+  '@objectstack/service-sms': ['@objectstack/plugin-auth', '@objectstack/service-settings'],
+  '@objectstack/service-storage': [
+    '@objectstack/objectql', '@objectstack/observability', '@objectstack/platform-objects',
+    '@objectstack/spec', '@objectstack/types',
+  ],
+  '@objectstack/trigger-record-change': [
+    '@objectstack/core', '@objectstack/driver-sql', '@objectstack/objectql',
+    '@objectstack/service-automation',
+  ],
+  '@objectstack/trigger-schedule': ['@objectstack/service-automation', '@objectstack/spec'],
+  '@objectstack/types': ['@objectstack/spec'],
+  '@objectstack/verify': [
+    '@objectstack/objectql', '@objectstack/platform-objects', '@objectstack/plugin-auth',
+    '@objectstack/plugin-hono-server', '@objectstack/plugin-security', '@objectstack/plugin-sharing',
+    '@objectstack/rest', '@objectstack/runtime', '@objectstack/service-analytics',
+    '@objectstack/service-automation', '@objectstack/service-datasource', '@objectstack/service-settings',
+    '@objectstack/spec', '@objectstack/types',
+  ],
+};
+
+// ── workspace enumeration ───────────────────────────────────────────────────
+
+/** Directory globs from pnpm-workspace.yaml, which are all `<dir>/*`. */
+const WORKSPACE_PARENT_DIRS = [
+  'packages',
+  'packages/apps',
+  'packages/adapters',
+  'packages/connectors',
+  'packages/drivers',
+  'packages/plugins',
+  'packages/qa',
+  'packages/services',
+  'packages/triggers',
+  'apps',
+  'examples',
+];
+
+const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', 'coverage', '.turbo', '.next', '.cache']);
+const TEST_FILE = /\.(test|spec)\.[cm]?[jt]sx?$/;
+const SOURCE_FILE = /\.[cm]?[jt]sx?$/;
+/** A path that continues PAST a file extension — `…/index.ts/logger`. */
+const THROUGH_A_FILE = /\.[cm]?[jt]sx?[\\/]/;
+
+function readJson(file) {
+  return JSON.parse(readFileSync(file, 'utf8'));
+}
+
+function listWorkspacePackages(root) {
+  const out = [];
+  for (const parent of WORKSPACE_PARENT_DIRS) {
+    const abs = join(root, parent);
+    if (!existsSync(abs)) continue;
+    for (const name of readdirSync(abs)) {
+      const dir = join(abs, name);
+      const manifest = join(dir, 'package.json');
+      if (!existsSync(manifest)) continue;
+      let json;
+      try {
+        json = readJson(manifest);
+      } catch {
+        continue;
+      }
+      if (!json.name) continue;
+      out.push({ name: json.name, dir, rel: relative(root, dir), json });
+    }
+  }
+  return out;
+}
+
+/**
+ * Does importing this package land on a build artifact? Every entry point it
+ * declares is inspected: if any of them points under `dist/`, a stale build can
+ * decide a consumer's verdict.
+ */
+function resolvesToArtifact(json) {
+  const targets = JSON.stringify([json.main ?? '', json.module ?? '', json.types ?? '', json.exports ?? '']);
+  return /(^|[^a-z])dist\//.test(targets);
+}
+
+function walkFiles(dir, acc = []) {
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return acc;
+  }
+  for (const entry of entries) {
+    if (entry.name.startsWith('.')) continue;
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (SKIP_DIRS.has(entry.name)) continue;
+      walkFiles(path, acc);
+    } else if (entry.isFile()) {
+      acc.push(path);
+    }
+  }
+  return acc;
+}
+
+// ── import extraction ───────────────────────────────────────────────────────
+
+const IMPORT_PATTERNS =
+  /(?:^|[\s;})])(?:import|export)\s+([\s\S]*?)\s*from\s*['"]([^'"]+)['"]|(?:^|[\s;{(=,])import\s*\(\s*['"]([^'"]+)['"]\s*\)|(?:^|[\s;{(=,])require\s*\(\s*['"]([^'"]+)['"]\s*\)|(?:^|[\s;}])import\s+['"]([^'"]+)['"]/g;
+
+/**
+ * Every module specifier the file loads AT RUNTIME, with type-only imports
+ * dropped: `import type { X } from 'y'` and `import { type X } from 'y'` are
+ * erased before anything resolves, so they cannot read a stale artifact.
+ */
+function extractRuntimeImports(text) {
+  const specs = [];
+  IMPORT_PATTERNS.lastIndex = 0;
+  let match;
+  while ((match = IMPORT_PATTERNS.exec(text))) {
+    const clause = match[1];
+    const spec = match[2] ?? match[3] ?? match[4] ?? match[5];
+    if (!spec) continue;
+    if (clause != null && isTypeOnlyClause(clause)) continue;
+    specs.push(spec);
+  }
+  return specs;
+}
+
+function isTypeOnlyClause(clause) {
+  const trimmed = clause.trim();
+  if (/^type\b/.test(trimmed)) return true;
+  const braced = trimmed.match(/^\{([\s\S]*)\}$/);
+  if (!braced) return false;
+  const names = braced[1]
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return names.length > 0 && names.every((n) => /^type\s/.test(n));
+}
+
+const RELATIVE_CANDIDATE_SUFFIXES = ['', '.ts', '.tsx', '.mts', '.cts', '.js', '.mjs', '.cjs', '.jsx'];
+
+function resolveRelative(fromFile, spec) {
+  const base = resolve(dirname(fromFile), spec);
+  const candidates = [];
+  for (const suffix of RELATIVE_CANDIDATE_SUFFIXES) candidates.push(base + suffix);
+  // NodeNext writes `./x.js` for `./x.ts`.
+  if (base.endsWith('.js')) candidates.push(base.slice(0, -3) + '.ts', base.slice(0, -3) + '.tsx');
+  for (const suffix of RELATIVE_CANDIDATE_SUFFIXES) candidates.push(join(base, 'index' + suffix));
+  for (const candidate of candidates) {
+    if (!candidate || !SOURCE_FILE.test(candidate)) continue;
+    try {
+      if (statSync(candidate).isFile()) return candidate;
+    } catch {
+      /* try the next candidate */
+    }
+  }
+  return null;
+}
+
+/**
+ * Workspace specifiers reachable from this package's tests, following relative
+ * imports inside the package. Starting at the tests rather than at every file
+ * in the package matters: a specifier only decides a verdict if a test can
+ * actually reach it.
+ */
+function testReachableWorkspaceImports(pkg, workspaceNames) {
+  const files = walkFiles(pkg.dir);
+  const tests = files.filter((f) => TEST_FILE.test(f));
+  if (tests.length === 0) return null;
+
+  const seen = new Set();
+  const queue = [...tests];
+  /** bare package name -> the specifiers actually written (bare and subpath) */
+  const imports = new Map();
+
+  while (queue.length > 0) {
+    const file = queue.pop();
+    if (seen.has(file)) continue;
+    seen.add(file);
+    if (!SOURCE_FILE.test(file)) continue;
+    let text;
+    try {
+      text = readFileSync(file, 'utf8');
+    } catch {
+      continue;
+    }
+    for (const spec of extractRuntimeImports(text)) {
+      if (spec.startsWith('.')) {
+        const resolved = resolveRelative(file, spec);
+        if (resolved && !seen.has(resolved)) queue.push(resolved);
+        continue;
+      }
+      const scoped = spec.match(/^(@[^/]+\/[^/]+)(?:\/.*)?$/);
+      const bare = scoped ? scoped[1] : spec.split('/')[0];
+      if (bare === pkg.name || !workspaceNames.has(bare)) continue;
+      if (!imports.has(bare)) imports.set(bare, new Set());
+      imports.get(bare).add(spec);
+    }
+  }
+
+  return { testCount: tests.length, imports };
+}
+
+// ── vitest config alias reading ─────────────────────────────────────────────
+
+const VITEST_CONFIG_NAMES = [
+  'vitest.config.ts',
+  'vitest.config.mts',
+  'vitest.config.cts',
+  'vitest.config.js',
+  'vitest.config.mjs',
+  'vitest.config.cjs',
+];
+
+function findVitestConfig(dir) {
+  for (const name of VITEST_CONFIG_NAMES) {
+    const path = join(dir, name);
+    if (existsSync(path)) return path;
+  }
+  return null;
+}
+
+const REGEX_CAN_START_AFTER = new Set(['(', ',', '=', ':', '[', '!', '&', '|', '?', '{', '}', ';', '+', '-', '*', '%', '~', '^', '<', '>', '']);
+
+/**
+ * Remove comments, leaving strings, template literals and regex literals
+ * intact. Needed because these configs carry long rationale comments that name
+ * the very specifiers being matched — reading one as an alias would report a
+ * package as safe on the strength of a paragraph about why it is not.
+ */
+function stripComments(src) {
+  let out = '';
+  let previous = '';
+  let i = 0;
+  while (i < src.length) {
+    const c = src[i];
+    const next = src[i + 1];
+    if (c === '/' && next === '/') {
+      while (i < src.length && src[i] !== '\n') i++;
+      continue;
+    }
+    if (c === '/' && next === '*') {
+      i += 2;
+      while (i < src.length && !(src[i] === '*' && src[i + 1] === '/')) i++;
+      i += 2;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === '`') {
+      out += c;
+      i++;
+      while (i < src.length) {
+        if (src[i] === '\\') {
+          out += src[i] + (src[i + 1] ?? '');
+          i += 2;
+          continue;
+        }
+        out += src[i];
+        if (src[i] === c) {
+          i++;
+          break;
+        }
+        i++;
+      }
+      previous = c;
+      continue;
+    }
+    if (c === '/' && REGEX_CAN_START_AFTER.has(previous)) {
+      const end = scanRegexLiteral(src, i);
+      if (end > 0) {
+        out += src.slice(i, end);
+        i = end;
+        previous = '/';
+        continue;
+      }
+    }
+    out += c;
+    if (!/\s/.test(c)) previous = c;
+    i++;
+  }
+  return out;
+}
+
+/** End index (exclusive) of the regex literal starting at `start`, or -1. */
+function scanRegexLiteral(src, start) {
+  let i = start + 1;
+  let inClass = false;
+  while (i < src.length) {
+    const c = src[i];
+    if (c === '\\') {
+      i += 2;
+      continue;
+    }
+    if (c === '\n') return -1;
+    if (inClass) {
+      if (c === ']') inClass = false;
+    } else if (c === '[') {
+      inClass = true;
+    } else if (c === '/') {
+      let end = i + 1;
+      while (end < src.length && /[a-z]/.test(src[end])) end++;
+      return end;
+    }
+    i++;
+  }
+  return -1;
+}
+
+/** Extract the balanced region starting at the opener at `start`. */
+function balancedRegion(src, start) {
+  const open = src[start];
+  const close = open === '[' ? ']' : '}';
+  let depth = 0;
+  for (let i = start; i < src.length; i++) {
+    const c = src[i];
+    if (c === '"' || c === "'" || c === '`') {
+      i = skipString(src, i);
+      continue;
+    }
+    if (c === '/' ) {
+      const end = scanRegexLiteral(src, i);
+      if (end > 0) {
+        i = end - 1;
+        continue;
+      }
+    }
+    if (c === open) depth++;
+    else if (c === close) {
+      depth--;
+      if (depth === 0) return src.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
+function skipString(src, start) {
+  const quote = src[start];
+  let i = start + 1;
+  while (i < src.length) {
+    if (src[i] === '\\') {
+      i += 2;
+      continue;
+    }
+    if (src[i] === quote) return i;
+    i++;
+  }
+  return i;
+}
+
+class UnreadableConfig extends Error {}
+
+/**
+ * Alias entries in declaration order, as `{ find, replacement }` where `find`
+ * is a string (prefix match) or a RegExp. Anything this cannot read statically
+ * throws rather than returning an empty list — a config whose aliases are
+ * assembled elsewhere must not be silently reported as aliasing nothing.
+ */
+function readAliasEntries(configPath) {
+  const src = stripComments(readFileSync(configPath, 'utf8'));
+  const marker = src.match(/\balias\s*:\s*[[{]/);
+  if (!marker) return [];
+  const open = marker.index + marker[0].length - 1;
+  const region = balancedRegion(src, open);
+  if (region == null) throw new UnreadableConfig('unbalanced `alias` block');
+  if (/\.\.\./.test(region)) throw new UnreadableConfig('`alias` block spreads a value this gate cannot read statically');
+
+  const entries = [];
+  if (region[0] === '[') {
+    for (const object of topLevelObjects(region)) {
+      const find = readValue(object, /\bfind\s*:/);
+      const replacement = readValue(object, /\breplacement\s*:/);
+      if (find == null || replacement == null) throw new UnreadableConfig('alias array entry without find/replacement');
+      entries.push({ find: asFind(find), replacement: asPath(replacement) });
+    }
+  } else {
+    for (const [key, value] of topLevelPairs(region)) {
+      entries.push({ find: asFind(key), replacement: asPath(value) });
+    }
+  }
+  return entries;
+}
+
+/** Objects at depth 1 of an array region. */
+function topLevelObjects(region) {
+  const objects = [];
+  let depth = 0;
+  for (let i = 0; i < region.length; i++) {
+    const c = region[i];
+    if (c === '"' || c === "'" || c === '`') {
+      i = skipString(region, i);
+      continue;
+    }
+    if (c === '/') {
+      const end = scanRegexLiteral(region, i);
+      if (end > 0) {
+        i = end - 1;
+        continue;
+      }
+    }
+    if (c === '[') depth++;
+    else if (c === ']') depth--;
+    else if (c === '{' && depth === 1) {
+      const object = balancedRegion(region, i);
+      if (object == null) throw new UnreadableConfig('unbalanced alias entry');
+      objects.push(object);
+      i += object.length - 1;
+    }
+  }
+  return objects;
+}
+
+/** `key: value` pairs at depth 1 of an object region. */
+function topLevelPairs(region) {
+  const pairs = [];
+  let depth = 0;
+  let segmentStart = 1;
+  const flush = (end) => {
+    const segment = region.slice(segmentStart, end).trim();
+    if (segment === '') return;
+    const split = segment.match(/^((?:'[^']*'|"[^"]*"|`[^`]*`|[A-Za-z0-9_$]+))\s*:\s*([\s\S]+)$/);
+    if (!split) throw new UnreadableConfig(`unreadable alias entry: ${segment.slice(0, 60)}`);
+    pairs.push([split[1], split[2]]);
+  };
+  for (let i = 0; i < region.length; i++) {
+    const c = region[i];
+    if (c === '"' || c === "'" || c === '`') {
+      i = skipString(region, i);
+      continue;
+    }
+    if (c === '/') {
+      const end = scanRegexLiteral(region, i);
+      if (end > 0) {
+        i = end - 1;
+        continue;
+      }
+    }
+    if (c === '{' || c === '[' || c === '(') depth++;
+    else if (c === ']' || c === ')') depth--;
+    else if (c === '}') {
+      depth--;
+      if (depth === 0) {
+        flush(i);
+        break;
+      }
+    } else if (c === ',' && depth === 1) {
+      flush(i);
+      segmentStart = i + 1;
+    }
+  }
+  return pairs;
+}
+
+function readValue(object, keyPattern) {
+  const match = object.match(keyPattern);
+  if (!match) return null;
+  let i = match.index + match[0].length;
+  while (i < object.length && /\s/.test(object[i])) i++;
+  let depth = 0;
+  const start = i;
+  for (; i < object.length; i++) {
+    const c = object[i];
+    if (c === '"' || c === "'" || c === '`') {
+      i = skipString(object, i);
+      continue;
+    }
+    if (c === '/') {
+      const end = scanRegexLiteral(object, i);
+      if (end > 0) {
+        i = end - 1;
+        continue;
+      }
+    }
+    if (c === '(' || c === '[' || c === '{') depth++;
+    else if (c === ')' || c === ']') depth--;
+    else if (c === '}') {
+      if (depth === 0) break;
+      depth--;
+    } else if (c === ',' && depth === 0) break;
+  }
+  return object.slice(start, i).trim();
+}
+
+function asFind(raw) {
+  const literal = raw.trim();
+  const asRegex = literal.match(/^\/((?:[^/\\]|\\.)*)\/([a-z]*)$/);
+  if (asRegex) return new RegExp(asRegex[1], asRegex[2]);
+  const asString = literal.match(/^(['"`])([\s\S]*)\1$/);
+  if (asString) return asString[2];
+  throw new UnreadableConfig(`alias key is neither a string nor a regex literal: ${literal.slice(0, 60)}`);
+}
+
+/**
+ * The path an alias replacement produces. `path.resolve(__dirname, '../x/src')`
+ * carries its answer in the last string literal; a bare string literal is
+ * itself the answer.
+ */
+function asPath(raw) {
+  const strings = [...raw.matchAll(/(['"`])((?:[^\\]|\\.)*?)\1/g)].map((m) => m[2]);
+  if (strings.length === 0) throw new UnreadableConfig(`alias replacement has no literal path: ${raw.slice(0, 60)}`);
+  return strings[strings.length - 1];
+}
+
+/**
+ * Resolve `spec` through `entries` exactly as Vite does: entries in order,
+ * first match wins, string `find` replacing a PREFIX and regex `find` going
+ * through `String.replace` (so `$1` back-references work).
+ */
+function resolveThroughAliases(spec, entries) {
+  for (const entry of entries) {
+    if (typeof entry.find === 'string') {
+      if (!spec.startsWith(entry.find)) continue;
+      return { entry, result: entry.replacement + spec.slice(entry.find.length) };
+    }
+    if (!entry.find.test(spec)) continue;
+    entry.find.lastIndex = 0;
+    return { entry, result: spec.replace(entry.find, entry.replacement) };
+  }
+  return null;
+}
+
+function pointsAtSource(path) {
+  return /(^|[\\/])src([\\/]|$)/.test(path) && !/(^|[\\/])dist([\\/]|$)/.test(path);
+}
+
+// ── the scan ────────────────────────────────────────────────────────────────
+
+/**
+ * @returns {{ packages: Array, artifactPackages: Set<string>, totalPackages: number }}
+ */
+function scan(root) {
+  const workspace = listWorkspacePackages(root);
+  const names = new Set(workspace.map((p) => p.name));
+  const artifactPackages = new Set(workspace.filter((p) => resolvesToArtifact(p.json)).map((p) => p.name));
+
+  const packages = [];
+  for (const pkg of workspace) {
+    const reachable = testReachableWorkspaceImports(pkg, names);
+    if (!reachable) continue;
+
+    const configPath = findVitestConfig(pkg.dir);
+    let entries = [];
+    let unreadable = null;
+    if (configPath) {
+      try {
+        entries = readAliasEntries(configPath);
+      } catch (error) {
+        if (!(error instanceof UnreadableConfig)) throw error;
+        unreadable = error.message;
+      }
+    }
+
+    const unaliased = [];
+    const throughAFile = [];
+    for (const [dep, specs] of [...reachable.imports].sort(([a], [b]) => a.localeCompare(b))) {
+      if (!artifactPackages.has(dep)) continue; // resolves to source already; not an artifact
+      let anyUnaliased = false;
+      for (const spec of [...specs].sort()) {
+        const resolved = resolveThroughAliases(spec, entries);
+        if (!resolved) {
+          anyUnaliased = true;
+          continue;
+        }
+        if (THROUGH_A_FILE.test(resolved.result)) {
+          throughAFile.push({ spec, result: resolved.result });
+          continue;
+        }
+        if (!pointsAtSource(resolved.result)) anyUnaliased = true;
+      }
+      if (anyUnaliased) unaliased.push(dep);
+    }
+
+    packages.push({
+      name: pkg.name,
+      rel: pkg.rel,
+      testCount: reachable.testCount,
+      configPath: configPath ? relative(root, configPath) : null,
+      unreadable,
+      unaliased,
+      throughAFile,
+    });
+  }
+
+  return { packages, artifactPackages, totalPackages: workspace.length };
+}
+
+// ── the gate ────────────────────────────────────────────────────────────────
+
+/** Spell a specifier the way it must appear inside a `/…/` regex literal. */
+function escapeForRegexLiteral(spec) {
+  return spec.replace(/[/\\^$*+?.()|[\]{}]/g, (c) => '\\' + c);
+}
+
+function check(root, registry) {
+  const failures = [];
+  const { packages, artifactPackages, totalPackages } = scan(root);
+
+  // Census guard. Every reading below is a scan result, and a scan that has
+  // quietly stopped matching reports a spotless repo — the #4868 family. Zero
+  // is never the good news it looks like.
+  if (totalPackages === 0) failures.push('scanner found NO workspace packages at all — the scan is broken, not the repo');
+  if (artifactPackages.size === 0)
+    failures.push('scanner found NO package resolving to `dist/` — entry-point detection is broken, not the repo');
+  if (packages.length === 0) failures.push('scanner found NO package with test files — test discovery is broken, not the repo');
+
+  const measured = new Map(packages.filter((p) => p.unaliased.length > 0).map((p) => [p.name, p.unaliased]));
+
+  for (const pkg of packages) {
+    if (pkg.unreadable) {
+      failures.push(
+        `${pkg.rel}: ${pkg.configPath} cannot be read statically (${pkg.unreadable}).\n` +
+          '    This gate must be able to see every alias. Write them as literal entries in this file.',
+      );
+    }
+    for (const trap of pkg.throughAFile) {
+      failures.push(
+        `${pkg.rel}: alias resolves \`${trap.spec}\` to \`${trap.result}\` — a path THROUGH a file (ENOTDIR at run time).\n` +
+          '    The object alias form matches by PREFIX. Anchor the pattern with the array form\n' +
+          `    (\`{ find: /^${escapeForRegexLiteral(trap.spec)}$/, replacement: … }\`) or list the subpath entry BEFORE the bare one.`,
+      );
+    }
+  }
+
+  for (const [name, deps] of measured) {
+    const registered = registry[name];
+    if (!registered) {
+      const pkg = packages.find((p) => p.name === name);
+      failures.push(
+        `${pkg.rel} (${name}): tests import ${deps.length} workspace package(s) that resolve to \`dist/\` with no source alias:\n` +
+          `    ${deps.join(', ')}\n` +
+          '    Every verdict in this package is currently a function of build state, not of the source in the\n' +
+          '    checkout — and the dangerous case is SILENT (a dist merely behind the source runs GREEN against\n' +
+          '    old behaviour). Add the aliases to its vitest.config.ts, anchored-regex/array form:\n' +
+          `      alias: [{ find: /^${escapeForRegexLiteral(deps[0])}$/, replacement: path.resolve(__dirname, '<relative>/src/index.ts') }]`,
+      );
+      continue;
+    }
+    const added = deps.filter((d) => !registered.includes(d));
+    const gone = registered.filter((d) => !deps.includes(d));
+    if (added.length > 0)
+      failures.push(
+        `${name}: NEW unaliased artifact import(s) since this entry was measured: ${added.join(', ')}.\n` +
+          '    Alias them in the package\'s vitest.config.* — widening the registry entry is not the fix.',
+      );
+    if (gone.length > 0)
+      failures.push(
+        `${name}: registry entry is STALE — no longer unaliased: ${gone.join(', ')}.\n` +
+          `    Narrow the entry to exactly: ${JSON.stringify(deps)}`,
+      );
+  }
+
+  for (const name of Object.keys(registry)) {
+    if (measured.has(name)) continue;
+    const known = packages.some((p) => p.name === name);
+    failures.push(
+      known
+        ? `${name}: registry entry is no longer needed — every artifact import is aliased to source now. Delete the entry.`
+        : `${name}: registry entry names a package with no test files (or no such package). Delete the entry.`,
+    );
+  }
+
+  return { failures, packages, measured };
+}
+
+// ── reporting ───────────────────────────────────────────────────────────────
+
+function printList(root) {
+  const { packages } = scan(root);
+  const offenders = packages.filter((p) => p.unaliased.length > 0).sort((a, b) => a.name.localeCompare(b.name));
+  console.log('const KNOWN_UNALIASED_TEST_IMPORTS = {');
+  for (const pkg of offenders) {
+    console.log(`  '${pkg.name}': [${pkg.unaliased.map((d) => `'${d}'`).join(', ')}],`);
+  }
+  console.log('};');
+  console.error(
+    `\n${offenders.length} of ${packages.length} packages with tests have >=1 unaliased artifact import ` +
+      `(${offenders.reduce((n, p) => n + p.unaliased.length, 0)} package-dependency pairs).`,
+  );
+}
+
+// ── self-test ───────────────────────────────────────────────────────────────
+
+function fixture(root, rel, files) {
+  const dir = join(root, rel);
+  for (const [name, content] of Object.entries(files)) {
+    const path = join(dir, name);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, content, 'utf8');
+  }
+  return dir;
+}
+
+const ARTIFACT_MANIFEST = (name) =>
+  JSON.stringify({ name, main: 'dist/index.js', exports: { '.': { import: './dist/index.js' } } }, null, 2);
+
+function buildFixtureTree() {
+  const root = join(tmpdir(), `os-test-source-alias-selftest-${process.pid}`);
+  rmSync(root, { recursive: true, force: true });
+  mkdirSync(join(root, 'packages'), { recursive: true });
+
+  // The stale-able dependency every fixture imports.
+  fixture(root, 'packages/core', {
+    'package.json': ARTIFACT_MANIFEST('@fx/core'),
+    'src/index.ts': 'export const alive = 1;\n',
+    'src/logger.ts': 'export const log = 1;\n',
+  });
+
+  // (1) violating: tests import the artifact, no config at all.
+  fixture(root, 'packages/violator', {
+    'package.json': ARTIFACT_MANIFEST('@fx/violator'),
+    'src/thing.ts': "import { alive } from '@fx/core';\nexport const thing = alive;\n",
+    'src/thing.test.ts': "import { thing } from './thing';\nexport default thing;\n",
+  });
+
+  // (2) compliant: anchored array-form alias to source.
+  fixture(root, 'packages/compliant', {
+    'package.json': ARTIFACT_MANIFEST('@fx/compliant'),
+    'src/thing.ts': "import { alive } from '@fx/core';\nexport const thing = alive;\n",
+    'src/thing.test.ts': "import { thing } from './thing';\nexport default thing;\n",
+    'vitest.config.ts':
+      "import path from 'path';\nexport default { resolve: { alias: [\n" +
+      "  { find: /^@fx\\/core$/, replacement: path.resolve(__dirname, '../core/src/index.ts') },\n" +
+      '] } };\n',
+  });
+
+  // (3) type-only import: erased before resolution, so NOT a hazard.
+  fixture(root, 'packages/type-only', {
+    'package.json': ARTIFACT_MANIFEST('@fx/type-only'),
+    'src/thing.test.ts': "import type { Alive } from '@fx/core';\nexport type T = Alive;\n",
+  });
+
+  // (4) the ENOTDIR trap: bare object-form key swallowing a subpath import.
+  fixture(root, 'packages/prefix-trap', {
+    'package.json': ARTIFACT_MANIFEST('@fx/prefix-trap'),
+    'src/thing.test.ts': "import { log } from '@fx/core/logger';\nexport default log;\n",
+    'vitest.config.ts':
+      "import path from 'path';\nexport default { resolve: { alias: {\n" +
+      "  '@fx/core': path.resolve(__dirname, '../core/src/index.ts'),\n" +
+      '} } };\n',
+  });
+
+  // (5) a config whose aliases are assembled elsewhere — unreadable, not empty.
+  fixture(root, 'packages/opaque', {
+    'package.json': ARTIFACT_MANIFEST('@fx/opaque'),
+    'src/thing.test.ts': "import { alive } from '@fx/core';\nexport default alive;\n",
+    'vitest.config.ts': "import { shared } from './shared';\nexport default { resolve: { alias: [...shared] } };\n",
+  });
+
+  // (6) unreachable from tests: the import exists but no test pulls it in.
+  fixture(root, 'packages/unreachable', {
+    'package.json': ARTIFACT_MANIFEST('@fx/unreachable'),
+    'src/lonely.ts': "import { alive } from '@fx/core';\nexport default alive;\n",
+    'src/thing.test.ts': "export default 1;\n",
+  });
+
+  return root;
+}
+
+function selfTest() {
+  const root = buildFixtureTree();
+  const problems = [];
+  const expect = (condition, message) => {
+    if (!condition) problems.push(message);
+  };
+  const has = (failures, needle) => failures.some((f) => f.includes(needle));
+
+  try {
+    // Baseline: the fixtures the registry does not cover must all be reported.
+    const bare = check(root, {});
+    expect(has(bare.failures, 'packages/violator'), 'violating package with no config was not reported');
+    expect(!has(bare.failures, 'packages/compliant'), 'compliant package was reported');
+    expect(!has(bare.failures, 'packages/type-only'), 'type-only import was treated as a runtime hazard');
+    expect(!has(bare.failures, 'packages/unreachable'), 'an import no test can reach was treated as a hazard');
+    expect(has(bare.failures, 'ENOTDIR'), 'the prefix/ENOTDIR alias trap was not detected');
+    expect(has(bare.failures, 'cannot be read statically'), 'a config with spread aliases was read as aliasing nothing');
+
+    // Registered at the measured state: the violator goes quiet, nothing else does.
+    const registered = check(root, { '@fx/violator': ['@fx/core'] });
+    expect(!has(registered.failures, 'packages/violator'), 'a correctly registered package still failed');
+    expect(!has(registered.failures, '@fx/violator'), 'a correctly registered package still failed the both-directions audit');
+
+    // Both-directions audit — an entry that is no longer needed must fail.
+    const stale = check(root, { '@fx/violator': ['@fx/core'], '@fx/compliant': ['@fx/core'] });
+    expect(has(stale.failures, 'no longer needed'), 'a registry entry for an already-fixed package did not fail');
+
+    // …and one naming a package that does not exist.
+    const ghost = check(root, { '@fx/violator': ['@fx/core'], '@fx/ghost': ['@fx/core'] });
+    expect(has(ghost.failures, '@fx/ghost'), 'a registry entry for a non-existent package did not fail');
+
+    // Growth: an entry that is too NARROW must fail rather than absorb the drift.
+    fixture(root, 'packages/violator', {
+      'src/second.ts': "import { log } from '@fx/core/logger';\nexport default log;\n",
+      'src/thing.ts': "import { alive } from '@fx/core';\nimport { other } from '@fx/other';\nexport const thing = alive + other;\n",
+    });
+    fixture(root, 'packages/other', {
+      'package.json': ARTIFACT_MANIFEST('@fx/other'),
+      'src/index.ts': 'export const other = 1;\n',
+    });
+    const grown = check(root, { '@fx/violator': ['@fx/core'] });
+    expect(has(grown.failures, 'NEW unaliased artifact import'), 'a new unaliased import under an existing entry did not fail');
+
+    // Shrink: an entry wider than the measurement must fail too — no headroom.
+    const wide = check(root, { '@fx/violator': ['@fx/core', '@fx/other', '@fx/gone'] });
+    expect(has(wide.failures, 'STALE'), 'a registry entry listing a dep that is no longer unaliased did not fail');
+
+    // A dependency that resolves to SOURCE is not an artifact and needs no alias.
+    fixture(root, 'packages/source-dep', {
+      'package.json': JSON.stringify({ name: '@fx/source-dep', exports: { '.': './src/index.ts' } }, null, 2),
+      'src/index.ts': 'export const s = 1;\n',
+    });
+    fixture(root, 'packages/consumes-source', {
+      'package.json': ARTIFACT_MANIFEST('@fx/consumes-source'),
+      'src/thing.test.ts': "import { s } from '@fx/source-dep';\nexport default s;\n",
+    });
+    const sourceDep = check(root, { '@fx/violator': ['@fx/core', '@fx/other'] });
+    expect(!has(sourceDep.failures, '@fx/consumes-source'), 'a dep that already resolves to source was reported as a hazard');
+
+    // Census guard: an empty tree is a broken scanner, never a clean repo.
+    const empty = join(tmpdir(), `os-test-source-alias-empty-${process.pid}`);
+    rmSync(empty, { recursive: true, force: true });
+    mkdirSync(empty, { recursive: true });
+    const emptyResult = check(empty, {});
+    expect(has(emptyResult.failures, 'the scan is broken'), 'an empty tree did not trip the census guard');
+    rmSync(empty, { recursive: true, force: true });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+
+  if (problems.length > 0) {
+    console.error('check-test-source-alias --self-test FAILED:');
+    for (const problem of problems) console.error(`  - ${problem}`);
+    process.exit(1);
+  }
+  console.log('check-test-source-alias --self-test OK');
+}
+
+// ── entry point ─────────────────────────────────────────────────────────────
+
+const argv = process.argv.slice(2);
+if (argv.includes('--self-test')) {
+  selfTest();
+} else if (argv.includes('--list')) {
+  printList(REPO_ROOT);
+} else {
+  const { failures, packages, measured } = check(REPO_ROOT, KNOWN_UNALIASED_TEST_IMPORTS);
+  if (failures.length > 0) {
+    console.error('check-test-source-alias FAILED\n');
+    for (const failure of failures) console.error(`  ✗ ${failure}\n`);
+    console.error(
+      'A unit test must be a verdict about the source in the checkout. See this file\'s header for\n' +
+        'why the dangerous case is a test that PASSES.',
+    );
+    process.exit(1);
+  }
+  console.log(
+    `check-test-source-alias OK — ${packages.length} packages with tests scanned; ` +
+      `${measured.size} registered as still resolving a workspace dep through \`dist/\`.`,
+  );
+}

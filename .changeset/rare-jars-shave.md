@@ -47,3 +47,5 @@ validation — the write-path mirror of `stripReadDecorations` — and
 round-trip to the renderer untouched. `id` was deliberately **not** declared:
 it is a React list key, and declaring it would put a UI artifact on the
 authorable surface.
+
+<!-- adr-0087: registered authoring-schemas-strict-unknown-keys -->

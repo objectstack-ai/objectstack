@@ -104,6 +104,12 @@
       "status": "live",
       "note": "renderer."
     },
+    "internal": {
+      "status": "live",
+      "verifiedAt": "2026-08-12",
+      "evidence": "packages/objectql/src/secret-fields.ts (collectInternalReadFields — collects by FLAG, not by field type); packages/objectql/src/engine.ts (Engine.omitInternalFields deletes the collected keys from the result rows at four post-hook sites: find, findOne, the 201 create body and the by-id update body)",
+      "note": "[#7728] ADR-0100 named three credential channels and channel 3 — auth-subsystem one-way hashes on text columns — had NO read protection: collectMaskedReadFields collects the secret/password TYPES, so a text column is never collected regardless of managedBy. sys_api_key.key (a SHA-256 hash declared 'never exposed to clients') therefore serialized on get-by-id, on list, on an explicit ?select=id,key projection and in the PATCH body — all four measured on a real engine before the fix. This flag is that channel's read protection: OMIT rather than SECRET_MASK (key is required:true, so a 'a value is set' mask carries zero bits) applied at the same post-hook position the credential mask and the #7642 __search companion strip already occupy. Storage, the verifier's where:{key:<hash>} lookup and the show-once POST /api/v1/keys mint path are untouched by construction — the strip acts on RESULT ROWS, after the driver has evaluated the predicate. Proven in packages/qa/dogfood/test/api-key-hash-not-serialized.dogfood.test.ts (both directions: absent from all four surfaces AND the key still authenticates AND mint still returns it once) and packages/objectql/src/internal-fields.test.ts (engine-level, including the ?select= projection case and non-flagged columns surviving)."
+    },
     "widget": {
       "status": "live",
       "verifiedAt": "2026-08-09",
@@ -165,6 +171,10 @@
     "scale": {
       "status": "live",
       "note": "CAVEAT — grid formatting only; DDL never sizes."
+    },
+    "useGrouping": {
+      "status": "planned",
+      "note": "[#7768] Declared 2026-08-11 — Option A of the card's fork (narrowest shape with measured pull, maintainer veto window open). Maps 1:1 to `Intl.NumberFormat`'s `useGrouping`. The runtime consumer is objectui#4033 (in flight at declaration time): its interim heuristic (`scale === 0 && no currency` ⇒ ungrouped) is explicitly documented at its own definition as \"overridden by the spec presentation hint when it lands\" — i.e. the read side is designed to pick this key up, not a speculative future phase. Not `authorWarn`'d: unlike `externalSharingModel`'s scheduled-phase precedent, an author who sets this today loses nothing and is not misled — the value becomes effective the moment the objectui consumer lands, no re-authoring needed. Re-verify to `live` once #4033 (or its successor) actually reads the key."
     },
     "reference": {
       "status": "live",

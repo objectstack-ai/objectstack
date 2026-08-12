@@ -140,7 +140,11 @@ describe('SettingsService — audit sink', () => {
     const events: any[] = [];
     const svc = new SettingsService({
       env: {},
-      audit: { record: (e) => events.push(e) },
+      audit: {
+        record: (e) => {
+          events.push(e);
+        },
+      },
     });
     svc.registerManifest(mailSettingsManifest);
     await svc.setMany('mail', { provider: 'resend', api_key: 'top-secret', from_email: 'a@b.com' });
