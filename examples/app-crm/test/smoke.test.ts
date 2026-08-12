@@ -118,6 +118,25 @@ describe('app-crm minimal metadata bundle', () => {
     expect(offenders, `un-acknowledged generic password field(s): ${offenders.join(', ')}`).toEqual([]);
   });
 
+  // #8164 — crm_opportunity_line_item is a master_detail CHILD of
+  // crm_opportunity (sharingModel: 'controlled_by_parent'). Record-level
+  // access always follows the parent (ADR-0055), but object-level CRUD is a
+  // SEPARATE gate the platform never derives (security-master-detail-ungranted):
+  // a permission set that grants the master but forgets the child denies
+  // role-bound non-admin users a 403 before parent-derived access is ever
+  // consulted. Assert `crm_sales_user` grants the child, with the SAME shape
+  // as its master — not an independently-invented one.
+  it('grants crm_opportunity_line_item in crm_sales_user, matching its master crm_opportunity (#8164)', () => {
+    const salesUserSet = (stack.permissions ?? []).find((p: any) => p.name === 'crm_sales_user') as any;
+    expect(salesUserSet, 'crm_sales_user permission set not found').toBeDefined();
+
+    const masterGrant = salesUserSet.objects?.crm_opportunity;
+    const childGrant = salesUserSet.objects?.crm_opportunity_line_item;
+    expect(masterGrant, 'crm_opportunity itself must remain granted').toBeDefined();
+    expect(childGrant, 'crm_opportunity_line_item has no object-level CRUD grant').toBeDefined();
+    expect(childGrant).toEqual(masterGrant);
+  });
+
 });
 
 describe('Pipeline dashboard', () => {
