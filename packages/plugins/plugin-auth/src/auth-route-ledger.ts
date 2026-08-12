@@ -61,7 +61,30 @@ export type AuthRouteDisposition =
   /** Public, unauthenticated browser-facing route. */
   | 'public'
   /** Server and client disagree on the shape — needs reconciliation. */
-  | 'mismatch';
+  | 'mismatch'
+  /**
+   * PUBLISHED BY THE CATCH-ALL, REFUSED AT RUNTIME (#7735). The path resolves —
+   * better-auth registers the endpoint unconditionally, so it is in
+   * `BETTER_AUTH_MOUNTED_SURFACE` and it is NOT a 404-by-absence — but the
+   * capability behind it is deliberately not configured, so every call is
+   * refused. `note` MUST say which switch is off and what has to be decided
+   * before it goes on.
+   *
+   * This is `gap`'s mirror image, and the pair is why a separate word was worth
+   * adding rather than reusing one: `gap` means the server has the capability
+   * and the SDK does not express it; `disabled` means the SDK expresses it and
+   * the server refuses. Both are "not a live product surface", and neither is a
+   * `mismatch` (that word is for a shape disagreement, and its count is
+   * ratcheted to zero).
+   *
+   * ⛔ A `disabled` row is a LEDGER STATE, never a parking space. It exists so
+   * the ledger can say "we know, and here is the decision it is waiting on"
+   * instead of booking a dead route as `sdk`; the conformance suite pins the
+   * set of them against the live better-auth options, so a row cannot sit here
+   * while the capability is quietly switched on, nor be re-booked as `sdk`
+   * while it is off.
+   */
+  | 'disabled';
 
 export interface AuthRouteLedgerEntry {
   /** `VERB /api/v1/auth/...` — full wire path at the default base. */
@@ -75,7 +98,12 @@ export interface AuthRouteLedgerEntry {
    */
   source: 'better-auth' | 'objectstack';
   disposition: AuthRouteDisposition;
-  /** Dotted method path on `ObjectStackClient` — required when disposition is `sdk`. */
+  /**
+   * Dotted method path on `ObjectStackClient` — required when disposition is
+   * `sdk`, and deliberately KEPT on a `disabled` row (#7735): the SDK method
+   * still exists and still builds this URL, so erasing the name would hide
+   * exactly the fact the row is there to record.
+   */
   client?: string;
   /** Optional better-auth plugin this route needs (absent = always mounted). */
   requires?: string;
@@ -115,9 +143,18 @@ export interface AuthRouteLedgerEntry {
 }
 
 export const AUTH_ROUTE_LEDGER: readonly AuthRouteLedgerEntry[] = [
-  { route: 'POST /api/v1/auth/change-email', family: 'core-auth', source: 'better-auth', disposition: 'sdk', client: 'auth.changeEmail' },
+  { route: 'POST /api/v1/auth/change-email', family: 'core-auth', source: 'better-auth', disposition: 'sdk', client: 'auth.changeEmail', note: 'live since #7735: auth-manager.ts sets user.changeEmail.enabled, and the confirmation link rides emailVerification.sendVerificationEmail to the NEW address' },
   { route: 'POST /api/v1/auth/change-password', family: 'core-auth', source: 'better-auth', disposition: 'sdk', client: 'auth.changePassword' },
-  { route: 'POST /api/v1/auth/delete-user', family: 'core-auth', source: 'better-auth', disposition: 'sdk', client: 'auth.deleteUser' },
+  // #7735 — self-service account deletion is NOT wired, and this row says so
+  // rather than booking it as a live SDK surface. Maintainer ruling
+  // 2026-08-12, verbatim: 「`delete-user` 从 ledger 摘掉 mounted 记账(记为
+  // disabled/未接线,诚实状态)。⛔ 不配置 `user.deleteUser`:B2B 多租户下自助删号
+  // 牵连记录归属与租户数据 …… 自助删号需要一次 deliberate 设计,不由一张 QA 卡带
+  // 出来」. The ruling's other reason — that the admin-side `/admin/remove-user`
+  // was itself broken — has since expired (#7724 landed), and the conclusion
+  // does not move with it: the design question is the standing one, and a
+  // future design starts from #7724's deletion semantics.
+  { route: 'POST /api/v1/auth/delete-user', family: 'core-auth', source: 'better-auth', disposition: 'disabled', client: 'auth.deleteUser', note: 'better-auth publishes the endpoint but user.deleteUser is deliberately unconfigured, so it answers 404 (as does its GET /delete-user/callback half); self-service deletion needs a deliberate B2B design first — maintainer ruling 2026-08-12 on #7735' },
   { route: 'GET /api/v1/auth/get-session', family: 'core-auth', source: 'better-auth', disposition: 'sdk', client: 'auth.me', note: 'auth.me and auth.refreshToken both target it' },
   { route: 'POST /api/v1/auth/link-social', family: 'core-auth', source: 'better-auth', disposition: 'sdk', client: 'auth.accounts.linkSocial' },
   { route: 'GET /api/v1/auth/list-accounts', family: 'core-auth', source: 'better-auth', disposition: 'sdk', client: 'auth.accounts.list' },
@@ -178,6 +215,22 @@ export const AUTH_ROUTE_LEDGER: readonly AuthRouteLedgerEntry[] = [
  * test's failure diff after a better-auth upgrade, then REVIEW the diff — a new
  * entry here is a new publicly-mounted auth endpoint, which is a security
  * surface change even when it is an intended one.
+ *
+ * ⚠️ PUBLICATION, NOT LIVENESS (#7735). This list answers "what does the
+ * catch-all expose", and nothing else — better-auth registers several endpoints
+ * unconditionally and then refuses them at runtime when the feature switch
+ * behind them is off, so an entry here is NOT evidence that a call succeeds.
+ * Today that gap is `POST /api/v1/auth/delete-user` and
+ * `GET /api/v1/auth/delete-user/callback`: both are published, both answer 404,
+ * because `user.deleteUser` is deliberately unconfigured. The claim about
+ * whether a route WORKS lives one list up, in `AUTH_ROUTE_LEDGER`, where that
+ * pair carries the `disabled` disposition and its reason.
+ *
+ * ⛔ So do not "reconcile" a disabled route by deleting it from here. This list
+ * is checked for EXACT equality against the live `auth.api` enumeration in both
+ * directions; removing a published entry makes the conformance test red and
+ * would misreport the mounted attack surface, which is the one thing this list
+ * exists to keep honest.
  *
  * The two `/.well-known/*` entries are not under the base path: `auth-plugin.ts`
  * mounts those discovery documents at the app root (RFC 8414 / OIDC require it).

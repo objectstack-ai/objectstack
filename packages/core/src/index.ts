@@ -44,6 +44,12 @@ export * from './utils/migration-journal.js';
 // Export the runtime filter-placeholder resolver (framework#3582)
 export * from './utils/filter-tokens.js';
 
+// Export the shared single-record 404 (#4435/#5138, moved down here in #7867) —
+// the one `RECORD_NOT_FOUND` envelope `protocol.updateData`/`deleteData`,
+// `callData`'s ObjectQL fallback and the engine's own by-id write gate answer
+// with. `@objectstack/metadata-protocol` re-exports it from its original home.
+export * from './utils/record-not-found.js';
+
 // Export in-memory fallbacks for core-criticality services
 export * from './fallbacks/index.js';
 

@@ -6,10 +6,23 @@
 // primitive, each in EXACTLY ONE honest state (enforced / experimental /
 // removed). `enforced` rows name their runtime enforcement site; high-risk
 // enforced rows additionally reference an end-to-end dogfood proof. The
-// companion test (`authz-conformance.test.ts`) asserts the matrix is complete
-// and that every referenced proof file exists — so "the permission model is
-// landed" is a CHECKED artifact, not a one-time scan. A new fail-open (a
-// declared-but-unenforced primitive) or a deleted proof breaks CI.
+// companion test (`authz-conformance.test.ts`) asserts the matrix is complete,
+// that every referenced proof file exists, AND that the row ↔ proof pairing is
+// MUTUAL — so "the permission model is landed" is a CHECKED artifact, not a
+// one-time scan. A new fail-open (a declared-but-unenforced primitive) or a
+// deleted proof breaks CI.
+//
+// [#7976] Existence used to be the whole `proof` contract, which meant a row
+// could cite a file exercising a NEIGHBOURING primitive and stay green forever:
+// `rls-read` and `rls-by-id-write` cite the same file, and until PR #7975
+// nothing could tell whether it exercised one, the other, or both. "Does this
+// test prove this row" is not mechanically decidable and is deliberately NOT
+// attempted. The checkable question it is converted into: each proof file NAMES
+// the rows it is the proof for (a header `// authz-row: <id>` line), and the
+// checker asserts both directions — a cited file must claim the citing row, and
+// every claim must be reciprocated by the ledger. A shared proof file therefore
+// has to SAY which rows it covers, and a row whose proof will not claim it
+// loses the citation out loud instead of borrowing a sibling's credibility.
 
 export type AuthzState = 'enforced' | 'experimental' | 'removed';
 
@@ -216,8 +229,7 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
     note: 'REMOVED from spec (rls.zod.ts — RLSConfigSchema/RLSAuditEventSchema/RLSAuditConfigSchema deleted). The enforced RLS path (plugin-security computeRlsFilter) never read them; per-policy RowLevelSecurityPolicySchema is the live surface and is unchanged.' },
   { id: 'requireAuth-removed', summary: 'anonymous access to object data is denied unconditionally (no opt-out)', state: 'enforced',
     enforcement: 'core/security/anonymous-deny.ts shouldDenyAnonymous — no `requireAuth` input; every seam denies an anonymous, non-system caller outside the control-plane allowlist. spec tombstones `api.requireAuth` (retiredKey).',
-    proof: 'showcase-anonymous-deny.dogfood.test.ts',
-    note: 'ADR-0056 D2 → #3963: the `requireAuth: false` opt-out is RETIRED, not merely defaulted-on. Legitimate session-less surfaces survive by DECLARATION, not by posture: public-form submission (publicFormGrant), share-links (token → SYSTEM read), and public-book reads (audience:public, §6.7). A stack that mounts no auth now FAILS AT BOOT (cli/serve.ts, plugin-dev) instead of getting an explicit fail-open.' },
+    note: 'ADR-0056 D2 → #3963: the `requireAuth: false` opt-out is RETIRED, not merely defaulted-on. Legitimate session-less surfaces survive by DECLARATION, not by posture: public-form submission (publicFormGrant), share-links (token → SYSTEM read), and public-book reads (audience:public, §6.7). A stack that mounts no auth now FAILS AT BOOT (cli/serve.ts, plugin-dev) instead of getting an explicit fail-open. [#7976] The `showcase-anonymous-deny.dogfood.test.ts` CITATION WAS DROPPED under mutual attribution — that file drives the platform default and observes 401, which is precisely what the `anonymous-deny` row (same file) already claims; it never authors `requireAuth: false`, never reads the spec tombstone and never boots an auth-less stack, so it cannot prove the distinguishing half of THIS row (that there is no opt-out). The retirement is pinned elsewhere and unit-side: the spec tombstone + the ADR-0087 conversion entry `stack.api.requireAuth` (conversions/registry.ts, which strips a surviving key) and rest/rest-auth-gate.test.ts. Not high-risk, so the row is sound without a dogfood proof; writing a real one (author `api: { requireAuth: false }` → expect the boot/authoring rejection) is the honest upgrade path, not re-citing the posture proof.' },
 
   // ── Removed — by ADR-0049 (roadmap M2) ─────────────────────────────────
   { id: 'allow-transfer-restore-purge', summary: 'transfer/restore/purge ops (RBAC gate pre-mapped)', state: 'removed',

@@ -14,9 +14,18 @@
  * `discover` enables the **ratchet**: re-derive the real surface from source and
  * fail when a declaration is unclassified (the #1887 / declared-but-unenforced
  * class) or a `covers` entry is stale.
+ *
+ * The optional `attribution` closes the gap #7976 named: a `proof` used to be
+ * checked for EXISTENCE only, so a row could cite a file that exercises a
+ * neighbouring primitive and stay green forever (`rls-read` and
+ * `rls-by-id-write` cited the same file, and nothing could tell whether it
+ * exercised one, the other, or both). "Does this test actually prove this row"
+ * is not mechanically decidable and is deliberately NOT attempted; the
+ * checkable question it is converted into is **mutual naming** — the proof file
+ * must claim the rows it is cited for, and every claim must be reciprocated.
  */
 
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 export type ConformanceState = 'enforced' | 'experimental' | 'removed';
@@ -32,7 +41,11 @@ export interface ConformanceRow {
   state: ConformanceState;
   /** Runtime enforcement site — REQUIRED when `state === 'enforced'`. */
   enforcement?: string;
-  /** Proof path (resolved against {@link CheckLedgerOptions.proofRoot}); file must exist. */
+  /**
+   * Proof path (resolved against {@link CheckLedgerOptions.proofRoot}); the file
+   * must exist — and, when {@link CheckLedgerOptions.attribution} is on, must
+   * also CLAIM this row's id (see {@link ProofAttributionOptions}).
+   */
   proof?: string;
   /** Ratchet keys this row accounts for (matched against `discover()`). */
   covers?: string[];
@@ -51,6 +64,60 @@ export interface CheckLedgerOptions {
   highRisk?: string[];
   /** When true, EVERY enforced row must carry a proof (default: only high-risk). */
   proofRequiredForEnforced?: boolean;
+  /** Bind row ↔ proof by NAME, not just by path (#7976). */
+  attribution?: ProofAttributionOptions;
+}
+
+/**
+ * Mutual row ↔ proof attribution (#7976).
+ *
+ * A cited proof file self-declares the rows it is a proof FOR, as header
+ * comment lines: `// <marker>: <row-id>`, one per row. `checkLedger` then
+ * asserts the pairing in BOTH directions:
+ *
+ *   1. every row's cited proof file claims that row's id, and
+ *   2. every claim is reciprocated — the claimed id is a real ledger row AND
+ *      that row cites this very file.
+ *
+ * Direction 2 is what makes a stale claim (a renamed row, a proof that was
+ * re-pointed elsewhere) fail rather than rot, which is why {@link scan} exists:
+ * a file no row cites is invisible to direction 1 by construction.
+ *
+ * A comment marker — rather than an exported manifest — is deliberate: proof
+ * files are test modules whose import registers (and can boot) real stacks, so
+ * the claim must be readable WITHOUT executing them. It is the same
+ * `readFileSync` the existence check already implies, and it mirrors the
+ * `@proof:` header idiom dogfood proofs already carry for the ADR-0054 liveness
+ * registry. The marker keyword is per-ledger precisely so the two vocabularies
+ * (liveness proof ids vs ledger row ids) cannot be confused for one another.
+ */
+export interface ProofAttributionOptions {
+  /** Claim keyword, e.g. `'authz-row'` → a proof file line `// authz-row: rls-read`. */
+  marker: string;
+  /**
+   * Extra proof-root-relative files to scan for claims, beyond the ones rows
+   * cite. Any claim found in a file NO row cites is reported (direction 2).
+   */
+  scan?: () => Iterable<string>;
+}
+
+/** Escape a literal for embedding in a RegExp source. */
+function escapeRe(literal: string): string {
+  return literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Extract a proof file's row claims. Matches the marker at the start of a
+ * comment line (`//` or a block-comment `*` continuation) so a mention inside
+ * prose or a string literal is not mistaken for a claim.
+ */
+function readClaims(absPath: string, marker: string): string[] {
+  const re = new RegExp(`^[ \\t]*(?://+|\\*)[ \\t]*${escapeRe(marker)}:[ \\t]*(\\S+)`, 'gm');
+  const src = readFileSync(absPath, 'utf8');
+  const claims: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(src)) !== null) claims.push(m[1]);
+  return claims;
 }
 
 const VALID_STATES: ReadonlySet<string> = new Set(['enforced', 'experimental', 'removed']);
@@ -83,6 +150,43 @@ export function checkLedger(rows: readonly ConformanceRow[], opts: CheckLedgerOp
     const r = rows.find((x) => x.id === id);
     if (!r) problems.push(`high-risk id not in ledger: ${id}`);
     else if (!r.proof) problems.push(`high-risk ${id} must carry a proof`);
+  }
+
+  // Mutual row ↔ proof attribution (#7976) — a proof must NAME what it proves.
+  if (opts.attribution) {
+    const { marker, scan } = opts.attribution;
+
+    // Which rows cite each proof file (a shared file legitimately proves several).
+    const citedBy = new Map<string, string[]>();
+    for (const r of rows) {
+      if (r.proof) citedBy.set(r.proof, [...(citedBy.get(r.proof) ?? []), r.id]);
+    }
+
+    for (const file of new Set([...citedBy.keys(), ...(scan?.() ?? [])])) {
+      const abs = join(opts.proofRoot, file);
+      if (!existsSync(abs)) continue; // already reported as missing on disk
+      const claims = readClaims(abs, marker);
+      const citers = citedBy.get(file) ?? [];
+
+      // Direction 1 — the cited file must claim every row citing it.
+      for (const id of citers) {
+        if (!claims.includes(id)) {
+          problems.push(`${id}: proof does not claim this row — add \`${marker}: ${id}\` to ${file}, or stop citing it`);
+        }
+      }
+
+      // Direction 2 — every claim is reciprocated by the ledger.
+      for (const id of claims) {
+        if (!seenIds.has(id)) {
+          problems.push(`${file}: claims \`${marker}: ${id}\`, but no such row is in the ledger (orphaned claim)`);
+        } else if (!citers.includes(id)) {
+          const cited = rows.find((x) => x.id === id)?.proof;
+          problems.push(
+            `${file}: claims \`${marker}: ${id}\`, but that row cites ${cited ? `\`${cited}\`` : 'no proof'} — attribution is not mutual`,
+          );
+        }
+      }
+    }
   }
 
   // `covers`: each surface classified by exactly one row.

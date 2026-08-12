@@ -3,6 +3,10 @@
 // FLOW runAs identity-enforcement proof (#1888), exercised end-to-end through the
 // real HTTP + automation + security stack.
 //
+// ADR-0056 D10 — the authz-conformance matrix row this file is the cited proof
+// for; `authz-conformance.test.ts` asserts the pairing is mutual (#7976).
+// authz-row: flow-run-as
+//
 // @proof: flow-runas-identity
 // Security-layer instance of the "configured in the UI, silently does nothing at
 // runtime" anti-pattern (sibling of the assignment/decision node fixes). A flow's

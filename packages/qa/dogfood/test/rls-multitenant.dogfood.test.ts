@@ -36,6 +36,17 @@
 //
 // Empirically (CRM): single-tenant → every object `member-visible`; multi-tenant
 // → `rls-consistent` with zero holes. This test asserts that faithful state.
+//
+// ADR-0056 D10 — the authz-conformance matrix row this file is the cited proof
+// for; `authz-conformance.test.ts` asserts the pairing is mutual (#7976).
+// ⚠️ The claim is CONDITIONAL by construction: the suite is
+// `describe.skipIf(!organizationsAvailable)`, so in the open workspace it does
+// not run at all and only enterprise/cloud CI (which ships
+// `@objectstack/organizations`) actually exercises the row. The marker records
+// what this file proves WHERE IT RUNS — it is not an assertion that open-core CI
+// proved it. `OS_TEST_MULTI_ORG_ENABLED=1` turns an unexpected skip into a
+// failure, which is the mechanism that keeps the skip honest (#4700).
+// authz-row: multi-tenant
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import crmStack from '@objectstack/example-crm';

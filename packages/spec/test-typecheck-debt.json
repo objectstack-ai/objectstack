@@ -31,7 +31,6 @@
     "src/data/driver-nosql.test.ts": 2,
     "src/data/driver-sql.test.ts": 1,
     "src/data/driver.test.ts": 11,
-    "src/data/driver/memory.test.ts": 1,
     "src/data/field.test.ts": 2,
     "src/data/object-strictness-batch20.test.ts": 1,
     "src/data/query.test.ts": 25,

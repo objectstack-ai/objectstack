@@ -53,6 +53,10 @@ export * from './object.zod';
 // API-method derivation — the single source of truth turning an object's
 // `enable.apiMethods` whitelist into its effective operation set (#3391).
 export * from './api-derivation';
+// The managed-object `apiMethods` ⊆ affordances predicate — one table read by
+// objectql's registration-time strip AND @objectstack/lint's authoring gate,
+// so the two can never drift apart (#7521).
+export * from './managed-api-affordance';
 export * from './field.zod';
 // The credential read mask (ADR-0100) — the ONE string a masked read serves, in
 // place of the two byte-identical literals objectql and service-settings each

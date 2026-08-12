@@ -8,6 +8,18 @@
 // control-plane (`/auth/*`) stays open (sign-up itself is an anonymous call).
 // Public forms survive the same default via the declaration-derived
 // publicFormGrant — see showcase-public-form.dogfood.test.ts.
+//
+// ADR-0056 D10 — the authz-conformance matrix row this file is the cited proof
+// for; `authz-conformance.test.ts` asserts the pairing is mutual (#7976).
+// authz-row: anonymous-deny
+//
+// ⚠️ It claims `anonymous-deny` and NOTHING ELSE. The `requireAuth-removed` row
+// used to cite this same file (#7976): what that row asserts is that the
+// deployment-wide OPT-OUT is RETIRED — `api.requireAuth` tombstoned in spec, a
+// stack that mounts no auth failing AT BOOT — and this file exercises none of
+// it. It drives the platform default and observes 401, which is exactly what
+// `anonymous-deny` already claims. Under mutual attribution that citation could
+// not be made honestly, so it was dropped rather than rubber-stamped here.
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';

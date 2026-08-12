@@ -32,7 +32,7 @@
  * This module is the **API-tightening axis** (verb → *primitive*): what the
  * automatic API will admit. It is deliberately NOT the same as the UI-intent
  * axis (verb → *affordance*) that `resolveCrudAffordances` /
- * `MANAGED_WRITE_VERB_AFFORDANCE` (objectql `registry.ts`) and
+ * `MANAGED_WRITE_VERB_AFFORDANCE` (`./managed-api-affordance`, #7521) and
  * `WRITE_OP_AFFORDANCE` (plugin-security `system-write-guard.ts`) implement.
  * Merging the two would blur an authoring-intent (UX affordance) concern into a
  * security (API exposure) concern; they stay separate tables. See ADR-0103.

@@ -34,6 +34,24 @@
  * The cases below that used to measure the ABSENCE now measure the presence,
  * and say so in place: the "count before-hooks too" reflex was answered with
  * evidence before, and is answered with evidence now that the evidence changed.
+ *
+ * ## ⚠️ AMENDED BY #7867 — the by-id SKIP is retired; the per-object question is not
+ *
+ * A by-id update now reads its prior row UNCONDITIONALLY, so the gate no longer
+ * decides whether the engine LOOKS. A fifth demand joined the list and it is
+ * not expressible as a registration:
+ *
+ *   5. EXISTENCE. A by-id update whose id names no row must answer
+ *      `RECORD_NOT_FOUND` rather than run on into validation, the driver and
+ *      the hook chain and die on whichever complains first. Every by-id update
+ *      has this demand, and no cheaper question answers it — so demands 1–4 can
+ *      no longer gate the read, only explain who else consumes it.
+ *
+ * What survives intact, and is still pinned below: the demand is asked PER
+ * OBJECT for DISPATCH (`hasHooksFor` mirroring `triggerHooks`' own filter),
+ * `previous` is bound from ONE read, the never-fabricate rule, and the
+ * PREDICATE path's gate — a `multi: true` update matching zero rows is
+ * legitimately "0 rows affected", not a missing record.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -196,18 +214,51 @@ const observer = (name: string, object: string, event: string, sink: Array<unkno
 } as unknown as Hook);
 
 describe('[#5284] the prior-row demand is asked per object', () => {
-  it('object A pays NO prior read while only object B has an afterUpdate hook', async () => {
-    // The issue itself: before the narrowing this delta was 1 — one plugin's
-    // registration on ONE object taxed every single-id update on every other.
+  it('[#7867] object A pays exactly ONE prior read — the by-id read is no longer the gate\'s to skip', async () => {
+    // ⚠️ Asserted 0 between #5284 and #7867. The delta this file exists to hold
+    // down was never "is it 0" but "does ONE object's registration tax the
+    // others": before #5284 it was 1 HERE and 1 on B, growing with every
+    // plugin's registration list. It is 1 here now for a demand that belongs to
+    // THIS call and nobody else's registration — the not-found gate — and it
+    // does not grow when another object gains a hook. The per-object property
+    // is intact; only the skip is gone.
+    const seen: Array<unknown> = [];
     const { engine, reads } = await boot([
-      observer('audits_b', 'scope_task_b', 'afterUpdate', []),
+      observer('audits_b', 'scope_task_b', 'afterUpdate', seen),
     ]);
 
     const row: any = await engine.insert('scope_task_a', { title: 'A', status: 'todo', done: false });
     const before = reads.findOne;
     await engine.update('scope_task_a', { status: 'in_progress' }, { where: { id: row.id } } as any);
 
-    expect(reads.findOne - before).toBe(0);
+    expect(reads.findOne - before).toBe(1);
+    // B's hook still did not fire for A's update — the DISPATCH half of the
+    // per-object question, which is what #5284 was about, is untouched.
+    expect(seen).toEqual([]);
+  });
+
+  it('[#7867] a by-id update against an id that names no row is refused — RECORD_NOT_FOUND', async () => {
+    // Demand 5, stated as behaviour. This is the defect #7867 fixed: nothing on
+    // the action-body write path ever asked whether the row existed, so a ghost
+    // id was a silent no-op that resolved `null` and the write then died on
+    // whatever the pipeline complained about first. The 400 class varied with
+    // the object's declarations; the missing 404 was the constant.
+    const seen: Array<unknown> = [];
+    const { engine } = await boot([
+      observer('pre_a', 'scope_task_a', 'beforeUpdate', seen),
+    ]);
+
+    const err: any = await engine
+      .update('scope_task_a', { status: 'in_progress' }, { where: { id: 'never_existed' } } as any)
+      .then(() => null, (e) => e);
+
+    expect(err, 'a ghost id must be refused, not silently resolved').not.toBeNull();
+    expect(err.code).toBe('RECORD_NOT_FOUND');
+    expect(err.status).toBe(404);
+    // Refused BEFORE the before phase, so no handler is handed a context for a
+    // record nobody read — the producer is removed, not the message
+    // specialized (#5574's ruled remedy for this family).
+    expect(seen, 'beforeUpdate must not dispatch for a row that is not there').toEqual([]);
   });
 
   it('the object that DOES have the hook still pays it, and `previous` is the stored row', async () => {

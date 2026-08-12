@@ -6,6 +6,10 @@
 // count = 0. This proves the opposite, plus the spec→runtime translation.
 //
 // @proof: showcase-declarative-rbac-seeding
+//
+// ADR-0056 D10 — the authz-conformance matrix row this file is the cited proof
+// for; `authz-conformance.test.ts` asserts the pairing is mutual (#7976).
+// authz-row: declarative-rbac-seeding
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
