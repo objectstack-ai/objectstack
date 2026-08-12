@@ -333,6 +333,22 @@ jobs:
       - name: Normalized metadata-type guard
         run: pnpm check:meta-type-normalized
 
+      # Filter-slot wire-alias parity guard (#8002). The ONE filter slot is
+      # spelled four ways, declared in TWO packages: `where`/`filter` come from
+      # the spec table, while the wire-only `filters`/`$filter` are declared in
+      # `metadata-protocol` (no schema declares them) and named LITERALLY in
+      # `packages/rest`, which gates the slot's arity at the querystring ingress
+      # (#7390). A runtime import cannot join them — the normalizer's table is a
+      # module-private const, and metadata-protocol is only a devDependency of
+      # rest — so a fifth wire-only spelling would fold correctly and be
+      # silently ungated, putting repetition on it back on the misdiagnosis
+      # #7390 removed. The REST side alone is pinned by that card's §5 test;
+      # this covers the half it cannot reach. AST-based, and an unreadable
+      # declaration is RED rather than an empty corpus reported as a pass
+      # (#4690). Runs its own --self-test first.
+      - name: Filter-slot wire-alias parity guard
+        run: pnpm check:filter-alias-parity
+
       # Init-service declaration guard (#4471, ADR-0116). The kernel's ordering
       # contract (dependencies / optionalDependencies / requiresServices /
       # providesServices) was complete but VOLUNTARY: a plugin that resolves
