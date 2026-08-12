@@ -235,6 +235,60 @@ describe('[#4828] getDiscoveryInfo() conforms to DiscoverySchema', () => {
       const bare: any = await new HttpDispatcher(withoutComments).getDiscoveryInfo('/api/v1');
       expect(bare.capabilities.comments.enabled).toBe(false);
     });
+
+    it('[#7602] answers `search` false WITH a search service registered — the slot is not the predicate', async () => {
+      // The `comments` pair above proves a key is measured rather than stamped.
+      // This is the opposite direction, and the only assertion that separates
+      // "right today" from "right on purpose".
+      //
+      // `capabilities.search.enabled` read `!!searchSvc` until #7602. That is
+      // `false` on every host that exists — nothing registers the slot
+      // (`CORE_SERVICE_PROVIDER` records `'search': null`) — so the pin below
+      // (`has retired features and endpoints`) passed for a reason that had
+      // nothing to do with what this face serves. Fill the slot, which is
+      // exactly what it exists for, and the document flipped to `true` while
+      // the dispatcher still mounts no `/search` route: an advertised endpoint
+      // that 404s (Prime Directive #10), the same defect #7541 closed on the
+      // `getDiscovery()` producer.
+      //
+      // Reverse verification, direction predicted BEFORE running (and observed:
+      // 1 failed / 22 passed): restore the old slot-presence predicate —
+      // `search: { enabled: searchRegistered }` — and THIS case goes red while the
+      // pre-existing `enabled === false` pin — driven by a kernel with no
+      // services — stays green. That asymmetry is the whole point of the case.
+      const kernel = {
+        context: {
+          getService: (name: string) => {
+            if (name === 'objectql') {
+              return {
+                registry: {
+                  getObject: vi.fn().mockReturnValue({ name: 'test_obj' }),
+                  getRegisteredTypes: vi.fn().mockReturnValue([]),
+                  getAllPackages: vi.fn().mockReturnValue([]),
+                },
+              };
+            }
+            // A real-shaped occupant of the slot — `CoreServiceName`'s
+            // "Search Engine (Elastic/Meili)", not a stub that `isServiceServeable`
+            // would reject anyway. Nothing about it can make this face serve
+            // `/search`, which is the point.
+            if (name === 'search') return { searchAll: async () => [] };
+            return null;
+          },
+        },
+      } as any;
+
+      const info: any = await new HttpDispatcher(kernel).getDiscoveryInfo('/api/v1');
+
+      // Anti-vacuity: the stub really WAS resolved, so the `false` below is a
+      // decision about the HTTP surface and not a failed registration.
+      expect(info.services.search.enabled, 'the search slot must actually be filled in this fixture').toBe(true);
+
+      expect(info.capabilities.search.enabled, 'a filled `search` slot must NOT advertise the capability').toBe(false);
+      // …and no route is advertised on its behalf either, on the same basis.
+      expect(info.routes.search, '`routes.search` must stay unadvertised').toBeUndefined();
+      expect(DiscoverySchema.safeParse(info).success).toBe(true);
+    });
   });
 
   it('has retired `features` and `endpoints` (ADR-0049 enforce-or-remove)', async () => {
