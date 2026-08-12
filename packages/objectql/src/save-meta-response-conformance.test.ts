@@ -73,11 +73,24 @@ function makeMemoryDriver() {
         return s;
     };
     let nextId = 0;
+    // `$and` / `$or` are conjoined WITH their sibling keys, the way a real
+    // driver ANDs them. The short-circuiting shape this stub used to carry
+    // (`if ($or) return $or.some(...)`) discarded every sibling equality key in
+    // the same object, so a query like
+    // `{ state:'draft', package_id, $or:[{organization_id:ORG},{organization_id:null}] }`
+    // was silently answered on the `$or` alone — a different query than the one
+    // written, with the suite still green. See #7620.
     const matchesWhere = (row: Record<string, unknown>, where: any): boolean => {
         if (!where || typeof where !== 'object') return true;
-        if (Array.isArray(where.$and)) return where.$and.every((w: any) => matchesWhere(row, w));
-        if (Array.isArray(where.$or)) return where.$or.some((w: any) => matchesWhere(row, w));
         for (const [k, v] of Object.entries(where)) {
+            if (k === '$and' && Array.isArray(v)) {
+                if (!v.every((w: any) => matchesWhere(row, w))) return false;
+                continue;
+            }
+            if (k === '$or' && Array.isArray(v)) {
+                if (!v.some((w: any) => matchesWhere(row, w))) return false;
+                continue;
+            }
             if (k.startsWith('$')) continue;
             const rowVal = row[k];
             const expected = (v && typeof v === 'object' && '$eq' in (v as any)) ? (v as any).$eq : v;

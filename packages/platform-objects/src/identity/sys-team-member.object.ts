@@ -67,7 +67,10 @@ export const SysTeamMember = ObjectSchema.create({
       type: 'api',
       target: '/api/v1/auth/organization/remove-team-member',
       requiresFeature: 'organization',
-      confirmText: 'Remove this user from the team? They will lose any team-scoped access.',
+      // Confirm question on `description`, not `confirmText`: this action collects
+      // params, and pairing the two keys opens two dialogs for one decision
+      // (#7278 ruling 2026-08-10, swept by #7309).
+      description: 'Remove this user from the team? They will lose any team-scoped access.',
       successMessage: 'Team member removed',
       refreshAfter: true,
       params: [

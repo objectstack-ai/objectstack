@@ -614,9 +614,27 @@ describe('InMemoryDriver', () => {
       expect(results[0].name).toBe('Evan Davis');
     });
 
-    it('should filter with $contains case-insensitively', async () => {
+    // [#6682] Flipped, not deleted. This row pinned the fold; #4706 Q2 = A rules
+    // the `$contains` family case-SENSITIVE on every backend, so the same input
+    // now selects nothing — and the case-insensitive answer it used to assert
+    // has a spelling of its own, `$icontains`, pinned beside it so the pair
+    // still covers both behaviours rather than losing one.
+    it('should filter with $contains case-SENSITIVELY', async () => {
       const results = await driver.find(testTable, {
         where: { name: { $contains: 'alice' } },
+      });
+      expect(results).toHaveLength(0);
+
+      const exact = await driver.find(testTable, {
+        where: { name: { $contains: 'Alice' } },
+      });
+      expect(exact).toHaveLength(1);
+      expect(exact[0].name).toBe('Alice Johnson');
+    });
+
+    it('should filter case-insensitively with $icontains, the operator that spells it', async () => {
+      const results = await driver.find(testTable, {
+        where: { name: { $icontains: 'alice' } },
       });
       expect(results).toHaveLength(1);
       expect(results[0].name).toBe('Alice Johnson');
@@ -668,9 +686,15 @@ describe('InMemoryDriver', () => {
       expect(results).toHaveLength(3);
     });
 
+    // [#6682] The subject here is COMBINATION — a `$contains` under `$and` — so
+    // the comparand moved rather than the expectation: `'a'` matched
+    // `Alice Johnson` only through the fold this card removed (that name carries
+    // no lower-case `a`). `'o'` is case-exact for both surviving rows, and it
+    // also makes the conjunction do visible work: on its own it selects
+    // `Bob Smith` too, whom the age bound excludes.
     it('should handle $contains inside $and', async () => {
       const results = await driver.find(testTable, {
-        where: { $and: [{ name: { $contains: 'a' } }, { age: { $gte: 30 } }] },
+        where: { $and: [{ name: { $contains: 'o' } }, { age: { $gte: 30 } }] },
       });
       expect(results).toHaveLength(2);
       expect(results.map((r: any) => r.name).sort()).toEqual(['Alice Johnson', 'Charlie Brown']);

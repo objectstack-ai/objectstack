@@ -27,3 +27,14 @@ export {
 
 export { AutoEnqueuer, type AutoEnqueuerOptions, type HttpEnqueueFn } from './auto-enqueuer.js';
 export { SysWebhook } from './sys-webhook.object.js';
+
+/**
+ * [#7799] The signing-secret seam. Exported so a host that boots the pieces
+ * itself (rather than mounting {@link WebhookOutboxPlugin}) can still run the
+ * cleartext sweep, and so the column name has one spelling.
+ */
+export { WEBHOOK_SECRET_FIELD } from './webhook-secret.js';
+export {
+    migrateLegacyWebhookSecrets,
+    type MigrateWebhookSecretsResult,
+} from './migrate-webhook-secrets.js';

@@ -815,6 +815,34 @@ interface ExecutionLogEntry {
     // ↑ built by `buildRunTrigger` at EVERY site — see its doc comment for why
     // that is a chokepoint rather than eight object literals.
     steps: StepLogEntry[];
+    /**
+     * #7639: the run's variable map, written at the two `paused` sites only —
+     * the point-in-time snapshot the run suspended holding, and the SAME object
+     * handed to {@link AutomationEngine.persistSuspendedRun}.
+     *
+     * Not new vocabulary. `ExecutionLogSchema` has declared
+     * `variables` ("Final state of flow variables") since the schema was
+     * written, and this interface has declared it for as long — with no
+     * producer anywhere, so the key `GET /automation/:name/runs/:runId`
+     * publishes was never populated by anything. That is the same
+     * declared-with-no-writer shape as `StepLogEntry.retryAttempt` (#7546):
+     * consume the existing declaration rather than invent a second spelling.
+     *
+     * Why `paused` and not every status: a paused run is the one an operator
+     * cannot otherwise inspect. A terminal run has already produced its
+     * `output`, and its step log says what ran; a run stopped at an approval or
+     * a screen has produced neither, so "what did the previous node actually
+     * resolve, and why did the next one route the way it did?" was answerable
+     * only by inference. Widening to `completed`/`failed` would be a disclosure
+     * change with no card behind it — those runs keep exactly the fields they
+     * had.
+     *
+     * SNAPSHOT, not a live read: taken at the suspend, never refreshed. The map
+     * itself is dead by then (the run unwound; resume rebuilds a fresh one from
+     * the continuation), so there is nothing later to diverge from — and
+     * because the continuation gets this very object, the snapshot an operator
+     * reads is by construction the state the run will resume from.
+     */
     variables?: Record<string, unknown>;
     output?: unknown;
     error?: string;
@@ -3011,13 +3039,19 @@ export class AutomationEngine implements IAutomationService {
             // caller can later `resume()` it. This is NOT a failure.
             if (isSuspendSignal(err)) {
                 const durationMs = Date.now() - startTime;
+                // #7639 — ONE snapshot expression feeding BOTH consumers: the
+                // continuation the run will resume from, and the `paused` log
+                // entry run-detail serves. Same object, so what an operator
+                // reads can never disagree with what the run holds. See
+                // {@link ExecutionLogEntry.variables} for why the log carries it.
+                const variablesSnapshot = Object.fromEntries(variables);
                 await this.persistSuspendedRun({
                     runId,
                     flowName,
                     flowVersion: flow.version,
                     nodeId: err.nodeId,
                     nodeType: err.nodeType,
-                    variables: Object.fromEntries(variables),
+                    variables: variablesSnapshot,
                     steps,
                     context: runContext,
                     startedAt,
@@ -3034,6 +3068,7 @@ export class AutomationEngine implements IAutomationService {
                     durationMs,
                     trigger: buildRunTrigger(context),
                     steps,
+                    variables: variablesSnapshot,
                 });
                 return {
                     success: true,
@@ -3766,11 +3801,18 @@ export class AutomationEngine implements IAutomationService {
                 // Re-suspended at a downstream node: persist a fresh continuation.
                 if (isSuspendSignal(err)) {
                     const durationMs = Date.now() - run.startTime;
+                    // #7639 — the re-suspend half of the same rule as the
+                    // initial-execution site above: one snapshot, both consumers.
+                    // A multi-stage approval re-pauses HERE on every stage but the
+                    // first, so covering only the other site would leave every
+                    // stage after stage 1 — the ones an operator actually needs to
+                    // inspect — unreadable.
+                    const variablesSnapshot = Object.fromEntries(variables);
                     await this.persistSuspendedRun({
                         ...run,
                         nodeId: err.nodeId,
                         nodeType: err.nodeType,
-                        variables: Object.fromEntries(variables),
+                        variables: variablesSnapshot,
                         steps,
                         correlation: err.correlation,
                         screen: err.screen,
@@ -3784,6 +3826,7 @@ export class AutomationEngine implements IAutomationService {
                         durationMs,
                         trigger: buildRunTrigger(context),
                         steps,
+                        variables: variablesSnapshot,
                     });
                     return { success: true, status: 'paused', runId, durationMs, screen: err.screen };
                 }

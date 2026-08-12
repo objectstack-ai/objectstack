@@ -500,8 +500,12 @@ describe('Door 2 lowers FilterArray to FilterCondition before the driver (#5158)
   });
 
   it('the gate does not re-judge list MEMBERS — that is #5234, on another face', async () => {
-    // A `$field` reference and a plain object are both legitimate members here;
-    // this gate asks only whether the comparand is a list at all.
+    // This gate asks only whether the comparand is a LIST at all; WHAT the
+    // members are is somebody else's judgement. The `$field` member is not a
+    // legal one — #7596 ruled it out of the spec's `$in`/`$nin` declaration and
+    // both SQL drivers refuse it by index — and it is used here precisely
+    // because it is judged elsewhere: the gate must pass it through untouched
+    // rather than grow a second opinion about members.
     const where = { stage: { $in: [{ $field: 'other' }, 'won'] } };
     await engine.find('deal', { where });
     expect(lastWhere()).toEqual(where);

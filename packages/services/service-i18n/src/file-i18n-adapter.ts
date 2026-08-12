@@ -1,5 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { normalizeSupportedLocales } from '@objectstack/spec/system';
 import type { II18nService } from '@objectstack/spec/contracts';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -119,6 +120,15 @@ export class FileI18nAdapter implements II18nService {
   private readonly mergedCache = new Map<string, Record<string, unknown>>();
   private defaultLocale: string;
   private readonly fallbackLocale: string | undefined;
+  /**
+   * [#7679] The app's DECLARED `i18n.supportedLocales`, injected by
+   * `AppPlugin.loadTranslations` the same way `defaultLocale` is. `undefined`
+   * means the app declared nothing, which must keep reporting every loaded
+   * locale. Deliberately NOT a prune of `translations`: the platform plugins
+   * push their bundles at `kernel:ready`, after the app plugin has run, so
+   * this can only work as a read-time filter in `getLocales()`.
+   */
+  private supportedLocales: string[] | undefined;
 
   constructor(options: FileI18nAdapterOptions = {}) {
     this.defaultLocale = options.defaultLocale ?? 'en';
@@ -189,10 +199,31 @@ export class FileI18nAdapter implements II18nService {
     this.mergedCache.clear();
   }
 
+  /**
+   * Report the locales this stack offers.
+   *
+   * [#7679] When the app declared `i18n.supportedLocales`, that declaration IS
+   * the answer — in declared order, and including a declared locale no bundle
+   * was ever loaded for (declared-but-unserved). Reporting the declaration
+   * rather than an intersection is what gives a client the signal that a
+   * locale it is offered has nothing behind it yet; quietly dropping it leaves
+   * the gap invisible on both sides. It is also the only answer independent of
+   * how much had loaded by the time this was called — the platform plugins are
+   * still pushing bundles at `kernel:ready`.
+   *
+   * With nothing declared, the loaded set — the behaviour every app that never
+   * opted in already has.
+   */
   getLocales(): string[] {
+    if (this.supportedLocales) return [...this.supportedLocales];
     const locales = new Set(this.translations.keys());
     for (const locale of this.authoredTranslations.keys()) locales.add(locale);
     return Array.from(locales);
+  }
+
+  /** @see II18nService.setSupportedLocales — [#7679] */
+  setSupportedLocales(locales: readonly string[] | undefined): void {
+    this.supportedLocales = normalizeSupportedLocales(locales);
   }
 
   getDefaultLocale(): string {

@@ -155,6 +155,74 @@ describe('Security Service Contract', () => {
     await expect(nothingDisclosable.getMetadataReadableFields?.('deal', { userId: 'u1' })).resolves.toEqual([]);
   });
 
+  it('[#7616] resolvePermissionSetsForContext is OPTIONAL — absence keeps the consumer on its own resolution (compile-time)', () => {
+    // THE structural pin behind "a consumer must keep its local resolution as
+    // the fallback until a floor version carrying this method can be assumed".
+    // Optional is what makes that a property of the TYPE: a security service
+    // that predates the method still satisfies the contract, and the unguarded
+    // call does not compile, so the fallback branch cannot be dropped by
+    // accident on the way to a delegation that a deployment may not support.
+    const withoutIt: ISecurityService = makeService();
+    expect(typeof withoutIt.resolvePermissionSetsForContext).toBe('undefined');
+
+    // Never invoked — its only job is to make the COMPILER prove the point.
+    const mustNotCompileWithoutAGuard = () =>
+      // @ts-expect-error possibly undefined — a consumer must feature-detect first
+      withoutIt.resolvePermissionSetsForContext({ userId: 'u1' });
+    expect(typeof mustNotCompileWithoutAGuard).toBe('function');
+
+    // The names-only sibling is NOT optional and stays reachable unguarded —
+    // the two are different questions, not two spellings of one, so a service
+    // carrying only the older method is a complete implementation.
+    expect(typeof withoutIt.resolvePermissionSetNames).toBe('function');
+  });
+
+  it('[#7616] the sets carry the four columns the names cannot: objects, fields, systemPermissions, tabPermissions', async () => {
+    // Why the method exists at all. `resolvePermissionSetNames` answers an
+    // AUDIENCE question ("does this caller hold `sales_manager`?"); a consumer
+    // that must MERGE the caller's grants — the object/field map
+    // `/auth/me/permissions` serves, the capability + tab surface `/me/apps`
+    // filters with — cannot reach any of these four from a name, which is
+    // exactly why those two endpoints re-implement set resolution locally.
+    const service = makeService({
+      resolvePermissionSetNames: async () => ['member_default', 'sales_manager'],
+      resolvePermissionSetsForContext: async () => [
+        {
+          name: 'member_default',
+          objects: { deal: { allowRead: true } },
+          fields: { 'deal.amount': { readable: true, editable: false } },
+          systemPermissions: [],
+          tabPermissions: { app_crm: 'default_on' },
+        },
+        {
+          name: 'sales_manager',
+          objects: { deal: { allowRead: true, allowEdit: true } },
+          fields: { 'deal.amount': { readable: true, editable: true } },
+          systemPermissions: ['setup.access'],
+          tabPermissions: { app_crm: 'visible' },
+        },
+      ] as any,
+    });
+
+    const sets = await service.resolvePermissionSetsForContext?.({ userId: 'u1' });
+    expect(sets?.map((s) => s.name)).toEqual(['member_default', 'sales_manager']);
+    // The names surface answers the audience question over the SAME resolution…
+    await expect(service.resolvePermissionSetNames({ userId: 'u1' }))
+      .resolves.toEqual(['member_default', 'sales_manager']);
+    // …and nothing else. Every column below is unreachable from that list.
+    expect(sets?.[1]?.objects).toBeDefined();
+    expect(sets?.[1]?.fields).toBeDefined();
+    expect(sets?.[1]?.systemPermissions).toEqual(['setup.access']);
+    expect(sets?.[1]?.tabPermissions).toEqual({ app_crm: 'visible' });
+
+    // The merge stays with the CALLER — this contract hands over the INPUT to
+    // it, unmerged and in resolution order, because two consumers legitimately
+    // project different subsets of the same sets. Folding a merge in here would
+    // make the method a fourth copy of the rule rather than the one source of
+    // its input.
+    expect(sets).toHaveLength(2);
+  });
+
   it('a partial implementation is feature-detectable rather than wrong', () => {
     // Consumers probe (`typeof svc.getReadableFields === 'function'`) so an
     // implementation may omit a method it cannot honour and still be usable.

@@ -90,7 +90,33 @@ export interface EmitResult {
     /** True when `dedupKey` matched an existing event and fan-out was skipped. */
     readonly deduped: boolean;
     readonly deliveries: DeliveryOutcome[];
+    /**
+     * Deliveries a channel ACCEPTED — a terminal, observed outcome.
+     *
+     * Only the inline (P0) fan-out can produce a non-zero count here, because
+     * only it has a channel's answer by the time `emit()` returns. The
+     * outbox-backed (P1) path reports its accepted rows as {@link enqueued}
+     * instead: it has handed the work to the dispatcher and genuinely does not
+     * yet know whether it will land.
+     *
+     * This field used to carry the enqueued count too (#7747), which read as
+     * "1 delivered" to every caller while the row was still pending — and
+     * stayed 1 after the dispatcher dead-lettered it. A caller that reports
+     * `delivered` to an operator was therefore contradicting
+     * `sys_notification_delivery`; keeping the two counts apart is what makes
+     * "delivered" mean delivered.
+     */
     readonly delivered: number;
+    /**
+     * Deliveries durably accepted into the outbox but NOT yet attempted — the
+     * P1 path's success count. Their real outcome (`success` / `failed` /
+     * `dead` / `suppressed`) lands on the `sys_notification_delivery` row
+     * afterwards, which is the record that owns that truth.
+     *
+     * Non-zero means "this much is in flight, ask the delivery record how it
+     * went" — never "this much arrived".
+     */
+    readonly enqueued: number;
     readonly failed: number;
 }
 
@@ -575,7 +601,7 @@ export class MessagingService {
                 this.ctx.logger.info(
                     `[messaging] emit: dedupKey '${input.dedupKey}' already emitted (${existing}); skipping`,
                 );
-                return { notificationId: existing, deduped: true, deliveries: [], delivered: 0, failed: 0 };
+                return { notificationId: existing, deduped: true, deliveries: [], delivered: 0, enqueued: 0, failed: 0 };
             }
         }
 
@@ -598,7 +624,7 @@ export class MessagingService {
                     this.ctx.logger.info(
                         `[messaging] emit: dedupKey '${input.dedupKey}' raced; converged to ${winner}`,
                     );
-                    return { notificationId: winner, deduped: true, deliveries: [], delivered: 0, failed: 0 };
+                    return { notificationId: winner, deduped: true, deliveries: [], delivered: 0, enqueued: 0, failed: 0 };
                 }
             }
             throw err;
@@ -611,7 +637,7 @@ export class MessagingService {
         });
         if (recipients.length === 0) {
             this.ctx.logger.warn(`[messaging] emit: topic '${input.topic}' resolved to 0 recipients`);
-            return { notificationId, deduped: false, deliveries: [], delivered: 0, failed: 0 };
+            return { notificationId, deduped: false, deliveries: [], delivered: 0, enqueued: 0, failed: 0 };
         }
 
         // 3b) Preference filter (ADR-0030 P2): drop the (recipient × channel)
@@ -625,14 +651,25 @@ export class MessagingService {
         });
         if (targets.length === 0) {
             this.ctx.logger.info(`[messaging] emit: topic '${input.topic}' suppressed for all recipients by preference`);
-            return { notificationId, deduped: false, deliveries: [], delivered: 0, failed: 0 };
+            return { notificationId, deduped: false, deliveries: [], delivered: 0, enqueued: 0, failed: 0 };
         }
 
         // 4) Either enqueue durable deliveries (P1 outbox) or fan out inline (P0).
         if (this.outbox) {
             const deliveries = await this.enqueueDeliveries(this.outbox, notificationId, targets, input, payload);
-            const delivered = deliveries.filter((d) => d.ok).length;
-            return { notificationId, deduped: false, deliveries, delivered, failed: deliveries.length - delivered };
+            // An accepted row here is ENQUEUED, not delivered — the dispatcher
+            // decides that later and records it on `sys_notification_delivery`.
+            // Reporting it as `delivered` is what let a run summary claim a
+            // delivery the delivery record went on to mark `dead` (#7747), so
+            // the two counts stay apart: `delivered` is 0 on this path by
+            // construction, and there is no moment at which it becomes non-zero
+            // retroactively. `failed` keeps its meaning — an enqueue that threw
+            // never reached the outbox at all.
+            const enqueued = deliveries.filter((d) => d.ok).length;
+            return {
+                notificationId, deduped: false, deliveries,
+                delivered: 0, enqueued, failed: deliveries.length - enqueued,
+            };
         }
 
         const notification: Notification = {
@@ -648,8 +685,10 @@ export class MessagingService {
             payload: input.payload,
         };
 
+        // Inline (P0): every channel has already answered, so `delivered` is a
+        // real terminal count and nothing is left in flight.
         const { deliveries, delivered, failed } = await this.fanOut(notification, targets);
-        return { notificationId, deduped: false, deliveries, delivered, failed };
+        return { notificationId, deduped: false, deliveries, delivered, enqueued: 0, failed };
     }
 
     /**

@@ -329,10 +329,54 @@ export interface IMetadataService {
 
     /**
      * List all metadata items of a given type
+     *
+     * The returned array is AMBIGUOUS by construction, in the same way
+     * {@link get}'s `undefined` is: a short list means "that is all anyone
+     * declared" *and* "a loader that could hold more of them failed". Prefer
+     * {@link listDiagnosed} wherever the difference could change a decision, and
+     * especially before restating the array's LENGTH as a fact about the
+     * environment (#6504).
+     *
      * @param type - Metadata type
      * @returns Array of metadata definitions
      */
     list(type: string): Promise<unknown[]>;
+
+    /**
+     * List all metadata items of a given type, and say whether the answer can
+     * be trusted as complete. The plural counterpart of {@link getDiagnosed},
+     * drawing the same ADR-0110 D3 distinction on the read that returns a set.
+     *
+     * [#6504] Declared for the reason {@link getDiagnosed} was, with one thing
+     * added that makes it sharper rather than merely analogous. On the singular
+     * read a MISS and an OUTAGE arrive as the same `undefined`; on the plural
+     * read they arrive as the same *array*, and an array carries a **count**.
+     * A count is the strongest positive claim a read can make — a consumer that
+     * renders `list(t).length` as "this environment contains N items" states,
+     * positively and numerically, something no read established. `list` cannot
+     * be fixed in place (every caller would have to change at once, and most
+     * are right to keep ignoring the verdict), so the verdict is offered
+     * alongside it, exactly as `getDiagnosed` is offered alongside `get`.
+     *
+     * `degraded` is true when at least one loader could not be read while the
+     * set was assembled, with those loaders' messages in `errors`. It says the
+     * set is known-PARTIAL — never that it is empty, and never that it is
+     * wrong: `items` is still the best-effort answer and is served as it always
+     * was. A consumer must not read `degraded` as a reason to withhold the
+     * items; it is a reason to withhold any claim of COMPLETENESS made on top
+     * of them.
+     *
+     * Optional, for the same reason its singular twin is: implementations that
+     * predate it simply cannot report the distinction, so a consumer that
+     * probes for it must keep reading {@link list} when it is absent — and a
+     * service without it reports nothing degraded, which is precisely what it
+     * could express.
+     *
+     * @param type - Metadata type
+     */
+    listDiagnosed?(
+        type: string,
+    ): Promise<{ items: unknown[]; degraded: boolean; errors: string[] }>;
 
     /**
      * Unregister/remove a metadata item by type and name.
@@ -412,6 +456,15 @@ export interface IMetadataService {
 
     /**
      * Convenience: list all object definitions
+     *
+     * Carries the same ambiguity {@link list} documents — a short answer may be
+     * an outage rather than a small environment (#6504). This member declares
+     * no equivalence to `list('object')`, so it has no diagnosed twin of its
+     * own: a consumer that needs the verdict asks {@link listDiagnosed} for it
+     * separately rather than presuming the two reads resolve the same set. That
+     * is the plural instance of the fork {@link getObject} records, and it is
+     * deliberately left as a fork rather than settled here.
+     *
      * @returns Array of object definitions
      */
     listObjects(): Promise<unknown[]>;

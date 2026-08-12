@@ -181,7 +181,39 @@ export const SysWebhook = ObjectSchema.create({
     definition_json: Field.textarea({
       label: 'Definition',
       required: true,
-      description: 'Serialised Webhook JSON (see @objectstack/spec/automation/webhook) — full headers/auth/retry/payload config',
+      description: 'Serialised Webhook JSON (see @objectstack/spec/automation/webhook) — headers/timeout config. The signing secret is NOT stored here; it lives in the encrypted `signing_secret` field.',
+      group: 'Definition',
+    }),
+
+    /**
+     * [#7799] HMAC signing key, in the engine's ENCRYPTED credential channel.
+     *
+     * It used to ride inside `definition_json` as cleartext, because that column
+     * is where the seeder parked the whole authored envelope. `definition_json`
+     * is an ordinary textarea on an admin-authorable object with no restrictive
+     * `enable.apiMethods`, so `GET /api/v1/data/sys_webhook` handed the key back
+     * to every persona that can read the object — and that key is the receiver's
+     * ONLY proof a delivery came from us. Same exposure class as #7722's
+     * per-attempt copies, minus the retention window that eventually aged those
+     * out.
+     *
+     * `type: 'secret'` moves it onto the channel built for this: the engine
+     * encrypts on write via the registered `ICryptoProvider`, stores the
+     * ciphertext as a `sys_secret` row, keeps only an opaque `secret:<id>` ref
+     * on this column, and returns the mask on every read path. The enqueuer
+     * recovers the plaintext server-side through `engine.resolveSecretField()`
+     * when it refreshes its subscription cache.
+     *
+     * Fail-closed by construction: with no CryptoProvider wired the engine
+     * REFUSES the write rather than falling back to cleartext, so the seeder
+     * skips that webhook loudly instead of re-opening the hole in a new column.
+     */
+    signing_secret: Field.secret({
+      label: 'Signing Secret',
+      required: false,
+      description:
+        'HMAC-SHA256 key used to sign deliveries (X-Objectstack-Signature). Encrypted at rest into '
+        + 'sys_secret; reads return a mask, never the key. Leave the mask untouched to keep the current value.',
       group: 'Definition',
     }),
 

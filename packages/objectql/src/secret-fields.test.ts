@@ -34,15 +34,21 @@ function makeStubDriver() {
     }
     return true;
   };
+  // Rows leave the driver as COPIES, like a real driver's do. Handing out the
+  // live stored object makes the double lie: `maskSecretFields` mutates the
+  // rows it is given, so one `find` would stamp SECRET_MASK over the stored ref
+  // and the next `resolveSecret*` would read the mask back as "no secret" — an
+  // artefact of the double that reads exactly like an engine bug (#7799).
+  const copy = <T,>(r: T): T => (r == null ? r : ({ ...r } as T));
   const driver: any = {
     name: 'memory', version: '0.0.0', supports: {},
     async connect() {}, async disconnect() {}, async checkHealth() { return true; },
     async execute() { return null; },
     async find(object: string, ast: any) {
-      return Array.from(storeFor(object).values()).filter((r) => matches(r, ast?.where));
+      return Array.from(storeFor(object).values()).filter((r) => matches(r, ast?.where)).map(copy);
     },
     async findOne(object: string, ast: any) {
-      for (const r of storeFor(object).values()) if (matches(r, ast?.where)) return r;
+      for (const r of storeFor(object).values()) if (matches(r, ast?.where)) return copy(r);
       return null;
     },
     async create(object: string, data: Record<string, unknown>) {
@@ -50,7 +56,7 @@ function makeStubDriver() {
       const id = (data.id as string) ?? `r_${nextId}`;
       const row = { ...data, id };
       storeFor(object).set(id, row);
-      return row;
+      return copy(row);
     },
     async update(object: string, id: string, data: Record<string, unknown>) {
       const s = storeFor(object);
@@ -58,7 +64,7 @@ function makeStubDriver() {
       if (!cur) throw new Error(`not found: ${object}/${id}`);
       const updated = { ...cur, ...data, id };
       s.set(id, updated);
-      return updated;
+      return copy(updated);
     },
     async upsert(object: string, data: Record<string, unknown>) {
       const id = data.id as string | undefined;
@@ -224,6 +230,44 @@ describe('objectql secret-field channel', () => {
     expect(secretReads).toHaveLength(1);
     expect(secretReads[0].ast).not.toHaveProperty('object');
     expect(secretReads[0].ast.where).toEqual({ id: expect.any(String) });
+  });
+
+  // [#7799] `resolveSecret` is documented for privileged consumers "against the
+  // stored ref" — but the read mask means no consumer can OBTAIN that ref, so
+  // the only ways to reach a stored credential were to keep a cleartext copy
+  // somewhere unmasked (the defect #7799 reports on `sys_webhook`) or to reach
+  // past the engine into the driver. This is the supported third way.
+  it("resolveSecretField recovers one row's plaintext without the caller ever seeing the ref", async () => {
+    const created = await ctx.engine.insert('ext_datasource', { name: 'pg', db_password: 's3cr3t' });
+
+    // The caller has ONLY what the generic read path gives it — the mask.
+    const viaFind = (await ctx.engine.find('ext_datasource', { where: { id: created.id } }))[0] as any;
+    expect(viaFind.db_password).toBe(SECRET_MASK);
+
+    expect(await ctx.engine.resolveSecretField('ext_datasource', created.id, 'db_password')).toBe('s3cr3t');
+  });
+
+  it('resolveSecretField returns null for an unset secret and for a row that is gone', async () => {
+    const created = await ctx.engine.insert('ext_datasource', { name: 'pg' });
+    expect(await ctx.engine.resolveSecretField('ext_datasource', created.id, 'db_password')).toBeNull();
+    expect(await ctx.engine.resolveSecretField('ext_datasource', 'nope', 'db_password')).toBeNull();
+  });
+
+  it('resolveSecretField refuses a non-secret field — it is a decrypt, not a mask bypass', async () => {
+    const created = await ctx.engine.insert('ext_datasource', { name: 'pg', db_password: 's3cr3t' });
+    // A plain column is not dereferenceable…
+    await expect(
+      ctx.engine.resolveSecretField('ext_datasource', created.id, 'name'),
+    ).rejects.toThrow(/not declared as type 'secret'/i);
+
+    // …and neither is a `password` field, which is PLAINTEXT at rest and masked
+    // for exactly that reason (ADR-0100). Allowing it here would hand back the
+    // very value the mask exists to withhold.
+    const pw = await buildPasswordEngine();
+    const device = await pw.engine.insert('device', { name: 'router', admin_password: 'hunter2' });
+    await expect(
+      pw.engine.resolveSecretField('device', device.id, 'admin_password'),
+    ).rejects.toThrow(/not declared as type 'secret'/i);
   });
 
   it('fail-closed: writing a secret field with no CryptoProvider throws', async () => {

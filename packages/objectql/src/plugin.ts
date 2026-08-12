@@ -398,6 +398,12 @@ export class ObjectQLPlugin implements Plugin {
     // Idempotent: the bind fully replaces the 'metadata-service' package
     // set, so edited hooks re-bind and deleted hooks tear down.
     ctx.hook('kernel:ready', async () => {
+        // #7737 — FIRST, before anything that might read data: bind every
+        // declared federated object to its remote table now that every
+        // plugin's `start()` (including the declared-datasource auto-connect
+        // in `AppPlugin.start()`) has run. See
+        // {@link reconcileFederatedBindings}.
+        await this.reconcileFederatedBindings(ctx);
         await this.resyncAuthoredHooks(ctx);
         await this.resyncAuthoredActions(ctx);
         // [ADR-0110 D5] Governance inventory — AFTER the authored-action
@@ -975,7 +981,8 @@ export class ObjectQLPlugin implements Plugin {
       // read. Two of the three were engine reads through the full read pipeline
       // (middleware, RLS, field masking) and neither consulted any demand gate.
       // This change removes one and makes the engine's the single producer;
-      // `captureBefore`'s now-redundant read is the identity lane's follow-up.
+      // `captureBefore`'s now-redundant read followed it out in #6656, which
+      // leaves the engine's gated read as the only producer on this path.
       //
       // ⛔ RETIRED — `sys_fetch_previous_delete` (#5929, ADR-0049
       // enforce-or-remove). Do not reintroduce it.
@@ -1059,6 +1066,107 @@ export class ObjectQLPlugin implements Plugin {
    */
 
   /**
+   * Bind every declared FEDERATED (external) object to its remote table —
+   * once, at `kernel:ready`, when the boot has finished moving (#7737).
+   *
+   * ## What the binding is, and why it has to happen twice
+   *
+   * `driver.registerExternalObject(obj)` is what installs an external
+   * object's read metadata: the object -> remote-table mapping
+   * (`external.remoteName` / `remoteSchema`), the `external.columnMap`
+   * translation, and the type-coercion maps. Nothing else installs it. An
+   * external object without it resolves to a table named after the OBJECT
+   * rather than the remote table it declares, so every read against it either
+   * fails with "no such table" or silently answers from the wrong table.
+   *
+   * {@link syncRegisteredSchemas} already calls it — but it runs inside THIS
+   * plugin's `start()`, and the declared datasource that owns the remote
+   * database is auto-connected in `AppPlugin.start()` (ADR-0062 D1), a later
+   * `start()`. So at boot schema-sync time `getDriverForObject()` legitimately
+   * answers `undefined` for a federated object on a healthy boot, and that
+   * call is skipped. Whether the object ends up bound then depends on some
+   * OTHER component re-driving it afterwards — today
+   * `DatasourceConnectionService` does, but only for objects the datasource
+   * knew to name (an explicit `object.datasource`), never for objects a
+   * `datasourceMapping` rule routes to it, and not at all when
+   * `OS_SKIP_SCHEMA_SYNC` is set (that flag is about DDL, and this binding is
+   * DDL-free).
+   *
+   * This pass removes that dependence on boot ORDER: it runs after every
+   * `start()` has completed, re-drives the binding for every registered
+   * external object (idempotent — `registerExternalObject` is pure metadata
+   * assignment), and is therefore correct no matter which plugin connected
+   * the datasource, in which slot, or whether DDL was skipped.
+   *
+   * ## …and it REPORTS what it could not bind
+   *
+   * A federated object that reaches the end of boot with no driver is
+   * declared-but-unreadable while the object stays registered, keeps its REST
+   * routes and keeps rendering in the UI. That is the shape #7737 was filed
+   * for, and the reason its ruling is that the skip must stop being silent:
+   * `debug` at the skip site was the whole diagnosis of a broken federation.
+   * Reported at `error` per the AGENTS.md degradation-log-level rule — from
+   * the outside the deployment looks healthy while declared data is simply
+   * not reachable — naming the objects, their datasources, the consequence
+   * and the fix. A boot with nothing to report says nothing.
+   */
+  private async reconcileFederatedBindings(ctx: PluginContext): Promise<void> {
+    if (!this.ql) return;
+
+    const allObjects = this.ql.registry?.getAllObjects?.() ?? [];
+    const federated = allObjects.filter((o: any) => o?.external != null);
+    if (federated.length === 0) return;
+
+    let bound = 0;
+    const unbound: string[] = [];
+    const unsupported: string[] = [];
+    const failed: string[] = [];
+    const datasourceOf = (name: string): string =>
+      this.ql?.resolveEffectiveDatasource?.(name) ?? '(default)';
+
+    for (const obj of federated) {
+      const driver: any = this.ql.getDriverForObject(obj.name);
+      if (!driver) {
+        unbound.push(`${obj.name} -> datasource '${datasourceOf(obj.name)}'`);
+        continue;
+      }
+      if (typeof driver.registerExternalObject !== 'function') {
+        unsupported.push(`${obj.name} -> driver '${driver.name}'`);
+        continue;
+      }
+      try {
+        await driver.registerExternalObject(obj);
+        bound++;
+      } catch (e: unknown) {
+        failed.push(`${obj.name}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+
+    if (unbound.length === 0 && unsupported.length === 0 && failed.length === 0) {
+      ctx.logger.debug('Federated objects bound to their remote tables', { bound });
+      return;
+    }
+
+    ctx.logger.error(
+      `${unbound.length + unsupported.length + failed.length} federated (external) object(s) are NOT bound to their remote ` +
+        `table, yet stay registered and served: they keep their REST routes and keep rendering in the UI, while every read ` +
+        `against them resolves to a table named after the OBJECT instead of the remote table it declares — so those reads ` +
+        `fail with "no such table", or answer from the wrong table. ` +
+        (unbound.length
+          ? `No driver for the declared datasource (never declared, or its connection was refused/failed — see that ` +
+            `datasource's own connect verdict earlier in this boot): ${unbound.join(', ')}. `
+          : '') +
+        (unsupported.length
+          ? `Driver does not implement external-object registration (ADR-0015 federation): ${unsupported.join(', ')}. `
+          : '') +
+        (failed.length ? `Registration threw: ${failed.join(', ')}. ` : '') +
+        `Fix the datasource/driver named above and restart (or trigger a metadata reload) to re-run this binding.`,
+      undefined,
+      { bound, unbound: unbound.length, unsupported: unsupported.length, failed: failed.length },
+    );
+  }
+
+  /**
    * Synchronize all registered object schemas to the database.
    *
    * Groups objects by their responsible driver, then:
@@ -1123,6 +1231,33 @@ export class ObjectQLPlugin implements Plugin {
     for (const obj of allObjects) {
       const driver = this.ql.getDriverForObject(obj.name);
       if (!driver) {
+        // #7737 — for a FEDERATED object this skip is not a schema-sync
+        // detail. `registerExternalObject` (just below) is the ONLY thing
+        // that installs the object -> remote-table mapping, and it lives past
+        // this guard: skip it and every read of that object resolves against
+        // a table named after the object instead of the remote table it
+        // declares.
+        //
+        // It is also NOT, by itself, a defect. Boot schema-sync runs inside
+        // this plugin's `start()`, while a declared datasource is
+        // auto-connected in `AppPlugin.start()` — a later `start()` on every
+        // composition that has one — so on a perfectly healthy boot the
+        // driver genuinely does not exist yet at this line.
+        //
+        // Hence the split: quiet HERE, because the deferral is expected, and
+        // reconciled + REPORTED at `kernel:ready` by
+        // {@link reconcileFederatedBindings}, after every `start()` has run.
+        // That is the point at which "still no driver" is final and is a real
+        // defect, and it is reported as one — this skip is no longer the last
+        // word on a declared external object.
+        if (obj.external != null) {
+          ctx.logger.debug(
+            'No driver yet for federated object — deferring its remote-table binding to the kernel:ready reconciliation',
+            { object: obj.name, datasource: this.ql.resolveEffectiveDatasource?.(obj.name) },
+          );
+          skipped++;
+          continue;
+        }
         ctx.logger.debug('No driver available for object, skipping schema sync', {
           object: obj.name,
         });

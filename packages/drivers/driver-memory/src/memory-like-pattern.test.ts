@@ -111,16 +111,17 @@ describe('[#7536] driver-memory — $like / $ilike on both faces', () => {
     // The control: `$contains` must NOT have moved.
     //
     // The comparand is `Ltd` rather than the `Industries` every other row uses,
-    // and that is deliberate. Measured on this branch: `{ $contains:
-    // 'Industries' }` answers ['1','2','3','4'] on the QUERY path and
-    // ['1','2','3'] on the reference matcher, because the query path lowers
-    // `$contains` to a RegExp carrying the `i` flag while the matcher uses
-    // `String.includes`. That is this package's KNOWN open divergence — the
-    // #6682 DEBT row the driver-conformance ledger carries for exactly this
-    // pair of faces — and it predates #7536 by a long way. Steering the control
-    // around it keeps this file measuring what it is about; pinning either
-    // answer here would enshrine a defect or fail for a reason unrelated to
-    // `$like`.
+    // and it was steered there deliberately: when this file was written the two
+    // faces disagreed on `{ $contains: 'Industries' }` — ['1','2','3','4'] on
+    // the QUERY path against ['1','2','3'] on the reference matcher — because
+    // the query path lowered `$contains` to a RegExp carrying the `i` flag
+    // while the matcher used `String.includes`. That was #6682's open half, the
+    // last DEBT row the driver-conformance ledger carried for this pair of
+    // faces. #7723 closed it: `filterSubstringPattern` no longer sets the flag,
+    // both faces answer ['1','2','3'] (measured), and the ledger is at zero.
+    // The comparand stays `Ltd` because it is a perfectly good control and
+    // moving it would change what this row measures, not because it still has
+    // to dodge anything.
     ['the $contains control still matches substrings', { name: { $contains: 'Ltd' } }, ['2']],
   ];
 

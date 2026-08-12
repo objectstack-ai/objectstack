@@ -58,7 +58,7 @@ export const ContributorAccess = definePermissionSet({
 | `name` | `string` | snake_case identifier |
 | `label` | `string` | Human-readable name |
 | `object` | `string` | Target object — or `'*'` to apply to every object |
-| `operation` | `'select' \| 'insert' \| 'update' \| 'delete' \| 'all'` | Which operation the policy guards |
+| `operation` | `'select' \| 'insert' \| 'update' \| 'delete' \| 'all'` | Which operation the policy guards. A `select` policy also bounds writes when no write-class policy applies — see below |
 | `using` | `string` | Predicate for rows the user may **see / act on** (compiled into the query filter) |
 | `check` | `string` | Predicate rows must satisfy **after a write**. Omit it and `using` is reused |
 | `positions` | `string[]` | Which positions the policy applies to. Omit = everyone |
@@ -70,6 +70,17 @@ At least one of `using` / `check` is required.
 `insert` / `update` / `delete` guard the matching write; `all` applies to
 everything. Internally `find` / `findOne` / `count` / `aggregate` all map to
 `select`.
+
+**`select` also bounds writes when nothing else does.** A write target must be
+inside the caller's **readable** set, so when **no** write-class policy applies
+to a caller on an object, the `update` / `delete` scope is derived from that
+caller's `select` policies — a record they cannot read is one they cannot
+modify, by id or in bulk. Authoring a write-class policy switches the
+derivation off for that class: an authored `update` predicate then decides
+`update` alone and widens exactly as written. Nothing is derived for `insert`
+(there is no pre-existing row to be visible), and a caller holding the
+read-side superuser bypass (`viewAllRecords` on a private or platform-global
+object) is not narrowed, because their readable set is already unbounded.
 
 ## The expression grammar
 

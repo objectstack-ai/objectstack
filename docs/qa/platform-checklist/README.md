@@ -54,7 +54,11 @@ next-sequential numbers do.
   "fixtures": {                          // what the environment must provide — the #1 cause of
     "app": "showcase",                   // blocked runs in #3358 was missing fixtures, so they are
     "requires": ["…"],                   // declared up front, and known gaps are recorded, not
-    "knownGaps": ["…"]                   // rediscovered every sweep
+    "knownGaps": ["…"],                  // rediscovered every sweep
+    "provisioning": {                    // OPT INTO an area-level recipe (next section) instead of
+      "use": "qa-scratch-authz",         // copying its call sequence into this item
+      "why": "which clauses it unblocks, and what they would score without it"
+    }
   },
   "steps": ["…"],                        // how to exercise it
   "acceptance": [                        // ★ the acceptance criteria — one clause per assertable fact
@@ -87,6 +91,74 @@ Design notes:
 - **`automated` is the 🤖 lane** of the 15.1 plan: once a permanent test pins an item,
   runs may satisfy it by executing that test and citing its output as evidence, instead
   of re-driving the browser.
+
+### Area-level `fixtures` — one named provisioning recipe, many items
+
+When several items in an area need the *same* environment that stock seeds do not
+provide, the recipe is written **once at the area level** and items **reference** it. Two
+halves, both required — a recipe nobody references is dead text, and a reference to a
+recipe that isn't there is a dangling pointer. The worked instance is `qa-scratch-authz`
+in [`areas/attachments-storage.json`](./areas/attachments-storage.json) (#7716/#7670);
+copy its shape rather than inventing a second one.
+
+**Half 1 — the recipe**, a keyed block beside the area's `area`/`title`/`items` keys:
+
+```jsonc
+"fixtures": {                            // AREA level — a sibling of "items", not inside one
+  "$comment": "…",                       // what this block is, and the replay rule for runners
+  "qa-scratch-authz": {                  // the recipe KEY — what items name in `provisioning.use`
+    "title": "Scratch authz parents (qa_vault / qa_shared / qa_nofiles) + two member personas",
+    "why": "what is missing from stock seeds, and which clauses block(fixture) without it",
+    "provenance": "run #7635 (framework 92f26f75) → #7670",   // where the recipe was proven
+    "app": "showcase",
+    "requires": ["capabilities/sessions the recipe itself needs before step 1"],
+    "sequence": [                        // the calls, in order — replayable literally
+      { "step": 1,
+        "call": "POST /api/v1/packages",
+        "body": { "…": "…" },            // optional; omit for a non-body step
+        "expect": "what a correct response looks like — and the re-run/409 caveat",
+        "source": "framework file:line that grounds the call and its shape" }
+    ],
+    "teardown": "the one call (or the cheaper discard-the-DB path) that undoes it",
+    "knownGaps": ["where the recipe is known to be sharp — e.g. an SDK helper that drops ?package="]
+  }
+}
+```
+
+**Half 2 — the reference**, on each item that needs it:
+
+```jsonc
+"fixtures": {
+  "app": "showcase",
+  "requires": ["…"],                     // item-specific needs stay here
+  "provisioning": {
+    "use": "qa-scratch-authz",           // must match a key in the AREA's fixtures block
+    "why": "which of THIS item's clauses the recipe unblocks, and what they'd score without it"
+  },
+  "knownGaps": ["CLOSED by the qa-scratch-authz recipe (#7670): … ; fall back to <pin> only if …"]
+}
+```
+
+Why this shape:
+
+- **Recipes are runtime-provisioned.** No repo file is touched and nothing is seeded, so
+  the only cleanup is the `teardown` line. That is what makes a recipe safe to replay on
+  a live boot — and why `requires` must name the capability the recipe itself needs
+  (e.g. a session holding `manage_metadata`) rather than assuming a bare admin session.
+- **Every call cites framework source at `file:line`.** Replay them literally; if one
+  4xxs, re-read the citation before assuming the recipe rotted.
+- **`why` is the debt marker.** A recipe exists because stock fixtures cannot demonstrate
+  something — the same discipline as a coverage waiver. Landing the fixture in the
+  showcase seeds proper retires the recipe; until then `why` says what is missing and
+  which clauses would go `blocked(fixture)` without it.
+- **Opting in does not delete the item's `knownGaps`** — it rewrites them as
+  *CLOSED-by-recipe*, naming any pinned fallback and asking the run to record **which**
+  of the two its verdict rests on. Deleting the gap loses the reason the recipe exists.
+
+The validator does **not** yet resolve `provisioning.use` against the area's `fixtures`
+keys — that was deliberately deferred (option C on #7716's open question, tracked at
+#7720), to be revisited if the recipe shape spreads to more areas. Until then a typo'd
+`use` is caught by review, not by `check:platform-checklist`: copy the key, don't retype it.
 
 ## Lifecycle — append, change, retire (never delete)
 

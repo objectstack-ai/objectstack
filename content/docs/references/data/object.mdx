@@ -117,7 +117,7 @@ const result = ApiMethod.parse(data);
 | **isSystem** | `boolean` | optional | Is system object (protected from deletion; defaults its org-wide sharing to public when no sharingModel is set — plugin-sharing) |
 | **managedBy** | `Enum<'platform' \| 'config' \| 'system-data' \| 'engine-owned' \| 'append-only' \| 'better-auth'>` | optional | Lifecycle bucket — platform (user CRUD) \| config (admin authored) \| system-data (platform-defined schema, admin/user-writable data) \| engine-owned (engine owns the lifecycle, no user writes) \| append-only (audit) \| better-auth (identity). UI clients honour the resolved affordance matrix. |
 | **ownership** | `Enum<'user' \| 'business_unit' \| 'org' \| 'none'>` | optional | Record-ownership model: user (default — injects reassignable owner_id plus owning_business_unit_id) \| business_unit (unit-owned: owning_business_unit_id only, no owner_id) \| org \| none (no per-record owner, neither anchor). Distinct from the package own/extend contribution kind. |
-| **userActions** | `{ create?: boolean; import?: boolean; edit?: boolean \| object; delete?: boolean \| object; … }` | optional | Per-object override of the resolved CRUD affordance matrix. |
+| **userActions** | `{ create?: boolean \| object; import?: boolean \| object; edit?: boolean \| object; delete?: boolean \| object; … }` | optional | Per-object override of the resolved CRUD affordance matrix. |
 | **systemFields** | `false \| { tenant?: boolean; audit?: boolean }` | optional | Opt out of, or selectively disable, registry-level system-field auto-injection. |
 | **datasource** | `string` | optional | Target Datasource ID. "default" is the primary DB. |
 | **external** | `{ remoteName?: string; remoteSchema?: string; writable?: boolean; columnMap?: Record<string, string>; … }` | optional | Remote table binding for federated (external) objects. |
@@ -293,15 +293,15 @@ Type: `string[]`
 
 ## RowCrudActionOverride
 
-Boolean-or-predicates override for a built-in row CRUD affordance.
+Boolean-or-predicates override for a built-in CRUD affordance.
 
 ### Properties
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | optional | Object-level on/off for the generic affordance; same meaning as the bare boolean form. Omitted → managedBy bucket default. |
-| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Per-record CEL predicate; false → hide the row button for that record. Fail-closed. |
-| **disabledWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Per-record CEL predicate; true → render the row button disabled for that record. Fail-soft. |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | CEL predicate over the record in scope (row record for edit/delete, host record for a related-list create/import toolbar); false → hide the button. Fail-closed. |
+| **disabledWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | CEL predicate over the record in scope (row record for edit/delete, host record for a related-list create/import toolbar); true → render the button disabled. Fail-soft. |
 
 
 ---

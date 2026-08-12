@@ -314,3 +314,114 @@ describe('createMemoryI18n locale fallback', () => {
         expect(i18n.t('hello', 'ja')).toBe('Hello');
     });
 });
+
+describe('createMemoryI18n supportedLocales narrowing (#7679)', () => {
+    // `GET /i18n/locales` advertised four locales on an app declaring two.
+    // Nothing was wrong with what was LOADED — every platform plugin ships an
+    // `en/zh-CN/ja-JP/es-ES` bundle and pushes it at `kernel:ready`, which is
+    // correct. What was wrong is that the loaded set was REPORTED as the set
+    // the app offers, so a picker built from the route handed users locales in
+    // which only `sys_*` metadata is translated.
+
+    /** The four-locale platform reality this fix has to narrow. */
+    function loadedFourLocales() {
+        const i18n = createMemoryI18n();
+        i18n.loadTranslations('en', { objects: { sys_user: { label: 'User' } } });
+        i18n.loadTranslations('zh-CN', { objects: { sys_user: { label: '用户' } } });
+        i18n.loadTranslations('ja-JP', { objects: { sys_user: { label: 'ユーザー' } } });
+        i18n.loadTranslations('es-ES', { objects: { sys_user: { label: 'Usuario' } } });
+        return i18n;
+    }
+
+    it('reports only the declared locales — the #7679 repro', () => {
+        const i18n = loadedFourLocales();
+        expect(i18n.getLocales().sort()).toEqual(['en', 'es-ES', 'ja-JP', 'zh-CN']);
+
+        i18n.setSupportedLocales(['en', 'zh-CN']);
+        expect(i18n.getLocales()).toEqual(['en', 'zh-CN']);
+    });
+
+    it('narrows what is REPORTED, not what is LOADED — undeclared locales stay servable', () => {
+        // Explicitly out of scope for #7679, and pinned so nobody "completes"
+        // the fix by unloading the bundles. `sys_*` translations for a locale
+        // the app does not advertise cost nothing sitting in the map, and
+        // anything that already asked for them by code keeps working.
+        const i18n = loadedFourLocales();
+        i18n.setSupportedLocales(['en', 'zh-CN']);
+
+        expect(i18n.getLocales()).not.toContain('ja-JP');
+        expect(i18n.getTranslations('ja-JP')).toEqual({ objects: { sys_user: { label: 'ユーザー' } } });
+        expect(i18n.t('objects.sys_user.label', 'ja-JP')).toBe('ユーザー');
+    });
+
+    it('applies at READ time, so bundles loaded AFTER the declaration are narrowed too', () => {
+        // The ordering that makes a one-shot prune wrong: `AppPlugin` declares
+        // the set during its own setup, and the platform plugins push their
+        // bundles later, at `kernel:ready`. A prune would narrow only whatever
+        // had loaded first and the rest would grow straight back.
+        const i18n = createMemoryI18n();
+        i18n.setSupportedLocales(['en', 'zh-CN']);
+        i18n.loadTranslations('en', { a: 'a' });
+        i18n.loadTranslations('ja-JP', { a: 'あ' });
+
+        expect(i18n.getLocales()).toEqual(['en', 'zh-CN']);
+    });
+
+    it('DECISION 1 — an app that declares nothing reports every loaded locale', () => {
+        const i18n = loadedFourLocales();
+        expect(i18n.getLocales().sort()).toEqual(['en', 'es-ES', 'ja-JP', 'zh-CN']);
+
+        // Same answer for an explicit clear and for a declaration carrying no
+        // usable code: absent is "no narrowing", never "narrow to nothing".
+        i18n.setSupportedLocales(undefined);
+        expect(i18n.getLocales().sort()).toEqual(['en', 'es-ES', 'ja-JP', 'zh-CN']);
+        i18n.setSupportedLocales([]);
+        expect(i18n.getLocales().sort()).toEqual(['en', 'es-ES', 'ja-JP', 'zh-CN']);
+    });
+
+    it('DECISION 2 — a declared locale with no bundle is REPORTED, not dropped', () => {
+        // Declared-but-unserved. The declaration is the app's statement of
+        // intent and the client is entitled to see it; a silently shortened
+        // list leaves the authoring gap invisible on both sides. Reads degrade
+        // to the default locale exactly the way a half-translated bundle does.
+        const i18n = loadedFourLocales();
+        i18n.setSupportedLocales(['en', 'zh-CN', 'fr-FR']);
+
+        expect(i18n.getLocales()).toEqual(['en', 'zh-CN', 'fr-FR']);
+        expect(i18n.getTranslations('fr-FR')).toEqual({});
+        expect(i18n.t('objects.sys_user.label', 'fr-FR')).toBe('User');
+    });
+
+    it('a declaration can be replaced, and clearing restores the loaded set', () => {
+        const i18n = loadedFourLocales();
+        i18n.setSupportedLocales(['en']);
+        expect(i18n.getLocales()).toEqual(['en']);
+        i18n.setSupportedLocales(['zh-CN', 'en']);
+        expect(i18n.getLocales()).toEqual(['zh-CN', 'en']);
+        i18n.setSupportedLocales(undefined);
+        expect(i18n.getLocales().sort()).toEqual(['en', 'es-ES', 'ja-JP', 'zh-CN']);
+    });
+
+    it('the caller cannot mutate the stored declaration through the array it passed or got back', () => {
+        const i18n = loadedFourLocales();
+        const declared = ['en', 'zh-CN'];
+        i18n.setSupportedLocales(declared);
+        declared.push('ja-JP');
+        expect(i18n.getLocales()).toEqual(['en', 'zh-CN']);
+
+        i18n.getLocales().push('es-ES');
+        expect(i18n.getLocales()).toEqual(['en', 'zh-CN']);
+    });
+
+    it('narrows the authored overlay too — authored-only locales are not a bypass', () => {
+        // `getLocales()` unions the static and authored maps, so a locale that
+        // exists only as runtime-authored `translation` metadata (#2591) would
+        // otherwise slip past the declaration.
+        const i18n = loadedFourLocales();
+        i18n.replaceAuthoredTranslations({ 'ko-KR': { objects: { sys_user: { label: '사용자' } } } });
+        expect(i18n.getLocales()).toContain('ko-KR');
+
+        i18n.setSupportedLocales(['en', 'zh-CN']);
+        expect(i18n.getLocales()).toEqual(['en', 'zh-CN']);
+    });
+});

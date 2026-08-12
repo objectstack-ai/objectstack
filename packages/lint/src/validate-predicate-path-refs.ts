@@ -103,7 +103,10 @@
  *    unjudged.
  *  - **A `schemaId` that resolves to no schema.** A stack may name a schema this
  *    package cannot see (a custom one, or a type served only at runtime). No
- *    oracle, no verdict.
+ *    oracle, no verdict — for the two RESOLUTION limbs. The site is still
+ *    walked so the oracle-free right-hand limb runs (#7696); before that it was
+ *    skipped wholesale, which is the shape a shared walk quietly imposes on a
+ *    rule that never needed the thing being shared.
  *
  * ## Repeater rows rebind `data`, and the rule follows (#6254)
  *
@@ -180,12 +183,47 @@
  *    correctly is a false build error in the one direction a gate may not fail
  *    in.
  *
+ * ### One position, one prescription (#7696)
+ *
+ * A BARE word on the right — `data.type == active` — used to draw three
+ * findings across two files, and they prescribed opposite fixes:
+ * `visibility-bare-identifier` (`error`) and `predicate-path-unrooted`
+ * (`error`, when the word is also a schema key) both read it as a dropped
+ * binding root and said write `<root>.active`; this rule read it as a literal
+ * missing its quotes and said write `'active'`. The `error`s were the ones that
+ * blocked the write.
+ *
+ * They are not two defensible opinions. The rooted spelling they prescribe —
+ * `data.type == data.active` — is a path on the RIGHT, which is this rule's own
+ * `error` arm one paragraph up: an author who obeys the loud finding lands on a
+ * louder one, and if they then "fix" that by making the path resolve, #7214's
+ * `predicate-path-unresolved` is the third corner. So the root reading is not a
+ * competing fix on this surface; it is a spelling the surface does not have,
+ * and the `error`'s own bar ("there is no reading of the metadata under which it
+ * was going to work") is FALSE here — the literal reading works today, which is
+ * why the bare arm is `warning` in the first place.
+ *
+ * Both root-prescribing rules therefore stand down for identifiers that occur
+ * ONLY as a bare right operand of `==` / `!=` on a metadata-editing form
+ * ({@link bareRhsOnlyIdentifiers}), and this rule's bare-arm finding absorbs
+ * what they were trying to say: it names BOTH readings, gives the sanctioned
+ * spelling for each, and says in as many words that adding the root in place is
+ * not one of them. ⛔ Which reading the author meant is still not decided — that
+ * is the thing no linter can know, and inventing an answer is what the three
+ * contradicting messages were doing.
+ *
+ * The stand-down is per-IDENTIFIER, never per-predicate: `status == active`
+ * keeps its refusal, because `status` on the left is a genuine dropped root and
+ * nothing about the right-hand word says otherwise.
+ *
  * ### What this rule deliberately does NOT do
  *
  *  - **Suppress the resolution limbs.** `data.a == data.tpye` reports twice —
  *    once because `tpye` is not a key, once because the position is a literal.
  *    Both statements are true and their fixes differ, and #7214's behaviour is
- *    not this rule's to narrow.
+ *    not this rule's to narrow. The one exception is the bare-word position
+ *    above, where the two verdicts were not merely different but mutually
+ *    unsatisfiable.
  *  - **Judge `in`'s array parse.** The same `parseLiteral` tail is reachable
  *    through `x in [...]` (objectui#4266), which is a distinct defect in the
  *    consumer and deliberately not folded in here.
@@ -204,6 +242,12 @@ import { getMetadataTypeSchema } from '@objectstack/spec/kernel';
 import { findClosestMatches, formatSuggestion } from '@objectstack/spec';
 
 import { collectionEntries } from './collection-entries.js';
+import {
+  COMPREHENSION_MACROS,
+  EQUALITY_OPS,
+  bareRhsOnlyIdentifiers,
+  schemaIdOf,
+} from './predicate-rhs-position.js';
 import { formViewSites } from './view-walk.js';
 
 export const PREDICATE_PATH_UNRESOLVED = 'predicate-path-unresolved';
@@ -267,13 +311,6 @@ const PREDICATE_KEYS = ['visibleWhen', 'visibleOn'] as const;
 
 /** The binding root this rule resolves. Metadata-editing forms only — see the module note. */
 const ROOT = 'data';
-
-/**
- * CEL comprehension macros: the receiver-call forms that BIND their first
- * argument as a loop variable. A bare identifier that is one of those is not a
- * dropped root, so it is declared before the unrooted limb runs.
- */
-const COMPREHENSION_MACROS = new Set(['all', 'exists', 'exists_one', 'map', 'filter']);
 
 // ── Zod introspection ───────────────────────────────────────────────
 //
@@ -490,9 +527,6 @@ function rootedPaths(node: unknown, out: string[][]): void {
  */
 const PATH_SHAPED_RHS = /^[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*$/;
 
-/** The comparison operators whose right side the renderer parses as a literal. */
-const EQUALITY_OPS = new Set(['==', '!=']);
-
 /** One `==` / `!=` site: the operator as written, and its right operand. */
 interface EqualitySite {
   op: string;
@@ -582,18 +616,6 @@ function isRec(v: unknown): v is AnyRec {
   return !!v && typeof v === 'object' && !Array.isArray(v);
 }
 
-/**
- * The `schemaId` a form view resolves its row shape from, or `undefined` when
- * the view is not schema-bound. Read off `ViewDataSourceSchema`'s `schema`
- * member (`view.zod.ts:151-161`) — the shape `defineForm` writes.
- */
-function schemaIdOf(view: AnyRec): string | undefined {
-  const data = view.data;
-  if (!isRec(data)) return undefined;
-  if (data.provider !== 'schema') return undefined;
-  return typeof data.schemaId === 'string' ? data.schemaId : undefined;
-}
-
 function checkPredicate(
   source: string,
   scope: unknown,
@@ -641,37 +663,51 @@ function checkPredicate(
   }
 
   // ── `predicate-path-unrooted` ──
+  //
+  // Skipped entirely when the scope is not key-bearing (no oracle, no verdict).
+  // Written as a guarded BLOCK rather than an early return so the right-hand
+  // limb below still runs: that one asks about a POSITION and needs no oracle
+  // at all, and gating it behind a resolvable schema is how it went silent on a
+  // form whose `schemaId` this package cannot see.
   const declaredHere = keysOf(scope);
-  if (!declaredHere) return;
-  const values = new Set<string>();
-  const excluded = new Set<string>();
-  classifyIdentifiers(ast, values, excluded);
-  for (const id of values) {
-    if (excluded.has(id) || !declaredHere.includes(id)) continue;
-    findings.push({
-      severity: 'error',
-      rule: PREDICATE_PATH_UNROOTED,
-      where,
-      path,
-      message:
-        `predicate references \`${id}\` as a bare identifier, but \`${id}\` is a key of the schema `
-        + `this form edits — the binding root was dropped. Values are bound under \`${ROOT}\` and are `
-        + `never flattened to top level, so \`${id}\` resolves to nothing, the predicate can never `
-        + `evaluate and the console falls OPEN: the element renders unconditionally and looks exactly `
-        + `like one carrying no predicate at all (#5149, #6254).`,
-      hint:
-        `Write \`${ROOT}.${id}\` instead of \`${id}\`. A metadata-editing form binds the row under `
-        + `edit as \`${ROOT}\` at every depth — inside a repeater \`${ROOT}\` is the ROW, but it is `
-        + `still spelled \`${ROOT}\` (there is no implicit row scope).`,
-    });
+  // #7696 — an identifier that occurs ONLY as the bare right operand of
+  // `==` / `!=` is in a LITERAL slot, so it is not a dropped root. Suppressed
+  // here rather than re-diagnosed: the right-hand limb below reports the same
+  // token, once, with the prescription that surface actually accepts.
+  const rhsOnly = bareRhsOnlyIdentifiers(ast);
+  if (declaredHere) {
+    const values = new Set<string>();
+    const excluded = new Set<string>();
+    classifyIdentifiers(ast, values, excluded);
+    for (const id of values) {
+      if (excluded.has(id) || rhsOnly.has(id) || !declaredHere.includes(id)) continue;
+      findings.push({
+        severity: 'error',
+        rule: PREDICATE_PATH_UNROOTED,
+        where,
+        path,
+        message:
+          `predicate references \`${id}\` as a bare identifier, but \`${id}\` is a key of the schema `
+          + `this form edits — the binding root was dropped. Values are bound under \`${ROOT}\` and are `
+          + `never flattened to top level, so \`${id}\` resolves to nothing, the predicate can never `
+          + `evaluate and the console falls OPEN: the element renders unconditionally and looks exactly `
+          + `like one carrying no predicate at all (#5149, #6254).`,
+        hint:
+          `Write \`${ROOT}.${id}\` instead of \`${id}\`. A metadata-editing form binds the row under `
+          + `edit as \`${ROOT}\` at every depth — inside a repeater \`${ROOT}\` is the ROW, but it is `
+          + `still spelled \`${ROOT}\` (there is no implicit row scope).`,
+      });
+    }
   }
 
   // ── `predicate-rhs-path-shaped` (#7659) ──
   //
   // Deliberately independent of `scope`: this asks about the POSITION a token
   // sits in, never about what it resolves to. It therefore runs even where the
-  // two limbs above went opaque, and it does not suppress them — see the module
-  // note's §The right-hand side.
+  // two limbs above went opaque, and it does not suppress them where they have
+  // something of their own to say — see the module note's §The right-hand side.
+  // For the ONE position where they contradicted it, they now stand down and
+  // this is the single finding (#7696, §One position, one prescription).
   const sites: EqualitySite[] = [];
   equalitySites(ast, sites);
   for (const { op, right } of sites) {
@@ -696,16 +732,25 @@ function checkPredicate(
         : `predicate compares against the unquoted word \`${text}\` on the RIGHT of \`${op}\`. The `
           + `right-hand side of \`${op}\` is a literal, never a reference, so this is read as the `
           + `literal string "${text}" — which is probably what you meant, and is why it appears to `
-          + `work. It is outside the declared subset all the same (\`path == 'literal'\`), it is `
-          + `indistinguishable from a dropped \`${ROOT}.\` root, and it stops working when this `
-          + `surface moves to the real CEL evaluator, where a bare \`${text}\` resolves to nothing `
-          + `(objectui#4049).`,
-      hint:
-        `Two sanctioned spellings. (1) If you meant the TEXT, quote it: \`${op} '${text}'\`. `
-        + `(2) If you meant the PATH, restructure so the path is on the LEFT and a literal is on `
-        + `the right — comparing one path against another is outside the subset this surface `
-        + `renders, which is \`path == 'literal'\` / \`path != 'literal'\` and nothing wider. There `
-        + `is no third spelling that compares two paths here.`,
+          + `work. It is outside the declared subset all the same (\`path == 'literal'\`), and it `
+          + `stops working when this surface moves to the real CEL evaluator, where a bare `
+          + `\`${text}\` resolves to nothing (objectui#4049). The token also reads as a \`${ROOT}.\` `
+          + `root someone dropped, so this one finding carries BOTH readings: which one you meant `
+          + `is the thing no linter can know, and it changes the fix (#7696).`,
+      hint: dotted
+        ? `Two sanctioned spellings. (1) If you meant the TEXT, quote it: \`${op} '${text}'\`. `
+          + `(2) If you meant the PATH, restructure so the path is on the LEFT and a literal is on `
+          + `the right — comparing one path against another is outside the subset this surface `
+          + `renders, which is \`path == 'literal'\` / \`path != 'literal'\` and nothing wider. There `
+          + `is no third spelling that compares two paths here.`
+        : `Two sanctioned spellings, and you must pick — they are not the same predicate. `
+          + `(1) If you meant the TEXT \`${text}\`, quote it: \`${op} '${text}'\`. That is what this `
+          + `renders as today, so it changes no behaviour and is the fix unless you know otherwise. `
+          + `(2) If you meant the FIELD \`${ROOT}.${text}\`, move it to the LEFT and put a literal on `
+          + `the right, e.g. \`${ROOT}.${text} == 'yes'\`. ⛔ Do NOT simply add the root in place: `
+          + `\`${op} ${ROOT}.${text}\` is a path on the RIGHT, which this surface parses as the `
+          + `literal string "${ROOT}.${text}" — it is refused by this same rule at \`error\`, and it `
+          + `is FALSE on every row. The subset here is \`path == 'literal'\` and nothing wider.`,
     });
   }
 }
@@ -784,16 +829,19 @@ export function validatePredicatePathRefs(
     for (const site of formViewSites(view, viewPath)) {
       const schemaId = schemaIdOf(site.view);
       if (!schemaId) continue;
+      // An id no schema resolves leaves the two RESOLUTION limbs without an
+      // oracle, and they go quiet on their own (`keysOf(undefined)` is `null`,
+      // and every `stepInto` is `opaque`). The site is still walked, because
+      // the right-hand-position limb needs no oracle — and since #7696 the
+      // sibling rules STAND DOWN on this surface, walking past it would turn a
+      // reconciliation into a silence. A resolver that throws on an unknown id
+      // is the same case and must not take the build down with it.
       let root: unknown;
       try {
         root = resolveSchema(schemaId);
       } catch {
-        // A resolver that throws on an unknown id must not take the build down
-        // with it — no oracle, no verdict, same as an id that resolves to
-        // `undefined`.
-        continue;
+        root = undefined;
       }
-      if (!root) continue;
 
       const where = site.surface
         ? `view "${viewName}" · ${site.surface} (schema "${schemaId}")`

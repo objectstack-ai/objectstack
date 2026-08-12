@@ -148,7 +148,12 @@ export const SysOrganization = ObjectSchema.create({
       target: '/api/v1/cloud/organizations/{id}/change-slug',
       method: 'POST',
       requiresFeature: 'multiOrgEnabled',
-      confirmText: 'Renaming the slug rewrites every platform subdomain for this org and parks the old slug for 90 days. Continue?',
+      // Confirm question on `description`, not `confirmText`: this action collects
+      // params, and pairing the two keys opens two dialogs for one decision
+      // (#7278 ruling 2026-08-10, swept by #7309). The two param-LESS actions
+      // above (`delete_organization`, `leave_organization`) keep `confirmText`
+      // — with no param dialog, the confirm IS the only dialog.
+      description: 'Renaming the slug rewrites every platform subdomain for this org and parks the old slug for 90 days. Continue?',
       successMessage: 'Organization slug changed',
       refreshAfter: true,
       params: [
