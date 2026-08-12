@@ -10,6 +10,12 @@ import {
   TENANT_SCOPE_FIELD_DEF,
   OWNER_FIELD_DEF,
   OWNING_BUSINESS_UNIT_FIELD_DEF,
+  // [#7774] The i18n-bundle identity table and its value reader, sunk into
+  // metadata-core so this registry and the `/meta` list merge in
+  // `@objectstack/metadata-protocol` answer "what is this type's identity?"
+  // from one place. Re-exported below under its original name.
+  ITEM_KEY_DISCRIMINATORS,
+  readDiscriminatorValue as discriminatorValue,
 } from '@objectstack/metadata-core';
 import { SystemFieldName } from '@objectstack/spec/system';
 import { resolveTenancyPosture, resolveSearchPinyinEnabled } from '@objectstack/types';
@@ -881,34 +887,26 @@ function isCodeArtifactBody(item: unknown): boolean {
  *
  * `registerItem` keys every item by `name` (composite `<packageId>:<name>` when
  * a package ships it). For most types that IS the identity. `email_template`
- * declares otherwise: `EmailTemplateDefinitionSchema` states that "multiple
- * rows with the same `name` but different `locale` form an i18n bundle; the
- * service picks the best match for the recipient's locale, falling back to
- * `en-US`" (`packages/spec/src/system/email-template.zod.ts`), and its header
- * says a template "is resolved by `(name, locale)`". A name-only key cannot
- * hold that: the second locale collided with the first and overwrote it
- * through the `[Registry] Overwriting …` path, so a stack authoring en-US and
- * zh-CN copies materialized ONE row into `sys_email_template` — declared, not
- * enforced.
+ * declares otherwise — see the table's own TSDoc for the schema clause it
+ * enforces and for why the discriminator is declared per type.
  *
- * The discriminator is declared PER TYPE rather than duck-typed off a `locale`
- * property, because the key computation is generic to every registered
- * metadata type: reading whatever `item.locale` happened to be set would
- * silently re-key any other type that grows a locale-ish field, which is a much
- * larger contract change than the one this table makes. `email_template` is the
- * only type on `main` whose schema declares a top-level `locale` that is part
- * of its identity (`grep '  locale:' packages/spec/src/**\/*.zod.ts` — the
- * other hits are SCIM users, execution context, discovery and translation
- * payloads, none of which is a registered metadata type).
+ * [#7774] The table itself now lives in `@objectstack/metadata-core` and is
+ * re-exported here unchanged. It moved because this registry is not the only
+ * layer that keys metadata by name: `@objectstack/metadata-protocol`'s
+ * unscoped `/meta/<type>` list merge keys by `(package, name)` too, and a
+ * bundle that survives registration only to collapse in that merge is still
+ * collapsed. objectql depends on metadata-protocol, so the protocol package
+ * cannot import from here; metadata-core is the package both already depend
+ * on. The re-export is deliberate and load-bearing —
+ * `registry-i18n-bundle-key.test.ts` imports `ITEM_KEY_DISCRIMINATORS` from
+ * this module by name.
  *
- * `canonical` is the bundle member a bare-name read resolves to. It mirrors the
- * schema's own `locale` default and `sendTemplate`'s documented fallback, and
- * `registry-i18n-bundle-key.test.ts` pins the two together so this copy cannot
- * drift from the spec.
+ * The storage-key FORMAT below ({@link BUNDLE_KEY_SEPARATOR},
+ * {@link withDiscriminator}, {@link bundleBaseKey}, {@link collectBundle})
+ * stayed here on purpose: it encodes a discriminator into THIS registry's
+ * `<packageId>:<name>` Map keys, which no other package reads or writes.
  */
-export const ITEM_KEY_DISCRIMINATORS: Readonly<Record<string, { field: string; canonical: string }>> = {
-  email_template: { field: 'locale', canonical: 'en-US' },
-};
+export { ITEM_KEY_DISCRIMINATORS };
 
 /**
  * Separator between an item's name and its bundle discriminator inside a
@@ -921,13 +919,6 @@ export const ITEM_KEY_DISCRIMINATORS: Readonly<Record<string, { field: string; c
  * AFTER the last `:`.
  */
 const BUNDLE_KEY_SEPARATOR = '@';
-
-/** The discriminator value an item declares, trimmed; `''` when it declares none. */
-function discriminatorValue(item: unknown, field: string): string {
-  const holder = item as Record<string, any> | null | undefined;
-  const raw = holder?.[field] ?? holder?.content?.[field];
-  return typeof raw === 'string' ? raw.trim() : '';
-}
 
 /** `pkg:auth.welcome` + `zh-CN` → `pkg:auth.welcome@zh-CN`. */
 function withDiscriminator(baseKey: string, value: string): string {
@@ -1450,13 +1441,63 @@ export class SchemaRegistry {
    * the same way rather than growing a second, drifting copy.
    */
   private foldExtenders(contributors: ObjectContributor[], base: ObjectContributor): ServiceObject {
-    let merged = { ...base.definition };
+    return this.foldExtendersOntoDefinition(contributors, base.definition);
+  }
+
+  /**
+   * The fold itself, over a base DEFINITION rather than a base contributor, so
+   * {@link foldObjectExtendersOnto} can apply it to a body that never came
+   * from this registry without growing a second copy of the merge.
+   */
+  private foldExtendersOntoDefinition(
+    contributors: ObjectContributor[],
+    baseDefinition: ServiceObject,
+  ): ServiceObject {
+    let merged = { ...baseDefinition };
     for (const contrib of contributors) {
       if (contrib.ownership === 'extend') {
         merged = mergeObjectDefinitions(merged, contrib.definition);
       }
     }
     return merged;
+  }
+
+  /**
+   * [#7556] Fold this object's `extend` contributors onto a base body the
+   * CALLER supplies — the same fold {@link resolveObject} (D9.2) and
+   * {@link resolveOwnerLayer} (D9.6) apply, exposed for a base layer that did
+   * not come from this registry.
+   *
+   * Why this is public API rather than the protocol reaching for the
+   * contributor list: `GET /meta/object/:name` reaches an object body through a
+   * source this registry never sees — the copy `MetadataPlugin` registers into
+   * the `metadata` SERVICE when a deployment ingests a compiled artifact, where
+   * `objects` and `objectExtensions` are stored as SEPARATE collections. That
+   * body is ONE LAYER, and serving a layer as the resolved schema is what
+   * dropped every `objectExtensions` field from the by-name read (and from both
+   * layers of `?layers=true`) while `GET /meta/object` — which reads
+   * `resolveObject` — kept them. Two folds would re-open exactly that seam one
+   * level down, so there is one.
+   *
+   * Returns `base` untouched when nothing extends the name, so a caller may
+   * apply it unconditionally.
+   *
+   * NOT idempotent, by construction: {@link mergeObjectDefinitions} CONCATENATES
+   * `validations` and `indexes`, so folding an already-folded body would
+   * duplicate both. Callers must apply this only to a base that has not been
+   * through the fold — which is why the protocol applies it to the
+   * MetadataService body and never to a registry-resolved one.
+   */
+  foldObjectExtendersOnto<T>(name: string, base: T): T {
+    if (base === null || typeof base !== 'object') return base;
+    const fqn = this.resolveObjectKey(name);
+    if (fqn === undefined) return base;
+    const contributors = this.objectContributors.get(fqn);
+    if (!contributors || !contributors.some((c) => c.ownership === 'extend')) return base;
+    return this.foldExtendersOntoDefinition(
+      contributors,
+      base as unknown as ServiceObject,
+    ) as unknown as T;
   }
 
   /**
@@ -2057,6 +2098,119 @@ export class SchemaRegistry {
   }
 
   /**
+   * [#7221] Unregister every GENERIC metadata item a package shipped — the
+   * counterpart of {@link unregisterObjectsByPackage}, which is addressed by
+   * package too but reaches only `objectContributors`.
+   *
+   * ## Why this exists at all
+   *
+   * A package writes into TWO stores, and until this method only one of them
+   * had a package-addressed removal verb. `unregisterObjectsByPackage` walks
+   * `objectContributors`; every non-object item a package ships — its `page`,
+   * `view`, `flow`, `app`, `api` … — lives in the generic `metadata` map under
+   * the composite key {@link registerItem} builds, and nothing removed those.
+   * Measured on the real registry before this method existed: after
+   * `uninstallPackage('crm')` the package record was gone while
+   * `getItem('page', 'home')` kept serving the uninstalled package's page, and
+   * `metadata.get('flow')` still held `crm:onboard`, for the life of the
+   * process. That is not a stale cache — it is an uninstall that leaves the
+   * package's UI and API metadata installed.
+   *
+   * It is placed HERE, on the registry, rather than privately on
+   * `MetadataFacade`, because the measurement above says both callers have the
+   * gap: {@link uninstallPackage} is registry-direct and shares it exactly. A
+   * private copy in the facade would have been a second expression of the
+   * "which key belongs to which package" rule (#6808's drift), and would have
+   * left every registry-direct uninstall still half-done.
+   *
+   * ## Identity, expressed once
+   *
+   * Membership is the exact inverse of the construction in `registerItem`:
+   * that method stores under `${packageId}:${baseName}` (plus the `@<disc>`
+   * suffix for a discriminated type), so a key belongs to this package iff it
+   * starts with `${packageId}:`. The discriminator rides along at the end and
+   * needs no special handling here — the whole bundle leaves with the package
+   * that shipped it, which is the same "a name addresses the BUNDLE" rule
+   * `unregisterItem` applies. The prefix relation assumes a package id
+   * contains no `:`, the same assumption `getItem`'s composite scan already
+   * makes with `key.endsWith(':' + name)`.
+   *
+   * ## ⛔ What this deliberately does NOT take, and why it says so out loud
+   *
+   * BARE-key entries are left untouched. A bare key is the ADR-0005
+   * runtime/DB overlay slot — a tenant's own customization, rehydrated from
+   * `sys_metadata` — and it carries no package provenance, so an uninstall
+   * that deleted it would take a tenant's authored data along with the package
+   * it merely overlaid. Nobody authorised that delete, and this verb does not
+   * invent the authorisation.
+   *
+   * That leaves a real consequence: an overlay whose base has just been
+   * uninstalled now layers over nothing. This registry's house pattern for
+   * exactly that state is to make it LOUD rather than to silently delete it or
+   * silently keep it — {@link assertSingleOwnerPerObject}'s ADR-0029 D9.5
+   * orphan-overlay violation names the offender and tells the operator to
+   * "re-install the package that owns it, or delete the sys_metadata row", and
+   * {@link unregisterObjectsByPackage} refuses loudly rather than quietly
+   * tearing down an object other packages extend. So this method warns, naming
+   * every orphaned overlay it left behind, and returns them so a caller that
+   * wants to act on them can.
+   *
+   * ⚠️ Deliberately NOT the object-side D9.7 rule ("an overlay layer leaves
+   * with the base it layers over"). That rule is safe precisely because an
+   * object overlay LAYER is a runtime projection of a `sys_metadata` row the
+   * removal does not touch, so a re-install re-hydrates it and nothing durable
+   * is lost. A bare-key generic entry is the other way round: it IS the
+   * runtime face of that row and there is no separate contributor list holding
+   * the durable copy, so dropping it here would lose the tenant's edit.
+   *
+   * @param packageId The package being uninstalled.
+   * @returns `removed` — the storage keys taken, as `type/key`; and
+   *   `orphanedOverlays` — the bare-key overlays deliberately left behind that
+   *   now have no base, as `type/name`.
+   */
+  unregisterItemsByPackage(packageId: string): { removed: string[]; orphanedOverlays: string[] } {
+    const prefix = `${packageId}:`;
+    const removed: string[] = [];
+    const orphanedOverlays: string[] = [];
+
+    for (const [type, collection] of this.metadata.entries()) {
+      // Collect before deleting — mutating a Map while iterating its own keys
+      // is legal but reads as a trap, and the bare-slot probe below wants the
+      // collection in its post-removal state to be truthful.
+      const owned = [...collection.keys()].filter(key => key.startsWith(prefix));
+      for (const key of owned) {
+        collection.delete(key);
+        removed.push(`${type}/${key}`);
+        this.log(`[Registry] Unregistered ${type}: ${key} (package ${packageId} uninstalled)`);
+      }
+      for (const key of owned) {
+        // The bare (overlay) slot for this item is its key without the package
+        // prefix — the same `bareKey` the artifact-vs-DB collision warning in
+        // `registerItem` compares against, discriminator included.
+        const bareSlot = key.slice(prefix.length);
+        const label = `${type}/${bareSlot}`;
+        if (collection.has(bareSlot) && !orphanedOverlays.includes(label)) {
+          orphanedOverlays.push(label);
+        }
+      }
+    }
+
+    if (orphanedOverlays.length > 0) {
+      console.warn(
+        `[Registry] Package "${packageId}" was uninstalled, but ${orphanedOverlays.length} ` +
+        `runtime/DB overlay row(s) layered over its items were KEPT — they are tenant-authored ` +
+        `(ADR-0005) and an uninstall does not delete them: ${orphanedOverlays.join(', ')}. ` +
+        `Each now overlays nothing — re-install the package that owns it, or delete the ` +
+        `sys_metadata row.`,
+      );
+    }
+    if (removed.length > 0) {
+      this.log(`[Registry] Unregistered ${removed.length} item(s) from package: ${packageId}`);
+    }
+    return { removed, orphanedOverlays };
+  }
+
+  /**
    * Universal Get Method.
    *
    * ADR-0048 §3.3 — *package-scoped* resolution. When `currentPackageId` is
@@ -2473,6 +2627,14 @@ export class SchemaRegistry {
 
     // Unregister objects (will throw if extenders exist)
     this.unregisterObjectsByPackage(id);
+
+    // [#7221] …and everything else the package shipped. The object verb above
+    // reaches `objectContributors` only, so without this an uninstall dropped
+    // the package record while its `page`/`view`/`flow`/`app`/`api` entries
+    // stayed resolvable through `getItem`/`listItems` for the life of the
+    // process. Runs AFTER the object verb because that one can refuse
+    // (ADR-0029 extenders): a refused uninstall must remove nothing at all.
+    this.unregisterItemsByPackage(id);
 
     // Remove package record
     const collection = this.metadata.get('package');

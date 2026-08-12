@@ -981,7 +981,8 @@ export class ObjectQLPlugin implements Plugin {
       // read. Two of the three were engine reads through the full read pipeline
       // (middleware, RLS, field masking) and neither consulted any demand gate.
       // This change removes one and makes the engine's the single producer;
-      // `captureBefore`'s now-redundant read is the identity lane's follow-up.
+      // `captureBefore`'s now-redundant read followed it out in #6656, which
+      // leaves the engine's gated read as the only producer on this path.
       //
       // ⛔ RETIRED — `sys_fetch_previous_delete` (#5929, ADR-0049
       // enforce-or-remove). Do not reintroduce it.

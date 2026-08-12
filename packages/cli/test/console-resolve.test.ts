@@ -18,7 +18,8 @@ import { createRequire } from 'module';
 import {
   resolveConsolePath,
   isConsoleVersionCompatible,
-  warnOnConsoleShaDrift,
+  detectConsoleShaDrift,
+  formatConsoleShaDriftWarning,
 } from '../src/utils/console.js';
 
 // resolveConsolePath() also discovers the real, version-locked workspace
@@ -158,9 +159,15 @@ describe('resolveConsolePath version guard', () => {
   });
 });
 
-describe('warnOnConsoleShaDrift', () => {
+describe('detectConsoleShaDrift', () => {
   const SHA_A = '2b86379384f0f6e99d9a5bb81d73017fd6f99cef';
   const SHA_B = '69d6b94419bcaa11223344556677889900aabbcc';
+
+  /** What resolution reports for a drifted candidate, as the message it renders. */
+  const warningsFor = (consoleDir: string): string[] => {
+    const drift = detectConsoleShaDrift(consoleDir);
+    return drift ? [formatConsoleShaDriftWarning(drift)] : [];
+  };
 
   /**
    * Lay out a monorepo-shaped tree: <root>/.objectui-sha is the pin, and
@@ -184,8 +191,7 @@ describe('warnOnConsoleShaDrift', () => {
 
   it('warns when the dist stamp differs from the pin (the pull-without-rebuild case)', () => {
     const { consoleDir } = makePinnedTree(SHA_A, SHA_B);
-    const warnings: string[] = [];
-    warnOnConsoleShaDrift(consoleDir, (m) => warnings.push(m));
+    const warnings = warningsFor(consoleDir);
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain(SHA_A.slice(0, 12));
     expect(warnings[0]).toContain(SHA_B.slice(0, 12));
@@ -194,15 +200,13 @@ describe('warnOnConsoleShaDrift', () => {
 
   it('is silent when the dist stamp matches the pin', () => {
     const { consoleDir } = makePinnedTree(SHA_A, SHA_A);
-    const warnings: string[] = [];
-    warnOnConsoleShaDrift(consoleDir, (m) => warnings.push(m));
+    const warnings = warningsFor(consoleDir);
     expect(warnings).toEqual([]);
   });
 
   it('is silent for an unstamped dist (pre-guard build / sibling-repo fallback)', () => {
     const { consoleDir } = makePinnedTree(SHA_A, null);
-    const warnings: string[] = [];
-    warnOnConsoleShaDrift(consoleDir, (m) => warnings.push(m));
+    const warnings = warningsFor(consoleDir);
     expect(warnings).toEqual([]);
   });
 
@@ -215,8 +219,7 @@ describe('warnOnConsoleShaDrift', () => {
     fs.writeFileSync(path.join(consoleDir, 'dist', 'index.html'), '<html></html>');
     fs.writeFileSync(path.join(consoleDir, 'dist', '.objectui-sha'), `${SHA_B}\n`);
 
-    const warnings: string[] = [];
-    warnOnConsoleShaDrift(consoleDir, (m) => warnings.push(m));
+    const warnings = warningsFor(consoleDir);
     expect(warnings).toEqual([]);
   });
 });

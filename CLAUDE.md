@@ -19,7 +19,7 @@ All agents share one GitHub identity, so the assignee field can't tell you wheth
 is **yours** — a claim is assign **plus a claim comment with your session ID and branch**
 (`claude/issue-<n>-<slug>`), and before writing code you must re-read the comments: an
 earlier claim with a different session ID means it's taken, whatever the assignee says.
-(#4551 was implemented twice in one morning because this read was skipped — see #4588.)
+(Skipping that read is how one issue got implemented twice in one morning.)
 
 ## ⛔ Worktree-first — before your FIRST file edit (AGENTS.md Prime Directive #11)
 
@@ -52,13 +52,12 @@ stack — your `pop` restores whatever the other agent pushed a moment earlier, 
 own changes stay on the stack for them to take. `pop` reports **success**; the only
 symptom is someone else's files appearing in your `git status`, and a following
 `git add -A` merges their work into your PR. Not hypothetical: it happened between two
-parallel agents mid reverse-verification (objectui#3430) and cost both of them their
-in-flight changes, recoverable only as unreachable commits.
+parallel agents mid reverse-verification and cost both of them their in-flight
+changes, recoverable only as unreachable commits.
 
 Use one of these instead — no shared state, all inside your own worktree:
 
 ```
-git checkout origin/main -- <path>     # then: git checkout <your-branch> -- <path>
 git diff > /tmp/wip.patch && git checkout -- <paths>   # then: git apply /tmp/wip.patch
 git commit -am wip                                     # then: git reset --soft HEAD~1
 git worktree add ../objectstack-<task>-cmp <ref>       # a second tree to compare against

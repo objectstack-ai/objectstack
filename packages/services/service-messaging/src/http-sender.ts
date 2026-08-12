@@ -9,10 +9,46 @@ import type { HttpAckResult, HttpDelivery } from './http-outbox.js';
  * Lifted and generalised from `plugin-webhooks/src/http-sender.ts`: a single
  * stateless attempt (`sendOnce`) plus the retry-schedule classifier
  * (`classifyAttempt`). The dispatcher owns claim/ack; this module owns the wire.
+ *
+ * It also owns both halves of the HMAC contract — {@link deliveryBody} (the exact
+ * bytes that are signed AND sent) and {@link signBody} (how they are signed) — so
+ * the enqueue-time signer and the send-time transport cannot drift into signing
+ * one string and posting another. See {@link HttpDelivery.signature} for why the
+ * signature is computed once, at enqueue, instead of re-derived at send time from
+ * a secret carried on the row.
  */
 
 /** Default per-request timeout. */
 export const DEFAULT_HTTP_TIMEOUT_MS = 15_000;
+
+/** Header carrying the HMAC-SHA256 signature of the request body. */
+export const SIGNATURE_HEADER = 'X-Objectstack-Signature';
+
+/**
+ * The exact request body for a delivery — the bytes that get POSTed, and
+ * therefore the bytes the signature covers.
+ *
+ * A string payload is sent verbatim (a pre-rendered body); anything else is
+ * JSON-serialised. Stable across a persistence round-trip: `SqlHttpOutbox`
+ * stores `JSON.stringify(payload)` and re-parses it on claim, and
+ * `JSON.stringify(JSON.parse(s)) === s` for any `s` that `JSON.stringify`
+ * produced — so signing at enqueue and sending after a reload agree byte for
+ * byte. `http-signature-at-rest.integration.test.ts` pins that.
+ */
+export function deliveryBody(payload: unknown): string {
+    return typeof payload === 'string' ? payload : JSON.stringify(payload ?? null);
+}
+
+/**
+ * Compute the `X-Objectstack-Signature` value for a body: `sha256=<hex>` of
+ * `HMAC-SHA256(body, secret)`.
+ *
+ * The output is safe to persist (it is handed to the receiver on the wire
+ * anyway); the `secret` argument is NOT — see {@link HttpDelivery.signature}.
+ */
+export function signBody(body: string, secret: string): string {
+    return `sha256=${createHmac('sha256', secret).update(body).digest('hex')}`;
+}
 
 /** Truncate response bodies to keep storage cost predictable. */
 const RESPONSE_BODY_CAP = 16 * 1024;
@@ -55,10 +91,7 @@ export async function sendOnce(
     delivery: HttpDelivery,
     fetchImpl: FetchImpl,
 ): Promise<HttpAttemptOutcome> {
-    const body =
-        typeof delivery.payload === 'string'
-            ? delivery.payload
-            : JSON.stringify(delivery.payload ?? null);
+    const body = deliveryBody(delivery.payload);
 
     const headers: Record<string, string> = {
         'Content-Type': 'application/json',
@@ -68,9 +101,11 @@ export async function sendOnce(
         ...(delivery.label ? { 'X-Objectstack-Event': delivery.label } : {}),
         ...(delivery.headers ?? {}),
     };
-    if (delivery.signingSecret) {
-        const sig = createHmac('sha256', delivery.signingSecret).update(body).digest('hex');
-        headers['X-Objectstack-Signature'] = `sha256=${sig}`;
+    // Signed at enqueue (the body is fixed then and never rewritten), so the
+    // signing secret is not on the row for this attempt — or any other — to
+    // carry. #7722.
+    if (delivery.signature) {
+        headers[SIGNATURE_HEADER] = delivery.signature;
     }
 
     const timeoutMs = delivery.timeoutMs ?? DEFAULT_HTTP_TIMEOUT_MS;

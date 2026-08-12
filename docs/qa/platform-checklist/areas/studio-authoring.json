@@ -227,7 +227,7 @@
       "title": "Record-page authoring round-trip: created bound to its object, seeded from the default layout, block-edited, published, rendered",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin (authors)", "end user (opens the record)"],
@@ -249,13 +249,13 @@
         {
           "clause": "the created page persists bound to its object with PRE-SEEDED regions — record:highlights present, regions non-empty",
           "oracle": "network",
-          "verify": "the captured PUT body has type:'record', object:'showcase_invoice', Array.isArray(regions) with blocks including record:highlights (pinned by objectui e2e/live/studio-record-page.spec.ts)",
+          "verify": "the captured PUT body has type:'record', object:'showcase_invoice', Array.isArray(regions) with blocks including record:highlights. ⚠ Drive this by hand: the pin (objectui e2e/live/studio-record-page.spec.ts) is STALE against the current surface — it fills the Object control as an input when it is now a role=combobox button — see automated.stale",
           "evidence": "the captured PUT payload"
         },
         {
           "clause": "the page editor exposes block authoring: the picker offers schema-backed block kinds (Card, Section, Record details)",
           "oracle": "dom",
-          "verify": "after a screenshot confirms the editor rendered, the Add-block dialog lists the three kinds (pinned by objectui e2e/live/studio-editor.spec.ts)",
+          "verify": "after a screenshot confirms the editor rendered, the Add-block dialog lists the three kinds. ⚠ Drive this by hand: the pin (objectui e2e/live/studio-editor.spec.ts) is STALE — it targets a 'Layout' heading that no longer exists and a shipped page the editor correctly locks — see automated.stale",
           "evidence": "screenshot + dialog DOM read"
         },
         {
@@ -275,13 +275,26 @@
         "a new record page opening as a blank canvas (regions: []) is objectui#1541 regressed — the createSeed seeding is the point of the item; FAIL"
       ],
       "traps": ["stale-console-bundle", "hydration-race", "automation-input"],
-      "automated": { "kind": "e2e", "ref": "objectui: e2e/live/studio-record-page.spec.ts" },
+      "automated": {
+        "kind": "e2e",
+        "ref": "objectui: e2e/live/studio-record-page.spec.ts",
+        "stale": {
+          "since": "2026-08-11",
+          "observedIn": "#7695",
+          "ref": "#7753 item 6",
+          "why": "STALE, NOT RED — the spec fails against the CURRENT surface, not against a product defect. `studio-record-page.spec.ts` fills the Object control as an input when it is now a `role=combobox` button; `studio-editor.spec.ts` (cited in source, and the pin behind the Add-block clause) targets a 'Layout' heading that no longer exists, plus a SHIPPED page the editor correctly locks. Neither is reporting a regression.",
+          "runnerRule": "Do NOT satisfy this item by citing these specs' output, and do NOT score their failure as a FAIL of this item — drive the clauses by hand (browser + the captured PUT) until the specs are re-pointed. A stale ref left unmarked costs a red run every time the area is exercised, which is how a stale ref turns into ignored signal.",
+          "ownedBy": "objectui — re-pointing the specs at the current surface is a cross-repo half of #7753, reported not edited from this repo",
+          "seeAlso": "the same class, already repaired: object-designer-roundtrip's 4th automated ref failed only because package-create moved to /_console/studio; that contract passes on the current surface"
+        }
+      },
       "source": [
-        "objectui: e2e/live/studio-record-page.spec.ts (#1541, ADR-0034 — create bound + seeded regions, asserted off the PUT payload)",
-        "objectui: e2e/live/studio-editor.spec.ts (page editor sections + Add-block picker contract)"
+        "objectui: e2e/live/studio-record-page.spec.ts (#1541, ADR-0034 — create bound + seeded regions, asserted off the PUT payload) — ⚠ STALE against the current surface, see automated.stale",
+        "objectui: e2e/live/studio-editor.spec.ts (page editor sections + Add-block picker contract) — ⚠ STALE against the current surface, see automated.stale"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "new item: record-page authoring round-trip pinned to the two objectui live e2e specs (create-seeded draft, block picker) and extended to the publish + end-user render sides they do not cover", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-07", "change": "new item: record-page authoring round-trip pinned to the two objectui live e2e specs (create-seeded draft, block picker) and extended to the publish + end-user render sides they do not cover", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-11", "change": "marked both pinning specs STALE (run #7695): studio-record-page.spec.ts fills the Object control as an input when it is now a role=combobox button, and studio-editor.spec.ts targets a 'Layout' heading that no longer exists plus a shipped page the editor correctly locks. Neither reports a product defect — the annotation tells a runner not to cite their output and not to score their failure as this item's FAIL. Re-pointing the specs lives in objectui (cross-repo half of #7753 item 6); this repo only records the staleness", "ref": "#7753" }
       ]
     },
     {
@@ -289,7 +302,7 @@
       "title": "Metadata draft→publish lifecycle: drafts staged not served, publish flips visibility atomically, conflicts and invalid drafts refused, and the history/audit/diff/rollback forensics tell the truth",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin (authors drafts)", "end user (must not see drafts)"],
@@ -307,7 +320,7 @@
         "publish per-ref: POST /api/v1/meta/dashboard/qa_lifecycle_probe/publish → 200; GET now serves the authored body",
         "author a SECOND draft revision on the same name and confirm the live read keeps serving revision 1 until that draft is published",
         "concurrency guard: re-PUT with the STALE version as If-Match and capture the 409",
-        "package-wide door: stage two drafts in the writable package and POST /api/v1/packages/<pkg id>/publish-drafts — both flip in one atomic release (the audit's 'Published all drafts in this package (one atomic release)' toast)",
+        "package-wide door: stage two drafts in the writable package and POST /api/v1/packages/<pkg id>/publish-drafts — both flip in one atomic release (the audit's 'Published all drafts in this package (one atomic release)' toast); capture the STATUS and the BODY separately, because the abort path answers 200 with data.success:false (see the clause below)",
         "author an INVALID draft (a widget carrying a stray legacy key) and attempt its publish — the author-time gate must reject the draft→active transition (#4463)",
         "meta forensics (after the two publishes of qa_lifecycle_probe — revision 1, then the second revision): GET /api/v1/meta/dashboard/qa_lifecycle_probe/history — the durable sys_metadata_history events must list BOTH published revisions (a dashboard is an overlay type, so history is real; a non-overlay type answers { events: [] } by design)",
         "GET /api/v1/meta/dashboard/qa_lifecycle_probe/diff?from=1&to=2 (or omit the params for previous-vs-current) — the structural diff must name the widget key that changed between the revisions, not dump the whole body",
@@ -343,8 +356,8 @@
         {
           "clause": "package-wide publish-drafts promotes every pending draft in one atomic release — and a non-compliant draft (e.g. an object draft missing the package namespace prefix) aborts the batch BEFORE any promotion",
           "oracle": "api",
-          "verify": "POST /api/v1/packages/<id>/publish-drafts flips both staged drafts; the namespace-gate rejection path leaves ALL drafts unpromoted (packages/objectql/src/protocol-publish-package-drafts.test.ts pins the atomicity)",
-          "evidence": "the publish-drafts response + post-state reads"
+          "verify": "POST /api/v1/packages/<id>/publish-drafts flips both staged drafts; the namespace-gate rejection path leaves ALL drafts unpromoted (packages/objectql/src/protocol-publish-package-drafts.test.ts pins the atomicity). ⚠ SCORE THE ABORT OFF THE BODY, NOT THE STATUS (run #7695): the namespace-gate abort answers HTTP 200 with data.success:false, so a status-only assertion reads an aborted publish as a successful one. Read data.success and then prove the atomicity — the run verified the abort leaves BOTH names 404. Whether 200+success:false or a 4xx is the intended contract for this door is an OPEN LEDGER QUESTION recorded at #7753 item 2, awaiting one deliberate ruling; until it is ruled, assert the CURRENT behaviour and do not file the status code as a defect",
+          "evidence": "the publish-drafts response (status AND body) + post-state reads showing both names still 404"
         },
         {
           "clause": "an invalid draft cannot cross into active: the author-time rules gate the draft→active transition (#4463) — publish of the stray-key draft is refused",
@@ -387,7 +400,8 @@
         "a draft body served to end users before publish is the lifecycle FAIL this item exists for",
         "a publish that answers 200 while the live read still serves the old body is a FAIL — the ADR-0045 visibility flip failing loudly is exactly the path packages.ts warns about, and silence there is worse than the warning",
         "a forensics route consulted on the dispatcher instead of the REST route-manager server is a recording error — the dispatcher /meta branch swallows /history as a compound name and 404s (rest-route-ledger.ts note); the oracle is the live server os dev serves",
-        "a rollback that answers 200 while the live read still serves the newer revision is a FAIL (the restore must actually flip the served body)"
+        "a rollback that answers 200 while the live read still serves the newer revision is a FAIL (the restore must actually flip the served body)",
+        "OPEN LEDGER QUESTION, not a verdict (run #7695 → #7753 item 2): publish-drafts' namespace-gate abort answers HTTP 200 with data.success:false rather than a 4xx. The envelope-level success flag may well be the intended contract for this door, and the atomicity behind it is correct (the abort leaves both names 404) — but an HTTP-status-only client reads an aborted publish as a successful one, which is why it is worth ONE deliberate ruling. Recorded here so the observation is not re-derived every run; a runner does not adjudicate it and does not score it as a FAIL"
       ],
       "traps": ["hydration-race", "dispatcher-vs-hono-route"],
       "automated": { "kind": "e2e", "ref": "packages/qa/dogfood/test/dashboard-designer-roundtrip.dogfood.test.ts" },
@@ -401,7 +415,8 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item: both sides of the draft→publish gate (staged-not-served / flipped-on-publish), plus OCC 409, atomic package-wide publish, and the #4463 invalid-draft publish refusal — grounded in the spec receipt schema, the runtime publish-drafts handler, and the pinned dogfood roundtrip", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-08-08", "change": "clause-extension (routes hunter #12): meta forensics — GET /meta/:type/:name/{history,audit,diff} + POST .../rollback (two publishes → history lists both, diff names the changed key, rollback restores rev-1 and the live app serves it, audit rows carry the actor); traps gain dispatcher-vs-hono-route (the dispatcher /meta branch 404s /history)", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 2, "date": "2026-08-08", "change": "clause-extension (routes hunter #12): meta forensics — GET /meta/:type/:name/{history,audit,diff} + POST .../rollback (two publishes → history lists both, diff names the changed key, rollback restores rev-1 and the live app serves it, audit rows carry the actor); traps gain dispatcher-vs-hono-route (the dispatcher /meta branch 404s /history)", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 3, "date": "2026-08-11", "change": "recorded the run #7695 ledger note that publish-drafts' namespace-gate abort answers HTTP 200 with data.success:false, not a 4xx: the step and the clause now say capture status and body separately and score the abort off data.success (the atomicity itself was verified — the abort leaves both names 404). Logged in negatives as an OPEN ledger question awaiting one deliberate ruling (#7753 item 2) — deliberately RECORDED, not adjudicated: a runner asserts the current behaviour and does not file the status code as a defect", "ref": "#7753" }
       ]
     },
     {
@@ -409,13 +424,16 @@
       "title": "An invalid authored shape is rejected at save with a LOCATED error and is not persisted",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin"],
       "fixtures": {
         "app": "showcase",
-        "requires": ["scratch metadata names only (qa_invalid_probe / qa_invalid_views) — rejected drafts must leave nothing behind, so no cleanup dependency"]
+        "requires": ["scratch metadata names only (qa_invalid_probe / qa_invalid_views) — rejected drafts must leave nothing behind, so no cleanup dependency"],
+        "knownGaps": [
+          "KNOWN SPURIOUS BANNER — do not file it as new (run #7695's sighting recorded here so it is not re-filed a third time): a freshly saved VALID draft can show \"Unrecognized key(s) on this object: `_diagnostics`\". The designer re-validates the server's OWN annotation on read-back — `_diagnostics` is added by the server to the saved body, and the strict client-side schema then rejects it. It is a false positive on a save that succeeded, and it is the exact inverse of what this item asserts (a LOCATED error on an INVALID shape), so it is worth telling apart on sight: if the banner names `_diagnostics` and the save returned 2xx, it is this known issue, not a validation failure"
+        ]
       },
       "steps": [
         "attempt PUT /api/v1/meta/object/qa_invalid_probe?mode=draft with a field MISSING its type; capture the status and full error body",
@@ -459,7 +477,8 @@
       ],
       "negative": [
         "a 2xx on an invalid draft, or a rejection that leaves the invalid body readable afterwards, is a FAIL",
-        "silent client-side swallowing — no visible error after a failed save — is a FAIL even though the server refused correctly (the author must SEE the located error)"
+        "silent client-side swallowing — no visible error after a failed save — is a FAIL even though the server refused correctly (the author must SEE the located error)",
+        "NOT this item's FAIL: an \"Unrecognized key(s) on this object: `_diagnostics`\" banner on a draft that SAVED successfully — that is the known designer-side re-validation of the server's own annotation (see the knownGap), not a validation gate misfiring on the authored shape"
       ],
       "traps": ["stale-console-bundle", "automation-input"],
       "source": [
@@ -468,7 +487,8 @@
         "dashboards.strict-widget-rejects-stray-keys (dashboard-kind stray keys — cross-referenced, not duplicated)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "new item: authoring validation with located errors and verified non-persistence, sampling object + view kinds and cross-referencing the deepened dashboard stray-key item instead of duplicating it", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-07", "change": "new item: authoring validation with located errors and verified non-persistence, sampling object + view kinds and cross-referencing the deepened dashboard stray-key item instead of duplicating it", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-11", "change": "recorded run #7695's sighting of the ALREADY-KNOWN spurious '_diagnostics' banner on a freshly saved VALID draft (the designer re-validates the server's own annotation on read-back) as a knownGap + a NOT-this-item's-FAIL negative, so the sighting is not filed as a new defect and the false positive is told apart from a real located-error miss. Note only; no clause changed", "ref": "#7753" }
       ]
     },
     {
@@ -476,7 +496,7 @@
       "title": "The metadata type registry gates runtime writes: allowOrgOverride=false kinds refuse overlay (403 not_overridable), allowRuntimeCreate=false kinds refuse creation — both sides",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": ["admin"],
@@ -484,6 +504,10 @@
         "app": "showcase",
         "requires": [
           "the stock showcase artifact (artifact-backed objects like showcase_task and packaged views are the locked targets; a scratch name serves the allowed-create side)"
+        ],
+        "knownGaps": [
+          "CORRECTION TO RUN #7637 (recorded by run #7695): the Studio read-only badge is HONEST on this build/pin — it is not asserting a lock the server declines to apply. With OS_METADATA_WRITABLE=permission set, GET /meta reports permission { allowOrgOverride: true, overrideSource: 'env' } (the enum is registry|env — packages/spec/src/api/protocol.zod.ts:208) and the editor becomes fully writable; the badge tracks the real writable computation, proven BOTH ways in that run. #7637's contrary observation does not reproduce here — do not act on it as written, and do not re-file it",
+          "ROUTE NOTE (run #7695 / #7690): a flow authored over the metadata API is NOT editable in Studio — it opens behind 'This flow is provided by an installed package, so it is read-only at runtime', with or without `?package=`. objectui's ResourceEditPage treats an item as artifact-backed when `layered.code != null && _packageId !== 'sys_metadata'` (packages/app-shell/src/views/metadata-admin/ResourceEditPage.tsx:951-955 / 1311-1323) and `flow` declares allowOrgOverride:false, so for THIS kind the banner is arguably telling the truth: the server would refuse the overlay write anyway. The editable path is the console's own create page. Recorded as a route note, NOT a defect — the polarity-reversed case (the same heuristic locking an object published into a WRITABLE package, which Studio and the server both treat as editable) IS the defect and is filed at objectui#4308; whoever works that card should confirm this case stays correct"
         ]
       },
       "steps": [
@@ -543,10 +567,13 @@
         "packages/spec/src/kernel/metadata-plugin.zod.ts (DEFAULT_METADATA_TYPE_REGISTRY per-kind flags; allowOrgOverride doc: 'runtime returns HTTP 403 not_overridable'; the object/field lock rationale; job's #4509 create lock)",
         "packages/objectql/src/overlay-precedence.test.ts ('denied — must throw 403 (not_overridable or not_creatable)')",
         "packages/metadata-protocol/src/protocol.ts (isRuntimeCreateAllowed — the write-gate authority)",
-        "ADR-0005 (metadata customization opt-in), ADR-0049 (enforce-or-remove — the job rationale)"
+        "ADR-0005 (metadata customization opt-in), ADR-0049 (enforce-or-remove — the job rationale)",
+        "packages/spec/src/api/protocol.zod.ts:208 (overrideSource registry|env — how GET /meta reports an OS_METADATA_WRITABLE-granted override, the read that made the #7637 correction checkable)",
+        "objectui packages/app-shell/src/views/metadata-admin/ResourceEditPage.tsx:951-955, 1311-1323 (the artifact-backed heuristic behind the read-only banner; cross-linked to objectui#4308)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "new item: both sides of the registry's runtime-write gates (not_overridable / not_creatable vs accepted overlay / accepted create), variants sampled straight from DEFAULT_METADATA_TYPE_REGISTRY and pinned to the overlay-precedence suite", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-07", "change": "new item: both sides of the registry's runtime-write gates (not_overridable / not_creatable vs accepted overlay / accepted create), variants sampled straight from DEFAULT_METADATA_TYPE_REGISTRY and pinned to the overlay-precedence suite", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-11", "change": "recorded two notes from run #7695 — (a) the CORRECTION to run #7637: with OS_METADATA_WRITABLE=permission the Studio read-only badge clears and the editor is fully writable (GET /meta reports overrideSource:'env'), so the earlier 'badge asserts a lock the server is not applying' observation does not reproduce and must not be acted on as written; (b) the route note that a metadata-API-authored flow opens read-only in Studio (ResourceEditPage's artifact-backed heuristic + flow's allowOrgOverride:false) — correct for this kind, with the polarity-reversed defect filed at objectui#4308. Notes only; no clause, variant or oracle changed", "ref": "#7753" }
       ]
     },
     {

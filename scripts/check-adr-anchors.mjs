@@ -109,6 +109,43 @@
 //     resolves the historical citations and makes re-use collide loudly under
 //     the number-uniqueness audit instead of merely going stale here.
 //
+// ## The fourth thing it checks: a tombstone is NOT anchorable (#7329)
+//
+// The tombstone remedy above buys the citation audit exactly what it wanted —
+// `ADR-0107` in a changeset now resolves — and it did so by putting a FILE under
+// `docs/adr/`. But `records` is assembled from filenames alone, so the same file
+// also satisfied the anchor loop's `records.has(...)` guard, which was never meant
+// to accept it: an entry in `adr-anchors/` could anchor live code to a number whose
+// record says, in its own words, that "nothing in it is in force". Measured on
+// `main` @ `69fde55` — a shard citing `ADR-0107` made this gate print OK and exit 0.
+//
+// The two audits want opposite answers about the same file, so one set is not
+// enough. A tombstone number is now in `records` (citations resolve — wanted) AND
+// in `nonDecisions` (anchors are refused — the gap this closes). Nothing about a
+// live record's treatment changes.
+//
+// **The marker is the filename**, `NNNN-withdrawn-<slug>.md`, for the reason the
+// `.vN` rule and the cross-repo qualifier are also spellings rather than lists: a
+// structural signal is available to every future record without editing this file,
+// and it is legible to a human reading `ls docs/adr/`. Two alternatives were
+// weighed and rejected:
+//
+//   - **A `status:` field in YAML front-matter.** Self-describing, and the more
+//     obvious design — but ZERO of the 119 records carry front-matter today, so it
+//     is a new repo-wide convention introduced for one file; the records' status
+//     lines are deliberately free prose and deliberately outside this gate's rules
+//     (see the collision section above); and #6741 routes ANY diff touching
+//     `docs/adr/**` to the maintainer's own merge, so marking the tombstone would
+//     couple a script-only fix to a governance approval. It also fails open in
+//     exactly the way the filename does — a future tombstone can forget either one.
+//   - **An explicit `NON_DECISION_RECORDS` list here.** Cannot misfire, but it is
+//     the one option that needs this file edited for every future tombstone, which
+//     is the property the other two are chosen for.
+//
+// A number counts as a non-decision only when EVERY stem claiming it is a
+// tombstone. A tombstone sharing its number with a live record is a collision, and
+// the audit above already reports that, loudly and about the right fact.
+//
 // ## Where the registry lives (#6957)
 //
 // `scripts/adr-anchors/` — **one JSON file per anchor**, named after the path it
@@ -172,6 +209,24 @@ const ADR_FILENAME = /^(\d{4})-([a-z0-9]+(?:-[a-z0-9]+)*)(?:\.v(\d+))?\.md$/;
  * instead of slipping past the number audit because its name did not parse.
  */
 const NON_RECORD_FILES = new Set(['PRIORITIZATION.md']);
+
+/**
+ * The slug prefix that marks a record as a TOMBSTONE — a file whose whole content
+ * is "this number is withdrawn, do not reuse" (`0107-withdrawn-hook-body-write-
+ * set-static-gap.md`, the first one, #6676).
+ *
+ * A tombstone is a record for the purpose of RESOLVING citations, which is the
+ * job it exists to do, and is NOT a record for the purpose of ANCHORING code:
+ * an anchor's `invariant` has to state what the ADR decided, and this number
+ * decided nothing. See the "#7329" section of the header for why the marker is
+ * the filename and not a status field or a list.
+ *
+ * It is a prefix of the SLUG, not a substring of the name, so a live decision
+ * *about* withdrawing something (`0123-withdrawn-plugin-cleanup-policy.md` would
+ * be the collision to worry about) has a spelling that stays clear of it: name
+ * the decision for what it decides.
+ */
+const TOMBSTONE_SLUG_PREFIX = 'withdrawn-';
 
 /**
  * An ADR citation as written in prose or a code comment, with the word before it
@@ -238,6 +293,9 @@ const UNRESOLVED_ADR_CITATIONS = [
   // awaiting release plus an audit, so the grandfather clause would have expired
   // on its own and quietly re-freed the number. A record does not expire, and a
   // re-use now collides in `auditAdrDirectory` — loud, and about the right fact.
+  // The one thing the tombstone bought that this list never could — resolving the
+  // citations — is also the one thing it must NOT buy for anchors, which is why
+  // `nonDecisions` exists (#7329).
 ];
 
 /**
@@ -304,14 +362,18 @@ const { anchors, errors: registryErrors } = loadAnchors(ROOT);
  *
  * @param {string[]} filenames
  * @param {{ number: string, decisions: string[], why: string }[]} allowlist
- * @returns {{ records: Set<string>, errors: string[] }} `records` is the set of
- *   numbers that name a real record, as the anchor loop below needs it.
+ * @returns {{ records: Set<string>, nonDecisions: Set<string>, errors: string[] }}
+ *   `records` is the set of numbers that name a real record, as the citation audit
+ *   needs it; `nonDecisions` is the subset of those whose every claimant is a
+ *   tombstone, as the anchor loop needs it (#7329).
  */
 function auditAdrDirectory(filenames, allowlist) {
   const errors = [];
   const records = new Set();
   /** number → set of decision stems claiming it. */
   const stemsByNumber = new Map();
+  /** number → set of those stems that are tombstones. */
+  const tombstoneStemsByNumber = new Map();
 
   for (const name of [...filenames].sort()) {
     if (!name.endsWith('.md') || NON_RECORD_FILES.has(name)) continue;
@@ -332,6 +394,18 @@ function auditAdrDirectory(filenames, allowlist) {
     const stem = `${number}-${slug}`;
     if (!stemsByNumber.has(number)) stemsByNumber.set(number, new Set());
     stemsByNumber.get(number).add(stem);
+    if (slug.startsWith(TOMBSTONE_SLUG_PREFIX)) {
+      if (!tombstoneStemsByNumber.has(number)) tombstoneStemsByNumber.set(number, new Set());
+      tombstoneStemsByNumber.get(number).add(stem);
+    }
+  }
+
+  // A number is a non-decision only if EVERY stem claiming it is a tombstone. A
+  // tombstone sharing a number with a live record is a collision, reported as one
+  // below — and until it is resolved, the live record keeps its anchors.
+  const nonDecisions = new Set();
+  for (const [number, tombstones] of tombstoneStemsByNumber) {
+    if (tombstones.size === stemsByNumber.get(number).size) nonDecisions.add(number);
   }
 
   /** number → the sorted stems sharing it, for numbers claimed more than once. */
@@ -386,7 +460,39 @@ function auditAdrDirectory(filenames, allowlist) {
     }
   }
 
-  return { records, errors };
+  return { records, nonDecisions, errors };
+}
+
+/**
+ * Decide whether an anchor entry may cite `adr` — the whole ADR-id judgement of
+ * the anchor loop, extracted so its red paths are exercised by `--self-test`
+ * rather than only by a real registry someone would have to break on purpose.
+ *
+ * @param {string} adr  the id as written in the shard, e.g. `ADR-0090`
+ * @param {Set<string>} records  numbers that name a real record
+ * @param {Set<string>} nonDecisions  the subset that are tombstones
+ * @returns {string|null} why it may not, or null if it may
+ */
+function anchorIdProblem(adr, records, nonDecisions) {
+  const m = ADR_ID.exec(adr);
+  if (!m) return `"${adr}" is not an ADR id (expected e.g. ADR-0090).`;
+  // Anchoring a never-written or deleted record sends the next author to a
+  // dead end (cf. ADR-0001, whose record was deleted in the 2026-02-11
+  // permission-protocol rewrite and never restored).
+  if (!records.has(m[1])) return `${adr} has no record under ${ADR_DIR}/ — anchor a decision that exists.`;
+  if (nonDecisions.has(m[1])) {
+    return (
+      `${adr} names a WITHDRAWN record, not a decision — nothing may be anchored to it (#7329).\n` +
+      `      ${ADR_DIR}/${m[1]}-${TOMBSTONE_SLUG_PREFIX}*.md is a tombstone: it exists so the number RESOLVES for ` +
+      'the citations that discuss its withdrawal, and so the number can never be handed to an unrelated ' +
+      'decision. Nothing in it is in force, so no code can be governed by it and no "invariant" can be ' +
+      'written for it truthfully.\n' +
+      '      If the code really is governed by a decision, that decision has a live record — anchor that one. ' +
+      'If the decision was never written down, write it under the next free number; reviving this one would ' +
+      'retroactively re-point every historical citation of it (#6634).'
+    );
+  }
+  return null;
 }
 
 /**
@@ -552,7 +658,7 @@ try {
 }
 
 /** Decision records that actually exist, by number: `0090` → `0090-permission-model-...md`. */
-const { records, errors: numberErrors } = auditAdrDirectory(adrFiles, KNOWN_NUMBER_COLLISIONS);
+const { records, nonDecisions, errors: numberErrors } = auditAdrDirectory(adrFiles, KNOWN_NUMBER_COLLISIONS);
 
 const errors = [...registryErrors, ...numberErrors];
 let checked = 0;
@@ -591,23 +697,12 @@ for (const entry of anchors) {
 
   const body = readFileSync(abs, 'utf8');
   for (const adr of adrs) {
-    const m = ADR_ID.exec(adr);
-    if (!m) {
-      errors.push(`${shard}: "${adr}" is not an ADR id (expected e.g. ADR-0090).`);
-      continue;
-    }
-    // Anchoring a never-written or deleted record sends the next author to a
-    // dead end (cf. ADR-0001, whose record was deleted in the 2026-02-11
-    // permission-protocol rewrite and never restored).
-    //
-    // ⚠️ This resolves against the FILENAME only, so a tombstone — a record whose
-    // whole content is "this number is withdrawn, do not reuse" — reads here as a
-    // decision that exists (#6676 added the first, ADR-0107). Anchoring code to
-    // one is not caught mechanically; what catches it is the `invariant` field,
-    // which has to state what the ADR decided and cannot be written truthfully
-    // for a number that decided nothing.
-    if (!records.has(m[1])) {
-      errors.push(`${shard}: ${adr} has no record under ${ADR_DIR}/ — anchor a decision that exists.`);
+    // Resolution — the id parses, names a record, and that record is a DECISION
+    // rather than a tombstone (#7329). All three live in `anchorIdProblem` so
+    // `--self-test` drives the real judgement.
+    const problem = anchorIdProblem(adr, records, nonDecisions);
+    if (problem) {
+      errors.push(`${shard}: ${problem}`);
       continue;
     }
     if (!body.includes(adr)) {
@@ -765,6 +860,105 @@ function selfTest() {
       );
     }
 
+    // ── A tombstone resolves citations but is not anchorable (#7329) ─────────
+    //
+    // The two halves pull in OPPOSITE directions over the SAME file, which is
+    // exactly why one `records` set was not enough — so both are pinned, and a
+    // test of only the red half would pass on an implementation that broke the
+    // citation resolution the tombstone exists for.
+    {
+      const TOMB = [...BASE, '0003-withdrawn-something.md'];
+      const { errors: e, records, nonDecisions } = audit(TOMB);
+      assert('tombstone-directory-is-green', e.length === 0, `a tombstone is a legal record, got:\n${joined(e)}`);
+      assert(
+        'tombstone-number-still-resolves-citations',
+        records.has('0003'),
+        `a tombstone must stay in \`records\` — resolving citations is the job it exists for; got {${[...records].join(',')}}`,
+      );
+      assert(
+        'tombstone-number-is-a-non-decision',
+        nonDecisions.has('0003'),
+        `got {${[...nonDecisions].join(',')}}`,
+      );
+      assert(
+        'live-records-are-not-non-decisions',
+        !nonDecisions.has('0001') && !nonDecisions.has('0002') && nonDecisions.size === 1,
+        `only the tombstone may be flagged, got {${[...nonDecisions].join(',')}}`,
+      );
+    }
+
+    {
+      // A revised tombstone is still a tombstone: `.vN` repeats the stem.
+      const { nonDecisions } = audit([...BASE, '0003-withdrawn-something.md', '0003-withdrawn-something.v2.md']);
+      assert('versioned-tombstone-is-still-a-non-decision', nonDecisions.has('0003'), 'the `.vN` rule must carry the marker');
+    }
+
+    {
+      // The marker is a SLUG PREFIX, not a substring: a live decision whose slug
+      // merely contains the word keeps its anchors.
+      const { nonDecisions } = audit([...BASE, '0003-policy-for-withdrawn-plugins.md']);
+      assert(
+        'marker-is-a-prefix-not-a-substring',
+        !nonDecisions.has('0003'),
+        'a live decision that merely mentions withdrawal must not be disarmed',
+      );
+    }
+
+    {
+      // A tombstone sharing its number with a live record is a COLLISION, and the
+      // live record must keep its anchors rather than being silently disarmed by
+      // its squatter — the number audit is the check that speaks to this.
+      const { errors: e, nonDecisions } = audit([...BASE, '0002-withdrawn-something.md']);
+      assert(
+        'tombstone-colliding-with-a-live-record-is-red',
+        e.length === 1 && joined(e).includes('0002-withdrawn-something'),
+        `expected the collision to be reported, got:\n${joined(e)}`,
+      );
+      assert(
+        'a-contested-number-is-not-a-non-decision',
+        !nonDecisions.has('0002'),
+        'only a number whose EVERY claimant is a tombstone may be disarmed',
+      );
+    }
+
+    {
+      // The anchor loop's own judgement, over the real function.
+      const id = (n) => 'ADR-' + n;
+      const RECS = new Set(['0090', '0107']);
+      const TOMBS = new Set(['0107']);
+
+      assert(
+        'anchor-to-a-live-record-is-allowed',
+        anchorIdProblem(id('0090'), RECS, TOMBS) === null,
+        `got: ${anchorIdProblem(id('0090'), RECS, TOMBS)}`,
+      );
+      assert(
+        'anchor-to-a-missing-record-is-refused',
+        /has no record under/.test(anchorIdProblem(id('0202'), RECS, TOMBS) ?? ''),
+        `got: ${anchorIdProblem(id('0202'), RECS, TOMBS)}`,
+      );
+      assert(
+        'anchor-to-a-malformed-id-is-refused',
+        /is not an ADR id/.test(anchorIdProblem('ADR-90', RECS, TOMBS) ?? ''),
+        `got: ${anchorIdProblem('ADR-90', RECS, TOMBS)}`,
+      );
+
+      // The point of the whole change: this returned null before #7329.
+      const tomb = anchorIdProblem(id('0107'), RECS, TOMBS) ?? '';
+      assert('anchor-to-a-tombstone-is-refused', tomb !== '', 'a tombstone must not satisfy the anchor guard');
+      assert('tombstone-message-names-the-id', tomb.includes('0107'), `message lacks the id:\n${tomb}`);
+      assert(
+        'tombstone-message-says-what-to-do-instead',
+        /next free number/.test(tomb) && /anchor that one/.test(tomb),
+        `the author must be told to anchor the live decision or write a new record, not just that this is wrong:\n${tomb}`,
+      );
+      assert(
+        'tombstone-message-is-distinct-from-the-missing-record-one',
+        !/has no record under/.test(tomb),
+        `"the record is missing" and "the record decided nothing" are different facts and must read differently:\n${tomb}`,
+      );
+    }
+
     // ── Cited numbers resolve (#6634) ────────────────────────────────────────
     //
     // ⚠️ Fixture ids are BUILT, never written literally: this file is itself in
@@ -898,6 +1092,40 @@ function selfTest() {
           `ablation-reports-${n}`,
           red.some((e) => e.includes(`number ${n} is claimed`)),
           `ADR number ${n} is allowlisted but does not collide under ablation — the entry is stale`,
+        );
+      }
+
+      // ── Tombstones on the real tree (#7329) ───────────────────────────────
+      //
+      // The live half of the synthetic assertions above: ADR-0107 is the corpus's
+      // only tombstone today, and the shipped registry must be clean under the
+      // new rule — a green build here is what says the rule costs nothing to keep.
+      {
+        const { records: liveRecs, nonDecisions: liveTombs } = audit(liveFiles, KNOWN_NUMBER_COLLISIONS);
+        assert(
+          'live-tombstone-is-flagged',
+          liveTombs.has('0107'),
+          `docs/adr/0107-withdrawn-*.md is the corpus's tombstone; got {${[...liveTombs].join(',')}}`,
+        );
+        assert(
+          'live-tombstone-still-resolves-citations',
+          liveRecs.has('0107'),
+          'flagging the tombstone must not un-resolve the citations it was written to resolve',
+        );
+        const anchored = (anchors ?? []).flatMap((entry) => (entry?.adrs ?? []).map((adr) => `${entry.file} → ${adr}`));
+        const disarmed = anchored.filter((hit) => anchorIdProblem(hit.split(' → ')[1], liveRecs, liveTombs) !== null);
+        assert(
+          'live-registry-anchors-only-decisions',
+          disarmed.length === 0,
+          `no shipped anchor may name a tombstone, got:\n        ${disarmed.join('\n        ')}`,
+        );
+
+        // Ablation, predicted RED: an anchor to the tombstone must be refused. This
+        // is the exact probe run on `main` @ `69fde55`, where it came back GREEN.
+        assert(
+          'ablation-anchoring-the-live-tombstone-is-red',
+          anchorIdProblem('ADR-' + '0107', liveRecs, liveTombs) !== null,
+          'the #7329 gap is open again — a shard citing the tombstone would pass',
         );
       }
 

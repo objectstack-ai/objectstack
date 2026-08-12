@@ -4,12 +4,14 @@ import type { AnalyticsQuery, AnalyticsResult } from '@objectstack/spec/contract
 import type { Cube } from '@objectstack/spec/data';
 import type { AnalyticsStrategy, StrategyContext } from './types.js';
 import {
+  lowerAnalyticsWhere,
   normalizeAnalyticsFilterTree,
   toSqlBindValue,
   SQL_CONST_FALSE,
   SQL_CONST_TRUE,
   type NormalizedFilterNode,
 } from './filter-normalizer.js';
+import { findCrossFieldComparand } from '../comparand-shape.js';
 import { compileScopedFilterToSql } from '../read-scope-sql.js';
 import { datasetInvalidError, invalidMemberError } from '../dataset-refusal.js';
 import { likePattern, LIKE_ESCAPE_CHAR, asciiLowerSqlExpr, type LikeShape } from '../like-pattern.js';
@@ -117,8 +119,146 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
         }
       }
     }
+    // ── [#7598] DECLINE a `{ $field }` cross-field comparison ───────────────
+    //
+    // ## The maintainer ruling this implements (2026-08-12, Q1 = B)
+    //
+    // 「`NativeSQLStrategy.canHandle` 对携带 `$field` 的 `where` / read scope
+    //   **decline**,落回 ObjectQL/engine 路径,由 driver 用它自有的 metadata 强制
+    //   全部四条 #5222 裁定 —— 安全规则只存在一处,不复制、不新增
+    //   `StrategyContext` 钩子、不动 `packages/spec`。⚠️ canHandle 依据 filter
+    //   内容路由是新行为 —— 认可并接受,实现时在 canHandle 处注释记录本裁定。」
+    //
+    // (Q1 = B; option A — `StrategyContext.getDeclaredFields` / `getTenantColumn`
+    // hooks plus a SECOND implementation of the four rulings inside this package
+    // — was explicitly rejected: it builds an enumeration surface with no
+    // measured consumer, and its fallback when a host omits a hook is either
+    // "refuse" or "skip the check", and skipping the check is the defect #7598
+    // exists to close. Q2 = A: `read-scope-sql`'s envelope is untouched.)
+    //
+    // ## What is new here, and why it is sound
+    //
+    // Every other decline above turns on the query's SHAPE (a granularity, a
+    // federated object). This one turns on filter CONTENT, which is new
+    // behaviour for `canHandle` — named as such in the ruling and accepted
+    // there. It is the same mechanism ADR-0062 D6 already uses one branch up:
+    // when this strategy cannot compile something CORRECTLY, routing to the
+    // lower-priority ObjectQL path is better than compiling it anyway. What it
+    // cannot compile correctly here is a column-to-column comparison, because
+    // the four #5222 rulings (same-table columns only, declared-only
+    // enumeration, tenant-isolation column forbidden on BOTH sides, same
+    // comparison class) each turn on metadata `StrategyContext` does not expose
+    // — an object's declared field set, its declared types, its
+    // tenant-isolation column. `driver-sql` reads all four out of its own
+    // `initObjects` capture, so declining puts the query in front of the one
+    // component that can enforce them, instead of enforcing them twice.
+    //
+    // ## Both inputs, because a read scope is not the caller's `where`
+    //
+    // The caller's `where` and the RLS read scope are separate producers and
+    // either can carry a reference — `compileCelToFilter` emits `{ $field }`
+    // for a field-to-field comparison in an ADMIN-authored CEL rule, which is
+    // the read-scope half and the one #5041 measured. The scopes of the JOINED
+    // objects are read too, for the same reason `generateSql` injects them:
+    // `applyReadScope` would compile each of them through `read-scope-sql`.
+    //
+    // `lowerAnalyticsWhere` rather than `query.where` raw, so the authored
+    // ARRAY sugar (`['amount', '=', { $field: 'budget' }]`) is seen after
+    // `parseFilterAST` has lowered it (#7597). A THROW from that lowering is
+    // not this gate's to answer — the filter is malformed either way and
+    // `normalizeAnalyticsFilterTree` refuses it a moment later with the message
+    // and envelope it has always had — so it is caught and read as "no
+    // reference found".
+    if (this.carriesCrossFieldComparison(query, ctx)) return false;
     const caps = ctx.queryCapabilities(query.cube);
     return caps.nativeSql && typeof ctx.executeRawSql === 'function';
+  }
+
+  /**
+   * [#7598] Does serving this query require the cross-field capability this
+   * strategy declines? See the ruling recorded at {@link canHandle}.
+   *
+   * ⚠️ This and {@link assertNoCrossFieldComparison} read the SAME inputs
+   * through the SAME detector, which is what makes the decline and the
+   * fail-closed backstop unable to drift: a shape one of them recognises is a
+   * shape the other recognises.
+   */
+  private carriesCrossFieldComparison(query: AnalyticsQuery, ctx: StrategyContext): boolean {
+    return this.crossFieldComparisonIn(query, ctx) !== null;
+  }
+
+  private crossFieldComparisonIn(
+    query: AnalyticsQuery,
+    ctx: StrategyContext,
+  ): { source: string; op: string; field: string; ref: string } | null {
+    let where: unknown = null;
+    try {
+      where = lowerAnalyticsWhere(query);
+    } catch {
+      // A `where` this compiler cannot even lower is refused downstream, with
+      // its own message. Nothing to route.
+      return null;
+    }
+    const inWhere = findCrossFieldComparand(where);
+    if (inWhere) return { source: 'the query\'s `where`', ...inWhere };
+
+    if (typeof ctx.getReadScope !== 'function') return null;
+    const cube = query.cube ? ctx.getCube(query.cube) : undefined;
+    if (!cube) return null;
+    const objects = [this.extractObjectName(cube)];
+    for (const alias of Object.keys(cube.joins ?? {})) {
+      objects.push(cube.joins?.[alias]?.name ?? alias);
+    }
+    for (const objectName of objects) {
+      const scope = ctx.getReadScope(objectName);
+      if (scope === undefined || scope === null) continue;
+      const inScope = findCrossFieldComparand(scope);
+      if (inScope) return { source: `the read scope of "${objectName}"`, ...inScope };
+    }
+    return null;
+  }
+
+  /**
+   * [#7598] The fail-closed backstop at the door that BINDS.
+   *
+   * ⚠️ **Unreachable by construction, and kept deliberately** — saying so
+   * because #7598's brief asks that a refusal arm which has become unreachable
+   * be named rather than left to be re-discovered. {@link canHandle} declines
+   * every query this would fire on, and it declines using
+   * {@link crossFieldComparisonIn} — the same walk over the same two inputs —
+   * so `resolveStrategy` cannot hand this strategy a query carrying one.
+   *
+   * It is kept because of what the failure mode is if that ever stops being
+   * true. The defect #7598 measured was not a missing error: it was a SILENT
+   * BIND — `toSqlBindValue` JSON-stringifies the reference object, so the
+   * statement compiled perfectly and compared a column against the text
+   * `{"$field":"budget"}`, a value no row can hold. A routing gate that misses
+   * a shape therefore degrades to a wrong ANSWER rather than to an error, and
+   * that is the one class this package refuses to leave to a single guard
+   * (Prime Directive #12 — refuse at the door, do not tolerate at the
+   * consumer). One line, no measurable cost, and it turns a routing regression
+   * into a loud refusal instead of an empty chart.
+   *
+   * Deliberately BARE — an undeclared 500, not `INVALID_FILTER` / 400 — for the
+   * reason `buildFilterClauseSql`'s #5333 exit in `objectql-strategy.ts` gives
+   * for the same class: the caller's filter is legal and is served on the
+   * engine path, so an arrival here is drift between our own routing gate and
+   * our own emitter. Billing the caller 400 for that would hide a platform bug
+   * from 5xx alerting and tell a dashboard user to fix a filter that is fine.
+   * Same tier as `resolveMeasureSql`'s unrecognised-`Metric.type` throw below.
+   */
+  private assertNoCrossFieldComparison(query: AnalyticsQuery, ctx: StrategyContext): void {
+    const hit = this.crossFieldComparisonIn(query, ctx);
+    if (!hit) return;
+    throw new Error(
+      `[native-sql-strategy] ${hit.source} carries a field reference ` +
+      `{ "$field": "${hit.ref}" } under "${hit.op}" on "${hit.field}", which this strategy does not ` +
+      `compile into a column-to-column comparison — it would BIND the reference object as the ` +
+      `comparison's value and answer a wrong row set silently (#7598). \`canHandle\` declines such a ` +
+      `query so it routes to the ObjectQL/engine path, whose driver compiles it and enforces the ` +
+      `#5222 rulings with metadata it owns; reaching this throw means the decline and this emitter ` +
+      `stopped agreeing, which is our bug and must never degrade to a silent answer.`,
+    );
   }
 
   async execute(query: AnalyticsQuery, ctx: StrategyContext): Promise<AnalyticsResult> {
@@ -139,6 +279,10 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     if (!cube) {
       throw new Error(`Cube not found: ${query.cube}`);
     }
+
+    // [#7598] Unreachable by construction — `canHandle` declined this query.
+    // See {@link assertNoCrossFieldComparison} for why it is asserted anyway.
+    this.assertNoCrossFieldComparison(query, ctx);
 
     const params: unknown[] = [];
     const selectClauses: string[] = [];

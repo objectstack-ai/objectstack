@@ -28,6 +28,11 @@ import {
     // definition table — see {@link governServedItem} / {@link stripServedSystemColumns}.
     applyInjectedSystemColumns,
     stripInjectedSystemColumns,
+    // [#7774] The i18n-bundle identity table (#7730) and its reader. A type
+    // listed here is identified by `(name, <field>)`, so every merge in the
+    // unscoped `/meta` list keys on the pair — see {@link metaItemKey}.
+    ITEM_KEY_DISCRIMINATORS,
+    itemDiscriminator,
     type MetadataItem,
 } from '@objectstack/metadata-core';
 // [#5532] One vocabulary of "which driver read errors are benign", shared with
@@ -984,9 +989,52 @@ function mergeArtifactProtection(item: unknown, artifactItem: unknown): unknown 
  * `${packageId}:${name}` keys. Any list-merge that deduplicates by bare `name`
  * collapses the two packages' rows into one (last-write-wins), which is the
  * bug this key closes. A `NUL` separator keeps names containing `:` unambiguous.
+ *
+ * [#7774] `discriminator` is a third component, and it is OPTIONAL on purpose:
+ * omitting it produces the exact two-component string this function has always
+ * produced, so every type identified by `(package, name)` keeps a
+ * byte-identical key and this change's blast radius is provable rather than
+ * argued. It is supplied only for a type listed in `ITEM_KEY_DISCRIMINATORS`
+ * (`email_template` today), whose identity the spec declares as
+ * `(name, locale)` — an i18n bundle. Without it the second locale's
+ * `Map.set` overwrote the first and `GET /meta/email_template` served one
+ * member of a bundle it had every member of.
  */
-function metaItemKey(packageId: string | null | undefined, name: unknown): string {
-    return `${packageId ?? ''}\u0000${String(name)}`;
+function metaItemKey(
+    packageId: string | null | undefined,
+    name: unknown,
+    discriminator?: string,
+): string {
+    const base = `${packageId ?? ''}\u0000${String(name)}`;
+    return discriminator === undefined ? base : `${base}\u0000${discriminator}`;
+}
+
+/**
+ * [#7774] The bundle discriminator a STORED `sys_metadata` row declares, read
+ * off the row's serialized body.
+ *
+ * The row's own COLUMNS cannot answer this: `sys_metadata`'s overlay
+ * uniqueness is `(type, name, organization_id, package_id)` — declared on
+ * `idx_sys_metadata_overlay_active` in `sys-metadata.object.ts` — and the
+ * table has no locale column at all. An `email_template` overlay's locale
+ * lives inside the `metadata` JSON payload, which is where its identity is.
+ * So a row-level merge keying on columns alone cannot tell two members of one
+ * bundle apart, and the body has to be consulted.
+ *
+ * The parse is skipped entirely for an undiscriminated type (all but one
+ * today): `undefined` comes back before any JSON work, so this costs nothing
+ * on the paths it does not serve. A body that fails to parse falls back to the
+ * canonical member instead of throwing — the caller a few lines on parses it
+ * again for real, and that failure is the one that should surface.
+ */
+function storedRowDiscriminator(type: string, record: unknown): string | undefined {
+    if (!ITEM_KEY_DISCRIMINATORS[type]) return undefined;
+    const raw = (record as { metadata?: unknown } | null | undefined)?.metadata;
+    let body: unknown = raw;
+    if (typeof raw === 'string') {
+        try { body = JSON.parse(raw); } catch { body = undefined; }
+    }
+    return itemDiscriminator(type, body);
 }
 
 /**
@@ -1013,25 +1061,47 @@ function metaItemKey(packageId: string | null | undefined, name: unknown): strin
  * `transform(data, prev)` runs on each `records` body before it enters the
  * merge (view-identity healing, draft tagging); `prev` is the base row it
  * shadows at the same slot (or any same-name base row), else undefined.
+ *
+ * [#7774] The bucket is per SLOT, not per name, and for a type in
+ * `ITEM_KEY_DISCRIMINATORS` the slot is `(name, discriminator)`. This is the
+ * half of the collapse that #7774's card predicted would need no change, and
+ * it needed one: the card reasoned about the OVERLAY rows (correctly — they
+ * are unique on `type+name+organization_id+package_id` and carry no locale
+ * column), but the rows are only the higher layer. `baseItems` is the
+ * SchemaRegistry's listing, and since #7730 that listing carries every member
+ * of a bundle. Bucketed by bare name, two members of one bundle landed in one
+ * bucket and the loop below emitted exactly one row per `(bucket, package)` —
+ * so a single unrelated overlay row for the type was enough to drop a locale,
+ * and the surviving row was the overlay body regardless of which member it
+ * actually customizes. Slot-keyed, the overlay lands on its OWN member and the
+ * others are served untouched. An undiscriminated type's slot is its name, so
+ * its buckets are unchanged.
+ *
+ * @param type Canonical (singular) metadata type of every row being merged.
  */
 function mergePackageAwareOverlay(
+    type: string,
     baseItems: unknown[],
     records: Array<{ data: unknown; packageId: string | undefined }>,
     transform?: (data: any, prev: any) => any,
 ): unknown[] {
-    // Per-name, layer-ordered contributions; `pkg: undefined` = package-less.
+    // Per-SLOT, layer-ordered contributions; `pkg: undefined` = package-less.
     const buckets = new Map<string, Array<{ pkg: string | undefined; item: any }>>();
-    const order: string[] = []; // first-seen name order → stable output
-    const push = (name: string, pkg: string | undefined, item: any) => {
-        let list = buckets.get(name);
-        if (!list) { buckets.set(name, (list = [])); order.push(name); }
+    const order: string[] = []; // first-seen slot order → stable output
+    const slotOf = (item: unknown, name: unknown): string => {
+        const disc = itemDiscriminator(type, item);
+        return disc === undefined ? String(name) : `${String(name)}\u0000${disc}`;
+    };
+    const push = (slot: string, pkg: string | undefined, item: any) => {
+        let list = buckets.get(slot);
+        if (!list) { buckets.set(slot, (list = [])); order.push(slot); }
         list.push({ pkg, item });
     };
 
     for (const raw of baseItems) {
         const item = raw as any;
         if (item && typeof item === 'object' && 'name' in item) {
-            push(item.name, (item._packageId ?? undefined) as string | undefined, item);
+            push(slotOf(item, item.name), (item._packageId ?? undefined) as string | undefined, item);
         }
     }
     for (const { data, packageId } of records) {
@@ -1039,19 +1109,20 @@ function mergePackageAwareOverlay(
         if (!(body && typeof body === 'object' && 'name' in body)) continue;
         // The base row this record shadows at its own slot (for view-identity
         // healing): a same-package row, else a package-less one, else any
-        // same-name row it stands in for.
-        const list = buckets.get(body.name);
+        // same-slot row it stands in for.
+        const slot = slotOf(body, body.name);
+        const list = buckets.get(slot);
         const prev = list
             ? (list.find((c) => c.pkg === packageId)?.item
                 ?? list.find((c) => c.pkg === undefined)?.item
                 ?? list[0]?.item)
             : undefined;
-        push(body.name, packageId, transform ? transform(body, prev) : body);
+        push(slot, packageId, transform ? transform(body, prev) : body);
     }
 
     const out: unknown[] = [];
-    for (const name of order) {
-        const list = buckets.get(name)!;
+    for (const slot of order) {
+        const list = buckets.get(slot)!;
         const reals = Array.from(new Set(list.filter((c) => c.pkg !== undefined).map((c) => c.pkg)));
         if (reals.length === 0) {
             out.push(list[list.length - 1].item); // latest package-less row wins
@@ -4046,6 +4117,53 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#7556] Resolve an OBJECT body that came from the MetadataService into the
+     * object's resolved schema, by folding the registry's `extend` contributors
+     * onto it.
+     *
+     * The two readers of a single object — this file's by-name read and its
+     * layered view — consult {@link readItemFromMetadataService} BEFORE the
+     * SchemaRegistry, because that service is the HMR-fresh copy. For every
+     * other metadata type that ordering is free. For `object` it is not: an
+     * object's resolved schema is DEFINED (ADR-0029 D9.2 / D9.6) as a base layer
+     * with its `extend` contributors folded on, and the MetadataService copy is
+     * only the base layer. A deployment that ingests a compiled artifact
+     * (`artifactSource`, i.e. every sealed/served runtime) registers `objects`
+     * and `objectExtensions` into that service as SEPARATE collections, so the
+     * body this method receives is the owner's declaration with no extender in
+     * it. Serving it unfolded is what made the showcase's three
+     * `objectExtensions` fields readable through `GET /meta/object`, writable
+     * through the data API, and absent from `GET /meta/object/:name` — the read
+     * the edit and new forms derive from.
+     *
+     * The list read needs no counterpart: it reads `registry.listItems`, whose
+     * object branch resolves through the same fold, so it was never wrong.
+     * This method exists to make the two AGREE at their one point of
+     * divergence, not to give the by-name route a rule of its own.
+     *
+     * Applied ONLY to a MetadataService body. A registry-sourced body has
+     * already been folded, and the fold concatenates `validations`/`indexes`
+     * (see {@link SchemaRegistry.foldObjectExtendersOnto}), so applying it twice
+     * would duplicate both.
+     */
+    private foldObjectExtendersFromRegistry(type: string, name: string, body: unknown): unknown {
+        const singular = PLURAL_TO_SINGULAR[type] ?? type;
+        if (singular !== 'object') return body;
+        if (body === null || typeof body !== 'object') return body;
+        const registry = (this.engine as any)?.registry;
+        // Partial registry doubles in tests predate this method; a host that
+        // cannot fold answers exactly as it did before.
+        if (!registry || typeof registry.foldObjectExtendersOnto !== 'function') return body;
+        try {
+            return registry.foldObjectExtendersOnto(name, body);
+        } catch {
+            // The fold is a read over in-memory contributors; a failure here
+            // must not turn a served schema into a 5xx.
+            return body;
+        }
+    }
+
+    /**
      * [#5840] Read ONE item from the `metadata` service, keeping the ADR-0110
      * D3 verdict instead of flattening it into `undefined`.
      *
@@ -4203,9 +4321,23 @@ export class ObjectStackProtocolImplementation implements
             // ADR-0048 (#1828) — key by (package, name), not bare name, so a
             // package A row and a package B row of the same name do not
             // collapse; org-over-env precedence still holds within each slot.
+            //
+            // [#7774] …and for a bundled type the slot is `(package, name,
+            // locale)`. Within ONE org this changes nothing — the store's own
+            // unique index is `(type, name, organization_id, package_id)`, so
+            // an org cannot hold two rows that differ only by body locale.
+            // Across the two tiers it can: an env-wide row and this org's row
+            // may customize DIFFERENT members of one bundle, and keying them
+            // together made the org's zh-CN row silently displace the
+            // env-wide en-US one. Precedence is unchanged where it was ever
+            // meaningful — an org row still overrides the env-wide row of the
+            // same member — and an undiscriminated type keeps a
+            // byte-identical key.
             const mergedMap = new Map<string, any>();
-            for (const r of envWideRecords) mergedMap.set(metaItemKey(r.package_id, r.name), r);
-            for (const r of orgRecords) mergedMap.set(metaItemKey(r.package_id, r.name), r);
+            const rowKey = (r: any): string =>
+                metaItemKey(r.package_id, r.name, storedRowDiscriminator(request.type, r));
+            for (const r of envWideRecords) mergedMap.set(rowKey(r), r);
+            for (const r of orgRecords) mergedMap.set(rowKey(r), r);
             const records = Array.from(mergedMap.values());
             if (records && records.length > 0) {
                 const isView = (PLURAL_TO_SINGULAR[request.type] ?? request.type) === 'view';
@@ -4239,8 +4371,11 @@ export class ObjectStackProtocolImplementation implements
                 // not collapsed to one. #2555 — heal identity-less view overlays
                 // from the entry they shadow (a raw-config row would otherwise
                 // drop viewKind/object and vanish the view from switcher/list
-                // consumers); the overlay's own fields still win.
-                items = mergePackageAwareOverlay(items, overlays, (data, prev) => {
+                // consumers); the overlay's own fields still win. [#7774] The
+                // merge slot carries the bundle discriminator, so an
+                // `email_template` overlay lands on its own locale member
+                // instead of flattening every member of the bundle onto it.
+                items = mergePackageAwareOverlay(request.type, items, overlays, (data, prev) => {
                     if (isView && data && typeof data === 'object') {
                         const patch = viewIdentityPatch(data as Record<string, unknown>, prev);
                         if (patch) Object.assign(data as Record<string, unknown>, patch);
@@ -4325,7 +4460,10 @@ export class ObjectStackProtocolImplementation implements
                         }
                         return { data, packageId: recPkg };
                     });
-                    items = mergePackageAwareOverlay(items, drafts, (data) => {
+                    // [#7774] Same bundle slot as the active merge above — a
+                    // draft of one locale must preview over that locale, not
+                    // over the whole bundle.
+                    items = mergePackageAwareOverlay(request.type, items, drafts, (data) => {
                         if (data && typeof data === 'object') (data as any)._draft = true;
                         return data;
                     });
@@ -4356,11 +4494,27 @@ export class ObjectStackProtocolImplementation implements
                     // Merge, avoiding duplicates. ADR-0048 (#1828) — key by
                     // (package, name), not bare name, so a runtime item from one
                     // package does not collapse a same-name item from another.
+                    //
+                    // [#7774] …and by `(package, name, locale)` for a type
+                    // whose identity the spec declares as a pair. This loop is
+                    // where the i18n bundle actually died: `items` already
+                    // held both members (the registry keeps them since #7730),
+                    // the second `set` overwrote the first, and
+                    // `GET /meta/email_template` served one locale. It only
+                    // ever ran with a `metadata` service installed AND
+                    // answering non-empty for the type — which is why the
+                    // regression was invisible to every suite that omits one.
                     const itemMap = new Map<string, any>();
+                    const entryKey = (entry: any): string =>
+                        metaItemKey(
+                            entry._packageId ?? undefined,
+                            entry.name,
+                            itemDiscriminator(request.type, entry),
+                        );
                     for (const item of items) {
                         const entry = item as any;
                         if (entry && typeof entry === 'object' && 'name' in entry) {
-                            itemMap.set(metaItemKey(entry._packageId ?? undefined, entry.name), entry);
+                            itemMap.set(entryKey(entry), entry);
                         }
                     }
                     for (const item of runtimeItems) {
@@ -4374,7 +4528,7 @@ export class ObjectStackProtocolImplementation implements
                             // view overlays disappear from list endpoints on
                             // refresh (detail endpoint kept showing the
                             // overlay because it uses a different code path).
-                            const key = metaItemKey(entry._packageId ?? undefined, entry.name);
+                            const key = entryKey(entry);
                             if (!itemMap.has(key)) {
                                 itemMap.set(key, entry);
                             }
@@ -4647,7 +4801,12 @@ export class ObjectStackProtocolImplementation implements
                     request.packageId,
                 );
                 if (fromService.data !== undefined && fromService.data !== null) {
-                    item = fromService.data;
+                    // [#7556] A layer, not a resolved schema — see
+                    // {@link foldObjectExtendersFromRegistry}. No-op for every
+                    // type but `object`, and for an object nothing extends.
+                    item = this.foldObjectExtendersFromRegistry(
+                        request.type, request.name, fromService.data,
+                    );
                 } else if (fromService.degraded) {
                     serviceDegraded = fromService;
                 }
@@ -4860,7 +5019,15 @@ export class ObjectStackProtocolImplementation implements
                 request.packageId,
             );
             if (fromService.data !== undefined && fromService.data !== null) {
-                code = fromService.data;
+                // [#7556] The CODE layer of an object is D9.6's "owner's
+                // declaration with its extenders folded on", so the
+                // MetadataService copy is its base, not the layer itself.
+                // `effective` is `overlay ?? code`, so an object with no
+                // overlay row — the ordinary shape — is corrected by this
+                // single fold on both layers the diagnostic reports.
+                code = this.foldObjectExtendersFromRegistry(
+                    request.type, request.name, fromService.data,
+                );
             } else if (fromService.degraded) {
                 // [#5840] Kept, not swallowed — acted on after the registry
                 // fallback below, which may still produce a real code layer.
@@ -7408,9 +7575,16 @@ export class ObjectStackProtocolImplementation implements
             objectsScanned++;
 
             // Build AND-of-OR filter: every term must hit at least one field.
-            // ObjectQL exposes case-insensitive substring matching via `$contains`.
+            // [#7641] Case-insensitive substring matching is `$icontains`, NOT
+            // `$contains` — the comment this replaced asserted the opposite and
+            // was the same declared≠enforced defect as `search-filter.ts`'s
+            // (`$contains` is contractually case-SENSITIVE, #4706 Q2 = A). The
+            // global-search palette is a SECOND producer of search clauses and
+            // was wrong the same way; `search.global-search`'s knownGaps already
+            // recorded it as this issue's to fix. Neither operator's semantics
+            // changed — only which one the palette compiles to.
             const andClauses = terms.map(term => ({
-                $or: searchableFields.map(f => ({ [f]: { $contains: term } })),
+                $or: searchableFields.map(f => ({ [f]: { $icontains: term } })),
             }));
             const where = andClauses.length === 1 ? andClauses[0] : { $and: andClauses };
 
@@ -8709,13 +8883,95 @@ export class ObjectStackProtocolImplementation implements
      * Used by the two-tier authorization model to distinguish
      * "overlaying a packaged item" (requires `allowOrgOverride`) from
      * "authoring a DB-only item" (requires only `allowRuntimeCreate`).
+     *
+     * [#7743] …and it must answer that question about the artifact as SHIPPED,
+     * not about how the registry happens to key it. See
+     * {@link isNestedArtifactField} for the one declared type whose artifacts
+     * are not standalone registry items at all.
      */
     private isArtifactBacked(type: string, name: string): boolean {
         // `lookupArtifactItem` only returns items whose `_packageId` marks a
         // genuine code package (the `'sys_metadata'` rehydration sentinel is
         // excluded), and — via `SchemaRegistry.getArtifactItem` — is immune
         // to plain-key shadows hydrated from overlay rows.
-        return this.lookupArtifactItem(type, name) !== undefined;
+        if (this.lookupArtifactItem(type, name) !== undefined) return true;
+        return this.isNestedArtifactField(type, name);
+    }
+
+    /**
+     * [#7743] Is `(field, '<object>.<field>')` a field a code package ships?
+     *
+     * ## Why this predicate needs a second resolver at all
+     *
+     * `field` is the ONE type in `DEFAULT_METADATA_TYPE_REGISTRY` whose
+     * artifacts are not standalone registry items. Its `filePatterns`
+     * (`**\/*.field.ts`) match nothing in any app — fields are authored INSIDE
+     * the object (`ObjectSchema.fields`, a `z.record(name, FieldSchema)`), so
+     * the object's loader registers one `object` item and no `field` items at
+     * all. `getArtifactItem('field', 'showcase_task.title')` therefore misses
+     * on a field the package unambiguously ships.
+     *
+     * That miss is not cosmetic — it is a load-bearing authorization input.
+     * `isArtifactBacked` is what picks the write INTENT for
+     * `SysMetadataRepository.assertAllowed` (`override-artifact` vs
+     * `runtime-only`) and what arms `saveMetaItem`'s own `NOT_OVERRIDABLE`
+     * gate. With the lookup empty, an override of a packaged field was
+     * classified as a runtime-only CREATE, and `field` carries
+     * `allowRuntimeCreate: true` — so `allowOrgOverride: false` was never
+     * consulted, and `PUT /api/v1/meta/field/showcase_task.title` answered
+     * **200** on a write the registry forbids. Measured on the showcase before
+     * this fix: 200 `state:'active'`, the row reading back with
+     * `_diagnostics.valid=true`.
+     *
+     * ## Why this is `field`-only and not a general nesting rule
+     *
+     * Measured across the whole registry on a booted showcase (#7743): every
+     * other declared type either registers its artifacts standalone with a
+     * `_packageId` — `action` (70), `page` (33), `permission` (16), `dataset`
+     * (9), `doc` (9), `hook` (4), `report` (4), `mapping`/`book`/
+     * `email_template` (1 each) — or genuinely ships no artifacts at all
+     * (`position`, `tool`, `skill`, `seed`, `translation`,
+     * `external_catalog`), where "not artifact-backed" is the TRUE answer and
+     * the runtime-create tier is the right one. `action` is the instructive
+     * one: it is also nested inside the object document, yet it IS registered
+     * standalone, so it was already refused correctly (403) in the same run.
+     * `field` is the only name where the registry's answer and the shipped
+     * artifact disagree, so widening this to a class would be widening it past
+     * what was measured.
+     *
+     * ## Shape decisions
+     *
+     *  - **Containment, not a synthetic envelope.** This returns a boolean
+     *    rather than routing through {@link lookupArtifactItem}, because a
+     *    field sub-document is a bare `{ name, label, type, … }` with no
+     *    `_packageId` / `_lock` envelope. The other `lookupArtifactItem`
+     *    callers (lock resolution, `mergeArtifactProtection`, the layered
+     *    read) consume that envelope, and handing them a field body would make
+     *    them assert provenance nobody stamped. The authorization question —
+     *    "does a package ship this?" — is answerable without one.
+     *  - **The OBJECT is resolved through the artifact-only lookup**, so an
+     *    overlay row hydrated under the plain key cannot manufacture *or* mask
+     *    an artifact field (ADR-0010 §3.3, the same shadow-immunity the
+     *    standalone path relies on).
+     *  - **`fields` is read in its one canonical form** — a record keyed by
+     *    field name (`object.zod.ts`, `z.record(...)`). No array fallback:
+     *    Prime Directive #12 keeps one contract rather than two dialects.
+     *  - **A brand-new field stays creatable.** A name the object's artifact
+     *    does not carry answers `false` here, keeps the `runtime-only` intent,
+     *    and is still accepted under `allowRuntimeCreate: true` — the
+     *    declaration has two tiers and this closes only the overlay one.
+     */
+    private isNestedArtifactField(type: string, name: string): boolean {
+        if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'field') return false;
+        // `<object>.<field>` — both halves are snake_case and carry no dot of
+        // their own, so the FIRST separator is the only one.
+        const sep = name.indexOf('.');
+        if (sep <= 0 || sep === name.length - 1) return false;
+        const objectArtifact = this.lookupArtifactItem('object', name.slice(0, sep)) as
+            { fields?: Record<string, unknown> } | undefined;
+        const fields = objectArtifact?.fields;
+        if (!fields || typeof fields !== 'object') return false;
+        return Object.prototype.hasOwnProperty.call(fields, name.slice(sep + 1));
     }
 
     // ───────────────────────────────────────────────────────────────────
@@ -11613,6 +11869,7 @@ export class ObjectStackProtocolImplementation implements
     async deletePackage(request: {
         packageId: string;
         organizationId?: string;
+        allTenants?: boolean;
         actor?: string;
         keepData?: boolean;
     }): Promise<{
@@ -11623,6 +11880,78 @@ export class ObjectStackProtocolImplementation implements
         failed: Array<{ type: string; name: string; error: string; code?: string }>;
         cleanups: UninstallCleanupOutcome[];
     }> {
+        // [#7780] A cross-tenant uninstall must be DECLARED, never inferred from
+        // an absent parameter. Maintainer ruling (2026-08-12):
+        // 跨租户卸载必须显式声明,缺省缺参永远不等于「全部租户」.
+        //
+        // Before this gate, `{ packageId }` with no org matched EVERY
+        // organization's rows — measured during #7705 at 5 of 5 deleted,
+        // including a foreign org's. The two doors disagreed on which semantic
+        // that was: the direct-mount REST registrar
+        // (`packages/rest/src/package-routes.ts`) passes no org and got the
+        // cross-tenant read, while the dispatcher twin
+        // (`packages/runtime/src/domains/packages.ts`) resolves one and got the
+        // org-scoped read. Nobody chose that split; it fell out of a missing
+        // argument.
+        //
+        // Why a flag and not a convention: `resolveActiveOrganizationId`
+        // (#4127) is entirely `catch`-wrapped, so ANY throw on the auth seam
+        // returns `undefined`. An accidental org-less call and a deliberate
+        // env-wide one are byte-identical at the call site, and the widest
+        // possible reading of a destructive operation is the one that must
+        // never be reachable by accident. `allTenants: true` is the carrier
+        // that makes the two distinguishable.
+        //
+        // ⛔ NOT narrowed to `organization_id IS NULL` — #7705 proved that
+        // revives the orphaned-row defect on the other door. The remedy here is
+        // explicitness, not narrowing: with the flag, the no-org branch stays
+        // package-wide exactly as it was.
+        //
+        // Mirrors the `force: true` / `DESTRUCTIVE_CHANGE` opt-in this same
+        // class already uses for `saveMetaItem` — refuse, name the remedy in the
+        // message, and carry a ledger-declared code plus an explicit status.
+        // Two ways to violate ONE contract — "the uninstall's tenant scope must be
+        // readable off the request" — so both answer in the same family, with the
+        // same code and status, and each names the parameters that produced it.
+        //
+        // (a) CONTRADICTORY. `organizationId` says "this tenant", `allTenants`
+        // says "every tenant". Rejecting beats picking a winner, because both
+        // silent resolutions are worse than a refusal: resolving narrow-first
+        // makes `allTenants: true` silently INERT (the caller believes they
+        // asked for a cross-tenant uninstall and quietly gets a scoped one,
+        // discovering it only when the rows they expected gone are still
+        // there); resolving explicit-first silently IGNORES a named
+        // organization and deletes every tenant's rows — the original defect
+        // wearing a flag. Rejecting is also the only reading that stays correct
+        // when a request is COMPOSED from two places (a resolver supplying the
+        // org, config supplying the flag), which is exactly the accidental
+        // composition `resolveActiveOrganizationId` makes real.
+        if (request.organizationId && request.allTenants === true) {
+            const err = new Error(
+                `[tenant_scope_required] Refusing to uninstall '${request.packageId}':`
+                + ` organizationId ('${request.organizationId}') and allTenants: true are mutually exclusive —`
+                + ` one scopes the uninstall to a single tenant, the other clears every tenant's rows.`
+                + ` — pass organizationId alone to scope it, or allTenants: true alone to confirm the cross-tenant uninstall.`
+            );
+            (err as any).code = 'TENANT_SCOPE_REQUIRED';
+            (err as any).status = 400;
+            throw err;
+        }
+        // (b) UNDECLARED. Note `!== true`: an explicit `allTenants: false` lands
+        // here with absent, deliberately. `false` is not a request for
+        // cross-tenant semantics, so it cannot authorise them — only the
+        // affirmative `true` does.
+        if (!request.organizationId && request.allTenants !== true) {
+            const err = new Error(
+                `[tenant_scope_required] Refusing to uninstall '${request.packageId}' with no organization scope:`
+                + ` an uninstall that names neither an organization nor an explicit cross-tenant intent would delete`
+                + ` EVERY organization's rows for this package.`
+                + ` — pass organizationId to scope it, or allTenants: true to confirm the cross-tenant uninstall.`
+            );
+            (err as any).code = 'TENANT_SCOPE_REQUIRED';
+            (err as any).status = 400;
+            throw err;
+        }
         const where: Record<string, unknown> = { package_id: request.packageId };
         // [#7705] Surface BOTH org-scoped rows and env-wide (`organization_id
         // IS NULL`) rows to an org-scoped uninstall. A strict
@@ -11649,7 +11978,15 @@ export class ObjectStackProtocolImplementation implements
         // registrar, `packages/rest/src/package-routes.ts`) passes no
         // `organizationId` at all, and restricting it to env-wide rows would
         // orphan every org-scoped row — the same bug, re-created on the other
-        // door. Absent an org, a full uninstall stays package-wide.
+        // door. Absent an org, a full uninstall stays package-wide — and since
+        // #7780 that branch is reachable only with `allTenants: true`, so the
+        // width is now something a caller ASKED for rather than something a
+        // missing argument selected.
+        //
+        // There is no tie-break for "both supplied" because that combination
+        // never reaches here — it is refused above. A destructive operation
+        // whose scope is stated twice, contradictorily, has no reading that is
+        // safe to guess.
         if (request.organizationId) {
             where.$or = [
                 { organization_id: request.organizationId },
@@ -11789,8 +12126,98 @@ export class ObjectStackProtocolImplementation implements
             request.targetNamespace ?? (request.targetPackageId.split('.').pop() ?? request.targetPackageId);
 
         const where: Record<string, unknown> = { package_id: request.sourcePackageId, state: 'active' };
-        if (request.organizationId) where.organization_id = request.organizationId;
-        const rows = (await this.engine.find('sys_metadata', { where })) as any[];
+        // [#7819 tier 2] Copy the source's env-wide (`organization_id IS NULL`)
+        // rows too, not just the ones this org happens to own — the same `$or`
+        // {@link deletePackage} (#7705) and {@link listCommits} (#7779) carry.
+        // Unlike the tier-1 sites this really is plain scan scoping (`where` is
+        // keyed on package + state, not on `id`), so the family remedy applies
+        // without their authorization question.
+        //
+        // Measured on a real driver before the fix: a source package holding one
+        // env-wide row and one org-scoped row duplicated by an org caller
+        // answered `{success: true, copiedCount: 1, failedCount: 0}` — a PARTIAL
+        // copy reported as a whole one, because `organization_id = <org>` matches
+        // no NULL column. The mixed state is ordinary, not contrived: a publish
+        // made before an active org was selected lands its `sys_metadata` row
+        // env-wide (`saveMetaItem` writes `organization_id = NULL`), and
+        // `resolveActiveOrganizationId` yields `undefined` for such a session
+        // *and* for any throw on the auth seam.
+        //
+        // The sharper consequence is the rename map below, which is built ONLY
+        // from the rows this scan returns. With the env-wide OBJECT rows missing
+        // it came out empty, so a copied view was renamed `iojn2_list` while its
+        // `data.object` still pointed at the SOURCE package's `iojn_widget` — a
+        // duplicate silently wired back to the base it was cloned from, reporting
+        // success. An all-env-wide source degraded differently and just as
+        // quietly: `{success: false, copiedCount: 0, failedCount: 0}`, nothing
+        // copied and nothing named as failed.
+        //
+        // The no-org branch is deliberately NOT narrowed to `organization_id IS
+        // NULL`, exactly as #7705 / #7779 / tier 1 left theirs: that door copies
+        // every scope today, and restricting it to env-wide rows would drop every
+        // org-scoped row from the copy — the same bug pointed the other way.
+        if (request.organizationId) {
+            where.$or = [
+                { organization_id: request.organizationId },
+                { organization_id: null },
+            ];
+        }
+        const scanned = (await this.engine.find('sys_metadata', { where })) as any[];
+
+        // [#7819 tier 2] ADR-0005 overlay precedence — the caller's OWN org
+        // shadows env-wide ({@link resolveMetaItemOrgScope} states the same rule
+        // for history lineages). Widening the scan makes a collision newly
+        // possible that could not occur while it was a strict equality: one item
+        // can now appear TWICE, as an env-wide row PLUS this org's overlay of it.
+        // Every copy is written under `request.organizationId`, so both would
+        // land on the same target key — overlay uniqueness is
+        // `(type, name, organization_id, COALESCE(package_id, ''))` — and which
+        // body survived would be decided by driver row order. Keep the org
+        // overlay: it is what this caller already reads everywhere else.
+        let rows = scanned;
+        if (request.organizationId) {
+            const byKey = new Map<string, any>();
+            for (const row of scanned) {
+                // [#7932] …and for a bundled type the slot is
+                // `(type, name, discriminator)`. Same shape #7774 gave
+                // {@link metaItemKey}: the discriminator is appended ONLY
+                // when the type declares one, so every undiscriminated type
+                // keeps a byte-identical two-component key and this
+                // change's blast radius is provable rather than argued.
+                //
+                // Within ONE org the collapse cannot happen —
+                // `sys_metadata`'s overlay uniqueness is
+                // `(type, name, organization_id, package_id)` and the table
+                // has no locale column, so one org cannot hold two rows
+                // differing only by body locale. Across the two tiers it
+                // can, and this scan is the one place they meet: an
+                // env-wide `auth.welcome` customized in `en-US` and THIS
+                // org's `zh-CN` customization are two different members of
+                // one bundle (`EmailTemplateDefinitionSchema` resolves a
+                // template by `(name, locale)`), and keying them together
+                // let the org row displace the env-wide one — the
+                // duplicate then shipped one locale of a two-locale
+                // customization, reporting success. Precedence is unchanged
+                // where it was ever meaningful: an org row still wins over
+                // the env-wide row of the SAME member.
+                //
+                // The discriminator is read off the RAW stored body rather
+                // than the converted one, which is safe because no ADR-0087
+                // conversion entry touches `email_template` — re-checked
+                // against `packages/spec/src/conversions/registry.ts`,
+                // whose surfaces are flow/page/object/view/app/… and never
+                // this type.
+                const disc = storedRowDiscriminator(String(row?.type), row);
+                const base = `${row?.type}\u0000${row?.name}`;
+                const key = disc === undefined ? base : `${base}\u0000${disc}`;
+                const kept = byKey.get(key);
+                const keptIsEnvWide = kept != null && (kept.organization_id ?? null) === null;
+                if (kept == null || (keptIsEnvWide && (row?.organization_id ?? null) !== null)) {
+                    byKey.set(key, row);
+                }
+            }
+            rows = [...byKey.values()];
+        }
 
         // Map only OBJECT names that carry the source namespace prefix; views/etc.
         // are renamed by the same prefix swap and reference-rewritten via the map.
@@ -11932,6 +12359,36 @@ export class ObjectStackProtocolImplementation implements
             }
             const rewritten = deepRewrite(item);
             if (rewritten && typeof rewritten === 'object' && !Array.isArray(rewritten)) rewritten.name = newName;
+            // [#7819 tier 2] The copy lands in the SCOPE OF THE ROW IT CAME
+            // FROM, not the request's — the same rule #7559 gave `revertCommit`
+            // ({@link resolveMetaItemOrgScope}) for the same reason, now that
+            // widening the scan above means this loop, too, processes a batch
+            // that "legitimately mixes an env-wide artifact with an org
+            // overlay".
+            //
+            // Not cosmetic: without it the read fix alone cannot produce a
+            // working duplicate. Stamping the request's org on every copy is
+            // REFUSED for any type the metadata-type registry declares
+            // `allowOrgOverride=false` — `object` among them — with
+            // `NOT_OVERRIDABLE`, because boot hydration loads env-wide rows
+            // only and an org-scoped `object` row would vanish on the next
+            // restart (ADR-0005, #6190). Since an `object` therefore CANNOT
+            // exist org-scoped, every object row in a source package is
+            // env-wide, and an org-scoped `duplicatePackage` could not copy a
+            // single one: before this card the strict equality hid them, and
+            // with only the scan widened they would land in `failed[]`
+            // instead. Objects being what a base is mostly made of, ADR-0070
+            // D4's "duplicate base" gesture was structurally unable to
+            // duplicate a base whenever an org was active.
+            //
+            // Scoped to the org-scoped door alone. With no `organizationId` on
+            // the request the scan returns every organization's rows and each
+            // copy is written env-wide exactly as before — that door's
+            // behaviour is deliberately left byte-identical, as this card
+            // leaves all of its no-org branches.
+            const copyOrgId: string | null = request.organizationId
+                ? ((row?.organization_id ?? null) as string | null)
+                : null;
             try {
                 await this.saveMetaItem({
                     type: row.type,
@@ -11939,7 +12396,7 @@ export class ObjectStackProtocolImplementation implements
                     item: rewritten,
                     mode: 'publish',
                     packageId: request.targetPackageId,
-                    ...(request.organizationId ? { organizationId: request.organizationId } : {}),
+                    ...(copyOrgId ? { organizationId: copyOrgId } : {}),
                     ...(request.actor ? { actor: request.actor } : {}),
                 });
                 copied.push({ type: row.type, name: newName });
@@ -11978,7 +12435,45 @@ export class ObjectStackProtocolImplementation implements
         targetPackageId: string;
     }> {
         const where: Record<string, unknown> = {};
-        if (request.organizationId) where.organization_id = request.organizationId;
+        // [#7819 tier 2] See env-wide (`organization_id IS NULL`) orphans too.
+        // This is the sharper member of the family, because FINDING ORPHANS IS
+        // THE ENTIRE PURPOSE of this method: a class of orphan it structurally
+        // cannot see is not a partial answer, it is a wrong one. Measured on a
+        // real driver before the fix — two orphans, one env-wide and one
+        // org-scoped, adopted by an org caller: `{success: true,
+        // reassignedCount: 1}`, with the env-wide orphan left at
+        // `package_id = null` and nothing reporting that it was skipped.
+        //
+        // Not a legacy-only population, which is what makes this live rather
+        // than latent. The docstring above calls orphans a pre-package-first
+        // residue, and ADR-0070 D1 does reject NEW orphans that name a
+        // read-only package (`WRITABLE_PACKAGE_REQUIRED`) — but a
+        // `saveMetaItem` that names NO package at all still succeeds today and
+        // lands `package_id = null, organization_id = null`, i.e. the current
+        // write path mints exactly the orphan this scan could not see.
+        //
+        // ADR-0070 D5 settles the scope question this widening raises (an
+        // org-scoped caller now rebinds rows every org can see): the unit is
+        // explicitly the ENVIRONMENT — "bulk-assign legacy orphans to a default
+        // base named for the environment", completing when "an environment has
+        // no orphans", in a deployment model whose own words are "there is no
+        // per-org overlay dimension here… the relevant axis is code package vs
+        // writable base, not 'org'". Under that model every orphan is env-wide,
+        // so the strict equality made this method inert for an org-scoped
+        // caller in precisely the deployment it was designed for.
+        //
+        // ⛔ The no-org branch stays `{}` — deliberately un-narrowed, and this
+        // is the exposure the card flagged as worst: that door already scans
+        // EVERY organization's rows. Narrowing it to `organization_id IS NULL`
+        // would re-create this same bug pointed the other way. Whether that
+        // door should be that wide is #7780's open product question, which is
+        // a maintainer call and explicitly NOT decided here.
+        if (request.organizationId) {
+            where.$or = [
+                { organization_id: request.organizationId },
+                { organization_id: null },
+            ];
+        }
         const rows = (await this.engine.find('sys_metadata', { where })) as any[];
         const orphans = rows.filter(
             (r) => r?.package_id == null || r.package_id === '' || r.package_id === 'sys_metadata',
@@ -12114,7 +12609,42 @@ export class ObjectStackProtocolImplementation implements
     }>> {
         try {
             const where: Record<string, unknown> = { package_id: request.packageId };
-            if (request.organizationId) where.organization_id = request.organizationId;
+            // [#7779] Surface BOTH org-scoped and env-wide (`organization_id IS
+            // NULL`) commit rows to an org-scoped caller — the same defect and
+            // the same remedy as the sibling {@link deletePackage} read one
+            // function above (#7705), and as {@link
+            // SysMetadataRepository.listDrafts} (#3115) in this package.
+            //
+            // Env-wide commit rows are not hypothetical: {@link
+            // recordPackageCommit} stores `organization_id: request.
+            // organizationId ?? null`, and the ONLY door into a publish — the
+            // dispatcher's `POST /packages/:id/publish-drafts` — forwards an
+            // org only when `resolveActiveOrganizationId` yields one. That
+            // resolver answers `undefined` for a session with no active
+            // organization AND for every failure on the auth seam (it is
+            // `catch`-wrapped). So a publish made before an org was selected —
+            // or during a transient auth blip — lands its commit env-wide,
+            // permanently, and the strict equality then hid it from every
+            // org-scoped read of that package's timeline.
+            //
+            // This is NOT merely an observability miss. {@link
+            // rollbackToPackageCommit} derives the set of commits to undo from
+            // this list, so an invisible commit was silently never reverted:
+            // measured pre-fix, a rollback past an env-wide commit answered
+            // `{success: true, revertedCommits: []}` while that commit's
+            // changes stayed live.
+            //
+            // The no-org branch is deliberately NOT narrowed to
+            // `organization_id IS NULL`, exactly as #7705 left its own: a
+            // caller with no active org reads the package's whole timeline,
+            // and restricting it to env-wide rows would hide every org-scoped
+            // commit instead — the same bug pointed the other way.
+            if (request.organizationId) {
+                where.$or = [
+                    { organization_id: request.organizationId },
+                    { organization_id: null },
+                ];
+            }
             const rows = (await this.engine.find('sys_metadata_commit', {
                 where,
                 ...(request.limit ? { limit: request.limit } : {}),
@@ -12177,7 +12707,52 @@ export class ObjectStackProtocolImplementation implements
         await this.ensureOverlayIndex();
         const orgId = request.organizationId ?? null;
         const where: Record<string, unknown> = { id: request.commitId };
-        if (request.organizationId) where.organization_id = request.organizationId;
+        // [#7819] Resolve BOTH org-scoped and env-wide (`organization_id IS
+        // NULL`) commit rows for an org-scoped caller — the same defect and
+        // remedy as the sibling {@link listCommits} (#7779) and {@link
+        // deletePackage} (#7705). `organization_id = <org>` matches no NULL
+        // column, so this answered `COMMIT_NOT_FOUND` (404) for a row that
+        // demonstrably exists and that the SAME caller's `listCommits`
+        // returns.
+        //
+        // ⚠️ This site is NOT the family's plain scan-scoping, and the `$or`
+        // was chosen over the two alternatives rather than copied. `where` is
+        // keyed on `id`, so the predicate reads like an AUTHORIZATION filter
+        // layered on a unique key. Measured against the only door, it is not
+        // one: authorization on `POST /packages/:id/commits/:commitId/revert`
+        // is `requireManageMetadata`, checked before this call; the
+        // `organizationId` that arrives is the session's *active org
+        // selection* from `resolveActiveOrganizationId`, whose body is
+        // entirely `catch`-wrapped and answers `undefined` on any auth-seam
+        // throw — and `undefined` omits this predicate, which is the WIDEST
+        // reading (every organization's commits). A boundary that fails OPEN
+        // is not a boundary, so there is no authz here to make precise; that
+        // rules out "keep it but distinguish 'not yours' from 'no such
+        // commit'". Dropping the predicate outright is defensible on an id
+        // lookup, but it would newly let an org caller revert ANOTHER
+        // organization's commit by id — a widening this card never asked for.
+        // The `$or` admits the env-wide rows and refuses that one.
+        //
+        // The body already agreed with this reading before the lookup did:
+        // #7559 made each item resolve its scope FROM THE ROW ({@link
+        // resolveMetaItemOrgScope}) precisely because "a batch legitimately
+        // mixes an env-wide artifact with an org overlay", so the loop below
+        // processes env-wide items for an org caller while the lookup above
+        // refused to hand them over. {@link rollbackToPackageCommit} made the
+        // contradiction self-evident: since #7814 it plans from `listCommits`
+        // (org + env-wide) and fed each id straight back into this lookup.
+        //
+        // The no-org branch is deliberately NOT narrowed to `organization_id
+        // IS NULL`, exactly as #7705 and #7779 left theirs: the direct-mount
+        // REST registrar passes no `organizationId` at all, and restricting
+        // that door to env-wide rows would make every org-scoped commit
+        // unrevertable — the same bug pointed the other way.
+        if (request.organizationId) {
+            where.$or = [
+                { organization_id: request.organizationId },
+                { organization_id: null },
+            ];
+        }
         const row = (await this.engine.findOne('sys_metadata_commit', { where })) as any;
         if (!row) {
             const err: any = new Error(`[commit_not_found] No commit '${request.commitId}'.`);
@@ -12452,7 +13027,20 @@ export class ObjectStackProtocolImplementation implements
         failed: Array<{ commitId: string; error: string }>;
     }> {
         const where: Record<string, unknown> = { id: request.commitId };
-        if (request.organizationId) where.organization_id = request.organizationId;
+        // [#7819] Same widening as the {@link revertCommit} lookup above, and
+        // for the sharper reason: this function PLANS from {@link listCommits},
+        // which since #7814 returns org-scoped and env-wide rows alike to an
+        // org caller. With the strict equality here, an org-scoped rollback
+        // whose TARGET happened to be recorded env-wide answered 404 before it
+        // planned anything at all — for a commit the caller's own timeline had
+        // just listed. The rationale for the `$or` over the alternatives, and
+        // for leaving the no-org branch un-narrowed, is stated in full there.
+        if (request.organizationId) {
+            where.$or = [
+                { organization_id: request.organizationId },
+                { organization_id: null },
+            ];
+        }
         const target = (await this.engine.findOne('sys_metadata_commit', { where })) as any;
         if (!target) {
             const err: any = new Error(`[commit_not_found] No commit '${request.commitId}'.`);

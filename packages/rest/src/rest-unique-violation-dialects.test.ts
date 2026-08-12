@@ -12,12 +12,14 @@
  * still ship green.
  *
  * So {@link DIALECT_SAMPLES} below is the single source, and every case runs
- * twice:
+ * against each face:
  *
  *   face 1 — `isUniqueViolationError` (`@objectstack/types`), the predicate;
- *   face 2 — `mapDataError` (this package), the wire envelope a client sees.
+ *   face 2 — `mapDataError` (this package), the wire envelope a client sees;
+ *   face 3 — [#7821] the `field` that envelope carries, and the dialects where
+ *            it must carry none.
  *
- * A dialect that regresses on either face goes red here, and adding a dialect
+ * A dialect that regresses on any face goes red here, and adding a dialect
  * to only one of them cannot go green.
  *
  * **This file lives in `@objectstack/rest` and not in the predicate's own
@@ -37,6 +39,9 @@
 import { describe, it, expect } from 'vitest';
 import { isUniqueViolationError, looksLikeInternalErrorLeak } from '@objectstack/types';
 import { mapDataError } from './rest-server.js';
+// [#7821] The bulk path, imported only so the parity assertion can compare the
+// two paths' answers in one place. This file does not otherwise test it.
+import { sanitizeRowError } from './import-runner.js';
 
 /**
  * The user data value MySQL embeds in its conflict message. Kept as a named
@@ -61,6 +66,15 @@ interface DialectSample {
     readonly unique: boolean;
     /** Face 2: the exact wire envelope `mapDataError` must produce. */
     readonly rest: { readonly status: number; readonly code: string };
+    /**
+     * Face 3 (#7821): the `field` the 409 body must carry, or `undefined` when
+     * the dialect did not determinably name a COLUMN and the envelope must
+     * therefore carry no `field` key at all.
+     *
+     * Only meaningful on conflicts; left unset on the negatives, which never
+     * reach the 409 branch.
+     */
+    readonly field?: string;
 }
 
 /** Attach driver metadata to an `Error` the way a real driver does. */
@@ -206,7 +220,9 @@ const DIALECT_SAMPLES: readonly DialectSample[] = [
         rest: { status: 409, code: 'UNIQUE_VIOLATION' },
     },
     // The `DETAIL:` line Postgres appends names the column AND the value.
-    // Included because it is the shape the 409 body must not forward.
+    // Included because it is the shape the 409 body must not forward — and,
+    // since #7821, the shape from which the body DOES take the column: `email`
+    // reaches the wire, `acme@example.com` and `idx_email_unique` do not.
     {
         dialect: 'postgres',
         label: 'duplicate key with DETAIL naming column and value',
@@ -217,6 +233,58 @@ const DIALECT_SAMPLES: readonly DialectSample[] = [
                     `DETAIL: Key (email)=(${OFFENDING_VALUE}) already exists.`,
                 { code: '23505' },
             ),
+        unique: true,
+        rest: { status: 409, code: 'UNIQUE_VIOLATION' },
+        field: 'email',
+    },
+    // [#7821] The same conflict as **node-postgres actually delivers it**: the
+    // `DETAIL:` line on its own `detail` property, absent from the message.
+    // This is the sample that makes handing `uniqueViolationColumn` the ERROR
+    // rather than `error.message` load-bearing — the bulk path's string-only
+    // read resolves `undefined` here, and this branch resolves `email`.
+    {
+        dialect: 'postgres',
+        label: '[#7821] DETAIL on `error.detail`, not in the message',
+        channel: 'message',
+        build: () =>
+            driverError(`duplicate key value violates unique constraint "${OFFENDING_INDEX}"`, {
+                code: '23505',
+                detail: `Key (email)=(${OFFENDING_VALUE}) already exists.`,
+            }),
+        unique: true,
+        rest: { status: 409, code: 'UNIQUE_VIOLATION' },
+        field: 'email',
+    },
+    // [#7821] …and the same again behind a re-throw, since the `cause` walk is
+    // the third channel the object read buys over the string read.
+    {
+        dialect: 'postgres',
+        label: '[#7821] DETAIL on a wrapped `cause`',
+        channel: 'cause',
+        build: () =>
+            driverError('Write failed', {
+                cause: driverError(
+                    `duplicate key value violates unique constraint "${OFFENDING_INDEX}"`,
+                    { code: '23505', detail: `Key (email)=(${OFFENDING_VALUE}) already exists.` },
+                ),
+            }),
+        unique: true,
+        rest: { status: 409, code: 'UNIQUE_VIOLATION' },
+        field: 'email',
+    },
+    // [#7821] A COMPOSITE key names no single offending column, so the envelope
+    // must degrade to the unnamed sentence rather than pick `tenant_id` — the
+    // user typed `email` twice, and a form sent to the wrong input is worse
+    // than a form sent nowhere.
+    {
+        dialect: 'postgres',
+        label: '[#7821] composite key — no single column, so no `field`',
+        channel: 'message',
+        build: () =>
+            driverError(`duplicate key value violates unique constraint "${OFFENDING_INDEX}"`, {
+                code: '23505',
+                detail: `Key (tenant_id, email)=(1, ${OFFENDING_VALUE}) already exists.`,
+            }),
         unique: true,
         rest: { status: 409, code: 'UNIQUE_VIOLATION' },
     },
@@ -260,12 +328,29 @@ const DIALECT_SAMPLES: readonly DialectSample[] = [
             }),
         unique: true,
         rest: { status: 409, code: 'UNIQUE_VIOLATION' },
+        // [#7821] `sys_user.email` → `email`: the TABLE qualifier is stripped,
+        // which is what keeps the pre-existing "wire must not contain
+        // `sys_user.email`" assertion below true after the field is added.
+        field: 'email',
     },
     {
         dialect: 'sqlite',
         label: 'SQLITE_CONSTRAINT_UNIQUE — code channel only',
         channel: 'code',
         build: () => driverError('insert failed', { code: 'SQLITE_CONSTRAINT_UNIQUE' }),
+        unique: true,
+        rest: { status: 409, code: 'UNIQUE_VIOLATION' },
+    },
+    // [#7821] SQLite's other spelling for a partial/expression index names the
+    // INDEX. That is not a column and must not be reported as one.
+    {
+        dialect: 'sqlite',
+        label: "[#7821] UNIQUE constraint failed: index 'x' — an index, so no `field`",
+        channel: 'message',
+        build: () =>
+            driverError(`UNIQUE constraint failed: index '${OFFENDING_INDEX}'`, {
+                code: 'SQLITE_CONSTRAINT_UNIQUE',
+            }),
         unique: true,
         rest: { status: 409, code: 'UNIQUE_VIOLATION' },
     },
@@ -350,6 +435,15 @@ describe('#6250 face 2 — the REST wire envelope (mapDataError)', () => {
  * name and, in its `DETAIL:` line, the column and the value. A 409 that
  * forwarded any of that would hand one tenant another tenant's data through an
  * error body — while the pre-#6250 500 that this replaces disclosed nothing.
+ *
+ * [#7821] added the conflicting **column** to the body, and these assertions are
+ * unchanged by it — which is exactly the check that matters. The column is the
+ * one thing in that list that is safe to name: it is a schema identifier the
+ * caller already knows (they just posted it as a field), it arrives via
+ * `uniqueViolationColumn` as a bare `[A-Za-z_][A-Za-z0-9_$]*` and never as
+ * driver prose, and the other three — the offending value, the index name, and
+ * the `table.` qualifier — still must not appear. So `sys_user.email` yields
+ * `email` and the `not.toContain('sys_user.email')` limb below keeps holding.
  */
 describe('#6250 — the 409 body echoes nothing the driver said', () => {
     it.each(CONFLICTS.map((s) => [`${s.dialect}: ${s.label}`, s] as const))(
@@ -369,11 +463,136 @@ describe('#6250 — the 409 body echoes nothing the driver said', () => {
         },
     );
 
-    it('says the same sentence for every dialect — the body is fixed text, not driver prose', () => {
+    /**
+     * [#7821] This assertion used to read `toEqual(new Set(['A record with this
+     * value already exists']))` — ONE sentence for every dialect. It is
+     * deliberately widened, not deleted, because the invariant it defends was
+     * never "one sentence"; it was **"the body is assembled from fixed text and
+     * values this package chose, never from driver prose."**
+     *
+     * There are now exactly two sentences, and the only difference between them
+     * is a bare identifier `uniqueViolationColumn` could determine is a COLUMN.
+     * The set-equality is kept (rather than relaxed to a regex) so that a future
+     * change which lets driver text leak into `body.error` still goes red here:
+     * a third distinct sentence fails this, whatever it says.
+     */
+    it('assembles the body from fixed text — exactly two sentences, one bare identifier apart', () => {
         const bodies = new Set(
             CONFLICTS.map((s) => String(mapDataError(s.build(), 'sys_user').body.error)),
         );
-        expect(bodies).toEqual(new Set(['A record with this value already exists']));
+        expect(bodies).toEqual(
+            new Set([
+                'A record with this value already exists',
+                'A record with this email already exists',
+            ]),
+        );
+    });
+});
+
+/**
+ * [#7821] Face 3 — the `field` the 409 body carries.
+ *
+ * ## What was wrong
+ *
+ * The platform resolved the colliding column on the **bulk / import** path
+ * (`sanitizeRowError` → `uniqueViolationColumn`, #6544) and withheld it on the
+ * **single-record** path, which held the same error object and sat one import
+ * from the same helper. One rule, two implementations, one strictly worse: on an
+ * object with several unique fields the single-record caller was told only that
+ * "a value" was taken and had to guess which, and — because the body carried no
+ * `field` — a client that wanted to render its own localized message could not
+ * name the field either.
+ *
+ * ## Degradation is the contract, not a fallback
+ *
+ * `uniqueViolationColumn` answers `undefined` whenever the dialect named an
+ * INDEX (MySQL always; SQLite's `index 'x'` form; Postgres' constraint-name
+ * form), named a COMPOSITE key, or emitted prose it does not parse. Every one of
+ * those must produce the unnamed sentence and **no `field` key at all** — a
+ * wrong field name is worse than none, because it sends the user to correct an
+ * input that was never the problem. That is why the negative half below asserts
+ * `not.toHaveProperty('field')` rather than `field === undefined`: a `field: null`
+ * or `field: ''` on the wire is the same defect wearing a different type.
+ *
+ * ⛔ The bulk path is NOT touched by #7821 and is pinned unchanged in
+ * `import-runner-error-sanitize.test.ts`. Convergence here was upward only.
+ */
+describe('#7821 face 3 — the conflicting field on the wire', () => {
+    const NAMED = CONFLICTS.filter((s) => s.field !== undefined);
+    const UNNAMED = CONFLICTS.filter((s) => s.field === undefined);
+
+    it('both halves of the table are populated — the pin is not vacuous', () => {
+        // Without this, deleting every `field` from the samples above would make
+        // the whole describe pass by having nothing to assert.
+        expect(NAMED.length).toBeGreaterThan(0);
+        expect(UNNAMED.length).toBeGreaterThan(0);
+    });
+
+    it.each(NAMED.map((s) => [`${s.dialect}/${s.channel}: ${s.label}`, s] as const))(
+        'names the field for %s',
+        (_name, sample) => {
+            const r = mapDataError(sample.build(), 'sys_user');
+            // `code` AND `status` per ADR-0112 — never "it stopped being a 500".
+            expect(r.status).toBe(409);
+            expect(r.body.code).toBe('UNIQUE_VIOLATION');
+            expect(r.body.field).toBe(sample.field);
+            expect(r.body.error).toBe(`A record with this ${sample.field} already exists`);
+        },
+    );
+
+    it.each(UNNAMED.map((s) => [`${s.dialect}/${s.channel}: ${s.label}`, s] as const))(
+        'degrades cleanly — no bogus field — for %s',
+        (_name, sample) => {
+            const r = mapDataError(sample.build(), 'sys_user');
+            expect(r.status).toBe(409);
+            expect(r.body.code).toBe('UNIQUE_VIOLATION');
+            expect(r.body).not.toHaveProperty('field');
+            expect(r.body.error).toBe('A record with this value already exists');
+        },
+    );
+
+    /**
+     * MySQL is the whole accepted cost of `uniqueViolationColumn`'s contract, so
+     * it is asserted by name rather than left to the table: its duplicate-entry
+     * message names the index and never the column, so a MySQL deployment gets
+     * the unnamed sentence. If someone later "improves" the helper by deriving
+     * `email` from `idx_email_unique`, this goes red — which is the point.
+     */
+    it('MySQL still names no field — an index name is not a column', () => {
+        for (const sample of CONFLICTS.filter((s) => s.dialect === 'mysql')) {
+            const r = mapDataError(sample.build(), 'sys_user');
+            expect(r.status).toBe(409);
+            expect(r.body).not.toHaveProperty('field');
+        }
+    });
+
+    it('the field is additive — `code` and `object` are untouched beside it', () => {
+        const named = NAMED[0];
+        const r = mapDataError(named.build(), 'sys_user');
+        expect(r.body.code).toBe('UNIQUE_VIOLATION');
+        expect(r.body.object).toBe('sys_user');
+        expect(r.body.field).toBe(named.field);
+        // …and a route with no object still omits `object`, not `field`.
+        const bare = mapDataError(named.build());
+        expect(bare.body).not.toHaveProperty('object');
+        expect(bare.body.field).toBe(named.field);
+    });
+
+    /**
+     * The reported asymmetry, asserted as the single fact it is: for a conflict
+     * both paths can name, the two paths now say the same field. `sanitizeRowError`
+     * is called with the string it is always given, exactly as `import-runner`
+     * calls it — this compares the two paths, it does not re-test either.
+     */
+    it('parity with the bulk path — both name the same field for one conflict', () => {
+        const message = 'UNIQUE constraint failed: sys_user.email';
+        const single = mapDataError(driverError(message, { code: 'SQLITE_CONSTRAINT_UNIQUE' }), 'sys_user');
+
+        expect(single.body.field).toBe('email');
+        // Unchanged by #7821, and restated here so a regression on either side
+        // surfaces as the divergence it would be.
+        expect(sanitizeRowError(message)).toBe('A record with this email already exists.');
+        expect(String(single.body.error)).toContain('email');
     });
 });
 

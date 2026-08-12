@@ -702,10 +702,13 @@ function selfTest() {
     {
       // The anti-false-positive direction. #5451 route B generalized the published
       // copy on purpose: no startup self-description, no this-repo issue numbers.
-      // A gate that reads those as drift would be reverted, so prove it does not.
+      // (Since the 2026-08-12 principles-only rewrite the internal copy carries no
+      // issue numbers either — check-skill-id-lint enforces that — so this fixture
+      // mutates wording only.) A gate that reads wording as drift would be
+      // reverted, so prove it does not.
       label: 'wording-only divergence (the #5451 generalization) → stays GREEN',
       copies: () => {
-        let c = mutate(base, 'internal-pm', /#\d{4}/g, '#0000');
+        let c = mutate(base, 'internal-pm', '长期代价', '长远代价');
         c = mutate(c, 'internal-pm', '创业项目', '项目');
         return mutate(c, 'internal-pm', '不作数', '不算证据');
       },

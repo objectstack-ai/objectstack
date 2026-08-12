@@ -331,16 +331,40 @@ export class MetadataManager implements IMetadataService {
   // above. The concurrent half is delivered by `inflightListReads` below, which
   // is why the two fields are one policy and are documented together.
   //
-  // [#5184] That hazard is NOT historical — it was re-verified on the current
-  // driver stack before this policy was chosen. `DatabaseLoader._find()` still
-  // issues `engine.find('sys_metadata', …)` without threading the caller's
-  // transaction, and `driver-sql` still treats SQLite as a single-connection
-  // pool (`activeTransactions`, `assertBareKnexSafe` — the latter a dev/test
-  // guard that is a no-op in production, so production still waits the timeout
-  // out). `plugin-audit`'s `captureBefore` threads the transaction by hand for
-  // exactly this reason. Hence the policy below keeps caching degraded reads
-  // rather than skipping them: "don't cache a degraded read" would trade one
-  // 30s silent window for a fresh 60s stall per call.
+  // [#5184; re-measured under #7708 on 2026-08-11] That hazard is NOT
+  // historical — and the re-measurement NARROWED it rather than retiring it.
+  // Measured on the current stack: real `ObjectQL` + real `SqlDriver`
+  // (better-sqlite3), a real `DatabaseLoader.list()` with the loader's own
+  // cache off, `knex.client.pool.max === 1` confirmed for the SQLite dialect
+  // and `acquireConnectionTimeout` left at the knex default of 60s.
+  //
+  //   • Transaction opened DIRECTLY on the driver (`driver.beginTransaction()`)
+  //     → the read STALLS for the full timeout and then throws knex's "Timeout
+  //     acquiring a connection" (measured: 60_085ms). `DatabaseLoader._find()`
+  //     forwards no options, so nothing threads the caller's transaction, and
+  //     `driver-sql` still models SQLite as a single-connection pool
+  //     (`activeTransactions`, `assertBareKnexSafe` — the latter a dev/test
+  //     guard that is a no-op in production, so production still waits the
+  //     timeout out). `list()` catches that throw and degrades, which is
+  //     precisely the entry whose TTL this policy is choosing.
+  //   • Transaction opened through `engine.transaction()` / `ScopedContext`
+  //     → returns immediately (measured: 12ms, with `activeTransactions === 1`
+  //     and the driver observably receiving the handle on the call). Those
+  //     publish the transaction into the engine's ambient `txStore` (ADR-0034)
+  //     and `buildDriverOptions` threads it onto the read for the loader.
+  //
+  // So the stall shape is live but CONDITIONAL: it needs an open transaction
+  // that the engine's ambient store cannot see. `SqlDriver.ensureSequencesTable()`
+  // is the live witness that this is worth designing against — it takes
+  // `parentTrx` and runs its DDL on the caller's transaction for exactly this
+  // reason, with `assertBareKnexSafe` as the tripwire for callers that forget;
+  // `sql-driver-sqlite-tx-guard.test.ts` pins both halves. (Until #7708 the
+  // witness cited here was `plugin-audit`'s `captureBefore`, retired by #6656.
+  // It was REPLACED rather than dropped: the example died, the hazard did not.)
+  //
+  // Hence the policy below keeps caching degraded reads rather than skipping
+  // them: "don't cache a degraded read" would trade one 30s silent window for
+  // a fresh 60s stall per call on every caller in the first bullet.
   //
   // [#5184] WHAT IS ACTUALLY CACHED, AND FOR HOW LONG — this paragraph is the
   // contract, and it describes `cacheListResult()` / `readCachedList()` below.

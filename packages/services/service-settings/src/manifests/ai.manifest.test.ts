@@ -57,38 +57,59 @@ describe('aiSettingsManifest', () => {
   });
 });
 
+/** Mirror how the service invokes a handler: full input, never a partial. */
+const runTest = (values: Record<string, unknown>) =>
+  aiTestActionHandler({ namespace: 'ai', actionId: 'test', values, ctx: {} });
+const runTestEmbedder = (values: Record<string, unknown>) =>
+  aiTestEmbedderActionHandler({ namespace: 'ai', actionId: 'test_embedder', values, ctx: {} });
+
 describe('aiTestActionHandler', () => {
   it('returns warning for memory provider (no external call to validate)', async () => {
-    const r = await aiTestActionHandler({ values: { provider: 'memory' } } as any);
+    const r = await runTest({ provider: 'memory' });
     expect(r.ok).toBe(true);
     expect(r.severity).toBe('warning');
   });
 
   it('rejects gateway provider without gateway_model', async () => {
-    const r = await aiTestActionHandler({ values: { provider: 'gateway' } } as any);
+    const r = await runTest({ provider: 'gateway' });
     expect(r.ok).toBe(false);
     expect(r.severity).toBe('error');
   });
 
   it('rejects openai provider without api key', async () => {
-    const r = await aiTestActionHandler({ values: { provider: 'openai' } } as any);
+    const r = await runTest({ provider: 'openai' });
     expect(r.ok).toBe(false);
     expect(r.severity).toBe('error');
   });
 
   it('accepts openai provider with api key and reports the model', async () => {
-    const r = await aiTestActionHandler({
-      values: { provider: 'openai', openai_api_key: 'sk-test', openai_model: 'gpt-4o' },
-    } as any);
+    const r = await runTest({
+      provider: 'openai',
+      openai_api_key: 'sk-test',
+      openai_model: 'gpt-4o',
+    });
     expect(r.ok).toBe(true);
     expect(r.message).toContain('gpt-4o');
   });
 
   it('accepts anthropic with api key', async () => {
-    const r = await aiTestActionHandler({
-      values: { provider: 'anthropic', anthropic_api_key: 'sk-ant-test' },
-    } as any);
+    const r = await runTest({ provider: 'anthropic', anthropic_api_key: 'sk-ant-test' });
     expect(r.ok).toBe(true);
+  });
+});
+
+describe('aiTestEmbedderActionHandler', () => {
+  it('warns when the embedder is disabled', async () => {
+    const r = await runTestEmbedder({ embedder_provider: 'none' });
+    expect(r.ok).toBe(false);
+    expect(r.severity).toBe('warning');
+  });
+
+  it('requires an api key for non-ollama providers', async () => {
+    const r = await runTestEmbedder({ embedder_provider: 'openai' });
+    expect(r.ok).toBe(false);
+    expect(r.severity).toBe('error');
+    expect(r.message).toContain('API key');
   });
 });
 

@@ -4,11 +4,15 @@ import {
     IHttpServer, resolveAuthzContext, resolveLocalizationContext, isAuthGateAllowlisted,
     assembleExecutionContext, normalizeAuthGate, type AuthGate,
     shouldDenyAnonymous, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS,
+    // [#7678] ADR-0090 D5/D9 suggested-binding `?status=` vocabulary — the one
+    // owner, shared with the runtime dispatcher's `/security` domain.
+    isAudienceBindingSuggestionStatus, unknownAudienceBindingSuggestionStatusMessage,
 } from '@objectstack/core';
 import {
     isMcpServerEnabled,
     looksLikeInternalErrorLeak,
     isUniqueViolationError,
+    uniqueViolationColumn,
     matchMissingColumnOfRelation,
     declaresServerFault,
     INTERNAL_ERROR_MESSAGE,
@@ -26,6 +30,7 @@ import {
     ObjectSchemaMaskEvaluationError,
     applyObjectSchemaMask,
     foldVisibilityFingerprintIntoEtag,
+    isObjectSchemaMaskExempt,
     isObjectSchemaMaskingEnabled,
     normalizeIfNoneMatch,
     resolveObjectSchemaMaskPosture,
@@ -39,7 +44,10 @@ import { RouteManager, type RouteEntry } from './route-manager.js';
 // read points. Each handler below declares WHICH of its parameters are
 // single-valued; genuinely multi-valued ones (`select`, `expand`, `objects`,
 // `fields`, `searchFields`, `approverId`) are deliberately never listed.
-import { refuseRepeatedQueryParams } from './query-multiplicity.js';
+// [#7390] The filter slot is the one arity judgement the shared normalizer
+// structurally cannot make (a filter AST IS an array), so the querystring
+// ingress — the only layer that knows it is one — makes it instead.
+import { refuseRepeatedQueryParams, assertFilterParamSuppliedOnce } from './query-multiplicity.js';
 // [#7527] The other half of the same discipline: a parameter this route does
 // not KNOW is refused rather than dropped. See `query-allowlist.ts` for why an
 // ignored filter is the one wrong answer a caller cannot detect.
@@ -1071,21 +1079,61 @@ export function mapDataError(error: any, object?: string): { status: number; bod
     // this file would have been the fifth private vocabulary, which is the
     // defect #6250 is named for.
     //
-    // **The body says nothing the driver said.** The message is a fixed
-    // sentence and the only interpolated value is the object name the ROUTE
-    // supplied. That is load-bearing, not incidental: MySQL's text embeds the
-    // offending USER DATA (`Duplicate entry 'acme@example.com' …`) and
-    // Postgres' embeds the index and column names, so echoing the driver here
-    // would trade a status-code bug for an information-disclosure one. Pinned
-    // in `rest-unique-violation-dialects.test.ts`. The full text still reaches
-    // the operator: `handleRouteError` / `logWithheldServerFault` log the
-    // original error untouched.
+    // **The body still says nothing the driver said.** The message is fixed
+    // text and the only interpolated values are the object name the ROUTE
+    // supplied and — since #7821 — the conflicting FIELD, and that second one
+    // is safe for the same reason the first is: it does not come from the
+    // driver's prose, it comes from `uniqueViolationColumn`, which hands back
+    // only a bare `[A-Za-z_][A-Za-z0-9_$]*` identifier it could determine is a
+    // COLUMN. The withholding this branch exists to enforce is unchanged:
+    // MySQL's text embeds the offending USER DATA (`Duplicate entry
+    // 'acme@example.com' …`) and Postgres' embeds the index name, and neither
+    // can reach the wire — `uniqueViolationColumn` refuses index names outright
+    // and the table qualifier is stripped (`sys_user.email` → `email`). Pinned,
+    // per dialect, in `rest-unique-violation-dialects.test.ts`. The full text
+    // still reaches the operator: `handleRouteError` / `logWithheldServerFault`
+    // log the original error untouched.
+    //
+    // **[#7821] Why `field` at all — parity, not a new feature.** The bulk /
+    // import path has named the colliding column since #6544
+    // (`sanitizeRowError` → `uniqueViolationColumn` → "A record with this
+    // `email` already exists."), while this branch — holding the same error
+    // object, one import away from the same helper — answered "a value". So the
+    // platform gave two different answers to one constraint depending only on
+    // whether the write arrived one row at a time or in a batch, and a client
+    // that wanted to render its own localized message could not name the field
+    // either, because the body carried no `field`. Both halves are fixed here:
+    // the wire gets `field`, and the default sentence reaches parity.
+    //
+    // ⚠️ The bulk path is deliberately NOT touched. Convergence is upward only:
+    // it already names the field and must keep naming it exactly as it does.
+    //
+    // **Passing the error OBJECT, not `error.message`, is the point.**
+    // `sanitizeRowError` only ever holds a string, so it reads the message
+    // channel alone. This site has the whole error, and `uniqueViolationColumn`
+    // additionally reads `detail` and one step of `cause` — which is where the
+    // column actually is for the Postgres driver we ship: node-postgres keeps
+    // its `DETAIL: Key (email)=(…)` line on `error.detail` and off the message.
+    // Measured on `origin/main`: that shape resolves `email` from the object and
+    // `undefined` from `err.message`.
+    //
+    // **When it cannot tell, it says nothing.** `uniqueViolationColumn` returns
+    // `undefined` for an index name (MySQL's `for key 'idx_email_unique'`,
+    // SQLite's `index 'x'`), for a composite key, and for any dialect it does
+    // not parse — and then this branch emits the unnamed sentence and NO `field`
+    // key at all. That degradation is the contract, not a fallback: a wrong
+    // field name is worse than none, because it sends the user to correct an
+    // input that was never the problem.
     if (isUniqueViolationError(error)) {
+        const field = uniqueViolationColumn(error);
         return {
             status: 409,
             body: {
-                error: 'A record with this value already exists',
+                error: field
+                    ? `A record with this ${field} already exists`
+                    : 'A record with this value already exists',
                 code: 'UNIQUE_VIOLATION',
+                ...(field ? { field } : {}),
                 ...(object ? { object } : {}),
             },
         };
@@ -2432,7 +2480,19 @@ export class RestServer {
         // blocked from protected resources, while the core allow-list keeps auth
         // + remediation reachable. Runs before the anonymous check.
         const gate = context?.authGate;
-        if (gate && req?.method !== 'OPTIONS' && !isAuthGateAllowlisted(req?.path)) {
+        // Exemption requires a REAL, non-empty path — mirrors the sibling seam
+        // (`shouldDenyAnonymous`, core/src/security/anonymous-deny.ts:122).
+        //
+        // ⚠️ `isAuthGateAllowlisted(undefined)` returns `true` (it treats "no
+        // path" as allow-listed). Passed the raw value, a request whose `path`
+        // is absent or empty read as allow-listed on EVERY route, so the gate
+        // did not fire for a session policy says must be blocked — fail-OPEN by
+        // omission. No shipped transport reaches here without a `path` (the
+        // hono adapter sets it at all three request-construction sites), so this
+        // is the default being made safe, not a live bypass being closed (#7432).
+        const pathExempt =
+            typeof req?.path === 'string' && req.path.length > 0 && isAuthGateAllowlisted(req.path);
+        if (gate && req?.method !== 'OPTIONS' && !pathExempt) {
             res.status(403).json({ error: { code: gate.code, message: gate.message } });
             return true;
         }
@@ -2667,6 +2727,69 @@ export class RestServer {
     resolvePackageRouteExecutionContext(req: any): Promise<any | undefined> {
         const environmentId = req?.params?.environmentId ?? undefined;
         return this.resolveExecCtx(environmentId, req).catch(() => undefined);
+    }
+
+    /**
+     * [#7749] The acting identity recorded on a metadata WRITE — the single
+     * producer for every `/meta` route that stamps an `actor` (save, delete,
+     * publish, rollback, compound save).
+     *
+     * ## What was wrong
+     *
+     * All five sites resolved the actor inline as
+     *
+     * ```
+     * req.headers['x-actor'] ?? req.headers['X-Actor'] ?? req.user?.id ?? req.userId
+     * ```
+     *
+     * and NOTHING on this transport ever sets `req.user` or `req.userId` —
+     * this server resolves identity through {@link resolveExecCtx} (better-auth
+     * → `resolveAuthzContext`), which puts it on the returned ExecutionContext,
+     * never back onto the raw request. So a bearer-authenticated admin's PUT
+     * yielded `undefined`, and the protocol's own defaults took over: the audit
+     * row recorded the sentinel `'system'` (`recordMetadataAudit`:
+     * `actor ?? 'system'`) and the history row recorded `NULL` (#4556:
+     * `actor ?? null`). The trail could not answer "who changed this" for any
+     * client that did not know to hand-set a non-standard header.
+     *
+     * The two dead limbs are not widened here with a third — that would leave
+     * the same "a value everything reads and nothing writes" shape one level
+     * down. They are replaced by the identity resolution this server actually
+     * performs, the SAME one the route's own `manage_metadata` capability gate
+     * reads a few lines earlier, so the caller a write is ATTRIBUTED to can
+     * never drift from the caller it was AUTHORIZED against. `resolveExecCtx`
+     * is memoized per request, so the three routes that already resolved a
+     * context for their gate pay nothing extra for this.
+     *
+     * ## Precedence — deliberately unchanged (#7749)
+     *
+     * `X-Actor` still outranks the authenticated identity, exactly as the
+     * expression above read. That ordering was masked while the other limbs
+     * were always `undefined`; it becomes load-bearing the moment this method
+     * produces one. Whether an authenticated caller may keep attributing a
+     * metadata write to somebody else by sending a header is a security
+     * semantics question for the audit contract, not something to settle as a
+     * side effect of fixing the producer — so it is measured and reported on
+     * the issue rather than quietly reordered here.
+     *
+     * Anonymous / internal writes are unaffected: no resolved principal → no
+     * context → `undefined` → the protocol's `'system'` / `NULL` defaults still
+     * apply. A machine write is never stamped with a real user.
+     */
+    private async resolveMetaWriteActor(
+        environmentId: string | undefined,
+        req: any,
+    ): Promise<string | undefined> {
+        const header = req?.headers?.['x-actor'] ?? req?.headers?.['X-Actor'];
+        // A well-formed header wins, as before. A PRESENT-but-unusable header
+        // (repeated → array, or empty) falls through to the session rather than
+        // suppressing attribution: recording the real caller beats recording
+        // `'system'` for a malformed request, and it keeps "no usable header →
+        // the authenticated identity" a single rule.
+        if (typeof header === 'string' && header) return header;
+        const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
+        const userId = (ctx as any)?.userId;
+        return typeof userId === 'string' && userId ? userId : undefined;
     }
 
     /**
@@ -4540,6 +4663,37 @@ export class RestServer {
                 handler: async (req: any, res: any) => {
                     try {
                         const environmentId = isScoped ? req.params?.environmentId : undefined;
+                        // [ADR-0106 D5(4) / #6599] `_drafts` is an AUTHORING
+                        // surface — the console's pending-changes view and
+                        // draft-aware package reads — not a general read. A
+                        // pending object draft carries its full `fields` map, so
+                        // serving it unfiltered leaks every hidden field's
+                        // label, type, options, formula and `requiredPermissions`
+                        // to any authenticated caller, which is the disclosure
+                        // ADR-0106 closes one route over. The other `/meta`
+                        // exits MASK per field; this one GATES per caller, on the
+                        // SAME `systemPermissions` judgement D4 uses for its
+                        // read exemption (`isObjectSchemaMaskExempt`) — a caller
+                        // who could not see a field on `/meta/object` has no
+                        // authoring reason to see the draft that carries it. The
+                        // gate is intentionally independent of the D8 field-mask
+                        // escape hatch: opting out of per-field masking is not
+                        // consent to expose pending drafts to non-authors.
+                        //
+                        // Gate FIRST — before resolving the protocol — so an
+                        // unauthorized caller cannot use the 501-vs-200 answer to
+                        // probe which kernels support drafts (same posture as
+                        // `_migrate-stored` below).
+                        const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
+                        if (!isObjectSchemaMaskExempt(ctx)) {
+                            res.status(403).json({
+                                error: {
+                                    code: 'FORBIDDEN',
+                                    message: 'Reading pending metadata drafts requires an authoring capability (studio.access, setup.access or manage_metadata).',
+                                },
+                            });
+                            return;
+                        }
                         const p = await this.resolveProtocol(environmentId, req);
                         if (typeof (p as any).listDrafts !== 'function') {
                             res.status(501).json({
@@ -5843,9 +5997,9 @@ export class RestServer {
                     const parentVersion = typeof ifMatchHeader === 'string'
                         ? ifMatchHeader.replace(/^"|"$/g, '') // strip ETag-style quotes
                         : undefined;
-                    const actorHeader = req.headers?.['x-actor'] ?? req.headers?.['X-Actor']
-                        ?? req.user?.id ?? req.userId;
-                    const actor = typeof actorHeader === 'string' ? actorHeader : undefined;
+                    // [#7749] Header, else the request's authenticated identity — one
+                    // producer, shared by every `/meta` write (see resolveMetaWriteActor).
+                    const actor = await this.resolveMetaWriteActor(environmentId, req);
                     // Phase 3a-destructive: `?force=true` opts past the
                     // destructive-change safety check. Accept any truthy
                     // string ('true', '1', 'yes') for resilience.
@@ -5956,15 +6110,16 @@ export class RestServer {
                     // Mirror saveMetaItem's OCC + actor plumbing (ADR-0008
                     // PR-10d wiring): `If-Match` pins the expected current
                     // version so concurrent edits get a 409 instead of a
-                    // silent reset; `X-Actor` (or req.user) flows into the
-                    // history tombstone row.
+                    // silent reset; `X-Actor` — or, since #7749, the request's
+                    // authenticated identity — flows into the history
+                    // tombstone row.
                     const ifMatchHeader = req.headers?.['if-match'] ?? req.headers?.['If-Match'];
                     const parentVersion = typeof ifMatchHeader === 'string'
                         ? ifMatchHeader.replace(/^"|"$/g, '')
                         : undefined;
-                    const actorHeader = req.headers?.['x-actor'] ?? req.headers?.['X-Actor']
-                        ?? req.user?.id ?? req.userId;
-                    const actor = typeof actorHeader === 'string' ? actorHeader : undefined;
+                    // [#7749] Header, else the request's authenticated identity — one
+                    // producer, shared by every `/meta` write (see resolveMetaWriteActor).
+                    const actor = await this.resolveMetaWriteActor(environmentId, req);
 
                     // [#6877] `?state=` and the destructive `?dropStorage=`
                     // both fail SAFE on an array today (the comparisons stop
@@ -6107,9 +6262,9 @@ export class RestServer {
                         });
                         return;
                     }
-                    const actorHeader = req.headers?.['x-actor'] ?? req.headers?.['X-Actor']
-                        ?? req.user?.id ?? req.userId;
-                    const actor = typeof actorHeader === 'string' ? actorHeader : undefined;
+                    // [#7749] Header, else the request's authenticated identity — one
+                    // producer, shared by every `/meta` write (see resolveMetaWriteActor).
+                    const actor = await this.resolveMetaWriteActor(environmentId, req);
                     const body = (req.body && typeof req.body === 'object') ? req.body : {};
                     const message = typeof body.message === 'string' ? body.message : undefined;
                     const result = await (p as any).publishMetaItem({
@@ -6161,9 +6316,9 @@ export class RestServer {
                         });
                         return;
                     }
-                    const actorHeader = req.headers?.['x-actor'] ?? req.headers?.['X-Actor']
-                        ?? req.user?.id ?? req.userId;
-                    const actor = typeof actorHeader === 'string' ? actorHeader : undefined;
+                    // [#7749] Header, else the request's authenticated identity — one
+                    // producer, shared by every `/meta` write (see resolveMetaWriteActor).
+                    const actor = await this.resolveMetaWriteActor(environmentId, req);
                     const message = typeof body.message === 'string' ? body.message : undefined;
                     const result = await (p as any).rollbackMetaItem({
                         type: req.params.type,
@@ -6513,9 +6668,9 @@ export class RestServer {
                     const parentVersion = typeof ifMatchHeader === 'string'
                         ? ifMatchHeader.replace(/^"|"$/g, '')
                         : undefined;
-                    const actorHeader = req.headers?.['x-actor'] ?? req.headers?.['X-Actor']
-                        ?? req.user?.id ?? req.userId;
-                    const actor = typeof actorHeader === 'string' ? actorHeader : undefined;
+                    // [#7749] Header, else the request's authenticated identity — one
+                    // producer, shared by every `/meta` write (see resolveMetaWriteActor).
+                    const actor = await this.resolveMetaWriteActor(environmentId, req);
 
                     // [#6877] The `typeof` guard below dropped a repeated
                     // `?package=` to `undefined`, i.e. wrote the row as an
@@ -6606,14 +6761,39 @@ export class RestServer {
                         const context = await this.resolveExecCtx(environmentId, req);
                         if (this.enforceAuth(req, res, context)) return;
                         if (await this.enforceApiAccess(req, res, p, environmentId, 'list')) return;
-                        // [#6877] Deliberately NOT gated here. This route hands
-                        // the WHOLE query record to `findData`, whose normalizer
+                        // [#6877] Still NOT arity-gated as a whole, for the
+                        // reason it never was: this route hands the WHOLE query
+                        // record to `findData`, whose normalizer
                         // (`metadata-protocol`) owns every parameter's arity — the
                         // `$`-alias table, the implicit field-equality bucket, and
                         // the `$select`/`$expand`/`$searchFields` params that are
                         // legitimately multi-valued. Declaring an arity list here
                         // would be this file guessing at another package's
-                        // contract. Filed separately; see the report on #6877.
+                        // contract.
+                        //
+                        // [#7390] ONE slot is the exception, and structurally so
+                        // rather than by taste. A filter AST *is* an array
+                        // (`['status','=','open']`), so #7386's arity gate cannot
+                        // read `Array.isArray` as evidence of repetition on the
+                        // filter slot: the normalizer serves this querystring and
+                        // `POST /data/:object/query`'s arbitrary-JSON body through
+                        // one door and cannot tell them apart. THIS layer can — on
+                        // a querystring an array is a repeated parameter and can be
+                        // nothing else — so the filter slot's arity is judged here,
+                        // and only here, leaving the normalizer free of a heuristic.
+                        //
+                        // Refused, never resolved (maintainer ruling 2026-08-11 on
+                        // #7390): last-wins and AND-merge are each a silent choice
+                        // between two intents a caller actually expressed. Before
+                        // this line the common shape was answered with the WRONG
+                        // diagnosis — `malformedFilterArrayError`, telling a caller
+                        // whose filters were both well-formed to check their AST
+                        // syntax — and the rarer `?filter=status&filter=%3D&filter=open`
+                        // spelled a valid AST and returned 200 with a filter nobody
+                        // expressed. It throws rather than responding so both keep
+                        // the envelope this route's other filter refusals already
+                        // use; see the helper for why.
+                        assertFilterParamSuppliedOnce(req.query);
                         const result = await p.findData({
                             object: req.params.object,
                             query: req.query,
@@ -9366,8 +9546,26 @@ export class RestServer {
                     // [#6877] Both are `String(array)` joins — `?status=a&status=b`
                     // filtered on the single status `'a,b'` and returned nothing.
                     if (refuseRepeatedQueryParams(req, res, ['status', 'packageId'])) return;
+                    // [#7678] …and a single well-formed but UNKNOWN `?status=`
+                    // did the same thing one layer on: the service's contract
+                    // declares exactly three values, anything else matched no
+                    // row, and the caller got 200 with an empty list — which
+                    // reads as "there are no suggestions" rather than "your
+                    // filter was not a status". The runtime dispatcher's twin of
+                    // this route had refused it since #4127; this live route
+                    // never did. Same predicate, imported — not a second copy of
+                    // the vocabulary.
+                    const status = req.query?.status ? String(req.query.status) : undefined;
+                    if (status !== undefined && !isAudienceBindingSuggestionStatus(status)) {
+                        return res.status(400).json({
+                            error: {
+                                code: 'VALIDATION_ERROR',
+                                message: unknownAudienceBindingSuggestionStatusMessage(status),
+                            },
+                        });
+                    }
                     const result = await svc.listAudienceBindingSuggestions(context ?? {}, {
-                        status: req.query?.status ? String(req.query.status) : undefined,
+                        status,
                         packageId: req.query?.packageId ? String(req.query.packageId) : undefined,
                     });
                     res.json({ data: result });

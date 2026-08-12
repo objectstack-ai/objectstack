@@ -28,7 +28,7 @@ for both corollaries.
 | Type | live | exp | dead | planned | classified |
 |---|---|---|---|---|---|
 | `object` | 49 | 0 | 0 | 1 | 50 |
-| `field` | 66 | 0 | 0 | 0 | 66 |
+| `field` | 67 | 0 | 0 | 1 | 68 |
 | `flow` | 34 | 0 | 6 | 0 | 40 |
 | `action` | 42 | 0 | 2 | 0 | 44 |
 | `hook` | 18 | 0 | 2 | 0 | 20 |
@@ -52,9 +52,9 @@ for both corollaries.
 | `job` | 15 | 0 | 0 | 0 | 15 |
 | `mapping` | 14 | 0 | 0 | 0 | 14 |
 | `seed` | 12 | 0 | 0 | 0 | 12 |
-| `translation` | 19 | 0 | 0 | 0 | 19 |
+| `translation` | 19 | 0 | 0 | 2 | 21 |
 | `validation` | 15 | 0 | 3 | 0 | 18 |
 | `api` | 25 | 0 | 0 | 2 | 27 |
 | `capability` | 12 | 0 | 0 | 0 | 12 |
 | `qa` | 4 | 0 | 5 | 0 | 9 |
-| **total** | **776** | **6** | **52** | **5** | **839** |
+| **total** | **777** | **6** | **52** | **8** | **843** |

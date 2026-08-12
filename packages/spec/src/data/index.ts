@@ -58,6 +58,12 @@ export * from './api-derivation';
 // so the two can never drift apart (#7521).
 export * from './managed-api-affordance';
 export * from './field.zod';
+// The credential read mask (ADR-0100) — the ONE string a masked read serves, in
+// place of the two byte-identical literals objectql and service-settings each
+// declared until #7572. Both now import this one, so the mask a console sees on
+// the encrypted-FIELD path cannot desynchronise from the mask it sees on the
+// settings REST path.
+export * from './secret-mask';
 // The unknown-authoring-key lint's CORE — comparator, finding shape, curated
 // guidance tables (#3786). Kept frontend-safe: the stack WALKER that imports
 // every schema lives in kernel/metadata-authoring-lint.ts, so this subpath's

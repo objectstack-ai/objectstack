@@ -9,6 +9,9 @@
  * idempotency — with retry / backoff / dead-letter handled by the shared
  * {@link HttpDispatcher}.
  *
+ * Rows are signed, never keyed: the HMAC signature is computed once at enqueue
+ * and the signing secret is discarded (#7722) — see {@link HttpDelivery.signature}.
+ *
  * It generalises the original `plugin-webhooks` outbox so two callers share one
  * reliable substrate:
  *   - the Flow `http` node executor (`@objectstack/service-automation`), and
@@ -54,8 +57,22 @@ export interface HttpDelivery {
     method?: string;
     /** Custom headers. */
     headers?: Record<string, string>;
-    /** HMAC-SHA256 secret. If present, an `X-Objectstack-Signature` header is added. */
-    signingSecret?: string;
+    /**
+     * Pre-computed `X-Objectstack-Signature` value (`sha256=<hex>`), or absent
+     * for an unsigned delivery.
+     *
+     * **A delivery row never holds the signing secret** (#7722). The body is
+     * fixed at enqueue and never rewritten — retries and `redeliver()` replay
+     * the same bytes — so the HMAC has exactly one correct value, and the outbox
+     * computes it once, at enqueue, from {@link EnqueueHttpInput.signingSecret}.
+     * What lands on the row is the signature: a one-way function of
+     * (body, secret) that the receiver is handed on the wire anyway, so it
+     * authenticates this payload without being usable to forge another. The
+     * secret stays with the subscriber that owns it instead of being copied onto
+     * every attempt, where it used to sit in cleartext for anyone who could read
+     * `sys_http_delivery`.
+     */
+    signature?: string;
     /** Per-request timeout in ms. */
     timeoutMs?: number;
     /** JSON-serialisable body. */
@@ -92,6 +109,13 @@ export interface EnqueueHttpInput {
     url: string;
     method?: string;
     headers?: Record<string, string>;
+    /**
+     * HMAC-SHA256 secret. **Consumed, not stored** (#7722): `enqueue()` signs the
+     * body with it and persists only the resulting
+     * {@link HttpDelivery.signature}. It exists on this input — and nowhere on
+     * the delivery row — so a producer can keep owning its secret (a webhook
+     * subscriber's, a flow node's) without every attempt taking a cleartext copy.
+     */
     signingSecret?: string;
     timeoutMs?: number;
     payload: unknown;
@@ -177,8 +201,9 @@ export interface IHttpOutbox {
 
     /**
      * Reset a terminal row (`success` / `failed` / `dead`) back to `pending` so
-     * the dispatcher re-sends it. Resets `attempts=0`; URL / payload / secret are
-     * NOT touched (byte-for-byte replay). Throws {@link HttpRedeliverError}.
+     * the dispatcher re-sends it. Resets `attempts=0`; URL / payload / signature
+     * are NOT touched (byte-for-byte replay — the same body carries the same
+     * signature). Throws {@link HttpRedeliverError}.
      */
     redeliver(id: string): Promise<HttpDelivery>;
 }

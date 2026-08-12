@@ -166,12 +166,13 @@ unaffected.
 A sharing rule's grants are **materialized** — evaluating a rule writes real
 `sys_record_share` rows with `source: 'rule'` and `source_id` set to the rule.
 Because those rows outlive the evaluation that produced them, withdrawal has to
-be an explicit act, and it happens at **three** moments:
+be an explicit act, and it happens at **four** moments:
 
 | When | What is reconciled |
 |:--|:--|
 | **The write that deactivates or edits the rule** | That rule's grants, immediately — deactivating with `active: false` (or `POST {basePath}/sharing/rules` with the same name) revokes them before the call returns |
 | **The next insert/update of a matching record** | That record's grants for every rule on the object — an inactive rule desires nothing, so its rows are revoked |
+| **A `sys_business_unit` or `sys_business_unit_member` write** | The grants of rules whose recipients read the BU graph — `unit_and_subordinates` and `business_unit`, and only those two. Recipients the rule no longer reaches are revoked **before the write returns**; the grant direction (a unit moved *into* a shared subtree) is queued and coalesced per rule (objectstack#7729) |
 | **Every boot** | All rules, plus a sweep of `source: 'rule'` rows whose `source_id` no longer resolves to any rule |
 
 Deleting a rule withdraws its grants too, whether you delete it through

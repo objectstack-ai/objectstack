@@ -696,17 +696,63 @@ describe('[#5374] operator semantics — the analytics face against the live que
    * absent and the rows happen to line up", and the emitted `$match` is the
    * artifact the issue actually diagnosed.
    */
-  it('the emitted $match wraps the negation around a pattern instead of a bare scalar', async () => {
+  const matchStageOf = async (where: FilterCondition): Promise<string> => {
     const { sql } = await service.query({
       cube: COMPARAND_TABLE,
       measures: [`${COMPARAND_TABLE}.count`],
-      where: { name: { $notContains: 'et' } } as FilterCondition,
+      where,
     });
-    const matchStage = /\/\* Stage 1: \$match \*\/ (.*)/.exec(sql ?? '')?.[1] ?? '';
-    // `JSON.stringify` renders a RegExp as `{}`, so assert on the STRUCTURE the
-    // pipeline carries rather than on that rendering.
+    return /\/\* Stage 1: \$match \*\/ (.*)/.exec(sql ?? '')?.[1] ?? '';
+  };
+
+  it('the emitted $match wraps the negation around a pattern instead of a bare scalar', async () => {
+    const matchStage = await matchStageOf({ name: { $notContains: 'et' } } as FilterCondition);
     expect(matchStage).not.toBe('{"name":{"$not":"et"}}');
     expect(matchStage).toContain('"$not"');
     expect(matchStage).toContain('"$regex"');
   });
+
+  /**
+   * [#7853] The dump's CONTENT for the pattern operators, not merely its shape.
+   *
+   * The assertion above pins the structure `$not` wraps, and it passed for as
+   * long as the pattern itself was missing: `JSON.stringify` renders a `RegExp`
+   * as `{}` (no own enumerable properties), so `{name: {$contains: 'et'}}`
+   * dumped as `{"name":{"$regex":{}}}` — non-empty, structurally correct, and
+   * silent about the one field an author reading this dump came for. That is
+   * why the cases below assert the pattern TEXT: a `toBeDefined()` or a
+   * `toContain('$regex')` cannot tell the two states apart.
+   *
+   * The rendering is the pattern's own literal syntax, `/source/flags`. No
+   * operator this face declares carries a RegExp FLAG today — measured:
+   * `$icontains`' fold is compiled into the pattern source (#6520) and
+   * `$contains` is case-exact (#7723) — so the flags segment renders empty
+   * here; it is in the form because a fold that ever moved into a flag would
+   * otherwise vanish exactly the way the source did.
+   */
+  const PATTERN_DUMP_CASES: Array<[string, FilterCondition, string]> = [
+    // The pattern, plainly, for the operator the issue measured.
+    ['$contains', { name: { $contains: 'et' } } as FilterCondition, '{"name":{"$regex":"/et/"}}'],
+    // The ASCII fold is IN the source, so the dump shows the folded character
+    // classes rather than an `i` — this is what #6520 compiled, made visible.
+    ['$icontains', { name: { $icontains: 'BET' } } as FilterCondition, '{"name":{"$regex":"/[Bb][Ee][Tt]/"}}'],
+    // The negation still wraps a pattern, and now the pattern is legible.
+    ['$notContains', { name: { $notContains: 'et' } } as FilterCondition, '{"name":{"$not":{"$regex":"/et/"}}}'],
+    // A comparand carrying a regex metacharacter shows its ESCAPE. `a.p` is a
+    // literal here, not "any character between a and p" (#5567's direction), and
+    // the dump is the only place an author can see which of the two ran.
+    ['$contains with a metacharacter', { name: { $contains: 'a.p' } } as FilterCondition, '{"name":{"$regex":"/a\\\\.p/"}}'],
+  ];
+
+  for (const [label, where, expected] of PATTERN_DUMP_CASES) {
+    it(`the pipeline dump renders ${label}'s pattern instead of dropping it to {}`, async () => {
+      const matchStage = await matchStageOf(where);
+      expect(
+        matchStage,
+        `${label}: the dump lost its RegExp operand — this is the \`{"$regex":{}}\` state, ` +
+          'which is non-empty and passes every assertion that only checks for presence',
+      ).not.toContain('{}');
+      expect(matchStage).toBe(expected);
+    });
+  }
 });

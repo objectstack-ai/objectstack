@@ -202,8 +202,22 @@ describe('HttpDispatcher extracted domains (PR-2)', () => {
         expect(notification.markRead).toHaveBeenCalledWith('u1', ['n1']);
     });
 
-    it('/security responds 503 when no security service is wired (legacy in-handler semantics)', async () => {
-        const result = await makeDispatcher().dispatch('GET', '/security/suggested-bindings', undefined, {}, {} as any);
+    it('/security still answers 503 from inside the handler when no service is wired, for an authenticated caller (#7911: the anonymous-deny gate now runs BEFORE this, not after)', async () => {
+        // Direct delegate call for the same reason as the notifications case
+        // above: dispatch() re-resolves identity from the (mock, auth-less)
+        // kernel and would overwrite the seeded executionContext with an
+        // anonymous one, and an anonymous caller no longer reaches this probe
+        // at all post-#7911 (see the anonymous-denial test right below). This
+        // test's job is narrower than that: prove the in-handler 503 path
+        // (`!service || typeof service.listAudienceBindingSuggestions !==
+        // 'function'`) still exists once an authenticated caller has cleared
+        // the gate -- the negative pin proving #7911 was a hoist, not a
+        // deletion. Before #7911 the 503 sat AHEAD of the gate and this test
+        // reached it anonymously by accident of the harness ("legacy
+        // in-handler semantics"); now it sits after the gate, so the test
+        // authenticates deliberately instead of relying on that accident.
+        const context: any = { executionContext: { userId: 'admin-1' } };
+        const result = await makeDispatcher().handleSecurity('/suggested-bindings', 'GET', undefined, {}, context);
         expect(result.handled).toBe(true);
         expect(result.response?.status).toBe(503);
     });
@@ -717,8 +731,19 @@ describe('HttpDispatcher extracted domains (PR-7: auth/ai)', () => {
         expect(JSON.stringify(result.response?.body ?? {})).not.toMatch(/mock_token_/);
     });
 
+    // [#7653] The caller has to be AUTHENTICATED for this case to mean what it
+    // says. The courtesy is owed to the console — an authenticated surface —
+    // not to the wire: the anonymous gate is consulted BEFORE `/ai/**`'s
+    // capability answers now, so an unauthenticated caller is denied 401 ahead
+    // of it. This used to run through `dispatch()`, which re-resolves identity
+    // off the auth-less mock kernel and therefore measured the courtesy as an
+    // anonymous caller — i.e. through the hole #7653 closed. Split in two so
+    // neither half is lost: the delegate call carries a seeded principal (the
+    // same bypass the `/keys` and `/automation` cases above use, and for the
+    // same reason), and the registry path keeps its own assertion below.
     it('/ai/agents returns an empty list (not 404) when no AI service is configured', async () => {
-        const result = await makeDispatcher().dispatch('GET', '/ai/agents', undefined, {}, {} as any);
+        const context: any = { request: {}, executionContext: { userId: 'usr_1' } };
+        const result = await makeDispatcher().handleAI('/ai/agents', 'GET', undefined, {}, context);
         expect(result.response?.status).toBe(200);
         // #4053: in the declared envelope now, with `AiAgentsResponseSchema`'s
         // `{ agents }` RELOCATED under `data` rather than flattened to the bare
@@ -735,9 +760,32 @@ describe('HttpDispatcher extracted domains (PR-7: auth/ai)', () => {
     // request with no AI service reached a handler that had nothing to
     // delegate to — 501. (`GET /ai/agents` keeps its deliberate empty-list
     // 200, asserted separately: the console polls it on every navigation.)
+    // [#7653] Authenticated, for the same reason as the case above: the 501 is
+    // what a legitimate caller is told, while an anonymous one is denied 401
+    // before ever reaching it.
     it('/ai routes 501 (service missing) for non-agents paths', async () => {
-        const result = await makeDispatcher().dispatch('POST', '/ai/chat', { q: 'hi' }, {}, {} as any);
+        const context: any = { request: {}, executionContext: { userId: 'usr_1' } };
+        const result = await makeDispatcher().handleAI('/ai/chat', 'POST', { q: 'hi' }, {}, context);
         expect(result.response?.status).toBe(501);
+    });
+
+    /**
+     * [#7653] The registry path itself, which the two cases above used to cover
+     * incidentally. `dispatch()` re-resolves identity off the auth-less mock
+     * kernel, so the caller it produces is ANONYMOUS — and an anonymous caller
+     * is exactly what must not receive either capability answer. So this keeps
+     * the end-to-end registry coverage and pins the fix at the same time: the
+     * `/ai` prefix is still claimed and routed (`handled: true`), and what comes
+     * back is the ADR-0112 refusal envelope rather than the 200 courtesy or the
+     * 501 remedy sentence.
+     */
+    it('/ai/** denies an anonymous caller through the full registry path', async () => {
+        for (const [method, path] of [['GET', '/ai/agents'], ['POST', '/ai/chat']] as const) {
+            const result = await makeDispatcher().dispatch(method, path, undefined, {}, {} as any);
+            expect(result.handled, path).toBe(true);
+            expect(result.response?.status, path).toBe(401);
+            expect(result.response?.body?.error?.code, path).toBe('UNAUTHENTICATED');
+        }
     });
 
     it('/ai dispatches to a matching cached kernel route with params + user threading', async () => {

@@ -5,6 +5,12 @@ import { createAdapterFactory } from 'better-auth/adapters';
 import type { CleanedWhere, WhereOperator } from 'better-auth/adapters';
 import { SystemObjectName } from '@objectstack/spec/system';
 import { resolveAttributedUserId } from './auth-actor-attribution.js';
+import { adoptExistingMembership } from './adopt-membership.js';
+import {
+  filterRevokedSessionRows,
+  hideRevokedSessionRow,
+  reconcileSessionDelete,
+} from './session-tombstone.js';
 
 /**
  * Mapping from better-auth model names to ObjectStack protocol object names.
@@ -492,9 +498,50 @@ function isEnginePolicyRefusal(err: unknown): err is { code?: string; message?: 
 }
 
 /**
+ * [#7724] A REFERENTIAL refusal — the engine's `cascadeDeleteRelations` found
+ * dependent rows it may neither cascade nor null, so it vetoed the delete
+ * (`DELETE_RESTRICTED`, 409, ADR-0112).
+ *
+ * The third shape in this file, and the one that shows why the set had to be
+ * widened rather than left at two. The two arms above both map errors raised by
+ * code that *knows about better-auth* — the record validator and this package's
+ * own policy guards. A referential restrict is raised by the ENGINE, several
+ * layers below, and carries neither signature; `rethrowAsBetterAuthError` fell
+ * through to `throw err`, better-auth's router saw an unhandled fault, and the
+ * admin caller got a **500 with an empty body** for a refusal the engine had
+ * explained in full. The client is told nothing at all — not the status, not the
+ * dependent object, not the remedy.
+ *
+ * Mapped HERE, at the adapter, rather than at the REST transport: this is the
+ * seam where an engine error crosses into better-auth, so one arm covers every
+ * better-auth endpoint that deletes through the adapter. `rest-server.ts`'s
+ * `mapDataError` already maps the same code correctly for the generic data
+ * routes and is deliberately untouched — the two transports map the one engine
+ * error independently, exactly as they already do for the two arms above.
+ *
+ * The structured half of the envelope rides along unchanged (`developerMessage`
+ * / `dependentObject` / `dependentCount`), for the reason #7307 gives at the
+ * REST mapping: dropping the remedy at the transport moves the defect rather
+ * than fixing it, and the fields disclose nothing the envelope did not carry.
+ */
+function isReferentialDeleteRestriction(
+  err: unknown,
+): err is {
+  code?: string;
+  message?: string;
+  developerMessage?: string;
+  dependentObject?: string;
+  dependentCount?: number;
+} {
+  if (!err || typeof err !== 'object') return false;
+  return (err as { code?: unknown }).code === 'DELETE_RESTRICTED';
+}
+
+/**
  * Re-throw `err` as a better-auth `APIError` when it is an ObjectQL validation
- * failure or an engine policy refusal; otherwise re-throw it verbatim. Always
- * throws — the return type is `never`.
+ * failure (400), an engine policy refusal (403) or a referential delete
+ * restriction (409); otherwise re-throw it verbatim. Always throws — the return
+ * type is `never`.
  */
 async function rethrowAsBetterAuthError(err: unknown): Promise<never> {
   if (isObjectQLValidationError(err)) {
@@ -519,15 +566,31 @@ async function rethrowAsBetterAuthError(err: unknown): Promise<never> {
       code: 'PERMISSION_DENIED',
     });
   }
+  if (isReferentialDeleteRestriction(err)) {
+    const { APIError } = await import('better-auth/api');
+    throw new APIError('CONFLICT', {
+      message:
+        typeof err.message === 'string' && err.message.trim()
+          ? err.message
+          : 'Cannot delete: dependent records exist',
+      code: 'DELETE_RESTRICTED',
+      ...(typeof err.developerMessage === 'string' && err.developerMessage.length > 0
+        ? { developerMessage: err.developerMessage }
+        : {}),
+      ...(err.dependentObject ? { dependentObject: err.dependentObject } : {}),
+      ...(typeof err.dependentCount === 'number' ? { dependentCount: err.dependentCount } : {}),
+    });
+  }
   throw err;
 }
 
 /**
  * Wrap every function-valued method of a better-auth adapter so an ObjectQL
- * `ValidationError` (400) or an engine policy refusal (403) thrown from the
- * underlying engine surfaces as a 4xx `APIError` instead of an opaque 500.
- * Non-function properties pass through untouched, and every error that carries
- * neither signature is re-thrown verbatim.
+ * `ValidationError` (400), an engine policy refusal (403) or a referential
+ * delete restriction (409, #7724) thrown from the underlying engine surfaces as
+ * a 4xx `APIError` instead of an opaque 500. Non-function properties pass
+ * through untouched, and every error that carries none of those signatures is
+ * re-thrown verbatim.
  */
 export function withValidationErrorMapping<A extends Record<string, any>>(adapter: A): A {
   const out: Record<string, any> = {};
@@ -660,7 +723,17 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
         const objectName = resolveProtocolName(model);
         const bridged = objectName !== model;
         const payload = normaliseIdentifierWrite(model, data);
-        const result = await dataEngine.insert(objectName, bridged ? remapKeys(payload, camelToSnake) : payload);
+        const row = bridged ? remapKeys(payload, camelToSnake) : payload;
+        // [#7725] `sys_member` declares `{organization_id, user_id}` unique, and
+        // the platform auto-binds every user at sign-up (ADR-0093 D1/D2), so
+        // better-auth's accept-invitation `createMember` collides on a pair that
+        // by declaration IS the membership it is trying to create. Adopt that row
+        // instead of minting a second one. Returns `null` for every other case —
+        // other object, unidentifiable pair, no existing row — and then this is a
+        // plain insert, byte for byte as before. See `adopt-membership.ts` for
+        // why the seam is here and what adoption does to the role.
+        const adopted = await adoptExistingMembership(dataEngine as any, objectName, row);
+        const result = adopted ?? (await dataEngine.insert(objectName, row));
         const norm = normaliseLegacyDates(model, result);
         return (bridged ? remapKeys(norm, snakeToCamel) : norm) as T;
       },
@@ -671,10 +744,22 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
         const objectName = resolveProtocolName(model);
         const bridged = objectName !== model;
         const filter = convertWhere(model, bridged ? remapWhere(where) : where);
-        const fields = bridged && select ? select.map(camelToSnake) : select;
+        let fields = bridged && select ? select.map(camelToSnake) : select;
+        // [#7732] A projection that omits `revoked_at` would make every row look
+        // live to the tombstone rule. Ask for it, then drop it again below if
+        // the caller did not.
+        const revokedAtIsBorrowed =
+          objectName === SystemObjectName.SESSION &&
+          Array.isArray(fields) &&
+          fields.length > 0 &&
+          !fields.includes('revoked_at');
+        if (revokedAtIsBorrowed) fields = [...(fields as string[]), 'revoked_at'];
 
         const result = await dataEngine.findOne(objectName, { where: filter, fields });
         if (!result) return null;
+        // [#7732] A revoked session is not a session — see `session-tombstone.ts`.
+        if (await hideRevokedSessionRow(objectName, result)) return null;
+        if (revokedAtIsBorrowed) delete (result as Record<string, unknown>).revoked_at;
         const norm = normaliseLegacyDates(model, result);
         return (bridged ? remapKeys(norm, snakeToCamel) : norm) as T;
       },
@@ -693,12 +778,14 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
           ? [{ field: bridged ? camelToSnake(sortBy.field) : sortBy.field, order: sortBy.direction as 'asc' | 'desc' }]
           : undefined;
 
-        const results = await dataEngine.find(objectName, {
+        const found = await dataEngine.find(objectName, {
           where: filter,
           limit: limit || 100,
           offset,
           orderBy,
         });
+        // [#7732] A revoked session is not a session — see `session-tombstone.ts`.
+        const results = await filterRevokedSessionRows(objectName, found);
 
         return results.map((r) => {
           const norm = normaliseLegacyDates(model, r as Record<string, any>);
@@ -761,6 +848,10 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
         const record = await dataEngine.findOne(objectName, { where: filter });
         if (!record) return;
 
+        // [#7732] An interactive revoke ends the session by stamping it, not by
+        // deleting it — see `session-tombstone.ts` for the ledger and the seam.
+        if (!(await reconcileSessionDelete(dataEngine, objectName, record))) return;
+
         await dataEngine.delete(objectName, { where: { id: record.id } });
       },
 
@@ -771,8 +862,12 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
         const bridged = objectName !== model;
         const filter = convertWhere(model, bridged ? remapWhere(where) : where);
 
-        const records = await dataEngine.find(objectName, { where: filter });
+        const found = await dataEngine.find(objectName, { where: filter });
+        // [#7732] Same rule, per row: a matched session the platform has
+        // already tombstoned is left exactly as it is.
+        const records = await filterRevokedSessionRows(objectName, found);
         for (const record of records) {
+          if (!(await reconcileSessionDelete(dataEngine, objectName, record))) continue;
           await dataEngine.delete(objectName, { where: { id: record.id } });
         }
         return records.length;

@@ -65,6 +65,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Definition",
         help: "Serialised Webhook JSON (see @objectstack/spec/automation/webhook) — full headers/auth/retry/payload config"
       },
+      signing_secret: {
+        label: "Signing Secret",
+        help: "HMAC-SHA256 key used to sign deliveries (X-Objectstack-Signature). Encrypted at rest into sys_secret; reads return a mask, never the key. Leave the mask untouched to keep the current value."
+      },
       managed_by: {
         label: "Managed By",
         help: "Record provenance: platform = framework built-in / package = app/package-declared (boot-seeded from defineStack webhooks) / admin = created in Setup.",

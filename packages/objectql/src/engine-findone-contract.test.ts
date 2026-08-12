@@ -68,8 +68,14 @@ function makeRecordingDriver() {
             if (k === '$and') return (v as any[]).every((w) => matches(row, w));
             if (k === '$or') return (v as any[]).some((w) => matches(row, w));
             if (k.startsWith('$')) continue;
-            if (v && typeof v === 'object' && '$contains' in (v as any)) {
-                const needle = String((v as any).$contains).toLowerCase();
+            // [#7641] `$icontains` — the operator `$search` compiles to. This
+            // arm folded BOTH sides while it was still keyed on `$contains`,
+            // i.e. it implemented `$icontains` semantics under the case-
+            // SENSITIVE operator's name. That is part of why no unit test on
+            // this path noticed the compiler was emitting the wrong operator:
+            // the double answered the way the fixed compiler asks for.
+            if (v && typeof v === 'object' && '$icontains' in (v as any)) {
+                const needle = String((v as any).$icontains).toLowerCase();
                 if (!String(row[k] ?? '').toLowerCase().includes(needle)) return false;
                 continue;
             }
@@ -146,11 +152,14 @@ describe('findOne executes what it declares and refuses an empty predicate (#441
         expect(row?.id).not.toBe(one.id);
     });
 
-    it('the search term reaches the driver as a $contains predicate — `search` never does', async () => {
+    it('the search term reaches the driver as an $icontains predicate — `search` never does', async () => {
         await engine.findOne('crm_account', { search: 'Two' });
         const { ast } = lastRead();
         expect(ast.where).toBeTruthy();
-        expect(JSON.stringify(ast.where)).toContain('$contains');
+        // [#7641] `$icontains`, not `$contains`: the latter is contractually
+        // case-SENSITIVE (#4706 Q2 = A), so `$search` compiling to it made
+        // matching case-sensitive against three declarations saying otherwise.
+        expect(JSON.stringify(ast.where)).toContain('$icontains');
         expect(ast.search).toBeUndefined();
         expect(ast.searchFields).toBeUndefined();
     });
@@ -332,7 +341,8 @@ describe('findOne executes what it declares and refuses an empty predicate (#441
             call: { search: 'Two' },
             expect: ({ ast }) => {
                 expect(ast.search).toBeUndefined();
-                expect(JSON.stringify(ast.where)).toContain('$contains');
+                // [#7641] the case-folding operator, not the case-sensitive one.
+                expect(JSON.stringify(ast.where)).toContain('$icontains');
             },
         },
         searchFields: {

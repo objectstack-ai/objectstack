@@ -50,6 +50,18 @@
  * filter. The read scope answers `READ_SCOPE_COMPILE_FAILED` / 500 fail-closed —
  * a policy produced it, and #5367 ruled that route withholds its message. One
  * sentence, two envelopes; `comparand-shape.ts` owns the sentence.
+ *
+ * # [#7693] The family's fifth member
+ *
+ * The LIKE-family loops below drive `TEXT_PATTERN_OPERATORS` by name, and they
+ * used to name FOUR operators. `$icontains` arrived after this fence (#6520)
+ * and got the read-scope door's `assertRenderableText` call but not the entry
+ * in that set, so `{name: {$icontains: {foo: 1}}}` reproduced row 2 of the
+ * table above exactly — `%[object Object]%` on the `where` door, REFUSED on the
+ * read-scope one — one operator with two answers inside one package. #7693
+ * added the entry; the loops now name all five, and the `where`-door arm of the
+ * `$icontains` row is the case that only passes because of it (the read-scope
+ * arm was already green and is here as the no-regression control).
  */
 
 import { describe, it, expect } from 'vitest';
@@ -107,7 +119,8 @@ describe('[#5234] the analytics `where` door refuses an uncompilable comparand',
   });
 
   describe('shape 2 — a LIKE-family comparand with no faithful text rendering', () => {
-    for (const op of ['$contains', '$notContains', '$startsWith', '$endsWith'] as const) {
+    // [#7693] `$icontains` is the fifth member — see this file's header.
+    for (const op of ['$contains', '$notContains', '$startsWith', '$endsWith', '$icontains'] as const) {
       it(`\`${op}\` refuses an object comparand`, () => {
         const err = refusalOf(() => tree({ name: { [op]: { foo: 1 } } }));
         expect(err.code, op).toBe('INVALID_FILTER');
@@ -225,7 +238,9 @@ describe('[#5234] the read-scope lowering refuses the same two shapes, fail-clos
     expect(err.message).toContain('index 0');
   });
 
-  for (const op of ['$contains', '$notContains', '$startsWith', '$endsWith'] as const) {
+  // [#7693] `$icontains` was ALREADY refused on this door — it is in the loop as
+  // the no-regression control for the entry added on the other one.
+  for (const op of ['$contains', '$notContains', '$startsWith', '$endsWith', '$icontains'] as const) {
     it(`\`${op}\` refuses an object comparand instead of binding '%[object Object]%'`, () => {
       const err = refusalOf(() => scope({ name: { [op]: { foo: 1 } } }));
       expect(err.code, op).toBe('READ_SCOPE_COMPILE_FAILED');

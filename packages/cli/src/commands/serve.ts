@@ -71,8 +71,12 @@ import {
   CONSOLE_PATH,
   resolveConsolePath,
   hasConsoleDist,
+  decideConsoleMount,
+  formatConsoleShaDriftWarning,
+  formatConsoleShaDriftRefusal,
   createConsoleStaticPlugin,
   createRuntimeAssetsPlugin,
+  type ConsoleShaDrift,
 } from '../utils/console.js';
 import dotenvFlow from 'dotenv-flow';
 
@@ -185,12 +189,22 @@ const getAvailablePort = async (startPort: number): Promise<number> => {
   return port;
 };
 
+/**
+ * The IDENTITIES a capability provider registers under: full `plugin.name` ids
+ * (`com.objectstack.mcp`) and/or exported class names (`MCPServerPlugin`).
+ *
+ * Compared EXACTLY by {@link Serve.providesCapability} — never as substrings.
+ * These used to be free-form *fragments* tested with `String.includes()`; see
+ * that method for the whole class of bug that spelling caused (#7652).
+ */
+type CapabilityIdentities = string[];
+
 type CapabilitySpec = {
   pkg: string;
-  export: string;            // named export to import
-  nameMatch: string[];       // plugin.name / constructor.name fragments to detect dupes
-  configKey?: string;        // optional config field passed as constructor arg
-  extras?: Array<{ pkg: string; export: string; nameMatch: string[] }>;
+  export: string;                    // named export to import
+  identities: CapabilityIdentities;  // exact provider identities — see the type
+  configKey?: string;                // optional config field passed as constructor arg
+  extras?: Array<{ pkg: string; export: string; identities: CapabilityIdentities }>;
 };
 
 export default class Serve extends Command {
@@ -325,11 +339,59 @@ export default class Serve extends Command {
   };
 
   /**
+   * Is one of `identities` ALREADY loaded — i.e. did the app supply this
+   * capability's provider itself, so the resolver must not load a second one?
+   *
+   * Compares a plugin's `name` and its constructor name against the declared
+   * identities by EQUALITY. That exactness is the fix for #7652, not a detail:
+   *
+   * This check used to treat `identities` as free-form fragments and test them
+   * with `String.includes()`. Substring matching cannot tell a capability's
+   * PROVIDER from one of its CONSUMERS, because a consumer is conventionally
+   * named after the thing it consumes — so any plugin whose name merely
+   * CONTAINED a fragment satisfied the capability and SUPPRESSED the real
+   * provider. The stock showcase hit exactly that: it loads
+   * `com.objectstack.connector.mcp` (the outbound MCP *client* connector),
+   * whose name contains the `mcp` fragment, so `MCPServerPlugin` never loaded
+   * and the MCP endpoint the boot banner advertises answered 501.
+   *
+   * `mcp` was not the only fragment short enough to collide (`audit` was one
+   * consumer away from the same fate, and every class-name fragment was
+   * satisfied by any class merely ENDING in it, e.g. `MyAuditPlugin` for
+   * `AuditPlugin`). Equality closes the class: a plugin either IS the provider
+   * or it is not, and no naming convention can blur that.
+   *
+   * Both directions matter. Tightening the comparison must not stop a genuine
+   * provider being recognised, so the registry below declares each provider's
+   * REAL registered `name` (measured from its package, and pinned by
+   * `serve-capability-identity.test.ts` so a rename can't silently reintroduce
+   * double-loading) alongside its exported class name.
+   */
+  static providesCapability(plugins: readonly unknown[], identities: readonly string[]): boolean {
+    const wanted = new Set(identities.filter((id) => id !== ''));
+    if (wanted.size === 0) return false;
+    return plugins.some((p) => {
+      const name = (p as { name?: unknown } | null | undefined)?.name;
+      const ctor = (p as { constructor?: { name?: unknown } } | null | undefined)?.constructor?.name;
+      return (
+        (typeof name === 'string' && wanted.has(name)) ||
+        (typeof ctor === 'string' && wanted.has(ctor))
+      );
+    });
+  }
+
+  /**
    * Registry of `requires` token → built-in service-plugin provider for the
    * standalone serve path. Keys are canonical kebab-case platform capability
    * tokens — a drift test asserts every key is in the spec-owned
    * PLATFORM_CAPABILITY_TOKENS vocabulary (framework#3265). Adding a built-in
    * capability = one entry here + its token in the spec vocabulary.
+   *
+   * `identities` are matched EXACTLY (see {@link Serve.providesCapability}), so
+   * each entry names the provider's real registered `plugin.name` — NOT a
+   * shortened fragment of it. Before #7652 most of these name fragments were in
+   * fact dead (`service-cache` never matched `com.objectstack.service.cache`:
+   * dash vs dot), and the entries were carried entirely by their class name.
    */
   static readonly CAPABILITY_PROVIDERS: Record<string, CapabilitySpec> = {
     automation: {
@@ -338,38 +400,38 @@ export default class Serve extends Command {
       // companion node-pack plugins.
       pkg: '@objectstack/service-automation',
       export: 'AutomationServicePlugin',
-      nameMatch: ['service-automation', 'AutomationServicePlugin'],
+      identities: ['com.objectstack.service-automation', 'AutomationServicePlugin'],
     },
     analytics: {
       pkg: '@objectstack/service-analytics',
       export: 'AnalyticsServicePlugin',
-      nameMatch: ['service-analytics', 'AnalyticsServicePlugin'],
+      identities: ['com.objectstack.service-analytics', 'AnalyticsServicePlugin'],
       configKey: 'analyticsCubes',
     },
     audit: {
       pkg: '@objectstack/plugin-audit',
       export: 'AuditPlugin',
-      nameMatch: ['audit', 'AuditPlugin'],
+      identities: ['com.objectstack.audit', 'AuditPlugin'],
     },
     cache: {
       pkg: '@objectstack/service-cache',
       export: 'CacheServicePlugin',
-      nameMatch: ['service-cache', 'CacheServicePlugin'],
+      identities: ['com.objectstack.service.cache', 'CacheServicePlugin'],
     },
     storage: {
       pkg: '@objectstack/service-storage',
       export: 'StorageServicePlugin',
-      nameMatch: ['service-storage', 'StorageServicePlugin'],
+      identities: ['com.objectstack.service.storage', 'StorageServicePlugin'],
     },
     queue: {
       pkg: '@objectstack/service-queue',
       export: 'QueueServicePlugin',
-      nameMatch: ['service-queue', 'QueueServicePlugin'],
+      identities: ['com.objectstack.service.queue', 'QueueServicePlugin'],
     },
     job: {
       pkg: '@objectstack/service-job',
       export: 'JobServicePlugin',
-      nameMatch: ['service-job', 'JobServicePlugin'],
+      identities: ['com.objectstack.service.job', 'JobServicePlugin'],
     },
     messaging: {
       // Backs the `notify` flow node (ADR-0012): delivers to a user's
@@ -377,7 +439,7 @@ export default class Serve extends Command {
       // this the notify node degrades to a logged no-op.
       pkg: '@objectstack/service-messaging',
       export: 'MessagingServicePlugin',
-      nameMatch: ['service-messaging', 'MessagingServicePlugin'],
+      identities: ['com.objectstack.service.messaging', 'MessagingServicePlugin'],
     },
     triggers: {
       // Makes autolaunched flows actually fire. The automation engine ships
@@ -386,12 +448,12 @@ export default class Serve extends Command {
       // via the job service — so pair `triggers` with `job`).
       pkg: '@objectstack/trigger-record-change',
       export: 'RecordChangeTriggerPlugin',
-      nameMatch: ['trigger-record-change', 'RecordChangeTriggerPlugin'],
+      identities: ['com.objectstack.trigger.record-change', 'RecordChangeTriggerPlugin'],
       extras: [
         {
           pkg: '@objectstack/trigger-schedule',
           export: 'ScheduleTriggerPlugin',
-          nameMatch: ['trigger-schedule', 'ScheduleTriggerPlugin'],
+          identities: ['com.objectstack.trigger.schedule', 'ScheduleTriggerPlugin'],
         },
         {
           // Declarative time-relative sweep (#1874) — arms flows whose start
@@ -400,21 +462,21 @@ export default class Serve extends Command {
           // @objectstack/trigger-schedule; needs the job service + ObjectQL.
           pkg: '@objectstack/trigger-schedule',
           export: 'TimeRelativeTriggerPlugin',
-          nameMatch: ['trigger-schedule', 'TimeRelativeTriggerPlugin'],
+          identities: ['com.objectstack.trigger.time-relative', 'TimeRelativeTriggerPlugin'],
         },
         {
           // Inbound webhook/HTTP trigger (ADR-0041 Tier 1) — arms
           // `type: 'api'` flows with HMAC-verified, queue-backed hooks.
           pkg: '@objectstack/trigger-api',
           export: 'ApiTriggerPlugin',
-          nameMatch: ['trigger-api', 'ApiTriggerPlugin'],
+          identities: ['com.objectstack.trigger.api', 'ApiTriggerPlugin'],
         },
       ],
     },
     realtime: {
       pkg: '@objectstack/service-realtime',
       export: 'RealtimeServicePlugin',
-      nameMatch: ['service-realtime', 'RealtimeServicePlugin'],
+      identities: ['com.objectstack.service.realtime', 'RealtimeServicePlugin'],
     },
     // `feed` removed (ADR-0052 §5): `sys_comment`/`sys_activity` (durable,
     // default-loaded, UI-wired) is the canonical record collaboration +
@@ -424,17 +486,17 @@ export default class Serve extends Command {
     mcp: {
       pkg: '@objectstack/mcp',
       export: 'MCPServerPlugin',
-      nameMatch: ['mcp-server', 'MCPServerPlugin', 'mcp'],
+      identities: ['com.objectstack.mcp', 'MCPServerPlugin'],
     },
     marketplace: {
       pkg: '@objectstack/service-package',
       export: 'PackageServicePlugin',
-      nameMatch: ['service-package', 'PackageServicePlugin'],
+      identities: ['package-service', 'PackageServicePlugin'],
     },
     email: {
       pkg: '@objectstack/plugin-email',
       export: 'EmailServicePlugin',
-      nameMatch: ['plugin-email', 'EmailServicePlugin'],
+      identities: ['com.objectstack.service.email', 'EmailServicePlugin'],
     },
     sms: {
       // #2780 — backs phone-number OTP sign-in/reset (plugin-auth) and
@@ -443,39 +505,39 @@ export default class Serve extends Command {
       // unconfigured ⇒ dev LogSmsTransport (no real send).
       pkg: '@objectstack/service-sms',
       export: 'SmsServicePlugin',
-      nameMatch: ['service-sms', 'SmsServicePlugin'],
+      identities: ['com.objectstack.service.sms', 'SmsServicePlugin'],
     },
     sharing: {
       pkg: '@objectstack/plugin-sharing',
       export: 'SharingServicePlugin',
-      nameMatch: ['plugin-sharing', 'SharingServicePlugin', 'SharingPlugin'],
+      identities: ['com.objectstack.service.sharing', 'SharingServicePlugin'],
     },
     // #2486 — auto-required above when resolveSearchPinyinEnabled()
     // (explicit env, else any configured zh-* locale) says on.
     'pinyin-search': {
       pkg: '@objectstack/plugin-pinyin-search',
       export: 'PinyinSearchPlugin',
-      nameMatch: ['plugin-pinyin-search', 'PinyinSearchPlugin'],
+      identities: ['com.objectstack.plugin.pinyin-search', 'PinyinSearchPlugin'],
     },
     reports: {
       pkg: '@objectstack/plugin-reports',
       export: 'ReportsServicePlugin',
-      nameMatch: ['plugin-reports', 'ReportsServicePlugin'],
+      identities: ['com.objectstack.service.reports', 'ReportsServicePlugin'],
     },
     approvals: {
       pkg: '@objectstack/plugin-approvals',
       export: 'ApprovalsServicePlugin',
-      nameMatch: ['plugin-approvals', 'ApprovalsServicePlugin'],
+      identities: ['com.objectstack.service.approvals', 'ApprovalsServicePlugin'],
     },
     settings: {
       pkg: '@objectstack/service-settings',
       export: 'SettingsServicePlugin',
-      nameMatch: ['service-settings', 'SettingsServicePlugin'],
+      identities: ['com.objectstack.service.settings', 'SettingsServicePlugin'],
     },
     webhooks: {
       pkg: '@objectstack/plugin-webhooks',
       export: 'WebhookOutboxPlugin',
-      nameMatch: ['plugin-webhook-outbox', 'WebhookOutboxPlugin'],
+      identities: ['com.objectstack.plugin-webhook-outbox', 'WebhookOutboxPlugin'],
     },
   };
 
@@ -2324,12 +2386,11 @@ export default class Serve extends Command {
       // the static registry + its token in the spec vocabulary (#3265).
       const CAPABILITY_PROVIDERS = Serve.CAPABILITY_PROVIDERS;
 
-      const hasPluginMatching = (fragments: string[]) =>
-        plugins.some((p: any) => {
-          const n = String(p?.name ?? '');
-          const c = String(p?.constructor?.name ?? '');
-          return fragments.some((f) => n.includes(f) || c.includes(f));
-        });
+      // Exact identity comparison, NOT substring containment — a consumer named
+      // after the capability it consumes must never be mistaken for its
+      // provider (#7652). See Serve.providesCapability.
+      const hasPluginMatching = (identities: readonly string[]) =>
+        Serve.providesCapability(plugins, identities);
 
       for (const cap of requires) {
         const spec = CAPABILITY_PROVIDERS[cap];
@@ -2349,7 +2410,7 @@ export default class Serve extends Command {
           }
           continue;
         }
-        if (hasPluginMatching(spec.nameMatch)) continue;
+        if (hasPluginMatching(spec.identities)) continue;
 
         try {
           const mod: any = await import(/* webpackIgnore: true */ spec.pkg);
@@ -2415,7 +2476,7 @@ export default class Serve extends Command {
 
           if (spec.extras) {
             for (const ex of spec.extras) {
-              if (hasPluginMatching(ex.nameMatch)) continue;
+              if (hasPluginMatching(ex.identities)) continue;
               try {
                 const exMod: any = await import(/* webpackIgnore: true */ ex.pkg);
                 const ExCtor = exMod[ex.export];
@@ -2472,7 +2533,7 @@ export default class Serve extends Command {
 
         if (
           ExternalDatasourceServicePlugin &&
-          !hasPluginMatching(['service-external-datasource', 'ExternalDatasourceServicePlugin'])
+          !hasPluginMatching(['com.objectstack.service-external-datasource', 'ExternalDatasourceServicePlugin'])
         ) {
           await kernel.use(new ExternalDatasourceServicePlugin());
           trackPlugin('ExternalDatasourceServicePlugin');
@@ -2485,7 +2546,7 @@ export default class Serve extends Command {
         const { createExternalValidationPlugin } = await import('@objectstack/runtime');
         if (
           createExternalValidationPlugin &&
-          !hasPluginMatching(['external-validation', 'ExternalValidationPlugin'])
+          !hasPluginMatching(['com.objectstack.external-validation', 'ExternalValidationPlugin'])
         ) {
           await kernel.use(createExternalValidationPlugin());
           trackPlugin('ExternalValidationPlugin');
@@ -2521,7 +2582,7 @@ export default class Serve extends Command {
 
         if (
           DatasourceAdminServicePlugin &&
-          !hasPluginMatching(['service-datasource-admin', 'DatasourceAdminServicePlugin'])
+          !hasPluginMatching(['com.objectstack.service-datasource-admin', 'DatasourceAdminServicePlugin'])
         ) {
           // Lazy data-engine surface for the secret store (resolved per call
           // so it works whether the engine is registered as 'data' or
@@ -2630,20 +2691,38 @@ export default class Serve extends Command {
         // opt out of the Console entirely — useful for control-plane
         // deployments where the runtime Console is meaningless.
         const consoleEnabled = flags.console && process.env.OS_DISABLE_CONSOLE !== '1';
-        const consolePath = consoleEnabled ? resolveConsolePath() : null;
-        const consoleWillMount = !!(consolePath && hasConsoleDist(consolePath));
+        // Resolution reports objectui-SHA drift instead of warning about it
+        // itself, so the decision below owns the single message about it.
+        // (Boxed so the assignment made inside `onDrift` is visible to
+        // control-flow analysis after the call returns.)
+        const driftBox: { value: ConsoleShaDrift | null } = { value: null };
+        const consolePath = consoleEnabled
+          ? resolveConsolePath({ onDrift: (d) => { driftBox.value = d; } })
+          : null;
+        const consoleDrift = driftBox.value;
+        const { mount: consoleWillMount, refusedForDrift } = decideConsoleMount({
+          hasDist: !!(consolePath && hasConsoleDist(consolePath)),
+          drift: consoleDrift,
+          isDev,
+        });
 
         // ── Console portal ──────────────────────────────────────────
         // The opinionated, fork-ready runtime console (`@object-ui/console`,
         // published from the objectstack-ai/objectui monorepo) mounts under
         // `/_console/`. When present, it owns the root `/` redirect
         // (preferred default UI). It is optional — we only mount it when
-        // the package resolves and a pre-built `dist/` is present.
+        // the package resolves and a pre-built `dist/` is present, and — in
+        // dev — only when that build matches the repo's objectui pin (#7752).
         if (consolePath) {
           if (consoleWillMount) {
+            if (consoleDrift) {
+              console.warn(chalk.yellow(formatConsoleShaDriftWarning(consoleDrift)));
+            }
             const consoleDistPath = path.join(consolePath, 'dist');
             await kernel.use(createConsoleStaticPlugin(consoleDistPath, { isDev }));
             trackPlugin('ConsoleUI');
+          } else if (refusedForDrift && consoleDrift) {
+            console.error(chalk.red(formatConsoleShaDriftRefusal(consoleDrift)));
           } else {
             console.warn(chalk.yellow(`  ⚠ Console dist not found — install \`@object-ui/console\` (already built) or run \`pnpm --filter @object-ui/console build\` in the objectui workspace`));
           }

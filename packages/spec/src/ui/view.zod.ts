@@ -1760,7 +1760,20 @@ const FormFieldBaseSchema = lazySchema(() => {
   disclosure: z.enum(['inline', 'popover']).optional().describe('Composite rendering: inline bordered box (default) or a summary line + gear popover (progressive disclosure).'),
   };
   return z.object(shape, {
-    error: strictObjectError({ ...VISIBILITY_STRICT_OPTIONS, extraKeys: ['fields'] }, shape),
+    error: strictObjectError({
+      ...VISIBILITY_STRICT_OPTIONS,
+      extraKeys: ['fields'],
+      // The one member of the `visibleWhen` family that can answer `disabled`
+      // with a key of its own (#7832). `VISIBILITY_STRICT_OPTIONS` is shared
+      // with `FormSectionSchema` and `PageComponentSchema`, and neither of those
+      // declares a read-only or disabled slot, so this row belongs HERE rather
+      // than in the shared table — filed there it would name a key two of its
+      // three surfaces do not accept. `visible` / `showWhen` need nothing: they
+      // match `VISIBILITY_KEY_PATTERN` and are already answered by the shared
+      // ADR-0089 prescription, which consumes the key before the rename channel
+      // is consulted, so an alias for either would be dead on arrival.
+      aliases: { disabled: 'readonly' },
+    }, shape),
   });
 });
 

@@ -17,12 +17,27 @@
  *
  * ## Shape translation (authoring → runtime row)
  * The spec shape diverges from the runtime column names; we map only at this
- * boundary and stash the full validated envelope in `definition_json` (whence
- * the enqueuer reads headers / secret / timeout):
+ * boundary and stash the validated envelope in `definition_json` (whence the
+ * enqueuer reads headers / timeout):
  *   - `object`     → `object_name`
  *   - `isActive`   → `active`
  *   - `triggers` / `url` / `method` / `label` / `description` → same-named columns
- *   - the entire parsed {@link Webhook} → `definition_json` (JSON string)
+ *   - `secret`     → `signing_secret` (ENCRYPTED — see below)
+ *   - the rest of the parsed {@link Webhook} → `definition_json` (JSON string)
+ *
+ * ## The secret does NOT go in `definition_json` (#7799)
+ * It used to: `definition_json: JSON.stringify(wh)` serialized the whole
+ * envelope, key included, into an ordinary textarea on an admin-authorable
+ * object — so `GET /api/v1/data/sys_webhook` returned the receiver's only proof
+ * of origin to anyone who could read the object. The authored key now goes to
+ * `sys_webhook.signing_secret`, a `type: 'secret'` column the engine encrypts
+ * into `sys_secret` and masks on read; `definition_json` carries the same
+ * envelope MINUS `secret`. Nothing about the authoring surface changes —
+ * `webhook.zod.ts` still declares `secret` and authors still write it.
+ *
+ * Fail-closed: with no CryptoProvider registered the engine REFUSES the write
+ * (it will not store cleartext), so a secret-bearing webhook is skipped with an
+ * actionable log line instead of being seeded with an exposed key.
  *
  * Each item is validated through `WebhookSchema.parse()` first — this gives the
  * spec schema a real consumer (defaults for `method`/`isActive`/`timeoutMs` get
@@ -43,6 +58,14 @@
 
 import type { IDataEngine } from '@objectstack/spec/contracts';
 import { WebhookSchema, type Webhook } from '@objectstack/spec/automation';
+import {
+  WEBHOOK_SECRET_FIELD,
+  WEBHOOK_SECRET_REFUSAL_CODE,
+  WEBHOOK_SECRET_REFUSAL_STATUS,
+  canResolveSecrets,
+  isSecretProtectionFailure,
+  splitWebhookSecret,
+} from './webhook-secret.js';
 
 /** System write context — the boot seeder is not an admin authoring action. */
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
@@ -146,6 +169,7 @@ export async function bootstrapDeclaredWebhooks(
         const patch = {
           id: row.id,
           ...mapWebhookToRow(wh),
+          ...(await secretPatch(engine, wh, row, subscriptionsObject)),
           // Adopt pristine/legacy (pre-provenance) rows so future boots
           // recognize them as package-managed.
           managed_by: 'package',
@@ -156,9 +180,15 @@ export async function bootstrapDeclaredWebhooks(
         continue;
       }
 
+      const { secret } = splitWebhookSecret(wh as Record<string, unknown>);
       const newRow = {
         id: uid('whk'),
         ...mapWebhookToRow(wh),
+        // Cleartext goes in exactly once, into the `secret`-typed column; the
+        // engine's write path wraps it into `sys_secret` and leaves an opaque
+        // ref behind. Omitted entirely when unauthored, so a webhook with no
+        // secret costs no crypto and needs no CryptoProvider.
+        ...(secret ? { [WEBHOOK_SECRET_FIELD]: secret } : {}),
         managed_by: 'package',
         customized: false,
         created_at: now,
@@ -167,10 +197,23 @@ export async function bootstrapDeclaredWebhooks(
       await engine.insert(subscriptionsObject, newRow, { context: SYSTEM_CTX } as any);
       seeded += 1;
     } catch (err: any) {
-      logger?.warn?.('[webhook] declared webhook seed failed', {
-        name: wh.name,
-        error: err?.message ?? String(err),
-      });
+      // [#7799] The engine refuses to persist a `secret` field with no
+      // CryptoProvider wired, rather than falling back to cleartext. Say so in
+      // those words — "seed failed" would read as a transient glitch, when what
+      // actually happened is that the deployment has nowhere safe to put a key.
+      const protection = isSecretProtectionFailure(err);
+      logger?.warn?.(
+        protection
+          ? '[webhook] declared webhook NOT seeded — its signing secret cannot be stored encrypted (#7799)'
+          : '[webhook] declared webhook seed failed',
+        {
+          name: wh.name,
+          ...(protection
+            ? { code: WEBHOOK_SECRET_REFUSAL_CODE, status: WEBHOOK_SECRET_REFUSAL_STATUS }
+            : {}),
+          error: err?.message ?? String(err),
+        },
+      );
       skipped += 1;
     }
   }
@@ -184,11 +227,55 @@ export async function bootstrapDeclaredWebhooks(
 }
 
 /**
+ * Decide what a RE-SEED should do with an existing row's `signing_secret`.
+ *
+ * Re-seeding runs on every boot, and a `secret`-typed write always mints a
+ * fresh `sys_secret` ciphertext row — so blindly restating the declared key
+ * would leak one orphan cipher row per webhook per restart. Compare against the
+ * stored plaintext first (via the engine's privileged dereference) and write
+ * only on an actual change:
+ *
+ *  - declared key differs from stored ⇒ write it (rotation in code propagates,
+ *    exactly as it did when the whole envelope was rewritten every boot);
+ *  - identical ⇒ omit the key entirely, leaving the existing ref untouched;
+ *  - declared key removed, row still holds one ⇒ write `null` to CLEAR it
+ *    (code remains the authority for package rows);
+ *  - engine cannot dereference (older engine, or the compare threw) ⇒ fall back
+ *    to writing the declared value. Correct signatures beat tidy storage.
+ */
+async function secretPatch(
+  engine: IDataEngine,
+  wh: Webhook,
+  row: any,
+  subscriptionsObject: string,
+): Promise<Record<string, unknown>> {
+  const { secret } = splitWebhookSecret(wh as Record<string, unknown>);
+  const hasStored = row?.[WEBHOOK_SECRET_FIELD] != null && row[WEBHOOK_SECRET_FIELD] !== '';
+
+  if (!secret) return hasStored ? { [WEBHOOK_SECRET_FIELD]: null } : {};
+  if (!hasStored || !canResolveSecrets(engine)) return { [WEBHOOK_SECRET_FIELD]: secret };
+
+  try {
+    const current = await (engine as any).resolveSecretField(
+      subscriptionsObject,
+      String(row.id),
+      WEBHOOK_SECRET_FIELD,
+    );
+    return current === secret ? {} : { [WEBHOOK_SECRET_FIELD]: secret };
+  } catch {
+    return { [WEBHOOK_SECRET_FIELD]: secret };
+  }
+}
+
+/**
  * Translate a validated {@link Webhook} into `sys_webhook` column values.
- * `object → object_name`, `isActive → active`; the full envelope is stashed in
- * `definition_json` for the enqueuer's advanced-config read (headers/secret/…).
+ * `object → object_name`, `isActive → active`; the envelope MINUS its `secret`
+ * is stashed in `definition_json` for the enqueuer's advanced-config read
+ * (headers/timeout). The key itself is written separately, into the encrypted
+ * `signing_secret` column — see the module header and #7799.
  */
 function mapWebhookToRow(wh: Webhook): Record<string, unknown> {
+  const { envelope } = splitWebhookSecret(wh as Record<string, unknown>);
   return {
     name: wh.name,
     label: wh.label ?? wh.name,
@@ -200,6 +287,6 @@ function mapWebhookToRow(wh: Webhook): Record<string, unknown> {
     method: String(wh.method ?? 'POST').toLowerCase(),
     description: wh.description ?? null,
     active: wh.isActive !== false,
-    definition_json: JSON.stringify(wh),
+    definition_json: JSON.stringify(envelope),
   };
 }

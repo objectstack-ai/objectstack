@@ -209,6 +209,7 @@ export const ERROR_CODE_LEDGER = {
     'INTERNAL',
     'INVALID_REQUEST',
     'INVALID_RESUME_TOKEN',
+    'UPLOAD_SESSION_EXPIRED',     // chunk/complete against a session past its own expires_at (#7667)
     'UPLOAD_SESSION_NOT_FOUND',
   ],
   '@objectstack/service-i18n': [
@@ -283,6 +284,7 @@ export const ERROR_CODE_LEDGER = {
     'OBJECT_OVERLAY_PACKAGE_MISMATCH',  // [ADR-0029 D9.9] object overlay row bound to a package that does not own the object
     'OBJECT_PACKAGE_DISABLED',    // [#7557] object is registered but its owning package is disabled — data plane refuses rather than serving rows
     'ROLLED_BACK',             // atomic data-batch row was written, then undone by the batch rollback (#4793)
+    'TENANT_SCOPE_REQUIRED',      // [#7780] destructive call named neither an organization nor an explicit cross-tenant intent; needs an explicit opt-in
     'UNSUPPORTED_QUERY_PARAM',
     'VALIDATION_FAILED',
     'VERSION_NOT_FOUND',
@@ -378,6 +380,13 @@ export const ERROR_CODE_LEDGER = {
     'RECORD_LOCKED',
   ],
   '@objectstack/plugin-security': [
+    // [#7474] `controlled_by_parent` declared with no `master_detail` relation.
+    // Second EMITTER of the code — `@objectstack/metadata-protocol` already
+    // registers for the metadata publish path (`saveMetaItem`); one condition,
+    // one vocabulary. Per this file's header, a code emitted by several
+    // packages is listed once per emitting package — provenance, not identity
+    // (see above; #7504).
+    'INVALID_METADATA',
     'SUGGESTION_NOT_FOUND',
     'SUGGESTION_STATE',           // suggestion exists but is not in a confirmable/dismissable state
   ],

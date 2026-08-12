@@ -33,6 +33,36 @@ export function createAiDomain(deps: DomainHandlerDeps): DomainRoute {
  * Resolves the AI service and its built-in route handlers, then dispatches.
  */
 export async function handleAIRequest(deps: DomainHandlerDeps, subPath: string, method: string, body: any, query: any, context: HttpProtocolContext): Promise<HttpDispatcherResult> {
+    // [#7653] ANONYMOUS BASELINE — decided here, ahead of every capability
+    // answer below.
+    //
+    // The gate itself was already in this handler, but only INSIDE the
+    // per-route loop, which is reachable only once the AI service is
+    // serveable. On an open-edition boot (no `service-ai` — a Cloud/Enterprise
+    // package) the `!isServiceServeable` branch below answered first, so the
+    // whole `/ai/**` family replied to unauthenticated callers: `GET
+    // /ai/agents` → 200 with the empty-list courtesy, every other route → 501
+    // carrying the Cloud/EE remedy sentence. Serveability decided whether the
+    // gate ran at all, which inverts the contract: `/ai` stands on the same
+    // anonymous-deny floor as `/data`, `/meta`, `/security`, `/actions` and
+    // `/automation` (ADR-0056 D2 → #3963), and `domains/automation.ts`
+    // already gates ahead of its own `capabilityUnavailable` for exactly this
+    // reason — an anonymous caller must not learn from a 501-vs-401 whether
+    // this deployment mounts AI at all.
+    //
+    // The decision is taken ONCE and consulted twice; there is no second copy
+    // of the rule to drift. The route-level `auth: false` opt-out stays down
+    // in the loop because that is the only place it can mean anything: it is a
+    // property of a REGISTERED route, so it can only be honoured where a route
+    // table exists. With no serveable service there is no route to declare it,
+    // and the family default — auth required — stands.
+    const gec: any = context.executionContext;
+    const denyAnonymous = shouldDenyAnonymous({ userId: gec?.userId, isSystem: gec?.isSystem });
+    const anonymousRefusal = (): HttpDispatcherResult => ({
+        handled: true,
+        response: deps.error(ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS, { code: ANONYMOUS_DENY_CODE }),
+    });
+
     let aiService: IAIService | undefined;
     try {
         aiService = await deps.resolveService(context, 'ai');
@@ -47,6 +77,10 @@ export async function handleAIRequest(deps: DomainHandlerDeps, subPath: string, 
     // which both reads as a fault and loses the `/ai/agents` empty-list
     // courtesy the console depends on.
     if (!isServiceServeable(aiService)) {
+        // [#7653] The gate before the courtesy and the 501: both of them are
+        // capability disclosures, and neither is owed to a caller who has not
+        // authenticated. This is the exit the defect lived behind.
+        if (denyAnonymous) return anonymousRefusal();
         // The console polls `GET /ai/agents` on every navigation to decide
         // whether to show AI affordances. Reporting that as a 404 turns the
         // normal "no AI service configured" state (the open-source default —
@@ -105,6 +139,12 @@ export async function handleAIRequest(deps: DomainHandlerDeps, subPath: string, 
     }> | undefined;
 
     if (!routes) {
+        // [#7653] Same shape as the unserveable exit above: a route table that
+        // has not been published yet offers no route to declare `auth: false`,
+        // so the family default applies and the gate goes first. Otherwise a
+        // boot-race window would answer anonymous callers "AI is mounted, come
+        // back in a moment" — the very disclosure this ordering exists to stop.
+        if (denyAnonymous) return anonymousRefusal();
         return { handled: true, response: deps.error('AI service routes not yet initialized', 503) };
     }
 
@@ -121,17 +161,14 @@ export async function handleAIRequest(deps: DomainHandlerDeps, subPath: string, 
         // adapter/model config back. Gate when the deployment requires
         // auth; an authenticated user (or an internal system context)
         // passes, matching the REST `enforceAuth` seam. Off → unchanged.
-        if (route.auth !== false) {
-            const gec: any = context.executionContext;
-            // `route.auth !== false` is the AI-route contract; #3963 dropped the
-            // deployment-wide opt-out, so the shared function owns the decision.
-            if (shouldDenyAnonymous({ userId: gec?.userId, isSystem: gec?.isSystem })) {
-                return {
-                    handled: true,
-                    response: deps.error(ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS, { code: ANONYMOUS_DENY_CODE }),
-                };
-            }
-        }
+        //
+        // [#7653] `route.auth !== false` is the AI-route contract and the one
+        // thing this site adds over the family-wide decision taken at the top
+        // of the handler: a registered route may legitimately open itself to
+        // anonymous callers, and only a registered route can. The decision
+        // itself is the same one — `denyAnonymous`, computed once above —
+        // so the two exits cannot answer differently.
+        if (route.auth !== false && denyAnonymous) return anonymousRefusal();
 
         // Resolve `req.user` from the already-resolved ExecutionContext so
         // AI route handlers can attribute the call to the authenticated

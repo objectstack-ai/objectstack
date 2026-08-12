@@ -54,6 +54,16 @@ export {
   type RecomputeEngine,
 } from './bulk-recompute.js';
 export {
+  bindBusinessUnitTreeRecompute,
+  unbindBusinessUnitTreeRecompute,
+  writeCanChangeExpansion,
+  pendingBuTreeRegrants,
+  BU_TREE_RECOMPUTE_PACKAGE,
+  BU_TREE_RECIPIENT_TYPES,
+  BU_GRAPH_OBJECTS,
+  type BuTreeRecomputeRuleService,
+} from './bu-tree-recompute.js';
+export {
   bindRecordShareCascade,
   unbindRecordShareCascade,
   objectCanCarryRecordShares,

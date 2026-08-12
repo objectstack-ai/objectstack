@@ -122,6 +122,7 @@ import type { ICryptoProvider, CryptoHandle } from '@objectstack/spec/contracts'
 import {
   collectSecretFields,
   collectMaskedReadFields,
+  collectInternalReadFields,
   collectCredentialFields,
   makeSecretRef,
   parseSecretRef,
@@ -131,6 +132,7 @@ import {
 import { pluralToSingular, ExternalWriteForbiddenError } from '@objectstack/spec/shared';
 import { SchemaRegistry, computeFQN } from './registry.js';
 import { expandSearchToFilter } from './search-filter.js';
+import { isSearchCompanionRequested, stripSearchCompanion } from './search-companion.js';
 import { ExpressionEngine } from '@objectstack/formula';
 import type { Expression } from '@objectstack/spec';
 import { isAggregatedViewContainer, expandViewContainer } from '@objectstack/spec';
@@ -2491,17 +2493,41 @@ export class ObjectQL implements IObjectQLEngine {
    *
    * Carries `tenantId` from the active ExecutionContext so the driver can
    * enforce per-tenant isolation (SQL driver auto-scopes reads and
-   * auto-injects the tenant column on writes) — EXCEPT for objects that
-   * declare `tenancy.enabled: false` (ADR-0066 platform-global posture,
-   * e.g. `sys_license`): stamping the caller's active-org tenantId there
-   * would org-scope a global catalog at the driver, and its NULL-org rows
-   * would vanish for authenticated org-context reads while anonymous
-   * reads still see them (#3249). The SQL driver has its own opt-out
-   * (sticky tenant-field cache), but withholding tenantId here protects
-   * every driver at the source. Existing user-supplied shapes
-   * (transactions, AST extras) are preserved by spreading them first — an
-   * explicitly-passed `base.tenantId` is deliberate caller intent and
-   * still wins.
+   * auto-injects the tenant column on writes) — EXCEPT for the two object
+   * postures below. The SQL driver has its own opt-out (sticky tenant-field
+   * cache), but withholding tenantId here protects every driver at the
+   * source. Existing user-supplied shapes (transactions, AST extras) are
+   * preserved by spreading them first — an explicitly-passed `base.tenantId`
+   * is deliberate caller intent and still wins, under both exemptions.
+   *
+   * 1. **`tenancy.enabled: false`** (ADR-0066 platform-global posture, e.g.
+   *    `sys_license`): stamping the caller's active-org tenantId there would
+   *    org-scope a global catalog at the driver, and its NULL-org rows would
+   *    vanish for authenticated org-context reads while anonymous reads still
+   *    see them (#3249).
+   *
+   * 2. **`external != null`** — a federated object (ADR-0015), whose schema
+   *    is owned by the REMOTE database (#7738). The driver turns `tenantId`
+   *    into `(organization_id = :tenant OR organization_id IS NULL)`, and
+   *    against a remote table that carries no such column that is a SQL error
+   *    on Postgres/MySQL — or worse on SQLite, whose quoted-identifier
+   *    fallback reinterprets the unresolvable identifier as the string
+   *    literal `'organization_id'`, makes both disjuncts constant-false, and
+   *    answers **0 rows with HTTP 200**: a correctly-bound external object
+   *    silently reads empty.
+   *
+   *    Note the reason is NOT "the remote happens to lack the column". The
+   *    column the driver detects is the platform's OWN: `applySystemFields`
+   *    (`resolveInjectedSystemColumns`) injects `organization_id` into every
+   *    object it registers, with no `external` branch, and
+   *    `SqlDriver.registerExternalObject` is DDL-free by design and runs no
+   *    introspection — so it computes the tenant column from the platform's
+   *    field set, never from the remote's. On a federated object
+   *    `organization_id`'s presence is therefore always the injection and
+   *    never evidence about the remote, which leaves the engine no ground on
+   *    which to scope by it. Tenant isolation for federated data belongs to
+   *    the remote and to the layers above (RBAC/RLS, the datasource binding),
+   *    not to a predicate the platform guesses onto someone else's table.
    *
    * System / isSystem callers may still cross tenants by clearing
    * `tenantId` themselves on the resulting object; this helper does not
@@ -2525,9 +2551,15 @@ export class ObjectQL implements IObjectQLEngine {
     // reaches the driver that owns it. It covers READS too, which have no gate
     // of their own and were riding the same wrong connection.
     const hasTx = tx !== undefined && this.transactionCoversDriverFor(object, tx);
+    const objectSchema = this._registry.getObject(object) as any;
+    // `external != null` is the same predicate `syncObjectSchema` routes a
+    // federated object by — one spelling of "this schema is the remote's",
+    // not a second reading of it.
+    const isFederated = objectSchema?.external != null;
     const hasTenant =
       execCtx?.tenantId !== undefined &&
-      !isTenancyDisabled(this._registry.getObject(object));
+      !isTenancyDisabled(objectSchema) &&
+      !isFederated;
     const hasTz = execCtx?.timezone !== undefined;
     const isSystem = execCtx?.isSystem === true;
     const preserveAudit = (execCtx as any)?.preserveAudit === true;
@@ -4709,20 +4741,129 @@ export class ObjectQL implements IObjectQLEngine {
    * `null`. Privileged callers that genuinely need a secret's plaintext use
    * {@link resolveSecret} against the stored ref; a `password` field is stored
    * as plaintext at rest, so its cleartext is only ever reachable off this path.
+   *
+   * [#7728] Second collector branch, same choke point: a field declared
+   * `internal: true` is OMITTED rather than masked — see
+   * {@link omitInternalFields} for why the two dispositions differ.
    */
   private maskSecretFields(object: string, rows: any): void {
     if (!rows) return;
     const schema = this._registry.getObject(object);
     const maskedFields = collectMaskedReadFields(schema);
-    if (maskedFields.length === 0) return;
+    if (maskedFields.length > 0) {
+      const list = Array.isArray(rows) ? rows : [rows];
+      for (const row of list) {
+        if (!row || typeof row !== 'object') continue;
+        for (const field of maskedFields) {
+          if (!(field in row)) continue;
+          row[field] = row[field] == null ? null : SECRET_MASK;
+        }
+      }
+    }
+    // Runs AFTER the mask, so a field that is somehow both `secret`-typed and
+    // `internal` ends up omitted rather than masked — the stricter disposition
+    // wins, which is the only safe way for the two to compose.
+    this.omitInternalFields(object, rows);
+  }
+
+  /**
+   * [#7728] Drop every field declared `internal: true` from the rows the engine
+   * hands back — "the declared value is never returned on the generic data
+   * path". This is the read protection for ADR-0100's third credential channel:
+   * auth-subsystem one-way hashes stored in `text` columns, which the two
+   * type-keyed credential collectors structurally cannot reach.
+   *
+   * **OMIT, not mask** (maintainer ruling 2026-08-12 on #7728). The credential
+   * mask exists to signal "a value is set" without leaking it. The column this
+   * was minted for — `sys_api_key.key` — is `required: true`, so it is ALWAYS
+   * set: the signal carries zero bits, while still shipping a value under a
+   * field whose own description says it is "never exposed to clients". Omission
+   * also leaves that description string untouched, so the four generated
+   * translation bundles that mirror it do not churn.
+   *
+   * **`?select=` is covered by construction, and that is load-bearing.** The
+   * strip acts on the RESULT ROWS, not on the projection, so a client that
+   * spells the column out (`?select=id,key`) gets a 200 without it rather than
+   * a bypass. `select` only gates on whether a field is KNOWN
+   * (`assertProjectionFieldsExist`) and a flagged column is known, so a
+   * projection-aware strip would have shipped looking complete and still leaked
+   * to any caller who named the column — measured on the sibling column in
+   * #7823, and reproduced here on `sys_api_key.key` before the fix.
+   *
+   * **No system carve-out**, and this is where the shape deliberately diverges
+   * from its sibling {@link stripSearchCompanionFromRead}. That one keeps the
+   * `__search` companion for a system caller who names it by projection,
+   * because it has exactly one such reader whose backfill comparison would
+   * otherwise rewrite every row on every run. This flag has no such reader: the
+   * API-key verifier uses the column as a `where` FILTER and never reads it off
+   * the result (`resolveApiKeyPrincipal` takes `expires_at` / `user_id` /
+   * `organization_id` / `scopes`), and the mint path returns the plaintext it
+   * generated, not the row it inserted. An escape hatch nobody needs is a hole
+   * in a non-exposure guarantee, so there isn't one — if a legitimate system
+   * reader ever appears, it reads the column through a purpose-built privileged
+   * accessor, the way {@link resolveSecret} does for `secret`.
+   *
+   * Nothing below storage is touched. The strip runs on rows the driver has
+   * already produced, so the predicate has been evaluated and the index used
+   * before this method sees anything — which is precisely why authentication
+   * keeps working.
+   */
+  private omitInternalFields(object: string, rows: any): void {
+    if (!rows) return;
+    const schema = this._registry.getObject(object);
+    const internalFields = collectInternalReadFields(schema);
+    if (internalFields.length === 0) return;
     const list = Array.isArray(rows) ? rows : [rows];
     for (const row of list) {
       if (!row || typeof row !== 'object') continue;
-      for (const field of maskedFields) {
-        if (!(field in row)) continue;
-        row[field] = row[field] == null ? null : SECRET_MASK;
-      }
+      for (const field of internalFields) delete row[field];
     }
+  }
+
+  /**
+   * [#7642] Strip the hidden `__search` companion column from what a read
+   * hands back, unless a SYSTEM caller named it in its projection.
+   *
+   * The column is declared client-invisible (`hidden` + `readonly` + `system`
+   * + `searchable: false`) and the enforcement that exists is real: it is kept
+   * out of auto-views, out of the `$search` auto-default, and a `$searchFields`
+   * override naming it is refused with a 400 ("is hidden"). What was missing is
+   * the PROJECTION half — a query that names no `fields` reaches the driver
+   * with `ast.fields` undefined, every driver answers that with `SELECT *`, and
+   * the companion rode back in every record body: list results, GET by id,
+   * `/search` hits (which are `engine.find` rows verbatim) and the 201 create
+   * body. The rule is applied HERE, at the engine, because the engine is the
+   * PRODUCER those four surfaces share; fixing them one consumer at a time is
+   * how three of the four would stay broken.
+   *
+   * Two carve-outs, both measured rather than defensive:
+   *
+   *  - **A system caller that asks for it by name keeps it.** The companion has
+   *    exactly one such reader: `plugin-pinyin-search`'s backfill/reconcile
+   *    walk, which projects `['id', ...sources, '__search']` under
+   *    `{ isSystem: true }` and compares the stored blob against the recomputed
+   *    one. Strip it unconditionally and that comparison reads `undefined`
+   *    every pass — the backfill would rewrite every row of every object on
+   *    every run, which is worse than the disclosure it was fixing.
+   *  - **A non-system caller does NOT keep it, even by name.** `select` only
+   *    gates on whether a field is KNOWN (`assertProjectionFieldsExist`), and
+   *    the companion is known once provisioned — so `?select=__search` would
+   *    otherwise be an open door straight through this strip, and a
+   *    client-invisibility rule with a documented spelling that bypasses it is
+   *    not one. `isSystem` is server-derived (never client input), the same
+   *    trust the read-only strips on the write path already place in it.
+   *
+   * ⚠️ `requestedFields` must be the CALLER's `fields`, captured before
+   * `planFormulaProjection` — that pass rewrites the projection to every stored
+   * column when a formula is in play, companion included.
+   */
+  private stripSearchCompanionFromRead(
+    rows: unknown,
+    requestedFields: readonly string[] | undefined,
+    context: ExecutionContext | undefined,
+  ): void {
+    if (context?.isSystem && isSearchCompanionRequested(requestedFields)) return;
+    stripSearchCompanion(rows);
   }
 
   /**
@@ -4758,6 +4899,58 @@ export class ObjectQL implements IObjectQLEngine {
       key: secret.key,
       tenantId: opts?.tenantId,
     });
+  }
+
+  /**
+   * Privileged: recover the plaintext of ONE row's `secret`-typed field.
+   *
+   * {@link resolveSecret} is documented for "privileged consumers … against the
+   * stored ref", but until #7799 there was no supported way for such a consumer
+   * to OBTAIN that ref: {@link maskSecretFields} replaces it with
+   * {@link SECRET_MASK} on every `find`/`findOne`, unconditionally and after
+   * hooks. A server-side reader that genuinely needs the value therefore had
+   * two options, both bad — keep the credential in cleartext somewhere the read
+   * path does not mask (which is the defect #7799 reports on
+   * `sys_webhook.definition_json`), or reach around the engine into the driver
+   * from a plugin. This method is the supported third option, and it is why the
+   * webhook signing secret can now live in the encrypted channel at all.
+   *
+   * The row is read at DRIVER level on purpose — that is the only layer where
+   * the ref still exists — which means it bypasses read hooks, field-level
+   * security and sharing. That is the same trust `resolveSecret` already places
+   * in its caller, and the reason both are spelled as explicit, separately-named
+   * privileged verbs rather than an option on `find`: there is no query string
+   * that reaches this, so it cannot be turned on from outside the process.
+   *
+   * Refuses any field that is not declared `type: 'secret'`. Without that guard
+   * this would be a generic mask-bypass — in particular over a `password` field,
+   * which is stored as PLAINTEXT at rest and is masked for exactly that reason
+   * (ADR-0100). Only the encrypted channel is dereferenceable.
+   *
+   * Fail-closed like {@link resolveSecret}: throws when no CryptoProvider is
+   * registered or the `sys_secret` row has gone missing. Returns `null` when the
+   * row does not exist or the field holds no secret (never set, or cleared).
+   */
+  async resolveSecretField(
+    object: string,
+    recordId: string,
+    field: string,
+    opts?: { tenantId?: string },
+  ): Promise<string | null> {
+    const schema = this._registry.getObject(object);
+    if (!collectSecretFields(schema).includes(field)) {
+      throw new Error(
+        `Cannot resolve secret field "${object}.${field}": it is not declared as type 'secret'. `
+          + 'Only the encrypted secret channel is dereferenceable — a `password` field is stored as '
+          + 'plaintext at rest and is masked deliberately (ADR-0100), so dereferencing one here '
+          + 'would be a mask bypass, not a decrypt.',
+      );
+    }
+    const driver = this.getDriver(object);
+    const found = await driver.find(object, { where: { id: recordId } });
+    const row: any = Array.isArray(found) ? found[0] : found;
+    if (!row) return null;
+    return this.resolveSecret(row[field], opts);
   }
 
   /**
@@ -6837,6 +7030,10 @@ export class ObjectQL implements IObjectQLEngine {
     const _findSchema = this._registry.getObject(object);
 
     this.expandSearchOnAst(ast, _findSchema);
+    // [#7642] The caller's OWN projection, captured before any planning pass
+    // rewrites it — the only thing that can answer "did this caller ask for
+    // `__search`?". See `stripSearchCompanionFromRead`.
+    const _findRequestedFields = Array.isArray(ast.fields) ? [...ast.fields] : undefined;
     // [#7095] Before the projection is planned and before anything is handed to
     // a driver: an ORDER BY this engine cannot materialise is refused, not
     // dropped. `fillQueryAstDefaults` has already normalised `orderBy` into
@@ -6923,6 +7120,12 @@ export class ObjectQL implements IObjectQLEngine {
           // resolveSecret() against the stored ref instead.
           this.maskSecretFields(object, hookContext.result);
 
+          // [#7642] …and never let the hidden `__search` companion column out
+          // through the default projection either. After the hooks, for the
+          // same reason the mask is: a server-side `afterFind` handler is not
+          // the client this column is hidden from.
+          this.stripSearchCompanionFromRead(hookContext.result, _findRequestedFields, opCtx.context);
+
           return hookContext.result;
       } catch (e) {
           this.logger.error('Find operation failed', e as Error, { object });
@@ -6993,6 +7196,8 @@ export class ObjectQL implements IObjectQLEngine {
     // dropped sort does not merely reorder the answer, it returns a DIFFERENT
     // record, and the one it returns looks exactly as legitimate.
     assertOrderByIsMaterializable(objectName, 'findOne', _findOneSchema, ast.orderBy);
+    // [#7642] Caller's own projection, before planning rewrites it — see `find`.
+    const _findOneRequestedFields = Array.isArray(ast.fields) ? [...ast.fields] : undefined;
     const _findOneFormula = planFormulaProjection(_findOneSchema, ast.fields);
     if (_findOneFormula.projected) ast.fields = _findOneFormula.projected;
 
@@ -7059,6 +7264,10 @@ export class ObjectQL implements IObjectQLEngine {
 
       // Mask secret fields — plaintext never leaves through the read path.
       this.maskSecretFields(objectName, hookContext.result);
+      // [#7642] Hidden `__search` companion — same door, same rule as `find`.
+      // This is the `GET /data/:object/:id` surface (`getData` reads through
+      // findOne), one of the four the issue measured.
+      this.stripSearchCompanionFromRead(hookContext.result, _findOneRequestedFields, opCtx.context);
 
       return hookContext.result;
     });
@@ -7625,6 +7834,21 @@ export class ObjectQL implements IObjectQLEngine {
           rowCtx.event = 'afterInsert';
           rowCtx.result = coerceBooleanFields(schemaForValidation as any, resultRows[k] as any);
           await this.triggerHooks('afterInsert', rowCtx);
+          // [#7642] The 201 create body is the surface most likely to be missed
+          // on this card, and the one no read-path fix reaches: `createData`
+          // returns `engine.insert`'s value verbatim as `record`, so the
+          // companion the `beforeInsert` stamp just wrote came straight back to
+          // the client. A write has no projection to consult, so there is no
+          // "asked for it by name" case to honour — the strip is unconditional.
+          // AFTER the hook dispatch, matching the read path: `afterInsert`
+          // handlers still observe the whole stored row.
+          stripSearchCompanion(rowCtx.result);
+          // [#7728] Same position, same reason, for `internal` fields. A write
+          // has no projection to consult here either, so the omit is
+          // unconditional. This does NOT touch the show-once mint path: that
+          // route reads only `id` off the insert result and returns the
+          // plaintext it generated itself.
+          this.omitInternalFields(object, rowCtx.result);
         }
 
         // Roll-up: recompute parent summary fields that aggregate this object.
@@ -8551,6 +8775,27 @@ export class ObjectQL implements IObjectQLEngine {
              }
            }
 
+           // [#7642] Same strip the create body gets, for the same reason: a
+           // by-id update resolves to a RECORD, `updateData` returns it as
+           // `record`, and the `beforeUpdate` companion stamp had just written
+           // `__search` into the row it echoes. The issue measured four
+           // surfaces and this is not one of them — it is the same column, the
+           // same contract and the same response shape, and leaving it out
+           // would mean POST and PATCH on one object disagreed about whether a
+           // client-invisible column is visible. A predicate update resolves to
+           // an affected-row COUNT (#4639), which the strip skips as a
+           // non-object.
+           stripSearchCompanion(hookContext.result);
+           // [#7728] …and the same for `internal` fields, on the identical
+           // argument. This is not a hypothetical symmetry: `sys_api_key` is
+           // one of the few identity objects with a write verb open
+           // (`apiMethods: ['get','list','update']`, #7727) and its declared
+           // revoke/restore row actions PATCH it, so before this line a client
+           // revoking a key got the stored hash back in the 200 body — measured,
+           // and the fourth leaking surface on the object #7728 was filed
+           // against. A predicate update resolves to an affected-row COUNT
+           // (#4639), which the omit skips as a non-object.
+           this.omitInternalFields(object, hookContext.result);
            // The record IS updated; a summary that could not recompute after
            // retries must surface, not stay silent (framework#3147).
            if (summaryFailures.length > 0) throw new SummaryRecomputeError(summaryFailures, hookContext.result);
@@ -8993,7 +9238,9 @@ export class ObjectQL implements IObjectQLEngine {
       //                     by `targets(objectName)` inside the handler)
       //   * `service-storage` file-reference-lifecycle before+afterDelete
       //                     (filters by `activeFileFields(object)` inside)
-      //   * `plugin-audit`  captureBefore / writeAudit before+afterDelete,
+      //   * `plugin-audit`  writeAudit  afterDelete only — #6656 retired
+      //                     `captureBefore`, which was its `beforeDelete` half,
+      //                     so it holds term 2 open and no longer term 1;
       //                     global MINUS `excludeObjects: AUDIT_EXCLUDED_OBJECTS`
       //                     (#5860) — the one that narrows at the ENGINE face,
       //                     so `hookMatchesObject` can subtract it and an
@@ -9312,14 +9559,31 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
-   * Fail-closed guard (ADR-0100 / #3171): refuse to aggregate over a credential
-   * field. `secret`/`password` values are masked on the generic read path so
-   * plaintext never leaves the engine, but `aggregate()` has no equivalent mask
-   * — a GROUP BY / MIN / MAX / array_agg over such a column would surface the
-   * stored `secret:<id>` ref or the password value, and post-hoc masking would
-   * corrupt group keys. So we reject instead. The check is unconditional
-   * (ignores `managedBy`): aggregating a credential is never legitimate, even on
-   * a better-auth object, where it would be an inference oracle over hashes.
+   * Fail-closed guard (ADR-0100 / #3171 / #7922): refuse to aggregate over a
+   * field whose value is withheld on the generic read path. Such fields reach
+   * this guard through **two independent collectors**, and it needs both:
+   *
+   *  - {@link collectCredentialFields} — keyed by field TYPE (`secret` /
+   *    `password`). A GROUP BY / MIN / MAX / array_agg over such a column would
+   *    surface the stored `secret:<id>` ref or the password value.
+   *  - {@link collectInternalReadFields} — keyed by the `internal: true` FLAG
+   *    (#7728). ADR-0100's third credential channel is a one-way hash living in
+   *    an ordinary `text` column, which no type-keyed collector can ever reach;
+   *    the flag is that channel's opt-in declaration. Without this half the
+   *    guard had the same type-vs-flag blind spot #7728 fixed on the read path:
+   *    a flagged column was omitted from `find`/`findOne` yet freely groupable
+   *    here, so the flag's promise ("never returned on the generic data path")
+   *    stopped at the edge of `aggregate()`.
+   *
+   * Post-hoc masking is not available on this path — the value is already a
+   * group key by the time there is a row, and masking group keys corrupts the
+   * result. So we reject instead.
+   *
+   * Neither collector carries a `managedBy` exemption, so the union does not
+   * acquire one, deliberately. Read-masking exempts `password` on better-auth
+   * objects so login reads still see the stored value; *aggregating* a
+   * credential is never legitimate, least of all on an identity table, where it
+   * is an inference oracle over hashes.
    *
    * Only the two output-bearing positions on `EngineAggregateOptions` carry
    * field names: `aggregations[].field` (skip COUNT(*) — undefined or '*') and
@@ -9327,8 +9591,12 @@ export class ObjectQL implements IObjectQLEngine {
    */
   private rejectCredentialAggregation(object: string, query: EngineAggregateOptions): void {
     const schema = this._registry.getObject(object);
-    const credentialFields = collectCredentialFields(schema);
-    if (credentialFields.length === 0) return;
+    // Deduped: one field can be reachable through both collectors (a `secret`
+    // column that is also flagged `internal`), and it must be named once.
+    const protectedFields = [
+      ...new Set([...collectCredentialFields(schema), ...collectInternalReadFields(schema)]),
+    ];
+    if (protectedFields.length === 0) return;
 
     const referenced = new Set<string>();
     for (const agg of query?.aggregations ?? []) {
@@ -9340,13 +9608,14 @@ export class ObjectQL implements IObjectQLEngine {
       if (field) referenced.add(field);
     }
 
-    const hit = credentialFields.filter((f) => referenced.has(f));
+    const hit = protectedFields.filter((f) => referenced.has(f));
     if (hit.length > 0) {
       throw new Error(
         `Cannot aggregate credential field(s) ${hit.map((f) => `"${object}.${f}"`).join(', ')}: `
-          + 'secret/password fields are masked on read so plaintext never leaves the engine, and '
-          + 'aggregating them (group-by, min/max, array_agg, …) would surface the stored value. '
-          + 'Refusing (fail-closed) — see ADR-0100 / #3171.',
+          + 'secret/password fields are masked on read and `internal: true` fields are omitted '
+          + 'outright, so the value never leaves the engine on the generic data path; aggregating '
+          + 'them (group-by, min/max, array_agg, …) would surface it. '
+          + 'Refusing (fail-closed) — see ADR-0100 / #3171 / #7922.',
       );
     }
   }

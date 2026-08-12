@@ -81,7 +81,10 @@ export const SysAccount = ObjectSchema.create({
       locations: ['list_item', 'record_header'],
       type: 'api',
       target: '/api/v1/auth/unlink-account',
-      confirmText: 'Unlink this identity link? The user will no longer be able to sign in with this provider until they re-link it from their account settings.',
+      // Confirm question on `description`, not `confirmText`: this action collects
+      // params, and pairing the two keys opens two dialogs for one decision
+      // (#7278 ruling 2026-08-10, swept by #7309).
+      description: 'Unlink this identity link? The user will no longer be able to sign in with this provider until they re-link it from their account settings.',
       successMessage: 'Identity link removed',
       refreshAfter: true,
       params: [
