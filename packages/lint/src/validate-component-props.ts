@@ -177,6 +177,47 @@ function suppliedByDataSource(issue: LintZodIssue, component: AnyRec): boolean {
   return strName(dataSource?.object) !== undefined;
 }
 
+/**
+ * The `unrecognized_keys` issue hiding inside a collapsed `invalid_union`, when
+ * exactly one arm produced one and produced nothing else.
+ *
+ * Why this is needed at all: zod 4 does not surface arm failures. A union
+ * reports as ONE `invalid_union` whose message is the bare `"Invalid input"`,
+ * with each arm's issues tucked inside `issue.errors`. `describeIssue` already
+ * unpacks that for the human message (#5583), so the named surface and the
+ * rename DO reach the author — but the finding was still filed as a value
+ * verdict, so a strict union arm and a strict object reported the same fact
+ * under two different rule ids with two different hints. #4001 batch A closed
+ * `RecordHighlightsField`'s object arm and `record:related_list`'s sort-entry
+ * arm, which made that split load-bearing rather than theoretical.
+ *
+ * ⚠️ The one-arm condition is the whole correctness of this. A union arm
+ * rejecting a key does NOT mean the author meant that arm — `fields: ['status']`
+ * is a perfectly good `record:highlights` entry through the STRING arm. So the
+ * rename is only claimed when every other arm rejected the value for a
+ * different reason (a type mismatch: it is an object, they wanted a string) and
+ * exactly one arm got far enough to judge keys. Anything else — two arms both
+ * complaining about keys, or one arm complaining about both a key and a value —
+ * falls through to the ordinary value verdict, where `describeIssue` still
+ * prints every arm's own message. Guessing which arm was meant is the failure
+ * mode this rule exists to prevent, not one to introduce here.
+ */
+function unrecognizedKeysFromUnionArm(issue: LintZodIssue): LintZodIssue | undefined {
+  if (issue.code !== 'invalid_union') return undefined;
+  const arms = issue.errors;
+  if (!arms || arms.length === 0) return undefined;
+  let found: LintZodIssue | undefined;
+  for (const arm of arms) {
+    const keyIssues = arm.filter((inner) => inner.code === 'unrecognized_keys');
+    if (keyIssues.length === 0) continue;
+    // This arm judged keys — it must have judged ONLY keys, and be the only
+    // such arm, or we cannot say which shape the author was reaching for.
+    if (keyIssues.length !== arm.length || found) return undefined;
+    found = keyIssues[0];
+  }
+  return found;
+}
+
 export function validateComponentProps(stack: AnyRec): ComponentPropsFinding[] {
   const findings: ComponentPropsFinding[] = [];
   if (!isRec(stack)) return findings;
@@ -233,6 +274,24 @@ export function validateComponentProps(stack: AnyRec): ComponentPropsFinding[] {
       for (const issue of parsed.error?.issues ?? []) {
         if (suppliedByDataSource(issue, component)) continue;
         const at = issue.path.length ? `${base}.${issue.path.join('.')}` : base;
+        // A strict UNION ARM reports the same fact one layer in — see
+        // `unrecognizedKeysFromUnionArm`. Routed to the unknown-key rule id
+        // rather than left as a value verdict, so a closed arm and a closed
+        // object are one diagnostic for the author.
+        const armIssue = unrecognizedKeysFromUnionArm(issue);
+        if (armIssue) {
+          for (const key of armIssue.keys ?? []) {
+            findings.push({
+              severity: 'warning',
+              rule: COMPONENT_PROPS_UNKNOWN_KEY,
+              where,
+              path: `${at}.${key}`,
+              message: `\`${key}\` is not a prop \`${type}\` declares (ComponentPropsMap, @objectstack/spec/ui): ${armIssue.message}`,
+              hint: `Remove \`${key}\`, or declare it on \`${type}\`'s props schema if the component honours it.`,
+            });
+          }
+          continue;
+        }
         // A strict props schema reports its undeclared keys HERE instead of
         // through the walker above. Same fact, same rule id — see the header.
         if (issue.code === 'unrecognized_keys') {
