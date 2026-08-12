@@ -133,12 +133,15 @@ describe('engine read scoping — count/aggregate honor injected filters (#2737)
     await ql.aggregate('note', {
       where: { title: 'x' },
       groupBy: ['owner'],
-      aggregations: [{ func: 'count', field: 'id', alias: 'n' }],
-    } as any);
+      aggregations: [{ function: 'count', field: 'id', alias: 'n' }],
+    });
 
     expect(seen.aggregateAst?.where).toEqual({ $and: [{ title: 'x' }, { owner: 'me' }] });
     // groupBy/aggregations survive on the same ast.
     expect(seen.aggregateAst?.groupBy).toEqual(['owner']);
+    expect(seen.aggregateAst?.aggregations).toEqual([
+      { function: 'count', field: 'id', alias: 'n' },
+    ]);
   });
 
   it('count() and find() see the SAME scoped where (total matches records)', async () => {
