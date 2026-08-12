@@ -100,10 +100,16 @@ export function registerCrmPositionBindings(ctx: BindHostContext): void {
   // Bind on `kernel:bootstrapped` — the anchor that fires only after every
   // `kernel:ready` handler (incl. the security bootstrap that seeds the
   // position/set rows) has settled. Fall back to a deferred immediate run
-  // if the host context somehow omits the hook registrar.
+  // if the host context somehow omits the hook registrar (never true for the
+  // real runtime `PluginContext`, which always provides one — this branch is
+  // unreachable in practice, so a microtask deferral is equivalent to the
+  // macrotask `setTimeout` it replaces). Pure-ES deferral, no ambient
+  // `setTimeout`/`window`/`node` global: `examples/**` sources reachable from
+  // `scripts/analytics-reconcile/*.ts` type-check under the workspace ROOT
+  // tsconfig, which declares neither `dom` nor `types: ["node"]`.
   if (typeof ctx.hook === 'function') {
     ctx.hook('kernel:bootstrapped', run);
   } else {
-    setTimeout(() => void run(), 0);
+    void Promise.resolve().then(run);
   }
 }
