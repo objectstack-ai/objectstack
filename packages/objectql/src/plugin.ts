@@ -73,7 +73,7 @@ export interface ObjectQLPluginOptions {
    *
    * **Leave unset on every kernel that serves `PUT /api/v1/meta/*` to end
    * users.** The default `'environment'` runs the #4463 runtime authoring
-   * rules (the 26 shared `AUTHORING_RULES` that `os validate` / `os lint`
+   * rules (the shared `AUTHORING_RULES` that `os validate` / `os lint`
    * run), which for a Studio tenant or an MCP/AI author is the ONLY
    * author-time gate — there is no `os lint` for a `sys_metadata` overlay row.
    *

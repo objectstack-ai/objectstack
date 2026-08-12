@@ -2766,7 +2766,7 @@ export type MetadataAuthoringGate = (ctx: MetadataAuthoringGateContext) => void 
  * the CLI's lightweight host-config assembler (`serve.ts`'s auto-register
  * branch, `new ObjectQLPlugin()` with no options) also leaves `environmentId`
  * undefined, and it serves an END-USER `PUT /api/v1/meta/*`. Both topologies
- * read identically, so the whole #4463 gate — all 26 shared `AUTHORING_RULES`
+ * read identically, so the whole #4463 gate — all the shared `AUTHORING_RULES`
  * — was disengaged on a self-hosted app server. #5086 had already moved the
  * code-only refusal off the same proxy for the same reason ("keying
  * authorization off a row-scoping key is what made a type-level declaration
@@ -3154,7 +3154,7 @@ export class ObjectStackProtocolImplementation implements
         // with no options) ALSO leaves `environmentId` undefined, and it
         // serves an end-user `PUT /api/v1/meta/*`. `isHostConfig` →
         // `shouldBootWithLibrary === false` is the flagship showcase's own
-        // boot shape, so a self-hosted app server ran all 26 shared
+        // boot shape, so a self-hosted app server ran all the shared
         // `AUTHORING_RULES` on exactly nothing — and for a Studio tenant or an
         // MCP/AI author this gate is not the weakest of four doors, it is the
         // ONLY one (#4463's filing reason).
