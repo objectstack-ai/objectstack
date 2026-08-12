@@ -109,8 +109,8 @@ describe('os serve — an app booted from its artifact keeps its module code (#4
     expect(stderr).not.toContain('hookfix_task:do_thing');
 
     // And the config's code was not merely tolerated in silence: nothing should
-    // report it as orphaned either.
-    expect(stderr).not.toContain('no app bundle claimed');
-    expect(stderr).not.toContain('no app bundle claimed');
+    // report it as orphaned either. One stream covers both since #7915 — every
+    // human line `serve` prints goes to stderr.
+    expect(stdout + stderr).not.toContain('no app bundle claimed');
   }, 240_000);
 });
