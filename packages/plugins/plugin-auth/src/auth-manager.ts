@@ -1323,47 +1323,32 @@ export class AuthManager {
           // (open editions / self-host) → no gate. Unauthenticated → fall
           // through so the OP redirects to login; the gate runs on the
           // return pass (or immediately for a bearer/cookie session).
+          //
+          // [#8102] The acting subject is resolved through the shared,
+          // hook-order-independent {@link resolveActor} — NOT a second inline
+          // copy of it. This branch used to carry its own token lookup, line
+          // for line the same logic, and the two diverged the moment one was
+          // fixed: #8101 taught `resolveActor` to strip the signature from a
+          // bearer credential (`session.token` stores the UNSIGNED value while
+          // `bearer()` hands clients the SIGNED form in `set-auth-token`), and
+          // the copy here kept looking the signed credential up verbatim. It
+          // resolved nothing — and because the unresolved case is deliberately
+          // fail-open, an AUTHENTICATED caller on the documented API lane was
+          // read as unauthenticated and this env-access check never evaluated
+          // at all. Two resolution sites are what let them diverge, so the fix
+          // is to delete one, not to correct it in place.
           if (ctx?.path === '/oauth2/authorize' && this.config.oidcAuthorizeGate) {
             const clientId = ctx?.query?.client_id;
             if (clientId) {
-              let gateUserId: string | undefined;
-              // (a) standard resolver — handles the cookie session.
-              try {
-                const { getSessionFromCtx } = await import('better-auth/api');
-                const s: any = await getSessionFromCtx(ctx as any);
-                gateUserId = s?.user?.id ?? s?.session?.userId;
-              } catch { /* fall through to explicit resolution */ }
-              // (b) explicit token resolution — hook-order-independent. The
-              // bearer plugin may convert `Authorization: Bearer` to a session
-              // AFTER this global before-hook, so getSessionFromCtx can miss a
-              // bearer (or non-default cookie) request here. Resolve the token
-              // (bearer or the session cookie's token part) and look it up.
-              if (!gateUserId) {
-                try {
-                  const hdr = (k: string): string =>
-                    ((ctx?.headers?.get?.(k) ?? ctx?.request?.headers?.get?.(k)) as string) || '';
-                  let token: string | undefined;
-                  const bm = /^Bearer\s+(.+)$/i.exec(hdr('authorization'));
-                  if (bm?.[1]) token = bm[1].trim();
-                  if (!token) {
-                    const cm = /(?:^|;\s*)(?:__Secure-|__Host-)?better-auth\.session_token=([^;]+)/.exec(hdr('cookie'));
-                    if (cm?.[1]) token = decodeURIComponent(cm[1]).split('.')[0];
-                  }
-                  if (token) {
-                    const sess: any = await (ctx as any).context.adapter.findOne({
-                      model: 'session',
-                      where: [{ field: 'token', value: token }],
-                    });
-                    const exp = sess?.expiresAt ?? sess?.expires_at;
-                    if (sess && (!exp || new Date(exp).getTime() > Date.now())) {
-                      gateUserId = String(sess.userId ?? sess.user_id ?? '') || undefined;
-                    }
-                  }
-                } catch { /* unresolved → fall through, OP handles auth */ }
-              }
-              if (gateUserId) {
+              const actor = await this.resolveActor(ctx);
+              // Unauthenticated → fall through, per the contract above. Only an
+              // AUTHENTICATED subject is gated here. `resolveActor` also returns
+              // `activeOrgId`; this gate deliberately does not consume it — the
+              // D5.1 host contract is `(userId, clientId)` and the control plane
+              // derives org membership / app assignment from the user itself.
+              if (actor?.userId) {
                 const allowed = await this.config.oidcAuthorizeGate({
-                  userId: gateUserId,
+                  userId: actor.userId,
                   clientId: String(clientId),
                 });
                 if (!allowed) {
