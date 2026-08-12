@@ -2143,6 +2143,9 @@ importers:
       '@objectstack/service-job':
         specifier: workspace:*
         version: link:../service-job
+      '@objectstack/service-messaging':
+        specifier: workspace:*
+        version: link:../service-messaging
       '@types/node':
         specifier: ^26.1.2
         version: 26.1.2
