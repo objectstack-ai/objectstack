@@ -40,7 +40,9 @@ describe('printServerReady Tenancy row (#4801, ADR-0105 D1)', () => {
 
   beforeEach(() => {
     lines = [];
-    spy = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+    // stderr, not stdout (#7915): the whole banner is a diagnostic, and
+    // `serve` keeps stdout clear for the MCP stdio transport.
+    spy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
       // Strip SGR escapes so assertions hold whether or not chalk colors.
       lines.push(args.join(' ').replace(/\u001b\[[0-9;]*m/g, ''));
     });

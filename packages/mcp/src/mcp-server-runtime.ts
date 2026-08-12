@@ -13,6 +13,7 @@ import type {
   RegisterObjectToolsOptions,
   RegisterActionToolsOptions,
 } from './mcp-http-tools.js';
+import { protocolStdout } from './protocol-stdout.js';
 import { renderSkillMarkdown, type RenderSkillOptions } from './skill-md.js';
 import {
   listSkillPrompts,
@@ -1020,7 +1021,14 @@ export class MCPServerRuntime {
     const logger = this.config.logger;
 
     if (this.config.transport === 'stdio') {
-      this.transport = new StdioServerTransport();
+      // [#7915] stdin as usual, stdout through the transport's OWN channel to
+      // the real stream. A host that boots this plugin must keep its banners
+      // and kernel logs off stdout (the framing is newline-delimited JSON), and
+      // the only way to move every writer at once is to intercept
+      // `process.stdout.write` — which would swallow these frames too. See
+      // protocol-stdout.ts for why the transport claims the channel itself
+      // rather than being handed one.
+      this.transport = new StdioServerTransport(process.stdin, protocolStdout());
       await this.mcpServer.connect(this.transport);
       // [#7645] The transport now OWNS this process's stdin — so make sure it
       // is actually flowing. `StdioServerTransport.start()` only attaches a

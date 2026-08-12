@@ -1,7 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * `--json` stdout reservation (#6217).
+ * stdout reservation — `--json` payloads (#6217) and `os serve`'s protocol
+ * channel (#7915).
  *
  * ## The invariant
  *
@@ -9,6 +10,13 @@
  * run's **stdout must be one JSON document** — `JSON.parse(stdout)` with no
  * heuristic extraction. Anything else is a `--json` flag that isn't
  * machine-readable.
+ *
+ * `os serve` has the same invariant for a different reason (#7915): with
+ * `OS_MCP_STDIO_ENABLED=true` the MCP stdio transport owns stdout, and that
+ * protocol is newline-delimited JSON — a conforming client `JSON.parse`s every
+ * line it reads, so one banner line is a transport error. `serve` therefore
+ * reserves stdout too, for the whole life of the process and **unconditionally**
+ * (see {@link redirectStdoutToStderr}).
  *
  * It was not true for the commands that boot a kernel. `ObjectLogger` routes
  * `debug`/`info`/`warn` to **stdout** and only `error`/`fatal` to stderr
@@ -99,6 +107,30 @@ export function isStdoutReserved(): boolean {
  * payload.
  */
 export function reserveStdoutForJson(): () => void {
+  return redirectStdoutToStderr();
+}
+
+/**
+ * The same reservation, named for the case that has no `--json` payload:
+ * **every** byte written to `process.stdout` is forwarded to stderr, and
+ * nothing is expected to come back the other way.
+ *
+ * This is what `os serve` installs, once, for the life of the process (#7915).
+ * Banners, boot progress and kernel logs are diagnostics, not program output,
+ * so they belong on stderr whether or not anything is listening on stdout —
+ * which is also why `serve` installs it UNCONDITIONALLY rather than "when the
+ * stdio MCP transport is mounted". A conditional needs a reliable signal at the
+ * moment each line prints, and it fails silently and in the worse direction
+ * when that signal is wrong or late: a frame-corrupting line that appears only
+ * in some boots is far harder to find than one that always does.
+ *
+ * The one writer that must still reach the real stdout is whoever the stream is
+ * reserved FOR — `--json`'s payload writer goes through
+ * {@link writeStdoutDirect}; the MCP stdio transport holds its own channel to
+ * the real stream (`packages/mcp/src/protocol-stdout.ts`), for the same reason
+ * and by the same rule: nothing else may reach stdout.
+ */
+export function redirectStdoutToStderr(): () => void {
   if (realStdoutWrite) return () => { /* an inner reservation owns nothing */ };
 
   const original = process.stdout.write.bind(process.stdout) as StreamWrite;
