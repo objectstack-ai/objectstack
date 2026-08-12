@@ -1506,7 +1506,18 @@ describe('RestServer', () => {
       const res = { json: vi.fn(), status: vi.fn().mockReturnThis() };
       await route!.handler({ params: { object: 'account', id: 'a1' }, body: {} } as any, res as any);
       expect(res.status).toHaveBeenCalledWith(400);
-      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ code: 'VALIDATION_FAILED' }));
+      // [#8111] Migrated from the retired FLAT position to the ADR-0112 D5 one.
+      // Same code, same 400 — `body.error.code` is where it is now declared.
+      // This arm carried the OTHER retired dialect too (`{ code, error: '<bare
+      // string>' }`), so its message now lives at `body.error.message` rather
+      // than being `body.error` itself; asserting the code position alone does
+      // not catch a bare string sitting where the object belongs.
+      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+        error: expect.objectContaining({
+          code: 'VALIDATION_FAILED',
+          message: 'recipientId is required',
+        }),
+      }));
     });
 
     it('DELETE revokes and returns 204', async () => {
