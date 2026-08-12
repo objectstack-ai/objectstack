@@ -24,7 +24,11 @@
 // `packages/qa/dogfood/test/org-scoped-sharing-rule-listing.dogfood.test.ts`.
 
 import { describe, it, expect, afterEach } from 'vitest';
-import { bootStack, type VerifyStack } from './harness';
+// `.js` extension deliberately: this package resolves NodeNext, so an
+// extensionless relative import is a TS2835 the type-check-debt ratchet counts
+// (the sibling test files predate the gate and carry theirs in the ledger — a
+// NEW one would raise it, which is not something a test file gets to do).
+import { bootStack, type VerifyStack } from './harness.js';
 
 const app = {
   manifest: {
