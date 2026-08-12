@@ -108,7 +108,6 @@ export const zhCN: TranslationData = {
         nav_datasources: { label: '数据源' },
 
         nav_oauth_apps: { label: 'OAuth 应用' },
-        nav_jwks: { label: '签名密钥 (JWKS)' },
         nav_accounts: { label: '身份链接' },
         nav_user_preferences: { label: '用户偏好' },
       },
