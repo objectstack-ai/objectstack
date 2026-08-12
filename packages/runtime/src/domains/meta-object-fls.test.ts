@@ -222,23 +222,31 @@ async function runDraftsExit(testCase: ObjectSchemaMaskCase) {
             listDrafts: vi.fn(async () => [{ type: 'object', name: 'account', item: account() }]),
         },
     });
-    return dispatcher.handleMetadata('/_drafts', ctxFor(testCase), 'GET');
+    const res = await dispatcher.handleMetadata('/_drafts', ctxFor(testCase), 'GET');
+    // `HttpDispatcherResult.response` is optional — a missing one would mean
+    // `_drafts` was not handled at all, which is its own failure and must not
+    // be read as "no disclosure". Asserting it here gives every case below a
+    // real answer to inspect (and keeps the #4311 TEST_DEBT ledger flat).
+    if (!res.response) {
+        throw new Error(`/metadata/_drafts was not handled for case '${testCase.id}'`);
+    }
+    return res.response;
 }
 
 describe('[ADR-0106 D5(4)] GET /metadata/_drafts — per-caller authoring gate', () => {
     for (const testCase of OBJECT_SCHEMA_MASK_CASES) {
         it(testCase.id, async () => {
-            const res = await runDraftsExit(testCase);
-            const wire = JSON.stringify(res.response.body);
+            const response = await runDraftsExit(testCase);
+            const wire = JSON.stringify(response.body);
 
             if (isObjectSchemaMaskExempt(testCase.context)) {
                 // An author reads the drafts unfiltered — the gate masks nothing.
-                expect(res.response.status).toBe(200);
+                expect(response.status).toBe(200);
                 expect(wire).toContain('salary_grade');
             } else {
                 // ADR-0112 envelope: code AND status, not just "it 403s".
-                expect(res.response.status).toBe(403);
-                expect(res.response.body?.error?.code).toBe('PERMISSION_DENIED');
+                expect(response.status).toBe(403);
+                expect(response.body?.error?.code).toBe('PERMISSION_DENIED');
                 // The refusal discloses nothing — no hidden field leaks out.
                 expect(wire).not.toContain('salary_grade');
             }

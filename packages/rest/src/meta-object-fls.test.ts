@@ -402,7 +402,11 @@ describe('[ADR-0106 D5(4)] GET /meta/_drafts — per-caller authoring gate', () 
             await routeFor(rest, DRAFTS_PATH)!.handler(
                 { params: {}, query: {}, headers: {} }, res,
             );
-            const body = res.json.mock.calls.at(-1)?.[0];
+            // Last `res.json(...)` argument. Indexed rather than `.at(-1)`:
+            // this package's tsconfig lib predates `Array.prototype.at`, and a
+            // new use of it would raise the #4311 TEST_DEBT ledger.
+            const calls = res.json.mock.calls;
+            const body = calls[calls.length - 1]?.[0];
             const wire = JSON.stringify(body);
 
             if (isObjectSchemaMaskExempt(testCase.context)) {
