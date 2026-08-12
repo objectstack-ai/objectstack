@@ -1747,8 +1747,13 @@ const WIRE_DOLLAR_ALIASES: readonly (readonly [string, string])[] = [
  *                      and the array from either slot.
  *  - `where`         — a FILTER AST is an array (`['status','=','open']`), so a
  *                      blanket arity refusal here would reject the AST body form
- *                      outright. A repeated `?filter=` is still refused, one
- *                      block down, by `isFilterAST` failing to read it.
+ *                      outright. Arity for this slot is judged one layer up, at
+ *                      the REST querystring ingress (`assertFilterParamSuppliedOnce`,
+ *                      #7390) — the only layer that knows an array on this wire
+ *                      is a repetition and can be nothing else. A repeated
+ *                      `?filter=` never reaches this block on `GET /data/:object`;
+ *                      worse, `?filter=status&filter=%3D&filter=open` spells a
+ *                      valid AST and succeeds with a filter nobody expressed.
  *  - `groupBy`       — `z.array(GroupByNodeSchema)`.
  *  - `aggregations`  — `z.array(AggregationNodeSchema)`.
  *  - `joins` / `windowFunctions` — retired ARRAY keys (#4286). The tombstone,

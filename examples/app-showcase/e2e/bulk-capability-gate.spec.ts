@@ -27,7 +27,7 @@ import { test, expect } from '@playwright/test';
  */
 
 // Ambient `process` for the env read below — the showcase tsconfig doesn't pull
-// in `@types/node`, and the package-global shim in test/node-shim.d.ts declares
+// in `@types/node`, and the package-global shim in types/node-shim.d.ts declares
 // only `cwd()`. Same idiom (and same reason) as the declarations in
 // objectstack.config.ts and src/system/self-url.ts: keeps `pnpm typecheck` green
 // without widening the type surface. Playwright provides the real `process`.

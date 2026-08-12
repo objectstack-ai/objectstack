@@ -452,15 +452,23 @@ easiest way to ship a formula whose sign is inverted on every row.
 </Callout>
 
 <Callout type="info">
-**`dateField == today()` now matches (#3183).** A `date` field reads back as a
-`YYYY-MM-DD` string, and CEL treats a string and a timestamp as unequal — so the
-natural "is it due today" predicate used to silently return `false`. The engine
-now rewrites temporal `==` / `!=` comparisons (coercing the field operand with
-`date(...)`), so `record.due_date == today()` matches on the calendar day. This
-applies to formulas, defaults, validation rules, and hook/flow conditions.
-Ordering (`< > <= >=`) and string equality (`record.d == "2026-06-20"`) were
-always fine. This is the read-side counterpart to the date-arithmetic build
-error above — equality is rewritten and works; `+`/`-` arithmetic is rejected.
+**`dateField == today()` now matches (#3183, #7168).** A `date` field reads back
+as a `YYYY-MM-DD` string, and CEL treats a string and a timestamp as unequal — so
+the natural "is it due today" predicate used to silently return `false`. The
+engine now rewrites temporal `==` / `!=` comparisons (coercing the field operand
+with `date(...)`), so `record.due_date == today()` matches on the calendar day.
+The counterpart may be a temporal **call** (`today()`, `now()`, `daysFromNow()`,
+`daysAgo()`) or a **binding that holds a `Date`** — which covers the
+mixed-provenance comparison `record.due == previous.due`, where `previous`
+arrives from the driver as a `Date` while `record` arrives from a JSON payload as
+a `YYYY-MM-DD` string (#7168). This applies to formulas, defaults, validation
+rules, and hook/flow conditions. Ordering (`< > <= >=`) and string equality
+(`record.d == "2026-06-20"`) were always fine. The coercion is deliberately
+narrow — it requires one side to be a real `Date` and the other an ISO-8601
+date/date-time string — so a non-date string compared against a `Date` still
+answers `false` instead of being coerced into a match. This is the read-side
+counterpart to the date-arithmetic build error above — equality is rewritten and
+works; `+`/`-` arithmetic is rejected.
 </Callout>
 
 ### Financial Calculations
