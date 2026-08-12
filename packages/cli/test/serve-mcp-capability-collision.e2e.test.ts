@@ -96,7 +96,12 @@ let dir: string;
 let port: string;
 let base: string;
 let apiKey: string;
-let bootStdout = '';
+/**
+ * The boot's human output. Read from **stderr** since #7915 — `serve` keeps its
+ * stdout clear for the MCP stdio transport, so every banner and log line the
+ * assertions below look for arrives on stderr.
+ */
+let bootOutput = '';
 const children: ChildProcessWithoutNullStreams[] = [];
 
 function boot(env: Record<string, string | undefined>, waitFor: RegExp): Promise<ChildProcessWithoutNullStreams> {
@@ -127,17 +132,22 @@ function boot(env: Record<string, string | undefined>, waitFor: RegExp): Promise
       rejectBoot(new Error(`serve never printed ${waitFor}\n--- stdout ---\n${out.slice(-4000)}\n--- stderr ---\n${err.slice(-4000)}`));
     }, 150_000);
 
-    child.stdout.on('data', (d) => {
-      out += String(d);
-      bootStdout = out;
-      if (!settled && waitFor.test(out)) {
+    const onOutput = () => {
+      bootOutput = err;
+      if (!settled && waitFor.test(out + err)) {
         settled = true;
         clearTimeout(timer);
         resolveBoot(child);
       }
+    };
+
+    child.stdout.on('data', (d) => {
+      out += String(d);
+      onOutput();
     });
     child.stderr.on('data', (d) => {
       err += String(d);
+      onOutput();
     });
     child.on('exit', (code) => {
       if (settled) return;
@@ -247,10 +257,10 @@ describe('#7652: an app loading the MCP client connector still gets the MCP serv
     // The banner lists the app's own plugins. If the fixture ever stops loading
     // the connector, the rest of this file would pass for the wrong reason.
     expect(
-      bootStdout,
-      `the fixture's ${CONSUMER_CLASS_NAME} is not in the boot output:\n${bootStdout.slice(-3000)}`,
+      bootOutput,
+      `the fixture's ${CONSUMER_CLASS_NAME} is not in the boot output:\n${bootOutput.slice(-3000)}`,
     ).toMatch(/mcpcollision|Server is ready/);
-    expect(bootStdout).not.toMatch(/Capability "mcp".*not installed/);
+    expect(bootOutput).not.toMatch(/Capability "mcp".*not installed/);
   });
 
   it('GET /api/v1/mcp/skill answers 200 — the card\'s repro', async () => {

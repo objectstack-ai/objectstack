@@ -84,9 +84,15 @@ interface Booted {
 }
 
 /**
- * Spawn `os serve` and resolve once `waitFor` matches its stdout, leaving the
- * child RUNNING — the shared `runServe` helper kills on match, and this file
- * has to keep talking to the process afterwards.
+ * Spawn `os serve` and resolve once `waitFor` matches its output — stdout and
+ * stderr together — leaving the child RUNNING; the shared `runServe` helper
+ * kills on match, and this file has to keep talking to the process afterwards.
+ *
+ * Both streams, because since #7915 `serve` writes every human line (banner,
+ * boot progress, kernel logs — including the `[MCP] Server started` record this
+ * file waits for) to stderr, and keeps stdout clear for the protocol. Matching
+ * stdout alone would wait on a stream that carries nothing until a client
+ * speaks.
  *
  * NOTE: no positional config path is passed. That is deliberate and load-bearing:
  * supplying one makes oclif skip `tryStdin` entirely, so stdin is never paused
@@ -124,16 +130,21 @@ function boot(env: Record<string, string | undefined>, waitFor: RegExp): Promise
       );
     }, 150_000);
 
-    child.stdout.on('data', (d) => {
-      out += String(d);
-      if (!settled && waitFor.test(out)) {
+    const onOutput = () => {
+      if (!settled && waitFor.test(out + err)) {
         settled = true;
         clearTimeout(timer);
         resolveBoot({ child, stdout: () => out, stderr: () => err });
       }
+    };
+
+    child.stdout.on('data', (d) => {
+      out += String(d);
+      onOutput();
     });
     child.stderr.on('data', (d) => {
       err += String(d);
+      onOutput();
     });
     child.on('exit', (code) => {
       if (settled) return;

@@ -164,7 +164,7 @@ describe('os serve — organizations import stage vs mount stage (#4818)', () =>
         expect(stderr, `the absent-package diagnosis was lost${seen}`).toMatch(/could not be loaded/);
         // …and the escape hatch is still offered on the path it belongs to.
         expect(stderr).toMatch(/set OS_ALLOW_DEGRADED_TENANCY=1 to boot/);
-        expect(stdout, `serve served traffic without the wall${seen}`).not.toContain(BANNER);
+        expect(stderr, `serve served traffic without the wall${seen}`).not.toContain(BANNER);
       },
       300_000,
     );
@@ -183,7 +183,7 @@ describe('os serve — organizations import stage vs mount stage (#4818)', () =>
         });
         const seen = seenOf(stdout, stderr);
 
-        expect(stdout, `serve never reached its banner${seen}`).toContain(BANNER);
+        expect(stderr, `serve never reached its banner${seen}`).toContain(BANNER);
         expect(stderr, `the degraded boot was not branded${seen}`).toMatch(/DEGRADED TENANCY/);
         expect(stderr, `the degraded opt-in still fired the fail-fast${seen}`).not.toMatch(/✖ FATAL/);
       },
@@ -205,7 +205,7 @@ describe('os serve — organizations import stage vs mount stage (#4818)', () =>
 
         // D5's posture is unchanged: isolation was requested and cannot be
         // delivered, so the boot still dies.
-        expect(stdout, `serve served traffic without the wall${seen}`).not.toContain(BANNER);
+        expect(stderr, `serve served traffic without the wall${seen}`).not.toContain(BANNER);
         expect(stderr, `no fail-fast fired for a refusing plugin${seen}`).toMatch(/✖ FATAL/);
 
         // The crux: the operator is told the package IS there, and reads the
@@ -242,7 +242,7 @@ describe('os serve — organizations import stage vs mount stage (#4818)', () =>
         const seen = seenOf(stdout, stderr);
 
         expect(
-          stdout,
+          stderr,
           `OS_ALLOW_DEGRADED_TENANCY swallowed a plugin refusal and served traffic${seen}`,
         ).not.toContain(BANNER);
         expect(stderr, `the refusal did not fail fast under the escape hatch${seen}`).toMatch(/✖ FATAL/);
