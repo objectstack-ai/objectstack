@@ -244,7 +244,10 @@ const MODULES = {
       'the repo\'s hottest response file (208 write sites, edited several times a day) — a `responses` ratchet would go red for edits that are not envelope drift',
     ratchet: '#7035 (option 1: convert onto the shared sendOk/sendError)',
     stringError: 44,
-    siblingCode: 77,
+    // 77 → 75 (#7981): registerSecurityEndpoints' two `handleError` arms moved
+    // off the `{ code, error }` sibling-code literal onto the shared
+    // `respondError` helper, banking that progress per the ratchet's own rule.
+    siblingCode: 75,
   },
 };
 
