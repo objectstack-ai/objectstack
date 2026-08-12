@@ -154,17 +154,28 @@ describe('#8144: auth session events reach sys_audit_log', () => {
   }, 120_000);
 
   it('the shipped `auth_events` list view stops being empty', async () => {
-    // The view's own filter: action in (login, logout, permission_change). It
-    // shipped against rows nothing wrote, so it was permanently empty by
-    // construction — that is the user-visible half of #7675.
+    // The view shipped against rows nothing wrote, so it was permanently empty
+    // by construction — that is the user-visible half of #7675.
+    //
+    // Its filter is READ FROM THE RUNNING REGISTRY, never copied here. The
+    // vocabulary moves: #8200 retired `permission_change` and `export` from the
+    // action enum and narrowed this very view in the same PR, and a hard-coded
+    // copy would have gone on querying a value nothing can hold while still
+    // reporting success (the view has exactly the shape that makes that
+    // invisible — it would just find the login rows and pass).
+    const schema: any = (ql as any).getSchema('sys_audit_log');
+    const actions: string[] = schema?.listViews?.auth_events?.filter?.[0]?.value ?? [];
+    expect(actions.length, 'auth_events view declares no action filter').toBeGreaterThan(0);
+    expect(actions).toContain('login');
+
     const query = `/data/sys_audit_log?$filter=${encodeURIComponent(
-      JSON.stringify({ action: { $in: ['login', 'logout', 'permission_change'] } }),
+      JSON.stringify({ action: { $in: actions } }),
     )}`;
     const res = await stack.apiAs(adminToken, 'GET', query);
     expect(res.status, await res.clone().text()).toBe(200);
     const rows = await rowsOf(res);
-    expect(rows.length).toBeGreaterThan(0);
-    expect(rows.every((r: any) => ['login', 'logout', 'permission_change'].includes(r.action))).toBe(true);
+    expect(rows.length, 'the auth_events view is still empty').toBeGreaterThan(0);
+    expect(rows.every((r: any) => actions.includes(r.action))).toBe(true);
   }, 60_000);
 
   // ── The other half of the ruling: logout ────────────────────────────────
