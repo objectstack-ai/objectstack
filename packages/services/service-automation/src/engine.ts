@@ -2556,6 +2556,68 @@ export class AutomationEngine implements IAutomationService {
         const limit = options?.limit ?? 20;
         const inMem = this.executionLogs.filter(l => l.flowName === flowName);
 
+        // [#8050] Durable PAUSED rows — the arm this merge was missing.
+        //
+        // `sys_automation_run` holds TWO disjoint row families: the terminal
+        // history rows `recordTerminal` writes (id `run_` + runId, status
+        // completed/failed) and the LIVE suspension rows `save` writes (id =
+        // the raw runId, status `paused`). The history arm below reads the
+        // first family; nothing here read the second. Before a restart that is
+        // invisible, because a paused run is still in `executionLogs` — so
+        // every in-process test of this method passes. After a restart the ring
+        // is empty and the paused rows had no reader at all, which is the
+        // defect: an operator who restarts the process can enumerate what
+        // FINISHED and what is IN FLIGHT vanishes — the strictly more urgent
+        // half. It also structurally emptied #7359's just-enforced
+        // `?status=paused`: with no producer of a `paused` entry after a
+        // restart, that filter could never match a row, and the one query
+        // reached for here always answered "nothing pending".
+        //
+        // Read-side only, by construction: this rehydrates the row the suspend
+        // path already writes. No column, prefix or lifecycle changes — the
+        // paused row is NOT reshaped into a history row, because the two have
+        // different lifetimes (a paused row is live resumable state, deleted on
+        // completion and exempt from the age sweep; a history row is a
+        // tombstone). Unifying them would trade an observability gap for a
+        // persistence-semantics change.
+        //
+        // Skipped when the caller filters for a status a paused row can never
+        // have: `suspendedRunToLogEntry` always yields `paused`, and a run that
+        // has since finished is answered by the fresher history/ring entry that
+        // outranks it in the merge below — so the arm cannot change the result
+        // of `?status=failed`, only its cost. `store.list()` is a table scan of
+        // every paused row in the deployment (see its own contract), so not
+        // paying it on the monitoring queries is worth the one-line guard.
+        const wantsPaused = options?.status === undefined || options.status === 'paused';
+        let durablePaused: ExecutionLogEntry[] = [];
+        if (this.store && wantsPaused) {
+            try {
+                const rows = await this.store.list();
+                durablePaused = rows
+                    .filter(r => r.flowName === flowName)
+                    .map(r => this.suspendedRunToLogEntry(r));
+            } catch (err) {
+                // #6499 — driver text to the structured slot; `warn(message,
+                // meta?)`, meta SECOND (no `Error` slot on `warn`).
+                //
+                // #4632 verdict: FUNCTIONAL — `warn`, for the same reason as
+                // the history arm below and `listSuspendedRunsDurable`. Nothing
+                // claimed-persisted failed to land: the paused rows are intact
+                // and still resumable by id (`resume` reads them through
+                // `loadSuspendedRun`, a different door that is unaffected by
+                // this failure). What degrades is this observability read, back
+                // to exactly the pre-#8050 answer.
+                this.logger.warn(
+                    `[Automation] paused-run read failed for '${flowName}' — the Runs listing DEGRADES to the ` +
+                        `in-memory ring buffer plus terminal history, so runs parked by a previous process are ` +
+                        `missing and '?status=paused' can report an empty result for a flow that has runs ` +
+                        `waiting. The rows themselves are untouched and still resumable by id. Fix the store ` +
+                        `failure in this record's meta.`,
+                    describeThrownForLog(err),
+                );
+            }
+        }
+
         // Merge durable run history so the "Runs" view survives a restart and
         // ring-buffer eviction. In-memory entries are the freshest (they carry
         // full step detail); durable rows backfill runs the process no longer
@@ -2588,7 +2650,28 @@ export class AutomationEngine implements IAutomationService {
                 );
             }
         }
+        // Dedupe by run id, weakest source first — the same run legitimately
+        // appears in more than one of these (#8050):
+        //
+        //   1. durable PAUSED  — the run parked, and the row is still there.
+        //   2. durable HISTORY — the run reached a terminal state.
+        //   3. in-memory ring  — this process executed it.
+        //
+        // The order is a precedence claim, not an accident. Paused loses to
+        // both because it is the only one that can be STALE while the others
+        // cannot: `forgetSuspendedRun` deletes the paused row on completion,
+        // but that delete is best-effort (a store outage swallows it), so a
+        // finished run can leave its paused row behind. A terminal row or a
+        // terminal ring entry for the same id is therefore strictly later
+        // evidence, and letting the paused row win would report a completed run
+        // as still waiting — the exact defect `run-history.test.ts`'s "latest
+        // entry wins" block pins for `getRun`. There is no symmetric hazard:
+        // within a process the ring is written in the same breath as the paused
+        // row (`persistSuspendedRun` then `recordLog`, and again on re-suspend),
+        // so it is never the older of the two; across a restart the ring is
+        // empty and cannot mask anything.
         const byId = new Map<string, ExecutionLogEntry>();
+        for (const e of durablePaused) byId.set(e.id, e);
         for (const e of durable) byId.set(e.id, e);
         for (const e of inMem) byId.set(e.id, e); // freshest wins
 
@@ -2669,6 +2752,47 @@ export class AutomationEngine implements IAutomationService {
         };
     }
 
+    /**
+     * Rehydrate a durably-stored {@link SuspendedRun} into the `paused`
+     * {@link ExecutionLogEntry} the Runs surfaces expect (#8050) — the
+     * suspension-row twin of {@link runRecordToLogEntry}.
+     *
+     * Deliberately reconstructs the SAME entry the two `status: 'paused'`
+     * `recordLog` sites write, from the same inputs, so that whether a paused
+     * run is read before or after a restart is invisible to the caller:
+     *
+     *  - `trigger` goes through {@link buildRunTrigger} on the persisted
+     *    `context_json`, not through the flattened `trigger_*` columns. Those
+     *    columns exist for FILTERING (#7533) and drop `type` to `null` where
+     *    the log entry says `'manual'`; the context is what the ring entry was
+     *    built from, so reusing the chokepoint reproduces it exactly rather
+     *    than approximating it.
+     *  - `variables` is carried because #7639 made it part of what a PAUSED run
+     *    discloses on run-detail, and the row has held the same snapshot all
+     *    along (`variables_json` is written from the very object handed to the
+     *    log entry). Dropping it here would have re-opened #7639 for exactly
+     *    the runs an operator most needs it for — the ones that outlived the
+     *    process.
+     *
+     * `durationMs` / `completedAt` are absent because a suspension row records
+     * no pause instant — only `started_at` / `start_time`. Absent reads as "not
+     * recorded", which is what the schema's `optional()` means; inventing an
+     * age-since-start here would publish a number that grows every time the row
+     * is read and is not the "time spent executing" the ring entry reports.
+     */
+    private suspendedRunToLogEntry(run: SuspendedRun): ExecutionLogEntry {
+        return {
+            id: run.runId,
+            flowName: run.flowName,
+            flowVersion: run.flowVersion,
+            status: 'paused',
+            startedAt: run.startedAt,
+            trigger: buildRunTrigger(run.context),
+            steps: run.steps ?? [],
+            variables: run.variables ?? {},
+        };
+    }
+
     async getRun(runId: string): Promise<ExecutionLogEntry | null> {
         // LAST entry wins, not the first: a run that pauses and later finishes
         // records TWO entries under the same run id ('paused', then
@@ -2708,6 +2832,38 @@ export class AutomationEngine implements IAutomationService {
                         `the caller sees exactly what it would see if the run had never run and cannot tell ` +
                         `the two apart. The terminal row, if one exists, is untouched. Fix the store failure ` +
                         `in this record's meta.`,
+                    describeThrownForLog(err),
+                );
+            }
+        }
+        // [#8050] …and the PAUSED fallback, so run-detail and `listRuns` answer
+        // out of one story. The card measured both surfaces failing together
+        // after a restart — list returning zero rows AND this method 404ing —
+        // and fixing only the list would have swapped a visible gap for an
+        // inconsistency between two reads of the same run.
+        //
+        // AFTER the terminal probe, matching the merge order in `listRuns`: a
+        // paused row can outlive the run it describes (the delete on completion
+        // is best-effort), so a terminal row for the same id is later evidence
+        // and must win. Trying this first would resurrect #3456's "paused
+        // forever" for any run whose cleanup delete was lost.
+        //
+        // This does NOT make a nonexistent run findable: `store.load` answers
+        // `null` for an unknown id exactly as `loadTerminal` does, so the route
+        // above still returns its 404 `RESOURCE_NOT_FOUND` envelope for one.
+        if (this.store) {
+            try {
+                const suspended = await this.store.load(runId);
+                if (suspended) return this.suspendedRunToLogEntry(suspended);
+            } catch (err) {
+                // #6499 / #4632: same verdict as the terminal probe above —
+                // FUNCTIONAL, so `warn`. The suspension row is intact and the
+                // run stays parked and resumable; what degrades is this read.
+                this.logger.warn(
+                    `[Automation] durable paused-run lookup failed for '${runId}' — this read DEGRADES to null, ` +
+                        `so a run that is parked and resumable reports as if it had never run, and the caller ` +
+                        `cannot tell the two apart. The suspension row is untouched. Fix the store failure in ` +
+                        `this record's meta.`,
                     describeThrownForLog(err),
                 );
             }
@@ -3510,9 +3666,11 @@ export class AutomationEngine implements IAutomationService {
      * against a run that can no longer advance (#4420).
      *
      * THROWS when the durable store cannot be read — an outage means "unknown",
-     * and a caller must not act on it as if the run were gone. Contrast
-     * {@link getRun}, which reports on the execution LOG and returns null for a
-     * run suspended by a previous process even when its state is durable.
+     * and a caller must not act on it as if the run were gone. That is the one
+     * axis {@link getRun} still differs on: since #8050 it, too, sees a run
+     * suspended by a previous process, but as an OBSERVABILITY read it degrades
+     * a store failure to `null` with a warning rather than throwing. Use this
+     * one before writing anything of your own; use `getRun` to display.
      */
     async hasSuspendedRun(runId: string): Promise<boolean> {
         return (await this.loadSuspendedRunStrict(runId)) !== null;

@@ -2,6 +2,13 @@ import { request } from '@playwright/test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
+// Ambient `process` with `env` — types/node-shim.d.ts declares the global as
+// `{ cwd(): string }` only, so each module that reads env widens it locally.
+// Same one-liner as the specs beside this file and objectstack.config.ts.
+// Declared above the block comment below so that comment stays attached to the
+// first emitted statement.
+declare const process: { env: Record<string, string | undefined> };
+
 /**
  * Auth for the showcase smoke: sign in against the backend (better-auth) and
  * persist a Playwright storageState. The console (served at :3000/_console)

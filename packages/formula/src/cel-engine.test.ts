@@ -557,6 +557,79 @@ describe('celEngine', () => {
       expect(rewriteTemporalEquality('$'.repeat(5000))).toBe('$'.repeat(5000));
       expect(rewriteTemporalEquality('now('.repeat(2000))).toBe('now('.repeat(2000));
     });
+
+    // #7168 — the Date-valued BINDING arm. The counterpart is not a temporal
+    // call but a binding that HOLDS a Date at evaluation time, which the AST
+    // cannot see — so this arm only fires when a scope is supplied.
+    describe('Date-valued binding counterpart (#7168)', () => {
+      const day = new Date('2026-06-20T00:00:00Z');
+      const mixed = { record: { due: '2026-06-20' }, previous: { due: day } };
+
+      it('wraps the ISO-string operand when its counterpart is a Date-valued binding', () => {
+        expect(rewriteTemporalEquality('record.due == previous.due', mixed))
+          .toBe('date(record.due) == previous.due');
+        expect(rewriteTemporalEquality('previous.due == record.due', mixed))
+          .toBe('previous.due == date(record.due)');
+        expect(rewriteTemporalEquality('record.due != previous.due', mixed))
+          .toBe('date(record.due) != previous.due');
+      });
+
+      it('never fires without a scope — the runtime type of a binding is not in the AST', () => {
+        expect(rewriteTemporalEquality('record.due == previous.due'))
+          .toBe('record.due == previous.due');
+      });
+
+      it('is idempotent — an already-coerced operand is not re-wrapped', () => {
+        expect(rewriteTemporalEquality('date(record.due) == previous.due', mixed))
+          .toBe('date(record.due) == previous.due');
+      });
+
+      it('composes with the temporal-call arm on one expression', () => {
+        expect(rewriteTemporalEquality('record.due == today() && record.due == previous.due', mixed))
+          .toBe('date(record.due) == today() && date(record.due) == previous.due');
+      });
+
+      // ── The fence: nothing else may start being coerced ──────────────────
+      it('leaves every comparison that is NOT string-vs-Date untouched', () => {
+        // two ISO strings — the author's string equality, still string equality
+        expect(rewriteTemporalEquality('record.due == previous.due',
+          { record: { due: '2026-06-20' }, previous: { due: '2026-06-20' } }))
+          .toBe('record.due == previous.due');
+        // two Dates — already compares as instants, nothing to coerce
+        expect(rewriteTemporalEquality('record.due == previous.due',
+          { record: { due: day }, previous: { due: day } }))
+          .toBe('record.due == previous.due');
+        // a non-date string opposite a Date — a genuine mismatch, not a
+        // serialization artifact. `date("hello")` is an Invalid Date.
+        expect(rewriteTemporalEquality('record.a == previous.b',
+          { record: { a: 'hello' }, previous: { b: day } }))
+          .toBe('record.a == previous.b');
+        // a NUMERIC string opposite a Date. Load-bearing: `new Date("5")` and
+        // `new Date("05")` both parse to 2001-05-01, so coercing here would
+        // invent an equality between two different strings.
+        expect(rewriteTemporalEquality('record.a == previous.b',
+          { record: { a: '5' }, previous: { b: day } }))
+          .toBe('record.a == previous.b');
+        // a number opposite a Date — not a string, nothing to coerce
+        expect(rewriteTemporalEquality('record.a == previous.b',
+          { record: { a: 5 }, previous: { b: day } }))
+          .toBe('record.a == previous.b');
+        // null / absent operands
+        expect(rewriteTemporalEquality('record.a == previous.b',
+          { record: { a: null }, previous: { b: day } }))
+          .toBe('record.a == previous.b');
+        expect(rewriteTemporalEquality('record.a == previous.b', { previous: { b: day } }))
+          .toBe('record.a == previous.b');
+        // ORDERING against a Date binding is untouched — this arm is `==`/`!=`
+        // only; `<`/`>` against a string-serialized field is ADR-0032 §1c's
+        // retry path (#7098), which fires on a fault and is not clean-path.
+        expect(rewriteTemporalEquality('record.due >= previous.due', mixed))
+          .toBe('record.due >= previous.due');
+        // a string LITERAL counterpart is not a binding
+        expect(rewriteTemporalEquality('record.due == "2026-06-20"', mixed))
+          .toBe('record.due == "2026-06-20"');
+      });
+    });
   });
 
   // #3183 — the end-to-end runtime behavior the rewrite delivers: a `Field.date`
@@ -595,6 +668,84 @@ describe('celEngine', () => {
         .toEqual({ ok: true, value: false });
       expect(celEngine.evaluate(cel('record.due == today()'), rec(null)))
         .toEqual({ ok: true, value: false });
+    });
+  });
+
+  // #7168 — the end-to-end behavior of the Date-valued-binding arm. The
+  // reachable shape is a MIXED-PROVENANCE comparison: `previous` hydrated by the
+  // driver as a `Date`, `record` parsed from a JSON payload as a `YYYY-MM-DD`
+  // string. Same logical field, same instant, and the predicate answered a
+  // silent `false` — `{ ok: true, value: false }`, no fault, no log line.
+  describe('date-string == Date-valued binding runtime fix (#7168)', () => {
+    const now = new Date('2026-06-20T08:00:00Z');
+    const midnight = new Date('2026-06-20T00:00:00Z');
+    const row = (due: unknown, prev: unknown) => ({ now, record: { due }, previous: { due: prev } });
+
+    it('a same-day mixed-provenance comparison answers true instead of a silent false', () => {
+      expect(celEngine.evaluate(cel('record.due == previous.due'), row('2026-06-20', midnight)))
+        .toEqual({ ok: true, value: true });
+      // operand order does not matter
+      expect(celEngine.evaluate(cel('previous.due == record.due'), row('2026-06-20', midnight)))
+        .toEqual({ ok: true, value: true });
+      // `!=` was the same defect inverted — it answered a silent `true`
+      expect(celEngine.evaluate(cel('record.due != previous.due'), row('2026-06-20', midnight)))
+        .toEqual({ ok: true, value: false });
+    });
+
+    it('a datetime string matches the same INSTANT (date() parses, it does not truncate)', () => {
+      const afternoon = new Date('2026-06-20T14:33:00Z');
+      expect(celEngine.evaluate(cel('record.due == previous.due'), row('2026-06-20T14:33:00Z', afternoon)))
+        .toEqual({ ok: true, value: true });
+    });
+
+    // ── The fence: what SHOULD stay false still does ──────────────────────
+    it('a different calendar day stays false', () => {
+      expect(celEngine.evaluate(cel('record.due == previous.due'), row('2026-06-19', midnight)))
+        .toEqual({ ok: true, value: false });
+      expect(celEngine.evaluate(cel('record.due != previous.due'), row('2026-06-19', midnight)))
+        .toEqual({ ok: true, value: true });
+    });
+
+    it('a date-ONLY string against a Date carrying wall-clock time stays false', () => {
+      // Deliberately not "fixed": these are genuinely different instants, and
+      // truncating both sides to a calendar day would flip a correct `false`
+      // into a wrong `true` for real datetime comparisons.
+      expect(celEngine.evaluate(cel('record.due == previous.due'),
+        row('2026-06-20', new Date('2026-06-20T14:33:00Z'))))
+        .toEqual({ ok: true, value: false });
+    });
+
+    it('non-date and numeric strings against a Date stay false — no invented equality', () => {
+      expect(celEngine.evaluate(cel('record.due == previous.due'), row('hello', midnight)))
+        .toEqual({ ok: true, value: false });
+      expect(celEngine.evaluate(cel('record.due == previous.due'), row('5', midnight)))
+        .toEqual({ ok: true, value: false });
+      expect(celEngine.evaluate(cel('record.due == previous.due'), row(null, midnight)))
+        .toEqual({ ok: true, value: false });
+    });
+
+    it('a string-vs-string comparison keeps STRING equality, including the lenient-parse pairs', () => {
+      // "5" and "05" are different strings; both parse to 2001-05-01 as dates.
+      // Neither side is a Date binding, so no coercion happens and they differ.
+      expect(celEngine.evaluate(cel('record.due == previous.due'), row('5', '05')))
+        .toEqual({ ok: true, value: false });
+      expect(celEngine.evaluate(cel('record.due == previous.due'), row('2026-06-20', '2026-06-20')))
+        .toEqual({ ok: true, value: true });
+    });
+
+    it('the verdict is per ROW, not cached against the source', () => {
+      // The binding arm depends on values, not on the expression — so the same
+      // source must be re-decided for every scope. If its result were memoized
+      // under the source (as the temporal-CALL arm safely is), row 2 would
+      // evaluate `date(record.due) == previous.due`, comparing a Timestamp
+      // against a string, and answer a wrong `false`.
+      const src = cel('record.due == previous.due');
+      expect(celEngine.evaluate(src, row('2026-06-20', midnight))).toEqual({ ok: true, value: true });
+      expect(celEngine.evaluate(src, row('2026-06-20', '2026-06-20'))).toEqual({ ok: true, value: true });
+      // …and in the other order, to catch poisoning either way.
+      const src2 = cel('previous.due == record.due');
+      expect(celEngine.evaluate(src2, row('2026-06-20', '2026-06-20'))).toEqual({ ok: true, value: true });
+      expect(celEngine.evaluate(src2, row('2026-06-20', midnight))).toEqual({ ok: true, value: true });
     });
   });
 
