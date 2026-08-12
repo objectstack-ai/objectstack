@@ -2183,6 +2183,29 @@ export class SecurityPlugin implements Plugin {
       // safety + compile (incl. the fail-closed deny sentinel) is shared with
       // the public getReadFilter service via computeRlsFilter, so the engine
       // find-path and the analytics raw-SQL path enforce identical scoping.
+      //
+      // [#7809] `opCtx.operation` is passed RAW here — no `purge -> delete`,
+      // `transfer|restore -> update` normalisation like the 2.7 gate above
+      // does at `rlsOperation`. That asymmetry is deliberate and safe, but ONLY
+      // because of an invariant that lives in another package: the engine's
+      // middleware dispatch vocabulary (`OperationContext['operation']`) has
+      // seven members and none of them is a destructive lifecycle verb, and
+      // middleware is reachable only through the private
+      // `executeWithMiddleware(ctx: OperationContext, …)`. So no `purge` /
+      // `transfer` / `restore` can arrive here to be mis-derived.
+      //
+      // Measured, not assumed — a real engine driven through every public
+      // method dispatches exactly `find/findOne/count/aggregate` (with ast),
+      // `insert/update/delete` by-id (no ast) and bulk `update`/`delete` (with
+      // ast). The 2.7 gate normalises anyway because it is pre-wired for the
+      // M2 ops (#1883); this path is not, and does not need to be while the
+      // invariant holds.
+      //
+      // ⚠️ The invariant is PINNED, in the package that owns it:
+      // `packages/objectql/src/engine-middleware-operation-vocabulary.test.ts`.
+      // If a recycle bin (#3146) ever makes one of those verbs dispatchable,
+      // that pin goes red first — and THIS site and the D10 delegator half
+      // below are what must normalise before it can go green again.
       if (opCtx.ast) {
         const extra: Record<string, unknown>[] = [];
         const rlsFilter = await this.computeRlsFilter(
