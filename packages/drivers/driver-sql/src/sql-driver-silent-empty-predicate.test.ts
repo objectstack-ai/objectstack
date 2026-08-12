@@ -185,13 +185,23 @@ describe('[#5234] SqlDriver refuses the two comparand shapes that compiled to a 
       expect(err.message).toContain('index 1');
     });
 
-    it('the `$field` member refusal from #5041 still answers first, unchanged', async () => {
-      // A `$field` member is also unbindable, so the two arms overlap. The
-      // cross-field message is the more actionable one and must keep winning.
+    it('the `$field` member refusal from #5041 still answers first, operands withheld', async () => {
+      // A `$field` member is also unbindable, so the two arms overlap, and the
+      // cross-field arm must keep winning — an unbindable-member message would
+      // describe the shape without naming the condition.
+      //
+      // [#7929] What it no longer does is say WHICH member: `at index 1` named
+      // the position of a reference the caller may not have written (a read
+      // scope is ANDed in with the caller's own `where`, and the driver cannot
+      // tell the two apart). The index moved to the server log with the rest of
+      // the operands; the sibling assertions above — over ordinary unbindable
+      // objects, which disclose nothing about a policy — still pin it on the
+      // wire, so this is a narrowing of the `$field` arm and not of the family.
       const err = await refusalOf(() => find({ status: { $in: ['a', { $field: 'name' }] } }));
       expect(err.code).toBe('INVALID_FILTER');
-      expect(err.message).toContain('Cross-field comparison');
-      expect(err.message).toContain('at index 1');
+      expect(err.message).toContain('cross-field comparison');
+      expect(err.message).not.toContain('at index 1');
+      expect(err.message).not.toContain('name');
     });
 
     it('a `$between` bound is a comparand in its own right and gets the same envelope', async () => {

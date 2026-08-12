@@ -88,6 +88,33 @@ describe('[#5222] SqlDriver `$field` position matrix — compiled vs refused', (
     driver.find('deal', { fields: ['id'], where: where as FilterCondition });
   const ids = async (where: unknown) => (await find(where)).map((r: any) => String(r.id));
 
+  /**
+   * [#7929] Run a refusal and return BOTH halves: the error the caller sees and
+   * everything the driver wrote to its log while raising it.
+   *
+   * The two are asserted together throughout the refusal block below, because
+   * each is satisfiable alone by an implementation nobody wants — a refusal
+   * that says nothing at all passes the disclosure half, and the pre-#7929
+   * message passes the reason half. The seam under test is `SqlDriver`'s own
+   * `logger` property, spied here the way a host injects a real sink.
+   */
+  const refusalWithLog = async (
+    run: () => Promise<unknown>,
+  ): Promise<{ err: WireBearingError; logged: string }> => {
+    const lines: string[] = [];
+    const restore = (driver as unknown as { logger: Record<string, unknown> }).logger;
+    (driver as unknown as { logger: unknown }).logger = {
+      ...restore,
+      warn: (m: string) => { lines.push(m); },
+    };
+    try {
+      const err = await refusalOf(run);
+      return { err, logged: lines.join('\n') };
+    } finally {
+      (driver as unknown as { logger: unknown }).logger = restore;
+    }
+  };
+
   // ── SUPPORTED: the six scalar comparison operators ────────────────────────
   //
   // The issue's repro is the first row. Each expectation is decided by the one
@@ -185,6 +212,13 @@ describe('[#5222] SqlDriver `$field` position matrix — compiled vs refused', (
   // list against both SQL drivers; this block pins the ones whose WORDING a
   // caller has to act on, plus the positions unique to this matrix.
   describe('refused positions keep the INVALID_FILTER envelope', () => {
+    // [#7929] The third column moved from "a fragment of the CALLER'S message"
+    // to "a fragment of the SERVER LOG". The refusals are unchanged — same
+    // code, same status, same set of refused shapes — but the sentence that
+    // says WHICH boundary bit no longer travels to the caller, because on a
+    // read-scope refusal every name in it was written by an administrator the
+    // caller never saw. `refusalWithLog` captures the log line beside the error so
+    // both halves are asserted on one run.
     const refused: Array<[string, unknown, string]> = [
       ['a dotted relation path', { amount: { $gt: { $field: 'a.b' } } }, 'dotted path'],
       ['an undeclared column', { amount: { $gt: { $field: 'nope' } } }, 'not a declared field'],
@@ -203,14 +237,17 @@ describe('[#5222] SqlDriver `$field` position matrix — compiled vs refused', (
     ];
 
     for (const [name, where, fragment] of refused) {
-      it(`${name} → 400 INVALID_FILTER naming the reason`, async () => {
-        const err = await refusalOf(() => find(where));
+      it(`${name} → 400 INVALID_FILTER, reason in the log and not on the wire`, async () => {
+        const { err, logged } = await refusalWithLog(() => find(where));
         expect(err.code).toBe('INVALID_FILTER');
         expect(err.status).toBe(400);
         expect(err).not.toBeInstanceOf(TypeError);
         expect(err.message).not.toContain('can only bind');
         expect(err.message).not.toContain('[sql-driver]');
-        expect(err.message).toContain(fragment);
+        expect(logged, 'the reason must survive, server-side').toContain(fragment);
+        for (const column of ['amount', 'budget', 'stage', 'note', 'organization_id', 'nope', 'a.b']) {
+          expect(err.message, `caller-visible message names "${column}"`).not.toContain(column);
+        }
       });
     }
 
@@ -219,11 +256,16 @@ describe('[#5222] SqlDriver `$field` position matrix — compiled vs refused', (
       // recurses into — so nesting is not a way around it. Worth pinning
       // because a validation placed at the top-level entry instead would pass
       // this and refuse only the flat spelling.
-      const err = await refusalOf(() =>
+      //
+      // [#7929] And the withhold recurses with it: the log seam sits at
+      // `applyFilters`, one frame OUTSIDE the recursion, so a refusal raised
+      // three combinators deep still reaches it exactly once.
+      const { err, logged } = await refusalWithLog(() =>
         find({ $or: [{ stage: 'won' }, { amount: { $gt: { $field: 'organization_id' } } }] }),
       );
       expect(err.code).toBe('INVALID_FILTER');
-      expect(err.message).toContain('tenant-isolation column');
+      expect(logged).toContain('tenant-isolation column');
+      expect(err.message).not.toContain('organization_id');
     });
 
     it('the bare `{ field: { $field } }` spelling names the operator form to use', async () => {
@@ -240,11 +282,18 @@ describe('[#5222] SqlDriver `$field` position matrix — compiled vs refused', (
       // unknown-operator posture, deliberately kept), so compiling it would
       // open a divergence — and the message points at the `$eq` spelling that
       // does compile.
-      const err = await refusalOf(() => find({ amount: { $field: 'budget' } }));
+      //
+      // [#7929] The prescription survives as a SHAPE with placeholder names —
+      // the old text spelled it out with the caller's two real columns, which
+      // on a read-scope refusal is the administrator's policy handed back as a
+      // suggestion. The real names are in the log line instead.
+      const { err, logged } = await refusalWithLog(() => find({ amount: { $field: 'budget' } }));
       expect(err.code).toBe('INVALID_FILTER');
       expect(err.status).toBe(400);
       expect(err.message).toContain('$eq');
-      expect(err.message).toContain('budget');
+      expect(err.message).not.toContain('budget');
+      expect(err.message).not.toContain('amount');
+      expect(logged).toContain('"amount": { "$eq": { "$field": "budget" } }');
     });
 
     it('the equality TRIPLE no longer lowers to that bare spelling (#7597)', async () => {

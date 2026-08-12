@@ -27,9 +27,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           restore: "復元",
           login: "ログイン",
           logout: "ログアウト",
-          permission_change: "権限変更",
           config_change: "構成変更",
-          export: "エクスポート",
           import: "インポート"
         }
       },

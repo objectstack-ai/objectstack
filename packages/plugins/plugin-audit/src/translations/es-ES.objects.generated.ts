@@ -27,9 +27,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           restore: "Restaurar",
           login: "Inicio de sesión",
           logout: "Cierre de sesión",
-          permission_change: "Cambio de permisos",
           config_change: "Cambio de configuración",
-          export: "Exportar",
           import: "Importar"
         }
       },

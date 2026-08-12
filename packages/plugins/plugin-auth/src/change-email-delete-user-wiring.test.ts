@@ -130,8 +130,14 @@ function createMemoryEngine() {
 
 type MemoryEngine = ReturnType<typeof createMemoryEngine>;
 
-/** Recording email transport — every `sendTemplate` call, in order. */
-function createRecordingEmailService() {
+/**
+ * Recording email transport — every `sendTemplate` call, in order.
+ *
+ * `failOn` makes a chosen template name throw, which is how the #8019 tests
+ * below prove the old-address notice is not load-bearing: a transport that
+ * refuses exactly that one template must leave the change-email flow intact.
+ */
+function createRecordingEmailService(failOn?: string) {
   const sent: SendTemplateInput[] = [];
   const service: IEmailService = {
     async send(): Promise<SendEmailResult> {
@@ -139,6 +145,9 @@ function createRecordingEmailService() {
     },
     async sendTemplate(input: SendTemplateInput): Promise<SendEmailResult> {
       sent.push(input);
+      if (failOn && input.template === failOn) {
+        throw new Error(`TEMPLATE_NOT_FOUND: ${input.template} (locale=en-US)`);
+      }
       return { id: `email_${sent.length}`, status: 'sent' };
     },
   };
@@ -227,9 +236,16 @@ describe('#7735 — POST /change-email is wired, and confirmed by email', () => 
     // Confirmation goes to the NEW address, through the same verification
     // callback sign-up uses — better-auth's single-step default, which is the
     // 「策略按 better-auth 常规」 the ruling names.
-    expect(email.sent).toHaveLength(1);
-    const [confirmation] = email.sent;
-    expect(confirmation.template).toBe('auth.verify_email');
+    //
+    // Selected by TEMPLATE, not by being the only mail sent: #8019 added a
+    // second, independent mail on this same request (the notice to the OLD
+    // address). The claim this test makes has always been "the confirmation is
+    // an auth.verify_email addressed to the new address" — a count of 1 was
+    // only ever a proxy for it, and the proxy is what expired. Still pinned to
+    // exactly one CONFIRMATION, so a second verification mail would fail here.
+    const confirmations = email.sent.filter((s) => s.template === 'auth.verify_email');
+    expect(confirmations).toHaveLength(1);
+    const [confirmation] = confirmations;
     expect(confirmation.to).toMatchObject({ address: 'after@example.com' });
 
     // …and NOTHING has changed yet. A request nobody confirms must not move the
@@ -253,8 +269,12 @@ describe('#7735 — POST /change-email is wired, and confirmed by email', () => 
 
     await post(manager, '/change-email', cookie, { newEmail: 'new@example.com' });
 
-    const lastSent = email.sent[email.sent.length - 1];
-    const verificationUrl = (lastSent?.data as { verificationUrl?: string } | undefined)?.verificationUrl;
+    // By template, not by arrival order: since #8019 the LAST mail on this
+    // request is the old-address notice, which carries no verification link by
+    // design (⛔ no undo/rollback affordance), so "the last one sent" now names
+    // the wrong mail.
+    const verification = email.sent.find((s) => s.template === 'auth.verify_email');
+    const verificationUrl = (verification?.data as { verificationUrl?: string } | undefined)?.verificationUrl;
     expect(typeof verificationUrl, 'the change-email mail must carry a verification link').toBe('string');
 
     const applied = await manager.handleRequest(new Request(verificationUrl!, { headers: { cookie } }));
@@ -340,5 +360,158 @@ describe('#7735 — POST /delete-user stays unwired, and the ledger says so', ()
     expect(response.status).toBe(404);
     expect(JSON.stringify(await errorBody(response))).toContain('NOT_FOUND');
     expect(userRows(engine).map((r) => r.email)).toEqual(['callback@example.com']);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+/**
+ * #8019 — the OLD address is told, and is still not a gate.
+ *
+ * Maintainer ruling 2026-08-12: 「notify the OLD address — do not gate on it」.
+ * BOTH halves are asserted here on purpose, because each one alone passes over
+ * the other's failure: a suite that only checks "the notice was sent" stays
+ * green while the notification quietly becomes a blocking step, which is the
+ * exact regression the ruling was written to prevent.
+ *
+ * The template NAME is spelled as a literal in every assertion below rather
+ * than imported from `@objectstack/plugin-email`. Importing it would make the
+ * expectation and the implementation read the same constant, and a rename
+ * would then travel through both sides at once and fail nothing.
+ */
+const NOTICE_TEMPLATE = 'auth.email_change_notice';
+
+/** Every recorded send of the old-address notice. */
+const notices = (sent: SendTemplateInput[]): SendTemplateInput[] =>
+  sent.filter((s) => s.template === NOTICE_TEMPLATE);
+
+describe('#8019 — change-email notifies the previous address without gating on it', () => {
+  it('mails the OLD address, mails the NEW one, and the change still completes', async () => {
+    const engine = createMemoryEngine();
+    const email = createRecordingEmailService();
+    const manager = makeManager(engine, email.service);
+
+    const cookie = cookieFrom(await signUp(manager, 'old@example.com'));
+    email.sent.length = 0;
+
+    const response = await post(manager, '/change-email', cookie, { newEmail: 'new@example.com' });
+    expect(response.status, await response.clone().text()).toBe(200);
+
+    // ── Half one: the previous address is told what is happening. ──────────
+    expect(notices(email.sent), 'exactly one notice, to the address being left').toHaveLength(1);
+    const [notice] = notices(email.sent);
+    expect(notice.to).toMatchObject({ address: 'old@example.com' });
+    // The notice must NAME the new address — a notice that says only "your
+    // email is changing" leaves the reader unable to tell hijack from typo.
+    expect(notice.data).toMatchObject({ newEmail: 'new@example.com' });
+    expect((notice.data as { user?: { email?: string } }).user?.email).toBe('old@example.com');
+
+    // ⛔ Ruling edge 3: no undo/rollback link. Assert over the whole rendered
+    // payload, not just a named hole, so a link smuggled in through any other
+    // variable is caught too.
+    expect(JSON.stringify(notice.data)).not.toMatch(/undo|revert|rollback|cancel-change/i);
+
+    // ── Half two: nothing about the notice altered the flow. ───────────────
+    // The verification still goes to the NEW address, through the unchanged
+    // single-step path #7735 established.
+    const verifications = email.sent.filter((s) => s.template === 'auth.verify_email');
+    expect(verifications).toHaveLength(1);
+    expect(verifications[0].to).toMatchObject({ address: 'new@example.com' });
+
+    // …and following it still applies the change, unblocked. If the notice had
+    // become a gate, better-auth would be waiting on the old address here and
+    // this address would still read `old@example.com`.
+    const verificationUrl = (verifications[0].data as { verificationUrl?: string }).verificationUrl;
+    const applied = await manager.handleRequest(new Request(verificationUrl!, { headers: { cookie } }));
+    expect([200, 302]).toContain(applied.status);
+    expect(userRows(engine)[0]!.email).toBe('new@example.com');
+    expect(userRows(engine)[0]!.email_verified).toBeTruthy();
+  });
+
+  it('a notice that CANNOT be delivered still does not block the change', async () => {
+    // The failure mode the ruling names, driven directly: the transport refuses
+    // the notice template (unseeded template, dead mailbox, SMTP outage). The
+    // change-email flow must be indistinguishable from the happy path.
+    const engine = createMemoryEngine();
+    const email = createRecordingEmailService(NOTICE_TEMPLATE);
+    const manager = makeManager(engine, email.service);
+
+    const cookie = cookieFrom(await signUp(manager, 'stuck@example.com'));
+    email.sent.length = 0;
+
+    const response = await post(manager, '/change-email', cookie, { newEmail: 'moved@example.com' });
+    expect(response.status, 'a failed notice must not surface as a failed change').toBe(200);
+    expect(await response.json()).toEqual({ status: true });
+
+    // It was attempted (so this test cannot pass by the notice being skipped)…
+    expect(notices(email.sent)).toHaveLength(1);
+    // …and the flow ran to completion regardless.
+    const verification = email.sent.find((s) => s.template === 'auth.verify_email');
+    const url = (verification?.data as { verificationUrl?: string } | undefined)?.verificationUrl;
+    expect(typeof url).toBe('string');
+    const applied = await manager.handleRequest(new Request(url!, { headers: { cookie } }));
+    expect([200, 302]).toContain(applied.status);
+    expect(userRows(engine)[0]!.email).toBe('moved@example.com');
+  });
+
+  it('sends no notice when the request is REFUSED', async () => {
+    // A false alarm is a real cost on a security notice: it trains the reader
+    // to ignore the next one. better-auth refuses `newEmail === current` with
+    // 400 before anything is minted, so nothing may go out.
+    const engine = createMemoryEngine();
+    const email = createRecordingEmailService();
+    const manager = makeManager(engine, email.service);
+
+    const cookie = cookieFrom(await signUp(manager, 'same@example.com'));
+    email.sent.length = 0;
+
+    const response = await post(manager, '/change-email', cookie, { newEmail: 'same@example.com' });
+    expect(response.status).toBe(400);
+    expect(notices(email.sent)).toHaveLength(0);
+  });
+
+  it('sends no notice for an unauthenticated attempt', async () => {
+    const engine = createMemoryEngine();
+    const email = createRecordingEmailService();
+    const manager = makeManager(engine, email.service);
+    await signUp(manager, 'bystander@example.com');
+    email.sent.length = 0;
+
+    const response = await manager.handleRequest(
+      new Request(`${AUTH}/change-email`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: ORIGIN },
+        body: JSON.stringify({ newEmail: 'attacker@example.com' }),
+      }),
+    );
+    expect(response.status).toBe(401);
+    expect(notices(email.sent)).toHaveLength(0);
+  });
+
+  it('does not fire on sign-up verification — only a real identity move notifies', async () => {
+    const engine = createMemoryEngine();
+    const email = createRecordingEmailService();
+    const manager = makeManager(engine, email.service);
+
+    await signUp(manager, 'fresh@example.com');
+    expect(notices(email.sent)).toHaveLength(0);
+  });
+
+  it('keeps `sendChangeEmailConfirmation` OFF — the notice is not the gate in disguise', async () => {
+    // ⛔ Ruling edge 1: #7735's 「策略按 better-auth 常规」 still governs the
+    // CONFIRMATION option, and in better-auth 1.7.0-rc.2 that option is not a
+    // notifier — `update-user.mjs` returns immediately after invoking it, so
+    // the NEW address is never mailed until the OLD one clicks. Setting it
+    // would silently convert this card's notification into the approval gate
+    // the ruling refuses, and every assertion above would still pass. Read off
+    // the options object better-auth actually runs on.
+    const manager = makeManager(createMemoryEngine(), createRecordingEmailService().service);
+    const auth = (await manager.getAuthInstance()) as unknown as {
+      options: { user?: { changeEmail?: Record<string, unknown> } };
+    };
+    const changeEmail = auth.options.user?.changeEmail;
+
+    expect(changeEmail?.enabled, 'the capability itself stays on (#7735)').toBe(true);
+    expect(changeEmail?.sendChangeEmailConfirmation).toBeUndefined();
+    expect(changeEmail?.updateEmailWithoutVerification).toBeUndefined();
   });
 });
