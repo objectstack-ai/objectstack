@@ -347,12 +347,18 @@ describe('@objectstack/platform-objects', () => {
     // admin included. `nav_jwks` → `sys_jwks` was exactly that, and is gone.
     // ─────────────────────────────────────────────────────────────────────
     describe('object entries can actually serve a list (#7544)', () => {
-      /** Nav targets this package owns, so their `enable` block is importable. */
+      // Objects this package owns whose `enable` block is therefore importable
+      // here: every current Setup nav target, PLUS `sys_jwks`. Keeping the
+      // removed one listed is what makes the gate diagnose rather than merely
+      // notice — a re-added `nav_jwks` fails on "cannot serve a list", the
+      // actual reason, instead of falling into the unclassified branch below
+      // and reporting only that this file has never heard of the object.
       const OWNED_NAV_OBJECTS: Record<string, { enable?: unknown }> = {
         sys_account: SysAccount,
         sys_api_key: SysApiKey,
         sys_business_unit: SysBusinessUnit,
         sys_invitation: SysInvitation,
+        sys_jwks: SysJwks,
         sys_oauth_application: SysOauthApplication,
         sys_organization: SysOrganization,
         sys_session: SysSession,
