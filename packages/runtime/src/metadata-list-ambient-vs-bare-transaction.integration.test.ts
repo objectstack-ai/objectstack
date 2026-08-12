@@ -115,7 +115,10 @@ async function boot(): Promise<Fixture> {
   const engine = new ObjectQL();
   engine.registerDriver(driver, true);
   await engine.init();
-  engine.registry.registerObject(SysMetadataObject as any);
+  // The engine's own proxy, not `engine.registry.registerObject` — the registry
+  // method requires a `packageId` and the proxy supplies one, so this keeps the
+  // fixture out of the package's TEST_DEBT ledger (`check:type-check-debt`).
+  engine.registerObject(SysMetadataObject as any);
 
   // `cache: { enabled: false }` is what makes every `list()` below a real
   // database read; with the loader's own read-through cache on, the second call
