@@ -314,47 +314,24 @@ function toSnakeCase(name: string): string {
 
 /**
  * Every better-auth plugin factory `auth-manager.ts` can assemble, keyed by the
- * imported name, with how this file accounts for it.
+ * name it imports, with how this guard accounts for it.
  *
- * `loaded: true` means the factory is in {@link betterAuthPluginSet} below and
- * its columns are therefore part of the derived surface. Anything else needs a
- * reason, and "it is off by default" is not one — see the file header.
+ * The plugin SET is derived from this map rather than written beside it, which
+ * is what makes the accounting real: an entry carrying a `construct` IS in the
+ * derived surface, because that thunk is what builds it. There is no way to
+ * declare a plugin covered and not load it — the failure a hand-kept pair of
+ * lists invites. `skip` is the other disposition and costs a written reason;
+ * "it is off by default" is not one, see the file header.
  *
- * Every entry is currently loaded. The map exists so a future exclusion has to
- * be written down rather than simply omitted, and so the tripwire below can
- * reconcile it against `auth-manager.ts` in both directions.
- */
-const AUTH_MANAGER_PLUGINS: Record<string, { loaded: true } | { loaded: false; reason: string }> = {
-  bearer: { loaded: true },
-  organization: { loaded: true },
-  twoFactor: { loaded: true },
-  haveIBeenPwned: { loaded: true },
-  admin: { loaded: true },
-  phoneNumber: { loaded: true },
-  magicLink: { loaded: true },
-  genericOAuth: { loaded: true },
-  jwt: { loaded: true },
-  oauthProvider: { loaded: true },
-  sso: { loaded: true },
-  scim: { loaded: true },
-  deviceAuthorization: { loaded: true },
-  customSession: { loaded: true },
-};
-
-/**
- * The plugin set the auth manager actually assembles (`buildPluginList()`),
- * constructed here WITHOUT the `schema` overrides — see below for why that
- * omission is load-bearing rather than laziness.
- *
- * Feature-flagged-off plugins are included on the reason
+ * Feature-flagged-off plugins are all constructed on the reason
  * `better-auth-schema-parity.test.ts` states for its own derivation: the column
  * has to exist before the flag can be turned on, so a deployment-time flag
- * cannot decide who owns a column. Several of these contribute no model surface
- * at all today (`bearer`, `haveIBeenPwned`, `magicLink` — which reuses
- * `verification` — `genericOAuth`, `customSession`); they are constructed
- * anyway so the set is "what the auth manager loads" rather than "what someone
- * judged relevant", and so a version bump that gives one of them a user column
- * is seen here on the day it lands.
+ * cannot decide who owns a column. Several contribute no model surface at all
+ * today (`bearer`, `haveIBeenPwned`, `magicLink` — which reuses `verification`
+ * — `genericOAuth`, `customSession`); they are constructed anyway so the set is
+ * "what the auth manager loads" rather than "what someone judged relevant", and
+ * so a version bump that gives one of them a user column is seen here the day
+ * it lands.
  *
  * ⛔ Do NOT add the `schema:` options from `auth-schema-config.ts` to make this
  * match the parity gate's call. The two gates want different things from the
@@ -368,32 +345,40 @@ const AUTH_MANAGER_PLUGINS: Record<string, { loaded: true } | { loaded: false; r
  * half the mappings would provide is already covered: `toSnakeCase` records
  * both spellings.
  */
+const AUTH_MANAGER_PLUGINS: Record<string, { construct: () => unknown } | { skip: string }> = {
+  bearer: { construct: () => bearer() },
+  // `teams: { enabled: true }` mirrors the auth-manager default. Without it
+  // better-auth omits the team models entirely, so the sys_team /
+  // sys_team_member entries below would be absent and any extension field added
+  // to those objects would collide silently. (#3624)
+  organization: { construct: () => organization({ teams: { enabled: true } }) },
+  twoFactor: { construct: () => twoFactor() },
+  haveIBeenPwned: { construct: () => haveIBeenPwned() },
+  admin: { construct: () => admin() },
+  // The callbacks below are required by their constructors and never invoked:
+  // this file only reads the schema each plugin declares.
+  phoneNumber: { construct: () => phoneNumber({ sendOTP: async () => undefined }) },
+  magicLink: { construct: () => magicLink({ sendMagicLink: async () => undefined }) },
+  genericOAuth: { construct: () => genericOAuth({ config: [] }) },
+  jwt: { construct: () => jwt() },
+  deviceAuthorization: { construct: () => deviceAuthorization() },
+  customSession: {
+    construct: () =>
+      customSession(async ({ user, session }: { user: unknown; session: unknown }) => ({
+        user,
+        session,
+      })),
+  },
+  sso: { construct: () => sso() },
+  scim: { construct: () => scim() },
+  oauthProvider: { construct: () => oauthProvider({ loginPage: '/login' }) },
+};
+
+/** The plugin set the auth manager actually assembles (`buildPluginList()`). */
 function betterAuthPluginSet(): unknown[] {
-  return [
-    bearer(),
-    // `teams: { enabled: true }` mirrors the auth-manager default. Without it
-    // better-auth omits the team models entirely, so the sys_team /
-    // sys_team_member entries below would be absent and any extension field
-    // added to those objects would collide silently. (#3624)
-    organization({ teams: { enabled: true } }),
-    twoFactor(),
-    haveIBeenPwned(),
-    admin(),
-    // The callbacks are required by the constructors and never invoked: this
-    // file only reads the schema each plugin declares.
-    phoneNumber({ sendOTP: async () => {} }),
-    magicLink({ sendMagicLink: async () => {} }),
-    genericOAuth({ config: [] }),
-    jwt(),
-    deviceAuthorization(),
-    customSession(async ({ user, session }: { user: unknown; session: unknown }) => ({
-      user,
-      session,
-    })),
-    sso(),
-    scim(),
-    oauthProvider({ loginPage: '/login' }),
-  ];
+  return Object.values(AUTH_MANAGER_PLUGINS)
+    .filter((entry): entry is { construct: () => unknown } => 'construct' in entry)
+    .map((entry) => entry.construct());
 }
 
 /**
@@ -647,27 +632,33 @@ describe('managed extension fields (ADR-0105 D7)', () => {
       `auth-manager.ts imports better-auth plugin factories this guard does not account for: `
         + `${unaccounted.join(', ')}. A plugin the auth manager can assemble owns columns on the `
         + `tables this guard compares, so leaving it out means the derived surface is narrower than `
-        + `the one a booted environment gets. Add it to betterAuthPluginSet() and to `
-        + `AUTH_MANAGER_PLUGINS as { loaded: true } — or, if it genuinely declares no schema this `
-        + `call can read, register it with loaded: false and the reason. "It is off by default" is `
-        + `NOT a reason: the column has to exist before the flag can be turned on.`,
+        + `the one a booted environment gets. Add it to AUTH_MANAGER_PLUGINS with a construct thunk `
+        + `— or, if it genuinely declares no schema this call can read, with a skip reason. "It is `
+        + `off by default" is NOT a reason: the column has to exist before the flag can be turned on.`,
     ).toEqual([]);
 
     const stale = declared.filter((name) => !imported.includes(name));
     expect(
       stale,
       `AUTH_MANAGER_PLUGINS names plugins auth-manager.ts no longer imports: ${stale.join(', ')}. `
-        + `Either the plugin was dropped (remove it here and from betterAuthPluginSet()) or the `
-        + `import shape changed and this scan is now blind — check authManagerPluginFactories() `
-        + `against the real import sites before deleting anything.`,
+        + `Either the plugin was dropped (remove its entry) or the import shape changed and this scan `
+        + `is now blind — check authManagerPluginFactories() against the real import sites before `
+        + `deleting anything.`,
     ).toEqual([]);
 
-    // Nothing may sit in the map unloaded without a stated reason.
+    // A skip is a decision, so it costs a sentence. `construct` needs no such
+    // check: it cannot claim coverage it does not deliver, because the thunk IS
+    // what builds the derived surface.
     for (const [name, entry] of Object.entries(AUTH_MANAGER_PLUGINS)) {
-      if (!entry.loaded) {
-        expect(entry.reason.length, `${name} is not loaded but carries no reason`).toBeGreaterThan(20);
+      if ('skip' in entry) {
+        expect(entry.skip.length, `${name} is skipped but carries no reason`).toBeGreaterThan(20);
       }
     }
+    // The set really is built from the map — otherwise the reconciliation above
+    // would be auditing a list nothing reads.
+    expect(betterAuthPluginSet().length).toBe(
+      Object.values(AUTH_MANAGER_PLUGINS).filter((entry) => 'construct' in entry).length,
+    );
   });
 
   it('editable extension fields are a SUBSET of declared extension fields', () => {
