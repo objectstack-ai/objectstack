@@ -41,6 +41,33 @@
  * measures its guard short-circuiting, so "the guard can no longer be true"
  * stays a measurement rather than a claim that rots. It is the delete-side twin
  * of the case #5846 left in `engine-update-prior-read-scope.test.ts`.
+ *
+ * ## ⚠️ AMENDED BY #7867 — the by-id READ-SKIP half is retired
+ *
+ * This card's subject splits in two, and only one half survives:
+ *
+ *   - **The DISPATCH half stands, untouched.** `hasHooksFor` still answers per
+ *     object, `hookMatchesObject` still subtracts `excludeObjects`, an excluded
+ *     object still dispatches nothing, and `sys_fetch_previous_delete` is still
+ *     retired and must not come back. Those are what #5929 was actually about,
+ *     and every case pinning them is unchanged below.
+ *
+ *   - **The by-id READ-SKIP half is gone.** A by-id delete now reads its
+ *     pre-image UNCONDITIONALLY, because #7867 added the not-found gate the
+ *     path never had — a delete against an id naming no row must answer
+ *     `RECORD_NOT_FOUND` instead of reporting success for a row that was never
+ *     there (#5138's record names `delete` as the worst of the three when this
+ *     gate was missing). Existence is a consumer the three-term demand never
+ *     enumerated and the one consumer EVERY by-id delete has, and no cheaper
+ *     question answers it — so the skip and the gate are mutually exclusive.
+ *
+ * The cases below that measured the SKIP now measure the READ, each saying so
+ * at its own site. What that costs is small for the reason section 4's own
+ * prose gives from the other side: on any kernel loading the global delete-side
+ * registrants (plugin-sharing, service-storage, plugin-auth), term 1 or 2 was
+ * true for every object anyway. The PREDICATE path (section 3) keeps its gate
+ * in full — a bulk delete matching zero rows is legitimately "0 rows affected",
+ * not a missing record.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -226,16 +253,46 @@ const observer = (
  * ──────────────────────────────────────────────────────────────────────────── */
 
 describe('[#5929] the delete-side prior-row demand is asked per object', () => {
-  it('object A pays NO prior read while only object B has an afterDelete hook', async () => {
-    const { engine, reads } = await boot([observer('audits_b', 'del_scope_b', 'afterDelete', [])]);
+  it('[#7867] object A pays the prior read too — the by-id read is no longer the gate\'s to skip', async () => {
+    // ⚠️ Asserted 0 until #7867. The DISPATCH question this file is about is
+    // unchanged (nothing fires on A), but the by-id READ is now unconditional:
+    // the not-found gate has to know whether the row is there, and that is the
+    // one demand no hook registration can express. The dispatch half is pinned
+    // by the `previous`-observing cases below, which are untouched.
+    const seen: Array<unknown> = [];
+    const { engine, reads } = await boot([observer('audits_b', 'del_scope_b', 'afterDelete', seen)]);
 
     const row: any = await engine.insert('del_scope_a', { title: 'A', status: 'todo', done: false });
     const before = reads.findOneOn['del_scope_a'] ?? 0;
     await engine.delete('del_scope_a', { where: { id: row.id } } as any);
 
-    expect((reads.findOneOn['del_scope_a'] ?? 0) - before).toBe(0);
-    // The row really went — a skipped read must not have skipped the write.
+    expect((reads.findOneOn['del_scope_a'] ?? 0) - before).toBe(1);
+    // …and B's hook still did not fire for A's delete — the per-object dispatch
+    // question, which is what #5929 was actually about, is intact.
+    expect(seen).toEqual([]);
+    // The row really went — the added read must not have cost the write.
     expect(await engine.count('del_scope_a', {})).toBe(0);
+  });
+
+  it('[#7867] a by-id delete against an id that names no row is refused — RECORD_NOT_FOUND', async () => {
+    // What the unconditional read buys. #5138's own record: with no gate "the
+    // delete ran and the answer was 200 { deleted: true } for any string in the
+    // path, so a typo'd id, an already-deleted row and a real deletion were
+    // indistinguishable". That was still live on this path — the one an action
+    // body's `.delete()` takes — until this card.
+    const fired: Array<unknown> = [];
+    const { engine } = await boot([observer('pre_a', 'del_scope_a', 'beforeDelete', fired)]);
+
+    const err: any = await engine
+      .delete('del_scope_a', { where: { id: 'never_existed' } } as any)
+      .then(() => null, (e) => e);
+
+    expect(err, 'a ghost id must be refused, not reported as a deletion').not.toBeNull();
+    expect(err.code).toBe('RECORD_NOT_FOUND');
+    expect(err.status).toBe(404);
+    // Refused before the before phase — no handler runs for a row that is not
+    // there, and no cascade touches a dependent of a parent that never existed.
+    expect(fired).toEqual([]);
   });
 
   it('the object that DOES have the afterDelete hook pays it, and `previous` is the stored row', async () => {
@@ -303,18 +360,22 @@ describe('[#5929] the delete-side prior-row demand is asked per object', () => {
     expect(storeFor('del_scope_invoice').get(parent.id)?.line_total).toBe(0);
   });
 
-  it('`needsPriorRecord` is NOT a term — a readonlyWhen object still skips the read', async () => {
-    // Stated as a case because it is the one asymmetry with `update()`'s twin
-    // gate, and an honest gate is exactly where someone would reflexively add
-    // it back. `delete()` evaluates no validation rules and no field
-    // predicates, so the term would buy a read with no reader.
+  it('`needsPriorRecord` is still NOT a term — a readonlyWhen object owes the read for EXISTENCE, not for rules', async () => {
+    // The asymmetry with `update()`'s twin gate survives #7867 and is worth
+    // keeping stated, because the read count no longer distinguishes it: this
+    // object now pays 1 like every other by-id delete. What is pinned here is
+    // the REASON — `delete()` evaluates no validation rules and no field
+    // predicates, so `needsPriorRecord` would still buy nothing if it were
+    // added; the read is owed to the not-found gate alone. Adding the term back
+    // would be adding a second, redundant justification for a read that already
+    // happens, which is how a gate acquires a term nobody can retire.
     const { engine, reads } = await boot([], [lockedTask]);
 
     const row: any = await engine.insert('del_scope_locked', { title: 'Ship it', status: 'done', done: true });
     const before = reads.findOneOn['del_scope_locked'] ?? 0;
     await engine.delete('del_scope_locked', { where: { id: row.id } } as any);
 
-    expect((reads.findOneOn['del_scope_locked'] ?? 0) - before).toBe(0);
+    expect((reads.findOneOn['del_scope_locked'] ?? 0) - before).toBe(1);
     expect(await engine.count('del_scope_locked', {})).toBe(0);
   });
 });
@@ -343,7 +404,13 @@ describe('[#5929 / #5860] the gate honours `excludeObjects` on both delete phase
     });
   };
 
-  it('an EXCLUDED object skips the prior read, and the hook does not fire on it', async () => {
+  it('[#7867] an EXCLUDED object does not DISPATCH — it still pays the by-id existence read', async () => {
+    // ⚠️ The read half of this case asserted 0 until #7867; the DISPATCH half
+    // is the one #5860/#5929 are about and it is unchanged. They no longer move
+    // together on the by-id path, and that is the point rather than a
+    // regression: `hookMatchesObject` still decides who fires, but it no longer
+    // decides whether the engine looks — the not-found gate does, for every
+    // by-id delete, excluded or not.
     const fired: unknown[] = [];
     const { engine, reads } = await boot();
     registerGlobalDeleteHook(engine, 'beforeDelete', fired, ['del_scope_a']);
@@ -352,9 +419,7 @@ describe('[#5929 / #5860] the gate honours `excludeObjects` on both delete phase
     const before = reads.findOneOn['del_scope_a'] ?? 0;
     await engine.delete('del_scope_a', { where: { id: row.id } } as any);
 
-    expect((reads.findOneOn['del_scope_a'] ?? 0) - before).toBe(0);
-    // The read count and the dispatch agree — which is the property, not a
-    // coincidence: both ask `hookMatchesObject`.
+    expect((reads.findOneOn['del_scope_a'] ?? 0) - before).toBe(1);
     expect(fired).toEqual([]);
   });
 
@@ -380,7 +445,9 @@ describe('[#5929 / #5860] the gate honours `excludeObjects` on both delete phase
     const before = reads.findOneOn['del_scope_a'] ?? 0;
     await engine.delete('del_scope_a', { where: { id: row.id } } as any);
 
-    expect((reads.findOneOn['del_scope_a'] ?? 0) - before).toBe(0);
+    // [#7867] The dispatch subtraction is the assertion; the read is the
+    // unconditional by-id existence read, same as the before-phase case above.
+    expect((reads.findOneOn['del_scope_a'] ?? 0) - before).toBe(1);
     expect(fired).toEqual([]);
   });
 });
@@ -466,11 +533,17 @@ describe('[#5929] on a KERNEL-hosted engine the per-object skip finally happens'
     }
   });
 
-  it('a single-id delete on a hook-free object performs NO prior-row read', async () => {
-    // ⚠️ THE pin. This read count was 1 for every object on every kernel-hosted
-    // engine that has ever run, because `sys_fetch_previous_delete` held term 1
-    // of the gate open — and then never used the row it forced the engine to
-    // fetch.
+  it('[#7867] a single-id delete on a hook-free object performs EXACTLY ONE prior-row read', async () => {
+    // ⚠️ THE pin, amended. It asserted 0 between #5929 and #7867. The number it
+    // exists to hold down is "how many reads does ONE by-id delete cost" —
+    // #5929 drove it from 1 to 0 by retiring a builtin that forced a read it
+    // never used, and #7867 puts it back to 1 for a reader that does use it:
+    // the not-found gate, without which this delete would report success for a
+    // row that was never there.
+    //
+    // What must NOT come back is the builtin. The `hasHooksFor` case above
+    // still asserts its absence directly, and the number here is 1 — not 2,
+    // which is what a reintroduced `sys_fetch_previous_delete` would cost.
     const { kernel, engine, reads } = await bootKernel([kernelTask]);
     try {
       const row: any = await engine.insert('del_kernel_task', { title: 'A', status: 'todo', done: false });
@@ -479,7 +552,9 @@ describe('[#5929] on a KERNEL-hosted engine the per-object skip finally happens'
 
       await engine.delete('del_kernel_task', { where: { id: row.id } });
 
-      expect((reads.findOneOn['del_kernel_task'] ?? 0) - beforeFindOne).toBe(0);
+      expect((reads.findOneOn['del_kernel_task'] ?? 0) - beforeFindOne).toBe(1);
+      // The PREDICATE path's gate is untouched by #7867 — no matched-row-set
+      // read on a hook-free object.
       expect((reads.findOn['del_kernel_task'] ?? 0) - beforeFind).toBe(0);
       expect(await engine.count('del_kernel_task', {})).toBe(0);
     } finally {
@@ -552,17 +627,29 @@ describe('[#5929] a fetch-previous `beforeDelete` hook is now dead weight', () =
     expect((reads.findOneOn['del_scope_a'] ?? 0) - before).toBe(1);
   });
 
-  it('the residual shape — engine read found nothing — leaves `previous` UNBOUND, not fabricated', async () => {
-    // The one shape in which the retired guard could still have been TRUE: the
-    // row is already gone, so the engine's read binds nothing. The builtin's
-    // read would have found nothing either (same row, same scope), so retiring
-    // it changes no binding here — and `bindPreImage` must still refuse to
-    // fabricate `{}`/`null` for a record nobody read (#4649/#4775).
+  it('[#7867] the residual shape is now UNREACHABLE — the delete is refused before any hook runs', async () => {
+    // ⚠️ This case used to assert `seen == [undefined]`: the row was already
+    // gone, the engine's read bound nothing, and `beforeDelete` dispatched
+    // anyway with `previous` UNBOUND (never fabricated — #4649/#4775).
+    //
+    // The never-fabricate rule is untouched and still governs `bindPreImage`.
+    // What #7867 changed is that this dispatch no longer happens at all: a
+    // by-id delete whose id names no row is refused with RECORD_NOT_FOUND
+    // BEFORE the before phase, so no handler is ever handed a context for a
+    // record nobody read. That is the same remedy #5574 chose one path over —
+    // kill the producer, do not specialize what it produced — and it is why
+    // #5571's six rounds of blaming the binding site were measuring the wrong
+    // thing: the binding was correct on a path that should never have been
+    // entered.
     const seen: Array<unknown> = [];
     const { engine } = await boot([observer('pre_a', 'del_scope_a', 'beforeDelete', seen)]);
 
-    await engine.delete('del_scope_a', { where: { id: 'never_existed' } } as any);
+    const err: any = await engine
+      .delete('del_scope_a', { where: { id: 'never_existed' } } as any)
+      .then(() => null, (e) => e);
 
-    expect(seen).toEqual([undefined]);
+    expect(err).not.toBeNull();
+    expect(err.code).toBe('RECORD_NOT_FOUND');
+    expect(seen, 'no handler may be dispatched for a row that is not there').toEqual([]);
   });
 });

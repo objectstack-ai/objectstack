@@ -3,7 +3,7 @@
 import type {
     DataProtocol, MetadataProtocol, PackageProtocol,
 } from '@objectstack/spec/api';
-import { IDataEngine, engineCanRollBack } from '@objectstack/core';
+import { IDataEngine, engineCanRollBack, recordNotFoundError } from '@objectstack/core';
 import { readEnvWithDeprecation, resolveTenancyPosture } from '@objectstack/types';
 // [#6285] ADR-0105 D1's authority on "does this deployment wall organizations?".
 // `resolveMultiOrgEnabled()` is DEMOTED and its own doc comment says answering
@@ -640,43 +640,22 @@ export function zodIssuesToMetadataIssues(issues: unknown): MetadataIssueEntry[]
 }
 
 /**
- * [#4435] The 404 a single-record operation answers when the id names no row.
+ * [#4435/#5138] The 404 a single-record operation answers when the id names no
+ * row — the repo's ONE `RECORD_NOT_FOUND` envelope.
  *
- * Extracted so the READ and the two WRITE paths cannot disagree about it. They
- * did: `getData` answered `404 RECORD_NOT_FOUND` while `updateData` returned
- * `200 { record: null }` and `deleteData` returned `200 { success: true }` for
- * any string in the path — so a typo'd id, an already-deleted row and a real
- * deletion were indistinguishable, and a client PATCHing a concurrently deleted
- * record was told its write had landed.
+ * [#7867] The body moved to `@objectstack/core`
+ * (`utils/record-not-found.ts` — full provenance lives there); this is a
+ * re-export, so every existing importer of
+ * `@objectstack/metadata-protocol`'s `recordNotFoundError` is unchanged and
+ * the three producers still share one function object.
  *
- * That is the same silent-no-op shape the v17 train removed everywhere else
- * this window (#4240/#4303/#4315 refuse missing fields, #4169 refuses unknown
- * params, #4190 stopped dropping filters) — a write that touched zero rows
- * reporting 200 is that shape one level up, on the verb where it costs the
- * most.
- *
- * [#5138] EXPORTED, for the same "cannot disagree about it" reason one layer
- * out. `@objectstack/runtime`'s `callData` is protocol-first with an ObjectQL
- * FALLBACK, and the fallback had reinvented this fact three incompatible ways
- * (`get` → `null`, `update` → a bare `Error` with no status ⇒ 500, `delete` →
- * no check at all ⇒ `200 { deleted: true }` for a row that never existed). It
- * now calls THIS function, so the two paths behind one `callData` answer a
- * missing id identically — which is the only reason a caller may stop caring
- * which of them served it. Re-spelling the envelope there would have been a
- * second not-found envelope; `RECORD_NOT_FOUND` (#5088) is the one this repo
- * has.
+ * ⛔ Do not re-declare it here. It moved because a THIRD producer needed it and
+ * could not reach this package: `ObjectQL.update()`/`delete()`'s by-id gate
+ * lives in `packages/objectql`, whose `/core` entry closure is forbidden by
+ * ADR-0076 D2's boundary ratchet from importing `@objectstack/metadata-protocol`
+ * at all. A local copy here would be the second spelling #5138 ruled out.
  */
-export function recordNotFoundError(object: string, id: string | number): Error {
-    const err = new Error(`Record ${id} not found in ${object}`) as Error & {
-        code?: string;
-        status?: number;
-        object?: string;
-    };
-    err.code = 'RECORD_NOT_FOUND';
-    err.status = 404;
-    err.object = object;
-    return err;
-}
+export { recordNotFoundError };
 
 /**
  * A 400 for a `$filter` ARRAY that looks like a filter AST but is not one.

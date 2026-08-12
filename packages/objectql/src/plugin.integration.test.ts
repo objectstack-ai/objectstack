@@ -1374,7 +1374,15 @@ describe('ObjectQLPlugin - Metadata Service Integration', () => {
       const mockDriver = {
         name: 'ro-capture', version: '1.0.0',
         connect: async () => {}, disconnect: async () => {},
-        find: async () => [], findOne: async () => null,
+        find: async () => [],
+        // [#7867] The by-id update path reads its target row before it writes;
+        // `findOne: async () => null` would make this double looser than the
+        // producer and every case below would die at the not-found gate instead
+        // of reaching the strip it measures.
+        findOne: async (_o: string, ast: any) => {
+          const id = ast?.where?.id;
+          return id === undefined || id === null ? null : { id, name: 'stored' };
+        },
         create: async (_o: string, d: any) => ({ id: 'rec-1', ...d }),
         update: async (_o: string, _i: any, d: any) => { updates.push({ ...d }); return { id: _i, ...d }; },
         delete: async () => true, syncSchema: async () => {},
@@ -1438,7 +1446,15 @@ describe('ObjectQLPlugin - Metadata Service Integration', () => {
       const mockDriver = {
         name: 'hist-capture', version: '1.0.0',
         connect: async () => {}, disconnect: async () => {},
-        find: async () => [], findOne: async () => null,
+        find: async () => [],
+        // [#7867] The by-id update path reads its target row before it writes;
+        // `findOne: async () => null` would make this double looser than the
+        // producer and every case below would die at the not-found gate instead
+        // of reaching the strip it measures.
+        findOne: async (_o: string, ast: any) => {
+          const id = ast?.where?.id;
+          return id === undefined || id === null ? null : { id, name: 'stored' };
+        },
         create: async (_o: string, d: any) => ({ id: 'rec-1', ...d }),
         update: async (_o: string, _i: any, d: any) => { updates.push({ ...d }); return { id: _i, ...d }; },
         delete: async () => true, syncSchema: async () => {},

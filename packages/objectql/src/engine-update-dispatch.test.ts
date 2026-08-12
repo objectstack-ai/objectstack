@@ -35,7 +35,18 @@ function makeRecordingDriver() {
     supports: {},
     async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
     async find() { return []; },
-    async findOne() { return null; },
+    // [#7867] Answers the row the by-id branch's not-found gate asks for.
+    // This used to be `return null`, which — now that a by-id update refuses a
+    // ghost id with `RECORD_NOT_FOUND` — would make every by-id case in this
+    // file die at the gate and never reach the driver, i.e. a DOUBLE looser
+    // than the producer hiding the very dispatch verdict the file exists to
+    // observe (#4434/#4550's shape, in the file that pins against it). It
+    // echoes back whatever id it was asked for, so it stays agnostic about the
+    // dispatch: it can never make a `reject` case look like a `by-id` one.
+    async findOne(_o: string, ast: any) {
+      const id = ast?.where?.id;
+      return id === undefined || id === null ? null : { id, title: 'stored' };
+    },
     async create(_o: string, data: Record<string, unknown>) { return { id: 'r1', ...data }; },
     async update(_o: string, id: string, data: Record<string, unknown>) { calls.push({ fn: 'update', arg: id }); return { id, ...data }; },
     async updateMany(_o: string, ast: unknown) { calls.push({ fn: 'updateMany', arg: ast }); return 0; },

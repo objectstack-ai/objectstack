@@ -202,6 +202,69 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
     expect(r.status, 'an authenticated caller must clear the auth gate').not.toBe(401);
   });
 
+  // ── #7867 — what the member's answer actually IS, now that it is asserted ──
+  //
+  // ⚠️ These two cases exist because the one ABOVE cannot fail for them, by
+  // design: its `.not.toBe(401)` is deliberately about anonymity and tolerates
+  // any non-401. For as long as this fixture has existed that tolerance let a
+  // real defect ride through this required 3-shard gate, 23/23 green, while
+  // printing a stack trace on every run:
+  //
+  //   ERROR Update operation failed … Hook 'showcase_audit_task_completion'
+  //   could not evaluate its condition (type: Unknown variable: previous) …
+  //     at unevaluableConditionError (packages/objectql/src/hook-wrappers.ts)
+  //     at _ObjectQL.triggerHooks (packages/objectql/src/engine.ts)
+  //   ERROR [BodyRunner] sandboxed action threw …
+  //
+  // `ACTION` targets a deliberately NON-EXISTENT record id — the anonymous
+  // cases need that, since the 401 floor must land before any lookup — so the
+  // member's request is a by-id write against a ghost id. `ObjectQL.update()`
+  // had no not-found gate on that path, so the write ran on and died on
+  // whichever stage complained first: a `HookConditionError` 400 here, a
+  // required-field 400 on an unhooked object. The 400 class varied with the
+  // object's declarations; the missing 404 was the constant (#7867, from
+  // #5571's reproduction).
+  //
+  // Asserted on the CODE and the STATUS, never on "it threw": the pre-fix
+  // behaviour also produced an error response, so "it failed" cannot tell the
+  // two apart — and 404-vs-400 is exactly what a client's retry and cache
+  // policy read.
+  //
+  // ⛔ The case above is left as it was. Narrowing IT to 404 would make this
+  // file's anonymity proof fail for reasons belonging to another proof, which
+  // is what its own comment warns against.
+  it('[#7867] a member hitting the action with a NONEXISTENT record id gets 404 RECORD_NOT_FOUND', async () => {
+    const r = await stack.apiAs(memberToken, 'POST', ACTION, { params: {} });
+
+    expect(r.status, 'a ghost record id must answer 404, not a 400 from further down the pipeline').toBe(404);
+    const body = (await r.json()) as Record<string, unknown>;
+    const err = (isRecord(body.error) ? body.error : {}) as Record<string, unknown>;
+    expect(err.code).toBe('RECORD_NOT_FOUND');
+    // The dispatcher's wrapper echoes the status it served; both are asserted so
+    // a body that says 404 while the response says 400 cannot pass either.
+    expect(err.httpStatus).toBe(404);
+    // …and specifically NOT the shape this fixture used to tolerate in silence.
+    expect(String(err.message ?? '')).not.toMatch(/not bound for this operation/);
+    expect(String(err.message ?? '')).not.toMatch(/HookConditionError/);
+  });
+
+  it('[#7867] …the SAME answer the REST data surface gives for that same id', async () => {
+    // The comparison that made #7867 measurable in the first place: one id, one
+    // object, one process, one second — and two surfaces that disagreed
+    // (`/actions` → 400, `/data` → 404). Both are asserted here, so they cannot
+    // drift apart again without this gate saying so.
+    const ghostId = ACTION.slice(ACTION.lastIndexOf('/') + 1);
+    const rest = await stack.apiAs(memberToken, 'PATCH', `/data/showcase_task/${ghostId}`, { done: true });
+
+    expect(rest.status).toBe(404);
+    const body = (await rest.json()) as Record<string, unknown>;
+    // `@objectstack/rest` answers the flat envelope; the dispatcher-mounted
+    // `/actions` answers its own wrapper. Different shells, one code — each read
+    // in its own shape, with no `??` chain across the two (#5632's rule, which
+    // this file already enforces for the 401 bodies).
+    expect(body.code).toBe('RECORD_NOT_FOUND');
+  });
+
   // ── /automation (dispatcher-mounted; runtime domains/automation.ts) ─────
   //
   // The gate is DOMAIN-WIDE and sits ahead of the `isServiceServeable` probe on
