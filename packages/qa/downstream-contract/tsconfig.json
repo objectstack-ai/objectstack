@@ -3,12 +3,89 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
+    // `lib` and `types` are here as a CONSEQUENCE of the `paths` block below,
+    // not as a preference. Putting `packages/spec/src` into this program means
+    // tsc now checks spec's own source files, which are written against spec's
+    // own environment (`packages/spec/tsconfig.json`: `lib` ES + DOM +
+    // DOM.Iterable, `types` node). Without them the first run reported two
+    // `TS2591: Cannot find name 'process'` in `spec/src/shared/lazy-schema.ts`
+    // — a verdict about THIS package's compiler environment, not about spec's
+    // backward compatibility. Mirroring spec's own environment keeps every red
+    // this gate produces attributable to the spec contract, which is the only
+    // thing it is allowed to be read as.
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node"],
     "strict": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "rootDir": "."
+    // `rootDir: "."` was removed for the same reason. It emits nothing under
+    // `noEmit`, but it is still enforced: with spec source in the program it
+    // produced 247 x `TS6059: File '.../packages/spec/src/...' is not under
+    // 'rootDir'`, drowning the one error the gate exists to print.
+    //
+    // -- Why `paths` at all (#8021) ----------------------------------------
+    //
+    // This package is the repo's backward-compatibility gate for
+    // `@objectstack/spec` (#2035), and its README gives typecheck a job the
+    // suite next door cannot do: "a removed or NARROWED export fails here".
+    // It declared no `paths`, so under NodeNext tsc resolved
+    // `@objectstack/spec` through the workspace link and the `exports` map --
+    // i.e. `dist/index.d.mts`, A BUILD ARTIFACT. The type half was therefore
+    // rendering a verdict about the last `pnpm build`, exactly as the runtime
+    // half was before #7991 aliased vitest to source.
+    //
+    // Measured on this package, direction predicted before running, one
+    // variable moved -- identical checkout, identical stale `dist`
+    // (`.build-input-hash cf8635aa...`), a narrowing injected into SOURCE only
+    // and no rebuild (`spec/src/integration/connector.zod.ts`, `label:
+    // z.string()` narrowed to `z.number()`, which the frozen `DcConnector`
+    // fixture assigns `'DC HubSpot'` to):
+    //
+    //   without this `paths` block   tsc --noEmit -> exit 0, CLEAN
+    //   with this `paths` block      src/additional-domains.fixtures.ts(35,3):
+    //                                error TS2322: Type 'string' is not
+    //                                assignable to type 'number'.
+    //
+    // Turbo orders `typecheck` after `^build`, so `turbo run typecheck` was
+    // never the failing path and needs no change. What breaks is every path
+    // turbo does not mediate: `pnpm --filter ... typecheck` in the package, an
+    // editor's TS server, or an agent in a tree built at an older commit --
+    // i.e. exactly the paths this gate is re-read on WHILE someone is changing
+    // the spec, when it most needs to be telling the truth.
+    //
+    // -- The shape of the two rules ----------------------------------------
+    //
+    // ONE subpath rule for every namespace, never an enumeration: the fixtures
+    // reach `automation` / `data` / `identity` / `integration` / `security` /
+    // `system` / `ui` today, and a hand-maintained list goes stale silently the
+    // first time a fixture reaches a new one -- silently, because the failure
+    // mode is a green typecheck.
+    //
+    // The anchoring discipline #7991 records for Vite's ALIAS applies here in
+    // a different spelling, so it is worth stating exactly. A tsconfig `paths`
+    // key WITHOUT a `*` is an EXACT match, so the bare `@objectstack/spec`
+    // entry cannot swallow `@objectstack/spec/ui` the way a Vite object-form
+    // alias does (that trap is `ENOTDIR` at run time; see `vitest.config.ts`).
+    // The tsconfig-shaped version of the same mistake is spelling the key
+    // `@objectstack/spec*` -- star NOT preceded by a slash -- which matches
+    // every namespace and folds it onto whatever the target names. That one is
+    // WORSE than the Vite trap, because `spec/src/index.ts` re-exports most of
+    // the namespace surface, so it does not crash: it type-checks the fixtures
+    // against the wrong module and stays green. The pin cases in
+    // `test/source-resolution.pin.test.ts` refuse that spelling by simulating
+    // this block's resolution.
+    //
+    // Both rules are load-bearing and they fail INDEPENDENTLY -- measured,
+    // with the subpath rule left in place and only the bare rule deleted, tsc
+    // was still CLEAN while `src/stack.ts`'s `defineStack` types came from
+    // `dist`. A missing rule here does not announce itself; that is what the
+    // pin cases are for.
+    "paths": {
+      "@objectstack/spec": ["../../spec/src/index.ts"],
+      "@objectstack/spec/*": ["../../spec/src/*/index.ts"]
+    }
   },
   "include": ["src/**/*", "test/**/*"]
 }

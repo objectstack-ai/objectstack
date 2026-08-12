@@ -118,10 +118,13 @@ export interface ApprovalResumeSurface {
    * a decision from being recorded against a run that can never advance
    * (#4420). Read-only; it never consumes the suspension.
    *
-   * Distinct from {@link getRun}, which reports on the execution LOG: a run
-   * suspended by a PREVIOUS process resolves to `null` there even when its
-   * state is durable, so it cannot tell "waiting for a human" from "dead".
-   * This asks the suspension store itself.
+   * Still distinct from {@link getRun}, but no longer on the axis this comment
+   * used to name: since #8050 `getRun` also sees a run suspended by a PREVIOUS
+   * process (it resolved `null` there before, unable to tell "waiting for a
+   * human" from "dead"). The difference that remains is the one a pre-flight
+   * turns on — this asks the suspension store and REJECTS when it cannot be
+   * read, where `getRun` degrades an outage to `null`. A caller about to WRITE
+   * must not accept a degraded read.
    *
    * Rejects when the durable store cannot be read — existence is then
    * unknown, and callers must not read an outage as a dead run. Optional: an
@@ -3023,10 +3026,14 @@ export class ApprovalService implements IApprovalService {
    * class of failure stayed silent.
    *
    * It also could not have answered the question even if it looked: its
-   * liveness oracle is `getRun`, which reads the execution LOG, and after a
-   * restart that returns `null` for a perfectly ALIVE suspended run. It treats
-   * `null` as alive (conservative, correct) — but that means it has no way to
-   * say "this run is really gone".
+   * liveness oracle is `getRun`, which treats both `null` and `paused` as alive
+   * (conservative, correct) — so it has no way to say "this run is really
+   * gone". (Until #8050 that oracle was weaker still: after a restart it
+   * returned `null` for a perfectly ALIVE suspended run, so "alive" and
+   * "unknown" were the same answer. It now reports such a run as `paused`,
+   * which does not change any branch here — both already meant "leave alone" —
+   * but it is why the sweep below needs `hasSuspendedRun` as a second oracle
+   * rather than a sharper reading of the first.)
    *
    * So this uses BOTH oracles, and a row must fail both to be reported:
    *

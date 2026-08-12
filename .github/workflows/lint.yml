@@ -333,6 +333,22 @@ jobs:
       - name: Normalized metadata-type guard
         run: pnpm check:meta-type-normalized
 
+      # Filter-slot wire-alias parity guard (#8002). The ONE filter slot is
+      # spelled four ways, declared in TWO packages: `where`/`filter` come from
+      # the spec table, while the wire-only `filters`/`$filter` are declared in
+      # `metadata-protocol` (no schema declares them) and named LITERALLY in
+      # `packages/rest`, which gates the slot's arity at the querystring ingress
+      # (#7390). A runtime import cannot join them — the normalizer's table is a
+      # module-private const, and metadata-protocol is only a devDependency of
+      # rest — so a fifth wire-only spelling would fold correctly and be
+      # silently ungated, putting repetition on it back on the misdiagnosis
+      # #7390 removed. The REST side alone is pinned by that card's §5 test;
+      # this covers the half it cannot reach. AST-based, and an unreadable
+      # declaration is RED rather than an empty corpus reported as a pass
+      # (#4690). Runs its own --self-test first.
+      - name: Filter-slot wire-alias parity guard
+        run: pnpm check:filter-alias-parity
+
       # Init-service declaration guard (#4471, ADR-0116). The kernel's ordering
       # contract (dependencies / optionalDependencies / requiresServices /
       # providesServices) was complete but VOLUNTARY: a plugin that resolves
@@ -1080,6 +1096,42 @@ jobs:
       # script header on layering.
       - name: Check the decision frame is in sync across its four copies
         run: pnpm check:skill-frame-sync
+
+      # The SECOND skill-frame gate — and deliberately only HALF of it (#8110).
+      #
+      # `pnpm check:skill-frame-freshness` is `--self-test && the scan`, and only the
+      # SCAN half is CI-hostile: it asks "is THIS WORKING TREE's frame current with
+      # origin/main?", which on a fresh merge ref is a tautological green, and on any
+      # PR that legitimately edits the frame would be a false red — "differs from main"
+      # is that PR's whole purpose. That script's own header ("WHERE IT RUNS") argues
+      # it, and the scan stays out of CI for exactly that reason. It is NOT wired here.
+      #
+      # The `--self-test` half is a different animal. It DERIVES a coherent two-axis
+      # specimen from this tree's own frame documents, commits it and the real
+      # documents into throwaway git repos whose `origin` points at a path that does
+      # not exist, and asserts 12 verdicts against the gate's own code. No network, no
+      # origin/main, no history: measured green in a `--depth 1` clone carrying no
+      # remote-tracking ref at all, in ~1.3s. So the half that CANNOT run in CI was
+      # keeping the half that CAN out of it, and the price was measured on #8024 —
+      # the fixture had stranded TWICE, neither time noticed, while the gate sat in
+      # the gate list reading as coverage and protecting nothing.
+      #
+      # This step cannot redden a PR that edits the frame on purpose: the specimen is
+      # re-derived from whatever the frame currently is, so a reword, a reflow or a
+      # principles-only rewrite carries the fixture with it (verified adversarially
+      # before wiring this — rewording axis prose across all three frame files keeps
+      # both gates green). What DOES redden it is a STRUCTURAL change — an axis added,
+      # removed, or its declaring sentence reworded past the shared anchors — and that
+      # reddens `check:skill-frame-sync` directly above with the same diagnosis, which
+      # the self-test's own failure message names as the thing to fix first. No PR can
+      # reach this step red with the step above green.
+      #
+      # Invoked as `node`, NOT `pnpm check:skill-frame-freshness`, precisely because
+      # that npm script would drag the scan half in with it — the same shape as the
+      # `dev` chain calling check-dev-prereqs.mjs directly rather than through its
+      # pnpm script (see that script's header).
+      - name: Self-test the skill-frame freshness gate (self-test half only, never the scan)
+        run: node scripts/check-skill-frame-freshness.mjs --self-test
 
       # The third gate over SKILL.md, covering the one line the other two cannot see
       # (#5331). check:skill-docs / check:skill-refs compare generated artifacts and
