@@ -62,7 +62,7 @@ import {
 } from '@objectstack/spec/data';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 import { applyConversionsToStoredItem, type ConversionNotice } from '@objectstack/spec';
-import { type FormView, isAggregatedViewContainer } from '@objectstack/spec/ui';
+import { type FormView, isAggregatedViewContainer, expandViewContainer } from '@objectstack/spec/ui';
 import { METADATA_FORM_REGISTRY, CORE_SERVICE_PROVIDER, serviceUnavailableMessage, inProcessServiceMessage } from '@objectstack/spec/system';
 import { DEFAULT_METADATA_TYPE_REGISTRY, getMetadataTypeSchema, getMetadataTypeActions, getMetadataCreateSeed, PROTOCOL_VERSION } from '@objectstack/spec/kernel';
 import {
@@ -9556,7 +9556,85 @@ export class ObjectStackProtocolImplementation implements
         if (!registry || typeof registry.registerItem !== 'function') return false;
         const artifact = this.lookupArtifactItem(type, (data as any).name, options.packageId ?? undefined);
         registry.registerItem(type, mergeArtifactProtection(data, artifact), 'name' as any);
+        this.hydrateExpandedViewItems(type, data, options, registry);
         return true;
+    }
+
+    /**
+     * [#7736] Expand an aggregated `defineView` container that arrived through
+     * the RUNTIME door into the same independent ViewItems the two SOURCE
+     * registrars produce — at the one hydration choke point all three runtime
+     * callers already share.
+     *
+     * "Object has-many View" (ADR-0017 §2, §3.2) makes container ingestion
+     * DUAL-READ: register the container under the bare `<object>` key for
+     * back-compatible single-item reads, AND register every expanded ViewItem
+     * under `<object>.<viewKey>`, because only the expanded items carry the
+     * `viewKind` + `object` pair that every object-bound read path filters on
+     * (`GET /meta/view?object=` in `rest-server.ts`, `getViewsByObject()` in
+     * `metadata-manager.ts`). Both source registrars do exactly this — the
+     * ObjectQL boot loop (`engine.ts`, `key === 'views'`) and the metadata
+     * artifact/HMR loader (`plugin.ts`, `isAggregatedViewContainer`) — and the
+     * runtime door did not, so a container authored against a writable runtime
+     * package was stored, badged `_diagnostics.valid: true`, and then served by
+     * nothing: `getMetaItems` DROPS containers from enumeration (the
+     * canonical-shape filter below) on the stated assumption that "the
+     * registrar expands it", and for a runtime-written row no registrar ever
+     * had. Measured before the fix: the stored container expands cleanly to two
+     * items that WOULD match the switcher, and both object-bound exits answered
+     * zero.
+     *
+     * Here rather than at either read exit deliberately. There are two
+     * independent object-bound readers — the REST route reads through
+     * `getMetaItems`, while `getViewsByObject()` reads `MetadataManager.list`
+     * — so expanding at one of them fixes the card's literal repro and leaves
+     * its sibling exit answering empty. This function is the ONE place all
+     * three runtime hydration callers (boot `loadMetaFromDb`, read-side
+     * `getMetaItems`, write-through `applyRegistryWriteThrough`) already
+     * funnel through, so one expansion serves every reader, survives a restart,
+     * and keeps read-your-writes — the "single, universally-applied location"
+     * #7163 asked for after the same defect was fixed one seam further in.
+     *
+     * The canonical-shape filter in `getMetaItems` is deliberately left alone:
+     * its invariant ("a container's expanded items are also present") is what
+     * was false here, and this restores it rather than loosening the filter —
+     * which would surface the legacy wrapper shape to every list consumer and
+     * still show the switcher nothing, since a container carries no `viewKind`.
+     *
+     * Object-name derivation mirrors `plugin.ts` (`list.data.object` →
+     * `form.data.object`), falling back to the row's own name — for a container
+     * the metadata door's save name IS the object. No derivable object means no
+     * expansion, exactly as the artifact loader already decides.
+     */
+    private hydrateExpandedViewItems(
+        type: string,
+        data: unknown,
+        options: { packageId?: string | null; organizationId: string | null },
+        registry: any,
+    ): void {
+        if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'view') return;
+        if (!isAggregatedViewContainer(data)) return;
+        const container = data as Record<string, any>;
+        const viewObject =
+            container?.list?.data?.object
+            ?? container?.form?.data?.object
+            ?? (typeof container.name === 'string' ? container.name : undefined);
+        if (!viewObject) return;
+        for (const vi of expandViewContainer(viewObject, container)) {
+            // Carry the container's package provenance onto each expanded item
+            // so the package-disable filter and ADR-0048 artifact scoping judge
+            // them by the same owner the container has.
+            const item: Record<string, unknown> = { ...(vi as any) };
+            if (container._packageId !== undefined && item._packageId === undefined) {
+                item._packageId = container._packageId;
+            }
+            const viArtifact = this.lookupArtifactItem(
+                type,
+                vi.name,
+                (item._packageId as string | undefined) ?? options.packageId ?? undefined,
+            );
+            registry.registerItem(type, mergeArtifactProtection(item, viArtifact), 'name' as any);
+        }
     }
 
     /**
