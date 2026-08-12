@@ -687,6 +687,13 @@ export interface WidgetLike {
   id?: string;
   title?: string;
   description?: string;
+  /**
+   * The renderer-extras bag (`DashboardWidgetOptionsSchema`). `translateDashboard`
+   * writes exactly one key into it — `description`, the metric widget's
+   * sub-caption slot — when the bundle carries a
+   * `dashboards.<name>.widgets.<id>.subCaption` entry (#5428 item 4, #7862).
+   */
+  options?: Record<string, any>;
   [key: string]: any;
 }
 
@@ -717,7 +724,7 @@ function lookupWidgetAttr(
   bundle: TranslationBundle | undefined,
   dashboardName: string,
   widgetId: string,
-  attr: 'title' | 'description',
+  attr: 'title' | 'description' | 'subCaption',
   opts?: ResolveOptions,
 ): string | undefined {
   if (!bundle) return undefined;
@@ -732,8 +739,15 @@ function lookupWidgetAttr(
 /**
  * Apply the active locale to a dashboard metadata document — translates the
  * dashboard's `label` / `description` and each widget's `title` /
- * `description` against `dashboards.<name>.widgets.<id>.*`. The input document
- * is not mutated.
+ * `description` / `subCaption` against `dashboards.<name>.widgets.<id>.*`.
+ * The input document is not mutated.
+ *
+ * `subCaption` overlays the widget's `options.description` — the metric
+ * widget's sub-caption, a DIFFERENT authored field from `widget.description`
+ * (#5428 item 4: two authored fields, two keys; #7862). The `description`
+ * key never reaches `options.description`, and `subCaption` never reaches
+ * `widget.description`; the other `options` keys are carried through
+ * untouched.
  */
 export function translateDashboard<T extends DashboardLike>(
   doc: T,
@@ -755,6 +769,8 @@ export function translateDashboard<T extends DashboardLike>(
         if (title) next.title = title;
         const desc = lookupWidgetAttr(bundle, name, w.id, 'description', opts);
         if (desc) next.description = desc;
+        const subCaption = lookupWidgetAttr(bundle, name, w.id, 'subCaption', opts);
+        if (subCaption) next.options = { ...w.options, description: subCaption };
         return next;
       })
     : doc.widgets;

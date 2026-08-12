@@ -895,6 +895,59 @@ describe('translation unknown-key strictness (#4001)', () => {
   });
 
   // ──────────────────────────────────────────────────────────────────────────
+  // #7862 — `dashboards.<name>.widgets.<id>.subCaption`, the metric widget's
+  // sub-caption (`options.description`). #5428 item 4: two authored fields,
+  // two keys — `description` translates `widget.description`, `subCaption`
+  // translates `widget.options.description`; sharing one key is forbidden.
+  // ──────────────────────────────────────────────────────────────────────────
+  describe('dashboard widget sub-caption (#7862)', () => {
+    const parse = (widgets: unknown) =>
+      TranslationDataSchema.safeParse({ dashboards: { sales: { widgets } } });
+
+    it('accepts `subCaption` on the widget node, alongside title/description', () => {
+      const result = parse({
+        rev: { title: '营收', description: '本季度确认的营收', subCaption: '较上季度' },
+      });
+      expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+    });
+
+    it('keeps `title`/`description` byte-identical through the parse', () => {
+      const body = { rev: { title: 'Revenue', description: 'Recognized revenue this quarter' } };
+      const result = parse(body);
+      expect(result.success).toBe(true);
+      expect((result as { success: true; data: any }).data.dashboards.sales.widgets)
+        .toEqual(body);
+    });
+
+    it('stays `.strict()` — an invented key is still refused, with substance', () => {
+      const result = parse({ rev: { footnote: 'x' } });
+      expect(result.success).toBe(false);
+      const message = result.error?.issues.find((i) => i.code === 'unrecognized_keys')?.message ?? '';
+      expect(message).toContain('this widget translation');
+      expect(message).toContain('`footnote`');
+    });
+
+    it('sends `subtitle` to `subCaption`, not to `description`', () => {
+      // On a metric widget the string an author calls the "subtitle" is the
+      // sub-caption under the number (`options.description`). Pointing it at
+      // `description` would steer authors to precisely the shared key the
+      // #5428 ruling forbids (「两个作者字段两个 key」).
+      const result = parse({ rev: { subtitle: '较上季度' } });
+      expect(result.success).toBe(false);
+      const message = result.error?.issues.find((i) => i.code === 'unrecognized_keys')?.message ?? '';
+      expect(message).toContain('`subtitle` → `subCaption`');
+      expect(message).not.toContain('`subtitle` → `description`');
+    });
+
+    it('suggests `subCaption` for a near-miss spelling', () => {
+      const result = parse({ rev: { subCaptoin: '较上季度' } });
+      expect(result.success).toBe(false);
+      expect(result.error?.issues.find((i) => i.code === 'unrecognized_keys')?.message)
+        .toContain('→ `subCaption`');
+    });
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
   // #7646 — `flows.<name>.screens.<nodeId>`, the screen-flow wizard's copy
   // ──────────────────────────────────────────────────────────────────────────
   describe('screen-flow copy (#7646)', () => {
@@ -1087,7 +1140,7 @@ describe('translation unknown-key strictness (#4001)', () => {
       apps: { crm: { label: 'CRM', navigation: { sales: { label: 'Sales' } } } },
       messages: { 'common.save': 'Save' },
       globalActions: { export_csv: { label: 'Export', params: { format: { label: 'Format' } } } },
-      dashboards: { sales: { label: 'Sales', widgets: { rev: { title: 'Revenue' } } } },
+      dashboards: { sales: { label: 'Sales', widgets: { rev: { title: 'Revenue', subCaption: 'vs last quarter' } } } },
       pages: { home: { label: 'Home', title: 'Welcome' } },
       flows: { lead_conversion: { label: 'Convert Lead', screens: { details: { title: 'Details', fields: { name: { label: 'Name', placeholder: 'Enter a name' } } } } } },
       settings: { mail: { title: 'Mail', keys: { host: { label: 'Host' } } } },

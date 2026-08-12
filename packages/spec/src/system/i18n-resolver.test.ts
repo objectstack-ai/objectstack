@@ -871,6 +871,67 @@ describe('translateDashboard', () => {
     expect(out.widgets[1].title).toBe('Other');
   });
 
+  // #7862 — `subCaption` overlays the metric widget's `options.description`,
+  // a DIFFERENT authored field from `widget.description` (#5428 item 4: two
+  // authored fields, two keys).
+  describe('widget subCaption (#7862)', () => {
+    const subBundle: TranslationBundle = {
+      'zh-CN': {
+        dashboards: {
+          system_overview: {
+            widgets: {
+              widget_total_users: {
+                title: '用户总数',
+                description: '系统中注册的用户总数',
+                subCaption: '较上月',
+              },
+            },
+          },
+        },
+      },
+    };
+    const metricDashboard = {
+      name: 'system_overview',
+      widgets: [
+        {
+          id: 'widget_total_users',
+          type: 'metric',
+          title: 'Total Users',
+          description: 'Total registered users',
+          options: { description: 'vs last month', sortBy: 'created' },
+        },
+        { id: 'widget_other', title: 'Other', options: { description: 'untouched extra' } },
+      ],
+    };
+
+    it('overlays `options.description` and carries the other options keys through', () => {
+      const out = translateDashboard(metricDashboard, subBundle, { locale: 'zh-CN' });
+      expect(out.widgets[0].options).toEqual({ description: '较上月', sortBy: 'created' });
+    });
+
+    it('keeps the two authored fields on their own keys — `description` never reaches `options.description`, `subCaption` never reaches `widget.description`', () => {
+      const out = translateDashboard(metricDashboard, subBundle, { locale: 'zh-CN' });
+      expect(out.widgets[0].description).toBe('系统中注册的用户总数');
+      expect(out.widgets[0].options?.description).toBe('较上月');
+    });
+
+    it('leaves `options` of a widget without a subCaption entry untouched (same reference semantics as title)', () => {
+      const out = translateDashboard(metricDashboard, subBundle, { locale: 'zh-CN' });
+      expect(out.widgets[1].options).toEqual({ description: 'untouched extra' });
+    });
+
+    it('does not mutate the input document', () => {
+      translateDashboard(metricDashboard, subBundle, { locale: 'zh-CN' });
+      expect(metricDashboard.widgets[0].options.description).toBe('vs last month');
+    });
+
+    it('creates the options bag when the bundle carries a subCaption and the widget has none — mirroring how a bundle-only `title` renders', () => {
+      const bare = { name: 'system_overview', widgets: [{ id: 'widget_total_users' }] };
+      const out = translateDashboard(bare, subBundle, { locale: 'zh-CN' });
+      expect(out.widgets[0].options).toEqual({ description: '较上月' });
+    });
+  });
+
   it('works through translateMetadataDocument with dashboard type', () => {
     const out = translateMetadataDocument('dashboard', dashboard, bundle, { locale: 'zh-CN' });
     expect(out.label).toBe('系统概览');
