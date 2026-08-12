@@ -28,7 +28,7 @@ import {
     type ObjectSchemaMaskExit,
     type ObjectSchemaMaskOutcome,
 } from '@objectstack/metadata-core/testing';
-import { OBJECT_SCHEMA_MASK_DISABLE_ENV } from '@objectstack/metadata-core';
+import { OBJECT_SCHEMA_MASK_DISABLE_ENV, isObjectSchemaMaskExempt } from '@objectstack/metadata-core';
 import { HttpDispatcher } from '../http-dispatcher.js';
 
 const account = () => JSON.parse(JSON.stringify(FLS_CONTRACT_OBJECT));
@@ -192,4 +192,56 @@ describe('[ADR-0106 D6 tier 3] a masking fault is not a lookup miss', () => {
         expect(getObject).not.toHaveBeenCalled();
         expect(JSON.stringify(res.response.body)).not.toContain('salary_grade');
     });
+});
+
+/**
+ * [ADR-0106 D5(4) / #6599] `GET /metadata/_drafts` — the dispatcher face of the
+ * same authoring gate the REST `/meta/_drafts` route carries
+ * (`packages/rest/src/meta-object-fls.test.ts`). Not masked like the five
+ * resolvers above: a pending-drafts list is an AUTHORING surface, so it GATES
+ * per caller on the SAME D4 exemption predicate the mask uses
+ * (`isObjectSchemaMaskExempt`) and 403s a non-author.
+ *
+ * Driven through the SAME `OBJECT_SCHEMA_MASK_CASES` table as its REST twin —
+ * the point the card makes about a two-face contract: one shared case list, so
+ * the two transports cannot drift on "who is an author" without a red test.
+ * Separate block, not one more `EXITS` row, for the same reason the REST twin
+ * is: the gate's contract (403 for a restricted caller) is not the mask's
+ * (a masked document), so `assertObjectSchemaMaskCase` does not apply.
+ *
+ * The runtime transport derives its ADR-0112 code from the 403 status
+ * (`PERMISSION_DENIED`), matching `_migrate-stored`'s next-door precedent — the
+ * deliberate spelling difference from the REST twin's `FORBIDDEN`, not a drift.
+ */
+async function runDraftsExit(testCase: ObjectSchemaMaskCase) {
+    const dispatcher = make({
+        protocol: {
+            // Serves the pending object draft verbatim — full `fields`, sensitive
+            // one included — so an author reads it and a non-author must be
+            // refused BEFORE it is reached.
+            listDrafts: vi.fn(async () => [{ type: 'object', name: 'account', item: account() }]),
+        },
+    });
+    return dispatcher.handleMetadata('/_drafts', ctxFor(testCase), 'GET');
+}
+
+describe('[ADR-0106 D5(4)] GET /metadata/_drafts — per-caller authoring gate', () => {
+    for (const testCase of OBJECT_SCHEMA_MASK_CASES) {
+        it(testCase.id, async () => {
+            const res = await runDraftsExit(testCase);
+            const wire = JSON.stringify(res.response.body);
+
+            if (isObjectSchemaMaskExempt(testCase.context)) {
+                // An author reads the drafts unfiltered — the gate masks nothing.
+                expect(res.response.status).toBe(200);
+                expect(wire).toContain('salary_grade');
+            } else {
+                // ADR-0112 envelope: code AND status, not just "it 403s".
+                expect(res.response.status).toBe(403);
+                expect(res.response.body?.error?.code).toBe('PERMISSION_DENIED');
+                // The refusal discloses nothing — no hidden field leaks out.
+                expect(wire).not.toContain('salary_grade');
+            }
+        });
+    }
 });

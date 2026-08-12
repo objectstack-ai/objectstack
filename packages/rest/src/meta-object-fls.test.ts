@@ -37,6 +37,7 @@ import {
     type ObjectSchemaMaskExit,
     type ObjectSchemaMaskOutcome,
 } from '@objectstack/metadata-core/testing';
+import { isObjectSchemaMaskExempt } from '@objectstack/metadata-core';
 import { RestServer } from './rest-server';
 
 const ACCOUNT = FLS_CONTRACT_OBJECT as unknown as Record<string, unknown>;
@@ -84,6 +85,10 @@ function boot(opts: BootOptions) {
         createData: vi.fn().mockResolvedValue({ id: '1' }),
         updateData: vi.fn().mockResolvedValue({}),
         deleteData: vi.fn().mockResolvedValue({ success: true }),
+        // [#6599] `_drafts` serves whatever `listDrafts` returns, verbatim — a
+        // pending object draft carries its full `fields`, including the
+        // sensitive one the authoring gate exists to withhold from non-authors.
+        listDrafts: vi.fn(async () => [{ type: 'object', name: 'account', item: account() }]),
     };
     if (opts.cached) {
         protocol.getMetaItemCached = vi.fn(async () => ({
@@ -360,4 +365,58 @@ describe('[ADR-0106 D6] failure postures on the wire', () => {
         expect(res.statusCode).toBe(503);
         expect(body?.item).toBeUndefined();
     });
+});
+
+/**
+ * [ADR-0106 D5(4) / #6599] `GET /meta/_drafts` — the outlet the #3682 sweep left
+ * uncovered. It is NOT masked like its five siblings above: a draft list is an
+ * AUTHORING surface (the console's pending-changes view), so it GATES per caller
+ * on the SAME D4 exemption predicate the mask uses (`isObjectSchemaMaskExempt`)
+ * and 403s a non-author, rather than projecting fields.
+ *
+ * Driven through the SAME `OBJECT_SCHEMA_MASK_CASES` the mask exits use — not a
+ * bespoke case list — so the gate cannot silently diverge from the mask's notion
+ * of "who is an author", and its dispatcher twin
+ * (`packages/runtime/src/domains/meta-object-fls.test.ts`) drives the identical
+ * table. This is a SEPARATE block, not one more `EXITS` row, because the gate's
+ * contract differs from the mask's: `assertObjectSchemaMaskCase` expects a
+ * masked document for a restricted caller, where this outlet expects a 403.
+ *
+ * The verdict is derived, not hand-tabulated: `isObjectSchemaMaskExempt(context)`
+ * decides allow-vs-refuse for every case, so a NEW exemption principal added to
+ * the shared table flows into this gate automatically. Two consequences worth
+ * pinning fall out of that:
+ *   - `unrestricted-caller/byte-identical` (readable = every field, but NO
+ *     authoring capability) is a 403 here — the gate is stricter than the mask,
+ *     which is the whole point of route (a);
+ *   - `masking-disabled/D8` is STILL a 403 — the authoring gate is independent
+ *     of the per-field-mask escape hatch.
+ */
+const DRAFTS_PATH = '/api/v1/meta/_drafts';
+
+describe('[ADR-0106 D5(4)] GET /meta/_drafts — per-caller authoring gate', () => {
+    for (const testCase of OBJECT_SCHEMA_MASK_CASES) {
+        it(testCase.id, async () => {
+            const { rest } = boot({ testCase });
+            const res = mockRes();
+            await routeFor(rest, DRAFTS_PATH)!.handler(
+                { params: {}, query: {}, headers: {} }, res,
+            );
+            const body = res.json.mock.calls.at(-1)?.[0];
+            const wire = JSON.stringify(body);
+
+            if (isObjectSchemaMaskExempt(testCase.context)) {
+                // An author reads the drafts unfiltered — the gate masks nothing.
+                expect(res.statusCode).toBe(200);
+                expect(wire).toContain('salary_grade');
+            } else {
+                // ADR-0112 envelope: code AND status, not just "it 403s".
+                expect(res.statusCode).toBe(403);
+                expect(body?.error?.code).toBe('FORBIDDEN');
+                // The refusal discloses nothing — no hidden field leaks through
+                // the 403 body, which is the disclosure this gate closes.
+                expect(wire).not.toContain('salary_grade');
+            }
+        });
+    }
 });
