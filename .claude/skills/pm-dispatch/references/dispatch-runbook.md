@@ -8,6 +8,15 @@
 一次性云卡用 `create_session`,⛔ 不用 create_trigger+fire(维护者 2026-08-07 拍
 板;trigger 流只留给定时/重复型)。
 
+**适用面与取舍论证(维护者 2026-08-12 裁定,覆盖「M 及以上默认云卡」)**:S 级机
+械 + M ⇒ `mode:subagent`(PM 容器内并行、逐卡显式 `model` 分档);云只保留给 L/XL、
+必须活过 PM 会话的工作、浏览器/dogfood 验证、以及逐卡判断的 build 重 M 卡 —— 共享
+容器争用只来自 build+test,docs/指令类 M 卡碰不到它。论证入档:云有三项固定税 ——
+归档债(实测一个座位积欠 11 个遗忘容器)、create/poke/subscribe/collect 派发收集管
+线、逐卡容器+clone 启动;subagent 的唯一实成本是「随 PM 会话死」,已由
+branch-early、draft-PR 时点报告、transcript 复活与 worktree 接手协议兜底。归档义务
+因此只落在云卡上,遗忘容器面收窄到 L 级派发。
+
 1. **授权面随 source,不随环境**:trigger 拉起的会话没有仓库授权(只能只读勘察);
    `create_session` 带 `source_url` 的会话出生即持推送授权。同时带
    `outcome_branch`(= 认领分支)、显式 `model`(trigger 流不可指模型)、`title`
