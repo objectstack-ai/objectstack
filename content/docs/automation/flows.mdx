@@ -684,6 +684,25 @@ GET /api/v1/automation/{flow}/runs/{runId}         # one run
 GET /api/v1/automation/{flow}/runs/{runId}/screen  # re-fetch a paused screen
 ```
 
+<Callout type="warn" title="The two run-state reads require read access to sys_automation_run">
+A run carries the flow's variable snapshot and its `output` — which is to say
+the triggering record's fields. So `GET /runs` and `GET /runs/{runId}` are gated
+on the same grant the `sys_automation_run` object read answers with, not on
+authentication alone; a caller without it gets `403 PERMISSION_DENIED`. Grant it
+to the identities your operator tooling and monitoring run as:
+
+```ts
+permissions: [{
+  name: 'automation_operator',
+  objects: { sys_automation_run: { allowRead: true } },
+}]
+```
+
+The screen re-fetch is deliberately **not** gated this way — it serves the end
+user the flow paused for, and its `resume` counterpart answers on the pause's
+own `resumeAuthority` instead.
+</Callout>
+
 Each run's `steps[]` records every executed node — including loop iterations,
 parallel branch bodies, and try/catch region steps — which the Studio flow
 designer surfaces, nested by iteration / branch / handler, in its **Runs** side
@@ -1238,8 +1257,8 @@ curl -b cookies.txt -X POST \
 | Endpoint | Purpose |
 |:---|:---|
 | `POST /api/v1/automation/:name/trigger` | Start a flow (canonical) |
-| `GET /api/v1/automation/:name/runs` | List runs (`?limit`, `?cursor`, `?status` — narrow to one execution status; an undeclared value is refused `400 VALIDATION_FAILED`) |
-| `GET /api/v1/automation/:name/runs/:runId` | One run's detail (404 `Execution not found`) |
+| `GET /api/v1/automation/:name/runs` | List runs (`?limit`, `?cursor`, `?status` — narrow to one execution status; an undeclared value is refused `400 VALIDATION_FAILED`). Requires read on `sys_automation_run` — see [Observing runs](#observing-runs) |
+| `GET /api/v1/automation/:name/runs/:runId` | One run's detail (404 `Execution not found`). Requires read on `sys_automation_run` — see [Observing runs](#observing-runs) |
 | `POST /api/v1/automation/:name/runs/:runId/resume` | Resume a paused run — body `{ inputs, output, branchLabel }` |
 | `GET /api/v1/automation/:name/runs/:runId/screen` | The pending screen of a screen-flow run |
 

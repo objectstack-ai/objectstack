@@ -176,6 +176,25 @@ export interface HttpDispatcherOptions {
 }
 
 /**
+ * `services.search`'s in-process remedy string (#7939), kept out of the
+ * shared `inProcessServiceMessage('search')` path on purpose: that helper's
+ * wording ("Kernel-internal service — consumed in-process via the service
+ * registry") is written for `cache`/`queue`/`job` — kernel-managed contracts
+ * with no HTTP surface *by construction*. A registered search service is the
+ * opposite kind of occupant: an external engine (Elasticsearch/Meilisearch,
+ * per `core-services.zod.ts`'s `REMEDY_DETAIL['search']`) that simply has no
+ * *dispatcher* route to advertise. Reusing the shared sentence would call an
+ * external engine "kernel-internal", which is false; this says the true thing
+ * instead, and cross-references `capabilities.search` (a different question
+ * about the same slot — see #7602 / PR #7937) rather than leaving readers to
+ * wonder why an occupied slot never got a route.
+ */
+const SEARCH_IN_PROCESS_MESSAGE =
+    "Search engine registered, but the dispatcher has no HTTP route for the 'search' slot — "
+    + 'no dedicated search endpoint is mounted on its behalf. Cross-object search, where a host '
+    + 'serves it, is reported separately by capabilities.search.';
+
+/**
  * The HTTP dispatch engine — translates an inbound (method, path, body, ctx)
  * request into a kernel response. Used directly by the framework's HTTP adapters
  * (express / fastify / nextjs / nestjs / nuxt / sveltekit / hono) and plugin-msw,
@@ -1250,13 +1269,20 @@ export class HttpDispatcher {
         // reduced capability (contrast `realtime` below, whose advertised
         // capability IS the missing surface). Message written once in
         // `@objectstack/spec/system` so both discovery builders agree.
-        const svcInProcess = (name: string, svc: unknown) => {
+        // `fallbackMessage` lets a slot opt out of the shared "Kernel-internal
+        // service" wording (#7939): that sentence is true for cache/queue/job
+        // — kernel-managed, in-process by construction — but false for a slot
+        // whose occupant is an external engine with no dispatcher surface
+        // (`search`: Elasticsearch/Meilisearch, per `core-services.zod.ts`'s
+        // REMEDY_DETAIL). The shared string still applies wherever it reads
+        // true; only the slot that would misdescribe itself with it overrides.
+        const svcInProcess = (name: string, svc: unknown, fallbackMessage?: string) => {
             const self = svc ? readServiceSelfInfo(svc) : undefined;
             return {
                 enabled: true,
                 status: self?.status ?? ('available' as const),
                 handlerReady: false,
-                message: self?.message ?? inProcessServiceMessage(name),
+                message: self?.message ?? fallbackMessage ?? inProcessServiceMessage(name),
             };
         };
 
@@ -1567,7 +1593,22 @@ export class HttpDispatcher {
                 // occupant's behalf — which is the same fact `capabilities
                 // .search` states above, said about the slot instead of about
                 // the host's HTTP surface.
-                search:         searchRegistered ? svcAvailable(undefined, undefined, searchSvc) : svcUnavailable('search'),
+                //
+                // [#7939] But `svcAvailable` was still the wrong builder for a
+                // filled slot: it defaults an unmarked occupant to
+                // `handlerReady: true`, which this map's own contract (above)
+                // reserves for "the dispatcher has a real, bound handler for
+                // this route" — and the dispatcher has none for search (no
+                // `route-ledger.ts` entry, no branch here, `route` is always
+                // `undefined`). That is exactly the contradiction #4318 closed
+                // for `cache`/`queue`/`job` with `svcInProcess`; `search` was
+                // the one slot of that shape #4318 didn't reach, latent only
+                // because no host has ever registered one (`CORE_SERVICE_PROVIDER
+                // ['search'] === null`). Fixed the same way, with its own
+                // remedy string — see `svcInProcess`'s fallbackMessage note.
+                search:         searchRegistered
+                                    ? svcInProcess('search', searchSvc, SEARCH_IN_PROCESS_MESSAGE)
+                                    : svcUnavailable('search'),
             },
             locale,
         };
