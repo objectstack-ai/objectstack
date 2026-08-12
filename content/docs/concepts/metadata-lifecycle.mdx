@@ -74,7 +74,7 @@ any production path: every `new LayeredRepository(...)` call site is a test
 When a user edits a view in Studio:
 
 1. Studio calls `PUT /api/v1/meta/view/case_grid` (REST).
-2. `protocol.ts:saveMetaItem()` runs the two-tier gate (see [overlay whitelist](#overlay-whitelist)): an item that already exists as a packaged artifact requires `MetadataTypeRegistryEntry.allowOrgOverride`; a brand-new item requires `allowRuntimeCreate` **or** `allowOrgOverride`.
+2. `protocol.ts:saveMetaItem()` runs the two-tier gate (see [overlay whitelist](#overlay-whitelist-shared-db-tenancy-invariant)): an item that already exists as a packaged artifact requires `MetadataTypeRegistryEntry.allowOrgOverride`; a brand-new item requires `allowRuntimeCreate` **or** `allowOrgOverride`.
 3. If allowed, the call lands on `MetadataRepository.put(ref, body, { parentVersion, actor })`.
 4. The repository:
    - Verifies `parentVersion` matches the current head (`ConflictError` on mismatch).

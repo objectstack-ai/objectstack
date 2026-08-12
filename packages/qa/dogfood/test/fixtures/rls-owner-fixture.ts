@@ -86,11 +86,19 @@ export const ownerScopedMemberSet: PermissionSet = PermissionSetSchema.parse({
 });
 
 /**
- * RED. Owner policy on SELECT only — reads stay owner-scoped (member still
- * can't see others' notes) but no UPDATE/DELETE policy applies, so
- * `computeRlsFilter` returns null for the write op and the pre-image check is
- * skipped → the by-id write lands. The member mutated a row it could not read:
- * the #1994 hole class. Expected runner verdict: `rls-hole`.
+ * Owner policy on SELECT only — the #1994 hole class's authoring shape, and
+ * the shape QA #7637 measured live on the stock showcase (#7665).
+ *
+ * Until #7665 this variant was the automated RED proof: no UPDATE/DELETE
+ * policy applied, `computeRlsFilter` returned null for the write op, the
+ * pre-image check was skipped, and the by-id write landed on a row the member
+ * could not read — expected runner verdict `rls-hole`. #7665 closed the class
+ * platform-side: an empty write-class policy collection now derives its scope
+ * from the caller's SELECT narrowing, so the same authoring shape yields
+ * `rls-consistent` — which is exactly what the consuming test now pins as the
+ * end-to-end regression guard for #7665. (Detector liveness — "the runner CAN
+ * answer `rls-hole`" — is pinned by `rls-runner.test.ts` on a scripted stack,
+ * where the hole can still be planted.)
  */
 export const readOnlyScopedMemberSet: PermissionSet = PermissionSetSchema.parse({
   name: FIXTURE_MEMBER_SET,

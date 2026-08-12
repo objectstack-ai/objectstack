@@ -219,3 +219,97 @@ describe('FileI18nAdapter', () => {
     });
   });
 });
+
+describe('FileI18nAdapter supportedLocales narrowing (#7679)', () => {
+  // The production provider's half of the fix. Both providers of the `i18n`
+  // slot serve `GET /i18n/locales` interchangeably, so narrowing only the
+  // in-memory fallback would leave the same route answering two different sets
+  // depending on whether `I18nServicePlugin` happened to be installed — the
+  // exact split #3636 and #3833 each cost a round on this route family.
+
+  /** The four-locale platform reality this fix has to narrow. */
+  function loadedFourLocales(): FileI18nAdapter {
+    const i18n = new FileI18nAdapter({ defaultLocale: 'en', fallbackLocale: 'en' });
+    i18n.loadTranslations('en', { objects: { sys_user: { label: 'User' } } });
+    i18n.loadTranslations('zh-CN', { objects: { sys_user: { label: '用户' } } });
+    i18n.loadTranslations('ja-JP', { objects: { sys_user: { label: 'ユーザー' } } });
+    i18n.loadTranslations('es-ES', { objects: { sys_user: { label: 'Usuario' } } });
+    return i18n;
+  }
+
+  it('reports only the declared locales — the #7679 repro', () => {
+    const i18n = loadedFourLocales();
+    expect(i18n.getLocales().sort()).toEqual(['en', 'es-ES', 'ja-JP', 'zh-CN']);
+
+    i18n.setSupportedLocales(['en', 'zh-CN']);
+    expect(i18n.getLocales()).toEqual(['en', 'zh-CN']);
+  });
+
+  it('narrows what is REPORTED, not what is LOADED', () => {
+    const i18n = loadedFourLocales();
+    i18n.setSupportedLocales(['en', 'zh-CN']);
+
+    expect(i18n.getLocales()).not.toContain('es-ES');
+    expect(i18n.getTranslations('es-ES')).toEqual({ objects: { sys_user: { label: 'Usuario' } } });
+    expect(i18n.t('objects.sys_user.label', 'es-ES')).toBe('Usuario');
+  });
+
+  it('applies at READ time, so bundles loaded AFTER the declaration are narrowed too', () => {
+    const i18n = new FileI18nAdapter({ defaultLocale: 'en' });
+    i18n.setSupportedLocales(['en', 'zh-CN']);
+    i18n.loadTranslations('en', { a: 'a' });
+    i18n.loadTranslations('ja-JP', { a: 'あ' });
+
+    expect(i18n.getLocales()).toEqual(['en', 'zh-CN']);
+  });
+
+  it('DECISION 1 — an app that declares nothing reports every loaded locale', () => {
+    const i18n = loadedFourLocales();
+    expect(i18n.getLocales().sort()).toEqual(['en', 'es-ES', 'ja-JP', 'zh-CN']);
+
+    i18n.setSupportedLocales(undefined);
+    expect(i18n.getLocales().sort()).toEqual(['en', 'es-ES', 'ja-JP', 'zh-CN']);
+    i18n.setSupportedLocales([]);
+    expect(i18n.getLocales().sort()).toEqual(['en', 'es-ES', 'ja-JP', 'zh-CN']);
+  });
+
+  it('DECISION 2 — a declared locale with no bundle is REPORTED, not dropped', () => {
+    const i18n = loadedFourLocales();
+    i18n.setSupportedLocales(['en', 'zh-CN', 'fr-FR']);
+
+    expect(i18n.getLocales()).toEqual(['en', 'zh-CN', 'fr-FR']);
+    expect(i18n.getTranslations('fr-FR')).toEqual({});
+    // Degrades to the configured fallback, exactly as a half-translated
+    // bundle's missing keys do — declaring a locale nobody shipped is an
+    // authoring gap, not a broken response.
+    expect(i18n.t('objects.sys_user.label', 'fr-FR')).toBe('User');
+  });
+
+  it('narrows the authored overlay too — authored-only locales are not a bypass', () => {
+    const i18n = loadedFourLocales();
+    i18n.replaceAuthoredTranslations({ 'ko-KR': { objects: { sys_user: { label: '사용자' } } } });
+    expect(i18n.getLocales()).toContain('ko-KR');
+
+    i18n.setSupportedLocales(['en', 'zh-CN']);
+    expect(i18n.getLocales()).toEqual(['en', 'zh-CN']);
+  });
+
+  it('the caller cannot mutate the stored declaration through the array it passed or got back', () => {
+    const i18n = loadedFourLocales();
+    const declared = ['en', 'zh-CN'];
+    i18n.setSupportedLocales(declared);
+    declared.push('ja-JP');
+    expect(i18n.getLocales()).toEqual(['en', 'zh-CN']);
+
+    i18n.getLocales().push('es-ES');
+    expect(i18n.getLocales()).toEqual(['en', 'zh-CN']);
+  });
+
+  it('both providers answer the same declaration identically', () => {
+    // The property that matters more than either provider's own behaviour:
+    // whichever one mounts `GET /i18n/locales`, the body is the same.
+    const file = loadedFourLocales();
+    file.setSupportedLocales(['en', 'zh-CN', 'fr-FR']);
+    expect(file.getLocales()).toEqual(['en', 'zh-CN', 'fr-FR']);
+  });
+});

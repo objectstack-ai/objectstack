@@ -55,17 +55,20 @@
  * - `driver-mongodb` answers the `$contains` family case-exactly since #6682,
  *   and its suite (`mongodb-filter-text-conformance.test.ts`) imports this
  *   whole table — every row, rejections included — so its DEBT row is gone.
- * - `driver-memory` still folds the `$contains` family over the whole Unicode
- *   range on its query and analytics faces while its reference matcher does
- *   not (#6682), which is why it still carries a measured DEBT row in that
- *   gate's ledger rather than importing this table: coverage is judged by
- *   IMPORT, and a cell that answers one requirement and not the other must not
- *   claim the whole set. The ledger is RECONCILED against the imports on every
- *   run, so read the open set THERE rather than trusting a count written in
- *   prose here.
+ * - `driver-memory` answers it too since #6682's second half: the `i` flag came
+ *   off all nine sites on its query path and off `filterSubstringPattern`, the
+ *   shared rule its analytics face borrows, so the two folding faces moved onto
+ *   the reference matcher's already-case-exact answer rather than the other way
+ *   round. `memory-filter-text-conformance.test.ts` imports this whole table and
+ *   runs it on every face, and that DEBT row is gone with it.
  *
- * Rule 2 above still governs the open cells: the rows join a driver's suite
- * in the PR that closes its gap, not before.
+ * So the ledger is EMPTY: all five drivers import this table. The ledger is
+ * RECONCILED against the imports on every run, so read the open set THERE rather
+ * than trusting a count written in prose here — this paragraph is the thing that
+ * goes stale, which is why the gate and not the prose is the authority.
+ *
+ * Rule 2 above still governs any future gap: the rows join a driver's suite
+ * in the PR that closes it, not before.
  *
  * The `$regex` rejection cases carried a further ordering constraint when
  * this table landed: `plugin-auth`'s ObjectQL adapter still emitted
@@ -89,7 +92,7 @@
  * @see https://github.com/objectstack-ai/objectstack/issues/5701 (this table)
  * @see https://github.com/objectstack-ai/objectstack/issues/5702 (the SQL family — landed)
  * @see https://github.com/objectstack-ai/objectstack/issues/6520 ($icontains on the JS faces — landed)
- * @see https://github.com/objectstack-ai/objectstack/issues/6682 (the $contains family — mongodb landed, memory open)
+ * @see https://github.com/objectstack-ai/objectstack/issues/6682 (the $contains family — mongodb and memory both landed)
  */
 
 import type { FilterCondition } from './filter.zod';
@@ -256,15 +259,16 @@ export const FILTER_TEXT_CASES: readonly FilterTextCase[] = [
   // family case-exact (GLOB on the SQLite dialects), so those three drivers
   // answer these rows today, and #6682 took mongo\'s hardcoded `$options: 'i'`
   // off all four arms, so `translateFilter` now lowers `$contains` to a bare
-  // `$regex` and that driver answers them too. driver-memory\'s query and
-  // analytics faces still fold Unicode — that remainder is #6682\'s open half,
-  // not #5702\'s. (`formula` and driver-memory\'s reference matcher measured
-  // case-exact both then and now.)
+  // `$regex` and that driver answers them too. #6682\'s second half then took
+  // the same flag off driver-memory\'s query path and off the rule its analytics
+  // face borrows, which was the last folding face on the platform. (`formula`
+  // and driver-memory\'s reference matcher measured case-exact both then and
+  // now — they are what the other faces were moved onto.)
   {
     name: '$contains is case-SENSITIVE — a lower-case comparand misses the upper-case row',
     filter: { name: { $contains: 'acme' } },
     expected: ['2'],
-    note: 'Row 1 (ACME Corp) must NOT match. SQLite\'s LIKE folds ASCII — the defect #6518 replaced with GLOB on the SQLite dialects; a backend returning both here has regressed to it (driver-memory still folds — #6682).',
+    note: 'Row 1 (ACME Corp) must NOT match. SQLite\'s LIKE folds ASCII — the defect #6518 replaced with GLOB on the SQLite dialects; a JS backend\'s equivalent is a RegExp carrying the `i` flag, which #6682 took off the last two. A backend returning both here has regressed to one of them.',
   },
   {
     name: '$contains is case-SENSITIVE — an upper-case comparand misses the lower-case row',

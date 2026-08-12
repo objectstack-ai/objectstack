@@ -13,6 +13,15 @@ export type { MemoryAnalyticsConfig } from './memory-analytics.js';
 
 export { InMemoryStrategy } from './in-memory-strategy.js';
 
+export {
+  MemoryMultiTenantUnsupportedError,
+  MULTI_TENANT_UNSUPPORTED_CODE,
+  assertSingleTenantPosture,
+  assertObjectsNotTenantScoped,
+  declaresTenantScope,
+} from './memory-tenancy-guard.js';
+export type { TenancyAwareSchema } from './memory-tenancy-guard.js';
+
 export default {
   id: 'com.objectstack.driver.memory',
   version: '1.0.0',

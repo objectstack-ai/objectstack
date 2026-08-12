@@ -411,11 +411,20 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     // consumers stale until the next restart.
                     //
                     // The RESPONSE field keeps its `unhiddenApps` / `unhideError`
-                    // spelling deliberately: it is a wire contract read by the
-                    // objectui Publish button, and renaming it here — in a repo
-                    // that cannot verify or update that consumer — would be a
-                    // silent break of the exact kind #4829 is about. The rename
-                    // rides the objectui follow-up card, together.
+                    // spelling deliberately and PERMANENTLY: it is a wire contract
+                    // read by the objectui Publish button, and renaming it here —
+                    // in a repo that cannot verify or update that consumer — would
+                    // be a silent break of the exact kind #4829 is about. A
+                    // lockstep rename was once planned to ride the objectui
+                    // follow-up card, together; #6955 measured that "together" out
+                    // rather than in — the server still emits these names and
+                    // objectui reads neither field anywhere (zero grep hits
+                    // repo-wide) — so the PM ratified "not at all" as option A:
+                    // renaming a zero-reader diagnostic payload buys no capability
+                    // (startup-scope discipline). If the vocabulary is ever worth
+                    // tidying on its own merits, that is a standalone
+                    // producer-side rename card (option B), not a rider on this
+                    // one.
                     //
                     // [#7018 / the #6190 ruling, Option A] `app` declares
                     // `allowOrgOverride: false`, so this flip does NOT carry the
@@ -790,6 +799,46 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             }
 
             const deletedCount = (persisted as any)?.deletedCount ?? 0;
+            const failedCount = (persisted as any)?.failedCount ?? 0;
+
+            // [#7557] A failed persistence used to ride inside a 200: this
+            // handler stated `success: true` unconditionally and forwarded the
+            // protocol's own `{ success: false, deletedCount: 0 }` underneath
+            // it, so the status line and the payload disagreed and every caller
+            // that checks the status (which is every caller that does not go
+            // digging into `persisted`) recorded an uninstall that had not
+            // happened.
+            //
+            // The failure rule is the one the REST twin of this route already
+            // uses (`packages/rest/src/package-routes.ts`), stated the same way
+            // on purpose — DELETE /packages/:id has TWO doors (this dispatcher
+            // and the direct-mount REST registrar, which shadows it only when a
+            // `package` service is registered), and two doors answering one
+            // request differently is how this divergence arrived. Zero metadata
+            // rows is still a successful uninstall — a runtime-registered
+            // package that never published metadata has nothing in
+            // `sys_metadata` — so only PER-ITEM failures make it a failure.
+            //
+            // Checked BEFORE the not-found test below, which asks
+            // `deletedCount === 0`: an uninstall where every row failed to
+            // delete also has `deletedCount === 0`, and answering "not found"
+            // for a package whose rows are demonstrably present and demonstrably
+            // stuck is the same lie one layer over.
+            if (failedCount > 0) {
+                return {
+                    handled: true,
+                    response: deps.error(
+                        `Deleting ${id} left ${failedCount} item(s) behind.`,
+                        400,
+                        {
+                            code: 'PACKAGE_DELETE_PARTIAL',
+                            registryRemoved,
+                            failed: (persisted as any)?.failed,
+                            cleanups: (persisted as any)?.cleanups,
+                        },
+                    ),
+                };
+            }
             if (!registryRemoved && deletedCount === 0) {
                 return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
             }

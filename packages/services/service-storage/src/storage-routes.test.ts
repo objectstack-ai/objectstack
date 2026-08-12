@@ -217,6 +217,161 @@ describe('Storage REST Routes', () => {
     });
   });
 
+  // ── terminal session statuses (#7667) ──────────────────────────────────
+  // `failed` and `expired` are declared on `sys_upload_session.status`, reaped
+  // on by the retention backstop, and published to clients by
+  // `UploadProgressSchema` — and until #7667 no code path wrote either. Each
+  // test below asserts the DURABLE ROW (`store.getSession`), not just the
+  // response body: a status that exists only in a response is the same dead
+  // declaration wearing a smaller coat.
+  describe('terminal upload-session statuses (#7667)', () => {
+    /** Drive an init and hand back its ids. */
+    async function initSession(overrides: Record<string, unknown> = {}) {
+      const initHandler = httpServer._getHandler('POST', '/api/v1/storage/upload/chunked')!;
+      const initReq = createMockReq({
+        body: { filename: 'term.bin', mimeType: 'application/octet-stream', totalSize: 100, ...overrides },
+      });
+      const initRes = createMockRes();
+      await initHandler(initReq, initRes);
+      expect(initRes._status).toBe(200);
+      return initRes._json.data as { uploadId: string; resumeToken: string; fileId: string };
+    }
+
+    /** Backdate the session's own deadline — the state a day-old row is in. */
+    async function backdate(uploadId: string) {
+      await store.updateSession(uploadId, { expires_at: new Date(Date.now() - 60_000).toISOString() });
+    }
+
+    async function putChunk(uploadId: string, resumeToken: string, bytes = 100) {
+      const chunkHandler = httpServer._getHandler('PUT', '/api/v1/storage/upload/chunked/:uploadId/chunk/:chunkIndex')!;
+      const res = createMockRes();
+      await chunkHandler(
+        createMockReq({
+          params: { uploadId, chunkIndex: '0' },
+          headers: { 'x-resume-token': resumeToken },
+          rawBody: async () => Buffer.from('x'.repeat(bytes)),
+        } as any),
+        res,
+      );
+      return res;
+    }
+
+    async function getProgress(uploadId: string) {
+      const progressHandler = httpServer._getHandler('GET', '/api/v1/storage/upload/chunked/:uploadId/progress')!;
+      const res = createMockRes();
+      await progressHandler(createMockReq({ params: { uploadId } }), res);
+      return res;
+    }
+
+    async function complete(uploadId: string, parts: Array<{ chunkIndex: number; eTag: string }> = []) {
+      const completeHandler = httpServer._getHandler('POST', '/api/v1/storage/upload/chunked/:uploadId/complete')!;
+      const res = createMockRes();
+      await completeHandler(createMockReq({ params: { uploadId }, body: { parts } }), res);
+      return res;
+    }
+
+    it("stamps 'failed' on the row when the backend completion throws", async () => {
+      const { uploadId } = await initSession();
+      vi.spyOn(adapter, 'completeChunkedUpload').mockRejectedValue(new Error('NoSuchUpload'));
+
+      const res = await complete(uploadId);
+
+      expect(res._status).toBe(500);
+      // Pre-#7667 the row stuck at `completing` — a NON-terminal status the 7d
+      // retention backstop never reaps and progress reads as still assembling.
+      expect((await store.getSession(uploadId))!.status).toBe('failed');
+      expect((await getProgress(uploadId))._json.data.status).toBe('failed');
+    });
+
+    it("lets a retried completion overwrite 'failed' with 'completed'", async () => {
+      const { uploadId, resumeToken } = await initSession();
+      const chunkRes = await putChunk(uploadId, resumeToken);
+      const parts = [{ chunkIndex: 0, eTag: chunkRes._json.data.eTag }];
+
+      const spy = vi.spyOn(adapter, 'completeChunkedUpload').mockRejectedValueOnce(new Error('transient blip'));
+      await complete(uploadId, parts);
+      expect((await store.getSession(uploadId))!.status).toBe('failed');
+
+      // `failed` records an attempt; it does not lock the session. Nothing
+      // reads it as a refusal, so a retry runs the happy path.
+      spy.mockRestore();
+      const retry = await complete(uploadId, parts);
+      expect(retry._status).toBe(200);
+      expect((await store.getSession(uploadId))!.status).toBe('completed');
+    });
+
+    it("stamps 'expired' and 410s a chunk PUT past the session deadline", async () => {
+      const { uploadId, resumeToken } = await initSession();
+      await backdate(uploadId);
+
+      const res = await putChunk(uploadId, resumeToken);
+
+      expect(res._status).toBe(410);
+      expect(res._json.error.code).toBe('UPLOAD_SESSION_EXPIRED');
+      const row = (await store.getSession(uploadId))!;
+      expect(row.status).toBe('expired');
+      // The chunk was refused, not quietly accepted against a dead session.
+      expect(row.uploaded_chunks ?? 0).toBe(0);
+    });
+
+    it("stamps 'expired' and 410s a completion past the session deadline", async () => {
+      const { uploadId } = await initSession();
+      await backdate(uploadId);
+
+      const res = await complete(uploadId);
+
+      expect(res._status).toBe(410);
+      expect(res._json.error.code).toBe('UPLOAD_SESSION_EXPIRED');
+      expect((await store.getSession(uploadId))!.status).toBe('expired');
+    });
+
+    it("reports 'expired' on progress rather than refusing the poll", async () => {
+      const { uploadId } = await initSession();
+      await backdate(uploadId);
+
+      const res = await getProgress(uploadId);
+
+      // A resuming client (the SDK polls progress first) is told the session is
+      // gone, in the shape `UploadProgressSchema` already declares.
+      expect(res._status).toBe(200);
+      expect(res._json.data.status).toBe('expired');
+      expect((await store.getSession(uploadId))!.status).toBe('expired');
+    });
+
+    it('does not expire a session that is still inside its deadline', async () => {
+      const { uploadId, resumeToken } = await initSession();
+
+      const res = await putChunk(uploadId, resumeToken);
+
+      expect(res._status).toBe(200);
+      expect((await store.getSession(uploadId))!.status).toBe('in_progress');
+    });
+
+    it('leaves a completed session alone once its deadline passes', async () => {
+      const { uploadId, resumeToken } = await initSession();
+      const chunkRes = await putChunk(uploadId, resumeToken);
+      await complete(uploadId, [{ chunkIndex: 0, eTag: chunkRes._json.data.eTag }]);
+      expect((await store.getSession(uploadId))!.status).toBe('completed');
+
+      await backdate(uploadId);
+
+      // A finished upload does not become `expired` by sitting around waiting
+      // for the reaper — the retention backstop reaps it as `completed`.
+      expect((await getProgress(uploadId))._json.data.status).toBe('completed');
+      expect((await store.getSession(uploadId))!.status).toBe('completed');
+    });
+
+    it('leaves a session with no declared deadline in progress', async () => {
+      const { uploadId } = await initSession();
+      // The route always stamps `expires_at`; a row without one carries no
+      // declared deadline, and this guard enforces the row's own deadline
+      // rather than inventing one.
+      await store.updateSession(uploadId, { expires_at: undefined });
+
+      expect((await getProgress(uploadId))._json.data.status).toBe('in_progress');
+    });
+  });
+
   describe('GET /files/:fileId/url', () => {
     it('should return download URL for committed file', async () => {
       // Create and commit a file

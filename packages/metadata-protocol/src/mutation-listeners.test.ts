@@ -119,10 +119,14 @@ describe('ObjectStackProtocolImplementation.registerMutationProjector (ADR-0094)
 
 // #3050 — the pre-persistence AUTHORING GATE seam (ADR-0094 addendum). The
 // inverse contract of the projector: it runs BEFORE persistence and a throw
-// PROPAGATES (rejecting the write) instead of being swallowed. saveMetaItem
-// invokes it for env writes only, both draft and publish-mode saves; the
-// domain-gate behavior itself (OWD posture) is pinned in plugin-security's
-// object-posture-gate suite.
+// PROPAGATES (rejecting the write) instead of being swallowed. [#7674]
+// saveMetaItem invokes it on every channel except a declared `package-author`
+// one — both draft and publish-mode saves; it used to say "for env writes
+// only", which was the `environmentId` proxy that left the gate dead on every
+// host-config deployment. The domain-gate behavior itself (OWD posture) is
+// pinned in plugin-security's object-posture-gate suite, and its journey
+// through the real `PUT /api/v1/meta/object/*` in
+// `packages/rest/src/meta-object-owd-gate.test.ts`.
 describe('ObjectStackProtocolImplementation.registerAuthoringGate (#3050)', () => {
   const save = (over: Record<string, unknown> = {}) => ({
     type: 'object', name: 'crm_account', state: 'active' as const, body: { sharingModel: 'private' }, ...over,

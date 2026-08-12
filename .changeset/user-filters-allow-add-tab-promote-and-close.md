@@ -39,3 +39,5 @@ FROM → TO:未声明的键 → 删除它,或改成它想表达的那个已声�
 FROM → TO:`userFilters.tabs` → 对象的 `listViews` 具名条目;`showAllRecords` → 默认列表视图本身就是「全部记录」入口;`allowAddTab` → 由 ViewTabBar 自带的新增控件承担。三条拒绝各自带 `guidance` 处方,不是裸的 "unrecognized key"。
 
 派生变体同时改为携带**自己的**错误映射:`.omit()` 会连基类的 `knownKeys` 一起继承,而那份候选列表是从基类形状读的、仍然含被 omit 掉的键 —— 实测在对象视图上写 `tab` 会被答复 *"Did you mean `tab` → `tabs`?"*,把作者指向这个形状唯一拒绝的键。形状仍由 `.omit()` 派生(#2231 不变),候选池改为按 omit 后的形状构建。
+
+<!-- adr-0087: registered authoring-schemas-strict-unknown-keys -->

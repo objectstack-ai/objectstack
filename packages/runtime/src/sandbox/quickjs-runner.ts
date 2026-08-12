@@ -636,13 +636,35 @@ export class QuickJSScriptRunner implements ScriptRunner {
     apiObj.dispose();
 
     const logObj = vm.newObject();
-    for (const level of ['info', 'warn', 'error'] as const) {
+    // [#7661] FOUR levels, not three. `debug` was granted by the CLI's
+    // capability extractor (`ctx\.log\.(?:info|warn|error|debug)` → `log`) and
+    // taught by the docs table while this loop installed only the first three,
+    // so a body that followed the documentation threw `TypeError: not a
+    // function` here — and under `onError: 'abort'` that aborted the write.
+    // Enforced rather than retired from the other two surfaces (ADR-0049): the
+    // `crypto.hash` precedent this shape echoes (#4391) was removed because
+    // implementing it widened the sandbox's SECURITY surface, and emitting a
+    // debug-level diagnostic carries no such argument — `--log-level debug` is
+    // exactly what such a body is for. `Logger.debug(message, meta)` is on the
+    // contract (`packages/spec/src/contracts/logger.ts`), so nothing new is
+    // required of the host logger either.
+    for (const level of ['debug', 'info', 'warn', 'error'] as const) {
       const fn = vm.newFunction(level, (msgH, dataH) => {
         if (!caps.has('log')) {
           throwSandboxFault(vm, `capability 'log' not granted to ${origin.kind} '${origin.name}'`);
         }
         const msg = vm.getString(msgH);
-        const data = dataH ? safeJsonParse(vm.getString(dataH)) : undefined;
+        // [#7448] `vm.dump`, NOT `vm.getString` — the marshalling every other
+        // host-call bridge in this file already uses (`ctx.api`'s
+        // `argHandles.map((h) => vm.dump(h))`, and the return-value paths).
+        // `getString` on a non-string handle applies JS string coercion INSIDE
+        // the VM, so the `data` object a body passes arrives as the literal
+        // `"[object Object]"` — which `safeJsonParse` then fails to parse and
+        // returns verbatim, so every structured field of every body log call
+        // was lost. That is the payload half of the same declared-capability
+        // gap #7448 recorded, surfaced by its reproduction; `dump`
+        // deserialises the handle into a real value.
+        const data = dataH ? vm.dump(dataH) : undefined;
         ctx.log?.[level]?.(msg, data);
         return vm.undefined;
       });

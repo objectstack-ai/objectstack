@@ -52,6 +52,9 @@ importers:
       eslint:
         specifier: ^10.8.0
         version: 10.8.0(jiti@2.7.0)
+      github-slugger:
+        specifier: 2.0.0
+        version: 2.0.0
       semver:
         specifier: ^7.8.5
         version: 7.8.5
@@ -854,6 +857,9 @@ importers:
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec
+      '@objectstack/types':
+        specifier: workspace:*
+        version: link:../../types
       mingo:
         specifier: ^7.2.2
         version: 7.2.2
@@ -861,6 +867,12 @@ importers:
       '@types/node':
         specifier: ^26.1.2
         version: 26.1.2
+      '@types/sql.js':
+        specifier: ^1.4.11
+        version: 1.4.11
+      sql.js:
+        specifier: ^1.14.1
+        version: 1.14.1
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -1703,6 +1715,9 @@ importers:
       '@objectstack/formula':
         specifier: workspace:*
         version: link:../../formula
+      '@objectstack/metadata-core':
+        specifier: workspace:*
+        version: link:../../metadata-core
       '@objectstack/platform-objects':
         specifier: workspace:*
         version: link:../../platform-objects
@@ -1710,9 +1725,6 @@ importers:
         specifier: workspace:*
         version: link:../../spec
     devDependencies:
-      '@objectstack/metadata-core':
-        specifier: workspace:*
-        version: link:../../metadata-core
       '@objectstack/plugin-sharing':
         specifier: workspace:*
         version: link:../plugin-sharing
@@ -1772,6 +1784,12 @@ importers:
         specifier: workspace:*
         version: link:../../spec
     devDependencies:
+      '@objectstack/metadata-core':
+        specifier: workspace:*
+        version: link:../../metadata-core
+      '@objectstack/objectql':
+        specifier: workspace:*
+        version: link:../../objectql
       '@types/node':
         specifier: ^26.1.2
         version: 26.1.2
@@ -1953,6 +1971,9 @@ importers:
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../objectql
+      '@objectstack/plugin-security':
+        specifier: workspace:*
+        version: link:../plugins/plugin-security
       '@objectstack/service-analytics':
         specifier: workspace:*
         version: link:../services/service-analytics
@@ -2085,6 +2106,9 @@ importers:
       '@objectstack/driver-sql':
         specifier: workspace:*
         version: link:../../drivers/driver-sql
+      '@objectstack/driver-sqlite-wasm':
+        specifier: workspace:*
+        version: link:../../drivers/driver-sqlite-wasm
       '@types/node':
         specifier: ^26.1.2
         version: 26.1.2
@@ -2128,6 +2152,9 @@ importers:
       '@objectstack/service-job':
         specifier: workspace:*
         version: link:../service-job
+      '@objectstack/service-messaging':
+        specifier: workspace:*
+        version: link:../service-messaging
       '@types/node':
         specifier: ^26.1.2
         version: 26.1.2
@@ -2331,9 +2358,15 @@ importers:
         specifier: workspace:*
         version: link:../../types
     devDependencies:
+      '@objectstack/driver-sql':
+        specifier: workspace:*
+        version: link:../../drivers/driver-sql
       '@objectstack/metadata-core':
         specifier: workspace:*
         version: link:../../metadata-core
+      '@objectstack/objectql':
+        specifier: workspace:*
+        version: link:../../objectql
       '@types/node':
         specifier: ^26.1.2
         version: 26.1.2

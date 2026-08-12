@@ -24,13 +24,18 @@
  * ## Why this file drives the ROWS and spells its own cases
  *
  * `check-driver-conformance.mjs` judges coverage by whether a package names the
- * shared text case-set's marker export. Naming it here would flip this driver's
- * cell to "covered" while requirement 2 of that case-set (the `$contains` family
- * folding Unicode on this driver) is still open — and a ledger entry for a
- * covered cell fails the gate's RECONCILED invariant. So this file drives
- * `FILTER_TEXT_ROWS`, the fixture, and writes out the `$icontains` cases it is
- * entitled to answer. The DEBT row stays until #6682 closes the other half; see
- * that row's `why`, which now names one open requirement instead of two.
+ * shared text case-set's marker export. Naming it here would have flipped this
+ * driver's cell to "covered" while requirement 2 of that case-set — the
+ * `$contains` family folding Unicode on this driver — was still open, and a
+ * ledger entry for a covered cell fails the gate's RECONCILED invariant. So
+ * this file drives `FILTER_TEXT_ROWS`, the fixture, and writes out the
+ * `$icontains` cases it was entitled to answer.
+ *
+ * [#7723] That other half is now closed: `filterSubstringPattern` no longer
+ * carries the `i` flag, `memory-filter-text-conformance.test.ts` names the
+ * marker and enrolls the cell, and the DEBT row is gone. This file keeps its
+ * own cases — the shared case-set enrolls the FAMILY, not this operator's ASCII
+ * boundary — but it no longer stands in for a cell nothing else covers.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -114,9 +119,10 @@ describe('[#6520] $icontains — the accept table, on every face', () => {
   /**
    * `$icontains` is the case-INSENSITIVE twin, so its case-EXACT sibling must
    * NOT have moved. This is the row that would catch an implementation that
-   * "fixed" the fold by making `$contains` insensitive too — and note the
-   * matcher is the face that answers `$contains` case-exactly today (the query
-   * path still folds Unicode there, which is #6682, not this PR).
+   * "fixed" the fold by making `$contains` insensitive too. When it was written
+   * the matcher was the ONLY face answering `$contains` case-exactly, the query
+   * path still folding Unicode (#6682); since #7723 all three agree, so the
+   * choice of face here is no longer load-bearing.
    */
   it('leaves $contains case-SENSITIVE on the reference matcher', () => {
     expect(matcherIds({ name: { $contains: 'acme' } })).toEqual(['2']);

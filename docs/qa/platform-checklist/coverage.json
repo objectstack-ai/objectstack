@@ -124,6 +124,11 @@
         "identity-auth.teams-bu-membership"
       ]
     },
+    "qa": {
+      "items": [
+        "cli.qa-suite-execution"
+      ]
+    },
     "query": {
       "items": [
         "api-backend.query-contract-matrix"

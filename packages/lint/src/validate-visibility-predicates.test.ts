@@ -452,6 +452,47 @@ describe('visibility-bare-identifier (#6128 / #5149 requirement 3)', () => {
     });
   });
 
+  describe('the ONE position this rule stands down on (#7696)', () => {
+    /** The same one-field form, but SCHEMA-BOUND — a metadata-editing form. */
+    const metaForm = (predicate: string) => ({
+      views: [{
+        name: 'field_editor',
+        data: { provider: 'schema', schemaId: 'field' },
+        sections: [{ fields: [{ field: 'notes', visibleWhen: predicate }] }],
+      }],
+    });
+
+    it('a bare word on the RIGHT of `==` is a literal slot, not a dropped root', () => {
+      // The console's metadata-admin evaluator hands the right side to
+      // `parseLiteral` and never resolves it (objectui#4049), so this rule's
+      // prescription — `<root>.active` — is not a fix but a second defect, and
+      // `predicate-rhs-path-shaped` refuses that spelling at `error`. One
+      // position, one prescription: this rule is silent and that one speaks.
+      expect(bareFindings(metaForm('data.type == active'))).toEqual([]);
+      expect(bareFindings(metaForm('data.type != active'))).toEqual([]);
+    });
+
+    it('proves the scanner still sees — the stand-down is per IDENTIFIER', () => {
+      // Every one of these is the same schema-bound form, so a walk that had
+      // gone blind would report nothing here either.
+      expect(bareFindings(metaForm('status == active')).map((f) => f.hint))
+        .toEqual([expect.stringContaining('`record.status`')]);
+      expect(bareFindings(metaForm('active == data.type'))).toHaveLength(1);
+      expect(bareFindings(metaForm('data.type == active && active'))).toHaveLength(1);
+      // A macro body produces no replacement finding, so nothing stands down.
+      expect(bareFindings(metaForm('data.tags.all(t, t == active)'))).toHaveLength(1);
+    });
+
+    it('is scoped to the metadata-editing surface — a runtime view is untouched', () => {
+      // A runtime `*.view.ts` predicate goes to real CEL, where a path on the
+      // right is perfectly legal and a bare word there IS a dropped root. No
+      // replacement rule walks this shape, so standing down would be silence.
+      const findings = bareFindings(formStack('record.status == active'));
+      expect(findings).toHaveLength(1);
+      expect(findings[0].hint).toContain('`record.active`');
+    });
+  });
+
   describe('the layer decides the prescribed root (ADR-0089 D3)', () => {
     it('a metadata-editing form is told to write `data.`, not `record.`', () => {
       const findings = bareFindings(formStack("layout == 'grid'"), { layer: 'metadata' });

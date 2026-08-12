@@ -21,10 +21,11 @@
 // deliberately NOT built (#6659's triage): it is a separate maintainer-facing
 // call, not a prerequisite for labelling the ids it cannot see.
 //
-// This file makes no general claim. It pins exactly four ids that were checked
+// This file makes no general claim. It pins exactly five ids that were checked
 // ONE BY ONE against a repo-wide grep — `id: '<key>'` returned zero hits for
-// each of them on `61282f906`, against a control probe (`nav_webhooks`) that
-// returned five — and each of which has a recorded reason to be gone:
+// each of them on `61282f906` (`nav_jwks` on `68a1edb`), against a control
+// probe (`nav_webhooks`) that returned five — and each of which has a recorded
+// reason to be gone:
 //
 //   nav_approval_processes  the process engine was retired in favour of the
 //                           approval flow node (#1408, ADR-0019 P4/P5)
@@ -34,16 +35,26 @@
 //                           ever render "failed to load" (#2266, and the
 //                           comment that records it in
 //                           `setup-nav.contributions.ts`)
+//   nav_jwks                `sys_jwks` (JWT signing PRIVATE keys) declares
+//                           `apiEnabled: false` / `apiMethods: []`, so its list
+//                           answers `OBJECT_API_DISABLED` (404). Unlike the two
+//                           above this entry EXISTED and was dead for every
+//                           persona — `apiAccessDenialFromEnable` is a pure
+//                           function of `enable`, so the admin-looking
+//                           `requiredPermissions` gate it carried could never
+//                           prune it (#7544)
 //   nav_metadata            moved to Studio as `nav_metadata_directory` when
 //                           the Studio app was split out (482eb67cc)
 //
 // ---------------------------------------------------------------------------
 // What to do when this test goes red
 // ---------------------------------------------------------------------------
-// It goes red on exactly one event: one of the four ids comes back. That is not
-// automatically wrong — re-adding `nav_verifications` or `nav_device_codes` is a
-// deliberate security decision (it requires enabling `list` on the object
-// first), and `nav_approval_processes` could return with a new owner. The rule
+// It goes red on exactly one event: one of the five ids comes back. That is not
+// automatically wrong — re-adding `nav_verifications`, `nav_device_codes` or
+// `nav_jwks` is a deliberate security decision (each requires enabling the read
+// on the object first — for `sys_jwks`, opening a data-API read path onto
+// private signing-key material, which is why it is the least likely of the
+// three), and `nav_approval_processes` could return with a new owner. The rule
 // is the ORDER: the declaring nav item comes back first, the label second, and
 // the id's line is deleted from `DEAD_SETUP_NAV_IDS` in that same commit. A
 // label with no declaring nav item is what this tombstone exists to refuse.
@@ -61,6 +72,7 @@ const LOCALES = { en, 'zh-CN': zhCN, 'ja-JP': jaJP, 'es-ES': esES } as const;
 const DEAD_SETUP_NAV_IDS = [
   'nav_approval_processes',
   'nav_device_codes',
+  'nav_jwks',
   'nav_metadata',
   'nav_verifications',
 ] as const;

@@ -1809,10 +1809,10 @@
     },
     {
       "id": "access-security.capability-declaration-lifecycle",
-      "title": "A package-declared capability bootstraps into sys_capability and resolves across the grant/require three-way (ADR-0066); platform names cannot be shadowed",
+      "title": "A package-declared capability bootstraps into sys_capability and resolves across the grant/require three-way (ADR-0066) on the PLATFORM action path; platform names cannot be shadowed",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -1824,22 +1824,27 @@
         "app": "showcase",
         "requires": [
           "the shipped capability declaration examples/app-showcase/src/security/capabilities.ts (showcase.export_data, org-scoped, defineCapability) — the DEFINE side of ADR-0066",
-          "OpsPermissionSet granting it via systemPermissions (examples/app-showcase/src/security/permission-sets.ts) — the GRANT side"
+          "OpsPermissionSet granting it via systemPermissions (examples/app-showcase/src/security/permission-sets.ts) — the GRANT side",
+          "the shipped REQUIRE-side specimens examples/app-showcase/src/ui/actions/predicate-matrix.action.ts: showcase_zoo_perm_held (requires showcase.export_data — the GRANTED capability), showcase_zoo_perm_missing (requires showcase.restricted_ops — DEFINED but granted to nobody), showcase_zoo_perm_and (requires BOTH — the gate is an AND), showcase_zoo_perm_empty (requiredPermissions:[] — always passes). All four are type:'script' on the `zoo` object, so the platform action path can invoke them"
         ],
         "knownGaps": [
-          "no shipped resource REQUIREs showcase.export_data yet (the source note calls it a 'future export endpoint/action') — the require-side enforcement clause needs a scratch resource carrying requiredPermissions:['showcase.export_data'], or is recorded as a knownGap on stock seeds"
+          "the require side is exercised on the PLATFORM action path only — there is NO REST action-invoke route on this build and its absence is deliberate (#7680, ruling 2026-08-12): see the `data-actions` block comment in packages/rest/src/rest-route-ledger.ts. Which platform surface is reachable depends on the HTTP front the build under test boots (@objectstack/rest mounts neither /actions nor /mcp); the runner picks whichever of the dispatcher /actions domain, the MCP run_action bridge, or in-process ql.executeAction/invokeBusinessAction this build exposes, and RECORDS which — all three funnel through the single-sourced actionPermissionError"
         ]
       },
       "variants": [
         "DEFINE — capability metadata authored via defineCapability, bootstrapped to a sys_capability row",
         "GRANT — a permission set's systemPermissions carries the capability name",
-        "REQUIRE — a resource's requiredPermissions lists it; denied unless a granted set carries it",
+        "REQUIRE — an action's requiredPermissions lists it; invocation on the platform action path is denied unless a granted set carries it (ADR-0066 D4 actionPermissionError)",
+        "REGRANT — the grant is withdrawn from the permission set and restored; the gate must follow both edits, not cache the first answer",
         "shadow-refusal — a declaration whose name collides with PLATFORM_CAPABILITY_NAMES is refused loudly"
       ],
       "steps": [
         "boot showcase isolated; confirm the declared capability bootstrapped: GET the sys_capability row for showcase.export_data (bootstrap-declared-capabilities.ts upsertPackageCapability writes name/label/description/scope)",
         "read its fields — label falls back to humanize(name), description to 'Capability <name>.' when absent (capabilityRowFields)",
-        "as the GRANTED member (holding OpsPermissionSet) and as a NON-granted member, exercise a resource that REQUIREs the capability (author a scratch resource with requiredPermissions:['showcase.export_data'] if none ships — see knownGaps): granted passes, non-granted is denied 403",
+        "identify which platform action-invoke surface this build exposes (dispatcher /actions domain · MCP run_action · in-process ql.executeAction/invokeBusinessAction) and record it; do NOT probe /api/v1/actions/... or /api/v1/data/:object/actions/... — @objectstack/rest mounts no action-invoke route by design (#7680), so a 404 there scores nothing",
+        "on that surface, INVOKE showcase_zoo_perm_held (requires showcase.export_data) as the GRANTED member holding OpsPermissionSet, then as a NON-granted member: granted executes, non-granted is refused with the actionPermissionError text naming the action and the missing capability",
+        "REGRANT leg: withdraw showcase.export_data from OpsPermissionSet's systemPermissions, re-invoke as the (formerly) granted member → now refused; restore the grant, re-invoke → executes again",
+        "invoke showcase_zoo_perm_missing (requires showcase.restricted_ops, granted to nobody) as EVERY persona incl. the OpsPermissionSet holder → refused for all; and showcase_zoo_perm_empty (requiredPermissions:[]) → executes for all, since 'declares nothing' is not 'denies everything'",
         "author a scratch package declaring a capability whose name is in PLATFORM_CAPABILITY_NAMES; boot/validate",
         "author a scratch capability with a malformed/unvalidated shape and confirm the write door validates it before it reaches the sys_capability upsert (the #5961 concern: an unvalidated row lands directly in the authorization namespace)"
       ],
@@ -1851,10 +1856,10 @@
           "evidence": "the row read + the declaration source"
         },
         {
-          "clause": "the three-way resolves by NAME: a resource requiring the capability is denied for a member whose granted permission sets do not carry it, and permitted for one that does — both sides",
+          "clause": "the three-way resolves by NAME on the surface that actually enforces it — the PLATFORM action path (ADR-0066 D4 actionPermissionError, reached via the dispatcher /actions domain, the MCP run_action bridge, or ql.executeAction): invoking an action that REQUIREs the capability is refused for a member whose granted sets do not carry it and executes for one that does, the refusal follows a grant WITHDRAWN from the permission set, and execution returns when it is re-granted — grant / deny / regrant, all three legs",
           "oracle": "api",
-          "verify": "403 for the non-granted member, 2xx for the OpsPermissionSet holder, on a resource carrying requiredPermissions:['showcase.export_data']",
-          "evidence": "the two responses (scratch resource if none ships — record which)"
+          "verify": "on the platform surface this build exposes (recorded per steps): showcase_zoo_perm_held executes for the OpsPermissionSet holder and is refused for a non-granted member with the actionPermissionError string naming the action and the missing capability; after withdrawing showcase.export_data from OpsPermissionSet the SAME holder is refused, and after restoring it executes again. Cross-checks on the same surface: showcase_zoo_perm_missing (showcase.restricted_ops, granted to nobody) is refused for every persona, and showcase_zoo_perm_empty (requiredPermissions:[]) executes for every persona. This clause is NOT scored against @objectstack/rest — it mounts no action-invoke route by design (#7680)",
+          "evidence": "the invocation results for all three legs (grant → deny → regrant) plus the two cross-checks, each with the refusal text or the executed result, and a note of which platform surface was driven"
         },
         {
           "clause": "a declaration whose name shadows a curated PLATFORM_CAPABILITY_NAME is refused LOUDLY — a package cannot hijack a platform-owned capability name",
@@ -1870,17 +1875,26 @@
         }
       ],
       "negative": [
-        "a shadow declaration silently accepted (overwriting a platform capability) is a FAIL; an unvalidated capability row reaching sys_capability is the #5961 authz-namespace-injection FAIL"
+        "a shadow declaration silently accepted (overwriting a platform capability) is a FAIL; an unvalidated capability row reaching sys_capability is the #5961 authz-namespace-injection FAIL",
+        "REQUIRE-side fail-open: a NON-granted member whose platform-path invocation of showcase_zoo_perm_held SUCCEEDS is the ADR-0066 D4 gate failing open — FAIL, and the server-side shape of the client-side fail-open #3923 reported. Likewise showcase_zoo_perm_missing executing for anyone (nobody is granted showcase.restricted_ops), or showcase_zoo_perm_and executing for a caller holding only showcase.export_data (the gate is an AND, not an OR)",
+        "stale-grant: after showcase.export_data is withdrawn from OpsPermissionSet, the former holder still executing showcase_zoo_perm_held is a FAIL — the gate is reading a cached grant, not the current permission set",
+        "over-block: the OpsPermissionSet holder REFUSED on showcase_zoo_perm_held, or showcase_zoo_perm_empty refused for anyone, is a FAIL in the other direction — 'declares nothing' is not 'denies everything'",
+        "a 404 from a REST action-invoke probe is NEITHER pass nor fail — that surface does not exist on this build by design (#7680). Scoring this clause off a REST 404, in either direction, is a mis-run: re-run it on the platform surface"
       ],
       "traps": [
         "wrong-persona",
-        "stale-dist"
+        "stale-dist",
+        "dispatcher-vs-hono-route"
       ],
       "source": [
         "packages/spec/liveness/capability.json (ADR-0066 D1, #5961 — the kind's own liveness ledger)",
         "packages/plugins/plugin-security/src/bootstrap-declared-capabilities.ts (upsertPackageCapability, capabilityRowFields, PLATFORM_CAPABILITY_NAMES guard)",
         "packages/lint/src/validate-capability-references.ts (authoring lint known-name set)",
-        "examples/app-showcase/src/security/{capabilities.ts,permission-sets.ts} (DEFINE + GRANT fixtures)"
+        "examples/app-showcase/src/security/{capabilities.ts,permission-sets.ts} (DEFINE + GRANT fixtures)",
+        "packages/runtime/src/action-execution.ts (actionPermissionError — ADR-0066 D4, the single-sourced REQUIRE-side gate every invoke surface calls)",
+        "packages/runtime/src/domains/{actions.ts,mcp.ts} + packages/runtime/src/route-ledger.ts (the platform action-invoke surfaces that reach it)",
+        "examples/app-showcase/src/ui/actions/predicate-matrix.action.ts (the four REQUIRE-side specimens: held / missing / and / empty)",
+        "packages/rest/src/rest-route-ledger.ts `data-actions` block (why there is no REST action-invoke route, and the day-one enforcement requirement if one is ever added — #7680)"
       ],
       "history": [
         {
@@ -1888,6 +1902,12 @@
           "date": "2026-08-08",
           "change": "initial — the coverage ratchet caught `capability` as a NEW metadata kind (#5961 landed on main); authored the declaration→bootstrap→grant/require lifecycle + shadow-refusal + the #5961 authz-namespace validation concern",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-12",
+          "change": "re-pointed the REQUIRE clause at the surface that enforces it (#7680, maintainer ruling 2026-08-12). The clause asked for a 403 from a REST resource carrying requiredPermissions; no such surface exists — @objectstack/rest mounts no action-invoke route, deliberately — so the clause was unrunnable as written and the run fell back to a platform capability. Now: grant/deny/regrant driven through the platform action path (actionPermissionError via the dispatcher /actions domain, MCP run_action, or ql.executeAction) against the four shipped predicate-matrix specimens, with the fail-open / stale-grant / over-block / AND-vs-OR failure modes spelled out in `negative`, and REST 404s explicitly scoring nothing. The knownGap moved from 'no resource REQUIREs it' (false — four actions do) to 'which platform surface the build exposes, recorded per run'",
+          "ref": "claude/issue-7680-package-capability-doctrine"
         }
       ]
     }

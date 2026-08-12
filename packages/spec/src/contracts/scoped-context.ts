@@ -61,7 +61,7 @@
  *   - `create` (an `insert` alias), `deleteById`, `execute` — no call site at
  *     all outside those fixtures.
  *   - `sudo()`. The one exclusion with a real cross-package caller — plugin-audit's
- *     `persistAuditTrailRow` and its `captureBefore` snapshot both reach
+ *     `persistAuditTrailRow` and `resolveLookupTitles` both reach
  *     `api.sudo()` — and it is excluded ON PURPOSE rather than for lack of
  *     evidence, which is why it is called out instead of listed above. Every
  *     one of those callers holds the value as `any` (`api: any`,

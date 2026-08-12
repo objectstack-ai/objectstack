@@ -56,6 +56,7 @@
 import type { FilterCondition } from '../data/filter.zod.js';
 import type { ExecutionContext } from '../kernel/execution-context.zod.js';
 import type { ExplainDecision, ExplainOperation } from '../security/explain.zod.js';
+import type { PermissionSet } from '../security/permission.zod.js';
 
 /**
  * The context shape these methods accept.
@@ -287,6 +288,51 @@ export interface ISecurityService {
    * than treating it as "no sets".
    */
   resolvePermissionSetNames(context?: SecurityContext): Promise<string[]>;
+
+  /**
+   * [#7616] The effective permission SETS for `context` — the same resolution
+   * {@link resolvePermissionSetNames} reports the names of, returned WHOLE:
+   * each set's `objects`, `fields`, `systemPermissions` and `tabPermissions`,
+   * in resolution order.
+   *
+   * **Why a second method rather than a wider return on the first.** The names
+   * are the primitive for an audience check ("does this caller hold
+   * `sales_manager`?"); the sets are the primitive for a MERGE. A consumer that
+   * must fold the caller's grants into one answer — the object/field access map
+   * `/auth/me/permissions` serves, the capability + tab surface `/me/apps`
+   * filters its app list with — cannot do it from names, so it re-implements
+   * set resolution locally instead. That local copy is the drift this method
+   * exists to end: the same rule has now diverged from the enforcement path
+   * three times, each divergence found only after it reached a user (#7608 —
+   * a member's first grant took them from 2 apps to 1; #7555 — an app-declared
+   * `isDefault` displaced `member_default`; #6334 — grant aggregation missed
+   * `sys_user_position` entirely).
+   *
+   * Implementations MUST return the sets their own enforcement path resolved —
+   * positions expanded, the ADR-0090 D5 baseline applied ADDITIVELY (never as a
+   * `resolved.length === 0` cliff), and the ADR-0090 D10 agent-principal rule
+   * honoured — not a re-derivation. Widening this to "the sets, roughly" would
+   * reintroduce the very drift the method removes.
+   *
+   * The merge semantics stay with the CALLER, deliberately: most-permissive for
+   * `objects`/`fields`, union for `systemPermissions`, highest-rank-wins for
+   * `tabPermissions`. Two consumers legitimately project different subsets of
+   * the same sets, and folding a merge in here would make this method the
+   * fourth copy of a rule instead of the one source of its input.
+   *
+   * **Throws** on resolution failure, exactly as {@link resolvePermissionSetNames}
+   * does; callers must fail CLOSED on a throw rather than reading it as "no sets".
+   *
+   * **OPTIONAL, and absence is a defined state — not a bug.** A security service
+   * that predates this method omits it, and a consumer resolving the service as
+   * `Partial<ISecurityService>` (the availability rule at the top of this file)
+   * must keep its own resolution as the fallback until a floor version carrying
+   * the method can be assumed. Declaring it optional is what makes that
+   * degradation a property of the type rather than a promise in prose: the
+   * unguarded call does not compile, so a consumer cannot skip the fallback by
+   * accident.
+   */
+  resolvePermissionSetsForContext?(context?: SecurityContext): Promise<PermissionSet[]>;
 
   /**
    * [#3544] Whether `context` may EXPORT `object` — the user-level export axis

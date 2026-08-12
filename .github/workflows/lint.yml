@@ -169,6 +169,24 @@ jobs:
       - name: Doc/skill authoring guard
         run: pnpm check:doc-authoring
 
+      # #7484 docs anchors: `lychee.toml` sets `include_fragments = "none"`, so
+      # the `Check Documentation Links` job resolves a link's FILE and never its
+      # `#anchor` — measured with the pinned lychee 0.24.2 under the CI argv, a
+      # link to a heading that does not exist is reported `[200] OK`. So a
+      # cross-file anchor was a two-sided invariant with no owner: rename the
+      # heading, leave the inbound link, ship green. This resolves every internal
+      # `#fragment` against the destination page's real heading ids, computed
+      # with `github-slugger` — the same package fumadocs-core renders the site
+      # with, so the gate and the renderer cannot disagree about a slug.
+      #
+      # It lives in this job rather than in check-links.yml for two reasons: it
+      # needs a workspace install (that job is deliberately a checkout plus two
+      # dependency-free `node` checks), and it is REQUIRED where that lane is
+      # advisory. The four anchors that were already dead were fixed in the same
+      # PR, so this ships with no baseline and no allowlist.
+      - name: Docs anchors resolve to real headings
+        run: pnpm check:doc-anchors
+
       # #4851: the docs-accuracy-audit workflow carries its default scope inline
       # (a workflow script runs in a vm with no filesystem, so it cannot enumerate
       # content/docs/ itself). Hand-kept, that list rotted in BOTH directions —
@@ -518,6 +536,27 @@ jobs:
       # Reads two YAML files; sub-second.
       - name: Required-context name pin
         run: pnpm check:required-contexts
+
+      # Cross-package test inputs (#7802). A test that resolves the repo root
+      # and walks it has an input set far wider than its own package, and BOTH
+      # of CI's scoping layers judge it by where it LIVES: `turbo ls --affected`
+      # reaches packages through the dependency GRAPH, and turbo's task cache
+      # hashes `$TURBO_DEFAULT$`, which is package-local. So spec's
+      # `*.object.ts` conformance scan went unrun on a platform-objects-only
+      # diff, AND replayed a cached green in the merge-queue build that runs the
+      # full package list — a violation reached `main` with every gate green and
+      # was then charged to the next unrelated PR that happened to touch `spec`.
+      # Twenty such tests, in eight packages, exist today.
+      # This gate finds the escaping tests ITSELF, statically — nothing has to
+      # be registered to be DETECTED — and fails on any package that has one and
+      # no declared input radius, on a declaration gone stale, on a declared
+      # glob turbo.json does not hash, and on a radius too narrow to cover the
+      # paths its own tests name. The point is what happens by default: a new
+      # cross-package scan nobody remembers to register produces a RED GATE
+      # naming it and the globs to write, not a silent skip.
+      # Reads ~2000 test sources; sub-second.
+      - name: Cross-package test inputs
+        run: pnpm check:cross-package-test-inputs
 
       # #4248 packaging-hygiene guard. Without a `files` whitelist npm packs the
       # whole package directory, and 20 of the 49 publishable packages declared

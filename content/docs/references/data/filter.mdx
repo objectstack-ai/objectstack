@@ -99,6 +99,10 @@ Type: `[FilterArray](#filterarray)[]`
 
 ---
 
+## FilterCondition
+
+**Type:** `Record<string, any> & { $and?: [FilterCondition](#filtercondition)[]; $or?: [FilterCondition](#filtercondition)[]; $not?: [FilterCondition](#filtercondition) }`
+
 
 ---
 
@@ -119,8 +123,8 @@ Type: `[FilterArray](#filterarray)[]`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **$in** | `any[]` | optional |  |
-| **$nin** | `any[]` | optional |  |
+| **$in** | `any[]` | optional | Membership list. Members are literal values of any type the column stores. A `{ $field }` reference is NOT a member shape: no backend resolves one inside a list (#7596) — put it in a scalar comparison ($eq/$ne/$gt/$gte/$lt/$lte) instead. |
+| **$nin** | `any[]` | optional | Membership list. Members are literal values of any type the column stores. A `{ $field }` reference is NOT a member shape: no backend resolves one inside a list (#7596) — put it in a scalar comparison ($eq/$ne/$gt/$gte/$lt/$lte) instead. |
 
 
 ---

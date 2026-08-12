@@ -101,6 +101,10 @@ describe('MessagingService', () => {
             expect(inbox.seen[0].notification.title).toBe('Deal closed');
             expect(result.delivered).toBe(2);
             expect(result.failed).toBe(0);
+            // Inline fan-out leaves nothing in flight — the counterpart to the
+            // outbox pin below, and what keeps `delivered` a terminal count on
+            // BOTH paths rather than a name two things share (#7747).
+            expect(result.enqueued).toBe(0);
             expect(result.notificationId).toMatch(/^evt_/); // synthesized w/o data layer
             expect(result.deliveries[0]).toMatchObject({ channel: 'inbox', recipient: 'user_1', ok: true, externalId: 'row_1' });
         });
@@ -308,7 +312,14 @@ describe('MessagingService', () => {
 
             // Nothing sent inline — the dispatcher owns the send.
             expect(inbox.seen).toHaveLength(0);
-            expect(result.delivered).toBe(2); // 2 enqueued (accepted)
+            // …so nothing is DELIVERED yet, and the result says so (#7747). This
+            // pin used to read `delivered: 2` with the comment "2 enqueued
+            // (accepted)" — the conflation itself, written down: callers were
+            // handed an enqueue count under the name `delivered`, and it stayed
+            // put when the dispatcher later dead-lettered the row.
+            expect(result.enqueued).toBe(2);
+            expect(result.delivered).toBe(0);
+            expect(result.failed).toBe(0);
             const rows = await outbox.list();
             expect(rows).toHaveLength(2);
             expect(rows.every((r) => r.status === 'pending')).toBe(true);

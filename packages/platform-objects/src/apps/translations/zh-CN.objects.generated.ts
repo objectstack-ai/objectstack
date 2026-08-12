@@ -135,7 +135,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "封禁用户",
-        confirmText: "要封禁该用户吗？封禁后会立即登出，且在解除封禁前无法再次登录。",
+        description: "要封禁该用户吗？封禁后会立即登出，且在解除封禁前无法再次登录。",
         successMessage: "用户已封禁",
         params: {
           banReason: {
@@ -251,7 +251,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       delete_my_account: {
         label: "删除我的账号",
-        confirmText: "确定要永久删除您的账户吗？此操作无法撤销——您的所有会话都将被终止，并将按照配置的保留策略移除您拥有的所有数据。",
+        description: "确定要永久删除您的账户吗？此操作无法撤销——您的所有会话都将被终止，并将按照配置的保留策略移除您拥有的所有数据。",
         successMessage: "已删除账号",
         params: {
           password: {
@@ -270,7 +270,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       disable_two_factor: {
         label: "停用双因素认证",
-        confirmText: "要关闭双因素认证吗？您的账户安全性将降低。",
+        description: "要关闭双因素认证吗？您的账户安全性将降低。",
         successMessage: "双因素认证已停用。",
         params: {
           password: {
@@ -280,7 +280,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       generate_backup_codes: {
         label: "重新生成备用码",
-        confirmText: "要生成一组新的备用码吗？之前生成的备用码将全部失效。",
+        description: "要生成一组新的备用码吗？之前生成的备用码将全部失效。",
         successMessage: "新备用码已生成——请妥善保存。",
         params: {
           password: {
@@ -349,6 +349,9 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       all_sessions: {
         label: "全部"
+      },
+      revoked: {
+        label: "已撤销"
       }
     },
     _actions: {
@@ -452,7 +455,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       unlink_account: {
         label: "解除关联",
-        confirmText: "确定要解除此身份关联吗？在用户从账户设置中重新关联之前，将无法再使用此提供方登录。",
+        description: "确定要解除此身份关联吗？在用户从账户设置中重新关联之前，将无法再使用此提供方登录。",
         successMessage: "已解除身份关联"
       }
     }
@@ -555,7 +558,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       change_slug: {
         label: "修改标识符",
-        confirmText: "重命名标识符会重写该组织所有平台子域名，旧标识符将保留占用 90 天。继续吗？",
+        description: "重命名标识符会重写该组织所有平台子域名，旧标识符将保留占用 90 天。继续吗？",
         successMessage: "组织标识符已修改"
       }
     }
@@ -794,7 +797,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       remove_team_member: {
         label: "移出团队",
-        confirmText: "要将该用户移出团队吗？移除后其将失去所有团队范围内的访问权限。",
+        description: "要将该用户移出团队吗？移除后其将失去所有团队范围内的访问权限。",
         successMessage: "团队成员已移除"
       }
     }
@@ -1057,7 +1060,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       disable_two_factor: {
         label: "停用 2FA",
-        confirmText: "要停用你账号上的双因素认证吗？",
+        description: "要停用你账号上的双因素认证吗？",
         successMessage: "2FA 已停用",
         params: {
           password: {
@@ -1067,7 +1070,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       regenerate_backup_codes: {
         label: "重新生成备用码",
-        confirmText: "确定要重新生成备份码吗？此前的所有备份码将立即失效。",
+        description: "确定要重新生成备份码吗？此前的所有备份码将立即失效。",
         params: {
           password: {
             label: "当前密码"
@@ -1333,12 +1336,12 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     _actions: {
       disable_oauth_application: {
         label: "停用 OAuth 应用",
-        confirmText: "确定要停用此 OAuth 应用吗？已为其签发的有效访问令牌/刷新令牌将继续在 token、authorize 和 introspect 端点被拒绝。现有集成将立即停止工作。",
+        description: "确定要停用此 OAuth 应用吗？已为其签发的有效访问令牌/刷新令牌将继续在 token、authorize 和 introspect 端点被拒绝。现有集成将立即停止工作。",
         successMessage: "OAuth 应用已停用"
       },
       enable_oauth_application: {
         label: "启用 OAuth 应用",
-        confirmText: "确定要重新启用此 OAuth 应用吗？令牌签发、授权和内省将立即恢复。",
+        description: "确定要重新启用此 OAuth 应用吗？令牌签发、授权和内省将立即恢复。",
         successMessage: "OAuth 应用已启用"
       },
       create_oauth_application: {
@@ -1373,7 +1376,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       rotate_client_secret: {
         label: "轮换 Client Secret",
-        confirmText: "确定要轮换此 OAuth 客户端的密钥吗？旧密钥将立即失效，任何使用它的集成都将中断，直到更新为新密钥为止。新密钥仅显示一次。",
+        description: "确定要轮换此 OAuth 客户端的密钥吗？旧密钥将立即失效，任何使用它的集成都将中断，直到更新为新密钥为止。新密钥仅显示一次。",
         resultDialog: {
           title: "Client Secret 已轮换",
           description: "请立即保存新密钥——它只显示一次。请在旧密钥宽限期结束前更新所有集成。",
@@ -1385,7 +1388,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       delete_oauth_application: {
         label: "删除 OAuth 应用",
-        confirmText: "确定要永久删除此 OAuth 应用吗？所有已签发的令牌和授权同意都将失效，使用此 client_id 的集成将立即停止工作。此操作无法撤销。",
+        description: "确定要永久删除此 OAuth 应用吗？所有已签发的令牌和授权同意都将失效，使用此 client_id 的集成将立即停止工作。此操作无法撤销。",
         successMessage: "OAuth 应用已删除"
       }
     }
@@ -1860,7 +1863,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       delete_sso_provider: {
         label: "删除 SSO 提供方",
-        confirmText: "删除该 SSO 提供方吗？其域名下的用户将无法再通过它登录。",
+        description: "删除该 SSO 提供方吗？其域名下的用户将无法再通过它登录。",
         successMessage: "SSO 提供方已删除"
       }
     }

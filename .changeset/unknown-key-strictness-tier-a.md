@@ -54,3 +54,5 @@ error message carries the fix; the FROM → TO mappings baked into it include:
   `guard`/`when`/`expression`→`condition`; a top-level `object`/`objectName`/`schedule`
   belongs on the START node's `config` (`{ objectName, triggerType, condition,
   schedule }`), not on the flow.
+
+<!-- adr-0087: registered authoring-schemas-strict-unknown-keys -->

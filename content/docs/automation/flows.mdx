@@ -237,7 +237,7 @@ Replace them per branch — they are different mechanisms, not one rename:
 
 | Retired shape | Use instead |
 | --- | --- |
-| `actionType: 'email'` (+ `template` / `recipients` / `variables`) | a [`notify` node](#notify) — it delivers through the messaging service: the in-app inbox by default, real email once `@objectstack/plugin-email` is installed |
+| `actionType: 'email'` (+ `template` / `recipients` / `variables`) | a [`notify` node](#node-types) — it delivers through the messaging service: the in-app inbox by default, real email once `@objectstack/plugin-email` is installed |
 | `actionType: 'slack'` | a `connector_action` node with the Slack connector, or an `http` node posting to an incoming webhook |
 | `actionType: 'my_fn'` (shorthand) | `function: 'my_fn'` — the conversion moves it for you |
 | inline `config.script` | move the logic into a registered function and call it via `config.function` |

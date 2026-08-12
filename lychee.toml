@@ -34,6 +34,22 @@ max_retries = 2
 # ⛔ Not a boolean on the pinned lychee (0.24.2) -- it takes one of
 # none | anchor-only | text-only | full, and a bare `false` is a HARD parse
 # error. "none" preserves the original `false` semantics: fragments unchecked.
+#
+# ⚠️ "none" means a link to a heading that DOES NOT EXIST is reported
+# `[200] ✅ OK` -- measured with 0.24.2 under this repo's CI argv (#7484). Read
+# that as a scope statement, not a gap: since #7484 the fragment half of an
+# internal link is owned by `pnpm check:doc-anchors`
+# (scripts/check-doc-anchors.mjs, a REQUIRED step in Lint & Type Check), which
+# resolves every `#fragment` in content/**, README.md and ARCHITECTURE.md
+# against the destination page's real heading ids.
+#
+# ⛔ Do not "fix" this by flipping the enum. `include_fragments` is global: it
+# cannot be scoped to internal links, so it would pull in external-anchor
+# checking -- which needs the remote page fetched and parsed, the one thing the
+# `--offline` lane exists to never do. It also cannot know how Fumadocs slugs a
+# heading (github-slugger + a `[#custom-id]` suffix), so it would disagree with
+# the rendered site. Both reasons are recorded in check-doc-anchors.mjs's
+# header, with the measurement behind them.
 include_fragments = "none"
 
 # Verbose output
