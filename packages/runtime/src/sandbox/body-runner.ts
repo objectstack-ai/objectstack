@@ -111,7 +111,10 @@ function buildBodyLogSurface(
           `discarded. Pass \`logger\` to ${origin.kind}BodyRunnerFactory({ … }). See #7448.`,
       );
     };
-    return { info: warnOnce, warn: warnOnce, error: warnOnce };
+    // [#7661] `debug` is warned for like the other three. A member missing from
+    // THIS branch is `undefined` at `ctx.log?.[level]?.(…)`, which is the same
+    // `TypeError: not a function` one construction shape over.
+    return { debug: warnOnce, info: warnOnce, warn: warnOnce, error: warnOnce };
   }
 
   // `Logger.meta` is a `Record` (`packages/spec/src/contracts/logger.ts`); a
@@ -124,6 +127,14 @@ function buildBodyLogSurface(
   };
 
   return {
+    // [#7661] The fourth level. `installCtx` forwards through
+    // `ctx.log?.[level]?.(…)` — an optional call — so a `debug` absent from this
+    // object is not a throw but a SILENT DROP: the VM-side method exists, the
+    // body runs to completion, and the line goes nowhere. That is the #7448
+    // defect verbatim, which is why the pin asserts a delivered record rather
+    // than the absence of a throw. `Logger.debug` is `(message, meta)` — two
+    // args, like `info`/`warn` and unlike `error` below.
+    debug: (msg: string, data?: unknown) => logger.debug?.(`${label} ${msg}`, toMeta(data)),
     info: (msg: string, data?: unknown) => logger.info?.(`${label} ${msg}`, toMeta(data)),
     warn: (msg: string, data?: unknown) => logger.warn?.(`${label} ${msg}`, toMeta(data)),
     // ⚠️ `Logger.error` is `(message, error, meta)` — THREE args, and the body's

@@ -351,7 +351,7 @@ import { isFilterAST, parseFilterAST, VALID_AST_OPERATORS } from '@objectstack/s
 import { StandardErrorCode } from '@objectstack/spec/api';
 import {
   CROSS_FIELD_COMPARISON_OPERATORS,
-  fieldReferenceComparandMessage,
+  fieldReferenceBetweenBoundMessage,
   isBindableComparand,
   isFieldReference,
   isRenderableTextComparand,
@@ -388,8 +388,19 @@ export interface NormalizedAnalyticsFilter {
  *
  * It carries no `#5352`-specific wording on purpose — the envelope is the
  * contract, the message stays whatever the refusing site says.
+ *
+ * [#7598] EXPORTED, and the "only way this module refuses" invariant is
+ * unchanged by it: that rule is about this file's own sites, and the export
+ * exists so a sibling in this directory cannot invent a SECOND spelling of the
+ * same envelope. `ObjectQLStrategy.generateSql` refuses a cross-field
+ * comparison it cannot honestly render, and that refusal is a `where`-door
+ * refusal in every respect that matters — the caller authored the input, the
+ * repair is theirs — so it takes the `where` door's envelope rather than a
+ * hand-rolled twin. (`read-scope-sql.ts` keeps its OWN local error factory
+ * because its envelope genuinely differs: a read scope is not caller-authored,
+ * hence `READ_SCOPE_COMPILE_FAILED` / 500 by the #5367 ruling.)
  */
-function invalidFilterError(message: string): Error {
+export function invalidFilterError(message: string): Error {
   const err = new Error(message) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.INVALID_FILTER;
   err.status = 400;
@@ -562,18 +573,26 @@ function andOf(children: NormalizedFilterNode[]): NormalizedFilterNode | null {
  * `FilterCondition` that never passes through here — and carries the same two
  * checks in its own fail-closed envelope.
  *
- * Three shapes are refused: the two #5234 measured, and — since #7598 — a
- * `{$field}` reference in the comparand of a scalar comparison, the position
- * both of #5234's checks are simply never asked about. `$eq` and friends keep
+ * Two shapes are refused, the two #5234 measured. `$eq` and friends keep
  * binding any OTHER object as JSON (`toSqlBindValue`), which remains a separate
  * account.
+ *
+ * ⚠️ [#7598, maintainer ruling 2026-08-12 Q1 = B] A THIRD arm briefly lived
+ * here — a `{$field}` reference in the comparand of the six scalar comparison
+ * operators, added by #7694 as the shipped interim while the routing question
+ * was with the maintainer. It is GONE, and its removal is the point of the
+ * ruling rather than a cleanup: this function runs inside {@link fieldLeaves},
+ * which is the one producer of leaf nodes for ALL THREE consumers of this tree
+ * — including `ObjectQLStrategy.convertFilter`, the ENGINE path. Refusing here
+ * therefore refused the very execution B routes such a query to, so the arm and
+ * the ruling cannot both stand. `NativeSQLStrategy.canHandle` now declines
+ * instead (see the ruling recorded there), and `driver-sql` compiles the
+ * comparison under the four #5222 rulings with the metadata it owns.
+ *
+ * What did NOT move is the `$between` arm — see
+ * {@link assertNoFieldReferenceComparand}, which is now that arm alone.
  */
 function assertCompilableComparand(opKey: string, field: string, value: unknown): void {
-  // [#7598] The field-reference arm runs FIRST, and only over the positions that
-  // were BOUND — see {@link assertNoFieldReferenceComparand} for the measured
-  // table, for why the LIKE / list positions keep their own (converging) wording
-  // instead, and for why refusing is the answer rather than compiling.
-  assertNoFieldReferenceComparand(opKey, field, value);
   if (TEXT_PATTERN_OPERATORS.has(opKey)) {
     // An array reaches this door as `values[0]` — i.e. every member after the
     // first is silently DROPPED — while `read-scope-sql` and `driver-sql`
@@ -594,74 +613,52 @@ function assertCompilableComparand(opKey: string, field: string, value: unknown)
 }
 
 /**
- * [#7598] A `{ $field: 'col' }` reference in a comparand position this door
- * BOUND instead of refusing.
+ * [#7598] A `{ $field: 'col' }` reference in a `$between` ENDPOINT — the one
+ * position on this door where the gate is still load-bearing after the
+ * 2026-08-12 ruling, and the one place its removal would silently CREATE a
+ * capability rather than remove a refusal.
  *
- * ## The measured cell, on `origin/main` (`5823d593d`)
+ * ## Why this arm survived when the scalar-comparand arm did not
  *
- * `{ amount: { $gt: { $field: 'budget' } } }` produced the leaf
- * `{member: 'amount', operator: 'gt', values: [{$field: 'budget'}]}` — and then
- * the THREE consumers of that leaf answered three different ways, which is the
- * split this module's header spends its length removing:
+ * The ruling (Q1 = B) moved the six scalar comparison operators OUT of this
+ * door's business entirely: `NativeSQLStrategy.canHandle` declines a `where`
+ * carrying one, the query routes to the engine, and `driver-sql` compiles the
+ * comparison under the four #5222 rulings. Refusing them here would refuse the
+ * execution the routing exists to reach, so that arm is gone.
  *
- * | consumer | answer |
- * |---|---|
- * | `NativeSQLStrategy` (the statement that executes) | `WHERE amount > $1`, bound to the JSON TEXT `{"$field":"budget"}` |
- * | `ObjectQLStrategy.generateSql` (the `/analytics/sql` echo) | `WHERE amount > $1`, bound to the reference OBJECT |
- * | `ObjectQLStrategy.convertFilter` (the engine path) | `{amount: {$gt: {$field: 'budget'}}}` — reaches `driver-sql`, which COMPILES it correctly since #5222 |
+ * `$between` is the opposite case, because of a LOWERING this door performs and
+ * the driver never sees. {@link fieldLeaves}'s `$between` branch splits
+ * `{ $between: [a, b] }` into a `gte` leaf and an `lte` leaf, and
+ * `ObjectQLStrategy.convertFilter` hands those to the engine as `{ $gte: a }` /
+ * `{ $lte: b }`. So a reference in an endpoint would arrive at `driver-sql`
+ * wearing a `$gte` it was never authored with — and `$gte` is a position #5222
+ * COMPILES. The result would be that `{ amount: { $between: [{ $field:
+ * 'budget' }, 100] } }` quietly SUCCEEDS on the analytics face while
+ * `CROSS_FIELD_REFUSALS` pins it as refused on both SQL drivers, and while
+ * #7596 has removed the position from `FieldReferenceSchema` altogether
+ * (maintainer ruling 2026-08-11, ADR-0049 declared = enforced). One shape, two
+ * answers, created by a laundering this module does on the way past — exactly
+ * the class #7598 was filed about, spelled backwards.
  *
- * Two wrong answers and one right one, chosen by which strategy the datasource
- * routed to. The two wrong ones are wrong in the silent way (#3650 / #5234): a
- * valid statement comparing a column against a value no row can hold, so a
- * widget draws an empty chart with nothing to read.
+ * Refusing here therefore CONVERGES with `driver-sql`'s own #5222 refusal arm,
+ * which is what every surviving `{$field}` refusal in this package now does:
+ * the LIKE family through {@link assertCompilableComparand}'s
+ * `isRenderableTextComparand` call, `$in` / `$nin` members through its
+ * `isBindableComparand` one, a bare `{ field: { $field: … } }` as an unsupported
+ * operator, and this. The scalar comparands are the only positions where the
+ * two faces now differ, and they differ by the analytics face DECLINING to
+ * serve them itself rather than by refusing them.
  *
- * ## Why this refuses instead of compiling — and what it costs
- *
- * ⚠️ Refusing at the door NARROWS the engine path, which today passes the
- * reference through to a driver that handles it properly. That cost is taken
- * deliberately and is the part to re-open if the maintainer rules otherwise:
- *
- *   - the pass-through is an ACCIDENT of {@link convertFilter} forwarding an
- *     unrecognised comparand, not a capability this package implements — nothing
- *     here validates it, and no test pinned it;
- *   - leaving it makes one authored `where` mean two things depending on the
- *     backend behind the cube, which is the exact "whichever face took the query
- *     is the answer you get" split #5146 / #5332 / #5567 / #5298 each spent a
- *     round removing — and the loud half of it would still be missing, since the
- *     other two emitters cannot be made to agree;
- *   - the four #5222 rulings that make a referenced column name safe in a SQL
- *     identifier position (declared-only enumeration, declared types for the
- *     comparison class, the tenant-isolation column, federation) turn on
- *     metadata `StrategyContext` does not expose, so this door cannot enforce
- *     them for the two emitters that would need it.
- *
- * So the package answers ONE way, loudly, exactly as it already does for
- * `{$contains: {$field: …}}` — a refusal that CONVERGES with `driver-sql`'s own
- * #5222 refusal arm. Whether the capability should instead be IMPLEMENTED here
- * (which needs a `StrategyContext` hook, i.e. a `packages/spec` change) is the
- * open question on #7598, and is deliberately not decided by this gate.
- *
- * ## Positions
- *
- * Only the ones that were bound: the six scalar comparison operators'
- * whole comparand ({@link CROSS_FIELD_COMPARISON_OPERATORS}) and the two
- * `$between` endpoints. `$between` needs naming because its branch in
- * {@link fieldLeaves} lowers to `gte` / `lte` leaves BEFORE this gate is
- * consulted, so its endpoints were the one position no shape gate on this door
- * ever saw. The LIKE family and `$in` / `$nin` members keep their existing
- * wording — they were already refused here AND on `driver-sql`.
+ * Asserted under the `$between` name, not under the `gte` / `lte` the bounds
+ * lower to, because the author wrote `$between` and that is the key they have
+ * to repair.
  */
 function assertNoFieldReferenceComparand(opKey: string, field: string, value: unknown): void {
-  if (CROSS_FIELD_COMPARISON_OPERATORS.has(opKey) && isFieldReference(value)) {
-    throw invalidFilterError(
-      `[analytics] ${fieldReferenceComparandMessage(opKey, field, value.$field)}`,
-    );
-  }
   if (opKey !== '$between' || !Array.isArray(value)) return;
   value.forEach((member, index) => {
     if (!isFieldReference(member)) return;
     throw invalidFilterError(
-      `[analytics] ${fieldReferenceComparandMessage(opKey, field, member.$field, `index ${index}`)}`,
+      `[analytics] ${fieldReferenceBetweenBoundMessage(opKey, field, member.$field, index)}`,
     );
   });
 }
@@ -1279,6 +1276,41 @@ function nullValueSatisfiesOperator(op: string, value: unknown): boolean {
 
 /** Is this operator's compiled leaf already total for a NULL column? */
 function operatorIsNullTotal(op: string, value: unknown): boolean {
+  // [#7598, maintainer ruling 2026-08-12] A `{ $field }` comparand on any of the
+  // six scalar comparison operators is TOTAL AT THE BACKEND, so this module must
+  // add no guard of its own — and MEASURED, adding one changes the answer.
+  //
+  // Every other entry in this switch is total because THIS module compiles the
+  // operator into a null predicate. This one is total because of where the leaf
+  // ends up: since the ruling, a `where` carrying a reference is declined by
+  // `NativeSQLStrategy.canHandle` and served on the engine path, where
+  // `driver-sql`'s `applyCrossFieldComparison` emits a predicate written total
+  // across NULLs by construction (it repeats both column expressions for exactly
+  // that reason — see `cross-field-conformance-cases.ts`, whose rows 4-6 carry
+  // every NULL arrangement a pair of columns can be in). `@objectstack/formula`
+  // resolves the reference and then compares in two-valued JS. The two agree,
+  // and the corpus's declared id lists are the third statement of it.
+  //
+  // ## What the guard did before this arm existed — measured on the wasm driver
+  //
+  // The `$ne` arm of {@link nullValueSatisfiesOperator} answers `true` for any
+  // non-null comparand, so a reference took the negative-polarity totalisation
+  // in {@link fieldLeaves} and `{ amount: { $ne: { $field: 'budget' } } }`
+  // lowered to `{$or: [{amount: null}, {amount: {$ne: ref}}]}`. That admitted
+  // fixture row 6 — BOTH columns NULL — where the corpus, both SQL drivers and
+  // the memory evaluator all EXCLUDE it, because row 6 satisfies the inner
+  // `$eq` and `$ne` is its exact complement. Six corpus cases moved: the three
+  // `$ne` class-pair cases, `a column differs from itself on no row`, and the
+  // two `$not`-of-`$eq` cases (which reach the same guard through
+  // {@link nullGuardForFieldSpec}). Widening a `$ne`, on a shape whose producer
+  // is an RLS rule, is the direction that matters.
+  //
+  // The guard is right for a LITERAL comparand and is untouched there: `{amount:
+  // {$ne: 5}}` must still admit a NULL `amount`, which is #5298's ruling and the
+  // JS backends' answer. What differs is only that a reference's NULL semantics
+  // are already decided by the referent, not by the target column alone — so
+  // there is nothing left for a guard to decide.
+  if (CROSS_FIELD_COMPARISON_OPERATORS.has(op) && isFieldReference(value)) return true;
   switch (op) {
     // Compile to `set` / `notSet` — `IS NULL` / `IS NOT NULL`, two-valued by
     // construction, on every strategy that compiles this tree.

@@ -5,6 +5,7 @@ import type { RegisteredErrorCode } from '@objectstack/spec/api';
 import { likePattern, LIKE_ESCAPE_CHAR, asciiLowerSqlExpr } from './like-pattern.js';
 import {
   CROSS_FIELD_COMPARISON_OPERATORS,
+  fieldReferenceBetweenBoundMessage,
   fieldReferenceComparandMessage,
   isBindableComparand,
   isFieldReference,
@@ -223,14 +224,35 @@ import {
  * tenant-isolation column, so the enumeration the rulings turn on does not
  * exist on this side).
  *
- * ⚠️ Note what this does NOT do: it does not make the capability available.
- * A read scope carrying a field-to-field comparison still cannot be served by
- * the raw-SQL analytics path — it is now REFUSED there instead of silently
- * mis-answered, which is the whole of the change. The same scope continues to
- * work on the ObjectQL engine path, where the driver compiles it and enforces
- * the rulings with the metadata it owns (measured: `ObjectQLStrategy` ANDs the
- * scope into the `FilterCondition` it hands `engine.aggregate`, so the reference
- * reaches `driver-sql` intact and never passes through this file).
+ * ⚠️ [UPDATED — maintainer ruling 2026-08-12, #7598 Q1 = B] When this section
+ * was written the refusal was the whole answer, and it said so: "it does not
+ * make the capability available". **It does now, by getting out of the way.**
+ * `NativeSQLStrategy.canHandle` DECLINES a query whose read scope carries a
+ * reference, so the query falls through to the ObjectQL/engine path — where
+ * `ObjectQLStrategy` ANDs the scope into the `FilterCondition` it hands
+ * `engine.aggregate`, the reference reaches `driver-sql` intact, and the driver
+ * compiles it under all four #5222 rulings using its own `initObjects`
+ * metadata. A field-to-field RLS rule is therefore SERVED on the analytics
+ * face, and the security rules live in exactly one place rather than two.
+ *
+ * What that leaves for the gate below is a narrower but still live job:
+ * `applyReadScope` (`native-sql-strategy.ts`) no longer reaches it — the
+ * decline runs first — but `ObjectQLStrategy.generateSql` does. That is the
+ * `/analytics/sql` ECHO, a display string for an execution it does not perform,
+ * and it has no faithful rendering of the total column-to-column predicate the
+ * engine path runs. The ruling answered that face explicitly —
+ * 「一致的响亮答案,不半渲染」 (one consistent, loud answer; no half-rendering) —
+ * so the refusal here IS the echo's decline. `compileScopedFilterToSql` is also
+ * a public export of this package (`index.ts`), so the gate additionally holds
+ * for any consumer outside these two.
+ *
+ * ⛔ The ENVELOPE is untouched, and deliberately: Q2 = A kept the #5367 ruling
+ * verbatim — `READ_SCOPE_COMPILE_FAILED` / 500 with the message withheld. No new
+ * ADR-0112 code for the unsupported-rule class (option C was declined for zero
+ * measured pull; #5367 recorded that no consumer reads a code on this path), and
+ * no 4xx (option B reintroduces both defects #5367 closed). The paragraph above
+ * beginning "⚠️ Deliberately NOT a 4xx of any flavour" is that ruling's own text
+ * and is not to be rewritten.
  */
 
 const IDENT = /^[a-z_][a-z0-9_]*$/i;
@@ -837,21 +859,37 @@ function assertBooleanFlagComparands(field: string, spec: unknown): void {
  *
  * `$between` is in the covered set even though {@link assertCompilableMembers}
  * would also refuse its endpoints, because this gate runs FIRST and the truer
- * diagnosis wins: "a field reference is not compiled here" tells the policy
- * author what to write, where "cannot be bound as a SQL parameter" describes a
- * consequence of the shape rather than the shape.
+ * diagnosis wins: "a range bound may not be a field reference on any backend"
+ * tells the policy author what to write, where "cannot be bound as a SQL
+ * parameter" describes a consequence of the shape rather than the shape. The two
+ * covered positions now say DIFFERENT sentences, because the 2026-08-12 ruling
+ * made them different conditions — see {@link fieldReferenceComparandMessage}
+ * (a rendering boundary on a rule the platform SERVES) versus
+ * {@link fieldReferenceBetweenBoundMessage} (a position refused everywhere, and
+ * removed from the spec by #7596).
  *
- * ## Envelope: unchanged, deliberately (#5367 ruling, 2026-08-06)
+ * ## What reaches this gate after the 2026-08-12 ruling
+ *
+ * Not `applyReadScope`. `NativeSQLStrategy.canHandle` declines a query whose
+ * read scope carries a scalar reference before that method runs, so the scope
+ * is served on the engine path instead (module header). What DOES reach it is
+ * `ObjectQLStrategy.generateSql` — the `/analytics/sql` echo — plus any external
+ * consumer of the `compileScopedFilterToSql` export. The gate is therefore the
+ * echo's decline, which is what the ruling asked that face for.
+ *
+ * ## Envelope: unchanged, deliberately (#5367 ruling 2026-08-06, re-affirmed as
+ * #7598 Q2 = A on 2026-08-12)
  *
  * `READ_SCOPE_COMPILE_FAILED` / 500, like the other twelve. The two arguments
- * that ruling gave apply to this shape verbatim rather than by analogy: the
- * producer is an ADMIN-authored sharing rule / permission set and its CEL
- * lowering — `compileCelToFilter` is exactly what emits `{ $field: path }` — so
- * a 4xx would bill the caller for a document they cannot author, and a 4xx
- * echoes the message, which here names the POLICY's field names. Whether an
- * unsupported-capability refusal on this path should nevertheless get a code and
- * status of its own is a contract-face question raised on #7598 and left to the
- * maintainer; it is not decided as a rider by the change that stops the bind.
+ * #5367 gave apply to this shape verbatim rather than by analogy: the producer
+ * is an ADMIN-authored sharing rule / permission set and its CEL lowering —
+ * `compileCelToFilter` is exactly what emits `{ $field: path }` — so a 4xx would
+ * bill the caller for a document they cannot author, and a 4xx echoes the
+ * message, which here names the POLICY's field names. #7598 put the question to
+ * the maintainer and it was answered A: keep #5367 as it stands, add no new
+ * ADR-0112 code for the unsupported-rule class (option C had zero measured pull
+ * — #5367 recorded that no consumer reads a code on this path — and a zero-pull
+ * vocabulary is recorded, not built), and do not move to 4xx.
  */
 function assertNoFieldReferenceComparand(field: string, spec: unknown): void {
   if (!isFilterNode(spec)) return;
@@ -865,7 +903,7 @@ function assertNoFieldReferenceComparand(field: string, spec: unknown): void {
     opValue.forEach((member, index) => {
       if (!isFieldReference(member)) return;
       throw readScopeCompileError(
-        `[read-scope-sql] ${fieldReferenceComparandMessage(op, field, member.$field, `index ${index}`)}`,
+        `[read-scope-sql] ${fieldReferenceBetweenBoundMessage(op, field, member.$field, index)}`,
       );
     });
   }

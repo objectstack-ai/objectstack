@@ -38,6 +38,50 @@ describe('showcase: external datasource auto-connects with no onEnable bridge (A
     const res = await stack.apiAs(admin, 'GET', '/data/showcase_ext_customer');
     expect(res.status, 'federated object must be queryable — driver auto-connected').toBe(200);
     const rows = listOf(await res.json());
+    // [#7834] ⛔ THIS ASSERTION IS NOT ORG-WALL COVERAGE — read this before
+    // treating a green run of this file as proof of anything about tenancy.
+    //
+    // What it DOES cover (real, which is why this test is not skipped): the
+    // ADR-0062 D8 auto-connect path — a declared external datasource connects
+    // at boot with no `onEnable` driver bridge, and its federated objects
+    // answer a genuine authenticated read through the real REST stack.
+    //
+    // What it does NOT cover: the organization wall. `bootStack(showcaseStack)`
+    // above passes NO options, and `bootStack` requests
+    // `OS_TENANCY_POSTURE = 'isolated'` only when `opts.multiTenant` is truthy
+    // (`packages/verify/src/harness.ts`, `requestIsolatedPosture`). It also
+    // boots AuthPlugin with `autoDefaultOrganization: false` and registers no
+    // organization plugin. So this fixture boots posture `single` — the boot
+    // log says so: `[security] tenancy posture 'single' — Layer 0 is inert` —
+    // with no active org. `execCtx.tenantId` is therefore undefined, which is
+    // the FIRST conjunct of `hasTenant` in `ObjectQLEngine.buildDriverOptions`
+    // (`packages/objectql/src/engine.ts`); it short-circuits false before the
+    // `isFederated` exemption is even reached, and the driver is handed no
+    // `tenantId` to scope by. **The org predicate is never emitted here, in
+    // either direction.** Measured on #7738: `engine.ts` was checked back out
+    // at pre-fix `main`, `@objectstack/objectql` rebuilt, and this file re-run
+    // — 3 passed / 3 both WITH the fix and WITHOUT it. This assertion sat green
+    // while a correctly-bound federated object answered 0 rows under a real
+    // org wall, and it cannot catch a regression of that.
+    //
+    // Where the regression defence actually lives: the seam pin in
+    // `packages/objectql/src/engine-external-tenant-scope.test.ts` (#7833). It
+    // asserts on `DriverOptions` in both directions — an external object gets
+    // no `tenantId`/`tenantIds`, an ordinary one still does — and is reachable
+    // without the enterprise package. ⛔ That is a UNIT/SEAM pin, not
+    // end-to-end proof: it pins what the engine hands the driver, never what a
+    // walled deployment returns over HTTP.
+    //
+    // Why this is deliberately left as-is (maintainer ruling, 2026-08-12 on
+    // #7834): the federated-read × org-walled intersection is accepted as
+    // covered at the unit/seam tier ONLY. The single honest walled harness is
+    // `multiTenant: true` with the cloud-private `@objectstack/organizations`
+    // (`'posture-only'` stamps nothing and scopes no query — see
+    // `BootOptions.multiTenant` — so it would assert nothing here); its
+    // feasibility in this repo is untested, and one intersection does not
+    // justify building that fixture. ⛔ Do not "fix" this by asserting tenancy
+    // on this single-tenant boot — that pins the inert path and makes the
+    // false reading of coverage worse.
     expect(rows.length).toBeGreaterThanOrEqual(3);
     expect(rows.map((r) => r.name)).toContain('Aurora Labs');
   });

@@ -139,12 +139,13 @@ export const en: TranslationData = {
         // No `nav_verifications` / `nav_device_codes` here on purpose:
         // `sys_verification` and `sys_device_code` omit `list` from their
         // `apiMethods`, so `setup-nav.contributions.ts` deliberately declares
-        // no browse entry for them (#2266). Nor `nav_metadata` — that entry
-        // moved to Studio as `nav_metadata_directory`. Re-adding a label here
-        // means re-adding the nav item first; the tombstone in
+        // no browse entry for them (#2266). Nor `nav_jwks` — `sys_jwks` is
+        // `apiEnabled: false`, so its list 404s for EVERY persona and the entry
+        // was removed (#7544). Nor `nav_metadata` — that entry moved to Studio
+        // as `nav_metadata_directory`. Re-adding a label here means re-adding
+        // the nav item first; the tombstone in
         // `setup-nav-dead-key-tombstone.test.ts` states the whole rule (#6660).
         nav_oauth_apps: { label: 'OAuth Applications' },
-        nav_jwks: { label: 'Signing Keys (JWKS)' },
         nav_accounts: { label: 'Identity Links' },
         nav_user_preferences: { label: 'User Preferences' },
       },

@@ -7515,9 +7515,16 @@ export class ObjectStackProtocolImplementation implements
             objectsScanned++;
 
             // Build AND-of-OR filter: every term must hit at least one field.
-            // ObjectQL exposes case-insensitive substring matching via `$contains`.
+            // [#7641] Case-insensitive substring matching is `$icontains`, NOT
+            // `$contains` — the comment this replaced asserted the opposite and
+            // was the same declared≠enforced defect as `search-filter.ts`'s
+            // (`$contains` is contractually case-SENSITIVE, #4706 Q2 = A). The
+            // global-search palette is a SECOND producer of search clauses and
+            // was wrong the same way; `search.global-search`'s knownGaps already
+            // recorded it as this issue's to fix. Neither operator's semantics
+            // changed — only which one the palette compiles to.
             const andClauses = terms.map(term => ({
-                $or: searchableFields.map(f => ({ [f]: { $contains: term } })),
+                $or: searchableFields.map(f => ({ [f]: { $icontains: term } })),
             }));
             const where = andClauses.length === 1 ? andClauses[0] : { $and: andClauses };
 

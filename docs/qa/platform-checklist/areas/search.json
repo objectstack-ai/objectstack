@@ -8,7 +8,7 @@
       "title": "$search is a server-resolved cross-field match: terms AND-ed, fields OR-ed, case-insensitive, select labels mapped to values",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai)"],
@@ -18,8 +18,8 @@
           "the seeded accounts: Northwind (industry 'retail', name does NOT contain 'retail'), Acme Retail (name-hit control), Contoso (cross-term control) — examples/app-showcase/src/data/seed/index.ts"
         ],
         "knownGaps": [
-          "the textual case-fold clause FAILS on builds carrying #7641: search-filter.ts fieldClausesForTerm emits { field: { $contains: term } } for textual types and `$contains` is contractually case-SENSITIVE (#4706 Q2 = A), so a lowercase term misses a capitalized name (run #7629, framework 92f26f75, reproduced on two fresh boots; the #6518 SQLite LIKE→GLOB change removed the incidental ASCII fold that used to hide it). Case-insensitive stays the DECLARED truth — this item states the contract and #7641 moves the executor onto `$icontains`. A run records the FAIL against #7641; it does NOT re-declare the semantics to match a red build",
-          "the automated pin (packages/qa/dogfood/test/showcase-search.dogfood.test.ts) stayed green through #7641 because its only case assertion is a select LABEL, which survives via optionValuesMatching's JS-side lowercasing. A run may not treat that pin as covering the textual case-fold clause — that clause needs its own lowercase-name assertion"
+          "CLOSED by #7641 (was: the textual case-fold clause FAILED because search-filter.ts fieldClausesForTerm emitted { field: { $contains: term } } for textual types, and `$contains` is contractually case-SENSITIVE per #4706 Q2 = A, so a lowercase term missed a capitalized name — run #7629, framework 92f26f75, reproduced on two fresh boots; #6518's SQLite LIKE→GLOB change removed the incidental ASCII fold that had hidden it). fieldClausesForTerm now emits `$icontains` for textual types and for the select raw-value fallback, so the executor honours the declaration this item transcribes. Neither operator's own semantics moved — `$contains` remains case-SENSITIVE. A run that still sees the lowercase spelling miss is on a build predating #7641; score it FAIL against the declaration, not against this item",
+          "the automated pin (packages/qa/dogfood/test/showcase-search.dogfood.test.ts) used to stay green on a case-SENSITIVE build because its only case assertion was a select LABEL, which survives via optionValuesMatching's JS-side lowercasing. #7641 closed that blind spot: the pin now carries the ['name']-narrowed lowercase-vs-capitalized assertion this item's textual clause needs, so the pin and the clause finally cover the same mechanism"
         ]
       },
       "steps": [
@@ -47,13 +47,13 @@
         {
           "clause": "matching is case-insensitive on TEXTUAL fields: narrowed to ['name'], both 'retail' and 'Retail' return the name-hit control (Acme Retail) — the case-fold is a property of the matching itself, not a side effect of the select-label path",
           "oracle": "api",
-          "verify": "the two ['name']-narrowed responses both carry Acme Retail. This is the DECLARED contract: `$contains` is case-SENSITIVE (#4706 Q2 = A), so a conforming executor emits the case-insensitive `$icontains` for textual fields. On a build where search-filter.ts still emits `$contains`, the lowercase spelling returns [] — FAIL this clause against #7641 rather than softening the declaration",
+          "verify": "the two ['name']-narrowed responses both carry Acme Retail. This is the DECLARED contract: `$contains` is case-SENSITIVE (#4706 Q2 = A), so a conforming executor emits the case-insensitive `$icontains` for textual fields — which search-filter.ts fieldClausesForTerm does since #7641. On a build predating it the lowercase spelling returns [] — FAIL this clause against #7641 rather than softening the declaration",
           "evidence": "the two ['name']-narrowed response bodies"
         },
         {
           "clause": "select labels map to option values: 'Retail' (label case) matches rows storing the value 'retail' — an independent mechanism from the textual case-fold above",
           "oracle": "api",
-          "verify": "the capitalized search still returns Northwind (optionValuesMatching lowercases both sides in JS before emitting $in; raw-value $contains fallback). Ticking this clause says nothing about the textual clause — they are verified separately on purpose",
+          "verify": "the capitalized search still returns Northwind (optionValuesMatching lowercases both sides in JS before emitting $in; raw-value $icontains fallback since #7641). Ticking this clause says nothing about the textual clause — they are verified separately on purpose",
           "evidence": "the response body"
         },
         {
@@ -65,8 +65,8 @@
       ],
       "negative": [
         "'retail contoso' returning Contoso (terms OR-ed instead of AND-ed) is a FAIL against the declared matching semantics",
-        "an empty result for 'retail' means the executor silently dropped $search — the exact pre-ADR-0061 no-op this surface replaced; FAIL, not thin data. Rule out the #7641 case-fold gap first: if 'Retail' hits where 'retail' misses, the executor did not drop $search, it failed to case-fold",
-        "a lowercase term missing a capitalized name ('retail' → [] while 'Retail' → Acme Retail) is a case-fold FAIL, not thin data and not a fixture problem — the declaration is the truth and the executor is what must move (#7641)"
+        "an empty result for 'retail' means the executor silently dropped $search — the exact pre-ADR-0061 no-op this surface replaced; FAIL, not thin data. Distinguish it from the case-fold gap #7641 closed: if 'Retail' hits where 'retail' misses, the executor did not drop $search, it failed to case-fold (a build predating #7641)",
+        "a lowercase term missing a capitalized name ('retail' → [] while 'Retail' → Acme Retail) is a case-fold FAIL, not thin data and not a fixture problem — the declaration is the truth and the executor is what must move; #7641 moved it onto `$icontains`, so on a current build this spelling must hit"
       ],
       "variants": [
         "multi-term AND",
@@ -78,13 +78,14 @@
       "automated": { "kind": "api", "ref": "packages/qa/dogfood/test/showcase-search.dogfood.test.ts" },
       "source": [
         "packages/qa/dogfood/test/search-conformance.ledger.ts (rows search-executor, search-select-label-mapping — the variants list is the enforced behavior set)",
-        "packages/objectql/src/search-filter.ts (docblock line 18 — matching semantics: terms AND-ed, fields OR-ed, case-insensitive, label mapping; the DECLARATION this item transcribes, which fieldClausesForTerm does not yet honor for textual types — #7641)",
+        "packages/objectql/src/search-filter.ts (docblock 'Matching:' paragraph — matching semantics: terms AND-ed, fields OR-ed, case-insensitive, label mapping; the DECLARATION this item transcribes, honored for textual types by fieldClausesForTerm since #7641 moved it onto `$icontains`)",
         "packages/objectql/src/engine.ts expandSearchOnAst (the executor site the ledger names)",
         "#4706 Q2 = A (the operator ruling that fixes the direction: `$contains` is a case-SENSITIVE substring test and `$icontains` is the case-insensitive one — so 'case-insensitive $search' means $icontains, and the declaration is what the executor must satisfy)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item transcribed from the search-conformance ledger and its HTTP-level dogfood proof, seeded names (Northwind/Acme Retail/Contoso) verified in the showcase seed", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-08-11", "change": "case-fold made separately assertable, and aligned TOWARD the declaration per the #4706 Q2 = A ruling (case-insensitive is the declared truth; the product-side conformance gap is #7641's job, not this file's). Run #7629 scored the old clause FAIL and showed why it had gone unnoticed for a release: one clause conflated two mechanisms — textual case-fold and select label→value mapping — and the label half passes on a case-SENSITIVE build because optionValuesMatching lowercases in JS, so a green tick (and a green dogfood pin) said nothing about the textual half. Now split into two clauses with a ['name']-narrowed probe that pins the textual case-fold away from the select path, a step and a negative for the lowercase-name assertion the run identified as the missing one, and knownGaps recording the #7641 expected FAIL plus the pin's blind spot. The variant string 'case-insensitive $contains' was self-contradictory under Q2 = A and now names $icontains semantics. Title, docblock citation and the case-insensitive declaration itself are deliberately UNCHANGED", "ref": "#7647" }
+        { "revision": 2, "date": "2026-08-11", "change": "case-fold made separately assertable, and aligned TOWARD the declaration per the #4706 Q2 = A ruling (case-insensitive is the declared truth; the product-side conformance gap is #7641's job, not this file's). Run #7629 scored the old clause FAIL and showed why it had gone unnoticed for a release: one clause conflated two mechanisms — textual case-fold and select label→value mapping — and the label half passes on a case-SENSITIVE build because optionValuesMatching lowercases in JS, so a green tick (and a green dogfood pin) said nothing about the textual half. Now split into two clauses with a ['name']-narrowed probe that pins the textual case-fold away from the select path, a step and a negative for the lowercase-name assertion the run identified as the missing one, and knownGaps recording the #7641 expected FAIL plus the pin's blind spot. The variant string 'case-insensitive $contains' was self-contradictory under Q2 = A and now names $icontains semantics. Title, docblock citation and the case-insensitive declaration itself are deliberately UNCHANGED", "ref": "#7647" },
+        { "revision": 3, "date": "2026-08-12", "change": "the executor caught up with the declaration, so the item records a CLOSED gap instead of an open one. #7641 moved search-filter.ts fieldClausesForTerm from `$contains` to `$icontains` for textual types (and for the select raw-value fallback); the label→value `$in` path is untouched, and the `__search` companion clause deliberately stays `$contains` because both of its sides are already lowercase. No clause substance changed and the case-insensitive declaration is again deliberately UNCHANGED — this revision only flips the tense of knownGaps, the textual clause's verify note, the two negatives and the search-filter.ts source citation, which all read as if the gap were still open. The second knownGap is closed by the same PR: the dogfood pin now carries the ['name']-narrowed lowercase-vs-capitalized assertion it was missing, so the pin and the textual clause finally cover the same mechanism", "ref": "#7641" }
       ]
     },
     {
@@ -384,7 +385,7 @@
       "title": "The console global search — ⌘K palette, header Search button, and /search page — drives ONE path (GET /api/v1/search): hits group under object headings, RLS hides invisible rows, Enter opens the record, empty input shows recents",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -401,7 +402,7 @@
         "knownGaps": [
           "the /_console bundle is vendored and may be stale — verify the palette/page behavior against current objectui app-shell or a fresh build (stale-console-bundle, RUNNER §2)",
           "when the search plugin is ABSENT, searchAll's GET /api/v1/search answers 404 and useRecordSearch degrades to the per-object find({ $search }) fanout — record WHICH path served from the network trace rather than assuming the global endpoint",
-          "the /search path inherits the same declared-vs-actual case gap as search.cross-field-object-search: matching is DECLARED case-insensitive (#4706 Q2 = A makes `$icontains` the case-insensitive operator) and searchAll's filter still emits `$contains`, so a query whose case differs from the stored value can miss on a build carrying #7641. Vary case deliberately, or query in the stored case, before scoring a miss as a palette/UI defect — the declaration stands and #7641 owns the executor side"
+          "CLOSED by #7641 (was: the /search path inherited the same declared-vs-actual case gap as search.cross-field-object-search — matching is DECLARED case-insensitive, #4706 Q2 = A makes `$icontains` the case-insensitive operator, and searchAll's filter emitted `$contains`, so a query whose case differed from the stored value could miss). searchAll is a SECOND producer of search clauses and #7641 fixed it alongside search-filter.ts: metadata-protocol/src/protocol.ts searchAll now emits `$icontains`, and the comment there that claimed `$contains` was the case-insensitive operator is gone. A case-varying miss on a current build is a real palette/UI defect, not this gap; on a build predating #7641 it is the executor"
         ]
       },
       "steps": [
@@ -486,7 +487,8 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-08", "change": "new item: console global-search UI (⌘K palette + header button ADR-0054 C1 + /search page) over GET /api/v1/search — object-grouped hits, RLS parity, Enter-navigates, empty-shows-recents; grounded in objectui app-shell + the framework search route ledger", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-08-11", "change": "two text corrections from run #7629, no clause substance changed. (1) The RLS-parity fixture carried the same stale invoice count as search.rls-both-personas — the seed ships 12 rows INV-1001..INV-1012, not 8; INV-1003's owner (linus) is now named so the invisible-row premise is checkable in place. (2) knownGaps records that this path inherits the declared-case-insensitive contract and the #7641 executor gap, since searchAll also emits `$contains` — without it a run scores a case-driven miss as a palette defect. Direction is per the #4706 Q2 = A ruling: case-insensitive is the declared truth, so the checklist reconciles toward the declaration and #7641 owns the product side", "ref": "#7647" }
+        { "revision": 2, "date": "2026-08-11", "change": "two text corrections from run #7629, no clause substance changed. (1) The RLS-parity fixture carried the same stale invoice count as search.rls-both-personas — the seed ships 12 rows INV-1001..INV-1012, not 8; INV-1003's owner (linus) is now named so the invisible-row premise is checkable in place. (2) knownGaps records that this path inherits the declared-case-insensitive contract and the #7641 executor gap, since searchAll also emits `$contains` — without it a run scores a case-driven miss as a palette defect. Direction is per the #4706 Q2 = A ruling: case-insensitive is the declared truth, so the checklist reconciles toward the declaration and #7641 owns the product side", "ref": "#7647" },
+        { "revision": 3, "date": "2026-08-12", "change": "the executor gap this item's third knownGap recorded is CLOSED, so the gap flips to past tense. #7641 found searchAll to be a SECOND producer of search clauses with the same declared≠enforced defect — metadata-protocol/src/protocol.ts built its AND-of-OR from `$contains` under a comment asserting `$contains` was the case-insensitive operator — and moved it onto `$icontains` in the same PR as search-filter.ts. No clause substance changed; a case-varying miss on a current build is now a real palette/UI defect rather than an expected executor FAIL, which is the scoring instruction this revision corrects", "ref": "#7641" }
       ]
     }
   ]

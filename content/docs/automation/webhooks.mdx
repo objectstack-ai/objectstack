@@ -53,12 +53,12 @@ requires receiver-side idempotency keys, which we provide but cannot enforce.
 attempted. A node crash mid-flight loses at most the in-flight HTTP
 attempt; the next node picks the row up from the queue.
 
-**P3 — Signed when configured.** Whenever a webhook's `definition_json`
-carries a `secret`, every outbound request for it carries a signature the
-receiver can verify with that shared secret (see §6). The `secret` field is
-optional, not auto-generated — a webhook created without one is delivered
-unsigned. Customers can detect spoofing without writing custom auth, once
-they set a secret.
+**P3 — Signed when configured.** Whenever a webhook has a signing secret set,
+every outbound request for it carries a signature the receiver can verify with
+that shared secret (see §6). The `secret` field is optional, not auto-generated
+— a webhook created without one is delivered unsigned. Customers can detect
+spoofing without writing custom auth, once they set a secret. The key itself is
+encrypted at rest and never readable back over the data API (§3.1).
 
 **P4 — Safe egress.** Webhooks are a textbook SSRF vector, and the design
 goal is to refuse localhost, private IP ranges, and cloud-provider metadata
@@ -84,9 +84,11 @@ CRUD, permissions, audit, and Studio UI without bespoke code.
 ### 3.1 `sys_webhook`
 
 The subscription record. One row per "I want webhook X to fire for object Y".
-The full transport configuration (headers, secret, timeout, method) is carried
-in `definition_json`, a serialised `Webhook` JSON (canonical schema:
-`WebhookSchema`, exported from `@objectstack/spec/automation`).
+The transport configuration (headers, timeout, method) is carried in
+`definition_json`, a serialised `Webhook` JSON (canonical schema:
+`WebhookSchema`, exported from `@objectstack/spec/automation`). The signing
+secret is the one authored value that does **not** live in that blob — it has
+its own encrypted column, see below.
 
 | Field             | Type      | Notes                                                                              |
 |-------------------|-----------|------------------------------------------------------------------------------------|
@@ -99,16 +101,25 @@ in `definition_json`, a serialised `Webhook` JSON (canonical schema:
 | `method`          | select    | HTTP method — one of `GET` / `POST` / `PUT` / `PATCH` / `DELETE`. Default `POST`.   |
 | `description`     | textarea  | Free-text description.                                                              |
 | `active`          | boolean   | Inactive webhooks are skipped by the dispatcher. Default `true`.                    |
-| `definition_json` | textarea  | Serialised `Webhook` JSON (`WebhookSchema` from `@objectstack/spec/automation`) — carries the full headers / auth / retry / payload config, including the signing `secret`, custom `headers`, and `timeoutMs`. |
+| `definition_json` | textarea  | Serialised `Webhook` JSON (`WebhookSchema` from `@objectstack/spec/automation`) — carries the transport config: custom `headers` and `timeoutMs`. **Not** the signing secret. |
+| `signing_secret`  | secret    | The HMAC-SHA256 key (`Field.secret`). Encrypted on write into `sys_secret`; the row keeps only an opaque ref and every read path returns a mask, so the key is not recoverable over the data API. Leave the mask untouched when editing to keep the current value. |
 | `created_at`      | datetime  | Standard audit columns.                                                            |
 | `updated_at`      | datetime  |                                                                                    |
 
 Matching at runtime is purely `object_name` + the multi-select `triggers`
-list; the headers, signing secret, and per-attempt timeout are parsed out of
-`definition_json` when an event is enqueued. There is no per-row org/tenant
-column, no `events[]` glob field, no stored `retry_policy`, and no
-`secret_hint` — see §6 for the actual signing model and §11 for the (single)
-retry budget.
+list; the headers and per-attempt timeout are parsed out of `definition_json`
+when an event is enqueued, and the signing key is dereferenced server-side from
+`signing_secret`. There is no per-row org/tenant column, no `events[]` glob
+field, no stored `retry_policy`, and no `secret_hint` — see §6 for the actual
+signing model and §11 for the (single) retry budget.
+
+<Callout type="info">
+Until v17 the authored `secret` was serialised into `definition_json` along with
+the rest of the envelope, which made it readable through an ordinary
+`GET /api/v1/data/sys_webhook`. It now goes to `signing_secret`; existing rows
+are migrated on boot. Authoring does not change — `defineWebhook({ secret })` is
+written exactly as before.
+</Callout>
 
 ### 3.2 `sys_http_delivery`
 
@@ -426,8 +437,8 @@ Requests also set `Content-Type: application/json` and
 
 ## 6. Signing & verification
 
-GitHub-style HMAC over the raw request body. When the webhook's
-`definition_json` carries a `secret`, every outbound request is signed.
+GitHub-style HMAC over the raw request body. When the webhook has a
+`signing_secret` set, every outbound request is signed.
 
 ### 6.1 Outbound header
 
@@ -446,6 +457,12 @@ a delivery row read over the data API exposes the signature that was sent, not
 the key that can mint new ones. Rotating a webhook's `secret` changes what
 *subsequent* deliveries are signed with; rows already enqueued keep the
 signature that matches the body they carry.
+
+The key itself is never on either row in the clear. The dispatcher resolves it
+from the subscription's encrypted `signing_secret` column (§3.1) when it
+refreshes its cache, holds it in memory for the HMAC, and hands the outbox a
+value it consumes rather than persists. Neither `sys_webhook` nor
+`sys_http_delivery` returns it over the data API, for any persona.
 
 ### 6.2 Receiver-side verification
 

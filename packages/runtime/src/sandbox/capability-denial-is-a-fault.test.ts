@@ -92,7 +92,9 @@ describe('[#4431] an in-VM capability denial reaches the classifier as a FAULT',
   });
 
   it('ctx.log without the log capability', async () => {
-    const log = { info: () => {}, warn: () => {}, error: () => {} };
+    // Four members since #7661 — `debug` is a real level of this seam, not a
+    // decoration, so a host double that omits it no longer type-checks.
+    const log = { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} };
     const err = await faultOf(() =>
       runner.runScript(
         { language: 'js', source: "ctx.log.info('hi'); return 1;", capabilities: [] },

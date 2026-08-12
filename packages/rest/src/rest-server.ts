@@ -26,6 +26,7 @@ import {
     ObjectSchemaMaskEvaluationError,
     applyObjectSchemaMask,
     foldVisibilityFingerprintIntoEtag,
+    isObjectSchemaMaskExempt,
     isObjectSchemaMaskingEnabled,
     normalizeIfNoneMatch,
     resolveObjectSchemaMaskPosture,
@@ -4552,6 +4553,37 @@ export class RestServer {
                 handler: async (req: any, res: any) => {
                     try {
                         const environmentId = isScoped ? req.params?.environmentId : undefined;
+                        // [ADR-0106 D5(4) / #6599] `_drafts` is an AUTHORING
+                        // surface — the console's pending-changes view and
+                        // draft-aware package reads — not a general read. A
+                        // pending object draft carries its full `fields` map, so
+                        // serving it unfiltered leaks every hidden field's
+                        // label, type, options, formula and `requiredPermissions`
+                        // to any authenticated caller, which is the disclosure
+                        // ADR-0106 closes one route over. The other `/meta`
+                        // exits MASK per field; this one GATES per caller, on the
+                        // SAME `systemPermissions` judgement D4 uses for its
+                        // read exemption (`isObjectSchemaMaskExempt`) — a caller
+                        // who could not see a field on `/meta/object` has no
+                        // authoring reason to see the draft that carries it. The
+                        // gate is intentionally independent of the D8 field-mask
+                        // escape hatch: opting out of per-field masking is not
+                        // consent to expose pending drafts to non-authors.
+                        //
+                        // Gate FIRST — before resolving the protocol — so an
+                        // unauthorized caller cannot use the 501-vs-200 answer to
+                        // probe which kernels support drafts (same posture as
+                        // `_migrate-stored` below).
+                        const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
+                        if (!isObjectSchemaMaskExempt(ctx)) {
+                            res.status(403).json({
+                                error: {
+                                    code: 'FORBIDDEN',
+                                    message: 'Reading pending metadata drafts requires an authoring capability (studio.access, setup.access or manage_metadata).',
+                                },
+                            });
+                            return;
+                        }
                         const p = await this.resolveProtocol(environmentId, req);
                         if (typeof (p as any).listDrafts !== 'function') {
                             res.status(501).json({

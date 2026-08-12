@@ -125,8 +125,11 @@ function makeStubDriver() {
                 if (!v.every((arm) => matchesWhere(row, arm))) return false;
                 continue;
             }
-            // [#4254] `$or` + `$contains` are the shape the engine expands
-            // `search` into (an `$or` of case-insensitive `$contains`, ADR-0061).
+            // [#4254] `$or` + `$icontains` are the shape the engine expands
+            // `search` into (an `$or` of case-insensitive `$icontains`,
+            // ADR-0061). [#7641] It read "`$contains`" until the compiler moved
+            // onto the operator that actually folds — `$contains` is
+            // contractually case-SENSITIVE (#4706 Q2 = A).
             // Without them the driver would MATCH EVERY ROW for any search, and
             // the "searchFields really narrows the row set" controls below would
             // hold vacuously against a search that never filtered anything.
@@ -139,9 +142,12 @@ function makeStubDriver() {
                 if (!(v as any).$in.map(String).includes(String(row[k]))) return false;
                 continue;
             }
-            if (v && typeof v === 'object' && '$contains' in (v as any)) {
+            // [#7641] Keyed on `$icontains` since the compiler emits it. The
+            // body is unchanged — it already folded both sides, which is
+            // `$icontains`' semantics wearing `$contains`' name.
+            if (v && typeof v === 'object' && '$icontains' in (v as any)) {
                 const haystack = String(row[k] ?? '').toLowerCase();
-                if (!haystack.includes(String((v as any).$contains).toLowerCase())) return false;
+                if (!haystack.includes(String((v as any).$icontains).toLowerCase())) return false;
                 continue;
             }
             const expected = (v && typeof v === 'object' && '$eq' in (v as any)) ? (v as any).$eq : v;
