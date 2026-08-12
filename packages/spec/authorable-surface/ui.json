@@ -537,6 +537,7 @@
     "ui/GlobalFilter:field",
     "ui/GlobalFilter:label",
     "ui/GlobalFilter:name",
+    "ui/GlobalFilter:object",
     "ui/GlobalFilter:options",
     "ui/GlobalFilter:optionsFrom",
     "ui/GlobalFilter:scope",
