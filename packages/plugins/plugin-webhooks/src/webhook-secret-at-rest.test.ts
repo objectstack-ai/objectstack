@@ -554,45 +554,13 @@ describe('boot ordering: the cache is built before the CryptoProvider (#8022)', 
         expect(JSON.stringify(rows)).not.toContain(SECRET);
     });
 
-    it('re-arms even when registration lands while the first cache build is still in flight', async () => {
-        // The narrow race the naive fix leaves behind: `refresh()` coalesces
-        // onto an in-flight build, so a re-arm that merely called it would join
-        // the pre-crypto read, report success, and re-arm nothing.
-        const { engine } = await bootWithoutCrypto();
-        const realtime = new FakeRealtime();
-        const outbox = new MemoryHttpOutbox();
-
-        // Hold the first build open, then register crypto mid-flight.
-        const realFind = engine.find.bind(engine);
-        let release: (() => void) | undefined;
-        const gate = new Promise<void>((r) => { release = r; });
-        let gated = true;
-        (engine as any).find = async (object: string, q?: any) => {
-            if (gated && object === 'sys_webhook') { gated = false; await gate; }
-            return realFind(object, q);
-        };
-
-        const enqueuer = new AutoEnqueuer(engine, realtime, (i) => outbox.enqueue(i), {
-            refreshIntervalMs: 0,
-            logger: { error: () => {}, warn: () => {} },
-        });
-        const starting = enqueuer.start();
-        await new Promise((r) => setTimeout(r, 0));
-        engine.setCryptoProvider(makeFakeCrypto());
-        release!();
-        await starting;
-        await settle();
-
-        await realtime.publish(recordEvent('contact', { id: 'c_midflight', name: 'Ada' }));
-        await settle();
-        const { impl, calls } = makeFetch();
-        await new HttpDispatcher({ nodeId: 'n1', outbox, fetchImpl: impl, partitionCount: 1 }).tick();
-        await enqueuer.stop();
-
-        expect(await outbox.list()).toHaveLength(1);
-        const expected = createHmac('sha256', SECRET).update(calls[0].body).digest('hex');
-        expect(calls[0].headers['X-Objectstack-Signature']).toBe(`sha256=${expected}`);
-    });
+    // NOT pinned here, deliberately: that the re-arm does not COALESCE onto the
+    // in-flight pre-registration build (see `rearmAfterCryptoRegistered`). Every
+    // harness that can inject the registration at that instant also moves the
+    // secret resolution to after it, so the naive `() => this.refresh()` passes
+    // too — a test that cannot separate the two revisions is a false green, and
+    // this repo has paid for those. The guard stays because the reasoning is
+    // sound, not because a test proves it.
 
     it('still refuses to deliver unsigned while the key stays unresolvable, and says so once, loudly', async () => {
         const { engine } = await bootWithoutCrypto();
