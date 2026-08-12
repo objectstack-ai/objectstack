@@ -36,7 +36,9 @@ import { BulkActionDefSchema } from './bulk-action.zod';
  */
 const base = { name: 'approval_reject', label: 'Reject', target: 'rejectApproval' } as const;
 
-const oneParam = [{ name: 'reason', label: 'Reason', type: 'textarea', required: true }];
+// `type` is narrowed rather than widened to `string` so this literal is also
+// assignable to `defineAction`'s typed input, which the last test below calls.
+const oneParam = [{ name: 'reason', label: 'Reason', type: 'textarea' as const, required: true }];
 
 /** The single issue this guard raises, or `undefined` if it did not fire. */
 const guardIssue = (result: ReturnType<typeof ActionSchema.safeParse>) =>

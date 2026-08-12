@@ -1051,7 +1051,11 @@ const actionObject = () => strictObject({
   order: z.number().optional().describe('Sort order within a location group (lower = higher). Promotes/demotes an action toward the record_header primary button; stable, so actions without `order` keep their registration order.'),
 
   /** UX Behavior */
-  confirmText: I18nLabelSchema.optional().describe('Confirmation message before execution. Param-LESS actions only — pairing it with a non-empty `params` is REFUSED (#7428), because it opens a second dialog for one decision; put the question on `description` instead.'),
+  // NB this describe() renders into the InlineAction reference table too (both
+  // tables derive from this one field factory), and the #7428 refusal lives on
+  // `ActionSchema`'s refine chain alone — hence "a registered action" rather
+  // than an unqualified claim that would be false on the inline surface.
+  confirmText: I18nLabelSchema.optional().describe('Confirmation message before execution. On a registered action, pairing this with a non-empty `params` is refused (#7428) — that opens a second dialog for one decision; put the question on `description` instead. Correct on a param-LESS action, where the confirm is the only dialog there is.'),
   successMessage: I18nLabelSchema.optional().describe('Success message to show after execution'),
   // Runtime (ActionRunner) already honours this — declared here so authors can
   // set a friendly failure toast instead of surfacing the raw error string.
