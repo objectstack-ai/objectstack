@@ -2479,13 +2479,26 @@ export const ObjectListViewSchema = lazySchema(() =>
   ListViewSchema.omit({ userFilters: true }).extend({ userFilters: ObjectUserFiltersSchema.optional() }));
 
 /**
+ * [#4001/#7741] The wrap remedy, ONE prose source for two doors: the container's
+ * unknown-key guidance (the build/authoring door below) and the inline overlay
+ * arms' missing-binding refusals (the runtime write door —
+ * {@link flattenedViewOverlayFields}). The ruling on #7741 (2026-08-12) requires
+ * the write door to reuse the build path's existing guidance — 「写门的拒绝复用
+ * build 路径已有的 guidance」 — so the sentence is shared rather than forked into
+ * a second copy that would drift on the first rewording.
+ */
+const VIEW_WRAP_REMEDY =
+  'Wrap it: `defineView({ list: { type, data, columns, … } })`, or name it — '
+  + '`defineView({ listViews: { my_view: { … } } })`.';
+
+/**
  * Master View Schema
  * Can define multiple named views.
  */
 /**
  * View Container Schema
  * Aggregates all view definitions for a specific object or context.
- * 
+ *
  * @example
  * {
  *   list: { type: "grid", columns: ["name"] },
@@ -2527,7 +2540,7 @@ export const ViewSchema = lazySchema(() => strictObject({
   // entry is a claim about the schema, and claims need verifying like code.
   guidance: Object.fromEntries(
     ['type', 'columns', 'data', 'viewKind', 'filters', 'sort']
-      .map((k) => [k, `\`${k}\` belongs to a single VIEW, not to the container. Wrap it: \`defineView({ list: { type, data, columns, … } })\`, or name it — \`defineView({ listViews: { my_view: { … } } })\`. The container's own keys are \`list\`, \`form\`, \`listViews\`, \`formViews\`.`]),
+      .map((k) => [k, `\`${k}\` belongs to a single VIEW, not to the container. ${VIEW_WRAP_REMEDY} The container's own keys are \`list\`, \`form\`, \`listViews\`, \`formViews\`.`]),
   ),
 }, {
     // Item identity. The container is a registered metadata item, so the door
@@ -2925,20 +2938,93 @@ export function defineViewItem(config: z.input<typeof ViewItemSchema>): ViewItem
 // above the object schemas #4001 closed: at union-MEMBER SELECTION, not at
 // any single member. The fix is a precondition, NOT a strictness flip on the
 // members — see {@link assertViewIdentity} and {@link viewMetadataVocabulary}.
+//
+// [#7741] The residue that precondition deliberately let through — a body that
+// DOES speak view vocabulary (`{ type: 'grid', columns: […] }`) but names no
+// object to attach to — was the same defect one layer further in: accepted,
+// persisted, badged valid, served by nothing. Closed at the members this time
+// (ruled direction B, 2026-08-12): the two flattened overlay arms now REQUIRE
+// `object` + `viewKind` — the exact pair the object-bound read paths filter on
+// — with located refusals that reuse the container door's wrap guidance. The
+// precondition's bar (speaks the vocabulary at all) and the members' bar
+// (bound enough to be servable) are different questions and stay in their own
+// stages; a baseline-shadowing personalization PUT arrives here already bound
+// because `normalizeViewMetadata` inherits identity before validation (#2555).
 
 /**
- * Optional identity + structural-guard fields layered onto the two "flattened
- * runtime overlay" members. The `config`/`list`/`form`/`listViews`/`formViews`
- * guards pin those keys to `undefined`: a body carrying any of them is a record
- * or a container, not a flattened overlay, so it must be validated by the
- * dedicated member instead of slipping through here with its real payload
- * stripped away.
+ * [#7741] The located refusals the two inline overlay arms give a body that
+ * arrives at the runtime write door without its object binding.
+ *
+ * Why these are REQUIRED rather than optional (maintainer ruling, 2026-08-12,
+ * direction B): every object-bound read path matches a stored view row on
+ * `object` AND `viewKind` — `GET /meta/view?object=` (rest-server.ts) and
+ * `getViewsByObject()` (metadata-manager.ts) both filter
+ * `v.viewKind && v.object === obj` — so an inline config missing either is
+ * stored, badged `valid: true`, and then served by nothing: `expandViewContainer`
+ * never sees it (it is not a container) and the switcher never lists it. The
+ * ruling: 「一个无法展开、无法被任何读路径服务的行,不允许被存储并盖上
+ * `valid:true`」. Both fields, not `object` alone, because the pair is what the
+ * measured serving filter requires — a row bound by `object` but missing
+ * `viewKind` is exactly as invisible to the switcher as the card's repro.
+ *
+ * The platform's own personalization writes are unaffected: `saveMetaItem`
+ * normalizes before it validates, and `viewIdentityPatch`
+ * (`@objectstack/metadata-protocol`, #2555) inherits `viewKind`/`object`/`label`
+ * from the registry entry the overlay shadows — an expanded ViewItem always
+ * carries both — so a console pin/sort/hide PUT on a REAL view reaches this
+ * schema already bound. The body that arrives unbound is the one with no entry
+ * to inherit from: a new name authored inline, i.e. the dead row this closes.
+ *
+ * Draft and active alike, by the same ruling — the schema is mode-agnostic on
+ * purpose: 「draft 与 active 同样适用 …… 现在没有这个证据,不预留」.
+ */
+const INLINE_VIEW_OBJECT_REQUIRED =
+  'This inline view config names no `object`, so the saved row could never be served: '
+  + '`GET /meta/view?object=…` and the view switcher match stored views on `object` + `viewKind`, '
+  + 'and a row missing them is registered yet renders nowhere. '
+  + 'Bind it — add `object: "<object_name>"` and `viewKind: "list" | "form"` — or save a ViewItem '
+  + 'record (`{ name, object, viewKind, config: { … } }`), or make it a container. '
+  + VIEW_WRAP_REMEDY;
+
+const INLINE_VIEW_KIND_REQUIRED =
+  'This inline view config names no `viewKind`, so the saved row could never be served: '
+  + '`GET /meta/view?object=…` and the view switcher match stored views on `object` + `viewKind`, '
+  + 'and a row missing them is registered yet renders nowhere. '
+  + 'Bind it — add `viewKind: "list" | "form"` alongside `object` — or save a ViewItem record '
+  + '(`{ name, object, viewKind, config: { … } }`), or make it a container. '
+  + VIEW_WRAP_REMEDY;
+
+/**
+ * Identity + structural-guard fields layered onto the two "flattened runtime
+ * overlay" members. The `config`/`list`/`form`/`listViews`/`formViews` guards
+ * pin those keys to `undefined`: a body carrying any of them is a record or a
+ * container, not a flattened overlay, so it must be validated by the dedicated
+ * member instead of slipping through here with its real payload stripped away.
+ *
+ * [#7741] `object` and `viewKind` are REQUIRED on these two members — see the
+ * refusal constants above for the measured reason and the ruling. The rest of
+ * the identity fields stay optional: they are display/round-trip state, not
+ * what any read path filters on.
  */
 function flattenedViewOverlayFields() {
   return {
     name: z.string().optional().describe('Save name / qualified view id (stamped by the write path).'),
-    object: z.string().optional().describe('Bound object name (inherited from the shadowed entry — #2555).'),
-    viewKind: ViewKindSchema.optional().describe('View family (inherited from the shadowed entry — #2555).'),
+    object: z
+      .string({ error: (issue) => (issue.input === undefined ? INLINE_VIEW_OBJECT_REQUIRED : undefined) })
+      .describe(
+        'Bound object name — REQUIRED on an inline view config (#7741): the object-bound read paths '
+        + '(`GET /meta/view?object=`, the view switcher) match on `object` + `viewKind`, so an unbound '
+        + 'row can never be served. Inherited from the shadowed entry on personalization PUTs (#2555).',
+      ),
+    viewKind: z
+      .enum(ViewKindSchema.options, {
+        error: (issue) => (issue.input === undefined ? INLINE_VIEW_KIND_REQUIRED : undefined),
+      })
+      .describe(
+        'View family — REQUIRED on an inline view config (#7741): half of the `object` + `viewKind` '
+        + 'pair the object-bound read paths match on. Inherited from the shadowed entry on '
+        + 'personalization PUTs (#2555).',
+      ),
     label: I18nLabelSchema.optional().describe('Display label (inherited from the shadowed entry — #2555).'),
     isDefault: z.boolean().optional(),
     order: z.number().int().optional(),
@@ -3066,7 +3152,11 @@ function speaksViewVocabulary(body: unknown): boolean {
  * whether the view is *complete* — which is what keeps it compatible with every
  * lean shape the platform round-trips. A pin PUT (`{ isPinned: true }`), a hide
  * PUT (`{ hidden: true }`), a reorder (`{ sortOrder: 3 }`) and a column-sort PUT
- * all carry declared non-identity keys and are unaffected.
+ * all carry declared non-identity keys and are unaffected *by this precondition*
+ * ([#7741] the UNION may still refuse the baseline-less ones — an overlay with
+ * no shadowed entry to inherit `object`/`viewKind` from now fails the members'
+ * binding requirement, which is the ruled behaviour, and the refusal is the
+ * members' located guidance rather than this precondition's).
  *
  * "Complete" is deliberately NOT the bar, and the distinction is the whole
  * reason this is safe: `{ isPinned: true }` is not a renderable view either, but
@@ -3203,6 +3293,10 @@ const ViewContainerWireSchema = lazySchema(() =>
  * ledger names this as the trap to watch while batching: a response-side
  * extension of an authoring schema must strip back, or an upstream field
  * addition becomes a crash.
+ *
+ * [#7741] `object` + `viewKind` are required on this arm (and its form
+ * sibling) — see {@link flattenedViewOverlayFields} for the ruling and the
+ * measured serving filter that decides exactly this pair.
  */
 const ListViewOverlayWireSchema = lazySchema(() =>
   ListViewSchema.extend(flattenedViewOverlayFields()).strip(),

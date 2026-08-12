@@ -278,8 +278,20 @@ describe('#5074 — the wire door accepts what the platform itself writes', () =
     // `updateView` PUTs `{ ...current, ...partial }`; when there is no stored
     // item to merge, `current` is empty and the body is the bare partial.
     // `isPinned`/`sortOrder` are declared on member 1, so they are vocabulary.
-    accept(ViewMetadataSchema, { isPinned: true });
-    accept(ViewMetadataSchema, { sortOrder: 3 });
+    //
+    // [#7741] "Reaches the union" is still the claim — but the UNION now
+    // refuses the baseline-less bare partial (no `object`/`viewKind` to inherit
+    // means the saved row could never be served), so the pin is split in two:
+    // the refusal must be the members' located binding guidance, never the
+    // precondition's "not a view"; and the same partial as the write path
+    // actually delivers it (identity inherited from the shadowed entry,
+    // #2555) parses clean.
+    for (const partial of [{ isPinned: true }, { sortOrder: 3 }]) {
+      const msg = reject(ViewMetadataSchema, partial);
+      expect(msg).not.toContain('Not a `view` body');
+      expect(msg).toContain('names no `object`');
+      accept(ViewMetadataSchema, { ...partial, object: 'showcase_task', viewKind: 'list' });
+    }
   });
 
   it('#5599 — …but a body speaking NO view key is stopped before any member runs', () => {

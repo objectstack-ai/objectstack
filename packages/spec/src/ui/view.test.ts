@@ -783,8 +783,10 @@ describe('FormViewSchema — the `groups` legacy alias folds onto `sections` (#6
     });
 
     it('ViewMetadataSchema — the FLATTENED form-overlay member (`.extend()` inherits the fold)', () => {
+      // [#7741] the overlay arm requires the `object` + `viewKind` binding.
       const parsed = ViewMetadataSchema.parse({
         viewKind: 'form',
+        object: 'account',
         type: 'simple',
         groups: [S('Account')],
       }) as Record<string, unknown>;

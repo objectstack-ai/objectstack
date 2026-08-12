@@ -99,6 +99,11 @@ const BUILTIN_METADATA_TYPE_SCHEMAS: Partial<Record<MetadataType, z.ZodType>> = 
   // standalone ViewItem record, flattened personalization overlay). The bare
   // container `ViewSchema` strip-parsed ViewItem/personalization bodies to `{}`,
   // making save-time 422 validation and read-time diagnostics a no-op for them.
+  // [#7741] The flattened overlay arms REQUIRE the `object` + `viewKind`
+  // binding (ruled 2026-08-12, draft and active alike): an inline config that
+  // cannot say which object it attaches to would be stored, badged valid, and
+  // served by no read path. Every consumer of this entry — saveMetaItem's 422
+  // gate and the read-time diagnostics badge — inherits that refusal here.
   view: ViewMetadataSchema,
   page: PageSchema,
   dashboard: DashboardSchema,

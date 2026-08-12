@@ -256,17 +256,28 @@ describe('[#7510] ⛔ the acceptance face did not move', () => {
   // through the same door. The refusals' top-level issue CODES are pinned with
   // them: focusing happens inside `errors`, so the envelope other consumers key
   // on is untouched.
+  //
+  // [#7741] One deliberate, RULED move since that measurement (2026-08-12,
+  // direction B): the flattened overlay arms require the `object` + `viewKind`
+  // binding, so the three formerly-unbound overlay/PUT entries here carry it
+  // now, and their unbound originals are pinned as REFUSED below. #7510's own
+  // claim — focusing never changes a verdict — is unaffected and still pinned
+  // by the rest of this corpus.
   const ACCEPTED: unknown[] = [
     formItem({ field: 'owner', publicPicker: { displayFields: ['name'] } }),
     { name: 'crm_lead.all', object: 'crm_lead', viewKind: 'list', config: { type: 'grid', columns: ['name'] } },
     { object: 'crm_lead', list: { type: 'grid', columns: ['name'] } },
     { object: 'crm_lead', formViews: { my: { type: 'simple' } } },
-    { type: 'grid', columns: ['name'], isDefault: true, order: 2 },
-    { type: 'simple' },
-    { isPinned: true },
+    { type: 'grid', columns: ['name'], isDefault: true, order: 2, object: 'crm_lead', viewKind: 'list' },
+    { type: 'simple', object: 'crm_lead', viewKind: 'form' },
+    { isPinned: true, object: 'crm_lead', viewKind: 'list' },
   ];
 
   const REFUSED: Array<[unknown, string[]]> = [
+    // [#7741] the unbound originals of the last three ACCEPTED entries.
+    [{ type: 'grid', columns: ['name'], isDefault: true, order: 2 }, ['invalid_union']],
+    [{ type: 'simple' }, ['invalid_union']],
+    [{ isPinned: true }, ['invalid_union']],
     [MISDIRECTED[0]![1], ['invalid_union']],
     [MISDIRECTED[3]![1], ['invalid_union']],
     [{ name: 'a.b', object: 'a', viewKind: 'chart', config: { type: 'grid', columns: ['name'] } }, ['invalid_union']],
