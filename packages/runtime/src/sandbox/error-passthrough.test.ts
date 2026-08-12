@@ -160,3 +160,80 @@ describe('#3918 follow-up — VM error → host', () => {
         expect(err.fields).toBeUndefined();
     });
 });
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * [#7867] `status` — the third allowlisted property, and why it had to join
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+describe('[#7867] an error that names its own HTTP status keeps it across the boundary', () => {
+    /** The exact shape `@objectstack/core`'s `recordNotFoundError` produces. */
+    const recordNotFound = () =>
+        Object.assign(new Error('Record ghost not found in invoice'), {
+            code: 'RECORD_NOT_FOUND',
+            status: 404,
+            object: 'invoice',
+        });
+
+    const UNCAUGHT = `await ctx.api.object('invoice').update({ id: 'ghost' }); return { never: true };`;
+
+    it('carries `status` onto the thrown SandboxError, so /actions can serve 404', async () => {
+        // Without this the action surface answered the RIGHT diagnosis at the
+        // WRONG status — `{ code: 'RECORD_NOT_FOUND', httpStatus: 400 }` —
+        // because `domains/actions.ts`'s "an error that NAMES its own HTTP
+        // status is asking to be served with it" branch reads `.status`, and
+        // the number never arrived. 404 and 400 mean different things to a
+        // client's retry and cache policy, so a half-carried error is not a fix.
+        const err = await run(UNCAUGHT, recordNotFound()).catch((e) => e);
+
+        expect(err).toBeInstanceOf(SandboxError);
+        expect(err.code).toBe('RECORD_NOT_FOUND');
+        expect(err.status).toBe(404);
+    });
+
+    it('a body can read `status` off a rejected write', async () => {
+        const r = await run(
+            `try { await ctx.api.object('invoice').update({ id: 'ghost' }); }
+             catch (e) { return { code: e.code, status: e.status }; }
+             return { never: true };`,
+            recordNotFound(),
+        );
+
+        expect(r.value).toEqual({ code: 'RECORD_NOT_FOUND', status: 404 });
+    });
+
+    it('still carries NOTHING outside the allowlist — `object` does not cross', async () => {
+        // The allowlist widened by exactly one property, and the security
+        // assertion widens with it rather than being relaxed. `recordNotFound`
+        // also hangs an `object` off itself; it must not become readable.
+        const r = await run(
+            `try { await ctx.api.object('invoice').update({ id: 'ghost' }); }
+             catch (e) { return { object: e.object ?? null, keys: Object.keys(e) }; }
+             return { never: true };`,
+            recordNotFound(),
+        );
+
+        const v = r.value as any;
+        expect(v.object).toBeNull();
+        expect(v.keys.sort()).toEqual(['code', 'message', 'name', 'status']);
+    });
+
+    it('leaves an error with no status alone — `status` stays undefined', async () => {
+        // The contrast pin. A record `ValidationError` deliberately carries no
+        // `.status` (`validation-failure.ts`), which is what keeps it out of
+        // the classifier's status branch and on the 400 rejection exit.
+        const err = await run(UNCAUGHT, new ValidationError(FIELDS)).catch((e) => e);
+
+        expect(err.code).toBe('VALIDATION_FAILED');
+        expect(err.status).toBeUndefined();
+    });
+
+    it('ignores a non-finite status rather than serving a nonsense one', async () => {
+        const err = await run(
+            `var e = new Error('nope'); e.code = 'WEIRD'; e.status = NaN; throw e;`,
+            new Error('unused'),
+        ).catch((e) => e);
+
+        expect(err.code).toBe('WEIRD');
+        expect(err.status).toBeUndefined();
+    });
+});

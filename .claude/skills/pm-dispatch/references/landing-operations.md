@@ -38,6 +38,13 @@
 确认 **MERGED** —— 每轮同时读队列分支与 `origin/main` 两个读数。ready 与
 auto-merge 的顺序不可反(转回 draft 会同时掉 auto-merge 与队列成员资格)。
 
+**确认 MERGED 的同一动作里给 `Part of` 卡收口**:`Fixes` 卡 GitHub 代关、标签随卡
+离开在飞视图;`Part of` 卡仍开着,`pm:dispatched` 不摘就把一张无 dev、无分支、无在
+飞物的卡永远算在 `label:pm:dispatched is:open` 里。摘标(换回 `pm:queue` 或按剩余
+物定级)+ 一条评论(已交付什么、还剩什么、剩下的归谁)与 MERGED 确认是一个动作,
+⛔ 不拆成「下轮巡检再摘」。同刻顺手读一次相关卡的 `closed_by_pull_requests`,确认没
+有别的卡被正文里的闭合关键词误关(事实表见平台读数)。
+
 **落地窗口给关键 PR 挂 `subscribe_pr_activity`**(会话型座位专用;Routine 座位每
 fire 新会话收不到,维持轮询):
 

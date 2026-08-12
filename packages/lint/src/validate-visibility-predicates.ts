@@ -78,9 +78,9 @@
  *     predicate here is a wrong-layer paste that silently never matches; and
  *   - **metadata-editing** forms (`*.form.ts` — the row under edit) bind `data`, so
  *     a `record.`-rooted predicate there is the same bug in the other direction.
- *   The layer is supplied by the caller (`opts.layer`, default `'runtime'`): the
- *   app-lint path (`os validate` / `compile`) always lints runtime surfaces, while a
- *   file-aware caller linting a `*.form.ts` passes `layer: 'metadata'`.
+ *   The layer is read off the METADATA where the metadata declares it, and taken
+ *   from the caller (`opts.layer`, default `'runtime'`) only where it does not —
+ *   see §Which layer a site is on (#7815).
  *
  * Scope: `views` — every form view reachable from a `views[]` entry (the entry
  * itself when it IS a form view, plus the container's `form` and each
@@ -283,6 +283,40 @@
  *   `validatePredicatePathRefs` walks on, so every token this rule stops
  *   reporting is reported by that one — as a `warning`, which is the severity
  *   #7659 already argued for a spelling that renders correctly today.
+ *
+ * ## Which layer a site is on (#7815)
+ *
+ * `opts.layer` is the layer for sites whose binding environment the metadata
+ * does **not** state. A form view that declares `data: { provider: 'schema',
+ * schemaId }` states it: that data source is what makes the console's
+ * metadata-admin evaluator the thing that renders the surface, and that
+ * evaluator binds the row under edit as `data`. So such a site is judged at
+ * `metadata` whatever the caller's default is, and every other site (a plain
+ * runtime view, every page component) takes `opts.layer`.
+ *
+ * This is plumbing, not a change to `visibility-root-mislayered`, which was
+ * always correct for the layer it was told. What was wrong is that at the
+ * **runtime publish gate** (`authoring-rules.ts` → `validateVisibilityPredicates(stack)`,
+ * no options) nobody told it: every schema-bound form was judged at the
+ * `'runtime'` default, so a correctly `data.`-rooted form drew the advisory
+ * telling its author to write `record.`, and `visibility-bare-identifier`'s hint
+ * prescribed `record.<word>` on a surface that binds no `record` at all. An
+ * advisory that is wrong on correct metadata, at the publish door, for a whole
+ * surface class — and nothing goes red, which is what made it survive.
+ *
+ * Derived per SITE rather than per stack because one `views[]` entry can carry
+ * both kinds (`formViews.<key>` sub-containers each declare their own `data`),
+ * and it is derived from the same `schemaIdOf` call that decides `literalRhs`,
+ * so the layer verdict and the right-hand-slot stand-down can never disagree
+ * about which surface they are on — the reason `schemaIdOf` is shared in the
+ * first place (`predicate-rhs-position.ts`).
+ *
+ * ⚠️ Acceptance is untouched by the derivation. `visibility-root-mislayered` is
+ * `warning` in BOTH directions, so what moves is which advisories an author
+ * hears; the three `error` ids fire on exactly the inputs they fired on before,
+ * and only the ROOT quoted inside two of their hints changes (`record.x` →
+ * `data.x` on a schema-bound form, which is the fix, not a side effect).
+ * `runtime-gate.test.ts` pins that error/advisory boundary as a property.
  */
 
 import {
@@ -321,7 +355,17 @@ export type VisibilityLayer = 'runtime' | 'metadata';
 
 /** Options for {@link validateVisibilityPredicates}. */
 export interface VisibilityOptions {
-  /** Binding layer of the surface being linted. Defaults to `'runtime'`. */
+  /**
+   * Binding layer for the sites whose layer the metadata does not state.
+   * Defaults to `'runtime'`.
+   *
+   * A form view that declares `data: { provider: 'schema', schemaId }` DOES
+   * state it — the metadata-admin evaluator renders that surface and binds the
+   * row under edit as `data` — so such a site is judged at `'metadata'`
+   * regardless of this option (#7815; see the module note §Which layer a site is
+   * on). Pass `'metadata'` to cover the forms that do not carry that data source
+   * either, which is what a file-aware caller linting a `*.form.ts` does.
+   */
   layer?: VisibilityLayer;
 }
 
@@ -836,17 +880,22 @@ function isFieldObject(entry: unknown): entry is AnyRec {
  * `visibility-predicate-over-budget` (#7217) and `visibility-bare-identifier`
  * (#6128) are `error` and the caller is expected to fail the build on them.
  *
- * The binding-root check is layer-directional (ADR-0089 D3): pass
- * `opts.layer = 'metadata'` when linting a `*.form.ts` metadata-editing form (so a
- * `record.`-rooted predicate is flagged), or leave it at the `'runtime'` default for
- * `*.view.ts` / `*.page.ts` surfaces (so a `data.`-rooted predicate is flagged). The
- * syntax and bare-identifier checks are layer-agnostic.
+ * The binding-root check is layer-directional (ADR-0089 D3). A form view that
+ * declares `data: { provider: 'schema', schemaId }` is judged at `metadata` on
+ * its own say-so (#7815); for every other site pass `opts.layer = 'metadata'`
+ * when linting a `*.form.ts` metadata-editing form (so a `record.`-rooted
+ * predicate is flagged), or leave it at the `'runtime'` default for `*.view.ts` /
+ * `*.page.ts` surfaces (so a `data.`-rooted predicate is flagged). The syntax and
+ * bare-identifier checks are layer-agnostic — but the ROOT their hints prescribe
+ * is not, which is the second half of what #7815 fixes.
  */
 export function validateVisibilityPredicates(
   stack: AnyRec,
   opts: VisibilityOptions = {},
 ): VisibilityFinding[] {
-  const layer: VisibilityLayer = opts.layer ?? 'runtime';
+  // The layer for every site that does not state its own — see §Which layer a
+  // site is on.
+  const declaredLayer: VisibilityLayer = opts.layer ?? 'runtime';
   const findings: VisibilityFinding[] = [];
 
   // ── Views: every reachable form view's sections / groups, and their fields ──
@@ -868,7 +917,16 @@ export function validateVisibilityPredicates(
       // A runtime `*.view.ts` predicate goes to real CEL, where a path on the
       // right is perfectly legal and a bare word there really is a dropped
       // root — so it is not in this set and its refusal is untouched.
-      const literalRhs = schemaIdOf(site.view) !== undefined;
+      //
+      // #7815 — and the same fact is what puts the site on the METADATA layer.
+      // One `schemaIdOf` call feeds both so the two verdicts cannot drift: the
+      // surface whose right-hand slot is a literal slot is exactly the surface
+      // whose row under edit is bound as `data`, because both are consequences
+      // of the one evaluator rendering it. `opts.layer` governs every OTHER site
+      // (a plain runtime view, and every page component below).
+      const schemaBound = schemaIdOf(site.view) !== undefined;
+      const literalRhs = schemaBound;
+      const layer: VisibilityLayer = schemaBound ? 'metadata' : declaredLayer;
       // `sections` (canonical) and `groups` (legacy alias → sections) both hold
       // FormSection objects with an optional visibility predicate + `fields`.
       for (const bucket of ['sections', 'groups'] as const) {
@@ -912,7 +970,10 @@ export function validateVisibilityPredicates(
     const pageName = typeof page.name === 'string' ? page.name : undefined;
     const where = `page "${pageName ?? pagePath}"`;
     for (const walked of walkPageComponents(page, pagePath)) {
-      checkElement(walked.component, where, walked.path, layer, findings);
+      // No per-site derivation here: a page component declares no data source of
+      // its own, so nothing in the metadata states a layer for it and
+      // `opts.layer` is the only answer available (#7815).
+      checkElement(walked.component, where, walked.path, declaredLayer, findings);
     }
   }
 

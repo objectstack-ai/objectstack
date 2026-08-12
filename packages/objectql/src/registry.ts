@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveCrudAffordances, resolveInjectedSystemColumns, LEGACY_API_METHODS, AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
+import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveInjectedSystemColumns, checkManagedApiMethodAffordances, LEGACY_API_METHODS, AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
 // [#4513] The audit-family governance table, and [#6562] the injected-column
 // DEFINITION tables it governs — see the re-exports below for why both live in a
 // package `objectql` and `metadata-protocol` both depend on.
@@ -139,6 +139,27 @@ function mergeObjectDefinitions(base: ServiceObject, extension: Partial<ServiceO
   if (extension.description !== undefined) merged.description = extension.description;
 
   return merged;
+}
+
+/**
+ * [#8027] Key-order-insensitive JSON, for comparing two `validations` /
+ * `indexes` entries BY VALUE — see
+ * {@link SchemaRegistry.subtractExtenderContributions}.
+ *
+ * Plain `JSON.stringify` would report the same rule as two different rules
+ * whenever the two copies were built by different code paths (a stored overlay
+ * row that went through `JSON.parse` vs the contributor's in-memory literal),
+ * which is exactly the pair being compared, so key order cannot be assumed.
+ * Arrays keep their order — an index's `fields` list is ordered and two
+ * spellings of it are genuinely two different indexes.
+ */
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([, v]) => v !== undefined)
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${stableStringify(v)}`).join(',')}}`;
 }
 
 /**
@@ -616,31 +637,6 @@ function declaresTenantIndex(schema: ServiceObject): boolean {
 }
 
 /**
- * Generic-write `apiMethods` verbs mapped to the {@link resolveCrudAffordances}
- * flag each one needs. Read verbs (`get`/`list`/`search`/`history`/…) are
- * always permitted, so they are absent here and never stripped.
- *
- * ⚠️ Two orthogonal axes — do NOT merge this with the API-tightening table.
- * This table (verb → *affordance*) is the UI-intent axis: it strips write verbs
- * a managed bucket does not *offer* from the whitelist. The verb → *primitive*
- * derivation that decides what the automatic API *admits* lives in
- * `@objectstack/spec/data` `API_METHOD_DERIVATION` / `resolveEffectiveApiMethods`
- * (#3391). The identical-shaped `WRITE_OP_AFFORDANCE` in plugin-security
- * `system-write-guard.ts` is the runtime enforcement of this same UI-intent
- * axis. The enum shrink (#3543) DELIBERATELY kept the three tables separate —
- * merging would blur a UX-affordance concern into a security concern (ADR-0103).
- * The `upsert`/`purge` keys survive the shrink: raw (un-parsed) whitelists may
- * still carry legacy verbs, and stripping here must keep covering them.
- */
-const MANAGED_WRITE_VERB_AFFORDANCE: Record<string, 'create' | 'edit' | 'delete'> = {
-  create: 'create',
-  update: 'edit',
-  upsert: 'edit',
-  delete: 'delete',
-  purge: 'delete',
-};
-
-/**
  * Reconcile a managed object's `enable.apiMethods` against the generic-write
  * affordances it actually grants (ADR-0092 / ADR-0103).
  *
@@ -653,8 +649,21 @@ const MANAGED_WRITE_VERB_AFFORDANCE: Record<string, 'create' | 'edit' | 'delete'
  * This is the registration-time backstop that makes the contradiction
  * impossible to *ship*: any write verb whose CRUD affordance the object does
  * not grant — via the `managedBy` bucket default plus `userActions` overrides,
- * exactly as {@link resolveCrudAffordances} computes for the UI — is stripped,
+ * exactly as `resolveCrudAffordances` computes for the UI — is stripped,
  * with a warning. Reads are never touched.
+ *
+ * The judgement itself is NOT here. `checkManagedApiMethodAffordances`
+ * (`@objectstack/spec/data`) owns the verb → affordance table, and
+ * `@objectstack/lint`'s `validateManagedApiMethods` — the authoring-time gate
+ * that reports the same contradiction where the AUTHOR is, rather than in a
+ * boot log nobody reads (#7521) — reads that same predicate. This function is
+ * only the registration-time REACTION to it: strip and warn. If a verdict seems
+ * wrong, fix the predicate, never this reaction — a second table here is the
+ * declared≠enforced drift the predicate exists to detect.
+ *
+ * WARN and strip, never throw — deliberately (the #7521 ruling, 2026-08-11):
+ * failing registration closed would let one metadata typo kill a control-plane
+ * boot, which is too harsh for ops. The author-time gate is where this blocks.
  *
  * Runs for every managed bucket (ADR-0103). Objects that legitimately take
  * user-context writes declare `userActions` opening those verbs, so their
@@ -673,30 +682,22 @@ export function reconcileManagedApiMethods(
   schema: ServiceObject,
   opts?: { warn?: (msg: string) => void },
 ): ServiceObject {
-  if ((schema as any).managedBy == null) return schema;
+  const conflicts = checkManagedApiMethodAffordances(schema);
+  if (conflicts.length === 0) return schema;
 
-  const methods = (schema as any).enable?.apiMethods;
-  if (!Array.isArray(methods) || methods.length === 0) return schema;
-
-  const affordances = resolveCrudAffordances(schema);
-  const stripped: string[] = [];
-  const kept = methods.filter((m: string) => {
-    const need = MANAGED_WRITE_VERB_AFFORDANCE[m];
-    if (need && !affordances[need]) {
-      stripped.push(m);
-      return false;
-    }
-    return true;
-  });
-
-  if (stripped.length === 0) return schema;
+  const methods = (schema as any).enable.apiMethods as unknown[];
+  const strippedIndexes = new Set(conflicts.map((c) => c.index));
+  const kept = methods.filter((_m, i) => !strippedIndexes.has(i));
+  const stripped = conflicts.map((c) => c.verb);
 
   const warn = opts?.warn ?? ((msg: string) => console.warn(msg));
   warn(
     `[Registry] Object "${schema.name}" is managedBy:'${(schema as any).managedBy}' but advertised ` +
       `generic write verb(s) [${stripped.join(', ')}] in enable.apiMethods its resolved affordances ` +
       `do not permit — stripping them (ADR-0092/ADR-0103). Declare userActions to open a verb the ` +
-      `object legitimately takes from a user context. Kept: [${kept.join(', ')}].`,
+      `object legitimately takes from a user context. Kept: [${kept.join(', ')}]. ` +
+      `\`os lint\` reports the same contradiction as \`object/managed-api-method-unaffordable\` ` +
+      `with full authoring context.`,
   );
 
   return {
@@ -1502,11 +1503,36 @@ export class SchemaRegistry {
    * Returns `base` untouched when nothing extends the name, so a caller may
    * apply it unconditionally.
    *
-   * NOT idempotent, by construction: {@link mergeObjectDefinitions} CONCATENATES
-   * `validations` and `indexes`, so folding an already-folded body would
-   * duplicate both. Callers must apply this only to a base that has not been
-   * through the fold — which is why the protocol applies it to the
-   * MetadataService body and never to a registry-resolved one.
+   * [#8027] IDEMPOTENT, by construction — and it has to be, because the
+   * "callers must only pass an unfolded base" precondition this method carried
+   * when #7556 introduced it is not one any caller can honour.
+   *
+   * {@link mergeObjectDefinitions} CONCATENATES `validations` and `indexes`
+   * (`fields` is a key-keyed spread and the scalar props are last-writer-wins,
+   * so those were always safe). A second fold therefore used to duplicate both,
+   * and two shipped call sites already handed it a folded base:
+   *
+   *  1. The MetadataService body on an IN-PROCESS boot. ObjectQL's
+   *     `bridgeObjectsToMetadataService` seeds that service from
+   *     `registry.getAllObjects()` — bodies that are already resolved — so the
+   *     by-name read and the layered `code` layer folded a folded body and
+   *     served every extender-contributed validation and index TWICE. #7556's
+   *     own pin could not see it: it compares FIELD NAMES, and the field spread
+   *     is idempotent.
+   *  2. A `sys_metadata` overlay row (#8027). The write path persists the
+   *     request body verbatim (ADR-0005 §Validation), so the ordinary Studio
+   *     GET → edit → PUT round-trip stores whatever the read served — and since
+   *     #7556 that read is folded. The row is DEFINED by D9.2 as the base
+   *     layer, but nothing enforces it, and legacy/seeded/imported rows are
+   *     unconstrained besides.
+   *
+   * So the precondition is dropped rather than documented harder: an entry the
+   * `extend` contributors are about to add, already sitting in `base`, is
+   * removed from the base first and then re-added by the fold exactly once.
+   * Extenders are still concatenated against EACH OTHER — two contributors
+   * declaring an identical rule still yield two, matching {@link resolveObject}
+   * — so this narrows nothing the fold was doing on an unfolded base, and such
+   * a base is returned byte-identically to before.
    */
   foldObjectExtendersOnto<T>(name: string, base: T): T {
     if (base === null || typeof base !== 'object') return base;
@@ -1516,8 +1542,46 @@ export class SchemaRegistry {
     if (!contributors || !contributors.some((c) => c.ownership === 'extend')) return base;
     return this.foldExtendersOntoDefinition(
       contributors,
-      base as unknown as ServiceObject,
+      this.subtractExtenderContributions(contributors, base as unknown as ServiceObject),
     ) as unknown as T;
+  }
+
+  /**
+   * [#8027] Remove from `base` the `validations` / `indexes` entries the
+   * `extend` contributors are about to contribute — the half of
+   * {@link foldObjectExtendersOnto} that makes the fold idempotent.
+   *
+   * Only the two CONCATENATING keys are considered; `fields` and the scalar
+   * props already re-apply cleanly. Matching is by deep value equality on the
+   * serialised entry, so it fires only on an entry byte-identical to the one
+   * the extender declares — an entry the author merely gave the same `name` is
+   * a different rule and is left where it is.
+   *
+   * Returns `base` BY REFERENCE when nothing matched, which is the ordinary
+   * case (an unfolded base), so the pre-#8027 body is preserved exactly.
+   */
+  private subtractExtenderContributions(
+    contributors: ObjectContributor[],
+    base: ServiceObject,
+  ): ServiceObject {
+    const key = (entry: unknown): string => stableStringify(entry);
+    let out: ServiceObject | undefined;
+    for (const listKey of ['validations', 'indexes'] as const) {
+      const baseList = (base as Record<string, unknown>)[listKey];
+      if (!Array.isArray(baseList) || baseList.length === 0) continue;
+      const contributed = new Set<string>();
+      for (const contrib of contributors) {
+        if (contrib.ownership !== 'extend') continue;
+        const list = (contrib.definition as unknown as Record<string, unknown>)[listKey];
+        if (Array.isArray(list)) for (const entry of list) contributed.add(key(entry));
+      }
+      if (contributed.size === 0) continue;
+      const kept = baseList.filter((entry) => !contributed.has(key(entry)));
+      if (kept.length === baseList.length) continue;
+      out ??= { ...base };
+      (out as unknown as Record<string, unknown>)[listKey] = kept;
+    }
+    return out ?? base;
   }
 
   /**

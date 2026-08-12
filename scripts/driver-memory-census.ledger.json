@@ -90,6 +90,12 @@
       "why": "the mock makes the module resolve as ERR_MODULE_NOT_FOUND, so this file pins DevPlugin's behaviour when the driver is ABSENT. It is the opposite of a consumer."
     },
     {
+      "file": "packages/plugins/plugin-dev/src/dev-plugin-optional-load-failure.test.ts",
+      "kind": "mock",
+      "axis": "mock-replacement",
+      "why": "the #7926 pin's PRESENT-but-failing arm, and the one plugin-dev mock that is not the absent-module shape: the factory supplies its own `InMemoryDriver` whose constructor throws, so DevPlugin's load site can be shown reporting a construction failure instead of 'not installed'. It never calls `importOriginal`, so the real driver is not loaded here either. Not a migration candidate: DevPlugin resolves this specifier BY NAME, so a test of that load site must name it, and nothing is stored — there is no test backend here for sqlite `:memory:` to replace."
+    },
+    {
       "file": "packages/plugins/plugin-dev/src/dev-plugin-tenancy-failfast.test.ts",
       "kind": "mock",
       "axis": "mock-replacement",

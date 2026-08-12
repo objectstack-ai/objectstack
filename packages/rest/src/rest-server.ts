@@ -1758,6 +1758,80 @@ export const APPROVAL_REQUEST_LIST_PARAMS: readonly string[] = [
     'limit', 'offset',
 ];
 
+/**
+ * [#7606] The closed query-parameter set of `GET {basePath}/data/:object/:id`.
+ *
+ * **Measured**, at `registerCrudEndpoints`' read-record handler, from the ONE
+ * line that reads the query — `const { select, expand } = req.query || {}`.
+ * The handler destructures exactly these two names and forwards nothing else,
+ * so every other parameter on this route is dropped in the fullest sense: it
+ * never reaches `getData` at all.
+ *
+ * ⚠️ The dropped names include the CANONICAL spelling of one slot. The spec's
+ * alias table (`RPC_QUERY_ALIAS_SLOTS`) declares the fields slot as canonical
+ * `fields` with alias `select`, and the expand slot as canonical `expand` with
+ * alias `populate` — but this route folds no aliases, so `?fields=name`
+ * silently returns the FULL record and `?populate=…` silently expands nothing.
+ * Both are outside this set on purpose: adding them here would advertise a
+ * capability the handler does not implement, which is the declared-≠-enforced
+ * trap in the other direction. Refusing them instead makes the gap
+ * self-reporting — the located message names `select` / `expand` as what this
+ * route does accept. Tracked as #8039 (an alias-coverage question for the spec
+ * table and this handler to settle together) rather than widened here.
+ */
+export const DATA_RECORD_READ_PARAMS: readonly string[] = ['select', 'expand'];
+
+/**
+ * [#7606] The closed query-parameter set of `GET {basePath}/data/:object/export`.
+ *
+ * **Measured** from the export handler's own reads of `q = req.query ?? {}`,
+ * every one of them: the output controls (`format`, `header`), the paging pair
+ * (`limit`, and `page` — which on this route is the streaming CHUNK size, not
+ * a page number), the row-selection axes (`filter`, `search`, `searchFields`,
+ * `orderby`) and the column selection (`fields`).
+ *
+ * ⚠️ …and `locale`, **which the handler body never mentions**. It is read one
+ * frame down, by `extractLocale` behind the `translateMetaItem` call that
+ * localises the header row — the "anything middleware reads" clause of the
+ * measuring rule, and the single name on this route that a read of the handler
+ * alone gets wrong. Omitting it would 400 every `?locale=zh-CN` export that
+ * works today, turning localised column headers into an outage: precisely the
+ * silent-widening-traded-for-a-loud-incident failure the policy warns about,
+ * committed by the change meant to prevent it. The measurement is only
+ * finished when the helpers the handler calls have been read too.
+ *
+ * `fields` and `searchFields` are in this set but are deliberately absent from
+ * the route's sibling multiplicity declaration: both read their array arm on
+ * purpose (columns are genuinely a list). Recognition and arity are separate
+ * questions and a name can be answered differently by each.
+ *
+ * ⚠️ Dropping `limit` from this array would convert a silent-widening bug into
+ * a loud export outage — the preservation half of
+ * `rest-server-closed-query-params.test.ts` exists to make that impossible to
+ * land, and pins `locale` by name for the reason above.
+ */
+export const DATA_EXPORT_PARAMS: readonly string[] = [
+    'format', 'header',
+    'limit', 'page',
+    'filter', 'search', 'searchFields', 'orderby',
+    'fields',
+    'locale',
+];
+
+/**
+ * [#7606] The closed query-parameter set of `GET {basePath}/search`.
+ *
+ * **Measured** from the cross-object search handler: the term under both
+ * spellings it honours (`q`, and the `query` fallback the very next line
+ * reads), the object scope (`objects`), and the two result caps (`limit`,
+ * `perObject`). A dropped `?objects=` here is the widening case in its purest
+ * form — the search silently fans out across every object instead of the one
+ * the caller named.
+ */
+export const GLOBAL_SEARCH_PARAMS: readonly string[] = [
+    'q', 'query', 'objects', 'limit', 'perObject',
+];
+
 /** Platform object backing async import jobs (see sys-import-job.object.ts). */
 const IMPORT_JOB_OBJECT = 'sys_import_job';
 /** Cap on per-row results persisted on the job (failures first). */
@@ -6834,10 +6908,23 @@ export class RestServer {
                         // flattening it) would be the regression. The card listed
                         // this line under "array flows downstream"; measurement
                         // says the downstream was built for it.
-                        const { select, expand } = req.query || {};
                         const context = await this.resolveExecCtx(environmentId, req);
                         if (this.enforceAuth(req, res, context)) return;
                         if (await this.enforceApiAccess(req, res, p, environmentId, 'get')) return;
+                        // [#7606] Closed parameter set, AFTER the capability
+                        // gates for the same reason #7527 put it there: which
+                        // parameters a route understands is information, and a
+                        // caller who may not read this object should not learn
+                        // the shape of its ingress before being refused.
+                        //
+                        // This gate RESPONDS rather than throwing, which on this
+                        // route is load-bearing and not a style choice: the catch
+                        // below rewrites every 400 into a 404 (a bad id is a
+                        // miss, not a malformed request). A refusal routed
+                        // through it would reach the caller as "no such record"
+                        // — the silent-drop defect wearing a different status.
+                        if (refuseUnknownQueryParams(req, res, DATA_RECORD_READ_PARAMS)) return;
+                        const { select, expand } = req.query || {};
                         const result = await p.getData({
                             object: req.params.object,
                             id: req.params.id,
@@ -7698,6 +7785,19 @@ export class RestServer {
                     // `fields` and `searchFields` are NOT listed — both already
                     // read the array arm on purpose (`Array.isArray(q.fields)`
                     // a few lines down), and columns are genuinely a list.
+                    // [#7606] Recognition runs BEFORE arity, per the rule stated
+                    // in `query-allowlist.ts`: "I do not know this parameter"
+                    // outranks "this parameter I do know was supplied twice", so
+                    // a request committing both errors is told the more
+                    // fundamental one. Both gates answer the SAME envelope here
+                    // (nested ADR-0112 `VALIDATION_ERROR`), so composing them
+                    // adds no second dialect to this route — the divergence
+                    // recorded in #8001 is between the LIST route's
+                    // `INVALID_FILTER` and this one, and is left exactly as it
+                    // was: `filter` is inside the closed set below, so a
+                    // repeated `?filter=` still reaches the multiplicity gate
+                    // and still answers what it answered before.
+                    if (refuseUnknownQueryParams(req, res, DATA_EXPORT_PARAMS)) return;
                     if (refuseRepeatedQueryParams(req, res,
                         ['format', 'header', 'limit', 'page', 'filter', 'search', 'orderby'])) return;
                     const q = req.query ?? {};
@@ -8071,6 +8171,12 @@ export class RestServer {
                     // term `'a,b'`. `objects` is NOT listed: the next line reads
                     // its array arm deliberately — a cross-object search over a
                     // LIST of objects is the whole point of the parameter.
+                    // [#7606] Recognition before arity, same order and same
+                    // envelope as the export route — see `query-allowlist.ts`.
+                    // A dropped `?objects=` is the widening case at its worst:
+                    // the term fans out across every searchable object while the
+                    // caller believes they scoped it to one.
+                    if (refuseUnknownQueryParams(req, res, GLOBAL_SEARCH_PARAMS)) return;
                     if (refuseRepeatedQueryParams(req, res, ['q', 'query', 'limit', 'perObject'])) return;
                     const q = String(req.query?.q ?? req.query?.query ?? '');
                     const objectsParam = req.query?.objects;

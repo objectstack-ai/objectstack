@@ -64,6 +64,11 @@ import {
   type RetryOptions,
   filterTokenContextFrom,
   resolveFilterTokens,
+  // [#7867] The repo's ONE single-record 404 (#4435/#5138). It lives in
+  // `@objectstack/core` precisely so this file can reach it: ADR-0076 D2's
+  // boundary ratchet forbids the `/core` entry closure — engine.ts included —
+  // from importing `@objectstack/metadata-protocol`, where it was written.
+  recordNotFoundError,
 } from '@objectstack/core';
 import { SummaryRecomputeError, type SummaryRecomputeFailure } from './summary-errors.js';
 import { CrossDatasourceTransactionWriteError, TransactionUnsupportedError } from './transaction-errors.js';
@@ -1660,6 +1665,16 @@ export class ObjectQL implements IObjectQLEngine {
   // writing an object that declares a secret field fails closed (never
   // persists cleartext). Injected by the host via setCryptoProvider().
   private cryptoProvider?: ICryptoProvider;
+
+  // [#8022] Listeners notified when a crypto provider is (re)registered.
+  // Server-side consumers that dereference a secret at BOOT — the webhook
+  // auto-enqueuer's subscription cache is the one this was built for — run
+  // inside `kernel:ready`, which every host completes BEFORE its composition
+  // root injects a provider. Their first read therefore fails closed against a
+  // capability that is about to exist, and without a notification the only way
+  // back is to poll. The engine is the sole party that knows the moment it
+  // arrives, so the notification belongs here.
+  private readonly cryptoProviderListeners = new Set<() => void>();
 
   // [ADR-0105 D2 / #3623] Posture accessor for driver-scope widening under the
   // `group` posture. Injected by SecurityPlugin via setTenancyPostureProvider();
@@ -4613,10 +4628,51 @@ export class ObjectQL implements IObjectQLEngine {
    * Mirrors the Settings subsystem's ICryptoProvider wiring; the host (e.g.
    * `serve`) injects `LocalCryptoProvider` in dev and a KMS/Vault-backed
    * provider in production.
+   *
+   * Notifies {@link onCryptoProviderChange} listeners AFTER the provider is in
+   * place, so a listener that immediately re-reads a secret sees the new
+   * capability rather than the state that made it fail (#8022).
    */
   setCryptoProvider(provider: ICryptoProvider): void {
     this.cryptoProvider = provider;
     this.logger.info('CryptoProvider configured for secret fields');
+    // A listener is a re-arm, never part of this call's contract: one that
+    // throws must not fail the host's composition root, and must not stop the
+    // listeners behind it from re-arming.
+    for (const listener of [...this.cryptoProviderListeners]) {
+      try {
+        listener();
+      } catch (err) {
+        this.logger.warn('CryptoProvider registration listener failed', {
+          error: (err as Error)?.message ?? String(err),
+        });
+      }
+    }
+  }
+
+  /**
+   * [#8022] Observe crypto-provider registration.
+   *
+   * Exists for consumers that must dereference a `secret` field on a schedule
+   * they do not control — the boot path. `secret` reads are fail-closed by
+   * design (#7799), which is correct, but "no provider" at boot is a
+   * *transient* state on every host: `kernel:ready` runs plugins, and only
+   * after `runtime.start()` returns does the composition root call
+   * {@link setCryptoProvider}. A consumer whose cache was built in that gap is
+   * wrong until it rebuilds, and polling is the only alternative to being told.
+   *
+   * Fires on every registration, including a later replacement (a KMS provider
+   * swapped in over the dev one) — a listener that re-reads is correct in both
+   * cases, and a re-read is cheap next to signing with a key from the wrong
+   * provider.
+   *
+   * @returns an unsubscribe function; call it when the listener's owner stops.
+   */
+  onCryptoProviderChange(listener: () => void): () => void {
+    this.cryptoProviderListeners.add(listener);
+    return () => {
+      this.cryptoProviderListeners.delete(listener);
+    };
   }
 
   /**
@@ -8160,9 +8216,9 @@ export class ObjectQL implements IObjectQLEngine {
        // Pre-update snapshot. Exposed to hooks via `hookContext.previous` in
        // BOTH phases now (the HookContext contract documents `previous` for
        // update/delete) and reused for object-level validation rules and the
-       // roll-up recompute. Fetched once, only for single-id updates, and only
-       // when something on THIS object actually consumes it — see
-       // `wantsPriorRecord` below.
+       // roll-up recompute. Fetched once, and only for single-id updates —
+       // [#7867] unconditionally there, since the not-found gate at the by-id
+       // branch below is a fourth consumer that every such write has.
        let priorRecord: Record<string, unknown> | null = null;
        // [#5038] The matched rows a PREDICATE write fires its per-row
        // `afterUpdate` contexts over. `[]` is meaningful and distinct from
@@ -8186,26 +8242,78 @@ export class ObjectQL implements IObjectQLEngine {
            // `ql.findOne` on every by-id update to bind exactly this value;
            // #5846 retires it, because the engine now binds `previous` before
            // any authored before-hook runs.
-           const wantsPriorRecord =
-             needsPriorRecord(updateSchema as any) ||
-             this.hasHooksFor('beforeUpdate', object) ||
-             this.hasHooksFor('afterUpdate', object) ||
-             this.getSummaryDescriptors(object).length > 0;
-           if (wantsPriorRecord) {
-               // `buildDriverOptions` is what carries the open transaction and
-               // the tenant scope onto a raw driver read — the same bag the
-               // post-phase write uses, built here because the write's own
-               // merge has not happened yet. `delete()`'s pre-image read does
-               // the same for the same reason.
-               const priorAst: QueryAST = { object, where: { id }, limit: 1 };
-               const preOpts = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any);
-               priorRecord = await driver.findOne(object, priorAst, preOpts);
-               // Never fabricate: a row that is not there leaves `previous`
-               // UNBOUND rather than `{}`/`null`, so a condition reading it
-               // faults loudly instead of answering for a record nobody read
-               // (#4649/#4775) — `delete()`'s `bindPreImage` rule, verbatim.
-               if (priorRecord) hookContext.previous = coerceBooleanFields(updateSchema as any, priorRecord as any) as any;
-           }
+           // [#7867] …and the read is now UNCONDITIONAL, because the gate below
+           // is a question only a read can answer. `wantsPriorRecord` — the
+           // #5284 narrowing this replaces — asked "does anything CONSUME the
+           // prior row?" and skipped the read when nothing did. Existence is a
+           // consumer it never counted, and it is the one consumer every by-id
+           // write has.
+           //
+           // What the narrowing actually bought, measured rather than assumed:
+           // its own #5929 twin in `delete()` enumerates the global registrants
+           // (plugin-sharing, service-storage, plugin-auth, plugin-audit — all
+           // registering with no `object`, hence matching every object), so on
+           // any kernel that loads them `wantsPriorRecord` was ALREADY true for
+           // everything and skipped nothing. The read becomes genuinely new
+           // only for a bare `@objectstack/objectql/core` embedder whose object
+           // has no hooks, no prior-reading validation rule and no roll-up —
+           // and that embedder is buying a 404 it did not have.
+           //
+           // ⚠️ It cannot be answered from the write's own return value
+           // instead. `IDataDriver.update` declares `Promise<Record<string,
+           // unknown>>` — no not-found signal in the contract at all — and the
+           // engine's post-write readback is `null` for a SECOND reason
+           // (`protocol.updateData`'s own note: a write that moves the row out
+           // of the caller's row scope, e.g. reassigning `owner_id` away from
+           // yourself under an owner-scoped policy, reads back null while
+           // having succeeded). Reading either as "not found" would answer 404
+           // to a write that landed. Both siblings ask existence BEFORE the
+           // write for exactly this reason; so does this.
+           //
+           // `buildDriverOptions` is what carries the open transaction and
+           // the tenant scope onto a raw driver read — the same bag the
+           // post-phase write uses, built here because the write's own
+           // merge has not happened yet. `delete()`'s pre-image read does
+           // the same for the same reason.
+           const priorAst: QueryAST = { object, where: { id }, limit: 1 };
+           const preOpts = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any);
+           priorRecord = await driver.findOne(object, priorAst, preOpts);
+           // ── [#7867] The not-found gate ──────────────────────────────────
+           //
+           // A by-id update whose id names no row was a SILENT NO-OP that
+           // resolved `null`: nothing on this path ever asked whether the row
+           // existed, so the write ran on into validation, the driver and the
+           // hook chain, and died on whichever of them complained first. The
+           // 400 class varied with the object's declarations — a
+           // `HookConditionError` on a hooked object, a required-field
+           // `VALIDATION_FAILED` on an unhooked one — while the missing 404 was
+           // the constant. Two sibling paths had this gate and an action body
+           // traverses neither: `protocol.updateData` (#4435) and `callData`'s
+           // ObjectQL fallback (#5138). This is the third, placed at the one
+           // point all of them funnel through, so it is not a fourth site.
+           //
+           // ⚠️ It throws BEFORE `triggerHooks('beforeUpdate')` deliberately,
+           // and that ordering is the fix rather than a detail of it. The
+           // reported symptom was an `afterUpdate` condition reading `previous`
+           // on a row that was never there; `if (priorRecord) …` below is
+           // CORRECT and stays untouched (ADR-0058 Addendum II / #4649 —
+           // never fabricate a prior state), it was simply running on a path
+           // that should never have been entered. Killing the producer is
+           // #5574's ruled remedy for this family, not specializing the
+           // message the symptom happened to produce.
+           //
+           // Scope: the BY-ID branch only. A `multi: true` predicate update
+           // that matches zero rows is legitimately "0 rows affected", not a
+           // missing record — same line both siblings draw.
+           if (!priorRecord) throw recordNotFoundError(object, id);
+           // Never fabricate: a row that is not there leaves `previous`
+           // UNBOUND rather than `{}`/`null`, so a condition reading it
+           // faults loudly instead of answering for a record nobody read
+           // (#4649/#4775) — `delete()`'s `bindPreImage` rule, verbatim.
+           // The guard is kept verbatim although the gate above now makes it
+           // permanently true here: it states the invariant, and the invariant
+           // outlives this call site.
+           if (priorRecord) hookContext.previous = coerceBooleanFields(updateSchema as any, priorRecord as any) as any;
            await this.triggerHooks('beforeUpdate', hookContext);
            // The retired lever, refused. Everything above — `previous`, and
            // below it the `readonlyWhen` strip and every validation rule — was
@@ -9253,11 +9361,28 @@ export class ObjectQL implements IObjectQLEngine {
       // actually serves — plugin-audit's `excludeObjects` face is the worked
       // example — is what would convert them into skips, and that is each
       // package's own card, not this one's.
+      // [#7867] ⚠️ RETIRED — the three-term `wantsPreImage` gate the paragraphs
+      // above describe is GONE, and the paragraphs are kept because what they
+      // record (which registrants hold which term open, and why an honest gate
+      // is not the same as a usually-false one) is still the reason the removal
+      // costs nothing measurable.
+      //
+      // It asked "does anything CONSUME the pre-image?" and skipped the read
+      // when nothing did. Existence is a consumer it never counted — and it is
+      // the one consumer EVERY by-id delete has, because a delete against an id
+      // that names no row must answer 404 rather than run. So the by-id branch
+      // below reads the pre-image unconditionally and gates on it; the
+      // predicate branch reads its doomed rows under its own `perRowBefore/
+      // AfterHooks` gate, which is untouched. On any kernel loading the global
+      // registrants enumerated above, term 1 or 2 was already true for every
+      // object, so this skipped nothing there anyway; the read becomes
+      // genuinely new only for a bare embedder whose object has no delete-side
+      // hook and no roll-up — and that embedder is buying a 404 it did not have.
+      //
+      // ⛔ Do not reintroduce it as a guard around the by-id read. A gate on
+      // whether to LOOK is not compatible with a rule about what to do when
+      // nothing is there. See `update()`'s twin.
       const deleteSchema = this._registry.getObject(object);
-      const wantsPreImage =
-        this.hasHooksFor('beforeDelete', object) ||
-        this.hasHooksFor('afterDelete', object) ||
-        this.getSummaryDescriptors(object).length > 0;
       // `buildDriverOptions` is what carries the open transaction and the
       // tenant scope onto a raw driver read. Skipping it here would read
       // outside this write's transaction and across the tenant boundary —
@@ -9300,10 +9425,29 @@ export class ObjectQL implements IObjectQLEngine {
       };
 
       if (isByIdDelete) {
-        if (wantsPreImage) {
-          priorRecord = await readPreImage(id);
-          bindPreImage(priorRecord);
-        }
+        // [#7867] Read first, then GATE — the twin of `update()`'s, and #5138's
+        // own record names `delete` as the worst of the three when the gate was
+        // missing: "the delete ran and the answer was `200 { deleted: true }`
+        // for any string in the path, so a typo'd id, an already-deleted row
+        // and a real deletion were indistinguishable" — the shape #4435 removed
+        // from `protocol.deleteData` and #5138 removed from `callData`, still
+        // live here on the path an action body's `.delete()` actually takes.
+        //
+        // The pre-image is the only honest place to ask. `IDataDriver.delete`
+        // does declare `Promise<boolean>` ("true if deleted, false if not
+        // found"), so the answer exists downstream — but downstream is AFTER
+        // `beforeDelete` has dispatched and after `cascadeDeleteRelations` has
+        // run, i.e. after handlers have fired and children have been touched
+        // for a parent that was never there. `IDataEngine.delete` also declares
+        // `Promise<any>` and passes its driver's result through the hook chain,
+        // so testing it for `=== false` here would read a signal this layer's
+        // contract does not promise — #5138's argument, unchanged.
+        priorRecord = await readPreImage(id);
+        if (!priorRecord) throw recordNotFoundError(object, id);
+        // Bound unconditionally now that the row is proven present.
+        // `bindPreImage`'s never-fabricate rule (#4649/#4775) is unchanged and
+        // still the reason the binding goes through it rather than around it.
+        bindPreImage(priorRecord);
         await this.triggerHooks('beforeDelete', hookContext);
         // [#6752] The retired lever, refused — the `update()` twin's check,
         // verbatim, because the rule is now ONE rule: a by-id target is
