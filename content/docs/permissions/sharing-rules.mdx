@@ -161,6 +161,22 @@ covered; an unauthorized call fails with `403 PERMISSION_DENIED`. Boot
 seeding, lifecycle hooks, and backfills run as system context and are
 unaffected.
 
+**…and an organization to be scoped by.** `manage_sharing` is declared
+`scope: 'org'`, so the capability alone is not enough: the caller's session
+must also resolve an **active organization**, which is what scopes every rule
+read to "this organization ∪ the platform-global rows". A session that carries
+none — a user who has not selected an organization, or whose active
+organization was cleared — is refused with the same `403 PERMISSION_DENIED`,
+naming the missing organization rather than answering with an empty list.
+Answering unscoped would hand that caller **every** organization's rules, and
+`evaluate` would reconcile grants across all of them (objectstack#8158).
+Two callers are deliberately unaffected, because neither is an org-scoped
+principal: **system** contexts, and **platform operators** — a holder of
+`manage_platform_settings` or of the built-in `platform_admin` position
+administers rules across the deployment whether or not an organization is
+selected, which is also what a single-tenant deployment looks like before its
+default organization is bootstrapped (ADR-0081 D1).
+
 ### Switching a rule off withdraws the access it granted
 
 A sharing rule's grants are **materialized** — evaluating a rule writes real
