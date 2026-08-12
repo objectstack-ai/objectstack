@@ -111,12 +111,12 @@ export function readLegacySecret(definitionJson: unknown): string | undefined {
   }
 }
 
-/** Strip `secret` from a serialized envelope, preserving every other key. */
-export function stripSecretFromDefinition(definitionJson: string): string {
-  const parsed = JSON.parse(definitionJson) as Record<string, unknown>;
-  const { envelope } = splitWebhookSecret(parsed);
-  return JSON.stringify(envelope);
-}
+// `stripSecretFromDefinition` lived here until #7986. Its single caller — the
+// boot sweep — now has to remove BOTH credential passengers from the blob, and
+// doing that as two independent parse/serialize round-trips would let the two
+// removals disagree about what the blob contained. The sweep owns one
+// `stripCredentialsFromDefinition` instead, built from `splitWebhookSecret` +
+// `splitWebhookHeaders` over a single parse.
 
 /**
  * objectql's two wire forms for the encrypted channel, restated here ONLY as a

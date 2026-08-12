@@ -34,6 +34,12 @@ export { SysWebhook } from './sys-webhook.object.js';
  * cleartext sweep, and so the column name has one spelling.
  */
 export { WEBHOOK_SECRET_FIELD } from './webhook-secret.js';
+
+/**
+ * [#7986] The custom-headers seam — the sibling passenger on the same blob,
+ * moved onto the same encrypted channel by the same boot sweep.
+ */
+export { WEBHOOK_HEADERS_FIELD } from './webhook-headers.js';
 export {
     migrateLegacyWebhookSecrets,
     type MigrateWebhookSecretsResult,

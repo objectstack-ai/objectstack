@@ -65,6 +65,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Definición",
         help: "JSON serializado de Webhook (consulte @objectstack/spec/automation/webhook): configuración completa de cabeceras/auth/reintentos/payload."
       },
+      headers_secret: {
+        label: "Cabeceras personalizadas",
+        help: "Cabeceras HTTP personalizadas enviadas con cada entrega, como un objeto JSON ({\"Authorization\": \"Bearer …\"}). Se cifran en reposo en sys_secret; las lecturas devuelven una máscara, nunca las cabeceras. Deje la máscara sin tocar para conservar el valor actual."
+      },
       signing_secret: {
         label: "Secreto de firma",
         help: "Clave HMAC-SHA256 usada para firmar las entregas (X-Objectstack-Signature). Se cifra en reposo en sys_secret; las lecturas devuelven una máscara, nunca la clave. Deje la máscara sin tocar para conservar el valor actual."

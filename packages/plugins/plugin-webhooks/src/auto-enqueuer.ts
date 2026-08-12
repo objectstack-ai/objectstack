@@ -11,6 +11,11 @@ import {
     readLegacySecret,
     resolveWebhookSecret,
 } from './webhook-secret.js';
+import {
+    WEBHOOK_HEADERS_FIELD,
+    readLegacyHeaders,
+    resolveWebhookHeaders,
+} from './webhook-headers.js';
 
 /**
  * The authored trigger vocabulary, taken from the spec rather than restated
@@ -26,6 +31,47 @@ type WebhookTrigger = WebhookTriggerType;
  * longer own a delivery outbox/dispatcher — they share the generic substrate.
  */
 export type HttpEnqueueFn = (input: EnqueueHttpInput) => Promise<string>;
+
+/**
+ * Which encrypted credential a drop is about, and the words its report needs.
+ *
+ * Parameterised rather than duplicated because the two reports differ only in
+ * the noun and the consequence clause — everything an `error` owes (the
+ * consequence, concretely, and the fix) is identical, and a second hand-written
+ * copy is how one of them drifts into being less actionable than the other.
+ */
+interface DropReason {
+    /** Column the value lives in — travels in the ADR-0112 meta. */
+    field: string;
+    /** How the credential is named in prose. */
+    noun: string;
+    /** Indefinite form for "webhook X holds …". */
+    article: string;
+    /** What delivering anyway would mean — the harm being refused. */
+    ratherThan: string;
+    /** Issue this drop rule comes from. */
+    issue: string;
+    /** Issue pair for the repeat line. */
+    issues: string;
+}
+
+const SIGNING_SECRET_CREDENTIAL: DropReason = {
+    field: WEBHOOK_SECRET_FIELD,
+    noun: 'signing secret',
+    article: 'an encrypted signing secret',
+    ratherThan: 'delivered unsigned',
+    issue: '#7799',
+    issues: '#7799/#8022',
+};
+
+const CUSTOM_HEADERS_CREDENTIAL: DropReason = {
+    field: WEBHOOK_HEADERS_FIELD,
+    noun: 'custom header map',
+    article: 'encrypted custom headers',
+    ratherThan: 'delivered without the headers it was authored with',
+    issue: '#7986',
+    issues: '#7986/#8022',
+};
 
 /**
  * Optional logger interface (subset of console / kernel logger).
@@ -126,7 +172,11 @@ export class AutoEnqueuer {
     /** [#8022] Detach for the engine's crypto-registration listener. */
     private unbindCryptoListener: (() => void) | undefined;
     /**
-     * [#8022] Webhook ids currently dropped for an unresolvable signing key.
+     * [#8022] Webhook ids currently dropped for an unresolvable credential —
+     * the signing key (#7799) or, since #7986, the custom header map. ONE set
+     * for both on purpose: a subscription is either armed or dropped, so a
+     * per-credential ledger would let a row already silenced for its key report
+     * loudly again for its headers on the very next refresh.
      * Held so the loud first report is said ONCE per outage (AGENTS.md
      * "Degradation log levels": *say it once, at the first degradation*) and
      * again if the same webhook breaks after recovering — not once per row per
@@ -259,14 +309,15 @@ export class AutoEnqueuer {
         for (const row of rows) {
             const sub = this.parseRow(row);
             if (!sub) continue;
-            // [#7799] The signing key is no longer in the row we just read — it
-            // lives encrypted in `sys_secret`, and this read path returns only a
-            // mask. Dereference it here, on the 60s refresh, rather than per
-            // event: the cache already holds the plaintext in memory (it always
-            // did), so this changes where the value comes FROM, not how long it
-            // is held. A row whose key cannot be recovered is DROPPED — see
-            // `attachSecret`.
-            if (!(await this.attachSecret(sub, row))) continue;
+            // [#7799, #7986] Neither credential is in the row we just read —
+            // the signing key and the custom header map both live encrypted in
+            // `sys_secret`, and this read path returns only a mask. Dereference
+            // them here, on the 60s refresh, rather than per event: the cache
+            // already holds the plaintext in memory (it always did), so this
+            // changes where the values come FROM, not how long they are held. A
+            // row whose credentials cannot be recovered is DROPPED — see
+            // `attachCredentials`.
+            if (!(await this.attachCredentials(sub, row))) continue;
             // Empty objectName == "any object" → indexed under '*'.
             const key = sub.objectName ?? '*';
             const arr = next.get(key) ?? [];
@@ -295,8 +346,42 @@ export class AutoEnqueuer {
     }
 
     /**
-     * [#7799] Resolve `sub.secret` for one cached subscription. Returns `false`
-     * when the subscription must be dropped from the cache.
+     * [#7799, #7986] Resolve BOTH encrypted credentials for one cached
+     * subscription. Returns `false` when the subscription must be dropped from
+     * the cache.
+     *
+     * The two halves are deliberately resolved on the SAME build rather than on
+     * separate schedules. #8022's re-arm rebuilds the whole cache when a
+     * CryptoProvider registers; a header map recovered on any other cadence
+     * would let the enqueuer re-arm into a delivery that is correctly signed and
+     * silently missing its `Authorization`, which is the failure mode of both
+     * cards at once.
+     *
+     * The drop ledger is cleared only when BOTH succeed — otherwise a row whose
+     * secret resolves and whose headers do not would clear its own "already
+     * reported" mark on every refresh and shout the same `error` every 60s,
+     * which is precisely the unreadable-error-channel failure #8022's say-once
+     * rule exists to prevent.
+     *
+     * Cost: up to two point reads + two decrypts per credential-bearing row per
+     * refresh (default 60s), off the write path entirely. Deliberately NOT
+     * memoised across refreshes — the only cheap cache key would be
+     * `updated_at`, which nothing guarantees is stamped when a credential is
+     * rotated, and a stale key signs every delivery with a signature the
+     * receiver rejects.
+     */
+    private async attachCredentials(sub: CachedSubscription, row: any): Promise<boolean> {
+        if (!(await this.attachSecret(sub, row))) return false;
+        if (!(await this.attachHeaders(sub, row))) return false;
+        // Recovered — a later break is a new outage and gets said loudly again
+        // rather than being swallowed as a repeat.
+        this.droppedForSecret.delete(sub.id);
+        return true;
+    }
+
+    /**
+     * [#7799] Resolve `sub.secret`. Returns `false` when the subscription must
+     * be dropped.
      *
      * Three sources, in order:
      *  1. `sys_webhook.signing_secret` — the encrypted column. The read path
@@ -314,25 +399,16 @@ export class AutoEnqueuer {
      * origin (#7722, #7799): a webhook that stops arriving is visible and gets
      * investigated, while one that keeps arriving unsigned is invisible and
      * teaches the receiver to accept unauthenticated traffic.
-     *
-     * Cost: one point read + one decrypt per secret-bearing row per refresh
-     * (default 60s), off the write path entirely. Deliberately NOT memoised
-     * across refreshes — the only cheap cache key would be `updated_at`, which
-     * nothing guarantees is stamped when a secret is rotated, and a stale key
-     * signs every delivery with a signature the receiver rejects.
      */
     private async attachSecret(sub: CachedSubscription, row: any): Promise<boolean> {
         try {
             const stored = await resolveWebhookSecret(this.engine, row, this.subscriptionsObject);
             if (stored) {
                 sub.secret = stored;
-                // Recovered — a later break is a new outage and gets said loudly
-                // again rather than being swallowed as a repeat.
-                this.droppedForSecret.delete(sub.id);
                 return true;
             }
         } catch (err) {
-            this.reportDrop(sub, err);
+            this.reportDrop(sub, err, SIGNING_SECRET_CREDENTIAL);
             return false;
         }
 
@@ -347,7 +423,49 @@ export class AutoEnqueuer {
             );
             sub.secret = legacy;
         }
-        this.droppedForSecret.delete(sub.id);
+        return true;
+    }
+
+    /**
+     * [#7986] Resolve `sub.headers` from the encrypted column, with the same
+     * three-source shape as {@link attachSecret} and for the same reasons.
+     *
+     * A stored-but-unresolvable header map DROPS the subscription rather than
+     * delivering without it. That is the identical trade #7799 made for the
+     * signature, and it needs restating because the intuition runs the other
+     * way: a missing `Authorization` looks self-announcing, since the receiver
+     * answers 401 and the attempt lands in `sys_http_delivery` for anyone to
+     * find. But that is only the AUTHENTICATED case. Against an endpoint that
+     * does not require the header — a routing `X-Tenant-Id`, an
+     * `X-Environment: staging` — the delivery SUCCEEDS while quietly deviating
+     * from the configuration the author wrote, and nothing anywhere records
+     * that it went out incomplete. A subscription that stops is visible; a
+     * delivery that arrives subtly wrong is not.
+     */
+    private async attachHeaders(sub: CachedSubscription, row: any): Promise<boolean> {
+        try {
+            const stored = await resolveWebhookHeaders(this.engine, row, this.subscriptionsObject);
+            if (stored) {
+                sub.headers = stored;
+                return true;
+            }
+        } catch (err) {
+            this.reportDrop(sub, err, CUSTOM_HEADERS_CREDENTIAL);
+            return false;
+        }
+
+        const legacy = readLegacyHeaders(row?.definition_json);
+        if (legacy) {
+            this.logger.warn?.(
+                `[webhook-auto-enqueuer] webhook '${sub.name}' still carries its custom headers as ` +
+                    `CLEARTEXT in definition_json, readable over the data API (#7986) — that map is the ` +
+                    `ordinary place an Authorization header goes. Delivery continues from it; run the boot ` +
+                    `sweep (migrateLegacyWebhookSecrets) with a CryptoProvider wired to move them into ` +
+                    `sys_secret.`,
+                { id: sub.id },
+            );
+            sub.headers = legacy;
+        }
         return true;
     }
 
@@ -376,11 +494,15 @@ export class AutoEnqueuer {
      * the pair, not on message text. Same pair the seeder's refusal carries for
      * the same underlying cause.
      */
-    private reportDrop(sub: CachedSubscription, err: unknown): void {
+    private reportDrop(
+        sub: CachedSubscription,
+        err: unknown,
+        credential: DropReason = SIGNING_SECRET_CREDENTIAL,
+    ): void {
         const meta = {
             id: sub.id,
             webhook: sub.name,
-            field: WEBHOOK_SECRET_FIELD,
+            field: credential.field,
             code: WEBHOOK_SECRET_REFUSAL_CODE,
             status: WEBHOOK_SECRET_REFUSAL_STATUS,
             err: (err as Error)?.message ?? err,
@@ -388,21 +510,21 @@ export class AutoEnqueuer {
         if (this.droppedForSecret.has(sub.id)) {
             this.logger.debug?.(
                 `[webhook-auto-enqueuer] webhook '${sub.name}' is still dropped for an unresolvable ` +
-                    'signing secret (#7799/#8022)',
+                    `${credential.noun} (${credential.issues})`,
                 meta,
             );
             return;
         }
         this.droppedForSecret.add(sub.id);
         const message =
-            `[webhook-auto-enqueuer] webhook '${sub.name}' holds an encrypted signing secret that ` +
-            'could not be decrypted — the subscription is DROPPED rather than delivered unsigned ' +
-            '(#7799), so every matching record change is discarded with NO delivery and NO ' +
+            `[webhook-auto-enqueuer] webhook '${sub.name}' holds ${credential.article} that ` +
+            `could not be decrypted — the subscription is DROPPED rather than ${credential.ratherThan} ` +
+            `(${credential.issue}), so every matching record change is discarded with NO delivery and NO ` +
             'sys_http_delivery row, while the row keeps reading active:true in Setup. Fix: register a ' +
             'CryptoProvider (engine.setCryptoProvider — LocalCryptoProvider in dev, KMS/Vault in ' +
-            'production) with the same key the secret was written under, and make sure the sys_secret ' +
-            'row is reachable; the subscription re-arms on registration (#8022) and at the next ' +
-            'periodic refresh.';
+            `production) with the same key the ${credential.noun} was written under, and make sure the ` +
+            'sys_secret row is reachable; the subscription re-arms on registration (#8022) and at the ' +
+            'next periodic refresh.';
         // The logger surface is a subset of console/kernel logger — `error` is
         // optional on it, so fall back rather than silently losing the report
         // on a logger that only implements `warn`.
@@ -478,10 +600,11 @@ export class AutoEnqueuer {
             return null;
         }
 
-        // The "definition_json" field carries advanced config (headers,
-        // timeout); attempt a best-effort parse. Fall back to top-level fields
-        // where present. It no longer carries the signing secret (#7799) —
-        // `attachSecret` sources that from the encrypted column.
+        // The "definition_json" field carries advanced config (timeout);
+        // attempt a best-effort parse. Fall back to top-level fields where
+        // present. It no longer carries either credential — the signing secret
+        // (#7799) and the custom headers (#7986) are both sourced from their
+        // encrypted columns by `attachCredentials`.
         let defn: Record<string, any> = {};
         if (typeof row.definition_json === 'string' && row.definition_json.length > 0) {
             try {
@@ -502,9 +625,9 @@ export class AutoEnqueuer {
             // method regardless of whether the row was authored before or after
             // the select change (legacy rows stored 'POST').
             method: String(row.method ?? defn.method ?? 'POST').toUpperCase(),
-            headers: defn.headers,
-            // `secret` is filled by attachSecret() from the encrypted column,
-            // NOT read off the row — see #7799.
+            // `headers` and `secret` are both filled by attachCredentials()
+            // from their encrypted columns, NOT read off the row — see #7799
+            // (secret) and #7986 (headers).
             timeoutMs: defn.timeoutMs,
         };
     }

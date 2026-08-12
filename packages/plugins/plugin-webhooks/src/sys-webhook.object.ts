@@ -181,7 +181,47 @@ export const SysWebhook = ObjectSchema.create({
     definition_json: Field.textarea({
       label: 'Definition',
       required: true,
-      description: 'Serialised Webhook JSON (see @objectstack/spec/automation/webhook) — headers/timeout config. The signing secret is NOT stored here; it lives in the encrypted `signing_secret` field.',
+      description: 'Serialised Webhook JSON (see @objectstack/spec/automation/webhook) — timeout and the rest of the authored envelope. Credentials are NOT stored here: the signing secret lives in the encrypted `signing_secret` field and the custom headers in the encrypted `headers_secret` field.',
+      group: 'Definition',
+    }),
+
+    /**
+     * [#7986] Custom HTTP headers, in the engine's ENCRYPTED credential channel.
+     *
+     * The sibling passenger #7799 left on the blob it emptied. That card was
+     * framed as "the signing secret is in cleartext" and was fixed exactly as
+     * framed — but the COLUMN was the problem, and `headers` is the ordinary
+     * place an `Authorization: Bearer …` goes. `definition_json` is an ordinary
+     * textarea on an admin-authorable object with no restrictive
+     * `enable.apiMethods` at all, so `GET /api/v1/data/sys_webhook` returned the
+     * header map to every persona that can read the object, with none of the
+     * retention bound that eventually ages out `sys_http_delivery`'s copies.
+     *
+     * The WHOLE map moves rather than the credential-looking entries, because
+     * only some entries are credentials and the platform cannot tell which:
+     * guessing from the header name is fail-OPEN on exactly the custom spellings
+     * (`X-Acme-Token`) most likely to be one, and letting the author declare
+     * which are sensitive is a change to the authoring envelope
+     * (`webhook.zod.ts`) that belongs to the spec seat. See
+     * `webhook-headers.ts` for the full comparison.
+     *
+     * Stored as the SERIALIZED map (the encrypted channel carries a string);
+     * the enqueuer recovers and re-parses it server-side through
+     * `engine.resolveSecretField()` when it refreshes its subscription cache,
+     * on the same refresh that recovers the signing secret.
+     *
+     * Fail-closed by construction, the same way `signing_secret` is: with no
+     * CryptoProvider the engine REFUSES the write rather than falling back to
+     * cleartext, and a stored map that cannot be decrypted DROPS the
+     * subscription rather than delivering it with its headers silently missing.
+     */
+    headers_secret: Field.secret({
+      label: 'Custom Headers',
+      required: false,
+      description:
+        'Custom HTTP headers sent with each delivery, as a JSON object ({"Authorization": "Bearer …"}). '
+        + 'Encrypted at rest into sys_secret; reads return a mask, never the headers. Leave the mask '
+        + 'untouched to keep the current value.',
       group: 'Definition',
     }),
 

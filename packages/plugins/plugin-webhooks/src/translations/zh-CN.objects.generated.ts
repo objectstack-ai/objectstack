@@ -65,6 +65,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "定义",
         help: "序列化的 Webhook JSON（参见 @objectstack/spec/automation/webhook）——包含完整的 headers/auth/retry/payload 配置"
       },
+      headers_secret: {
+        label: "自定义请求头",
+        help: "随每次投递发送的自定义 HTTP 请求头，采用 JSON 对象格式（{\"Authorization\": \"Bearer …\"}）。静态存储时加密写入 sys_secret；读取只返回掩码，绝不返回请求头内容。保持掩码不变即保留当前值。"
+      },
       signing_secret: {
         label: "签名密钥",
         help: "用于对投递请求签名的 HMAC-SHA256 密钥（X-Objectstack-Signature）。静态存储时加密写入 sys_secret；读取只返回掩码，绝不返回密钥。保持掩码不变即保留当前值。"

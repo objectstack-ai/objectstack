@@ -44,8 +44,14 @@ import {
   WEBHOOK_SECRET_REFUSAL_STATUS,
   isSecretProtectionFailure,
   readLegacySecret,
-  stripSecretFromDefinition,
+  splitWebhookSecret,
 } from './webhook-secret.js';
+import {
+  WEBHOOK_HEADERS_FIELD,
+  readLegacyHeaders,
+  serializeHeaders,
+  splitWebhookHeaders,
+} from './webhook-headers.js';
 
 /** System write context — a boot reconciler is not an admin authoring action. */
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
@@ -93,8 +99,16 @@ export async function migrateLegacyWebhookSecrets(
   }
 
   for (const row of rows) {
-    const legacy = readLegacySecret(row?.definition_json);
-    if (!legacy || !row?.id) continue;
+    if (!row?.id) continue;
+    const legacySecret = readLegacySecret(row.definition_json);
+    const legacyHeaders = readLegacyHeaders(row.definition_json);
+    // [#7986] A row counts as found when it carries EITHER passenger. The two
+    // move in ONE update on purpose: two updates would mint two revisions of
+    // the same row, and a failure between them could land a blob stripped of
+    // its headers while the encrypted copy was never written — the exact
+    // "never widens the blast radius" rule the secret half already states,
+    // which only holds if the strip and the store stay in the same write.
+    if (!legacySecret && !legacyHeaders) continue;
     out.found += 1;
 
     try {
@@ -102,8 +116,9 @@ export async function migrateLegacyWebhookSecrets(
         subscriptionsObject,
         {
           id: row.id,
-          [WEBHOOK_SECRET_FIELD]: legacy,
-          definition_json: stripSecretFromDefinition(row.definition_json as string),
+          ...(legacySecret ? { [WEBHOOK_SECRET_FIELD]: legacySecret } : {}),
+          ...(legacyHeaders ? { [WEBHOOK_HEADERS_FIELD]: serializeHeaders(legacyHeaders) } : {}),
+          definition_json: stripCredentialsFromDefinition(row.definition_json as string),
         },
         { context: SYSTEM_CTX } as any,
       );
@@ -111,10 +126,13 @@ export async function migrateLegacyWebhookSecrets(
     } catch (err: any) {
       out.failed += 1;
       const protection = isSecretProtectionFailure(err);
+      const what = legacySecret && legacyHeaders
+        ? 'signing secret and custom headers'
+        : legacySecret ? 'signing secret' : 'custom headers';
       logger?.warn?.(
         protection
-          ? '[webhook] signing secret STILL CLEARTEXT in definition_json — no CryptoProvider to encrypt it (#7799)'
-          : '[webhook] signing secret migration failed — row left unchanged (#7799)',
+          ? `[webhook] ${what} STILL CLEARTEXT in definition_json — no CryptoProvider to encrypt them (#7799/#7986)`
+          : `[webhook] ${what} migration failed — row left unchanged (#7799/#7986)`,
         {
           name: row.name ?? row.id,
           id: row.id,
@@ -127,7 +145,19 @@ export async function migrateLegacyWebhookSecrets(
   }
 
   if (out.found > 0) {
-    logger?.info?.('[webhook] legacy cleartext signing secrets swept into sys_secret', { ...out });
+    logger?.info?.('[webhook] legacy cleartext credentials swept into sys_secret', { ...out });
   }
   return out;
+}
+
+/**
+ * Strip both credential passengers from a serialized envelope, preserving every
+ * other key. Parsed and re-serialized ONCE so the two removals cannot disagree
+ * about what the blob contained.
+ */
+function stripCredentialsFromDefinition(definitionJson: string): string {
+  const parsed = JSON.parse(definitionJson) as Record<string, unknown>;
+  const { envelope: withoutSecret } = splitWebhookSecret(parsed);
+  const { envelope } = splitWebhookHeaders(withoutSecret as Record<string, unknown>);
+  return JSON.stringify(envelope);
 }
