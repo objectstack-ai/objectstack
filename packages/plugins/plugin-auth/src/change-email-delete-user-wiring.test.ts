@@ -239,6 +239,12 @@ describe('#7735 — POST /change-email is wired, and confirmed by email', () => 
 
     const cookie = cookieFrom(await signUp(manager, 'old@example.com'));
     email.sent.length = 0;
+    // The address is unverified at this point, so the transition below is a
+    // real one. (`email_verified` is 0/1 rather than false/true because the
+    // ObjectQL adapter declares `supportsBooleans: false` — better-auth encodes
+    // before the engine sees it, so assert the value's TRUTH, not its spelling.)
+    expect(userRows(engine)[0]!.email_verified).toBeFalsy();
+
     await post(manager, '/change-email', cookie, { newEmail: 'new@example.com' });
 
     const verificationUrl = (email.sent.at(-1)?.data as { verificationUrl?: string } | undefined)?.verificationUrl;
@@ -249,7 +255,7 @@ describe('#7735 — POST /change-email is wired, and confirmed by email', () => 
 
     const user = userRows(engine)[0]!;
     expect(user.email).toBe('new@example.com');
-    expect(user.email_verified).toBe(true);
+    expect(user.email_verified).toBeTruthy();
   });
 
   it('without an email transport it refuses for the HONEST reason, not CHANGE_EMAIL_DISABLED', async () => {
@@ -277,22 +283,42 @@ describe('#7735 — POST /delete-user stays unwired, and the ledger says so', ()
     const engine = createMemoryEngine();
     const manager = makeManager(engine, createRecordingEmailService().service);
 
-    const cookie = cookieFrom(await signUp(manager, 'keeper@example.com'));
-    expect(userRows(engine)).toHaveLength(1);
+    // TWO accounts, and the SECOND one asks to be deleted. With only one, the
+    // platform's break-glass guard (auth-manager.ts `before` hook: never remove
+    // the last local-password login) refuses first with 409 CONFLICT, and the
+    // request never reaches better-auth's disabled check — a green 409 would
+    // say nothing about whether `user.deleteUser` is wired. Measured on this
+    // very test: it read 409 until the second account existed.
+    await signUp(manager, 'keeper@example.com');
+    const cookie = cookieFrom(await signUp(manager, 'leaver@example.com'));
+    expect(userRows(engine)).toHaveLength(2);
+
+    // Rejection-class, and the discriminator has to be built rather than
+    // asserted: better-auth's DISABLED branch here is
+    // `APIError.fromStatus('NOT_FOUND')`, which carries **no body at all** — no
+    // `code`, no message — so a lone `expect(404)` could equally be a route
+    // that does not exist. The anonymous call is what separates them: the path
+    // IS mounted and IS authenticated, so 401-without-a-session next to
+    // 404-with-one can only be the capability switch.
+    const anonymous = await manager.handleRequest(
+      new Request(`${AUTH}/delete-user`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: ORIGIN },
+        body: JSON.stringify({}),
+      }),
+    );
+    expect(anonymous.status, 'the route is mounted and session-guarded').toBe(401);
 
     const response = await post(manager, '/delete-user', cookie, { password: PASSWORD });
-
-    // Rejection-class: assert the envelope (status AND code), never a bare
-    // "not 200". better-auth answers a DISABLED delete-user with 404/NOT_FOUND
-    // before it looks at the session, so a status-only assertion could not tell
-    // this apart from an unauthenticated call — and an unauthenticated call is
-    // exactly what a green test would be measuring if the session broke.
     expect(response.status).toBe(404);
-    const body = await errorBody(response);
-    expect(JSON.stringify(body)).toContain('NOT_FOUND');
+    // Pinned as it really is, not as the envelope convention would like it:
+    // an upstream version that starts sending a code here should surface as a
+    // diff someone reads. Its `/delete-user/callback` half DOES carry
+    // `code: NOT_FOUND` — asserted in the next test.
+    expect(await errorBody(response)).toEqual({});
 
     // The half that matters: the account is still there.
-    expect(userRows(engine).map((r) => r.email)).toEqual(['keeper@example.com']);
+    expect(userRows(engine).map((r) => r.email)).toEqual(['keeper@example.com', 'leaver@example.com']);
   });
 
   it('refuses the /delete-user/callback half too — a token cannot route around the switch', async () => {
