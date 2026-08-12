@@ -4,6 +4,7 @@
 "@objectstack/metadata-protocol": patch
 "@objectstack/runtime": patch
 "@objectstack/plugin-audit": patch
+"@objectstack/plugin-auth": patch
 ---
 
 fix(objectql): a by-id `update()`/`delete()` against a nonexistent record answers 404 `RECORD_NOT_FOUND` instead of a 400 from further down the pipeline (#7867)
@@ -73,6 +74,12 @@ recording what changed and why at its own site: #5284's and #5929's in
 The DISPATCH half all three are actually about — the per-object `hasHooksFor`
 question, the `excludeObjects` subtraction, and the retired
 `sys_fetch_previous_*` builtins — is untouched and still pinned.
+
+One further case encoded the old silent no-op as correct: `@objectstack/plugin-auth`'s
+#5941 last-admin-guard test deleted a `sys_account` id that was never seeded and
+asserted it RESOLVED, to show the guard does not write-guard that object. It now
+deletes a REAL row — which states the same thing more strongly — and separately
+pins that a ghost id there is refused by the ENGINE rather than by the guard.
 
 **Scope.** By-id only. A `multi: true` predicate write matching zero rows still
 resolves "0 rows affected" — the same line both sibling paths draw.
