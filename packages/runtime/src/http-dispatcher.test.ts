@@ -3043,7 +3043,11 @@ describe('HttpDispatcher', () => {
             (kernel as any).services = new Map([['search', searchSvc]]);
 
             const info = await dispatcher.getDiscoveryInfo('/api/v1');
-            const reported = info.services.search;
+            // Cast like the #4318 cache/queue/job tests above: `svcInProcess`'s
+            // return type carries no `route` key at all (route-less by
+            // construction), so a direct `info.services.search.route` read
+            // does not typecheck against the narrowed union.
+            const reported = (info.services as Record<string, any>).search;
             expect(reported.enabled, 'services.search.enabled').toBe(true);
             expect(reported.status, 'services.search.status').toBe('available');
             expect(reported.handlerReady, 'services.search.handlerReady').toBe(false);
