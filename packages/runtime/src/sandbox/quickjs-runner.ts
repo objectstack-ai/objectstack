@@ -636,7 +636,19 @@ export class QuickJSScriptRunner implements ScriptRunner {
     apiObj.dispose();
 
     const logObj = vm.newObject();
-    for (const level of ['info', 'warn', 'error'] as const) {
+    // [#7661] FOUR levels, not three. `debug` was granted by the CLI's
+    // capability extractor (`ctx\.log\.(?:info|warn|error|debug)` → `log`) and
+    // taught by the docs table while this loop installed only the first three,
+    // so a body that followed the documentation threw `TypeError: not a
+    // function` here — and under `onError: 'abort'` that aborted the write.
+    // Enforced rather than retired from the other two surfaces (ADR-0049): the
+    // `crypto.hash` precedent this shape echoes (#4391) was removed because
+    // implementing it widened the sandbox's SECURITY surface, and emitting a
+    // debug-level diagnostic carries no such argument — `--log-level debug` is
+    // exactly what such a body is for. `Logger.debug(message, meta)` is on the
+    // contract (`packages/spec/src/contracts/logger.ts`), so nothing new is
+    // required of the host logger either.
+    for (const level of ['debug', 'info', 'warn', 'error'] as const) {
       const fn = vm.newFunction(level, (msgH, dataH) => {
         if (!caps.has('log')) {
           throwSandboxFault(vm, `capability 'log' not granted to ${origin.kind} '${origin.name}'`);

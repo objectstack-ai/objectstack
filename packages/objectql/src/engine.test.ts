@@ -246,8 +246,10 @@ describe('ObjectQL Engine', () => {
             await engine.find('account', { search: 'retail' });
 
             const ast = (mockDriver.find as any).mock.calls.at(-1)[1];
+            // [#7641] `$icontains` on the textual field — the case-folding
+            // operator — while the select label→value path stays an exact `$in`.
             expect(ast.where).toEqual({ $or: [
-                { name: { $contains: 'retail' } },
+                { name: { $icontains: 'retail' } },
                 { industry: { $in: ['retail'] } },
             ] });
             expect(ast.search).toBeUndefined();
@@ -264,7 +266,7 @@ describe('ObjectQL Engine', () => {
 
             const ast = (mockDriver.find as any).mock.calls.at(-1)[1];
             expect(ast.where.$and).toContainEqual({ status: 'active' });
-            expect(ast.where.$and).toContainEqual({ $or: [{ name: { $contains: 'acme' } }] });
+            expect(ast.where.$and).toContainEqual({ $or: [{ name: { $icontains: 'acme' } }] });
         });
     });
 

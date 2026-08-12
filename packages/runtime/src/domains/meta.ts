@@ -20,6 +20,7 @@ import { CoreServiceName } from '@objectstack/spec/system';
 import {
     ObjectSchemaMaskEvaluationError,
     applyObjectSchemaMask,
+    isObjectSchemaMaskExempt,
     isObjectSchemaMaskingEnabled,
     resolveObjectSchemaMaskPosture,
     type ObjectSchemaMaskPosture,
@@ -472,6 +473,29 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
     // `_drafts` is intercepted before the generic `:type` handler below so it
     // is never mistaken for a metadata type name.
     if (parts.length === 1 && parts[0] === '_drafts' && (!method || method.toUpperCase() === 'GET')) {
+        // [ADR-0106 D5(4) / #6599] The dispatcher face of the same authoring
+        // gate the REST `/meta/_drafts` route carries. A pending object draft
+        // ships its full `fields` map, so serving `listDrafts()` verbatim leaks
+        // every hidden field's definition — the disclosure ADR-0106 closes on
+        // every other `/meta` outlet. `_drafts` is authored-metadata, not a
+        // general read, so it GATES per caller on the SAME D4 exemption
+        // predicate (`isObjectSchemaMaskExempt`) the mask exits use — 403 for a
+        // non-author — rather than masking per field. Gate FIRST, before the
+        // protocol is resolved, so the 501-vs-200 answer cannot be used to probe
+        // (same posture as `_migrate-stored` below). The runtime transport
+        // derives the ADR-0112 code from the 403 status (`PERMISSION_DENIED`),
+        // matching `_migrate-stored`'s next-door precedent rather than the REST
+        // twin's `FORBIDDEN`.
+        const ec: any = _context.executionContext;
+        if (!isObjectSchemaMaskExempt(ec)) {
+            return {
+                handled: true,
+                response: deps.error(
+                    'Reading pending metadata drafts requires an authoring capability (studio.access, setup.access or manage_metadata).',
+                    403,
+                ),
+            };
+        }
         const protocol = await deps.resolveService(_context, 'protocol');
         if (protocol && typeof protocol.listDrafts === 'function') {
             try {

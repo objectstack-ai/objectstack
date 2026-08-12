@@ -545,6 +545,27 @@ jobs:
       - name: Required-context name pin
         run: pnpm check:required-contexts
 
+      # Cross-package test inputs (#7802). A test that resolves the repo root
+      # and walks it has an input set far wider than its own package, and BOTH
+      # of CI's scoping layers judge it by where it LIVES: `turbo ls --affected`
+      # reaches packages through the dependency GRAPH, and turbo's task cache
+      # hashes `$TURBO_DEFAULT$`, which is package-local. So spec's
+      # `*.object.ts` conformance scan went unrun on a platform-objects-only
+      # diff, AND replayed a cached green in the merge-queue build that runs the
+      # full package list — a violation reached `main` with every gate green and
+      # was then charged to the next unrelated PR that happened to touch `spec`.
+      # Twenty such tests, in eight packages, exist today.
+      # This gate finds the escaping tests ITSELF, statically — nothing has to
+      # be registered to be DETECTED — and fails on any package that has one and
+      # no declared input radius, on a declaration gone stale, on a declared
+      # glob turbo.json does not hash, and on a radius too narrow to cover the
+      # paths its own tests name. The point is what happens by default: a new
+      # cross-package scan nobody remembers to register produces a RED GATE
+      # naming it and the globs to write, not a silent skip.
+      # Reads ~2000 test sources; sub-second.
+      - name: Cross-package test inputs
+        run: pnpm check:cross-package-test-inputs
+
       # #4248 packaging-hygiene guard. Without a `files` whitelist npm packs the
       # whole package directory, and 20 of the 49 publishable packages declared
       # none — so consumers installed TypeScript sources, unit tests and build

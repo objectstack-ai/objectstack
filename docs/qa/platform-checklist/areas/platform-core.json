@@ -482,9 +482,9 @@
         "Setup detail: confirm each settings URL entry (nav_settings_* → /apps/setup/system/settings/<namespace>) opens the settings namespace form (localization/company/branding/auth/mail/storage/ai/knowledge/feature_flags), and Users / Organization / Business Units / Teams / Sessions / OAuth Applications / Identity Links / User Preferences render",
         "Studio detail: confirm each metadata:resource list (object/app/view/page/dashboard/report/dataset/action/hook/flow/agent/tool/skill/email_template) renders, and the component surfaces render (App Builder studio:builder, All Metadata Types metadata:directory, Packages developer:packages, API Console developer:api-console, Flow Runs developer:flow-runs, Public Forms developer:public-forms)",
         "Account detail: confirm Profile (account:profile_card), Notifications (sys_inbox_message/mine), Approvals (sys_approval_request/my_pending), Linked Accounts (sys_account), Active Sessions (sys_session/mine), API Keys (sys_api_key/mine), OAuth Applications (sys_oauth_application/mine) each render",
-        "confirm the gated entries resolve to ABSENT-not-erroring for the admin: nav_organizations (requiresService org-scoping) is absent in single-org mode; nav_jwks Signing Keys (requiredPermissions manage_platform_settings, sys_jwks private per ADR-0066) is PRESENT for admin; SSO Providers is absent unless OS_SSO_ENABLED (knownGap)",
+        "confirm the gated entries resolve to ABSENT-not-erroring for the admin: nav_organizations (requiresService org-scoping) is absent in single-org mode; nav_jwks Signing Keys is ABSENT for EVERY persona, admin included — the entry was removed in #7544 because sys_jwks declares apiEnabled:false, so its list answers OBJECT_API_DISABLED (404) for all callers and no permission gate could prune it; SSO Providers is absent unless OS_SSO_ENABLED (knownGap)",
         "sign in as the plain member: attempt to open Setup (com.objectstack.setup) and Studio (com.objectstack.studio) — capture the app-level refusal (App.requiredPermissions setup.access / studio.access); open Account (declares no requiredPermissions) — capture it opening",
-        "as the member, GET /api/v1/meta/app for a reachable app and confirm every manage_platform_settings-gated entry (JWKS, API Keys, the manage_platform_settings settings URLs) is ABSENT from the member's payload — the server prunes, the client does not merely hide",
+        "as the member, GET /api/v1/meta/app for a reachable app and confirm every manage_platform_settings-gated entry (API Keys, the manage_platform_settings settings URLs) is ABSENT from the member's payload — the server prunes, the client does not merely hide. JWKS is deliberately NOT in this list any more: it is absent for admins too, so finding it absent for a member proves nothing about the gate (#7544)",
         "cross-check served-vs-rendered: diff each app's meta/app nav destinations against what actually rendered so nothing is silently outside the walk"
       ],
       "acceptance": [
@@ -541,7 +541,7 @@
         "packages/platform-objects/src/apps/setup.app.ts (shell group anchors + requiredPermissions setup.access)",
         "packages/platform-objects/src/apps/studio.app.ts (static nav; requiredPermissions studio.access)",
         "packages/platform-objects/src/apps/account.app.ts (no requiredPermissions; hidden from App Switcher; requiresObject/requiresService entry gates)",
-        "packages/platform-objects/src/apps/setup-nav.contributions.ts (nav_jwks manage_platform_settings; nav_organizations requiresService org-scoping; nav_api_keys manage_platform_settings)",
+        "packages/platform-objects/src/apps/setup-nav.contributions.ts (nav_organizations requiresService org-scoping; nav_api_keys manage_platform_settings; no nav_jwks — removed in #7544)",
         "packages/plugins/plugin-auth/src/auth-plugin.ts (SSO Providers nav_sso_providers contributed only when isSsoWired())",
         "ADR-0048 (Setup/Studio/Account as one-app packages com.objectstack.{setup,studio,account}); ADR-0029 (nav contributions); ADR-0066 (sys_jwks private)"
       ],

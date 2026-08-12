@@ -240,7 +240,20 @@ export interface ScriptContext {
   /** Engine-side `result` (only set for after* hooks). */
   result?: unknown;
   api?: unknown;
+  /**
+   * Host-provided log seam for the `['log']` capability — four levels, matching
+   * the four `installCtx` (quickjs-runner.ts) wires onto the VM's `ctx.log` and
+   * the four the CLI's capability extractor infers `log` from.
+   *
+   * `debug` joined the other three in #7661. It was the `crypto.hash` shape one
+   * member over — inferred by the extractor and taught by the docs table with
+   * nothing installed behind it, so the one call it typed threw inside the VM.
+   * Unlike hashing it was ENFORCED rather than removed (ADR-0049): a body
+   * emitting debug-level diagnostics is exactly what `--log-level debug` is
+   * for, and `Logger.debug(message, meta)` already existed on the contract.
+   */
   log?: {
+    debug: (msg: string, data?: unknown) => void;
     info: (msg: string, data?: unknown) => void;
     warn: (msg: string, data?: unknown) => void;
     error: (msg: string, data?: unknown) => void;

@@ -219,6 +219,42 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   { route: 'DELETE /api/v1/data/:object/:id', family: 'crud', source: 'route-manager', disposition: 'sdk', client: 'data.delete' },
 
   // ── data actions (clone / import / import jobs / export) ──────────────────
+  //
+  // THERE IS NO ACTION-INVOKE ROUTE IN THIS FAMILY, AND ITS ABSENCE IS
+  // DELIBERATE (#7680). This family is the built-in DATA operations only. No
+  // route on this server invokes a declared object/record action: not
+  // `POST /api/v1/data/:object/actions/:name`, nor `/api/v1/actions/:name`,
+  // `/api/v1/action/:name`, `/api/v1/objects/:object/actions/:name`. A QA probe
+  // (#7637) measured all four spellings 404 against a booted showcase, which is
+  // the state this table records — a missing row here, not a missing entry.
+  //
+  // WHERE `requiredPermissions` IS ACTUALLY ENFORCED. ADR-0066 D4's capability
+  // gate is `actionPermissionError` (packages/runtime/src/action-execution.ts),
+  // and every caller that reaches it does so on a PLATFORM path: the runtime
+  // dispatcher's `/actions` domain (runtime/src/domains/actions.ts, which
+  // dispatches through `ql.executeAction`) and the MCP `run_action` bridge
+  // (runtime/src/domains/mcp.ts). Those routes are ledgered in
+  // `packages/runtime/src/route-ledger.ts`, not here. Read
+  // `actionPermissionError`'s own docstring with that split in mind: the "REST
+  // `/actions/...` route" it names is the DISPATCHER's HTTP surface, not a
+  // route `@objectstack/rest` mounts. So "`requiredPermissions` is not enforced
+  // over REST" is not a defect on this build — it is a surface that does not
+  // exist, and a 404 from the probes above is evidence of nothing else.
+  //
+  // IF YOU ARE THE AUTHOR ADDING AN ACTION-INVOKE ROUTE HERE: server-side
+  // `requiredPermissions` enforcement is a DAY-ONE requirement of that route,
+  // not a follow-up you file behind it. `Action.requiredPermissions` is
+  // authored metadata the Console ALSO gates on client-side; a REST invoke door
+  // that ships without calling the same gate resurrects precisely the
+  // client-side fail-open #3923 reported — the action greyed out in the UI and
+  // wide open on the wire, which is the worst of both, because the UI's refusal
+  // reads as proof the rule is being kept. Call `actionPermissionError` rather
+  // than re-deriving the check: it is single-sourced so that every invoke
+  // surface enforces the SAME declaration, and a second implementation is a
+  // second thing to drift. Then ledger the new route with that gate named in
+  // its `note`, and re-point the platform-checklist item that this comment's
+  // counterpart clause sends to the platform path
+  // (`access-security.capability-declaration-lifecycle`).
   { route: 'POST /api/v1/data/:object/:id/clone', family: 'data-actions', source: 'route-manager', disposition: 'sdk', client: 'data.clone' },
   { route: 'POST /api/v1/data/:object/import', family: 'data-actions', source: 'route-manager', disposition: 'sdk', client: 'data.import' },
   { route: 'POST /api/v1/data/:object/import/jobs', family: 'data-actions', source: 'route-manager', disposition: 'sdk', client: 'data.createImportJob' },

@@ -13,6 +13,7 @@ import { hasDanglingLikeEscape, likePatternToRegexSource } from '@objectstack/sp
 import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
 import { Logger, createLogger, nextUtcCalendarDay } from '@objectstack/core';
 import { Query, Aggregator } from 'mingo';
+import { assertSingleTenantPosture, assertObjectsNotTenantScoped } from './memory-tenancy-guard.js';
 import { getValueByPath } from './memory-matcher.js';
 import {
   assertFilterConditionShape,
@@ -156,6 +157,14 @@ export class InMemoryDriver implements IDataDriver {
   private persistenceAdapter: PersistenceAdapterInterface | null = null;
 
   constructor(config?: InMemoryDriverConfig) {
+    // #6915 — this driver has NO row-level tenant isolation, so it refuses a
+    // multi-tenant deployment outright rather than serving it unisolated.
+    // Construction is the earliest seam and the one behind no escape hatch:
+    // `connect()` re-checks (and is what aborts kernel bootstrap with this
+    // message), but `ObjectQLEngine.init()` downgrades a connect rejection to a
+    // warning under `OS_ALLOW_DRIVER_CONNECT_FAILURE=1`, which would boot
+    // unisolated again. See `memory-tenancy-guard.ts`.
+    assertSingleTenantPosture();
     this.config = config || {};
     this.logger = config?.logger || createLogger({ level: 'info', format: 'pretty' });
     this.logger.debug('InMemory driver instance created');
@@ -198,6 +207,12 @@ export class InMemoryDriver implements IDataDriver {
   // ===================================
 
   async connect() {
+    // #6915 — re-checked here (not just in the constructor) because a host may
+    // flip the posture between construction and connect, and because a rejection
+    // from here is what `ObjectQLEngine.init()` turns into a `DriverConnectError`
+    // that aborts kernel bootstrap (framework#3741).
+    assertSingleTenantPosture();
+
     // Initialize persistence adapter if configured
     await this.initPersistence();
 
@@ -1277,6 +1292,9 @@ export class InMemoryDriver implements IDataDriver {
   // ===================================
 
   async syncSchema(object: string, schema: any, options?: DriverOptions) {
+    // #6915 — metadata-level half of the tenancy guard: an object asking for
+    // row-level isolation cannot get it here, so the table is never allocated.
+    assertObjectsNotTenantScoped([{ object, schema }]);
     if (!this.db[object]) {
       this.db[object] = [];
       this.tablesCreatedHere.add(object);

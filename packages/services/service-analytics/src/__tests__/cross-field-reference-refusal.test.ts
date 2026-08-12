@@ -1,15 +1,14 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#7598] Both of this package's SQL-lowering doors answer a `{ $field }`
- * comparand the same way — a loud refusal — instead of binding the reference
- * object as a value.
+ * [#7598] Where a `{ $field }` comparand is answered in this package, now that
+ * the routing ruling has landed — and which refusals survived it.
  *
  * ## What was actually wrong, which is NOT what the issue said
  *
  * #7598 was filed reading "`service-analytics`' compilers still REFUSE `$field`,
  * so a CEL field-to-field RLS rule 400s on those faces". Measured on
- * `origin/main` (`5823d593d`) before any change here, nothing 400'd. For the six
+ * `origin/main` (`5823d593d`) before any change, nothing 400'd. For the six
  * scalar comparison operators — exactly the ones #5222 taught `driver-sql` to
  * compile — both doors COMPILED, and bound the reference object as the
  * comparison's value:
@@ -22,86 +21,72 @@
  * | analytics `where` → ObjectQL engine | `{amount:{$gt:{$field:'budget'}}}` — reached `driver-sql`, which compiles it CORRECTLY since #5222 |
  *
  * So the defect was a silent wrong answer, not a refusal: a syntactically
- * perfect predicate comparing a column against a value no row can hold. On the
- * read-scope door that is an ADMIN's RLS predicate quietly answering the wrong
- * row set, which is why it is graded above the `where` door's empty chart. The
- * gates that were assumed to be catching this — `isBindableComparand` /
- * `isRenderableTextComparand` — were never ASKED about that position: both doors
- * consult them for the LIKE family and for `$in`/`$nin`/`$between` MEMBERS only.
- * They had not drifted from `driver-sql`; they were answering a different
- * question.
+ * perfect predicate comparing a column against a value no row can hold. The
+ * gates that were assumed to be catching it — `isBindableComparand` /
+ * `isRenderableTextComparand` — were never ASKED about that position. They had
+ * not drifted from `driver-sql`; they were answering a different question.
  *
- * ## The corpus is the shared one, driven through both faces
+ * ## Two changes, and this file pins the SECOND one's end state
  *
- * `CROSS_FIELD_CASES` / `CROSS_FIELD_REFUSALS` are exported from
- * `@objectstack/driver-sql` (`cross-field-conformance-cases.ts`) precisely so a
- * second face can be held to the same table, and this suite is that second
- * consumer. Held here in the direction the measurement supports: **every case in
- * both arms is REFUSED on both analytics doors.** The supported arm's refusals
- * are the asymmetry #7598 exists to record, stated as an executable fact — when
- * the capability lands here, those cases flip from "refused" to row sets and
- * this file is what says so.
+ * #7694 stopped the bind by REFUSING the shape on both doors — the shipped
+ * interim, while the routing question went to the maintainer. **The 2026-08-12
+ * ruling (Q1 = B) replaced that with routing**: `NativeSQLStrategy.canHandle`
+ * declines a query whose `where` or read scope carries a scalar reference, the
+ * query falls through to the ObjectQL/engine path, and `driver-sql` compiles the
+ * comparison under the four #5222 rulings with the metadata it owns. The
+ * capability is AVAILABLE, and the security rules live in exactly one place.
  *
- * ⚠️ Corpus `messageIncludes` are deliberately NOT asserted: those pin
- * `driver-sql`'s wordings, and this package's refusals are its own (a driver
- * message naming `initObjects` declarations would be a lie here). The envelope
- * is asserted for every case; the wordings are asserted separately, per door,
- * against the sentences `comparand-shape.ts` owns.
+ * So this file no longer asserts a `where`-door refusal for the supported arm —
+ * it asserts the LOWERING that carries the reference to the engine, which is the
+ * step the routing depends on. That the rows actually come back is a separate
+ * question and a separate suite: `cross-field-engine-fallback.test.ts` runs the
+ * whole road against a real SQLite engine. This file is the unit half — what
+ * each compiler in this package does with the shape, asserted where it is cheap
+ * and exact.
+ *
+ * ## The refusals that survived, and why each one did
+ *
+ * Not every `{ $field }` position was routed. Three classes stayed refused HERE,
+ * and each converges with `driver-sql`'s own #5222 refusal arm rather than
+ * diverging from it:
+ *
+ *   - the LIKE family (`isRenderableTextComparand`) — a column-side LIKE pattern
+ *     cannot be metacharacter-escaped portably;
+ *   - `$in` / `$nin` MEMBERS (`isBindableComparand`) — the memory evaluator does
+ *     not resolve a reference inside a list either, so there is no semantics to
+ *     be equivalent TO;
+ *   - `$between` ENDPOINTS, which is the one that had to be argued rather than
+ *     inherited. This door LOWERS `$between` into a `gte` leaf and an `lte` leaf,
+ *     so a routed endpoint reference would reach the driver wearing an operator
+ *     #5222 COMPILES — succeeding here while the identical filter is refused on
+ *     both SQL drivers and removed from the spec by #7596. See
+ *     `filter-normalizer.ts`'s `assertNoFieldReferenceComparand`.
+ *
+ * And the read-scope door keeps its refusal WHOLE, in its own envelope: after
+ * the ruling its remaining caller is `ObjectQLStrategy.generateSql`, the
+ * `/analytics/sql` echo, which has no faithful rendering of the total
+ * column-to-column predicate the engine path runs. 「一致的响亮答案,不半渲染」.
  *
  * ## Reverse verification — direction predicted BEFORE running it
  *
- * Plain before-green / after-red, with one predicted asymmetry. Removing the two
- * `assertNoFieldReferenceComparand` call sites must:
+ * The predictions, written first:
  *
- *   - turn every case in the `$field`-in-a-scalar-comparand blocks RED, and red
- *     by RESOLVING rather than by throwing something else — which is why
- *     `refusalOf` reports "returned" rather than letting a bare `toThrow` count
- *     a differently-caused throw as a pass;
- *   - leave the LIKE-family and list-member blocks GREEN, because those refusals
- *     predate this change and come from the #5234 gates. That half is the proof
- *     the new gate is NARROW rather than merely present.
+ *   1. Restoring the scalar arm in `assertCompilableComparand` (i.e. undoing the
+ *      ruling) must turn the `where`-door LOWERING assertions below RED **and**
+ *      take `cross-field-engine-fallback.test.ts` down with them — because that
+ *      gate sits in `fieldLeaves`, the one leaf producer for all three consumers
+ *      of the tree, so it refuses the engine path it was meant to route to.
+ *      That coupling is the whole reason the arm had to go, so it is the
+ *      prediction worth measuring.
+ *   2. Removing the `$between` arm must turn ONLY the `$between` cells red here,
+ *      and must ALSO make the engine-fallback suite's two `$between` refusal
+ *      cells red by RESOLVING — the laundering, demonstrated rather than argued.
+ *   3. Removing the `#7598` arm of `operatorIsNullTotal` must turn exactly six
+ *      corpus cases red in the fallback suite (three `$ne` class pairs, the
+ *      self-`$ne` control, and the two `$not`-of-`$eq` cases) plus one cell
+ *      here, and nothing else.
  *
- * Measured with both call sites disabled, over this file and
- * `comparand-shape-refusal.test.ts` together: **87 failed / 47 passed**, and
- * every failure reads `expected the compiler to refuse this filter, but it
- * returned …` — the predicted cells, failing in the predicted MANNER rather than
- * by some other throw. Both halves of the prediction held under a targeted
- * re-read of the output:
- *
- *   - not one LIKE-family or `$in` / `$nin` corpus case went red, so the new
- *     gate is proven NARROW and those refusals are proven to come from the
- *     #5234 gates rather than from this one;
- *   - the two `$between`-endpoint cases went red on the `where` door only. On
- *     the read-scope door they stayed green, because `assertCompilableMembers`
- *     already refused them there — which is exactly why `$between` had to be
- *     named on the `where` door: its branch in `fieldLeaves` lowers to `gte` /
- *     `lte` before any shape gate is consulted, so it was the one comparand
- *     position on that door no gate had ever seen;
- *   - `comparand-shape-refusal.test.ts` stayed green in full (1 file failed, 1
- *     passed), confirming nothing in the #5234 pins depends on this change.
- *
- * ## The one cell that did NOT refuse on the `where` door — CLOSED by #7693
- *
- * This file used to end in a RECORDED GAP block: `$icontains` was absent from
- * `comparand-shape.ts`'s `TEXT_PATTERN_OPERATORS`, so the analytics `where`
- * door applied NO comparand-shape gate to it at all — a #5234-class hole that
- * arrived with the operator itself (#6520 added `$icontains` to
- * `MONGO_TO_CUBE_OP` and to `read-scope-sql`'s `assertRenderableText`, but not
- * to that set). #7598 left it alone deliberately and filed it as #7693.
- *
- * #7693 added the entry, so the pin FLIPPED: the block at the bottom now
- * asserts the refusal it used to record the absence of, and the corpus loop
- * below no longer has to filter the operator out of `CROSS_FIELD_REFUSALS`.
- *
- * Reverse-verified by deleting the entry again and re-running the WHOLE
- * package: **5 failed / 1553 passed** (green: 1558 / 0). The five are exactly
- * the `where`-door cells — the three new ones here, this file's now-unfiltered
- * corpus case, and `comparand-shape-refusal.test.ts`'s fifth loop member. What
- * stayed GREEN is the other half of the proof: every read-scope `$icontains`
- * assertion (that door's refusal comes from its own `assertRenderableText`, not
- * from this entry), and every narrowness control below — a well-formed
- * `$icontains` comparand compiles identically in both states, so the entry is
- * shown to close a hole rather than retire the operator #6520 added.
+ * Measured — see the PR body for the run output.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -109,8 +94,7 @@ import {
   CROSS_FIELD_CASES,
   CROSS_FIELD_REFUSALS,
 } from '@objectstack/driver-sql';
-import type { FilterCondition } from '@objectstack/spec/data';
-import type { Cube } from '@objectstack/spec/data';
+import type { Cube, FilterCondition } from '@objectstack/spec/data';
 import type { AnalyticsQuery, StrategyContext } from '@objectstack/spec/contracts';
 
 import { normalizeAnalyticsFilterTree } from '../strategies/filter-normalizer.js';
@@ -118,6 +102,7 @@ import { compileScopedFilterToSql } from '../read-scope-sql.js';
 import { ObjectQLStrategy } from '../strategies/objectql-strategy.js';
 import {
   CROSS_FIELD_COMPARISON_OPERATORS,
+  findCrossFieldComparand,
   isFieldReference,
 } from '../comparand-shape.js';
 
@@ -147,32 +132,52 @@ function refusalOf(run: () => unknown): WireBearingError {
 const tree = (where: unknown) => normalizeAnalyticsFilterTree({ where } as any);
 const scope = (where: unknown) => compileScopedFilterToSql(where as FilterCondition, 'deal');
 
-/** Does this filter put a reference in a position #5222 made the drivers COMPILE? */
-function usesScalarCrossField(filter: unknown): boolean {
-  if (!filter || typeof filter !== 'object') return false;
-  if (Array.isArray(filter)) return filter.some(usesScalarCrossField);
-  return Object.entries(filter as Record<string, unknown>).some(([key, value]) => {
-    if (CROSS_FIELD_COMPARISON_OPERATORS.has(key) && isFieldReference(value)) return true;
-    return usesScalarCrossField(value);
-  });
+/** Every leaf comparand the normalizer produced, structure discarded. */
+function leafComparands(node: unknown): unknown[] {
+  if (!node || typeof node !== 'object') return [];
+  const n = node as Record<string, any>;
+  if (n.kind === 'leaf') return [...(n.values ?? [])];
+  if (n.kind === 'not') return leafComparands(n.child);
+  if (Array.isArray(n.children)) return n.children.flatMap(leafComparands);
+  return [];
 }
 
-// ── The shared corpus, through both doors ────────────────────────────────────
+/** Does this filter put a reference in a position #5222 made the drivers COMPILE? */
+const usesScalarCrossField = (filter: unknown): boolean =>
+  findCrossFieldComparand(filter) !== null;
 
-describe("[#7598] the #5222 corpus's SUPPORTED arm is refused by both analytics doors", () => {
-  // Every case here RETURNS ROWS on `driver-sql` / `driver-sqlite-wasm`. That
-  // these same filters are refused two doors away IS the asymmetry #7598
-  // records — pinned so it cannot be closed, or widened, without this file
-  // saying so.
+const CUBE: Cube = {
+  name: 'deals',
+  title: 'Deals',
+  sql: 'deal',
+  measures: { total: { name: 'total', label: 'Total', type: 'count', sql: '*' } },
+  dimensions: {
+    id: { name: 'id', label: 'Id', type: 'string', sql: 'id' },
+    amount: { name: 'amount', label: 'Amount', type: 'number', sql: 'amount' },
+    budget: { name: 'budget', label: 'Budget', type: 'number', sql: 'budget' },
+  },
+  public: false,
+} as unknown as Cube;
+
+// ── The supported arm: routed, not refused ───────────────────────────────────
+
+describe("[#7598] the #5222 corpus's SUPPORTED arm is ROUTED by the `where` door, not refused", () => {
   for (const testCase of CROSS_FIELD_CASES) {
-    it(`the \`where\` door refuses: ${testCase.name}`, () => {
-      const err = refusalOf(() => tree(testCase.filter));
-      expect(err.code, testCase.name).toBe('INVALID_FILTER');
-      expect(err.status, testCase.name).toBe(400);
-      expect(err.message, testCase.name).toContain('$field');
+    it(`the \`where\` door lowers it with the reference intact: ${testCase.name}`, () => {
+      // The step the routing rests on. `canHandle` declines the query, so the
+      // tree this produces is compiled by `ObjectQLStrategy.convertFilter` into
+      // the `FilterCondition` `engine.aggregate` receives — and a reference that
+      // did not survive THIS lowering could not survive that one. Asserting the
+      // comparand rather than the whole tree keeps the assertion about the one
+      // thing this file is measuring.
+      const refs = leafComparands(tree(testCase.filter)).filter(isFieldReference);
+      expect(refs.length, testCase.name).toBeGreaterThan(0);
     });
 
-    it(`the read-scope door refuses: ${testCase.name}`, () => {
+    it(`the read-scope door still refuses it (the /analytics/sql echo): ${testCase.name}`, () => {
+      // Unchanged by the ruling, and deliberately: this lowering's remaining
+      // caller is the display echo, which cannot render the total predicate the
+      // engine path runs. #7598 Q2 = A kept the #5367 envelope verbatim.
       const err = refusalOf(() => scope(testCase.filter));
       expect(err.code, testCase.name).toBe('READ_SCOPE_COMPILE_FAILED');
       expect(err.status, testCase.name).toBe(500);
@@ -180,23 +185,91 @@ describe("[#7598] the #5222 corpus's SUPPORTED arm is refused by both analytics 
       expect(err.message, testCase.name).toContain('$field');
     });
   }
+
+  it('the `$eq` spelling reaches the engine as an EXPLICIT `$eq`, not a bare field spec', () => {
+    // The one spelling that would have broken silently. `convertFilter`'s
+    // `equals` arm returns the comparand BARE for a literal (`{amount: 5}` is
+    // implicit equality and every backend reads it), which for a reference
+    // produces `{amount: {$field: 'budget'}}` — a field spec whose only key is
+    // `$field`, which no backend reads as an equality. That is #7597's defect at
+    // the spec's lowering sink, arriving here through a different door; the fix
+    // branches on the COMPARAND, exactly as #7597's did.
+    expect(engineFilterFor({ amount: { $eq: { $field: 'budget' } } }))
+      .toEqual({ amount: { $eq: { $field: 'budget' } } });
+    // The literal keeps its implicit-equality lowering — the narrowness control.
+    expect(engineFilterFor({ amount: { $eq: 5 } })).toEqual({ amount: 5 });
+    // …and the five siblings were never affected: they emit their operator
+    // explicitly, so they are asserted as the control that the fix is narrow.
+    expect(engineFilterFor({ amount: { $gt: { $field: 'budget' } } }))
+      .toEqual({ amount: { $gt: { $field: 'budget' } } });
+  });
+
+  it('a scalar reference takes NO null guard — the driver writes the predicate total', () => {
+    // The measured interaction that six corpus cases turned on. `$ne`'s
+    // negative-polarity totalisation (#5298) is right for a literal — a NULL
+    // column must satisfy `$ne: 5` — and WRONG for a reference, whose NULL
+    // semantics are decided by the referent as well. Unguarded, `$ne` excludes
+    // the both-NULL row, which is what the corpus, both SQL drivers and the
+    // memory evaluator all say.
+    expect(tree({ amount: { $ne: { $field: 'budget' } } })).toEqual({
+      kind: 'leaf', member: 'amount', operator: 'notEquals', values: [{ $field: 'budget' }],
+    });
+    // …and the literal keeps its guard, unchanged. This pair is the whole claim.
+    expect(tree({ amount: { $ne: 5 } })).toEqual({
+      kind: 'or',
+      children: [
+        { kind: 'leaf', member: 'amount', operator: 'notSet', values: [] },
+        { kind: 'leaf', member: 'amount', operator: 'notEquals', values: [5] },
+      ],
+    });
+  });
 });
 
-describe("[#7598] the #5222 corpus's REFUSAL arm stays refused on both doors", () => {
-  // These are refused on the drivers too, so this block asserts CONVERGENCE
-  // rather than asymmetry.
-  //
-  // [#7693] The corpus is driven WHOLE. It used to be filtered — `$icontains`
-  // was the single exception on the `where` door, because it was missing from
-  // `TEXT_PATTERN_OPERATORS` — and dropping that filter is half of this card's
-  // proof: `$icontains against a field reference is refused` is a corpus case
-  // that only passes here once the entry exists.
+/** The `FilterCondition` `ObjectQLStrategy` would hand `engine.aggregate`. */
+function engineFilterFor(where: unknown): Record<string, unknown> {
+  const strategy = new ObjectQLStrategy() as unknown as {
+    applyFilterNode(
+      node: unknown,
+      cube: Cube,
+      filter: Record<string, unknown>,
+      conjuncts: unknown[],
+    ): void;
+  };
+  const filter: Record<string, unknown> = {};
+  const conjuncts: Record<string, unknown>[] = [];
+  strategy.applyFilterNode(tree(where), CUBE, filter, conjuncts);
+  if (conjuncts.length) filter.$and = [...((filter.$and as unknown[]) ?? []), ...conjuncts];
+  return filter;
+}
+
+// ── The refusal arm: split by who answers it ─────────────────────────────────
+
+describe("[#7598] the #5222 corpus's REFUSAL arm — routed, or refused at this door", () => {
   for (const testCase of CROSS_FIELD_REFUSALS) {
-    it(`the \`where\` door refuses: ${testCase.name}`, () => {
-      const err = refusalOf(() => tree(testCase.filter));
-      expect(err.code, testCase.name).toBe('INVALID_FILTER');
-      expect(err.status, testCase.name).toBe(400);
-    });
+    const routed = usesScalarCrossField(testCase.filter);
+
+    it(
+      routed
+        ? `the \`where\` door ROUTES it to the driver's gate: ${testCase.name}`
+        : `the \`where\` door refuses it here: ${testCase.name}`,
+      () => {
+        if (routed) {
+          // The four #5222 rulings — dotted paths, undeclared columns, the
+          // tenant-isolation column, the comparison class — are enforced by
+          // `driver-sql` with `initObjects` metadata this package cannot see.
+          // Re-implementing them here is precisely what the ruling rejected as
+          // option A, so this door must pass the shape THROUGH. That the driver
+          // then refuses it is asserted end-to-end in
+          // `cross-field-engine-fallback.test.ts`.
+          expect(leafComparands(tree(testCase.filter)).filter(isFieldReference).length)
+            .toBeGreaterThan(0);
+          return;
+        }
+        const err = refusalOf(() => tree(testCase.filter));
+        expect(err.code, testCase.name).toBe('INVALID_FILTER');
+        expect(err.status, testCase.name).toBe(400);
+      },
+    );
 
     it(`the read-scope door refuses: ${testCase.name}`, () => {
       const err = refusalOf(() => scope(testCase.filter));
@@ -205,23 +278,34 @@ describe("[#7598] the #5222 corpus's REFUSAL arm stays refused on both doors", (
     });
   }
 
-  it('the two arms are answered by DIFFERENT gates, not by one blanket refusal', () => {
+  it('the surviving `where`-door refusals are answered by DIFFERENT gates, each with its own wording', () => {
     // Otherwise every assertion above would hold for a compiler that refused
     // `{$field}` everywhere with one sentence — which is the thing #5240 says
-    // sends an operator to the wrong repair. The supported arm hits the new
-    // capability gate; the LIKE family and list members keep the #5234 wordings.
-    expect(refusalOf(() => tree({ amount: { $gt: { $field: 'budget' } } })).message)
-      .toContain('does not compile into a column-to-column comparison');
+    // sends an operator to the wrong repair.
     expect(refusalOf(() => tree({ stage: { $contains: { $field: 'owner' } } })).message)
       .toContain('StringOperatorSchema');
     expect(refusalOf(() => tree({ amount: { $in: [{ $field: 'budget' }, 1] } })).message)
       .toContain('cannot be bound as a SQL parameter');
-    expect(refusalOf(() => scope({ amount: { $gt: { $field: 'budget' } } })).message)
-      .toContain('does not compile into a column-to-column comparison');
-    expect(refusalOf(() => scope({ stage: { $contains: { $field: 'owner' } } })).message)
-      .toContain('StringOperatorSchema');
-    expect(refusalOf(() => scope({ amount: { $in: [{ $field: 'budget' }, 1] } })).message)
-      .toContain('cannot be bound as a SQL parameter');
+    expect(refusalOf(() => tree({ amount: { $between: [{ $field: 'budget' }, 100] } })).message)
+      .toContain('may not be a field reference on any backend');
+    // …and the scalar position is not refused at all here any more.
+    expect(tree({ amount: { $gt: { $field: 'budget' } } })).toEqual({
+      kind: 'leaf', member: 'amount', operator: 'gt', values: [{ $field: 'budget' }],
+    });
+  });
+
+  it('the `$between` refusal names the laundering it prevents, not a bind failure', () => {
+    // The repair a `$between` author needs is different from the one a
+    // read-scope author needs, so the two sentences are different (#5240 in the
+    // direction that separates rather than merges).
+    const err = refusalOf(() => tree({ amount: { $between: [0, { $field: 'budget' }] } }));
+    expect(err.code).toBe('INVALID_FILTER');
+    expect(err.status).toBe(400);
+    expect(err.message).toContain('index 1');
+    expect(err.message).toContain('#7596');
+    // It points at the spelling that IS served, rather than at "use a literal"
+    // alone — the capability exists one operator away.
+    expect(err.message).toContain('"$gte"');
   });
 
   it('every corpus case that uses a SCALAR cross-field position is covered', () => {
@@ -233,9 +317,29 @@ describe("[#7598] the #5222 corpus's REFUSAL arm stays refused on both doors", (
       .filter((c) => usesScalarCrossField(c.filter));
     expect(covered.length).toBeGreaterThan(20);
   });
+
+  it('the routing detector agrees with the operator set it is built from', () => {
+    // `findCrossFieldComparand` is what `canHandle` declines on, so a drift
+    // between it and `CROSS_FIELD_COMPARISON_OPERATORS` would silently narrow
+    // the decline — and a narrowed decline is a silent bind, not an error.
+    for (const op of CROSS_FIELD_COMPARISON_OPERATORS) {
+      expect(findCrossFieldComparand({ amount: { [op]: { $field: 'budget' } } }), op)
+        .toEqual({ op, field: 'amount', ref: 'budget' });
+    }
+    // …and it finds one however deeply it is nested, because a reference three
+    // combinators down still needs the engine path.
+    expect(findCrossFieldComparand({
+      $or: [{ stage: 'won' }, { $not: { $and: [{ amount: { $gt: { $field: 'budget' } } }] } }],
+    })).toEqual({ op: '$gt', field: 'amount', ref: 'budget' });
+    // …and it does NOT fire on the positions this door still refuses, which is
+    // what keeps those refusals reachable instead of routed past.
+    expect(findCrossFieldComparand({ stage: { $contains: { $field: 'owner' } } })).toBeNull();
+    expect(findCrossFieldComparand({ amount: { $in: [{ $field: 'budget' }] } })).toBeNull();
+    expect(findCrossFieldComparand({ amount: { $between: [{ $field: 'budget' }, 1] } })).toBeNull();
+  });
 });
 
-// ── What the refusal replaced: nothing binds any more ────────────────────────
+// ── What the read-scope refusal replaced: nothing binds any more ─────────────
 
 describe('[#7598] the reference object never reaches a bind list again', () => {
   // The defect was not "an error was missing" — it was a VALUE in the bind list.
@@ -285,17 +389,22 @@ describe('[#7598] the reference object never reaches a bind list again', () => {
 
 describe('[#7598] the field-reference shape is read exactly as `driver-sql` reads it', () => {
   it('extra keys do not disqualify a reference — `formula` ignores them too', () => {
-    const err = refusalOf(() => tree({ amount: { $gt: { $field: 'budget', extra: 1 } } }));
-    expect(err.code).toBe('INVALID_FILTER');
     // #5222 measured this cell driver-side and moved its own test to the
     // supported arm for it: a narrower reading would let the remainder be
     // re-bound as a literal on one face and ignored on another.
+    expect(findCrossFieldComparand({ amount: { $gt: { $field: 'budget', extra: 1 } } }))
+      .toEqual({ op: '$gt', field: 'amount', ref: 'budget' });
+    const err = refusalOf(() => scope({ amount: { $gt: { $field: 'budget', extra: 1 } } }));
+    expect(err.code).toBe('READ_SCOPE_COMPILE_FAILED');
     expect(err.message).toContain('budget');
   });
 
   it('a NON-STRING `$field` is not a reference — it stays the object account', () => {
     // `driver-sql`'s `fieldReferenceOf` requires `typeof ref === 'string'`, and
     // this package mirrors that spelling rather than inventing a third reading.
+    // It is therefore NOT routed either: it binds as JSON, exactly as any other
+    // object comparand does, which is the account #5234 left open on purpose.
+    expect(findCrossFieldComparand({ amount: { $gt: { $field: 5 } } })).toBeNull();
     expect(tree({ amount: { $gt: { $field: 5 } } })).toEqual({
       kind: 'leaf', member: 'amount', operator: 'gt', values: [{ $field: 5 }],
     });
@@ -303,35 +412,23 @@ describe('[#7598] the field-reference shape is read exactly as `driver-sql` read
   });
 
   it('an ordinary object comparand is untouched — #5234 left that account open', () => {
+    expect(findCrossFieldComparand({ amount: { $eq: { a: 1 } } })).toBeNull();
     expect(tree({ amount: { $eq: { a: 1 } } })).toEqual({
       kind: 'leaf', member: 'amount', operator: 'equals', values: [{ a: 1 }],
     });
   });
 });
 
-// ── The path this refusal deliberately does NOT touch ────────────────────────
+// ── The path the routing lands on ────────────────────────────────────────────
 
-describe('[#7598] a read scope keeps working on the ObjectQL engine path', () => {
-  const CUBE: Cube = {
-    name: 'deals',
-    title: 'Deals',
-    sql: 'deal',
-    measures: { total: { name: 'total', label: 'Total', type: 'count', sql: '*' } },
-    dimensions: {
-      id: { name: 'id', label: 'Id', type: 'string', sql: 'id' },
-      amount: { name: 'amount', label: 'Amount', type: 'number', sql: 'amount' },
-      budget: { name: 'budget', label: 'Budget', type: 'number', sql: 'budget' },
-    },
-    public: false,
-  } as unknown as Cube;
-
+describe('[#7598] a read scope reaches the ObjectQL engine path intact', () => {
   it('the reference reaches `engine.aggregate` intact, never `read-scope-sql`', async () => {
-    // Load-bearing for `read-scope-sql`'s header claim that this change refuses
-    // a shape without removing the one path that serves it. `ObjectQLStrategy`
-    // ANDs the scope into the `FilterCondition` it hands the engine, so the
-    // reference travels to `driver-sql` — which compiles it under the four #5222
-    // rulings, with the declared-field and tenant-column metadata it owns and
-    // this package does not.
+    // Load-bearing for `read-scope-sql`'s header claim that its refusal serves
+    // the display echo without removing the path that SERVES the rule.
+    // `ObjectQLStrategy` ANDs the scope into the `FilterCondition` it hands the
+    // engine, so the reference travels to `driver-sql` — which compiles it under
+    // the four #5222 rulings, with the declared-field and tenant-column metadata
+    // it owns and this package does not.
     let seen: unknown;
     const ctx = {
       getCube: (n: string) => (n === 'deals' ? CUBE : undefined),

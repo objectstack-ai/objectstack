@@ -24,6 +24,7 @@
   },
   "devDependencies": {
     "@objectstack/driver-sql": "workspace:*",
+    "@objectstack/driver-sqlite-wasm": "workspace:*",
     "@types/node": "^26.1.2",
     "@types/sql.js": "^1.4.11",
     "sql.js": "^1.14.1",

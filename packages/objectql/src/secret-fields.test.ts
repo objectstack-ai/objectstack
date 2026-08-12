@@ -13,6 +13,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectQL } from './engine.js';
 import { SECRET_MASK, isSecretRef } from './secret-fields.js';
+import { SECRET_MASK as SPEC_SECRET_MASK } from '@objectstack/spec/data';
 import type { ICryptoProvider, CryptoHandle, CryptoContext } from '@objectstack/spec/contracts';
 
 // ---- minimal stub driver (equality-only WHERE) ----------------------------
@@ -145,6 +146,27 @@ async function buildEngine(withCrypto: boolean) {
   if (withCrypto) engine.setCryptoProvider(crypto.provider);
   return { engine, stores, crypto, driver };
 }
+
+/**
+ * [#7572] This package no longer DECLARES the read mask — it re-exports the one
+ * `@objectstack/spec` declares, so the encrypted-field path and the settings
+ * REST path cannot serve two different masks.
+ *
+ * The pin restates the literal on purpose. Every assertion below compares an
+ * engine read against the imported `SECRET_MASK`, which stays green whatever
+ * that constant says; only a restated copy can catch the mask's bytes changing
+ * under this package, and only the identity check can catch the re-export being
+ * quietly replaced by a fresh local literal — the exact shape #7572 removed.
+ */
+describe('objectql SECRET_MASK re-export (#7572)', () => {
+  it('is the spec declaration, not a copy', () => {
+    expect(SECRET_MASK).toBe(SPEC_SECRET_MASK);
+  });
+
+  it('is the eight-bullet mask ADR-0100 pins', () => {
+    expect(SECRET_MASK).toBe('••••••••');
+  });
+});
 
 describe('objectql secret-field channel', () => {
   let ctx: Awaited<ReturnType<typeof buildEngine>>;

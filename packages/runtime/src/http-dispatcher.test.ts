@@ -2181,6 +2181,14 @@ describe('HttpDispatcher', () => {
     // ═══════════════════════════════════════════════════════════════
 
     describe('GET /metadata/_drafts', () => {
+        // [ADR-0106 D5(4) / #6599] `_drafts` is authoring-gated: a pending object
+        // draft carries its full `fields`, so the route 403s a non-author rather
+        // than serve it. These plumbing cases therefore run as an AUTHOR
+        // (`studio.access` — one of the D4 exemptions); the non-author refusal
+        // itself is pinned just below, and the full per-caller matrix lives in
+        // the shared ADR-0106 case table (`domains/meta-object-fls.test.ts`).
+        const AUTHOR = { userId: 'u1', systemPermissions: ['studio.access'] };
+
         it('routes to protocol.listDrafts with packageId + type and returns drafts', async () => {
             const listDrafts = vi.fn().mockResolvedValue({
                 drafts: [{ type: 'object', name: 'course', packageId: 'app.edu', updatedAt: 't1', updatedBy: 'ai' }],
@@ -2190,7 +2198,7 @@ describe('HttpDispatcher', () => {
                 return null;
             });
 
-            const result = await dispatcher.handleMetadata('_drafts', { request: {}, executionContext: { userId: 'u1' } } as any, 'GET', undefined, {
+            const result = await dispatcher.handleMetadata('_drafts', { request: {}, executionContext: { ...AUTHOR } } as any, 'GET', undefined, {
                 packageId: 'app.edu',
                 type: 'object',
             });
@@ -2209,7 +2217,7 @@ describe('HttpDispatcher', () => {
                 return null;
             });
 
-            const result = await dispatcher.handleMetadata('_drafts', { request: {}, executionContext: { userId: 'u1' } } as any, 'GET', undefined, {});
+            const result = await dispatcher.handleMetadata('_drafts', { request: {}, executionContext: { ...AUTHOR } } as any, 'GET', undefined, {});
             expect(result.handled).toBe(true);
             expect(result.response?.status).toBe(501);
         });
@@ -2222,9 +2230,26 @@ describe('HttpDispatcher', () => {
                 return null;
             });
 
-            await dispatcher.handleMetadata('_drafts', { request: {}, executionContext: { userId: 'u1' } } as any, 'GET', undefined, {});
+            await dispatcher.handleMetadata('_drafts', { request: {}, executionContext: { ...AUTHOR } } as any, 'GET', undefined, {});
             expect(listDrafts).toHaveBeenCalledTimes(1);
             expect(getMetaItems).not.toHaveBeenCalled();
+        });
+
+        it('[#6599] 403s a non-author BEFORE the protocol is resolved (gate-first)', async () => {
+            // The gate must refuse without ever touching listDrafts, so the
+            // 501-vs-200 answer cannot be used to probe kernel support.
+            const listDrafts = vi.fn().mockResolvedValue({ drafts: [] });
+            (kernel as any).getService = vi.fn().mockImplementation((name: string) => {
+                if (name === 'protocol') return Promise.resolve({ listDrafts });
+                return null;
+            });
+
+            const result = await dispatcher.handleMetadata('_drafts', { request: {}, executionContext: { userId: 'u1' } } as any, 'GET', undefined, {});
+
+            // ADR-0112 envelope: code AND status, not just "it 403s".
+            expect(result.response?.status).toBe(403);
+            expect((result.response as any)?.body?.error?.code).toBe('PERMISSION_DENIED');
+            expect(listDrafts).not.toHaveBeenCalled();
         });
     });
 
@@ -3118,12 +3143,19 @@ describe('HttpDispatcher', () => {
             const stub = stubbed({ chat: vi.fn(), listModels: vi.fn() });
             serveOnly('ai', stub);
 
-            const chat = await dispatcher.handleAI('/ai/chat', 'POST', { messages: [] }, {}, { request: {} });
+            // [#7653] Authenticated — the same principal the `/notifications`
+            // stub-slot case above passes, and for the same reason. What this
+            // test pins is that a STUB slot degrades like an empty one; the
+            // anonymous gate is a separate axis, and since #7653 it is consulted
+            // before these capability answers, so an empty context would now
+            // measure the 401 instead of the degradation.
+            const authed = { request: {}, executionContext: { userId: 'usr_1' } };
+            const chat = await dispatcher.handleAI('/ai/chat', 'POST', { messages: [] }, {}, authed);
             expect(chat.handled).toBe(true);
             expect(chat.response?.status).toBe(501);
             expect(stub.chat).not.toHaveBeenCalled();
 
-            const agents = await dispatcher.handleAI('/ai/agents', 'GET', undefined, {}, { request: {} });
+            const agents = await dispatcher.handleAI('/ai/agents', 'GET', undefined, {}, authed);
             expect(agents.handled).toBe(true);
             expect(agents.response?.status).toBe(200);
             // #4053 enveloped this body while #4058 was in flight. The courtesy

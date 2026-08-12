@@ -857,6 +857,9 @@ importers:
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec
+      '@objectstack/types':
+        specifier: workspace:*
+        version: link:../../types
       mingo:
         specifier: ^7.2.2
         version: 7.2.2
@@ -2103,6 +2106,9 @@ importers:
       '@objectstack/driver-sql':
         specifier: workspace:*
         version: link:../../drivers/driver-sql
+      '@objectstack/driver-sqlite-wasm':
+        specifier: workspace:*
+        version: link:../../drivers/driver-sqlite-wasm
       '@types/node':
         specifier: ^26.1.2
         version: 26.1.2

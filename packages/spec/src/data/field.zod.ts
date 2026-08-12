@@ -860,6 +860,40 @@ export const FieldSchema = lazySchema(() => strictObject({
 
   /** Security & Visibility */
   hidden: z.boolean().default(false).describe('Hidden from default UI'),
+
+  /**
+   * [#7728] "The declared value is never returned on the generic data path."
+   *
+   * Opt-in, and deliberately NOT a synonym for anything already here. `hidden`
+   * is a UI contract ("Hidden from default UI") and has never governed
+   * serialization; `readonly` governs the WRITE path; `requiredPermissions`
+   * masks per CALLER, so it cannot express "nobody, ever". This flag is the
+   * read-side complement: the engine OMITS the key from the rows it hands back
+   * — on `find`, `findOne`, the 201 create body and the by-id update body, on
+   * the default projection AND when a client names the field in `?select=`.
+   *
+   * OMIT, not mask (maintainer ruling 2026-08-12). The credential mask exists
+   * to signal "a value is set" without leaking it; on a `required` column that
+   * signal carries zero bits, while still shipping a value under a field whose
+   * declaration promises none. So the property is dropped, not replaced.
+   *
+   * What it deliberately does NOT do — the flag would be unusable otherwise:
+   *  - it does not touch STORAGE or encryption (that is `Field.secret`, which
+   *    rewrites the column to a `sys_secret` ref);
+   *  - it does not touch FILTERING or indexing, so a server-side verifier can
+   *    still match on the column (`where: { key: <sha-256 hash> }`) — the strip
+   *    runs on the RESULT ROWS, after the driver has evaluated the predicate;
+   *  - it does not touch a purpose-built issue/mint route that returns the
+   *    value once at creation off the generic path.
+   *
+   * This is the read protection for ADR-0100's third credential channel —
+   * auth-subsystem one-way hashes on `text` columns, which `secret`/`password`
+   * masking cannot reach because `collectMaskedReadFields` collects by TYPE and
+   * a `text` column is never collected. ADR-0049: enforced from landing day, at
+   * `Engine.maskSecretFields`.
+   */
+  internal: z.boolean().optional().describe("[#7728] Never return this field's value on the generic data path — the engine OMITS the key from `find`/`findOne` results, the 201 create body and the by-id update body, on the default projection AND when a client names the field in `?select=`. Storage, filtering and indexing are untouched, so a server-side verifier can still match on the column and a purpose-built mint route can still return the value once at creation. The read protection for ADR-0100's third credential channel (auth-subsystem one-way hashes on `text` columns). Omission, not masking: a mask signals 'a value is set', which carries no information on a `required` column."),
+
   readonly: z.boolean().default(false).describe('Read-only — never editable in forms, AND server-enforced on BOTH write paths: a non-system write to this field is silently dropped from the payload on UPDATE (#2948/#3003) and on INSERT (#3043; a create can no longer directly seed e.g. `approval_status: "approved"`), symmetric with `readonlyWhen`. A stripped INSERT field still falls back to its `defaultValue`. Exempt from the strip on BOTH paths: `isSystem` writes (seed replay, migration). Exempt on the UPDATE path ONLY: an opt-in "historical" import (`preserveAudit`, #3493) — which admits a whitelist (the audit/timestamp family plus author-declared business `readonly` fields). On INSERT the exemption does NOT apply (#6640): a non-system create that requests `preserveAudit` still has its readonly fields stripped, and is warned loudly that the exemption is UPDATE-only — replaying archival readonly facts on create requires a system context. A normal (non-system) import is NOT system-context and still strips.'),
 
   /**

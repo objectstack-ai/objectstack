@@ -484,6 +484,7 @@
     "SEARCH_AUTO_EXCLUDED_FIELDS (const)",
     "SEARCH_AUTO_EXCLUDED_TYPES (const)",
     "SEARCH_VIRTUAL_TYPES (const)",
+    "SECRET_MASK (const)",
     "SINGLE_OPTION_TYPES (const)",
     "SQLDialect (type)",
     "SQLDialectSchema (const)",
