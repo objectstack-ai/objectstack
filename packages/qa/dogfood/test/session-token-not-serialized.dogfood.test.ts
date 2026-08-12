@@ -223,6 +223,47 @@ describe('#7823: sys_session.token (a live bearer) never serializes on the gener
     expect(await stillAuthenticates(freshAdmin)).toBe(true);
   });
 
+  it('the session LIFECYCLE still works — sign-out and revoke-other-sessions', async () => {
+    // The deepest negative arm, and the one that decides whether this flag is
+    // applicable to this column at all.
+    //
+    // better-auth's storage adapter is implemented OVER the objectql engine
+    // (`plugin-auth/src/objectql-adapter.ts` → `dataEngine.findOne`), which is
+    // the very path `omitInternalFields` runs on, and better-auth then reads
+    // `session.session.token` back OFF that row — to re-sign the session cookie
+    // (`api/routes/session.mjs:143`), to delete the session on sign-out (:197),
+    // to extend it on refresh (:234) and to pick the sessions to drop in
+    // revoke-other-sessions (:512). A `where`-only analysis misses all four,
+    // because the token is BOTH the filter and a value read back.
+    //
+    // So: does the lifecycle still land? Asked by observing the ROW, not the
+    // response code — a handler that no-ops on an undefined token still
+    // answers 200.
+    const ql = await stack.kernel.getServiceAsync<any>('objectql');
+    const victim = await stack.signUp('session-token-lifecycle@verify.test');
+    expect(await stillAuthenticates(victim)).toBe(true);
+
+    const rowsFor = async (bearer: string): Promise<any[]> =>
+      (await ql.find('sys_session', {
+        where: { token: bearer },
+        context: { isSystem: true },
+      })) as any[];
+
+    expect((await rowsFor(victim)).length).toBe(1);
+
+    const signOut = await stack.apiAs(victim, 'POST', '/auth/sign-out', {});
+    expect([200, 204]).toContain(signOut.status);
+
+    // The row must actually be gone (or tombstoned) — this is the assertion a
+    // silently-undefined `deleteSession(session.token)` fails.
+    const after = await rowsFor(victim);
+    const stillLive = after.filter((r: any) => r.revoked_at == null);
+    expect(stillLive.length, 'sign-out must remove/tombstone the session row').toBe(0);
+
+    // …and the bearer must stop working, which is the user-visible half.
+    expect(await stillAuthenticates(victim)).toBe(false);
+  });
+
   it('the by-token session lookup still resolves server-side — the value is still in STORAGE', async () => {
     // The load-bearing negative assertion. `internal` is a SERIALIZATION
     // contract, not a storage one: the strip runs on rows the driver has
