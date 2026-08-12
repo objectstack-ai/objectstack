@@ -2724,6 +2724,69 @@ export class RestServer {
     }
 
     /**
+     * [#7749] The acting identity recorded on a metadata WRITE — the single
+     * producer for every `/meta` route that stamps an `actor` (save, delete,
+     * publish, rollback, compound save).
+     *
+     * ## What was wrong
+     *
+     * All five sites resolved the actor inline as
+     *
+     * ```
+     * req.headers['x-actor'] ?? req.headers['X-Actor'] ?? req.user?.id ?? req.userId
+     * ```
+     *
+     * and NOTHING on this transport ever sets `req.user` or `req.userId` —
+     * this server resolves identity through {@link resolveExecCtx} (better-auth
+     * → `resolveAuthzContext`), which puts it on the returned ExecutionContext,
+     * never back onto the raw request. So a bearer-authenticated admin's PUT
+     * yielded `undefined`, and the protocol's own defaults took over: the audit
+     * row recorded the sentinel `'system'` (`recordMetadataAudit`:
+     * `actor ?? 'system'`) and the history row recorded `NULL` (#4556:
+     * `actor ?? null`). The trail could not answer "who changed this" for any
+     * client that did not know to hand-set a non-standard header.
+     *
+     * The two dead limbs are not widened here with a third — that would leave
+     * the same "a value everything reads and nothing writes" shape one level
+     * down. They are replaced by the identity resolution this server actually
+     * performs, the SAME one the route's own `manage_metadata` capability gate
+     * reads a few lines earlier, so the caller a write is ATTRIBUTED to can
+     * never drift from the caller it was AUTHORIZED against. `resolveExecCtx`
+     * is memoized per request, so the three routes that already resolved a
+     * context for their gate pay nothing extra for this.
+     *
+     * ## Precedence — deliberately unchanged (#7749)
+     *
+     * `X-Actor` still outranks the authenticated identity, exactly as the
+     * expression above read. That ordering was masked while the other limbs
+     * were always `undefined`; it becomes load-bearing the moment this method
+     * produces one. Whether an authenticated caller may keep attributing a
+     * metadata write to somebody else by sending a header is a security
+     * semantics question for the audit contract, not something to settle as a
+     * side effect of fixing the producer — so it is measured and reported on
+     * the issue rather than quietly reordered here.
+     *
+     * Anonymous / internal writes are unaffected: no resolved principal → no
+     * context → `undefined` → the protocol's `'system'` / `NULL` defaults still
+     * apply. A machine write is never stamped with a real user.
+     */
+    private async resolveMetaWriteActor(
+        environmentId: string | undefined,
+        req: any,
+    ): Promise<string | undefined> {
+        const header = req?.headers?.['x-actor'] ?? req?.headers?.['X-Actor'];
+        // A well-formed header wins, as before. A PRESENT-but-unusable header
+        // (repeated → array, or empty) falls through to the session rather than
+        // suppressing attribution: recording the real caller beats recording
+        // `'system'` for a malformed request, and it keeps "no usable header →
+        // the authenticated identity" a single rule.
+        if (typeof header === 'string' && header) return header;
+        const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
+        const userId = (ctx as any)?.userId;
+        return typeof userId === 'string' && userId ? userId : undefined;
+    }
+
+    /**
      * [ADR-0046 §6.7] The audience-evaluation view of the caller for book/doc
      * gating. `permissionSets` resolves through the security service's
      * `resolvePermissionSetNames` — the SAME resolution as data-plane
@@ -5928,9 +5991,9 @@ export class RestServer {
                     const parentVersion = typeof ifMatchHeader === 'string'
                         ? ifMatchHeader.replace(/^"|"$/g, '') // strip ETag-style quotes
                         : undefined;
-                    const actorHeader = req.headers?.['x-actor'] ?? req.headers?.['X-Actor']
-                        ?? req.user?.id ?? req.userId;
-                    const actor = typeof actorHeader === 'string' ? actorHeader : undefined;
+                    // [#7749] Header, else the request's authenticated identity — one
+                    // producer, shared by every `/meta` write (see resolveMetaWriteActor).
+                    const actor = await this.resolveMetaWriteActor(environmentId, req);
                     // Phase 3a-destructive: `?force=true` opts past the
                     // destructive-change safety check. Accept any truthy
                     // string ('true', '1', 'yes') for resilience.
@@ -6041,15 +6104,16 @@ export class RestServer {
                     // Mirror saveMetaItem's OCC + actor plumbing (ADR-0008
                     // PR-10d wiring): `If-Match` pins the expected current
                     // version so concurrent edits get a 409 instead of a
-                    // silent reset; `X-Actor` (or req.user) flows into the
-                    // history tombstone row.
+                    // silent reset; `X-Actor` — or, since #7749, the request's
+                    // authenticated identity — flows into the history
+                    // tombstone row.
                     const ifMatchHeader = req.headers?.['if-match'] ?? req.headers?.['If-Match'];
                     const parentVersion = typeof ifMatchHeader === 'string'
                         ? ifMatchHeader.replace(/^"|"$/g, '')
                         : undefined;
-                    const actorHeader = req.headers?.['x-actor'] ?? req.headers?.['X-Actor']
-                        ?? req.user?.id ?? req.userId;
-                    const actor = typeof actorHeader === 'string' ? actorHeader : undefined;
+                    // [#7749] Header, else the request's authenticated identity — one
+                    // producer, shared by every `/meta` write (see resolveMetaWriteActor).
+                    const actor = await this.resolveMetaWriteActor(environmentId, req);
 
                     // [#6877] `?state=` and the destructive `?dropStorage=`
                     // both fail SAFE on an array today (the comparisons stop
@@ -6192,9 +6256,9 @@ export class RestServer {
                         });
                         return;
                     }
-                    const actorHeader = req.headers?.['x-actor'] ?? req.headers?.['X-Actor']
-                        ?? req.user?.id ?? req.userId;
-                    const actor = typeof actorHeader === 'string' ? actorHeader : undefined;
+                    // [#7749] Header, else the request's authenticated identity — one
+                    // producer, shared by every `/meta` write (see resolveMetaWriteActor).
+                    const actor = await this.resolveMetaWriteActor(environmentId, req);
                     const body = (req.body && typeof req.body === 'object') ? req.body : {};
                     const message = typeof body.message === 'string' ? body.message : undefined;
                     const result = await (p as any).publishMetaItem({
@@ -6246,9 +6310,9 @@ export class RestServer {
                         });
                         return;
                     }
-                    const actorHeader = req.headers?.['x-actor'] ?? req.headers?.['X-Actor']
-                        ?? req.user?.id ?? req.userId;
-                    const actor = typeof actorHeader === 'string' ? actorHeader : undefined;
+                    // [#7749] Header, else the request's authenticated identity — one
+                    // producer, shared by every `/meta` write (see resolveMetaWriteActor).
+                    const actor = await this.resolveMetaWriteActor(environmentId, req);
                     const message = typeof body.message === 'string' ? body.message : undefined;
                     const result = await (p as any).rollbackMetaItem({
                         type: req.params.type,
@@ -6598,9 +6662,9 @@ export class RestServer {
                     const parentVersion = typeof ifMatchHeader === 'string'
                         ? ifMatchHeader.replace(/^"|"$/g, '')
                         : undefined;
-                    const actorHeader = req.headers?.['x-actor'] ?? req.headers?.['X-Actor']
-                        ?? req.user?.id ?? req.userId;
-                    const actor = typeof actorHeader === 'string' ? actorHeader : undefined;
+                    // [#7749] Header, else the request's authenticated identity — one
+                    // producer, shared by every `/meta` write (see resolveMetaWriteActor).
+                    const actor = await this.resolveMetaWriteActor(environmentId, req);
 
                     // [#6877] The `typeof` guard below dropped a repeated
                     // `?package=` to `undefined`, i.e. wrote the row as an
