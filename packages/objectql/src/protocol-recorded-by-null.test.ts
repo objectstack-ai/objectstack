@@ -159,7 +159,7 @@ function makeStubDriver() {
     return { driver, stores };
 }
 
-const viewBody = (label: string) => ({ name: 'cases', type: 'grid', label, columns: ['id'] });
+const viewBody = (label: string) => ({ name: 'cases', type: 'grid', label, columns: ['id'], object: 'case', viewKind: 'list' }); // [#7741] the inline arm requires the object binding pair
 
 describe('#4556 — protocol write paths store NULL, not the sentinel string', () => {
     let engine: ObjectQL;

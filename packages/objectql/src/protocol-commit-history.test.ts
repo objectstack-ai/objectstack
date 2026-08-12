@@ -397,6 +397,7 @@ function makeRealRepoHarness(seedCommits: any[] = [], opts: { controlPlane?: boo
  */
 const gridBody = (label: string) => ({
   name: 'myapp_case_grid', type: 'grid', label, columns: ['id', 'title'],
+  object: 'case', viewKind: 'list', // [#7741] the inline arm requires the object binding pair
 });
 
 /** v1 authored in the package workspace, then the edit the commit recorded. */

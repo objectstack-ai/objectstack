@@ -195,6 +195,7 @@ const viewBody = (name: string) => ({
     name,
     label: 'Project Tasks',
     object: 'proj_task',
+    viewKind: 'list', // [#7741] the inline arm requires the object binding pair
     columns: [{ field: 'title', label: 'Title' }],
 });
 

@@ -50,6 +50,7 @@ const validView = {
     name: 'case_grid',
     label: 'Cases',
     object: 'case',
+    viewKind: 'list', // [#7741] the inline arm requires the object binding pair
     columns: [
         { field: 'name', label: 'Name' },
         { field: 'status', label: 'Status' },
@@ -401,6 +402,7 @@ describe('canonical hash stability (PR-10b backfill precondition)', () => {
     it('hashSpec: stable across key reorder for a view payload', () => {
         const reordered = {
             columns: validView.columns,
+            viewKind: validView.viewKind, // [#7741] rides with the binding pair
             object: validView.object,
             label: validView.label,
             name: validView.name,

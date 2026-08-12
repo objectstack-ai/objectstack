@@ -104,7 +104,7 @@ describe('saveMetaItem — repository write path (post PR-10d.6)', () => {
             type: 'view',
             name: 'case_grid',
             organizationId: 'org_alpha',
-            item: { name: 'case_grid', type: 'grid', label: 'Cases', columns: ['id', 'title'] },
+            item: { name: 'case_grid', type: 'grid', label: 'Cases', columns: ['id', 'title'], object: 'case', viewKind: 'list' },
         });
         expect(result.success).toBe(true);
         expect((result as any).seq).toBeGreaterThan(0);
@@ -116,7 +116,7 @@ describe('saveMetaItem — repository write path (post PR-10d.6)', () => {
     it('repository path writes the checksum and surfaces seq', async () => {
         const { engine, rows } = makeStubEngine();
         const protocol = new ObjectStackProtocolImplementation(engine);
-        const body = { name: 'case_grid', type: 'grid', label: 'Cases', columns: ['id', 'title'] };
+        const body = { name: 'case_grid', type: 'grid', label: 'Cases', columns: ['id', 'title'], object: 'case', viewKind: 'list' };
         const result = await protocol.saveMetaItem({
             type: 'view',
             name: 'case_grid',
@@ -134,11 +134,11 @@ describe('saveMetaItem — repository write path (post PR-10d.6)', () => {
         const protocol = new ObjectStackProtocolImplementation(engine);
         const r1 = await protocol.saveMetaItem({
             type: 'view', name: 'v', organizationId: 'org',
-            item: { name: 'view_one', type: 'grid', label: 'A', columns: ['id'] },
+            item: { name: 'view_one', type: 'grid', label: 'A', columns: ['id'], object: 'case', viewKind: 'list' },
         });
         const r2 = await protocol.saveMetaItem({
             type: 'view', name: 'v', organizationId: 'org',
-            item: { name: 'view_one', type: 'grid', label: 'B', columns: ['id'] },
+            item: { name: 'view_one', type: 'grid', label: 'B', columns: ['id'], object: 'case', viewKind: 'list' },
         });
         expect((r1 as any).seq).toBe(1);
         expect((r2 as any).seq).toBe(2);
@@ -152,13 +152,13 @@ describe('saveMetaItem — repository write path (post PR-10d.6)', () => {
         // First write establishes a HEAD.
         await protocol.saveMetaItem({
             type: 'view', name: 'v', organizationId: 'org',
-            item: { name: 'view_one', type: 'grid', label: 'A', columns: ['id'] },
+            item: { name: 'view_one', type: 'grid', label: 'A', columns: ['id'], object: 'case', viewKind: 'list' },
         });
         // Second write with an explicit stale parentVersion → conflict.
         await expect(
             protocol.saveMetaItem({
                 type: 'view', name: 'v', organizationId: 'org',
-                item: { name: 'view_one', type: 'grid', label: 'B', columns: ['id'] },
+                item: { name: 'view_one', type: 'grid', label: 'B', columns: ['id'], object: 'case', viewKind: 'list' },
                 parentVersion: 'sha256:notTheCurrentHead',
             }),
         ).rejects.toMatchObject({
@@ -170,7 +170,7 @@ describe('saveMetaItem — repository write path (post PR-10d.6)', () => {
     it('repository path no-ops when body is identical (idempotent put)', async () => {
         const { engine, rows } = makeStubEngine();
         const protocol = new ObjectStackProtocolImplementation(engine);
-        const body = { name: 'view_one', type: 'grid', label: 'A', columns: ['id'] };
+        const body = { name: 'view_one', type: 'grid', label: 'A', columns: ['id'], object: 'case', viewKind: 'list' };
         const r1 = await protocol.saveMetaItem({
             type: 'view', name: 'v', organizationId: 'org', item: body,
         });
@@ -189,11 +189,11 @@ describe('saveMetaItem — repository write path (post PR-10d.6)', () => {
         const protocol = new ObjectStackProtocolImplementation(engine);
         await protocol.saveMetaItem({
             type: 'view', name: 'v',
-            item: { name: 'view_one', type: 'grid', label: 'env-wide', columns: ['id'] },
+            item: { name: 'view_one', type: 'grid', label: 'env-wide', columns: ['id'], object: 'case', viewKind: 'list' },
         });
         await protocol.saveMetaItem({
             type: 'view', name: 'v', organizationId: 'org_alpha',
-            item: { name: 'view_one', type: 'grid', label: 'org_alpha', columns: ['id'] },
+            item: { name: 'view_one', type: 'grid', label: 'org_alpha', columns: ['id'], object: 'case', viewKind: 'list' },
         });
         // Two rows: one with organization_id=null, one with org_alpha.
         expect(rows.size).toBe(2);
@@ -210,7 +210,7 @@ describe('saveMetaItem — repository write path (post PR-10d.6)', () => {
             type: 'views',
             name: 'case_grid',
             organizationId: 'org',
-            item: { name: 'case_grid', type: 'grid', label: 'OK', columns: ['id'] },
+            item: { name: 'case_grid', type: 'grid', label: 'OK', columns: ['id'], object: 'case', viewKind: 'list' },
         });
         expect(result.success).toBe(true);
         const row = Array.from(rows.values())[0];
@@ -255,7 +255,7 @@ describe('saveMetaItem — repository write path (post PR-10d.6)', () => {
             type: 'view',
             name: 'cases',
             organizationId: 'org_x',
-            item: { name: 'cases', type: 'grid', label: 'Original', columns: ['id'] },
+            item: { name: 'cases', type: 'grid', label: 'Original', columns: ['id'], object: 'case', viewKind: 'list' },
         });
         const beforeBody = (Array.from(rows.values())[0] as any).metadata;
 
@@ -265,7 +265,7 @@ describe('saveMetaItem — repository write path (post PR-10d.6)', () => {
                 type: 'view',
                 name: 'cases',
                 organizationId: 'org_x',
-                item: { name: 'cases', type: 'grid', label: 'Mutated (should not land)', columns: ['id'] },
+                item: { name: 'cases', type: 'grid', label: 'Mutated (should not land)', columns: ['id'], object: 'case', viewKind: 'list' },
                 parentVersion: 'sha256:stale',
             }),
         ).rejects.toMatchObject({ code: 'METADATA_CONFLICT', status: 409 });
@@ -378,7 +378,7 @@ describe('saveMetaItem — repository write path (post PR-10d.6)', () => {
             organizationId: 'org_alpha',
             packageId: 'app.objectstack.hotcrm',
             mode: 'draft',
-            item: { name: 'case_grid', type: 'grid', label: 'Cases (org overlay)', columns: ['id', 'title'] },
+            item: { name: 'case_grid', type: 'grid', label: 'Cases (org overlay)', columns: ['id', 'title'], object: 'case', viewKind: 'list' },
         });
         const create = inserts.find((d) => d.type === 'view' && d.name === 'case_grid');
         expect(create).toBeTruthy();

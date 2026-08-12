@@ -60,6 +60,7 @@ function seedLockedArtifact(
         name,
         label: name,
         object: 'case',
+        viewKind: 'list', // [#7741] the inline arm requires the object binding pair
         columns: [{ field: 'name', label: 'Name' }],
         _packageId: '@objectstack/test-fixture',
         _packageVersion: '1.0.0',
@@ -74,6 +75,7 @@ const validView = {
     name: 'case_grid',
     label: 'Cases',
     object: 'case',
+    viewKind: 'list', // [#7741] the inline arm requires the object binding pair
     columns: [{ field: 'name', label: 'Name' }],
 };
 

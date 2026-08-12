@@ -330,6 +330,7 @@ describe('code-only metadata types are refused on every kernel (#5086)', () => {
                     name: 'rc3_probe_view',
                     label: 'Probe',
                     object: 'task',
+                    viewKind: 'list', // [#7741] the inline arm requires the object binding pair
                     columns: [{ field: 'name', label: 'Name' }],
                 },
             });
@@ -452,6 +453,7 @@ describe('code-only metadata types are refused on every kernel (#5086)', () => {
                     name: 'rc3_receipt_view',
                     label: 'Receipt',
                     object: 'task',
+                    viewKind: 'list', // [#7741] the inline arm requires the object binding pair
                     columns: [{ field: 'name', label: 'Name' }],
                 },
             },
