@@ -51,12 +51,30 @@
 //    `executeWithMiddleware`, so it still has to build an `OperationContext`, so
 //    the union has to widen — and widening it breaks the weld.
 //
-//    ⚠️ Measured the hard way: the weld was FIRST written as type-level
-//    assignability consts, and the ablation that widened the union passed
-//    BOTH vitest and `tsc --noEmit`. Cause: this package's tsconfig excludes
-//    `**/*.test.ts`, so no type assertion in any test file here is enforced by
-//    anything. A type-level pin in a test file is decoration. Do not
-//    reintroduce one.
+//    ⚠️ Measured, and the first measurement was WRONG in a way worth writing
+//    down. The weld began as type-level assignability consts. The ablation that
+//    widened the union passed both vitest and `pnpm typecheck`, and the
+//    conclusion drawn was "a type pin here is enforced by nothing". That is
+//    FALSE, and the second measurement is the real picture:
+//
+//      • `pnpm typecheck` is `tsc --noEmit` against this package's tsconfig,
+//        which excludes the test layer. It genuinely never reads this file.
+//      • But `pnpm check:type-check-coverage` DOES compile it — it lifts the
+//        exclusion and ratchets the package's raw error count through its
+//        TEST_DEBT ledger (`@objectstack/objectql`, currently 355). Verified
+//        from both sides: three type errors in this file made that gate report
+//        358 and go red; fixing them returned it to exactly 355.
+//
+//    So a type-level weld WOULD have been caught — in CI, as "TEST_DEBT +1".
+//    The runtime weld is kept anyway, for reasons that are about diagnosis
+//    rather than enforcement: it names what broke instead of moving a count by
+//    one, it fails in `pnpm test` where the person changing the union is
+//    already looking, and replacing an unevaluated pin with a runtime assertion
+//    is one of the routes `check-type-check-coverage` itself prescribes.
+//
+//    The moral is not "types don't work here" — it is that a pin's enforcing
+//    runner has to be identified before the pin is trusted, and `pnpm
+//    typecheck` is not the only tsc in this repo.
 //
 // B. THE BEHAVIOURAL PROBE — a REAL `ObjectQL` engine driven through every
 //    public data method, recording what middleware actually receives. This is
@@ -72,7 +90,8 @@
 // checked against itself, which is not evidence of anything.
 
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ObjectQL } from './engine';
 import { SchemaRegistry } from './registry';
@@ -138,7 +157,16 @@ type Declared = (typeof DISPATCHED_OPERATIONS)[number];
  * this replaced.
  */
 function readDispatchedUnionFromEngineSource(): string[] {
-  const enginePath = fileURLToPath(new URL('./engine.ts', import.meta.url));
+  // Located from THIS test file's own path, via vitest's runner state, rather
+  // than `import.meta.url`: the package's build config targets CommonJS, so
+  // `import.meta` is a TS1470 there and would bill the TEST_DEBT ledger for a
+  // config-tier error that says nothing about this test. `testPath` is absolute
+  // and independent of the cwd the suite was launched from.
+  const testPath = expect.getState().testPath;
+  if (!testPath) {
+    throw new Error('vitest did not report a testPath — the #7809 weld cannot locate engine.ts.');
+  }
+  const enginePath = join(dirname(testPath), 'engine.ts');
   const src = readFileSync(enginePath, 'utf8');
 
   const iface = src.match(/export interface OperationContext\s*\{([\s\S]*?)\n\}/);
@@ -186,7 +214,13 @@ const NOTE_SCHEMA = {
  */
 const ROW = { id: 'n1', title: 'x', owner: 'me' };
 
-function makeDriver() {
+// `any` on the double itself, matching the sibling read-filter test: this is a
+// deliberately PARTIAL driver (the engine only reaches the members listed), and
+// annotating it `IDataDriver` would demand the whole surface for no assertion.
+// Note this is not the erasure `query-options/no-any-erasure` bans — that rule
+// is about the OPTIONS BAG passed to the four read methods, which is typed
+// above.
+function makeDriver(): any {
   return {
     name: 'memory',
     supports: {},
@@ -234,16 +268,30 @@ async function makeEngine() {
  * bulk one, and a probe that only exercised by-id writes would never observe it.
  */
 async function driveEveryPublicMethod(ql: ObjectQL): Promise<void> {
-  const ctx = { userId: 'u1', isSystem: true };
-  await ql.find('note', { where: { title: 'x' }, context: ctx } as any);
-  await ql.findOne('note', { where: { id: 'n1' }, context: ctx } as any);
-  await ql.count('note', { where: { title: 'x' }, context: ctx } as any);
-  await ql.aggregate('note', {
-    where: { title: 'x' },
-    groupBy: ['owner'],
-    aggregations: [{ func: 'count', field: 'id', alias: 'n' }],
-    context: ctx,
-  } as any);
+  const ctx: ExecutionContext = { userId: 'u1', isSystem: true };
+  // The four READ calls carry no `as any`: these signatures already declare
+  // `EngineQueryOptions` / `EngineCountOptions` / `EngineAggregateOptions`, and
+  // erasing them is what `query-options/no-any-erasure` bans (#4674, #4918).
+  // Nothing here is deliberately off-contract, so the remedy is the typed form,
+  // not `as unknown as EngineQueryOptions`. Execution context goes in the
+  // TRAILING options argument — the one rule across reads and writes.
+  await ql.find('note', { where: { title: 'x' } }, { context: ctx });
+  await ql.findOne('note', { where: { id: 'n1' } }, { context: ctx });
+  await ql.count('note', { where: { title: 'x' } }, { context: ctx });
+  await ql.aggregate(
+    'note',
+    {
+      where: { title: 'x' },
+      groupBy: ['owner'],
+      // `function`, NOT `func`. The neighbouring read-filter test spells this
+      // `func` behind an `as any`, so nothing ever checked it; typing the bag
+      // here is what surfaced it. That is #4674's exact shape — an unknown key
+      // is silently DROPPED, never rejected — so the erasure was the only
+      // reason the wrong spelling compiled.
+      aggregations: [{ function: 'count', field: 'id', alias: 'n' }],
+    },
+    { context: ctx },
+  );
   await ql.insert('note', { title: 'fresh' }, { context: ctx } as any);
   await ql.update('note', { id: 'n1', title: 'by-id' }, { context: ctx } as any);
   await ql.update('note', { title: 'bulk' }, { multi: true, where: { owner: 'me' }, context: ctx } as any);
