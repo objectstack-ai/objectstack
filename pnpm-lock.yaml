@@ -1829,6 +1829,9 @@ importers:
       '@objectstack/metadata':
         specifier: workspace:*
         version: link:../../metadata
+      '@objectstack/metadata-core':
+        specifier: workspace:*
+        version: link:../../metadata-core
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../objectql

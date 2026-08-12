@@ -16,6 +16,7 @@
 // `isolated` keeps vitest defaults (fresh fork registry per file) for
 // everything else — fixture stacks, custom security/plugins, env-flag files.
 import { defineConfig } from 'vitest/config';
+import path from 'path';
 
 // Files proven eligible for the worker-shared plain showcase stack.
 const SHARED_SHOWCASE = [
@@ -35,6 +36,23 @@ const SHARED_SHOWCASE = [
 ];
 
 export default defineConfig({
+  resolve: {
+    // [#7865] `federated-anchor-provenance.dogfood.test.ts` imports the
+    // provenance marker from `@objectstack/metadata-core` — alias it to SOURCE
+    // so the pin is a verdict about the checkout, not about a build artifact
+    // (`check-test-source-alias`; #7668 is what a dist-resolved pin costs).
+    // Anchored array form on purpose: the object form matches by prefix and
+    // would swallow subpath imports (the ENOTDIR trap the gate's header names).
+    // Aliasing is graph-wide, so packages still loaded from dist (objectql,
+    // plugin-security, …) resolve their own `@objectstack/metadata-core`
+    // imports to this same single source instance rather than a second copy.
+    alias: [
+      {
+        find: /^@objectstack\/metadata-core$/,
+        replacement: path.resolve(__dirname, '../../metadata-core/src/index.ts'),
+      },
+    ],
+  },
   test: {
     projects: [
       {

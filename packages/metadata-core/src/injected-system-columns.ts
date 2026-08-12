@@ -317,3 +317,176 @@ export function stripInjectedSystemColumns<T>(doc: T): T {
 
   return { ...(doc as unknown as Record<string, unknown>), fields: kept } as unknown as T;
 }
+
+// ---------------------------------------------------------------------------
+// [#7865] Injected-column PROVENANCE — the one authoritative answer to
+// "is this column actually provisioned by the platform?"
+// ---------------------------------------------------------------------------
+
+/**
+ * [#7865] Does the platform provision storage for this object's schema?
+ *
+ * `false` exactly when the object carries an ADR-0015 `external` binding: the
+ * remote database owns the schema, `Engine.syncObjectSchema` returns early and
+ * issues no DDL, and `SqlDriver.registerExternalObject` is DDL-free by design.
+ * This is the same `external != null` predicate `syncObjectSchema` routes a
+ * federated object by — ONE spelling of "this schema is the remote's", exported
+ * so consumers stop re-spelling it (`isFederated` in `Engine.buildDriverOptions`
+ * / PR #7833 and `isFederatedObject` in plugin-security / PR #7859 are the two
+ * existing hand-rolled copies; both converge here when next touched, per the
+ * 2026-08-12 maintainer ruling on #7865).
+ *
+ * Tolerant of bare / un-parsed metadata records, like everything in this module.
+ */
+export function platformProvisionsStorage(def: unknown): boolean {
+  if (!def || typeof def !== 'object' || Array.isArray(def)) return true;
+  return (def as { external?: unknown }).external == null;
+}
+
+/**
+ * [#7865] Provenance verdict for one column on one object document — the
+ * machine-readable marker the 2026-08-12 maintainer ruling ordered (direction
+ * B: keep injecting, mark the injected anchors), in its API spelling.
+ *
+ *  - `'injected-provisioned'` — the platform's own injected anchor, with real
+ *    storage behind it: the object's storage is platform-provisioned, so the
+ *    column exists in the table exactly as registered.
+ *  - `'injected-unprovisioned'` — **the marker**: the platform's own injected
+ *    anchor on an object the platform provisions NO storage for (ADR-0015
+ *    `external`). The column exists in the registered schema and nowhere else;
+ *    a predicate over it can never resolve — on SQLite it degrades to a string
+ *    literal and the query goes constant-false (HTTP 200, zero rows, no error).
+ *  - `'author'` — the author declared this field; the platform makes no storage
+ *    claim about it. On a local object it is provisioned like any declared
+ *    field; on a federated object it maps a remote column the author vouches
+ *    for. Consumers must treat it as REAL — a federated object may legitimately
+ *    expose a real remote `organization_id`, and its tenant wall must keep
+ *    working (#7859's recorded reasoning).
+ *  - `'absent'` — not a column the injection provides on this object, and not
+ *    declared either. (Note `id` always answers `'absent'`: the primary key is
+ *    the DRIVER's, not this pass's — `resolveInjectedSystemColumns` reports it
+ *    as addressable, but no injected definition exists for it, and on a
+ *    federated object the remote's own primary key backs it via the binding.)
+ *
+ * ## Why an exported derivation and NOT a `provisioned: false` key in the data
+ *
+ * The ruling's literal illustration ("`provisioned: false` or an equivalent")
+ * cannot land as a key on the injected field definitions without moving
+ * surfaces the ruling fenced off, so this API is the equivalent:
+ *
+ *  1. `FieldSchema` is `strictObject` — an undeclared key on a served document
+ *     is rejected BY NAME, and `/meta` serves the post-injection document, so
+ *     the key would stamp `_diagnostics: { valid: false }` on every federated
+ *     object (the exact #6810 defect, closed once already). Declaring the key
+ *     instead would make it AUTHORABLE, handing authors a switch that turns
+ *     their own tenant wall off — the shape plugin-security's
+ *     `federated-phantom-anchors.ts` records as deliberately rejected.
+ *  2. Three consumers read the anchor definitions by EXACT identity — the
+ *     #4326 round-trip strip above ({@link stripInjectedSystemColumns}), the
+ *     #7859 Layer-0 guard (`equalsShippedDef`, key-count strict), and the
+ *     stored-vs-shipped no-op check in {@link isInjectedDefinition}'s doc. A
+ *     new key on the external-object anchors flips every one of them from
+ *     "the platform's anchor" to "the author's field" — for the Layer-0 guard
+ *     that re-emits the phantom tenant predicate, resurrecting the measured
+ *     zero-rows defect this family of fixes closed.
+ *  3. The #7865 fence: the marker must not change what any consumer accepts.
+ *     This derivation changes no document byte anywhere — registered, served,
+ *     stored — which is what makes the three no-regression proofs exact.
+ *
+ * ## Convergence map (opportunistic, per the ruling — NOT rewritten in #7865's PR)
+ *
+ *  - #7833 (engine): `isFederated` ⇒ `!platformProvisionsStorage(schema)`.
+ *  - #7859 (plugin-security): `hasPhantomTenantAnchor(schema)` ⇒
+ *    `resolveInjectedColumnProvenance(schema, 'organization_id') === 'injected-unprovisioned'`.
+ *  - #7858 (plugin-sharing): the `owner_id` twin of #7859.
+ *
+ * ## Fail direction
+ *
+ * Any mismatch — an extra key, a stamped default, an unrecognisable shape —
+ * answers `'author'`: the consumer keeps enforcing exactly as it does today.
+ * Toward isolation, never toward exposure; the same direction the #7859 guard
+ * documents.
+ *
+ * Accepts both registered `fields` shapes (record and array); the array shape's
+ * extra `name` key is excluded from the identity comparison, exactly as the
+ * #7859 guard excludes it, so both shapes reach the same verdict.
+ */
+export type InjectedColumnProvenance =
+  | 'author'
+  | 'injected-provisioned'
+  | 'injected-unprovisioned'
+  | 'absent';
+
+/** See {@link InjectedColumnProvenance} — the verdict, and the doc, live together. */
+export function resolveInjectedColumnProvenance(
+  def: unknown,
+  column: string,
+): InjectedColumnProvenance {
+  const injectedDef = injectedSystemColumnDefs(def)[column];
+  const declared = readDeclaredFieldDef(def, column);
+  if (injectedDef === undefined) {
+    return declared.present ? 'author' : 'absent';
+  }
+  // Absent from the document ⇒ the injection provides it at registration
+  // (pre-injection input); identical to the platform's definition ⇒ the
+  // injection wrote it (post-injection input), or the author typed a
+  // byte-identical copy — indistinguishable and semantically equivalent, the
+  // same reasoning {@link stripInjectedSystemColumns} records. Anything else —
+  // including a present-but-unrecognisable value — is the author's field (the
+  // fail direction above).
+  const isPlatformAnchor =
+    !declared.present || (declared.def !== undefined && isInjectedDefinition(declared.def, injectedDef));
+  if (!isPlatformAnchor) return 'author';
+  return platformProvisionsStorage(def) ? 'injected-provisioned' : 'injected-unprovisioned';
+}
+
+/**
+ * [#7865] The injected columns this object carries with NO storage behind them
+ * — the enumerable form of the marker. Empty for every object whose storage
+ * the platform provisions, and for a federated object exactly the injected
+ * anchors whose registered definition is the platform's own (an
+ * author-declared column of the same name is the author's and is excluded, in
+ * both `fields` shapes). Order follows {@link injectedSystemColumnDefs}.
+ */
+export function unprovisionedInjectedColumns(def: unknown): string[] {
+  if (platformProvisionsStorage(def)) return [];
+  return Object.keys(injectedSystemColumnDefs(def)).filter(
+    (name) => resolveInjectedColumnProvenance(def, name) === 'injected-unprovisioned',
+  );
+}
+
+/**
+ * Read one declared field definition off either `fields` shape — the record
+ * shape (`fields: { organization_id: {...} }`) or the array shape
+ * (`fields: [{ name: 'organization_id', ... }]`). The array element's `name`
+ * key duplicates what the record shape expresses as the map key, so it is
+ * removed before the identity comparison — the same exclusion the #7859
+ * guard's `equalsShippedDef` applies, for the same reason: both shapes must
+ * reach the same verdict about the same column.
+ *
+ * `present` distinguishes "the document does not mention this column" (the
+ * injection provides it) from "the document mentions it in a shape this module
+ * cannot read" (the author's — {@link resolveInjectedColumnProvenance}'s fail
+ * direction requires the two to answer differently).
+ */
+function readDeclaredFieldDef(
+  doc: unknown,
+  name: string,
+): { present: boolean; def?: Record<string, unknown> } {
+  if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return { present: false };
+  const fields = (doc as { fields?: unknown }).fields;
+  if (Array.isArray(fields)) {
+    const found = fields.find(
+      (f) => !!f && typeof f === 'object' && (f as { name?: unknown }).name === name,
+    );
+    if (found === undefined) return { present: false };
+    const copy = { ...(found as Record<string, unknown>) };
+    delete copy.name;
+    return { present: true, def: copy };
+  }
+  if (!fields || typeof fields !== 'object') return { present: false };
+  const value = (fields as Record<string, unknown>)[name];
+  if (value === undefined) return { present: false };
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return { present: true };
+  return { present: true, def: value as Record<string, unknown> };
+}

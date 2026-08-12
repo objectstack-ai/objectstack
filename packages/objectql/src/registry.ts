@@ -327,6 +327,24 @@ export interface SchemaRegistryOptions {
 export { AUDIT_FIELD_DEFS, TENANT_SCOPE_FIELD_DEF, OWNER_FIELD_DEF, OWNING_BUSINESS_UNIT_FIELD_DEF };
 
 /**
+ * [#7865] Injected-column PROVENANCE — the registry face of the 2026-08-12
+ * maintainer ruling (direction B): the injection below keeps running for
+ * `external` objects, and the machine-readable marker for the anchors it
+ * registers without provisioning storage is this API, re-exported from the
+ * table's home in `@objectstack/metadata-core` exactly like the definition
+ * tables above (#6562's discipline: the producer and every consumer read one
+ * answer from one place). The definitions themselves stay byte-identical —
+ * see `resolveInjectedColumnProvenance`'s doc for why the marker is an
+ * exported derivation and NOT a `provisioned: false` key on the field defs.
+ */
+export {
+  platformProvisionsStorage,
+  resolveInjectedColumnProvenance,
+  unprovisionedInjectedColumns,
+  type InjectedColumnProvenance,
+} from '@objectstack/metadata-core';
+
+/**
  * [#4447] The subset of {@link AUDIT_FIELD_DEFS} that is NOT authorable — the
  * keys that decide who may write an audit column.
  *
@@ -368,6 +386,17 @@ export function applySystemFields(
   // ownership of WHAT each column looks like, the same split #3786 established
   // for the audit family. Do NOT re-derive a condition below: a second copy here
   // is exactly the drift the plan exists to prevent.
+  //
+  // [#7865] This pass runs for `external` (ADR-0015) objects too — DELIBERATELY
+  // (maintainer ruling 2026-08-12, direction B). The platform provisions no
+  // storage for a federated object (`syncObjectSchema` returns early, no DDL),
+  // so the anchors injected below are registered-but-unprovisioned there; the
+  // machine-readable marker for that fact is `resolveInjectedColumnProvenance`
+  // / `unprovisionedInjectedColumns` (re-exported above from
+  // `@objectstack/metadata-core`), NOT a key on the definitions this function
+  // spreads — the definitions must stay byte-identical to the shipped tables,
+  // because the #7859 Layer-0 guard and the #4326 round-trip strip both read
+  // them by exact identity. Do not add keys here; consumers ask the API.
   const plan = resolveInjectedSystemColumns(schema);
 
   // 1. Hard opt-out at object level (e.g. seed/migration tables).

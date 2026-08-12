@@ -4,6 +4,17 @@ import { resolveInjectedSystemColumns } from '@objectstack/spec/data';
 import { describe, it, expect } from 'vitest';
 
 import { applySystemFields } from './index.js';
+// [#7865] The provenance marker, through this registry's own re-export — the
+// path a consumer standing at the injection site is pointed to.
+import {
+  TENANT_SCOPE_FIELD_DEF,
+  OWNER_FIELD_DEF,
+  OWNING_BUSINESS_UNIT_FIELD_DEF,
+  AUDIT_FIELD_DEFS,
+  platformProvisionsStorage,
+  resolveInjectedColumnProvenance,
+  unprovisionedInjectedColumns,
+} from './registry.js';
 
 // ---------------------------------------------------------------------------
 // [#5378] Parity pin: the spec's derivation vs. this registry's injection.
@@ -85,6 +96,73 @@ describe('[#5378] resolveInjectedSystemColumns ↔ applySystemFields parity', ()
       expect(plan.owningBusinessUnit, `${label}: owningBusinessUnit`)
         .toBe(injected.has('owning_business_unit_id') || declared.has('owning_business_unit_id'));
     }
+  });
+
+  // [#7865] Direction B (maintainer ruling 2026-08-12): the injection KEEPS
+  // running for `external` objects, the definitions stay byte-identical, and
+  // the marker for "registered but unprovisioned" is the provenance API — so
+  // the marker and the live pass must agree about every column the pass adds,
+  // or a consumer converging on the marker inherits a drifted answer.
+  describe('[#7865] provenance marker ↔ live injection parity', () => {
+    const externalize = (def: Record<string, unknown>): Record<string, unknown> => ({
+      ...def,
+      external: { remoteName: 'remote_table' },
+    });
+
+    it('every column the pass injects carries the marker verdict matching the object storage', () => {
+      for (const [label, def] of CASES) {
+        for (const variant of [def, externalize(def)] as const) {
+          const isExternal = variant.external != null;
+          const injected = actuallyInjected(variant, true);
+          const after = applySystemFields(structuredClone(variant) as any, { multiTenant: true });
+          for (const column of injected) {
+            // Verdict agrees between the authored input and the registered output.
+            for (const shape of [variant, after]) {
+              expect(
+                resolveInjectedColumnProvenance(shape, column),
+                `${label}${isExternal ? ' (external)' : ''}: ${column}`,
+              ).toBe(isExternal ? 'injected-unprovisioned' : 'injected-provisioned');
+            }
+          }
+          expect(unprovisionedInjectedColumns(after).sort(), label).toEqual(
+            isExternal ? [...injected].sort() : [],
+          );
+        }
+      }
+    });
+
+    it('the pass keeps injecting for external objects, byte-identical to the shipped tables', () => {
+      // The before-picture of the #7865 card (7 anchors on the showcase's
+      // federated object) must survive the marker: same columns, same bytes.
+      const def = externalize({ name: 'crm_contact', fields: fields() });
+      expect(platformProvisionsStorage(def)).toBe(false);
+      const after = applySystemFields(structuredClone(def) as any, { multiTenant: true });
+      const afterFields = after.fields as Record<string, unknown>;
+      expect(afterFields.organization_id).toEqual(TENANT_SCOPE_FIELD_DEF);
+      expect(afterFields.owner_id).toEqual(OWNER_FIELD_DEF);
+      expect(afterFields.owning_business_unit_id).toEqual(OWNING_BUSINESS_UNIT_FIELD_DEF);
+      for (const [name, tableDef] of Object.entries(AUDIT_FIELD_DEFS)) {
+        expect(afterFields[name], name).toEqual(tableDef);
+      }
+      // No definition gained a provenance key — the marker is the API above,
+      // never data (see resolveInjectedColumnProvenance's doc for the three
+      // identity consumers a data key would flip).
+      for (const [name, fieldDef] of Object.entries(afterFields)) {
+        expect('provisioned' in (fieldDef as Record<string, unknown>), name).toBe(false);
+      }
+    });
+
+    it("an author-declared anchor on an external object stays 'author' through the pass", () => {
+      // #7859's security direction: a federated object exposing a REAL remote
+      // organization_id keeps its tenant wall.
+      const def = externalize({
+        name: 'crm_contact',
+        fields: { ...fields(), organization_id: { type: 'text', label: 'Remote Org Key' } },
+      });
+      const after = applySystemFields(structuredClone(def) as any, { multiTenant: true });
+      expect(resolveInjectedColumnProvenance(after, 'organization_id')).toBe('author');
+      expect(unprovisionedInjectedColumns(after)).not.toContain('organization_id');
+    });
   });
 
   it('multiTenant changes only the INDEX, never which columns exist', () => {
