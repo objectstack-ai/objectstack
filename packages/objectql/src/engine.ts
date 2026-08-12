@@ -9559,14 +9559,31 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
-   * Fail-closed guard (ADR-0100 / #3171): refuse to aggregate over a credential
-   * field. `secret`/`password` values are masked on the generic read path so
-   * plaintext never leaves the engine, but `aggregate()` has no equivalent mask
-   * — a GROUP BY / MIN / MAX / array_agg over such a column would surface the
-   * stored `secret:<id>` ref or the password value, and post-hoc masking would
-   * corrupt group keys. So we reject instead. The check is unconditional
-   * (ignores `managedBy`): aggregating a credential is never legitimate, even on
-   * a better-auth object, where it would be an inference oracle over hashes.
+   * Fail-closed guard (ADR-0100 / #3171 / #7922): refuse to aggregate over a
+   * field whose value is withheld on the generic read path. Such fields reach
+   * this guard through **two independent collectors**, and it needs both:
+   *
+   *  - {@link collectCredentialFields} — keyed by field TYPE (`secret` /
+   *    `password`). A GROUP BY / MIN / MAX / array_agg over such a column would
+   *    surface the stored `secret:<id>` ref or the password value.
+   *  - {@link collectInternalReadFields} — keyed by the `internal: true` FLAG
+   *    (#7728). ADR-0100's third credential channel is a one-way hash living in
+   *    an ordinary `text` column, which no type-keyed collector can ever reach;
+   *    the flag is that channel's opt-in declaration. Without this half the
+   *    guard had the same type-vs-flag blind spot #7728 fixed on the read path:
+   *    a flagged column was omitted from `find`/`findOne` yet freely groupable
+   *    here, so the flag's promise ("never returned on the generic data path")
+   *    stopped at the edge of `aggregate()`.
+   *
+   * Post-hoc masking is not available on this path — the value is already a
+   * group key by the time there is a row, and masking group keys corrupts the
+   * result. So we reject instead.
+   *
+   * Neither collector carries a `managedBy` exemption, so the union does not
+   * acquire one, deliberately. Read-masking exempts `password` on better-auth
+   * objects so login reads still see the stored value; *aggregating* a
+   * credential is never legitimate, least of all on an identity table, where it
+   * is an inference oracle over hashes.
    *
    * Only the two output-bearing positions on `EngineAggregateOptions` carry
    * field names: `aggregations[].field` (skip COUNT(*) — undefined or '*') and
@@ -9574,8 +9591,12 @@ export class ObjectQL implements IObjectQLEngine {
    */
   private rejectCredentialAggregation(object: string, query: EngineAggregateOptions): void {
     const schema = this._registry.getObject(object);
-    const credentialFields = collectCredentialFields(schema);
-    if (credentialFields.length === 0) return;
+    // Deduped: one field can be reachable through both collectors (a `secret`
+    // column that is also flagged `internal`), and it must be named once.
+    const protectedFields = [
+      ...new Set([...collectCredentialFields(schema), ...collectInternalReadFields(schema)]),
+    ];
+    if (protectedFields.length === 0) return;
 
     const referenced = new Set<string>();
     for (const agg of query?.aggregations ?? []) {
@@ -9587,13 +9608,14 @@ export class ObjectQL implements IObjectQLEngine {
       if (field) referenced.add(field);
     }
 
-    const hit = credentialFields.filter((f) => referenced.has(f));
+    const hit = protectedFields.filter((f) => referenced.has(f));
     if (hit.length > 0) {
       throw new Error(
         `Cannot aggregate credential field(s) ${hit.map((f) => `"${object}.${f}"`).join(', ')}: `
-          + 'secret/password fields are masked on read so plaintext never leaves the engine, and '
-          + 'aggregating them (group-by, min/max, array_agg, …) would surface the stored value. '
-          + 'Refusing (fail-closed) — see ADR-0100 / #3171.',
+          + 'secret/password fields are masked on read and `internal: true` fields are omitted '
+          + 'outright, so the value never leaves the engine on the generic data path; aggregating '
+          + 'them (group-by, min/max, array_agg, …) would surface it. '
+          + 'Refusing (fail-closed) — see ADR-0100 / #3171 / #7922.',
       );
     }
   }
