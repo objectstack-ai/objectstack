@@ -3118,12 +3118,19 @@ describe('HttpDispatcher', () => {
             const stub = stubbed({ chat: vi.fn(), listModels: vi.fn() });
             serveOnly('ai', stub);
 
-            const chat = await dispatcher.handleAI('/ai/chat', 'POST', { messages: [] }, {}, { request: {} });
+            // [#7653] Authenticated — the same principal the `/notifications`
+            // stub-slot case above passes, and for the same reason. What this
+            // test pins is that a STUB slot degrades like an empty one; the
+            // anonymous gate is a separate axis, and since #7653 it is consulted
+            // before these capability answers, so an empty context would now
+            // measure the 401 instead of the degradation.
+            const authed = { request: {}, executionContext: { userId: 'usr_1' } };
+            const chat = await dispatcher.handleAI('/ai/chat', 'POST', { messages: [] }, {}, authed);
             expect(chat.handled).toBe(true);
             expect(chat.response?.status).toBe(501);
             expect(stub.chat).not.toHaveBeenCalled();
 
-            const agents = await dispatcher.handleAI('/ai/agents', 'GET', undefined, {}, { request: {} });
+            const agents = await dispatcher.handleAI('/ai/agents', 'GET', undefined, {}, authed);
             expect(agents.handled).toBe(true);
             expect(agents.response?.status).toBe(200);
             // #4053 enveloped this body while #4058 was in flight. The courtesy
