@@ -258,10 +258,33 @@ export class MetadataFacade {
   }
 
   /**
-   * Unregister all metadata from a package
+   * Unregister all metadata from a package.
+   *
+   * [#7221] Both stores, for the same reason {@link register} and
+   * {@link unregister} reach both: `unregisterObjectsByPackage` walks
+   * `objectContributors` alone, so this verb — whose `IMetadataService`
+   * contract reads "Unregister all metadata items from a specific package" —
+   * used to leave every non-object item the package shipped (`page`, `view`,
+   * `flow`, `app`, `api` …) fully resolvable through this class's own `get`,
+   * `list`, `listNames` and `exists`, plus the generic-map half of its
+   * objects, which {@link registerObjectBothPlaces} writes. A half-uninstall,
+   * silently.
+   *
+   * `SchemaRegistry.unregisterItemsByPackage` is the registry-side verb rather
+   * than a scan private to this class, because `SchemaRegistry.uninstallPackage`
+   * was measured to have the identical gap — a second copy of the
+   * package-ownership rule here would be the #6808 drift, and would have left
+   * the registry-direct caller half-done. It deliberately keeps bare-key
+   * ADR-0005 runtime/DB overlays and warns about the ones it orphans; see its
+   * header for why that is loudness rather than a silent delete.
+   *
+   * Ordering mirrors {@link unregister}: the object verb runs first because it
+   * is the half that can refuse (ADR-0029 extenders), so a refusal removes
+   * nothing at all rather than taking the generic half with it.
    */
   async unregisterPackage(packageName: string): Promise<void> {
     this.registry.unregisterObjectsByPackage(packageName);
+    this.registry.unregisterItemsByPackage(packageName);
   }
 
   /**

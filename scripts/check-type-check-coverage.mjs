@@ -395,10 +395,6 @@ const DEBT = {
       + '5ab08428, up from 8; code-tier is unchanged at 3, so the +2 is config-tier/noise. 8 of the 10 are '
       + 'in __tests__/knowledge-service.test.ts.',
   },
-  '@objectstack/service-settings': {
-    errors: 13,
-    note: 'code-tier 12 (TS2345 x7: manifest action handlers called without `namespace`/`actionId`; TS2322) + 1 noise. Was ledgered at 44 with "no code-tier finding" -- wrong in both directions: 31 of those 44 were unresolved imports (see the NodeNext note at the top of this ledger), and the resolution they were blocking is what made the 12 real ones visible.',
-  },
   '@objectstack/service-storage': {
     errors: 52,
     note: 'code-tier 8 (TS2339 x4, TS2347 x4); config-tier 21 (TS2835); noise 13 (TS7006 x11, TS6196, '

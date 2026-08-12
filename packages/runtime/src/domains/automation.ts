@@ -13,7 +13,7 @@ import {
     shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
 } from '@objectstack/core';
 import { CoreServiceName } from '@objectstack/spec/system';
-import type { IAutomationService } from '@objectstack/spec/contracts';
+import type { IAutomationService, ISecurityService } from '@objectstack/spec/contracts';
 import { isServiceServeable } from '../service-serveable.js';
 import { validationFailure } from '../validation-failure.js';
 import { ExecutionStatus } from '@objectstack/spec/automation';
@@ -108,6 +108,129 @@ export function createAutomationDomain(deps: DomainHandlerDeps): DomainRoute {
 }
 
 /**
+ * [#7900] The system object whose READ grant governs automation RUN STATE —
+ * the durable row `service-automation` writes for every suspended run, whose
+ * `variables_json` column holds the very snapshot `GET /:name/runs/:runId`
+ * hands back (`sys-automation-run.object.ts`).
+ *
+ * It is named here because the two are ONE policy with two doors, not two
+ * policies: reading the row through `/data/sys_automation_run` has always
+ * answered with this object's permissions, while the `/automation` door asked
+ * only "are you authenticated?".
+ */
+export const AUTOMATION_RUN_OBJECT = 'sys_automation_run';
+
+/** [#7900] Refusal vocabulary for the run-state read gate (ADR-0112: code AND status). */
+const RUN_READ_DENY_STATUS = 403;
+const RUN_READ_DENY_CODE = 'PERMISSION_DENIED';
+const RUN_READ_DENY_MESSAGE =
+    `Reading automation run state requires read access to '${AUTOMATION_RUN_OBJECT}'.`;
+
+/**
+ * [#7900] Which `/automation` GET routes serve `sys_automation_run`-class data.
+ *
+ * Declared as ONE predicate rather than a check per branch on purpose — the
+ * whole point of the ruling is that this domain gets one policy, and a policy
+ * spelled out at three call sites is three policies that happen to agree today.
+ * `parts` is the flow-scoped path split (`parts[0]` is the flow name).
+ *
+ *   `/:name/runs`         → listRuns, an `ExecutionLogEntry[]`
+ *   `/:name/runs/:runId`  → getRun,   an `ExecutionLogEntry` served verbatim
+ *
+ * `/:name/runs/:runId/screen` is deliberately NOT here; the audit reason is on
+ * the route itself, below.
+ */
+function isRunStateRead(parts: string[], method: string): boolean {
+    if (method !== 'GET') return false;
+    if (parts.length < 2 || parts[1] !== 'runs') return false;
+    // `/:name/runs` (listRuns) and `/:name/runs/:runId` (getRun) — nothing deeper.
+    return parts.length === 2 || parts.length === 3;
+}
+
+/**
+ * [#7900] Ask the SAME question the other door answers with: may this caller
+ * READ `sys_automation_run`?
+ *
+ * Returns a refusal result when the answer is no, `undefined` when the read may
+ * proceed — so the caller reads as a guard clause and no route can accidentally
+ * consume a "denied" as a value.
+ *
+ * ## Why `explain`, and why nothing new was built
+ *
+ * `ISecurityService` is the contract for exactly this: "the query surface that
+ * lets code OUTSIDE the ObjectQL engine middleware ask the same questions the
+ * middleware answers when it enforces access", with a standing instruction that
+ * a consumer re-deriving any of these answers locally will drift. `explain` runs
+ * the same permission-set resolution, the same `PermissionEvaluator` and the
+ * same RLS compiler the middleware runs — `allowed` is `!capsDeny &&
+ * crudAllowed && !denyAll && !delegatorMissing` over that shared machinery — so
+ * this gate cannot answer differently from the `/data` door by drifting. The
+ * slot is already on `DomainHandlerDeps` (`domains/meta.ts` resolves it the same
+ * way for ADR-0106 masking), so no new cross-package seam exists to invent.
+ *
+ * ⛔ It is deliberately NOT a per-field filter of the run's `variables` map —
+ * rejected by the ruling, on the card's own measurement that the map's keys
+ * (`.`, `record`, `previous`, `$runId`, seeded inputs) are not decidably
+ * record fields.
+ *
+ * ## The three non-denials, each of which is a decision
+ *
+ * 1. **System context passes.** The middleware's very first act is
+ *    `if (opCtx.context?.isSystem) return next()`. A gate that refused what the
+ *    object read admits would not be convergence.
+ * 2. **No security service ⇒ no grant to require.** In a deployment without
+ *    `plugin-security` there is no object-permission system at all, so
+ *    `/data/sys_automation_run` is itself ungated: "authenticated is enough" is
+ *    what BOTH doors answer, and refusing here would make them disagree in the
+ *    other direction. The contract mandates this tolerance ("Consumers MUST
+ *    tolerate absence"). Same for a partial implementation that omits `explain`.
+ * 3. **An `explain` THROW is a denial, not a pass.** This is an
+ *    access-narrowing answer, so it fails CLOSED — the stance `plugin-security`
+ *    itself takes when an object's posture cannot be resolved (#3545).
+ *
+ * ## The one place this is STRICTER than the door it converges on
+ *
+ * The middleware skips its CRUD gate entirely for an authenticated caller whose
+ * permission-set resolution comes back EMPTY (`if (permissionSets.length > 0)`),
+ * while `explain` runs `checkObjectPermission` over that empty list and gets
+ * `false`. ADR-0090 D5's additive baseline plus the post-resolution fallback
+ * make an empty resolution reachable only on a deployment that configures NO
+ * baseline permission set at all — and on that deployment this surface refuses
+ * where `/data` falls open. Left as-is deliberately: the divergence is in the
+ * closed direction on the door this card was filed about, and closing it the
+ * other way would mean re-deriving the middleware's own empty-set rule here,
+ * which is the drift `ISecurityService` exists to prevent.
+ */
+async function refuseUngrantedRunRead(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+): Promise<HttpDispatcherResult | undefined> {
+    const ec = context?.executionContext;
+    if (ec?.isSystem === true) return undefined;
+
+    const security = await deps.resolveService(context, 'security').catch(() => undefined) as
+        Partial<ISecurityService> | undefined;
+    if (!security || typeof security.explain !== 'function') return undefined;
+
+    let allowed = false;
+    try {
+        const decision = await security.explain({ object: AUTOMATION_RUN_OBJECT, operation: 'read' }, ec);
+        allowed = decision?.allowed === true;
+    } catch {
+        allowed = false;
+    }
+    if (allowed) return undefined;
+
+    // The refusal names the GRANT it wants and nothing about the caller — no
+    // positions, no permission-set names (#7450: a denial must not answer the
+    // caller's authorization topology).
+    return {
+        handled: true,
+        response: deps.error(RUN_READ_DENY_MESSAGE, RUN_READ_DENY_STATUS, { code: RUN_READ_DENY_CODE }),
+    };
+}
+
+/**
  * Handles Automation requests
  * path: sub-path after /automation/
  *
@@ -125,7 +248,9 @@ export function createAutomationDomain(deps: DomainHandlerDeps): DomainRoute {
  *   POST   /:name/toggle         → toggleFlow (unknown name → 404, #7535)
  *   GET    /:name/runs           → listRuns (query: limit, cursor — validated, #7300;
  *                                  status — validated AND honoured, #7359)
+ *                                  ⚑ run-state read — `sys_automation_run` grant (#7900)
  *   GET    /:name/runs/:runId    → getRun
+ *                                  ⚑ run-state read — `sys_automation_run` grant (#7900)
  *   POST   /:name/runs/:runId/resume → resume a paused run (screen input / ADR-0019)
  *   GET    /:name/runs/:runId/screen → the screen a paused run awaits
  */
@@ -160,6 +285,34 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
             };
         }
     }
+    const m = method.toUpperCase();
+    const parts = path.replace(/^\/+/, '').split('/').filter(Boolean);
+
+    // [#7900] RUN-STATE READ GATE — the maintainer ruling of 2026-08-12: the
+    // `/automation` read surface requires the same permission the
+    // `sys_automation_run` object read answers with. One policy, two doors, one
+    // answer.
+    //
+    // What it closes, measured: `GET /:name/runs/:runId` answered with
+    // `deps.success(run)` — the `ExecutionLogEntry` verbatim, no projection, no
+    // redaction, no masking — so any AUTHENTICATED caller who knew a run id read
+    // the triggering record's fields with that record's own FLS never applying.
+    // `listRuns` serves the same entries a page at a time and was gated the same
+    // (i.e. not at all).
+    //
+    // Placed with the #5519 anonymous floor and AHEAD of the service probe below
+    // for that gate's own reason, read one authorization tier up: which
+    // permission a route requires must not vary with which automation service a
+    // deployment happens to mount, and a 501-vs-403 should not be the thing that
+    // tells an ungranted caller whether automation is mounted here.
+    //
+    // Which routes: `isRunStateRead` above — deliberately one predicate, so the
+    // domain's policy cannot drift route by route the way the finding described.
+    if (isRunStateRead(parts, m)) {
+        const refusal = await refuseUngrantedRunRead(deps, context);
+        if (refusal) return refusal;
+    }
+
     const automationService = await deps.getService(context, CoreServiceName.enum.automation);
     // [#4058] Empty slot — or a slot filled by a self-declared non-handler
     // (`handlerReady: false`, ADR-0076 D12), which is the same amount of
@@ -172,9 +325,6 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     // mounted, so the dispatcher's ROUTE_NOT_FOUND exit ("No handler matched
     // this request") described neither half truthfully. See ./unavailable.ts.
     if (!isServiceServeable(automationService)) return capabilityUnavailable(deps, 'automation');
-
-    const m = method.toUpperCase();
-    const parts = path.replace(/^\/+/, '').split('/').filter(Boolean);
 
     // Legacy: POST /automation/trigger/:name — the shape
     // `client.automation.trigger()` calls. Same handling as
@@ -196,6 +346,18 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     }
 
     // GET / → listFlows
+    //
+    // [#7900 AUDIT — stays authenticated-only, with a reason] Together with
+    // `GET /:name`, `GET /actions`, `GET /connectors` and `GET /_status`, this
+    // serves FLOW-DEFINITION and REGISTRY data: names, definitions, the
+    // deployment's action/connector catalogs, per-flow enabled/bound state. None
+    // of it is `sys_automation_run`-class data — no run, no trigger record, no
+    // variable snapshot — so the grant the ruling names says nothing about it,
+    // and requiring it here would not be convergence but a SECOND policy
+    // invented for a different data class, which is precisely what the ruling
+    // forbids. Flow definitions are metadata and are governed on the metadata
+    // plane (`/meta`, ADR-0106); if their read posture should narrow, that is a
+    // metadata-plane decision and belongs to its own card.
     if (parts.length === 0 && m === 'GET') {
         if (typeof automationService.listFlows === 'function') {
             const names = await automationService.listFlows();
@@ -477,6 +639,32 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
 
         // GET /:name/runs/:runId/screen → the screen a paused run awaits
         // (refresh-safe re-fetch for the UI flow-runner).
+        //
+        // [#7900 AUDIT — stays authenticated-only, with a reason] This is the
+        // one run-scoped read the `sys_automation_run` grant is NOT applied to,
+        // and the omission is a decision rather than an oversight, so it is
+        // recorded here rather than only in the PR:
+        //
+        //  - It is the END USER's surface, not the operator's. The pause exists
+        //    because the flow is asking THIS caller to fill a form in; the
+        //    trigger response already handed them the same `screen` inline, and
+        //    this route exists so a browser refresh does not lose it. Requiring
+        //    an operator grant here would refuse the screen to the very person
+        //    the flow paused for — a breakage, not the narrowing the ruling
+        //    prices in ("operator tooling … now needs the grant").
+        //  - Its WRITE sibling one route up already answers on a different
+        //    axis: `resume` is gated in the engine by the suspension's declared
+        //    `resumeAuthority` (#3801 / #5561) — a per-run authority model, not
+        //    an object grant. Read and write on the same pause answering to two
+        //    unrelated permissions would be the incoherence this card is about.
+        //
+        // The residual is real and is NOT claimed closed: a `ScreenSpec` carries
+        // `defaults` / `defaultValue` interpolated against the live flow
+        // variables (`builtin/screen-nodes.ts`), so an authenticated caller who
+        // knows a run id can still read record-derived values through this door.
+        // Closing it wants the per-run authority read gate the resume path
+        // already has, which is a different mechanism from this card's ruling —
+        // filed as its own issue and linked from the PR.
         if (parts[1] === 'runs' && parts[2] && parts[3] === 'screen' && m === 'GET') {
             if (typeof automationService.getSuspendedScreen === 'function') {
                 const screen = await automationService.getSuspendedScreen(parts[2]);
