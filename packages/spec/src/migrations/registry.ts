@@ -2763,6 +2763,75 @@ const step17: MigrationStep = {
         + 'that same `!= null` test yourself.',
     },
     {
+      id: 'external-lookup-message-queue-families-retired',
+      surface:
+        'data.externalLookup / data.externalDataSource / data.externalFieldMapping '
+        + '(the whole of data/external-lookup.zod.ts — 3 defs, 8 exported names) and '
+        + 'system.messageQueue (the whole of system/message-queue.zod.ts — '
+        + 'MessageQueueConfig, MessageQueueProvider, TopicConfig, ConsumerConfig, '
+        + 'DeadLetterQueue — 5 defs, 14 exported names)',
+      replacement:
+        '(removed — there is no replacement key, because there was never a key: neither '
+        + 'family was reachable from any metadata-type binding, stack collection or /meta '
+        + 'door, so no document could carry either. For external data: `object.external` '
+        + '(`ObjectExternalBindingSchema`, ADR-0015/0062) names a datasource by reference '
+        + 'and connection credentials live in the datasource config — never inline in '
+        + 'object metadata; `data/external-catalog.zod.ts` is that federated path\'s '
+        + 'catalog surface and is untouched. For message queues: the LIVE surface is '
+        + '`kernel/events/integrations.zod.ts`\'s `EventMessageQueueConfig` '
+        + '(`EventBusConfig.messageQueue`), which deliberately carries NO credential '
+        + 'field — broker connection and SASL credentials are runtime deployment '
+        + 'configuration, not authorable metadata. Either capability returns via the '
+        + 'ENFORCE route of ADR-0049 through a new ADR — the executor / broker admin '
+        + 'service first, the vocabulary second)',
+      reason:
+        'Both families are the #8075 census verdict (fork (b), accepted 2026-08-12): '
+        + 'security-shaped declared surface with inline-credential sinks and ZERO '
+        + 'consumers. `ExternalDataSourceSchema.authentication.config` is a record of '
+        + 'unknown whose own docblock example wrote `"clientSecret": "..."` inline, and '
+        + '`MessageQueueConfigSchema.sasl.password` was a required inline broker '
+        + 'credential — the #7990 class (cleartext-at-rest credential sinks), except '
+        + 'that unlike #7990\'s two measured surfaces nothing ever persisted these: no '
+        + 'metadata-type binding (kernel/metadata-type-schemas.ts imports neither '
+        + 'module), no stack collection, no object/field embedding (`object.external` '
+        + 'binds `ObjectExternalBindingSchema` — remoteName/remoteSchema/writable/'
+        + 'columnMap, no authentication), and zero imports outside packages/spec '
+        + 'repo-wide, with the corpus-reach control (`DatasourceSchema` under identical '
+        + 'exclusions) returning hits in the same run. The consumed MQ near-namesake '
+        + '`kernel/EventMessageQueueConfig` deliberately has no credential key, so the '
+        + 'consumed shape had no credential and the credential-bearing shape had no '
+        + 'consumer. A dead schema minus one field is still a dead schema, so the whole '
+        + 'declarations go, not just the credential faces (#3950: an exported schema '
+        + 'with no consumer reads as a capability to whoever finds it — here it read as '
+        + 'an invitation to author secrets in cleartext). With no carrier key there is '
+        + 'nothing to tombstone and no source or `sys_metadata` row for a D2 conversion '
+        + 'to rewrite: route 3, the #4834 / #4988 / #5055 / #6486 shape — '
+        + 'RETIRED_DEFS_BY_MAJOR plus this entry ARE the declaration. '
+        + '⚠️ The #5552 `data/ExternalFieldMapping:transform` tombstone (one of that '
+        + 'retirement\'s three spellings) is SUBSUMED by the def retirement, the '
+        + 'WidgetManifest.performance way: it goes with the shape that carried it. The '
+        + 'base `shared/FieldMapping` tombstone and the `integration/'
+        + 'ConnectorFieldMapping` spelling are untouched and still reject `transform` '
+        + 'with the #5552 prescription. '
+        + '⚠️ The #7990 Option-B reopen trigger ("a third measured artefact-type '
+        + 'surface") is NOT met by this census — that ruling\'s parked class-level '
+        + 'write-boundary guard stays parked; this is the ADR-0049 leg of the fork the '
+        + 'triage pre-agreed.',
+      acceptanceCriteria:
+        'No code imports `ExternalLookup(Schema|Parsed)`, `ExternalDataSource(Schema)`, '
+        + '`ExternalFieldMapping(Schema|Parsed)`, `MessageQueueConfig(Schema|Parsed)`, '
+        + '`MessageQueueProvider(Schema)`, `TopicConfig(Schema|Parsed)`, '
+        + '`ConsumerConfig(Schema|Parsed)` or `DeadLetterQueue(Schema|Parsed)` from '
+        + '`@objectstack/spec`, `@objectstack/spec/data` or `@objectstack/spec/system` — '
+        + 'every one is TS2305 after upgrade, on every public entry (pinned by resolved '
+        + 'symbol identity in `data/external-lookup-retirement.test.ts` and '
+        + '`system/message-queue-retirement.test.ts`). No metadata document needs '
+        + 'editing, because none could ever carry one of these shapes. '
+        + '`kernel/EventMessageQueueConfig` (with its inline provider enum and no '
+        + 'credential key), `data/external-catalog.zod.ts`, `object.external` and '
+        + '`kernel/DeadLetterQueueEntry` survive unchanged.',
+    },
+    {
       id: 'filter-regex-options-retired',
       // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
       // code span already, and a nested backtick would close it.
@@ -4379,11 +4448,14 @@ export const MIGRATION_MAJORS: readonly number[] = Object.keys(MIGRATIONS_BY_MAJ
  */
 export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> = {
   // The first entries since #4659 built this table (#5552). ONE tombstone
-  // produces THREE keys: `transform` is declared on `shared/FieldMapping` and
-  // `integration/ConnectorFieldMapping` / `data/ExternalFieldMapping` are
-  // `.extend()`s of it, so the retired property is copied into all three walked
-  // shapes and `authorable-surface.json` marks each `[RETIRED]` separately.
-  // Registered per key, as the gate reads them — nothing radiates from the base.
+  // produced THREE keys: `transform` is declared on `shared/FieldMapping`, and
+  // every `.extend()` of the base copies the retired property into its own
+  // walked shape, which `authorable-surface/` marks `[RETIRED]` separately.
+  // Registered per key, as the gate reads them — nothing radiates from the
+  // base. Two of the three remain: `data/ExternalFieldMapping:transform` left
+  // when #8075 retired the whole external-lookup family (the def retirement
+  // subsumes the key entry, the WidgetManifest.performance way — see
+  // RETIRED_DEFS_BY_MAJOR below).
   17: [
     // One file per entry under `entries/retired-keys/`, concatenated here sorted by
     // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
@@ -4468,7 +4540,6 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // takes (`query-joins-retired` / `query-cursor-retired` /
     // `query-distinct-retired` / `query-window-functions-retired`, #4286).
     'data/AggregationNode:distinct',
-    'data/ExternalFieldMapping:transform',
     // #7990 — sibling of `data/PostgresConfig:password`, same ruling, same
     // disposition: tombstoned inline credential; the secret binder /
     // `external.credentialsRef` is the mechanism. See that entry for the reasoning
@@ -4691,6 +4762,37 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     'automation/ETLSyncMode',
     'automation/ETLTransformation',
     'automation/ETLTransformationType',
+    // #8075 — data/external-lookup.zod.ts, retired whole (ADR-0049
+    // enforce-or-remove; fork (b) of the #8075 census, accepted 2026-08-12). The
+    // external-data-source shape whose `authentication.config` record accepted
+    // inline OAuth client secrets and API keys — its own docblock example wrote
+    // `"clientSecret": "..."`. Zero consumers: no metadata-type binding, no stack
+    // collection, no object/field embedding (`object.external` binds
+    // `ObjectExternalBindingSchema`, which routes credentials through datasource
+    // config per ADR-0015/0062), and its only in-module consumer
+    // (`ExternalLookupSchema.dataSource`) was itself consumed by nothing. Route 3:
+    // no tombstone, no D2 conversion — this table plus the D3
+    // `external-lookup-message-queue-families-retired` are the declaration.
+    'data/ExternalDataSource',
+    // #8075 — data/external-lookup.zod.ts, retired whole (ADR-0049). Extended
+    // `shared/FieldMapping` and was embedded only by `ExternalLookupSchema`, which
+    // nothing consumed. Its `transform` key's #5552 `retiredKey()` tombstone — and
+    // the `data/ExternalFieldMapping:transform` RETIRED_KEYS entry that registered
+    // it — are SUBSUMED here, the WidgetManifest.performance way: they go with the
+    // shape that carried them, which is strictly stronger, because there is no
+    // longer a mapping shape to author the key INTO. The base tombstone on
+    // `shared/FieldMapping` and the `integration/ConnectorFieldMapping` spelling
+    // are untouched and still reject the key with the #5552 prescription.
+    'data/ExternalFieldMapping',
+    // #8075 — data/external-lookup.zod.ts, retired whole (ADR-0049). The root of
+    // the module's dependency shape: it embedded `ExternalDataSource` (the inline
+    // credential sink) and `ExternalFieldMapping`, and was itself referenced by no
+    // stack collection, metadata type or import outside packages/spec — the
+    // #5552 conversion's docblock had already recorded that no external-lookup
+    // document exists for the conversion walker to visit. Real-time external
+    // lookup returns via the enforce route of ADR-0049: the executor first, the
+    // vocabulary second.
+    'data/ExternalLookup',
     // #4914 — the plugin manifest's `loading` block (ADR-0049 enforce-or-remove,
     // maintainer ruling 2026-08-04). `PluginLoadingConfig` was reachable from
     // authored metadata ONLY through `Manifest.loading`, and the ten members
@@ -4716,11 +4818,48 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     'kernel/PluginPreloadConfig',
     'kernel/PluginSandboxing',
     'shared/FieldMappingTransform',
+    // #8075 — system/message-queue.zod.ts, retired whole (ADR-0049). Consumer
+    // group config (groupId / offset reset / auto-commit / poll size), embedded
+    // only by `system/MessageQueueConfig` (retired in the same change) and
+    // consumed by nothing.
+    'system/ConsumerConfig',
+    // #8075 — system/message-queue.zod.ts, retired whole (ADR-0049). DLQ config,
+    // embedded only by `system/MessageQueueConfig` (retired in the same change)
+    // and consumed by nothing. ⚠️ `kernel/DeadLetterQueueEntry` is a different
+    // declaration (the event bus's per-event DLQ record) and is untouched —
+    // name adjacency is not evidence, the `system/ServerRateLimitConfig` note
+    // applies verbatim.
+    'system/DeadLetterQueue',
+    // #8075 — system/message-queue.zod.ts, retired whole (ADR-0049
+    // enforce-or-remove; fork (b) of the #8075 census, accepted 2026-08-12). The
+    // top-level broker-administration config, carrying a required inline
+    // `sasl.password` credential when `sasl` was present. Zero consumers outside
+    // packages/spec repo-wide; no `message_queue` metadata type; the connector
+    // 'message_queue' ConnectorType enum value never referenced this schema. The
+    // consumed near-namesake `kernel/EventMessageQueueConfig`
+    // (`EventBusConfigSchema.messageQueue`) deliberately carries NO credential
+    // field and is untouched. Route 3: no tombstone, no D2 conversion — this
+    // table plus the D3 `external-lookup-message-queue-families-retired` are the
+    // declaration.
+    'system/MessageQueueConfig',
+    // #8075 — system/message-queue.zod.ts, retired whole (ADR-0049). The
+    // six-value broker provider enum, embedded only by
+    // `system/MessageQueueConfig` (retired in the same change). Not the same
+    // declaration as `kernel/EventMessageQueueConfig.provider` — that is its own
+    // INLINE `z.enum` (same six values, never a reference to this def) and is
+    // untouched.
+    'system/MessageQueueProvider',
     // #5295 — system/http-server.zod.ts runtime vocabulary
     'system/ServerCapabilities',
     'system/ServerEvent',
     'system/ServerEventType',
     'system/ServerStatus',
+    // #8075 — system/message-queue.zod.ts, retired whole (ADR-0049). Topic
+    // partitions/replication/retention/compression config, embedded only by
+    // `system/MessageQueueConfig` (retired in the same change) and consumed by
+    // nothing — leaving it behind would strand an exported schema with no
+    // consumer (#3950).
+    'system/TopicConfig',
     'ui/DateFormat',
     'ui/I18nObject',
     'ui/LocaleConfig',

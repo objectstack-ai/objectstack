@@ -169,10 +169,10 @@ describe('the committed RENAMED_DEFS table', () => {
   });
 
   it('leaves the shared BASE alone — `shared/FieldMapping` keeps the bare name', () => {
-    // `integration/ConnectorFieldMapping` and `data/ExternalFieldMapping` both
-    // `.extend()` it. Renaming the base would move keys under two other defs
-    // and change nothing about the collision, which was between the two
-    // domain-specific sides and the base's own name.
+    // `integration/ConnectorFieldMapping` (and `data/ExternalFieldMapping`,
+    // until #8075 retired that family whole) `.extend()` it. Renaming the base
+    // would move keys under other defs and change nothing about the collision,
+    // which was between the two domain-specific sides and the base's own name.
     expect(RENAMED_DEFS['shared/FieldMapping']).toBeUndefined();
   });
 

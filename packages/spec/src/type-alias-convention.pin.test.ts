@@ -139,7 +139,6 @@ import type * as M61 from './data/driver/common.zod.js';
 import type * as M62 from './data/driver/memory.zod.js';
 import type * as M63 from './data/driver/sqlite.zod.js';
 import type * as M181 from './data/driver/turso.zod.js';
-import type * as M64 from './data/external-lookup.zod.js';
 import type * as M65 from './data/feed.zod.js';
 import type * as M66 from './data/field.zod.js';
 import type * as M67 from './data/filter.zod.js';
@@ -226,7 +225,6 @@ import type * as M133 from './system/incident-response.zod.js';
 import type * as M134 from './system/job.zod.js';
 import type * as M135 from './system/license.zod.js';
 import type * as M136 from './system/logging.zod.js';
-import type * as M137 from './system/message-queue.zod.js';
 import type * as M138 from './system/metadata-persistence.zod.js';
 import type * as M139 from './system/metrics.zod.js';
 import type * as M140 from './system/migration.zod.js';
@@ -743,8 +741,7 @@ export type Iso334 = Assert<Eq< z.input< typeof M63.SqliteWasmPersistModeSchema 
 // data/driver/turso.zod.ts
 export type Iso834 = Assert<Eq< z.input< typeof M181.TursoTransportModeSchema >, z.infer< typeof M181.TursoTransportModeSchema > >>;
 
-// data/external-lookup.zod.ts
-export type Iso335 = Assert<Eq< z.input< typeof M64.ExternalDataSourceSchema >, z.infer< typeof M64.ExternalDataSourceSchema > >>;
+// data/external-lookup.zod.ts — retired whole (#8075, ADR-0049); its pin left with it.
 
 // data/feed.zod.ts
 export type Iso336 = Assert<Eq< z.input< typeof M65.FeedItemType >, z.infer< typeof M65.FeedItemType > >>;
@@ -1153,8 +1150,7 @@ export type Iso583 = Assert<Eq< z.input< typeof M136.LogDestinationType >, z.inf
 export type Iso584 = Assert<Eq< z.input< typeof M136.ExternalServiceDestinationConfigSchema >, z.infer< typeof M136.ExternalServiceDestinationConfigSchema > >>;
 export type Iso585 = Assert<Eq< z.input< typeof M136.StructuredLogEntrySchema >, z.infer< typeof M136.StructuredLogEntrySchema > >>;
 
-// system/message-queue.zod.ts
-export type Iso586 = Assert<Eq< z.input< typeof M137.MessageQueueProviderSchema >, z.infer< typeof M137.MessageQueueProviderSchema > >>;
+// system/message-queue.zod.ts — retired whole (#8075, ADR-0049); its pin left with it.
 
 // system/metadata-persistence.zod.ts
 export type Iso587 = Assert<Eq< z.input< typeof M138.MetadataScopeSchema >, z.infer< typeof M138.MetadataScopeSchema > >>;

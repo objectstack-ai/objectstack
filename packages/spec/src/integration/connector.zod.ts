@@ -153,9 +153,10 @@ import { retiredKey } from '../shared/retired-key';
  * base name for the base, matching `ConnectorErrorCategory` and
  * `ConnectorRetryStrategy` in this same file (`ConnectorRateLimitConfig`,
  * #4684, was the fourth until its whole shape was retired in #4911), and
- * `ExternalFieldMappingSchema` in `data/external-lookup.zod.ts` — which extends
- * the same base and, precisely because it carries a domain prefix, never
- * entered the dual-source baseline.
+ * `ExternalFieldMappingSchema` in `data/external-lookup.zod.ts` — which
+ * extended the same base and, precisely because it carried a domain prefix,
+ * never entered the dual-source baseline (the external-lookup family was
+ * itself retired whole in #8075 — ADR-0049, zero consumers).
  */
 import { lazySchema } from '../shared/lazy-schema';
 export const ConnectorFieldMappingSchema = lazySchema(() => BaseFieldMappingSchema.extend({
