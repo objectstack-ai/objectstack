@@ -8,7 +8,15 @@
  */
 
 export { AuditPlugin } from './audit-plugin.js';
-export { installAuditWriters } from './audit-writers.js';
+export { createFieldPresenceProbe, installAuditWriters } from './audit-writers.js';
+export { createAuthEventAuditSink } from './auth-event-audit.js';
+export type {
+  AuthEventAuditLogger,
+  AuthEventAuditSink,
+  AuthEventAuditSinkOptions,
+  AuthSessionAuditAction,
+  AuthSessionAuditEvent,
+} from './auth-event-audit.js';
 export {
   installCommentAccessHooks,
   installCommentReadVisibility,

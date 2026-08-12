@@ -22,6 +22,12 @@ import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/secu
 import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
 import { createObjectQLAdapterFactory, withSystemReadContext } from './objectql-adapter.js';
 import { runWithAuthActorScope, setAuthActorResolver } from './auth-actor-attribution.js';
+import {
+  emitAuthSessionAuditEvent,
+  loginEventFor,
+  logoutEventFor,
+  type AuthEventAuditSurface,
+} from './auth-session-audit.js';
 import { SESSION_ERASURE_PATHS } from './session-tombstone.js';
 import {
   invitationRoleCapFailure,
@@ -570,6 +576,19 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
    * (no target org), preserving pre-ADR-0093 behavior.
    */
   getTenancy?: () => TenancyService | undefined;
+
+  /**
+   * [#8144] Accessor for the `audit` service — the compliance ledger's ingress
+   * for events that are not CRUD. Consulted by the session lifecycle hooks to
+   * record `login` / `logout` in `sys_audit_log`.
+   *
+   * Lazy for the same reason `getTenancy` is: the service is registered on the
+   * kernel after the AuthManager is constructed, and every call happens at
+   * request time. Omitted, or resolving to `undefined` (the audit plugin is not
+   * installed — it is an OPTIONAL pair in the CLI) → no auth rows are written,
+   * which is exactly today's behaviour.
+   */
+  getAuditSink?: () => AuthEventAuditSurface | undefined;
 
   /**
    * Optional structured logger (the kernel `ctx.logger`) for best-effort
@@ -4183,6 +4202,35 @@ export class AuthManager {
           }
         : hostSessionBefore;
 
+    // [#8144] The `login` / `logout` audit writers (#7675 sub-issue A). See
+    // `auth-session-audit.ts` for why these two hooks and no others, and why
+    // logout reads the endpoint path from the hook's own `ctx` argument rather
+    // than from the ambient auth context.
+    //
+    // Host hooks chain FIRST and keep their result, exactly as `sessionBefore`
+    // above does: the audit row is an observation, never a participant in what
+    // better-auth decides. Both emitters are awaited but cannot throw
+    // (`emitAuthSessionAuditEvent` swallows), so neither can turn a valid
+    // sign-in or sign-out into an error.
+    const hostSessionCreateAfter = (host as any)?.session?.create?.after;
+    const sessionCreateAfter = async (session: any, ctx: any) => {
+      const result = hostSessionCreateAfter ? await hostSessionCreateAfter(session, ctx) : undefined;
+      await emitAuthSessionAuditEvent(
+        this.config.getAuditSink?.(),
+        loginEventFor(session, typeof ctx?.path === 'string' ? ctx.path : undefined),
+      );
+      return result;
+    };
+    const hostSessionDeleteAfter = (host as any)?.session?.delete?.after;
+    const sessionDeleteAfter = async (session: any, ctx: any) => {
+      const result = hostSessionDeleteAfter ? await hostSessionDeleteAfter(session, ctx) : undefined;
+      await emitAuthSessionAuditEvent(
+        this.config.getAuditSink?.(),
+        logoutEventFor(session, typeof ctx?.path === 'string' ? ctx.path : undefined),
+      );
+      return result;
+    };
+
     // ADR-0093 D2 — the single owner of the membership invariant. Composed into
     // `user.create.after`, the one seam EVERY creation path flows through
     // (email signup, admin create-user, bulk import, SSO JIT). Host hook (e.g.
@@ -4234,17 +4282,21 @@ export class AuthManager {
           after: userAfter,
         },
       },
-      ...(sessionBefore
-        ? {
-            session: {
-              ...((host as any)?.session ?? {}),
-              create: {
-                ...((host as any)?.session?.create ?? {}),
-                before: sessionBefore,
-              },
-            },
-          }
-        : {}),
+      session: {
+        ...((host as any)?.session ?? {}),
+        create: {
+          ...((host as any)?.session?.create ?? {}),
+          // `sessionBefore` is undefined only when `autoActiveOrganization` is
+          // off AND the host supplied none — spread it in conditionally so the
+          // key is absent rather than explicitly `undefined`.
+          ...(sessionBefore ? { before: sessionBefore } : {}),
+          after: sessionCreateAfter,
+        },
+        delete: {
+          ...((host as any)?.session?.delete ?? {}),
+          after: sessionDeleteAfter,
+        },
+      },
     } as BetterAuthOptions['databaseHooks'];
   }
 
@@ -4842,12 +4894,34 @@ export class AuthManager {
    * successful sign-in. Best-effort and always fire-and-forget safe: a login
    * audit write must never turn a valid login into an error, and it runs
    * unconditionally (unlike lockout accounting, which is gated on a threshold).
+   *
+   * [#8144] The write is ATTRIBUTED to the user who just signed in. Before this
+   * it went out as a bare `{ isSystem: true }`, so the audit writer recorded it
+   * with `user_id: null` — and since nothing else wrote a `login` row, that
+   * unattributed `update sys_user` row was the *only* trace a sign-in left
+   * behind (#7675's reproduction). `attributedUserId` is the platform's one
+   * channel for "the human CREDITED for a write the system authorized" (#4586,
+   * `auth-actor-attribution.ts`); it travels as provenance, no security
+   * middleware reads it, and it never becomes the subject the write authorizes
+   * as — `isSystem: true` stays exactly where it is.
+   *
+   * Passed EXPLICITLY rather than through `authSystemWriteContext()`: the
+   * ambient actor scope is filled by better-auth's global before-hook from the
+   * request's session, and on `/sign-in/email` there is no session yet when
+   * that hook runs. The one path that knows who this is, is this one.
+   *
+   * Attributed rather than EXCLUDED (the ruling allowed either). Suppressing it
+   * would mean adding `last_login_at`/`last_login_ip` to the CRUD writer's
+   * repo-wide `NOISE_FIELDS`, which deletes the `last_login_ip` change trail —
+   * a login from a new address is exactly the kind of thing a compliance ledger
+   * is read for — for every object and every deployment. The defect the ruling
+   * named is the missing actor, and this is that actor.
    */
   private async stampLastLogin(userId: string, ip: string | undefined): Promise<void> {
     const engine = this.getDataEngine();
     if (!engine || !userId) return;
     try {
-      const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
+      const SYSTEM_CTX = { isSystem: true, attributedUserId: userId, positions: [], permissions: [] };
       const patch: Record<string, unknown> = { id: userId, last_login_at: new Date() };
       // Cap to the column width (IPv6 textual max 45) — a malformed/oversized
       // forwarded header must not blow up the write.

@@ -188,6 +188,10 @@ const DURABILITY_CRITICAL_CALLEES = new Map([
         'The compliance audit row was never written — the audited write itself succeeded and returned 200, so the API, the data and every counter read clean, while the `sys_audit_log` entry that records WHO did it is simply absent and nothing retries it. The gap surfaces, if ever, to an auditor who cannot connect it back to the write (#5226, the #4420 shape on the compliance ledger).',
     ],
     [
+        'persistAuthEventAuditRow',
+        'The compliance audit row for a sign-in / sign-out was never written — the auth request itself succeeded and the user holds a valid session, so the API, the cookie and every counter read clean, while the `sys_audit_log` row recording WHO signed in is simply absent and nothing retries it. The shipped `auth_events` list view and the system-overview widgets read exactly those rows, so the screen an operator checks stays empty and healthy-looking (#8144, the #5226 shape on the auth seam).',
+    ],
+    [
         'deleteMetaItemFromLoader',
         'The metadata definition was never deleted from the authoritative store — `unregister()` still resolves and still announces `deleted`, the in-memory registry entry is gone, and the surviving row is read straight back out of storage by the very next `list()`/`get()`, so the "deleted" item reappears and survives every restart. Nothing retries it (#5259).',
     ],

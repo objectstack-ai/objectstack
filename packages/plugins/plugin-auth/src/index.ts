@@ -51,6 +51,11 @@ export * from './session-tombstone.js';
 // `isSystem` for authorization, `attributedUserId` for attribution — rather
 // than inventing a second way to say "the system did this, for that person".
 export * from './auth-actor-attribution.js';
+// [#8144] The `login`/`logout` ledger seam. Exported because a host that
+// composes its own `databaseHooks.session.*` (the cloud does) needs the same
+// mapping — and because `AuthEventAuditSurface` is the shape anything
+// registering the `audit` service must satisfy.
+export * from './auth-session-audit.js';
 export * from './auth-schema-config.js';
 // ADR-0093 — membership reconciler + tenancy service (public host API: hosts
 // compose the reconciler into their own hooks; embeddings query tenancy mode).
