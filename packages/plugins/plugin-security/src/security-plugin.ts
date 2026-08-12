@@ -768,6 +768,17 @@ export class SecurityPlugin implements Plugin {
             objects: parseJson(r.object_permissions, {}),
             fields: parseJson(r.field_permissions, {}),
             systemPermissions: parseJson(r.system_permissions, []),
+            // [#7616] Hydrate the tab column too. Nothing on the DATA plane
+            // reads `tabPermissions` (the evaluator never mentions it), so this
+            // is inert for enforcement — but `resolvePermissionSetsForContext`
+            // is published on the `security` service as returning the sets
+            // WHOLE, and a loader that dropped this column would make that
+            // declaration false for every DB-authored set: the UI-plane copy in
+            // `/me/apps` reads exactly `tab_permissions` off the same row.
+            // Declared ≠ delivered is the failure this contract exists to
+            // prevent, so the column is loaded where the promise is made. The
+            // row is already fetched in full — no extra query, one JSON parse.
+            tabPermissions: parseJson(r.tab_permissions, {}),
             // [ADR-0090 D12] Hydrate the delegated-admin scope so the gate can
             // resolve a DB-authored delegate's authority. Null column → absent.
             ...(r.admin_scope ? { adminScope: parseJson(r.admin_scope, undefined) } : {}),
@@ -900,6 +911,32 @@ export class SecurityPlugin implements Plugin {
           const sets = await this.resolvePermissionSetsForContext(context);
           return sets.map((s) => s.name);
         },
+        // [#7616] The same resolution, returned WHOLE — `objects`, `fields`,
+        // `systemPermissions`, `tabPermissions`, in resolution order. The names
+        // above answer an AUDIENCE question; a consumer that must MERGE the
+        // caller's grants (the object/field map `/auth/me/permissions` serves,
+        // the capability + tab surface `/me/apps` filters its app list with)
+        // cannot reach any of those four columns from a name, so both endpoints
+        // re-implement this resolution locally instead — one rule in three
+        // copies, which has already drifted from the enforcement path three
+        // times (#7608, #7555, #6334), each divergence found only after it
+        // reached a user.
+        //
+        // Exposed HERE, on the registered literal, and not merely as a public
+        // class member: `plugin-hono-server` must never take a runtime
+        // dependency on this plugin (it is optional in the stacks those
+        // endpoints serve — the `!evaluator` degraded branches are exactly its
+        // absence), so the service locator is the only seam that can carry the
+        // delegation. A method the class declares but the literal does not
+        // expose is unreachable across that seam, which is the precise failure
+        // this addition exists to prevent.
+        //
+        // The class method stays private on purpose: this literal is the
+        // supported surface, and routing every cross-package caller through it
+        // is what keeps the published contract and the enforcement path the
+        // same code rather than two that agree today.
+        resolvePermissionSetsForContext: (context?: any): Promise<PermissionSet[]> =>
+          this.resolvePermissionSetsForContext(context),
         // [ADR-0090 D6] First-class access explanation. Same code paths as
         // the middleware (resolution/evaluator/RLS compiler) — explained by
         // construction. Explaining ANOTHER user requires `manage_users`.
@@ -950,7 +987,7 @@ export class SecurityPlugin implements Plugin {
           this.getMetadataReadableFields(object, context),
       });
       ctx.registerService('security', registeredSecurityService);
-      ctx.logger.info('[security] registered "security" service (getReadFilter, getReadableFields, getMetadataReadableFields, canExport, checkAuthoredRowWrite, explain, audience-binding suggestions) — ADR-0021 D-C / ADR-0090 D5/D6/D9 / ADR-0106 D7 / #3544 / #3547 / #5493');
+      ctx.logger.info('[security] registered "security" service (getReadFilter, getReadableFields, getMetadataReadableFields, canExport, checkAuthoredRowWrite, resolvePermissionSetNames, resolvePermissionSetsForContext, explain, audience-binding suggestions) — ADR-0021 D-C / ADR-0090 D5/D6/D9 / ADR-0106 D7 / #3544 / #3547 / #5493 / #7616');
     } catch (e) {
       ctx.logger.warn?.('[security] failed to register "security" service', {
         error: (e as Error).message,
@@ -3427,8 +3464,18 @@ export class SecurityPlugin implements Plugin {
 
   /**
    * [ADR-0106 D7] Resolve the configured baseline permission set(s) on their
-   * own — the second step `/auth/me/permissions` takes when a caller's own
-   * names resolve to nothing (`resolved.length === 0 && fallbackName`).
+   * own — the deployment's answer to "what does a caller with NO resolved sets
+   * of their own see".
+   *
+   * [#7616] This used to describe itself as "the second step
+   * `/auth/me/permissions` takes when a caller's own names resolve to nothing
+   * (`resolved.length === 0 && fallbackName`)". That step no longer exists:
+   * PR #7615 (#7608, ADR-0090 D5) deleted it, because the `resolved.length === 0`
+   * guard WAS the fallback cliff D5 abolishes — a member's first explicit grant
+   * silently cost them the entire baseline. That endpoint now folds the
+   * baseline into the FIRST resolution, additively and unconditionally, so a
+   * second call over a subset of the same names could add nothing. Only the
+   * cross-reference was stale; this method's own behaviour never depended on it.
    *
    * Distinct from the post-resolution fallback inside
    * {@link resolvePermissionSetsForContext}, which is gated on `context.userId`
@@ -3439,8 +3486,8 @@ export class SecurityPlugin implements Plugin {
    *
    * [#7555] Reads the COMPOSED baseline, deliberately — D7 warrants it. This
    * method exists to answer "what does this deployment's baseline disclose",
-   * and its whole justification is being *the same* resolution the data plane
-   * performs ("the same two-step `/auth/me/permissions` performs", above); one
+   * and its whole justification is being *the same* baseline resolution the
+   * data plane performs (the composed `security.baselinePermissionSets`); one
    * plane composing while the other displaced would put the two planes in
    * disagreement about what the baseline even is, which is the drift D7 is
    * written to avoid. On every deployment that declares no app baseline the

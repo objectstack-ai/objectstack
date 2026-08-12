@@ -1072,7 +1072,40 @@ export type ObjectExternalBindingParsed = z.infer<typeof ObjectExternalBindingSc
  * record bound as `record.*` (and bare fields) — the same machinery custom
  * actions already use, so authoring is identical.
  */
-export const RowCrudActionOverrideSchema = z.object({
+export const RowCrudActionOverrideSchema = strictObject({
+  surface: 'this row CRUD override',
+  // Closed from birth (objectui#2614), so nothing was ever silently stripped
+  // here — but the rejection was zod's own bare `Unrecognized key: "visible"`,
+  // which names neither the surface nor a key to write instead. #7832.
+  history:
+    'This shape has been closed since objectui#2614, so the key was never silently dropped — '
+    + 'until #7832 the rejection just could not tell you which key to write instead.',
+  aliases: {
+    // `showWhen` carries no boolean reading: whatever surface an author borrowed
+    // it from, they meant a predicate, and the predicate slot here is
+    // `visibleWhen`. The two keys that DO have both readings are answered by
+    // `guidance` below rather than renamed, because a rename has to pick one.
+    showWhen: 'visibleWhen',
+  },
+  guidance: {
+    // The near-misses on this surface all arrive from custom row actions
+    // (`actions[].visible` / `.disabled`), where ONE key takes either a boolean
+    // or a CEL string. This shape splits that pair in two — `enabled` for the
+    // object-level switch, `*When` for the per-record predicate — so a rename
+    // cannot answer either key without guessing which form the author meant,
+    // and guessing wrong just relocates the confusion (#7816's own note: point
+    // the boolean reading at `enabled`, not at `visibleWhen`).
+    visible:
+      '`visible` is the CUSTOM row-action spelling (`actions[].visible`), where one key takes '
+      + 'either form. This override splits them: write `enabled: false` for the object-level '
+      + 'on/off, or `visibleWhen: <CEL over record.*>` for a per-record predicate (FALSE hides '
+      + 'that row\'s button).',
+    disabled:
+      '`disabled` is the CUSTOM row-action spelling (`actions[].disabled`). The per-record form '
+      + 'here is `disabledWhen: <CEL over record.*>` (TRUE renders that row\'s button disabled); '
+      + 'there is no boolean `disabled` — switch the affordance off with `enabled: false`.',
+  },
+}, {
   enabled: z.boolean().optional().describe(
     'Object-level on/off for the generic affordance; same meaning as the bare boolean form. Omitted → managedBy bucket default.',
   ),
@@ -1082,7 +1115,7 @@ export const RowCrudActionOverrideSchema = z.object({
   disabledWhen: ExpressionInputSchema.optional().describe(
     'Per-record CEL predicate; true → render the row button disabled for that record. Fail-soft.',
   ),
-}).strict().describe('Boolean-or-predicates override for a built-in row CRUD affordance.');
+}).describe('Boolean-or-predicates override for a built-in row CRUD affordance.');
 export type RowCrudActionOverride = z.input<typeof RowCrudActionOverrideSchema>;
 /** Post-parse shape of {@link RowCrudActionOverride} — defaults applied, transforms run (ADR-0122). */
 export type RowCrudActionOverrideParsed = z.infer<typeof RowCrudActionOverrideSchema>;

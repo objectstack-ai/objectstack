@@ -2432,7 +2432,19 @@ export class RestServer {
         // blocked from protected resources, while the core allow-list keeps auth
         // + remediation reachable. Runs before the anonymous check.
         const gate = context?.authGate;
-        if (gate && req?.method !== 'OPTIONS' && !isAuthGateAllowlisted(req?.path)) {
+        // Exemption requires a REAL, non-empty path — mirrors the sibling seam
+        // (`shouldDenyAnonymous`, core/src/security/anonymous-deny.ts:122).
+        //
+        // ⚠️ `isAuthGateAllowlisted(undefined)` returns `true` (it treats "no
+        // path" as allow-listed). Passed the raw value, a request whose `path`
+        // is absent or empty read as allow-listed on EVERY route, so the gate
+        // did not fire for a session policy says must be blocked — fail-OPEN by
+        // omission. No shipped transport reaches here without a `path` (the
+        // hono adapter sets it at all three request-construction sites), so this
+        // is the default being made safe, not a live bypass being closed (#7432).
+        const pathExempt =
+            typeof req?.path === 'string' && req.path.length > 0 && isAuthGateAllowlisted(req.path);
+        if (gate && req?.method !== 'OPTIONS' && !pathExempt) {
             res.status(403).json({ error: { code: gate.code, message: gate.message } });
             return true;
         }

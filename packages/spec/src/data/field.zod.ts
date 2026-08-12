@@ -458,6 +458,12 @@ export const FieldSchema = lazySchema(() => strictObject({
     decimals: 'scale', decimalPlaces: 'scale', digits: 'precision',
     isReadonly: 'readonly', disabled: 'readonly',
     isHidden: 'hidden', invisible: 'hidden',
+    // `showWhen` has only one reading — a predicate — so it renames. Its
+    // sibling `visible` has two on this surface and is answered in prose
+    // below; `disabled` already renames onto `readonly` above, which is the
+    // right target here because a field has `readonlyWhen`, not `disabledWhen`
+    // (#7832).
+    showWhen: 'visibleWhen',
     section: 'group', category: 'group', fieldset: 'group',
     component: 'widget', renderer: 'widget', control: 'widget',
     mimeTypes: 'accept', allowedTypes: 'accept', fileTypes: 'accept',
@@ -485,6 +491,16 @@ export const FieldSchema = lazySchema(() => strictObject({
       + '(ADR-0113). `required` is the WRITE contract and deliberately does not imply the column '
       + 'constraint.',
     tracked: '`tracked` is not a field key — per-field timeline tracking is `trackHistory: true` (ADR-0052 §5b).',
+    // Prose rather than a rename, because this surface declares BOTH forms and
+    // the two answers have opposite polarity: renaming onto `visibleWhen` sends
+    // `visible: false` to a slot that wants a CEL string, and renaming onto
+    // `hidden` silently inverts the value the author already wrote. Naming both
+    // is the only answer that cannot be acted on wrongly (#7832 / #7816).
+    visible:
+      '`visible` is not a field key, and which key you want depends on the form: a static '
+      + 'boolean is `hidden` — INVERTED, so `visible: false` is `hidden: true` — while a '
+      + 'per-record CEL predicate is `visibleWhen` (shown only when TRUE). Its siblings are '
+      + '`readonlyWhen` and `requiredWhen`.',
   },
 }, {
   /** Identity */
