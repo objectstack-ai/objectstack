@@ -21,8 +21,22 @@
 // harness was STRUCTURALLY incapable of going red on an envelope regression —
 // a wrong `error.code`, a dropped `httpStatus`, an unpromoted `details.code`, a
 // missing `success` — because none of those fields existed here to be wrong.
-// The exits are now taken off a real dispatcher (see `realErrorExits`), and the
+// The exits are now taken off a real dispatcher (see `realDomainDeps`), and the
 // cases at the bottom of this file drive the two error branches `/data` owns.
+//
+// [#7362] The mirror-image half of the same gap, on the SUCCESS exit. The
+// stand-in used to answer:
+//
+//     success: (data: any) => ({ status: 200, body: data })
+//
+// — the domain's return value handed straight back AS the whole body. No
+// `success: true` flag, no `data` nesting, no `meta`, while production's
+// `HttpDispatcher.success()` wraps all three:
+// `{ status: 200, body: { success: true, data, meta } }`. `success` is now
+// taken off the same real dispatcher as the error exits (`realDomainDeps`),
+// and the `[#7362]` describe block below drives a real `/data` success path
+// through it and reads the envelope off the response body — not a hand-built
+// object — so a dropped `success`/`data`/`meta` can go red here too.
 
 import { describe, it, expect, vi } from 'vitest';
 import { ApiErrorSchema, BaseResponseSchema, envelopeViolations } from '@objectstack/spec/api';
@@ -31,16 +45,18 @@ import { HttpDispatcher } from '../http-dispatcher.js';
 import type { DomainHandlerDeps } from '../domain-handler-registry.js';
 
 /**
- * [#6719] The dispatcher's OWN `DomainHandlerDeps` error exits — not a
- * lookalike. `HttpDispatcher.domainDeps` is the exact object every `/data`
- * request runs against in production; it is borrowed off a real dispatcher
- * built over a kernel stub, exactly as `error-envelope.conformance.test.ts`'s
- * `makeDispatcher()` does (these branches never reach a service).
+ * [#6719] [#7362] The dispatcher's OWN `DomainHandlerDeps` success + error
+ * exits — not a lookalike. `HttpDispatcher.domainDeps` is the exact object
+ * every `/data` request runs against in production; it is borrowed off a real
+ * dispatcher built over a kernel stub, exactly as
+ * `error-envelope.conformance.test.ts`'s `makeDispatcher()` does (these
+ * branches never reach a service).
  *
- * Deliberately NOT `apiErrorResponse({ … })` re-expressed here: `error()` also
- * carries the #3867 5xx message-leak guard, and a restatement would make these
- * cases green against the restatement's rules instead of production's — the
- * same class of mistake as the hand-written double it replaces.
+ * Deliberately NOT `apiErrorResponse({ … })` / `{ success: true, data }`
+ * re-expressed here: `error()` also carries the #3867 5xx message-leak guard,
+ * and a restatement would make these cases green against the restatement's
+ * rules instead of production's — the same class of mistake as the
+ * hand-written doubles this replaces.
  *
  * `routeNotFound` is unreachable from `handleDataRequest` today (the domain has
  * no route-resolution exit of its own) and `errorFromThrown` is applied one
@@ -48,10 +64,11 @@ import type { DomainHandlerDeps } from '../domain-handler-registry.js';
  * real anyway so a future `/data` branch is born conformant rather than
  * inheriting a stand-in.
  */
-const realErrorExits = (() => {
+const realDomainDeps = (() => {
     const dispatcher: any = new HttpDispatcher({ context: { getService: () => null } } as any);
     const domainDeps: DomainHandlerDeps = dispatcher.domainDeps;
     return {
+        success: domainDeps.success,
         error: domainDeps.error,
         routeNotFound: domainDeps.routeNotFound,
         errorFromThrown: domainDeps.errorFromThrown,
@@ -98,6 +115,36 @@ function expectDataErrorEnvelope(response: { status: number; body: any } | undef
     return body.error;
 }
 
+/**
+ * [#7362] Every assertion a `/data` SUCCESS body must satisfy, spelled once —
+ * the mirror of `expectDataErrorEnvelope` above. Production's
+ * `HttpDispatcher.success()` wraps the domain's return value as
+ * `{ success: true, data, meta }`. The OLD stand-in
+ * (`success: (data) => ({ status: 200, body: data })`) handed that same
+ * return value back AS the whole body, so none of these assertions were ever
+ * true of a case driven through it — `envelopeViolations` alone catches the
+ * missing `success` flag and the un-nested payload; the explicit `data` /
+ * `meta` checks below are what pins the shape on top of that.
+ */
+function expectDataSuccessEnvelope(response: { status: number; body: any } | undefined) {
+    expect(response, 'branch produced no response').toBeTruthy();
+    const body = response!.body;
+
+    expect(BaseResponseSchema.safeParse(body).success).toBe(true);
+    expect(envelopeViolations(body), `not the declared envelope: ${JSON.stringify(body)}`).toEqual([]);
+    expect(body.success).toBe(true);
+    expect(body.data).toBeDefined();
+    // Production's `success()` always writes the `meta` key — `{ success:
+    // true, data, meta }` — even when the caller passed no second argument,
+    // which every `/data` call site does (`deps.success(result)`, one arg).
+    // The key is therefore present but `undefined`-valued here; the OLD
+    // stand-in never had the key at all, since it returned the payload AS
+    // the body rather than wrapping it.
+    expect(Object.prototype.hasOwnProperty.call(body, 'meta')).toBe(true);
+
+    return body.data;
+}
+
 /** Records what the protocol service was asked for. */
 function setup(
     objectDefs: Record<string, any> = {},
@@ -120,9 +167,8 @@ function setup(
         getObjectQL: async () => engine,
         getRequestKernelService: async () => null,
         isMultiTenantHost: () => opts.multiTenantHost === true,
-        success: (data: any) => ({ status: 200, body: data }),
-        // [#6719] The REAL exits — see `realErrorExits`.
-        ...realErrorExits,
+        // [#6719] [#7362] The REAL success + error exits — see `realDomainDeps`.
+        ...realDomainDeps,
         resolveActiveOrganizationId: async () => undefined,
         announceKernelEvent: async () => {},
     };
@@ -270,5 +316,53 @@ describe('[#6719] /data error exits answer in the ADR-0112 envelope', () => {
         // The code was LIFTED, not copied: nothing else was in `details`, so
         // `details` disappears rather than lingering as `{}`.
         expect(error.details).toBeUndefined();
+    });
+});
+
+/**
+ * [#7362] The mirror-image half of the #6719 error-exit convergence: `/data`'s
+ * SUCCESS exit, driven through a real `/data` success path (not a hand-built
+ * object), reading the envelope off the actual response body.
+ *
+ * Every existing case above asserts through `findData`'s call arguments, not
+ * the response body — none of them would flip if the success exit regressed.
+ * These do: `expectDataSuccessEnvelope` reads the exact fields the old
+ * stand-in dropped (`success: true`, the `data` nesting, the `meta` key) off
+ * a response `handleDataRequest` actually produced.
+ */
+describe('[#7362] /data success exit answers in the production envelope', () => {
+    it('a real query success is wrapped in success/data/meta, not returned bare', async () => {
+        const { deps, context, findData } = setup({ crm_account: { apiEnabled: true } });
+        const res: any = await post(deps, context, 'crm_account/query', { where: { status: 'open' } });
+
+        expect(res.handled).toBe(true);
+        expect(res.response.status).toBe(200);
+        const data = expectDataSuccessEnvelope(res.response);
+
+        // The domain's return value is NESTED under `data` — not spread as
+        // the whole body, which is what the old stand-in produced.
+        expect(data).toEqual({ object: 'crm_account', records: [], total: 0 });
+        expect((res.response.body as any).object).toBeUndefined();
+        expect((res.response.body as any).records).toBeUndefined();
+        expect(findData).toHaveBeenCalledTimes(1);
+    });
+
+    it('a create success (201) still answers in the envelope, status override included', async () => {
+        // Distinct call site from every other branch: `domains/data.ts`
+        // mutates the ALREADY-WRAPPED response's `status` to 201 rather than
+        // building a fresh one — pin that the envelope survives the mutation.
+        // The fake `protocol` only implements `findData`, so this goes
+        // through the ObjectQL fallback (`ql.insert`), same pattern as the
+        // record-miss case above (`setup({}, { engine })`).
+        const engine = { insert: vi.fn(async (_object: string, data: any) => ({ id: 'rec_1', ...data })) };
+        const { deps, context } = setup({ crm_account: { apiEnabled: true } }, { engine });
+        const res: any = await handleDataRequest(deps, 'crm_account', 'POST', { name: 'Acme' }, {}, context);
+
+        expect(res.handled).toBe(true);
+        expect(res.response.status).toBe(201);
+        const data = expectDataSuccessEnvelope(res.response);
+
+        expect(data).toEqual({ object: 'crm_account', id: 'rec_1', record: { name: 'Acme', id: 'rec_1' } });
+        expect(engine.insert).toHaveBeenCalledTimes(1);
     });
 });
