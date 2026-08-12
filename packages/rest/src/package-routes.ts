@@ -10,7 +10,17 @@ import { OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES } from '@objectstack/metada
 import type { PackageService } from '@objectstack/service-package';
 // The declared envelope is written in ONE place for the whole platform (#3973),
 // and so (#8016) is the rule that reads an HTTP answer off a THROWN error.
-import { sendOk, sendError, resolveThrownHttpError } from '@objectstack/types';
+// [#8086] `looksLikeInternalErrorLeak` / `INTERNAL_ERROR_MESSAGE` come from the
+// same package for the same reason: "do not ship driver internals to clients"
+// is a property of the HTTP boundary, not of one router, so every boundary
+// applies ONE predicate in its own envelope (#3867).
+import {
+  sendOk,
+  sendError,
+  resolveThrownHttpError,
+  looksLikeInternalErrorLeak,
+  INTERNAL_ERROR_MESSAGE,
+} from '@objectstack/types';
 import { mountDirectRoutes, type DirectMountedRoute } from './direct-mount.js';
 import { readSingleQueryValue, repeatedQueryParamMessage } from './query-multiplicity.js';
 
@@ -122,19 +132,64 @@ async function refusePackageRequest(
  * leaving nothing on the default arm would trade one wrong answer for another
  * and hide real faults.
  *
- * ⚠️ The message is passed through as thrown. Unlike the dispatcher twin, this
- * door applies no `looksLikeInternalErrorLeak` withholding to 5xx bodies — that
- * gap predates this change and is unchanged by it (filed separately); nothing
- * here newly exposes a message that was not already exposed, because the 500
- * arm shipped `(error as Error).message` verbatim before.
+ * ## [#8086] …and a leaky 5xx message is withheld
+ *
+ * The paragraph that stood here recorded the gap as still open: "this door
+ * applies no `looksLikeInternalErrorLeak` withholding to 5xx bodies — that gap
+ * predates this change and is unchanged by it (filed separately)". Filed as
+ * #8086, and closed here.
+ *
+ * It was reachable, not theoretical, and was reproduced through this door
+ * before being fixed — a real `ObjectQL` engine and a real
+ * `ObjectStackProtocolImplementation` whose driver fails the `sys_metadata`
+ * read the way a missing table does. `DELETE /api/v1/packages/:id` with no
+ * `?version=` routes to `protocol.deletePackage`, whose FIRST database touch
+ * (`engine.find('sys_metadata', { where })`) sits outside that method's
+ * per-item `try`, so the driver line propagates whole and arrived here:
+ *
+ *     HTTP 500
+ *     {"success":false,"error":{"code":"INTERNAL_ERROR",
+ *      "message":"SQLITE_ERROR: no such table: sys_metadata"}}
+ *
+ * This is NOT a new rule — it is the rule this surface already follows, at the
+ * door that was missed. The dispatcher twin (`HttpDispatcher.error`,
+ * `packages/runtime/src/http-dispatcher.ts`) has run exactly this expression
+ * since #3867, and `rest-server.ts` runs the same predicate at three call
+ * sites. #5437 / PR #5464 closed this class one seam over and never reached
+ * this registrar, because it does not go through `resolveErrorResponse` at all.
+ * Two doors serve `/api/v1/packages` and this one mounts FIRST in the
+ * production stack, so the unfiltered answer was the live one.
+ *
+ * Scoped to 5xx, deliberately: a 4xx message is a caller-facing answer by
+ * design — the protocol's `[tenant_scope_required]` refusal names the very
+ * parameter to pass, a `409 DESTRUCTIVE_CHANGE` names the remedy — and
+ * withholding those would delete the self-correcting sentence, at exactly the
+ * boundary where disclosure costs nothing because the caller supplied the
+ * input. Only the PROSE is withheld: `status`, `code` and `details` are
+ * untouched, so #8016's mapping still answers and a client can still branch.
+ *
+ * ⚠️ Ceiling, stated because a green suite must not read as full coverage:
+ * `looksLikeInternalErrorLeak` is a heuristic over the message and recognises
+ * no Postgres `relation "…" does not exist` phrasing, so that dialect's line
+ * still travels — through this door and through the twin alike, since both run
+ * the same predicate. Widening it HERE would be a new rule at one door and
+ * would re-create the divergence this closes. The cure is option C — the
+ * producer (`metadata-protocol`) not interpolating driver text into
+ * client-facing messages at all — which is a separate card. Pinned as a live
+ * case in `package-door-5xx-message-sanitization.test.ts` so it goes red the
+ * day either lands.
  */
 function sendThrownError(res: any, error: unknown): void {
   const thrown = resolveThrownHttpError(error);
+  // The dispatcher twin's expression, byte for byte — one rule, two doors.
+  const message = thrown.status >= 500 && looksLikeInternalErrorLeak(thrown.message)
+    ? INTERNAL_ERROR_MESSAGE
+    : thrown.message;
   sendError(
     res,
     thrown.status,
     thrown.code,
-    thrown.message,
+    message,
     thrown.details ? { details: thrown.details } : undefined,
   );
 }
