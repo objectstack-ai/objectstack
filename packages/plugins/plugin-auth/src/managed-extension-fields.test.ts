@@ -371,7 +371,12 @@ const AUTH_MANAGER_PLUGINS: Record<string, { construct: () => unknown } | { skip
   },
   sso: { construct: () => sso() },
   scim: { construct: () => scim() },
-  oauthProvider: { construct: () => oauthProvider({ loginPage: '/login' }) },
+  // `loginPage` / `consentPage` are required by the constructor and are URLs
+  // the auth manager resolves from the console mount point; nothing about the
+  // schema depends on their value.
+  oauthProvider: {
+    construct: () => oauthProvider({ loginPage: '/login', consentPage: '/oauth/consent' }),
+  },
 };
 
 /** The plugin set the auth manager actually assembles (`buildPluginList()`). */
