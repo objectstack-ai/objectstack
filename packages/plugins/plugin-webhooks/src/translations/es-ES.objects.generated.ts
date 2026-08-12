@@ -65,6 +65,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Definición",
         help: "JSON serializado de Webhook (consulte @objectstack/spec/automation/webhook): configuración completa de cabeceras/auth/reintentos/payload."
       },
+      signing_secret: {
+        label: "Secreto de firma",
+        help: "Clave HMAC-SHA256 usada para firmar las entregas (X-Objectstack-Signature). Se cifra en reposo en sys_secret; las lecturas devuelven una máscara, nunca la clave. Deje la máscara sin tocar para conservar el valor actual."
+      },
       managed_by: {
         label: "Gestionado por",
         help: "Procedencia del registro: platform = integrado en el framework / package = declarado por app o paquete (sembrado al arrancar desde los webhooks de defineStack) / admin = creado en Setup.",

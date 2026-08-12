@@ -5,9 +5,11 @@ import type {
   JobSchedule,
   JobHandler,
   JobExecution,
+  JobRunOutcome,
   JobScheduleOptions,
 } from '@objectstack/spec/contracts';
 import { IntervalJobAdapter } from './interval-job-adapter.js';
+import { runWithPolicy } from './run-with-policy.js';
 
 const JOB_TABLE = 'sys_job';
 const RUN_TABLE = 'sys_job_run';
@@ -31,6 +33,25 @@ export interface DbJobAdapterOptions {
   maxExecutions?: number;
   /** Soft cap on sys_job_run rows recorded per job (defaults to none — handled by retention jobs) */
   recordRuns?: boolean;
+}
+
+/** Terminal statuses a finished run can land in — everything except `running`. */
+type TerminalStatus = 'success' | 'failed' | 'degraded' | 'timeout';
+
+/**
+ * The options handed DOWN to the timer adapter.
+ *
+ * `retryPolicy` and `timeout` are deliberately NOT forwarded (#7734): this
+ * adapter now runs the policy itself, inside {@link DbJobAdapter.wrap}, which
+ * is what lets the recorder observe a timeout at the instant it happens. A
+ * second `runWithPolicy` downstream would race that whole retry sequence
+ * against one more timeout budget and abandon the retries mid-flight.
+ * Every other option keeps flowing through untouched.
+ */
+function withoutPolicy(options?: JobScheduleOptions): JobScheduleOptions | undefined {
+  if (!options) return options;
+  const { retryPolicy: _retryPolicy, timeout: _timeout, ...rest } = options;
+  return Object.keys(rest).length > 0 ? (rest as JobScheduleOptions) : undefined;
 }
 
 function uid(prefix: string): string {
@@ -78,17 +99,19 @@ export class DbJobAdapter implements IJobService {
   // ── IJobService ──────────────────────────────────────────────────
 
   async schedule(name: string, schedule: JobSchedule, handler: JobHandler, options?: JobScheduleOptions): Promise<void> {
-    const wrapped = this.wrap(name, handler, 'schedule');
+    const wrapped = this.wrap(name, handler, 'schedule', options);
+    // The wrapper OWNS `retryPolicy`/`timeout` from here down — see withoutPolicy.
+    const downstream = withoutPolicy(options);
 
     if (schedule.type === 'cron') {
-      if (this.cron) await this.cron.schedule(name, schedule, wrapped, options);
+      if (this.cron) await this.cron.schedule(name, schedule, wrapped, downstream);
       else this.logger?.warn?.(
         `DbJobAdapter: cron schedule registered for "${name}" without CronJobAdapter — job will only run via manual trigger`,
       );
       // Still record in inner so trigger() works
-      await this.inner.schedule(name, schedule, wrapped, options);
+      await this.inner.schedule(name, schedule, wrapped, downstream);
     } else {
-      await this.inner.schedule(name, schedule, wrapped, options);
+      await this.inner.schedule(name, schedule, wrapped, downstream);
     }
 
     await this.upsertJobRow(name, schedule, true);
@@ -131,9 +154,17 @@ export class DbJobAdapter implements IJobService {
       // replayed degraded run would land TWO rows disagreeing with each other,
       // one `degraded` and one `success`, which is the very defect this card
       // fixes wearing a `trigger: 'replay'` tag.
+      // #7734 widened this from `degraded` to every terminal status for the
+      // same reason #5548 introduced it: a replayed run that timed out (or
+      // threw — `executeJob` swallows the error, so the catch below never sees
+      // it) used to land a `success` row next to the wrapper's honest one.
       const [last] = await this.inner.getExecutions(name, 1);
-      if (last?.status === 'degraded') await this.finishRun(runId, 'degraded', last.error);
-      else await this.finishRun(runId, 'success');
+      const status = last?.status;
+      if (status === 'degraded' || status === 'timeout' || status === 'failed') {
+        await this.finishRun(runId, status, last.error);
+      } else {
+        await this.finishRun(runId, 'success');
+      }
     } catch (err) {
       await this.finishRun(runId, 'failed', err instanceof Error ? err.message : String(err));
       throw err;
@@ -180,6 +211,29 @@ export class DbJobAdapter implements IJobService {
    * | resolves `undefined` | `success` | `success` | no |
    * | resolves `{ outcome: 'completed' }` | `success` | `success` | no |
    * | resolves `{ outcome: 'degraded', reason? }` | `degraded` (reason in `error`) | `degraded`, `failure_count` **flat** | no |
+   * | exceeds its `timeout` | `timeout` (guard message in `error`) | `timeout`, `failure_count` +1 | yes, by the retry policy |
+   *
+   * **Who runs the policy, and why it has to be this one** (#7734). The
+   * wrapper does not merely record around the handler — it runs the handler
+   * *under* `runWithPolicy` and records from that policy's per-attempt
+   * {@link JobAttemptRecorder}. Until this wiring, the wrapper was handed to
+   * the timer adapter, which applied `withTimeout` around the WRAPPER: the
+   * guard rejected, the adapter noted `timeout` in its in-memory history, and
+   * the wrapper's own `await handler(ctx)` — still pending on a handler
+   * JavaScript cannot cancel — resolved minutes later and wrote
+   * `finishRun(runId, 'success')` over the run an operator was looking at.
+   * A row saying `success` with a `duration_ms` five times the declared
+   * `timeout` was the visible symptom.
+   *
+   * Recording from inside the policy closes that race by construction: the
+   * abandoned attempt's eventual value loses `Promise.race` and reaches no
+   * observer at all. The per-run `settled` latch below is the second lock on
+   * the same door — one terminal write per `sys_job_run` row, so no path that
+   * anyone adds later can move a run off a terminal status.
+   *
+   * It also makes the attempt number REAL: `runWithPolicy` counts the attempts,
+   * so a retry lands `sys_job_run.attempt: 2` instead of the `1` every row used
+   * to carry.
    *
    * Until this wiring, "the handler did not throw" WAS the success criterion,
    * so a handler that degraded internally — #5529's wait-wake shot into an
@@ -192,35 +246,59 @@ export class DbJobAdapter implements IJobService {
    * Retry is untouched — it keys on a *rejected* promise only, so a `degraded`
    * run never re-runs (`spec/contracts/job-service.ts`, the JobHandler TSDoc).
    */
-  private wrap(name: string, handler: JobHandler, defaultTrigger: 'schedule' | 'manual' | 'replay'): JobHandler {
+  private wrap(
+    name: string,
+    handler: JobHandler,
+    defaultTrigger: 'schedule' | 'manual' | 'replay',
+    options?: JobScheduleOptions,
+  ): JobHandler {
     return async (ctx) => {
-      const runId = this.recordRuns ? await this.startRun(name, defaultTrigger) : undefined;
-      const startMs = Date.now();
-      try {
-        const outcome = await handler(ctx);
-        if (outcome && outcome.outcome === 'degraded') {
-          // Not a failure: the reason rides the existing `error` column and
-          // `failure_count` stays flat (decided on #7072, recorded in the
-          // `JobExecutionStatus` TSDoc). A reader must gate on `status`
-          // before reading that column as a failure.
-          const reason = outcome.reason;
-          if (runId) await this.finishRun(runId, 'degraded', reason, Date.now() - startMs);
-          await this.bumpJob(name, 'degraded', reason);
-          return outcome;
-        }
-        if (runId) await this.finishRun(runId, 'success', undefined, Date.now() - startMs);
-        await this.bumpJob(name, 'success');
-        return outcome;
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (runId) await this.finishRun(runId, 'failed', msg, Date.now() - startMs);
-        await this.bumpJob(name, 'failed', msg);
-        throw err;
-      }
+      // Per-FIRE state: one of these closures exists per invocation, so two
+      // overlapping fires of the same job never share a run row.
+      let current: { id?: string; settled: boolean } | undefined;
+
+      const settle = async (status: TerminalStatus, error?: string, durationMs?: number) => {
+        const run = current;
+        // One terminal write per row. Nothing reaches here twice today; the
+        // latch is what keeps that true as this seam grows (#7734).
+        if (!run || run.settled) return;
+        run.settled = true;
+        if (run.id) await this.finishRun(run.id, status, error, durationMs);
+        await this.bumpJob(name, status, error);
+      };
+
+      return await runWithPolicy<void | JobRunOutcome>(name, () => handler(ctx), options, {
+        onAttemptStart: async (attempt) => {
+          current = { id: this.recordRuns ? await this.startRun(name, defaultTrigger, attempt) : undefined, settled: false };
+        },
+        onAttemptSettled: async (_attempt, result) => {
+          if (result.ok) {
+            const outcome = result.value;
+            if (outcome && outcome.outcome === 'degraded') {
+              // Not a failure: the reason rides the existing `error` column and
+              // `failure_count` stays flat (decided on #7072, recorded in the
+              // `JobExecutionStatus` TSDoc). A reader must gate on `status`
+              // before reading that column as a failure.
+              await settle('degraded', outcome.reason, result.durationMs);
+            } else {
+              await settle('success', undefined, result.durationMs);
+            }
+            return;
+          }
+          const msg = result.error instanceof Error ? result.error.message : String(result.error);
+          // `timeout` vs `failed` is the distinction `JobExecutionStatus` has
+          // always declared and the durable record never carried.
+          await settle(result.timedOut ? 'timeout' : 'failed', msg, result.durationMs);
+        },
+      });
     };
   }
 
-  private async startRun(jobName: string, trigger: 'schedule' | 'manual' | 'replay'): Promise<string | undefined> {
+  private async startRun(
+    jobName: string,
+    trigger: 'schedule' | 'manual' | 'replay',
+    attempt = 1,
+  ): Promise<string | undefined> {
     const id = uid('run');
     const now = new Date().toISOString();
     try {
@@ -230,7 +308,7 @@ export class DbJobAdapter implements IJobService {
         status: 'running',
         started_at: now,
         trigger,
-        attempt: 1,
+        attempt,
         created_at: now,
       }, { context: SYSTEM_CTX });
       return id;
@@ -335,8 +413,13 @@ export class DbJobAdapter implements IJobService {
    * `last_error` carries the degraded `reason`, per the column decision
    * recorded in the `JobExecutionStatus` TSDoc (#7072): no new column, and the
    * "Error" label only reads correctly alongside `last_status`.
+   *
+   * `timeout` (#7734) is the mirror image of `degraded` here: it IS a failure —
+   * the run did not finish, the policy retries it — so it bumps `failure_count`
+   * alongside `failed`. Alerting that keys on that count is the reason a job
+   * stuck at five times its declared `timeout` must not read as a quiet success.
    */
-  private async bumpJob(name: string, last_status: 'success' | 'failed' | 'degraded', last_error?: string): Promise<void> {
+  private async bumpJob(name: string, last_status: TerminalStatus, last_error?: string): Promise<void> {
     try {
       const existing = await this.engine.find(JOB_TABLE, {
         where: { name },
@@ -352,7 +435,8 @@ export class DbJobAdapter implements IJobService {
         last_status,
         last_error: last_status === 'success' ? null : (last_error ?? null),
         run_count: (row.run_count ?? 0) + 1,
-        failure_count: (row.failure_count ?? 0) + (last_status === 'failed' ? 1 : 0),
+        failure_count:
+          (row.failure_count ?? 0) + (last_status === 'failed' || last_status === 'timeout' ? 1 : 0),
         updated_at: now,
       }, { context: SYSTEM_CTX });
     } catch (err) {

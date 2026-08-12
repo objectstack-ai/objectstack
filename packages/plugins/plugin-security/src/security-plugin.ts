@@ -50,6 +50,7 @@ import { RLSCompiler, RLS_DENY_FILTER } from './rls-compiler.js';
 import { computeTenantLayer0Filter, andComposeLayers } from './tenant-layer.js';
 import { isPlatformTenantPolicy, isAuthoredTenantPolicy } from './platform-tenant-policies.js';
 import { isPlatformOwnershipFloorPolicy } from './platform-ownership-policies.js';
+import { hasPhantomTenantAnchor } from './federated-phantom-anchors.js';
 import {
   normalizeTenancyPosture,
   postureEnforcesWall,
@@ -163,6 +164,19 @@ interface ObjectSecurityMeta {
   isPrivate: boolean;
   tenancyDisabled: boolean;
   isBetterAuthManaged: boolean;
+  /**
+   * [#7835] The object is FEDERATED (ADR-0015 `external`) and its
+   * `organization_id` is the anchor the REGISTRY injected, not a column the
+   * author declared — so the column exists in the registered schema and in no
+   * backing store, because `syncObjectSchema` issues no DDL for a federated
+   * object. Layer 0 reads this to answer "is this a tenant object?" truthfully;
+   * see `federated-phantom-anchors.ts` for the provenance test and for why the
+   * question is provenance rather than `external != null`.
+   *
+   * `false` on every local object and on a federated object that declares a
+   * real remote `organization_id` — both keep the tenant wall exactly as it is.
+   */
+  tenantAnchorIsPhantom: boolean;
   requiredPermissions: NormalizedRequiredPermissions;
   fieldRequiredPermissions: Record<string, string[]>;
   /**
@@ -754,6 +768,17 @@ export class SecurityPlugin implements Plugin {
             objects: parseJson(r.object_permissions, {}),
             fields: parseJson(r.field_permissions, {}),
             systemPermissions: parseJson(r.system_permissions, []),
+            // [#7616] Hydrate the tab column too. Nothing on the DATA plane
+            // reads `tabPermissions` (the evaluator never mentions it), so this
+            // is inert for enforcement — but `resolvePermissionSetsForContext`
+            // is published on the `security` service as returning the sets
+            // WHOLE, and a loader that dropped this column would make that
+            // declaration false for every DB-authored set: the UI-plane copy in
+            // `/me/apps` reads exactly `tab_permissions` off the same row.
+            // Declared ≠ delivered is the failure this contract exists to
+            // prevent, so the column is loaded where the promise is made. The
+            // row is already fetched in full — no extra query, one JSON parse.
+            tabPermissions: parseJson(r.tab_permissions, {}),
             // [ADR-0090 D12] Hydrate the delegated-admin scope so the gate can
             // resolve a DB-authored delegate's authority. Null column → absent.
             ...(r.admin_scope ? { adminScope: parseJson(r.admin_scope, undefined) } : {}),
@@ -886,6 +911,32 @@ export class SecurityPlugin implements Plugin {
           const sets = await this.resolvePermissionSetsForContext(context);
           return sets.map((s) => s.name);
         },
+        // [#7616] The same resolution, returned WHOLE — `objects`, `fields`,
+        // `systemPermissions`, `tabPermissions`, in resolution order. The names
+        // above answer an AUDIENCE question; a consumer that must MERGE the
+        // caller's grants (the object/field map `/auth/me/permissions` serves,
+        // the capability + tab surface `/me/apps` filters its app list with)
+        // cannot reach any of those four columns from a name, so both endpoints
+        // re-implement this resolution locally instead — one rule in three
+        // copies, which has already drifted from the enforcement path three
+        // times (#7608, #7555, #6334), each divergence found only after it
+        // reached a user.
+        //
+        // Exposed HERE, on the registered literal, and not merely as a public
+        // class member: `plugin-hono-server` must never take a runtime
+        // dependency on this plugin (it is optional in the stacks those
+        // endpoints serve — the `!evaluator` degraded branches are exactly its
+        // absence), so the service locator is the only seam that can carry the
+        // delegation. A method the class declares but the literal does not
+        // expose is unreachable across that seam, which is the precise failure
+        // this addition exists to prevent.
+        //
+        // The class method stays private on purpose: this literal is the
+        // supported surface, and routing every cross-package caller through it
+        // is what keeps the published contract and the enforcement path the
+        // same code rather than two that agree today.
+        resolvePermissionSetsForContext: (context?: any): Promise<PermissionSet[]> =>
+          this.resolvePermissionSetsForContext(context),
         // [ADR-0090 D6] First-class access explanation. Same code paths as
         // the middleware (resolution/evaluator/RLS compiler) — explained by
         // construction. Explaining ANOTHER user requires `manage_users`.
@@ -936,7 +987,7 @@ export class SecurityPlugin implements Plugin {
           this.getMetadataReadableFields(object, context),
       });
       ctx.registerService('security', registeredSecurityService);
-      ctx.logger.info('[security] registered "security" service (getReadFilter, getReadableFields, getMetadataReadableFields, canExport, checkAuthoredRowWrite, explain, audience-binding suggestions) — ADR-0021 D-C / ADR-0090 D5/D6/D9 / ADR-0106 D7 / #3544 / #3547 / #5493');
+      ctx.logger.info('[security] registered "security" service (getReadFilter, getReadableFields, getMetadataReadableFields, canExport, checkAuthoredRowWrite, resolvePermissionSetNames, resolvePermissionSetsForContext, explain, audience-binding suggestions) — ADR-0021 D-C / ADR-0090 D5/D6/D9 / ADR-0106 D7 / #3544 / #3547 / #5493 / #7616');
     } catch (e) {
       ctx.logger.warn?.('[security] failed to register "security" service', {
         error: (e as Error).message,
@@ -1426,9 +1477,13 @@ export class SecurityPlugin implements Plugin {
       // engine with `{ id } AND <writeFilter>`; a `find` does not re-enter this
       // block, so there is no recursion, and read-side RLS/tenant scoping
       // compose naturally. A `null` result means the row is either gone or
-      // RLS-hidden → deny. When `computeRlsFilter` returns `null` (no policy
-      // applies — e.g. an admin set with no RLS, or `modifyAllRecords`) the
-      // check is skipped and behaviour is unchanged.
+      // RLS-hidden → deny. When `computeRlsFilter` returns `null` the check
+      // is skipped — but since #7665 that is a far smaller class than "no
+      // WRITE policy applies": an empty write-class collection now derives
+      // its scope from the caller's SELECT narrowing inside
+      // `computeLayeredRlsFilter`, so the skip happens only when the caller's
+      // READABLE set is unbounded too (an admin set with no RLS at all, or a
+      // posture-permitting superuser bypass).
       //
       // [#5492] The filter is composed BY PROVENANCE. Two of the policies that
       // can land in it are the platform's OWN ownership floor
@@ -1586,8 +1641,12 @@ export class SecurityPlugin implements Plugin {
 
       // 2.8. ADR-0055 — controlled-by-parent WRITE: a detail write (insert/update/
       // delete) requires edit access to its master. The detail itself carries no
-      // authored RLS, so the #1994 pre-image check above is a no-op for it; this
-      // closes the by-id write path by checking the master instead.
+      // authored RLS (nothing to derive from either, #7665), so the #1994
+      // pre-image check above is a no-op for it; this closes the by-id write
+      // path by checking the master instead — and the master's own write
+      // filter, since #7665, derives from its SELECT narrowing when no
+      // write-class policy applies, so a select-only master gates its details
+      // by visibility too.
       if (
         ['insert', 'update', 'delete', 'transfer', 'restore', 'purge'].includes(opCtx.operation) &&
         permissionSets.length > 0 &&
@@ -3405,8 +3464,18 @@ export class SecurityPlugin implements Plugin {
 
   /**
    * [ADR-0106 D7] Resolve the configured baseline permission set(s) on their
-   * own — the second step `/auth/me/permissions` takes when a caller's own
-   * names resolve to nothing (`resolved.length === 0 && fallbackName`).
+   * own — the deployment's answer to "what does a caller with NO resolved sets
+   * of their own see".
+   *
+   * [#7616] This used to describe itself as "the second step
+   * `/auth/me/permissions` takes when a caller's own names resolve to nothing
+   * (`resolved.length === 0 && fallbackName`)". That step no longer exists:
+   * PR #7615 (#7608, ADR-0090 D5) deleted it, because the `resolved.length === 0`
+   * guard WAS the fallback cliff D5 abolishes — a member's first explicit grant
+   * silently cost them the entire baseline. That endpoint now folds the
+   * baseline into the FIRST resolution, additively and unconditionally, so a
+   * second call over a subset of the same names could add nothing. Only the
+   * cross-reference was stale; this method's own behaviour never depended on it.
    *
    * Distinct from the post-resolution fallback inside
    * {@link resolvePermissionSetsForContext}, which is gated on `context.userId`
@@ -3417,8 +3486,8 @@ export class SecurityPlugin implements Plugin {
    *
    * [#7555] Reads the COMPOSED baseline, deliberately — D7 warrants it. This
    * method exists to answer "what does this deployment's baseline disclose",
-   * and its whole justification is being *the same* resolution the data plane
-   * performs ("the same two-step `/auth/me/permissions` performs", above); one
+   * and its whole justification is being *the same* baseline resolution the
+   * data plane performs (the composed `security.baselinePermissionSets`); one
    * plane composing while the other displaced would put the two planes in
    * disagreement about what the baseline even is, which is the drift D7 is
    * written to avoid. On every deployment that declares no app baseline the
@@ -3925,7 +3994,54 @@ export class SecurityPlugin implements Plugin {
     // longer skip the tenant wall (that is Layer 0's own exemption, below).
     let layer1: Record<string, unknown> | null = null;
     if (!(posturePermits && superuserBypass)) {
-      const collected = this.collectRLSPolicies(permissionSets, object, operation, (context?.positions ?? []) as string[]);
+      let collected = this.collectRLSPolicies(permissionSets, object, operation, (context?.positions ?? []) as string[]);
+      // [#7665] The write-visibility floor: a write target must be inside the
+      // caller's READABLE set. When NO policy of the write class applies to
+      // this (principal, object, operation) — nothing authored for the class,
+      // and the platform ownership floor outside its `positions` domain — the
+      // write class used to compile to a null Layer 1, and every write-side
+      // row gate composed from it became a no-op at once: the by-id pre-image
+      // gate (step 2.7), the controlled_by_parent master check, and the bulk
+      // write AST injection. QA #7637 measured the result on the stock
+      // showcase (select-only narrowing, `contributor` position, OWD
+      // `public_read_write`): a contributor PATCHed by id records they could
+      // not read — on the master AND on a controlled_by_parent detail — while
+      // the read side correctly hid them.
+      //
+      // So an empty write-class collection now DERIVES the write scope from
+      // the caller's SELECT narrowing — the same policies, compiled by the
+      // same compiler, that the read path enforces. "You cannot mutate what
+      // you cannot see" then holds by construction, and the explain engine
+      // reports the same narrowing for update/delete that it reports for
+      // read, instead of "No RLS policy applies".
+      //
+      // Deliberately NOT derived:
+      //   - when ANY write-class policy applies (an authored predicate, or
+      //     the in-domain platform floor): those paths keep their exact
+      //     semantics, including every widening direction #7401 / #6736
+      //     track — #7665 criterion 5 (derive ONLY when no update-scope
+      //     predicate exists). `checkAuthoredRowWrite` is additionally
+      //     protected by its own authored-set pre-check, so a derived scope
+      //     can never masquerade as an authored admission (#5493 / #7281);
+      //   - for `insert` — there is no pre-existing row to be visible (a
+      //     controlled_by_parent detail INSERT is still gated through its
+      //     master's derived scope by step 2.8);
+      //   - when the caller holds the read-side superuser bypass on a
+      //     posture-permitting object — their readable set is unbounded, so
+      //     the readability requirement imposes nothing. This is the mirror
+      //     of the read path's own Layer-1 short-circuit above, so the
+      //     derived write scope can never be NARROWER than the read scope it
+      //     is derived from.
+      if (
+        collected.length === 0 &&
+        (operation === 'update' || operation === 'delete') &&
+        !(
+          posturePermits &&
+          this.permissionEvaluator.hasSuperuserReadBypass(object, permissionSets, { isPrivate: meta.isPrivate })
+        )
+      ) {
+        collected = this.collectRLSPolicies(permissionSets, object, 'select', (context?.positions ?? []) as string[]);
+      }
       // [#5492] Provenance composition: the caller (the by-id write pre-image
       // gate) has already asked the declared write authority — `ISharingService`
       // — and received a positive `allow`. Its answer REPLACES the platform's own
@@ -3972,7 +4088,25 @@ export class SecurityPlugin implements Plugin {
       // [ADR-0105 D2] The `group` wall's predicate. Resolved by
       // `resolveAuthzContext` and carried on the context — never re-derived here.
       accessibleOrgIds: context?.accessible_org_ids,
-      objectHasOrgIdField: objectFields ? objectFields.has('organization_id') : undefined,
+      // [#7835] A FEDERATED object's `organization_id` may be the registry's
+      // injected anchor rather than a remote column — present in the field set,
+      // absent from the store the query actually runs against (the platform
+      // issues no DDL for `external` objects). Answering "yes, tenant object"
+      // there AND-composes `organization_id = <org>` onto a federated read,
+      // where it isolates nothing and — on SQLite — degrades to a constant-false
+      // string comparison: 0 rows, no error, HTTP 200. This is the
+      // plugin-security sibling of #7738 / PR #7833, which withheld
+      // `DriverOptions.tenantId` for the same objects one layer down; that fix
+      // cannot reach a `where` predicate composed into the AST.
+      //
+      // Only the PLATFORM's anchor is discounted (provenance, per
+      // `federated-phantom-anchors.ts`): a federated object that DECLARES a real
+      // remote `organization_id` keeps its wall, and every local object is
+      // untouched. `undefined` (schema unresolvable) still means "assume tenant
+      // object" — the fail-toward-isolation default is unchanged.
+      objectHasOrgIdField: objectFields
+        ? objectFields.has('organization_id') && !meta.tenantAnchorIsPhantom
+        : undefined,
       tenancyDisabled,
       posturePermitsCrossTenant: posturePermits,
       isPlatformAdmin,
@@ -4443,6 +4577,9 @@ export class SecurityPlugin implements Plugin {
       // exemption; their `_self` carve-outs are their Layer 1 scoping, and Layer
       // 0 stays inert on a column-less table), so it can never leak to non-admins.
       isBetterAuthManaged: (obj as any)?.managedBy === 'better-auth',
+      // [#7835] Federated object carrying the registry's INJECTED
+      // `organization_id` — a column the platform provisions no storage for.
+      tenantAnchorIsPhantom: hasPhantomTenantAnchor(obj),
       requiredPermissions: normalizeRequiredPermissions((obj as any)?.requiredPermissions),
       fieldRequiredPermissions,
       unresolved: !obj,

@@ -111,7 +111,8 @@ describe('QuickJSScriptRunner — L2 hook script', () => {
   });
 
   it('rejects log calls without log capability', async () => {
-    const log = { info: () => {}, warn: () => {}, error: () => {} };
+    // Four members since #7661 — see `ScriptContext['log']`.
+    const log = { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} };
     await expect(
       runner.runScript(
         {

@@ -40,6 +40,11 @@ export * from './secondary-storage.js';
 export * from './register-sso-provider.js';
 export * from './send-verification-email.js';
 export * from './objectql-adapter.js';
+// [#7732] ADR-0069 D4's revoke-audit trail. Exported alongside the adapter it
+// plugs into, so a host reading `sys_session` knows the one rule that governs
+// those rows: a `revoked_at` row is a TOMBSTONE — an ended session kept as the
+// audit record of its ending — never a live session.
+export * from './session-tombstone.js';
 // [#4586] The better-auth actor seam. Exported because a host that writes an
 // identity table on better-auth's behalf (a control-plane provisioning hook,
 // an SSO JIT path) must construct the SAME two-part context —
@@ -50,6 +55,11 @@ export * from './auth-schema-config.js';
 // ADR-0093 — membership reconciler + tenancy service (public host API: hosts
 // compose the reconciler into their own hooks; embeddings query tenancy mode).
 export * from './reconcile-membership.js';
+// [#7725] The other half of that invariant: what happens when better-auth tries
+// to create a membership the reconciler already created. Exported alongside the
+// reconciler because a host composing its own membership writes needs the same
+// "the unique pair IS the membership, and acceptance never demotes" rule.
+export * from './adopt-membership.js';
 export * from './tenancy-service.js';
 // [ADR-0108 / #3723] `./org-roles.js` is gone: there is no app-declared
 // organization-role vocabulary to collect, normalize or materialize. The four

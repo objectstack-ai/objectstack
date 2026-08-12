@@ -518,7 +518,7 @@ export const RangeOperatorSchema = lazySchema(() => z.object({
  * | surface | `$contains` case behaviour | mechanism |
  * |---|---|---|
  * | `formula` `matchesFilterCondition` | SENSITIVE | `actual.includes(v)` |
- * | `driver-memory` — query path and analytics face | INSENSITIVE, full Unicode | `new RegExp(escapeRegex(v), 'i')` |
+ * | `driver-memory` — query path and analytics face | INSENSITIVE, full Unicode | `new RegExp(escapeRegex(v), 'i')` — the last one standing; #6682 closed it (see "Implementation status" below) |
  * | `driver-memory` — reference matcher (`memory-matcher`) | SENSITIVE | `value.includes(target)` |
  * | `driver-mongodb` | INSENSITIVE, full Unicode | hardcoded `$options: 'i'` |
  * | `driver-sql` family | the DIALECT's | `LIKE '%v%'` — ASCII-insensitive on SQLite (so also turso and sqlite-wasm), sensitive on Postgres, collation-dependent on MySQL |
@@ -578,20 +578,21 @@ export const RangeOperatorSchema = lazySchema(() => z.object({
  * `matches-filter.ts`; what #6520 changed is that no operator this array
  * DECLARES is answered that way any more.
  *
- * The `$contains`-family alignment the ruling above requires is likewise part
- * done rather than pending: #6518 made that family case-EXACT across the SQL
- * dialects and #6682 did the same on `driver-mongodb` (the hardcoded
- * `$options: 'i'` is off all four arms, and that driver's every face — query,
- * count, write and the aggregation `$match` — routes through the one
- * `translateFilter`, so there is no second answer). `driver-memory`'s query and
- * analytics faces still fold the whole Unicode range while its reference
- * matcher does not — the one row #6682 still tracks, and the one package that
- * answers this operator two ways.
+ * The `$contains`-family alignment the ruling above requires is now DONE on
+ * every backend: #6518 made that family case-EXACT across the SQL dialects,
+ * #6682 did the same on `driver-mongodb` (the hardcoded `$options: 'i'` is off
+ * all four arms, and that driver's every face — query, count, write and the
+ * aggregation `$match` — routes through the one `translateFilter`, so there is
+ * no second answer) and then on `driver-memory`, whose query path and analytics
+ * face lost the `i` flag their shared rule carried (`filterSubstringPattern`).
+ * That last one closed the package that answered this operator two ways: its
+ * reference matcher had been case-exact all along, so the fix moved the two
+ * that were wrong onto the one that was right.
  *
  * `FILTER_TEXT_CASES` (`filter-text-conformance.ts`) is the standard that
- * measures all of the above, and the driver-conformance ledger still carries a
- * DEBT row for `driver-memory` — on requirement 2 alone now, since #6520 closed
- * requirement 1 — so what is open stays counted rather than assumed.
+ * measures all of the above, and every driver now IMPORTS it — the
+ * driver-conformance ledger is empty. Read the open set from a run of that gate
+ * rather than from this paragraph.
  *
  * @see FILTER_TEXT_CASES — the conformance standard for every operator here.
  * @see RETIRED_FILTER_OPERATORS — why `$regex` is not in this list.
@@ -1269,6 +1270,77 @@ export type NormalizedFilter = {
 };
 
 /**
+ * [#7711] The only keys a normalized LOGICAL GROUP may carry.
+ *
+ * Written out as a value rather than derived from the schema because the
+ * field-condition branch needs it too — it is what tells a field NAME from a
+ * combinator, and a normalized field condition never spells either.
+ */
+const NORMALIZED_LOGICAL_KEYS = ['$and', '$or', '$not'] as const;
+
+/**
+ * [#7711] The author-facing refusal for a `$and` / `$or` member, or a `$not`
+ * operand, that is neither a field condition nor a logical group.
+ *
+ * It names the offending keys because that is the only part a reader cannot
+ * reconstruct: the two valid member shapes are fixed, the input's own keys are
+ * what decided which branch it was judged by and why that branch said no.
+ */
+function normalizedMemberMessage(position: string, input: unknown): string {
+  const isPlainObject = !!input && typeof input === 'object' && !Array.isArray(input);
+  const found = !isPlainObject
+    ? `got ${Array.isArray(input) ? 'an array' : input === null ? 'null' : typeof input}`
+    : `got an object with key(s) ${Object.keys(input as Record<string, unknown>)
+        .map((key) => JSON.stringify(key)).join(', ')}`;
+  return (
+    `Not a valid ${position} — ${found}. A ${position} is either a FIELD CONDITION `
+    + '({ "field": { "$op": value } }, whose keys are field names and whose operator map '
+    + 'must satisfy FieldOperatorsSchema — comparand shapes included), or a nested LOGICAL '
+    + `GROUP carrying only ${NORMALIZED_LOGICAL_KEYS.join(' / ')} and nothing else. `
+    + 'Ruled on #7711: declared = enforced (ADR-0049).'
+  );
+}
+
+/**
+ * [#7711] A field condition, with `$`-prefixed keys ruled out.
+ *
+ * The refusal is what DISCRIMINATES the member union. Without it a member is
+ * judged by whichever branch happens to answer first, and `{ $not: … }` answers
+ * on this one: `$not` reads as a field NAME, its operand reads as an operator
+ * map, and `FieldOperatorsSchema` — not `.strict()`, by the design its own
+ * docblock argues — strips every key of it and returns `{}`. So a whole negated
+ * subtree used to parse green *as a field condition* and come back erased.
+ * A normalized field condition's keys are field names (`amount`,
+ * `account.name`); none of them starts with `$`.
+ */
+const normalizedFieldConditionSchema = () =>
+  z.record(z.string(), FieldOperatorsSchema).refine(
+    (condition) => !Object.keys(condition).some((key) => key.startsWith('$')),
+    {
+      message: 'A field condition\'s keys are field names, never $-prefixed operators (#7711).',
+      // `abort` so this branch cannot become the union's spokesman. Measured on
+      // zod 4.4.3: a union whose other options all abort returns a lone
+      // CONTINUABLE failure verbatim, which made `{ $not: { c: <bad> } }` — a
+      // legitimate group shape with a bad operand — report "keys are field
+      // names", blaming `$not` for being spelled at all. Aborting keeps the
+      // union's own `error` in charge of every rejection.
+      abort: true,
+    },
+  );
+
+/**
+ * [#7711] One `$and` / `$or` member, or the `$not` operand.
+ *
+ * `position` only shapes the refusal text; the two accepted shapes are the same
+ * in all three slots, which is why they are built here once rather than spelled
+ * out per key as they were before.
+ */
+const normalizedMemberSchema = (position: string) =>
+  z.union([normalizedFieldConditionSchema(), NormalizedFilterSchema], {
+    error: (issue) => normalizedMemberMessage(position, issue.input),
+  });
+
+/**
  * Zod schema for the normalized filter AST.
  *
  * Every key is recursive, so there is no non-recursive half to infer from and
@@ -1281,30 +1353,55 @@ export type NormalizedFilter = {
  * rather than authored, and carries no `.default()` or `.transform()`, so input
  * and output are the same type. Leaving `Input` at its `unknown` default would
  * make `z.input` of anything embedding it `unknown` for no reason.
+ *
+ * ## The group branch is `.strict()`, and the field branch refuses `$`-keys (#7711)
+ *
+ * Each member used to be `z.union([z.record(z.string(), FieldOperatorsSchema),
+ * NormalizedFilterSchema])` against a NON-strict group whose every key is
+ * optional — and "all three of my optional keys are absent" is true of any
+ * object whatsoever. So the second branch was a catch-all: whenever the record
+ * branch REJECTED a field condition, the group branch accepted the very same
+ * value, and this face answered `true` for comparands no backend resolves.
+ * Measured on `main` @ `8669e5d`, all green before: `{ $and: [{ c: { $null:
+ * 'not-a-boolean' } } ] }`, `{ $and: [{ c: { $between: [1, 2, 3] } }] }`,
+ * `{ $and: [{ hello: 'world' }] }` — while `FieldOperatorsSchema`, which this
+ * schema is documented as validating against, refuses each one.
+ *
+ * The green was also LOSSY, which is the part that decided the fix over the
+ * alternative of deleting the "ENFORCED" claim from the two comments above:
+ * a value admitted by the catch-all came back parsed to `{}`, so the accepted
+ * output no longer contained the condition it was asked about. That is what
+ * makes the mixed shape the strictness might have cost — a group key and a
+ * field key at one level, `{ $or: [], c: { $eq: 1 } }` — a non-loss: it parsed
+ * to `{ $or: [] }`, the field condition dropped on the floor, so no mixed
+ * member ever survived a round-trip to begin with. Nothing legitimate spells it,
+ * and the normalizer's own output is `$and`/`$or`/`$not` groups over
+ * single-purpose field conditions.
+ *
+ * What stays accepted, deliberately: `{}` at any position, and the empty
+ * combinators — `{}`, `{ $and: [] }`, `{ $or: [] }`, `{ $or: [{}] }`,
+ * `{ $not: {} }` are boolean identities under the #5322 ruling documented on
+ * {@link FilterConditionSchema}, not malformed members, and each still parses.
+ * `{}` reaches the field-condition branch as an empty record, so the group
+ * branch is free to be strict without touching them.
+ *
+ * Scope, stated because the neighbouring face reads similar: this narrows the
+ * NORMALIZED AST only. {@link FilterConditionSchema} — the AUTHORING face every
+ * driver, `read-scope-sql` and `cel-to-filter` actually consume — is untouched
+ * and still admits sugar (implicit equality, relation nesting) by design, so no
+ * request path's row set can move with this. At the time of the change nothing
+ * in the repo called `.parse` / `.safeParse` on this schema outside this
+ * package's own tests (swept with `FilterConditionSchema`'s 20+ call sites as
+ * the positive control), so the narrowing has no measured internal caller.
  */
 export const NormalizedFilterSchema: z.ZodType<NormalizedFilter, NormalizedFilter> = z.lazy(() =>
   z.object({
-    $and: z.array(
-      z.union([
-        // Field condition: { field: { $op: value } }
-        z.record(z.string(), FieldOperatorsSchema),
-        // Nested logical group
-        NormalizedFilterSchema,
-      ])
-    ).optional(),
-    
-    $or: z.array(
-      z.union([
-        z.record(z.string(), FieldOperatorsSchema),
-        NormalizedFilterSchema,
-      ])
-    ).optional(),
-    
-    $not: z.union([
-      z.record(z.string(), FieldOperatorsSchema),
-      NormalizedFilterSchema,
-    ]).optional(),
-  })
+    $and: z.array(normalizedMemberSchema('$and member')).optional(),
+
+    $or: z.array(normalizedMemberSchema('$or member')).optional(),
+
+    $not: normalizedMemberSchema('$not operand').optional(),
+  }).strict()
 );
 
 // ============================================================================

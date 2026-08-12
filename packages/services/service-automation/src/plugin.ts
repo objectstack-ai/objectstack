@@ -288,6 +288,61 @@ interface DeclaredConnectorItem {
 }
 
 /**
+ * [#7742] Fold the connector collection of a freshly reloaded artifact into the
+ * connector items read out of the ObjectQL registry, and return the set the
+ * reconcile should treat as declared.
+ *
+ * The registry is a BOOT snapshot for connectors. `MetadataPlugin`'s reload
+ * re-ingests the artifact into the MetadataManager and announces
+ * `metadata:reloaded`; ObjectQL's handler re-ingests that payload's OBJECT
+ * definitions into the SchemaRegistry — and nothing re-ingests its `connector`
+ * items. So after a connector-only edit the registry still describes the
+ * pre-edit world, and a reconcile reading it alone is a no-op: the old
+ * connector keeps serving until the process restarts (masked in `os dev`,
+ * which restarts the serve child, but not on a Studio package publish).
+ *
+ * The fold is a REPLACEMENT scoped to what the artifact owns, not a union —
+ * a union could never observe a deletion, and deletion is half of what a
+ * reconcile is for:
+ *
+ *  - a registry entry whose name the artifact re-declares is superseded by the
+ *    artifact's (an edit re-materializes; an unchanged one still hashes to the
+ *    same signature and is left alone);
+ *  - a registry entry owned by one of the artifact's own packages but ABSENT
+ *    from it was deleted from the stack — dropped, so the reconcile tears it
+ *    down;
+ *  - every other registry entry is kept. That is the load-bearing half of the
+ *    scoping: a connector contributed by a plugin package the artifact says
+ *    nothing about must survive a reload of an unrelated app.
+ *
+ * `owners` is the artifact's package coordinates (see
+ * {@link AutomationServicePlugin.captureReloadedConnectors}). When it is empty
+ * — an artifact with no manifest id, whose items were never stamped — the
+ * middle rule cannot fire and the fold degrades to name-wise replacement: an
+ * edited or added connector is still picked up, a deleted one waits for the
+ * restart it always waited for.
+ */
+export function mergeDeclaredConnectorSources(
+    registryItems: readonly unknown[],
+    artifact: { items: readonly unknown[]; owners: ReadonlySet<string> } | undefined,
+): unknown[] {
+    if (!artifact) return [...registryItems];
+    const declaredNames = new Set(
+        artifact.items
+            .map((item) => (item as DeclaredConnectorItem)?.name)
+            .filter((name): name is string => typeof name === 'string' && name.length > 0),
+    );
+    const kept = registryItems.filter((item) => {
+        const name = (item as DeclaredConnectorItem)?.name;
+        if (typeof name === 'string' && declaredNames.has(name)) return false;
+        const owner = (item as { _packageId?: unknown })?._packageId;
+        if (typeof owner === 'string' && artifact.owners.has(owner)) return false;
+        return true;
+    });
+    return [...kept, ...artifact.items];
+}
+
+/**
  * Descriptor-only contract audit (#2612): declarative `connectors:` stack
  * entries are catalog descriptors — they are registered as metadata but never
  * reach the engine's connector registry, which is populated exclusively by
@@ -412,6 +467,23 @@ export class AutomationServicePlugin implements Plugin {
      */
     private degradedInstances = new Map<string, { attempts: number; signature: string; reason: string }>();
     private declarativeRetryTimer?: ReturnType<typeof setTimeout>;
+    /**
+     * [#7742] The connector collection carried by the most recent
+     * `metadata:reloaded` payload — the ONE view of the declarative connectors
+     * that a reload actually refreshes. See
+     * {@link AutomationServicePlugin.captureReloadedConnectors} for why the
+     * ObjectQL registry alone cannot answer after a reload, and
+     * {@link mergeDeclaredConnectorSources} for how the two are combined.
+     *
+     * Kept as plugin state rather than read off the payload at the call site
+     * because a reconcile has three callers and only one of them has a payload:
+     * a degraded-instance retry (or a later publish-triggered reconcile) firing
+     * minutes after the reload must still see the artifact the user last
+     * compiled, not the boot snapshot it would otherwise fall back to — which
+     * would tear down the freshly materialized instance and rebuild the
+     * pre-edit one.
+     */
+    private reloadedConnectors?: { items: unknown[]; owners: ReadonlySet<string> };
     /** Serializes reconcile runs — see {@link materializeDeclaredConnectors}. */
     private reconcileQueue: Promise<void> = Promise.resolve();
     private destroyed = false;
@@ -822,8 +894,16 @@ export class AutomationServicePlugin implements Plugin {
         // restart. Re-register every current flow (registerFlow re-binds its trigger
         // idempotently — ScheduleTrigger.start cancels + reschedules) and unregister
         // flows that vanished so their jobs stop.
-        ctx.hook('metadata:reloaded', async () => {
+        ctx.hook('metadata:reloaded', async (payload?: unknown) => {
             await this.resyncFlowsFromProtocol(ctx);
+            // #7742 — take the connector collection off the payload FIRST. The
+            // reconcile below used to read `listItems('connector')` alone, and
+            // nothing on the reload path ever re-ingests connector items into
+            // that registry (ObjectQL's own handler re-ingests the payload's
+            // OBJECTS and stops there) — so it reconciled the boot snapshot
+            // against itself and did nothing at all. See
+            // {@link captureReloadedConnectors}.
+            this.captureReloadedConnectors(payload);
             // A Studio publish / dev reload can add, change, or remove declarative
             // provider-bound connector instances — reconcile the live registry so
             // a newly-published instance becomes dispatchable (and a removed one
@@ -832,7 +912,7 @@ export class AutomationServicePlugin implements Plugin {
             await this.materializeDeclaredConnectors(ctx, { fatal: false });
             // Re-audit so the inert-descriptor warning stays current for plain
             // descriptors (see auditDeclaredConnectors).
-            this.auditDeclaredConnectors(ctx);
+            await this.auditDeclaredConnectors(ctx);
         });
 
         // ── Cold-boot bind via the PROTOCOL's flattened flow view ─────────────
@@ -856,7 +936,7 @@ export class AutomationServicePlugin implements Plugin {
             // Every plugin's init()/start() has completed here, so connector
             // plugins have registered their runtime connectors — the earliest
             // point the declared-vs-registered comparison is meaningful.
-            this.auditDeclaredConnectors(ctx);
+            await this.auditDeclaredConnectors(ctx);
         });
 
         // ── Silent-miss audit: unbound triggered flows (2026-07-17 eval) ──────
@@ -977,25 +1057,122 @@ export class AutomationServicePlugin implements Plugin {
     }
 
     /**
-     * Descriptor-only contract audit (#2612) — warn, once per boot/reload,
-     * about declarative `connectors:` entries that declare actions but have no
-     * runtime registration (see {@link findInertDeclaredConnectors}). Reads
-     * the same ObjectQL registry `registerApp` writes declarative connector
-     * metadata into. Best-effort: without an ObjectQL registry there is
-     * nothing declared, hence nothing to audit.
+     * [#7742] Record the connector collection of a `metadata:reloaded` payload
+     * so the reconcile that follows reads the artifact that was just loaded
+     * instead of the boot-time registry snapshot. See
+     * {@link mergeDeclaredConnectorSources} for the merge this feeds.
+     *
+     * A payload with no `metadata.connectors` ARRAY leaves the previous
+     * snapshot untouched — deliberately, and this is the distinction the whole
+     * capture turns on. Absence means "this announcement carries no connector
+     * view": a Studio publish announces `{ changed }` with no artifact at all,
+     * and a compiled artifact omits the key entirely when the stack declares no
+     * connectors. Reading either as "the stack now declares none" would tear
+     * down every live instance on the next unrelated publish. An artifact that
+     * carries an EMPTY array is the honest "none left" and does tear down —
+     * that shape is exactly what the compiler emits when the last entry is
+     * deleted from a stack that had one.
+     *
+     * `owners` scopes the deletion half of the merge to the packages this
+     * artifact speaks for: its manifest id (the same coordinate
+     * `MetadataPlugin._parseAndRegisterArtifact` stamps items with) plus any
+     * `_packageId` already stamped on the items themselves.
      */
-    private auditDeclaredConnectors(ctx: PluginContext): void {
-        if (!this.engine) return;
-        let declared: unknown[] = [];
+    private captureReloadedConnectors(payload: unknown): void {
+        const metadata = (payload as { metadata?: Record<string, unknown> } | undefined)?.metadata;
+        const items = metadata?.connectors;
+        if (!Array.isArray(items)) return;
+        const owners = new Set<string>();
+        const manifestId =
+            (metadata as { manifest?: { id?: unknown } } | undefined)?.manifest?.id
+            ?? (metadata as { id?: unknown } | undefined)?.id;
+        if (typeof manifestId === 'string' && manifestId.length > 0) owners.add(manifestId);
+        for (const item of items) {
+            const owner = (item as { _packageId?: unknown })?._packageId;
+            if (typeof owner === 'string' && owner.length > 0) owners.add(owner);
+        }
+        this.reloadedConnectors = { items, owners };
+    }
+
+    /**
+     * The declarative `connectors:` entries this plugin should treat as the
+     * current declaration — the input to both the descriptor audit and the
+     * ADR-0097 reconcile.
+     *
+     * Three sources, because no single one of them is current after a reload
+     * (#7742) — and the two reload TRIGGERS refresh different ones:
+     *
+     *  - the ObjectQL registry `registerApp` writes connector metadata into. It
+     *    is authoritative at boot and for everything a plugin package
+     *    contributes, and it is never refreshed for connectors afterwards.
+     *  - `protocol.getMetaItems({ type: 'connector' })` — the same flattened
+     *    `/meta` view the flow re-sync reads. It IS that registry read plus the
+     *    `sys_metadata` overlay rows layered over it, which is what a **Studio
+     *    package publish** promotes to active: the named production trigger.
+     *    Only consulted `post` = true (after boot). At boot the registry has
+     *    just been built and is current by construction, while this read costs
+     *    a `sys_metadata` query and can fail — neither belongs on the
+     *    fail-loudly boot path.
+     *  - the artifact carried by the last `metadata:reloaded` payload, folded
+     *    in by {@link mergeDeclaredConnectorSources} — the half that covers the
+     *    **dev artifact reload**, whose payload is the only place an edited (or
+     *    deleted) connector definition exists at all.
+     *
+     * A protocol read that answers with NOTHING while the registry has entries
+     * is treated as no answer rather than as an empty declaration: the view is
+     * a superset of the registry by construction, so an empty one means the
+     * type is not being served the way we assume — and acting on it would tear
+     * down every live connector on a reload. Same rule as the flow re-sync's
+     * `null` read: never tear down on an absent answer.
+     */
+    private async readDeclaredConnectorItems(
+        ctx: PluginContext,
+        opts: { post: boolean },
+    ): Promise<unknown[] | undefined> {
+        let registryItems: unknown[] | undefined;
         try {
             const ql = ctx.getService<{
                 registry?: { listItems?: (type: string) => unknown[] };
             }>('objectql');
-            declared = ql?.registry?.listItems?.('connector') ?? [];
+            registryItems = ql?.registry?.listItems?.('connector') ?? [];
         } catch {
-            return;
+            registryItems = undefined; // no registry service
         }
-        if (declared.length === 0) return;
+
+        let base = registryItems;
+        if (opts.post) {
+            const served = await this.readMetaItemsFromProtocol(ctx, 'connector');
+            // An empty served view is believed only when the registry is itself
+            // present and empty — then the two agree and nothing is declared.
+            // Empty while the registry HAS entries (or while there is no
+            // registry to compare it against) is "not served the way we assume".
+            if (served && (served.length > 0 || registryItems?.length === 0)) {
+                base = served;
+            }
+        }
+
+        // Before #7742 a missing registry ended the read. It still does — unless
+        // a reload declared connectors, which is a declaration in its own right.
+        if (base === undefined) {
+            if (!this.reloadedConnectors) return undefined;
+            base = [];
+        }
+        return mergeDeclaredConnectorSources(base, this.reloadedConnectors);
+    }
+
+    /**
+     * Descriptor-only contract audit (#2612) — warn, once per boot/reload,
+     * about declarative `connectors:` entries that declare actions but have no
+     * runtime registration (see {@link findInertDeclaredConnectors}). Reads the
+     * same declaration the reconcile does ({@link readDeclaredConnectorItems}),
+     * so the warning describes the stack as it is NOW rather than as it booted
+     * (#7742). Best-effort: with nothing declared there is nothing to audit.
+     */
+    private async auditDeclaredConnectors(ctx: PluginContext): Promise<void> {
+        if (!this.engine) return;
+        // Both call sites are post-boot hooks (`kernel:ready`, `metadata:reloaded`).
+        const declared = await this.readDeclaredConnectorItems(ctx, { post: true });
+        if (!declared || declared.length === 0) return;
         const live = new Set(this.engine.getConnectorDescriptors().map((d) => d.name));
         const inert = findInertDeclaredConnectors(declared, live);
         if (inert.length === 0) return;
@@ -1032,8 +1209,14 @@ export class AutomationServicePlugin implements Plugin {
      *    entry's old connector keeps serving until the new one materializes
      *    successfully.
      *
-     * Reads the same ObjectQL registry the descriptor audit uses; without one
-     * there is nothing declared, hence nothing to reconcile.
+     * Reads the same declaration the descriptor audit does
+     * ({@link readDeclaredConnectorItems}); with nothing declared there is
+     * nothing to reconcile. That reader is what makes a RELOAD reconcile
+     * meaningful at all (#7742): reading only the ObjectQL registry — which no
+     * reload path re-ingests connector items into — reconciled the boot
+     * snapshot against itself, so every run of this function on
+     * `metadata:reloaded` was a no-op and the pre-edit connector kept serving
+     * until the process restarted.
      *
      * **Upstream-availability exception (#3017):** a provider factory that
      * throws the `CONNECTOR_UPSTREAM_UNAVAILABLE` marker (e.g. `connector-mcp`
@@ -1063,15 +1246,11 @@ export class AutomationServicePlugin implements Plugin {
         // rescheduled at the end if instances remain degraded.
         this.clearDeclarativeRetryTimer();
 
-        let declared: unknown[] = [];
-        try {
-            const ql = ctx.getService<{
-                registry?: { listItems?: (type: string) => unknown[] };
-            }>('objectql');
-            declared = ql?.registry?.listItems?.('connector') ?? [];
-        } catch {
-            return; // no registry — nothing declared
-        }
+        // `post` = every reconcile that is not the boot one: the reload hook and
+        // the degraded-retry timer alike may see connectors a Studio publish
+        // wrote after boot.
+        const declared = await this.readDeclaredConnectorItems(ctx, { post: !opts.fatal });
+        if (!declared) return; // no registry, no reloaded artifact — nothing declared
 
         // Report a reconcile problem: fatal (boot) throws; soft (reload) logs.
         //
@@ -1529,6 +1708,21 @@ export class AutomationServicePlugin implements Plugin {
     private async readFlowDefsFromProtocol(
         ctx: PluginContext,
     ): Promise<Array<{ name?: string }> | null> {
+        return (await this.readMetaItemsFromProtocol(ctx, 'flow')) as Array<{ name?: string }> | null;
+    }
+
+    /**
+     * One read of the protocol's flattened `/meta/<type>` view, normalized and
+     * stripped of read decorations — the shared body of
+     * {@link readFlowDefsFromProtocol} and the connector half of
+     * {@link readDeclaredConnectorItems} (#7742). `null` means "no answer"
+     * (no protocol service, or the read failed); callers must treat that as
+     * leave-everything-alone, never as an empty declaration.
+     */
+    private async readMetaItemsFromProtocol(
+        ctx: PluginContext,
+        type: string,
+    ): Promise<unknown[] | null> {
         let protocol: { getMetaItems?(q: { type: string }): Promise<unknown> } | undefined;
         try {
             protocol = ctx.getService('protocol');
@@ -1539,25 +1733,25 @@ export class AutomationServicePlugin implements Plugin {
 
         let raw: unknown;
         try {
-            raw = await protocol.getMetaItems({ type: 'flow' });
+            raw = await protocol.getMetaItems({ type });
         } catch (err) {
             // #5048 — structured `meta`, not string interpolation (same reason as
             // the register seams below; see ./thrown-cause-diagnostics.ts).
             ctx.logger.warn(
-                "[Automation] flow read from protocol failed: getMetaItems('flow')",
+                `[Automation] ${type} read from protocol failed: getMetaItems('${type}')`,
                 describeThrownForLog(err),
             );
             return null;
         }
 
         // getMetaItems hands back a bare array or an `{ items: [...] }` envelope,
-        // and each entry is either the flow doc or an `{ item: <flow> }` wrapper.
+        // and each entry is either the doc itself or an `{ item: <doc> }` wrapper.
         const list = Array.isArray(raw) ? raw : (((raw as { items?: unknown[] })?.items) ?? []);
         return list.map((entry) => {
             const doc = entry && typeof entry === 'object' && 'item' in entry
                 ? (entry as { item: unknown }).item
                 : entry;
-            return stripReadDecorations(doc) as { name?: string };
+            return stripReadDecorations(doc);
         });
     }
 

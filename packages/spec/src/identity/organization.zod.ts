@@ -80,11 +80,19 @@ export const MemberSchema = lazySchema(() => z.object({
   userId: z.string().describe('User ID'),
   
   /**
-   * Member's role within the organization
-   * Common roles: 'owner', 'admin', 'member', 'guest'
-   * Can be customized per application
+   * Member's role within the organization.
+   *
+   * The vocabulary is CLOSED (ADR-0108): `owner`, `admin`, `delegated_admin`,
+   * `member` — `BUILTIN_MEMBERSHIP_ROLES` / `BUILTIN_MEMBERSHIP_ROLE_OPTIONS`
+   * in `./membership-role.js`, which is what `sys_member.role` and
+   * `sys_invitation.role` register as their select options. Nothing widens the
+   * list at boot, and a name outside it is refused at the door
+   * (`ROLE_NOT_FOUND`) rather than stored — a stack that needs another
+   * business role declares a `position`, not a role. Typed `z.string()` here
+   * because the wire shape mirrors better-auth's own column, not because the
+   * set is open.
    */
-  role: z.string().describe('Member role (e.g., owner, admin, member, guest)'),
+  role: z.string().describe('Member role (owner, admin, delegated_admin, member — ADR-0108 closed vocabulary)'),
   
   /**
    * Member creation timestamp
@@ -141,10 +149,13 @@ export const InvitationSchema = lazySchema(() => z.object({
   email: z.string().email().describe('Invitee email address'),
   
   /**
-   * Role the invitee will receive upon accepting
-   * Common roles: 'admin', 'member', 'guest'
+   * Role the invitee will receive upon accepting.
+   *
+   * Same closed vocabulary as {@link MemberSchema}'s `role` (ADR-0108):
+   * `owner`, `admin`, `delegated_admin`, `member`. A name outside it is
+   * refused at the door (`ROLE_NOT_FOUND`) before any invitation row exists.
    */
-  role: z.string().describe('Role to assign upon acceptance'),
+  role: z.string().describe('Role to assign upon acceptance (owner, admin, delegated_admin, member — ADR-0108 closed vocabulary)'),
   
   /**
    * Invitation status

@@ -131,6 +131,11 @@ export {
     nextHttpRetryDelayMs,
     newDeliveryId as newHttpDeliveryId,
     DEFAULT_HTTP_TIMEOUT_MS,
+    // The signing pair (#7722) — exported so a receiver-side verifier (or a
+    // test) recomputes the HMAC over exactly the bytes the sender signed.
+    deliveryBody as httpDeliveryBody,
+    signBody as signHttpBody,
+    SIGNATURE_HEADER as HTTP_SIGNATURE_HEADER,
     type FetchImpl,
     type HttpAttemptOutcome,
 } from './http-sender.js';

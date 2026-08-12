@@ -12,13 +12,15 @@
  *
  * `.claude/skills/pm-dispatch/SKILL.md` is read in full by every seat session
  * and every Routine fire. It reached 3,013 lines (~235 KB) before #7341's
- * extraction moved the long incident narratives into
- * `.claude/skills/pm-dispatch/references/` (loaded on demand), landing the
- * main file at 2,997 lines. #5925 item 7's approved intent is that the main
- * file's growth rate goes to ZERO: new rules stay in main, new case law lands
- * in `references/incidents.md` (append-only). Without a gate that intent
- * erodes one well-meaning paragraph at a time — the same way the file got to
- * 3,000 in the first place.
+ * extraction, and 2,568 before the #7885 principles-only rewrite (maintainer
+ * ruling 2026-08-12: 「现有的项目经理 skills 应该大幅简化,只需要说原则,不需要
+ * 写细节」) landed it at the current ceiling. The main file carries principles,
+ * the state machine and lookup tables ONLY; at-that-moment operational detail
+ * lives in `.claude/skills/pm-dispatch/references/` (loaded on demand), and
+ * incident case law lives in git history, not in any file (same ruling:
+ * issue-ID dereference is deprecated — see check-skill-id-lint.mjs). Without a
+ * gate that intent erodes one well-meaning paragraph at a time — the same way
+ * the file got to 3,000 in the first place.
  *
  * ## The ratchet discipline (shrink-only)
  *
@@ -40,10 +42,11 @@ import process from 'node:process';
 
 const SKILL_PATH = new URL('../../.claude/skills/pm-dispatch/SKILL.md', import.meta.url);
 
-// Post-#7341-extraction count: 2,997. Headroom ≈ 50 lines for rule edits
-// between extractions. Shrink-only: lower freely, raise only with a maintainer
-// ruling quoted in the raising PR (see header).
-export const MAX_LINES = 3050;
+// Post-#7885-rewrite count: 686 — the principles-only edition (single file,
+// per-role duty sections, zero issue-ID citations; references/ carries the
+// on-demand fact tables). Shrink-only: lower freely, raise only with a
+// maintainer ruling quoted in the raising PR (see header).
+export const MAX_LINES = 686;
 
 export function verdict(lineCount, maxLines) {
   if (lineCount === 0) return { ok: false, msg: 'SKILL.md read as empty — refusing to treat a missing/empty input as a pass (#4690).' };
@@ -52,8 +55,8 @@ export function verdict(lineCount, maxLines) {
       ok: false,
       msg:
         `SKILL.md is ${lineCount} lines; the ratchet ceiling is ${maxLines}. ` +
-        'Move narrative to .claude/skills/pm-dispatch/references/ (incidents.md is append-only case law) ' +
-        'instead of growing the hot file — raising the ceiling requires a maintainer ruling quoted in the PR.',
+        'Keep the hot file principles-only: move at-that-moment operational detail to ' +
+        '.claude/skills/pm-dispatch/references/ — raising the ceiling requires a maintainer ruling quoted in the PR.',
     };
   }
   return { ok: true, msg: `SKILL.md is ${lineCount} lines (ceiling ${maxLines}; headroom ${maxLines - lineCount}).` };

@@ -143,6 +143,7 @@ describe('AppPlugin', () => {
             mockI18n = {
                 loadTranslations: vi.fn(),
                 setDefaultLocale: vi.fn(),
+                setSupportedLocales: vi.fn(),
                 getLocales: vi.fn().mockReturnValue([]),
                 getDefaultLocale: vi.fn().mockReturnValue('en'),
             };
@@ -182,6 +183,86 @@ describe('AppPlugin', () => {
             await plugin.start!(mockContext);
 
             expect(mockI18n.setDefaultLocale).toHaveBeenCalledWith('zh-CN');
+        });
+
+        // ── #7679: `supportedLocales` is threaded like `defaultLocale` ──────
+        // This layer is the only one that can see the app's declaration, so
+        // these assertions are about the HANDOFF; what the provider then does
+        // with it is pinned in core / service-i18n, and the two ends are wired
+        // together in `i18n-supported-locales.test.ts`.
+
+        it('should thread supportedLocales from i18n config to the i18n service', async () => {
+            const bundle = {
+                id: 'com.test.supported',
+                i18n: { defaultLocale: 'en', supportedLocales: ['en', 'zh-CN'] },
+                translations: [{ en: { messages: { hello: 'Hello' } } }],
+            };
+            const plugin = new AppPlugin(bundle);
+            await plugin.start!(mockContext);
+
+            expect(mockI18n.setSupportedLocales).toHaveBeenCalledWith(['en', 'zh-CN']);
+        });
+
+        it('should thread supportedLocales even when the app ships no bundles of its own', async () => {
+            // The showcase's shape: the app declares which locales it offers,
+            // while the translations arrive from the platform plugins. An
+            // early return on "no bundles" here would leave exactly the app
+            // this issue was filed against unnarrowed.
+            const bundle = {
+                id: 'com.test.declared-only',
+                i18n: { defaultLocale: 'en', supportedLocales: ['en', 'zh-CN'] },
+            };
+            const plugin = new AppPlugin(bundle);
+            await plugin.start!(mockContext);
+
+            expect(mockI18n.setSupportedLocales).toHaveBeenCalledWith(['en', 'zh-CN']);
+            expect(mockI18n.loadTranslations).not.toHaveBeenCalled();
+        });
+
+        it('should NOT touch supportedLocales when the app declares none', async () => {
+            // Not merely "does not narrow" — does not CALL. Several AppPlugins
+            // share one kernel (the config apps are AppPlugins too), so an app
+            // with no `i18n` block clearing the declaration would undo the
+            // narrowing a sibling app had just set.
+            const bundle = {
+                id: 'com.test.undeclared',
+                i18n: { defaultLocale: 'zh-CN' },
+                translations: [{ en: { messages: { hello: 'Hello' } } }],
+            };
+            const plugin = new AppPlugin(bundle);
+            await plugin.start!(mockContext);
+
+            expect(mockI18n.setSupportedLocales).not.toHaveBeenCalled();
+            expect(mockI18n.setDefaultLocale).toHaveBeenCalledWith('zh-CN');
+        });
+
+        it('should treat an empty supportedLocales declaration as no declaration', async () => {
+            const bundle = {
+                id: 'com.test.emptylocales',
+                i18n: { defaultLocale: 'en', supportedLocales: [] },
+                translations: [{ en: { messages: { hello: 'Hello' } } }],
+            };
+            const plugin = new AppPlugin(bundle);
+            await plugin.start!(mockContext);
+
+            expect(mockI18n.setSupportedLocales).not.toHaveBeenCalled();
+        });
+
+        it('should skip narrowing on a provider that does not implement setSupportedLocales', async () => {
+            // `setSupportedLocales` is OPTIONAL on `II18nService` (as
+            // `setDefaultLocale` is), so a third-party provider must keep
+            // booting rather than crash on a method it never declared.
+            delete mockI18n.setSupportedLocales;
+            const bundle = {
+                id: 'com.test.oldprovider',
+                i18n: { defaultLocale: 'en', supportedLocales: ['en'] },
+                translations: [{ en: { messages: { hello: 'Hello' } } }],
+            };
+            const plugin = new AppPlugin(bundle);
+            await plugin.start!(mockContext);
+
+            expect(mockI18n.loadTranslations).toHaveBeenCalledWith('en', { messages: { hello: 'Hello' } });
+            expect(mockContext.logger.error).not.toHaveBeenCalled();
         });
 
         it('should auto-register in-memory i18n fallback when service is not registered', async () => {

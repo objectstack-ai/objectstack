@@ -329,8 +329,9 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       headers_json: {
         label: "Headers JSON"
       },
-      signing_secret: {
-        label: "HMAC Secret"
+      signature: {
+        label: "HMAC Signature",
+        help: "X-Objectstack-Signature sent with this delivery (sha256=<hex>). Computed at enqueue; the signing secret is never persisted."
       },
       timeout_ms: {
         label: "Timeout (ms)"

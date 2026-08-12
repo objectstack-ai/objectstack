@@ -98,7 +98,6 @@ export const jaJP: TranslationData = {
         nav_datasources: { label: 'データソース' },
 
         nav_oauth_apps: { label: 'OAuth アプリケーション' },
-        nav_jwks: { label: '署名キー (JWKS)' },
         nav_accounts: { label: 'ID 連携' },
         nav_user_preferences: { label: 'ユーザー設定' },
       },

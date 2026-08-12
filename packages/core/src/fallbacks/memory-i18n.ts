@@ -1,5 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { normalizeSupportedLocales } from '@objectstack/spec/system';
+
 /**
  * Recursively merge `source` into `target`. Nested plain objects are merged
  * rather than replaced, so multiple plugins can each contribute their own
@@ -84,6 +86,13 @@ export function createMemoryI18n() {
   // while authored values win over static bundle values on read.
   const authored = new Map<string, Record<string, unknown>>();
   let defaultLocale = 'en';
+  // [#7679] The app's DECLARED `i18n.supportedLocales`, injected by
+  // `AppPlugin.loadTranslations` the same way `defaultLocale` is. `undefined`
+  // means the app declared nothing, which must keep reporting every loaded
+  // locale. Held as a read-time filter, never as a prune of `translations`:
+  // platform plugins push their bundles at `kernel:ready`, after the app
+  // plugin has run, so anything pruned once would grow back.
+  let supportedLocales: string[] | undefined;
 
   /**
    * Resolve a dot-notation key from a nested object.
@@ -170,8 +179,29 @@ export function createMemoryI18n() {
       }
     },
 
+    /**
+     * Report the locales this stack offers.
+     *
+     * [#7679] When the app declared `i18n.supportedLocales`, that declaration
+     * IS the answer — in declared order, and including a declared locale no
+     * bundle was ever loaded for (declared-but-unserved). Reporting the
+     * declaration rather than an intersection is what gives a client the
+     * signal that the locale it is being offered has nothing behind it yet;
+     * quietly dropping it would leave the gap invisible on both sides. It is
+     * also the only answer that does not depend on how much had loaded by the
+     * time this was called.
+     *
+     * With nothing declared, the loaded set — the behaviour every app that
+     * never opted in already has.
+     */
     getLocales(): string[] {
+      if (supportedLocales) return [...supportedLocales];
       return [...new Set([...translations.keys(), ...authored.keys()])];
+    },
+
+    /** @see II18nService.setSupportedLocales — [#7679] */
+    setSupportedLocales(locales: readonly string[] | undefined): void {
+      supportedLocales = normalizeSupportedLocales(locales);
     },
 
     getDefaultLocale(): string {

@@ -26,7 +26,23 @@ export interface MessagingServiceSurface {
         source?: { object: string; id: string };
         actorId?: string;
         channels?: string[];
-    }): Promise<{ notificationId: string; delivered: number; failed: number }>;
+    }): Promise<{
+        notificationId: string;
+        /** Deliveries a channel ACCEPTED — a terminal, observed outcome. */
+        delivered: number;
+        failed: number;
+        /**
+         * Deliveries durably accepted into the messaging outbox but NOT yet
+         * attempted; their real outcome lands on `sys_notification_delivery`
+         * afterwards (#7747).
+         *
+         * Optional because this is a STRUCTURAL mirror of a service resolved at
+         * runtime: an older or third-party messaging implementation may not
+         * report it, and absent reads as "nothing is in flight" — which is the
+         * only answer such a stack could honestly give.
+         */
+        enqueued?: number;
+    }>;
 }
 
 /**
@@ -279,18 +295,46 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                     actorId,
                     channels: channels.length ? channels : undefined,
                 });
+                const delivered = Number(result.delivered) || 0;
+                const enqueued = Number(result.enqueued) || 0;
                 return {
                     success: true,
                     output: {
                         notificationId: result.notificationId,
-                        delivered: result.delivered,
+                        delivered,
+                        // Surfaced so a flow author templating the outcome can
+                        // tell "sent" from "handed to the outbox", and so the
+                        // notification id above has a stated reason to be
+                        // followed into `sys_notification_delivery`.
+                        enqueued,
                         failed: result.failed,
                     },
                     // A notification IS the action for a nudge/alert sweep, so it
                     // counts toward `acted` (#4354) — otherwise the flow whose
                     // whole job is to notify would report acting on nothing, and
                     // the broken-sweep detector would fire on every healthy run.
-                    metrics: { acted: Number(result.delivered) || 0 },
+                    //
+                    // But only a delivery a channel ACCEPTED is countable. With
+                    // the outbox in play (ADR-0030 P1) `emit()` returns once the
+                    // rows are durable and the dispatcher decides the outcome
+                    // afterwards — including dead-lettering an unregistered
+                    // channel — so counting the enqueue as `acted` made the run
+                    // summary assert a delivery that `sys_notification_delivery`
+                    // recorded as `dead` (#7747). The honest answer at the moment
+                    // the run settles is "an effect I cannot count yet", which is
+                    // exactly `unmeasuredEffect` — the same qualifier a
+                    // `connector_action` uses, and pointedly NOT a bare
+                    // `acted: 0`, which would claim the run did nothing and trip
+                    // the broken-sweep alert on every healthy notify. The alert
+                    // is `selected > 0 AND acted = 0 AND unmeasured = 0`, so a
+                    // pending delivery correctly suppresses it while refusing to
+                    // claim success.
+                    //
+                    // Waiting for the real outcome is not on the table: a notify
+                    // node must not block a flow on a downstream channel.
+                    metrics: enqueued > 0
+                        ? { ...(delivered > 0 ? { acted: delivered } : {}), unmeasuredEffect: true }
+                        : { acted: delivered },
                 };
             } catch (err) {
                 return { success: false, error: `notify failed: ${(err as Error).message}` };

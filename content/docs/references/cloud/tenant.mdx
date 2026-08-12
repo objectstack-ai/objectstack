@@ -158,6 +158,12 @@ const result = PackageInstallationSchema.parse(data);
 
 ---
 
+## TenantPlan
+
+Opaque plan/tier identifier. The vocabulary is control-plane config owned by the cloud distribution, not protocol — this schema accepts any string and does not enumerate valid values. Convention: an empty or unrecognized value is treated as the free tier by cloud-side readers (not enforced by this schema).
+
+**Type:** `string`
+
 
 ---
 

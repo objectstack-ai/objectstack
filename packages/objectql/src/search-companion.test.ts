@@ -142,9 +142,14 @@ describe('expandSearchToFilter with companion column (query-time, additive)', ()
 
   it('ORs the companion clause for latin terms (lowercased)', () => {
     const filter = expandSearchToFilter('ZhangWei', { fields });
+    // [#7641] The two clauses use DIFFERENT operators, on purpose. The
+    // companion is a normalized blob — lowercase by construction on the column
+    // side and lowercased here on the term side — so case-SENSITIVE
+    // `$contains` over two already-folded values is exact.
     expect(filter.$or).toContainEqual({ [SEARCH_COMPANION_FIELD]: { $contains: 'zhangwei' } });
-    // Source-field clauses are untouched alongside it.
-    expect(filter.$or).toContainEqual({ name: { $contains: 'ZhangWei' } });
+    // The SOURCE field compares against raw stored text, so it needs the
+    // folding operator; it carries the term at the caller's own casing.
+    expect(filter.$or).toContainEqual({ name: { $icontains: 'ZhangWei' } });
   });
 
   it('skips the companion clause for CJK and letterless terms', () => {
