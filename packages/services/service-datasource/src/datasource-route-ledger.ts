@@ -34,7 +34,8 @@
  * the fix. It is not: the two spellings are different mounted routes, in
  * different packages, and BOTH are live. Two of them do overlap —
  * `GET /:name/remote-tables` here and `GET /:name/external/tables` there both
- * reach `IExternalDatasourceService.listRemoteTables`, as do
+ * reach `IExternalDatasourceService.listRemoteTables` (they diverge on `?schema=`,
+ * which only the federation twin forwards — #7955), as do
  * `POST /:name/object-draft` and `POST /:name/external/tables/:remote/draft`
  * over `generateObjectDraft`. That overlap is known and was deliberately
  * reconciled rather than removed: #4249 gave the two paths ONE failure contract
@@ -69,7 +70,7 @@
  * `target: '/api/v1/datasources/${ctx.recordId}/test'`). Whether the SDK SHOULD
  * gain a datasource-lifecycle surface is a product decision, and inventing one
  * here — by writing ten `gap` rows — would be making that decision inside a
- * bookkeeping fix. It is filed separately instead; promoting any row to `sdk`
+ * bookkeeping fix. It is filed as #7954 instead; promoting any row to `sdk`
  * belongs in the PR that adds the method.
  *
  * This module is package-internal (not exported from the index): it is the
