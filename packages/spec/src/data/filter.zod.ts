@@ -518,7 +518,7 @@ export const RangeOperatorSchema = lazySchema(() => z.object({
  * | surface | `$contains` case behaviour | mechanism |
  * |---|---|---|
  * | `formula` `matchesFilterCondition` | SENSITIVE | `actual.includes(v)` |
- * | `driver-memory` — query path and analytics face | INSENSITIVE, full Unicode | `new RegExp(escapeRegex(v), 'i')` — the last one standing, until #6682 |
+ * | `driver-memory` — query path and analytics face | INSENSITIVE, full Unicode | `new RegExp(escapeRegex(v), 'i')` — the last one standing; #6682 closed it (see "Implementation status" below) |
  * | `driver-memory` — reference matcher (`memory-matcher`) | SENSITIVE | `value.includes(target)` |
  * | `driver-mongodb` | INSENSITIVE, full Unicode | hardcoded `$options: 'i'` |
  * | `driver-sql` family | the DIALECT's | `LIKE '%v%'` — ASCII-insensitive on SQLite (so also turso and sqlite-wasm), sensitive on Postgres, collation-dependent on MySQL |

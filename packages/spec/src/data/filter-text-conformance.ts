@@ -92,7 +92,7 @@
  * @see https://github.com/objectstack-ai/objectstack/issues/5701 (this table)
  * @see https://github.com/objectstack-ai/objectstack/issues/5702 (the SQL family — landed)
  * @see https://github.com/objectstack-ai/objectstack/issues/6520 ($icontains on the JS faces — landed)
- * @see https://github.com/objectstack-ai/objectstack/issues/6682 (the $contains family — mongodb landed, memory open)
+ * @see https://github.com/objectstack-ai/objectstack/issues/6682 (the $contains family — mongodb and memory both landed)
  */
 
 import type { FilterCondition } from './filter.zod';

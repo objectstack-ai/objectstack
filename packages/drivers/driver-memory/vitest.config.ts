@@ -11,6 +11,8 @@ export default defineConfig({
   resolve: {
     alias: {
       '@objectstack/core': path.resolve(__dirname, '../../core/src/index.ts'),
+      // [ADR-0105 D1] `resolveTenancyPosture()`, read by the #6915 tenancy guard.
+      '@objectstack/types': path.resolve(__dirname, '../../types/src/index.ts'),
       '@objectstack/spec/api': path.resolve(__dirname, '../../spec/src/api/index.ts'),
       '@objectstack/spec/contracts': path.resolve(__dirname, '../../spec/src/contracts/index.ts'),
       '@objectstack/spec/data': path.resolve(__dirname, '../../spec/src/data/index.ts'),

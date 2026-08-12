@@ -5,9 +5,9 @@
  *
  * The picker / list / command-palette surfaces all send a `$search` string;
  * historically the data layer dropped it (a silent no-op). This module turns
- * that string into a driver-agnostic `$or` of `$contains` predicates across the
+ * that string into a driver-agnostic `$or` of `$icontains` predicates across the
  * object's *server-resolved* searchable fields — every driver already executes
- * `$or` + `$contains`, so no driver changes are needed.
+ * `$or` + `$icontains`, so no driver changes are needed.
  *
  * Field resolution (server-side, never client-trusted) lives in
  * `@objectstack/spec/data` (`search-fields.ts`) since #4254, because the REST
@@ -18,7 +18,20 @@
  * Matching: case-insensitive; multiple whitespace-separated terms are AND-ed
  * (every term must hit some field); fields are OR-ed. `select`/`status` columns
  * store a value but users type the label, so the term is mapped to option
- * values whose label matches (with a raw-value `$contains` fallback).
+ * values whose label matches (with a raw-value `$icontains` fallback).
+ *
+ * [#7641] The case-insensitive operator is `$icontains`, NOT `$contains`.
+ * `$contains` is contractually case-SENSITIVE (#4706 Q2 = A), so the
+ * `$contains` this module emitted until #7641 made the sentence above a
+ * declaration the executor did not honour on textual fields: SQLite's `LIKE`
+ * used to fold ASCII incidentally and hid it, and #6518's `LIKE`→`GLOB` change
+ * removed that accident. Nothing about either OPERATOR changed here — only
+ * which one `$search` compiles to. Every filter face already answers
+ * `$icontains` (#6520 / #6682): both `driver-sql` compilers (and
+ * `driver-sqlite-wasm` / turso-local by inheritance), turso's independent
+ * `RemoteTransport`, service-analytics' read-scope and cube lowerings,
+ * `formula`'s RLS matcher, objectql's own HAVING evaluator, and the frozen
+ * `driver-memory` / `driver-mongodb` (#5499).
  *
  * Pinyin recall (#2486): when the object carries the hidden `__search`
  * companion column (provisioned by the SchemaRegistry when
@@ -87,10 +100,14 @@ function optionValuesMatching(meta: SearchFieldMeta, term: string): unknown[] {
 function fieldClausesForTerm(field: string, term: string, meta: SearchFieldMeta): any[] {
   if (SEARCHABLE_ENUM_TYPES.has(meta?.type ?? '')) {
     const values = optionValuesMatching(meta, term);
+    // The label→value path is already case-insensitive in JS (see
+    // `optionValuesMatching`) and emits an exact-value `$in` — untouched by
+    // #7641. Only the raw-value FALLBACK below is an operator clause, and it
+    // folds for the same reason the textual clause does.
     if (values.length > 0) return [{ [field]: { $in: values } }];
-    return [{ [field]: { $contains: term } }];
+    return [{ [field]: { $icontains: term } }];
   }
-  return [{ [field]: { $contains: term } }];
+  return [{ [field]: { $icontains: term } }];
 }
 
 /**
@@ -115,6 +132,14 @@ export function expandSearchToFilter(raw: unknown, opts: ExpandSearchOptions): a
   // stores lowercase normalized forms, so the term is lowercased; CJK terms
   // skip the clause (they hit the source columns directly and can never match
   // the ASCII companion).
+  //
+  // [#7641] This clause deliberately stays `$contains`: the companion is a
+  // NORMALIZED blob that is already lowercase on BOTH sides (the column by
+  // construction, the term by `.toLowerCase()` below), so a case-SENSITIVE
+  // operator over two folded values is exact, not a case bug. This is a
+  // different mechanism from the source-column clauses in
+  // `fieldClausesForTerm`, which compare against raw stored text and therefore
+  // need `$icontains`. Do not "align" the two.
   const hasCompanion = !!opts.fields[SEARCH_COMPANION_FIELD];
   const andClauses = terms.map((term) => {
     const clauses = searchFields.flatMap((f) => fieldClausesForTerm(f, term, opts.fields[f] || {}));

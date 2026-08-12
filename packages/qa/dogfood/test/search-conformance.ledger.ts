@@ -20,7 +20,12 @@ import type { ConformanceRow } from '@objectstack/verify';
 export const SEARCH_SURFACE: ConformanceRow[] = [
   {
     id: 'search-executor',
-    summary: '`$search` server-resolved cross-field executor (terms AND-ed, fields OR-ed, case-insensitive `$contains`)',
+    // [#7641] "case-insensitive `$contains`" was self-contradictory under
+    // #4706 Q2 = A, which rules `$contains` case-SENSITIVE. The executor now
+    // emits `$icontains` — the operator that actually folds — so the row names
+    // it. Neither operator's own semantics moved; only what `$search` compiles
+    // to did.
+    summary: '`$search` server-resolved cross-field executor (terms AND-ed, fields OR-ed, case-insensitive via `$icontains`)',
     surface: 'spec/api/query.zod.ts:$search (QueryParams `search`)',
     state: 'enforced',
     enforcement: 'objectql/src/engine.ts (find AST expansion) → objectql/src/search-filter.ts expandSearchToFilter',

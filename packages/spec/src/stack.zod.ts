@@ -1175,11 +1175,19 @@ function validateCrossReferences(config: ObjectStackDefinition): string[] {
   // Scope of the modal branch is the same #6739 ruling the other two arms
   // read: a `type: 'modal'` target names a PAGE, only.
   //
-  // `objectName` is deliberately NOT checked here. The key exists on this
-  // shape (unlike the inline one), but what it should MEAN on an action
-  // already embedded on an object — a mere existence check, or a consistency
-  // check against the owning object's name — is an open contract question,
-  // filed separately rather than settled as a side effect of this walk.
+  // Third arm: `objectName` → declared object, mirrored onto the embedded
+  // position (#7456, Option A — existence check, ruled 2026-08-11/12). This
+  // is the identical check the registered walk applies above; only the
+  // SUBJECT differs, same as the flow/modal arms just above. It does NOT
+  // give `objectName` new meaning at this position — `mergeActionsIntoObjects`
+  // still builds its map only from `config.actions`, so the key stays inert
+  // for merge purposes. It only makes a dangling value refused at authoring
+  // time, same as it already is in the registered position.
+  //
+  // Deliberately NOT checked: whether `objectName` here must equal the
+  // owning object's own name (Option B), or whether the key should be
+  // retired at this position instead (Option C) — both stay open per the
+  // issue and are not foreclosed by this existence check.
   if (config.objects) {
     for (const obj of config.objects) {
       for (const action of obj.actions ?? []) {
@@ -1192,6 +1200,12 @@ function validateCrossReferences(config: ObjectStackDefinition): string[] {
         if (action.type === 'modal' && action.target && pageNames.size > 0 && !pageNames.has(action.target)) {
           errors.push(
             `Action '${action.name}' on object '${obj.name}' references page '${action.target}' (via modal target) which is not defined in pages.`,
+          );
+        }
+
+        if (action.objectName && !objectNames.has(action.objectName)) {
+          errors.push(
+            `Action '${action.name}' on object '${obj.name}' references object '${action.objectName}' which is not defined in objects.`,
           );
         }
       }

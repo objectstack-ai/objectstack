@@ -181,6 +181,44 @@ describe('clampManagedObjectWrites', () => {
     expect(objects.sys_account.allowEdit).toBe(false);
   });
 
+  /**
+   * #7692 widened `userActions.create` to the same boolean-or-object union, so
+   * this clamp had to stop testing it with a bare `create !== true`. Without
+   * that change an object opting the create affordance IN through the object
+   * form would be clamped OFF here — a silent permission-hint tightening that
+   * `edit`/`delete` beside it do not suffer. Read `create` the same way, with
+   * the same fail-closed rule when `enabled` is omitted.
+   */
+  it('treats the #7692 create object form by its enabled flag only, like edit/delete', () => {
+    const schemas: Record<string, ManagedSchemaLike> = {
+      sys_user: {
+        managedBy: 'better-auth',
+        userActions: { create: { enabled: true, visibleWhen: 'record.status == "draft"' } as never },
+      },
+      sys_account: {
+        managedBy: 'better-auth',
+        // enabled omitted → NOT an explicit opt-in; the clamp stays fail-closed.
+        userActions: { create: { visibleWhen: 'record.status == "draft"' } as never },
+      },
+    };
+    const objects: Record<string, any> = {
+      sys_user: { allowCreate: true },
+      sys_account: { allowCreate: true },
+    };
+    clampManagedObjectWrites(objects, (n) => schemas[n]);
+    expect(objects.sys_user.allowCreate).toBe(true);
+    expect(objects.sys_account.allowCreate).toBe(false);
+    // The bare boolean form is untouched by the widening.
+    const boolObjects: Record<string, any> = { sys_user: { allowCreate: true }, sys_member: { allowCreate: true } };
+    clampManagedObjectWrites(boolObjects, (n) => (
+      n === 'sys_user'
+        ? { managedBy: 'better-auth', userActions: { create: true } }
+        : { managedBy: 'better-auth' }
+    ));
+    expect(boolObjects.sys_user.allowCreate).toBe(true);
+    expect(boolObjects.sys_member.allowCreate).toBe(false);
+  });
+
   it('fold + clamp compose to permission ∩ guard for a platform admin', () => {
     // As produced for a platform admin (admin_full_access '*' modifyAll) who
     // also holds organization_admin (explicit managed denies).

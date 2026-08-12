@@ -70,3 +70,5 @@ behaviour was not openness but strip — an authored `meta` arrived as `{}`.
 
 All three example apps (`app-showcase`, `app-crm`, `app-todo`) validate unchanged, so no
 ADR-0087 conversion accompanies this change.
+
+<!-- adr-0087: registered authoring-schemas-strict-unknown-keys -->

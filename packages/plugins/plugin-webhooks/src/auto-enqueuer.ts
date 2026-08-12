@@ -3,6 +3,7 @@
 import type { IDataEngine, IRealtimeService, RealtimeEventPayload } from '@objectstack/spec/contracts';
 import type { WebhookTriggerType } from '@objectstack/spec/automation';
 import type { EnqueueHttpInput } from '@objectstack/service-messaging';
+import { WEBHOOK_SECRET_FIELD, readLegacySecret, resolveWebhookSecret } from './webhook-secret.js';
 
 /**
  * The authored trigger vocabulary, taken from the spec rather than restated
@@ -201,6 +202,14 @@ export class AutoEnqueuer {
         for (const row of rows) {
             const sub = this.parseRow(row);
             if (!sub) continue;
+            // [#7799] The signing key is no longer in the row we just read — it
+            // lives encrypted in `sys_secret`, and this read path returns only a
+            // mask. Dereference it here, on the 60s refresh, rather than per
+            // event: the cache already holds the plaintext in memory (it always
+            // did), so this changes where the value comes FROM, not how long it
+            // is held. A row whose key cannot be recovered is DROPPED — see
+            // `attachSecret`.
+            if (!(await this.attachSecret(sub, row))) continue;
             // Empty objectName == "any object" → indexed under '*'.
             const key = sub.objectName ?? '*';
             const arr = next.get(key) ?? [];
@@ -215,6 +224,64 @@ export class AutoEnqueuer {
             objects: this.subscriptions.size,
             rows: rows.length,
         });
+    }
+
+    /**
+     * [#7799] Resolve `sub.secret` for one cached subscription. Returns `false`
+     * when the subscription must be dropped from the cache.
+     *
+     * Three sources, in order:
+     *  1. `sys_webhook.signing_secret` — the encrypted column. The read path
+     *     returns a mask, so presence is decidable here but the value is not;
+     *     `resolveWebhookSecret` dereferences it server-side.
+     *  2. `definition_json.secret` — a row not yet swept by
+     *     `migrateLegacyWebhookSecrets` (or hand-edited back in). Still honoured
+     *     so an un-migrated deployment keeps signing, and warned about once per
+     *     refresh so the exposure is visible rather than silently permanent.
+     *  3. Neither — an unsigned webhook, which is a legitimate authored choice
+     *     (`secret` is optional on the envelope).
+     *
+     * A stored-but-unresolvable key DROPS the subscription instead of
+     * delivering unsigned. The signature is the receiver's only proof of
+     * origin (#7722, #7799): a webhook that stops arriving is visible and gets
+     * investigated, while one that keeps arriving unsigned is invisible and
+     * teaches the receiver to accept unauthenticated traffic.
+     *
+     * Cost: one point read + one decrypt per secret-bearing row per refresh
+     * (default 60s), off the write path entirely. Deliberately NOT memoised
+     * across refreshes — the only cheap cache key would be `updated_at`, which
+     * nothing guarantees is stamped when a secret is rotated, and a stale key
+     * signs every delivery with a signature the receiver rejects.
+     */
+    private async attachSecret(sub: CachedSubscription, row: any): Promise<boolean> {
+        try {
+            const stored = await resolveWebhookSecret(this.engine, row, this.subscriptionsObject);
+            if (stored) {
+                sub.secret = stored;
+                return true;
+            }
+        } catch (err) {
+            this.logger.warn?.(
+                `[webhook-auto-enqueuer] webhook '${sub.name}' holds an encrypted signing secret that ` +
+                    `could not be decrypted — the subscription is DROPPED rather than delivered unsigned ` +
+                    `(#7799). Deliveries resume once the sys_secret row and CryptoProvider are reachable.`,
+                { id: sub.id, field: WEBHOOK_SECRET_FIELD, err: (err as Error)?.message ?? err },
+            );
+            return false;
+        }
+
+        const legacy = readLegacySecret(row?.definition_json);
+        if (legacy) {
+            this.logger.warn?.(
+                `[webhook-auto-enqueuer] webhook '${sub.name}' still carries its signing secret as ` +
+                    `CLEARTEXT in definition_json, readable over the data API (#7799). Signing continues ` +
+                    `from it; run the boot sweep (migrateLegacyWebhookSecrets) with a CryptoProvider wired ` +
+                    `to move it into sys_secret.`,
+                { id: sub.id },
+            );
+            sub.secret = legacy;
+        }
+        return true;
     }
 
     private parseRow(row: any): CachedSubscription | null {
@@ -283,8 +350,9 @@ export class AutoEnqueuer {
         }
 
         // The "definition_json" field carries advanced config (headers,
-        // secret, timeout); attempt a best-effort parse. Fall back to
-        // top-level fields where present.
+        // timeout); attempt a best-effort parse. Fall back to top-level fields
+        // where present. It no longer carries the signing secret (#7799) —
+        // `attachSecret` sources that from the encrypted column.
         let defn: Record<string, any> = {};
         if (typeof row.definition_json === 'string' && row.definition_json.length > 0) {
             try {
@@ -306,7 +374,8 @@ export class AutoEnqueuer {
             // the select change (legacy rows stored 'POST').
             method: String(row.method ?? defn.method ?? 'POST').toUpperCase(),
             headers: defn.headers,
-            secret: defn.secret,
+            // `secret` is filled by attachSecret() from the encrypted column,
+            // NOT read off the row — see #7799.
             timeoutMs: defn.timeoutMs,
         };
     }

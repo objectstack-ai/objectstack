@@ -56,6 +56,36 @@ describe('showcase: $search over the HTTP API (ADR-0061 conformance proof)', () 
     expect(records.map((r) => r.name)).not.toContain('Northwind');
   });
 
+  /**
+   * [#7641] The TEXTUAL case-fold, pinned away from the select path.
+   *
+   * This pin stayed green through the whole defect because its only case
+   * assertion was the select LABEL above ("Retail" → Northwind), which passes
+   * on a case-SENSITIVE build: `optionValuesMatching` lowercases both sides in
+   * JS before emitting `$in`, so the label half never touches the operator.
+   * The textual half does, and it was broken — `fieldClausesForTerm` emitted
+   * `$contains`, which #4706 Q2 = A rules case-SENSITIVE.
+   *
+   * Narrowing to `['name']` is what makes this assertion load-bearing: it keeps
+   * the label→value mapping out of the verdict, so the only thing that can
+   * satisfy it is the operator folding case. Asserted over the real HTTP API,
+   * so it covers the whole chain — compiler, engine, and the driver actually
+   * executing `$icontains` — not just the emitted filter tree.
+   */
+  it('textual case-fold: "retail" and "Retail" both match the capitalized name "Acme Retail"', async () => {
+    // The seed stores the name CAPITALIZED, so a lowercase term can only hit
+    // via a case-insensitive operator. This is the exact HTTP repro from #7641.
+    const lower = await query({ search: 'retail', searchFields: ['name'] });
+    expect(lower.map((r) => r.name)).toContain('Acme Retail');
+    // The capitalized spelling matched even on the broken build; asserting both
+    // is what makes a regression read as "the fold went away" rather than "the
+    // fixture moved".
+    const upper = await query({ search: 'Retail', searchFields: ['name'] });
+    expect(upper.map((r) => r.name)).toContain('Acme Retail');
+    // Same rows either way — case is not allowed to change the result set.
+    expect(lower.map((r) => r.name).sort()).toEqual(upper.map((r) => r.name).sort());
+  });
+
   it('terms AND: "retail northwind" still matches; "retail contoso" does not', async () => {
     const both = await query({ search: 'retail northwind' });
     expect(both.map((r) => r.name)).toContain('Northwind');

@@ -1051,38 +1051,87 @@ export type ObjectExternalBinding = z.input<typeof ObjectExternalBindingSchema>;
 export type ObjectExternalBindingParsed = z.infer<typeof ObjectExternalBindingSchema>;
 
 /**
- * Object form of a `userActions.edit` / `userActions.delete` override —
- * extends the plain boolean with **per-record** CEL predicates so the
- * built-in row Edit/Delete affordances can be hidden or disabled for a
- * subset of rows (objectstack-ai/objectui#2614).
+ * Object form of a `userActions` CRUD override — extends the plain boolean
+ * with CEL predicates so a built-in affordance can be hidden or disabled
+ * against record state rather than only per object
+ * (objectstack-ai/objectui#2614).
  *
- * Semantics (mirrors custom row actions' `visible` / `disabled`):
+ * Semantics (mirrors custom actions' `visible` / `disabled`):
  * - `enabled`      — object-level on/off, same meaning as the bare boolean.
  *                    Omitted → the `managedBy` bucket default.
- * - `visibleWhen`  — CEL over `record.*`; evaluates **false** → the row's
- *                    button is not rendered. Fail-closed (a faulting
- *                    predicate hides, and warns once).
- * - `disabledWhen` — CEL over `record.*`; evaluates **true** → the row's
- *                    button renders greyed / non-clickable. Fail-soft (a
- *                    faulting predicate leaves the button enabled).
+ * - `visibleWhen`  — CEL over `record.*`; evaluates **false** → the button
+ *                    is not rendered. Fail-closed (a faulting predicate
+ *                    hides, and warns once).
+ * - `disabledWhen` — CEL over `record.*`; evaluates **true** → the button
+ *                    renders greyed / non-clickable. Fail-soft (a faulting
+ *                    predicate leaves the button enabled).
  *
  * The predicates are advisory UI gating only — server-side enforcement
  * stays with permissions / hooks (e.g. `beforeUpdate` rejecting frozen
- * rows). Evaluation happens on the canonical CEL engine, per row, with the
- * record bound as `record.*` (and bare fields) — the same machinery custom
- * actions already use, so authoring is identical.
+ * rows). Evaluation happens on the canonical CEL engine, with the record
+ * bound as `record.*` (and bare fields) — the same machinery custom actions
+ * already use, so authoring is identical.
+ *
+ * **What `record.*` binds to depends on where the affordance renders, and
+ * the two cases are not the same fact** (#7692):
+ * - Row affordances (`edit`, `delete`) evaluate **per row**, against that
+ *   row's own record. This is the original #2614 case and the reason for
+ *   the `RowCrud` name, kept for export compatibility.
+ * - Toolbar affordances (`create`, `import`) have no row to bind — the
+ *   record they gate does not exist yet. They evaluate **once per toolbar**
+ *   against the record in scope where the toolbar renders: on a record
+ *   page's related list that is the **host (parent) record**. On a
+ *   standalone object list there is no record in scope, so a predicate
+ *   reading `record.*` has nothing to bind and — per the fail-closed rule
+ *   above — hides the button. Gate a toolbar action on parent state only
+ *   where a parent is actually in scope; anything else the child row must
+ *   carry itself (the denormalised parent-status snapshot pattern that
+ *   `edit`/`delete` already use).
  */
-export const RowCrudActionOverrideSchema = z.object({
+export const RowCrudActionOverrideSchema = strictObject({
+  surface: 'this row CRUD override',
+  // Closed from birth (objectui#2614), so nothing was ever silently stripped
+  // here — but the rejection was zod's own bare `Unrecognized key: "visible"`,
+  // which names neither the surface nor a key to write instead. #7832.
+  history:
+    'This shape has been closed since objectui#2614, so the key was never silently dropped — '
+    + 'until #7832 the rejection just could not tell you which key to write instead.',
+  aliases: {
+    // `showWhen` carries no boolean reading: whatever surface an author borrowed
+    // it from, they meant a predicate, and the predicate slot here is
+    // `visibleWhen`. The two keys that DO have both readings are answered by
+    // `guidance` below rather than renamed, because a rename has to pick one.
+    showWhen: 'visibleWhen',
+  },
+  guidance: {
+    // The near-misses on this surface all arrive from custom row actions
+    // (`actions[].visible` / `.disabled`), where ONE key takes either a boolean
+    // or a CEL string. This shape splits that pair in two — `enabled` for the
+    // object-level switch, `*When` for the per-record predicate — so a rename
+    // cannot answer either key without guessing which form the author meant,
+    // and guessing wrong just relocates the confusion (#7816's own note: point
+    // the boolean reading at `enabled`, not at `visibleWhen`).
+    visible:
+      '`visible` is the CUSTOM row-action spelling (`actions[].visible`), where one key takes '
+      + 'either form. This override splits them: write `enabled: false` for the object-level '
+      + 'on/off, or `visibleWhen: <CEL over record.*>` for a per-record predicate (FALSE hides '
+      + 'that row\'s button).',
+    disabled:
+      '`disabled` is the CUSTOM row-action spelling (`actions[].disabled`). The per-record form '
+      + 'here is `disabledWhen: <CEL over record.*>` (TRUE renders that row\'s button disabled); '
+      + 'there is no boolean `disabled` — switch the affordance off with `enabled: false`.',
+  },
+}, {
   enabled: z.boolean().optional().describe(
     'Object-level on/off for the generic affordance; same meaning as the bare boolean form. Omitted → managedBy bucket default.',
   ),
   visibleWhen: ExpressionInputSchema.optional().describe(
-    'Per-record CEL predicate; false → hide the row button for that record. Fail-closed.',
+    'CEL predicate over the record in scope (row record for edit/delete, host record for a related-list create/import toolbar); false → hide the button. Fail-closed.',
   ),
   disabledWhen: ExpressionInputSchema.optional().describe(
-    'Per-record CEL predicate; true → render the row button disabled for that record. Fail-soft.',
+    'CEL predicate over the record in scope (row record for edit/delete, host record for a related-list create/import toolbar); true → render the button disabled. Fail-soft.',
   ),
-}).strict().describe('Boolean-or-predicates override for a built-in row CRUD affordance.');
+}).describe('Boolean-or-predicates override for a built-in CRUD affordance.');
 export type RowCrudActionOverride = z.input<typeof RowCrudActionOverrideSchema>;
 /** Post-parse shape of {@link RowCrudActionOverride} — defaults applied, transforms run (ADR-0122). */
 export type RowCrudActionOverrideParsed = z.infer<typeof RowCrudActionOverrideSchema>;
@@ -1418,6 +1467,14 @@ const ObjectSchemaBase = strictObject(
    *
    * Omitting the block (or leaving individual flags `undefined`) keeps
    * the {@link managedBy}-derived default.
+   *
+   * Every CRUD flag except `exportCsv` also accepts the object form
+   * {@link RowCrudActionOverrideSchema} — `{ enabled?, visibleWhen?,
+   * disabledWhen? }` — which gates the affordance on record state instead
+   * of only per object. `edit`/`delete` evaluate it per row (objectui#2614);
+   * `create`/`import` evaluate it once per toolbar against the record in
+   * scope (#7692). Read that schema's docblock for what `record.*` binds to
+   * in each position — they are different records.
    */
   userActions: strictObject({
     surface: "this object's `userActions` block",
@@ -1468,8 +1525,12 @@ const ObjectSchemaBase = strictObject(
         'Visibility is governed by permissions (`requiredPermissions`) and `access.default`.',
     },
   }, {
-    create: z.boolean().optional().describe('Show generic "New" button.'),
-    import: z.boolean().optional().describe('Show CSV import wizard entry.'),
+    create: z.union([z.boolean(), RowCrudActionOverrideSchema]).optional().describe(
+      'Show generic "New" button. Boolean, or an object adding visibleWhen/disabledWhen CEL predicates evaluated once per toolbar against the record in scope (the host record on a related list).',
+    ),
+    import: z.union([z.boolean(), RowCrudActionOverrideSchema]).optional().describe(
+      'Show CSV import wizard entry. Boolean, or an object adding visibleWhen/disabledWhen CEL predicates evaluated once per toolbar against the record in scope (the host record on a related list).',
+    ),
     edit: z.union([z.boolean(), RowCrudActionOverrideSchema]).optional().describe(
       'Allow inline / form edit of existing rows. Boolean, or an object adding per-record visibleWhen/disabledWhen CEL predicates.',
     ),
@@ -2316,6 +2377,17 @@ export interface CrudAffordances {
   editPredicates?: RowCrudPredicates;
   /** Per-record CEL predicates for the built-in row Delete action. */
   deletePredicates?: RowCrudPredicates;
+  /**
+   * CEL predicates for the generic New button, present only when
+   * `userActions.create` used the object form (#7692). Unlike the row
+   * predicates above these evaluate **once per toolbar**, against the record
+   * in scope where the toolbar renders — the host record on a related list,
+   * and nothing at all on a standalone object list. See
+   * {@link RowCrudActionOverrideSchema}.
+   */
+  createPredicates?: RowCrudPredicates;
+  /** Toolbar-scope CEL predicates for the CSV import entry; same binding as {@link createPredicates}. */
+  importPredicates?: RowCrudPredicates;
 }
 
 /**
@@ -2386,26 +2458,32 @@ export function resolveCrudAffordances(
   const bucket = (obj?.managedBy ?? 'platform') as keyof typeof CRUD_AFFORDANCE_DEFAULTS;
   const base = CRUD_AFFORDANCE_DEFAULTS[bucket] ?? CRUD_AFFORDANCE_DEFAULTS.platform;
   const overrides = obj?.userActions ?? {};
+  const create = normalizeRowCrudOverride(overrides.create, base.create);
+  const imp = normalizeRowCrudOverride(overrides.import, base.import);
   const edit = normalizeRowCrudOverride(overrides.edit, base.edit);
   const del = normalizeRowCrudOverride(overrides.delete, base.delete);
   const out: CrudAffordances = {
-    create:    overrides.create    ?? base.create,
-    import:    overrides.import    ?? base.import,
+    create:    create.enabled,
+    import:    imp.enabled,
     edit:      edit.enabled,
     delete:    del.enabled,
     exportCsv: overrides.exportCsv ?? base.exportCsv,
   };
+  if (create.predicates) out.createPredicates = create.predicates;
+  if (imp.predicates) out.importPredicates = imp.predicates;
   if (edit.predicates) out.editPredicates = edit.predicates;
   if (del.predicates) out.deletePredicates = del.predicates;
   return out;
 }
 
 /**
- * Collapse a `userActions.edit` / `userActions.delete` override — bare
- * boolean or `{ enabled, visibleWhen, disabledWhen }` object — onto the
- * bucket default. The predicates pass through as authored; `predicates` is
- * only set when at least one predicate is present, so the boolean-only path
- * stays byte-identical to the pre-#2614 result.
+ * Collapse a `userActions` CRUD override — bare boolean or
+ * `{ enabled, visibleWhen, disabledWhen }` object — onto the bucket default.
+ * The predicates pass through as authored; `predicates` is only set when at
+ * least one predicate is present, so the boolean-only path stays
+ * byte-identical to the pre-#2614 result. Shared by all four predicate-
+ * carrying flags: `edit`/`delete` (per row) and `create`/`import` (per
+ * toolbar, #7692) — the collapse is the same, only the binding differs.
  */
 function normalizeRowCrudOverride(
   override: boolean | { enabled?: boolean; visibleWhen?: unknown; disabledWhen?: unknown } | null | undefined,

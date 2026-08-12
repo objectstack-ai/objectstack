@@ -53,14 +53,30 @@
 //   REAL        a declared `typecheck` script actually invokes tsc. A script
 //               that echoes, lints, or runs tests is not type coverage.
 //   TESTS_COVERED
-//               a package whose tsconfig `exclude`s its own `*.test.ts` /
-//               `*.spec.ts` carries a measured TEST_DEBT entry. `tsc --noEmit`
-//               reads the package tsconfig, so an exclusion there hides the
-//               tests from the very check the `typecheck` script advertises --
-//               COVERED and REAL both pass while nothing reads the files
-//               #4311 is actually about. This invariant is why the ledger is
-//               two ledgers: DEBT is "src does not check", TEST_DEBT is "src
-//               checks, tests are hidden", and they are independent.
+//               a package whose own `*.test.ts` / `*.spec.ts` files sit outside
+//               every tsc program that accounts for it carries a measured
+//               TEST_DEBT entry. `tsc --noEmit` reads the package tsconfig, so a
+//               test file that config never reaches is hidden from the very
+//               check the `typecheck` script advertises -- COVERED and REAL both
+//               pass while nothing reads the files #4311 is actually about. This
+//               invariant is why the ledger is two ledgers: DEBT is "src does
+//               not check", TEST_DEBT is "src checks, tests are hidden", and
+//               they are independent.
+//
+//               DECIDED PER FILE, and both ways a file can fall out (#7353).
+//               Until then this asked one per-config question -- does some
+//               `exclude` name the tests -- which detects a config that steers
+//               tsc AWAY from them and NEVER a config that simply never steered
+//               tsc TOWARD them. `include: ["src"]` beside a sibling `test/`
+//               tree, no `exclude` at all, read as fully covered: #7312 moved
+//               two example apps from hiding their tests to compiling them and
+//               this headline did not move by one file, because neither app had
+//               ever counted toward it. The census that came with the repair
+//               found 3 such packages and 65 such files, `packages/cli` alone
+//               hiding 56 test files worth 188 raw errors that no gate, ledger
+//               or CI job had ever read. Per file also makes PARTIAL coverage
+//               sayable: cli keeps 54 of its 110 test files under `include`,
+//               and 56 is the true number rather than 0 or 110.
 //
 //               Read across ALL of a package's tsconfigs, not just
 //               `tsconfig.json` (#5286). The build config has a reason to
@@ -379,10 +395,6 @@ const DEBT = {
       + '5ab08428, up from 8; code-tier is unchanged at 3, so the +2 is config-tier/noise. 8 of the 10 are '
       + 'in __tests__/knowledge-service.test.ts.',
   },
-  '@objectstack/service-settings': {
-    errors: 13,
-    note: 'code-tier 12 (TS2345 x7: manifest action handlers called without `namespace`/`actionId`; TS2322) + 1 noise. Was ledgered at 44 with "no code-tier finding" -- wrong in both directions: 31 of those 44 were unresolved imports (see the NodeNext note at the top of this ledger), and the resolution they were blocking is what made the 12 real ones visible.',
-  },
   '@objectstack/service-storage': {
     errors: 52,
     note: 'code-tier 8 (TS2339 x4, TS2347 x4); config-tier 21 (TS2835); noise 13 (TS7006 x11, TS6196, '
@@ -460,6 +472,15 @@ const EXEMPT = {
 // accurate for exactly as long as it took the next test file to land; a
 // derived one cannot drift at all, which is why this one is gone rather than
 // re-ratcheted.
+//
+// THE THREE ENTRIES THAT ARRIVED WITH #7353 -- cli 188, metadata-fs 6,
+// example-showcase 4 -- are not new debt and did not slip past a ledger that is
+// closed to it. They are debt this gate had never been able to SEE: TESTS_COVERED
+// asked whether an `exclude` named the tests, so a package that had simply never
+// pointed `include` at its test tree answered "covered" while nothing compiled a
+// line of it. All three were in that state before this ledger existed. 198 raw
+// errors is what the blind spot was worth on the day it was measured, and the
+// only thing that changed to surface them is the question.
 const TEST_DEBT = {
   '@objectstack/plugin-approvals': {
     errors: 547,
@@ -501,6 +522,22 @@ const TEST_DEBT = {
       + '(e8db1a230). The latest +9 is fully attributed and is ONE file: every one of the nine is a '
       + 'TS18048 in src/domains/meta-item-envelope.test.ts, added by #5563 / PR #5895 (the '
       + '`GET /meta/:type/:name` envelope convergence). Nothing else in the package moved.',
+  },
+  '@objectstack/cli': {
+    errors: 188,
+    note: 'TS7006 x100 (implicit any), TS2835 x59 (NodeNext extensions), TS2339 x24, TS2307 x3, TS18046 x2. '
+      + 'The package #7353 was really about, and the largest single thing the exclude-shaped detector could '
+      + 'not see: `tsconfig.json` says `include: ["src"]` and has no `exclude` AT ALL, so there was never an '
+      + 'exclusion to notice, and the 56 test files in the sibling `test/` tree were read by nothing -- not '
+      + 'this gate, not `pnpm typecheck`, not CI. The other 54 test files DO sit under `src` and always '
+      + 'compiled; 188 is the outside-`test/` layer only, which is why the file count reads 56 and not 110. '
+      + 'Read the top-of-ledger NodeNext note before sizing this: TS2835 plus the TS7006 cascade it causes '
+      + 'are 159 of the 188 and are one repair, not 159. Concentrated rather than spread -- '
+      + 'test/i18n-coverage.test.ts x35, test/data-model-rules.test.ts x26, '
+      + 'test/i18n-declared-surface-gate.test.ts x19, test/i18n-section-coverage.test.ts x18, '
+      + 'test/commands.test.ts x15 are 113 of it. Measured at b9f930b with the closure built. RECORDED '
+      + 'EXACTLY, no bootstrap margin: this layer has never been gated, so the first new error in it should '
+      + 'go red rather than be absorbed.',
   },
   '@objectstack/rest': {
     errors: 155,
@@ -591,6 +628,7 @@ const TEST_DEBT = {
   '@objectstack/formula': { errors: 17, note: 'TS2591 x6 (`process`), TS2345 x3, TS2352 x3, TS1470 x2, TS2339 x2. Re-measured 17 at 5ab08428, up from 12; the TS2591 half doubled, which is the missing `types:["node"]` again rather than five new defects.' },
   '@objectstack/trigger-record-change': { errors: 9, note: 'TS2353 x9 -- still the one unknown-property shape repeated, now in four files. Re-measured 9 at 5ab08428, up from 8.' },
   '@objectstack/verify': { errors: 8, note: 'TS2835 x4, TS7006 x4. Re-measured 8 at 5ab08428, up from 6; both classes are the NodeNext pair from the top-of-ledger note.' },
+  '@objectstack/metadata-fs': { errors: 6, note: 'TS6133 x5 (declared, never read -- the root config sets `noUnusedLocals`), TS2349 x1. Include-shaped: `include: ["src/**/*"]`, no `exclude` naming tests, and all 6 test files in a sibling `test/` tree, so this was invisible to the exclude-shaped detector (#7353). 5 of the 6 are in test/contract.test.ts; the TS2349 is in test/watch-write-registration.test.ts. Measured at b9f930b, recorded exactly.' },
   '@objectstack/connector-mcp': { errors: 5, note: 'TS2339 x5. Re-measured 5 at 5ab08428, exact.' },
   '@objectstack/connector-openapi': { errors: 5, note: 'TS2339 x5. Re-measured 5 at 5ab08428, exact.' },
   '@objectstack/http-conformance': {
@@ -601,6 +639,7 @@ const TEST_DEBT = {
       + 'this package\'s own code. Raw `tsc --noEmit` counts are what every number in these ledgers means, '
       + 'so they are counted here rather than filtered out -- but they are not this package\'s debt to fix.',
   },
+  '@objectstack/example-showcase': { errors: 4, note: 'TS2339 x4. The one entry here whose hidden files are Playwright specs rather than vitest tests: `include` names `src/**/*`, `objectstack.config.ts` and `test/**/*` -- so the vitest layer is compiled and the `e2e/` tree beside it is not. Three specs, 4 errors (detail-shapes.spec.ts x2, bulk-capability-gate.spec.ts x1, showcase-smoke.spec.ts x1). Measured by adding the three spec files to `include` one at a time, NOT `e2e/**/*`, which would also have pulled in e2e/global-setup.ts and billed this layer 6 errors from a file that is not a test. Sibling to #7312, which repaired app-crm and app-todo the same way and could not move this gate\'s count because neither app had ever counted toward it.' },
   '@objectstack/platform-objects': { errors: 3, note: 'TS2339 x2, TS7006 x1. Re-measured 3 at 5ab08428, exact.' },
   '@objectstack/plugin-sharing': { errors: 3, note: 'TS6133 x2, TS18048 x1. Re-measured 3 at 5ab08428, exact.' },
   '@objectstack/service-sms': { errors: 1, note: 'TS2493 x1, in transports.test.ts. Re-measured 1 at 5ab08428 and still 1 at e8db1a230, after two more hidden test files: #5773 added sms-manifest-providers.contract.test.ts and #2814 / PR #6042 added sms-daily-quota.test.ts. The file count moved twice while the error count did not -- both new files are type-clean with the exclusion lifted.' },
@@ -716,22 +755,67 @@ function configsNamedByTypecheck(scripts) {
 }
 
 /**
+ * Which tsc programs ACCOUNT for a package's test files -- the ones whose error
+ * count somebody actually reads.
+ *
+ * Normally that is the set the `typecheck` script invokes. A package with NO
+ * such script has no invoked program at all, but it is not therefore unmeasured:
+ * `measureDebt` runs `tsc -p tsconfig.json`, so the primary config is what its
+ * DEBT number was taken through, and a test file that config reads is counted
+ * there rather than hidden. Answering "hidden" for every test file of every
+ * DEBT package would move 353 files into the wrong ledger -- TEST_DEBT means
+ * "src checks, tests are hidden" and DEBT already owns "nothing checks this".
+ *
+ * @returns {Array<{file: string, roots: string[], excludesTests: boolean}>}
+ */
+function accountedPrograms(configs, invoked) {
+  if (invoked.length > 0) return invoked;
+  const primary = configs.find((c) => c.file === 'tsconfig.json');
+  return primary ? [primary] : [];
+}
+
+/**
+ * The test files no accounted program reads -- TESTS_COVERED's subject, decided
+ * per FILE rather than per config.
+ *
+ * The per-config form this replaces asked only whether some `exclude` named the
+ * tests, so it saw a config that steered tsc AWAY from them and never a config
+ * that had simply never steered tsc TOWARD them: a package with no `exclude` at
+ * all and an `include` of `["src"]` beside a sibling `test/` tree reported as
+ * fully covered while nothing read a line of it (#7353). Measured at the time:
+ * `packages/cli` hid 56 test files carrying 188 raw errors and the headline
+ * count did not know it existed.
+ *
+ * Asking it per file also makes PARTIAL coverage countable, which the old shape
+ * could not express -- `packages/cli` puts 54 of its 110 test files under
+ * `include` and 56 outside it, and the honest number is 56, not 0 and not 110.
+ *
+ * @param {string[]} testRels package-relative posix paths of every test file
+ * @returns {string[]} the unread ones, in walk order
+ */
+function unreadTests(testRels, programs) {
+  return testRels.filter((rel) => !programs.some((c) => configCovers(c, rel)));
+}
+
+/**
  * What this package's tsc programs read, and what they leave out.
  *
- * `excludesTests` is the TESTS_COVERED trigger and now means "some config
- * steers tsc away from the tests AND no config the typecheck script invokes
- * reads them" -- so a package repaired the supported way (a sibling
- * `tsconfig.test.json` named in the script) is covered rather than eternally in
- * debt, while a package that merely OWNS such a file without invoking it is not
- * (#5286).
+ * `hidesTests` is the TESTS_COVERED trigger and means "at least one of this
+ * package's test files sits outside every program that accounts for it" -- by
+ * an `exclude` that names it, or by an `include` that never reached it. A
+ * package repaired the supported way (a sibling `tsconfig.test.json` named in
+ * the script) is covered rather than eternally in debt, while a package that
+ * merely OWNS such a file without invoking it is not (#5286).
  *
  * `pinFiles` is PINS_CHECKED's input: test files carrying a `@ts-expect-error`
  * directive that no invoked program compiles. The scan walks the whole package,
  * not just the include roots -- `packages/metadata-core/test/` sat outside
  * `include` with no exclusion naming it (until #5476 put it in a program), and
- * that is just as unchecked.
+ * that is just as unchecked. PINS_CHECKED used to be the ONLY half that looked
+ * outside `include`, which is why an unpinned test tree out there was reported
+ * by neither: it collects `@ts-expect-error` files and nothing else.
  *
- * @returns {{excludesTests: boolean, testFiles: number, pinFiles: string[]}}
+ * @returns {{hidesTests: boolean, testFiles: number, hiddenTests: string[], pinFiles: string[]}}
  */
 function testCoverage(dir, scripts) {
   let configFiles = [];
@@ -743,22 +827,13 @@ function testCoverage(dir, scripts) {
   const configs = configFiles.map((file) => readTsconfig(dir, file));
   const named = configsNamedByTypecheck(scripts);
   const invoked = configs.filter((c) => named.has(c.file));
-  const anyExcludesTests = configs.some((c) => c.excludesTests);
-  const testsInvoked = invoked.filter((c) => !c.excludesTests);
 
-  const primary = configs.find((c) => c.file === 'tsconfig.json');
-  // Count only under the primary config's `include` roots: `exclude` subtracts
-  // from what `include` selected, so a test file outside those roots is already
-  // out of the program and is not what this exclusion hides. Several packages
-  // keep a sibling `test/` tree that their `include` never mentions -- counting
-  // it here would attribute files to an exclusion that has no bearing on them
-  // (PINS_CHECKED is what covers those).
-  const countRoots = primary ? primary.roots : [''];
-
-  let testFiles = 0;
-  const pinFiles = [];
-  const seen = new Set();
-  const walk = (abs, rel, depth, counting) => {
+  // One walk of the whole package. Both halves need the same list now: the
+  // hidden-file count is no longer confined to the include roots, because a
+  // file outside them is precisely the case this invariant had been missing.
+  const testRels = [];
+  const pinned = new Set();
+  const walk = (abs, rel, depth) => {
     let entries = [];
     try {
       entries = readdirSync(abs, { withFileTypes: true });
@@ -771,29 +846,30 @@ function testCoverage(dir, scripts) {
       if (entry.isDirectory()) {
         if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name.startsWith('.')) continue;
         if (depth > 0 && existsSync(join(child, 'package.json'))) continue; // another package's problem
-        walk(child, childRel, depth + 1, counting);
+        walk(child, childRel, depth + 1);
       } else if (TEST_FILE.test(entry.name)) {
-        if (counting && !seen.has(child)) {
-          seen.add(child); // overlapping include roots must not double-count
-          testFiles++;
-        }
-        if (!counting && PIN_DIRECTIVE.test(readFileSync(child, 'utf8'))) {
-          if (!testsInvoked.some((c) => configCovers(c, childRel))) pinFiles.push(posix.join(dir, childRel));
-        }
+        testRels.push(childRel);
+        if (PIN_DIRECTIVE.test(readFileSync(child, 'utf8'))) pinned.add(childRel);
       }
     }
   };
-  for (const root of countRoots) walk(join(ROOT, dir, root), root, 0, true);
-  walk(join(ROOT, dir), '', 0, false);
+  walk(join(ROOT, dir), '', 0);
+
+  const hiddenTests = unreadTests(testRels, accountedPrograms(configs, invoked));
+  // PINS_CHECKED stays anchored to the INVOKED programs, not the accounted
+  // ones: a pin's whole job is to go red in a check somebody runs, and the
+  // `--re-measure` path a DEBT number comes from is not that check.
+  const pinFiles = unreadTests([...pinned], invoked).map((rel) => posix.join(dir, rel));
 
   return {
-    excludesTests: anyExcludesTests && testsInvoked.length === 0,
-    testFiles,
+    hidesTests: hiddenTests.length > 0,
+    testFiles: hiddenTests.length,
+    hiddenTests,
     pinFiles: pinFiles.sort(),
   };
 }
 
-/** Every workspace member as { name, dir, scripts, hasTsconfig, excludesTests, testFiles }. */
+/** Every workspace member as { name, dir, scripts, hasTsconfig, hidesTests, testFiles }. */
 function workspacePackages() {
   const dirs = [];
   for (const glob of workspaceGlobs()) {
@@ -829,7 +905,7 @@ function workspacePackages() {
  * semantics the gate applies.
  *
  * @param {Array<{name: string, dir: string, scripts: Record<string,string>, hasTsconfig: boolean,
- *                excludesTests?: boolean, testFiles?: number, pinFiles?: string[]}>} packages
+ *                hidesTests?: boolean, testFiles?: number, pinFiles?: string[]}>} packages
  * @param {{name: string, scripts: Record<string,string>}} root
  * @param {{ debt: Record<string, {errors: number, note?: string}>,
  *           exempt: Record<string, string>,
@@ -852,27 +928,28 @@ function evaluate(packages, root, state) {
     // package is covered or in DEBT: this is about what the tsconfig hides, not
     // about whether a script exists to run against it.
     const inTestDebt = Object.hasOwn(state.testDebt, pkg.name);
-    if (pkg.excludesTests && pkg.testFiles > 0) {
+    if (pkg.hidesTests && pkg.testFiles > 0) {
       if (!inTestDebt) {
         problems.push(
-          `${pkg.name} (${pkg.dir}): tsconfig.json excludes its own test files, hiding ${pkg.testFiles} of them ` +
-            `from \`tsc --noEmit\` -- the check reports green over source it never read (${TRACKING_ISSUE}). ` +
-            `Drop the \`*.test.ts\`/\`*.spec.ts\` entry from \`exclude\`, add a sibling \`tsconfig.test.json\` ` +
-            `and name it in the \`typecheck\` script (the #5286 route, when the build config must keep the ` +
-            `exclusion), or measure what surfaces and add a TEST_DEBT entry in ${SELF}.`,
+          `${pkg.name} (${pkg.dir}): ${pkg.testFiles} of its test file(s) sit outside every tsc program that ` +
+            `accounts for this package -- named by an \`exclude\`, or never reached by any \`include\` -- so ` +
+            `the check reports green over source it never read (${TRACKING_ISSUE}). Drop the ` +
+            `\`*.test.ts\`/\`*.spec.ts\` entry from \`exclude\`, widen \`include\` to reach the test tree, add a ` +
+            `sibling \`tsconfig.test.json\` and name it in the \`typecheck\` script (the #5286 route, when the ` +
+            `build config must keep the exclusion), or measure what surfaces and add a TEST_DEBT entry in ${SELF}.`,
         );
       } else {
         const entry = state.testDebt[pkg.name];
         if (!entry || typeof entry.errors !== 'number' || entry.errors <= 0) {
           problems.push(
-            `${pkg.name}: TEST_DEBT entry has no measured error count -- lift the exclusion, run ` +
-              `\`tsc --noEmit\`, record the number, or drop the exclusion for good.`,
+            `${pkg.name}: TEST_DEBT entry has no measured error count -- put the files in a program, run ` +
+              `\`tsc --noEmit\`, record the number, or put them in a program for good.`,
           );
         }
       }
     } else if (inTestDebt) {
       problems.push(
-        `${pkg.name}: has a TEST_DEBT entry but ${pkg.testFiles === 0 ? 'has no test files' : 'no longer excludes its tests'} -- ` +
+        `${pkg.name}: has a TEST_DEBT entry but ${pkg.testFiles === 0 ? 'has no test files' : 'no longer hides its tests'} -- ` +
           `it graduated; delete its entry from TEST_DEBT in ${SELF}.`,
       );
     }
@@ -1299,21 +1376,57 @@ function measureDebt(dir) {
 
 /**
  * The TEST_DEBT number: what the package reports once its tsconfig stops
- * steering tsc away from its own tests. Written as a sibling project that
+ * steering tsc away from its own tests -- AND once it starts steering tsc toward
+ * the ones it had merely never reached. Written as a sibling project that
  * `extends` the real one and re-declares `exclude` without the test globs --
  * a sibling, in the package's own directory, because tsconfig resolves
  * `include`/`outDir`/`rootDir` relative to the file that DECLARES them, so a
  * config generated anywhere else would silently repoint every one of them.
  *
+ * Dropping exclusions is only half of un-hiding, because only half of hiding is
+ * an exclusion (#7353). A package whose `include` never named its `test/` tree
+ * has nothing to drop, and this measured its src twice over and called that the
+ * test layer's number. `hiddenTests` names the files the observation half found
+ * unread, so they are added to `include` ONE FILE AT A TIME rather than as a
+ * directory glob -- `e2e/**\/*` would have pulled `e2e/global-setup.ts` into
+ * app-showcase's measurement and billed the test layer 6 errors from a file that
+ * is not a test.
+ *
+ * `rootDir` goes with them. It is `src` in most of these packages, so widening
+ * `include` past it makes tsc answer with one TS6059 per added file and nothing
+ * else -- packages/cli measured 56 TS6059 that way and 188 real errors with
+ * `rootDir` neutralised. Under `--noEmit` there is no output layout for it to
+ * protect, so a TS6059 here is a diagnostic about this generated config rather
+ * than about the package, and counting it would be measuring the tape measure.
+ *
  * Removed in a `finally`: a stray `tsconfig.*.json` left behind would be picked
  * up by this very script's own tsconfig scan on the next run.
+ *
+ * @param {string[]} hiddenTests package-relative paths of the unread test files
  */
-function measureTestDebt(dir) {
+function measureTestDebt(dir, hiddenTests = []) {
   const configPath = join(ROOT, dir, REMEASURE_CONFIG);
   const raw = readFileSync(join(ROOT, dir, 'tsconfig.json'), 'utf8').replace(/^\s*\/\/.*$/gm, '');
   const parsed = JSON.parse(raw);
   const kept = (parsed.exclude ?? []).filter((pattern) => !TEST_GLOB.test(pattern));
-  writeFileSync(configPath, `${JSON.stringify({ extends: './tsconfig.json', exclude: kept }, null, 2)}\n`);
+  const project = { extends: './tsconfig.json', exclude: kept };
+
+  // Only the files this config's OWN `include` cannot reach need adding; the
+  // ones it already selects are back in the program the moment `exclude` stops
+  // subtracting them, and re-listing those would say nothing.
+  const include = Array.isArray(parsed.include) && parsed.include.length > 0 ? parsed.include : null;
+  if (include) {
+    const { roots } = readTsconfig(dir, 'tsconfig.json');
+    const unreachable = hiddenTests.filter(
+      (rel) => !roots.some((root) => root === '' || rel === root || rel.startsWith(`${root}/`)),
+    );
+    if (unreachable.length > 0) {
+      project.include = [...include, ...unreachable];
+      project.compilerOptions = { rootDir: '.' };
+    }
+  }
+
+  writeFileSync(configPath, `${JSON.stringify(project, null, 2)}\n`);
   try {
     return tscErrorCount(posix.join(dir, REMEASURE_CONFIG));
   } finally {
@@ -1331,6 +1444,9 @@ function measureTestDebt(dir) {
 function measureLedgers(packages, rootName, state) {
   const dirOf = new Map(packages.map((p) => [p.name, p.dir]));
   dirOf.set(rootName, ''); // the workspace root is a member like any other
+  // The observation half already walked every package; TEST_DEBT's measurement
+  // needs the file list it produced, not a second walk that could disagree.
+  const hiddenOf = new Map(packages.map((p) => [p.name, p.hiddenTests ?? []]));
 
   // BUILT CLOSURE, checked ONCE for the whole ledger rather than per entry: an
   // unbuilt dependency invalidates every number that resolves through it, so
@@ -1364,7 +1480,13 @@ function measureLedgers(packages, rootName, state) {
   for (const [name, entry] of Object.entries(state.testDebt)) {
     const dir = dirOf.get(name);
     if (dir === undefined) continue;
-    measurements.push({ ledger: 'TEST_DEBT', name, dir, recorded: entry.errors ?? 0, actual: measureTestDebt(dir) });
+    measurements.push({
+      ledger: 'TEST_DEBT',
+      name,
+      dir,
+      recorded: entry.errors ?? 0,
+      actual: measureTestDebt(dir, hiddenOf.get(name) ?? []),
+    });
   }
   return measurements;
 }
@@ -1554,17 +1676,17 @@ function selfTest() {
       expect: [],
     },
     {
-      label: 'a covered package that excludes its tests fails TESTS_COVERED',
-      packages: [pkg('a', { scripts: { typecheck: 'tsc --noEmit' }, excludesTests: true, testFiles: 12 })],
+      label: 'a covered package that hides its tests fails TESTS_COVERED',
+      packages: [pkg('a', { scripts: { typecheck: 'tsc --noEmit' }, hidesTests: true, testFiles: 12 })],
       root: okRoot,
       state: okState,
-      expect: [/excludes its own test files, hiding 12 of them/],
+      expect: [/12 of its test file\(s\) sit outside every tsc program/],
     },
     {
       label: 'a test-debt entry covers the exclusion, but an empty measurement fails',
       packages: [
-        pkg('a', { scripts: { typecheck: 'tsc --noEmit' }, excludesTests: true, testFiles: 3 }),
-        pkg('b', { scripts: { typecheck: 'tsc --noEmit' }, excludesTests: true, testFiles: 4 }),
+        pkg('a', { scripts: { typecheck: 'tsc --noEmit' }, hidesTests: true, testFiles: 3 }),
+        pkg('b', { scripts: { typecheck: 'tsc --noEmit' }, hidesTests: true, testFiles: 4 }),
       ],
       root: okRoot,
       state: { ...okState, testDebt: { a: { errors: 9 }, b: { errors: 0 } } },
@@ -1578,7 +1700,7 @@ function selfTest() {
       // adding a clean test file -- a bookkeeping toll on the one action this
       // ledger exists to encourage, which is what #5278 ruled out for `errors`.
       label: 'a TEST_DEBT entry that writes the derived file count down fails, even when it is right today',
-      packages: [pkg('a', { scripts: { typecheck: 'tsc --noEmit' }, excludesTests: true, testFiles: 7 })],
+      packages: [pkg('a', { scripts: { typecheck: 'tsc --noEmit' }, hidesTests: true, testFiles: 7 })],
       root: okRoot,
       state: { ...okState, testDebt: { a: { tests: 7, errors: 9 } } },
       expect: [/a: TEST_DEBT entry carries a hand-written `tests` count/],
@@ -1621,17 +1743,17 @@ function selfTest() {
     },
     {
       label: 'excluding tests when there are none to hide is not debt',
-      packages: [pkg('a', { scripts: { typecheck: 'tsc --noEmit' }, excludesTests: true, testFiles: 0 })],
+      packages: [pkg('a', { scripts: { typecheck: 'tsc --noEmit' }, hidesTests: true, testFiles: 0 })],
       root: okRoot,
       state: okState,
       expect: [],
     },
     {
       label: 'dropping the exclusion without deleting TEST_DEBT fails RECONCILED',
-      packages: [pkg('a', { scripts: { typecheck: 'tsc --noEmit' }, excludesTests: false, testFiles: 5 })],
+      packages: [pkg('a', { scripts: { typecheck: 'tsc --noEmit' }, hidesTests: false, testFiles: 5 })],
       root: okRoot,
       state: { ...okState, testDebt: { a: { errors: 7 } } },
-      expect: [/a: has a TEST_DEBT entry but no longer excludes its tests/],
+      expect: [/a: has a TEST_DEBT entry but no longer hides its tests/],
     },
     {
       label: 'TEST_DEBT for a vanished package fails RECONCILED',
@@ -1641,11 +1763,11 @@ function selfTest() {
       expect: [/TEST_DEBT entry for "gone" names no workspace package/],
     },
     {
-      label: 'test exclusion is judged independently of src coverage',
-      packages: [pkg('a', { excludesTests: true, testFiles: 6 })],
+      label: 'a hidden test layer is judged independently of src coverage',
+      packages: [pkg('a', { hidesTests: true, testFiles: 6 })],
       root: okRoot,
       state: { ...okState, debt: { a: { errors: 4 } } },
-      expect: [/a \(packages\/a\): tsconfig.json excludes its own test files/],
+      expect: [/a \(packages\/a\): 6 of its test file\(s\) sit outside every tsc program/],
     },
     {
       label: 'uncovered, unledgered package fails COVERED',
@@ -1777,6 +1899,80 @@ function selfTest() {
   for (const c of coverCases) {
     const got = configCovers(c.config, c.rel);
     if (got !== c.expect) failures.push(`configCovers — ${c.label}: expected ${c.expect}, got ${got}`);
+  }
+
+  // #7353. The two halves that decide WHICH test files are unread, and by which
+  // programs. Case 2 is the whole card: no `exclude` anywhere, and every one of
+  // the package's tests outside the program regardless -- the shape that read as
+  // fully covered while nothing compiled a line of it.
+  const buildCfg = { file: 'tsconfig.build.json', roots: ['src'], excludesTests: true };
+  const unreadCases = [
+    {
+      label: 'an exclusion hides the tests it names -- the shape this always saw',
+      testRels: ['src/a.test.ts', 'src/b.test.ts'],
+      programs: [srcNoTests],
+      expect: ['src/a.test.ts', 'src/b.test.ts'],
+    },
+    {
+      label: 'an `include` that never reached the tests hides them just as completely, with no `exclude` at all',
+      testRels: ['test/a.test.ts', 'test/b.test.ts'],
+      programs: [src],
+      expect: ['test/a.test.ts', 'test/b.test.ts'],
+    },
+    {
+      label: 'PARTIAL coverage counts only the files left out, which the per-config form could not say',
+      testRels: ['src/a.test.ts', 'test/b.test.ts'],
+      programs: [src],
+      expect: ['test/b.test.ts'],
+    },
+    {
+      label: 'a sibling test config the script names picks the outsiders back up (#5286)',
+      testRels: ['src/a.test.ts', 'test/b.test.ts'],
+      programs: [srcNoTests, whole],
+      expect: [],
+    },
+    {
+      label: 'nothing invoked reads them, so every test file is unread',
+      testRels: ['src/a.test.ts', 'test/b.test.ts'],
+      programs: [],
+      expect: ['src/a.test.ts', 'test/b.test.ts'],
+    },
+  ];
+  for (const c of unreadCases) {
+    const got = unreadTests(c.testRels, c.programs);
+    if (JSON.stringify(got) !== JSON.stringify(c.expect)) {
+      failures.push(`unreadTests — ${c.label}: expected ${JSON.stringify(c.expect)}, got ${JSON.stringify(got)}`);
+    }
+  }
+
+  const accountedCases = [
+    {
+      label: 'the typecheck script\'s configs are what account for a covered package',
+      configs: [buildCfg, src],
+      invoked: [src],
+      expect: ['tsconfig.json'],
+    },
+    {
+      // Without this, every DEBT package's whole test tree would land in
+      // TEST_DEBT for the sole reason that DEBT already owns it -- 353 files
+      // into the ledger that means "src checks, tests are hidden".
+      label: 'with no typecheck script, `tsconfig.json` accounts for them -- it is what measureDebt runs',
+      configs: [buildCfg, src],
+      invoked: [],
+      expect: ['tsconfig.json'],
+    },
+    {
+      label: 'a package with no tsconfig.json at all has nothing accounting for it',
+      configs: [buildCfg],
+      invoked: [],
+      expect: [],
+    },
+  ];
+  for (const c of accountedCases) {
+    const got = accountedPrograms(c.configs, c.invoked).map((p) => p.file);
+    if (JSON.stringify(got) !== JSON.stringify(c.expect)) {
+      failures.push(`accountedPrograms — ${c.label}: expected ${JSON.stringify(c.expect)}, got ${JSON.stringify(got)}`);
+    }
   }
 
   // The summary's hidden-file figure (#5826). It used to be the sum of a
@@ -2149,7 +2345,8 @@ function selfTest() {
   }
   console.log(
     `✓ check:type-check-coverage --self-test — ${cases.length} semantic case(s) + ` +
-      `${namedCases.length + coverCases.length + derivedCases.length} observation case(s) + ` +
+      `${namedCases.length + coverCases.length + unreadCases.length + accountedCases.length
+        + derivedCases.length} observation case(s) + ` +
       `${driftCases.length + countCases.length} re-measure case(s) + ` +
       `${typeEntryCases.length + closureCases.length} built-closure case(s) + ` +
       `${planCases.length + rewriteCases.length} auto-lowering case(s) hold.`,
@@ -2183,7 +2380,7 @@ console.log(
   `check-type-check-coverage: OK — ${covered}/${packages.length} workspace packages type-checked ` +
     `(plus the root), ${Object.keys(DEBT).length} in the DEBT ledger (${debtTotal} frozen raw errors, ` +
     `${TRACKING_ISSUE}), ${Object.keys(EXEMPT).length} exempt.\n` +
-    `  test layer: ${Object.keys(TEST_DEBT).length} package(s) still exclude their own tests ` +
+    `  test layer: ${Object.keys(TEST_DEBT).length} package(s) still hide their own tests from tsc ` +
     `(${testDebtFiles} files hidden as counted by this run, ${testDebtErrors} frozen raw errors in TEST_DEBT).`,
 );
 

@@ -379,6 +379,13 @@ export const ERROR_CODE_LEDGER = {
     'RECORD_LOCKED',
   ],
   '@objectstack/plugin-security': [
+    // [#7474] `controlled_by_parent` declared with no `master_detail` relation.
+    // Second EMITTER of the code — `@objectstack/metadata-protocol` already
+    // registers for the metadata publish path (`saveMetaItem`); one condition,
+    // one vocabulary. Per this file's header, a code emitted by several
+    // packages is listed once per emitting package — provenance, not identity
+    // (see above; #7504).
+    'INVALID_METADATA',
     'SUGGESTION_NOT_FOUND',
     'SUGGESTION_STATE',           // suggestion exists but is not in a confirmable/dismissable state
   ],

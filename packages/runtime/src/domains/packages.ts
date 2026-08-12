@@ -411,11 +411,20 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     // consumers stale until the next restart.
                     //
                     // The RESPONSE field keeps its `unhiddenApps` / `unhideError`
-                    // spelling deliberately: it is a wire contract read by the
-                    // objectui Publish button, and renaming it here — in a repo
-                    // that cannot verify or update that consumer — would be a
-                    // silent break of the exact kind #4829 is about. The rename
-                    // rides the objectui follow-up card, together.
+                    // spelling deliberately and PERMANENTLY: it is a wire contract
+                    // read by the objectui Publish button, and renaming it here —
+                    // in a repo that cannot verify or update that consumer — would
+                    // be a silent break of the exact kind #4829 is about. A
+                    // lockstep rename was once planned to ride the objectui
+                    // follow-up card, together; #6955 measured that "together" out
+                    // rather than in — the server still emits these names and
+                    // objectui reads neither field anywhere (zero grep hits
+                    // repo-wide) — so the PM ratified "not at all" as option A:
+                    // renaming a zero-reader diagnostic payload buys no capability
+                    // (startup-scope discipline). If the vocabulary is ever worth
+                    // tidying on its own merits, that is a standalone
+                    // producer-side rename card (option B), not a rider on this
+                    // one.
                     //
                     // [#7018 / the #6190 ruling, Option A] `app` declares
                     // `allowOrgOverride: false`, so this flip does NOT carry the

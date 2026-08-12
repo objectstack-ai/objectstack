@@ -22,6 +22,114 @@
       "outputs": [],
       "inputs": ["$TURBO_DEFAULT$", "!dist/**", "!coverage/**", "!.turbo/**"]
     },
+    "@objectstack/spec#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/packages/**/*.object.ts",
+        "$TURBO_ROOT$/packages/lint/src/**",
+        "$TURBO_ROOT$/content/docs/references/index.mdx",
+        "$TURBO_ROOT$/scripts/**",
+        "$TURBO_ROOT$/packages/runtime/src/**",
+        "$TURBO_ROOT$/packages/objectql/src/validation/**",
+        "$TURBO_ROOT$/packages/metadata-protocol/src/**",
+        "$TURBO_ROOT$/packages/plugins/plugin-audit/src/**"
+      ]
+    },
+    "@objectstack/core#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/packages/**/*.ts"
+      ]
+    },
+    "@objectstack/cli#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/packages/verify/src/**",
+        "$TURBO_ROOT$/packages/plugins/plugin-security/src/**"
+      ]
+    },
+    "@objectstack/lint#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/packages/cli/src/commands/**",
+        "$TURBO_ROOT$/packages/metadata-protocol/src/**",
+        "$TURBO_ROOT$/packages/objectql/src/validation/**",
+        "$TURBO_ROOT$/packages/services/service-automation/src/**"
+      ]
+    },
+    "@objectstack/plugin-auth#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/packages/**/*.object.ts",
+        "$TURBO_ROOT$/packages/core/src/security/**"
+      ]
+    },
+    "@objectstack/plugin-security#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/packages/spec/src/security/**",
+        "$TURBO_ROOT$/packages/spec/src/identity/**"
+      ]
+    },
+    "@objectstack/dogfood#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/packages/client/src/**",
+        "$TURBO_ROOT$/packages/mcp/src/**",
+        "$TURBO_ROOT$/packages/plugins/plugin-hono-server/src/**",
+        "$TURBO_ROOT$/packages/rest/src/**",
+        "$TURBO_ROOT$/packages/runtime/src/**",
+        "$TURBO_ROOT$/packages/services/service-realtime/src/**",
+        "$TURBO_ROOT$/packages/spec/src/automation/**",
+        "$TURBO_ROOT$/packages/spec/src/data/**"
+      ]
+    },
+    "create-objectstack#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/content/**"
+      ]
+    },
     "test:e2e": {
       "dependsOn": ["build"],
       "cache": false,

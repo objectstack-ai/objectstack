@@ -34,6 +34,7 @@ import {
   lowerAnalyticsWhere,
   conjunctFieldKeys,
 } from './strategies/filter-normalizer.js';
+import { findCrossFieldComparand } from './comparand-shape.js';
 import { compileDataset, type CompiledDataset, type RelationshipResolver } from './dataset-compiler.js';
 import { DatasetExecutor, resolveDimensionGranularity, type DateGranularityValue } from './dataset-executor.js';
 import {
@@ -1944,11 +1945,53 @@ export class AnalyticsService implements IAnalyticsService {
         return strategy;
       }
     }
+    // [#7598] Name the one decline that is about the QUERY rather than about
+    // the deployment. Since the 2026-08-12 ruling `NativeSQLStrategy` declines
+    // a cross-field `{ $field }` comparison so it routes to the engine path —
+    // so a host advertising `nativeSql` WITHOUT an aggregate bridge now reaches
+    // this exit for a filter it used to (wrongly) compile. The bare message
+    // below would send that operator off to check their driver configuration,
+    // which is not the problem: every other query on that cube still works.
+    //
+    // Reachability, measured: NOT from `AnalyticsServicePlugin`, whose default
+    // `queryCapabilities` derives BOTH flags from the bridges it wired
+    // (`objectqlAggregate: !!executeAggregate`) and auto-wires the aggregate
+    // bridge from the engine — so a real deployment that has `nativeSql` has
+    // `objectqlAggregate` too. Reachable only from a host that overrides
+    // `queryCapabilities` by hand. Cheap to say, and the alternative is a dead
+    // end that reads like a misconfiguration.
+    const crossField = findCrossFieldComparand(lowerAnalyticsWhereQuietly(query));
     throw new Error(
       `[Analytics] No strategy can handle query for cube "${query.cube}". ` +
       `Checked: ${this.strategies.map(s => s.name).join(', ')}${skip?.size ? ` (skipped at runtime: ${[...skip].map((s) => s.name).join(', ')})` : ''}. ` +
+      (crossField
+        ? `This query's filter compares against the field reference ` +
+          `{ "$field": "${crossField.ref}" } under "${crossField.op}" on "${crossField.field}", and ` +
+          `NativeSQLStrategy DECLINES a cross-field comparison so that it routes to the ObjectQL ` +
+          `engine path — whose driver compiles it and enforces the #5222 rulings with metadata it ` +
+          `owns (#7598). No such path is configured here, so the capability is unavailable on this ` +
+          `deployment: supply an \`executeAggregate\` bridge (the plugin auto-wires one from the ` +
+          `engine), or compare against a literal value. Every other query on this cube is ` +
+          `unaffected. `
+        : '') +
       'Ensure a compatible driver is configured or a fallback service is registered.',
     );
+  }
+}
+
+/**
+ * [#7598] A query's `where`, lowered — the same input the strategies scan, so
+ * the diagnostic above describes the filter the decline actually saw.
+ *
+ * Quiet by construction: a `where` that cannot even be lowered is refused
+ * downstream with its own message and envelope, and there is no reference to
+ * find in one that does not lower.
+ */
+function lowerAnalyticsWhereQuietly(query: AnalyticsQuery): unknown {
+  try {
+    return lowerAnalyticsWhere(query);
+  } catch {
+    return null;
   }
 }
 

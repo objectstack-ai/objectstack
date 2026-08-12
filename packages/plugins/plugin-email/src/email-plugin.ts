@@ -58,6 +58,30 @@ import {
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 
 /**
+ * "No source could answer" — distinct from "nothing declares this name", which
+ * is a plain `undefined`. Only the latter may retire a materialized template
+ * row; see {@link EmailServicePlugin.readEffectiveTemplate}.
+ */
+const FAILED_READ = Symbol('email-template-read-failed');
+
+/**
+ * Drop the underscore-prefixed keys a SERVED metadata item carries
+ * (`_diagnostics`, `_packageId`, `_provenance`, `_draft`, …). Every one of
+ * them is a read-time verdict the protocol attaches, never an authored field:
+ * `EmailTemplateDefinitionSchema` is a `strictObject` and declares no
+ * underscore key, so leaving them on turns a perfectly good declaration into a
+ * validation failure.
+ */
+function stripReadDecorations(item: unknown): unknown {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(item as Record<string, unknown>)) {
+    if (!k.startsWith('_')) out[k] = v;
+  }
+  return out;
+}
+
+/**
  * Plugin configuration.
  */
 export interface EmailServicePluginOptions {
@@ -246,6 +270,21 @@ export class EmailServicePlugin implements Plugin {
   private boundEngine?: IDataEngine;
   /** Live `email_template` metadata subscription — detached in dispose(). */
   private unsubscribeTemplates?: () => void;
+  /**
+   * Live `email_template` protocol-mutation listener (#7733) — detached in
+   * dispose(). Only set on the `onMetadataMutation` fallback; the preferred
+   * `registerMutationProjector` seam is a per-type Map slot with no
+   * unregister verb, so that half is released by dropping the protocol.
+   */
+  private unsubscribeTemplateMutations?: () => void;
+  /**
+   * Whether the live template bridge is armed. Cleared in dispose(), and read
+   * by the materializer because the projector seam has no unregister verb: a
+   * disposed plugin's projector stays in the protocol's per-type slot, and
+   * without this it would keep writing `sys_email_template` rows through an
+   * engine whose provenance hook has already been unbound.
+   */
+  private templateBridgeArmed = false;
   /** SMTP transport currently in use, if any — closed in dispose(). */
   private liveSmtp?: SmtpTransport;
   /**
@@ -930,13 +969,49 @@ export class EmailServicePlugin implements Plugin {
    *
    * `email_template` is `allowRuntimeCreate: true` (unlike `webhook`), so a
    * boot-only sweep would leave a Studio save inert until the next restart —
-   * the same bug, half-fixed. The subscription re-materializes the single
-   * changed item; `MetadataManager.register` notifies watchers only AFTER the
-   * write has landed, so re-reading on the event cannot race the data.
+   * the same bug, half-fixed.
+   *
+   * [#7733] The live path needs BOTH announcements, because the two authoring
+   * doors announce on different seams and neither one covers the other:
+   *
+   *   • `metadataService.subscribe('email_template', …)` — fed by
+   *     `MetadataManager.register()` → `notifyWatchers()`. That is the artifact
+   *     / package-ingest door. `register` announces only AFTER the write has
+   *     landed, so re-reading on the event cannot race the data.
+   *
+   *   • `protocol.registerMutationProjector` / `onMetadataMutation` — fed by
+   *     `saveMetaItem` / `publishMetaItem` / `deleteMetaItem`, i.e. the
+   *     RUNTIME-AUTHORING door: `PUT /api/v1/meta/email_template/:name`, the
+   *     Studio save behind it, the AI builders, direct protocol callers.
+   *
+   * The comment this replaces claimed the first seam covered "Studio saves /
+   * PUT /meta" too. It does not, and nothing else made up the difference:
+   * `saveMetaItem` persists to `sys_metadata`, write-throughs to the ObjectQL
+   * SchemaRegistry (the `[Registry] Registered email_template` line the QA run
+   * saw) and announces on its OWN seam — it never calls `register()`, and
+   * `notifyWatchers` has no caller outside `MetadataManager`. So the watcher
+   * was armed against an event the PUT path never emits: 200 on the write, no
+   * row in `sys_email_template`, and only a restart — which re-runs the boot
+   * sweep over the persisted row — made the template send.
+   *
+   * The projector seam is preferred over the listener seam for the same reason
+   * plugin-security's permission projection prefers it (ADR-0094): it is
+   * AWAITED inside the write, so `PUT` → read `sys_email_template` is
+   * consistent with no race window, and a materialization failure is reported
+   * on the write's own response (`projectionApplied`) instead of vanishing into
+   * a log. `onMetadataMutation` is the fallback for protocol implementations
+   * that predate the projector.
+   *
+   * Both seams landing the same write is harmless and NOT guarded against:
+   * `upsertDeclaredEmailTemplate` is keyed on `(name, locale)` and idempotent,
+   * so a second delivery updates the row it just wrote. Deduping would need
+   * per-write state whose only job is to skip a write that costs one indexed
+   * lookup.
    */
   private async bootDeclaredTemplates(ctx: PluginContext, engine: IDataEngine): Promise<void> {
     // Bind the provenance stamp so an admin edit freezes a seeded row.
     this.boundEngine = engine;
+    this.templateBridgeArmed = true;
     try { bindEmailTemplateProvenanceStamp(engine as any, ctx.logger as any); }
     catch (err: any) {
       ctx.logger.warn('EmailServicePlugin: template provenance stamp not bound: ' + (err?.message ?? err));
@@ -954,41 +1029,214 @@ export class EmailServicePlugin implements Plugin {
       );
     }
 
-    // Live path — Studio saves / PUT /meta land as `added`/`changed` events.
-    if (typeof metadataService?.subscribe !== 'function') return;
-    try {
-      this.unsubscribeTemplates = metadataService.subscribe('email_template', (event: any) => {
-        void (async () => {
-          try {
-            const kind = event?.type;
-            if (kind === 'deleted' || kind === 'unlink') {
-              // Delete events carry no locale — deactivate by name, and only
-              // rows this bridge owns.
-              await deactivateDeclaredEmailTemplate(engine, String(event?.name ?? ''), undefined, ctx.logger as any);
-              return;
-            }
-            const raw = event?.data ?? (event?.name
-              ? await metadataService.get?.('email_template', event.name)
-              : undefined);
-            if (!raw) return;
-            await upsertDeclaredEmailTemplate(engine, (raw as any)?.content ?? raw, undefined, ctx.logger as any);
-            ctx.logger.info(`EmailServicePlugin: email template '${event?.name}' materialized from a runtime write`);
-          } catch (err: any) {
-            ctx.logger.warn(
-              `EmailServicePlugin: runtime email-template sync failed for '${event?.name}': ${err?.message ?? err}`,
-            );
-          }
-        })();
+    // Live door 1 — package ingest / artifact reload, via the metadata service.
+    if (typeof metadataService?.subscribe === 'function') {
+      try {
+        this.unsubscribeTemplates = metadataService.subscribe('email_template', (event: any) => {
+          void this.materializeTemplateMutation(ctx, engine, {
+            name: event?.name,
+            // Watch events name the CHANGE (`added` / `changed` / `deleted` /
+            // `unlink`); mutation events name the resulting STATE. Fold to the
+            // one verb the materializer takes.
+            deleted: event?.type === 'deleted' || event?.type === 'unlink',
+            body: event?.data,
+            metadataService,
+          }).catch(() => { /* already logged */ });
+        });
+        ctx.logger.info('EmailServicePlugin: subscribed to email_template metadata changes');
+      } catch (err: any) {
+        ctx.logger.warn('EmailServicePlugin: email_template subscription failed: ' + (err?.message ?? err));
+      }
+    }
+
+    // Live door 2 — runtime authoring (`PUT /meta`, Studio, publish, delete),
+    // via the protocol's post-persistence seam. [#7733]
+    this.wireTemplateMutationProjection(ctx, engine, metadataService);
+  }
+
+  /**
+   * Arm the protocol-side half of the live template path (#7733).
+   *
+   * Prefers the AWAITED ADR-0094 projector so the write itself carries the
+   * materialization; falls back to the fire-and-forget `onMetadataMutation`
+   * listener (#2588) on protocol implementations that predate it. Silent no-op
+   * when the kernel registers no protocol at all (a data-plane-only host) —
+   * that deployment simply has no runtime-authoring door to bridge, and the
+   * boot sweep above still covers it.
+   */
+  private wireTemplateMutationProjection(
+    ctx: PluginContext,
+    engine: IDataEngine,
+    metadataService: IMetadataService | undefined,
+  ): void {
+    let protocol: any;
+    try { protocol = ctx.getService('protocol'); } catch { return; }
+    if (!protocol) return;
+
+    // `MetadataMutationEvent.state` is the row's resulting lifecycle. `draft`
+    // is the ADR-0005 staging buffer and is deliberately NOT live — the same
+    // reading every other consumer of this seam applies.
+    const materialize = (evt: any) => {
+      if (evt?.state === 'draft') return undefined;
+      return this.materializeTemplateMutation(ctx, engine, {
+        name: evt?.name,
+        deleted: evt?.state === 'deleted',
+        body: evt?.body,
+        metadataService,
+        protocol,
       });
-      ctx.logger.info('EmailServicePlugin: subscribed to email_template metadata changes');
+    };
+
+    try {
+      if (typeof protocol.registerMutationProjector === 'function') {
+        protocol.registerMutationProjector('email_template', async (evt: any) => {
+          // Throws on purpose: `runMutationProjector` catches it and reports
+          // `projectionApplied: { success:false, error }` on the save's own
+          // response, so an author whose template did not materialize learns
+          // it from the write instead of from a mail that never arrives.
+          await materialize(evt);
+        });
+        ctx.logger.info('EmailServicePlugin: projecting email_template metadata mutations');
+        return;
+      }
+      if (typeof protocol.onMetadataMutation === 'function') {
+        this.unsubscribeTemplateMutations = protocol.onMetadataMutation((evt: any) => {
+          if (evt?.type !== 'email_template') return;
+          void materialize(evt)?.catch(() => { /* already logged */ });
+        });
+        ctx.logger.info('EmailServicePlugin: subscribed to email_template metadata mutations');
+      }
     } catch (err: any) {
-      ctx.logger.warn('EmailServicePlugin: email_template subscription failed: ' + (err?.message ?? err));
+      ctx.logger.warn(
+        'EmailServicePlugin: email_template mutation projection failed to wire: ' + (err?.message ?? err),
+      );
     }
   }
 
+  /**
+   * Apply ONE announced `email_template` change to `sys_email_template` —
+   * shared by both live doors, so a Studio save and a package ingest land
+   * through exactly the same write (and the same seed-not-clobber rules).
+   *
+   * `body` is used when the announcement carries it (the projector's
+   * just-persisted item, a watch event's `data`); otherwise the item is
+   * re-read through the metadata service. Both are re-read AFTER persistence,
+   * so neither can race the row it describes.
+   *
+   * A DELETE is not automatically a withdrawal. `DELETE /meta/:type/:name`
+   * discards a CUSTOMIZATION overlay (ADR-0005), so on an artifact-backed
+   * template it resets to the packaged declaration rather than removing it —
+   * deactivating there would silently retire a template the package still
+   * ships. So a delete re-reads the EFFECTIVE item (ADR-0094 names this the
+   * projector's job) and re-materializes the revealed baseline; only when
+   * nothing resolves is the template genuinely gone and the rows deactivated.
+   * A FAILED read is not an answer and deactivates nothing — a transient DB
+   * error must never be what stops a live template being sent.
+   *
+   * Rethrows after logging: the projector caller turns that into the write's
+   * `projectionApplied` verdict, and the fire-and-forget callers swallow it.
+   */
+  private async materializeTemplateMutation(
+    ctx: PluginContext,
+    engine: IDataEngine,
+    evt: {
+      name: unknown;
+      deleted: boolean;
+      body: unknown;
+      metadataService: IMetadataService | undefined;
+      protocol?: any;
+    },
+  ): Promise<void> {
+    if (!this.templateBridgeArmed) return;
+    try {
+      if (evt.deleted) {
+        const revealed = await this.readEffectiveTemplate(ctx, evt);
+        if (revealed === FAILED_READ) return;
+        if (revealed) {
+          await upsertDeclaredEmailTemplate(engine, revealed, undefined, ctx.logger as any);
+          ctx.logger.info(
+            `EmailServicePlugin: email template '${evt.name}' reset to its packaged declaration`,
+          );
+          return;
+        }
+        // Genuinely withdrawn. Delete announcements carry no locale —
+        // deactivate by name, and only rows this bridge owns.
+        await deactivateDeclaredEmailTemplate(engine, String(evt.name ?? ''), undefined, ctx.logger as any);
+        return;
+      }
+      const raw = evt.body ?? (evt.name
+        ? await evt.metadataService?.get?.('email_template', String(evt.name))
+        : undefined);
+      if (!raw) return;
+      await upsertDeclaredEmailTemplate(engine, (raw as any)?.content ?? raw, undefined, ctx.logger as any);
+      ctx.logger.info(`EmailServicePlugin: email template '${evt.name}' materialized from a runtime write`);
+    } catch (err: any) {
+      ctx.logger.warn(
+        `EmailServicePlugin: runtime email-template sync failed for '${evt.name}': ${err?.message ?? err}`,
+      );
+      throw err;
+    }
+  }
+
+  /**
+   * The effective (layered) `email_template` body a delete may have revealed,
+   * `undefined` when nothing declares the name any more, or {@link FAILED_READ}
+   * when no source could answer.
+   *
+   * `protocol.getMetaItem` first — it is the layered read, so it reports the
+   * packaged declaration an overlay was hiding. `metadataService.get` is the
+   * fallback for hosts without that surface; it answers from the artifact
+   * registry, which for a delete is the same baseline. The three outcomes are
+   * kept apart on purpose: only "nothing declares it" may deactivate a row.
+   *
+   * The body is stripped of read decorations before it is returned. A served
+   * item carries the protocol's own underscore keys (`_diagnostics` from
+   * `decorateMetadataItem`, `_packageId` / `_provenance` from the registry and
+   * the overlay row), `EmailTemplateDefinitionSchema` is a `strictObject`, and
+   * it declares no underscore key — so handing the decorated body to the
+   * upsert would reject the very baseline this read exists to restore. This is
+   * the read-side twin of the strip `saveMetaItem` does on the write side.
+   */
+  private async readEffectiveTemplate(
+    ctx: PluginContext,
+    evt: { name: unknown; metadataService: IMetadataService | undefined; protocol?: any },
+  ): Promise<unknown | typeof FAILED_READ> {
+    const name = String(evt.name ?? '');
+    if (!name) return undefined;
+    let answered = false;
+    let item: unknown;
+    if (typeof evt.protocol?.getMetaItem === 'function') {
+      try {
+        const res: any = await evt.protocol.getMetaItem({ type: 'email_template', name });
+        answered = true;
+        item = res?.item ?? res?.data ?? (res?.name ? res : undefined);
+      } catch (err: any) {
+        ctx.logger.warn(
+          `EmailServicePlugin: effective read of email template '${name}' failed: ${err?.message ?? err}`,
+        );
+      }
+    }
+    if (!answered && typeof evt.metadataService?.get === 'function') {
+      try {
+        item = await evt.metadataService.get('email_template', name);
+        answered = true;
+      } catch (err: any) {
+        ctx.logger.warn(
+          `EmailServicePlugin: effective read of email template '${name}' failed: ${err?.message ?? err}`,
+        );
+      }
+    }
+    if (!answered) return FAILED_READ;
+    if (!item) return undefined;
+    return stripReadDecorations((item as any)?.content ?? item);
+  }
+
   async dispose(): Promise<void> {
+    this.templateBridgeArmed = false;
     try { this.unsubscribeTemplates?.(); } catch { /* best effort */ }
     this.unsubscribeTemplates = undefined;
+    try { this.unsubscribeTemplateMutations?.(); } catch { /* best effort */ }
+    this.unsubscribeTemplateMutations = undefined;
     if (this.liveSmtp) {
       try { await this.liveSmtp.close(); } catch { /* best effort */ }
       this.liveSmtp = undefined;
