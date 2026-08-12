@@ -50,3 +50,5 @@
 `.strict()` 是 parse 的属性,这里没有 parse —— 收紧只会让文件看起来完成,并留下*一个被精确校验的死槽位*(#4583)。账本因此新增第四类 **`no gate`**(承载键活、parse 缺),与批 13 的 `no door`(承载键本身不存在)并列:两者处方相反,前者该接闸门,后者该走 ADR-0049 退役。已归档为独立 issue。
 
 主题里那些**发出后无人读取**的 CSS 变量(`--font-size-*` / `--z-*` / `--duration-*` …)是 ADR-0049 的 liveness 题目,不是未知键题目,同样单独归档 —— 收紧能让被丢弃的键变响,不能让一个槽位变活。
+
+<!-- adr-0087: registered authoring-schemas-strict-unknown-keys -->

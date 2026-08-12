@@ -22,7 +22,7 @@ regenerate.
 |---|---|
 | Triaged directories | 5 |
 | Object sites in them | 438 |
-| Still-open (strip) sites | 181 |
+| Still-open (strip) sites | 180 |
 | Files carrying at least one | 27 |
 
 Remaining strip sites by class:
@@ -31,7 +31,7 @@ Remaining strip sites by class:
 |---|---|
 | authorable — the ruling's forced scope | 40 |
 | unresolved — needs a per-schema verdict | 34 |
-| wire / open — out of forced scope | 105 |
+| wire / open — out of forced scope | 104 |
 | no door — no carrier, ADR-0049 territory | 1 |
 | no gate — carrier live, no parse | 0 |
 | covered — no carrier, no parse, guarded at every consumer | 1 |
@@ -45,11 +45,11 @@ The `strict` column is the one the campaign schedules against; it counts both th
 | Dir | Sites | strict | passthrough | catchall | strip |
 |---|---|---|---|---|---|
 | `ui/` | 161 | 119 | 5 | 0 | 37 |
-| `data/` | 165 | 56 | 1 | 0 | 108 |
+| `data/` | 165 | 57 | 1 | 0 | 107 |
 | `automation/` | 65 | 42 | 0 | 0 | 23 |
 | `security/` | 20 | 7 | 0 | 0 | 13 |
 | `studio/` | 27 | 27 | 0 | 0 | 0 |
-| **total** | **438** | **251** | **6** | **0** | **181** |
+| **total** | **438** | **252** | **6** | **0** | **180** |
 
 ## File-level triage — site counts
 
@@ -179,7 +179,7 @@ over it is here.
 
 ### `data/` — open
 
-**108 strip of 165**, in 16 file(s).
+**107 strip of 165**, in 16 file(s).
 
 | File | Strip | Sites |
 |---|---|---|
@@ -194,18 +194,18 @@ over it is here.
 | `external-lookup.zod.ts` | 12 | 12 |
 | `field-value.zod.ts` | 2 | 3 |
 | `field.zod.ts` | 2 | 10 |
-| `filter.zod.ts` | 11 | 11 |
+| `filter.zod.ts` | 10 | 11 |
 | `hook.zod.ts` | 5 | 7 |
 | `object.zod.ts` | 1 | 20 |
 | `query.zod.ts` | 4 | 5 |
 | `seed-loader.zod.ts` | 12 | 12 |
-| **total** | **108** | **165** |
+| **total** | **107** | **165** |
 
 | Bucket | Sites |
 |---|---|
 | authorable — the ruling's forced scope | 8 |
 | unresolved — needs a per-schema verdict | 34 |
-| wire / open — out of forced scope | 66 |
+| wire / open — out of forced scope | 65 |
 | no door — no carrier, ADR-0049 territory | 0 |
 | no gate — carrier live, no parse | 0 |
 | covered — no carrier, no parse, guarded at every consumer | 0 |
@@ -271,4 +271,4 @@ directory rather than per file.
 | `kernel/` | 296 |
 | `qa/` | 6 |
 | `shared/` | 20 |
-| `system/` | 362 |
+| `system/` | 365 |

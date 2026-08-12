@@ -1019,3 +1019,147 @@ describe('[#7676] admin visibility of package-seeded (org-null) sharing rules', 
     expect(resolved?.organization_id).toBe('org1');
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────
+// [#7761] `getRule`'s BY-ID branch is scoped to the caller's organization.
+//
+// The by-name path has been scoped since #7676; the by-id branch was a bare
+// `{id: idOrName}` resolved under SYSTEM_CTX, so nothing re-scoped it
+// downstream. An org-scoped sharing admin holding another organization's
+// opaque `srule_…` id could read that org's rule, `evaluate` it, and — because
+// `deleteRule` resolves through `getRule` — DELETE it along with every
+// `sys_record_share` grant it had materialised: silently revoking another
+// tenant's record access. `manage_sharing` is an org-level capability
+// (`scope: 'org'`) and an id is not a tenant boundary — ids leak through logs,
+// exports, support tickets and the evaluate response's `{ruleId}`.
+//
+// The delete assertions pin the ROW **and its grants**, because grant purging
+// is the actual harm: a fix that kept the row but still purged the grants
+// would satisfy a row-only assertion while leaving the damage intact.
+//
+// Ablation (predicted in advance): restore `where: {id: idOrName}` and the
+// three "unreachable by id" tests flip red, while the platform-global,
+// own-org and BOOT pins below stay green.
+// ─────────────────────────────────────────────────────────────────────
+
+describe('[#7761] getRule by-id is scoped to the caller organization', () => {
+  let engine: ReturnType<typeof makeEngine>;
+  let rules: SharingRuleService;
+
+  /** Authenticated org-scoped sharing admins — the shape the REST layer builds. */
+  const ORG1_ADMIN = { userId: 'admin', organizationId: 'org1', systemPermissions: ['manage_sharing'] } as any;
+  const ORG2_ADMIN = { userId: 'other', organizationId: 'org2', systemPermissions: ['manage_sharing'] } as any;
+  /**
+   * The seeder's / boot context — carries NO organization, which is what
+   * stamps `organization_id: null`. Deliberately not this file's older `SYS`
+   * (`{isSystem: true, organizationId: 'org1'}`): `isSystem` bypasses the
+   * ADR-0111 D6 capability gate, never the org scope, so `SYS` would silently
+   * defeat every fixture below.
+   */
+  const BOOT = { isSystem: true, positions: [], permissions: [] } as any;
+
+  const SEEDED = 'share_red_projects_with_execs';
+  let seededId = '';
+  let otherOrgRuleId = '';
+  let org1RuleId = '';
+
+  /** The `sys_record_share` rows a given rule materialised. */
+  const grantsOf = (ruleId: string): Row[] =>
+    (engine._tables.sys_record_share ?? []).filter((g) => g.source === 'rule' && g.source_id === ruleId);
+
+  beforeEach(async () => {
+    engine = makeEngine();
+    engine._tables.project = [
+      { id: 'p_red', status: 'red', owner_id: 'someone' },
+      { id: 'p_green', status: 'green', owner_id: 'someone' },
+    ];
+    rules = new SharingRuleService({ engine: engine as any, sharing: new SharingService({ engine: engine as any }) });
+
+    // Platform-global package seed — defined with no org, as the boot seeder does.
+    seededId = (await rules.defineRule({
+      name: SEEDED, label: 'Red projects → execs', object: 'project',
+      criteria: { status: 'red' }, recipientType: 'user', recipientId: 'exec',
+      managedBy: 'package',
+    } as any, BOOT)).id;
+    // The victim: a rule owned by a DIFFERENT organization.
+    otherOrgRuleId = (await rules.defineRule({
+      name: 'other_org_rule', label: 'Other org', object: 'project',
+      criteria: { status: 'green' }, recipientType: 'user', recipientId: 'mallory',
+    } as any, ORG2_ADMIN)).id;
+    // The caller's own rule — the positive half.
+    org1RuleId = (await rules.defineRule({
+      name: 'org1_rule', label: 'Org1 own', object: 'project',
+      criteria: { status: 'red' }, recipientType: 'user', recipientId: 'alice',
+    } as any, ORG1_ADMIN)).id;
+
+    // Materialise org2's grants under BOOT, so the fixture does not depend on
+    // the very scoping decision these tests are measuring.
+    await rules.evaluateRule(otherOrgRuleId, BOOT);
+  });
+
+  it('the fixture really does have three distinct rows and live grants on the victim', () => {
+    const rows = engine._tables.sys_sharing_rule;
+    expect(rows.find((r) => r.id === seededId)?.organization_id).toBeNull();
+    expect(rows.find((r) => r.id === otherOrgRuleId)?.organization_id).toBe('org2');
+    expect(rows.find((r) => r.id === org1RuleId)?.organization_id).toBe('org1');
+    expect(new Set([seededId, otherOrgRuleId, org1RuleId]).size).toBe(3);
+    // Without this, the delete pin below could "pass" over a rule that never
+    // had any grants to lose.
+    expect(grantsOf(otherOrgRuleId)).toHaveLength(1);
+  });
+
+  // ── the defect: another organization's row, addressed by id ──────────
+
+  it('another organization’s rule is unreachable BY ID — read', async () => {
+    expect(await rules.getRule(otherOrgRuleId, ORG1_ADMIN)).toBeNull();
+  });
+
+  it('another organization’s rule is unreachable BY ID — evaluate', async () => {
+    await expect(rules.evaluateRule(otherOrgRuleId, ORG1_ADMIN)).rejects.toThrow(/RULE_NOT_FOUND/);
+    // Evaluate is a WRITE (it reconciles grants), so the refusal has to leave
+    // the victim's grants exactly as they were, not merely return an error.
+    expect(grantsOf(otherOrgRuleId)).toHaveLength(1);
+  });
+
+  it('another organization’s rule is unreachable BY ID — delete leaves the row AND its grants intact', async () => {
+    await rules.deleteRule(otherOrgRuleId, ORG1_ADMIN);
+    expect(engine._tables.sys_sharing_rule.find((r) => r.id === otherOrgRuleId)).toBeTruthy();
+    // The harm in this defect is grant purging — `deleteRule` revokes every
+    // `sys_record_share` row the rule materialised — so the grants are the
+    // assertion that matters, not just the surviving rule row.
+    expect(grantsOf(otherOrgRuleId)).toHaveLength(1);
+  });
+
+  // ── platform-global stays reachable (what #7760 enabled by name) ─────
+
+  it('a platform-global (organization_id = null) rule stays reachable BY ID — read', async () => {
+    const row = await rules.getRule(seededId, ORG1_ADMIN);
+    expect(row?.name).toBe(SEEDED);
+    expect(row?.organization_id).toBeNull();
+  });
+
+  it('a platform-global rule stays reachable BY ID — evaluate', async () => {
+    const res = await rules.evaluateRule(seededId, ORG1_ADMIN);
+    expect(res.ruleId).toBe(seededId);
+    expect(res.matchedRecords).toBe(1);
+    expect(res.grantsCreated).toBe(1);
+  });
+
+  // ── unchanged behaviour ──────────────────────────────────────────────
+
+  it('the caller’s OWN org rule is still fully addressable by id', async () => {
+    expect((await rules.getRule(org1RuleId, ORG1_ADMIN))?.organization_id).toBe('org1');
+    expect((await rules.evaluateRule(org1RuleId, ORG1_ADMIN)).ruleId).toBe(org1RuleId);
+    // Delete works on the caller's own row — the control proving the refusal
+    // above comes from the org scope and not from a delete path that stopped
+    // working for everyone.
+    await rules.deleteRule(org1RuleId, ORG1_ADMIN);
+    expect(engine._tables.sys_sharing_rule.find((r) => r.id === org1RuleId)).toBeUndefined();
+  });
+
+  it('a no-org (SYSTEM_CTX / boot) context still resolves ANY row by id', async () => {
+    expect((await rules.getRule(otherOrgRuleId, BOOT))?.organization_id).toBe('org2');
+    expect((await rules.getRule(seededId, BOOT))?.organization_id).toBeNull();
+    expect((await rules.getRule(org1RuleId, BOOT))?.organization_id).toBe('org1');
+  });
+});

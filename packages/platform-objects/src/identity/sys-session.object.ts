@@ -71,6 +71,14 @@ export const SysSession = ObjectSchema.create({
     },
   ],
 
+  // [#7732] A `revoked_at` row is a TOMBSTONE — an ended session kept as the
+  // ADR-0069 D4 audit record of its ending, not a session. Since the
+  // interactive revoke stamps the row instead of deleting it, the two
+  // session-listing views filter tombstones out (`revoke_session` still makes
+  // the row leave the grid, exactly as it did when the row was deleted), and
+  // the audit trail those columns exist for gets a view of its own — otherwise
+  // the fields would be written and still readable nowhere, which is the same
+  // declared-≠-enforced gap one layer up.
   listViews: {
     mine: {
       type: 'grid',
@@ -78,7 +86,10 @@ export const SysSession = ObjectSchema.create({
       label: 'My Sessions',
       data: { provider: 'object', object: 'sys_session' },
       columns: ['ip_address', 'active_organization_id', 'created_at', 'expires_at'],
-      filter: [{ field: 'user_id', operator: 'equals', value: '{current_user_id}' }],
+      filter: [
+        { field: 'user_id', operator: 'equals', value: '{current_user_id}' },
+        { field: 'revoked_at', operator: 'is_null' },
+      ],
       sort: [{ field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 50 },
     },
@@ -88,7 +99,18 @@ export const SysSession = ObjectSchema.create({
       label: 'All',
       data: { provider: 'object', object: 'sys_session' },
       columns: ['user_id', 'ip_address', 'active_organization_id', 'created_at', 'expires_at'],
+      filter: [{ field: 'revoked_at', operator: 'is_null' }],
       sort: [{ field: 'created_at', order: 'desc' }],
+      pagination: { pageSize: 50 },
+    },
+    revoked: {
+      type: 'grid',
+      name: 'revoked',
+      label: 'Revoked',
+      data: { provider: 'object', object: 'sys_session' },
+      columns: ['user_id', 'ip_address', 'revoked_at', 'revoke_reason', 'created_at'],
+      filter: [{ field: 'revoked_at', operator: 'is_not_null' }],
+      sort: [{ field: 'revoked_at', order: 'desc' }],
       pagination: { pageSize: 50 },
     },
   },

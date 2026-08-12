@@ -307,6 +307,34 @@ jobs:
             echo "Affected-set diff base: $SCM_BASE  (merge-base of origin/$BASE_REF and HEAD)"
             echo "Frozen payload base.sha: $PINNED_BASE_SHA  -- $BASE_REF has moved $DRIFT commit(s) since it was frozen, and that drift is exactly what this step used to charge to this PR."
             TURBO_SCM_BASE="$SCM_BASE" pnpm exec turbo ls --affected --output=json > "$RUNNER_TEMP/turbo-ls.json"
+            # `turbo ls --affected` answers "which packages does the dependency
+            # GRAPH reach from this diff" — and some suites read files the graph
+            # does not connect them to. spec's api-methods-batch-conformance scan
+            # walks every `*.object.ts` in the monorepo while spec declares no
+            # dependency on the packages it judges (nor should it: the scan reads
+            # source text precisely to avoid inverting the spec -> * direction).
+            # A platform-objects-only diff therefore left it unrun, and #7769
+            # landed a violation on `main` that only PRs touching `spec` ever saw.
+            # Measured on turbo 2.10.7: 51 packages affected by that diff, spec
+            # not among them.
+            #
+            # So packages that declare a cross-package input radius are unioned
+            # back in when the diff touches it. The declarations, and the static
+            # detector that refuses to let a new cross-package scan go
+            # undeclared, live in the script (`pnpm check:cross-package-test-inputs`).
+            #
+            # Failure here falls back to the FULL package list, never to the
+            # affected-only set: same posture as the merge-base fallback below
+            # (#6195), and the same reason — the full list is a strict superset,
+            # so doubt costs minutes rather than coverage. This is the FILTER
+            # CONTRACT's half 1 applied one layer down.
+            if ! git diff --name-only "$SCM_BASE" HEAD > "$RUNNER_TEMP/changed-files.txt" \
+              || ! node scripts/check-cross-package-test-inputs.mjs \
+                   --union-into "$RUNNER_TEMP/turbo-ls.json" \
+                   --changed "$RUNNER_TEMP/changed-files.txt"; then
+              echo "::warning::Could not union cross-package scans into the affected set; falling back to the full package list for this shard."
+              pnpm exec turbo ls --output=json > "$RUNNER_TEMP/turbo-ls.json"
+            fi
           else
             # Falling back to the FULL package list, never to the frozen
             # base.sha. This is not the #4690 silent-skip anti-pattern: that is

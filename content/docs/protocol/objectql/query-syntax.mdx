@@ -337,15 +337,16 @@ metacharacters — `{ name: { $icontains: 'a.b' } }` matches `a.b` and not `axb`
   compilers). A filter using it means the same thing whether your tests run on the
   in-memory double or your production runs SQL.
 
-  One half of the case rules above is still landing: `$contains` /
+  The other half of the case rules above has landed too: `$contains` /
   `$startsWith` / `$endsWith` / `$notContains` are case-**sensitive** by ruling and
-  are so on the SQL family and on MongoDB —
+  are so on every backend —
   [#6682](https://github.com/objectstack-ai/objectstack/issues/6682) removed the
-  hardcoded `$options: 'i'` that had folded them there. The in-memory driver's
-  query and analytics faces still fold over the whole Unicode range. Until that
-  half lands, prefer `$icontains` when you *want* a fold rather than relying on
-  `$contains` being loose on that backend. The shared standard both halves are
-  measured against is `FILTER_TEXT_CASES` (`@objectstack/spec/data`).
+  hardcoded `$options: 'i'` that folded them on MongoDB and the case-insensitive
+  regex that folded them on the in-memory driver's query and analytics faces.
+  **If you were relying on `$contains` being loose on the in-memory driver, that
+  is a row-set change: write `$icontains` when you want a fold.** The shared
+  standard both halves are measured against is `FILTER_TEXT_CASES`
+  (`@objectstack/spec/data`), which all five drivers now run.
 </Callout>
 
 ### `$regex` — removed
@@ -963,19 +964,21 @@ rule in [Case Sensitivity](#case-sensitivity) above. Note what that means for se
 a user typing `acme` does not find `ACME Corp`. Only `select` / `status` option
 *labels* are matched case-insensitively by the expansion itself.
 
-<Callout type="warn">
-  **Measured today: one driver still does not match that rule.** The `$contains`
-  alignment landed in two steps —
+<Callout type="info">
+  **Measured today: every driver matches that rule.** The `$contains` alignment
+  landed in three steps —
   [#6518](https://github.com/objectstack-ai/objectstack/issues/6518) made `SqlDriver`
   case-exact per dialect (`GLOB` on the SQLite dialects, `LIKE` unchanged on
   Postgres, `LIKE` over a binary cast on MySQL), and
   [#6682](https://github.com/objectstack-ai/objectstack/issues/6682) removed
-  `driver-mongodb`'s hardcoded `$options: 'i'`. `driver-memory`'s query path still
-  matches with a case-insensitive regex, so running your tests on the in-memory
-  double can still return rows a SQL or MongoDB deployment would not. Whether the
-  expansion should emit `$icontains` instead of `$contains` — i.e. whether search is
-  case-insensitive by definition — is a separate question that rides with that issue,
-  because it can only be answered once both operators mean one thing everywhere.
+  `driver-mongodb`'s hardcoded `$options: 'i'` and then the case-insensitive regex
+  `driver-memory` used on its query and analytics faces. So running your tests on the
+  in-memory double no longer returns rows a SQL or MongoDB deployment would not —
+  the divergence this callout warned about is closed, and
+  `FILTER_TEXT_CASES` holds all five drivers to it. Whether the expansion should emit
+  `$icontains` instead of `$contains` — i.e. whether search is case-insensitive by
+  definition — remains a separate open question, and one that can now actually be
+  answered, since both operators mean one thing everywhere.
 </Callout>
 `fuzzy`, `boost`, `operator`, `minScore`, `language`, and `highlight` carry
 `[EXPERIMENTAL — not enforced]` markers (#4286): the schema accepts them, the

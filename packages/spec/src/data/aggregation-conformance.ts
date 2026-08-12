@@ -67,8 +67,9 @@
  * a distinct value would answer `3` where {@link AGGREGATION_CASES} says `2`,
  * and that is not a theoretical failure mode: it is what `driver-mongodb`'s
  * `$addToSet` → `$size` lowering did until #6850/#6814 enrolled it — measured by
- * running this table against the emitted pipeline, not predicted (see the DEBT
- * list below, where `driver-memory` still carries the open half).
+ * running this table against the emitted pipeline, not predicted — and what
+ * `driver-memory`'s analytics face did too, from the same `$addToSet`, until
+ * #6814 (see the DEBT list below, now empty).
  *
  * The `count` cases sit beside them on purpose. `count(stage)` is `4` while
  * `count_distinct(stage)` is `2` and `count(*)` is `6`: three different numbers
@@ -95,6 +96,12 @@
  *   answer "does MongoDB agree?", which is the question a real-mongod half would
  *   own. Recorded here rather than left to be discovered, because a green cell
  *   reads as more than that.
+ * - **`driver-memory`** — `memory-aggregation-conformance.test.ts` [#6814]. The
+ *   one enrolled face that needs no engine AND no model: this driver runs in
+ *   process, so the suite is a real execution of the table through BOTH doors of
+ *   its data face (`find()` and `aggregate(AST)`, the one objectql's engine
+ *   uses) plus its analytics face. It is therefore the counter-example to the
+ *   caveat on `driver-mongodb` above — same package family, opposite instrument.
  * - **`objectql`'s in-memory fallback** — `in-memory-aggregation-conformance.test.ts`
  *   in `packages/objectql`. [#6401] Not a SQL face and not a driver, which is
  *   why #6409 left it out; enrolled here because it is the face that has always
@@ -118,19 +125,20 @@
  *
  * | Backend | Verdict | Evidence |
  * |---|---|---|
- * | `driver-memory` (data face) | **RED** — answers `null` | `MemoryDriver.computeAggregate` has no `count_distinct` arm; the `switch` falls to `default: return null`, so the aggregation resolves with no value and no error. |
- * | `driver-memory` (analytics face) | **agrees** | `memory-analytics.ts` collects `$addToSet` and sizes it — the same NULL question as MongoDB below; not executed against this table. |
+ * | ~~`driver-memory` (data face)~~ | **CLEARED** [#6814] | Was RED and answering `null`: `MemoryDriver.computeAggregate` had no `count_distinct` arm, so the `switch` fell to `default: return null` and the aggregation resolved with no value and no error. It now has the arm, null-excluded, beside its neighbours. |
+ * | ~~`driver-memory` (analytics face)~~ | **CLEARED** [#6814] | The row above it read this face as "agrees" from the source — `memory-analytics.ts` "collects `$addToSet` and sizes it". Executing the table showed it collected and never sized: the measure answered the raw ARRAY (`['won','lost',null]`) under a field its own `fields` metadata types as `number`. Wrong on the NULL question the row anticipated *and* on the shape it did not. The reason the row was wrong is the reason the DEBT list says "not executed against this table" — and why enrolling is the only thing that clears a cell. |
  * | ~~`driver-mongodb`~~ | **CLEARED** [#6850/#6814] | Was RED and under-stated: the `count_distinct` null (3 for the standard's 2), the `"[object Object]"` `$group._id` below, AND a third divergence neither row named — `count(col)` ignored `field` and answered the ROW count (6 for the standard's 4). All three fixed and enrolled; see the list above. |
- * | `driver-memory` — the #6401 alias cases | **agrees** | `MemoryDriver.performAggregation`'s `normalizeGroupBy` (`memory-driver.ts:1066-1068`) already returns `{ field, alias: node.alias ?? node.field }` and projects the group value under `alias`. It reached the enforce answer independently, so the alias leg needed NO mechanical alignment here — measured, not assumed. |
+ * | ~~`driver-memory` — the #6401 alias cases~~ | **CLEARED** [#6814] — and this one WAS right | `MemoryDriver.performAggregation`'s `normalizeGroupBy` (`memory-driver.ts:1066-1068`) already returns `{ field, alias: node.alias ?? node.field }` and projects the group value under `alias`. It reached the enforce answer independently, so the alias leg needed NO mechanical alignment here — measured, not assumed. |
  * | ~~`driver-mongodb` — the #6401 alias cases~~ | **CLEARED** [#6850] | Was RED and wider than the alias: `buildAggregationPipeline` typed `groupBy` as `string[]` and did `groupId[field] = '$' + field`, so a STRUCTURED node — aliased or not — stringified into a `"[object Object]"` `$group._id` keyed on a field path that matches nothing. The alias was unreachable rather than ignored. It now reads the union, keys `_id` on `alias ?? field`, and refuses a `dateGranularity` node with NOT_IMPLEMENTED/501 rather than dropping a declared key; `mongodb-driver.ts` spells the declared type instead of `(query as any).groupBy`, so the next drift is a `tsc` error. |
  *
- * `driver-memory` is inside the **#5499 investment freeze**, which is why its
- * row is a DEBT row and not a fix: #6409's ruling put it explicitly out of scope
- * and left its partial implementation untouched. Enrolling it means lifting the
- * freeze for it first — the row is here so that decision is made against a
- * measured verdict instead of an assumption that it already agrees. The
- * maintainer lifted the freeze for `driver-mongodb` alone on 2026-08-11, which
- * is why the two rows above are struck through and this one is not.
+ * Every row is struck through: the maintainer lifted the **#5499 investment
+ * freeze** for `driver-mongodb` on 2026-08-11 and for `driver-memory` later the
+ * same day, and both cells were enrolled rather than argued. What the list
+ * bought is worth keeping after it emptied — each row recorded a MEASURED
+ * verdict, and in both packages the verdict read from the source turned out to
+ * UNDER-state the divergence (mongodb's `count(col)`, memory's unsized
+ * `$addToSet`). A row read off the code is a hypothesis; the suite is the
+ * measurement. Add the next row the same way, and expect it to be optimistic.
  *
  * What the strike-throughs are worth keeping for: every one of those verdicts
  * was reached by READING, and when the suite finally executed the case-set it

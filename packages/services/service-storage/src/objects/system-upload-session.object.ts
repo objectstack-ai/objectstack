@@ -125,7 +125,17 @@ export const SystemUploadSession = ObjectSchema.create({
   // #2755 covers files, not sessions). The TTL reaps any row 1d past its own
   // `expires_at` (abandoned in-progress sessions included); the retention
   // backstop reaps terminal-status rows by age even if `expires_at` was
-  // never set. NOTE: this reaps the session ROW only — a reap guard that
+  // never set.
+  //
+  // Every status this clause names is one the service actually writes (#7667):
+  // `completed` on a finished assembly, `failed` when the backend completion
+  // throws, `expired` when a route is handed a session past its own
+  // `expires_at` — all three in `storage-routes.ts`. Until #7667 the last two
+  // had NO producer, so this rule reaped on two states the system could never
+  // enter and `completed` was the only member doing any work. Adding a member
+  // here without a writer re-opens exactly that hole (ADR-0049).
+  //
+  // NOTE: this reaps the session ROW only — a reap guard that
   // aborts the backend multipart upload for partial S3 sessions is a filed
   // follow-up (row reap is the declared scope of this item).
   lifecycle: {

@@ -74,3 +74,5 @@ feature: both metadata load paths call `applyProtection` on every type, so a
 package-loaded webhook already carried those keys when `plugin-webhooks`
 re-parsed it at boot. Closing the shape without declaring them would have turned
 every package-shipped webhook into a skipped subscription after a redeploy.
+
+<!-- adr-0087: registered authoring-schemas-strict-unknown-keys -->

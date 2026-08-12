@@ -250,6 +250,12 @@ export class SharingRuleService implements ISharingRuleService {
    * a cross-tenant read of a platform-global row. A same-named POST therefore
    * still creates an org-stamped row of the tenant's own, and
    * {@link findRuleRowByName} prefers it.
+   *
+   * [#7761] It IS applied to {@link getRule}'s by-**id** branch, which the
+   * second paragraph above records as the one read that still worked while
+   * everything else was over-scoped. That was never a feature: unfiltered
+   * meant an org admin could resolve — and, through {@link deleteRule},
+   * destroy — another organization's rule from its id alone.
    */
   private adminOrgScope(where: Record<string, unknown>, orgId: string | null | undefined): Record<string, unknown> {
     if (!orgId) return where;
@@ -280,8 +286,20 @@ export class SharingRuleService implements ISharingRuleService {
     if (!idOrName) return null;
     // `organizationId` is not on the envelope — see defineRule().
     const orgId = (context as any)?.organizationId ?? context?.tenantId;
+    // [#7761] The by-id branch carries the SAME tenant scope as the by-name
+    // path — it used to be a bare `{id: idOrName}`, resolved under SYSTEM_CTX
+    // so nothing downstream re-scoped it. An org-scoped sharing admin holding
+    // another organization's opaque `srule_…` id could therefore read that
+    // org's rule, `evaluate` it, and — because {@link deleteRule} resolves
+    // through here — DELETE it along with every `sys_record_share` grant it
+    // had materialised, i.e. silently revoke another tenant's record access.
+    // `manage_sharing` is an org-level capability (`scope: 'org'` in the spec's
+    // capability registry) and an id is not a tenant boundary: ids leak through
+    // logs, exports, support tickets and the evaluate response's `{ruleId}`.
+    // A platform-global (`organization_id = null`) row stays reachable, for
+    // symmetry with the by-name path — see {@link adminOrgScope}.
     const byId = await this.engine.find('sys_sharing_rule', {
-      where: { id: idOrName },
+      where: this.adminOrgScope({ id: idOrName }, orgId),
       limit: 1,
       context: SYSTEM_CTX,
     });
@@ -538,6 +556,86 @@ export class SharingRuleService implements ISharingRuleService {
         context: SYSTEM_CTX,
       } as any);
     }
+  }
+
+  /**
+   * [#7729] Revoke this rule's grants whose RECIPIENT the rule no longer
+   * expands to — the recipient-axis twin of
+   * {@link revokeRuleGrantsForRecords}.
+   *
+   * ## Why a third revoke, and why on this axis
+   *
+   * The two revokes above are both scoped by RECORD, because the writes that
+   * drove them were writes to records. A business-unit re-parent or a
+   * membership edit touches no record at all: what changes is who
+   * {@link expandRecipient} resolves to, and therefore which of the rule's
+   * already-materialised grants have gone stale. Scoping that withdrawal by
+   * record would mean enumerating every record the rule matches — the very
+   * scan {@link RULE_RECOMPUTE_ROW_CAP} exists because we cannot afford on a
+   * write path. Scoping it by recipient needs no record scan at all: one query
+   * for the rule's granted recipients, one recipient expansion, and a
+   * chunked set-based delete of the difference.
+   *
+   * ## Cheap enough to be the SYNCHRONOUS half
+   *
+   * This is the safety half of the same split the #4779 ruling settled
+   * (over-granting is a security incident, under-granting is an availability
+   * wobble): complete and synchronous on the write path, with the expensive
+   * re-grant deferred to {@link evaluateRule} on the shared re-grant queue.
+   * A BU moved OUT of a shared subtree therefore loses its members' access
+   * before the write returns, rather than at the shared record's next write —
+   * which was unbounded in time, and is what #7729 was filed for.
+   *
+   * The `granted.size === 0` short-circuit is load-bearing, not an
+   * optimisation: it is what keeps boot-time BU seeding (thousands of member
+   * inserts against an empty `sys_record_share`) from paying a subtree walk
+   * per row.
+   *
+   * An INACTIVE rule expands to nobody, so every grant it still holds is
+   * stale — the same verdict {@link evaluateRule} reaches by a longer road
+   * (#4433), reached here without one.
+   *
+   * Deletes set-based rather than through `SharingService.revoke`, following
+   * {@link revokeRuleGrantsForObject} / {@link revokeRuleGrantsForRecords}:
+   * under a system context `revoke` is itself a scalar-id delete with no
+   * event and no audit trail, so per-row revocation would buy nothing and
+   * cost one statement per grant on a path whose whole justification is that
+   * it stays cheap. Chunked at 200 for the same `$in` portability reason.
+   *
+   * @returns how many RECIPIENTS were retired (not how many rows went).
+   */
+  async revokeRuleGrantsForRetiredRecipients(rule: SharingRuleRow): Promise<number> {
+    if (!rule?.id) return 0;
+    const existing = await this.engine.find('sys_record_share', {
+      where: { source: 'rule', source_id: rule.id },
+      fields: ['id', 'recipient_id'],
+      limit: 100000,
+      context: SYSTEM_CTX,
+    });
+    const granted = new Set<string>();
+    for (const row of (existing ?? [])) {
+      const rid = (row as any).recipient_id;
+      if (rid != null && rid !== '') granted.add(String(rid));
+    }
+    if (granted.size === 0) return 0;
+
+    const desired = rule.active ? new Set(await this.expandRecipient(rule)) : new Set<string>();
+    const stale = [...granted].filter((recipientId) => !desired.has(recipientId));
+    if (stale.length === 0) return 0;
+
+    const CHUNK = 200;
+    for (let i = 0; i < stale.length; i += CHUNK) {
+      await this.engine.delete('sys_record_share', {
+        where: {
+          source: 'rule',
+          source_id: rule.id,
+          recipient_id: { $in: stale.slice(i, i + CHUNK) },
+        },
+        multi: true,
+        context: SYSTEM_CTX,
+      } as any);
+    }
+    return stale.length;
   }
 
   // ── internals ─────────────────────────────────────────────────────

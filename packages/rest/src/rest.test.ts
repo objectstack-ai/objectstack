@@ -1879,7 +1879,14 @@ describe('PUT /meta/:type/:name handler — header → request plumbing (PR-10d.
 
     const arg = (protocol.saveMetaItem as any).mock.calls[0][0];
     expect(arg).not.toHaveProperty('parentVersion');
-    expect(arg).not.toHaveProperty('actor');
+    // [#7749] `actor` used to be absent here too, and that absence was the
+    // defect rather than the contract: `req.user` / `req.userId` — the only
+    // non-header limbs of the old fallback chain — are never set on this
+    // transport, so an authenticated caller's write was recorded against
+    // `'system'`. With no `X-Actor`, the actor is now the request's
+    // authenticated identity, which on this stub is `test-user`. The row-level
+    // pins live in `meta-write-actor-identity.test.ts`.
+    expect(arg.actor).toBe('test-user');
   });
 
   it('maps a thrown METADATA_CONFLICT (409) to a 409 response with the code', async () => {

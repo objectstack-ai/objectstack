@@ -22,6 +22,7 @@ import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/secu
 import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
 import { createObjectQLAdapterFactory, withSystemReadContext } from './objectql-adapter.js';
 import { runWithAuthActorScope, setAuthActorResolver } from './auth-actor-attribution.js';
+import { SESSION_ERASURE_PATHS } from './session-tombstone.js';
 import {
   invitationRoleCapFailure,
   isPlainMemberInvitation,
@@ -162,6 +163,26 @@ function installWebContainerRequestStatePolyfill(): void {
       '[AuthManager] WebContainer detected: installed synchronous request-state polyfill ' +
         '(node:async_hooks AsyncLocalStorage does not propagate context across await in WebContainer).',
     );
+  }
+}
+
+/**
+ * [#7724] Carries better-auth's own error `Response` out through the engine
+ * transaction that must roll back because of it.
+ *
+ * better-auth's HTTP entrypoint CATCHES every fault and RETURNS a `Response` —
+ * it does not throw. A `try`/`catch`-shaped unit of work therefore sees a clean
+ * return on the exact path it exists to undo, commits, and the partial writes
+ * land anyway. So the failure signal has to be re-raised from the response
+ * status, and the response itself has to survive the throw that rolls the
+ * transaction back — that is the whole job of this class. It never escapes
+ * `runSubjectErasureAtomically`, which unwraps it back into the response the
+ * client was always going to get.
+ */
+class SubjectErasureRollback extends Error {
+  constructor(readonly response: Response) {
+    super(`subject-erasure unit of work rolled back (HTTP ${response.status})`);
+    this.name = 'SubjectErasureRollback';
   }
 }
 
@@ -3069,9 +3090,28 @@ export class AuthManager {
     // costs nothing: the scope starts empty, the before-hook drops a resolver
     // in, and the session is looked up only if some write asks. Attribution
     // only — the authorization subject of those writes is unchanged (system).
-    const response = await runWithAuthActorScope(() =>
-      runWithRequestState(new WeakMap(), () => auth.handler(request)),
-    );
+    // `await`, not a bare return: both scope helpers are generic over their
+    // callback, so the composed call is typed `Promise< Promise< Response > >`.
+    // The previous single call site flattened it with the `await` below.
+    const runHandler = async (): Promise<Response> =>
+      await runWithAuthActorScope(() =>
+        runWithRequestState(new WeakMap(), () => auth.handler(request)),
+      );
+
+    // [#7724] A subject-erasure request is ONE unit of work, and better-auth
+    // does not treat it as one: `internalAdapter.deleteUser` deletes the
+    // sessions, then the accounts, then the user, in three unrelated adapter
+    // calls with no transaction (verified in better-auth 1.7.0-rc.2 —
+    // `dist/db/internal-adapter.mjs` mentions no transaction at all). Anything
+    // that refuses the LAST of those three leaves the first two committed: the
+    // credential rows are gone, the `sys_user` row is not, and the deployment
+    // is left with an identity that still occupies the org roster and can no
+    // longer sign in. Nothing tells the operator, and there is no way back.
+    const endpointPath = this.betterAuthEndpointPath(request);
+    const response =
+      endpointPath !== undefined && SESSION_ERASURE_PATHS.has(endpointPath)
+        ? await this.runSubjectErasureAtomically(runHandler)
+        : await runHandler();
 
     if (response.status >= 500) {
       try {
@@ -3083,6 +3123,84 @@ export class AuthManager {
     }
 
     return response;
+  }
+
+  /**
+   * The better-auth endpoint path (`/admin/remove-user`) this request addresses,
+   * or `undefined` when it is not under the configured `basePath`.
+   *
+   * The same spelling better-auth's own `ctx.path` uses, so the sets keyed by it
+   * — `SESSION_ERASURE_PATHS`, the break-glass guard's path tests — are all
+   * talking about one thing.
+   */
+  private betterAuthEndpointPath(request: Request): string | undefined {
+    let pathname: string;
+    try {
+      pathname = new URL(request.url).pathname;
+    } catch {
+      return undefined;
+    }
+    const configured = this.config.basePath || '/api/v1/auth';
+    const base = (configured.startsWith('/') ? configured : `/${configured}`).replace(/\/+$/, '');
+    if (!pathname.startsWith(base)) return undefined;
+    const endpoint = pathname.slice(base.length).replace(/\/+$/, '');
+    return endpoint.startsWith('/') ? endpoint : undefined;
+  }
+
+  /**
+   * [#7724] Run a subject-erasure request as ONE unit of work: every write it
+   * makes commits together, or none of them do.
+   *
+   * Placed at the REQUEST seam rather than inside better-auth's route, because
+   * re-implementing `/admin/remove-user` here would duplicate its permission
+   * check, its self-removal check and its not-found check — and a duplicated
+   * security check is where the two copies drift apart. This wrapper reads no
+   * bodies and makes no authorization decision; better-auth's handler runs
+   * exactly as before, and the only thing added is the transaction it runs in.
+   *
+   * The engine's `transaction()` (ADR-0034) publishes its handle into the
+   * ambient store, so every adapter write on the way down joins it without the
+   * adapter knowing — which is why this needs no change in `objectql-adapter.ts`.
+   *
+   * Two declared limits, both inherited rather than introduced:
+   * - a datasource whose driver has no `beginTransaction` runs the callback
+   *   with no transaction and no rollback (ADR-0119 D1). The engine warns once
+   *   per driver. Failing CLOSED instead (`{ require: true }`) was considered
+   *   and rejected: it would make user removal impossible on those datasources,
+   *   which is the very defect this card is fixing.
+   * - side effects outside the datasource (a sent email, secondary-storage
+   *   session state) are not transactional and are not undone by a rollback.
+   *   `/admin/remove-user` sends nothing, so no path here relies on it.
+   */
+  private async runSubjectErasureAtomically(
+    run: () => Promise<Response>,
+  ): Promise<Response> {
+    const engine = this.config.dataEngine as
+      | (IDataEngine & {
+          transaction?: <T>(callback: (trxCtx: any, info: any) => Promise<T>) => Promise<T>;
+        })
+      | undefined;
+    // `transaction` is an ObjectQL capability, not an `IDataEngine` member — an
+    // engine without it (a test double, a foreign engine) keeps the previous
+    // behaviour rather than being refused.
+    if (typeof engine?.transaction !== 'function') return run();
+
+    try {
+      return await engine.transaction(async () => {
+        const response = await run();
+        // better-auth RETURNS its faults; see `SubjectErasureRollback`. Any 4xx/5xx
+        // means the erasure did not complete, so whatever part of it already
+        // landed must not survive. 2xx commits; so does the 302 that
+        // `/delete-user/callback` answers with on success.
+        if (response.status >= 400) throw new SubjectErasureRollback(response);
+        return response;
+      });
+    } catch (err) {
+      // The rollback has happened by the time this runs — hand the client the
+      // response better-auth composed, now with no partial writes behind it.
+      if (err instanceof SubjectErasureRollback) return err.response;
+      throw err;
+    }
   }
 
   /**

@@ -176,6 +176,33 @@ describe('storage error envelope (#3675)', () => {
       },
     },
     {
+      // #7667: `expired` used to be a status nothing wrote and no route
+      // enforced — a session past its own `expires_at` kept taking chunks
+      // until the TTL sweep deleted the row mid-upload.
+      name: 'chunk upload against a session past its own expires_at',
+      status: 410,
+      code: 'UPLOAD_SESSION_EXPIRED',
+      run: async () => {
+        const store = new StorageMetadataStore(null);
+        await store.createSession({
+          id: 'sess-gone',
+          file_id: 'f-2',
+          key: 'user/f-2.bin',
+          filename: 'f.bin',
+          mime_type: 'application/octet-stream',
+          total_size: 10,
+          chunk_size: 5,
+          total_chunks: 2,
+          status: 'in_progress',
+          expires_at: new Date(Date.now() - 60_000).toISOString(),
+        } as any);
+        const routes = mount(await tmpAdapter(), store);
+        return drive(routes, 'PUT', `${BASE}/upload/chunked/:uploadId/chunk/:chunkIndex`, {
+          params: { uploadId: 'sess-gone', chunkIndex: '0' },
+        });
+      },
+    },
+    {
       name: 'anonymous upload when a session resolver is wired',
       status: 401,
       code: 'AUTH_REQUIRED',

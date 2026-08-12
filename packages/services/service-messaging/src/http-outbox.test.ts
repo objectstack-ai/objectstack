@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
+import { createHmac } from 'node:crypto';
 import { MemoryHttpOutbox } from './memory-http-outbox.js';
 import { HttpDispatcher } from './http-dispatcher.js';
 import type { FetchImpl } from './http-sender.js';
@@ -120,6 +121,28 @@ describe('HttpDispatcher', () => {
 
         await dispatcher.tick();
 
-        expect(calls[0].headers['X-Objectstack-Signature']).toMatch(/^sha256=/);
+        // Verify the way a receiver does: recompute HMAC-SHA256 over the RAW
+        // body that arrived. `toMatch(/^sha256=/)` only proved a header was
+        // present — it would pass on a signature computed over other bytes.
+        const expected = createHmac('sha256', 's3cr3t').update(calls[0].body).digest('hex');
+        expect(calls[0].headers['X-Objectstack-Signature']).toBe(`sha256=${expected}`);
+    });
+
+    // [#7722] The secret is consumed by enqueue, never stored: the row the
+    // dispatcher works from carries the signature only.
+    it('keeps the signing secret off the delivery row', async () => {
+        const outbox = new MemoryHttpOutbox();
+        await outbox.enqueue({
+            source: 'webhook',
+            refId: 'w1',
+            dedupKey: 'e1',
+            url: 'https://x',
+            signingSecret: 's3cr3t',
+            payload: { a: 1 },
+        });
+
+        const [row] = await outbox.list();
+        expect(row.signature).toMatch(/^sha256=[0-9a-f]{64}$/);
+        expect(JSON.stringify(row)).not.toContain('s3cr3t');
     });
 });

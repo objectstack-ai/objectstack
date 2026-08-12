@@ -1108,7 +1108,6 @@ export class HttpDispatcher {
         ]);
 
         const hasAuth         = !!authSvc;
-        const hasSearch       = !!searchSvc;
         // [#4000, #4058] Every service whose HTTP surface is a DISPATCHER DOMAIN
         // mirrors that domain's OWN guard (`isServiceServeable`,
         // service-serveable.ts): a slot filled by a self-declared non-handler
@@ -1134,7 +1133,13 @@ export class HttpDispatcher {
         // registered stub is reported there as `status: 'stub', handlerReady:
         // false` (D12's honest self-report), which says strictly more than
         // collapsing it to `unavailable` / "install a plugin" would.
+        //
+        // [#7602] `search` is the one slot that is ONLY ever read this way. It
+        // has no dispatcher domain to mirror and no capability to gate (see
+        // `capabilities.search` below), so presence — "is the slot filled" —
+        // is the whole of what this producer honestly knows about it.
         const analyticsRegistered    = !!analyticsSvc;
+        const searchRegistered       = !!searchSvc;
         const filesRegistered        = !!filesSvc;
         const aiRegistered           = !!aiSvc;
         const notificationRegistered = !!notificationSvc;
@@ -1369,7 +1374,33 @@ export class HttpDispatcher {
             // host does not deliver it". The six additions below are the other
             // producer's half, answered from THIS producer's own facts.
             capabilities: {
-                search: { enabled: hasSearch },
+                // [#7602] Stated `false`, not slot-gated. This dispatcher
+                // mounts NO `/search` route — no `route-ledger.ts` entry, no
+                // handler, no `routes.search` above — so this face cannot
+                // deliver search no matter what fills the `search` slot.
+                //
+                // It used to read `!!searchSvc`, which was right only by
+                // accident: `false` because nothing registers the slot
+                // (`CORE_SERVICE_PROVIDER` records `'search': null`). Register
+                // any `ISearchService` — precisely what the slot exists for,
+                // per `CoreServiceName`'s "Search Engine (Elastic/Meili)" —
+                // and this document flipped to `true` while the host still
+                // 404s the endpoint, the `declared ≠ enforced` failure #7541
+                // closed on the `getDiscovery()` producer.
+                //
+                // Slot presence was never the right predicate here: `search`
+                // is not a dispatcher domain, so the "same predicate ⇒ same
+                // answer" rule above (#4000 / #4058) has no domain guard to
+                // mirror. Until the dispatcher serves search, the honest
+                // answer is a `false` that carries its reasoning — exactly how
+                // `websockets` is answered immediately below (ADR-0076 D12,
+                // #2462). The slot itself is still reported, honestly and
+                // separately, as `services.search`.
+                //
+                // Re-derive this ONLY when a `/search` domain is actually
+                // mounted; then the guard applies and the question answers
+                // itself (#7602 option 2).
+                search: { enabled: false },
                 // No WS/HTTP realtime surface is mounted anywhere — a mere
                 // in-process realtime service must not advertise websockets
                 // (ADR-0076 D12, #2462).
@@ -1530,7 +1561,13 @@ export class HttpDispatcher {
                 ai:             aiRegistered ? svcAvailable(routes.ai, undefined, aiSvc) : svcUnavailable('ai'),
                 i18n:           i18nRegistered ? svcAvailable(routes.i18n, undefined, i18nSvc) : svcUnavailable('i18n'),
                 'file-storage': filesRegistered ? svcAvailable(routes.storage, undefined, filesSvc) : svcUnavailable('file-storage'),
-                search:         hasSearch ? svcAvailable(undefined, undefined, searchSvc) : svcUnavailable('search'),
+                // [#7602] Presence-gated, and correctly so: this map reports
+                // what is REGISTERED, not what is served. The `route` argument
+                // is already `undefined` — no `/search` is advertised on the
+                // occupant's behalf — which is the same fact `capabilities
+                // .search` states above, said about the slot instead of about
+                // the host's HTTP surface.
+                search:         searchRegistered ? svcAvailable(undefined, undefined, searchSvc) : svcUnavailable('search'),
             },
             locale,
         };

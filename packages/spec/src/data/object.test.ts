@@ -1784,6 +1784,116 @@ describe('userActions row predicates + resolveCrudAffordances (objectui#2614)', 
   });
 });
 
+// #7692 completes the symmetry #3076/objectui#2614 left half-done: `create`
+// and `import` were boolean-only, so a related-list `[+ New]` could not be
+// gated on the host record's state while the row Edit/Delete beside it could.
+// Same union, same schema piece — only the binding differs (per toolbar rather
+// than per row), which the schema's docblock states rather than inventing a
+// second dialect.
+describe('userActions.create / .import toolbar predicates (#7692)', () => {
+  it('keeps parsing the plain boolean form for create and import (back-compat)', () => {
+    const obj = ObjectSchema.parse({
+      name: 'invoice',
+      fields: { name: { type: 'text' } },
+      userActions: { create: false, import: true },
+    });
+    expect(obj.userActions?.create).toBe(false);
+    expect(obj.userActions?.import).toBe(true);
+    const aff = resolveCrudAffordances(obj);
+    expect(aff.create).toBe(false);
+    expect(aff.import).toBe(true);
+    // Boolean-only path stays byte-identical to the pre-#7692 result: no
+    // predicate keys appear at all.
+    expect(aff.createPredicates).toBeUndefined();
+    expect(aff.importPredicates).toBeUndefined();
+  });
+
+  it('accepts the object form with a visibleWhen CEL shorthand on create', () => {
+    const obj = ObjectSchema.parse({
+      name: 'task_version_check_item',
+      fields: { name: { type: 'text' }, version_status: { type: 'text' } },
+      userActions: { create: { visibleWhen: 'record.version_status == "draft"' } },
+    });
+    // String shorthand normalizes to the canonical CEL envelope, exactly as it
+    // does for edit/delete — no new dialect.
+    expect((obj.userActions?.create as any).visibleWhen)
+      .toEqual({ dialect: 'cel', source: 'record.version_status == "draft"' });
+  });
+
+  it('accepts the object form on import too, with the same keys', () => {
+    const obj = ObjectSchema.parse({
+      name: 'task_position',
+      fields: { name: { type: 'text' } },
+      userActions: { import: { enabled: true, disabledWhen: 'record.frozen == true' } },
+    });
+    expect((obj.userActions?.import as any).enabled).toBe(true);
+    expect((obj.userActions?.import as any).disabledWhen)
+      .toEqual({ dialect: 'cel', source: 'record.frozen == true' });
+  });
+
+  it('resolveCrudAffordances carries the predicates through and defaults enabled from the bucket', () => {
+    const aff = resolveCrudAffordances({
+      managedBy: 'platform',
+      userActions: {
+        create: { visibleWhen: { dialect: 'cel', source: 'record.version_status == "draft"' } },
+        import: { enabled: false, disabledWhen: { dialect: 'cel', source: 'record.frozen == true' } },
+      },
+    } as never);
+    // No `enabled` on create → platform bucket default (true) applies.
+    expect(aff.create).toBe(true);
+    expect(aff.createPredicates?.visibleWhen)
+      .toEqual({ dialect: 'cel', source: 'record.version_status == "draft"' });
+    expect(aff.createPredicates?.disabledWhen).toBeUndefined();
+    // Explicit enabled:false wins over the bucket default; predicates still surface.
+    expect(aff.import).toBe(false);
+    expect(aff.importPredicates?.disabledWhen)
+      .toEqual({ dialect: 'cel', source: 'record.frozen == true' });
+  });
+
+  it('object form without predicates behaves exactly like the boolean form', () => {
+    const aff = resolveCrudAffordances({
+      managedBy: 'config',
+      userActions: { create: { enabled: false }, import: {} },
+    } as never);
+    expect(aff.create).toBe(false);
+    expect(aff.import).toBe(false); // config bucket default: import is opt-in
+    expect(aff.createPredicates).toBeUndefined();
+    expect(aff.importPredicates).toBeUndefined();
+  });
+
+  it('the object form still respects the import opt-in on a non-platform bucket', () => {
+    // #4671: `import` is opt-IN outside `platform`. Widening the key must not
+    // turn the object form into a back door around that — `{}` inherits the
+    // bucket default (false above), and only an explicit enabled:true grants it.
+    const aff = resolveCrudAffordances({
+      managedBy: 'system-data',
+      userActions: { import: { enabled: true, visibleWhen: 'record.frozen != true' } },
+    } as never);
+    expect(aff.import).toBe(true);
+  });
+
+  it('rejects unknown keys inside the create/import object form', () => {
+    for (const key of ['create', 'import'] as const) {
+      const result = ObjectSchema.safeParse({
+        name: 'invoice',
+        fields: { name: { type: 'text' } },
+        userActions: { [key]: { hideWhen: 'record.frozen == true' } },
+      });
+      expect(result.success).toBe(false);
+      expect(JSON.stringify(result.error?.issues)).toContain('hideWhen');
+    }
+  });
+
+  it('rejects a non-predicate value where the union accepts neither arm', () => {
+    const result = ObjectSchema.safeParse({
+      name: 'invoice',
+      fields: { name: { type: 'text' } },
+      userActions: { create: 'record.frozen != true' },
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
 // ADR-0100: a `password` field on a generic (non-better-auth) object is masked
 // on read but plaintext at rest — not hashed. create() warns (non-fatally) to
 // steer authors toward `secret` or the auth subsystem. The warning is deduped

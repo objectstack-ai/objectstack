@@ -199,11 +199,26 @@ export const SysApiKey = ObjectSchema.create({
     }),
 
     // ── Secret (hidden by default) ──────────────────────────────
+    //
+    // [#7728] `internal: true` is what makes the description below TRUE. It was
+    // false on every build before this flag existed: `hidden` is a UI contract
+    // ("Hidden from default UI"), never a serialization one, and the engine's
+    // credential read mask collects by field TYPE — so this `text` column was
+    // collected by nothing and the stored SHA-256 hash came back on get-by-id,
+    // on list, on an explicit `?select=id,key` and in the PATCH body.
+    //
+    // Still `text`, deliberately. `Field.secret` would encrypt at rest and
+    // replace the column with a `sys_secret` ref, destroying the
+    // `where: { key: hashApiKey(raw) }` lookup `resolveApiKeyPrincipal` uses —
+    // i.e. it would break authentication to fix a disclosure. `internal` is
+    // read-side only: storage, the index and the verifier's filter are
+    // untouched, and `POST /api/v1/keys` still returns the raw secret once.
     key: Field.text({
       label: 'Hashed Key',
       required: true,
       hidden: true,
       readonly: true,
+      internal: true,
       description: 'Hashed API key value — never exposed to clients',
       group: 'Secret',
     }),

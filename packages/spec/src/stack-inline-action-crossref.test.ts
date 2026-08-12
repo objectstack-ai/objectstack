@@ -45,6 +45,21 @@
  * with opposite verdicts; a/h and e/j confirm the legitimate shapes survive in
  * both. Row d's verdict is fixed by the same #6739 ruling, not re-decided here.
  *
+ * A THIRD arm was left deliberately unmirrored by #7397's own PR: `objectName`
+ * → declared object, "one key over" from the target arms above (#7456):
+ *
+ * ```
+ * k embedded   objectName -> missing object :  ACCEPTED   (l registered: REJECTED) ← split
+ * ```
+ *
+ * #7456's maintainer-ruled disposition is Option A (existence check, verbatim
+ * mirror — the same 元判据 that fixed rows b/f, c/g, d/i: a silently-dropped
+ * declaration joins the sibling branch's existing refusal set). Option A does
+ * NOT check that an embedded `objectName` agrees with its owning object — an
+ * embedded action naming a DIFFERENT declared object is accepted, same as
+ * before; only a DANGLING `objectName` newly refuses. Options B (consistency)
+ * and C (retirement) remain open and are not exercised here.
+ *
  * Message shape is contract here (one condition ⇒ one wording), so these pin
  * full message text rather than `toThrow()` alone: a bare throw assertion
  * cannot tell "refused for the right reason" from "refused because the fixture
@@ -347,6 +362,42 @@ describe('defineStack — object-embedded action cross-references: flow targets 
 
   it('skips embedded flow targets when the stack declares NO flows — same size gate as the registered rule', () => {
     expect(refusals(embeddedStack(flowAction('probe_nowhere')))).toEqual([]);
+  });
+});
+
+describe('defineStack — object-embedded action cross-references: objectName → object (#7456)', () => {
+  const dangling = { name: 'probe_on', label: 'On', type: 'script' as const, target: 'doThing', objectName: 'probe_missing' };
+
+  it('rejects a dangling embedded objectName (probe row k) with the registered rule\'s wording, subject adjusted to the owning object', () => {
+    expect(refusals(embeddedStack(dangling))).toEqual([
+      "Action 'probe_on' on object 'probe_task' "
+      + "references object 'probe_missing' which is not defined in objects.",
+    ]);
+  });
+
+  it('closes the b/f, c/g, d/i pattern one key over (rows k/l): the same action gets the same verdict embedded or registered', () => {
+    expect(refusals(embeddedStack(dangling)).length).toBe(1);
+    expect(refusals(registeredStack(dangling)).length).toBe(1);
+  });
+
+  it('accepts an embedded objectName naming its own owning object', () => {
+    expect(refusals(embeddedStack({ name: 'probe_on', label: 'On', type: 'script' as const, target: 'doThing', objectName: 'probe_task' }))).toEqual([]);
+  });
+
+  it('accepts an embedded objectName naming a DIFFERENT declared object — Option A is an existence check only, not a consistency check (B stays open)', () => {
+    const config = {
+      manifest: baseManifest,
+      objects: [
+        { ...objects[0], actions: [{ name: 'probe_on', label: 'On', type: 'script' as const, target: 'doThing', objectName: 'probe_note' }] },
+        { name: 'probe_note', label: 'Probe Note', fields: { body: { type: 'text' as const } } },
+      ],
+      pages,
+    };
+    expect(refusals(config)).toEqual([]);
+  });
+
+  it('leaves an embedded action with no objectName alone — unchanged from before #7456', () => {
+    expect(refusals(embeddedStack({ name: 'probe_on', label: 'On', type: 'script' as const, target: 'doThing' }))).toEqual([]);
   });
 });
 

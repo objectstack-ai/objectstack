@@ -195,7 +195,10 @@ export const SysSsoProvider = ObjectSchema.create({
       type: 'api',
       method: 'POST',
       target: '/api/v1/auth/sso/delete-provider',
-      confirmText: 'Delete this SSO provider? Users from its domain will no longer be able to sign in through it.',
+      // Confirm question on `description`, not `confirmText`: this action collects
+      // params, and pairing the two keys opens two dialogs for one decision
+      // (#7278 ruling 2026-08-10, swept by #7309).
+      description: 'Delete this SSO provider? Users from its domain will no longer be able to sign in through it.',
       successMessage: 'SSO provider deleted',
       refreshAfter: true,
       params: [

@@ -427,7 +427,7 @@
       "title": "The flow designer's connector picker mirrors GET /automation/connectors: same instances, declarative ones annotated, actions and their input schemas offered per pick",
       "since": "v15.1",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -436,12 +436,16 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the stock showcase connector registry: three declarative instances + the plugin-registered rest/slack connectors from objectstack.config.ts (so the picker has BOTH origins to distinguish)"
+          "the stock showcase connector registry: three declarative instances + the plugin-registered rest/slack connectors from objectstack.config.ts (so the picker has BOTH origins to distinguish)",
+          "a flow that is EDITABLE in Studio — use a shipped one (showcase_declarative_connector_ping) or create it from the console's own create page; see the knownGap before authoring one over the metadata API"
+        ],
+        "knownGaps": [
+          "A FLOW AUTHORED OVER THE METADATA API IS NOT EDITABLE IN STUDIO (run #7690, cross-observed by run #7695 / #7753 item 3) — with or without `?package=`, it opens behind 'This flow is provided by an installed package, so it is read-only at runtime', so a run that provisions its fixture flow via PUT /api/v1/meta/flows/... cannot then drive the picker on it. objectui's ResourceEditPage treats an item as artifact-backed when `layered.code != null && _packageId !== 'sys_metadata'`, and `flow` declares allowOrgOverride:false — so for THIS type the banner is arguably telling the truth (the server would refuse the overlay write anyway). The editable path is the console's own create page. Recorded, not filed: the polarity-reversed case, where the same heuristic locks a WRITABLE-package object it should not, is the real defect and lives at objectui#4308"
         ]
       },
       "steps": [
         "before the browser: GET /api/v1/automation/connectors and record { connectors, total } — this is the ground truth the picker must mirror",
-        "in Studio, open a flow (e.g. showcase_declarative_connector_ping) and add/select a connector_action node",
+        "in Studio, open a flow (e.g. showcase_declarative_connector_ping) and add/select a connector_action node — if the editor opens behind the 'provided by an installed package' banner, check how the flow was authored before filing anything (see the knownGap: metadata-API-authored flows are read-only in Studio)",
         "open the connector picker; screenshot; only AFTER the screenshot, read the DOM list",
         "pick showcase_mcp_tools; record which actions are offered and screenshot the action + input form for echo_upper",
         "pick a plugin-registered connector and compare its presentation with the declarative one's annotation"
@@ -491,6 +495,12 @@
           "date": "2026-08-07",
           "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 3,
+          "date": "2026-08-11",
+          "change": "recorded the run #7690 route note that a flow authored over the metadata API opens read-only in Studio ('provided by an installed package'): ResourceEditPage's artifact-backed heuristic (layered.code != null && _packageId !== 'sys_metadata') plus flow's allowOrgOverride:false. The fixture now names an editable flow and the step says check the authoring route before filing. Kept as a note, not a defect — the polarity-reversed case is objectui#4308",
+          "ref": "#7745"
         }
       ]
     },
@@ -499,7 +509,7 @@
       "title": "Outbound webhooks materialize (spec object→object_name, isActive→active), fire per trigger variant through the sys_http_delivery outbox with HMAC + timeout honored, reject retired trigger kinds, and never clobber admin edits",
       "since": "v15",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "fixtures": {
@@ -507,7 +517,10 @@
         "requires": [
           "a reachable webhook receiver (local echo server on the run's own port range) — point the shipped showcase_task_changed row at it, or author a scratch webhook",
           "the shipped fixture: showcase_task_changed (object showcase_task, triggers create/update/delete, isActive:false ON PURPOSE — flipping it active in Setup is part of the test, examples/app-showcase/src/automation/webhooks/index.ts)",
-          "a predicate multi-write path for the bulk variants (update/delete with multi:true on showcase_task)"
+          "a predicate multi-write path for the bulk variants (update/delete with multi:true on showcase_task) — NOT reachable over REST, see the knownGap below: author a flow with an `update_record` / `delete_record` node carrying multi:true and fire it through the api trigger"
+        ],
+        "knownGaps": [
+          "PREDICATE (multi:true) WRITES ARE UNREACHABLE OVER REST BY DESIGN (run #7690) — do not re-derive this, and do not file the 400 as a defect. #3897 made the batch routes parse their body against the spec contract, and Zod object schemas STRIP unknown keys: `options.multi` and `options.where` can no longer ride into the engine's delete/update options, and `POST /data/:object/deleteMany` now deletes per id (packages/rest/src/rest-server.ts:10461-10492). That is a security boundary, not a gap. The bulk_update/bulk_delete clause therefore needs a FLOW `update_record` / `delete_record` node authored with multi:true, fired through the api trigger — that is the supported predicate-write door"
         ]
       },
       "variants": [
@@ -523,7 +536,7 @@
         "boot the showcase; verify the materializer bridge: read sys_webhook over /api/v1/data and locate showcase_task_changed with object_name:'showcase_task', active:false, managed_by:'package', and the envelope in definition_json",
         "in Setup → Integrations → Webhooks flip the row active and point url at the local receiver (an admin edit — it must stamp customized)",
         "create, update, then delete a showcase_task; capture the three deliveries at the receiver (headers incl. the HMAC signature when a secret is set, body incl. recordId)",
-        "run a predicate multi-update and multi-delete (multi:true) matching several rows; capture the bulk deliveries and their { object, matched } shape",
+        "run a predicate multi-update and multi-delete (multi:true) matching several rows — through a FLOW node, not REST: author update_record / delete_record nodes with multi:true and fire them via the api trigger (the REST batch routes strip options.multi, #3897 — see the knownGap); capture the bulk deliveries and their { object, matched } shape",
         "read sys_http_delivery over /api/v1/data: one row per delivery with status/attempts/lastStatusCode",
         "kill the receiver and mutate again; re-read the delivery row through its retry/failure states",
         "author a scratch webhook with triggers:['undelete'] and one with ['api']; build both and capture the parse errors",
@@ -585,6 +598,7 @@
         "packages/spec/liveness/webhook.json (all 11 props live via the #3489 bridge; per-prop line refs)",
         "packages/plugins/plugin-webhooks/src/bootstrap-declared-webhooks.ts + auto-enqueuer.ts (remaps; trigger→event mapping incl. the #4639 bulk pair; #3196 unknown-trigger warn; seed-not-clobber)",
         "packages/services/service-messaging/src/http-outbox.ts (delivery statuses, attempts, redeliver contract) + plugin-webhooks/webhook-outbox-plugin.ts (sys_http_delivery nav)",
+        "packages/rest/src/rest-server.ts:10461-10492 (#3897 — the batch routes parse against the spec contract and Zod STRIPS unknown keys, so options.multi/options.where cannot ride in; deleteMany deletes per id. This is why the bulk clause must be driven from a flow node, not REST)",
         "examples/app-showcase/src/automation/webhooks/index.ts (the shipped inactive fixture and its activation story)",
         "#3358 §9 (webhook undelete/api trigger removal gate)"
       ],
@@ -606,6 +620,12 @@
           "date": "2026-08-08",
           "change": "pinned enumSource for the variants-freshness ratchet — spec enum drift is caught by the manual check on this item directly",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 4,
+          "date": "2026-08-11",
+          "change": "recorded the run #7690 note that predicate (multi:true) writes are unreachable over REST BY DESIGN — #3897 strips options.multi from the batch routes as a security boundary — so the bulk_update/bulk_delete clause must be driven from a flow update_record/delete_record node fired through the api trigger. Landed as a fixtures.knownGaps entry + a corrected step + a source citation so the next sweep does not re-derive it or file the 400 as a defect",
+          "ref": "#7745"
         }
       ],
       "enumSource": {
@@ -720,7 +740,7 @@
       "title": "Email templates materialize to sys_email_template, resolve (name, locale) with en-US fallback, render {{path}} holes, gate on required variables and active:false, survive admin edits across redeploys — and the raw POST /api/v1/email/send door authenticates, refuses anonymous, and 400s malformed input",
       "since": "v15",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "mixed",
       "fixtures": {
@@ -753,7 +773,8 @@
         "edit the template wording as an admin in Studio (stamps customized), redeploy/reboot, and re-read the row",
         "edit the DECLARED source template and metadata-reload WITHOUT a reboot — the single item re-materializes (email_template is allowRuntimeCreate:true; the plugin subscribes to metadata changes)",
         "build the two rejection probes (stray key `body`; name 'BadName') and capture the errors",
-        "drive the raw send door POST /api/v1/email/send three ways: (a) authed with a well-formed message { to, subject, bodyHtml } → capture status + the dev-transport landing; (b) anonymous (no session) → capture status; (c) a non-object / malformed body → capture the envelope"
+        "drive the raw send door POST /api/v1/email/send three ways: (a) authed with a well-formed message { to, subject, html } (or `text`; SendEmailInput's body keys are `html`/`text` — `bodyHtml`/`bodyText` are the TEMPLATE authoring fields, not wire keys) → capture status + the dev-transport landing; (b) anonymous (no session) → capture status; (c) a non-object / malformed body → capture the envelope",
+        "while you are at the raw door, send the wrong-vocabulary body { to, subject, bodyHtml } deliberately and capture the refusal — 400 VALIDATION_FAILED 'at least one of text or html is required'. This is the shape the checklist itself used to name (run #7690); keeping the probe pins the two vocabularies apart"
       ],
       "acceptance": [
         {
@@ -799,15 +820,16 @@
           "evidence": "the error texts"
         },
         {
-          "clause": "the raw transactional send door (POST /api/v1/email/send → IEmailService.send, complementary to the sendTemplate path above) authenticates and validates: an AUTHED well-formed message lands at the dev transport (200 with result.status 'sent'); an ANONYMOUS send is refused 401 UNAUTHENTICATED (the #3963 unconditional gate — the api.requireAuth opt-out is retired); a MALFORMED body is refused 400 with a ledgered envelope code (INVALID_REQUEST for a non-object body, VALIDATION_FAILED for a bad message shape) — never a 500 for caller-fixable input, and a runtime with no email provider answers 501 NOT_IMPLEMENTED rather than a fake success",
+          "clause": "the raw transactional send door (POST /api/v1/email/send → IEmailService.send, complementary to the sendTemplate path above) authenticates and validates: an AUTHED well-formed message — { to, subject } plus AT LEAST ONE of `html` / `text` — lands at the dev transport (200 with result.status 'sent'); an ANONYMOUS send is refused 401 UNAUTHENTICATED (the #3963 unconditional gate — the api.requireAuth opt-out is retired); a MALFORMED body is refused 400 with a ledgered envelope code (INVALID_REQUEST for a non-object body, VALIDATION_FAILED for a bad message shape) — never a 500 for caller-fixable input, and a runtime with no email provider answers 501 NOT_IMPLEMENTED rather than a fake success",
           "oracle": "api",
-          "verify": "the three POST /api/v1/email/send responses: authed 200 + dev-transport capture, anonymous 401 UNAUTHENTICATED, malformed 400 with the named code (rest-server.ts registerEmailEndpoints: enforceAuth, non-object→400 INVALID_REQUEST, VALIDATION_FAILED passthrough, 501 no-provider)",
-          "evidence": "the three responses + the dev-transport landing"
+          "verify": "the three POST /api/v1/email/send responses: authed 200 + dev-transport capture, anonymous 401 UNAUTHENTICATED, malformed 400 with the named code (rest-server.ts registerEmailEndpoints: enforceAuth, non-object→400 INVALID_REQUEST, VALIDATION_FAILED passthrough, 501 no-provider). ⚠ WIRE KEYS (corrected, run #7690): the send input is SendEmailInput { to, subject, text?, html?, from?, cc?, bcc?, replyTo?, … } (packages/spec/src/contracts/email-service.ts:42-68) — NOT `bodyHtml`. `bodyHtml`/`bodyText` are the email-TEMPLATE authoring fields (this item's own variants list at the `body:` and alias lines says so); posting them to this door is refused 400 'VALIDATION_FAILED: at least one of text or html is required' (packages/plugins/plugin-email/src/email-service.ts:232). A 400 here is the run using the wrong vocabulary, not a product defect — re-send with `html` before filing anything",
+          "evidence": "the three responses + the dev-transport landing (plus the wrong-vocabulary refusal, if the probe was driven)"
         }
       ],
       "negative": [
         "the false-compliance case #4509 named is the standing FAIL: an admin 'fixes' a template and recipients keep receiving the old copy — any render not matching the authoritative row is a FAIL against the bridge",
-        "a send with an unresolved {{placeholder}} residue delivered to the transport is a FAIL (render must substitute or refuse, never ship holes)"
+        "a send with an unresolved {{placeholder}} residue delivered to the transport is a FAIL (render must substitute or refuse, never ship holes)",
+        "NOT a FAIL: POST /api/v1/email/send answering 400 'at least one of text or html is required' to a body carrying `bodyHtml`. That is the two vocabularies being kept apart, correctly — template authoring uses bodyHtml/bodyText, the wire uses html/text (run #7690 corrected this checklist's own text)"
       ],
       "traps": [
         "stale-dist"
@@ -823,7 +845,8 @@
         "examples/app-showcase/src/system/emails/index.ts (showcase_task_done_email fixture)",
         "packages/rest/src/rest-server.ts (registerEmailEndpoints — POST /api/v1/email/send: enforceAuth 401 UNAUTHENTICATED #3963, non-object→400 INVALID_REQUEST, VALIDATION_FAILED passthrough, 501 no-provider, 500 EMAIL_SEND_FAILED)",
         "packages/rest/src/rest-route-ledger.ts (email family — POST /api/v1/email/send → client email.send)",
-        "packages/spec/src/api/error-code-ledger.zod.ts (EMAIL_SEND_FAILED under @objectstack/rest)"
+        "packages/spec/src/api/error-code-ledger.zod.ts (EMAIL_SEND_FAILED under @objectstack/rest)",
+        "packages/spec/src/contracts/email-service.ts:42-68 (SendEmailInput — the WIRE shape of POST /api/v1/email/send: to, subject, text?, html?; 'at least one of text or html must be supplied') + packages/plugins/plugin-email/src/email-service.ts:220-240 (normalizeMessage — where the VALIDATION_FAILED texts come from)"
       ],
       "history": [
         {
@@ -843,6 +866,12 @@
           "date": "2026-08-08",
           "change": "added the raw POST /api/v1/email/send route clause (authed → dev transport, anonymous → 401 UNAUTHENTICATED, malformed → 400 envelope, no-provider → 501) per PENDING-GAPS §D",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 4,
+          "date": "2026-08-11",
+          "change": "CORRECTION from run #7690: the raw-send step named a { to, subject, bodyHtml } message body, but those are the TEMPLATE authoring fields — the wire keys are `html`/`text` (SendEmailInput, email-service.ts:42-68), and the literal shape the step named is refused 400 'at least one of text or html is required'. Corrected the step and the clause, added the wrong-vocabulary probe that pins the two vocabularies apart, added a NOT-a-FAIL negative so the refusal is not filed as a defect next run, and cited the contract + normalizeMessage in source",
+          "ref": "#7745"
         }
       ]
     },
@@ -851,7 +880,7 @@
       "title": "The flow notify node delivers to the recipient's inbox (sys_inbox_message + receipt), readable and markable over /notifications, recipient-scoped — with unimplemented channels dead-lettering, never faking delivery",
       "since": "v15",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -864,10 +893,11 @@
         "requires": [
           "the shipped fixture flow showcase_task_assigned_notify (notify node: topic 'task.assigned', recipients ['{record.assignee}'], channels ['inbox'], title/message/actionUrl — examples/app-showcase/src/automation/flows/index.ts)",
           "MessagingServicePlugin installed (the showcase config requires the 'messaging' capability)",
-          "three personas with sessions: admin, the assignee, an unrelated member"
+          "three personas with sessions: admin, the assignee, an unrelated member — mint them by SIGNING THEM UP (or via POST /api/v1/auth/admin/create-user), not by grafting a credential onto a seeded demo persona; see the knownGap"
         ],
         "knownGaps": [
-          "channels push/slack/teams/webhook have NO delivery implementation (#3197 — notification.zod.ts says the dispatcher dead-letters them, and the enum's 'in-app' spelling vs the implemented 'inbox' channel is a known naming drift); this item tests inbox only and records the dead-letter behavior as a negative, not as deliverable channels"
+          "channels push/slack/teams/webhook have NO delivery implementation (#3197 — notification.zod.ts says the dispatcher dead-letters them, and the enum's 'in-app' spelling vs the implemented 'inbox' channel is a known naming drift); this item tests inbox only and records the dead-letter behavior as a negative, not as deliverable channels",
+          "THE OLD PERSONA-LOGIN RECIPE IS CLOSED (run #7690): `POST /api/v1/data/sys_account` answers 405, so the trick of inserting a credential row to turn a seeded demo persona into a real login no longer works. It is by design, not drift — sys_account is managedBy:'better-auth' and declares apiMethods ['get','list'] only, so HTTP answers 405 before the identity write guard's 403 (packages/platform-objects/src/identity/sys-account.object.ts:234-241, #1591 / ADR-0092 D2). Mint personas through better-auth instead: sign-up, or POST /api/v1/auth/admin/create-user as the platform admin (explicit password wins — #3031/#3033). Recorded here because every multi-persona item in this area pays for re-deriving it"
         ]
       },
       "variants": [
@@ -938,6 +968,12 @@
           "date": "2026-08-07",
           "change": "new item: the notify→inbox→/notifications chain had no checklist coverage; unimplemented channels pinned as dead-letter negatives per #3197 instead of asserted as capabilities",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-08-11",
+          "change": "recorded the run #7690 fixture note that POST /api/v1/data/sys_account now answers 405, closing the old recipe for turning a seeded demo persona into a real login (sys_account is managedBy better-auth with apiMethods ['get','list'] — 405 before the identity write guard's 403, #1591 / ADR-0092 D2). The three-persona requirement now names the supported way to mint them (sign-up / admin create-user). Notes only — no clause changed",
+          "ref": "#7745"
         }
       ]
     },

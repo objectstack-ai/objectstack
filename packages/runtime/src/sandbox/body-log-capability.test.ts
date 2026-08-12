@@ -144,6 +144,112 @@ describe('[#7448] hook body ctx.log reaches the host log stream', () => {
   });
 });
 
+/**
+ * [#7661] `ctx.log.debug` is the FOURTH member, not a decoration.
+ *
+ * The extractor (`packages/cli/src/utils/extract-hook-body.ts`) already matches
+ * `ctx.log.debug` and grants `['log']` for it, and the docs table already
+ * teaches it — so an author following the documentation wrote a body whose
+ * declared capability was satisfied and whose call then threw
+ * `TypeError: not a function` inside the VM, because the install loop covered
+ * only `info`/`warn`/`error`. Enforce arm of ADR-0049: the sandbox grows the
+ * method the other surfaces already promise.
+ *
+ * Each assertion below is on what the HOST LOGGER RECEIVED, for the same reason
+ * the #7448 block above is: a `debug` installed as a no-op passes a
+ * "nothing threw" test and is still not a real fourth method.
+ */
+describe('[#7661] hook body ctx.log.debug is installed and delivers', () => {
+  const runner = new QuickJSScriptRunner();
+
+  it('delivers the card\'s own reproduction — ctx.log.debug(\'hi\') — as a debug record', async () => {
+    const logger = captureLogger();
+    const factory = hookBodyRunnerFactory(runner, { ql: {}, appId: 'showcase', logger });
+    const fn = factory({
+      name: 'h',
+      object: 'showcase_task',
+      events: ['afterUpdate'],
+      body: { language: 'js', source: "ctx.log.debug('hi');", capabilities: ['log'] },
+    } as any);
+
+    // Before the install this rejected with `TypeError: not a function`, so the
+    // await itself is half the pin: under `onError: 'abort'` that throw aborts
+    // the write.
+    await expect(fn!({ input: {} } as any)).resolves.toBeUndefined();
+
+    // …and the other half: the record REACHED the logger, at debug level.
+    const emitted = logger.lines.filter((l) => l.message.includes('hi'));
+    expect(emitted.length).toBe(1);
+    expect(emitted[0].level).toBe('debug');
+    // Attributed like every other level — an author running ten hooks at
+    // `--log-level debug` has to be able to tell which one spoke.
+    expect(emitted[0].message).toContain('h');
+  });
+
+  it('carries structured data across the VM boundary as a value', async () => {
+    const logger = captureLogger();
+    const factory = hookBodyRunnerFactory(runner, { ql: {}, appId: 'showcase', logger });
+    const fn = factory({
+      name: 'showcase_debug_trace',
+      object: 'showcase_task',
+      events: ['afterUpdate'],
+      body: {
+        language: 'js',
+        source: "ctx.log.debug('trace', { step: 2, tags: ['a'], at: { deep: true } });",
+        capabilities: ['log'],
+      },
+    } as any);
+
+    await fn!({ input: {} } as any);
+
+    const line = logger.lines.find((l) => l.message.includes('trace'));
+    expect(line?.level).toBe('debug');
+    // `Logger.debug` is `(message, meta)` — two args, unlike `error`.
+    expect(line?.meta).toEqual({ step: 2, tags: ['a'], at: { deep: true } });
+  });
+
+  it('gates debug behind the log capability like the other three levels', async () => {
+    const logger = captureLogger();
+    const factory = hookBodyRunnerFactory(runner, { ql: {}, appId: 'showcase', logger });
+    const fn = factory({
+      name: 'ungranted_hook',
+      object: 'showcase_task',
+      events: ['afterUpdate'],
+      // `capabilities` omits 'log' — the fourth method must be no cheaper to
+      // reach than the first three.
+      body: { language: 'js', source: "ctx.log.debug('hi');", capabilities: [] },
+    } as any);
+
+    await expect(fn!({ input: {} } as any)).rejects.toThrow(/capability 'log' not granted/);
+    expect(logger.lines.filter((l) => l.message.includes('hi'))).toHaveLength(0);
+  });
+
+  it('names the hook in the unservable-capability warning for debug too', async () => {
+    // The no-logger surface returns a warn-once stub per method; a `debug`
+    // missing from it would be `undefined` and throw inside the VM again —
+    // the same defect one construction shape over.
+    const warnings: string[] = [];
+    const original = console.warn;
+    console.warn = (...args: any[]) => { warnings.push(args.map(String).join(' ')); };
+    try {
+      const factory = hookBodyRunnerFactory(runner, { ql: {}, appId: 'showcase' });
+      const fn = factory({
+        name: 'silent_debug_hook',
+        object: 'showcase_task',
+        events: ['afterUpdate'],
+        body: { language: 'js', source: "ctx.log.debug('a');", capabilities: ['log'] },
+      } as any);
+      await expect(fn!({ input: {} } as any)).resolves.toBeUndefined();
+    } finally {
+      console.warn = original;
+    }
+
+    const capabilityWarnings = warnings.filter((w) => w.includes('ctx.log output is discarded'));
+    expect(capabilityWarnings.length).toBe(1);
+    expect(capabilityWarnings[0]).toContain('silent_debug_hook');
+  });
+});
+
 describe('[#7448] action body ctx.log reaches the host log stream', () => {
   const runner = new QuickJSScriptRunner();
 

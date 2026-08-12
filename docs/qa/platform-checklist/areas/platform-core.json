@@ -365,7 +365,7 @@
       "title": "Metadata authoring round-trip: draft → publish on a WRITABLE package; read-only packages and locked types are server-side refused",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -401,7 +401,7 @@
         {
           "clause": "Studio's designer authors through the same pipeline: creating a record page issues PUT /api/v1/meta/page/<name> bound to its object and seeded from the default layout",
           "oracle": "network",
-          "verify": "capture the PUT during Studio create (pinned by objectui e2e/live/studio-record-page.spec.ts, which waits on exactly that request)",
+          "verify": "capture the PUT during Studio create. ⚠ Drive it by hand: the pin (objectui e2e/live/studio-record-page.spec.ts, which waits on exactly that request) is STALE against the current surface — it fills the Object control as an input when it is now a role=combobox button — see automated.stale",
           "evidence": "the captured PUT"
         },
         {
@@ -429,7 +429,19 @@
         "a published view that never appears in the console after reload is a FAIL of the round-trip even though every API call returned success (check against a fresh objectui build before filing — stale-console-bundle)"
       ],
       "traps": ["dispatcher-vs-hono-route", "stale-console-bundle"],
-      "automated": { "kind": "api", "ref": "packages/qa/dogfood/test/package-first-authoring.dogfood.test.ts; objectui: e2e/live/studio-record-page.spec.ts, e2e/live/studio-object-designer.spec.ts" },
+      "automated": {
+        "kind": "api",
+        "ref": "packages/qa/dogfood/test/package-first-authoring.dogfood.test.ts; objectui: e2e/live/studio-record-page.spec.ts, e2e/live/studio-object-designer.spec.ts",
+        "stale": {
+          "since": "2026-08-11",
+          "observedIn": "#7695",
+          "ref": "#7753 item 6",
+          "partial": "objectui: e2e/live/studio-record-page.spec.ts ONLY",
+          "why": "STALE, NOT RED — that spec fills the Object control as an input when it is now a `role=combobox` button, so it fails against the CURRENT surface rather than against a product defect. The dogfood pin (package-first-authoring) and studio-object-designer.spec.ts are unaffected; object-designer-roundtrip's 4th ref, from the same class, was already repaired (package-create moved to /_console/studio).",
+          "runnerRule": "The Studio-designer clause here (clause 3, 'creating a record page issues PUT /api/v1/meta/page/<name>') must be driven by hand — capture the PUT in the browser — until the spec is re-pointed; do not cite its output and do not score its failure as this item's FAIL. Every other clause keeps its own oracle.",
+          "ownedBy": "objectui — re-pointing the spec is a cross-repo half of #7753, reported not edited from this repo"
+        }
+      },
       "source": [
         "packages/runtime/src/route-ledger.ts (PUT /meta/:type/:name, GET /meta/_drafts, GET /meta/:type/:name/published, POST /packages/:id/publish-drafts)",
         "packages/spec/src/kernel/metadata-plugin.zod.ts (allowOrgOverride 403 not_overridable contract; validateOnWrite; registry flags per type)",
@@ -437,7 +449,8 @@
         "ADR-0033 (drafts / publish)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "initial — grounds the Studio authoring pipeline end-to-end with both deny gates as first-class clauses", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-07", "change": "initial — grounds the Studio authoring pipeline end-to-end with both deny gates as first-class clauses", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-11", "change": "annotated the objectui e2e/live/studio-record-page.spec.ts half of this item's automated.ref as STALE (run #7695): it fills the Object control as an input when it is now a role=combobox button, so it fails against the current surface, not against a defect. The Studio-designer clause now says drive it by hand until the spec is re-pointed; the dogfood pin and studio-object-designer.spec.ts are unaffected. Re-pointing lives in objectui (cross-repo half of #7753 item 6)", "ref": "#7753" }
       ]
     },
     {
@@ -469,9 +482,9 @@
         "Setup detail: confirm each settings URL entry (nav_settings_* → /apps/setup/system/settings/<namespace>) opens the settings namespace form (localization/company/branding/auth/mail/storage/ai/knowledge/feature_flags), and Users / Organization / Business Units / Teams / Sessions / OAuth Applications / Identity Links / User Preferences render",
         "Studio detail: confirm each metadata:resource list (object/app/view/page/dashboard/report/dataset/action/hook/flow/agent/tool/skill/email_template) renders, and the component surfaces render (App Builder studio:builder, All Metadata Types metadata:directory, Packages developer:packages, API Console developer:api-console, Flow Runs developer:flow-runs, Public Forms developer:public-forms)",
         "Account detail: confirm Profile (account:profile_card), Notifications (sys_inbox_message/mine), Approvals (sys_approval_request/my_pending), Linked Accounts (sys_account), Active Sessions (sys_session/mine), API Keys (sys_api_key/mine), OAuth Applications (sys_oauth_application/mine) each render",
-        "confirm the gated entries resolve to ABSENT-not-erroring for the admin: nav_organizations (requiresService org-scoping) is absent in single-org mode; nav_jwks Signing Keys (requiredPermissions manage_platform_settings, sys_jwks private per ADR-0066) is PRESENT for admin; SSO Providers is absent unless OS_SSO_ENABLED (knownGap)",
+        "confirm the gated entries resolve to ABSENT-not-erroring for the admin: nav_organizations (requiresService org-scoping) is absent in single-org mode; nav_jwks Signing Keys is ABSENT for EVERY persona, admin included — the entry was removed in #7544 because sys_jwks declares apiEnabled:false, so its list answers OBJECT_API_DISABLED (404) for all callers and no permission gate could prune it; SSO Providers is absent unless OS_SSO_ENABLED (knownGap)",
         "sign in as the plain member: attempt to open Setup (com.objectstack.setup) and Studio (com.objectstack.studio) — capture the app-level refusal (App.requiredPermissions setup.access / studio.access); open Account (declares no requiredPermissions) — capture it opening",
-        "as the member, GET /api/v1/meta/app for a reachable app and confirm every manage_platform_settings-gated entry (JWKS, API Keys, the manage_platform_settings settings URLs) is ABSENT from the member's payload — the server prunes, the client does not merely hide",
+        "as the member, GET /api/v1/meta/app for a reachable app and confirm every manage_platform_settings-gated entry (API Keys, the manage_platform_settings settings URLs) is ABSENT from the member's payload — the server prunes, the client does not merely hide. JWKS is deliberately NOT in this list any more: it is absent for admins too, so finding it absent for a member proves nothing about the gate (#7544)",
         "cross-check served-vs-rendered: diff each app's meta/app nav destinations against what actually rendered so nothing is silently outside the walk"
       ],
       "acceptance": [
@@ -528,7 +541,7 @@
         "packages/platform-objects/src/apps/setup.app.ts (shell group anchors + requiredPermissions setup.access)",
         "packages/platform-objects/src/apps/studio.app.ts (static nav; requiredPermissions studio.access)",
         "packages/platform-objects/src/apps/account.app.ts (no requiredPermissions; hidden from App Switcher; requiresObject/requiresService entry gates)",
-        "packages/platform-objects/src/apps/setup-nav.contributions.ts (nav_jwks manage_platform_settings; nav_organizations requiresService org-scoping; nav_api_keys manage_platform_settings)",
+        "packages/platform-objects/src/apps/setup-nav.contributions.ts (nav_organizations requiresService org-scoping; nav_api_keys manage_platform_settings; no nav_jwks — removed in #7544)",
         "packages/plugins/plugin-auth/src/auth-plugin.ts (SSO Providers nav_sso_providers contributed only when isSsoWired())",
         "ADR-0048 (Setup/Studio/Account as one-app packages com.objectstack.{setup,studio,account}); ADR-0029 (nav contributions); ADR-0066 (sys_jwks private)"
       ],

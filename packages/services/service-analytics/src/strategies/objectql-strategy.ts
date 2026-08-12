@@ -4,12 +4,15 @@ import type { AnalyticsQuery, AnalyticsResult } from '@objectstack/spec/contract
 import type { Cube } from '@objectstack/spec/data';
 import type { AnalyticsStrategy, StrategyContext } from './types.js';
 import {
+  invalidFilterError,
+  lowerAnalyticsWhere,
   normalizeAnalyticsFilterTree,
   collectFilterLeaves,
   SQL_CONST_FALSE,
   SQL_CONST_TRUE,
   type NormalizedFilterNode,
 } from './filter-normalizer.js';
+import { findCrossFieldComparand, isFieldReference } from '../comparand-shape.js';
 import { compileScopedFilterToSql } from '../read-scope-sql.js';
 import { invalidMemberError } from '../dataset-refusal.js';
 import { likePattern, LIKE_ESCAPE_CHAR, asciiLowerSqlExpr, type LikeShape } from '../like-pattern.js';
@@ -238,6 +241,50 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     const cube = ctx.getCube(query.cube!);
     if (!cube) {
       throw new Error(`Cube not found: ${query.cube}`);
+    }
+
+    // [#7598, maintainer ruling 2026-08-12] The echo DECLINES a cross-field
+    // comparison — 「`/analytics/sql` 的 echo 同样 decline(一致的响亮答案,
+    // 不半渲染)」.
+    //
+    // This renderer describes an execution it does not perform, and there is no
+    // honest description of a cross-field comparison available to it. The
+    // reference reaches `engine.aggregate` intact and `driver-sql` compiles it
+    // into a TOTAL column-to-column predicate — several repetitions of both
+    // column expressions, so the answer matches the memory evaluator across
+    // NULLs. What this file's `buildFilterClauseSql` can render is `amount >
+    // $1` with the reference OBJECT in `params`: not a simplification of that
+    // predicate but a different one, comparing a column against a value no row
+    // can hold. Rendering it would hand a debugger SQL that reproduces NONE of
+    // the rows the query returned — the #3601 / #3602 / #3650 failure this
+    // whole render block exists to prevent, in its worst direction.
+    //
+    // Note what this does NOT affect: `execute()` calls `generateSql` inside a
+    // `try`/`catch` precisely because the echo is a debugging aid that must
+    // never fail a query that already ran, so `/analytics/query` still serves
+    // these queries and returns rows — the response simply carries no `sql`
+    // string. Only the dry-run face (`/analytics/sql`) refuses, which is the
+    // "one consistent, loud answer" the ruling asked for.
+    //
+    // The READ SCOPE half needs no arm of its own: `compileScopedFilterToSql`
+    // below still refuses a reference in its own fail-closed envelope
+    // (`READ_SCOPE_COMPILE_FAILED` / 500, #5367 ruling kept verbatim by Q2 = A),
+    // and that refusal is now reached from HERE rather than from
+    // `NativeSQLStrategy.applyReadScope` — see `read-scope-sql.ts`'s header.
+    const crossField = findCrossFieldComparand(this.loweredWhere(query));
+    if (crossField) {
+      throw invalidFilterError(
+        `[analytics] cannot render display SQL for the field reference ` +
+        `{ "$field": "${crossField.ref}" } under "${crossField.op}" on "${crossField.field}". ` +
+        `The query itself is SERVED — \`NativeSQLStrategy.canHandle\` declines a cross-field ` +
+        `comparison so it routes to the ObjectQL engine path, where driver-sql compiles it into a ` +
+        `column-to-column predicate written TOTAL across NULLs and enforces the #5222 rulings ` +
+        `(#7598, maintainer ruling 2026-08-12). This renderer has no faithful rendering of that ` +
+        `predicate: what it can emit is a comparison against the reference object as a bound VALUE, ` +
+        `which reproduces none of the rows the query returns. Refusing rather than half-rendering — ` +
+        `an echo that contradicts execution is worse than no echo (#3601 / #3602 / #3650). Run the ` +
+        `query itself (/analytics/query) to get its rows.`,
+      );
     }
 
     const selectParts: string[] = [];
@@ -1101,7 +1148,26 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // side effect of converting; dropping the conversion must not drop the copy.
     const all = [...values];
     switch (operator) {
-      case 'equals': return v0;
+      // [#7598] IMPLICIT equality for a literal, EXPLICIT `$eq` for a field
+      // reference — the branch is on the COMPARAND, not on the operator, which
+      // is the same fix and the same reasoning #7597 applied to
+      // `parseFilterAST`, the spec's own lowering sink.
+      //
+      // `{ amount: 5 }` is implicit equality and every backend reads it that
+      // way. `{ amount: { $field: 'budget' } }` is NOT: it is a field-spec
+      // object whose only key is `$field`, which no backend reads as an
+      // equality — `driver-sql` sees an unrecognised operator key and the
+      // memory evaluator sees a comparand it never resolves. So the bare return
+      // was correct for four years' worth of literals and silently wrong for
+      // the one comparand the 2026-08-12 ruling routes HERE on purpose: with it,
+      // `{ amount: { $eq: { $field: 'budget' } } }` — the shape
+      // `compileCelToFilter` emits for a field-to-field CEL rule, and the shape
+      // `canHandle` now declines native SQL for — would arrive at the driver as
+      // something the driver cannot read, so the capability B exists to serve
+      // would fail on its single most important spelling. Its five siblings
+      // (`$ne`/`$gt`/`$gte`/`$lt`/`$lte`) were never affected: they emit their
+      // operator explicitly two lines down.
+      case 'equals': return isFieldReference(v0) ? { $eq: v0 } : v0;
       case 'notEquals': return { $ne: v0 };
       case 'gt': return { $gt: v0 };
       case 'gte': return { $gte: v0 };
@@ -1155,6 +1221,25 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
 
   private extractObjectName(cube: Cube): string {
     return cube.sql.trim();
+  }
+
+  /**
+   * [#7598] The query's `where`, lowered — the same input
+   * `NativeSQLStrategy.canHandle` scans, so the strategy that DECLINED and the
+   * echo that refuses read one shape rather than two.
+   *
+   * A throw from the lowering is swallowed for the same reason it is there: the
+   * `where` is malformed either way and `normalizeAnalyticsFilterTree` below
+   * refuses it with the message and envelope it has always had. This helper's
+   * only job is finding a reference, and there is none to find in a filter that
+   * does not lower.
+   */
+  private loweredWhere(query: AnalyticsQuery): unknown {
+    try {
+      return lowerAnalyticsWhere(query);
+    } catch {
+      return null;
+    }
   }
 
   /**
