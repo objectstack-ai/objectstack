@@ -161,6 +161,19 @@ Monetary value with currency configuration.
 { name: 'price', label: 'Price', type: 'currency', currencyConfig: { precision: 2, currencyMode: 'fixed', defaultCurrency: 'USD' } }
 ```
 
+A declared `precision` must agree with the currency's ISO 4217 fraction digits
+when the currency is statically known — that is, when `currencyConfig` is in
+`fixed` mode. Publish-time validation rejects the contradiction, naming both
+numbers ("currency JPY has 0 fraction digits; `precision: 2` contradicts it"):
+the yen has no minor unit to show two digits of, and `precision: 2` on a KWD
+field would silently drop the third fils digit that exists. Omit `precision`
+to let renderers derive the width from the currency itself. The rule is
+deliberately partial: a field in `dynamic` currencyMode has no single currency
+to check against, and currency codes outside CLDR `currencyData`
+(cryptocurrency or custom business codes) are not checked. The rule judges
+only *authored* precision — an untouched `currencyConfig` (whose `precision`
+defaults to `2`) is never rejected, whatever its currency.
+
 ### `percent`
 Percentage value (0–100 or decimal).
 

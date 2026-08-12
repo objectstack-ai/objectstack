@@ -102,6 +102,16 @@ export const ERROR_CODE_LEDGER = {
     'BATCH_UNRESOLVED_REF',
     'BLANK_MATCH_KEY',
     'CONCURRENT_UPDATE',
+    // [#8111] `respondSharingError`'s 409 arm — `revoke` on a rule-materialised
+    // share (`source != 'manual'`), thrown by plugin-sharing's `sharing-service`
+    // and documented at `content/docs/kernel/runtime-services/sharing-service.mdx`.
+    // REGISTERED, not renamed: this is the value the arm has always put on the
+    // wire, and #8111 converged its POSITION only. Consolidating it onto the
+    // standard catalog's `RESOURCE_CONFLICT` would change what clients read, so
+    // it is a deliberate wire change for the maintainer, filed separately —
+    // exactly the shape this block's existing generic synonyms (`NOT_FOUND`,
+    // `FORBIDDEN`, `INTERNAL`) already carry.
+    'CONFLICT',
     'CONFLICTING_MAPPING',
     'DATASET_INVALID',
     'DELEGABLE_SCOPE_FAILED',

@@ -258,7 +258,22 @@ const MODULES = {
     // COMPUTED message (`msg.slice(0, 500)`), which that counter cannot see —
     // the six flat `{ code, message }` arms converted alongside them were never
     // counted by either dialect, having no `error` key at all.
-    siblingCode: 73,
+    //
+    // 73 → 69 (#8111): `registerSharingEndpoints` — the record-sharing family —
+    // followed. Its four `{ code, error }` sites (the shared `respondSharingError`
+    // literal feeding 400/403/404/409/422, plus the three verb-specific 500s
+    // `SHARES_LIST_FAILED` / `SHARE_GRANT_FAILED` / `SHARE_REVOKE_FAILED`) now
+    // emit through the shared `sendError` from `@objectstack/types`.
+    // Measured: merge-base (2473cd2d3) siblingCode=73, branch head=69; the four
+    // vanished sites are merge-base lines 9480, 9507, 9541, 9570, all inside
+    // that one function, and the head has NO site left in that range while all
+    // 69 survivors map 1:1 onto a head line by the edit's own line shift (0
+    // before the emitter, +37 after it). `stringError`
+    // is unmoved at 44 by construction: all four arms carried a COMPUTED message
+    // (`msg.replace(…)`, `String(…).slice(0, 500)`), which that counter cannot
+    // see — and `respond501`, converted alongside them, was never counted by
+    // either dialect, having no `error` key at all.
+    siblingCode: 69,
   },
 };
 

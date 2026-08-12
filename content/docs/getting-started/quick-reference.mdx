@@ -23,7 +23,7 @@ Categories that have no section here at all are named under
 [Categories Without a Section](#categories-without-a-section) — that curation is stated,
 not left implicit.
 
-## Data Protocol (17 of 30 schemas)
+## Data Protocol (16 of 29 schemas)
 
 Core business logic and data modeling schemas.
 
@@ -43,7 +43,6 @@ Core business logic and data modeling schemas.
 | **[SQL Driver](/docs/references/data/driver-sql)** | `driver-sql.zod.ts` | SQLDriverConfig, SQLDialect | SQL-specific driver |
 | **[NoSQL Driver](/docs/references/data/driver-nosql)** | `driver-nosql.zod.ts` | NoSQLDriverConfig | NoSQL-specific driver |
 | **[Document](/docs/references/data/document)** | `document.zod.ts` | Document | Document-oriented data |
-| **[External Lookup](/docs/references/data/external-lookup)** | `external-lookup.zod.ts` | ExternalLookup | External data lookups |
 | **[Postgres Driver](/docs/references/data/driver-postgres)** | `driver/postgres.zod.ts` | PostgresConfig | PostgreSQL configuration |
 | **[Mongo Driver](/docs/references/data/driver-mongo)** | `driver/mongo.zod.ts` | MongoConfig | MongoDB configuration |
 
@@ -89,7 +88,7 @@ Plugin architecture, manifests, and kernel runtime.
 | **[Metadata Loader](/docs/references/kernel/metadata-loader)** | `metadata-loader.zod.ts` | MetadataLoaderContract | Metadata loading |
 | **[Package Registry](/docs/references/kernel/package-registry)** | `package-registry.zod.ts` | InstalledPackage, InstallPackageRequest | Package resolution |
 
-## System Protocol (18 of 37 schemas)
+## System Protocol (17 of 36 schemas)
 
 Runtime environment, logging, jobs, caching, and observability.
 
@@ -103,7 +102,6 @@ Runtime environment, logging, jobs, caching, and observability.
 | **[HTTP Server](/docs/references/system/http-server)** | `http-server.zod.ts` | RouteHandlerMetadata, MiddlewareConfig | Route + middleware metadata |
 | **[Job](/docs/references/system/job)** | `job.zod.ts` | Job, JobSchedule | Background job queue |
 | **[Logging](/docs/references/system/logging)** | `logging.zod.ts` | LoggingConfig | Structured logging |
-| **[Message Queue](/docs/references/system/message-queue)** | `message-queue.zod.ts` | MessageQueueConfig, TopicConfig | Message queuing |
 | **[Metadata Persistence](/docs/references/system/metadata-persistence)** | `metadata-persistence.zod.ts` | MetadataHistoryRecord, MetadataDiffResult | Metadata storage |
 | **[Metrics](/docs/references/system/metrics)** | `metrics.zod.ts` | Metrics | Application metrics |
 | **[Migration](/docs/references/system/migration)** | `migration.zod.ts` | Migration | Schema migration |

@@ -14,6 +14,7 @@ import {
   stripRuntimeOwnedFields,
   isRuntimeOwnedField,
   runtimeOwnedStripWarning,
+  readonlyStripWarning,
 } from './rule-validator.js';
 import { ValidationError } from './record-validator.js';
 
@@ -897,6 +898,142 @@ describe('stripReadonlyFields — implicit readonly on autonumber (#5503)', () =
     expect(rt).toContain('isSystem');
     expect(rt).toContain('preserveAudit');
     expect(rt).toContain('COMMITTED WITHOUT IT');
+  });
+});
+
+// #8141 — `options.addressKey`: the key that carries the write's ADDRESS is
+// still stripped, it just stops LOGGING. Every claim `readonlyStripWarning`
+// makes is false for that key (the caller did not supply it — the REST ingress
+// folded the path id in, #6479; nothing it wanted was dropped; nothing it asked
+// for was left out of the commit), and its remedy prose sends that caller to
+// `{ context: { isSystem: true } }`, which would exempt it from this strip
+// entirely — a strictly worse posture bought to silence a line that should
+// never have printed.
+//
+// The trap this block exists to catch is silencing too much: the line's own
+// docblock keeps it at `warn` so REAL forgery attempts stay visible, so every
+// case below has a counter-case where the WARN must survive BYTE-IDENTICAL.
+const addressedFields = {
+  name: 'pref',
+  fields: {
+    id: { type: 'text', primaryKey: true, readonly: true },
+    value: { type: 'text' },
+    locked_note: { type: 'text', readonly: true },
+  },
+};
+
+/** Collect the warn lines a single strip call emits. */
+function stripWithWarns(
+  schema: unknown,
+  data: Record<string, unknown>,
+  supplied: Record<string, unknown>,
+  options?: { preserveAudit?: boolean; addressKey?: string },
+) {
+  const warns: string[] = [];
+  const levels: string[] = [];
+  const logger: any = {
+    warn: (m: string) => { warns.push(m); levels.push('warn'); },
+    error: (m: string) => { warns.push(m); levels.push('error'); },
+    info: (m: string) => { warns.push(m); levels.push('info'); },
+    debug: (m: string) => { warns.push(m); levels.push('debug'); },
+  };
+  const out = stripReadonlyFields(schema as any, data, supplied, logger, options);
+  return { out, warns, levels };
+}
+
+describe('stripReadonlyFields — addressKey silences the LOG, never the strip (#8141)', () => {
+  it('STILL STRIPS the address key — the payload handed on is byte-identical', () => {
+    // The half that must not move. A same-value primary-key write is a no-op
+    // on SQL but an outright rejection on stores with immutable primary keys,
+    // and widening/narrowing the strip is #6435's explicitly separate
+    // decision. This fix is about the log line, and only the log line.
+    const supplied = { id: 'rec_1', value: 'v1' };
+    const { out, warns } = stripWithWarns(addressedFields, { ...supplied }, supplied, { addressKey: 'id' });
+    expect(out).toEqual({ value: 'v1' });
+    expect(warns).toEqual([]);
+  });
+
+  it('with NO addressKey the very same call still WARNs — the option is opt-in', () => {
+    // The regression pin for the two call sites this card does not touch (the
+    // multi branch and the insert-side sibling pass no `addressKey` at all).
+    const supplied = { id: 'rec_1', value: 'v1' };
+    const { out, warns, levels } = stripWithWarns(addressedFields, { ...supplied }, supplied);
+    expect(out).toEqual({ value: 'v1' });
+    expect(warns).toEqual([readonlyStripWarning('id', 'pref')]);
+    expect(levels).toEqual(['warn']);
+  });
+
+  it('a DIFFERENT read-only field in the same payload still WARNs, unchanged in wording and level', () => {
+    // The tripwire. Silencing the address must not silence the forgery riding
+    // along with it — asserted with `toBe` against the exported message so a
+    // reworded or downgraded line fails here.
+    const supplied = { id: 'rec_1', value: 'v1', locked_note: 'forged' };
+    const { out, warns, levels } = stripWithWarns(
+      addressedFields, { ...supplied }, supplied, { addressKey: 'id' },
+    );
+    expect(out).toEqual({ value: 'v1' });
+    expect(warns).toEqual([readonlyStripWarning('locked_note', 'pref')]);
+    expect(levels).toEqual(['warn']);
+    expect(warns[0]).toContain('COMMITTED WITHOUT IT');
+    expect(warns[0]).toContain('{ context: { isSystem: true } }');
+    expect(warns[0]).toContain('onFieldsDropped');
+  });
+
+  it('an addressKey naming a key the caller did NOT supply changes nothing', () => {
+    // A server stamp on the named key is kept, exactly as before — the option
+    // is consulted only where a strip would otherwise have logged.
+    const d = { id: 'rec_1', value: 'v1' };
+    const { out, warns } = stripWithWarns(addressedFields, d, { value: 'v1' }, { addressKey: 'id' });
+    expect(out).toBe(d); // nothing stripped ⇒ same reference
+    expect(warns).toEqual([]);
+  });
+
+  it('an addressKey naming a field that is not read-only changes nothing', () => {
+    const supplied = { value: 'v1', locked_note: 'forged' };
+    const { out, warns } = stripWithWarns(
+      addressedFields, { ...supplied }, supplied, { addressKey: 'value' },
+    );
+    expect(out).toEqual({ value: 'v1' });
+    expect(warns).toEqual([readonlyStripWarning('locked_note', 'pref')]);
+  });
+
+  it('composes with preserveAudit rather than overriding it', () => {
+    const supplied = { id: 'rec_1', created_at: '2020-01-01T00:00:00Z', organization_id: 'org_forged' };
+    const { out, warns } = stripWithWarns(
+      { name: 'pref', fields: { ...addressedFields.fields, ...historicalFields.fields } },
+      { ...supplied },
+      supplied,
+      { preserveAudit: true, addressKey: 'id' },
+    );
+    // Measured, and NOT what the first draft of this case predicted: under a
+    // historical import the address never reaches the address rule at all. A
+    // `readonly` field that is not `system` is an author-declared business
+    // field to {@link isPreservableUnderAudit}, so `preserveAudit` KEEPS `id`
+    // one line earlier — which is pre-#8141 behaviour, unchanged here, and
+    // #6435's separate decision if anyone wants it different. `created_at` is
+    // reinstated by the same whitelist; `organization_id` is a non-audit system
+    // column, so it is still stripped and still loud.
+    expect(out).toEqual({ id: 'rec_1', created_at: '2020-01-01T00:00:00Z' });
+    expect(warns).toEqual([readonlyStripWarning('organization_id', 'pref')]);
+  });
+
+  it('silences the RUNTIME-OWNED message for the same key, on the same ground', () => {
+    // Why the exemption keys on the key's ROLE and not on which lock caught it:
+    // an `autonumber` primary key addressed by id is the same write, and the
+    // reason the line is untrue there is identical. The record number of a
+    // DIFFERENT field still logs.
+    const numberedId = {
+      name: 'pref',
+      fields: {
+        id: { type: 'autonumber', primaryKey: true },
+        account_number: { type: 'autonumber' },
+        value: { type: 'text' },
+      },
+    };
+    const supplied = { id: 'ACC-1', account_number: 'ACC-888888', value: 'v1' };
+    const { out, warns } = stripWithWarns(numberedId, { ...supplied }, supplied, { addressKey: 'id' });
+    expect(out).toEqual({ value: 'v1' });
+    expect(warns).toEqual([runtimeOwnedStripWarning('account_number', 'autonumber', 'pref')]);
   });
 });
 

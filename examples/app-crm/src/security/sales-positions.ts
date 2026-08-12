@@ -35,11 +35,19 @@ export const SalesUserPermissionSet = definePermissionSet({
   name: 'crm_sales_user',
   label: 'CRM Sales User',
   objects: {
-    crm_account:     { allowRead: true, allowCreate: true,  allowEdit: true,  allowDelete: false },
-    crm_contact:     { allowRead: true, allowCreate: true,  allowEdit: true,  allowDelete: false },
-    crm_opportunity: { allowRead: true, allowCreate: true,  allowEdit: true,  allowDelete: false },
-    crm_lead:        { allowRead: true, allowCreate: true,  allowEdit: true,  allowDelete: false },
-    crm_activity:    { allowRead: true, allowCreate: true,  allowEdit: true,  allowDelete: false },
+    crm_account: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },
+    crm_contact: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },
+    crm_opportunity: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },
+    // [#8164] crm_opportunity_line_item is a master-detail CHILD of
+    // crm_opportunity (sharingModel: 'controlled_by_parent') — its RECORD
+    // scope always follows the parent (ADR-0055), but object-level CRUD is a
+    // SEPARATE gate that is never derived (security-master-detail-ungranted).
+    // Grant shape matches the master exactly: same set, same bits, so the
+    // line-item grid on the Opportunity form (inlineEdit: 'grid') opens for
+    // the same users who can already work the parent record.
+    crm_opportunity_line_item: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },
+    crm_lead: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },
+    crm_activity: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },
   },
 });
 

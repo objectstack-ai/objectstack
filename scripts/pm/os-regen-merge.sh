@@ -29,6 +29,18 @@
 # bogus 5xx assertions in the rest package — rerun
 # `pnpm --filter @objectstack/spec gen:openapi` to restore.
 #
+# ## Step 3 and the pre-commit hook agree (#8047)
+#
+# They used to contradict each other: this script deliberately produces the
+# commit the `os-regen` pre-commit hook refused, so following the procedure
+# meant skipping the hook — and `--no-verify` skips EVERY pre-commit check, not
+# just this one. Ruled 2026-08-12: the hook moved. It now recognises a merge
+# commit whose artifacts are stale and records a DEFERRAL rather than refusing,
+# then holds you to it — every commit after the merge is refused until the
+# regeneration lands, a second merge cannot defer on top of an outstanding one,
+# and `.githooks/pre-push` refuses a push that still owes one. So step 3 needs
+# no bypass, and step 4 is what clears the marker.
+#
 # The os-regen path list is read from .gitattributes AT RUN TIME — the one copy
 # that cannot rot is the one that does not exist.
 

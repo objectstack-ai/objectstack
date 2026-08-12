@@ -160,12 +160,15 @@ describe('engine filter placeholders (framework#3582)', () => {
     await ql.aggregate('deal', {
       where: { close_date: { $gte: '{current_year_start}' } },
       groupBy: ['owner'],
-      aggregations: [{ func: 'count', field: 'id', alias: 'n' }],
+      aggregations: [{ function: 'count', field: 'id', alias: 'n' }],
       context: CTX,
-    } as any);
+    });
 
     expect(seen.aggregateAst?.where).toEqual({ close_date: { $gte: THIS_YEAR_START } });
     expect(seen.aggregateAst?.groupBy).toEqual(['owner']);
+    expect(seen.aggregateAst?.aggregations).toEqual([
+      { function: 'count', field: 'id', alias: 'n' },
+    ]);
   });
 
   it('throws on an unknown placeholder instead of matching nothing', async () => {

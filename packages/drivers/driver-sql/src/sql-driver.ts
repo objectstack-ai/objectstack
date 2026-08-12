@@ -555,13 +555,103 @@ const SQLITE_TIME_EXPR_REFS = 8;
  * The `[sql-driver]` prefix these messages used to carry is GONE from the text:
  * it is driver-internal wording, and shipping it to clients is exactly what the
  * #3867 sanitiser exists to stop. The operator/field/vocabulary detail — the
- * part a caller can act on — stays.
+ * part a caller can act on — stays, EXCEPT where the caller may not be its
+ * author: see {@link withheldFilterError}.
+ *
+ * [#7929, maintainer ruling 2026-08-12] That exception is the cross-field
+ * `{ $field }` family. A read scope — an administrator's CEL sharing/permission
+ * rule, compiled by `compileCelToFilter` and ANDed into the query by the
+ * security middleware (`plugin-security`) or by `ObjectQLStrategy.withReadScope`
+ * (`service-analytics`) — reaches this compiler as a bare `FilterCondition` with
+ * NOTHING marking it as policy-authored. When it is refused, the "detail a
+ * caller can act on" is detail the caller never wrote: policy column names, and
+ * the identity of the tenant-isolation column. Those refusals therefore keep
+ * `code` and `status` and lose their operands; the full text goes to the server
+ * log. The paragraph above still describes every other refusal in this file.
  */
 function unsupportedFilterError(message: string): Error {
   const err = new Error(message) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.INVALID_FILTER;
   err.status = 400;
   return err;
+}
+
+/**
+ * [#7929] The full, operand-naming text of a refusal whose caller-visible
+ * message was redacted — carried on the Error under a SYMBOL key.
+ *
+ * A symbol rather than a string property because the carrier must not travel:
+ * `JSON.stringify(err)`, `{ ...err }`, `Object.keys`, `for…in` and the
+ * structured-clone boundary all skip symbol keys, so an error mapper that
+ * spreads or serialises the error cannot put the text back on the wire — which
+ * is the one way this redaction could be undone without anyone editing it.
+ * `Symbol.for` (the global registry) rather than a module-local symbol so a
+ * duplicated copy of this package still resolves the same key.
+ */
+const WITHHELD_FILTER_DIAGNOSTIC = Symbol.for('objectstack.driver-sql.withheldFilterDiagnostic');
+
+/**
+ * [#7929] Set on an error once its diagnostic has been written to the log, so
+ * the seam can be applied at more than one frame without the operator reading
+ * one refusal twice. Needed because knex invokes a WHERE-group callback lazily,
+ * which puts nested refusals outside the filter entry point's `catch` — see
+ * {@link SqlDriver.withWithheldFilterLog}.
+ */
+const WITHHELD_FILTER_LOGGED = Symbol.for('objectstack.driver-sql.withheldFilterLogged');
+
+/**
+ * [#7929, maintainer ruling 2026-08-12, verbatim: 「接受你的全部建议。」 adopting
+ * "B now, A next"] An `INVALID_FILTER` refusal that answers the caller with
+ * `message` and keeps `diagnostic` — the half naming the operands — server-side.
+ *
+ * # Why the redaction is unconditional
+ *
+ * The driver cannot tell an author's filter from a policy's. Measured on both
+ * merge boundaries (#7929's analytics capture, #7988's CRUD capture): the
+ * predicate arrives as a bare `FilterCondition` in `where`, `DriverQuery` is
+ * `Omit< QueryAST, 'object' >` and `QueryAST` has no provenance slot, and the
+ * one thing that does cross (`context`) says who is asking, never which subtree
+ * they did not write. A driver-side guess at provenance is precisely the shape
+ * the triage lens rejected, so B withholds for EVERY caller.
+ *
+ * # BOTH operands are withheld, not just the `$field` one
+ *
+ * On a read-scope refusal the whole predicate is the administrator's: in
+ * `{ amount: { $gt: { $field: 'secret_policy_column' } } }` the target `amount`
+ * is as policy-authored as the referent. Echoing the target would leave half
+ * the disclosure live, so the redaction takes both operands, the operator, the
+ * list index and the boundary `reason` — everything derived from the predicate.
+ * What stays is the refusal's IDENTITY (`INVALID_FILTER` / 400), which of the
+ * three cross-field refusal classes fired, and the capability statement, none
+ * of which is derived from what the caller or the administrator wrote.
+ *
+ * # The accepted cost, named rather than hidden
+ *
+ * An author debugging their OWN cross-field filter now gets the redacted
+ * message too, and that is a real diagnostic regression B pays for containment.
+ * #7929's follow-up card (A: a spec-declared provenance mark set at both merge
+ * boundaries) is what restores the author-facing text behind a real mark.
+ * ⛔ Do not "fix" this by re-adding the names, and ⛔ do not widen the REST
+ * boundary's 5xx-only withhold to 4xx instead (ruled out: it would delete
+ * #5367's tiering and #5667's legible-undeclared-5xx decision).
+ */
+function withheldFilterError(message: string, diagnostic: string): Error {
+  const err = unsupportedFilterError(message);
+  Object.defineProperty(err, WITHHELD_FILTER_DIAGNOSTIC, { value: diagnostic, enumerable: false });
+  return err;
+}
+
+/**
+ * [#7929] The withheld diagnostic carried by `err`, or `null` for any other
+ * error. The read half of {@link withheldFilterError} — used by
+ * {@link SqlDriver.logWithheldFilterDiagnostic} to write the text to the
+ * server log, and exported so a host that maps driver errors itself can do the
+ * same rather than re-deriving the seam.
+ */
+export function withheldFilterDiagnosticOf(err: unknown): string | null {
+  if (err === null || (typeof err !== 'object' && typeof err !== 'function')) return null;
+  const text = (err as Record<symbol, unknown>)[WITHHELD_FILTER_DIAGNOSTIC];
+  return typeof text === 'string' ? text : null;
 }
 
 /**
@@ -1016,15 +1106,22 @@ function fieldReferenceOf(value: unknown): string | null {
  *   value portably needs a dialect REPLACE chain nobody has proven; refused.
  * - **Any other operator** (`$null`, a retired spelling, …): no cross-field
  *   reading exists to compile.
+ *
+ * [#7929] The operands, the operator and the list index are withheld from the
+ * caller-visible half and kept in the server-log half — see
+ * {@link withheldFilterError} for why, and for what stays.
  */
 function crossFieldComparisonError(field: string, op: string, ref: string, index?: number): Error {
   const position = index === undefined ? '' : ` at index ${index} of its value list`;
-  return unsupportedFilterError(
+  return withheldFilterError(
+    `A cross-field comparison ({ "$field": … }) in this filter sits in a position SQL ` +
+      `push-down does not compile. Cross-field comparison compiles only as the whole comparand ` +
+      `of a scalar comparison operator ($eq/$ne/$gt/$gte/$lt/$lte) between two same-table ` +
+      `declared columns. Compare against a literal value here, or evaluate the rule in memory ` +
+      `(matchesFilter). The columns and the operator this filter used are withheld from the ` +
+      `message (#7929); the full diagnostic is in the server log.`,
     `Operator "${op}" on field "${field}" compares against another field ` +
-      `({ "$field": "${ref}" })${position}, a position SQL push-down does not compile. ` +
-      `Cross-field comparison compiles only as the whole comparand of a scalar comparison ` +
-      `operator ($eq/$ne/$gt/$gte/$lt/$lte) between two same-table declared columns. ` +
-      `Compare against a literal value here, or evaluate the rule in memory (matchesFilter).`,
+      `({ "$field": "${ref}" })${position}, a position SQL push-down does not compile.`,
   );
 }
 
@@ -1055,14 +1152,24 @@ function crossFieldComparisonError(field: string, op: string, ref: string, index
  * NEW divergence. #7597 ruled that the evaluator's unknown-operator posture
  * stays as #6520 left it and moved the LOWERING instead, so this message keeps
  * pointing at the `$eq` spelling that does compile.
+ *
+ * [#7929] It points at that spelling with PLACEHOLDER names now. The old text
+ * wrote the corrected filter out with the two real column names — twice — which
+ * on a read-scope refusal hands the administrator's policy back to the tenant
+ * as a suggestion. The SHAPE survives the redaction; the names do not.
  */
 function bareFieldReferenceError(field: string, ref: string): Error {
-  return unsupportedFilterError(
+  return withheldFilterError(
+    `A field in this filter is constrained by a bare field reference ({ "$field": … }) with no ` +
+      `operator. Write the comparison explicitly — { "TARGET_FIELD": { "$eq": { "$field": ` +
+      `"OTHER_FIELD" } } } — which compiles to a column-to-column comparison. The bare form is ` +
+      `refused because the in-memory evaluator does not read it as an equality (it matches no ` +
+      `record), so compiling it here would make the two execution paths answer this filter ` +
+      `differently. The columns this filter named are withheld from the message (#7929); the ` +
+      `full diagnostic is in the server log.`,
     `Field "${field}" is constrained by a bare field reference ({ "$field": "${ref}" }) with no ` +
-      `operator. Write the comparison explicitly — { "${field}": { "$eq": { "$field": "${ref}" } } } ` +
-      `— which compiles to a column-to-column comparison. The bare form is refused because the ` +
-      `in-memory evaluator does not read it as an equality (it matches no record), so compiling ` +
-      `it here would make the two execution paths answer this filter differently.`,
+      `operator. The spelling that compiles is ` +
+      `{ "${field}": { "$eq": { "$field": "${ref}" } } }.`,
   );
 }
 
@@ -1140,13 +1247,24 @@ function crossFieldComparisonClass(
  * not own, refused wholesale), and the tenant-isolation column FORBIDDEN on
  * either side of the comparison. `reason` carries the specific sentence;
  * this wrapper keeps the envelope and the shared contract statement.
+ *
+ * [#7929] `reason` is SERVER-SIDE ONLY now, and it is the sharpest half of this
+ * card's disclosure rather than an afterthought: those sentences name the
+ * referenced column, the target column, the object and the declared types —
+ * and, on the tenant arm, state WHICH column is the tenant-isolation column of
+ * the object, a fact the platform otherwise keeps to itself. The shared
+ * contract statement that followed it names nothing and stays on the wire, so a
+ * caller still learns the capability boundary without learning this filter.
  */
 function uncompilableFieldReferenceError(field: string, op: string, ref: string, reason: string): Error {
-  return unsupportedFilterError(
-    `Operator "${op}" on field "${field}" compares against another field ` +
-      `({ "$field": "${ref}" }), which cannot be compiled here: ${reason} ` +
+  return withheldFilterError(
+    `A cross-field comparison ({ "$field": … }) in this filter cannot be compiled here. ` +
       `Cross-field comparison on SQL push-down supports same-table columns the object ` +
-      `declares, compared as the same type class, excluding the tenant-isolation column.`,
+      `declares, compared as the same type class, excluding the tenant-isolation column. ` +
+      `The columns, the operator this filter used and the specific reason are withheld from ` +
+      `the message (#7929); the full diagnostic is in the server log.`,
+    `Operator "${op}" on field "${field}" compares against another field ` +
+      `({ "$field": "${ref}" }), which cannot be compiled here: ${reason}`,
   );
 }
 
@@ -2245,6 +2363,34 @@ function classifyFilterKey(key: string, value: unknown, here: string): FilterVer
   // nobody ruled on. See {@link undefinedComparandError} for the measured
   // local/remote matrix and why `null` is untouched.
   assertDefinedComparands(key, value, here);
+
+  // [#7929, maintainer ruling 2026-08-12] A `{ $field }` comparand at any
+  // operator OUTSIDE the six that compile one is the CROSS-FIELD refusal —
+  // answered here, ahead of the comparand-SHAPE gates below.
+  //
+  // Not a new refusal: every one of these shapes was already refused, and the
+  // set of accepted filters is byte-identical. What changes is WHICH refusal
+  // answers, and that is the point. `$icontains`, `$like`/`$ilike`, `$null` and
+  // `$exists` each carry their own comparand-shape gate on this walk, and each
+  // gate renders the offending comparand into its message — so a field
+  // reference came back to the caller as `received {"$field":"…"}`, naming the
+  // referenced column, while the same reference at `$contains` (no gate here,
+  // refused at the emitter) was answered by the cross-field refusal instead.
+  // Measured on `origin/main`: five operators disclosing, four not, decided by
+  // nothing a caller can see. One condition — "this comparand is a reference to
+  // another field, in a position SQL push-down does not compile" — now has one
+  // answer, and that answer is the redacted one.
+  //
+  // The six scalar comparison operators are skipped because a reference IS
+  // their compiled meaning ({@link SqlDriver.applyCrossFieldComparison}); their
+  // own boundary refusals are raised there with the same withhold.
+  if (isFilterNode(value)) {
+    for (const [op, comparand] of Object.entries(value)) {
+      if (CROSS_FIELD_COMPARISON_OPERATORS.has(op)) continue;
+      const ref = fieldReferenceOf(comparand);
+      if (ref !== null) throw crossFieldComparisonError(key, op, ref);
+    }
+  }
 
   // [#5347] `$null`'s comparand is a boolean by declaration. Checked on this
   // walk rather than in the emitter's `$null` arm for the same
@@ -8504,7 +8650,79 @@ export class SqlDriver implements IDataDriver {
     throw jsonColumnOperatorError(column, op, bare);
   }
 
+  /**
+   * [#7929] Compile `filters` into `builder`, and write the server-side half of
+   * any REDACTED refusal to the log on the way out.
+   *
+   * This method is the single production entry into the filter compiler — every
+   * `find` / `count` / `aggregate` / `update` / `delete` path in this file
+   * reaches {@link SqlDriver.applyFilterCondition} through it, and that method
+   * recurses only into itself. So one `catch` here sees every refusal the three
+   * `{ $field }` builders raise ({@link crossFieldComparisonError},
+   * {@link bareFieldReferenceError}, {@link uncompilableFieldReferenceError})
+   * without a per-throw-site call, and without a re-entrancy guard.
+   *
+   * The log is `this.logger` — the sink this driver already owns, which a host
+   * injects and a test spies on. ⛔ Not `console.warn` from the module-level
+   * builders: that would bypass an injected sink, which is the whole reason the
+   * property exists.
+   *
+   * The rethrow is the original error, untouched: the caller-visible message,
+   * `code` and `status` are the redacted refusal's own, and the diagnostic
+   * stays on the symbol key where nothing that serialises an error can reach it.
+   */
   protected applyFilters(builder: Knex.QueryBuilder, filters: any) {
+    try {
+      this.compileFilters(builder, filters);
+    } catch (err) {
+      this.logWithheldFilterDiagnostic(err);
+      throw err;
+    }
+  }
+
+  /**
+   * [#7929] Write the withheld half of a redacted refusal to the server log.
+   *
+   * A no-op for every other error, so the `catch` above stays a pass-through
+   * for the refusals that were never redacted (they say everything they have to
+   * say on the wire already).
+   */
+  protected logWithheldFilterDiagnostic(err: unknown): void {
+    const diagnostic = withheldFilterDiagnosticOf(err);
+    if (diagnostic === null) return;
+    const marked = err as Record<symbol, unknown>;
+    if (marked[WITHHELD_FILTER_LOGGED] === true) return;
+    Object.defineProperty(err as object, WITHHELD_FILTER_LOGGED, { value: true, enumerable: false });
+    this.logger.warn(
+      `[sql-driver] INVALID_FILTER — cross-field reference refused; operands withheld from the ` +
+        `response (#7929). Full diagnostic: ${diagnostic}`,
+    );
+  }
+
+  /**
+   * [#7929] Run `fn`, writing the server-side half of a redacted refusal before
+   * rethrowing it.
+   *
+   * Applied at every KNEX GROUP CALLBACK as well as at {@link applyFilters},
+   * and that is a measurement rather than belt-and-braces: knex invokes a
+   * group callback LAZILY, when the statement is compiled — after
+   * `applyFilters` has already returned — so the entry point's `catch` never
+   * sees a refusal raised inside one. Measured before this method existed: a
+   * `$or`-nested cross-field refusal reached the caller correctly redacted
+   * while the server log stayed completely silent, which is the worst of both
+   * halves. {@link logWithheldFilterDiagnostic} marks the error, so an error
+   * that passes two of these frames is still logged once.
+   */
+  protected withWithheldFilterLog<T>(fn: () => T): T {
+    try {
+      return fn();
+    } catch (err) {
+      this.logWithheldFilterDiagnostic(err);
+      throw err;
+    }
+  }
+
+  private compileFilters(builder: Knex.QueryBuilder, filters: any) {
     if (!filters) return;
 
     // [#5158] `where` is a `FilterCondition` OBJECT. It always was — the spec
@@ -8807,7 +9025,7 @@ export class SqlDriver implements IDataDriver {
         (builder as any)[method]((qb: any) => {
           for (const sub of branches) {
             qb.where((subQb: any) => {
-              this.applyFilterCondition(subQb, sub, 'and', table);
+              this.withWithheldFilterLog(() => this.applyFilterCondition(subQb, sub, 'and', table));
             });
           }
         });
@@ -8832,7 +9050,7 @@ export class SqlDriver implements IDataDriver {
             // read scope of the shape `{$or:[{owner,status},{shared_with}]}`
             // returned rows the scope excluded — see sql-driver-or-filter.test.ts.
             qb.orWhere((subQb: any) => {
-              this.applyFilterCondition(subQb, sub, 'and', table);
+              this.withWithheldFilterLog(() => this.applyFilterCondition(subQb, sub, 'and', table));
             });
           }
         });
@@ -8858,7 +9076,7 @@ export class SqlDriver implements IDataDriver {
         const negated = nullSafeNegationOperand(value as Record<string, unknown>);
         const notMethod = logicalOp === 'or' ? 'orWhereNot' : 'whereNot';
         (builder as any)[notMethod]((qb: any) => {
-          this.applyFilterCondition(qb, negated, 'and', table);
+          this.withWithheldFilterLog(() => this.applyFilterCondition(qb, negated, 'and', table));
         });
       } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
         const localField = this.mapSortField(key);

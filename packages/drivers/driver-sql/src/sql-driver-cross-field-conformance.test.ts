@@ -61,6 +61,7 @@ import {
   CROSS_FIELD_AUTHORED_CASES,
   CROSS_FIELD_CASES,
   CROSS_FIELD_OBJECT_FIELDS,
+  CROSS_FIELD_OPERAND_NAMES,
   CROSS_FIELD_REFUSALS,
   CROSS_FIELD_ROWS,
 } from './cross-field-conformance-cases.js';
@@ -160,12 +161,25 @@ describe(`[#5222] driver-sql — cross-field \`$field\` push-down conformance ($
 
   describe('the refusal arm — narrowed, never removed (ADR-0112 envelope)', () => {
     for (const refusal of CROSS_FIELD_REFUSALS) {
-      it(`${refusal.name} → 400 INVALID_FILTER`, async () => {
+      it(`${refusal.name} → 400 INVALID_FILTER, operands withheld`, async () => {
+        // [#7929] Two halves, asserted together because either one alone is
+        // satisfiable by the wrong implementation: a refusal that says nothing
+        // at all passes the disclosure half, and the pre-#7929 message passes
+        // the diagnostic half. The pair is the deliverable — "still refused,
+        // same code, same status" AND "no longer discloses".
+        const logged: string[] = [];
+        const restore = (driver as unknown as { logger: { warn: (m: string) => void } }).logger;
+        (driver as unknown as { logger: unknown }).logger = {
+          ...restore,
+          warn: (m: string) => { logged.push(m); },
+        };
         let error: (Error & { code?: string; status?: number }) | null = null;
         try {
           await sqlIds(refusal.filter);
         } catch (e) {
           error = e as Error & { code?: string; status?: number };
+        } finally {
+          (driver as unknown as { logger: unknown }).logger = restore;
         }
         expect(error, `expected a refusal${refusal.note ? `\n${refusal.note}` : ""}`).not.toBeNull();
         expect(error!.code).toBe('INVALID_FILTER');
@@ -175,8 +189,12 @@ describe(`[#5222] driver-sql — cross-field \`$field\` push-down conformance ($
         expect(error!).not.toBeInstanceOf(TypeError);
         expect(error!.message).not.toContain('can only bind');
         expect(error!.message).not.toContain('[sql-driver]');
-        for (const fragment of refusal.messageIncludes) {
-          expect(error!.message).toContain(fragment);
+        for (const name of CROSS_FIELD_OPERAND_NAMES) {
+          expect(error!.message, `caller-visible message names "${name}"`).not.toContain(name);
+        }
+        const diagnostic = logged.join('\n');
+        for (const fragment of refusal.diagnosticIncludes) {
+          expect(diagnostic, `server log lost "${fragment}"`).toContain(fragment);
         }
       });
     }

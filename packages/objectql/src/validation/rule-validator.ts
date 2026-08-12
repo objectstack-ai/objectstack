@@ -957,17 +957,61 @@ export function isRuntimeOwnedField(def: { type?: string } | undefined | null): 
  * silent-drop. `warn` + a message that names both remedies is the honest single
  * level. Changing this means giving `ExecutionContext` a real origin marker
  * first — not guessing from the absence of a principal.
+ *
+ * ### ...and the one key it does NOT log: the write's ADDRESS (#8141)
+ *
+ * `options.addressKey` names the key that carries the ADDRESS of the row this
+ * call is already writing — the caller passes it only when it has established
+ * that fact, and only the by-id update branch can (`idAddressesThisRow` in
+ * `engine.ts`, #8093: the payload `id` equals the bound row's key). That key is
+ * still STRIPPED, byte for byte as before; what it no longer does is log.
+ *
+ * The three claims the message makes are all false for that key, and #8093
+ * measured them: on `PATCH /data/sys_user_preference/rec_1` with the body
+ * `{"value":[…]}` — no `id` key in it at all — the REST ingress folds the path
+ * id into the payload (`metadata-protocol`'s `updateData`, #6479, so a body
+ * `id` cannot bind a row other than the one the URL, the OCC check and the
+ * receipt all name), the fold lands before the `suppliedValues` snapshot, and
+ * this strip then logged that a caller-supplied `id` was DROPPED and the update
+ * COMMITTED WITHOUT IT. The caller supplied nothing, lost nothing, and the
+ * update carried out everything it asked for. Worse, the message's remedy told
+ * that caller to pass `{ context: { isSystem: true } }` — which would exempt it
+ * from this strip ENTIRELY, a strictly worse posture adopted to silence a line
+ * that should never have printed.
+ *
+ * Why this is a fix and not a mute: it fires on every single-record `PATCH` of
+ * every object declaring `id` as `readonly: true`, i.e. every platform object
+ * (the console's recents trace alone emits one per org switch), and the level
+ * argument directly above is that `warn` is worth keeping so REAL forgery
+ * attempts stay visible. A per-call flood of a line that cannot be acted on is
+ * what trains a reader to skip the channel — the log-side twin of the amber
+ * toast #8093 stopped, and of #3431 / #3794 one field over.
+ *
+ * Deliberately scoped to the LOG and to ONE key:
+ *  - any other read-only key in the same payload still logs, unchanged in
+ *    wording and level — a caller that forged `created_by` alongside the
+ *    address is still named;
+ *  - an `id` that does NOT equal the bound row is not an address, so the caller
+ *    never passes it here and it still logs;
+ *  - the multi branch and the insert-side sibling pass no `addressKey` at all
+ *    (nothing addresses a row by key there), so their behaviour is identical to
+ *    before this option existed;
+ *  - and the payload handed to the driver is unchanged everywhere. Removing the
+ *    address BEFORE the read-only pass would change what drivers receive for
+ *    objects whose `id` is not readonly, which #6435 ruled an explicitly
+ *    separate decision.
  */
 export function stripReadonlyFields(
   objectSchema: { name?: string; fields?: Record<string, ConditionalFieldDef> } | undefined | null,
   data: Record<string, unknown> | undefined | null,
   supplied: Readonly<Record<string, unknown>>,
   logger?: EvaluateRulesOptions['logger'],
-  options?: { preserveAudit?: boolean },
+  options?: { preserveAudit?: boolean; addressKey?: string },
 ): Record<string, unknown> | undefined | null {
   const fields = objectSchema?.fields;
   if (!fields || !data) return data;
   const preserveAudit = options?.preserveAudit === true;
+  const addressKey = options?.addressKey;
   let result = data;
   for (const [name, def] of Object.entries(fields)) {
     // [#5503] `readonly: true` is the AUTHOR-declared lock; a runtime-owned
@@ -991,6 +1035,14 @@ export function stripReadonlyFields(
     if (preserveAudit && isPreservableUnderAudit(name, def)) continue; // historical import reinstates it
     if (result === data) result = { ...data };
     delete (result as Record<string, unknown>)[name];
+    // [#8141] STRIPPED, then not logged: this key is the write's address, and
+    // every claim the message makes about it is false — the caller did not
+    // supply it, lost nothing, and the update committed everything it asked
+    // for. Placed AFTER the delete, never as an early `continue` above it: the
+    // strip must stay (a same-value primary-key write is a no-op on SQL but a
+    // rejection on stores with immutable primary keys, #6435), and only the
+    // caller can know a key is an address — this helper never guesses one.
+    if (addressKey !== undefined && name === addressKey) continue;
     logger?.warn?.(
       def?.readonly
         ? readonlyStripWarning(name, objectSchema?.name)

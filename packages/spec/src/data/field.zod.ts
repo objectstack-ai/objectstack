@@ -22,6 +22,10 @@ import {
   suggestDefaultValueToken,
 } from './default-value-shape';
 import { AddressSchema } from './field-value.zod';
+// #7918 — the ISO 4217 / CLDR fraction-digit contradiction check (maintainer
+// ruling 2026-08-12, Option A). One shared verdict for both anchors: the
+// field-level `precision` key and `CurrencyConfigSchema.precision`.
+import { currencyPrecisionContradiction } from './currency-fraction-digits';
 
 /**
  * Field Type Enum
@@ -208,10 +212,63 @@ export const CurrencyConfigSchema = lazySchema(() => strictObject({
   history: FIELD_HISTORY,
   aliases: { decimals: 'precision', scale: 'precision', mode: 'currencyMode', currency: 'defaultCurrency', code: 'defaultCurrency', isoCode: 'defaultCurrency' },
 }, {
-  precision: z.number().int().min(0).max(10).default(2).describe('Decimal precision (default: 2)'),
+  /**
+   * #7918 — `.default(2)` moved off this property and into the `.overwrite()`
+   * below, and this placement is load-bearing. A property-level default
+   * materializes AT PARSE, so a refinement over the parsed object cannot tell
+   * an authored `precision: 2` from an untouched one — and a rule firing on
+   * the baked default would refuse every untouched JPY currencyConfig (the
+   * permanently-noisy shape the ruling forbids). Declared `.optional()`, the
+   * authored-vs-absent distinction survives to the `.superRefine` below;
+   * the `.overwrite` then materializes the same `2` AFTER the check, so parse
+   * OUTPUT is byte-identical to the `.default(2)` era. The `default: 2`
+   * annotation states the contract default to schema consumers without
+   * touching parse order — the `autonumberFormat` pattern below.
+   */
+  precision: z.number().int().min(0).max(10).optional().meta({
+    description: 'Decimal precision (default: 2)',
+    default: 2,
+  }),
   currencyMode: z.enum(['dynamic', 'fixed']).default('dynamic').describe('Currency mode: dynamic (user selectable) or fixed (single currency)'),
   defaultCurrency: z.string().length(3).default('CNY').describe('Default or fixed currency code (ISO 4217, e.g., USD, CNY, EUR)'),
-}));
+}).superRefine((config, ctx) => {
+  // #7918 (maintainer ruling 2026-08-12, Option A): an AUTHORED `precision`
+  // that contradicts the statically-known currency's ISO 4217 / CLDR fraction
+  // digits is a publish-time error — `precision: 2` on a fixed-JPY config asks
+  // for two digits of a minor unit the yen does not have; `precision: 2` on
+  // fixed-KWD silently drops the third fils digit that exists.
+  //
+  // Deliberately partial, per the ruling: only `currencyMode: 'fixed'` pins a
+  // single currency to check against — `dynamic` mode is out of reach BY
+  // DESIGN (do not "improve" it), and codes outside CLDR `currencyData`
+  // (crypto/custom) fail OPEN. `config.precision` here is pre-`.overwrite`,
+  // so `undefined` means "not authored" — the defaulted 2 on an untouched
+  // fixed-JPY config never fires. `defaultCurrency` and `currencyMode` keep
+  // their property defaults: in authored-`fixed` mode the (possibly defaulted)
+  // `defaultCurrency` IS the field's one currency, so an authored `precision`
+  // contradicting it is judged even when the code itself was defaulted.
+  if (config.precision === undefined || config.currencyMode !== 'fixed') return;
+  const contradiction = currencyPrecisionContradiction(config.defaultCurrency, config.precision);
+  if (contradiction !== undefined) {
+    ctx.addIssue({ code: 'custom', path: ['precision'], message: contradiction });
+  }
+}).overwrite((config) => ({
+  // #7918 — the relocated `.default(2)`, applied AFTER the check above.
+  // `.overwrite()` rather than `.transform()` per the measured #6926 precedent
+  // (view.zod.ts `foldFormGroupsIntoSections`): it keeps this schema a
+  // `ZodObject` (a pipe has no `.extend` and answers shape introspection with
+  // an empty set), and checks run in attachment order, so the superRefine
+  // above always sees the pre-materialized value. Rebuilt in shape order so
+  // the output is byte-identical to the `.default(2)` era:
+  // `{precision, currencyMode, defaultCurrency}`, `precision` always a number.
+  // The one accepted cost, same as #6926's: the INFERRED output type still
+  // declares `precision?` even though a parsed config always carries it
+  // (ADR-0122 forbids hand-narrowing `CurrencyConfigParsed`); the runtime
+  // contract is the enforced one.
+  precision: config.precision ?? 2,
+  currencyMode: config.currencyMode,
+  defaultCurrency: config.defaultCurrency,
+})));
 
 /**
  * Currency Value Schema
@@ -1033,6 +1090,32 @@ export const FieldSchema = lazySchema(() => strictObject({
         'it. Use `required: true` + `storage.notNull` for an unconditional constraint, or ' +
         '`requiredWhen` alone for a conditional write contract (the column stays nullable).',
     });
+  }
+
+  // #7918 (maintainer ruling 2026-08-12, Option A): the FIELD-level
+  // `precision` key doubles as the currency display width — objectui's
+  // CurrencyField reads it, and objectui#4361 pinned authored-precision-wins
+  // there — so an authored value contradicting the statically-known currency's
+  // ISO 4217 / CLDR fraction digits is rejected at this seam too. The currency
+  // is statically known only under `currencyConfig.currencyMode: 'fixed'`
+  // (`dynamic` is out of reach BY DESIGN; a field with no `currencyConfig` has
+  // only the runtime tenant default, which is not static). This key has NO
+  // schema default, so `undefined` here IS "not authored" — the
+  // authored-vs-defaulted trap lives entirely on the `currencyConfig` twin of
+  // this check, which runs pre-default inside `CurrencyConfigSchema` itself.
+  // Unknown currency codes fail OPEN (see currency-fraction-digits.ts).
+  if (
+    field.type === 'currency' &&
+    field.precision !== undefined &&
+    field.currencyConfig?.currencyMode === 'fixed'
+  ) {
+    const contradiction = currencyPrecisionContradiction(
+      field.currencyConfig.defaultCurrency,
+      field.precision,
+    );
+    if (contradiction !== undefined) {
+      ctx.addIssue({ code: 'custom', path: ['precision'], message: contradiction });
+    }
   }
 
   // #7127: an authored `defaultValue` must be one of the key's three legal

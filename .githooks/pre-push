@@ -1,0 +1,24 @@
+#!/bin/sh
+# Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+#
+# The collection half of the os-regen deferred merge (#8047). `pre-commit` may
+# accept a MERGE commit whose regeneration is deferred to the next commit — but
+# at the moment it decides, that next commit does not exist yet, so it can only
+# RECORD the deferral. Something has to be the event that notices the deferral
+# was never discharged. Only two events can follow a merge commit: another
+# commit (which `pre-commit` already refuses while the artifacts are stale) and
+# the push. This is the push.
+#
+# Registered by the same `core.hooksPath=.githooks` that registers `pre-commit`,
+# so it needs no change to `scripts/setup-git-hooks.mjs` and no separate opt-in.
+#
+# Cheap by construction, exactly like `pre-commit`: with no pending marker the
+# script exits before doing any work, which is every push in this repo that did
+# not just defer a merge. The ref list git writes on stdin is drained and
+# ignored on purpose — the marker is per-worktree state, not per-ref state, so
+# which refs are being pushed cannot change the answer.
+
+if [ -z "$OS_SKIP_REGEN_CHECK" ]; then
+  cat >/dev/null
+  node "$(git rev-parse --show-toplevel)/scripts/check-regen-pending.mjs" --pre-push || exit 1
+fi
