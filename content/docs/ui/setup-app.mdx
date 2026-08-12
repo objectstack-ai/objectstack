@@ -56,7 +56,7 @@ anchors are:
 | **Configuration** (`group_configuration`) | All Settings · Localization · Company · Branding · Authentication · Email · File Storage · AI & Embedder · Knowledge · Feature Flags — `platform-objects` |
 | **Diagnostics** (`group_diagnostics`) | Sessions · Notification Events — `platform-objects`; Audit Logs — `plugin-audit` |
 | **Integrations** (`group_integrations`) | `plugin-webhooks` |
-| **Advanced** (`group_advanced`) | OAuth Applications · Signing Keys (JWKS) · Identity Links · User Preferences — `platform-objects` |
+| **Advanced** (`group_advanced`) | OAuth Applications · Identity Links · User Preferences — `platform-objects` |
 
 The exact rendered menu depends on which capability plugins are loaded.
 A few notable entries:
@@ -65,13 +65,17 @@ A few notable entries:
   into `group_diagnostics`.
 - **OAuth Applications** (`sys_oauth_application`) — third-party OAuth
   client registrations, contributed into `group_advanced`.
-- **Signing Keys (JWKS)** (`sys_jwks`) — JWKS keys used for OIDC / JWT
-  signing, contributed into `group_advanced`. The nav item is gated on the
-  `manage_platform_settings` capability, and the object itself is
-  `access: { default: 'private' }` (ADR-0066 ④) — signing keys are never
-  covered by the wildcard grant, so non-admins are denied server-side.
-  (`sys_verification` and `sys_device_code` are deliberately **not** in the
-  nav: sensitive, ephemeral secrets — not browsable, and also `private`.)
+- **Signing Keys (JWKS)** (`sys_jwks`) — **not** in the nav (#7544). The
+  object is the environment's JWT signing-key store (`private_key`) and
+  declares `enable.apiEnabled: false` / `apiMethods: []`, so the generic data
+  API answers `OBJECT_API_DISABLED` (404) on every list — for **every**
+  persona, platform admin included, since that gate reads only the object's
+  `enable` block and takes no user or permissions. The entry that used to be
+  here carried a `manage_platform_settings` gate, which could not prune it:
+  a permission gate and an API-disabled object are independent conditions.
+  (`sys_verification` and `sys_device_code` are likewise deliberately absent:
+  sensitive, ephemeral secrets — not browsable, and also `private`. All three
+  are pinned in `setup-nav-dead-key-tombstone.test.ts`.)
 - **Audit Logs** (`sys_audit_log`) — contributed by `plugin-audit` into
   `group_diagnostics`. (The `sys_activity` and `sys_comment` objects also
   live in `plugin-audit`, but they are not contributed as Setup nav

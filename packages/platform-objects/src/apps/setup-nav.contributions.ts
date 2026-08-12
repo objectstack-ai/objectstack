@@ -134,11 +134,30 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
     priority: BASE_PRIORITY,
     items: [
       { id: 'nav_oauth_apps', type: 'object', label: 'OAuth Applications', objectName: 'sys_oauth_application', icon: 'app-window' },
-      // nav_jwks is capability-gated (like nav_api_keys): sys_jwks is
-      // `access.default:'private'` (ADR-0066 ④ — signing keys), so a
-      // non-admin's list request 403s server-side; gating the nav item keeps
-      // the menu honest instead of showing an entry that can only error.
-      { id: 'nav_jwks', type: 'object', label: 'Signing Keys (JWKS)', objectName: 'sys_jwks', icon: 'key-round', requiredPermissions: ['manage_platform_settings'] },
+      // No `nav_jwks` here (#7544). `sys_jwks` is the environment's JWT SIGNING
+      // KEY store (`private_key` — private key material), and it declares
+      // `enable.apiEnabled: false` / `apiMethods: []`, so the generic data API
+      // answers `OBJECT_API_DISABLED` (404) on every list request.
+      //
+      // ⚠️ That 404 is NOT a permission outcome and no permission gate can
+      // prune it. `apiAccessDenialFromEnable` (rest-server.ts) is a PURE
+      // function of the object's `enable` block — it takes no user, no
+      // permissions and no context — so the 404 is identical for every
+      // persona, platform admin included. The entry this replaces carried
+      // `requiredPermissions: ['manage_platform_settings']` and a comment
+      // claiming a non-admin "403s server-side", which read as though an ADMIN
+      // could list the keys. None could: the page was dead for everyone, and
+      // the console masked the 404 as a generic empty state, so the surface
+      // read as "you have no signing keys" rather than "this page cannot work".
+      //
+      // ⛔ The repair is the entry, never the object: opening a read path onto
+      // private signing keys over the generic data API would be a credential
+      // disclosure. `apiMethods: []` fails CLOSED by design (#3391).
+      //
+      // The same reasoning already governs the two entries below, and it is why
+      // the other six API-disabled objects (the `sys_oauth_*` token/consent
+      // stores) have no nav entry either — `sys_jwks` was the only one that did.
+      //
       // `sys_verification` (email/phone tokens) and `sys_device_code` (OAuth
       // device-grant codes) deliberately omit `list` from their `apiMethods`
       // (sensitive, ephemeral secrets — not browsable), so an object/list-view

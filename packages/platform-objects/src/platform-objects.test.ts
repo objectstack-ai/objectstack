@@ -332,6 +332,110 @@ describe('@objectstack/platform-objects', () => {
         expect(contrib).toBeUndefined();
       }
     });
+
+    // ─────────────────────────────────────────────────────────────────────
+    // [#7544] A `type: 'object'` entry promises a browsable list. Whether the
+    // destination can serve one is decided by the OBJECT's own `enable` block
+    // — `apiEnabled: false` → 404 `OBJECT_API_DISABLED`, an `apiMethods`
+    // whitelist without `list` → 405 — resolved here through the same single
+    // derivation source `rest-server.ts` gates on (#3391), in the same order.
+    //
+    // ⚠️ That decision takes NO user and NO permissions
+    // (`apiAccessDenialFromEnable` is a pure function of `enable`), which is
+    // why a `requiredPermissions` gate on the ENTRY cannot prune an entry
+    // whose OBJECT is API-disabled: it is dead for every persona, platform
+    // admin included. `nav_jwks` → `sys_jwks` was exactly that, and is gone.
+    // ─────────────────────────────────────────────────────────────────────
+    describe('object entries can actually serve a list (#7544)', () => {
+      /** Nav targets this package owns, so their `enable` block is importable. */
+      const OWNED_NAV_OBJECTS: Record<string, { enable?: unknown }> = {
+        sys_account: SysAccount,
+        sys_api_key: SysApiKey,
+        sys_business_unit: SysBusinessUnit,
+        sys_invitation: SysInvitation,
+        sys_oauth_application: SysOauthApplication,
+        sys_organization: SysOrganization,
+        sys_session: SysSession,
+        sys_team: SysTeam,
+        sys_user: SysUser,
+        sys_user_preference: SysUserPreference,
+      };
+      // Targets owned by another package (contributed there, gated by
+      // `requiresObject`), so nothing here can read their `enable`. Named
+      // rather than skipped: a NEW unresolvable target must be classified by
+      // hand instead of silently dropping out of this gate's coverage.
+      const FOREIGN_NAV_OBJECTS = new Set(['sys_notification']);
+
+      const objectEntries = (): Array<{ id: string; objectName: string }> => {
+        const out: Array<{ id: string; objectName: string }> = [];
+        const walk = (items: readonly unknown[]): void => {
+          for (const raw of items) {
+            const e = raw as { id?: string; type?: string; objectName?: string; children?: unknown[] };
+            if (e?.type === 'object' && e.objectName) {
+              out.push({ id: e.id ?? '(unnamed)', objectName: e.objectName });
+            }
+            if (Array.isArray(e?.children)) walk(e.children);
+          }
+        };
+        for (const c of SETUP_NAV_CONTRIBUTIONS) walk(c.items);
+        return out;
+      };
+
+      /** The rest-server gate order, over an object's declared `enable`. */
+      const canList = (enable: unknown): boolean => {
+        if ((enable as { apiEnabled?: unknown } | undefined)?.apiEnabled === false) return false;
+        return isApiOperationAllowed(resolveEffectiveApiMethods(enable as never), 'list');
+      };
+
+      it('every contributed object entry targets a listable object', () => {
+        const entries = objectEntries();
+
+        // Control: the walk really reads the contributions, so the assertions
+        // below cannot pass by vacuity.
+        expect(entries.length).toBeGreaterThan(0);
+        expect(entries.map((e) => e.id)).toContain('nav_api_keys');
+
+        const unclassified = entries
+          .filter((e) => !(e.objectName in OWNED_NAV_OBJECTS) && !FOREIGN_NAV_OBJECTS.has(e.objectName))
+          .map((e) => `${e.id} → ${e.objectName}`);
+        expect(
+          unclassified,
+          'new nav target this package cannot check — add it to OWNED_NAV_OBJECTS or FOREIGN_NAV_OBJECTS',
+        ).toEqual([]);
+
+        const dead = entries
+          .filter((e) => e.objectName in OWNED_NAV_OBJECTS)
+          .filter((e) => !canList(OWNED_NAV_OBJECTS[e.objectName]!.enable))
+          .map((e) => `${e.id} → ${e.objectName}`);
+        expect(dead, 'nav entries whose destination answers 4xx on list — see #7544').toEqual([]);
+      });
+
+      it('nav_jwks is gone, and the nav_api_keys control still lists', () => {
+        const entries = objectEntries();
+
+        // The reported defect: no entry advertises the unreachable
+        // destination any more, under this id or any other.
+        expect(entries.find((e) => e.id === 'nav_jwks')).toBeUndefined();
+        expect(entries.some((e) => e.objectName === 'sys_jwks')).toBe(false);
+
+        // The NEGATIVE direction — the card's own control, from the same QA
+        // run: `nav_api_keys` → `sys_api_key` rides the same machinery and
+        // returns no 4xx. A fix that pruned this too would be over-reach, and
+        // must fail here.
+        expect(entries.find((e) => e.id === 'nav_api_keys')?.objectName).toBe('sys_api_key');
+        expect(canList(SysApiKey.enable)).toBe(true);
+      });
+
+      it('the repair is the nav entry — sys_jwks stays API-disabled and private', () => {
+        // ⛔ Opening a data-API read path onto private JWT signing-key material
+        // would be a credential disclosure. `apiMethods: []` fails CLOSED
+        // (#3391); the `private` posture is pinned above (ADR-0066 ④).
+        expect(SysJwks.enable?.apiEnabled).toBe(false);
+        expect(SysJwks.enable?.apiMethods).toEqual([]);
+        expect(canList(SysJwks.enable)).toBe(false);
+        expect((SysJwks as { access?: { default?: string } }).access?.default).toBe('private');
+      });
+    });
   });
 });
 
