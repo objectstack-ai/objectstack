@@ -143,7 +143,7 @@ describe('dogfood: the package is the authoring & delete unit (ADR-0070 D3/D4)',
     // 6. DELETE-CASCADE — deleting the base removes every item it owns; the base
     //    becomes empty. This is the answer to "a pile of loose metadata, how do I
     //    delete it?" — operate on the whole base.
-    const del = await protocol.deletePackage({ packageId: BASE });
+    const del = await protocol.deletePackage({ packageId: BASE, allTenants: true });
     expect(del.deletedCount).toBeGreaterThan(0);
     expect(del.failedCount).toBe(0);
     expect(await ownedNames(ql, BASE)).not.toContain(OBJ);
