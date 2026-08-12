@@ -58,7 +58,11 @@
 //   3. Read the package's `vitest.config.*` and resolve each of those
 //      specifiers the way Vite does — entries in order, FIRST MATCH WINS,
 //      string `find` matching by PREFIX and regex `find` by `String.replace`.
-//      A dep whose winning entry lands under `src/` is safe.
+//      A dep whose winning entry lands under `src/` is safe. The replacement
+//      is read statically, in the two spellings these configs use — a call
+//      whose last argument is the path, and a template literal carrying a
+//      `$1` back-reference inside it; `asPath` below states what that can and
+//      cannot read, and why it does not evaluate the config.
 //   4. Anything left is an unaliased artifact import, and the package must be
 //      registered in `KNOWN_UNALIASED_TEST_IMPORTS` below with EXACTLY that
 //      set. Unregistered ⇒ red.
@@ -225,7 +229,7 @@ const KNOWN_UNALIASED_TEST_IMPORTS = {
     '@objectstack/platform-objects', '@objectstack/service-automation', '@objectstack/spec',
     '@objectstack/trigger-record-change', '@objectstack/types',
   ],
-  '@objectstack/plugin-audit': ['@objectstack/objectql', '@objectstack/spec'],
+  '@objectstack/plugin-audit': ['@objectstack/objectql'],
   '@objectstack/plugin-auth': [
     '@objectstack/core', '@objectstack/driver-sql', '@objectstack/objectql',
     '@objectstack/platform-objects', '@objectstack/rest', '@objectstack/spec', '@objectstack/types',
@@ -291,7 +295,7 @@ const KNOWN_UNALIASED_TEST_IMPORTS = {
   ],
   '@objectstack/service-i18n': ['@objectstack/core', '@objectstack/spec', '@objectstack/types'],
   '@objectstack/service-job': ['@objectstack/metadata-core', '@objectstack/platform-objects'],
-  '@objectstack/service-knowledge': ['@objectstack/objectql', '@objectstack/spec'],
+  '@objectstack/service-knowledge': ['@objectstack/objectql'],
   '@objectstack/service-messaging': [
     '@objectstack/driver-sql', '@objectstack/metadata-core', '@objectstack/objectql',
     '@objectstack/platform-objects', '@objectstack/spec', '@objectstack/types',
@@ -789,14 +793,116 @@ function asFind(raw) {
 }
 
 /**
- * The path an alias replacement produces. `path.resolve(__dirname, '../x/src')`
- * carries its answer in the last string literal; a bare string literal is
- * itself the answer.
+ * The last string literal in an expression — the answer for the call forms
+ * these configs use, where the path is the final argument:
+ * `path.resolve(__dirname, '../x/src')`, `path.join(dir, 'x/src/$1.ts')`. A
+ * bare string literal is itself the answer.
+ *
+ * `context` is what the diagnostic quotes, so a failure inside a `${…}` hole
+ * names the whole replacement rather than the fragment.
+ */
+function lastStringLiteral(raw, context) {
+  const strings = [...raw.matchAll(/(['"`])((?:[^\\]|\\.)*?)\1/g)].map((m) => m[2]);
+  if (strings.length === 0)
+    throw new UnreadableConfig(`alias replacement has no literal path: ${context.slice(0, 60)}`);
+  return strings[strings.length - 1];
+}
+
+/**
+ * A template literal's pieces in order — literal chunks and `${…}` holes.
+ * Escapes are consumed as they are at run time, so `\${x}` is a literal
+ * `${x}` and not a hole.
+ */
+function splitTemplateLiteral(raw) {
+  const body = raw.slice(1, -1);
+  const parts = [];
+  let literal = '';
+  let i = 0;
+  while (i < body.length) {
+    const c = body[i];
+    if (c === '\\') {
+      literal += body[i + 1] ?? '';
+      i += 2;
+      continue;
+    }
+    if (c === '$' && body[i + 1] === '{') {
+      const hole = balancedRegion(body, i + 1);
+      if (hole == null) throw new UnreadableConfig(`unbalanced \`\${…}\` in alias replacement: ${raw.slice(0, 60)}`);
+      parts.push({ literal });
+      parts.push({ expression: hole.slice(1, -1).trim() });
+      literal = '';
+      i += hole.length + 1;
+      continue;
+    }
+    literal += c;
+    i++;
+  }
+  parts.push({ literal });
+  return parts;
+}
+
+/**
+ * The path an alias replacement produces, in the two spellings these configs
+ * use. Both are approximations of the same shape: what is returned stands in
+ * for the resolved path, and the only questions asked of it downstream are
+ * "does it have a `src` segment" and "does it continue past a file extension",
+ * so a relative fragment answers exactly as well as the absolute path
+ * `path.resolve` would really produce.
+ *
+ *   replacement: path.resolve(__dirname, '../x/src/index.ts')
+ *     → `../x/src/index.ts` — the last string literal is the whole answer.
+ *
+ *   replacement: `${path.resolve(__dirname, '../x/src')}/$1/index.ts`
+ *     → `../x/src/$1/index.ts` — each `${…}` hole resolves by the same rule and
+ *       the literal chunks are concatenated around it, so the `$1` back-
+ *       reference survives into `String.replace` and joins the `src` chunk.
+ *
+ * ⚠️ The template form is not a stylistic variant: it is how the one-rule-for-
+ * all-namespaces subpath alias is written (`/^@objectstack\/spec\/([a-z-]+)$/`
+ * → `…/spec/src/$1/index.ts`), because that rule needs the capture group
+ * INSIDE the path. Reading only the last string literal returned the entire
+ * template body — a text with no `src` SEGMENT in it (`spec/src'` is followed
+ * by a quote, not a separator) — so a config aliasing every namespace
+ * correctly read as aliasing nothing, and `plugin-audit` and
+ * `service-knowledge` sat in the registry as unaliased on the strength of how
+ * their replacement was SPELLED (#8020). Fail-closed, so never a false green —
+ * but it over-stated the remediation list and told two compliant packages to
+ * add the alias they already had.
+ *
+ * ── Spellings that are legal here and still unreadable ──────────────────────
+ *
+ * Each of these is fail-closed — either a loud `UnreadableConfig` naming the
+ * config, or the same over-statement above — never a silent pass. Listed so
+ * the next one is looked up rather than rediscovered:
+ *
+ *   - `+` concatenation: `path.resolve(__dirname, '../x/src') + '/$1/index.ts'`
+ *     resolves to the LAST literal, `/$1/index.ts`, which has no `src` segment
+ *     — the exact #8020 shape one spelling over. Write it as a template.
+ *   - A hole or argument with no string literal in it at all (`${SPEC_SRC}`,
+ *     `path.resolve(SRC_ROOT, 'index.ts')`) — the first throws
+ *     `UnreadableConfig`; the second silently answers `index.ts`.
+ *   - A path that is not the last argument, where later arguments are
+ *     non-literal (`path.join('x/src', suffix)` reads `x/src` and drops
+ *     `suffix`).
+ *   - A template literal nested inside a `${…}` hole — the scanner treats the
+ *     first inner backtick as the outer literal's terminator.
+ *
+ * Evaluating the config instead of reading it was measured and rejected: this
+ * gate runs on a bare checkout with NO `node_modules` (that is how CI reaches
+ * it, and how its own `--self-test` fixture tree in `tmpdir` works), while
+ * every real config here opens with `import { defineConfig } from
+ * 'vitest/config'`. Evaluation would trade a dependency-free ~3s scan for one
+ * that cannot run before `pnpm install`, and would make an alias list the gate
+ * cannot see today into one it executes.
  */
 function asPath(raw) {
-  const strings = [...raw.matchAll(/(['"`])((?:[^\\]|\\.)*?)\1/g)].map((m) => m[2]);
-  if (strings.length === 0) throw new UnreadableConfig(`alias replacement has no literal path: ${raw.slice(0, 60)}`);
-  return strings[strings.length - 1];
+  const literal = raw.trim();
+  if (literal[0] === '`' && skipString(literal, 0) === literal.length - 1) {
+    return splitTemplateLiteral(literal)
+      .map((part) => (part.expression == null ? part.literal : lastStringLiteral(part.expression, literal)))
+      .join('');
+  }
+  return lastStringLiteral(literal, literal);
 }
 
 /**
@@ -1051,6 +1157,78 @@ function buildFixtureTree() {
     'src/thing.test.ts': "export default 1;\n",
   });
 
+  // ── (7) THE CANARY ────────────────────────────────────────────────────────
+  //
+  // A byte-for-byte copy of the shape `plugin-audit` and `service-knowledge`
+  // really use. Those two packages have now defeated THREE readers of vitest
+  // aliases, twice on the same morning, by two different parsing assumptions:
+  //
+  //   - an `objectstack/core` grep census missed them because the anchored
+  //     regex form writes the bytes `@fx\/core` — with an ESCAPED SLASH, so
+  //     the plain specifier never appears in the file;
+  //   - this gate missed them because the one-rule-for-all-namespaces subpath
+  //     alias writes its replacement as a TEMPLATE LITERAL, to get the `$1`
+  //     back-reference inside the path (#8020).
+  //
+  // Neither spelling is exotic and neither is going away — the escaped slash
+  // is forced by the regex literal, the template by the capture group. They
+  // are pinned together, in one fixture, so the fourth reader of these configs
+  // inherits the two assumptions that have already cost this repo twice
+  // instead of rediscovering them. This fixture must stay COMPLIANT: it
+  // aliases everything it imports, and any reader that reports it is wrong
+  // about the reader, not about the config.
+  fixture(root, 'packages/canary', {
+    'package.json': ARTIFACT_MANIFEST('@fx/canary'),
+    'src/thing.test.ts':
+      "import { alive } from '@fx/core';\nimport { log } from '@fx/core/logger';\nexport default alive + log;\n",
+    'vitest.config.ts':
+      "import path from 'path';\nexport default { resolve: { alias: [\n" +
+      // Subpath rule first: one anchored regex for every namespace, with the
+      // capture group INSIDE the path — which is what forces the template.
+      '  {\n' +
+      '    find: /^@fx\\/core\\/([a-z-]+)$/,\n' +
+      "    replacement: `${path.resolve(__dirname, '../core/src')}/$1.ts`,\n" +
+      '  },\n' +
+      "  { find: /^@fx\\/core$/, replacement: path.resolve(__dirname, '../core/src/index.ts') },\n" +
+      '] } };\n',
+  });
+
+  // (8) the template form is a spelling, not a licence: one landing on `dist/`
+  // is still an unaliased artifact import.
+  fixture(root, 'packages/template-to-dist', {
+    'package.json': ARTIFACT_MANIFEST('@fx/template-to-dist'),
+    'src/thing.test.ts': "import { log } from '@fx/core/logger';\nexport default log;\n",
+    'vitest.config.ts':
+      "import path from 'path';\nexport default { resolve: { alias: [\n" +
+      '  {\n' +
+      '    find: /^@fx\\/core\\/([a-z-]+)$/,\n' +
+      "    replacement: `${path.resolve(__dirname, '../core/dist')}/$1.js`,\n" +
+      '  },\n' +
+      '] } };\n',
+  });
+
+  // (9) …and the ENOTDIR trap is still seen THROUGH a template: the chunks
+  // really are concatenated, rather than the whole thing waved past.
+  fixture(root, 'packages/template-prefix-trap', {
+    'package.json': ARTIFACT_MANIFEST('@fx/template-prefix-trap'),
+    'src/thing.test.ts': "import { log } from '@fx/core/logger';\nexport default log;\n",
+    'vitest.config.ts':
+      "import path from 'path';\nexport default { resolve: { alias: {\n" +
+      "  '@fx/core': `${path.resolve(__dirname, '../core/src')}/index.ts`,\n" +
+      '} } };\n',
+  });
+
+  // (10) a `${…}` hole with no literal in it is UNREADABLE, not empty — the
+  // fail-closed half of reading templates at all.
+  fixture(root, 'packages/opaque-template', {
+    'package.json': ARTIFACT_MANIFEST('@fx/opaque-template'),
+    'src/thing.test.ts': "import { alive } from '@fx/core';\nexport default alive;\n",
+    'vitest.config.ts':
+      "import { SRC } from './shared';\nexport default { resolve: { alias: [\n" +
+      '  { find: /^@fx\\/core$/, replacement: `${SRC}/index.ts` },\n' +
+      '] } };\n',
+  });
+
   return root;
 }
 
@@ -1071,6 +1249,45 @@ function selfTest() {
     expect(!has(bare.failures, 'packages/unreachable'), 'an import no test can reach was treated as a hazard');
     expect(has(bare.failures, 'ENOTDIR'), 'the prefix/ENOTDIR alias trap was not detected');
     expect(has(bare.failures, 'cannot be read statically'), 'a config with spread aliases was read as aliasing nothing');
+
+    // ── the canary (#8020) ────────────────────────────────────────────────
+    // Escaped-slash regex `find` AND template-literal `replacement`, together,
+    // exactly as the two real configs write them. Both spellings have already
+    // broken a reader of these configs; neither may break this one again.
+    expect(
+      !has(bare.failures, 'packages/canary'),
+      'the canary config (escaped-slash regex find + template-literal replacement) was reported as unaliased',
+    );
+    // Reading a template must not degrade into waving it past: one that lands
+    // on `dist/` is still unaliased, and one that resolves THROUGH a file is
+    // still the ENOTDIR trap — both require the chunks to be really joined.
+    expect(
+      has(bare.failures, 'packages/template-to-dist'),
+      'a template-literal replacement resolving to `dist/` was read as aliased to source',
+    );
+    expect(
+      has(bare.failures, '@fx/core/logger` to `') && has(bare.failures, 'packages/template-prefix-trap'),
+      'the ENOTDIR trap went unseen through a template-literal replacement',
+    );
+    // Fail-closed: a hole with nothing readable in it is UNREADABLE, never a
+    // config that aliases nothing.
+    expect(
+      has(bare.failures, 'packages/opaque-template'),
+      'a template replacement interpolating a non-literal was read as aliasing nothing',
+    );
+    expect(
+      bare.failures.some((f) => f.includes('packages/opaque-template') && f.includes('cannot be read statically')),
+      'an unreadable `${…}` hole did not fail as unreadable',
+    );
+
+    // Both directions on the canary: registering a package the reader can now
+    // see through is the stale half, and it must name itself for deletion —
+    // this is the shape of the two real entries that came off in #8020.
+    const canaryRegistered = check(root, { '@fx/violator': ['@fx/core'], '@fx/canary': ['@fx/core'] });
+    expect(
+      has(canaryRegistered.failures, '@fx/canary') && has(canaryRegistered.failures, 'no longer needed'),
+      'a registry entry for the now-readable canary config did not fail the both-directions audit',
+    );
 
     // Registered at the measured state: the violator goes quiet, nothing else does.
     const registered = check(root, { '@fx/violator': ['@fx/core'] });
