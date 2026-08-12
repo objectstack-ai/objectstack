@@ -4909,6 +4909,33 @@ export class ObjectQL implements IObjectQLEngine {
    *    not one. `isSystem` is server-derived (never client input), the same
    *    trust the read-only strips on the write path already place in it.
    *
+   * ## Why this door is SILENT where the `$searchFields` door returns a 400
+   *
+   * Asked on #7876 and ruled there on 2026-08-12 (direction C): the divergence
+   * is intended, and it is not reopenable on symmetry alone. The two doors are
+   * two KINDS of surface.
+   *
+   *  - `$searchFields` is AUTHORING input — it tells the server how to RUN the
+   *    query. A value the server will not honour has to be said out loud, or
+   *    the caller gets a WIDER answer than the one they narrowed to, in a
+   *    response with nothing to distinguish it from a satisfied one. That is
+   *    why `assertSearchFieldsAreSearchable` refuses the name with a 400
+   *    (#4254) — the refusal is protecting the ROW SET.
+   *  - `select` is a READ PROJECTION — it names what the caller would like
+   *    back. Dropping a column the caller may not see leaves the answer
+   *    correct: the rows are still the rows that were asked for, one key
+   *    lighter. {@link omitInternalFields} directly above answers
+   *    `?select=id,key` exactly this way, for exactly this reason (#7728), so
+   *    silence here is the platform's existing read-path rule, not an
+   *    exception to it.
+   *
+   * ⛔ Do not add a refusal here to make the two doors agree. That was option B
+   * on #7876, weighed and declined: it turns a request that answers 200
+   * today into a failure, for tidiness, on a spelling no non-system caller in
+   * this tree uses — the companion's only deliberate reader is the backfill
+   * carved out above. If a REAL caller is ever burned by the silent drop, that
+   * measurement reopens it; the asymmetry by itself does not.
+   *
    * ⚠️ `requestedFields` must be the CALLER's `fields`, captured before
    * `planFormulaProjection` — that pass rewrites the projection to every stored
    * column when a formula is in play, companion included.
@@ -9382,6 +9409,19 @@ export class ObjectQL implements IObjectQLEngine {
       // ⛔ Do not reintroduce it as a guard around the by-id read. A gate on
       // whether to LOOK is not compatible with a rule about what to do when
       // nothing is there. See `update()`'s twin.
+      //
+      // [#7933] The first three entries were carried here UNVERIFIED when
+      // #7707 corrected the `plugin-audit` one, which was wrong on BOTH halves
+      // — hook name and term. All three have since been read against the
+      // function that binds them — `registerIdentityWriteGuard`,
+      // `bindRecordShareCascade`, `installFileReferenceHooks` — and all three
+      // match what is claimed above: same events, same object-less
+      // registration, same in-handler filter. Nothing above needed changing.
+      // That audit is what the retirement note's "term 1 or 2 was already true
+      // for every object" stands on, so it is recorded here rather than left
+      // in a closed issue: the enumeration outlived the gate it was written
+      // for, and it is now load-bearing for a different claim than the one it
+      // was written to support.
       const deleteSchema = this._registry.getObject(object);
       // `buildDriverOptions` is what carries the open transaction and the
       // tenant scope onto a raw driver read. Skipping it here would read
