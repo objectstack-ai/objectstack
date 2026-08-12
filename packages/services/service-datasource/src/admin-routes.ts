@@ -49,7 +49,7 @@ const SERVICE_ERROR_CODE: Record<ServiceName, ErrorCode> = {
  * Served by `datasource-admin`:
  *
  *   GET    /datasources              → listDatasources (provenance + health)
- *   GET    /datasources/:name        → getDatasource (credential-stripped)
+ *   GET    /datasources/:name        → getDatasource (config credential-redacted)
  *   POST   /datasources/test         → testConnection (no persistence)
  *   POST   /datasources              → createDatasource (origin: 'runtime')
  *   PATCH  /datasources/:name        → updateDatasource (runtime only)
@@ -229,9 +229,12 @@ export function registerDatasourceAdminRoutes(
   // `datasource` `test_connection` action). Distinct from `POST /datasources/test`
   // which probes an unsaved draft carried inline. Registered before the generic
   // `:name` mutation routes.
-  // Read one datasource's full detail for the edit form (credential stripped;
-  // `config` is non-sensitive, plus a `hasSecret` flag). Registered after the
-  // static `/drivers` route so that literal segment is never captured as a name.
+  // Read one datasource's full detail for the edit form. `config` is redacted
+  // of every stored credential — including one embedded in a connection URL —
+  // and the response names what was withheld in `redactedConfigKeys`, alongside
+  // the `hasSecret` flag for the bound `sys_secret` handle (#8081). Registered
+  // after the static `/drivers` route so that literal segment is never captured
+  // as a name.
   server.get(`${root}/:name`, async (req: any, res: any) => {
     const svc = resolve(res, 'datasource-admin', 'getDatasource');
     if (!svc) return;
