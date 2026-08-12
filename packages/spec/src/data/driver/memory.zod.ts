@@ -15,7 +15,7 @@ import {
  *
  * Defines the configuration options for the in-memory driver.
  * Reference: objectql/packages/drivers/memory (Mingo-powered production-ready driver)
- * 
+ *
  * The memory driver is ideal for:
  * - Unit testing (no database setup required)
  * - Development & prototyping
@@ -30,6 +30,27 @@ import {
 // ==========================================================================
 
 /**
+ * Shared history line for the five `persistence` sub-shapes below (#4001 batch B).
+ *
+ * Until #4410 `datasource.config` was parsed by nothing at all, so an
+ * unrecognised key anywhere under `persistence` — including inside one of
+ * these variant shapes — was accepted in silence and the driver came up on
+ * its defaults instead. #4410 gave the top-level `MemoryConfigSchema` a
+ * parse door; `.strict()` does not recurse through it, so each variant
+ * object nested under the `persistence` union needed its own gate.
+ *
+ * ⚠️ Deliberately placed AFTER the module header above, not before it:
+ * `findModuleDocBlock` (#5059) takes the FIRST top-level doc comment in the
+ * file as the page description and returns null for the whole file if that
+ * comment is immediately followed by a declaration — it does not fall back
+ * to search further. A doc comment on this const, placed ahead of the real
+ * header, would have silently dropped this file's published description.
+ */
+const PERSISTENCE_HISTORY =
+  "Until #4410 nothing parsed `datasource.config` at all, so an unrecognised key here was "
+  + 'accepted in silence and the requested persistence mode came up on its defaults instead.';
+
+/**
  * Persistence adapter interface for custom persistence implementations.
  * Adapters must implement load/save/flush lifecycle methods.
  *
@@ -38,11 +59,17 @@ import {
  * via `PersistenceAdapterInterface` in the driver implementation.
  */
 import { lazySchema } from '../../shared/lazy-schema';
-export const PersistenceAdapterSchema = lazySchema(() => z.object({
-  load: z.function().describe('Load persisted data on startup. Returns Promise<Record<string, any[]> | null>'),
-  save: z.function().describe('Save data to persistent storage. Accepts Record<string, any[]>, returns Promise<void>'),
-  flush: z.function().describe('Flush pending writes and ensure data is persisted. Returns Promise<void>'),
-}).describe('Custom persistence adapter interface'));
+export const PersistenceAdapterSchema = lazySchema(() => strictObject(
+  {
+    surface: "this memory datasource's custom persistence adapter",
+    history: PERSISTENCE_HISTORY,
+  },
+  {
+    load: z.function().describe('Load persisted data on startup. Returns Promise<Record<string, any[]> | null>'),
+    save: z.function().describe('Save data to persistent storage. Accepts Record<string, any[]>, returns Promise<void>'),
+    flush: z.function().describe('Flush pending writes and ensure data is persisted. Returns Promise<void>'),
+  },
+).describe('Custom persistence adapter interface'));
 
 export type PersistenceAdapter = z.input<typeof PersistenceAdapterSchema>;
 
@@ -62,13 +89,19 @@ export type PersistenceType = z.input<typeof PersistenceTypeSchema>;
  * File-system persistence configuration.
  * Used in Node.js environments to save data to a JSON file.
  */
-export const FilePersistenceConfigSchema = lazySchema(() => z.object({
-  type: z.literal('file'),
-  /** File path to persist data (JSON format). Defaults to `.objectstack/data/memory-driver.json`. */
-  path: z.string().optional().describe('File path to persist data'),
-  /** Auto-save interval in milliseconds. Default: 2000ms. */
-  autoSaveInterval: z.number().min(100).default(2000).describe('Auto-save interval in ms'),
-}).describe('File-system persistence configuration'));
+export const FilePersistenceConfigSchema = lazySchema(() => strictObject(
+  {
+    surface: "this memory datasource's file persistence config",
+    history: PERSISTENCE_HISTORY,
+  },
+  {
+    type: z.literal('file'),
+    /** File path to persist data (JSON format). Defaults to `.objectstack/data/memory-driver.json`. */
+    path: z.string().optional().describe('File path to persist data'),
+    /** Auto-save interval in milliseconds. Default: 2000ms. */
+    autoSaveInterval: z.number().min(100).default(2000).describe('Auto-save interval in ms'),
+  },
+).describe('File-system persistence configuration'));
 
 export type FilePersistenceConfig = z.input<typeof FilePersistenceConfigSchema>;
 /** Post-parse shape of {@link FilePersistenceConfig} — defaults applied, transforms run (ADR-0122). */
@@ -78,11 +111,17 @@ export type FilePersistenceConfigParsed = z.infer<typeof FilePersistenceConfigSc
  * localStorage persistence configuration.
  * Used in browser environments to save data to localStorage.
  */
-export const LocalStoragePersistenceConfigSchema = lazySchema(() => z.object({
-  type: z.literal('local'),
-  /** localStorage key. Defaults to `objectstack:memory-db`. */
-  key: z.string().optional().describe('localStorage key for persisted data'),
-}).describe('localStorage persistence configuration'));
+export const LocalStoragePersistenceConfigSchema = lazySchema(() => strictObject(
+  {
+    surface: "this memory datasource's localStorage persistence config",
+    history: PERSISTENCE_HISTORY,
+  },
+  {
+    type: z.literal('local'),
+    /** localStorage key. Defaults to `objectstack:memory-db`. */
+    key: z.string().optional().describe('localStorage key for persisted data'),
+  },
+).describe('localStorage persistence configuration'));
 
 export type LocalStoragePersistenceConfig = z.input<typeof LocalStoragePersistenceConfigSchema>;
 
@@ -90,9 +129,15 @@ export type LocalStoragePersistenceConfig = z.input<typeof LocalStoragePersisten
  * Custom adapter persistence configuration.
  * Allows injecting a custom PersistenceAdapter implementation.
  */
-export const CustomPersistenceConfigSchema = lazySchema(() => z.object({
-  adapter: PersistenceAdapterSchema,
-}).describe('Custom adapter persistence configuration'));
+export const CustomPersistenceConfigSchema = lazySchema(() => strictObject(
+  {
+    surface: "this memory datasource's custom-adapter persistence config",
+    history: PERSISTENCE_HISTORY,
+  },
+  {
+    adapter: PersistenceAdapterSchema,
+  },
+).describe('Custom adapter persistence configuration'));
 
 export type CustomPersistenceConfig = z.input<typeof CustomPersistenceConfigSchema>;
 
@@ -112,15 +157,21 @@ export type CustomPersistenceConfig = z.input<typeof CustomPersistenceConfigSche
  * Optional overrides allow customizing the file path or localStorage key
  * used by the auto-detected adapter.
  */
-export const AutoPersistenceConfigSchema = lazySchema(() => z.object({
-  type: z.literal('auto'),
-  /** File path override when running in Node.js. */
-  path: z.string().optional().describe('File path override for Node.js environments'),
-  /** Auto-save interval override when running in Node.js. */
-  autoSaveInterval: z.number().min(100).optional().describe('Auto-save interval override for Node.js environments'),
-  /** localStorage key override when running in a browser. */
-  key: z.string().optional().describe('localStorage key override for browser environments'),
-}).describe('Auto-detect persistence configuration'));
+export const AutoPersistenceConfigSchema = lazySchema(() => strictObject(
+  {
+    surface: "this memory datasource's auto-detect persistence config",
+    history: PERSISTENCE_HISTORY,
+  },
+  {
+    type: z.literal('auto'),
+    /** File path override when running in Node.js. */
+    path: z.string().optional().describe('File path override for Node.js environments'),
+    /** Auto-save interval override when running in Node.js. */
+    autoSaveInterval: z.number().min(100).optional().describe('Auto-save interval override for Node.js environments'),
+    /** localStorage key override when running in a browser. */
+    key: z.string().optional().describe('localStorage key override for browser environments'),
+  },
+).describe('Auto-detect persistence configuration'));
 
 export type AutoPersistenceConfig = z.input<typeof AutoPersistenceConfigSchema>;
 

@@ -1181,7 +1181,6 @@ triage row record which one was taken.
 | `driver.zod.ts` | wire | **out of scope** — driver capability contract |
 | `analytics.zod.ts` | mixed (p) | `Metric` / `Dimension` / `Cube` / `AnalyticsQuery` — cube definitions are authored; needs a per-schema read |
 | `document.zod.ts` | wire (p) | `DocumentTemplate` / `ESignatureConfig` read authorable on their face — the `(p)` is unresolved, verify before scheduling either way |
-| `driver/memory.zod.ts` | authorable | The persistence-adapter union under `datasource.config`; `datasource.config` HAS been parsed against these since #4410, so strictness here now binds |
 | `query.zod.ts` | open | ~~⚠️ classification conflict — see #4721~~ **RESOLVED (11:41Z ruling, closed by #4721).** The conflict was real and the answer was that per-FILE classification was the imprecise instrument: `SortNodeSchema` was carved out as `authorable` and closed (`strictObject` + `aliases: { direction: 'order' }`), the other 4 sites keep `open`. Those 4 are the dialect proper — `BaseQuerySchema`, `AggregationNodeSchema`, `FullTextSearchSchema`, `GroupByNodeSchema`'s object arm — and `BaseQuerySchema`'s own top-level strictness is #4001's to schedule, deliberately **not** taken by #4721 |
 | `external-catalog.zod.ts` | wire (p) | **out of scope** |
 | `hook.zod.ts` | wire | **out of scope** — `HookContextSchema` + `.session`/`.provenance`/`.user` are the runtime shape handed to a handler; verified in the data step |
@@ -1191,13 +1190,18 @@ triage row record which one was taken.
 
 **Authorable strip in `data/`:**
 [the counts file](./2026-07-unknown-key-strictness-ledger.counts.md#data--open) splits this
-directory three ways, and the middle bucket is the one to read: `object`, `driver/memory`
-and `field` are **firm** authorable; `external-lookup`, `seed-loader`, `analytics` and
-`field-value` are **unresolved** — they still carry `mixed (p)`, so the ledger is saying
-"nobody has done the per-schema read" rather than "these are ready". The rest is wire/open
-and out of the ruling's forced scope; that count fell by one when #4721 closed
-`query.zod.ts`'s `SortNodeSchema`, the one row in this directory where the per-schema read
-moved a site OUT of `open` rather than confirming it.
+directory three ways, and the middle bucket is the one to read: `object` and `field` are
+**firm** authorable; `external-lookup`, `seed-loader`, `analytics` and `field-value` are
+**unresolved** — they still carry `mixed (p)`, so the ledger is saying "nobody has done the
+per-schema read" rather than "these are ready". The rest is wire/open and out of the
+ruling's forced scope; that count fell by one when #4721 closed `query.zod.ts`'s
+`SortNodeSchema`, the one row in this directory where the per-schema read moved a site OUT
+of `open` rather than confirming it, and by one more when **#4001 batch B** closed
+`driver/memory.zod.ts`'s remaining 5 sites (the persistence-adapter union under
+`datasource.config` — `PersistenceAdapterSchema`, `FilePersistenceConfigSchema`,
+`LocalStoragePersistenceConfigSchema`, `CustomPersistenceConfigSchema`,
+`AutoPersistenceConfigSchema`), dropping its row from the remaining-strip map entirely: the
+file's 6th site, `MemoryConfigSchema`, was already `strictObject` since #4410.
 
 **批 20 closed 13 of `object.zod.ts`'s 14 and parked the row at 1**, which makes it
 the fourth row in this ledger to shrink without disappearing — after `flow` (批 11),
