@@ -20,13 +20,14 @@ describe('MongoConfigSchema', () => {
   });
 
   it('should accept config with all fields', () => {
+    // `password` is deliberately absent: inline credentials are refused since
+    // #7990 — the refusal itself is pinned in driver-credential-refusal.test.ts.
     const config = MongoConfigSchema.parse({
       url: 'mongodb://localhost:27017',
       database: 'production',
       host: 'db.example.com',
       port: 27018,
       username: 'admin',
-      password: 'secret',
       authSource: 'admin',
       options: {
         ssl: true,

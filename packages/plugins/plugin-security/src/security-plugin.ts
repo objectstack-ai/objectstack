@@ -49,7 +49,11 @@ import { bootstrapDeclaredCapabilities } from './bootstrap-declared-capabilities
 import { RLSCompiler, RLS_DENY_FILTER } from './rls-compiler.js';
 import { computeTenantLayer0Filter, andComposeLayers } from './tenant-layer.js';
 import { isPlatformTenantPolicy, isAuthoredTenantPolicy } from './platform-tenant-policies.js';
-import { isPlatformOwnershipFloorPolicy } from './platform-ownership-policies.js';
+import {
+  isPlatformOwnershipFloorPolicy,
+  owdDeclaresOpenRowWrites,
+  owdOpenWritesCoversOperation,
+} from './platform-ownership-policies.js';
 import { hasPhantomTenantAnchor } from './federated-phantom-anchors.js';
 import {
   normalizeTenancyPosture,
@@ -177,6 +181,18 @@ interface ObjectSecurityMeta {
    * real remote `organization_id` — both keep the tenant wall exactly as it is.
    */
   tenantAnchorIsPhantom: boolean;
+  /**
+   * [#8023] The object DECLARES `sharingModel: 'public_read_write'` — the one
+   * OWD that states row-level writes are open org-wide. Read from the author's
+   * declaration, never from `plugin-sharing`'s effective bucket; see
+   * `owdDeclaresOpenRowWrites` in `platform-ownership-policies.ts` for why the
+   * two must not be confused here.
+   *
+   * `false` when the schema does not resolve, so the floor stays (fail closed)
+   * — and `unresolved` meta is never cached, so a transient boot miss is
+   * retried rather than frozen into an over-strict answer.
+   */
+  owdOpensRowWrites: boolean;
   requiredPermissions: NormalizedRequiredPermissions;
   fieldRequiredPermissions: Record<string, string[]>;
   /**
@@ -3995,6 +4011,41 @@ export class SecurityPlugin implements Plugin {
     let layer1: Record<string, unknown> | null = null;
     if (!(posturePermits && superuserBypass)) {
       let collected = this.collectRLSPolicies(permissionSets, object, operation, (context?.positions ?? []) as string[]);
+      // [#8023] An object whose author DECLARED `sharingModel:
+      // 'public_read_write'` does not inherit the platform's wildcard `update`
+      // ownership floor AT ALL. QA #7637 measured the contradiction it caused
+      // on the stock showcase: `showcase_project` declares that OWD, the access
+      // matrix grants `showcase_contributor` `edit: true`, no RLS is authored —
+      // and a PATCH of a row the persona had not created answered 403 with the
+      // record-level sentence. The floor is `member_default`'s
+      // `owner_only_writes` (object `'*'`, `created_by == current_user.id`,
+      // positions `['org_member']`), and it survived because the by-id gate
+      // only lets `ISharingService` REPLACE it on a positive `allow`, while a
+      // public object makes the service `abstain`.
+      //
+      // ⚠️ THE PLACEMENT IS THE FIX, not just where it reads best. Removing the
+      // floor HERE — before the #7665 derive-from-select branch below — leaves
+      // the update class EMPTY, so that branch then derives the write scope
+      // from the caller's SELECT narrowing and "you cannot mutate what you
+      // cannot see" still holds on this very object (#7792's by-id
+      // write-visibility property, which the card names as a non-regression
+      // criterion). Removing it at the `dropPlatformOwnershipFloor` filter
+      // further down would instead compile Layer 1 to null and hand back an
+      // UNGATED by-id write — the same hole #7665 closed, reopened by a fix for
+      // a different bug.
+      //
+      // Scope, stated twice because each half is load-bearing:
+      //   - only the PLATFORM's floor is dropped (provenance, ADR-0105 D3): an
+      //     app-authored policy spelling the identical predicate still reaches
+      //     the compiler and still refuses (ADR-0049);
+      //   - only `update` (`owdOpenWritesCoversOperation`): `owner_only_deletes`
+      //     stays, because `public_read_write` is "see and edit" and the alias
+      //     that also meant delete was removed for being wider than it.
+      // Layer 0 (the tenant wall) is untouched — a `public_read_write` object is
+      // org-wide open, never cross-tenant open.
+      if (meta.owdOpensRowWrites && owdOpenWritesCoversOperation(operation)) {
+        collected = collected.filter((p) => !isPlatformOwnershipFloorPolicy(p));
+      }
       // [#7665] The write-visibility floor: a write target must be inside the
       // caller's READABLE set. When NO policy of the write class applies to
       // this (principal, object, operation) — nothing authored for the class,
@@ -4580,6 +4631,8 @@ export class SecurityPlugin implements Plugin {
       // [#7835] Federated object carrying the registry's INJECTED
       // `organization_id` — a column the platform provisions no storage for.
       tenantAnchorIsPhantom: hasPhantomTenantAnchor(obj),
+      // [#8023] The author's DECLARED OWD, not the effective sharing bucket.
+      owdOpensRowWrites: owdDeclaresOpenRowWrites(obj),
       requiredPermissions: normalizeRequiredPermissions((obj as any)?.requiredPermissions),
       fieldRequiredPermissions,
       unresolved: !obj,

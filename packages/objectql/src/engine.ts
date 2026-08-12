@@ -1666,6 +1666,16 @@ export class ObjectQL implements IObjectQLEngine {
   // persists cleartext). Injected by the host via setCryptoProvider().
   private cryptoProvider?: ICryptoProvider;
 
+  // [#8022] Listeners notified when a crypto provider is (re)registered.
+  // Server-side consumers that dereference a secret at BOOT — the webhook
+  // auto-enqueuer's subscription cache is the one this was built for — run
+  // inside `kernel:ready`, which every host completes BEFORE its composition
+  // root injects a provider. Their first read therefore fails closed against a
+  // capability that is about to exist, and without a notification the only way
+  // back is to poll. The engine is the sole party that knows the moment it
+  // arrives, so the notification belongs here.
+  private readonly cryptoProviderListeners = new Set<() => void>();
+
   // [ADR-0105 D2 / #3623] Posture accessor for driver-scope widening under the
   // `group` posture. Injected by SecurityPlugin via setTenancyPostureProvider();
   // absent = equality scoping (fail toward isolation).
@@ -4618,10 +4628,51 @@ export class ObjectQL implements IObjectQLEngine {
    * Mirrors the Settings subsystem's ICryptoProvider wiring; the host (e.g.
    * `serve`) injects `LocalCryptoProvider` in dev and a KMS/Vault-backed
    * provider in production.
+   *
+   * Notifies {@link onCryptoProviderChange} listeners AFTER the provider is in
+   * place, so a listener that immediately re-reads a secret sees the new
+   * capability rather than the state that made it fail (#8022).
    */
   setCryptoProvider(provider: ICryptoProvider): void {
     this.cryptoProvider = provider;
     this.logger.info('CryptoProvider configured for secret fields');
+    // A listener is a re-arm, never part of this call's contract: one that
+    // throws must not fail the host's composition root, and must not stop the
+    // listeners behind it from re-arming.
+    for (const listener of [...this.cryptoProviderListeners]) {
+      try {
+        listener();
+      } catch (err) {
+        this.logger.warn('CryptoProvider registration listener failed', {
+          error: (err as Error)?.message ?? String(err),
+        });
+      }
+    }
+  }
+
+  /**
+   * [#8022] Observe crypto-provider registration.
+   *
+   * Exists for consumers that must dereference a `secret` field on a schedule
+   * they do not control — the boot path. `secret` reads are fail-closed by
+   * design (#7799), which is correct, but "no provider" at boot is a
+   * *transient* state on every host: `kernel:ready` runs plugins, and only
+   * after `runtime.start()` returns does the composition root call
+   * {@link setCryptoProvider}. A consumer whose cache was built in that gap is
+   * wrong until it rebuilds, and polling is the only alternative to being told.
+   *
+   * Fires on every registration, including a later replacement (a KMS provider
+   * swapped in over the dev one) — a listener that re-reads is correct in both
+   * cases, and a re-read is cheap next to signing with a key from the wrong
+   * provider.
+   *
+   * @returns an unsubscribe function; call it when the listener's owner stops.
+   */
+  onCryptoProviderChange(listener: () => void): () => void {
+    this.cryptoProviderListeners.add(listener);
+    return () => {
+      this.cryptoProviderListeners.delete(listener);
+    };
   }
 
   /**
@@ -4857,6 +4908,33 @@ export class ObjectQL implements IObjectQLEngine {
    *    client-invisibility rule with a documented spelling that bypasses it is
    *    not one. `isSystem` is server-derived (never client input), the same
    *    trust the read-only strips on the write path already place in it.
+   *
+   * ## Why this door is SILENT where the `$searchFields` door returns a 400
+   *
+   * Asked on #7876 and ruled there on 2026-08-12 (direction C): the divergence
+   * is intended, and it is not reopenable on symmetry alone. The two doors are
+   * two KINDS of surface.
+   *
+   *  - `$searchFields` is AUTHORING input — it tells the server how to RUN the
+   *    query. A value the server will not honour has to be said out loud, or
+   *    the caller gets a WIDER answer than the one they narrowed to, in a
+   *    response with nothing to distinguish it from a satisfied one. That is
+   *    why `assertSearchFieldsAreSearchable` refuses the name with a 400
+   *    (#4254) — the refusal is protecting the ROW SET.
+   *  - `select` is a READ PROJECTION — it names what the caller would like
+   *    back. Dropping a column the caller may not see leaves the answer
+   *    correct: the rows are still the rows that were asked for, one key
+   *    lighter. {@link omitInternalFields} directly above answers
+   *    `?select=id,key` exactly this way, for exactly this reason (#7728), so
+   *    silence here is the platform's existing read-path rule, not an
+   *    exception to it.
+   *
+   * ⛔ Do not add a refusal here to make the two doors agree. That was option B
+   * on #7876, weighed and declined: it turns a request that answers 200
+   * today into a failure, for tidiness, on a spelling no non-system caller in
+   * this tree uses — the companion's only deliberate reader is the backfill
+   * carved out above. If a REAL caller is ever burned by the silent drop, that
+   * measurement reopens it; the asymmetry by itself does not.
    *
    * ⚠️ `requestedFields` must be the CALLER's `fields`, captured before
    * `planFormulaProjection` — that pass rewrites the projection to every stored
@@ -9331,6 +9409,19 @@ export class ObjectQL implements IObjectQLEngine {
       // ⛔ Do not reintroduce it as a guard around the by-id read. A gate on
       // whether to LOOK is not compatible with a rule about what to do when
       // nothing is there. See `update()`'s twin.
+      //
+      // [#7933] The first three entries were carried here UNVERIFIED when
+      // #7707 corrected the `plugin-audit` one, which was wrong on BOTH halves
+      // — hook name and term. All three have since been read against the
+      // function that binds them — `registerIdentityWriteGuard`,
+      // `bindRecordShareCascade`, `installFileReferenceHooks` — and all three
+      // match what is claimed above: same events, same object-less
+      // registration, same in-handler filter. Nothing above needed changing.
+      // That audit is what the retirement note's "term 1 or 2 was already true
+      // for every object" stands on, so it is recorded here rather than left
+      // in a closed issue: the enumeration outlived the gate it was written
+      // for, and it is now load-bearing for a different claim than the one it
+      // was written to support.
       const deleteSchema = this._registry.getObject(object);
       // `buildDriverOptions` is what carries the open transaction and the
       // tenant scope onto a raw driver read. Skipping it here would read

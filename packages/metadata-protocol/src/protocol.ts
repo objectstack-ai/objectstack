@@ -2745,7 +2745,7 @@ export type MetadataAuthoringGate = (ctx: MetadataAuthoringGateContext) => void 
  * the CLI's lightweight host-config assembler (`serve.ts`'s auto-register
  * branch, `new ObjectQLPlugin()` with no options) also leaves `environmentId`
  * undefined, and it serves an END-USER `PUT /api/v1/meta/*`. Both topologies
- * read identically, so the whole #4463 gate — all 26 shared `AUTHORING_RULES`
+ * read identically, so the whole #4463 gate — all the shared `AUTHORING_RULES`
  * — was disengaged on a self-hosted app server. #5086 had already moved the
  * code-only refusal off the same proxy for the same reason ("keying
  * authorization off a row-scoping key is what made a type-level declaration
@@ -3133,7 +3133,7 @@ export class ObjectStackProtocolImplementation implements
         // with no options) ALSO leaves `environmentId` undefined, and it
         // serves an end-user `PUT /api/v1/meta/*`. `isHostConfig` →
         // `shouldBootWithLibrary === false` is the flagship showcase's own
-        // boot shape, so a self-hosted app server ran all 26 shared
+        // boot shape, so a self-hosted app server ran all the shared
         // `AUTHORING_RULES` on exactly nothing — and for a Studio tenant or an
         // MCP/AI author this gate is not the weakest of four doors, it is the
         // ONLY one (#4463's filing reason).
@@ -6187,6 +6187,33 @@ export class ObjectStackProtocolImplementation implements
      * `owner_id.name` — plausible from the select/sort axes — would be
      * silently dropped there, and this gate letting it through would
      * reintroduce the fallback it exists to close.
+     *
+     * ## The PROJECTION axis answers the same name differently — on purpose
+     *
+     * A name this gate refuses can still be spelled in `select` and come back
+     * 200 with the key simply absent: {@link assertProjectionFieldsExist} gates
+     * on whether a field is KNOWN, not on whether it is RETURNABLE, and the
+     * engine's read path then drops what the caller may not see
+     * (`omitInternalFields` for `internal: true` columns,
+     * `stripSearchCompanionFromRead` for the hidden `__search` companion).
+     * Measured on `__search`: `searchFields=__search` is a 400 here, while
+     * `select=__search` is a 200 whose body lacks it.
+     *
+     * That is not a gap someone forgot to close — it was asked as its own
+     * question and ruled intended on 2026-08-12 (#7876, direction C). The two
+     * axes are different KINDS of surface. `searchFields` is AUTHORING input:
+     * it tells the server how to RUN the query, so a value the server will not
+     * honour changes WHICH ROWS come back — the fail-open this gate exists for.
+     * `select` is a READ PROJECTION: it names what the caller would like back,
+     * the row set is untouched either way, and a column the caller may not see
+     * is simply not in the body.
+     *
+     * ⛔ Do not close the asymmetry by teaching the projection gate to refuse
+     * unreturnable columns. That was the alternative on #7876 and it was
+     * declined: it converts requests that answer 200 today into failures, for
+     * symmetry, on spellings with no measured callers. A real caller burned by
+     * a silent drop reopens the question on THAT measurement; the asymmetry
+     * alone does not.
      */
     private assertSearchFieldsAreSearchable(object: string, requested: unknown, param: string): void {
         // Shape first, BEFORE the field-map tiering below — same order as the

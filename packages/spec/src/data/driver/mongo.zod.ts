@@ -7,7 +7,9 @@ import { strictObject } from '../../shared/strict-object';
 import type { DriverDefinition } from '../datasource.zod';
 import {
   driverConfigJsonSchema,
+  INLINE_CREDENTIAL_REFUSED,
   READ_ONLY_BELONGS_ON_DATASOURCE,
+  refusedInlineCredentialKey,
   SCHEMA_MODE_BELONGS_ON_DATASOURCE,
 } from './common.zod';
 
@@ -41,13 +43,15 @@ export const MongoConfigSchema = lazySchema(() => strictObject(
       dbname: 'database',
       db: 'database',
       user: 'username',
-      passwd: 'password',
-      pwd: 'password',
       authdb: 'authSource',
       authdatabase: 'authSource',
       replicaset: 'options',
     },
     guidance: {
+      // #7990 — former aliases of the now-unwritable `password` key; the
+      // refusal is carried directly (see postgres.zod.ts for the reasoning).
+      passwd: INLINE_CREDENTIAL_REFUSED('passwd'),
+      pwd: INLINE_CREDENTIAL_REFUSED('pwd'),
       pool:
         '`pool` is not driver config — connection pooling is configured once for every driver in '
         + "the datasource's own `pool` block, which the factory maps onto the Mongo client's "
@@ -89,12 +93,11 @@ export const MongoConfigSchema = lazySchema(() => strictObject(
   username: z.string().optional().describe('Authentication user').meta({ title: 'User' }),
 
   /**
-   * Authentication password. Prefer `external.credentialsRef` — a datasource
-   * secret always wins over this value.
+   * Authentication password — REFUSED inline since #7990 (see postgres.zod.ts:
+   * declared-unwritable so `tsc`, the parse and the connection form's secret
+   * input all stay wired to the secret binder / `external.credentialsRef`).
    */
-  password: z.string().optional()
-    .describe('Authentication password (prefer external.credentialsRef)')
-    .meta({ title: 'Password', format: 'password' }),
+  password: refusedInlineCredentialKey('password', 'Password'),
 
   /** Authentication database, when it differs from `database`. */
   authSource: z.string().optional().describe('Authentication database')

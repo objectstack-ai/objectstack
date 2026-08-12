@@ -8,8 +8,9 @@ import { IHttpServer, shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY
 // OUT. Same value it read before — no re-ruling by side effect.
 import { OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES } from '@objectstack/metadata-core';
 import type { PackageService } from '@objectstack/service-package';
-// The declared envelope is written in ONE place for the whole platform (#3973).
-import { sendOk, sendError } from '@objectstack/types';
+// The declared envelope is written in ONE place for the whole platform (#3973),
+// and so (#8016) is the rule that reads an HTTP answer off a THROWN error.
+import { sendOk, sendError, resolveThrownHttpError } from '@objectstack/types';
 import { mountDirectRoutes, type DirectMountedRoute } from './direct-mount.js';
 import { readSingleQueryValue, repeatedQueryParamMessage } from './query-multiplicity.js';
 
@@ -76,6 +77,66 @@ async function refusePackageRequest(
     return true;
   }
   return false;
+}
+
+/**
+ * [#8016] The catch-all exit for every route in this registrar.
+ *
+ * ## What it replaced
+ *
+ * Four `catch` blocks, all spelling the same thing:
+ *
+ *     sendError(res, 500, 'INTERNAL_ERROR', (error as Error).message);
+ *
+ * i.e. status-blind and code-blind. `packageService.publish` / `.delete` and
+ * `protocol.deletePackage` run inside those blocks, and the metadata protocol
+ * throws CODED, status-carrying refusals from that call path — `409
+ * DESTRUCTIVE_CHANGE` is the established one. So a caller who was *refused*
+ * was told the platform had *broken*: a 500 is a server fault, it invites a
+ * retry that cannot succeed, and it hides the one thing the caller needed to
+ * act on (the code).
+ *
+ * It was also a disagreement rather than merely a bug. The dispatcher twin
+ * (`packages/runtime/src/domains/packages.ts` → `errorFromThrown`) has always
+ * read `.status` first and answered 409 for the same throw. Two doors serve
+ * `/api/v1/packages`; **this** registrar mounts first in the production stack
+ * (first-match-wins, see the module note above), so the wrong answer was the
+ * live one.
+ *
+ * ## Why it delegates instead of mapping here
+ *
+ * The mapping is one rule and this is its second door, so it is CALLED, not
+ * restated — a second `if (code === ...)` ladder here is how the divergence
+ * arose in the first place. `resolveThrownHttpError` (`@objectstack/types`) is
+ * that rule, and the dispatcher's `errorFromThrown` is now its other caller;
+ * the two doors agree by construction rather than by two suites agreeing about
+ * literals. It lives in `@objectstack/types` because it cannot live in
+ * `@objectstack/runtime`: that package depends on THIS one, so the import would
+ * only ever point the other way.
+ *
+ * ## The 500 survives
+ *
+ * A throw that declares no status and no registered code is a genuine fault and
+ * still answers `500 INTERNAL_ERROR` — `resolveThrownHttpError`'s fallback is
+ * this call's `500`, and the code derives from it. Mapping everything and
+ * leaving nothing on the default arm would trade one wrong answer for another
+ * and hide real faults.
+ *
+ * ⚠️ The message is passed through as thrown. Unlike the dispatcher twin, this
+ * door applies no `looksLikeInternalErrorLeak` withholding to 5xx bodies — that
+ * gap predates this change and is unchanged by it (filed separately); nothing
+ * here newly exposes a message that was not already exposed, because the 500
+ * arm shipped `(error as Error).message` verbatim before.
+ */
+function sendThrownError(res: any, error: unknown): void {
+  const thrown = resolveThrownHttpError(error);
+  sendError(
+    res,
+    thrown.status,
+    thrown.code,
+    thrown.message,
+    thrown.details ? { details: thrown.details } : undefined,
+  );
 }
 
 /**
@@ -225,6 +286,17 @@ export interface PackageRoutesOptions {
  * `readSingleQueryValue`), an unexpected throw is `INTERNAL_ERROR`. Only
  * the package-specific outcomes are registered — `PACKAGE_MANIFEST_INVALID`,
  * `PACKAGE_PUBLISH_FAILED`, `PACKAGE_DELETE_PARTIAL`, `PACKAGE_DELETE_FAILED`.
+ *
+ * [#8016] "An **unexpected** throw is `INTERNAL_ERROR`" is the sentence above,
+ * and it was right — the CODE had drifted wider than it. Every one of the four
+ * catch-alls treated *every* throw as unexpected, so a coded, status-carrying
+ * refusal from below (`409 DESTRUCTIVE_CHANGE` out of the metadata protocol,
+ * reached through `packageService.publish` / `.delete`) was answered as a
+ * server fault. The word doing the work is "unexpected": a throw that DECLARES
+ * its own status and a registered code is not unexpected, it is a refusal, and
+ * it now leaves through {@link sendThrownError} carrying both. `INTERNAL_ERROR`
+ * is still exactly what an unexpected throw gets — the sentence is unchanged
+ * because it was never the thing that was wrong.
  */
 export function registerPackageRoutes(
   server: IHttpServer,
@@ -292,7 +364,7 @@ export function registerPackageRoutes(
 
       sendError(res, 400, 'PACKAGE_PUBLISH_FAILED', result.error ?? `Failed to publish ${manifest.id}.`);
     } catch (error) {
-      sendError(res, 500, 'INTERNAL_ERROR', (error as Error).message);
+      sendThrownError(res, error);
     }
     },
   };
@@ -362,7 +434,7 @@ export function registerPackageRoutes(
       const packages = Array.from(packagesMap.values());
       sendOk(res, { packages, total: packages.length });
     } catch (error) {
-      sendError(res, 500, 'INTERNAL_ERROR', (error as Error).message);
+      sendThrownError(res, error);
     }
     },
   },
@@ -408,7 +480,7 @@ export function registerPackageRoutes(
 
       sendError(res, 404, 'RESOURCE_NOT_FOUND', `Package "${packageId}" was not found.`);
     } catch (error) {
-      sendError(res, 500, 'INTERNAL_ERROR', (error as Error).message);
+      sendThrownError(res, error);
     }
     },
   },
@@ -495,7 +567,7 @@ export function registerPackageRoutes(
         `Failed to delete ${packageId}${version ? `@${version}` : ''}.`,
       );
     } catch (error) {
-      sendError(res, 500, 'INTERNAL_ERROR', (error as Error).message);
+      sendThrownError(res, error);
     }
     },
   },

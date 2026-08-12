@@ -12,7 +12,10 @@ import { describe, it, expect } from 'vitest';
 import {
   isPlatformOwnershipFloorPolicy,
   platformOwnershipFloorPolicyCount,
+  owdDeclaresOpenRowWrites,
+  owdOpenWritesCoversOperation,
   OWNERSHIP_FLOOR_PREDICATE,
+  OWD_OPENING_ROW_WRITES,
 } from './platform-ownership-policies.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
 
@@ -93,5 +96,53 @@ describe('[#5492] platform ownership-floor provenance', () => {
       ['update', 'delete', 'all'].includes(String(p.operation)),
     );
     expect(writeClass.length).toBe(platformOwnershipFloorPolicyCount());
+  });
+});
+
+// [#8023] The OWD condition on the floor. The headline case is proven
+// end-to-end over HTTP by
+// `packages/qa/dogfood/test/owd-public-read-write-write-floor.dogfood.test.ts`;
+// what belongs HERE is the vocabulary boundary — which spellings open writes
+// and which look like they might but must not.
+describe('[#8023] owdDeclaresOpenRowWrites — the DECLARED model, never the effective bucket', () => {
+  it('the one canonical spelling opens writes, in both the flat and the nested spot', () => {
+    expect(owdDeclaresOpenRowWrites({ sharingModel: 'public_read_write' })).toBe(true);
+    expect(owdDeclaresOpenRowWrites({ security: { sharingModel: 'public_read_write' } })).toBe(true);
+    expect(OWD_OPENING_ROW_WRITES).toBe('public_read_write');
+  });
+
+  it('every OWD that does NOT declare open writes keeps the floor', () => {
+    for (const model of ['private', 'public_read', 'controlled_by_parent']) {
+      expect(owdDeclaresOpenRowWrites({ sharingModel: model }), `${model} must keep the floor`).toBe(false);
+    }
+  });
+
+  it('⚠️ `controlled_by_parent` and an UNSET model on a system object must NOT open writes', () => {
+    // Both collapse into plugin-sharing's `'public'` bucket
+    // (`effectiveSharingModel`), which is why reading THAT here would have been
+    // the bug: `controlled_by_parent` derives access from its master (which has
+    // its own OWD and its own gate) and declares nothing about its own writers,
+    // while an unset model on a `sys_*` table is a legacy default rather than
+    // an author's statement — opening writes there would hand every member
+    // cross-creator writes on the platform's identity tables.
+    expect(owdDeclaresOpenRowWrites({ name: 'owdw_detail', sharingModel: 'controlled_by_parent' })).toBe(false);
+    expect(owdDeclaresOpenRowWrites({ name: 'sys_user_position', isSystem: true })).toBe(false);
+    expect(owdDeclaresOpenRowWrites({ name: 'sys_user_position' })).toBe(false);
+  });
+
+  it('an unresolvable or malformed schema fails CLOSED (the floor stays)', () => {
+    for (const schema of [null, undefined, {}, { sharingModel: null }, { sharingModel: 'read_write' }]) {
+      expect(owdDeclaresOpenRowWrites(schema)).toBe(false);
+    }
+    // `read_write` above is the ADR-0090 D4 LEGACY alias. It no longer parses at
+    // authoring, and a stored value the platform does not recognise must never
+    // be read as the wider posture.
+  });
+
+  it('the opened write class is `update` alone — `owner_only_deletes` survives', () => {
+    expect(owdOpenWritesCoversOperation('update')).toBe(true);
+    for (const operation of ['delete', 'select', 'insert', 'all']) {
+      expect(owdOpenWritesCoversOperation(operation), `${operation} must not be opened`).toBe(false);
+    }
   });
 });

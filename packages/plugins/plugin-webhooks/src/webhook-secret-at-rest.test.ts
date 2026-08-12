@@ -176,9 +176,19 @@ const sysSecretObject = {
     },
 };
 
-async function buildEngine(opts: { withCrypto?: boolean } = {}) {
+/**
+ * A booted engine over a store.
+ *
+ * `reuse` hands back the SAME driver (and therefore the same rows) under a
+ * fresh engine — a process restart against an existing database, which is the
+ * only way to reach a state where the ciphertext predates the engine reading
+ * it (#8022).
+ */
+async function buildEngine(
+    opts: { withCrypto?: boolean; reuse?: { driver: any; stores: Map<string, Map<string, Record<string, unknown>>> } } = {},
+) {
     const engine = new ObjectQL();
-    const { driver, stores } = makeStubDriver();
+    const { driver, stores } = opts.reuse ?? makeStubDriver();
     engine.registerDriver(driver, true);
     await engine.init();
     engine.registry.registerObject(sysSecretObject as any, 'test');
@@ -453,5 +463,141 @@ describe('fail-closed: no CryptoProvider (#7799)', () => {
         const row = Array.from(stores.get('sys_webhook')!.values())[0] as any;
         expect(String(row.definition_json)).toContain(SECRET);
         expect(row[WEBHOOK_SECRET_FIELD] ?? null).toBeNull();
+    });
+});
+
+/**
+ * #8022 — the boot window #7799 opened.
+ *
+ * Every host wires its CryptoProvider from the composition root AFTER
+ * `runtime.start()` returns, and `runtime.start()` is what runs `kernel:ready`
+ * — the hook under which `AutoEnqueuer.start()` builds its first subscription
+ * cache. So the first build does not merely *race* crypto registration, it
+ * reliably precedes it: on `packages/cli/src/commands/serve.ts` the
+ * `setCryptoProvider` call sits below `await runtime.start()` unconditionally.
+ * A secret-bearing webhook was therefore dropped on every boot — correctly, on
+ * what the enqueuer could see — and nothing re-armed it until the periodic
+ * refresh up to 60s later. In that window a record change produced no delivery
+ * AND no `sys_http_delivery` row: not a dead letter, not a retry, nothing.
+ *
+ * The fail-closed drop is NOT what these tests relax. #7799's refusal to
+ * deliver unsigned is asserted below to still hold, before and after. What is
+ * fixed is the ORDERING: the drop must not outlive the reason for it.
+ */
+describe('boot ordering: the cache is built before the CryptoProvider (#8022)', () => {
+    /** Reboot onto the same rows in the host's real order: kernel first, crypto after. */
+    async function bootWithoutCrypto() {
+        const first = await buildEngine();
+        await bootstrapDeclaredWebhooks(first.engine, metadataWith([declaredWebhook()]));
+        // Precondition: the key is at rest as ciphertext only — the exact
+        // population #7799 created, and the only one this defect can reach.
+        expect(first.stores.get('sys_secret')!.size).toBe(1);
+
+        return buildEngine({
+            withCrypto: false,
+            reuse: { driver: first.driver, stores: first.stores },
+        });
+    }
+
+    /** Let the engine-driven re-arm settle. Two macrotasks — no polling, no 60s. */
+    const settle = async () => {
+        await new Promise((r) => setTimeout(r, 0));
+        await new Promise((r) => setTimeout(r, 0));
+    };
+
+    it('re-arms the dropped subscription when the CryptoProvider registers, without the 60s refresh', async () => {
+        const { engine } = await bootWithoutCrypto();
+        const realtime = new FakeRealtime();
+        const outbox = new MemoryHttpOutbox();
+        const enqueuer = new AutoEnqueuer(engine, realtime, (i) => outbox.enqueue(i), {
+            // The escape hatch this defect self-heals through, held shut. With a
+            // periodic refresh armed, a passing test proves only that waiting
+            // works — which it already did, 60s late. Zero means the ONLY thing
+            // that can re-arm the cache is the registration itself.
+            refreshIntervalMs: 0,
+            logger: { error: () => {}, warn: () => {} },
+        });
+        await enqueuer.start();
+
+        // ── The window, as the filer measured it ──────────────────────────
+        // Asserted on the durable record, not on a cache internal: a mutation
+        // here reaches neither the receiver nor `sys_http_delivery`. This is
+        // the state BOTH revisions are in at this point — it is the next half
+        // that separates them.
+        await realtime.publish(recordEvent('contact', { id: 'c_window', name: 'Ada' }));
+        await settle();
+        expect(await outbox.list()).toHaveLength(0);
+
+        // ── The composition root wires crypto, exactly as `serve` does ─────
+        engine.setCryptoProvider(makeFakeCrypto());
+        await settle();
+
+        // ── A mutation in what used to be the hole ────────────────────────
+        await realtime.publish(recordEvent('contact', { id: 'c_rearmed', name: 'Grace' }));
+        await settle();
+        const { impl, calls } = makeFetch();
+        await new HttpDispatcher({ nodeId: 'n1', outbox, fetchImpl: impl, partitionCount: 1 }).tick();
+        await enqueuer.stop();
+
+        // The durable record exists…
+        const rows = await outbox.list();
+        expect(rows).toHaveLength(1);
+        expect(rows[0].refId).toBe(Array.from((await engine.find('sys_webhook', {})).map((r: any) => r.id))[0]);
+        // …the receiver was actually hit, and #7799's whole point still holds:
+        // the delivery is SIGNED, with the key recovered from ciphertext alone.
+        expect(calls).toHaveLength(1);
+        const expected = createHmac('sha256', SECRET).update(calls[0].body).digest('hex');
+        expect(calls[0].headers['X-Objectstack-Signature']).toBe(`sha256=${expected}`);
+        expect(JSON.parse(calls[0].body)).toMatchObject({ object: 'contact', recordId: 'c_rearmed' });
+        // …and #7722's: the row carries the signature, never the key.
+        expect(rows[0].signature).toBe(`sha256=${expected}`);
+        expect(JSON.stringify(rows)).not.toContain(SECRET);
+    });
+
+    // NOT pinned here, deliberately: that the re-arm does not COALESCE onto the
+    // in-flight pre-registration build (see `rearmAfterCryptoRegistered`). Every
+    // harness that can inject the registration at that instant also moves the
+    // secret resolution to after it, so the naive `() => this.refresh()` passes
+    // too — a test that cannot separate the two revisions is a false green, and
+    // this repo has paid for those. The guard stays because the reasoning is
+    // sound, not because a test proves it.
+
+    it('still refuses to deliver unsigned while the key stays unresolvable, and says so once, loudly', async () => {
+        const { engine } = await bootWithoutCrypto();
+        const realtime = new FakeRealtime();
+        const outbox = new MemoryHttpOutbox();
+        const errors: Array<{ msg: string; meta: any }> = [];
+        const debugs: string[] = [];
+        const enqueuer = new AutoEnqueuer(engine, realtime, (i) => outbox.enqueue(i), {
+            refreshIntervalMs: 0,
+            logger: {
+                error: (msg: string, _err?: unknown, meta?: unknown) => { errors.push({ msg, meta: meta as any }); },
+                debug: (msg: string) => { debugs.push(msg); },
+                warn: () => {},
+            },
+        });
+        await enqueuer.start();
+        // No provider ever arrives. Rebuild anyway — the periodic refresh would.
+        await enqueuer.refresh();
+        await realtime.publish(recordEvent('contact', { id: 'c1', name: 'Ada' }));
+        await settle();
+        const { impl, calls } = makeFetch();
+        await new HttpDispatcher({ nodeId: 'n1', outbox, fetchImpl: impl, partitionCount: 1 }).tick();
+        await enqueuer.stop();
+
+        // The #7799 boundary: nothing is delivered, and nothing is delivered
+        // UNSIGNED, which is the outcome this whole card must not buy.
+        expect(calls).toHaveLength(0);
+        expect(await outbox.list()).toHaveLength(0);
+
+        // ADR-0112 — a consumer branches on the pair, not on message text.
+        expect(errors).toHaveLength(1);
+        expect(errors[0].meta).toMatchObject({ code: 'INTERNAL_ERROR', status: 500 });
+        // An `error` owes the consequence and the fix (AGENTS.md), and owes
+        // them ONCE: the second refresh repeats at debug, not at error, or an
+        // unfixed deployment prints this every 60s until nobody reads `error`.
+        expect(errors[0].msg).toMatch(/NO delivery and NO sys_http_delivery row/);
+        expect(errors[0].msg).toMatch(/setCryptoProvider/);
+        expect(debugs.join('\n')).toMatch(/still dropped for an unresolvable signing secret/);
     });
 });

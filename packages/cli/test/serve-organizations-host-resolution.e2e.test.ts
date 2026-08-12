@@ -167,10 +167,10 @@ describe('os serve — enterprise organizations resolution (cloud#1013)', () => 
       // reaching the banner at all.
       expect(stderr, `the D5 fail-fast fired — the app-installed package was not found${seen}`)
         .not.toMatch(/could not be loaded/);
-      expect(stdout, `serve never reached its banner${seen}`).toContain('Press Ctrl+C to stop');
+      expect(stderr, `serve never reached its banner${seen}`).toContain('Press Ctrl+C to stop');
       // …and it is the APP's package that got mounted: `Organizations` is
       // tracked only on the path that actually registered the plugin.
-      expect(stdout, `OrganizationsPlugin was not registered${seen}`).toContain('Organizations');
+      expect(stderr, `OrganizationsPlugin was not registered${seen}`).toContain('Organizations');
     },
     300_000,
   );
@@ -195,7 +195,7 @@ describe('os serve — enterprise organizations resolution (cloud#1013)', () => 
       );
       // The remedy names the app, because that is where the package has to go.
       expect(stderr).toMatch(/to THIS APP/);
-      expect(stdout, `serve served traffic without the wall${seen}`).not.toContain(
+      expect(stderr, `serve served traffic without the wall${seen}`).not.toContain(
         'Press Ctrl+C to stop',
       );
     },
@@ -226,10 +226,10 @@ describe('os serve — enterprise organizations resolution (cloud#1013)', () => 
       // …and the remedy is the declaration one, naming why reachability lost.
       expect(stderr).toMatch(/to THIS APP/);
       expect(stderr).toMatch(/NODE_PATH/);
-      expect(stdout, `serve served traffic without the wall${seen}`).not.toContain(
+      expect(stderr, `serve served traffic without the wall${seen}`).not.toContain(
         'Press Ctrl+C to stop',
       );
-      expect(stdout, `the hoisted package was mounted anyway${seen}`).not.toContain(
+      expect(stderr, `the hoisted package was mounted anyway${seen}`).not.toContain(
         'Organizations',
       );
     },

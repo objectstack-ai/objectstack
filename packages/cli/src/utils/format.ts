@@ -527,49 +527,72 @@ export interface AutomationReadySummary {
   draftCount: number;
 }
 
+/**
+ * `os serve`'s startup banner — on **stderr** (#7915).
+ *
+ * Everything below writes with `console.error`, and that is the whole point of
+ * this comment: the banner is a DIAGNOSTIC, not program output. `os serve`'s
+ * stdout belongs to the MCP stdio transport when one is mounted
+ * (`OS_MCP_STDIO_ENABLED=true`), and that protocol is newline-delimited JSON —
+ * a conforming client `JSON.parse`s every line it reads, so one banner line
+ * reaches it as a transport error. Measured on the #7915 repro: the
+ * `initialize` result arrived on line 517, behind 516 lines of banner and
+ * kernel log.
+ *
+ * Unconditional on purpose. "stderr when the stdio transport is mounted" needs
+ * a reliable signal at the moment each line prints, and fails silently and in
+ * the worse direction when that signal is wrong or late. Diagnostics belong on
+ * stderr whether or not anything is listening on stdout, and in a terminal it
+ * costs nothing — both streams render.
+ *
+ * `printBootDiagnostics`, `printAutomationSummary` and `printSeedSummary` are
+ * part of this same banner and follow the same rule. The general helpers above
+ * (`printSuccess`, `printKV`, `printMetadataStats`, …) deliberately do NOT:
+ * they serve every command, some of whose stdout IS the program's output.
+ */
 export function printServerReady(opts: ServerReadyOptions) {
   const base = `http://localhost:${opts.port}`;
-  console.log('');
-  console.log(chalk.bold.green('  ✓ Server is ready'));
-  console.log('');
-  console.log(chalk.cyan('  ➜') + chalk.bold('  API:       ') + chalk.cyan(base + '/'));
+  console.error('');
+  console.error(chalk.bold.green('  ✓ Server is ready'));
+  console.error('');
+  console.error(chalk.cyan('  ➜') + chalk.bold('  API:       ') + chalk.cyan(base + '/'));
   if (opts.uiEnabled && opts.consolePath) {
-    console.log(chalk.cyan('  ➜') + chalk.bold('  Console:   ') + chalk.cyan(base + opts.consolePath + '/'));
+    console.error(chalk.cyan('  ➜') + chalk.bold('  Console:   ') + chalk.cyan(base + opts.consolePath + '/'));
   }
   if (opts.mcpEnabled) {
-    console.log(chalk.cyan('  ➜') + chalk.bold('  MCP:       ') + chalk.cyan(base + '/api/v1/mcp'));
-    console.log(chalk.dim(`      connect an AI client (Claude Code, Cursor, …) · skill: ${base}/api/v1/mcp/skill`));
+    console.error(chalk.cyan('  ➜') + chalk.bold('  MCP:       ') + chalk.cyan(base + '/api/v1/mcp'));
+    console.error(chalk.dim(`      connect an AI client (Claude Code, Cursor, …) · skill: ${base}/api/v1/mcp/skill`));
   }
   if (opts.seededAdmin) {
-    console.log('');
-    console.log(
+    console.error('');
+    console.error(
       chalk.green('  🔑') + chalk.bold('  Dev admin: ') +
       chalk.bold.green(`${opts.seededAdmin.email} / ${opts.seededAdmin.password}`),
     );
-    console.log(chalk.dim('      seeded on empty DB · dev only — do not use in production'));
+    console.error(chalk.dim('      seeded on empty DB · dev only — do not use in production'));
   }
-  console.log('');
-  console.log(chalk.dim(`  Config:  ${opts.configFile}`));
-  console.log(chalk.dim(`  Mode:    ${opts.isDev ? 'development' : 'production'}`));
+  console.error('');
+  console.error(chalk.dim(`  Config:  ${opts.configFile}`));
+  console.error(chalk.dim(`  Mode:    ${opts.isDev ? 'development' : 'production'}`));
   if (opts.driverLabel) {
     const dbInfo = opts.databaseUrl ? `${opts.driverLabel}  ${chalk.dim('→')} ${opts.databaseUrl}` : opts.driverLabel;
-    console.log(chalk.dim(`  Driver:  ${dbInfo}`));
+    console.error(chalk.dim(`  Driver:  ${dbInfo}`));
   }
   // [ADR-0105 D1] Print the posture verbatim — see `tenancyPosture` above for
   // why this is not a boolean and why it must be the resolver's answer.
   if (opts.tenancyPosture !== undefined) {
-    console.log(chalk.dim(`  Tenancy: ${opts.tenancyPosture}`));
+    console.error(chalk.dim(`  Tenancy: ${opts.tenancyPosture}`));
   }
-  console.log(chalk.dim(`  Plugins: ${opts.pluginCount} loaded`));
+  console.error(chalk.dim(`  Plugins: ${opts.pluginCount} loaded`));
   if (opts.pluginNames && opts.pluginNames.length > 0) {
-    console.log(chalk.dim(`           ${opts.pluginNames.join(', ')}`));
+    console.error(chalk.dim(`           ${opts.pluginNames.join(', ')}`));
   }
   if (opts.automation) printAutomationSummary(opts.automation);
   if (opts.seeds) printSeedSummary(opts.seeds);
   if (opts.bootDiagnostics) printBootDiagnostics(opts.bootDiagnostics);
-  console.log('');
-  console.log(chalk.dim('  Press Ctrl+C to stop'));
-  console.log('');
+  console.error('');
+  console.error(chalk.dim('  Press Ctrl+C to stop'));
+  console.error('');
 }
 
 /** Boot-phase logger records held back by the boot-quiet window (#4012). */
@@ -592,22 +615,25 @@ export interface BootDiagnostics {
  * Quiet when a boot had nothing to say. Printed from the banner on a healthy
  * boot and directly from serve's error path on a failed one — a boot that dies
  * is exactly when its warnings matter most.
+ *
+ * Replayed to **stderr** (#7915) — these are the kernel's own diagnostics, held
+ * back and re-emitted, so they land where every other `serve` diagnostic does.
  */
 export function printBootDiagnostics(diagnostics: BootDiagnostics) {
   const { lines, dropped = 0 } = diagnostics;
   if (lines.length === 0) return;
 
-  console.log('');
-  console.log(
+  console.error('');
+  console.error(
     chalk.yellow(
       `  ⚠ Boot diagnostics — ${lines.length} warning${lines.length === 1 ? '' : 's'} logged during startup:`,
     ),
   );
-  for (const line of lines) console.log(chalk.dim(`    ${line}`));
+  for (const line of lines) console.error(chalk.dim(`    ${line}`));
   if (dropped > 0) {
-    console.log(chalk.dim(`    …and ${dropped} more (capture buffer full)`));
+    console.error(chalk.dim(`    …and ${dropped} more (capture buffer full)`));
   }
-  console.log(chalk.dim('    run with --log-level debug to watch the boot stream live'));
+  console.error(chalk.dim('    run with --log-level debug to watch the boot stream live'));
 }
 
 /**
@@ -618,7 +644,7 @@ export function printBootDiagnostics(diagnostics: BootDiagnostics) {
 function printAutomationSummary(a: AutomationReadySummary) {
   if (!a.enabled) {
     if (a.declaredFlowCount > 0) {
-      console.log(
+      console.error(
         chalk.yellow(
           `  ⚠ Flows:   ${a.declaredFlowCount} flow(s) declared but the automation engine is not enabled — ` +
           `they will never run. Add requires: ['automation', 'triggers'] to objectstack.config.ts`,
@@ -632,15 +658,15 @@ function printAutomationSummary(a: AutomationReadySummary) {
   const parts = [`${a.flowCount} flow(s)`, `${a.boundCount} bound to triggers`];
   if (a.triggerTypes.length > 0) parts.push(`(${a.triggerTypes.join(', ')})`);
   if (a.draftCount > 0) parts.push(`· ${a.draftCount} draft`);
-  console.log(chalk.dim(`  Flows:   ${parts.join(' ')}`));
+  console.error(chalk.dim(`  Flows:   ${parts.join(' ')}`));
 
   for (const u of a.unbound) {
-    console.log(
+    console.error(
       chalk.yellow(`  ⚠ flow '${u.flowName}' declares a '${u.triggerType}' trigger but is NOT bound — ${u.reason}`),
     );
   }
   for (const u of a.unknownObject) {
-    console.log(
+    console.error(
       chalk.yellow(
         `  ⚠ flow '${u.flowName}' targets unknown object '${u.object}' — bound, but it will never fire ` +
         `(object names match exactly; check the start node's config.objectName)`,
@@ -691,11 +717,11 @@ function printSeedSummary(sources: SeedSourceSummary[]) {
 
   const line = shown.map(fragment).join(' · ');
   if (anyProblem) {
-    console.log(chalk.yellow(`  ⚠ Seeds:   ${line}`));
-    console.log(chalk.dim('      run with OS_LOG_LEVEL=info to see each dropped record'));
+    console.error(chalk.yellow(`  ⚠ Seeds:   ${line}`));
+    console.error(chalk.dim('      run with OS_LOG_LEVEL=info to see each dropped record'));
     return;
   }
-  console.log(chalk.dim(`  Seeds:   ${line}`));
+  console.error(chalk.dim(`  Seeds:   ${line}`));
 }
 
 export function printMetadataStats(stats: MetadataStats) {

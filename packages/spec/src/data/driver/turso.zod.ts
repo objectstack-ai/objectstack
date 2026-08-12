@@ -7,7 +7,9 @@ import { strictObject } from '../../shared/strict-object';
 import type { DriverDefinition } from '../datasource.zod';
 import {
   driverConfigJsonSchema,
+  INLINE_CREDENTIAL_REFUSED,
   READ_ONLY_BELONGS_ON_DATASOURCE,
+  refusedInlineCredentialKey,
   SCHEMA_MODE_BELONGS_ON_DATASOURCE,
 } from './common.zod';
 
@@ -75,23 +77,32 @@ export const TursoConfigSchema = lazySchema(() => strictObject(
   {
     surface: "this turso datasource's config",
     // Semantic near-misses only — the spellings edit distance cannot reach.
-    // Case and underscore variants of a DECLARED key (`auth_token`,
-    // `encryption_key`, `sync_url`) are deliberately absent: the unknown-key
-    // probe already normalizes those onto the declared name, so entries for
-    // them would be alias rows that never fire, and two of them collided with
-    // each other on one probe (`auth_token`/`authtoken`,
-    // `sync_interval`/`syncinterval`) — caught by `alias-integrity.test.ts`.
+    // Case and underscore variants of a DECLARED key (`encryption_key`,
+    // `sync_url`) are deliberately absent: the unknown-key probe already
+    // normalizes those onto the declared name, so entries for them would be
+    // alias rows that never fire, and two of them collided with each other on
+    // one probe (`auth_token`/`authtoken`, `sync_interval`/`syncinterval`) —
+    // caught by `alias-integrity.test.ts`. The `auth_token`/`authtoken`
+    // variants moved to `guidance` in #7990: `authToken` is tombstoned, so it
+    // left the probe's candidate list (`acceptsNothing`) and the normalization
+    // that made alias rows redundant no longer reaches it.
     aliases: {
       uri: 'url',
       connectionstring: 'url',
       dsn: 'url',
       database: 'url',
       databaseurl: 'url',
-      token: 'authToken',
-      jwt: 'authToken',
       syncinterval: 'sync',
     },
     guidance: {
+      // #7990 — former aliases of the now-unwritable `authToken` key (`token:`
+      // was the misspelling this file's history block records). They carry the
+      // refusal directly rather than renaming onto a key that would reject
+      // them a second time (see postgres.zod.ts for the reasoning).
+      token: INLINE_CREDENTIAL_REFUSED('token'),
+      jwt: INLINE_CREDENTIAL_REFUSED('jwt'),
+      auth_token: INLINE_CREDENTIAL_REFUSED('auth_token'),
+      authtoken: INLINE_CREDENTIAL_REFUSED('authtoken'),
       pool:
         '`pool` is not driver config — libSQL sizes remote concurrency with `concurrency`, and '
         + "every driver's pooling block lives next to `driver` on the datasource itself.",
@@ -127,13 +138,15 @@ export const TursoConfigSchema = lazySchema(() => strictObject(
       .meta({ title: 'Database URL' }),
 
     /**
-     * JWT for a remote database. Prefer `external.credentialsRef` — a
-     * datasource secret always wins over an inline value, exactly as on the
-     * SQL drivers' `password`.
+     * JWT for a remote database — REFUSED inline since #7990, exactly as the
+     * SQL drivers' `password` (see postgres.zod.ts: declared-unwritable so
+     * `tsc`, the parse and the connection form's secret input all stay wired
+     * to the secret binder / `external.credentialsRef`). The standalone boot
+     * path is unaffected: `OS_DATABASE_AUTH_TOKEN` / `TURSO_AUTH_TOKEN` are
+     * resolved by the host and handed to the driver factory directly, never
+     * through this authoring schema.
      */
-    authToken: z.string().optional()
-      .describe('JWT auth token for a remote libSQL database (prefer external.credentialsRef)')
-      .meta({ title: 'Auth token', format: 'password' }),
+    authToken: refusedInlineCredentialKey('authToken', 'Auth token'),
 
     /** AES-256 key for the local database file; local/replica modes only. */
     encryptionKey: z.string().optional()

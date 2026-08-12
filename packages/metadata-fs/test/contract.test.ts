@@ -1,11 +1,13 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, beforeEach, afterEach, expect } from 'vitest';
+// `describe`/`it`/`beforeEach`/`expect` are NOT imported here on purpose: this
+// file registers the shared contract suite, which declares every case of its
+// own, so the only hook this file itself uses is `afterEach` for cleanup.
+import { afterEach } from 'vitest';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { runRepositoryContractTests } from '@objectstack/metadata-core/testing';
-import type { MetaRef } from '@objectstack/metadata-core';
 import { FileSystemRepository } from '../src/index.js';
 
 /** Track repos + tmpdirs across the contract suite for cleanup. */

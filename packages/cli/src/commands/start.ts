@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Command, Flags } from '@oclif/core';
-import chalk from 'chalk';
+import chalk, { chalkStderr } from 'chalk';
 import { spawn, spawnSync } from 'child_process';
 import crypto from 'crypto';
 import dotenvFlow from 'dotenv-flow';
@@ -9,6 +9,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { printHeader, printKV, printStep, printError } from '../utils/format.js';
+import { redirectStdoutToStderr } from '../utils/json-stdout.js';
 import { redactConnectionUrl } from '../utils/connection-display.js';
 import { databaseDriverFlag } from '../utils/database-driver-flag.js';
 import { readEnvWithDeprecation } from '@objectstack/types';
@@ -126,6 +127,19 @@ export default class Start extends Command {
 
   async run(): Promise<void> {
     const { flags } = await this.parse(Start);
+
+    // ── stdout belongs to the protocol, never to diagnostics (#7915) ──
+    // `start` is a supervisor: it prints a header, a few resolved values and a
+    // progress line, then spawns `serve` with INHERITED stdio. So its own
+    // stdout is the same fd the child's stdio MCP transport writes JSON-RPC
+    // frames to — and this is the invocation the stdio docs name
+    // (`OS_MCP_STDIO_ENABLED=true OS_MCP_STDIO_API_KEY=osk_… os start`).
+    // Everything on that fd from this process is a diagnostic, so it goes to
+    // stderr, unconditionally, for the same reasons spelled out at the top of
+    // `serve.run()`. The child installs the same policy for itself.
+    redirectStdoutToStderr();
+    // Colour follows the destination stream — see the same line in `serve`.
+    chalk.level = chalkStderr.level;
 
     // Load .env files following Vite/Next.js convention (mirrors `serve`).
     // Loaded BEFORE any env lookups so OS_DATABASE_URL/OS_HOME/AUTH_SECRET
