@@ -71,19 +71,27 @@
 import { describe, it, expect } from 'vitest';
 import { ObjectQL } from './engine.js';
 import { bindHooksToEngine } from './hook-binder.js';
-import type { Hook } from '@objectstack/spec/data';
+import type { Hook, ServiceObject } from '@objectstack/spec/data';
 
 const silentLogger = { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} };
 
 /**
  * A HOOKED object carrying the exact declaration the reproduction tripped over:
  * an `afterUpdate` condition that reads `previous`.
+ *
+ * Typed as `ServiceObject` rather than left to inference, and registered with
+ * its `packageId`, so this file adds nothing to `@objectstack/objectql`'s
+ * TEST_DEBT ledger — a shrink-only ratchet (#5278). Typing it is also what
+ * showed that `primaryKey` is not a declared field property: the registry
+ * provisions the primary key itself (`provisionPrimary`), so carrying the key
+ * here would have been a silent no-op the compiler could not see while the
+ * fixture stayed untyped.
  */
-const hookedTask = {
+const hookedTask: ServiceObject = {
   name: 'nf_task',
   label: 'Task',
   fields: {
-    id: { name: 'id', label: 'ID', type: 'text' as const, primaryKey: true },
+    id: { name: 'id', label: 'ID', type: 'text' as const },
     title: { name: 'title', label: 'Title', type: 'text' as const },
     done: { name: 'done', label: 'Done', type: 'boolean' as const },
   },
@@ -94,11 +102,11 @@ const hookedTask = {
  * this one the pre-fix answer was a required-field `ValidationError`, with no
  * hook and no `previous` anywhere near it.
  */
-const unhookedInvoice = {
+const unhookedInvoice: ServiceObject = {
   name: 'nf_invoice',
   label: 'Invoice',
   fields: {
-    id: { name: 'id', label: 'ID', type: 'text' as const, primaryKey: true },
+    id: { name: 'id', label: 'ID', type: 'text' as const },
     status: { name: 'status', label: 'Status', type: 'text' as const },
     issued_on: { name: 'issued_on', label: 'Issued On', type: 'text' as const, required: true },
   },
@@ -172,14 +180,24 @@ function makeStubDriver() {
   return { driver: d, calls };
 }
 
-async function bootEngine(hooks: Hook[], objects: unknown[] = [hookedTask, unhookedInvoice]) {
+/** Owning package for the fixtures — `registerObject` requires one. */
+const OWNER_PACKAGE = 'app:nf';
+
+async function bootEngine(
+  hooks: Hook[],
+  objects: ServiceObject[] = [hookedTask, unhookedInvoice],
+) {
   const engine = new ObjectQL();
   const stub = makeStubDriver();
   engine.registerDriver(stub.driver, true);
   await engine.init();
-  for (const o of objects) engine.registry.registerObject(o as any);
+  // `packageId` is REQUIRED by `SchemaRegistry.registerObject` — passing it (as
+  // the kernel-booting sibling files do) rather than dropping an `as any` on
+  // the call keeps this file out of the package's TEST_DEBT ledger, which is a
+  // shrink-only ratchet (#5278).
+  for (const o of objects) engine.registry.registerObject(o, OWNER_PACKAGE);
   if (hooks.length > 0) {
-    bindHooksToEngine(engine, hooks, { packageId: 'app:nf', logger: silentLogger });
+    bindHooksToEngine(engine, hooks, { packageId: OWNER_PACKAGE, logger: silentLogger });
   }
   return { engine, calls: stub.calls };
 }
