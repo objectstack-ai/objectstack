@@ -518,7 +518,7 @@ export const RangeOperatorSchema = lazySchema(() => z.object({
  * | surface | `$contains` case behaviour | mechanism |
  * |---|---|---|
  * | `formula` `matchesFilterCondition` | SENSITIVE | `actual.includes(v)` |
- * | `driver-memory` — query path and analytics face | INSENSITIVE, full Unicode | `new RegExp(escapeRegex(v), 'i')` |
+ * | `driver-memory` — query path and analytics face | INSENSITIVE, full Unicode | `new RegExp(escapeRegex(v), 'i')` — the last one standing, until #6682 |
  * | `driver-memory` — reference matcher (`memory-matcher`) | SENSITIVE | `value.includes(target)` |
  * | `driver-mongodb` | INSENSITIVE, full Unicode | hardcoded `$options: 'i'` |
  * | `driver-sql` family | the DIALECT's | `LIKE '%v%'` — ASCII-insensitive on SQLite (so also turso and sqlite-wasm), sensitive on Postgres, collation-dependent on MySQL |
@@ -578,20 +578,21 @@ export const RangeOperatorSchema = lazySchema(() => z.object({
  * `matches-filter.ts`; what #6520 changed is that no operator this array
  * DECLARES is answered that way any more.
  *
- * The `$contains`-family alignment the ruling above requires is likewise part
- * done rather than pending: #6518 made that family case-EXACT across the SQL
- * dialects and #6682 did the same on `driver-mongodb` (the hardcoded
- * `$options: 'i'` is off all four arms, and that driver's every face — query,
- * count, write and the aggregation `$match` — routes through the one
- * `translateFilter`, so there is no second answer). `driver-memory`'s query and
- * analytics faces still fold the whole Unicode range while its reference
- * matcher does not — the one row #6682 still tracks, and the one package that
- * answers this operator two ways.
+ * The `$contains`-family alignment the ruling above requires is now DONE on
+ * every backend: #6518 made that family case-EXACT across the SQL dialects,
+ * #6682 did the same on `driver-mongodb` (the hardcoded `$options: 'i'` is off
+ * all four arms, and that driver's every face — query, count, write and the
+ * aggregation `$match` — routes through the one `translateFilter`, so there is
+ * no second answer) and then on `driver-memory`, whose query path and analytics
+ * face lost the `i` flag their shared rule carried (`filterSubstringPattern`).
+ * That last one closed the package that answered this operator two ways: its
+ * reference matcher had been case-exact all along, so the fix moved the two
+ * that were wrong onto the one that was right.
  *
  * `FILTER_TEXT_CASES` (`filter-text-conformance.ts`) is the standard that
- * measures all of the above, and the driver-conformance ledger still carries a
- * DEBT row for `driver-memory` — on requirement 2 alone now, since #6520 closed
- * requirement 1 — so what is open stays counted rather than assumed.
+ * measures all of the above, and every driver now IMPORTS it — the
+ * driver-conformance ledger is empty. Read the open set from a run of that gate
+ * rather than from this paragraph.
  *
  * @see FILTER_TEXT_CASES — the conformance standard for every operator here.
  * @see RETIRED_FILTER_OPERATORS — why `$regex` is not in this list.

@@ -71,8 +71,12 @@ import {
   CONSOLE_PATH,
   resolveConsolePath,
   hasConsoleDist,
+  decideConsoleMount,
+  formatConsoleShaDriftWarning,
+  formatConsoleShaDriftRefusal,
   createConsoleStaticPlugin,
   createRuntimeAssetsPlugin,
+  type ConsoleShaDrift,
 } from '../utils/console.js';
 import dotenvFlow from 'dotenv-flow';
 
@@ -2630,20 +2634,38 @@ export default class Serve extends Command {
         // opt out of the Console entirely — useful for control-plane
         // deployments where the runtime Console is meaningless.
         const consoleEnabled = flags.console && process.env.OS_DISABLE_CONSOLE !== '1';
-        const consolePath = consoleEnabled ? resolveConsolePath() : null;
-        const consoleWillMount = !!(consolePath && hasConsoleDist(consolePath));
+        // Resolution reports objectui-SHA drift instead of warning about it
+        // itself, so the decision below owns the single message about it.
+        // (Boxed so the assignment made inside `onDrift` is visible to
+        // control-flow analysis after the call returns.)
+        const driftBox: { value: ConsoleShaDrift | null } = { value: null };
+        const consolePath = consoleEnabled
+          ? resolveConsolePath({ onDrift: (d) => { driftBox.value = d; } })
+          : null;
+        const consoleDrift = driftBox.value;
+        const { mount: consoleWillMount, refusedForDrift } = decideConsoleMount({
+          hasDist: !!(consolePath && hasConsoleDist(consolePath)),
+          drift: consoleDrift,
+          isDev,
+        });
 
         // ── Console portal ──────────────────────────────────────────
         // The opinionated, fork-ready runtime console (`@object-ui/console`,
         // published from the objectstack-ai/objectui monorepo) mounts under
         // `/_console/`. When present, it owns the root `/` redirect
         // (preferred default UI). It is optional — we only mount it when
-        // the package resolves and a pre-built `dist/` is present.
+        // the package resolves and a pre-built `dist/` is present, and — in
+        // dev — only when that build matches the repo's objectui pin (#7752).
         if (consolePath) {
           if (consoleWillMount) {
+            if (consoleDrift) {
+              console.warn(chalk.yellow(formatConsoleShaDriftWarning(consoleDrift)));
+            }
             const consoleDistPath = path.join(consolePath, 'dist');
             await kernel.use(createConsoleStaticPlugin(consoleDistPath, { isDev }));
             trackPlugin('ConsoleUI');
+          } else if (refusedForDrift && consoleDrift) {
+            console.error(chalk.red(formatConsoleShaDriftRefusal(consoleDrift)));
           } else {
             console.warn(chalk.yellow(`  ⚠ Console dist not found — install \`@object-ui/console\` (already built) or run \`pnpm --filter @object-ui/console build\` in the objectui workspace`));
           }

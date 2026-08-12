@@ -90,7 +90,10 @@ export const SysTwoFactor = ObjectSchema.create({
       type: 'api',
       target: '/api/v1/auth/two-factor/disable',
       requiresFeature: 'twoFactor',
-      confirmText: 'Disable two-factor authentication on your account?',
+      // Confirm question on `description`, not `confirmText`: this action collects
+      // params, and pairing the two keys opens two dialogs for one decision
+      // (#7278 ruling 2026-08-10, swept by #7309).
+      description: 'Disable two-factor authentication on your account?',
       successMessage: '2FA disabled',
       refreshAfter: true,
       params: [
@@ -106,7 +109,8 @@ export const SysTwoFactor = ObjectSchema.create({
       type: 'api',
       target: '/api/v1/auth/two-factor/generate-backup-codes',
       requiresFeature: 'twoFactor',
-      confirmText: 'Regenerate backup codes? All previous backup codes will stop working immediately.',
+      // Confirm question on `description` — one dialog, not two (#7278/#7309).
+      description: 'Regenerate backup codes? All previous backup codes will stop working immediately.',
       refreshAfter: true,
       params: [
         { name: 'password', label: 'Current Password', type: 'text', required: true },

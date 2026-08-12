@@ -58,7 +58,6 @@ in-flight changes, recoverable only as unreachable commits.
 Use one of these instead — no shared state, all inside your own worktree:
 
 ```
-git checkout origin/main -- <path>     # then: git checkout <your-branch> -- <path>
 git diff > /tmp/wip.patch && git checkout -- <paths>   # then: git apply /tmp/wip.patch
 git commit -am wip                                     # then: git reset --soft HEAD~1
 git worktree add ../objectstack-<task>-cmp <ref>       # a second tree to compare against

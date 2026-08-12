@@ -1,0 +1,92 @@
+{
+  "name": "Showcase platform smoke (Quality Protocol)",
+  "scenarios": [
+    {
+      "id": "health-liveness",
+      "name": "The booted server answers its liveness probe",
+      "description": "The cheapest real assertion in the suite, and the one that tells a failing run whether the target URL was even right. GET /api/v1/health is the unauthenticated liveness probe (packages/runtime/src/http-dispatcher.ts), so this scenario passes with or without --token — a failure here means the --url is wrong or the server is down, not that the data assertions below are broken.",
+      "steps": [
+        {
+          "name": "GET /api/v1/health",
+          "action": {
+            "type": "api_call",
+            "target": "/api/v1/health",
+            "payload": { "method": "GET" }
+          },
+          "assertions": [
+            { "field": "success", "operator": "equals", "expectedValue": true },
+            { "field": "data.status", "operator": "equals", "expectedValue": "ok" },
+            { "field": "data.timestamp", "operator": "not_null", "expectedValue": null }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "category-create-read-roundtrip",
+      "name": "A record created through the data API reads back by the id the create returned",
+      "description": "The load-bearing scenario: it can only pass if capture, {{variable}} interpolation and assertion evaluation all work, because the read step's URL is built from the id the create step captured. showcase_category is the target because it is sharingModel: public_read_write with exactly one required field (examples/app-showcase/src/data/objects/category.object.ts), so the record is legal on stock fixtures. Requires --token (a signed-in session); the data routes enforce auth.",
+      "tags": ["smoke", "crud"],
+      "steps": [
+        {
+          "name": "create a category",
+          "description": "POST /api/v1/data/:object — the wire body IS the record (#3899).",
+          "action": {
+            "type": "api_call",
+            "target": "/api/v1/data/showcase_category",
+            "payload": {
+              "method": "POST",
+              "body": { "name": "QA smoke — Quality Protocol roundtrip" }
+            }
+          },
+          "capture": { "categoryId": "id" },
+          "assertions": [
+            { "field": "id", "operator": "not_null", "expectedValue": null },
+            { "field": "object", "operator": "equals", "expectedValue": "showcase_category" },
+            { "field": "record.name", "operator": "equals", "expectedValue": "QA smoke — Quality Protocol roundtrip" }
+          ]
+        },
+        {
+          "name": "read it back by the captured id",
+          "description": "The target carries {{categoryId}}: if capture or interpolation is dead, this GET asks for the literal path segment and the step fails instead of silently passing.",
+          "action": {
+            "type": "api_call",
+            "target": "/api/v1/data/showcase_category/{{categoryId}}",
+            "payload": { "method": "GET" }
+          },
+          "assertions": [
+            { "field": "record.id", "operator": "not_null", "expectedValue": null },
+            { "field": "record.name", "operator": "equals", "expectedValue": "QA smoke — Quality Protocol roundtrip" },
+            { "field": "record.parent", "operator": "is_null", "expectedValue": null }
+          ]
+        },
+        {
+          "name": "find it in the list response",
+          "description": "`contains` over an array — the operator whose non-evaluable shapes used to pass silently (#7256). The field path points at a real array so the assertion is evaluated, not skipped.",
+          "action": {
+            "type": "api_call",
+            "target": "/api/v1/data/showcase_category",
+            "payload": { "method": "GET" }
+          },
+          "assertions": [
+            { "field": "records.0.id", "operator": "not_null", "expectedValue": null },
+            { "field": "object", "operator": "contains", "expectedValue": "category" }
+          ]
+        }
+      ],
+      "teardown": [
+        {
+          "name": "delete the category",
+          "description": "Teardown runs even after a failed step, so a red run does not leave the fixture dirty for the next one.",
+          "action": {
+            "type": "api_call",
+            "target": "/api/v1/data/showcase_category/{{categoryId}}",
+            "payload": { "method": "DELETE" }
+          },
+          "assertions": [
+            { "field": "success", "operator": "equals", "expectedValue": true }
+          ]
+        }
+      ]
+    }
+  ]
+}

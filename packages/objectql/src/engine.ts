@@ -131,6 +131,7 @@ import {
 import { pluralToSingular, ExternalWriteForbiddenError } from '@objectstack/spec/shared';
 import { SchemaRegistry, computeFQN } from './registry.js';
 import { expandSearchToFilter } from './search-filter.js';
+import { isSearchCompanionRequested, stripSearchCompanion } from './search-companion.js';
 import { ExpressionEngine } from '@objectstack/formula';
 import type { Expression } from '@objectstack/spec';
 import { isAggregatedViewContainer, expandViewContainer } from '@objectstack/spec';
@@ -2491,17 +2492,41 @@ export class ObjectQL implements IObjectQLEngine {
    *
    * Carries `tenantId` from the active ExecutionContext so the driver can
    * enforce per-tenant isolation (SQL driver auto-scopes reads and
-   * auto-injects the tenant column on writes) — EXCEPT for objects that
-   * declare `tenancy.enabled: false` (ADR-0066 platform-global posture,
-   * e.g. `sys_license`): stamping the caller's active-org tenantId there
-   * would org-scope a global catalog at the driver, and its NULL-org rows
-   * would vanish for authenticated org-context reads while anonymous
-   * reads still see them (#3249). The SQL driver has its own opt-out
-   * (sticky tenant-field cache), but withholding tenantId here protects
-   * every driver at the source. Existing user-supplied shapes
-   * (transactions, AST extras) are preserved by spreading them first — an
-   * explicitly-passed `base.tenantId` is deliberate caller intent and
-   * still wins.
+   * auto-injects the tenant column on writes) — EXCEPT for the two object
+   * postures below. The SQL driver has its own opt-out (sticky tenant-field
+   * cache), but withholding tenantId here protects every driver at the
+   * source. Existing user-supplied shapes (transactions, AST extras) are
+   * preserved by spreading them first — an explicitly-passed `base.tenantId`
+   * is deliberate caller intent and still wins, under both exemptions.
+   *
+   * 1. **`tenancy.enabled: false`** (ADR-0066 platform-global posture, e.g.
+   *    `sys_license`): stamping the caller's active-org tenantId there would
+   *    org-scope a global catalog at the driver, and its NULL-org rows would
+   *    vanish for authenticated org-context reads while anonymous reads still
+   *    see them (#3249).
+   *
+   * 2. **`external != null`** — a federated object (ADR-0015), whose schema
+   *    is owned by the REMOTE database (#7738). The driver turns `tenantId`
+   *    into `(organization_id = :tenant OR organization_id IS NULL)`, and
+   *    against a remote table that carries no such column that is a SQL error
+   *    on Postgres/MySQL — or worse on SQLite, whose quoted-identifier
+   *    fallback reinterprets the unresolvable identifier as the string
+   *    literal `'organization_id'`, makes both disjuncts constant-false, and
+   *    answers **0 rows with HTTP 200**: a correctly-bound external object
+   *    silently reads empty.
+   *
+   *    Note the reason is NOT "the remote happens to lack the column". The
+   *    column the driver detects is the platform's OWN: `applySystemFields`
+   *    (`resolveInjectedSystemColumns`) injects `organization_id` into every
+   *    object it registers, with no `external` branch, and
+   *    `SqlDriver.registerExternalObject` is DDL-free by design and runs no
+   *    introspection — so it computes the tenant column from the platform's
+   *    field set, never from the remote's. On a federated object
+   *    `organization_id`'s presence is therefore always the injection and
+   *    never evidence about the remote, which leaves the engine no ground on
+   *    which to scope by it. Tenant isolation for federated data belongs to
+   *    the remote and to the layers above (RBAC/RLS, the datasource binding),
+   *    not to a predicate the platform guesses onto someone else's table.
    *
    * System / isSystem callers may still cross tenants by clearing
    * `tenantId` themselves on the resulting object; this helper does not
@@ -2525,9 +2550,15 @@ export class ObjectQL implements IObjectQLEngine {
     // reaches the driver that owns it. It covers READS too, which have no gate
     // of their own and were riding the same wrong connection.
     const hasTx = tx !== undefined && this.transactionCoversDriverFor(object, tx);
+    const objectSchema = this._registry.getObject(object) as any;
+    // `external != null` is the same predicate `syncObjectSchema` routes a
+    // federated object by — one spelling of "this schema is the remote's",
+    // not a second reading of it.
+    const isFederated = objectSchema?.external != null;
     const hasTenant =
       execCtx?.tenantId !== undefined &&
-      !isTenancyDisabled(this._registry.getObject(object));
+      !isTenancyDisabled(objectSchema) &&
+      !isFederated;
     const hasTz = execCtx?.timezone !== undefined;
     const isSystem = execCtx?.isSystem === true;
     const preserveAudit = (execCtx as any)?.preserveAudit === true;
@@ -4726,6 +4757,52 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * [#7642] Strip the hidden `__search` companion column from what a read
+   * hands back, unless a SYSTEM caller named it in its projection.
+   *
+   * The column is declared client-invisible (`hidden` + `readonly` + `system`
+   * + `searchable: false`) and the enforcement that exists is real: it is kept
+   * out of auto-views, out of the `$search` auto-default, and a `$searchFields`
+   * override naming it is refused with a 400 ("is hidden"). What was missing is
+   * the PROJECTION half — a query that names no `fields` reaches the driver
+   * with `ast.fields` undefined, every driver answers that with `SELECT *`, and
+   * the companion rode back in every record body: list results, GET by id,
+   * `/search` hits (which are `engine.find` rows verbatim) and the 201 create
+   * body. The rule is applied HERE, at the engine, because the engine is the
+   * PRODUCER those four surfaces share; fixing them one consumer at a time is
+   * how three of the four would stay broken.
+   *
+   * Two carve-outs, both measured rather than defensive:
+   *
+   *  - **A system caller that asks for it by name keeps it.** The companion has
+   *    exactly one such reader: `plugin-pinyin-search`'s backfill/reconcile
+   *    walk, which projects `['id', ...sources, '__search']` under
+   *    `{ isSystem: true }` and compares the stored blob against the recomputed
+   *    one. Strip it unconditionally and that comparison reads `undefined`
+   *    every pass — the backfill would rewrite every row of every object on
+   *    every run, which is worse than the disclosure it was fixing.
+   *  - **A non-system caller does NOT keep it, even by name.** `select` only
+   *    gates on whether a field is KNOWN (`assertProjectionFieldsExist`), and
+   *    the companion is known once provisioned — so `?select=__search` would
+   *    otherwise be an open door straight through this strip, and a
+   *    client-invisibility rule with a documented spelling that bypasses it is
+   *    not one. `isSystem` is server-derived (never client input), the same
+   *    trust the read-only strips on the write path already place in it.
+   *
+   * ⚠️ `requestedFields` must be the CALLER's `fields`, captured before
+   * `planFormulaProjection` — that pass rewrites the projection to every stored
+   * column when a formula is in play, companion included.
+   */
+  private stripSearchCompanionFromRead(
+    rows: unknown,
+    requestedFields: readonly string[] | undefined,
+    context: ExecutionContext | undefined,
+  ): void {
+    if (context?.isSystem && isSearchCompanionRequested(requestedFields)) return;
+    stripSearchCompanion(rows);
+  }
+
+  /**
    * Dereference a stored secret ref back to its plaintext. Intended for
    * privileged, server-side consumers (e.g. a datasource connection-pool
    * binder) — NOT exposed through the generic read path, which only ever
@@ -6837,6 +6914,10 @@ export class ObjectQL implements IObjectQLEngine {
     const _findSchema = this._registry.getObject(object);
 
     this.expandSearchOnAst(ast, _findSchema);
+    // [#7642] The caller's OWN projection, captured before any planning pass
+    // rewrites it — the only thing that can answer "did this caller ask for
+    // `__search`?". See `stripSearchCompanionFromRead`.
+    const _findRequestedFields = Array.isArray(ast.fields) ? [...ast.fields] : undefined;
     // [#7095] Before the projection is planned and before anything is handed to
     // a driver: an ORDER BY this engine cannot materialise is refused, not
     // dropped. `fillQueryAstDefaults` has already normalised `orderBy` into
@@ -6923,6 +7004,12 @@ export class ObjectQL implements IObjectQLEngine {
           // resolveSecret() against the stored ref instead.
           this.maskSecretFields(object, hookContext.result);
 
+          // [#7642] …and never let the hidden `__search` companion column out
+          // through the default projection either. After the hooks, for the
+          // same reason the mask is: a server-side `afterFind` handler is not
+          // the client this column is hidden from.
+          this.stripSearchCompanionFromRead(hookContext.result, _findRequestedFields, opCtx.context);
+
           return hookContext.result;
       } catch (e) {
           this.logger.error('Find operation failed', e as Error, { object });
@@ -6993,6 +7080,8 @@ export class ObjectQL implements IObjectQLEngine {
     // dropped sort does not merely reorder the answer, it returns a DIFFERENT
     // record, and the one it returns looks exactly as legitimate.
     assertOrderByIsMaterializable(objectName, 'findOne', _findOneSchema, ast.orderBy);
+    // [#7642] Caller's own projection, before planning rewrites it — see `find`.
+    const _findOneRequestedFields = Array.isArray(ast.fields) ? [...ast.fields] : undefined;
     const _findOneFormula = planFormulaProjection(_findOneSchema, ast.fields);
     if (_findOneFormula.projected) ast.fields = _findOneFormula.projected;
 
@@ -7059,6 +7148,10 @@ export class ObjectQL implements IObjectQLEngine {
 
       // Mask secret fields — plaintext never leaves through the read path.
       this.maskSecretFields(objectName, hookContext.result);
+      // [#7642] Hidden `__search` companion — same door, same rule as `find`.
+      // This is the `GET /data/:object/:id` surface (`getData` reads through
+      // findOne), one of the four the issue measured.
+      this.stripSearchCompanionFromRead(hookContext.result, _findOneRequestedFields, opCtx.context);
 
       return hookContext.result;
     });
@@ -7625,6 +7718,15 @@ export class ObjectQL implements IObjectQLEngine {
           rowCtx.event = 'afterInsert';
           rowCtx.result = coerceBooleanFields(schemaForValidation as any, resultRows[k] as any);
           await this.triggerHooks('afterInsert', rowCtx);
+          // [#7642] The 201 create body is the surface most likely to be missed
+          // on this card, and the one no read-path fix reaches: `createData`
+          // returns `engine.insert`'s value verbatim as `record`, so the
+          // companion the `beforeInsert` stamp just wrote came straight back to
+          // the client. A write has no projection to consult, so there is no
+          // "asked for it by name" case to honour — the strip is unconditional.
+          // AFTER the hook dispatch, matching the read path: `afterInsert`
+          // handlers still observe the whole stored row.
+          stripSearchCompanion(rowCtx.result);
         }
 
         // Roll-up: recompute parent summary fields that aggregate this object.
@@ -8551,6 +8653,17 @@ export class ObjectQL implements IObjectQLEngine {
              }
            }
 
+           // [#7642] Same strip the create body gets, for the same reason: a
+           // by-id update resolves to a RECORD, `updateData` returns it as
+           // `record`, and the `beforeUpdate` companion stamp had just written
+           // `__search` into the row it echoes. The issue measured four
+           // surfaces and this is not one of them — it is the same column, the
+           // same contract and the same response shape, and leaving it out
+           // would mean POST and PATCH on one object disagreed about whether a
+           // client-invisible column is visible. A predicate update resolves to
+           // an affected-row COUNT (#4639), which the strip skips as a
+           // non-object.
+           stripSearchCompanion(hookContext.result);
            // The record IS updated; a summary that could not recompute after
            // retries must surface, not stay silent (framework#3147).
            if (summaryFailures.length > 0) throw new SummaryRecomputeError(summaryFailures, hookContext.result);

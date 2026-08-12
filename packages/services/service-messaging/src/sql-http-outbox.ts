@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import type { IDataEngine } from '@objectstack/spec/contracts';
 import { hashPartition } from './backoff.js';
 import { toEpochMs } from './audit-timestamp.js';
+import { deliveryBody, signBody } from './http-sender.js';
 import {
     HttpRedeliverError,
     type EnqueueHttpInput,
@@ -34,7 +35,7 @@ interface DeliveryRow {
     url: string;
     method?: string | null;
     headers_json?: string | null;
-    signing_secret?: string | null;
+    signature?: string | null;
     timeout_ms?: number | null;
     payload_json: string;
     partition_key: number;
@@ -106,7 +107,12 @@ export class SqlHttpOutbox implements IHttpOutbox {
             url: input.url,
             method: input.method ?? 'POST',
             headers_json: input.headers ? JSON.stringify(input.headers) : undefined,
-            signing_secret: input.signingSecret,
+            // Sign here, store only the signature (#7722). The body is decided
+            // at enqueue and replayed byte-for-byte by every retry, so one HMAC
+            // covers every attempt and the secret has no reason to be persisted.
+            signature: input.signingSecret
+                ? signBody(deliveryBody(input.payload), input.signingSecret)
+                : undefined,
             timeout_ms: input.timeoutMs,
             payload_json: JSON.stringify(input.payload ?? null),
             partition_key: hashPartition(input.refId, this.partitionCount),
@@ -268,7 +274,7 @@ export class SqlHttpOutbox implements IHttpOutbox {
             url: r.url,
             method: r.method ?? undefined,
             headers: r.headers_json ? JSON.parse(r.headers_json) : undefined,
-            signingSecret: r.signing_secret ?? undefined,
+            signature: r.signature ?? undefined,
             timeoutMs: r.timeout_ms ?? undefined,
             payload: JSON.parse(r.payload_json),
             status: r.status,

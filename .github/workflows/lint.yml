@@ -169,6 +169,24 @@ jobs:
       - name: Doc/skill authoring guard
         run: pnpm check:doc-authoring
 
+      # #7484 docs anchors: `lychee.toml` sets `include_fragments = "none"`, so
+      # the `Check Documentation Links` job resolves a link's FILE and never its
+      # `#anchor` — measured with the pinned lychee 0.24.2 under the CI argv, a
+      # link to a heading that does not exist is reported `[200] OK`. So a
+      # cross-file anchor was a two-sided invariant with no owner: rename the
+      # heading, leave the inbound link, ship green. This resolves every internal
+      # `#fragment` against the destination page's real heading ids, computed
+      # with `github-slugger` — the same package fumadocs-core renders the site
+      # with, so the gate and the renderer cannot disagree about a slug.
+      #
+      # It lives in this job rather than in check-links.yml for two reasons: it
+      # needs a workspace install (that job is deliberately a checkout plus two
+      # dependency-free `node` checks), and it is REQUIRED where that lane is
+      # advisory. The four anchors that were already dead were fixed in the same
+      # PR, so this ships with no baseline and no allowlist.
+      - name: Docs anchors resolve to real headings
+        run: pnpm check:doc-anchors
+
       # #4851: the docs-accuracy-audit workflow carries its default scope inline
       # (a workflow script runs in a vm with no filesystem, so it cannot enumerate
       # content/docs/ itself). Hand-kept, that list rotted in BOTH directions —

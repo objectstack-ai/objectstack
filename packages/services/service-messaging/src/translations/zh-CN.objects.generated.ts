@@ -329,8 +329,9 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       headers_json: {
         label: "请求头 JSON"
       },
-      signing_secret: {
-        label: "HMAC 密钥"
+      signature: {
+        label: "HMAC 签名",
+        help: "本次投递发送的 X-Objectstack-Signature(sha256=<hex>)。入队时计算,签名密钥不会落库。"
       },
       timeout_ms: {
         label: "超时(毫秒)"

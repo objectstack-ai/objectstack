@@ -209,6 +209,7 @@ export const ERROR_CODE_LEDGER = {
     'INTERNAL',
     'INVALID_REQUEST',
     'INVALID_RESUME_TOKEN',
+    'UPLOAD_SESSION_EXPIRED',     // chunk/complete against a session past its own expires_at (#7667)
     'UPLOAD_SESSION_NOT_FOUND',
   ],
   '@objectstack/service-i18n': [

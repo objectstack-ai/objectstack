@@ -247,10 +247,60 @@ describe('ADR-0067 — publishPackageDrafts records a commit', () => {
 /** A Studio authoring workspace id — writable under ADR-0070. */
 const APP_PKG = 'app.myapp';
 
+/**
+ * [#7819] `$or` / `$and` are understood, because a double that silently drops
+ * an operator does not answer "no match" — it answers a WRONG match.
+ *
+ * `revertCommit` and `rollbackToPackageCommit` resolve their target commit with
+ * `{ id, $or: [{ organization_id: <org> }, { organization_id: null }] }` so an
+ * org-scoped caller can reach a commit recorded env-wide. This helper was flat
+ * equality, so it compared `row['$or']` against the array and every lookup
+ * missed — including the two org-scoped cases below, whose seeded rows carry
+ * the caller's OWN org and therefore match the FIRST branch outright. Nothing
+ * about their subject (#6602's registry org-asymmetry) changed; the double just
+ * could not evaluate the predicate that now guards the door they enter through.
+ *
+ * ⚠️ CONJOINED with the sibling keys, in the entries loop — the corrected form
+ * #7846 just landed across six doubles in this package (part of #7620), and
+ * deliberately NOT the early-returning `if ($or) return …some(…)` shape those
+ * six carried before it. That shape discards every sibling equality key, so
+ * `{ id, $or: [...] }` would stop constraining `id` at all and this lookup
+ * would return SOME OTHER commit whose org happened to match. With one seeded
+ * commit per harness that is invisible today — which is exactly what makes it
+ * worth ruling out here rather than discovering later.
+ *
+ * This file was not among #7846's six because it had no operator handling at
+ * all to correct (pure flat equality), so it reads as a new member of the same
+ * #7620 lane rather than a regression of it.
+ *
+ * ⚠️ What this helper does NOT do is pin `$or` semantics — it is a
+ * reimplementation of them, so any assertion whose SUBJECT is the org predicate
+ * would be measuring this function rather than the protocol. No case in this
+ * file has that subject (which is precisely why this file could never see the
+ * #7705/#7779/#7819 family), and the operator's real behaviour against a real
+ * driver — whether `organization_id = 'org'` matches a NULL column — is pinned
+ * on a real engine in `packages/runtime/src/package-revert-commit-org-scope.
+ * integration.test.ts`. Keep it that way: do not add org-scoping cases here.
+ */
 const matchesWhere = (r: Record<string, unknown>, w: Record<string, unknown>): boolean => {
+  if (!w || typeof w !== 'object') return true;
   for (const [k, v] of Object.entries(w)) {
+    if (k === '$and' && Array.isArray(v)) {
+      if (!v.every((s: any) => matchesWhere(r, s))) return false;
+      continue;
+    }
+    if (k === '$or' && Array.isArray(v)) {
+      if (!v.some((s: any) => matchesWhere(r, s))) return false;
+      continue;
+    }
+    if (k.startsWith('$')) continue;
     if (v === undefined) continue;
-    if (r[k] !== v) return false;
+    // A column a row never set reads as NULL out of a real driver, so an
+    // absent field must satisfy `{ organization_id: null }` — the env-wide
+    // branch of the `$or`. Comparing `undefined !== null` would make this
+    // double refuse rows SQLite returns.
+    const actual = r[k] === undefined ? null : r[k];
+    if (actual !== v) return false;
   }
   return true;
 };

@@ -191,11 +191,25 @@ the diagnostics") is the workflow every dev agent runs, which is exactly why the
 window is wide. Use one of these instead — no shared state, all inside your own worktree:
 
 ```
-git checkout origin/main -- <path>          # then: git checkout <your-branch> -- <path>
 git diff > /tmp/wip.patch && git checkout -- <paths>    # then: git apply /tmp/wip.patch
 git commit -am wip                          # then: git reset --soft HEAD~1
 git worktree add ../objectstack-<task>-cmp <ref>        # a second tree to compare against
 ```
+
+**Doing reverse verification? Commit the fix FIRST.** Once it is committed, restoring is
+`git checkout <your-branch> -- <path>` — pulling the file back out of a commit that really
+exists. Running the same deletion against an **uncommitted** edit
+(`git checkout origin/main -- <path>`) leaves you no restore point at all: the working tree
+is the only copy, `git stash` is banned by the rule above, and `git checkout -- <path>`
+discarding local modifications is a normal, silent, exit-0 operation — no warning, no
+conflict, no "would be overwritten" refusal. The change is simply gone. Landed twice in one
+day in `objectui` (#4278 / PR #4293, #4243 / PR #4299) and once here (#7739 / PR #7791);
+every recovery depended on the change still being in the session transcript, so an
+incomplete transcript is a net loss. If you ever do retype a lost change, prove it is
+identical with `git diff` against a saved patch or `git hash-object <path>` — a matching
+`git diff --stat` insertion count is **not** byte-identity, and this failure mode is silent
+enough that only the strong check is worth anything. Then re-run the reverse verification
+from the committed state, so the red/green numbers you report are trustworthy.
 
 A third PreToolUse hook (`.claude/hooks/guard-shared-stash.sh`, mirrored from objectui
 after that incident — #5742) enforces this on the `Bash` matcher: it blocks the mutating

@@ -377,6 +377,80 @@ describe('validatePredicatePathRefs — path-shaped right-hand side (#7659)', ()
   });
 });
 
+describe('validatePredicatePathRefs — one position, one prescription (#7696)', () => {
+  const rhs = (source: string) =>
+    run(form([{ label: 'S', fields: [{ field: 'name', visibleWhen: source }] }]));
+
+  it('does not ALSO call a right-hand bare word a dropped root', () => {
+    // `type` is a declared key of DemoSchema, so before #7696 this drew
+    // `predicate-path-unrooted` at `error` ("write `data.type`") on top of the
+    // right-hand `warning` ("write `'type'`") — two findings, opposite fixes,
+    // and the blocking one asking for a spelling this same rule refuses.
+    const findings = rhs('data.name == type');
+    expect(findings.map((f) => f.rule)).toEqual([PREDICATE_RHS_PATH_SHAPED]);
+    expect(findings[0].severity).toBe('warning');
+  });
+
+  it('proves that silence is the stand-down, not a walk that stopped seeing keys', () => {
+    // Same schema key, LEFT of the comparison: the unrooted limb must still
+    // fire, or the assertion above is measuring a dead limb.
+    expect(rhs("type == 'formula'").map((f) => f.rule)).toEqual([PREDICATE_PATH_UNROOTED]);
+    // And in a right-hand slot it stays reported whenever it ALSO occurs
+    // somewhere that is not one.
+    expect(rhs('data.name == type && type').map((f) => f.rule).sort())
+      .toEqual([PREDICATE_PATH_UNROOTED, PREDICATE_RHS_PATH_SHAPED]);
+  });
+
+  it('stands down for `!=` as well, and not for a dotted chain', () => {
+    expect(rhs('data.name != type').map((f) => f.rule)).toEqual([PREDICATE_RHS_PATH_SHAPED]);
+    // A dotted chain is the `error` arm and was never part of the contradiction.
+    expect(rhs('data.name == data.type')[0].severity).toBe('error');
+  });
+
+  it('never suppresses inside a comprehension-macro body, where nothing replaces it', () => {
+    // `equalitySites` skips macro bodies, so an `==` in there produces no
+    // right-hand finding. Suppressing the unrooted verdict there would be a
+    // silence rather than a reconciliation.
+    expect(rhs('data.tags.all(t, t == type)').map((f) => f.rule)).toEqual([PREDICATE_PATH_UNROOTED]);
+  });
+
+  it('names both readings and refuses to prescribe the in-place rooting', () => {
+    const f = rhs('data.name == type')[0];
+    expect(f.hint).toMatch(/quote it: `== 'type'`/);
+    expect(f.hint).toMatch(/data\.type == 'yes'/);
+    expect(f.hint).toMatch(/Do NOT simply add the root in place/);
+    // The bar: BOTH spellings the message recommends must be clean…
+    expect(rhs("data.type == 'yes'")).toEqual([]);
+    expect(rhs("data.name == 'type'")).toEqual([]);
+    // …and the spelling it warns AGAINST must be reported, or the warning is
+    // noise. This is the exact edit the old `error` used to demand.
+    expect(rhs('data.name == data.type').map((x) => x.severity)).toEqual(['error']);
+  });
+
+  it('the LEFT-side spelling it recommends is judged on its own merits, not circular', () => {
+    // If the word names no field at all, moving it left is answered by #7214 —
+    // "`active` is not a key" — which is a NEW statement about a different
+    // mistake, not the old ring-around. The right-hand rule has nothing further
+    // to say once the token is out of the literal slot.
+    expect(rhs("data.active == 'yes'").map((x) => x.rule)).toEqual([PREDICATE_PATH_UNRESOLVED]);
+  });
+
+  it('judges the right-hand position on a form whose schemaId resolves to nothing', () => {
+    // The two resolution limbs need an oracle and correctly go quiet; the
+    // right-hand limb never did. Walking past the whole site made the
+    // stand-down above a silence on this shape, so the site is now walked with
+    // no scope instead of skipped.
+    const unknown = (source: string) =>
+      run(form([{ label: 'S', fields: [{ field: 'name', visibleWhen: source }] }], 'no_such_type'));
+    expect(unknown('data.a == data.b').map((f) => f.rule)).toEqual([PREDICATE_RHS_PATH_SHAPED]);
+    expect(unknown('data.a == active').map((f) => f.severity)).toEqual(['warning']);
+    // The resolution limbs stay silent there — no oracle, no verdict.
+    expect(unknown("data.tpye == 'x'")).toEqual([]);
+    // Control: the same predicate against a schema that DOES resolve reports.
+    expect(rhs("data.tpye == 'x'").map((f) => f.rule)).toEqual([PREDICATE_PATH_UNRESOLVED]);
+  });
+});
+
 describe('registry wiring', () => {
   it('is registered in AUTHORING_RULES as a gating rule on all three commands', () => {
     const entry = AUTHORING_RULES.find((r) => r.name === 'validatePredicatePathRefs');

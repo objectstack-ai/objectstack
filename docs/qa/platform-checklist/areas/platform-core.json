@@ -365,7 +365,7 @@
       "title": "Metadata authoring round-trip: draft → publish on a WRITABLE package; read-only packages and locked types are server-side refused",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -401,7 +401,7 @@
         {
           "clause": "Studio's designer authors through the same pipeline: creating a record page issues PUT /api/v1/meta/page/<name> bound to its object and seeded from the default layout",
           "oracle": "network",
-          "verify": "capture the PUT during Studio create (pinned by objectui e2e/live/studio-record-page.spec.ts, which waits on exactly that request)",
+          "verify": "capture the PUT during Studio create. ⚠ Drive it by hand: the pin (objectui e2e/live/studio-record-page.spec.ts, which waits on exactly that request) is STALE against the current surface — it fills the Object control as an input when it is now a role=combobox button — see automated.stale",
           "evidence": "the captured PUT"
         },
         {
@@ -429,7 +429,19 @@
         "a published view that never appears in the console after reload is a FAIL of the round-trip even though every API call returned success (check against a fresh objectui build before filing — stale-console-bundle)"
       ],
       "traps": ["dispatcher-vs-hono-route", "stale-console-bundle"],
-      "automated": { "kind": "api", "ref": "packages/qa/dogfood/test/package-first-authoring.dogfood.test.ts; objectui: e2e/live/studio-record-page.spec.ts, e2e/live/studio-object-designer.spec.ts" },
+      "automated": {
+        "kind": "api",
+        "ref": "packages/qa/dogfood/test/package-first-authoring.dogfood.test.ts; objectui: e2e/live/studio-record-page.spec.ts, e2e/live/studio-object-designer.spec.ts",
+        "stale": {
+          "since": "2026-08-11",
+          "observedIn": "#7695",
+          "ref": "#7753 item 6",
+          "partial": "objectui: e2e/live/studio-record-page.spec.ts ONLY",
+          "why": "STALE, NOT RED — that spec fills the Object control as an input when it is now a `role=combobox` button, so it fails against the CURRENT surface rather than against a product defect. The dogfood pin (package-first-authoring) and studio-object-designer.spec.ts are unaffected; object-designer-roundtrip's 4th ref, from the same class, was already repaired (package-create moved to /_console/studio).",
+          "runnerRule": "The Studio-designer clause here (clause 3, 'creating a record page issues PUT /api/v1/meta/page/<name>') must be driven by hand — capture the PUT in the browser — until the spec is re-pointed; do not cite its output and do not score its failure as this item's FAIL. Every other clause keeps its own oracle.",
+          "ownedBy": "objectui — re-pointing the spec is a cross-repo half of #7753, reported not edited from this repo"
+        }
+      },
       "source": [
         "packages/runtime/src/route-ledger.ts (PUT /meta/:type/:name, GET /meta/_drafts, GET /meta/:type/:name/published, POST /packages/:id/publish-drafts)",
         "packages/spec/src/kernel/metadata-plugin.zod.ts (allowOrgOverride 403 not_overridable contract; validateOnWrite; registry flags per type)",
@@ -437,7 +449,8 @@
         "ADR-0033 (drafts / publish)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "initial — grounds the Studio authoring pipeline end-to-end with both deny gates as first-class clauses", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-07", "change": "initial — grounds the Studio authoring pipeline end-to-end with both deny gates as first-class clauses", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-11", "change": "annotated the objectui e2e/live/studio-record-page.spec.ts half of this item's automated.ref as STALE (run #7695): it fills the Object control as an input when it is now a role=combobox button, so it fails against the current surface, not against a defect. The Studio-designer clause now says drive it by hand until the spec is re-pointed; the dogfood pin and studio-object-designer.spec.ts are unaffected. Re-pointing lives in objectui (cross-repo half of #7753 item 6)", "ref": "#7753" }
       ]
     },
     {
