@@ -126,7 +126,12 @@ the farm exactly once either way. Your local pass: ① build closure first
 packages' own `pnpm test` / `pnpm typecheck`, scoped by `--filter`; ③ the gate families the
 dispatch prompt names, plus any you can see are implicated (a new fake engine ⇒
 `check:engine-double-contract`; a new error code ⇒ `check:error-code-casing`;
-`.claude/agents/**` ⇒ `check:agent-model-declared`; any edit ⇒ `check:nul-bytes`). The
+`.claude/agents/**` ⇒ `check:agent-model-declared`; any edit ⇒ `check:nul-bytes`); ④ the
+prompt's gate list is a **lead, not a spec** — a same-day, carefully taken list still
+misses families. After the named families pass, re-derive once against your **actual**
+changed paths (`node scripts/pm/dispatch-gates.mjs <changed paths>`), run any family it
+surfaces that the prompt missed and your diff really touches, and name the addition in
+your report — one O(1) derivation, and naming accuracy stops resting on the PM alone. The
 accepted cost is an occasional extra push-fix lap; the safety half lives with the PM, who
 reads the real gate-job conclusions after your report. ⛔ Not licence to skip the named
 families — they are the cheap half you still owe; what you no longer owe is waiting for CI
@@ -164,14 +169,24 @@ silence is the expected shape, never permission:
   then regenerate (mechanized: `bash scripts/pm/os-regen-merge.sh`). Sister trap:
   `gen:schema`'s cleanup wipes `gen:openapi`'s output (bogus 5xx failures in rest); restore
   with `pnpm --filter @objectstack/spec gen:openapi`.
-- **⛔ Take a fix out with `git checkout`, a patch file or a temp commit — NEVER
-  `git stash`.** The worktree isolates files and HEAD, not `refs/stash`, which is one LIFO
-  stack shared by every worktree: two agents stashing swap entries, `pop` reports success
-  while restoring the *other's* changes, and a following `git add -A` commits their
-  half-finished work into your PR. A hook blocks the mutating forms; alternatives, all
-  inside your own worktree: `git checkout origin/main -- <path>`;
-  `git diff > /tmp/wip.patch && git checkout -- <paths>`; `git commit -am wip` then
-  `git reset --soft HEAD~1`.
+- **⛔ Take a fix out with a temp commit or a patch file — NEVER `git stash`.** The
+  worktree isolates files and HEAD, not `refs/stash`, which is one LIFO stack shared by
+  every worktree: two agents stashing swap entries, `pop` reports success while restoring
+  the *other's* changes, and a following `git add -A` commits their half-finished work
+  into your PR. A hook blocks the mutating forms; safe alternatives, all inside your own
+  worktree: `git commit -am wip` then `git reset --soft HEAD~1`;
+  `git diff > /tmp/wip.patch && git checkout -- <paths>` then `git apply /tmp/wip.patch`.
+- **Doing reverse verification ("revert the fix, watch the diagnostics")? Commit the fix
+  FIRST.** Committed, restoring is `git checkout <your-branch> -- <path>` — the file comes
+  back out of a commit that really exists. Against an **uncommitted** edit,
+  `git checkout origin/main -- <path>` leaves no restore point at all: the working tree is
+  the only copy, the stash is banned above, and discarding local modifications is a
+  normal, silent, exit-0 operation — the change is simply gone, and every recovery so far
+  depended on the change still being in the session transcript. If you ever retype a lost
+  change, prove identity with `git diff` against a saved patch or `git hash-object <path>`
+  — a matching `--stat` insertion count is **not** byte-identity — then re-run the reverse
+  verification from the committed state, so the red/green numbers you report are
+  trustworthy.
 - **Rejection-class cases assert the envelope, not the throw.** Minimum assertion set: the
   error's **`code` AND `status`** (the ADR-0112 envelope). `expect(...).toThrow()` alone is
   not a rejection test — measured both ways it goes blind: an unfixed driver throwing a bare
@@ -213,7 +228,14 @@ silence is the expected shape, never permission:
   not close the card** (you implemented only the actionable half; the other half sits in the
   decision box or was excluded by scope; say which half you left). ⛔ Never `Fixes` a card
   still in the decision box — merging silently closes it and the inbox filter only reads
-  open issues. Title and prose in **English** (GitHub artifacts are English per the
+  open issues. ⛔ **A negated closing sentence still closes the card it names**: GitHub's
+  closing-keyword parser matches `fix/fixes/fixed/close/closes/closed` and
+  `resolve/resolves/resolved` + `#<n>` and ignores any negation in front — a body sentence written to
+  declare a card out of scope is exactly what closes it on merge. Keep closing keywords
+  away from other cards' numbers; write `#<n> is not addressed here`,
+  `out of scope: #<n>`, or `#<n> remains open`. The PR body and the commit message are
+  parsed as **separate** sources — a clean commit message proves nothing about the body.
+  Title and prose in **English** (GitHub artifacts are English per the
   maintainer ruling of 2026-08-08 in AGENTS.md; a quoted Chinese ruling stays verbatim and
   untranslated — rewriting a quoted ruling is rewriting the ruling). Close the body with the
   **session-URL** attribution footer (see "Byte and sanitizer discipline").

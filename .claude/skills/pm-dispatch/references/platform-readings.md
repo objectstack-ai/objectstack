@@ -83,6 +83,20 @@
   接。dev 的临时目录(`.os-scratch/` 一类)是工作物不是交付物,清掉,⛔ 不进
   feature PR。
 
+## 闭合关键词解析(PR 正文写侧)
+
+- **PR 正文里「不修某卡」的否定句会关掉那张卡**:GitHub 的闭合关键词解析器匹配
+  `fix/fixes/fixed/close/closes/closed/resolve/resolves/resolved` + `#N`,**不理会前
+  面的否定词** ——「nothing here fixes #N」在合并时照关 #N,而写这句话的动机恰恰是声
+  明不修;好实践(读了兄弟卡、显式划界)反而制造了失效。安全写法:把号码放在没有关
+  键词打头的位置 —— `#N is not addressed here` / `out of scope: #N` /
+  `#N remains open`。
+- **PR body 与 squash commit message 是两个独立解析源**:commit message 只有
+  `Fixes` 首行、看起来干净,不代表 body 干净 —— 只查 commit 会漏。误关的卡以
+  `completed` 状态对一切「只看 open」的过滤与巡检隐身,没有任何机械守卫覆盖这条路
+  径(duplicate-fix-guard 比的是两个 PR 抢同一张卡,这是一个 PR 多关了一张没人抢的
+  卡);消费侧检查 = 合并后读 `closed_by_pull_requests`(在复核清单)。
+
 ## 断粮检测与跨墙恢复细则(5 小时用量墙)
 
 - **检测**:`npx ccusage blocks` 在容器内可用(读本地会话记录),两个有用读数 ——
