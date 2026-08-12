@@ -617,9 +617,20 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
     return result ?? null;
 }
 
+/**
+ * [#7828] Declared semantics only. `confirmText` is UI dialog copy — the
+ * platform's own authoring convention (#7278/#7309) is actively moving confirm
+ * questions onto `description`, so keying an AI-facing safety property off
+ * `confirmText`'s mere presence classifies on copy the author never intended
+ * as a safety signal, and erodes as that migration proceeds (6 of the 14
+ * #7309 identity actions flipped to "not destructive" the moment their
+ * `confirmText` was removed). `mode: 'delete'` and `variant: 'danger'` are
+ * closed, declared enumerations an author sets on purpose — those remain the
+ * signal. Maintainer ruling: issue #7828, comment 5265943521 (Option A).
+ */
 export function actionLooksDestructive(_deps: ActionExecutionDeps, action: any): boolean {
     if (action?.ai?.requiresConfirmation !== undefined) return Boolean(action.ai.requiresConfirmation);
-    return Boolean(action?.confirmText || action?.mode === 'delete' || action?.variant === 'danger');
+    return Boolean(action?.mode === 'delete' || action?.variant === 'danger');
 }
 
 export function summarizeAction(deps: ActionExecutionDeps, action: any, obj: any, objectName: string): any {

@@ -33,8 +33,20 @@ export default defineConfig({
     // swallow any subpath and resolve it to `…/src/index.ts/<subpath>`
     // (ENOTDIR) — a config that looks right and fails at run time. Same shape
     // as `service-storage`'s and `service-knowledge`'s.
+    //
+    // `@objectstack/metadata-core` (#7858) is on the same footing, and reaches
+    // the tests two ways: `federated-phantom-owner-scoping.test.ts` imports
+    // `OWNER_FIELD_DEF` to build its fixture, and `federated-phantom-anchors.ts`
+    // — pulled in transitively by `sharing-service.ts` — imports the same
+    // constant to compare against. That constant IS the provenance test's
+    // subject: it decides whether a federated object's `owner_id` is the
+    // platform's injected anchor or a column its author declared. Resolved from
+    // `dist/`, a stale copy would move the verdict without moving the assertion
+    // — the guard would answer about a definition that is no longer shipped,
+    // and stay green while doing it.
     alias: [
       { find: /^@objectstack\/driver-sql$/, replacement: path.resolve(__dirname, '../../drivers/driver-sql/src/index.ts') },
+      { find: /^@objectstack\/metadata-core$/, replacement: path.resolve(__dirname, '../../metadata-core/src/index.ts') },
     ],
   },
 });

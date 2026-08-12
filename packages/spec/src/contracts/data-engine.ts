@@ -26,6 +26,32 @@ import type { IDataDriver } from './data-driver.js';
  * surface a warning instead of a silent success (#3356's masked stage
  * write-backs).
  *
+ * ## What is NOT a drop: the address of a single-record write (#8093)
+ *
+ * A drop is a field the CALLER SUPPLIED and the engine REFUSED. On a by-id
+ * update the payload's `id`, when it equals the row the call is bound to, is
+ * the write's ADDRESS rather than part of its payload — it was refused nothing
+ * — so it is never reported here, even on the many objects that declare `id`
+ * as `readonly: true` and even though the strip does still remove it from the
+ * SET clause. Callers that FOLD an address into the payload get the same
+ * answer: `metadata-protocol`'s `updateData` appends the path id so a body
+ * `id` cannot bind a row other than the one the URL and the OCC check name
+ * (#6479), and that fold must not read back as a refused field.
+ *
+ * This is a report boundary, not a strip boundary, and the distinction is
+ * load-bearing in both directions: an `id` the update dispatch has RULED is
+ * not an identifier is a real drop and is still reported (`primary_key`,
+ * #6437), and a predicate/multi write — which addresses nothing by key — still
+ * reports a caller-supplied `id` in full.
+ *
+ * Why it matters more than one spurious warning: consumers render these events
+ * to end users, so an event nobody can act on teaches users that the channel
+ * is noise. #8093 was measured as a warning toast on every org switch, from an
+ * internal preference write; #3431 / #3794 were the same failure one field over
+ * (`updated_at`), and the lesson recorded there is the one that applies —
+ * a warning about a field the user never touched drowns the real signal the
+ * warning exists for.
+ *
  * Lives on the TS contract — NOT in the serializable Zod options schemas
  * (`EngineUpdateOptionsSchema` etc.): a function is unrepresentable in JSON
  * Schema and cannot cross the RPC (Virtual Data Engine) boundary, so remote

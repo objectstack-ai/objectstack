@@ -172,7 +172,6 @@ const KNOWN_UNALIASED_TEST_IMPORTS = {
     '@objectstack/service-analytics', '@objectstack/service-messaging', '@objectstack/service-storage',
     '@objectstack/spec', '@objectstack/types', '@objectstack/verify',
   ],
-  '@objectstack/downstream-contract': ['@objectstack/spec'],
   '@objectstack/driver-mongodb': [
     '@objectstack/core', '@objectstack/objectql', '@objectstack/spec', '@objectstack/types',
   ],

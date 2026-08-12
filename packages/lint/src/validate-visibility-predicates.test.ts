@@ -1,5 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { describe, it, expect } from 'vitest';
 import {
   validateVisibilityPredicates,
@@ -1134,5 +1138,129 @@ describe('visibility-predicate-over-budget (#7217)', () => {
     const findings = overBudgetFindings(stack);
     expect(findings.map((f) => f.path)).toEqual(['pages[0].regions[0].components[0]']);
     expect(findings[0].where).toBe('page "p"');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// #8042 — the emitted prose names the SURFACE, never one authoring route's
+// filename.
+//
+// Since #7815 the metadata layer is reachable at the runtime publish gate
+// (`authoring-rules.ts` → `validateVisibilityPredicates(stack)`, no options):
+// a form view declaring `data: { provider: 'schema', schemaId }` is judged
+// there on its own say-so. That door's audience is a Studio / REST `/meta` /
+// MCP author who has no `*.form.ts` to open, so a message that justified the
+// layer by naming that file prescribed correctly and then explained itself
+// somewhere the reader cannot go.
+//
+// Every case below calls with NO options, which IS the gate's call shape.
+// Nothing here judges severity, ids or firing conditions — those are pinned
+// above and by `runtime-gate.test.ts`, and #8042 changed none of them.
+// ─────────────────────────────────────────────────────────────────────
+describe('emitted prose names the surface, not a source file (#8042)', () => {
+  /** A schema-bound metadata-editing form — the shape the publish gate meets. */
+  const publishedForm = (predicate: string) => ({
+    views: [{
+      name: 'field_editor',
+      data: { provider: 'schema', schemaId: 'field' },
+      sections: [{ fields: [{ field: 'notes', visibleWhen: predicate }] }],
+    }],
+  });
+
+  /** Any `*.view.ts` / `*.page.ts` / `*.form.ts` spelling, in any position. */
+  const SOURCE_FILENAME = /\.(form|view|page)\.ts/;
+
+  it('the mis-layered advisory explains the metadata layer without naming a file', () => {
+    const f = validateVisibilityPredicates(publishedForm("record.type == 'grid'"))
+      .find((x) => x.rule === VISIBILITY_ROOT_MISLAYERED);
+    // Paired first: a silence would satisfy every `not.toContain` below.
+    expect(f, 'the advisory must still fire on a `record.`-rooted schema-bound form').toBeDefined();
+    expect(f!.message).not.toMatch(SOURCE_FILENAME);
+    expect(f!.hint).not.toMatch(SOURCE_FILENAME);
+    // The prescription is byte-for-byte what it was: same root, same severity.
+    expect(f!.severity).toBe('warning');
+    expect(f!.message).toContain('metadata-editing form');
+    expect(f!.hint).toBe(
+      'Metadata-editing forms bind `data` (the row under edit). Use e.g. '
+      + "`data.type == 'grid'` instead of `record.type == 'grid'`.",
+    );
+  });
+
+  it("the bare-identifier hint still prescribes `data.`, and still names no file", () => {
+    const f = bareFindings(publishedForm('status == active'))[0];
+    expect(f, 'the refusal must still fire on a bare word in the LEFT position').toBeDefined();
+    expect(f.severity).toBe('error');
+    expect(f.hint).toContain('`data.status`');
+    expect(f.hint).not.toMatch(SOURCE_FILENAME);
+  });
+
+  it('the RUNTIME arm is file-free too — the mirror sentence carried the same defect', () => {
+    // A view or page published through Studio has no `*.view.ts` either, and
+    // this arm explained the forbidden `data.` root by naming `*.form.ts`. Same
+    // class, other direction; fixing only the graded arm would have left half
+    // the sentence pointing at a file.
+    const f = validateVisibilityPredicates(formStack("data.type == 'grid'"))[0];
+    expect(f.rule).toBe(VISIBILITY_ROOT_MISLAYERED);
+    expect(f.severity).toBe('warning');
+    expect(f.message).not.toMatch(SOURCE_FILENAME);
+    expect(f.message).toContain('`data.`');
+    // Untouched — the runtime hint was already written surface-first.
+    expect(f.hint).toContain("`record.status == 'open'`");
+  });
+
+  it('no finding this module emits names a source file — the whole family, both layers', () => {
+    // The mechanical pin. One case per rule id per layer, so a future edit that
+    // reintroduces a filename in ANY arm goes red here rather than at a
+    // tenant's publish door.
+    const cases: Array<[string, Record<string, unknown>]> = [
+      ['mislayered · runtime', formStack("data.type == 'grid'")],
+      ['mislayered · metadata', publishedForm("record.type == 'grid'")],
+      ['bare-identifier · runtime', formStack("status == 'active'")],
+      ['bare-identifier · metadata', publishedForm("status == 'active'")],
+      ['syntax · runtime', formStack('country === "USA"')],
+      ['syntax · metadata', publishedForm('country === "USA"')],
+      ['over-budget · runtime', formStack(OVER_AST_NODES)],
+      ['over-budget · metadata', publishedForm(OVER_AST_NODES)],
+    ];
+    for (const [name, stack] of cases) {
+      const findings = validateVisibilityPredicates(stack);
+      // Non-vacuous: every row must actually produce the finding it is named for.
+      expect(findings.length, `${name} produced nothing — the case has gone blind`).toBeGreaterThan(0);
+      for (const f of findings) {
+        expect(f.message, `${name} message`).not.toMatch(SOURCE_FILENAME);
+        expect(f.hint, `${name} hint`).not.toMatch(SOURCE_FILENAME);
+      }
+    }
+  });
+
+  it('the file-aware caller reads the SAME prose — this changed strings, not a code path', () => {
+    // `MISLAYER_BY_LAYER` is keyed by LAYER, not by how the layer was decided,
+    // so a caller passing `opts.layer = 'metadata'` (the file-aware caller,
+    // linting a real `*.form.ts`) reads exactly what the published-through-
+    // Studio author reads. Pinned because the tempting shape of this fix — fork
+    // the wording by caller and give the file-aware one its filename back — is
+    // two messages for one condition, which #5240 rules out.
+    const viaOption = validateVisibilityPredicates(formStack("record.type == 'grid'"), { layer: 'metadata' })
+      .find((x) => x.rule === VISIBILITY_ROOT_MISLAYERED);
+    const viaDerivation = validateVisibilityPredicates(publishedForm("record.type == 'grid'"))
+      .find((x) => x.rule === VISIBILITY_ROOT_MISLAYERED);
+    expect(viaOption, 'the file-aware path must still reach the metadata arm').toBeDefined();
+    expect(viaDerivation).toBeDefined();
+    expect(viaOption!.message).toBe(viaDerivation!.message);
+    expect(viaOption!.hint).toBe(viaDerivation!.hint);
+  });
+
+  it('the file-aware CALLER contract keeps its filename — this was not a find-and-replace', () => {
+    // The discrimination that IS the card. What was wrong is prose addressed to
+    // an AUTHOR who may hold no file; `opts.layer` is addressed to a CALLER that
+    // is linting one, where `*.form.ts` is both accurate and the useful word. A
+    // blanket strip would have deleted that too, and would pass every assertion
+    // above — this is the one that notices.
+    const source = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), 'validate-visibility-predicates.ts'),
+      'utf8',
+    );
+    expect(source).toContain('a file-aware caller linting a `*.form.ts` does');
+    expect(source).toContain('when linting a `*.form.ts` metadata-editing form');
   });
 });

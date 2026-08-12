@@ -711,6 +711,14 @@ panel. Recent runs are held in an in-memory ring buffer; terminal runs
 history with a bounded step log, so `listRuns` / `getRun` still report a run's
 status, steps, and failure reason after a restart or ring-buffer eviction.
 
+Runs still **in flight** survive the same way. A run parked at an `approval`,
+`screen` or `wait` node is persisted as a live suspension row, and both
+`listRuns` (including `?status=paused`) and `getRun` read those rows back — so
+after a restart the Runs view shows what is *waiting*, not only what finished.
+A paused run reports its trigger attribution and its variable snapshot exactly
+as it did before the restart; it carries no `durationMs`, because a suspension
+records when the run started, not when it parked.
+
 ### Run summaries
 
 A run that reports `success: true` has not told you it did its job. A scheduled

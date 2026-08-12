@@ -60,6 +60,7 @@
     "check:error-code-casing": "node scripts/check-error-code-casing.mjs --self-test && node scripts/check-error-code-casing.mjs",
     "check:wildcard-fallthrough": "node scripts/check-wildcard-fallthrough.mjs --self-test && node scripts/check-wildcard-fallthrough.mjs",
     "check:meta-type-normalized": "node scripts/check-meta-type-normalized.mjs --self-test && node scripts/check-meta-type-normalized.mjs",
+    "check:filter-alias-parity": "node scripts/check-filter-alias-parity.mjs --self-test && node scripts/check-filter-alias-parity.mjs",
     "check:init-service-contract": "node scripts/check-init-service-contract.mjs --self-test && node scripts/check-init-service-contract.mjs",
     "check:kernel-hook-pairs": "node scripts/check-kernel-hook-pairs.mjs --self-test && node scripts/check-kernel-hook-pairs.mjs",
     "check:durability-log-level": "node scripts/check-durability-degradation-log-level.mjs --self-test && node scripts/check-durability-degradation-log-level.mjs",

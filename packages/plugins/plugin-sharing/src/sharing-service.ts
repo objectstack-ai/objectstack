@@ -22,6 +22,7 @@ import {
 // way out of its own contract to read fields the caller had already supplied.
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { WRITE_ACCESS_LEVELS, normalizeAccessLevel } from './access-level.js';
+import { hasPhantomOwnerAnchor } from './federated-phantom-anchors.js';
 import {
   deleteRowsForDeletedRecords,
   sweepOrphanedRowsByRecordExistence,
@@ -289,6 +290,16 @@ export class SharingService implements ISharingService {
     if (!schema) return null;
     if (effectiveSharingModel(schema) !== 'private') return null;
     if (!hasOwnerField(schema)) return null;
+    // [#7858] …and an `owner_id` the REGISTRY injected into a FEDERATED object
+    // is not an owner column at all: the platform provisions no storage for one,
+    // so the column exists in the schema and in no store. Scoping by it composes
+    // a predicate the remote table cannot resolve — constant-false on SQLite
+    // (0 rows, HTTP 200), a hard error on Postgres/MySQL — which is why this
+    // reads as "ownership contributes nothing", exactly like the owner-less
+    // object one line up, rather than as a narrower filter. A federated object
+    // that DECLARES a real remote owner column keeps its scoping, and every
+    // local object is untouched; see `federated-phantom-anchors.ts`.
+    if (hasPhantomOwnerAnchor(schema)) return null;
     if (!context.userId) {
       // Authenticated context with no user id is a degenerate case
       // (e.g. anonymous API key). Restrict to nothing rather than
@@ -366,6 +377,12 @@ export class SharingService implements ISharingService {
     if (!schema) return null;
     if (effectiveSharingModel(schema) === 'public') return null;
     if (!hasOwnerField(schema)) return null;
+    // [#7858] The write half of the same phantom-anchor test the read filter
+    // applies — the card measured BOTH gates. Fixing only the read half would
+    // leave a bulk `update`/`delete` AND-composing `owner_id = <caller>` onto a
+    // federated table that has no such column: the same constant-false /
+    // hard-error split, here silently touching zero rows instead of refusing.
+    if (hasPhantomOwnerAnchor(schema)) return null;
     if (!context.userId) {
       // Authenticated but principal-less → edit nothing (fail closed),
       // mirroring buildReadFilter's degenerate-context handling.

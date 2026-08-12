@@ -56,6 +56,11 @@ import type { DirectMountedRoute, MountedRouteSource } from './direct-mount.js';
 import { RestServerConfig, RestApiConfig, CrudEndpointsConfig, MetadataEndpointsConfig, BatchEndpointsConfig, RouteGenerationConfig } from '@objectstack/spec/api';
 import { DataProtocol, MetadataProtocol } from '@objectstack/spec/api';
 import type { FieldErrorCode } from '@objectstack/spec/api';
+// [#8073] The closed ADR-0112 error vocabulary, so the explain family's single
+// refusal emitter types its `code` parameter as the vocabulary rather than as
+// `string` — an invented code is a compile error at the call site instead of a
+// runtime surprise on whichever arm a test happens to drive.
+import type { ErrorCode } from '@objectstack/spec/api';
 // The async-import row ceiling has exactly one definition, in the spec, whose
 // TSDoc is its public statement (#6535). rest is the only enforcer, so it reads
 // that export rather than re-declaring the literal beside a "mirrors spec" comment.
@@ -72,6 +77,16 @@ import {
     effectiveOperationsArray,
     DATA_ACTION_TO_API_OPERATION,
 } from '@objectstack/spec/data';
+// [#8013] The SHARED envelope writer (#3973), aliased: this module already has a
+// module-scope `sendError` of its own — the sanitizing responder that maps a
+// THROWN error onto a status — and the two are not interchangeable. This one
+// emits the declared `{ success: false, error: { code, message } }` for a refusal
+// the handler DECIDED, with `code` typed to the closed ADR-0112 vocabulary rather
+// than `string`. Adding a call site here moves no `check:route-envelope` count:
+// the body literal lives in `@objectstack/types` (the pinned `SHARED_BUILDER`),
+// and this file is audited `dialectOnly` for the two non-conforming dialects it
+// still emits — which this deliberately is not.
+import { sendError as sendEnvelopeError } from '@objectstack/types';
 
 /**
  * The protocol slice the REST layer actually consumes (ADR-0076 D9 / #2462
@@ -3211,7 +3226,59 @@ export class RestServer {
      * is why this used to sniff the shape. There is one shape now.
      */
     private filterAppForUser(item: any, sysPerms: Set<string>, serviceGate?: (name: string) => boolean): any | null {
-        if (!item || typeof item !== 'object') return item;
+        return this.filterAppForUserWithReason(item, sysPerms, serviceGate).app;
+    }
+
+    /**
+     * {@link filterAppForUser}, plus WHICH gate withheld the app.
+     *
+     * The gate above collapses three different refusals into one `null`, and for
+     * the LIST route that is exactly right — every one of them means "not in
+     * your list". The by-name route is where they stop being the same answer
+     * (#8013).
+     *
+     * ## Why the caller needs the reason
+     *
+     * `GET /meta/app/<name>` answered a 404-equivalent for all three, so an
+     * app the session may never use and an app that does not exist were
+     * BYTE-IDENTICAL on the wire. The console has nothing to branch on, so it
+     * renders its only copy for an absent app — "it may still be publishing" —
+     * over a permanent authorization denial. Measured cost (objectui#4252): two
+     * acceptance-test batches spent chasing a "platform defect" that was a
+     * missing permission-set binding.
+     *
+     * ## Only ONE of the three converts, and that is the whole design
+     *
+     * The maintainer ruling (2026-08-12) licenses an explicit denial for
+     * `permission` alone. The other two keep answering absence, for reasons
+     * that are not stylistic:
+     *
+     *  - `unpublished` — ADR-0045 §3 says an unpublished app is *externally
+     *    unobservable*, not merely unlisted. A 403 confirms existence, which is
+     *    precisely what that contract withholds; `meta-app-publish-gate.test.ts`
+     *    has pinned the 404-over-403 choice since #4829 and it stands.
+     *  - `service` — an absent optional kernel service (ADR-0057 D10) is a
+     *    deployment fact about the platform, not a statement about this caller.
+     *    Nothing is denied TO the session, so there is no denial to report.
+     *
+     * That partition is the security boundary of #8013, and it cuts one way
+     * only: a denial for `permission` makes an app the caller may not use
+     * observable BY NAME, which the ruling accepts because a by-name probe
+     * already implies the name. Widening it to a name that resolves to nothing
+     * would make every app name on the platform enumerable — a different and
+     * unruled change. Hence `withheld` is set from the branch that fired, never
+     * inferred from `app == null` at the call site.
+     *
+     * Ordering is load-bearing for the same reason: `unpublished` is judged
+     * FIRST, so an app that is both unpublished and permission-gated reports
+     * `unpublished` and stays absent. ADR-0045 §3 wins over the disclosure.
+     */
+    private filterAppForUserWithReason(
+        item: any,
+        sysPerms: Set<string>,
+        serviceGate?: (name: string) => boolean,
+    ): { app: any | null; withheld?: 'unpublished' | 'permission' | 'service' } {
+        if (!item || typeof item !== 'object') return { app: item };
         // ADR-0045 §3 (as revised 2026-08, #4829) — the publish gate. An
         // UNPUBLISHED app is externally unobservable, not merely unlisted: only
         // builders (studio/setup access) receive it at all, for direct-URL
@@ -3229,20 +3296,20 @@ export class RestServer {
         // system. A hidden app is fully routable and permission-checked here;
         // only `_unpublished` withholds it.
         if (item._unpublished === true && !sysPerms.has('studio.access') && !sysPerms.has('setup.access')) {
-            return null;
+            return { app: null, withheld: 'unpublished' };
         }
         const reqApp = Array.isArray(item.requiredPermissions) ? item.requiredPermissions : [];
         if (reqApp.length > 0 && !reqApp.every((p: string) => sysPerms.has(p))) {
-            return null;
+            return { app: null, withheld: 'permission' };
         }
         // ADR-0057 D10 — capability gate: hide when the named kernel service is
         // absent. Fail-open when the gate can't be probed (serviceGate undefined).
         if (typeof item.requiresService === 'string' && serviceGate && serviceGate(item.requiresService) === false) {
-            return null;
+            return { app: null, withheld: 'service' };
         }
         const nav = Array.isArray(item.navigation) ? item.navigation : null;
         const areas = Array.isArray(item.areas) ? item.areas : null;
-        if (!nav && !areas) return item;
+        if (!nav && !areas) return { app: item };
 
         const filterNav = (entries: any[]): any[] => {
             const out: any[] = [];
@@ -3347,9 +3414,11 @@ export class RestServer {
         };
 
         return {
-            ...item,
-            ...(nav ? { navigation: filterNav(nav) } : {}),
-            ...(areas ? { areas: filterAreas(areas) } : {}),
+            app: {
+                ...item,
+                ...(nav ? { navigation: filterNav(nav) } : {}),
+                ...(areas ? { areas: filterAreas(areas) } : {}),
+            },
         };
     }
 
@@ -5849,8 +5918,42 @@ export class RestServer {
                                     );
                                     const registered = await this.resolveRegisteredServices((ctx as any).__kernel, [visible]);
                                     const serviceGate = registered ? (n: string) => registered.has(n) : undefined;
-                                    visible = this.filterAppForUser(visible, sysPerms, serviceGate);
+                                    const gated = this.filterAppForUserWithReason(visible, sysPerms, serviceGate);
+                                    visible = gated.app;
                                     if (visible == null) {
+                                        // [#8013] A PERMISSION denial is reported as
+                                        // one — everything else keeps answering
+                                        // absence. See
+                                        // {@link filterAppForUserWithReason} for why
+                                        // only this one of the three gates converts,
+                                        // and why the reason comes from the branch
+                                        // that fired rather than from `null`.
+                                        //
+                                        // The condition is generic, so it takes the
+                                        // ADR-0112 STANDARD catalog code rather than
+                                        // a bespoke synonym — 403 `PERMISSION_DENIED`,
+                                        // which is also what
+                                        // `standardErrorCodeForHttpStatus(403)`
+                                        // answers. objectui#4252 branches on exactly
+                                        // this `code`.
+                                        //
+                                        // Written through the shared `sendError`
+                                        // (`@objectstack/types`), aliased because this
+                                        // module has a local function of that name.
+                                        // That builder emits the DECLARED envelope
+                                        // `{ success: false, error: { code, message } }`,
+                                        // so the console reads `body.error.code` — the
+                                        // same accessor as the absence answer below,
+                                        // rather than a second dialect to special-case.
+                                        if (gated.withheld === 'permission') {
+                                            sendEnvelopeError(
+                                                res,
+                                                403,
+                                                'PERMISSION_DENIED',
+                                                `You do not have permission to open the '${req.params.name}' app.`,
+                                            );
+                                            return;
+                                        }
                                         res.status(404).json({
                                             error: { code: 'RESOURCE_NOT_FOUND', message: 'Metadata item not found or access denied.' },
                                         });
@@ -9170,6 +9273,45 @@ export class RestServer {
             catch { return undefined; }
         };
 
+        /**
+         * [#8073] The ONE refusal emitter for this route family — every arm of
+         * both handlers goes through it, so "explain and my-delegable-scope
+         * answer the same shape" is a property of the code rather than of
+         * eight literals that happen to agree.
+         *
+         * Before this, the family carried BOTH dialects ADR-0112 D5 retires:
+         * the 401/501/400/403 arms were flat `{ code, message }` and the two
+         * 500s were `{ code, error: 'a bare string' }`, so `body.error.code` —
+         * the one position D5 declares — read `undefined` on all six. #7035
+         * (PR #7293) had already removed both from this file's `/meta`
+         * refusals and #7981 (PR #8071) from `registerSecurityEndpoints`, the
+         * immediately ADJACENT registrar: a client calling `explain` and then
+         * `suggested-bindings` met two shapes inside one `security` family.
+         *
+         * Emitted through the SHARED builder (`sendError` from
+         * `@objectstack/types`, imported as `sendEnvelopeError` because this
+         * module has a local `sendError` of its own — the sanitizing responder
+         * for THROWN errors, a different thing). That is what makes this the
+         * reference shape by construction rather than a ninth local literal
+         * agreeing with the eight it replaced, and it types `code` to the
+         * closed vocabulary for free.
+         *
+         * ⛔ Status codes are untouched: only the POSITION of `code` and
+         * `message` moves. `detail` — the 400 arm's Zod-issue dump — moves to
+         * `error.details`, the slot `ApiErrorSchema` actually declares for
+         * structured context; as a top-level sibling it was undeclared.
+         */
+        const respondError = (
+            res: any,
+            status: number,
+            code: ErrorCode,
+            message: string,
+            details?: unknown,
+        ): void => sendEnvelopeError(
+            res, status, code, message,
+            details === undefined ? undefined : { details },
+        );
+
         const handler = async (req: any, res: any) => {
             try {
                 const environmentId = isScoped ? req.params?.environmentId : undefined;
@@ -9178,18 +9320,18 @@ export class RestServer {
                 if (!context?.userId) {
                     // The explain surface stays authenticated-only — it is an
                     // admin diagnosis tool. (Anonymous is already 401ed above.)
-                    return res.status(401).json({
-                        code: 'UNAUTHORIZED',
-                        message: 'The access-explanation endpoint requires an authenticated caller.',
-                    });
+                    return respondError(
+                        res, 401, 'UNAUTHORIZED',
+                        'The access-explanation endpoint requires an authenticated caller.',
+                    );
                 }
 
                 const svc = await resolveService(environmentId, req);
                 if (!svc || typeof svc.explain !== 'function') {
-                    return res.status(501).json({
-                        code: 'NOT_IMPLEMENTED',
-                        message: 'Access explanation is not available on this deployment (no security service with explain).',
-                    });
+                    return respondError(
+                        res, 501, 'NOT_IMPLEMENTED',
+                        'Access explanation is not available on this deployment (no security service with explain).',
+                    );
                 }
 
                 // GET reads the request from the query string, POST from the
@@ -9212,11 +9354,11 @@ export class RestServer {
                     ...(src.recordId != null && src.recordId !== '' ? { recordId: src.recordId } : {}),
                 });
                 if (!parsed.success) {
-                    return res.status(400).json({
-                        code: 'VALIDATION_FAILED',
-                        message: 'Invalid explain request — expected { object: string, operation: read|create|update|delete|transfer|restore|purge, userId?: string, recordId?: string }.',
-                        detail: String(parsed.error?.message ?? '').slice(0, 1000),
-                    });
+                    return respondError(
+                        res, 400, 'VALIDATION_FAILED',
+                        'Invalid explain request — expected { object: string, operation: read|create|update|delete|transfer|restore|purge, userId?: string, recordId?: string }.',
+                        String(parsed.error?.message ?? '').slice(0, 1000),
+                    );
                 }
 
                 const decision = await svc.explain(parsed.data, context);
@@ -9228,10 +9370,13 @@ export class RestServer {
                     error?.name === 'PermissionDeniedError' ||
                     msg.startsWith('[Security] Access denied')
                 ) {
-                    return res.status(403).json({ code: 'PERMISSION_DENIED', message: msg.slice(0, 1000) });
+                    return respondError(res, 403, 'PERMISSION_DENIED', msg.slice(0, 1000));
                 }
                 logError('[REST] Security explain error:', error);
-                res.status(500).json({ code: 'EXPLAIN_FAILED', error: msg.slice(0, 500) });
+                // The 500 arm keeps its 500-char cap: an unexpected fault's
+                // message is not a contract, and truncating it stays a
+                // sanitization step — only the position of the words moves.
+                respondError(res, 500, 'EXPLAIN_FAILED', msg.slice(0, 500));
             }
         };
 
@@ -9271,25 +9416,25 @@ export class RestServer {
                 const context = await this.resolveExecCtx(environmentId, req);
                 if (this.enforceAuth(req, res, context)) return;
                 if (!context?.userId) {
-                    return res.status(401).json({
-                        code: 'UNAUTHORIZED',
-                        message: 'The delegable-scope endpoint requires an authenticated caller.',
-                    });
+                    return respondError(
+                        res, 401, 'UNAUTHORIZED',
+                        'The delegable-scope endpoint requires an authenticated caller.',
+                    );
                 }
 
                 const svc = await resolveService(environmentId, req);
                 if (!svc || typeof svc.describeDelegableScope !== 'function') {
-                    return res.status(501).json({
-                        code: 'NOT_IMPLEMENTED',
-                        message: 'Delegated administration is not available on this deployment (no security service with describeDelegableScope).',
-                    });
+                    return respondError(
+                        res, 501, 'NOT_IMPLEMENTED',
+                        'Delegated administration is not available on this deployment (no security service with describeDelegableScope).',
+                    );
                 }
 
                 res.json(await svc.describeDelegableScope(context));
             } catch (error: any) {
                 const msg = String(error?.message ?? error ?? '');
                 logError('[REST] Delegable scope error:', error);
-                res.status(500).json({ code: 'DELEGABLE_SCOPE_FAILED', error: msg.slice(0, 500) });
+                respondError(res, 500, 'DELEGABLE_SCOPE_FAILED', msg.slice(0, 500));
             }
         };
 
