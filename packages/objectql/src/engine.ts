@@ -9787,8 +9787,8 @@ export class ObjectQL implements IObjectQLEngine {
       const field = (agg as { field?: string })?.field;
       if (field && field !== '*') referenced.add(field);
     }
-    for (const g of (query?.groupBy as unknown[]) ?? []) {
-      const field = typeof g === 'string' ? g : (g as { field?: string })?.field;
+    for (const g of query?.groupBy ?? []) {
+      const field = typeof g === 'string' ? g : g?.field;
       if (field) referenced.add(field);
     }
 
@@ -9824,7 +9824,7 @@ export class ObjectQL implements IObjectQLEngine {
         ast: {
             object,
             where: query.where,
-            groupBy: query.groupBy as any,
+            groupBy: query.groupBy,
             aggregations: query.aggregations,
             // ENFORCED since #4286 (step 3). On the ast so the FLS predicate
             // guard walks its references (predicate-guard.ts) and a future
@@ -9851,11 +9851,11 @@ export class ObjectQL implements IObjectQLEngine {
         // supported we can push the aggregate down to the driver; otherwise
         // we fall back to driver.find() + in-memory bucketing so the result
         // remains correct on partial-support dialects (e.g. SQLite + week).
-        const groupByItems = Array.isArray(query.groupBy) ? (query.groupBy as any[]) : [];
+        const groupByItems = Array.isArray(query.groupBy) ? query.groupBy : [];
         const granularityCaps: Record<string, boolean> | undefined =
             drv?.supports?.queryDateGranularity;
         const structuredItems = groupByItems.filter((g) => typeof g !== 'string');
-        const allStructuredSupported = structuredItems.every((g: any) => {
+        const allStructuredSupported = structuredItems.every((g) => {
             if (!g?.dateGranularity) return true; // plain {field} object is fine
             return granularityCaps?.[g.dateGranularity] === true;
         });
@@ -9867,7 +9867,7 @@ export class ObjectQL implements IObjectQLEngine {
         // matching rows are fetched), but bucketing runs uniformly in JS so a
         // row near a tz day-boundary lands identically on every driver.
         const tz = query.timezone;
-        const hasDateBucket = structuredItems.some((g: any) => !!g?.dateGranularity);
+        const hasDateBucket = structuredItems.some((g) => !!g?.dateGranularity);
         const tzRequiresInMemory = !!tz && tz !== 'UTC' && hasDateBucket;
         if (typeof drv.aggregate === 'function' && allStructuredSupported && !tzRequiresInMemory) {
             // HAVING is engine-owned (#4286): applied AFTER aggregation, over

@@ -25,7 +25,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectQL, type EngineReadOptions } from './engine.js';
 import { collectInternalReadFields, SECRET_MASK } from './secret-fields.js';
-import type { EngineAggregateOptions, ServiceObject } from '@objectstack/spec/data';
+import type { ServiceObject } from '@objectstack/spec/data';
 
 // ---- minimal stub driver (equality-only WHERE) ----------------------------
 // Rows leave the driver as COPIES, as a real driver's do — see the note in
@@ -366,16 +366,15 @@ describe('#7728: the `internal` field flag omits a value from the generic data p
 
     it('rejects the flagged field as a structured {field} groupBy bucket', async () => {
       await seedThree();
-      // `as unknown as` names the contract being bypassed rather than erasing
-      // it: `EngineAggregateOptions.groupBy` is declared `string[]`, while the
-      // engine reads structured `{ field, dateGranularity }` buckets too — so
-      // this is deliberately off-contract input, and the guard must walk that
-      // second spelling as well. (`as any` here would grow the #4918 ratchet.)
+      // The structured bucket form is ON-contract since #8032
+      // (`EngineAggregateOptions.groupBy` is the standard GroupByNodeSchema
+      // union) — this case type-checks honestly and pins that the guard walks
+      // the second spelling, not just the string form above.
       await expect(
         ctx.engine.aggregate('itest_api_key', {
           aggregations: [{ function: 'count', alias: 'n' }],
           groupBy: [{ field: 'key' }],
-        } as unknown as EngineAggregateOptions, SYSTEM),
+        }, SYSTEM),
       ).rejects.toThrow(/key/);
     });
 
