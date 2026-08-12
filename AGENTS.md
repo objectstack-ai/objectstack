@@ -654,17 +654,20 @@ Three things to get right, all of them measured rather than assumed:
   handler calls, not just the handler**: the export route's `?locale=` never appears in
   its body — it is read a frame down, by `extractLocale` behind the call that localises
   the header row — so a set measured from the handler alone would have 400'd every
-  localised export that works today. Pin both halves per route,
-  the #7527 file being the template: a refusal pin (status + nested `error.code` + **the
-  service was never called**) beside a preservation pin (**the arguments the service
-  actually received** — "still 200" is exactly what the defect looked like).
+  localised export that works today. Pin **both halves** per route: a refusal pin
+  (status + nested `error.code` + **the service was never called**) beside a
+  preservation pin (**the arguments the service actually received**). Neither half is
+  optional, and a bare status assertion is not a pin — "still 200" is exactly what the
+  defect looked like, and the refusal's whole point is that the service never ran.
 - ⛔ **Routes whose parameter set is genuinely OPEN are excluded, by name.**
   `GET /data/:object` hands its whole query to the normalizer, which lowers every
   leftover key into an implicit field filter (`?status=open` *is* the filter) — the
   valid names are the object's own fields, so any list here would be wrong. It is
-  already gated one layer down, against the right authority, by #4134/#7534's unknown-
-  **field** refusal. The test: *if an unrecognised name has a defined meaning on this
-  route, the set is open* — gate it where the authority for the name lives.
+  already gated one layer down, against the right authority: an unknown **field** is
+  refused there with `400 INVALID_FIELD`, judged against the object's real field map
+  (the registry's, including the audit/tenant/owner columns it injects — not the
+  author's declaration). The test: *if an unrecognised name has a defined meaning on
+  this route, the set is open* — gate it where the authority for the name lives.
 - **Existing routes convert per lane, ⛔ never as one sweep** (data read routes first).
   A broad wave with thin pins is the failure mode the ruling rejected.
 
