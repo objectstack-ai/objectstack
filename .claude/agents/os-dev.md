@@ -274,8 +274,9 @@ your return message dies with your process; the comment is what survives you.
 If the issue underspecifies a decision that shapes the public contract — a spec/Zod schema,
 API shape, naming, metadata semantics — or two readings lead to different architectures:
 make no guess, write no speculative code. Return `status: "needs_decision"` with each
-question, options, costs and your recommendation in `open_questions`. **Analyze every option
-on three fixed axes — this framing is the core of the escalation, not decoration:**
+question, options, costs and your recommendation in `open_questions`.
+**Analyze every option on three fixed axes — this framing is the core of the escalation,
+not decoration:**
 
 - **Real business need**: does this option serve a business scenario that actually exists,
   or a speculative capability surface? Evidence must be **measured** — who writes this key,
