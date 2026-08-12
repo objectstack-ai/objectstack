@@ -8149,9 +8149,62 @@ export class ObjectQL implements IObjectQLEngine {
      // read-only ones are (don't half-apply my payload), and the refusal error
      // composes its wording from `drops` so it never calls a stripped `id`
      // read-only. Route a new strip through here ⇒ own both halves.
+     //
+     // [#8093] ...and one thing is NOT a drop: the row's own primary key, when
+     // it is the address of the row this call is already writing. `droppedFields`
+     // has one declared meaning — fields the CALLER SUPPLIED and the engine
+     // REFUSED. An `id` that names the targeted row was refused nothing; it did
+     // its job. ADDRESSING IS NOT PAYLOAD.
+     //
+     // How a caller who sent no `id` gets one reported anyway: the REST ingress
+     // folds the path id INTO the write payload (`metadata-protocol`'s
+     // `updateData`: `{ ...request.data, id: request.id }`, #6479 — so a body
+     // `id` can no longer bind a different row than the one the URL, the OCC
+     // check and the receipt all name). That fold is correct and stays. But it
+     // lands in `data` BEFORE the `suppliedValues` snapshot above, so from here
+     // down the address is indistinguishable from something the caller typed —
+     // and on an object whose `id` is declared `readonly: true` (as platform
+     // objects' are), the static-`readonly` strip below then drops it and
+     // reports it. Measured on `main` through the real ingress:
+     // `PATCH /data/sys_user_preference/<id>` with the body `{"value":[...]}` —
+     // no `id` key in it — answered 200 carrying
+     // `droppedFields:[{fields:["id"],reason:"readonly"}]`.
+     //
+     // What that cost is not cosmetic. The console's internal "recent items"
+     // trace runs on every org switch, so every org switch popped a user-facing
+     // amber warning toast naming a field the user never touched. The damage is
+     // that the warning channel gets TRAINED TO BE IGNORED — a user who learns
+     // the amber toast is noise will ignore the one that matters. The identical
+     // failure mode is already on record one field over: #3431 / #3794 stopped
+     // `userState.ts` sending `updated_at` because doing so "made every
+     // recents/favorites write pop a scary warning about a field the user never
+     // touched, drowning the real signal the toast exists for."
+     //
+     // Deliberately the REPORT and not the strip. `id` still leaves the SET
+     // clause, and must: a same-value primary-key write is a harmless no-op on
+     // SQL but an outright rejection on stores with immutable primary keys, and
+     // #6435's block already ruled that widening the strip to the truthy-scalar
+     // case "is a separate decision, not a rider here". The payload handed to
+     // the driver is byte-identical before and after this change.
+     //
+     // Self-scoping to SINGLE-RECORD update by construction: `id` is bound only
+     // on the by-id branch, so a predicate/multi write — where nothing addresses
+     // a row by key — is untouched, and a caller-supplied `id` there is still
+     // reported. It cannot collide with the `primary_key` strips either: those
+     // fire only when the dispatch has ALREADY RULED the value is not a primary
+     // key, which is exactly when it cannot equal the bound key.
+     //
+     // Asked of `suppliedValues`, never of the live payload: this is a question
+     // about what the CALLER submitted, and the answer must survive a hook
+     // rewriting the key mid-write — the same reason that snapshot carries
+     // values at all (#5591).
      const onFieldsDropped = options?.onFieldsDropped;
      const strictReadonlyWrites = options?.strictReadonlyWrites === true;
      const strictDrops: DroppedFieldsEvent[] = [];
+     const idAddressesThisRow =
+       id !== undefined && id !== null
+       && Object.prototype.hasOwnProperty.call(suppliedValues, 'id')
+       && Object.is(suppliedValues.id, id);
      const reportDroppedFields = (
        before: Record<string, unknown> | null | undefined,
        after: Record<string, unknown> | null | undefined,
@@ -8159,7 +8212,10 @@ export class ObjectQL implements IObjectQLEngine {
      ): void => {
        if ((!onFieldsDropped && !strictReadonlyWrites) || before === after || !before) return;
        const afterObj = (after ?? {}) as Record<string, unknown>;
-       const fields = Object.keys(before).filter((k) => !(k in afterObj));
+       const fields = Object.keys(before).filter(
+         // [#8093] The address the caller wrote to is not a field it lost.
+         (k) => !(k in afterObj) && !(idAddressesThisRow && k === 'id'),
+       );
        if (fields.length === 0) return;
        if (strictReadonlyWrites) {
          strictDrops.push({ object, fields, reason });
