@@ -111,11 +111,39 @@ describe('RemoteTransport comparand refusal — the value half of #1004', () => 
       expect(calls).toHaveLength(0);
     });
 
-    it('names the operator, the column and the offending value in the message', async () => {
+    it('[#7929] names the operator, the columns and the value to the LOG — never to the caller', async () => {
+      // This case is the inversion of what it used to assert, and the
+      // inversion IS the change. It pinned `'deal.amount' $gt
+      // {"$field":"budget"}` in the message a caller receives; measured on
+      // #7929, that predicate is routinely an ADMINISTRATOR's — the security
+      // middleware ANDs a compiled CEL sharing rule into the same `where`, and
+      // this transport cannot tell the two apart. So the operands moved to the
+      // diagnostic sink `TursoDriver` wires to its logger, and what the caller
+      // gets keeps `INVALID_FILTER` / 400 and the capability sentence.
+      //
+      // BOTH halves are asserted here: a refusal that said nothing at all
+      // would pass the disclosure half alone, and the old message would pass
+      // the diagnostic half alone.
       const { t } = transportWithCapturingClient();
-      await expect(t.find('deal', { where: { amount: { $gt: { $field: 'budget' } } } })).rejects.toThrow(
-        /'deal\.amount' \$gt \{"\$field":"budget"\}/,
-      );
+      const logged: string[] = [];
+      t.setDiagnosticSink((m) => { logged.push(m); });
+      const err = await t.find('deal', { where: { amount: { $gt: { $field: 'budget' } } } }).catch((e) => e);
+      expect(err.code).toBe('INVALID_FILTER');
+      expect(err.status).toBe(400);
+      expect(err.message).not.toContain('budget');
+      expect(err.message).not.toContain('amount');
+      expect(logged.join('\n')).toMatch(/'deal\.amount' \$gt \{"\$field":"budget"\}/);
+    });
+
+    it('[#7929] the withheld text is not reachable by serialising the error', async () => {
+      // The carrier is a symbol key, and this is what that buys: an error
+      // mapper that spreads or stringifies the error — the ordinary way an
+      // envelope is built — cannot put the operands back on the wire, so the
+      // withhold cannot be undone downstream by code that never heard of it.
+      const { t } = transportWithCapturingClient();
+      const err = await t.find('deal', { where: { amount: { $gt: { $field: 'budget' } } } }).catch((e) => e);
+      expect(JSON.stringify({ ...err, message: err.message })).not.toContain('budget');
+      expect(Object.keys(err)).not.toContain('diagnostic');
     });
 
     it('says what to do instead — not "try another operator", which fails identically', async () => {
@@ -141,11 +169,19 @@ describe('RemoteTransport comparand refusal — the value half of #1004', () => 
       expect(calls).toHaveLength(0);
     });
 
-    it('refuses the marker as an `$in` element, naming which element', async () => {
+    it('refuses the marker as an `$in` element, naming which element — in the log (#7929)', async () => {
+      // Which ELEMENT is as much the policy's shape as the column names are:
+      // a read scope's `$in` list is the administrator's, so the index goes to
+      // the same place the operands went. Still refused, still `INVALID_FILTER`.
       const { t } = transportWithCapturingClient();
-      await expect(t.find('deal', { where: { id: { $in: ['a', { $field: 'other_id' }] } } })).rejects.toThrow(
-        /'deal\.id' \$in\[1\]/,
-      );
+      const logged: string[] = [];
+      t.setDiagnosticSink((m) => { logged.push(m); });
+      const err = await t
+        .find('deal', { where: { id: { $in: ['a', { $field: 'other_id' }] } } })
+        .catch((e) => e);
+      expect(err.code).toBe('INVALID_FILTER');
+      expect(err.message).not.toContain('other_id');
+      expect(logged.join('\n')).toMatch(/'deal\.id' \$in\[1\]/);
     });
   });
 

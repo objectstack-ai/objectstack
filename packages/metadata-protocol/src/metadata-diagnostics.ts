@@ -24,7 +24,7 @@
  */
 
 import type { z } from 'zod';
-import { getMetadataTypeSchema } from '@objectstack/spec/kernel';
+import { getMetadataTypeSchema, stripReadDecorations } from '@objectstack/spec/kernel';
 import type { MetadataValidationResult } from '@objectstack/spec/kernel';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 // [#5598] The READ path's share of the #5364 expansion. `zodIssuesToMetadataIssues`
@@ -67,12 +67,28 @@ export function computeMetadataDiagnostics(
         };
     }
 
-    // Strip our own decoration before re-validating so it never becomes
-    // a false-positive "unrecognized_keys" failure on schemas that grow
-    // a `.strict()` mode in the future.
-    const candidate = '_diagnostics' in (item as Record<string, unknown>)
-        ? stripDiagnostics(item as Record<string, unknown>)
-        : item;
+    // [#7656] Strip EVERY read decoration — the shared
+    // `METADATA_READ_DECORATIONS` list — before re-validating, not just the
+    // `_diagnostics` key this function stamps itself.
+    //
+    // This is a re-parse of a SERVED document in exactly the sense the module
+    // header of `spec/kernel/metadata-read-decorations.ts` means, so it is the
+    // third consumer of that list (after the write path's verbatim persist and
+    // the cold-boot flow bind) and must read it rather than keep a private
+    // one-key copy. The private copy predated `_draft` joining the list, and
+    // the schemas being closed since #4001 turned that gap into a verdict about
+    // the READER: `?preview=draft` stamps `_draft:true` on the item (both the
+    // single-item exit and the list overlay) and then decorates it, so the
+    // strict schema rejected our own badge BY NAME and every valid draft came
+    // back `valid:false / unrecognized_keys: ["_draft"]`.
+    //
+    // ⛔ The item schema is NOT the thing to loosen here: `_draft` is not a
+    // document key and must stay rejected when it appears in a stored body. It
+    // is the response's badge, which is precisely what the decoration list
+    // says. Same class as #6810 (`indexed`), different remedy — that key did
+    // not belong on the served body at all and left at its injection site,
+    // whereas this one is read by the UI and belongs on the response.
+    const candidate = stripReadDecorations(item);
 
     const parsed = (schema as z.ZodTypeAny).safeParse(candidate);
     if (parsed.success) {
@@ -100,12 +116,6 @@ export function computeMetadataDiagnostics(
     const errors = zodIssuesToMetadataIssues(parsed.error.issues);
 
     return { valid: false, errors };
-}
-
-function stripDiagnostics(item: Record<string, unknown>): Record<string, unknown> {
-    const { _diagnostics: _drop, ...rest } = item;
-    void _drop;
-    return rest;
 }
 
 /**

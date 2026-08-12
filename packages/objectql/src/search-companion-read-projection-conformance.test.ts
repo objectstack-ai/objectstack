@@ -43,6 +43,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import type { EngineQueryOptions, ServiceObject } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 
@@ -406,5 +407,95 @@ describe('[#7642] the system backfill keeps its read of `__search`', () => {
 
     const query: EngineQueryOptions = { context: SYSTEM_CTX };
     expectNoCompanion(await engine.find(CONTACT, query));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The OTHER door on the same column — the one this suite's docblock cites but
+// never exercised.
+// ---------------------------------------------------------------------------
+
+/**
+ * [#8080] `$searchFields=__search` is a 400, and it is asserted HERE.
+ *
+ * ## Why this pin exists
+ *
+ * Four docblocks in this tree state that a `$searchFields` override naming the
+ * companion "is refused with a 400 (\"is hidden\")" — this suite's own header,
+ * {@link stripSearchCompanion}'s, and `stripSearchCompanionFromRead`'s twice
+ * (the pre-existing sentence and the #7876 ruling block). Until now no test
+ * named this column and that refusal in the same assertion. The behaviour was
+ * only ever reachable by COMPOSING two separately-pinned facts —
+ * `resolveSearchFields` excludes hidden fields (`search-companion.test.ts`),
+ * and the ingress gate refuses a known-but-unsearchable name with
+ * `400 INVALID_FIELD` (`query-expression-conformance.test.ts`, on `estimate`).
+ * A composition is not a pin: a change that let hidden columns clear the
+ * searchability gate would leave all four docblocks false with every suite
+ * green.
+ *
+ * That matters more since #7876 (ruled 2026-08-12, direction C) made this 400
+ * load-bearing AS A CONTRAST: the projection door's silence — the whole
+ * subject of the matrix above — is documented as correct *precisely because*
+ * the authoring door refuses. The contrast's other half now fails loudly if it
+ * stops being true.
+ *
+ * ## Why it is a sibling block and not a row in the matrix
+ *
+ * The matrix runs the engine directly and runs BOTH provisioning states. This
+ * refusal is neither shaped for it:
+ *
+ *  - It is not an engine call. The gate lives at the REST ingress
+ *    (`assertSearchFieldsAreSearchable`, `@objectstack/metadata-protocol`), so
+ *    it needs a protocol in front of the engine — `engine.find` never sees it.
+ *    Adding one to the matrix's `beforeEach` would rebuild every door row's
+ *    harness for one case that shares none of their assertions.
+ *  - The two provisioning states do not give the same answer, and only one of
+ *    them is the documented one. With the column undeclared
+ *    (`OS_SEARCH_PINYIN_ENABLED=false`) it is not in the registry's field map
+ *    at all, so the gate refuses it as UNKNOWN — still a 400, but on the typo
+ *    tier, not the "is hidden" reason the four docblocks quote. Pinning the
+ *    cited prose means pinning the declared state.
+ */
+describe('[#8080] the `$searchFields` door refuses the column the read doors drop silently', () => {
+  it('names the companion and gets the ADR-0112 envelope: 400 INVALID_FIELD, "is hidden"', async () => {
+    const { engine, store } = await makeEngine(true);
+    store.seed(CONTACT, { id: 'con_1', name: '张伟', [SEARCH_COMPANION_FIELD]: BLOB });
+    const protocol = new ObjectStackProtocolImplementation(engine);
+
+    // CONTROL, and it is the load-bearing half of this test. A green rejection
+    // below proves nothing on its own — a call that never reached the gate
+    // (wrong door, wrong parameter spelling, a throw from somewhere earlier)
+    // rejects just as happily, which is this card's own failure mode one level
+    // up. So: the SAME door, the SAME parameter, a legitimate name — it must
+    // pass through the gate and answer.
+    await expect(protocol.findData({
+      object: CONTACT, query: { search: 'zhangwei', $searchFields: 'name' },
+    })).resolves.toBeDefined();
+
+    // The refusal. `code` AND `status` (ADR-0112), plus the parameter the
+    // caller wrote — the gate quotes the wire spelling back, so asserting it
+    // is what distinguishes "the searchFields gate ran" from "something else
+    // said 400".
+    await expect(protocol.findData({
+      object: CONTACT, query: { search: 'zhangwei', $searchFields: SEARCH_COMPANION_FIELD },
+    })).rejects.toMatchObject({
+      status: 400,
+      code: 'INVALID_FIELD',
+      field: SEARCH_COMPANION_FIELD,
+      object: CONTACT,
+      param: '$searchFields',
+    });
+
+    // …and the REASON, because the reason is what the four docblocks quote.
+    // `__search` is deliberately NOT in `SEARCH_AUTO_EXCLUDED_FIELDS` (that
+    // set names `id`, `owner_id`, the audit columns), so the auto-default
+    // branch reaches the `hidden` arm rather than the system/audit one. The
+    // word is the contract here: it is the flag — `hidden: true` on the
+    // provisioned column — that this door is enforcing, and a refusal that
+    // started arriving for a different reason would mean the composition the
+    // docblocks describe had come apart while staying green on code+status.
+    await expect(protocol.findData({
+      object: CONTACT, query: { search: 'zhangwei', $searchFields: SEARCH_COMPANION_FIELD },
+    })).rejects.toThrow(/'__search' is hidden/);
   });
 });

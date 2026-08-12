@@ -146,7 +146,11 @@ const TELEMETRY = 'telemetry';
 const auditRows: Rows = [
   { action: 'login', id: 'a1' },
   { action: 'login', id: 'a2' },
-  { action: 'permission_change', id: 'a3' },
+  // `delete`, not `permission_change` (#8147): that value was retired from the
+  // `sys_audit_log` action enum, and a fixture seeding a value the object no
+  // longer declares is a green-looking lie. `delete` is written for real by
+  // plugin-audit's generic hook writer.
+  { action: 'delete', id: 'a3' },
 ];
 
 const auditDataset = DatasetSchema.parse({
@@ -207,7 +211,7 @@ describe('executeRawSql auto-bridge routes by object (#5033)', () => {
     expect(viaRawSql.rows).toEqual(viaAggregate.rows);
     expect(viaRawSql.rows).toEqual([
       { action: 'login', event_count: 2 },
-      { action: 'permission_change', event_count: 1 },
+      { action: 'delete', event_count: 1 },
     ]);
   });
 

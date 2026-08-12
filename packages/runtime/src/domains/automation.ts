@@ -19,6 +19,7 @@ import {
     validationFailure, validationFailureDetails, fieldsFromZodIssues, VALIDATION_FAILED_STATUS,
 } from '../validation-failure.js';
 import { ExecutionStatus } from '@objectstack/spec/automation';
+import { ListRunsRequestSchema } from '@objectstack/spec/api';
 import { parseEnumParam, parseIntegerParam, parseStringParam } from '../query-param.js';
 import { capabilityUnavailable } from './unavailable.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
@@ -817,11 +818,29 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 //    first implementation that starts honouring cursors must not
                 //    be the one that discovers the type was never enforced.
                 //
-                // Out-of-range numbers are NOT refused — `?limit=1000` still
-                // reaches the engine as 1000 and is sliced there. Range is the
-                // service's declared business (`ListRunsRequestSchema` bounds it
-                // 1..100); this gate only refuses values that were never whole
-                // numbers.
+                // [#8054] `limit`'s RANGE — `ListRunsRequestSchema` has always
+                // declared `.min(1).max(100)`, and until now this gate only
+                // checked that the value was a whole number at all, never that
+                // it fell inside that declared range. `?limit=0` reached the
+                // engine as 0, and `store.listHistory(flowName, 0).slice(0, 0)`
+                // is `[]` — a confidently wrong "this flow has never run",
+                // exactly #7300's shape but from a value that WAS a valid
+                // integer. `?limit=101` reached the engine uncapped, so the
+                // declared upper bound was decorative.
+                //
+                // The bounds are READ off `ListRunsRequestSchema.shape.limit`
+                // rather than re-listed as `(1, 100)` here — the same
+                // discipline `status` already applies via
+                // `ExecutionStatus.options` two lines down. Re-listing the
+                // literals would make the boundary correct today and silently
+                // wrong again the moment the schema's own `.min()`/`.max()`
+                // changes; reading them makes declared == enforced true by
+                // construction, not by two call sites happening to agree.
+                //
+                // A value outside the range is refused in the same house shape
+                // as everything else in this module — `VALIDATION_FAILED` with
+                // an ADR-0114 field code, here `min_value` / `max_value`, the
+                // ones the property names already mirror.
                 //
                 // [#7359] `status` is the THIRD declared parameter, and until
                 // now the only one this handler never read. `ListRunsRequestSchema`
@@ -840,9 +859,13 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 // rather than a list copied into this file: the wire schema is
                 // built from that same enum, so a future member cannot be
                 // accepted by one and refused by the other.
+                const limitBounds = ListRunsRequestSchema.shape.limit.unwrap();
                 const options = query
                     ? {
-                        limit: parseIntegerParam('limit', query.limit),
+                        limit: parseIntegerParam('limit', query.limit, {
+                            min: limitBounds.minValue ?? undefined,
+                            max: limitBounds.maxValue ?? undefined,
+                        }),
                         cursor: parseStringParam('cursor', query.cursor),
                         status: parseEnumParam('status', query.status, ExecutionStatus.options),
                     }
@@ -877,7 +900,19 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                         { field: '(body)', code: 'invalid_type', message: 'expected a flow definition object' },
                     ]);
                 }
-                automationService.registerFlow(name, definition);
+                // [#8123] Same class as POST /: the engine's verdict on the
+                // definition is served as a 400, not a 500 — reusing the
+                // same route-agnostic `flowDefinitionRefusal` helper POST
+                // uses above, so the two doors cannot disagree about the
+                // class of an identical refusal (#8055 wired POST only).
+                try {
+                    automationService.registerFlow(name, definition);
+                } catch (e) {
+                    return {
+                        handled: true,
+                        response: deps.errorFromThrown(flowDefinitionRefusal(e), VALIDATION_FAILED_STATUS),
+                    };
+                }
                 return { handled: true, response: deps.success(definition) };
             }
         }

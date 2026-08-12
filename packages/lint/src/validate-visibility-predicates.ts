@@ -76,8 +76,14 @@
  *   - **runtime** view/page surfaces (`*.view.ts` / `*.page.ts`) bind
  *     `record` + `current_user` (pages also expose `page.<var>`), so a `data.`-rooted
  *     predicate here is a wrong-layer paste that silently never matches; and
- *   - **metadata-editing** forms (`*.form.ts` — the row under edit) bind `data`, so
- *     a `record.`-rooted predicate there is the same bug in the other direction.
+ *   - **metadata-editing** forms — the row under edit — bind `data`, so a
+ *     `record.`-rooted predicate there is the same bug in the other direction.
+ *   That surface is reached two ways: a `*.form.ts` module, and a form view
+ *   declaring `data: { provider: 'schema', schemaId }`, which is judged here on
+ *   its own say-so whatever the caller passes (#7815). Only the first has a
+ *   file, which is why the EMITTED prose names the surface and never a filename
+ *   (#8042) — the `*.form.ts` mentions that remain below are the ones addressed
+ *   to a file-aware CALLER of this function, where the filename is the point.
  *   The layer is read off the METADATA where the metadata declares it, and taken
  *   from the caller (`opts.layer`, default `'runtime'`) only where it does not —
  *   see §Which layer a site is on (#7815).
@@ -349,7 +355,9 @@ export type VisibilitySeverity = 'error' | 'warning';
 /**
  * Which binding environment the linted surface belongs to (ADR-0089 §Context):
  * - `runtime`  — `*.view.ts` / `*.page.ts`; binds `record` + `current_user` (+ `page`).
- * - `metadata` — `*.form.ts` metadata-editing forms; binds `data` (the row under edit).
+ * - `metadata` — metadata-editing forms (a `*.form.ts` module, or a form view
+ *   declaring `data: { provider: 'schema', schemaId }`); binds `data` (the row
+ *   under edit).
  */
 export type VisibilityLayer = 'runtime' | 'metadata';
 
@@ -672,8 +680,9 @@ function firstBareIdentifier(source: string, literalRhs: boolean): string | null
 
 /**
  * The root an author on this layer should have written. Runtime view/page
- * surfaces bind the live record as `record`; a `*.form.ts` metadata-editing
- * form binds the row under edit as `data` (ADR-0089 D3, §Context).
+ * surfaces bind the live record as `record`; a metadata-editing form binds the
+ * row under edit as `data` (ADR-0089 D3, §Context) — whether that form was
+ * authored as a `*.form.ts` module or published as a schema-bound form view.
  */
 const CANONICAL_ROOT_BY_LAYER: Record<VisibilityLayer, string> = {
   runtime: 'record',
@@ -692,8 +701,8 @@ const MISLAYER_BY_LAYER: Record<
   runtime: {
     forbiddenRoot: 'data',
     message:
-      'visibility predicate is rooted at `data.` — that is the ' +
-      'metadata-editing-form root (a `*.form.ts` row under edit), not a runtime ' +
+      'visibility predicate is rooted at `data.` — that is the root a ' +
+      'metadata-editing form binds (the row under edit), not a runtime ' +
       'surface. A runtime view/page predicate that binds `data.` never matches ' +
       'and the element renders unconditionally (ADR-0089).',
     hint:
@@ -704,10 +713,11 @@ const MISLAYER_BY_LAYER: Record<
   metadata: {
     forbiddenRoot: 'record',
     message:
-      'visibility predicate is rooted at `record.` — that is the runtime ' +
-      'record-surface root (a `*.view.ts` / `*.page.ts` live record), not a ' +
-      'metadata-editing form. A `*.form.ts` predicate that binds `record.` never ' +
-      'matches and the element renders unconditionally (ADR-0089).',
+      'visibility predicate is rooted at `record.` — that is the root a ' +
+      'runtime view/page surface binds (the live record), not the root a ' +
+      'metadata-editing form binds. On a metadata-editing form — the row ' +
+      'under edit — a `record.`-rooted predicate never matches and the ' +
+      'element renders unconditionally (ADR-0089).',
     hint:
       'Metadata-editing forms bind `data` (the row under edit). Use e.g. ' +
       "`data.type == 'grid'` instead of `record.type == 'grid'`.",
@@ -854,7 +864,7 @@ function checkElement(
           `Write \`${root}.${bare}\` instead of \`${bare}\`` +
           (layer === 'runtime'
             ? ' (runtime view/page surfaces bind `record` + `current_user`; a page component also exposes page state as `page.<var>`).'
-            : ' (a `*.form.ts` metadata-editing form binds the row under edit as `data`).'),
+            : ' (a metadata-editing form binds the row under edit as `data`).'),
       });
     }
   }
