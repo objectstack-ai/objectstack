@@ -119,7 +119,10 @@ export interface PackageRoutesOptions {
    */
   protocol?: {
     getMetaItems?(req: { type: string }): Promise<{ items: any[] }>;
-    deletePackage?(req: { packageId: string; actor?: string }): Promise<{
+    // [#7780] `allTenants` is the explicit carrier for cross-tenant uninstall
+    // semantics; the protocol refuses a call that names neither it nor an
+    // `organizationId` (`TENANT_SCOPE_REQUIRED`, 400).
+    deletePackage?(req: { packageId: string; actor?: string; allTenants?: boolean }): Promise<{
       success: boolean;
       deletedCount: number;
       failedCount: number;
@@ -437,7 +440,20 @@ export function registerPackageRoutes(
       // no ghost grants). A version-scoped delete keeps the narrow durable
       // registry semantics, as does a deployment without the protocol.
       if (!version && typeof options.protocol?.deletePackage === 'function') {
-        const result = await options.protocol.deletePackage({ packageId });
+        // [#7780] `allTenants: true` is stated, not implied. This registrar has
+        // no organization to resolve — `packages/rest` carries no
+        // `resolveActiveOrganizationId` and no org plumbing at all (the
+        // dispatcher twin owns that seam), so of the two doors the ruling
+        // allows — resolve an org, or declare the cross-tenant intent — only
+        // the second is available here.
+        //
+        // This preserves the behaviour this door has always had (a full
+        // uninstall through it is package-wide, which #7705 case 4 pinned on
+        // purpose); what changes is that the width is now DECLARED at the call
+        // site instead of being inferred from an argument nobody passed. The
+        // protocol now refuses the undeclared form outright, so the two doors
+        // can no longer disagree by accident.
+        const result = await options.protocol.deletePackage({ packageId, allTenants: true });
         // Zero metadata rows is still a successful uninstall (e.g. a
         // runtime-registered package that never published metadata) —
         // only per-item failures make it a failure.

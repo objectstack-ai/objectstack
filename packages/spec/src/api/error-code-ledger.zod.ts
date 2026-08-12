@@ -286,6 +286,7 @@ export const ERROR_CODE_LEDGER = {
     'OBJECT_OVERLAY_PACKAGE_MISMATCH',  // [ADR-0029 D9.9] object overlay row bound to a package that does not own the object
     'OBJECT_PACKAGE_DISABLED',    // [#7557] object is registered but its owning package is disabled — data plane refuses rather than serving rows
     'ROLLED_BACK',             // atomic data-batch row was written, then undone by the batch rollback (#4793)
+    'TENANT_SCOPE_REQUIRED',      // [#7780] destructive call named neither an organization nor an explicit cross-tenant intent; needs an explicit opt-in
     'UNSUPPORTED_QUERY_PARAM',
     'VALIDATION_FAILED',
     'VERSION_NOT_FOUND',

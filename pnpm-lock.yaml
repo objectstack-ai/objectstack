@@ -1977,12 +1977,18 @@ importers:
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../objectql
+      '@objectstack/plugin-hono-server':
+        specifier: workspace:*
+        version: link:../plugins/plugin-hono-server
       '@objectstack/plugin-security':
         specifier: workspace:*
         version: link:../plugins/plugin-security
       '@objectstack/service-analytics':
         specifier: workspace:*
         version: link:../services/service-analytics
+      '@objectstack/service-datasource':
+        specifier: workspace:*
+        version: link:../services/service-datasource
       '@types/node':
         specifier: ^26.1.2
         version: 26.1.2

@@ -23,9 +23,9 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { ObjectQL } from './engine.js';
+import { ObjectQL, type EngineReadOptions } from './engine.js';
 import { collectInternalReadFields, SECRET_MASK } from './secret-fields.js';
-import type { ServiceObject } from '@objectstack/spec/data';
+import type { EngineAggregateOptions, ServiceObject } from '@objectstack/spec/data';
 
 // ---- minimal stub driver (equality-only WHERE) ----------------------------
 // Rows leave the driver as COPIES, as a real driver's do — see the note in
@@ -144,6 +144,14 @@ async function buildEngine() {
 }
 
 const HASH = 'sha256:deadbeefcafe';
+
+/**
+ * Trailing read options for the aggregate cases below. Declared with its
+ * contract type rather than inlined `as any`: erasing a read method's options
+ * argument is what `query-options/no-any-erasure` bans and the #4918 ratchet
+ * counts (`scripts/check-query-options-erasure-ratchet.mjs`).
+ */
+const SYSTEM: EngineReadOptions = { context: { isSystem: true } };
 
 describe('#7728: the `internal` field flag omits a value from the generic data path', () => {
   let ctx: Awaited<ReturnType<typeof buildEngine>>;
@@ -278,6 +286,140 @@ describe('#7728: the `internal` field flag omits a value from the generic data p
       }
       const found = await ctx.engine.find('itest_api_key', { where: { key: HASH } });
       expect(found).toHaveLength(1);
+    });
+  });
+
+  /**
+   * [#7922] `aggregate()` has no strip: it groups and reduces the driver's raw
+   * rows, so a flagged column reached through `groupBy` or an aggregation
+   * measure would surface the very value the flag promises is "never returned
+   * on the generic data path". The type-keyed half of this guard has been in
+   * place since #3171 (see the `ADR-0100 / #3171` block in
+   * `secret-fields.test.ts`, which stays the floor for `secret` / `password`);
+   * what is pinned here is the flag-keyed half, which did not exist.
+   *
+   * The FIRST case is deliberately the negative one. A guard that refuses too
+   * much breaks analytics silently — nothing throws at the surface a reviewer
+   * looks at, the numbers just stop arriving — so the control that an
+   * unflagged column still aggregates has to be able to fail on its own.
+   */
+  describe('the aggregation guard', () => {
+    /** Two rows sharing a prefix and one on its own — enough for real buckets. */
+    const seedThree = async () => {
+      await ctx.engine.insert('itest_api_key', { name: 'k1', prefix: 'osk_', revoked: false, key: HASH }, { context: { isSystem: true } } as any);
+      await ctx.engine.insert('itest_api_key', { name: 'k2', prefix: 'osk_', revoked: false, key: `${HASH}-2` }, { context: { isSystem: true } } as any);
+      await ctx.engine.insert('itest_api_key', { name: 'k3', prefix: 'svc_', revoked: true, key: `${HASH}-3` }, { context: { isSystem: true } } as any);
+    };
+
+    it('CONTROL: an unflagged column on an object that HAS a flagged one still aggregates', async () => {
+      await seedThree();
+
+      // `prefix` is an ordinary text column on the same object as the flagged
+      // `key`. Grouping by it must keep working, and must return the real
+      // buckets — asserting only "does not throw" would still pass if the
+      // guard were replaced by a no-op that returned nothing.
+      const rows = await ctx.engine.aggregate('itest_api_key', {
+        aggregations: [{ function: 'count', alias: 'n' }],
+        groupBy: ['prefix'],
+      }, SYSTEM);
+
+      const byPrefix = Object.fromEntries(rows.map((r: any) => [r.prefix, Number(r.n)]));
+      expect(byPrefix).toEqual({ osk_: 2, svc_: 1 });
+    });
+
+    it('CONTROL: an object with NO flagged field aggregates untouched (the fast path)', async () => {
+      await ctx.engine.insert('itest_plain', { key: 'visible' });
+      await ctx.engine.insert('itest_plain', { key: 'visible' });
+      await ctx.engine.insert('itest_plain', { key: 'other' });
+
+      // `itest_plain.key` shares its NAME with the flagged column on the other
+      // object — a guard that collected field names globally rather than
+      // per-schema would refuse here.
+      const rows = await ctx.engine.aggregate('itest_plain', {
+        aggregations: [{ function: 'count', alias: 'n' }],
+        groupBy: ['key'],
+      });
+
+      const byKey = Object.fromEntries(rows.map((r: any) => [r.key, Number(r.n)]));
+      expect(byKey).toEqual({ visible: 2, other: 1 });
+    });
+
+    it('CONTROL: COUNT(*) on the flagged object is not a false positive', async () => {
+      await seedThree();
+      // The object merely HAS a flagged column; nothing references it.
+      const rows = await ctx.engine.aggregate('itest_api_key', {
+        aggregations: [{ function: 'count', alias: 'n' }],
+      }, SYSTEM);
+      expect(Number((rows[0] as any).n)).toBe(3);
+    });
+
+    it('rejects the flagged field as a string groupBy dimension', async () => {
+      await seedThree();
+      // The disclosure shape: one bucket per distinct hash, keyed BY the hash.
+      await expect(
+        ctx.engine.aggregate('itest_api_key', {
+          aggregations: [{ function: 'count', alias: 'n' }],
+          groupBy: ['key'],
+        }, SYSTEM),
+      ).rejects.toThrow(/key/);
+    });
+
+    it('rejects the flagged field as a structured {field} groupBy bucket', async () => {
+      await seedThree();
+      // `as unknown as` names the contract being bypassed rather than erasing
+      // it: `EngineAggregateOptions.groupBy` is declared `string[]`, while the
+      // engine reads structured `{ field, dateGranularity }` buckets too — so
+      // this is deliberately off-contract input, and the guard must walk that
+      // second spelling as well. (`as any` here would grow the #4918 ratchet.)
+      await expect(
+        ctx.engine.aggregate('itest_api_key', {
+          aggregations: [{ function: 'count', alias: 'n' }],
+          groupBy: [{ field: 'key' }],
+        } as unknown as EngineAggregateOptions, SYSTEM),
+      ).rejects.toThrow(/key/);
+    });
+
+    it('rejects the flagged field as an aggregation measure', async () => {
+      await seedThree();
+      // MIN/MAX over a credential is the inference oracle #3171 named.
+      await expect(
+        ctx.engine.aggregate('itest_api_key', {
+          aggregations: [{ function: 'max', field: 'key', alias: 'x' }],
+        }, SYSTEM),
+      ).rejects.toThrow(/key/);
+    });
+
+    it('rejects even though the object is `managedBy: better-auth`', async () => {
+      // The read path exempts better-auth from PASSWORD masking; neither
+      // collector feeding this guard has an exemption, so the union does not
+      // acquire one. `itest_api_key` is better-auth-managed and still refused.
+      expect((tokenObject as any).managedBy).toBe('better-auth');
+      await seedThree();
+      await expect(
+        ctx.engine.aggregate('itest_api_key', {
+          aggregations: [{ function: 'count', alias: 'n' }],
+          groupBy: ['key'],
+        }, SYSTEM),
+      ).rejects.toThrow(/itest_api_key\.key/);
+    });
+
+    it('names every refused field once, and only the refused ones', async () => {
+      await seedThree();
+      // Mixing a legitimate dimension with the flagged one refuses the whole
+      // query (fail-closed) but must not slander `prefix`.
+      const err = await ctx.engine.aggregate('itest_api_key', {
+        aggregations: [{ function: 'count', alias: 'n' }],
+        groupBy: ['prefix', 'key'],
+      }, SYSTEM).then(
+        () => null,
+        (e: unknown) => e as Error,
+      );
+      expect(err).toBeInstanceOf(Error);
+      expect(err!.message).toContain('itest_api_key.key');
+      expect(err!.message).not.toContain('prefix');
+      // Deduped: a field must not be listed twice if it is reachable through
+      // both collectors.
+      expect(err!.message.match(/itest_api_key\.key/g)).toHaveLength(1);
     });
   });
 });

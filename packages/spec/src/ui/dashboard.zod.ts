@@ -749,6 +749,24 @@ export const GlobalFilterSchema = lazySchema(() => strictObject({
   /** Field name to filter on */
   field: z.string().describe('Field name to filter on'),
 
+  /**
+   * Source object for i18n label resolution (#7804): when set, this filter's
+   * field label and option labels resolve through the SAME
+   * `fields.<object>.<field>` translation-bundle convention lists/forms
+   * already use, keyed by this object and `field` — zero new i18n
+   * vocabulary, one resolver path. Optional and additive: a filter that
+   * omits it renders its author-supplied `label` (or a raw fallback) exactly
+   * as it always has; nothing that parses today stops parsing.
+   *
+   * Distinct from `optionsFrom.object` — that names the object DYNAMIC
+   * OPTIONS are fetched from, which may differ (e.g. filtering `opportunity`
+   * by `owner` with options sourced from `user`); this key names the object
+   * `field` itself lives on, which is what a translator's bundle entry is
+   * keyed by. `optionsFrom.object` already proves the schema is willing to
+   * name an object here — this reuses that same primitive one level up.
+   */
+  object: z.string().optional().describe('Object whose `fields.<object>.<field>` translation-bundle entry resolves this filter\'s field label and option labels (#7804)'),
+
   /** Display label for the filter */
   label: I18nLabelSchema.optional().describe('Display label for the filter'),
 
