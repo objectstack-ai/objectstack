@@ -61,20 +61,68 @@
  * {@link MissingDriverPackageError} identity across both packages, which is what
  * keeps `serve.ts`'s `e instanceof MissingDriverPackageError` fatal branch
  * matching an error this module raised.
+ *
+ * ## #7314 — and the THIRD loader, one layer down
+ *
+ * #6268 converged the two HOST-injected loaders. It could not reach the
+ * open-core one: `createDefaultDatasourceDriverFactory`'s `turso` arm in
+ * `@objectstack/service-datasource`, which serves every door that is not a
+ * host's `default` — a datasource created in Setup, `testConnection`, a declared
+ * non-default datasource. Two things disagreed across that seam, and both were
+ * invisible to the author:
+ *
+ *  - **The config surface.** This module read `url` and `authToken`; the
+ *    open-core arm read nine keys. So the SAME declared libSQL config was
+ *    honoured or silently dropped depending on whether the datasource happened
+ *    to be named `default`.
+ *  - **The error class.** {@link MissingDriverPackageError} was declared here,
+ *    in a package `service-datasource` cannot import (the dependency runs the
+ *    other way), so that arm raised a plain `Error` — unmatched by any
+ *    `instanceof`, and unpinnable except by message text.
+ *
+ * Both are fixed by moving the shared declaration DOWN into the package both
+ * sides can reach, and consuming it here: `buildTursoDriverConfig` /
+ * `resolveTursoUrl` for the config, the error class for the identity. Neither
+ * is re-listed or re-declared in this file — a corrected copy would only have
+ * agreed until the next key.
  */
 
 import type {
   DatasourceConnectionSpec,
   DatasourceDriverHandle,
   IDatasourceDriverFactory,
+  TursoDriverConfigInput,
+} from '@objectstack/service-datasource';
+import {
+  buildTursoDriverConfig,
+  resolveTursoUrl,
+  MissingDriverPackageError,
+  TURSO_DRIVER_PACKAGE,
+  TURSO_DRIVER_INSTALL_COMMAND,
 } from '@objectstack/service-datasource';
 import { resolveDatabaseDriverId } from '@objectstack/spec/data';
 
-/** The optional package that provides the libSQL/Turso driver. */
-export const TURSO_DRIVER_PACKAGE = '@objectstack/driver-turso';
-
-/** The exact command an operator runs to install the optional libSQL driver. */
-export const TURSO_DRIVER_INSTALL_COMMAND = `npm install ${TURSO_DRIVER_PACKAGE}`;
+/**
+ * The optional package that provides the libSQL/Turso driver, the exact command
+ * an operator runs to install it, and the typed failure raised when it is
+ * absent.
+ *
+ * All three are RE-EXPORTED rather than declared here since #7314. This module
+ * carried its own equal copies of the first two and the sole declaration of the
+ * third; the open-core loader in `@objectstack/service-datasource` could reach
+ * none of them, because `runtime` depends on that package and not the reverse.
+ * Hand-aligned copies across a dependency edge is exactly the shape that let the
+ * two loaders drift, so the declarations moved DOWN to the package both sides
+ * can import and this module consumes them.
+ *
+ * They stay exported from here because the export surface is the contract:
+ * `@objectstack/cli`'s `storage-driver.ts` re-exports them from this module and
+ * `serve.ts` decides boot fatality with
+ * `e instanceof MissingDriverPackageError`. A move that dropped the old export
+ * would be an API break performed for a refactor's convenience — and, for the
+ * error class, would break the identity `serve.ts` depends on.
+ */
+export { TURSO_DRIVER_PACKAGE, TURSO_DRIVER_INSTALL_COMMAND, MissingDriverPackageError };
 
 /**
  * True for the driver ids {@link loadTursoDriverFactory}'s factory builds.
@@ -91,38 +139,9 @@ export function isTursoDriverId(driverId: string): boolean {
   return resolveDatabaseDriverId(driverId) === 'turso';
 }
 
-/**
- * Thrown by {@link loadTursoDriverFactory} when the OPTIONAL driver package the
- * selection needs is not installed, or resolves to something that is not the
- * driver (a shadowing stub, a truncated install, a major that renamed the
- * export).
- *
- * The install command rides as a field as well as inside the message so a
- * caller can render it however it likes, and so the pin test asserts the
- * command rather than a sentence shape.
- *
- * ## One class, deliberately (#6268)
- *
- * `packages/cli/src/commands/serve.ts` decides whether a boot failure is FATAL
- * with `e instanceof MissingDriverPackageError`. Two same-named classes — one
- * per package — would make that predicate silently stop matching, degrading a
- * fatal branch to a non-fatal one with no diagnostic anywhere. The CLI therefore
- * RE-EXPORTS this class rather than declaring its own; `storage-driver.test.ts`
- * pins the identity (`===`) and pins that an error raised by this module still
- * satisfies the CLI-side `instanceof`.
- */
-export class MissingDriverPackageError extends Error {
-  readonly driverType: string;
-  readonly packageName: string;
-  readonly installCommand: string;
-  constructor(args: { driverType: string; packageName: string; installCommand: string; message: string }) {
-    super(args.message);
-    this.name = 'MissingDriverPackageError';
-    this.driverType = args.driverType;
-    this.packageName = args.packageName;
-    this.installCommand = args.installCommand;
-  }
-}
+// `MissingDriverPackageError` was declared here until #7314 and is now
+// re-exported from `@objectstack/service-datasource` at the top of this file —
+// see that export's comment for why it moved and why it still ships from here.
 
 export interface LoadTursoDriverFactoryOptions {
   /**
@@ -210,8 +229,11 @@ export async function loadTursoDriverFactory(
   }
 
   const record = (mod ?? {}) as { TursoDriver?: unknown; default?: { TursoDriver?: unknown } };
+  // The ctor's parameter is the SHARED config type, not a local list of the two
+  // keys this loader used to read (#7314) — so widening the read cannot be
+  // undone by a narrow signature quietly rejecting the rest.
   const TursoDriverCtor = (record.TursoDriver ?? record.default?.TursoDriver) as
-    | (new (config: { url: string; authToken?: string }) => object)
+    | (new (config: TursoDriverConfigInput) => object)
     | undefined;
   if (typeof TursoDriverCtor !== 'function') {
     // Resolvable but not the module we expect (a shadowing stub, a truncated
@@ -232,8 +254,7 @@ export async function loadTursoDriverFactory(
   return {
     supports: (driverId: string) => isTursoDriverId(driverId),
     create: (spec: DatasourceConnectionSpec): DatasourceDriverHandle => {
-      const config = (spec.config ?? {}) as { url?: unknown; authToken?: unknown };
-      const url = typeof config.url === 'string' ? config.url : '';
+      const url = resolveTursoUrl(spec);
       if (!url) {
         // Defensive: both hosts resolve a URL before they select this kind (the
         // CLI refuses a URL-less `turso` selection in `resolveStorageDefinition`,
@@ -245,12 +266,16 @@ export async function loadTursoDriverFactory(
           + 'config (e.g. libsql://my-db.turso.io or file:./data/objectstack.db).',
         );
       }
-      const driver = new TursoDriverCtor({
-        url,
-        ...(typeof config.authToken === 'string' && config.authToken
-          ? { authToken: config.authToken }
-          : {}),
-      }) as {
+      // Every key the spec declares, read ONCE for both loaders (#7314). This
+      // arm used to build `{ url, authToken }` from a list of its own, so a
+      // `default` libSQL datasource silently lost `encryptionKey` / `syncUrl` /
+      // `sync` / `concurrency` / `timeout` / `mode` / `schemaMode` — all of them
+      // accepted by `TursoConfigSchema`, all of them honoured on the open-core
+      // path, and the only difference being that this datasource happened to be
+      // named `default`. Corrected by DERIVATION rather than by a second, longer
+      // hand-written list: the first two lists agreed on the day they were
+      // written too.
+      const driver = new TursoDriverCtor(buildTursoDriverConfig(spec, url)) as {
         connect?: () => Promise<void>;
         disconnect?: () => Promise<void>;
         checkHealth?: () => Promise<boolean>;

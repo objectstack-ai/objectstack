@@ -100,14 +100,35 @@ export { createDefaultDatasourceDriverFactory } from './default-datasource-drive
 // The OPTIONAL libSQL/Turso package and its install command, plus the
 // missing-package message this factory raises (#7314) — exported so the answer
 // to "how do I install it" has one declaration a host can read rather than a
-// sentence to re-type. `@objectstack/runtime`'s host loader keeps its own equal
-// pair today; it depends on this package, so converging onto these is a legal
-// import direction whenever that lane takes it up.
+// sentence to re-type. `@objectstack/runtime`'s host loader consumes these
+// (it depends on this package, which is the legal import direction) rather than
+// keeping its own equal pair.
 export {
   TURSO_DRIVER_PACKAGE,
   TURSO_DRIVER_INSTALL_COMMAND,
   missingTursoDriverMessage,
 } from './default-datasource-driver-factory.js';
+// The typed "that OPTIONAL package is not installed" failure (#7314). Declared
+// HERE, in the lowest package that raises it, so the host loaders in
+// `@objectstack/runtime` / `@objectstack/cli` and the open-core arm in this
+// package throw ONE class object — which is what keeps `serve.ts`'s
+// `e instanceof MissingDriverPackageError` fatal branch matching. `runtime`
+// re-exports it from its old home, so importers written before the move keep
+// compiling against the same class.
+export { MissingDriverPackageError } from './missing-driver-package-error.js';
+// The single read of a spec's libSQL config (#7314) — the host loader and the
+// open-core arm both build the driver from THIS, instead of each hand-listing
+// the keys it happens to know about. Exported so the runtime lane can call it
+// and so a pin can assert the surface without re-typing the list.
+export {
+  buildTursoDriverConfig,
+  resolveTursoUrl,
+  TURSO_DRIVER_CONFIG_KEYS,
+} from './turso-driver-config.js';
+export type { TursoDriverConfigInput } from './turso-driver-config.js';
+// ADR-0015 schema-ownership resolution, shared by every driver arm and by the
+// libSQL config builder above (#7314).
+export { resolveDatasourceSchemaMode } from './datasource-schema-mode.js';
 // The other two OPTIONAL driver packages this factory can be asked for, and the
 // messages it raises when they are absent (#7385) — same seam as the libSQL pair
 // above, because the three arms answer one class of problem and had answered it

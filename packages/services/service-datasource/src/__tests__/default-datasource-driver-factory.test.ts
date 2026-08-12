@@ -22,6 +22,7 @@ import {
   MONGODB_DRIVER_PACKAGE,
 } from '../default-datasource-driver-factory.js';
 import { isUnbuiltWorkspaceFailure } from '../connect-failure-remedy.js';
+import { MissingDriverPackageError } from '../missing-driver-package-error.js';
 
 const factory = () => createDefaultDatasourceDriverFactory({ dev: false });
 
@@ -459,6 +460,17 @@ describe('createDefaultDatasourceDriverFactory — the missing libSQL package is
     expect((raised as Error).message).toContain(TURSO_DRIVER_INSTALL_COMMAND);
     expect((raised as Error).message).toContain(TURSO_DRIVER_PACKAGE);
     expect((raised as Error).message).toContain("datasource 'warehouse'");
+
+    // …and it is the TYPED failure since #7314's second half, not a plain
+    // `Error` that happens to carry the same words. The class moved DOWN into
+    // this package precisely so this arm could raise it: `serve.ts` decides boot
+    // fatality with `e instanceof MissingDriverPackageError`, a predicate no
+    // amount of correct wording can satisfy. The install command rides as DATA
+    // here, so a host can render the remedy without parsing the sentence.
+    expect(raised).toBeInstanceOf(MissingDriverPackageError);
+    expect((raised as MissingDriverPackageError).driverType).toBe('turso');
+    expect((raised as MissingDriverPackageError).packageName).toBe(TURSO_DRIVER_PACKAGE);
+    expect((raised as MissingDriverPackageError).installCommand).toBe(TURSO_DRIVER_INSTALL_COMMAND);
   });
 });
 
