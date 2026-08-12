@@ -5,6 +5,18 @@
 # which `pnpm install` runs. Cheap by construction: with no pending marker it
 # exits before doing any work, which is every commit that did not just merge a
 # generator-owned artifact (#4675).
+#
+# One commit is exempt, and only one: the MERGE commit itself, which the
+# sanctioned landing sequence (`scripts/pm/os-regen-merge.sh`, step 3) commits
+# BEFORE regenerating, so that "what main brought" stays readable apart from
+# "what the change produces". That commit records a deferral instead of being
+# refused; the immediately following commit must discharge it, and
+# `.githooks/pre-push` refuses the push if none ever does (#8047).
+#
+# ⚠️ git does not run this hook for a merge it completes ITSELF — only for one
+# you finish with `git commit`. A clean auto-committed merge therefore lands
+# with the marker untouched and the refusal falls on the next commit, which is
+# the same collection point either way.
 
 if [ -z "$OS_SKIP_REGEN_CHECK" ]; then
   node "$(git rev-parse --show-toplevel)/scripts/check-regen-pending.mjs" || exit 1

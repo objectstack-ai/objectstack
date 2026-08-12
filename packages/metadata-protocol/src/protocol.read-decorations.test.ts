@@ -31,8 +31,12 @@ import { describe, expect, it } from 'vitest';
 // #5619 sank the two predicates into a package both sides already depend on.
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { FlowSchema } from '@objectstack/spec/automation';
-import { METADATA_READ_DECORATIONS } from '@objectstack/spec/kernel';
-import { ObjectStackProtocolImplementation, stripReadDecorations } from './index.js';
+import { METADATA_READ_DECORATIONS, getMetadataTypeSchema } from '@objectstack/spec/kernel';
+import {
+    ObjectStackProtocolImplementation,
+    computeMetadataDiagnostics,
+    stripReadDecorations,
+} from './index.js';
 
 interface Row {
     id: string;
@@ -324,5 +328,184 @@ describe('a served document survives its own (closed) schema — cloud#971', () 
             + 'METADATA_READ_DECORATIONS in @objectstack/spec) nor accepted by the closed schema — '
             + 'every strict re-parse of a served flow, including the cold-boot bind, now throws',
         ).toEqual([]);
+    });
+});
+
+/**
+ * #7656 — the read must not judge its own badge.
+ *
+ * The THIRD consumer of the same invariant, and the one where the served
+ * document never leaves the response: `decorateMetadataItem` re-parses the item
+ * to compute `_diagnostics`, which is a re-parse of a served document in exactly
+ * the sense the module header of `spec/kernel/metadata-read-decorations.ts`
+ * means. It stripped `_diagnostics` (its own key, by hand) and nothing else, so
+ * a `?preview=draft` read — which stamps `_draft:true` BEFORE decorating, on
+ * both exits — validated the badge it had just added against a closed schema
+ * and answered `_diagnostics.valid:false / unrecognized_keys: ["_draft"]` for a
+ * perfectly valid draft. The verdict was about the reader, not the document.
+ *
+ * Same class as #6810 (`indexed`, rejected by name on a served object) but not
+ * the same fix: `indexed` did not belong on the served body at all and was
+ * removed at the injection site, whereas `_draft` is the preview badge the UI
+ * reads — it belongs on the RESPONSE and is already a declared member of
+ * `METADATA_READ_DECORATIONS`. So this closes where the list is consumed, not
+ * where the badge is stamped.
+ *
+ * The anti-vacuity cases are the point of this block: "no `_draft` complaint"
+ * is also satisfied by a read that stopped computing diagnostics at all, which
+ * would be a strictly worse regression wearing a green test. Each side pairs a
+ * valid draft (must be `valid:true`) with a genuinely broken one (must still be
+ * `valid:false`, naming its OWN defect).
+ */
+describe('draft preview diagnostics do not judge the injected `_draft` badge (#7656)', () => {
+    /** The symptom, verbatim from the card: a complaint naming `_draft`. */
+    const draftKeyComplaints = (diagnostics: any): string[] =>
+        (diagnostics?.errors ?? [])
+            .map((e: { message?: string }) => String(e?.message ?? ''))
+            .filter((m: string) => m.includes('_draft'));
+
+    /**
+     * Seed a stored draft row directly. The save path refuses an invalid body
+     * with 422, so a genuinely-broken draft cannot be authored through
+     * `saveMetaItem` — which is the whole reason read-time diagnostics exist:
+     * they badge rows that are already in the table (authored before a schema
+     * tightened, or written by the ADR-0033 AI apply loop).
+     */
+    const seedDraft = async (engine: any, name: string, body: unknown) => {
+        await engine.insert('sys_metadata', {
+            type: 'object',
+            name,
+            organization_id: null,
+            package_id: null,
+            state: 'draft',
+            metadata: JSON.stringify(body),
+        });
+    };
+
+    /** Valid except for one deliberately-planted defect: `type` is not a field type. */
+    const brokenBody = (name: string) => ({
+        name,
+        label: 'Broken',
+        fields: { amount: { type: 'not_a_real_field_type', label: 'Amount' } },
+    });
+
+    describe('single-item read (`getMetaItem`, previewDrafts)', () => {
+        it('a valid draft reads back `_diagnostics.valid:true`', async () => {
+            const { engine } = makeStubEngine();
+            const protocol = new ObjectStackProtocolImplementation(engine);
+            await protocol.saveMetaItem({
+                type: 'object', name: 'crm_quote', item: objectBody('crm_quote'), mode: 'draft',
+            });
+
+            const served: any = (await protocol.getMetaItem({
+                type: 'object', name: 'crm_quote', previewDrafts: true,
+            })).item;
+
+            expect(served._draft, 'precondition — the preview read badges').toBe(true);
+            expect(draftKeyComplaints(served._diagnostics)).toEqual([]);
+            expect(
+                served._diagnostics.valid,
+                `draft preview reported invalid: ${JSON.stringify(served._diagnostics?.errors)}`,
+            ).toBe(true);
+        });
+
+        it('a genuinely broken draft still reports its OWN error (anti-vacuity)', async () => {
+            const { engine } = makeStubEngine();
+            const protocol = new ObjectStackProtocolImplementation(engine);
+            await seedDraft(engine, 'crm_broken', brokenBody('crm_broken'));
+
+            const served: any = (await protocol.getMetaItem({
+                type: 'object', name: 'crm_broken', previewDrafts: true,
+            })).item;
+
+            expect(served._draft, 'precondition — the preview read badges').toBe(true);
+            // Still computed, still false — the fix must not silence the path.
+            expect(served._diagnostics.valid).toBe(false);
+            expect(served._diagnostics.errors?.length).toBeGreaterThan(0);
+            // …and false for the DOCUMENT's reason, not for the reader's badge.
+            expect(draftKeyComplaints(served._diagnostics)).toEqual([]);
+            expect(
+                JSON.stringify(served._diagnostics.errors),
+                'the real defect must still be named',
+            ).toContain('amount');
+        });
+    });
+
+    describe('list overlay (`getMetaItems`, previewDrafts)', () => {
+        /** The overlaid draft entry for `name`, as the Studio list receives it. */
+        const listed = async (protocol: any, name: string) => {
+            const res: any = await protocol.getMetaItems({ type: 'object', previewDrafts: true });
+            const items: any[] = Array.isArray(res) ? res : (res?.items ?? []);
+            const served = items.find((i) => i?.name === name);
+            expect(served, `getMetaItems('object') overlaid the draft ${name}`).toBeDefined();
+            return served;
+        };
+
+        it('a valid draft reads back `_diagnostics.valid:true`', async () => {
+            const { engine } = makeStubEngine();
+            const protocol = new ObjectStackProtocolImplementation(engine);
+            await protocol.saveMetaItem({
+                type: 'object', name: 'crm_quote', item: objectBody('crm_quote'), mode: 'draft',
+            });
+
+            const served = await listed(protocol, 'crm_quote');
+            expect(served._draft, 'precondition — the overlay badges').toBe(true);
+            expect(draftKeyComplaints(served._diagnostics)).toEqual([]);
+            expect(
+                served._diagnostics.valid,
+                `draft overlay reported invalid: ${JSON.stringify(served._diagnostics?.errors)}`,
+            ).toBe(true);
+        });
+
+        it('a genuinely broken draft still reports its OWN error (anti-vacuity)', async () => {
+            const { engine } = makeStubEngine();
+            const protocol = new ObjectStackProtocolImplementation(engine);
+            await seedDraft(engine, 'crm_broken', brokenBody('crm_broken'));
+
+            const served = await listed(protocol, 'crm_broken');
+            expect(served._draft, 'precondition — the overlay badges').toBe(true);
+            expect(served._diagnostics.valid).toBe(false);
+            expect(served._diagnostics.errors?.length).toBeGreaterThan(0);
+            expect(draftKeyComplaints(served._diagnostics)).toEqual([]);
+            expect(
+                JSON.stringify(served._diagnostics.errors),
+                'the real defect must still be named',
+            ).toContain('amount');
+        });
+    });
+
+    describe('the verdict is computed from the list, and the schema stays closed', () => {
+        it('every declared read decoration is invisible to the verdict (drift guard)', () => {
+            // The mirror of the cloud#971 drift guard above, one layer down: a
+            // FOURTH decoration added to `METADATA_READ_DECORATIONS` must not
+            // have to remember this consumer. It fails here, on a unit, instead
+            // of as `valid:false` on somebody's badge.
+            const body = objectBody('crm_invoice');
+            expect(computeMetadataDiagnostics('object', body)?.valid).toBe(true);
+
+            for (const key of METADATA_READ_DECORATIONS) {
+                const verdict = computeMetadataDiagnostics('object', { ...body, [key]: true });
+                expect(
+                    verdict?.valid,
+                    `read decoration \`${key}\` leaked into the verdict: `
+                    + `${JSON.stringify(verdict?.errors)}`,
+                ).toBe(true);
+            }
+        });
+
+        it('the object schema itself still rejects `_draft` — only the strip moved', () => {
+            // ⛔ The remedy is NOT a looser item schema. `_draft` is a response
+            // badge; a STORED body carrying it is a polluted row and must keep
+            // failing by name, which is what makes the #4326 write-path strip
+            // load-bearing rather than cosmetic.
+            const schema = getMetadataTypeSchema('object');
+            expect(schema, 'precondition — `object` has a registered schema').toBeDefined();
+
+            const parsed = (schema as any).safeParse({ ...objectBody('crm_invoice'), _draft: true });
+            expect(parsed.success, 'the closed schema must still reject the badge').toBe(false);
+            expect(
+                parsed.error.issues.some((i: { code: string }) => i.code === 'unrecognized_keys'),
+            ).toBe(true);
+        });
     });
 });
