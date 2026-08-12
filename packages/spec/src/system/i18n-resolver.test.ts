@@ -730,6 +730,7 @@ import {
   translateApp,
   translateDashboard,
   resolveViewLabel as _resolveViewLabel,
+  type DashboardLike,
 } from './i18n-resolver';
 
 describe('locale fallback resolution (BCP-47)', () => {
@@ -900,7 +901,13 @@ describe('translateDashboard', () => {
           description: 'Total registered users',
           options: { description: 'vs last month', sortBy: 'created' },
         },
-        { id: 'widget_other', title: 'Other', options: { description: 'untouched extra' } },
+        {
+          id: 'widget_other',
+          type: 'metric',
+          title: 'Other',
+          description: 'Other card copy',
+          options: { description: 'untouched extra' },
+        },
       ],
     };
 
@@ -926,9 +933,9 @@ describe('translateDashboard', () => {
     });
 
     it('creates the options bag when the bundle carries a subCaption and the widget has none — mirroring how a bundle-only `title` renders', () => {
-      const bare = { name: 'system_overview', widgets: [{ id: 'widget_total_users' }] };
+      const bare: DashboardLike = { name: 'system_overview', widgets: [{ id: 'widget_total_users' }] };
       const out = translateDashboard(bare, subBundle, { locale: 'zh-CN' });
-      expect(out.widgets[0].options).toEqual({ description: '较上月' });
+      expect(out.widgets?.[0]?.options).toEqual({ description: '较上月' });
     });
   });
 
