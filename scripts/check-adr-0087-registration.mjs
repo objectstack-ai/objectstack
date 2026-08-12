@@ -543,13 +543,23 @@ export function breakingDeclaration(parsed) {
 // above is exactly that shape. So corroboration is a FALLBACK for the ambiguous
 // case, never the criterion.
 //
-// The residual blind spot, stated rather than hidden: prose here is HARD-WRAPPED at
-// ~80 columns, so a mention that happens to wrap onto a fresh line puts its
-// placeholder at column 0 with its governing word on the line above, and reads as a
-// label. `changelog-ships-in-tarball.md` is that shape (`…carry their\nFROM → TO
-// migration because…`) and stays a false positive. It declares no breaking change,
-// so it is never judged; a cross-line prefix was not attempted because a wrapped
-// LABEL is just as common and nothing distinguishes the two from the line above.
+// That blind spot is CLOSED (#7094). Prose here is HARD-WRAPPED at ~80 columns, so a
+// mention that wraps onto a fresh line puts its placeholder at column 0 with its
+// governing word on the line above; `labelPositioned` now asks that line the
+// question when the placeholder opens its own and the line above is prose (not a
+// heading, table row or fence marker). #7078 declined this because "a wrapped LABEL
+// is just as common", and it is RIGHT about that for the in-line predicate: reusing
+// `GOVERNING_WORD_RE` across the wrap reads every line-final letter as governance
+// and turns a label under any ordinary sentence into a mention. That version was
+// written first and its own positive control killed it (P52). What separates the two
+// shapes is a NARROWER question asked only across the break -- a closed class of
+// words that cannot END a segment (`carry their` continues; `ends the line here`
+// does not). See `WRAPPED_GOVERNOR_RE`. Measured over the full 1792-changeset stock:
+// 176 hits / 132 breaking -> 174 / 132. TWO changesets leave, NEITHER declared
+// breaking, and both are mentions on inspection -- `changelog-ships-in-tarball.md`
+// (the specimen) and `notification-retirement-evidence-corrected.md` (a docs-only
+// correction narrating which commits touched a published FROM → TO). The residue and
+// the `--audit-stock` `!` candidate list are UNCHANGED at 97 / 52.
 //
 // Anyone widening this later should start with the first two, with these numbers to
 // beat, and should re-measure the false-positive surface FIRST -- as #6419, #6497
@@ -788,6 +798,46 @@ const FRAMING_TAIL_RE =
   /(?:迁移|改写|改名|升级|migrat(?:e|es|ed|ing|ion|ions)|rename[sd]?|rewrit(?:e|es|ten|ing)|upgrade[sd]?)$/i;
 
 /**
+ * A line whose sentence CANNOT run on into the line below it -- markdown structure
+ * rather than prose. Consulted only by `labelPositioned`'s cross-line arm (#7094):
+ * a placeholder opening the line under one of these is opening a segment, so it is
+ * read exactly as it was before that arm existed.
+ *
+ * A bullet or a blockquote is deliberately NOT here: those DO wrap, and their
+ * continuation line is exactly the shape the arm exists to read. A blank line needs
+ * no entry either -- it governs nothing through the ordinary path.
+ */
+const STRUCTURAL_LINE_RE = /^\s{0,3}(?:#{1,6}\s|```|~~~|\|)/;
+
+/**
+ * Does the line ABOVE end on a word that cannot be the last word of a segment --
+ * so the noun phrase it opens must continue on the line below? (#7094)
+ *
+ * ⚠️ This is deliberately NOT `GOVERNING_WORD_RE`, and the difference is the whole
+ * safety of the cross-line arm. WITHIN a line, adjacency is the evidence: a letter
+ * immediately left of the placeholder means a word is attached to it, whatever word
+ * it is. A LINE BREAK is not adjacency -- it is ambiguous by construction, because
+ * a label may perfectly well open the line under a finished thought. So the
+ * cross-line test demands a stronger signal than "a word ended here": a CLOSED
+ * CLASS of determiners, possessives and complement-taking prepositions, none of
+ * which can end an English segment. `carry their` continues; `ends the line here`
+ * does not, and neither does `## Migration`.
+ *
+ * Reusing `GOVERNING_WORD_RE` across the wrap was written first and REJECTED by its
+ * own positive control (P52): it reads ANY line-final letter as governance, so
+ * every wrapped LABEL under an ordinary sentence became a mention -- the precise
+ * failure #7078 predicted when it declined to attempt this at all. The class below
+ * is what makes the two shapes separable; over the stock all three wrapped mentions
+ * end on `their`, `the` and `a` respectively, and nothing else in 1792 changesets
+ * ends a line in this class before a placeholder.
+ *
+ * The Chinese arm needs no class: `的` is the attributive particle and is already
+ * the one-character signal in-line (P40), so it carries across the wrap unchanged.
+ */
+const WRAPPED_GOVERNOR_RE =
+  /(?:^|[^A-Za-z])(?:the|an?|its|their|our|your|his|her|this|these|those|each|every|any|some|no|same|own|another|of|with|for|in|on|by|to|and|or)$|的$/i;
+
+/**
  * The two halves of a VERTICAL `FROM`/`TO` pair -- the placeholder spelled as two
  * consecutive blocks rather than across one arrow. Each must OPEN its line (past a
  * comment marker, bullet or emphasis) and be closed by `:`, `—`, whitespace or the
@@ -842,18 +892,56 @@ const VERTICAL_TO_RE = /^\s{0,3}(?:(?:\/\/|#|-|\*|>)\s*)*\**TO\**\s*(?::|—|-|$
  *
  * ⚠️ Prose in this repo is HARD-WRAPPED at ~80 columns, so "starts its line" is NOT
  * the test and never could be -- `carry their\nFROM → TO migration` puts a mention
- * at column 0. The prefix examined is the prefix WITHIN the line, which is why a
- * mention wrapped onto a fresh line is the one shape this rule cannot see. Stated
- * rather than hidden: `changelog-ships-in-tarball.md` is exactly that shape and
- * stays a false positive (it declares no breaking change, so it is never judged).
+ * at column 0 with nothing at all to its left. #7078 left that as a stated blind
+ * spot; #7094 closes it. When the placeholder OPENS its line, the word that governs
+ * it -- if one does -- is the last word of the line ABOVE, so that is where the
+ * question is asked instead.
+ *
+ * ⚠️ It is a DIFFERENT and narrower question there, and that asymmetry is the point.
+ * Adjacency within a line is evidence on its own; a line break is not, because a
+ * label may open the line under a finished thought. So the cross-line arm asks
+ * `WRAPPED_GOVERNOR_RE` -- a closed class of determiners, possessives and
+ * complement-taking prepositions -- where the in-line arm asks `GOVERNING_WORD_RE`.
+ * `carry their` continues into the next line; `ends the line here` does not.
+ *
+ * ⚠️ It is asked ONLY of a line the sentence can actually run on from. A structural
+ * line above -- a heading, a table row, a fence marker -- does not wrap into the one
+ * below, and a BLANK line above (46 of the stock's 49 line-opening occurrences)
+ * opens a paragraph, whose first token is a label by position. In all three the
+ * reading is exactly what it was before this arm existed.
+ *
+ * ⚠️ Measured over the whole 1792-changeset stock before it was believed: of the 49
+ * occurrences that open their line, 46 sit under a blank line and are untouched
+ * here; of the 3 with prose above, ALL THREE are mentions on inspection, and only
+ * TWO change their changeset's verdict --
+ * `changelog-ships-in-tarball.md` (the #7094 specimen, `carry their\nFROM → TO
+ * migration`) and `notification-retirement-evidence-corrected.md` (`the evidence and
+ * the\nFROM → TO), and one on the #4651 app-area entry`). BOTH declare no breaking
+ * change. `apimethod-enum-shrink.md` carries the third and keeps its hit on an
+ * EARLIER genuine label (`**Migration (FROM → TO).**`) -- it is the positive control
+ * for this arm, a body holding a real label and a wrapped mention at once. Zero
+ * declared-breaking changesets change state, so the residue and the `!` candidate
+ * list are byte-identical before and after.
+ *
+ * ⚠️ Still out of reach, stated rather than hidden: prose wrapped inside a FENCED
+ * block. The fence's opening line is structural and excluded, but a line INSIDE the
+ * fence reads as prose, and this predicate is given one line of context rather than
+ * the block structure. No stock occurrence has that shape.
  *
  * @param {string} line the line the `FROM` token sits on
  * @param {number} col  its column within that line
+ * @param {string} [prev] the line above it, when there is one (#7094)
  */
-function labelPositioned(line, col) {
+function labelPositioned(line, col, prev) {
   if (/^\s{0,3}#{1,6}\s/.test(line)) return true;
-  const prefix = line.slice(0, col).replace(/\s+$/, '').replace(FRAMING_TAIL_RE, '');
-  return !GOVERNING_WORD_RE.test(prefix);
+  const prefix = line.slice(0, col).replace(/\s+$/, '');
+  if (prefix !== '') return !GOVERNING_WORD_RE.test(prefix.replace(FRAMING_TAIL_RE, ''));
+  // The placeholder OPENS its line -- bare or merely indented, so a wrapped list
+  // item counts. There is no character to its left, so the governing word, if there
+  // is one, is the last word of the line above; and only a line that is prose the
+  // sentence can run on from is asked (#7094).
+  if (prev === undefined || STRUCTURAL_LINE_RE.test(prev)) return true;
+  return !WRAPPED_GOVERNOR_RE.test(prev.replace(/\s+$/, ''));
 }
 
 /**
@@ -933,7 +1021,7 @@ export function findMigrationPrescription(body) {
     const at = m.index + m[0].indexOf('FROM');
     const lineStart = body.lastIndexOf('\n', at - 1) + 1;
     const lineNo = body.slice(0, at).split(/\r?\n/).length - 1;
-    if (!labelPositioned(lines[lineNo] ?? '', at - lineStart)) {
+    if (!labelPositioned(lines[lineNo] ?? '', at - lineStart, lineNo > 0 ? lines[lineNo - 1] : undefined)) {
       if (corroborated === null) corroborated = carriesConcreteRewrite(body);
       if (!corroborated) continue;
     }
@@ -2483,6 +2571,63 @@ function selfTest() {
   assert(
     findMigrationPrescription('prose that wraps at eighty columns and ends the line here\nFROM → TO:\n\n- `a.b` → `a.c`\n')?.line === 'FROM → TO:',
     'P50: the evidence line is the placeholder\'s OWN line -- the match may open on the newline that ends the line above, which used to be reported instead',
+  );
+
+  // --- P51-P60: the HARD-WRAPPED mention, and the floors that keep the cure from
+  // --- being worse than the disease (#7094).
+  //
+  // Branch 1 reads the ONE character before the placeholder. When the placeholder
+  // opens its line there is no such character, and #7078 read that as "a label
+  // opens a segment" -- true under a blank line, false under a sentence that simply
+  // ran out of columns. These pin BOTH directions: the wrapped MENTION now loses,
+  // and every other way of opening a line keeps what it had. P52 is the positive
+  // control the specimen assertions are worthless without -- if it ever goes red
+  // with P51 green, the arm has stopped seeing rather than started discriminating.
+  assert(
+    !hasMigrationPrescription(
+      'The AGENTS.md post-task checklist requires breaking changesets to carry their\nFROM → TO migration because "this text ships to consumers as `CHANGELOG.md`\ninside the npm package and is what an upgrading agent greps after the tombstone\nerror."\n',
+    ),
+    'P51: the #7094 specimen VERBATIM -- `carry their` ends the line above, so the wrap does not make a mention a label (`changelog-ships-in-tarball.md`)',
+  );
+  assert(
+    findMigrationPrescription('prose that wraps at eighty columns and ends the line here\nFROM → TO: delete the block\n')?.branch === 'from-to-label',
+    'P52: POSITIVE CONTROL -- a wrapped LABEL under a line ending on a word that governs nothing still matches, with NO concrete rewrite in the body to fall back on',
+  );
+  assert(
+    findMigrationPrescription('The RLS compiler never read it.\nFROM → TO: a set a policy needs is now supplied\n')?.branch === 'from-to-label',
+    'P53: ...and so does one under a FINISHED sentence -- punctuation is a boundary across the wrap exactly as it is within the line (P43)',
+  );
+  assert(
+    findMigrationPrescription('an ordinary paragraph about something else\n\nFROM → TO:\n')?.branch === 'from-to-label',
+    'P54: a placeholder opening a PARAGRAPH is a label -- 46 of the stock\'s 49 line-opening occurrences are this shape and none of them moved',
+  );
+  assert(
+    findMigrationPrescription('## Migration\nFROM → TO:\n')?.branch === 'from-to-label',
+    'P55: a HEADING does not wrap into the line below it, so the placeholder under one still opens a segment',
+  );
+  assert(
+    findMigrationPrescription('| You wrote | Write instead |\nFROM → TO:\n')?.branch === 'from-to-label',
+    'P56: nor does a table row -- structure above is not a sentence running on',
+  );
+  assert(
+    !hasMigrationPrescription('这次改动只是把发布说明搬了个地方,真正的\nFROM → TO 落在部署方自己的代理配置上。\n'),
+    'P57: the Chinese spelling wraps too -- `的` ending the line above governs the placeholder below it (P40 across a wrap)',
+  );
+  assert(
+    !hasMigrationPrescription('- the checklist requires every breaking changeset to carry its own\n  FROM → TO guide, which is where the prescriptions live\n'),
+    'P58: a wrapped BULLET is prose that runs on -- the arm reads the line above whether the placeholder is at column 0 or merely indented',
+  );
+  assert(
+    findMigrationPrescription('- a bullet that ended cleanly\n\n  FROM → TO: delete the block\n')?.branch === 'from-to-label',
+    'P59: ...and an INDENTED label under a blank line is still a label -- indentation is not the test, which is the tightening this fix had to avoid',
+  );
+  assert(
+    findMigrationPrescription('the checklist requires each changeset to carry their\nFROM → TO guide\n\n- `objectPermissions` → `objectPermission`\n')?.branch === 'from-to-label',
+    'P60: the corroboration floor survives the wrap -- a wrapped mention is still taken at face value once the body SHOWS a concrete rewrite (P47)',
+  );
+  assert(
+    findMigrationPrescription('**Migration (FROM → TO).** Replace each legacy value with the primitive\n\nit is NOT a parse error: `stripLegacyApiMethods` strips it with a\nFROM→TO warning (canonicalize-and-warn)\n')?.line === '**Migration (FROM → TO).** Replace each legacy value with the primitive',
+    'P61: a body holding a real label AND a wrapped mention keeps the LABEL as its evidence -- `apimethod-enum-shrink.md`, declared-breaking, the stock\'s own control for this arm',
   );
 
   // ---- S1-S5: the `--audit-stock` classifier (#6350) ------------------------

@@ -31,6 +31,8 @@ export {
   resolveSearchCompanionSources,
   isCompanionSourceEligible,
   isCompanionMatchableTerm,
+  isSearchCompanionRequested,
+  stripSearchCompanion,
   containsCJK,
 } from './search-companion.js';
 export type { CompanionFieldMeta, CompanionObjectMeta } from './search-companion.js';

@@ -66,7 +66,12 @@ export const SysOauthApplication = ObjectSchema.create({
       method: 'POST',
       target: '/api/v1/auth/admin/oauth2/toggle-disabled',
       requiresFeature: 'oidcProvider',
-      confirmText: 'Disable this OAuth application? Active access/refresh tokens issued to it will continue to be rejected at the token, authorize, and introspect endpoints. Existing integrations will stop working immediately.',
+      // The confirm question rides `description`, not `confirmText`: this action
+      // collects params, and the console action runner chains confirmation THEN
+      // param collection, so pairing the two keys opens two dialogs for one
+      // decision (#7278 ruling 2026-08-10, swept by #7309). The param dialog
+      // renders this under its title — one dialog, question intact.
+      description: 'Disable this OAuth application? Active access/refresh tokens issued to it will continue to be rejected at the token, authorize, and introspect endpoints. Existing integrations will stop working immediately.',
       successMessage: 'OAuth application disabled',
       refreshAfter: true,
       visible: '!record.disabled',
@@ -86,7 +91,8 @@ export const SysOauthApplication = ObjectSchema.create({
       method: 'POST',
       target: '/api/v1/auth/admin/oauth2/toggle-disabled',
       requiresFeature: 'oidcProvider',
-      confirmText: 'Re-enable this OAuth application? Token issuance, authorization, and introspection will resume immediately.',
+      // Confirm question on `description` — one dialog, not two (#7278/#7309).
+      description: 'Re-enable this OAuth application? Token issuance, authorization, and introspection will resume immediately.',
       successMessage: 'OAuth application enabled',
       refreshAfter: true,
       visible: 'record.disabled',
@@ -138,7 +144,12 @@ export const SysOauthApplication = ObjectSchema.create({
       method: 'POST',
       target: '/api/v1/auth/oauth2/client/rotate-secret',
       requiresFeature: 'oidcProvider',
-      confirmText: 'Rotate this OAuth client\'s secret? The previous secret will stop working immediately and any integrations using it will break until they are updated with the new secret. The new secret is shown only once.',
+      // Three dialogs collapse to two here, and the two that remain are the two
+      // the user actually needs: this ONE param dialog (question + `client_id`),
+      // then the `resultDialog` that reveals the new secret AFTER the rotation.
+      // The result dialog is not part of the #7278 defect — it is a post-run
+      // reveal for output shown only once, not a second pre-run decision.
+      description: 'Rotate this OAuth client\'s secret? The previous secret will stop working immediately and any integrations using it will break until they are updated with the new secret. The new secret is shown only once.',
       refreshAfter: true,
       params: [
         { name: 'client_id', field: 'client_id', defaultFromRow: true, required: true },
@@ -163,7 +174,8 @@ export const SysOauthApplication = ObjectSchema.create({
       method: 'POST',
       target: '/api/v1/auth/oauth2/delete-client',
       requiresFeature: 'oidcProvider',
-      confirmText: 'Permanently delete this OAuth application? All issued tokens and consents will be invalidated and integrations using this client_id will stop working immediately. This cannot be undone.',
+      // Confirm question on `description` — one dialog, not two (#7278/#7309).
+      description: 'Permanently delete this OAuth application? All issued tokens and consents will be invalidated and integrations using this client_id will stop working immediately. This cannot be undone.',
       successMessage: 'OAuth application deleted',
       refreshAfter: true,
       params: [

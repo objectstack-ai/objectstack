@@ -49,6 +49,92 @@ interface FactoryOptions {
   logger?: any;
 }
 
+/**
+ * Build the `['log']` capability surface for one body invocation (#7448).
+ *
+ * ## Why this is not `engineCtx?.logger`
+ *
+ * It was, at `:339` (hooks) and `:377` (actions), and that key is written by
+ * nobody. `HookContextSchema` (`packages/spec/src/data/hook.zod.ts`) declares
+ * no `logger`, and ObjectQL's engine — the sole producer of a HookContext —
+ * builds all four of them (`engine.ts` `beforeFind` / `find` / `update` /
+ * `delete` assembly sites) without one. Both action-context assembly sites
+ * (`../domains/actions.ts` REST `/actions`, `../action-execution.ts` MCP
+ * `run_action`) likewise write no `logger`. So `ctx.log` resolved `undefined`
+ * on EVERY path, and `installCtx` (`quickjs-runner.ts`) forwards through
+ * `ctx.log?.[level]?.(…)` — an optional call on an absent host seam. The
+ * capability gate passes, the VM-side `ctx.log.info` exists, the body runs to
+ * completion and returns normally, and the line goes nowhere. QA run #7439 saw
+ * exactly that: `[BodyRunner] hook fired` at `--log-level debug` with the
+ * body's own `ctx.log.info('task completed: …')` absent.
+ *
+ * That is the third limb of this shape removed from this file, not the first:
+ * `doc` / `previousDoc` (#5906) and `session.user` (#6316) were also keys no
+ * producer ever wrote, deleted rather than left as a second de-facto contract
+ * (Prime Directive #12). The remedy is the same — read the source that exists.
+ * `opts.logger` is the engine's own `Logger`, handed to the factory by all four
+ * construction sites in `../app-plugin.ts` (`logger: ctx.logger`), and it is
+ * the very logger whose `[BodyRunner] hook fired` WAS observable in the same
+ * QA run. Adding a `logger` to `HookContextSchema` instead would widen the
+ * metadata contract to re-supply, per invocation, something the runner already
+ * holds for the lifetime of the bind.
+ *
+ * ## Why absence warns rather than falling back to `console`
+ *
+ * A declared capability must not silently produce nothing — either it works or
+ * the author is told it cannot. When the factory was constructed with no logger
+ * at all, working is not on the table, so this takes the told branch. Routing
+ * to `console` instead would override a decision that belongs to the host: a
+ * `Logger` carries the level threshold, formatting and sinks the host chose,
+ * and a host running at `warn` would start receiving body `info` lines on an
+ * unfiltered second stream it never configured. No production path reaches the
+ * warning — all four `../app-plugin.ts` sites pass `ctx.logger` — so it is a
+ * diagnostic for embedders that construct the factory directly, and it fires
+ * once per invocation rather than once per call so a chatty body cannot bury
+ * the rest of the log.
+ */
+function buildBodyLogSurface(
+  opts: FactoryOptions,
+  origin: { kind: 'hook' | 'action'; name: string },
+): ScriptContext['log'] {
+  const logger = opts.logger;
+  const label = `[${origin.kind} '${origin.name}']`;
+
+  if (!logger) {
+    let warned = false;
+    const warnOnce = () => {
+      if (warned) return;
+      warned = true;
+      console.warn(
+        `[BodyRunner] ${origin.kind} '${origin.name}' (app '${opts.appId}') declares the 'log' ` +
+          `capability, but this BodyRunner was constructed without a logger — ctx.log output is ` +
+          `discarded. Pass \`logger\` to ${origin.kind}BodyRunnerFactory({ … }). See #7448.`,
+      );
+    };
+    return { info: warnOnce, warn: warnOnce, error: warnOnce };
+  }
+
+  // `Logger.meta` is a `Record` (`packages/spec/src/contracts/logger.ts`); a
+  // body may pass anything JSON-serialisable, so non-objects are carried under
+  // a `data` key rather than dropped on the floor.
+  const toMeta = (data: unknown): Record<string, any> | undefined => {
+    if (data === undefined || data === null) return undefined;
+    if (typeof data === 'object' && !Array.isArray(data)) return data as Record<string, any>;
+    return { data };
+  };
+
+  return {
+    info: (msg: string, data?: unknown) => logger.info?.(`${label} ${msg}`, toMeta(data)),
+    warn: (msg: string, data?: unknown) => logger.warn?.(`${label} ${msg}`, toMeta(data)),
+    // ⚠️ `Logger.error` is `(message, error, meta)` — THREE args, and the body's
+    // `data` is the third. Passing it second lands a meta object in the `Error`
+    // slot, where `ConsoleLogger`/`JsonLogger` read `error.message`/`error.stack`
+    // as `undefined` and drop every field, leaving a bare sentence. Same trap
+    // `hook-wrappers.ts` documents for `HookDiagnosticsLogger`.
+    error: (msg: string, data?: unknown) => logger.error?.(`${label} ${msg}`, undefined, toMeta(data)),
+  };
+}
+
 export function hookBodyRunnerFactory(
   runner: ScriptRunner,
   opts: FactoryOptions,
@@ -69,7 +155,11 @@ export function hookBodyRunnerFactory(
     const body = parsed.data;
 
     return async function boundBodyHandler(engineCtx: any): Promise<void> {
-      const sandboxCtx = buildSandboxContext(engineCtx, opts.ql);
+      const sandboxCtx = buildSandboxContext(
+        engineCtx,
+        opts.ql,
+        buildBodyLogSurface(opts, { kind: 'hook', name: hook.name }),
+      );
       try {
         opts.logger?.debug?.('[BodyRunner] hook fired', { appId: opts.appId, hook: hook.name });
         const result = await runner.run(body, sandboxCtx, {
@@ -169,7 +259,11 @@ export function actionBodyRunnerFactory(
     const body = parsed.data;
 
     return async function boundActionHandler(actionCtx: any): Promise<unknown> {
-      const sandboxCtx = buildActionSandboxContext(actionCtx, opts.ql);
+      const sandboxCtx = buildActionSandboxContext(
+        actionCtx,
+        opts.ql,
+        buildBodyLogSurface(opts, { kind: 'action', name: action.name }),
+      );
       try {
         opts.logger?.debug?.('[BodyRunner] action fired', {
           appId: opts.appId,
@@ -304,7 +398,11 @@ function buildSandboxApi(engineCtx: any, ql: any, errLabel: string) {
   };
 }
 
-function buildSandboxContext(engineCtx: any, ql: any): ScriptContext {
+function buildSandboxContext(
+  engineCtx: any,
+  ql: any,
+  log: ScriptContext['log'],
+): ScriptContext {
   // `input` and `previous` are the engine's own spellings, and the only ones:
   // `HookContextSchema` (`packages/spec/src/data/hook.zod.ts`) declares neither a
   // top-level `doc` nor a `previousDoc`, and objectql's `engine.ts` — the sole
@@ -336,12 +434,19 @@ function buildSandboxContext(engineCtx: any, ql: any): ScriptContext {
     object: typeof engineCtx?.object === 'string' ? engineCtx.object : undefined,
     result: engineCtx?.result,
     api: buildSandboxApi(engineCtx, ql, 'hook body'),
-    log: engineCtx?.logger,
+    // [#7448] NOT `engineCtx?.logger` — a key no HookContext producer writes and
+    // `HookContextSchema` never declared, so the `['log']` capability resolved
+    // `undefined` and every body log line vanished. See {@link buildBodyLogSurface}.
+    log,
     crypto: globalThis.crypto,
   };
 }
 
-function buildActionSandboxContext(actionCtx: any, ql: any): ScriptContext {
+function buildActionSandboxContext(
+  actionCtx: any,
+  ql: any,
+  log: ScriptContext['log'],
+): ScriptContext {
   // Action ctx convention (mirrors http-dispatcher.ts):
   //   { record, params, recordId, user, session, engine, services, ... }
   // The script signature is `(input, ctx)` — input gets `params`, ctx gets
@@ -374,7 +479,9 @@ function buildActionSandboxContext(actionCtx: any, ql: any): ScriptContext {
     // a body makes to it rather than letting them vanish.
     record: unwrapProxyToPlain(actionCtx?.record),
     api: buildSandboxApi(actionCtx, ql, 'action body'),
-    log: actionCtx?.logger,
+    // [#7448] Same removal as the hook face: neither action-context assembly
+    // site (`../domains/actions.ts`, `../action-execution.ts`) writes `logger`.
+    log,
     crypto: globalThis.crypto,
   };
 }

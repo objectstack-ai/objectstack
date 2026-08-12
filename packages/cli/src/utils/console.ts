@@ -146,12 +146,23 @@ export interface ResolveConsoleOptions {
   cliVersion?: string;
   /** Warning sink; defaults to `console.warn`. */
   warn?: (message: string) => void;
+  /**
+   * Called when the dist about to be served was built from a different
+   * objectui SHA than the repo pins. Defaults to emitting the advisory
+   * one-liner on `warn`. A caller that enforces the pin itself — the dev
+   * server refuses to mount a drifted console, see `decideConsoleMount` —
+   * passes a collector instead, so the drift is reported exactly once and
+   * by whoever decides what to do about it.
+   */
+  onDrift?: (drift: ConsoleShaDrift) => void;
 }
 
 export function resolveConsolePath(options?: ResolveConsoleOptions): string | null {
   const cwd = options?.cwd ?? process.cwd();
   const cliVersion = options?.cliVersion ?? getCliVersion();
   const warn = options?.warn ?? ((message: string) => console.warn(message));
+  const onDrift =
+    options?.onDrift ?? ((drift: ConsoleShaDrift) => warn(formatConsoleShaDriftWarning(drift)));
 
   /** Version guard for vendored-package candidates (strategies 1 & 2). */
   const versionOk = (dir: string, candidateVersion: unknown): boolean => {
@@ -241,10 +252,12 @@ export function resolveConsolePath(options?: ResolveConsoleOptions): string | nu
   // Pass 1: prefer a candidate that actually has a built dist.
   for (const dir of candidates) {
     if (hasConsoleDist(dir)) {
-      // Loudly flag (but still serve) a dist built from a different objectui
-      // SHA than the framework pins — the silent-drift case the npm-major
-      // guard above can't see. No-op for published installs / unstamped dists.
-      warnOnConsoleShaDrift(dir, warn);
+      // Report a dist built from a different objectui SHA than the framework
+      // pins — the silent-drift case the npm-major guard above can't see.
+      // No-op for published installs / unstamped dists. What happens next is
+      // the caller's call: advisory by default, fail-closed under `os dev`.
+      const drift = detectConsoleShaDrift(dir);
+      if (drift) onDrift(drift);
       return dir;
     }
   }
@@ -300,30 +313,113 @@ function findObjectuiPin(startDir: string): { pin: string; file: string } | null
   return null;
 }
 
-export function warnOnConsoleShaDrift(
-  consoleDir: string,
-  warn: (message: string) => void,
-): void {
+/** A dist proven to be built from a different objectui commit than the pin. */
+export interface ConsoleShaDrift {
+  /** objectui SHA the dist was built from (`dist/.objectui-sha`). */
+  stamp: string;
+  /** objectui SHA the repo pins (`<root>/.objectui-sha`). */
+  pin: string;
+  /** Absolute path of the pin file the comparison used. */
+  pinFile: string;
+}
+
+/**
+ * Compare a resolved console package's dist stamp against the repo pin.
+ * Returns `null` for every unprovable case — no monorepo pin (published
+ * install), no stamp (pre-guard build or the sibling-repo dev fallback),
+ * unreadable files — and only reports drift it can prove.
+ */
+export function detectConsoleShaDrift(consoleDir: string): ConsoleShaDrift | null {
   const found = findObjectuiPin(consoleDir);
-  if (!found) return; // published install / no monorepo pin — nothing to compare
+  if (!found) return null; // published install / no monorepo pin — nothing to compare
 
   const stampFile = path.join(consoleDir, 'dist', '.objectui-sha');
   let stamp: string | null = null;
   try {
     if (fs.existsSync(stampFile)) stamp = fs.readFileSync(stampFile, 'utf-8').trim();
   } catch {
-    return; // unreadable stamp — fail open
+    return null; // unreadable stamp — fail open
   }
-  // Unstamped dist (pre-guard build or sibling-repo fallback): can't prove
-  // drift; `pnpm check:console-sha` surfaces it — don't nag on every boot.
-  if (!stamp || stamp === found.pin) return;
+  // Unstamped dist: can't prove drift; `pnpm check:console-sha` surfaces it.
+  if (!stamp || stamp === found.pin) return null;
 
-  warn(
-    `  ⚠ Console version drift: serving @objectstack/console built from objectui@${stamp.slice(0, 12)}, ` +
-    `but ${found.file} pins objectui@${found.pin.slice(0, 12)}. ` +
+  return { stamp, pin: found.pin, pinFile: found.file };
+}
+
+/** Advisory one-liner — used where the drifted console is still served. */
+export function formatConsoleShaDriftWarning(drift: ConsoleShaDrift): string {
+  return (
+    `  ⚠ Console version drift: serving @objectstack/console built from objectui@${drift.stamp.slice(0, 12)}, ` +
+    `but ${drift.pinFile} pins objectui@${drift.pin.slice(0, 12)}. ` +
     `packages/console/dist is a gitignored local build that 'turbo run build' does not refresh — ` +
-    `rebuild it with 'pnpm objectui:build'.`,
+    `rebuild it with 'pnpm objectui:build'.`
   );
+}
+
+/**
+ * The refusal block — `os dev` declines to mount a drifted console. Mirrors
+ * the remediation of `scripts/check-console-sha.mjs` verbatim (rebuild at the
+ * *pinned* SHA with `pnpm objectui:build`; `objectui:refresh` would re-bump
+ * the pin to the local ../objectui HEAD, which is the opposite of the fix).
+ */
+export function formatConsoleShaDriftRefusal(drift: ConsoleShaDrift): string {
+  return (
+    `\n  ✗ Console version drift — refusing to serve /_console in dev.\n\n` +
+    `      pinned  (${drift.pinFile}):              objectui@${drift.pin.slice(0, 12)}\n` +
+    `      built   (console/dist/.objectui-sha): objectui@${drift.stamp.slice(0, 12)}\n\n` +
+    `    packages/console/dist is a gitignored local build that 'turbo run build' does NOT refresh,\n` +
+    `    so this server would serve a Console SPA the repo no longer pins — and anything you\n` +
+    `    observed in it would describe a different objectui commit.\n\n` +
+    `    Rebuild the console at the pinned SHA:\n\n` +
+    `        pnpm objectui:build\n\n` +
+    `    (Use 'pnpm objectui:refresh' only when you intend to move the pin to your local ../objectui HEAD.)\n` +
+    `    To boot anyway with the stale bundle: ${DRIFT_OVERRIDE_ENV}=1 — the API still serves either way.\n`
+  );
+}
+
+/** Env switch that downgrades the dev refusal back to a warning. */
+export const DRIFT_OVERRIDE_ENV = 'OS_ALLOW_CONSOLE_DRIFT';
+
+function driftOverridden(env: NodeJS.ProcessEnv): boolean {
+  const v = String(env[DRIFT_OVERRIDE_ENV] ?? '').trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes' || v === 'on';
+}
+
+/**
+ * Decide whether the Console SPA may mount, given what resolution found.
+ *
+ * The drift guard has two seats and this is the second one. The first —
+ * `pnpm check:console-sha` — is wired into the root `pnpm dev` /
+ * `dev:showcase` / `dev:crm` / `dev:todo` scripts, and every boot that does
+ * not go through those scripts misses it: `objectstack dev` run directly in
+ * an example dir, an example's own `dev` script, a `.claude/launch.json`
+ * config, `pnpm exec objectstack dev`. That is how a QA sweep came to measure
+ * a console two days behind the pin (#7752) — the pin had moved, the local
+ * dist had not, and the boot path carried no guard. So the dev server itself
+ * refuses to mount a console it can prove is not a build of the pin: the
+ * stale bundle is unreachable rather than silently authoritative, and the API
+ * keeps serving so api/cli work is unaffected.
+ *
+ * Scope is deliberately narrow — `isDev` only, and only on proven drift
+ * (see `detectConsoleShaDrift`). Published installs carry no pin, so no
+ * production or cloud deployment can reach the refusal.
+ */
+export function decideConsoleMount(input: {
+  /** Whether the resolved package has a built `dist/index.html`. */
+  hasDist: boolean;
+  /** Proven drift, or null. */
+  drift: ConsoleShaDrift | null;
+  /** True under `objectstack dev` (`serve --dev`). */
+  isDev: boolean;
+  /** Defaults to `process.env`. */
+  env?: NodeJS.ProcessEnv;
+}): { mount: boolean; refusedForDrift: boolean } {
+  const { hasDist, drift, isDev } = input;
+  if (!hasDist) return { mount: false, refusedForDrift: false };
+  if (drift && isDev && !driftOverridden(input.env ?? process.env)) {
+    return { mount: false, refusedForDrift: true };
+  }
+  return { mount: true, refusedForDrift: false };
 }
 
 // ─── Plugin Factory ─────────────────────────────────────────────────

@@ -642,7 +642,17 @@ export class QuickJSScriptRunner implements ScriptRunner {
           throwSandboxFault(vm, `capability 'log' not granted to ${origin.kind} '${origin.name}'`);
         }
         const msg = vm.getString(msgH);
-        const data = dataH ? safeJsonParse(vm.getString(dataH)) : undefined;
+        // [#7448] `vm.dump`, NOT `vm.getString` — the marshalling every other
+        // host-call bridge in this file already uses (`ctx.api`'s
+        // `argHandles.map((h) => vm.dump(h))`, and the return-value paths).
+        // `getString` on a non-string handle applies JS string coercion INSIDE
+        // the VM, so the `data` object a body passes arrives as the literal
+        // `"[object Object]"` — which `safeJsonParse` then fails to parse and
+        // returns verbatim, so every structured field of every body log call
+        // was lost. That is the payload half of the same declared-capability
+        // gap #7448 recorded, surfaced by its reproduction; `dump`
+        // deserialises the handle into a real value.
+        const data = dataH ? vm.dump(dataH) : undefined;
         ctx.log?.[level]?.(msg, data);
         return vm.undefined;
       });

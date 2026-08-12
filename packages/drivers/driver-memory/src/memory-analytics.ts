@@ -3,7 +3,9 @@
 import type { IAnalyticsService, AnalyticsResult, CubeMeta } from '@objectstack/spec/contracts';
 import type { Cube, AnalyticsQuery } from '@objectstack/spec/data';
 // [#6520] `$icontains`' ASCII-only fold, from the spec's one definition.
-import { asciiCaseInsensitiveRegexSource } from '@objectstack/spec/data';
+// [#7117] `likePatternToGlobPattern` — the spec's one LIKE→GLOB translation, so
+// the SQL exit's wildcard rendering is not a third hand-copy of that escape.
+import { asciiCaseInsensitiveRegexSource, likePatternToGlobPattern } from '@objectstack/spec/data';
 import type { InMemoryDriver } from './memory-driver.js';
 import { Logger, createLogger, nextUtcCalendarDay } from '@objectstack/core';
 import {
@@ -153,8 +155,13 @@ interface MongoPredicateInput {
   /** The operands as authored. For operands that are not comparands. */
   readonly raw: readonly unknown[];
   /**
-   * A comparand as a case-insensitive literal-substring pattern, built by the
-   * DRIVER's own rule (`filterSubstringPattern`) rather than re-derived here.
+   * A comparand as a literal-substring pattern, built by the DRIVER's own rule
+   * (`filterSubstringPattern`) rather than re-derived here.
+   *
+   * [#7723] Case-EXACT, because that rule is: `filterSubstringPattern` carried
+   * an `i` flag until #7723 took it off, putting the `$contains` family on the
+   * #4706 Q2 = A answer across every face of this package. Borrowing the rule
+   * rather than restating it is what made that one edit reach this face too.
    */
   readonly substring: (value: unknown) => RegExp;
   /**
@@ -162,11 +169,12 @@ interface MongoPredicateInput {
    * `$icontains`' fold, which is NOT {@link substring}'s.
    *
    * The two are deliberately separate functions rather than one with a flag.
-   * `substring` folds the whole Unicode range (the driver's `i` flag), which is
-   * the open defect #6682 tracks for the `$contains` family on this face; this
-   * one folds `A-Z` only, which is what the protocol says `$icontains` means
-   * (#4706 Q1 = A). Collapsing them would silently give one of the two operators
-   * the other's answer.
+   * `substring` is case-EXACT (#4706 Q2 = A, landed for this package in #7723);
+   * this one folds `A-Z` and nothing else, which is what the protocol says
+   * `$icontains` means (#4706 Q1 = A). Collapsing them would silently give one
+   * of the two operators the other's answer — and note the fold lives in the
+   * pattern SOURCE, never in a RegExp flag, because an `i` flag folds the whole
+   * Unicode range and would answer `CAFÉ` for `café`.
    */
   readonly asciiSubstring: (value: unknown) => RegExp;
 }
@@ -258,6 +266,275 @@ const CUBE_OPERATOR_TO_MONGO_PREDICATE: Readonly<Record<CubeOperator, MongoPredi
   // call site's reading of a valueless `set` ("does it exist" → true).
   set: ({ raw }) => ({ $exists: raw.length > 0 ? Boolean(raw[0]) : true }),
 });
+
+/**
+ * [#7117] What one lowered entry gives its SQL predicate builder — the SQL twin
+ * of {@link MongoPredicateInput}, and split along the same seam for the same
+ * reason: a VALUE COMPARISON is rendered from the comparand in the field's
+ * storage form, while a PATTERN operand is built from what the author wrote.
+ */
+interface SqlPredicateInput {
+  /** The resolved column expression this predicate constrains. */
+  readonly column: string;
+  /** Comparands in the field's storage form (#4047). For value comparisons. */
+  readonly comparands: readonly unknown[];
+  /** The operands as authored. For operands that are not comparands. */
+  readonly raw: readonly unknown[];
+  /** One comparand as a SQL literal ({@link MemoryAnalyticsService.toSqlLiteral}). */
+  readonly literal: (value: unknown) => string;
+  /**
+   * A comparand as a case-EXACT substring GLOB pattern, already a SQL literal.
+   * See {@link globSubstringPattern} for why GLOB and not LIKE.
+   */
+  readonly globSubstring: (value: unknown) => string;
+}
+
+type SqlPredicateBuilder = (input: SqlPredicateInput) => string;
+
+/**
+ * [#7117] A comparand as a SQLite `GLOB` pattern that matches it as a literal
+ * SUBSTRING — the wildcard rendering this issue is about.
+ *
+ * ## Why a pattern at all
+ *
+ * `generateSql()` used to emit the bare comparand: `{name: {$contains: 'acme'}}`
+ * echoed `WHERE name LIKE 'acme'`, which is an EQUALITY, next to a `query()`
+ * that returns every row CONTAINING `acme`. The echo's whole job is reproducing
+ * execution, so an author who runs it to debug a chart gets a NARROWER row set
+ * and reads the filter as broken — the #5333 / #3650 class ("a rendering that
+ * contradicts execution is worse than no rendering") reached through this
+ * package's analytics face.
+ *
+ * ## Why GLOB and not LIKE
+ *
+ * This exit emits SQLite-shaped SQL — the dialect its sibling decisions already
+ * assume ({@link MemoryAnalyticsService.toSqlLiteral} spells booleans `1`/`0`,
+ * and #6520's `icontains` row reasoned from SQLite's ASCII-only `LIKE`). On
+ * SQLite `LIKE` folds ASCII case and the fold cannot be turned off per
+ * statement, while #4706 Q2 = A rules the `$contains` family case-SENSITIVE and
+ * #7723 put this package's execution faces on that answer. So a `LIKE` echo
+ * would have contradicted execution on a SECOND axis the moment the first was
+ * fixed: right rows for the wrong case. `GLOB` is case-exact by definition,
+ * which is exactly why `driver-sql`'s `textMatchPredicate` picks it for its own
+ * SQLite arm — this is the same cell of that table, rendered as a literal
+ * instead of a binding.
+ *
+ * ## Why the translation is borrowed and not written here
+ *
+ * GLOB's pattern language is not LIKE's: `*` / `?` / `[` are metacharacters to
+ * GLOB and ORDINARY characters to LIKE, and forgetting that direction is the
+ * `%`-matches-every-row bypass (#5567) wearing GLOB's clothes. The spec owns one
+ * definition of the translation (`likePatternToGlobPattern`), so the comparand
+ * is LIKE-escaped into a substring pattern and handed to it — a third hand-copy
+ * of the escape is the thing `service-analytics`' `like-pattern.ts` header says
+ * to refuse, and this is how it is refused.
+ *
+ * The LIKE escape in front of it is what keeps an author's own metacharacter
+ * literal: `{name: {$contains: '%'}}` matched NO row on `query()` and every
+ * non-null row on the echoed `LIKE '%'`, which is the widening direction, not
+ * the narrowing one this issue opened on.
+ */
+function globSubstringPattern(value: unknown): string {
+  return likePatternToGlobPattern(`%${String(value).replace(/[\\%_]/g, '\\$&')}%`);
+}
+
+/**
+ * [#7117] How each cube operator becomes a SQL predicate — the whole clause, not
+ * the name of an operator.
+ *
+ * # Why the shape changed
+ *
+ * This was `operatorToSql(operator): string`, a name→name map, and the WHERE
+ * builder filled the name in as `${column} ${op} ${literal}`. That shape can say
+ * "compare this column to this value" and NOTHING else, which is the same
+ * expressiveness ceiling {@link CUBE_OPERATOR_TO_MONGO_PREDICATE} was built to
+ * break on the mingo side in #5374 — and it failed here in the same three ways:
+ *
+ *   - **The LIKE family had nowhere to put its wildcards.** `contains` →
+ *     `'LIKE'` rendered `name LIKE 'acme'`, an equality. See
+ *     {@link globSubstringPattern}.
+ *   - **`in` / `notIn` / `set` are not in the table at all**, so they fell to
+ *     its `|| '='` fallback — the silent-wrong-answer shape #5374 and #5345
+ *     removed from this file's sibling tables. Measured against `query()` on
+ *     the fixture in `memory-analytics-echo-operator-coverage.test.ts`:
+ *     `{name: {$nin: [a]}}` echoed `name = a`, the exact COMPLEMENT of the rows
+ *     `query()` returns; `{name: {$in: [a, b]}}` echoed only `a`;
+ *     `{name: {$exists: true}}` echoed `name = 1`, which selects nothing at all.
+ *     (`startsWith` / `endsWith`, which this issue's text also expected to land
+ *     on that fallback, cannot reach it: they are not in
+ *     {@link MONGO_TO_CUBE_OPERATOR}, so `normalizeFilters` REFUSES them for
+ *     both exits with `INVALID_FILTER` / 400 — loudly, per #5345.)
+ *   - **A negation could not be made null-safe**, because `(a OR b)` is not a
+ *     name. SQL is three-valued and a `WHERE` keeps only TRUE, so a bare
+ *     `col != v` / `col NOT GLOB v` drops every row whose column is NULL, while
+ *     mingo returns them. #5146 ruled that divergence closed repo-wide and
+ *     #5297 spells the remedy — `(col IS NULL OR <test>)`, which is what
+ *     `read-scope-sql.ts`'s `nullSafeNegative` emits for `$ne` / `$nin` /
+ *     `$notContains`. The three negative rows below are that same rewrite.
+ *
+ * # Why it is a `Record<CubeOperator, …>`
+ *
+ * Same reason as its mingo twin, and it is the load-bearing half of this fix.
+ * The `|| '='` fallback is not merely unreachable now — it is UNNECESSARY:
+ * keying by {@link CubeOperator} makes widening {@link MONGO_TO_CUBE_OPERATOR}
+ * (a deliberate one-line edit, per #5345) fail to COMPILE until this table has
+ * the new operator's SQL spelling. The totality is proven rather than defended,
+ * so no future operator can silently render as an equality nobody wrote.
+ *
+ * # The one cell where SQL cannot say what mingo says
+ *
+ * `set` renders `IS NOT NULL` / `IS NULL` — the spelling this repo's other two
+ * SQL lowerings already use (`read-scope-sql.ts`'s `$exists` arm, `driver-sql`'s
+ * "a present field is a non-null column in SQL"). It is not an exact
+ * translation, and cannot be: mingo's `$exists` tests KEY PRESENCE, which a
+ * relational column always has. A row storing an explicit `null` therefore
+ * satisfies `$exists: true` on `query()` and fails `IS NOT NULL` in the echo.
+ * That residue is inherent to describing a document store in SQL, it is pinned
+ * as an explicit inequality in `memory-analytics-echo-operator-coverage.test.ts`
+ * so it cannot be "fixed" in silence, and it is a far smaller gap than the
+ * `name = 1` it replaces — which matched nothing at all.
+ */
+const CUBE_OPERATOR_TO_SQL_PREDICATE: Readonly<Record<CubeOperator, SqlPredicateBuilder>> = Object.freeze({
+  // [#5373] A null comparand is a NULLNESS test, not a comparison. SQL's
+  // `= NULL` is never true, so emitting one would move the very loss #5373
+  // closed from the mingo exit to this one: `{closed_at: null}` would select
+  // nothing while `query()` selects the null rows. The two exits have to mean
+  // the same thing.
+  equals: ({ column, comparands, literal }) =>
+    comparands[0] == null ? `${column} IS NULL` : `${column} = ${literal(comparands[0])}`,
+  notEquals: ({ column, comparands, literal }) =>
+    comparands[0] == null
+      ? `${column} IS NOT NULL`
+      : `(${column} IS NULL OR ${column} != ${literal(comparands[0])})`,
+  gt: ({ column, comparands, literal }) => `${column} > ${literal(comparands[0])}`,
+  gte: ({ column, comparands, literal }) => `${column} >= ${literal(comparands[0])}`,
+  lt: ({ column, comparands, literal }) => `${column} < ${literal(comparands[0])}`,
+  // Half-open on a bare-day bound, exactly as the mingo row above is (#4042; the
+  // SQL twin is #3777). `<= '2026-01-02'` drops that day's timestamped rows,
+  // which is measurable as an echo one row NARROWER than the chart it describes.
+  lte: ({ column, comparands, literal }) => {
+    const nextDay = nextUtcCalendarDay(comparands[0]);
+    return nextDay != null
+      ? `${column} < ${literal(nextDay)}`
+      : `${column} <= ${literal(comparands[0])}`;
+  },
+  // The list operators take the WHOLE list, and an EMPTY one is a real
+  // predicate on this side too — `$in: []` selects nothing, `$nin: []`
+  // everything. Saying so here is what retires the WHERE builder's
+  // `values.length > 0` guard, under which `{code: {$in: []}}` emitted no clause
+  // at all and the echo described the whole table while `query()` returns none
+  // of it. The mingo row above retired the identical guard in #5374.
+  in: ({ column, comparands, literal }) =>
+    comparands.length === 0 ? '1 = 0' : `${column} IN (${comparands.map(literal).join(', ')})`,
+  notIn: ({ column, comparands, literal }) =>
+    comparands.length === 0
+      ? '1 = 1'
+      : `(${column} IS NULL OR ${column} NOT IN (${comparands.map(literal).join(', ')}))`,
+  // A pattern, not a comparand: `raw`, and the shared GLOB substring rule.
+  contains: ({ column, raw, globSubstring }) => `${column} GLOB ${globSubstring(raw[0])}`,
+  notContains: ({ column, raw, globSubstring }) =>
+    `(${column} IS NULL OR ${column} NOT GLOB ${globSubstring(raw[0])})`,
+  // [#6520] The case-INSENSITIVE twin. SQLite's `lower()` folds ASCII and
+  // nothing else — measured in #6518: `lower('CAFÉ')` is `'cafÉ'` — so it is
+  // `$icontains`' fold (#4706 Q1 = A) rather than the Unicode one, and it goes
+  // on BOTH sides: folding only the pattern compares a folded needle against a
+  // raw column and matches just the rows that were already lower-case.
+  icontains: ({ column, raw, globSubstring }) =>
+    `lower(${column}) GLOB lower(${globSubstring(raw[0])})`,
+  // A presence flag, not a comparand — see this table's docblock for the one
+  // cell SQL cannot translate exactly. The `raw.length === 0` arm mirrors the
+  // mingo row's reading of a valueless `set`.
+  set: ({ column, raw }) =>
+    `${column} IS ${raw.length === 0 || Boolean(raw[0]) ? 'NOT NULL' : 'NULL'}`,
+});
+
+/**
+ * [#6814] The size of a collected `$addToSet`, as `count_distinct` defines it:
+ * distinct NON-NULL values of the column.
+ *
+ * That is what `COUNT(DISTINCT col)` computes on SQLite, PostgreSQL and MySQL
+ * alike, what objectql's fallback computes (`in-memory-aggregation.ts`), what
+ * this package's own data face computes (`MemoryDriver.computeAggregate`), and
+ * what `AGGREGATION_CASES` says — 2 over `AGGREGATION_ROWS`.
+ *
+ * ## Why the exclusion is HERE and not in the `$group` expression
+ *
+ * The two server-side spellings were considered and not taken, for the same
+ * reasons `driver-mongodb`'s twin records (#6814):
+ *
+ * - **`$ne: null` before the `$addToSet`** — as a `$match` it drops the row from
+ *   the WHOLE pipeline, so a `count` or `sum` measure sharing the query would
+ *   silently lose the null rows too. Correct only for a pipeline carrying one
+ *   measure, which this builder cannot assume.
+ * - **`$size` of a `$setDifference` against `[null]`** — sound, but it puts the
+ *   rule in the `$project` stage while the collection stays in `$group`, so the
+ *   two halves of one definition sit in different stages built by different
+ *   methods. Here they are one expression next to its own explanation.
+ *
+ * `undefined` is excluded beside `null`: mingo's `$addToSet` skips a MISSING
+ * field the way MongoDB's does, so this arm sees `undefined` only via an
+ * explicitly-undefined stored value — one state with `null` in SQL, and there is
+ * no third.
+ */
+function sizeDistinctSet(values: readonly unknown[]): number {
+  return new Set(values.filter((v) => v !== null && v !== undefined)).size;
+}
+
+/**
+ * [#7853] A `JSON.stringify` replacer that renders a `RegExp` operand instead of
+ * dropping it — the one value type the pipeline dump carries that
+ * `JSON.stringify` erases.
+ *
+ * ## What was lost
+ *
+ * A `RegExp` has no own enumerable properties, so `JSON.stringify` renders it as
+ * `{}`. Three operators put one into the `$match` stage — `contains` and
+ * `icontains` as `{$regex: …}`, `notContains` as `{$not: {$regex: …}}` (measured:
+ * those three and no others, out of the twelve this face declares) — so
+ * `{name: {$contains: 'Industries'}}` dumped as
+ *
+ * ```
+ * /* Stage 1: $match *\/ {"name":{"$regex":{}}}
+ * ```
+ *
+ * The one field an author debugging a chart is looking for is the one the dump
+ * dropped. This is lost information on a transparency surface, not the #5333
+ * class: the dump is explicitly NOT SQL (its header says so) and `{}` reads as
+ * "something is missing here" rather than as a working predicate, which is why
+ * it is graded below #7117 rather than beside it.
+ *
+ * ## Why the pattern's own literal syntax and not `{"$regex":"…","$options":"…"}`
+ *
+ * The mongo-shaped form is what the rest of the dump speaks, and it was the
+ * first candidate. It cannot be reached from a value replacer, and the reason is
+ * structural rather than cosmetic: the `RegExp` sits AT the `$regex` key, so
+ * replacing it with `{$regex, $options}` renders the doubled
+ * `{"name":{"$regex":{"$regex":"Industries","$options":""}}}` — a shape no mongo
+ * query has. Flattening it into the real mongo spelling means rewriting the
+ * PARENT object, which would make the dump disagree with the pipeline it claims
+ * to be dumping: what mingo executes is a JS `RegExp` object at that key, not a
+ * source/options pair. Trading a degenerate rendering for a plausible-but-wrong
+ * one is the #5333 direction, and this card is explicitly not that.
+ *
+ * So the value is rendered as the JS literal it is, `/source/flags`, which is
+ * also the only one-token form that keeps the FLAGS. Flags are not decoration
+ * here: `$icontains`' fold lives in the pattern SOURCE (#6520) while `$contains`
+ * is case-EXACT (#7723, #4706 Q2 = A), so a rendering that dropped `i` would
+ * recreate a smaller copy of this same information loss on the one axis those
+ * two operators differ.
+ *
+ * ## What it deliberately does not touch
+ *
+ * Every other value on this path already renders faithfully, measured rather
+ * than assumed: a `Date` comparand is canonicalized to an ISO string by
+ * {@link MemoryAnalyticsService.comparandsFor} before it reaches here, and
+ * `toJSON` runs BEFORE a replacer in any case, so dates are unchanged. A
+ * `BigInt` comparand does throw — but out of mingo's own `Query.compile` during
+ * EXECUTION, before this dump is ever built, so no replacer here reaches it.
+ */
+function pipelineDumpReplacer(_key: string, value: unknown): unknown {
+  return value instanceof RegExp ? `/${value.source}/${value.flags}` : value;
+}
 
 /**
  * Configuration for MemoryAnalyticsService
@@ -476,6 +753,22 @@ export class MemoryAnalyticsService implements IAnalyticsService {
     const tableName = this.extractTableName(cube.sql);
     const rawRows = await this.driver.aggregate(tableName, pipeline);
 
+    // [#6814] `$addToSet` COLLECTS; a `count_distinct` measure has to ANSWER a
+    // number. Without this step the value reached the caller as the raw array
+    // of values — under a field `measureTypeToFieldType` describes as `number`,
+    // so the response's own metadata disagreed with the cell beside it — and it
+    // included `null`, so even sizing it where it landed would have answered
+    // one HIGHER than the standard on any nullable column.
+    if (query.measures) {
+      for (const measure of query.measures) {
+        if (this.resolveMeasure(cube, measure)?.type !== 'count_distinct') continue;
+        const shortName = this.getShortName(measure);
+        for (const row of rawRows) {
+          if (Array.isArray(row[shortName])) row[shortName] = sizeDistinctSet(row[shortName]);
+        }
+      }
+    }
+
     // Rename fields from short names to full cube.field names
     const rows = rawRows.map(row => {
       const renamedRow: Record<string, unknown> = {};
@@ -596,27 +889,23 @@ export class MemoryAnalyticsService implements IAnalyticsService {
     }
 
     // Build WHERE clause
+    //
+    // [#7117] One builder per operator, from a table keyed by `CubeOperator` —
+    // the SQL twin of the `$match` construction in `query()`, and total by
+    // construction for the same reason. There is deliberately no
+    // `values.length > 0` guard any more: an empty list IS a predicate, and
+    // skipping the clause described the whole table (see the `in` row).
     const whereClauses: string[] = [];
     const normalizedFilters = this.normalizeFilters(query);
-    if (normalizedFilters.length > 0) {
-      for (const filter of normalizedFilters) {
-        const fieldPath = this.resolveFieldPath(cube, filter.member);
-        const sqlOp = this.operatorToSql(filter.operator);
-        if (filter.values && filter.values.length > 0) {
-          const comparand = this.comparandsFor(cube, filter.member, filter.values)[0];
-          // [#5373] A null comparand is a NULLNESS test, not a comparison. SQL's
-          // `= NULL` is never true (and `!= NULL` never true either), so emitting
-          // one would move the very loss this issue is about from the mingo exit
-          // to this one: `{closed_at: null}` would compile to a WHERE that
-          // selects nothing while `query()` selects the two null rows. The two
-          // exits have to mean the same thing.
-          if (comparand == null && (filter.operator === 'equals' || filter.operator === 'notEquals')) {
-            whereClauses.push(`${fieldPath} IS ${filter.operator === 'notEquals' ? 'NOT ' : ''}NULL`);
-          } else {
-            whereClauses.push(`${fieldPath} ${sqlOp} ${this.toSqlLiteral(comparand)}`);
-          }
-        }
-      }
+    for (const filter of normalizedFilters) {
+      const fieldPath = this.resolveFieldPath(cube, filter.member);
+      whereClauses.push(this.sqlPredicateBuilder(filter.operator)({
+        column: fieldPath,
+        comparands: this.comparandsFor(cube, filter.member, filter.values),
+        raw: filter.values,
+        literal: (value) => this.toSqlLiteral(value),
+        globSubstring: (value) => this.toSqlLiteral(globSubstringPattern(value)),
+      }));
     }
 
     let sql = `SELECT ${selectClauses.join(', ')} FROM ${tableName}`;
@@ -767,8 +1056,9 @@ export class MemoryAnalyticsService implements IAnalyticsService {
   }
 
   /**
-   * Lower a Filter Protocol `$op` key to the cube-style operator name
-   * `convertOperatorToMongo` / `operatorToSql` accept.
+   * Lower a Filter Protocol `$op` key to the cube-style operator name both exits
+   * consume — {@link CUBE_OPERATOR_TO_MONGO_PREDICATE} and
+   * {@link CUBE_OPERATOR_TO_SQL_PREDICATE} are keyed by its result.
    *
    * [#5345] An operator with no row in {@link MONGO_TO_CUBE_OPERATOR} is
    * REFUSED, not skipped. The gate in `normalizeFilters` refuses the same set
@@ -818,9 +1108,15 @@ export class MemoryAnalyticsService implements IAnalyticsService {
    * that justification was always sound for THIS half, and only wrong because
    * the in-memory half was forced to share it.
    *
-   * A `null` comparand never reaches here from `equals`/`notEquals`; the WHERE
-   * builder emits `IS NULL` / `IS NOT NULL` for those. `NULL` is the honest
-   * literal for the remaining operators, which cannot be satisfied by it.
+   * A `null` comparand never reaches here from `equals`/`notEquals`; those rows
+   * of {@link CUBE_OPERATOR_TO_SQL_PREDICATE} emit `IS NULL` / `IS NOT NULL`.
+   * `NULL` is the honest literal for the remaining operators, which cannot be
+   * satisfied by it.
+   *
+   * [#7117] It also renders the GLOB PATTERNS the text rows build, which is why
+   * the quote-doubling matters beyond comparands: a pattern is a string literal
+   * in the same statement, and `{name: {$contains: "o'brien"}}` has to survive
+   * as one.
    */
   private toSqlLiteral(v: unknown): string {
     if (v == null) return 'NULL';
@@ -904,7 +1200,10 @@ export class MemoryAnalyticsService implements IAnalyticsService {
       case 'max':
         return { $max: `$${fieldPath}` };
       case 'count_distinct':
-        return { $addToSet: `$${fieldPath}` }; // Will need post-processing for count
+        // Collects the distinct values; {@link sizeDistinctSet} turns the array
+        // into the NUMBER, excluding null — see the note there for why the
+        // exclusion is on that side rather than in this expression.
+        return { $addToSet: `$${fieldPath}` };
       default:
         return { $sum: 1 }; // Default to count
     }
@@ -952,25 +1251,29 @@ export class MemoryAnalyticsService implements IAnalyticsService {
     return build;
   }
 
-  private operatorToSql(operator: string): string {
-    const opMap: Record<string, string> = {
-      'equals': '=',
-      'notEquals': '!=',
-      'contains': 'LIKE',
-      'notContains': 'NOT LIKE',
-      // [#6520] Needed because the `|| '='` fallback below is not a default, it
-      // is a wrong ANSWER: without this row `icontains` would render as `=`, an
-      // EQUALITY, in a statement offered to the author as a description of a
-      // containment query. `LIKE` is also the semantically right construct here
-      // — this exit emits SQLite-shaped SQL, and SQLite's `LIKE` folds ASCII
-      // only, which is exactly `$icontains`' domain (#4706 Q1 = A).
-      'icontains': 'LIKE',
-      'gt': '>',
-      'gte': '>=',
-      'lt': '<',
-      'lte': '<=',
-    };
-    return opMap[operator] || '=';
+  /**
+   * [#7117] The SQL predicate builder for one lowered operator — the twin of
+   * {@link MemoryAnalyticsService.mongoPredicateBuilder}, with the same totality
+   * floor and for the same reason.
+   *
+   * It replaced `operatorToSql`, whose `|| '='` fallback was not a default but a
+   * wrong ANSWER: three of this face's twelve operators (`in`, `notIn`, `set`)
+   * had no row and rendered as an EQUALITY in a statement offered to the author
+   * as a description of their query. The throw below cannot be reached from any
+   * input — {@link ANALYTICS_FILTER_CAPABILITIES} refuses everything outside the
+   * vocabulary, and the `Record<CubeOperator, …>` key type makes a missing row a
+   * type error first — so an arrival means our own two tables drifted.
+   */
+  private sqlPredicateBuilder(operator: CubeOperator): SqlPredicateBuilder {
+    const build = (CUBE_OPERATOR_TO_SQL_PREDICATE as Record<string, SqlPredicateBuilder | undefined>)[operator];
+    if (!build) {
+      throw new Error(
+        `[driver-memory] analytics face: no SQL predicate for cube operator '${operator}'. ` +
+        `MONGO_TO_CUBE_OPERATOR and CUBE_OPERATOR_TO_SQL_PREDICATE have drifted — ` +
+        `add the missing builder rather than letting the operator render as an equality.`,
+      );
+    }
+    return build;
   }
 
   private measureToSql(measure: { type: string; sql: string }): string {
@@ -1033,9 +1336,13 @@ export class MemoryAnalyticsService implements IAnalyticsService {
   private generateSqlFromPipeline(table: string, pipeline: Record<string, any>[]): string {
     // Simplified SQL generation for debugging
     // This is a basic representation of the aggregation pipeline
+    //
+    // [#7853] The replacer is what keeps a `RegExp` operand from rendering as
+    // `{}` — see {@link pipelineDumpReplacer} for why the pattern's own literal
+    // syntax and not the mongo-shaped `{$regex, $options}`.
     const stages = pipeline.map((stage, idx) => {
       const op = Object.keys(stage)[0];
-      return `/* Stage ${idx + 1}: ${op} */ ${JSON.stringify(stage[op])}`;
+      return `/* Stage ${idx + 1}: ${op} */ ${JSON.stringify(stage[op], pipelineDumpReplacer)}`;
     }).join('\n');
     
     return `-- MongoDB Aggregation Pipeline on table: ${table}\n${stages}`;

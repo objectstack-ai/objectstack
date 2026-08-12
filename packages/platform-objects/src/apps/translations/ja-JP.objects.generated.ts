@@ -135,7 +135,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "利用停止",
-        confirmText: "このユーザーを利用停止にしますか？利用停止になるとサインアウトされ、解除されるまでサインインできなくなります。",
+        description: "このユーザーを利用停止にしますか？利用停止になるとサインアウトされ、解除されるまでサインインできなくなります。",
         successMessage: "ユーザーを利用停止にしました",
         params: {
           banReason: {
@@ -251,7 +251,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       delete_my_account: {
         label: "アカウント削除",
-        confirmText: "アカウントを完全に削除しますか？この操作は元に戻せません。すべてのセッションが終了され、設定された保持ポリシーに従って所有するすべてのデータが削除されます。",
+        description: "アカウントを完全に削除しますか？この操作は元に戻せません。すべてのセッションが終了され、設定された保持ポリシーに従って所有するすべてのデータが削除されます。",
         successMessage: "アカウントを削除しました",
         params: {
           password: {
@@ -270,7 +270,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       disable_two_factor: {
         label: "二要素認証を無効化",
-        confirmText: "二要素認証をオフにしますか？アカウントの安全性が低下します。",
+        description: "二要素認証をオフにしますか？アカウントの安全性が低下します。",
         successMessage: "二要素認証を無効にしました。",
         params: {
           password: {
@@ -280,7 +280,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       generate_backup_codes: {
         label: "バックアップコードを再生成",
-        confirmText: "新しいバックアップコードを生成しますか？以前に生成されたコードはすべて使用できなくなります。",
+        description: "新しいバックアップコードを生成しますか？以前に生成されたコードはすべて使用できなくなります。",
         successMessage: "新しいバックアップコードを生成しました。安全な場所に保管してください。",
         params: {
           password: {
@@ -349,6 +349,9 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       all_sessions: {
         label: "すべて"
+      },
+      revoked: {
+        label: "取り消し済み"
       }
     },
     _actions: {
@@ -452,7 +455,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       unlink_account: {
         label: "連携解除",
-        confirmText: "このID連携を解除しますか？ユーザーがアカウント設定から再度連携するまで、このプロバイダーでサインインできなくなります。",
+        description: "このID連携を解除しますか？ユーザーがアカウント設定から再度連携するまで、このプロバイダーでサインインできなくなります。",
         successMessage: "アイデンティティ連携を解除しました"
       }
     }
@@ -555,7 +558,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       change_slug: {
         label: "スラッグを変更",
-        confirmText: "スラッグを変更すると、この組織のすべてのプラットフォームサブドメインが書き換えられ、旧スラッグは 90 日間確保されます。続行しますか？",
+        description: "スラッグを変更すると、この組織のすべてのプラットフォームサブドメインが書き換えられ、旧スラッグは 90 日間確保されます。続行しますか？",
         successMessage: "組織のスラッグを変更しました"
       }
     }
@@ -794,7 +797,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       remove_team_member: {
         label: "チームから削除",
-        confirmText: "このユーザーをチームから削除しますか？チームスコープのアクセスを失います。",
+        description: "このユーザーをチームから削除しますか？チームスコープのアクセスを失います。",
         successMessage: "チームメンバーを削除しました"
       }
     }
@@ -1057,7 +1060,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       disable_two_factor: {
         label: "2FA を無効化",
-        confirmText: "アカウントの二要素認証を無効化しますか？",
+        description: "アカウントの二要素認証を無効化しますか？",
         successMessage: "2FA を無効化しました",
         params: {
           password: {
@@ -1067,7 +1070,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       regenerate_backup_codes: {
         label: "バックアップコード再生成",
-        confirmText: "バックアップコードを再生成しますか？以前のバックアップコードはすべて直ちに使用できなくなります。",
+        description: "バックアップコードを再生成しますか？以前のバックアップコードはすべて直ちに使用できなくなります。",
         params: {
           password: {
             label: "現在のパスワード"
@@ -1333,12 +1336,12 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     _actions: {
       disable_oauth_application: {
         label: "OAuthアプリケーションを無効化",
-        confirmText: "このOAuthアプリケーションを無効化しますか？発行済みの有効なアクセストークン／リフレッシュトークンは、token、authorize、introspect の各エンドポイントで引き続き拒否されます。既存の連携は直ちに動作しなくなります。",
+        description: "このOAuthアプリケーションを無効化しますか？発行済みの有効なアクセストークン／リフレッシュトークンは、token、authorize、introspect の各エンドポイントで引き続き拒否されます。既存の連携は直ちに動作しなくなります。",
         successMessage: "OAuthアプリケーションを無効化しました"
       },
       enable_oauth_application: {
         label: "OAuthアプリケーションを有効化",
-        confirmText: "このOAuthアプリケーションを再度有効化しますか？トークンの発行、認可、イントロスペクションが直ちに再開されます。",
+        description: "このOAuthアプリケーションを再度有効化しますか？トークンの発行、認可、イントロスペクションが直ちに再開されます。",
         successMessage: "OAuthアプリケーションを有効化しました"
       },
       create_oauth_application: {
@@ -1373,7 +1376,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       rotate_client_secret: {
         label: "クライアントシークレット更新",
-        confirmText: "このOAuthクライアントのシークレットをローテーションしますか？以前のシークレットは直ちに使用できなくなり、それを使用している連携は新しいシークレットに更新されるまで動作しなくなります。新しいシークレットは一度しか表示されません。",
+        description: "このOAuthクライアントのシークレットをローテーションしますか？以前のシークレットは直ちに使用できなくなり、それを使用している連携は新しいシークレットに更新されるまで動作しなくなります。新しいシークレットは一度しか表示されません。",
         resultDialog: {
           title: "クライアントシークレットをローテーションしました",
           description: "新しいシークレットを今すぐ保存してください。表示は一度きりです。旧シークレットの猶予期間が終わる前にすべての連携を更新してください。",
@@ -1385,7 +1388,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       delete_oauth_application: {
         label: "OAuthアプリケーションを削除",
-        confirmText: "このOAuthアプリケーションを完全に削除しますか？発行済みのすべてのトークンと同意が無効化され、この client_id を使用している連携は直ちに動作しなくなります。この操作は元に戻せません。",
+        description: "このOAuthアプリケーションを完全に削除しますか？発行済みのすべてのトークンと同意が無効化され、この client_id を使用している連携は直ちに動作しなくなります。この操作は元に戻せません。",
         successMessage: "OAuthアプリケーションを削除しました"
       }
     }
@@ -1860,7 +1863,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       delete_sso_provider: {
         label: "SSO プロバイダーを削除",
-        confirmText: "この SSO プロバイダーを削除しますか？そのドメインのユーザーは、これを通じてサインインできなくなります。",
+        description: "この SSO プロバイダーを削除しますか？そのドメインのユーザーは、これを通じてサインインできなくなります。",
         successMessage: "SSO プロバイダーを削除しました"
       }
     }

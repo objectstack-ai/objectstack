@@ -122,8 +122,15 @@ node executor and webhook fan-out, so both inherit retry / idempotency /
 dead-letter from one substrate. Webhook deliveries are the rows with
 `source = 'webhook'`. It generalises the old design's per-webhook table:
 `webhook_id` → `ref_id`, `event_id` → `dedup_key`, `event_type` → `label`,
-`secret` → `signing_secret`. Rows are managed by the platform and not directly
+`secret` → `signature`. Rows are managed by the platform and not directly
 writable.
+
+The row carries the **signature**, never the signing secret. The body is fixed
+at enqueue and replayed byte-for-byte by retries and redelivery, so the HMAC has
+exactly one correct value: the outbox computes it once at enqueue from the
+subscriber's `secret` and stores only the result — the same `sha256=<hex>` the
+receiver is handed on the wire. Reading a delivery row tells you what was sent,
+not how to forge it.
 
 | Field             | Type     | Notes                                                                        |
 |-------------------|----------|-----------------------------------------------------------------------------|
@@ -135,7 +142,7 @@ writable.
 | `url`             | text     | Target URL, snapshotted at enqueue so config edits do not rewrite live rows. |
 | `method`          | text     | HTTP method.                                                                 |
 | `headers_json`    | textarea | Custom headers, serialised.                                                  |
-| `signing_secret`  | text     | HMAC secret used for the signature header (see §6).                          |
+| `signature`       | text     | The `X-Objectstack-Signature` value sent with this delivery, `sha256=<hex>` — computed at enqueue; the secret is not stored (see §6). |
 | `timeout_ms`      | number   | Per-attempt timeout.                                                         |
 | `payload_json`    | textarea | The full payload that will be POSTed.                                        |
 | `partition_key`   | number   | `hash(ref_id) mod partitionCount`, precomputed for cheap `WHERE`.           |
@@ -431,6 +438,14 @@ X-Objectstack-Signature: sha256=5257a869e7ecebeda32affa62cdca3fa51cad7e77a0e56ff
 Where the hex value is `HMAC-SHA256( secret, raw_request_body )`. There is no
 timestamp, no `{t}.{body}` concatenation, no version (`v1`) prefix, and no
 replay window — the signature covers the body bytes only.
+
+The signature is computed **once, at enqueue**, and stored on the delivery row
+(`signature`); the secret is not. The body is decided at enqueue and every
+retry replays it byte-for-byte, so one HMAC is correct for every attempt — and
+a delivery row read over the data API exposes the signature that was sent, not
+the key that can mint new ones. Rotating a webhook's `secret` changes what
+*subsequent* deliveries are signed with; rows already enqueued keep the
+signature that matches the body they carry.
 
 ### 6.2 Receiver-side verification
 
