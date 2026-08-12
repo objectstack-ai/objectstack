@@ -43,7 +43,11 @@
  *     many gates read the whole tree (check:nul-bytes) or a convention rather
  *     than a path. The PM's judgment call stays a judgment call; what this
  *     script removes is the memory-shaped half (which named checks exist and
- *     where they live).
+ *     where they live);
+ *   - a CONVENTION-TRIGGERED check is one the path derivation can never reach,
+ *     because it counts a population it computes for itself and so names no
+ *     path literal to match. Those are derived from the change's KIND instead
+ *     and printed under their own heading — see CHANGE_KIND_GATES.
  *
  * The output is print-only and exits 0 on a completed derivation; a run that
  * cannot read the workflows or package.json exits non-zero (#4690: unreadable
@@ -135,6 +139,103 @@ export function hintCovers(hint, inputPath) {
 }
 
 // ---------------------------------------------------------------------------
+// Change-kind derivation — the gates a path match can never reach
+// ---------------------------------------------------------------------------
+
+/**
+ * Is this path a test file, judged the way the gates below judge it?
+ *
+ * Both gates classify by the FILENAME infix (`*.test.*` / `*.spec.*`), not by
+ * directory: a helper at `__tests__/fixtures.ts` is test-adjacent but neither
+ * gate counts it — it falls in their NON-test population, where the ordinary
+ * blocking lint rule applies instead. Matching directories here would name two
+ * gates that cannot move, which is the failure mode this whole script exists to
+ * avoid. The extension set is the UNION of the two gates' own (one counts
+ * `.ts`/`.tsx`, the other also `.mts`/`.cts`); these are leads to run locally,
+ * not verdicts, so the wider side is the safe one.
+ */
+export function isTestFilePath(path) {
+  return /\.(test|spec)\.(ts|tsx|mts|cts)$/.test(path);
+}
+
+/**
+ * Gates that fire on what a change IS, keyed by a mechanically-detectable
+ * convention. Everything else in this script is derived at runtime and lists
+ * nothing; this table is the one exception, and it is bounded on purpose.
+ *
+ * ## Why these two cannot be derived like the rest
+ *
+ * The path derivation matches a gate when the gate's own source names a
+ * directory that covers your file. Both gates here compute their population
+ * instead of naming it — one lints a glob set that lives in the shared ESLint
+ * config, the other walks the workspace members — so neither source carries a
+ * literal to match, and both sit permanently in the "undetermined" bucket. No
+ * per-card gate list derived from paths can ever name them, however the
+ * derivation improves.
+ *
+ * ## Why a named table and not a wider heuristic
+ *
+ * The tempting generalisation — scan every discovered check script for
+ * `*.test.ts`-shaped literals and call those the test-sensitive gates — was
+ * measured against this tree and names 22 families, because a script's source
+ * mentions test paths in its fixtures, its self-test and its comments.
+ * "Mentions a test file" is not "counts test files", and 22 leads is the same
+ * as none. So the pair is written down, and the cost of writing it down is paid
+ * back by the two properties below.
+ *
+ * ## How this entry stays honest
+ *
+ * - Every `name` here is resolved against the families actually discovered in
+ *   the workflows at runtime. A gate that is renamed, retired or dropped from
+ *   CI does not silently stop being suggested — the run prints it as STALE and
+ *   says to fix this table. A hand-written list that reports its own rot is a
+ *   different object from one that quietly ages.
+ * - The entry is deletable, with a stated criterion: when a gate here grows a
+ *   discoverable path literal, the ordinary derivation names it and its line
+ *   below becomes redundant. Delete it then.
+ */
+export const CHANGE_KIND_GATES = [
+  {
+    kind: 'adds or edits a test file',
+    matches: isTestFilePath,
+    gates: [
+      {
+        name: 'check:query-options-erasure',
+        why: 'its test-surface ceiling counts sites in *.test/*.spec files, so new test code moves it',
+      },
+      {
+        name: 'check:type-check-coverage',
+        why: "TEST_DEBT ratchets a package's test-layer type errors, so a new test file that does not typecheck cleanly moves it",
+      },
+    ],
+  },
+];
+
+/**
+ * Render the convention-triggered section. Pure over its inputs so the
+ * self-test can drive both the hit and the STALE branch offline;
+ * `resolveInvocation` returns a runnable command for a gate the live run
+ * discovered, or null for one it did not.
+ */
+export function changeKindLines(paths, resolveInvocation, kinds = CHANGE_KIND_GATES) {
+  const lines = [];
+  for (const { kind, matches, gates } of kinds) {
+    const hits = paths.filter((p) => matches(p));
+    if (hits.length === 0) continue;
+    lines.push(`  ${kind}: ${hits.join(', ')}`);
+    for (const { name, why } of gates) {
+      const invocation = resolveInvocation(name);
+      lines.push(
+        invocation
+          ? `    - ${invocation}   — ${why}`
+          : `    - ⚠ ${name}: STALE — no workflow runs a gate under this name. It was renamed or retired; fix CHANGE_KIND_GATES in this script.`,
+      );
+    }
+  }
+  return lines;
+}
+
+// ---------------------------------------------------------------------------
 // Live derivation
 // ---------------------------------------------------------------------------
 
@@ -201,9 +302,20 @@ function derive(paths) {
   } else {
     console.log('No check family names the given paths in its own source.');
   }
+  const kindLines = changeKindLines(paths, (name) => {
+    const entry = byCheck.get(name);
+    return entry ? runnableInvocation(entry) : null;
+  });
+  if (kindLines.length) {
+    console.log('\nConvention-triggered gates (this change KIND moves them; no path derivation can name them):');
+    for (const line of kindLines) console.log(line);
+  }
+
   console.log(
     `\nRepo-wide / undetermined (no path literals discoverable — not known irrelevant): ${undetermined.length} famil(ies).` +
-      '\nJudgment stays with the PM: convention-scoped gates (new fake engine ⇒ check:engine-double-contract, new error code ⇒ check:error-code-casing, any edit ⇒ check:nul-bytes) match by what the change IS, not where it lives.',
+      '\nConvention-scoped gates match by what the change IS, not where it lives. This script derives the conventions it can detect mechanically ' +
+      `(${CHANGE_KIND_GATES.map((k) => k.kind).join('; ')}) and prints them above when they hit; the rest stay the PM judgment call — ` +
+      'new fake engine ⇒ check:engine-double-contract, new error code ⇒ check:error-code-casing, any edit ⇒ check:nul-bytes.',
   );
 }
 
@@ -263,6 +375,28 @@ function selfTest() {
   t('collapsed glob prefix covers', hintCovers('packages/spec/src/**', 'packages/spec/src/data/filter.zod.ts'));
   t('input dir covers hint below it', hintCovers('packages/spec/scripts/check-x.mjs', 'packages/spec'));
   t('unrelated path does not match', !hintCovers('.claude/agents', 'packages/rest/src/server.ts'));
+
+  // Change-kind derivation. The predicate is pinned in BOTH directions against
+  // what the two gates themselves count: filename infix, never directory — a
+  // helper inside `__tests__/` is in their non-test population.
+  t('test file by .test infix', isTestFilePath('packages/objectql/src/engine.test.ts'));
+  t('test file by .spec infix', isTestFilePath('packages/rest/src/server.spec.tsx'));
+  t('test file with an mts extension', isTestFilePath('packages/spec/src/x.test.mts'));
+  t('a __tests__ helper is NOT a test file to these gates', !isTestFilePath('packages/core/src/__tests__/fixtures.ts'));
+  t('a plain source file is not a test file', !isTestFilePath('packages/objectql/src/engine.ts'));
+  t('a non-TS file named test is not a test file', !isTestFilePath('docs/how.test.md'));
+
+  const resolved = (name) => `pnpm ${name}`;
+  const kindHit = changeKindLines(['packages/objectql/src/engine.test.ts'], resolved);
+  t('a test path emits the convention section', kindHit.length === 3 && kindHit[0].includes('adds or edits a test file'));
+  t('the section names both convention gates, runnably', kindHit.some((l) => l.includes('pnpm check:query-options-erasure')) && kindHit.some((l) => l.includes('pnpm check:type-check-coverage')));
+  t('a non-test path emits nothing', changeKindLines(['scripts/pm/dispatch-gates.mjs'], resolved).length === 0);
+
+  // The table's own rot detector: a name no live run discovers must say so,
+  // never disappear quietly.
+  const stale = changeKindLines(['a.test.ts'], () => null);
+  t('an undiscoverable gate renders as STALE', stale.filter((l) => l.includes('STALE')).length === 2);
+  t('every declared convention gate carries a reason', CHANGE_KIND_GATES.every((k) => k.gates.every((g) => g.name && g.why)));
 
   let failed = 0;
   for (const [name, cond] of cases) {

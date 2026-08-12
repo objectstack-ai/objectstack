@@ -106,12 +106,14 @@ describe('GET/POST /security/explain (ADR-0090 D6)', () => {
     let res = mockRes();
     await post!.handler({ method: 'POST', params: {}, headers: {}, body: { operation: 'read' } } as any, res);
     expect(res.statusCode).toBe(400);
-    expect(res.body.code).toBe('VALIDATION_FAILED');
+    // [#8073] The code moved from the retired FLAT position to the ADR-0112 D5
+    // one. Same code, same 400 — `body.error.code` is where it is now declared.
+    expect(res.body.error.code).toBe('VALIDATION_FAILED');
 
     res = mockRes();
     await post!.handler({ method: 'POST', params: {}, headers: {}, body: { object: 'task', operation: 'frobnicate' } } as any, res);
     expect(res.statusCode).toBe(400);
-    expect(res.body.code).toBe('VALIDATION_FAILED');
+    expect(res.body.error.code).toBe('VALIDATION_FAILED');
   });
 
   it("maps the service's PermissionDeniedError to 403 (manage_users / D12 gate)", async () => {
@@ -124,7 +126,8 @@ describe('GET/POST /security/explain (ADR-0090 D6)', () => {
     await post!.handler({ method: 'POST', params: {}, headers: {}, body: { object: 'task', operation: 'read', userId: 'u_target' } } as any, res);
 
     expect(res.statusCode).toBe(403);
-    expect(res.body.code).toBe('PERMISSION_DENIED');
+    // [#8073] Migrated from the flat `res.body.code` to the D5 position.
+    expect(res.body.error.code).toBe('PERMISSION_DENIED');
   });
 
   it('returns 501 when no security service exposes explain', async () => {
@@ -133,7 +136,8 @@ describe('GET/POST /security/explain (ADR-0090 D6)', () => {
       const res = mockRes();
       await post!.handler({ method: 'POST', params: {}, headers: {}, body: { object: 'task', operation: 'read' } } as any, res);
       expect(res.statusCode).toBe(501);
-      expect(res.body.code).toBe('NOT_IMPLEMENTED');
+      // [#8073] Migrated from the flat `res.body.code` to the D5 position.
+      expect(res.body.error.code).toBe('NOT_IMPLEMENTED');
     }
   });
 
@@ -142,6 +146,10 @@ describe('GET/POST /security/explain (ADR-0090 D6)', () => {
     const res = mockRes();
     await post!.handler({ method: 'POST', params: {}, headers: {}, body: { object: 'task', operation: 'read' } } as any, res);
     expect(res.statusCode).toBe(500);
-    expect(res.body.code).toBe('EXPLAIN_FAILED');
+    // [#8073] Migrated from the flat `res.body.code`. This arm carried the OTHER
+    // retired dialect too — `{ code, error: '<bare string>' }` — so its message
+    // now lives at `body.error.message` rather than being `body.error` itself.
+    expect(res.body.error.code).toBe('EXPLAIN_FAILED');
+    expect(res.body.error.message).toBe('boom');
   });
 });

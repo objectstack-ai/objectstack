@@ -10,19 +10,30 @@
     "outDir": "./dist",
     "rootDir": "."
   },
-  // `e2e/**/*.spec.ts`, NOT `e2e/**/*` (#7923). This package took the widened-
-  // `include` route rather than a sibling `tsconfig.test.json` because its
-  // `rootDir` is already the package root, so nothing here needs neutralising —
-  // the same repair #7312 applied to app-crm / app-todo.
+  // This package took the widened-`include` route rather than a sibling
+  // `tsconfig.test.json` because its `rootDir` is already the package root, so
+  // nothing here needs neutralising — the same repair #7312 applied to
+  // app-crm / app-todo.
   //
-  // The glob is spec-scoped on purpose, and it is the trap the TEST_DEBT entry
-  // that this change deletes was written to warn about: `e2e/**/*` would also
-  // pull in `e2e/global-setup.ts`, a Playwright fixture rather than a test,
-  // which carries 6 errors of its own (3 `process.env` reads plus 3 gaps in
-  // test/node-shim.d.ts — no `mkdirSync`/`writeFileSync` on the `node:fs` shim
-  // and no `node:path` module at all). Billing the test layer for a non-test
-  // file is what the ledger note measured around, so the repair holds the same
-  // line. `global-setup.ts` therefore stays outside this program; it is filed
-  // separately rather than silently folded in here.
-  "include": ["src/**/*", "objectstack.config.ts", "test/**/*", "e2e/**/*.spec.ts"]
+  // `e2e/**/*` is deliberately wholesale, not `e2e/**/*.spec.ts` (#8062): the
+  // spec-scoped form left `e2e/global-setup.ts` — the fixture that authenticates
+  // the whole smoke run — read by no tsc program at all, and the coverage gate
+  // counts test files, so nothing else had an opinion on it either. The 6 errors
+  // the narrow glob was avoiding are fixed at their source rather than excluded
+  // (file-local `declare const process`, plus the `node:fs`/`node:path` members
+  // in types/node-shim.d.ts), so the wholesale form now costs nothing.
+  //
+  // `playwright.config.ts` is named for the same reason: it configures that same
+  // smoke lane and was dark in exactly the same way. `vitest.config.ts` is NOT
+  // named — its `vitest/config` import transitively drags in the whole of
+  // `@types/node`, which is precisely the type surface this package is
+  // deliberately without (see types/node-shim.d.ts).
+  "include": [
+    "src/**/*",
+    "objectstack.config.ts",
+    "playwright.config.ts",
+    "types/**/*",
+    "test/**/*",
+    "e2e/**/*"
+  ]
 }
