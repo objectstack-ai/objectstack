@@ -48,7 +48,14 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { OWNER_FIELD_DEF } from '@objectstack/metadata-core';
+import {
+  OWNER_FIELD_DEF,
+  assertEngineDeleteDispatch,
+  assertEngineUpdateDispatch,
+  type EngineDeleteDispatchInput,
+  type EngineUpdateDispatchData,
+  type EngineUpdateDispatchInput,
+} from '@objectstack/metadata-core';
 import { SharingService } from './sharing-service.js';
 
 /** The caller: an ordinary member whose read/write DEPTH is narrower than `org`. */
@@ -108,14 +115,35 @@ const GRANDFATHERED_SHOWCASE_SHAPE = federatedSchema({
  * The narrow slice of the engine both filters touch. `find` answers the
  * `sys_record_share` grant lookup with no rows, so the composed filter is the
  * owner branch alone — which is exactly the value under test.
+ *
+ * [#4550] `update` and `delete` open with the REAL engine's own dispatch
+ * predicates. Neither verb is exercised by the cases below — the `SharingEngine`
+ * contract requires both members, so the double has to declare them — but a
+ * double that would ACCEPT a call shape `ObjectQL` rejects is precisely how
+ * #4434 shipped a dead REST route with its suite green. That is the same
+ * failure this file's own fixture choice guards against one level up: an
+ * assertion that passes because the harness is more permissive than the thing
+ * it stands for. Imported from `@objectstack/metadata-core`, where the
+ * predicates have lived since #5619 and which this package already depends on
+ * for {@link OWNER_FIELD_DEF}.
  */
 function makeEngine(schemas: Record<string, unknown>) {
   return {
     getSchema: (name: string) => schemas[name],
     find: async () => [],
-    insert: async (_o: string, d: unknown) => d,
-    update: async (_o: string, d: unknown) => d,
-    delete: async () => ({ deleted: 0 }),
+    insert: async (_object: string, data: unknown) => data,
+    update: async (
+      _object: string,
+      data: EngineUpdateDispatchData,
+      options?: EngineUpdateDispatchInput,
+    ) => {
+      assertEngineUpdateDispatch(data, options);
+      return data;
+    },
+    delete: async (_object: string, options?: EngineDeleteDispatchInput) => {
+      assertEngineDeleteDispatch(options);
+      return { deleted: 0 };
+    },
   };
 }
 
