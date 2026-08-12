@@ -4838,6 +4838,58 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * Privileged: recover the plaintext of ONE row's `secret`-typed field.
+   *
+   * {@link resolveSecret} is documented for "privileged consumers … against the
+   * stored ref", but until #7799 there was no supported way for such a consumer
+   * to OBTAIN that ref: {@link maskSecretFields} replaces it with
+   * {@link SECRET_MASK} on every `find`/`findOne`, unconditionally and after
+   * hooks. A server-side reader that genuinely needs the value therefore had
+   * two options, both bad — keep the credential in cleartext somewhere the read
+   * path does not mask (which is the defect #7799 reports on
+   * `sys_webhook.definition_json`), or reach around the engine into the driver
+   * from a plugin. This method is the supported third option, and it is why the
+   * webhook signing secret can now live in the encrypted channel at all.
+   *
+   * The row is read at DRIVER level on purpose — that is the only layer where
+   * the ref still exists — which means it bypasses read hooks, field-level
+   * security and sharing. That is the same trust `resolveSecret` already places
+   * in its caller, and the reason both are spelled as explicit, separately-named
+   * privileged verbs rather than an option on `find`: there is no query string
+   * that reaches this, so it cannot be turned on from outside the process.
+   *
+   * Refuses any field that is not declared `type: 'secret'`. Without that guard
+   * this would be a generic mask-bypass — in particular over a `password` field,
+   * which is stored as PLAINTEXT at rest and is masked for exactly that reason
+   * (ADR-0100). Only the encrypted channel is dereferenceable.
+   *
+   * Fail-closed like {@link resolveSecret}: throws when no CryptoProvider is
+   * registered or the `sys_secret` row has gone missing. Returns `null` when the
+   * row does not exist or the field holds no secret (never set, or cleared).
+   */
+  async resolveSecretField(
+    object: string,
+    recordId: string,
+    field: string,
+    opts?: { tenantId?: string },
+  ): Promise<string | null> {
+    const schema = this._registry.getObject(object);
+    if (!collectSecretFields(schema).includes(field)) {
+      throw new Error(
+        `Cannot resolve secret field "${object}.${field}": it is not declared as type 'secret'. `
+          + 'Only the encrypted secret channel is dereferenceable — a `password` field is stored as '
+          + 'plaintext at rest and is masked deliberately (ADR-0100), so dereferencing one here '
+          + 'would be a mask bypass, not a decrypt.',
+      );
+    }
+    const driver = this.getDriver(object);
+    const found = await driver.find(object, { where: { id: recordId } });
+    const row: any = Array.isArray(found) ? found[0] : found;
+    if (!row) return null;
+    return this.resolveSecret(row[field], opts);
+  }
+
+  /**
    * Helper to get object definition
    */
   getSchema(objectName: string): ServiceObject | undefined {
