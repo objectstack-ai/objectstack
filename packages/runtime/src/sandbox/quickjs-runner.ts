@@ -284,8 +284,8 @@ export class QuickJSScriptRunner implements ScriptRunner {
         `function(e){
               globalThis.__error = (e && e.message) ? (e.name + ': ' + e.message) : String(e);
               try {
-                globalThis.__errorInfo = (e && (e.code || e.fields || e['${SANDBOX_FAULT_PROP}']))
-                  ? JSON.stringify({ code: e.code, fields: e.fields, sandboxFault: e['${SANDBOX_FAULT_PROP}'] === true })
+                globalThis.__errorInfo = (e && (e.code || e.fields || e.status || e['${SANDBOX_FAULT_PROP}']))
+                  ? JSON.stringify({ code: e.code, fields: e.fields, status: e.status, sandboxFault: e['${SANDBOX_FAULT_PROP}'] === true })
                   : undefined;
               } catch (_) { globalThis.__errorInfo = undefined; }
             }`;
@@ -949,16 +949,29 @@ function safeJsonStringify(v: unknown): string {
  * style one: everything placed on the handle below becomes readable by
  * untrusted sandboxed code, and host errors routinely hang driver state,
  * connection details, or whole record payloads off themselves. Copying the
- * error's own enumerable keys would leak all of it. Only these two are safe and
- * useful — they are already destined for the HTTP client.
+ * error's own enumerable keys would leak all of it. Only these three are safe
+ * and useful — they are already destined for the HTTP client.
  *
  * Why they need to cross at all: a record `ValidationError` reaching a body via
  * `ctx.api.object(x).update(...)` used to arrive as bare `name`/`message`, so
  * its `fields[]` was gone before any dispatcher exit could map it (#3918
  * follow-up) — a form action could only ever show prose, never highlight the
  * offending input.
+ *
+ * [#7867] `status` joined for the same reason one card later, on the same call
+ * shape. `ctx.api.object(x).update({ id, … })` against an id that names no row
+ * now throws the repo's one `RECORD_NOT_FOUND` — `code` 'RECORD_NOT_FOUND',
+ * `status` 404 — and `code` alone crossed, so the action surface answered
+ * `{ code: 'RECORD_NOT_FOUND', httpStatus: 400 }`: the right diagnosis served
+ * with the wrong status, which is the half-fix a client cannot act on (404 and
+ * 400 mean different things to a retry policy and to a cache).
+ *
+ * `domains/actions.ts`'s classifier already honours a `.status` FIRST — "an
+ * error that NAMES its own HTTP status is asking to be served with it" — so
+ * nothing downstream needed teaching; the number simply never arrived. A
+ * number, like `code`, carries no host state.
  */
-const SANDBOX_ERROR_PASSTHROUGH = ['code', 'fields'] as const;
+const SANDBOX_ERROR_PASSTHROUGH = ['code', 'fields', 'status'] as const;
 
 /**
  * Marshal a HOST error into the VM as a rejectable QuickJS error handle,
@@ -967,7 +980,7 @@ const SANDBOX_ERROR_PASSTHROUGH = ['code', 'fields'] as const;
  * The caller owns the returned handle and must dispose it.
  */
 function hostErrorToVm(vm: QuickJSContext, err: unknown): QuickJSHandle {
-  const e = err as { name?: string; message?: string; code?: unknown; fields?: unknown };
+  const e = err as { name?: string; message?: string; code?: unknown; fields?: unknown; status?: unknown };
   const errH = err instanceof Error
     ? vm.newError({ name: e.name || 'Error', message: e.message ?? '' })
     : vm.newError({ name: 'Error', message: String(err) });
@@ -982,6 +995,14 @@ function hostErrorToVm(vm: QuickJSContext, err: unknown): QuickJSHandle {
     if (Array.isArray(e?.fields)) {
       const h = jsonToHandle(vm, e.fields);
       vm.setProp(errH, 'fields', h);
+      h.dispose();
+    }
+    // [#7867] Finite numbers only — a status is a small integer or it is not a
+    // status, and `NaN`/`Infinity` would not survive the JSON side-channel that
+    // carries it back out.
+    if (typeof e?.status === 'number' && Number.isFinite(e.status)) {
+      const h = vm.newNumber(e.status);
+      vm.setProp(errH, 'status', h);
       h.dispose();
     }
     // [#4431] Mark the sandbox's OWN faults so the pump loop can tell them
@@ -1208,12 +1229,21 @@ export class SandboxError extends Error {
    * input instead of showing the message alone.
    */
   readonly fields?: unknown[];
+  /**
+   * [#7867] The HTTP status the error that crossed OUT of the VM named for
+   * itself — 404 for the engine's `RECORD_NOT_FOUND`, 403 for a permission
+   * refusal. `domains/actions.ts` serves it directly ("an error that NAMES its
+   * own HTTP status is asking to be served with it"); without it a by-id write
+   * against a nonexistent record was answered `RECORD_NOT_FOUND` at status 400.
+   */
+  readonly status?: number;
   constructor(message: string, innerMessage?: string, info?: SandboxErrorInfo) {
     super(message);
     this.name = 'SandboxError';
     this.innerMessage = innerMessage;
     if (info?.code) this.code = info.code;
     if (info?.fields) this.fields = info.fields;
+    if (typeof info?.status === 'number') this.status = info.status;
   }
 }
 
@@ -1221,6 +1251,8 @@ export class SandboxError extends Error {
 export interface SandboxErrorInfo {
   code?: string;
   fields?: unknown[];
+  /** [#7867] See {@link SandboxError.status}. */
+  status?: number;
   /**
    * [#4431] The error that crossed `__error` was the SANDBOX's own fault — a
    * denied capability, an unavailable `ctx.api`, a marshalling failure — not
@@ -1252,12 +1284,16 @@ function readErrorInfo(vm: QuickJSContext): SandboxErrorInfo | undefined {
   } catch {
     return undefined;
   }
-  const p = parsed as { code?: unknown; fields?: unknown; sandboxFault?: unknown };
+  const p = parsed as { code?: unknown; fields?: unknown; status?: unknown; sandboxFault?: unknown };
   const info: SandboxErrorInfo = {};
   if (typeof p?.code === 'string' && p.code) info.code = p.code;
   if (Array.isArray(p?.fields)) info.fields = p.fields;
+  // [#7867] `Number.isFinite` rather than a bare `typeof`: an out-of-range
+  // number JSON-round-trips to `null`, and `NaN` would satisfy `typeof` while
+  // making `errorFromThrown` emit a nonsense status line.
+  if (typeof p?.status === 'number' && Number.isFinite(p.status)) info.status = p.status;
   if (p?.sandboxFault === true) info.sandboxFault = true;
-  return info.code || info.fields || info.sandboxFault ? info : undefined;
+  return info.code || info.fields || info.status !== undefined || info.sandboxFault ? info : undefined;
 }
 
 /**

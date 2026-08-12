@@ -57,6 +57,17 @@ const ENV_KEYS = [
 const savedEnv: Record<string, string | undefined> = {};
 
 let live: Set<string>;
+/**
+ * The options object better-auth was actually constructed with — the same one
+ * its handlers read as `ctx.context.options`, so a capability switch read here
+ * is the switch the runtime enforces, not a restatement of the ledger.
+ */
+let liveOptions: {
+  user?: {
+    changeEmail?: { enabled?: boolean };
+    deleteUser?: { enabled?: boolean };
+  };
+};
 
 beforeAll(async () => {
   for (const k of ENV_KEYS) { savedEnv[k] = process.env[k]; delete process.env[k]; }
@@ -71,7 +82,9 @@ beforeAll(async () => {
   // handling would — so the table enumerates identically.
   const auth = (await manager.getAuthInstance()) as unknown as {
     api: Record<string, { path?: string; options?: { method?: string | string[] } }>;
+    options: typeof liveOptions;
   };
+  liveOptions = auth.options;
 
   live = new Set<string>();
   for (const endpoint of Object.values(auth.api ?? {})) {
@@ -175,5 +188,75 @@ describe('auth route ledger hygiene', () => {
     // resolves against the live better-auth table.
     expect(AUTH_ROUTE_LEDGER.filter((e) => e.disposition === 'gap').length).toBeLessThanOrEqual(0);
     expect(AUTH_ROUTE_LEDGER.filter((e) => e.disposition === 'mismatch').length).toBeLessThanOrEqual(0);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+/**
+ * #7735 — the ledger's disposition for a capability-gated route must agree with
+ * the SWITCH THE RUNTIME READS.
+ *
+ * This is the check whose absence was the whole defect. `change-email` and
+ * `delete-user` are published by the catch-all unconditionally, so every guard
+ * that asks "does better-auth serve this path" was green while one route
+ * answered 400 `CHANGE_EMAIL_DISABLED` and the other 404 — mounted, ledgered as
+ * live SDK surface, and dead. Path existence cannot see a feature switch.
+ *
+ * Both sides here are read independently: the left from `auth.options`, the
+ * object better-auth's own handlers consult (`ctx.context.options.user
+ * ?.changeEmail?.enabled`), the right from the ledger row. Deleting the config
+ * in auth-manager.ts turns this red without touching the ledger, and re-booking
+ * a `disabled` row as `sdk` turns it red without touching the config — a pin
+ * that derived both sides from the ledger could do neither.
+ */
+describe('#7735 — capability switches ↔ ledger disposition', () => {
+  /** The routes whose liveness is a better-auth `user.*` feature switch. */
+  const CAPABILITY_GATED = [
+    {
+      route: 'POST /api/v1/auth/change-email',
+      switchName: 'user.changeEmail.enabled',
+      isOn: () => liveOptions?.user?.changeEmail?.enabled === true,
+    },
+    {
+      route: 'POST /api/v1/auth/delete-user',
+      switchName: 'user.deleteUser.enabled',
+      isOn: () => liveOptions?.user?.deleteUser?.enabled === true,
+    },
+  ] as const;
+
+  it.each(CAPABILITY_GATED)(
+    'the row for $route matches the live $switchName',
+    ({ route, switchName, isOn }) => {
+      const row = AUTH_ROUTE_LEDGER.find((e) => e.route === route);
+      expect(row, `${route} is missing from AUTH_ROUTE_LEDGER`).toBeDefined();
+
+      const on = isOn();
+      expect(
+        row!.disposition,
+        on
+          ? `${switchName} is ON, so ${route} really is a live SDK surface and the ledger must book it as \`sdk\`.`
+          : `${switchName} is OFF, so ${route} is refused at runtime. Booking it as \`sdk\` is the #7735 defect: `
+            + 'either wire the capability, or leave the row `disabled` with the reason.',
+      ).toBe(on ? 'sdk' : 'disabled');
+    },
+  );
+
+  it('every `disabled` row names its refused capability, and the set is the reviewed one', () => {
+    const disabled = AUTH_ROUTE_LEDGER.filter((e) => e.disposition === 'disabled');
+
+    // Pinned, not counted: a second withheld capability is a product decision,
+    // so it must arrive as a diff someone reads — the same reason
+    // BETTER_AUTH_MOUNTED_SURFACE is checked for equality rather than growth.
+    expect(
+      disabled.map((e) => e.route).sort(),
+      'the `disabled` set changed. A route may only sit here with a ruling behind it (#7735); '
+        + 'wiring one up means moving it back to `sdk` in the same PR as the config.',
+    ).toEqual(['POST /api/v1/auth/delete-user']);
+
+    for (const row of disabled) {
+      // `note` is what makes the state honest rather than merely quiet — the
+      // hygiene test above requires one; this requires it to say something.
+      expect(row.note ?? '', `${row.route} must say WHICH switch is off`).toMatch(/deleteUser|changeEmail/);
+    }
   });
 });

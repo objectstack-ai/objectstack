@@ -706,9 +706,15 @@ describe('[#5272] a single-record delete binds `previous` through the real engin
     expect(before[0]).toEqual(after[0]);
   });
 
-  it('reads nothing at all when the object has no delete-side hook', async () => {
-    // Demand-driven, exactly like update()'s prior-row gate: an object nobody
-    // observes on delete pays for no pre-image.
+  it('[#7867] still reads exactly ONCE when the object has no delete-side hook — for existence, not for `previous`', async () => {
+    // ⚠️ Asserted 0 until #7867. The pre-image read on the by-id path is now
+    // unconditional: `delete()` has to know whether the row is there before it
+    // runs, because a delete against an id naming no row must answer
+    // RECORD_NOT_FOUND rather than report a deletion that never happened.
+    //
+    // What the number still holds down is that there is ONE read — the
+    // engine's — and not a second one behind some hook's guard. That was
+    // #5929's subject and it is unchanged.
     const { engine, reads } = await bootDelete([{
       name: 'update_only_guard',
       object: 'hook_task',
@@ -722,17 +728,31 @@ describe('[#5272] a single-record delete binds `previous` through the real engin
     const baseline = reads.findOne;
     await engine.delete('hook_task', { where: { id: row.id } } as any);
 
-    expect(reads.findOne - baseline).toBe(0);
+    expect(reads.findOne - baseline).toBe(1);
   });
 
-  it('leaves `previous` UNBOUND when the row is not there — nothing is fabricated', async () => {
+  it('[#7867] never REACHES the unbound-`previous` shape — the delete is refused first', async () => {
+    // ⚠️ This asserted `[undefined]` until #7867: the row was gone, the engine
+    // bound nothing, and `beforeDelete` dispatched anyway with `previous`
+    // absent. The never-fabricate rule that made it `undefined` rather than
+    // `{}`/`null` is UNCHANGED and still governs `bindPreImage` (#4649/#4775) —
+    // what changed is that no handler is dispatched at all for a row that is
+    // not there, so the shape has no way to arise on this path.
+    //
+    // This is the correction #5571 spent six triage rounds not finding: the
+    // binding was behaving correctly on a path that should never have been
+    // entered. Loosening it would have fixed the wrong thing; removing the
+    // entry is the fix.
     const seen: Array<Record<string, unknown> | undefined> = [];
     const { engine } = await bootDelete([observer('beforeDelete', seen)]);
 
-    await engine.delete('hook_task', { where: { id: 'never_existed' } } as any);
+    const err: any = await engine
+      .delete('hook_task', { where: { id: 'never_existed' } } as any)
+      .then(() => null, (e) => e);
 
-    // `{}` or `null` here would let `previous.status == "done"` answer for a
-    // record nobody read. Absent stays absent (#4649/#4775).
-    expect(seen).toEqual([undefined]);
+    expect(err).not.toBeNull();
+    expect(err.code).toBe('RECORD_NOT_FOUND');
+    expect(err.status).toBe(404);
+    expect(seen, 'no handler may be dispatched for a record nobody read').toEqual([]);
   });
 });

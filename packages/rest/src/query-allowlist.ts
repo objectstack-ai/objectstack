@@ -56,6 +56,86 @@
  * of "this request is malformed". `VALIDATION_ERROR` is the standard catalog's
  * member for 400 (`spec/src/api/errors.zod.ts`); nothing in `packages/spec`
  * moves for this.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * # THE INGRESS POLICY (#7606)
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * Maintainer ruling, 2026-08-12, verbatim and untranslated:
+ *
+ * > 裁定:政策 YES —— 闭合查询参数集成为 REST ingress 政策;采纳方式为增量,
+ * > ⛔ 不打大包。
+ *
+ * ## The rule
+ *
+ * **A new REST route declares its closed query-parameter set on the day it
+ * lands**, by opening its handler with {@link refuseUnknownQueryParams} over
+ * an exported `readonly string[]`. This is review-enforceable: a PR adding a
+ * `GET` route that reads `req.query` and does not declare a closed set is
+ * incomplete, and the reviewer should say so.
+ *
+ * Existing routes convert **per lane, never as one sweep** — a broad wave with
+ * thin pins is the failure mode the ruling explicitly rejected. Data READ
+ * routes convert first: silent widening and narrowing bite hardest there, and
+ * an AI caller can detect neither direction.
+ *
+ * ## Three rules for measuring the set — the part that goes wrong
+ *
+ * 1. ⛔ **Measure from the handler's ACTUAL read points. Never guess, and
+ *    never copy the docs.** The set is not "the filters": it includes paging,
+ *    ordering, output format, alias spellings the handler honours, and
+ *    anything a middleware reads off the query before the handler runs. A
+ *    whitelist that forgets `limit` converts a silent-widening bug into a loud
+ *    pagination incident — strictly worse than the defect it fixes.
+ * 2. **Declare only what the handler really implements.** When a route reads
+ *    an alias but not the canonical spelling (`GET /data/:object/:id` reads
+ *    `select`, never the canonical `fields`), the missing spelling stays
+ *    OUTSIDE the set. Adding it would advertise a capability that does not
+ *    exist; refusing it makes the gap self-reporting.
+ * 3. **Recognition and arity are different questions** and a name may be
+ *    answered differently by each. A multi-valued parameter belongs in the
+ *    recognition set and stays out of the multiplicity declaration.
+ *
+ * ## ⛔ Routes whose parameter set is genuinely OPEN are excluded — by name
+ *
+ * The policy is not "every route eventually". Some surfaces accept
+ * caller-defined names by design, and closing them would be a defect:
+ *
+ * - **`GET {basePath}/data/:object` (the record list)** — ⛔ **do not add this
+ *   gate.** The handler hands the WHOLE query record to `findData`, whose
+ *   normalizer lowers every leftover key into an implicit field-equality
+ *   predicate (`?status=open` IS the filter). The valid parameter names are
+ *   therefore the object's own field names, which vary per object and include
+ *   the audit / tenant / owner columns the registry injects — a closed list in
+ *   this file could only ever be wrong. That route is already guarded, one
+ *   layer down and against the right authority: #4134's read-path gate refuses
+ *   an unknown FIELD with `400 INVALID_FIELD` (`assertQueryParamsAreFields`,
+ *   `metadata-protocol`), and #7534 extended the same gate to the explicit
+ *   `where` / `$filter` axes. Adding recognition here would break every
+ *   implicit filter and author a third dialect for a condition that already
+ *   has two correct answers.
+ *
+ * The general test: **if an unrecognised name has a defined meaning on this
+ * route, the set is open and this gate does not belong.** Gate it where the
+ * authority for the name actually lives.
+ *
+ * ## Composition with the sibling gates
+ *
+ * Recognition runs FIRST, before {@link refuseRepeatedQueryParams} — see that
+ * helper and the note on {@link refuseUnknownQueryParams} itself. Both answer
+ * the same nested `VALIDATION_ERROR` envelope, so composing them adds no
+ * dialect. The third gate, `assertFilterParamSuppliedOnce` (#7390), answers
+ * `400 INVALID_FILTER` through the flat `mapDataError` envelope and lives
+ * ONLY on the list route excluded above — so it and this gate never run on one
+ * request, and the cross-route code divergence recorded in #8001 is neither
+ * widened nor resolved by this policy.
+ *
+ * ## This breaks tolerated traffic, deliberately
+ *
+ * A caller sending a parameter we ignore today starts getting a `400`. That is
+ * the point, and v17 is the intended window: the traffic is invisible to us
+ * precisely because we drop it silently, so the blast radius cannot be
+ * measured from our side — only decided. It was decided above.
  */
 
 /**

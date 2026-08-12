@@ -922,6 +922,59 @@ export class AuthManager {
         // the objectql `SysUser` object def (provisioned by boot schema-sync)
         // and read by a GUARDED system query in resolveCtx (can only no-op,
         // never break auth). better-auth stays oblivious to the extra column.
+
+        // ── #7735 — self-service email change, ON with verification ────────
+        // better-auth ships `changeEmail` OFF, so `POST /change-email` answered
+        // 400 CHANGE_EMAIL_DISABLED on every deployment while
+        // `auth-route-ledger.ts` booked the route as a live SDK surface. The
+        // ledger was right about the product and wrong about the runtime;
+        // maintainer ruling 2026-08-12 settled it by making the runtime true:
+        // 「`user.changeEmail` 在 plugin-auth 配置开启,带验证流程(变更需确认,
+        // 策略按 better-auth 常规)」.
+        //
+        // THE FLOW, as better-auth 1.7 actually implements it (read off
+        // `better-auth/dist/api/routes/update-user.mjs`, not off the docs):
+        //   1. `POST /change-email {newEmail}` mints a JWT carrying
+        //      `{ email: current, updateTo: newEmail, requestType:
+        //      'change-email-verification' }` and hands it to
+        //      `emailVerification.sendVerificationEmail` — the same callback
+        //      (and `auth.verify_email` template) sign-up verification uses,
+        //      addressed to the NEW address. Nothing is written yet.
+        //   2. `GET /verify-email?token=…` applies it: `updateUserByEmail(old,
+        //      { email: newEmail, emailVerified: true })`, then re-issues the
+        //      session cookie on the new identity.
+        // So the change is confirmed by proving control of the new mailbox —
+        // 「变更需确认」 — and an unclicked request changes nothing.
+        //
+        // TWO OPTIONS DELIBERATELY LEFT AT THEIR DEFAULTS, because each is a
+        // policy this ruling did not decide:
+        //   • `updateEmailWithoutVerification` — would let a user whose CURRENT
+        //     address is unverified swap emails with no confirmation at all.
+        //     That is the one thing the ruling names; leaving it false keeps
+        //     every path confirmed.
+        //   • `sendChangeEmailConfirmation` — better-auth's opt-in EXTRA step
+        //     that asks the OLD address to approve first (old → new, two
+        //     clicks). Stronger against a hijacked session, and it needs a
+        //     decision about which address is authoritative plus its own
+        //     template; 「策略按 better-auth 常规」 is the single-step default,
+        //     so the two-step variant stays a deliberate future design.
+        //
+        // No email transport wired ⇒ the `emailVerification` block below is
+        // absent ⇒ better-auth answers 400 "Verification email isn't enabled".
+        // That is the honest answer for a deployment with no mailbox, and a
+        // different sentence from "the platform does not offer this".
+        //
+        // The write itself already worked: `sys_user.email` is schema-`readonly`
+        // and the readonly-strip drops non-system updates, but the adapter runs
+        // better-auth's own writes as system (#3164, `withSystemContext` in
+        // objectql-adapter.ts), so the applied change persists.
+        //
+        // ⛔ `deleteUser` is NOT configured here, by the same ruling — see the
+        // `disabled` row for `POST /api/v1/auth/delete-user` in
+        // `auth-route-ledger.ts` for why, and for what has to be decided first.
+        changeEmail: {
+          enabled: true,
+        },
       },
       account: {
         ...AUTH_ACCOUNT_CONFIG,

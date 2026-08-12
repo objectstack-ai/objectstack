@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { SchemaRegistry, applySystemFields, reconcileManagedApiMethods, warnStrippedLegacyApiMethods, warnFunctionalCompleteness, computeFQN, parseFQN } from './registry';
-import { AUDIT_PROVENANCE_FIELDS, type ServiceObject } from '@objectstack/spec/data';
+import { AUDIT_PROVENANCE_FIELDS, checkManagedApiMethodAffordances, type ServiceObject } from '@objectstack/spec/data';
 
 describe('SchemaRegistry', () => {
     let registry: SchemaRegistry;
@@ -994,6 +994,69 @@ describe('reconcileManagedApiMethods', () => {
         reg.registerObject(managed(), 'sys', 'sys', 'own');
         const stored = (reg as any).objectContributors.get('sys_thing')[0].definition;
         expect(stored.enable.apiMethods).toEqual(['get', 'list']);
+    });
+
+    // ── #7521: the strip is a REACTION to the shared predicate ──────────
+    //
+    // The judgement moved to `checkManagedApiMethodAffordances`
+    // (`@objectstack/spec/data`) so that `@objectstack/lint`'s author-time gate
+    // reaches the identical verdict from the identical table. These pin the
+    // join: if someone reintroduces a local table here, the two can disagree
+    // again — which is the declared≠enforced drift the card is about.
+    describe('shares ONE predicate with the author-time gate (#7521)', () => {
+        const apiMethodsOf = (schema: ServiceObject): string[] =>
+            (schema as { enable: { apiMethods: string[] } }).enable.apiMethods;
+
+        it('strips exactly the verbs the shared predicate names, and only those', () => {
+            const schema = {
+                name: 'sys_environment',
+                managedBy: 'platform',
+                userActions: { create: false, edit: false, delete: false },
+                enable: { apiEnabled: true, apiMethods: ['get', 'list', 'create', 'update'] },
+            } as ServiceObject;
+
+            const conflicts = checkManagedApiMethodAffordances(schema);
+            expect(conflicts.map((c) => c.verb)).toEqual(['create', 'update']);
+
+            const warn = vi.fn<(msg: string) => void>();
+            const kept = apiMethodsOf(reconcileManagedApiMethods(schema, { warn }));
+            expect(kept).toEqual(['get', 'list']);
+            // The declared set minus exactly the predicate's verdict.
+            expect(kept).toEqual(
+                ['get', 'list', 'create', 'update'].filter(
+                    (_v, i) => !conflicts.some((c) => c.index === i),
+                ),
+            );
+        });
+
+        it('a duplicated offender does not take a legitimate verb down with it', () => {
+            const warn = vi.fn<(msg: string) => void>();
+            const out = reconcileManagedApiMethods(
+                {
+                    name: 'sys_thing',
+                    managedBy: 'better-auth',
+                    enable: { apiEnabled: true, apiMethods: ['create', 'get', 'create', 'list'] },
+                } as ServiceObject,
+                { warn },
+            );
+            expect(apiMethodsOf(out)).toEqual(['get', 'list']);
+        });
+
+        it('points the operator at the lint rule id, so a boot log leads to the gate', () => {
+            const warn = vi.fn<(msg: string) => void>();
+            reconcileManagedApiMethods(managed() as ServiceObject, { warn });
+            expect(warn.mock.calls[0]?.[0]).toContain('object/managed-api-method-unaffordable');
+        });
+
+        it('still WARNS rather than throwing — boot must survive a metadata typo', () => {
+            // The #7521 ruling: fail-closed at registration would let one typo
+            // kill a control-plane boot. The gate is where this blocks.
+            const warn = vi.fn<(msg: string) => void>();
+            expect(() =>
+                reconcileManagedApiMethods(managed() as ServiceObject, { warn }),
+            ).not.toThrow();
+            expect(warn).toHaveBeenCalledTimes(1);
+        });
     });
 });
 
