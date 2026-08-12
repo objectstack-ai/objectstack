@@ -931,6 +931,50 @@ jobs:
       - name: Stall-guard self-test
         run: pnpm check:stall-guard
 
+      # The dev-preflight gate's self-test — and deliberately only HALF of that
+      # gate (#8170, the second and only other member of #8110's split-gate
+      # family). Same neighbour as the step above for the same reason: both are
+      # self-tests of a guard whose real path CI does not exercise.
+      #
+      # The npm script of the same name is `--self-test && the scan`, and the
+      # SCAN half is genuinely CI-hostile. Its question is "is THIS WORKING TREE
+      # built, and is the one staleness-lying artifact current" — a precondition
+      # for `pnpm dev` on a human's long-lived tree. Re-measured on a fresh
+      # worktree before any install or build: exit 1, "The workspace is not built
+      # — 67 of 67 workspace packages declare an entry point under dist/ that is
+      # not on disk". In a job that has not built, that is a hard false red about
+      # a precondition CI does not have; in a job that just built, it is a
+      # tautological green. It correctly stays out, and it was taking the half
+      # that CAN run with it — the gate sat in the gate list reading as coverage
+      # while its scan ran on every human's `pnpm dev` and nothing kept that scan
+      # honest.
+      #
+      # The `--self-test` half is a different animal. Its fixtures are SYNTHETIC:
+      # it materializes throwaway workspaces in a temp dir and drives the gate's
+      # own `inspect`/`report`/`stamp` to all 16 verdicts. No network, no git, no
+      # node_modules, no workspace state at all — measured green in ~0.11s in a
+      # `--depth 1` clone carrying no remote-tracking ref for main.
+      #
+      # WHAT REDDENS IT, and where this differs from its sibling. #8110's step
+      # cannot go red alone (its specimen is derived from the frame documents, so
+      # a structural change reddens the sync gate above it first). This one CAN,
+      # and that is fine: its only input is this one script's own code, so the
+      # only PR that reaches it red is a PR that edits that script. Measured
+      # adversarially — rewording the stale-dist red message from "LIES" reds this
+      # step alone with `stale/says-it-lies: expected true, got false`, naming the
+      # assertion in the very file the PR is editing, so no sibling gate needs to
+      # diagnose it. The other direction was measured too: a legitimate change
+      # elsewhere cannot redden it — dropping `--stamp` from packages/spec's build
+      # script (which DOES red the scan half) leaves this step green, because the
+      # fixtures are synthetic. That is also this step's honest boundary: it
+      # vouches for the gate's verdict paths, never for this workspace.
+      #
+      # Invoked as `node`, NOT through the npm script, precisely because that
+      # script would drag the scan half in with it — the same shape as the `dev`
+      # chain calling this file directly (see the script's header).
+      - name: Self-test the dev-prereqs gate (self-test half only, never the scan)
+        run: node scripts/check-dev-prereqs.mjs --self-test
+
       - name: Type check (@objectstack/spec)
         run: pnpm --filter @objectstack/spec exec tsc --noEmit
 

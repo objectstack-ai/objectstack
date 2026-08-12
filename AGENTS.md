@@ -364,6 +364,18 @@ Even inside your own worktree, operate defensively:
    `$GIT_DIR/os-regen-pending` and `pre-commit` refuses the commit until those
    artifacts check clean. Sequence after a merge unchanged from §9: rebuild, then
    `check:generated --fix` — you just cannot forget it. Worth knowing:
+   - **The MERGE commit itself is the one exemption, and it is a deferral, not a
+     pass** (maintainer ruling 2026-08-12). `scripts/pm/os-regen-merge.sh` is the
+     in-repo authority for landing one of these branches, and its step 3 commits
+     the merge **before**
+     regenerating on purpose: the driver exits 0 while silently dropping one side, so
+     only a separate regeneration commit on a known-good base lets a reviewer read
+     "what main brought" apart from "what the change produces". `pre-commit` records
+     that merge as a deferral and then holds you to it — the immediately following
+     commit must discharge it (every commit until then is refused, and a second merge
+     cannot defer on top of an outstanding one), and `.githooks/pre-push` refuses a
+     push that still owes one. ⛔ So this step never needs `--no-verify`, which was
+     the old spelling and skips *every* pre-commit check rather than this one.
    - **The driver is a LOCAL facility** — the merge queue rebuilds server-side where no
      custom driver runs, so the three hottest artifacts are **sharded** per
      category/entry (`authorable-surface/`, `json-schema.manifest/`, `api-surface/`) to
