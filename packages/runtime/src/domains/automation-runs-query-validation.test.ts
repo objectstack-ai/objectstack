@@ -1,18 +1,24 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #7300 / #7359 — `GET /api/v1/automation/:name/runs`'s query parameters, at
- * the boundary that reads them.
+ * #7300 / #7359 / #8054 — `GET /api/v1/automation/:name/runs`'s query
+ * parameters, at the boundary that reads them.
  *
  * #7300 (below) closed the two parameters this handler already forwarded but
- * COERCED. #7359 closed the third, which is the same 200-with-the-wrong-answer
- * arrived at from the opposite direction: `status` was declared by
+ * COERCED. #7359 closed a third shape: `status` was declared by
  * `ListRunsRequestSchema`, had no slot on `IAutomationService.listRuns`, and
  * was never built into the handler's option object — so `?status=failed` was
  * dropped here in silence and the caller was answered with EVERY run of the
  * flow. #7300 deliberately pinned that ignore-the-key behaviour rather than
- * decide it; #7359 took the enforce route, so that one pin is superseded here
- * by cases asserting the opposite on the same input.
+ * decide it; #7359 took the enforce route, so that one pin was superseded by
+ * cases asserting the opposite on the same input. #8054 is the sibling of
+ * #7359 on the SAME route's OTHER declared constraint: `limit` was already
+ * type-checked (#7300) but its declared RANGE (`.min(1).max(100)`) was never
+ * read, so `?limit=0` answered 200 with zero rows — "this flow has never
+ * run", confidently, about a flow with runs — and `?limit=101` reached the
+ * engine with its cap simply not applied. The `?limit=1000`/`?limit=-5`/
+ * `?limit=0` preservation rows #7300 pinned are superseded here the same way
+ * #7359 superseded the `status`-ignored case: same input, opposite behaviour.
  *
  * The filed defect is character-for-character #6928's, one file over:
  * `{ limit: query.limit ? Number(query.limit) : undefined, cursor: query.cursor }`.
@@ -35,10 +41,14 @@
  *     absence of a throw, which is not the defect. The defect is the missing
  *     envelope.
  *  2. PRESERVATION — every value that had a defensible answer before keeps it,
- *     byte for byte, at the exact `listRuns(name, options)` call. That includes
- *     out-of-RANGE numbers (`?limit=1000`), which `ListRunsRequestSchema` bounds
- *     and the engine slices by: range is the service's declared business and
- *     stays reachable, unrefused.
+ *     byte for byte, at the exact `listRuns(name, options)` call. As of #8054
+ *     that no longer includes out-of-RANGE numbers (`?limit=1000`, `?limit=0`):
+ *     `ListRunsRequestSchema` bounds `limit` to 1..100 and the boundary now
+ *     enforces that declared range instead of only the value's type, so those
+ *     inputs moved from PRESERVATION to REFUSAL. An ORDINARY in-range value
+ *     (`?limit=25`) and both declared boundary values (`?limit=1`,
+ *     `?limit=100`) still keep their defensible answer — the over-block guard
+ *     for the new range check.
  *
  * The wire mapping of the thrown shape to `400` + `details.fields[]` is not
  * re-proved here — it is one mapping for every domain handler, pinned at both
@@ -197,6 +207,42 @@ describe('#7359 — a `?status=` outside the declared set is refused, not silent
     });
 });
 
+describe('#8054 — a `?limit=` outside the declared 1..100 range is refused, not silently answered', () => {
+    // Measured, twice, identical both passes: `?limit=0` answered 200 with
+    // ZERO rows (a confidently wrong "this flow has never run" — the store
+    // sliced `.slice(0, 0)`), and `?limit=101` answered 200 with the cap
+    // simply not applied. `ListRunsRequestSchema` had declared `.min(1).max(100)`
+    // the whole time; this boundary just never read it. Once the range is
+    // enforced there is no safe reading for a value outside it — same
+    // reasoning #7359 already applied to `status`, on a bounded number instead
+    // of a closed set.
+    it.each([
+        ['0 (the "no runs" trap)', '0', 'min_value'],
+        ['-5 (negative)', '-5', 'min_value'],
+        ['101 (one past the declared cap)', '101', 'max_value'],
+        ['1000 (far past the declared cap — the old preserved case, inverted)', '1000', 'max_value'],
+    ])('refuses ?limit=%s with 400 VALIDATION_FAILED (%s)', async (_label, raw, expectedCode) => {
+        const { details, status, listRuns } = await refusalFor({ limit: raw });
+
+        // ADR-0112: the envelope, not merely the throw — `code` AND `status`.
+        expect(details?.code).toBe('VALIDATION_FAILED');
+        expect(status).toBe(400);
+        // ADR-0114: `min_value`/`max_value` are the field codes the property
+        // names already mirror — no new vocabulary minted for this.
+        expect(details?.fields).toEqual([
+            { field: 'limit', code: expectedCode, message: expect.stringContaining('`limit`') },
+        ]);
+        // The whole point: the service is never reached with a limit outside
+        // its own declared contract, so no caller reads a wrong-but-confident
+        // "no runs" and no caller gets an uncapped result set.
+        expect(listRuns).not.toHaveBeenCalled();
+    });
+
+    // The boundary values themselves — `?limit=1` and `?limit=100` — are
+    // pinned as VALID in the `#7300` preservation block below (they were
+    // always in range and stay unaffected), so they are not repeated here.
+});
+
 describe('#7300 — every value that had a defensible answer keeps it', () => {
     async function listWith(query: Record<string, unknown> | undefined) {
         const { dispatcher, listRuns } = makeDispatcher();
@@ -207,19 +253,26 @@ describe('#7300 — every value that had a defensible answer keeps it', () => {
     it.each([
         // [label, query, the exact options object `listRuns` must receive]
         ['?limit=20', { limit: '20' }, { limit: 20, cursor: undefined, status: undefined }],
+        // An ordinary in-range value is the over-block guard for #8054: bounds
+        // threading must not start refusing numbers that were always fine.
+        ['?limit=25 (ordinary, mid-range)', { limit: '25' }, { limit: 25, cursor: undefined, status: undefined }],
         ['?limit=1 (the low boundary)', { limit: '1' }, { limit: 1, cursor: undefined, status: undefined }],
         ['?limit=100 (the declared high boundary)', { limit: '100' }, { limit: 100, cursor: undefined, status: undefined }],
-        // Out of RANGE is not out of DOMAIN. `ListRunsRequestSchema` bounds
-        // `limit` to 1..100 and the engine slices by whatever it is handed;
-        // neither answer is this boundary's to change, so both still arrive.
-        ['?limit=1000 (over the declared range)', { limit: '1000' }, { limit: 1000, cursor: undefined, status: undefined }],
-        ['?limit=-5 (under it)', { limit: '-5' }, { limit: -5, cursor: undefined, status: undefined }],
-        // Falsy spellings meant "no limit here" before this gate existed and
-        // still do — they must not become a new 400. `'0'` is NOT one of them:
-        // the string is truthy, so `query.limit ? Number(query.limit) : …` read
-        // it as the number `0` and passed it on, and that is preserved too.
+        // Out-of-RANGE numbers used to be preserved here (`?limit=1000`,
+        // `?limit=-5`, `?limit=0`) on the theory that range was the engine's
+        // declared business, not this boundary's. #8054 found the one place
+        // that reasoning was wrong: `ListRunsRequestSchema` had ALWAYS
+        // declared `limit`'s range, and nothing enforced it, so `?limit=0`
+        // answered "no runs" and `?limit=101` reached the engine uncapped.
+        // Those three rows are superseded by the `#8054` refusal block below
+        // rather than deleted outright — same input, opposite behaviour now.
+        //
+        // Falsy spellings still mean "no limit here", unaffected by bounds
+        // because the falsy gate runs BEFORE the bounds check: absent, `null`,
+        // `''`, and an in-process (non-string) `0` never reach it. `'0'` as a
+        // QUERY-STRING value is different — the string is truthy, so it always
+        // reached `Number()` — and is exercised in the `#8054` block instead.
         ['?limit= (empty)', { limit: '' }, { limit: undefined, cursor: undefined, status: undefined }],
-        ['?limit=0', { limit: '0' }, { limit: 0, cursor: undefined, status: undefined }],
         ['limit: 0 (in-process number)', { limit: 0 }, { limit: undefined, cursor: undefined, status: undefined }],
         ['limit: null', { limit: null }, { limit: undefined, cursor: undefined, status: undefined }],
         ['no parameters at all', {}, { limit: undefined, cursor: undefined, status: undefined }],
