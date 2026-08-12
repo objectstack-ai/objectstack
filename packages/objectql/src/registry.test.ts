@@ -374,6 +374,29 @@ describe('SchemaRegistry', () => {
             expect(registry.getObject('important')).toBeDefined();
         });
 
+        /**
+         * [#7970] MESSAGE IDENTITY, the half the reorder must not disturb. The
+         * refusal pass replaces an inline check, so it must name the SAME object
+         * and the SAME extenders as before — with two refusable objects the
+         * first one walked still wins, and an object's extenders are still
+         * listed in registration order. This test is deliberately written to
+         * pass BOTH before and after the fix: run it against the pre-fix
+         * `registry.ts` and it stays green, which is what proves the message did
+         * not move (only the mutations that used to precede it are gone).
+         */
+        it('[#7970] the refusal still names the first refusable object and all its extenders', () => {
+            registry.registerObject({ name: 'alpha', fields: {} }, 'com.owner', 'base', 'own');
+            registry.registerObject({ name: 'beta', fields: {} }, 'com.owner', 'base', 'own');
+            registry.registerObject({ name: 'alpha', fields: {} }, 'com.ext1', undefined, 'extend');
+            registry.registerObject({ name: 'alpha', fields: {} }, 'com.ext2', undefined, 'extend');
+            registry.registerObject({ name: 'beta', fields: {} }, 'com.ext3', undefined, 'extend');
+
+            expect(() => registry.unregisterObjectsByPackage('com.owner')).toThrow(
+                'Cannot uninstall package "com.owner": object "alpha" is extended by ' +
+                'com.ext1, com.ext2. Uninstall extenders first.',
+            );
+        });
+
         it('[#7970] force still removes the owner even with a free sibling ahead of it', () => {
             registry.registerObject({ name: 'free', fields: {} }, 'com.owner', 'base', 'own');
             registry.registerObject({ name: 'important', fields: {} }, 'com.owner', 'base', 'own');
