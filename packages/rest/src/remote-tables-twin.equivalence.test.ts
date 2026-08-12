@@ -56,10 +56,19 @@ import {
   ExternalDatasourceService,
   registerDatasourceAdminRoutes,
 } from '@objectstack/service-datasource';
-import type { IntrospectedSchema } from '@objectstack/spec/contracts';
+import type { IntrospectedColumn, IntrospectedSchema } from '@objectstack/spec/contracts';
 import { registerExternalDatasourceRoutes } from './external-datasource-routes.js';
 
 const DS = 'demo_ext';
+
+/** One remote column, spelled in full so the fixture needs no cast to be an
+ * `IntrospectedSchema` — `primaryKey` and `nullable` are both required. */
+const col = (name: string, primaryKey = false): IntrospectedColumn => ({
+  name,
+  type: name === 'id' ? 'uuid' : 'text',
+  nullable: !primaryKey,
+  primaryKey,
+});
 
 /** Two remote schemas, so a `?schema=` filter has something to exclude. */
 const REMOTE: IntrospectedSchema = {
@@ -68,23 +77,20 @@ const REMOTE: IntrospectedSchema = {
   tables: {
     'public.customers': {
       name: 'public.customers',
-      columns: [
-        { name: 'id', type: 'uuid', nullable: false },
-        { name: 'email', type: 'text', nullable: true },
-      ],
+      columns: [col('id', true), col('email')],
       indexes: [],
     },
     'public.orders': {
       name: 'public.orders',
-      columns: [{ name: 'id', type: 'uuid', nullable: false }],
+      columns: [col('id', true)],
       indexes: [],
     },
     'analytics.events': {
       name: 'analytics.events',
-      columns: [{ name: 'id', type: 'uuid', nullable: false }],
+      columns: [col('id', true)],
       indexes: [],
     },
-  } as IntrospectedSchema['tables'],
+  },
 };
 
 /**
