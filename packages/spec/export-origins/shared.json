@@ -91,7 +91,6 @@
     "TemplateExpressionInput": "src/shared/expression.zod.ts#TemplateExpressionInput (type)",
     "TemplateExpressionInputSchema": "src/shared/expression.zod.ts#TemplateExpressionInputSchema (const)",
     "VISIBILITY_ALIAS_KEYS": "src/shared/visibility.ts#VISIBILITY_ALIAS_KEYS (const)",
-    "VISIBILITY_ONLY_STRICT_OPTIONS": "src/shared/visibility.ts#VISIBILITY_ONLY_STRICT_OPTIONS (const)",
     "VISIBILITY_STRICT_OPTIONS": "src/shared/visibility.ts#VISIBILITY_STRICT_OPTIONS (const)",
     "ViewName": "src/shared/branded-types.zod.ts#ViewName (type)",
     "ViewNameParsed": "src/shared/branded-types.zod.ts#ViewNameParsed (type)",

@@ -3,7 +3,8 @@
 import { z } from 'zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { ExpressionInputSchema } from '../shared/expression.zod';
-import { normalizeVisibleWhen, VISIBILITY_ONLY_STRICT_OPTIONS } from '../shared/visibility';
+import { normalizeVisibleWhen } from '../shared/visibility';
+import { VISIBILITY_ONLY_STRICT_OPTIONS } from '../shared/editability-boundary';
 import { SortItemSchema } from '../shared/enums.zod';
 import { FilterConditionSchema } from '../data/filter.zod';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';

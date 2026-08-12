@@ -6,11 +6,8 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { strictObject, strictObjectError } from '../shared/strict-object';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { ExpressionInputSchema } from '../shared/expression.zod';
-import {
-  normalizeVisibleWhen,
-  VISIBILITY_ONLY_STRICT_OPTIONS,
-  VISIBILITY_STRICT_OPTIONS,
-} from '../shared/visibility';
+import { normalizeVisibleWhen, VISIBILITY_STRICT_OPTIONS } from '../shared/visibility';
+import { VISIBILITY_ONLY_STRICT_OPTIONS } from '../shared/editability-boundary';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 import { ChartTypeSchema } from './chart.zod';
 import { SharingConfigSchema } from './sharing.zod';
@@ -1779,7 +1776,7 @@ const FormFieldBaseSchema = lazySchema(() => {
       //
       // #7887 filed the OTHER half of that split from the same reasoning and in
       // the same direction: the two sibling shapes now carry an editability
-      // BOUNDARY prescription (`VISIBILITY_ONLY_STRICT_OPTIONS`), and it is
+      // BOUNDARY prescription (`shared/editability-boundary.ts`), and it is
       // filed on those two rather than shared, because a `disabled`-matching
       // guidanceSet on THIS table would consume the key before the rename below
       // ever runs — killing the one pointer that is correct here, and turning

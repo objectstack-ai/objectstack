@@ -35,6 +35,9 @@ reason.
 **Acceptance is unchanged, in both directions.** Every metadata document that
 parsed before parses identically, and every key rejected before is still
 rejected — a guidance string is not an accepted key, and the pins assert both.
+The package's public API surface does not move either: the new options table
+lives in `shared/editability-boundary.ts`, which the barrel deliberately does not
+re-export, alongside the `strictObject` machinery it belongs to.
 
 **The prescription is filed on those two shapes, not on the table they share.**
 `VISIBILITY_STRICT_OPTIONS` has a third consumer, `FormFieldSchema`, which is

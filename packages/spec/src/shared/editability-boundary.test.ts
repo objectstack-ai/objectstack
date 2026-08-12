@@ -30,13 +30,18 @@
  *    replaced the one correct pointer in the family with a redirect away from it.
  * 4. **acceptance is byte-identical** — the lane's admission criterion. A
  *    guidance string must never become an accepted key.
+ *
+ * The options table itself lives in `editability-boundary.ts`, which the
+ * `shared/index.ts` barrel deliberately does not re-export — so the package's
+ * public API surface does not move either (`check:api-surface`), which is the
+ * same claim one level out.
  */
 
 import { describe, it, expect } from 'vitest';
 
 import { FormFieldSchema, FormSectionSchema } from '../ui/view.zod';
 import { PageComponentSchema } from '../ui/page.zod';
-import { VISIBILITY_ONLY_STRICT_OPTIONS } from './visibility';
+import { VISIBILITY_ONLY_STRICT_OPTIONS } from './editability-boundary';
 import { keySetMatches } from './suggestions.zod';
 
 /**
