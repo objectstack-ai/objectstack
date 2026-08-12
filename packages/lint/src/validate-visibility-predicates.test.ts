@@ -256,6 +256,148 @@ describe('validateVisibilityPredicates (ADR-0089 D3b)', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────
+// #7815 — WHICH LAYER a site is on, when the caller does not say.
+//
+// The rule above is correct for the layer it is told. What it was told at the
+// runtime publish gate was the `'runtime'` default for EVERY view, including
+// schema-bound metadata forms — so a correctly `data.`-rooted form drew the
+// advisory telling its author to write `record.`. These cases pin the
+// derivation itself; `runtime-gate.test.ts` pins it at the door it was wrong at.
+// ─────────────────────────────────────────────────────────────────────
+
+describe('the layer a site declares for itself (#7815)', () => {
+  /**
+   * A schema-bound metadata form, with the data source on the CONTAINER (the
+   * `self` rung of the `formViewSites` ladder).
+   */
+  const metaForm = (predicate: string) => ({
+    views: [{
+      name: 'field_editor',
+      data: { provider: 'schema', schemaId: 'field' },
+      sections: [{ fields: [{ field: 'notes', visibleWhen: predicate }] }],
+    }],
+  });
+
+  /** The same predicate on a plain runtime view — the negative control. */
+  const runtimeForm = (predicate: string) => ({
+    views: [{ name: 'task_form', sections: [{ fields: [{ field: 'notes', visibleWhen: predicate }] }] }],
+  });
+
+  it('a `data.`-rooted predicate on a schema-bound form is CORRECT — no advisory', () => {
+    // The finding this card is about. `data` IS the root that surface binds.
+    expect(validateVisibilityPredicates(metaForm("data.type == 'grid'"))).toEqual([]);
+  });
+
+  it('the same predicate on a plain runtime view still draws it — the rule is live', () => {
+    // The negative control that keeps the case above from being a walk that
+    // simply went blind: one character of difference in the fixture (the
+    // `data:` source), opposite verdicts.
+    const findings = validateVisibilityPredicates(runtimeForm("data.type == 'grid'"));
+    expect(findings.map((f) => f.rule)).toEqual([VISIBILITY_ROOT_MISLAYERED]);
+    expect(findings[0].severity).toBe('warning');
+  });
+
+  it('a `record.`-rooted predicate on a schema-bound form draws it the OTHER way', () => {
+    // ADR-0089 D3 is bidirectional and this direction was unreachable at the
+    // runtime gate: told `'runtime'`, the rule forbids `data.` and says nothing
+    // about `record.`, so a form predicate that never matches published silent.
+    // No new behaviour — this is the metadata-layer arm the rule already had.
+    const findings = validateVisibilityPredicates(metaForm("record.type == 'grid'"));
+    expect(findings.map((f) => f.rule)).toEqual([VISIBILITY_ROOT_MISLAYERED]);
+    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].message).toContain('record.');
+    expect(findings[0].hint).toContain('data');
+  });
+
+  it('derives per SITE, not per stack — one entry can carry both kinds', () => {
+    // `formViews.<key>` sub-containers each declare their own `data`, so a
+    // stack-level layer would be wrong for one of these two no matter which
+    // value it took.
+    const stack = {
+      views: [{
+        name: 'mixed',
+        object: 'account',
+        formViews: {
+          meta: {
+            data: { provider: 'schema', schemaId: 'field' },
+            sections: [{ fields: [{ field: 'a', visibleWhen: "data.type == 'grid'" }] }],
+          },
+          live: {
+            sections: [{ fields: [{ field: 'b', visibleWhen: "data.type == 'grid'" }] }],
+          },
+        },
+      }],
+    };
+    const findings = validateVisibilityPredicates(stack);
+    expect(findings.map((f) => f.rule)).toEqual([VISIBILITY_ROOT_MISLAYERED]);
+    expect(findings[0].path).toBe('views[0].formViews.live.sections[0].fields[0]');
+  });
+
+  it('`opts.layer` still governs every site that declares no data source', () => {
+    // The file-aware caller's contract is unchanged: a `*.form.ts` whose form
+    // carries no `data: { provider: 'schema' }` is still only reachable through
+    // the option, and a page component always is.
+    expect(validateVisibilityPredicates(runtimeForm("data.type == 'grid'"), { layer: 'metadata' }))
+      .toEqual([]);
+    expect(
+      validateVisibilityPredicates(runtimeForm("record.type == 'grid'"), { layer: 'metadata' })
+        .map((f) => f.rule),
+    ).toEqual([VISIBILITY_ROOT_MISLAYERED]);
+
+    const page = (predicate: string) => ({
+      pages: [{ name: 'p', regions: [{ components: [{ type: 'element:text', visibleWhen: predicate }] }] }],
+    });
+    expect(validateVisibilityPredicates(page("data.x == 'y'")).map((f) => f.rule))
+      .toEqual([VISIBILITY_ROOT_MISLAYERED]);
+    expect(validateVisibilityPredicates(page("data.x == 'y'"), { layer: 'metadata' })).toEqual([]);
+  });
+
+  it('an unresolvable `schemaId` is still a schema-bound SURFACE', () => {
+    // The layer follows the data SOURCE, not whether the id resolves — the same
+    // boundary `literalRhs` draws off the same `schemaIdOf` call, so the two
+    // cannot disagree about which surface they are on.
+    expect(validateVisibilityPredicates({
+      views: [{
+        name: 'f',
+        data: { provider: 'schema', schemaId: 'no_such_schema' },
+        sections: [{ fields: [{ field: 'x', visibleWhen: "data.a == 'b'" }] }],
+      }],
+    })).toEqual([]);
+  });
+
+  it('a non-schema provider is NOT a metadata form', () => {
+    // `schemaIdOf` reads `provider === 'schema'` only; an ObjectQL-backed data
+    // source is a runtime surface and keeps the runtime direction.
+    const findings = validateVisibilityPredicates({
+      views: [{
+        name: 'f',
+        data: { provider: 'object', object: 'account' },
+        sections: [{ fields: [{ field: 'x', visibleWhen: "data.a == 'b'" }] }],
+      }],
+    });
+    expect(findings.map((f) => f.rule)).toEqual([VISIBILITY_ROOT_MISLAYERED]);
+  });
+
+  it('moves NO finding across the error/advisory boundary', () => {
+    // The acceptance guarantee, asserted rather than argued: the derivation may
+    // only ever change which ADVISORIES an author hears. Every fixture here is
+    // schema-bound — the set the derivation moves — and every `error` on it is
+    // the same id, at the same path, that the `'runtime'` reading produced.
+    const errorsOf = (predicate: string) =>
+      validateVisibilityPredicates(metaForm(predicate))
+        .filter((f) => f.severity === 'error')
+        .map((f) => f.rule)
+        .sort();
+
+    expect(errorsOf("data.type == 'grid'")).toEqual([]);
+    expect(errorsOf("record.type == 'grid'")).toEqual([]);
+    expect(errorsOf('status == active')).toEqual([VISIBILITY_BARE_IDENTIFIER]);
+    expect(errorsOf('active == data.type')).toEqual([VISIBILITY_BARE_IDENTIFIER]);
+    expect(errorsOf("country === 'USA'")).toEqual([VISIBILITY_PREDICATE_SYNTAX]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
 // `visibility-bare-identifier` — #6128 (the build-time half of #5149's
 // 2026-08-06 ruling; the runtime warn-once half landed as objectui#3541).
 // ─────────────────────────────────────────────────────────────────────
@@ -475,8 +617,15 @@ describe('visibility-bare-identifier (#6128 / #5149 requirement 3)', () => {
     it('proves the scanner still sees — the stand-down is per IDENTIFIER', () => {
       // Every one of these is the same schema-bound form, so a walk that had
       // gone blind would report nothing here either.
+      //
+      // #7815: this pin used to read `record.status`, which is what the rule
+      // said here while the caller's `'runtime'` default decided the layer for a
+      // form that binds no `record` at all. The refusal is unchanged — same id,
+      // same `error`, same one finding; only the ROOT it prescribes moved to the
+      // one this surface actually binds. (That the pin had to change is the
+      // measurement: an assertion was holding the wrong prescription in place.)
       expect(bareFindings(metaForm('status == active')).map((f) => f.hint))
-        .toEqual([expect.stringContaining('`record.status`')]);
+        .toEqual([expect.stringContaining('`data.status`')]);
       expect(bareFindings(metaForm('active == data.type'))).toHaveLength(1);
       expect(bareFindings(metaForm('data.type == active && active'))).toHaveLength(1);
       // A macro body produces no replacement finding, so nothing stands down.
