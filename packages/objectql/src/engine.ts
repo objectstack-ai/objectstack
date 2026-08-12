@@ -8198,6 +8198,14 @@ export class ObjectQL implements IObjectQLEngine {
      // about what the CALLER submitted, and the answer must survive a hook
      // rewriting the key mid-write — the same reason that snapshot carries
      // values at all (#5591).
+     //
+     // [#8141] #8093 wired this to the REPORT channel only, so the strip's own
+     // WARN went on calling the address a forged caller write on every
+     // single-record PATCH of every platform object. It now feeds BOTH channels
+     // — `reportDroppedFields` below and `stripReadonlyFields`' `addressKey`
+     // argument — from this ONE predicate. Deliberately not a second derivation:
+     // two notions of "this id is the address" that disagree in one edge case
+     // would be a worse defect than the log line either of them silences.
      const onFieldsDropped = options?.onFieldsDropped;
      const strictReadonlyWrites = options?.strictReadonlyWrites === true;
      const strictDrops: DroppedFieldsEvent[] = [];
@@ -8690,9 +8698,18 @@ export class ObjectQL implements IObjectQLEngine {
                // read-only writes are dropped, never the server stamps — and
                // (#5591) never a stamp a hook wrote OVER a key the caller
                // happened to echo back.
+               //
+               // [#8141] `addressKey` carries the SAME fact `reportDroppedFields`
+               // is already keyed on — `idAddressesThisRow`, one predicate, both
+               // channels — so the log and the report can never disagree about
+               // what is an address. The strip is unchanged: `id` still leaves
+               // the SET clause, and the driver receives the identical payload;
+               // only the WARN that called the address a caller forgery is gone.
+               // Undefined on every other path (the multi branch below, and the
+               // insert-side sibling), which is what keeps those byte-identical.
                if (!opCtx.context?.isSystem) {
                    const preRo = hookContext.input.data as Record<string, unknown>;
-                   hookContext.input.data = stripReadonlyFields(updateSchema as any, preRo, suppliedValues, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true }) as any;
+                   hookContext.input.data = stripReadonlyFields(updateSchema as any, preRo, suppliedValues, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true, addressKey: idAddressesThisRow ? 'id' : undefined }) as any;
                    reportDroppedFields(preRo, hookContext.input.data as Record<string, unknown>, 'readonly');
                }
                // [#5126] Both strip passes are done; refuse now if the caller
