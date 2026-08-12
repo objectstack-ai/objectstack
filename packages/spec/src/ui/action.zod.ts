@@ -1051,7 +1051,7 @@ const actionObject = () => strictObject({
   order: z.number().optional().describe('Sort order within a location group (lower = higher). Promotes/demotes an action toward the record_header primary button; stable, so actions without `order` keep their registration order.'),
 
   /** UX Behavior */
-  confirmText: I18nLabelSchema.optional().describe('Confirmation message before execution'),
+  confirmText: I18nLabelSchema.optional().describe('Confirmation message before execution. Param-LESS actions only — pairing it with a non-empty `params` is REFUSED (#7428), because it opens a second dialog for one decision; put the question on `description` instead.'),
   successMessage: I18nLabelSchema.optional().describe('Success message to show after execution'),
   // Runtime (ActionRunner) already honours this — declared here so authors can
   // set a friendly failure toast instead of surfacing the raw error string.
@@ -1356,6 +1356,46 @@ export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
 }, {
   message: 'ai.paramHints keys must match a declared param name (or "recordId").',
   path: ['ai', 'paramHints'],
+}).refine((data) => {
+  // #7428 — the structural half of #7278/#7309. `confirmText` beside a
+  // non-empty `params` opens TWO sequential dialogs for ONE decision: the
+  // console action runner awaits the confirm, THEN the param prompt
+  // (objectui `packages/core/src/actions/ActionRunner.ts`), so the first
+  // dialog already reads as "the action ran" while nothing has been sent.
+  //
+  // The two migrations repaired the 16 sites that shipped this (#7592 for
+  // plugin-approvals, #7827 for the 14 in platform-objects); neither stops
+  // the next one being written, which is what this refusal is for. Refuse
+  // rather than warn: the in-repo census is 0, so nothing legal breaks, and
+  // a warning that fires on every build of an untouched project is a check
+  // nobody reads.
+  //
+  // **Scoped by SCHEMA BOUNDARY, deliberately — not by a param-optionality
+  // heuristic.** The pair is CORRECT on a view's `bulkActionDefs`, where
+  // `BulkActionDefSchema`'s own contract renders it as ONE dialog: params are
+  // "inputs collected once before the run", `confirmText` sits "above the
+  // affected-record summary", and a `required` param "blocks the Confirm
+  // button until a value is present" — a param cannot block a button in a
+  // dialog that has not opened. That schema is a separate `strictObject` with
+  // its own refinements, so this refusal is structurally incapable of
+  // reaching it; `action-confirm-params-guard.test.ts` pins that both ways.
+  // The same holds for {@link InlineActionSchema}, which `.pick()`s from the
+  // field factory rather than deriving from this chain — and which does not
+  // pick `description`, so the remedy below has no slot there to move into.
+  if (data.confirmText != null && Array.isArray(data.params) && data.params.length > 0) {
+    return false;
+  }
+  return true;
+}, {
+  message:
+    'An action that declares `confirmText` beside a non-empty `params` shows the user TWO dialogs '
+    + 'for one decision — the confirm, then the param prompt, with nothing sent until the second. '
+    + "Carry the confirm question in the action's top-level `description` instead (it renders under "
+    + 'the param dialog\'s title) and drop `confirmText`: one condition, one wording, one dialog '
+    + '(#7278). Not `ai.description` — that is the LLM-facing tool contract. `confirmText` stays '
+    + 'correct for a param-LESS action, where the confirm IS the only dialog, and for a view\'s '
+    + '`bulkActionDefs`, where the pair renders one dialog by that schema\'s own contract.',
+  path: ['confirmText'],
 }).transform((data, ctx) => lowerRequiresFeature(data, ctx)));
 
 export type Action = z.input<typeof ActionSchema>;
