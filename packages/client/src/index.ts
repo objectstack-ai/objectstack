@@ -84,6 +84,7 @@ import type {
   ApprovalDecisionResult,
 } from '@objectstack/spec/contracts';
 import type { ExecutionStatus } from '@objectstack/spec/automation';
+import type { InvitationStatus } from '@objectstack/spec/identity';
 import { Logger, createLogger } from '@objectstack/core/logger';
 import { RealtimeAPI } from './realtime-api';
 
@@ -2011,8 +2012,8 @@ export class ObjectStackClient {
      */
     invitations: {
       /**
-       * List pending/accepted/canceled invitations for an organization.
-       * Requires owner/admin role on that org.
+       * List pending/accepted/rejected/expired/canceled invitations for an
+       * organization. Requires owner/admin role on that org.
        *
        * better-auth: GET /organization/list-invitations?organizationId=…
        */
@@ -2023,11 +2024,16 @@ export class ObjectStackClient {
         );
         const data = await res.json();
         const invitations = Array.isArray(data) ? data : (data?.data ?? data?.invitations ?? []);
+        // [#7781] `status` is `InvitationStatus` (from `@objectstack/spec/identity`)
+        // rather than a hand-copied literal — the SDK previously restated the
+        // vocabulary and drifted from it (missing `expired`). Derived from the
+        // spec union, so a future value reaches here by construction; see
+        // `invitation-status-vocabulary.test.ts` for the pin.
         return { invitations: invitations as Array<{
           id: string;
           email: string;
           role: string;
-          status: 'pending' | 'accepted' | 'rejected' | 'canceled';
+          status: InvitationStatus;
           organizationId: string;
           inviterId: string;
           expiresAt: string;
@@ -2046,11 +2052,14 @@ export class ObjectStackClient {
         const res = await this.fetch(`${this.baseUrl}${route}/organization/list-user-invitations`);
         const data = await res.json();
         const invitations = Array.isArray(data) ? data : (data?.data ?? data?.invitations ?? []);
+        // [#7781] Was a bare `string` — inconsistent with `list()` above and
+        // just as untethered from the spec vocabulary. Same derivation as
+        // `list()`.
         return { invitations: invitations as Array<{
           id: string;
           email: string;
           role: string;
-          status: string;
+          status: InvitationStatus;
           organizationId: string;
           inviterId: string;
           expiresAt: string;
