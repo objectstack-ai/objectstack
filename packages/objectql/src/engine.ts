@@ -9253,6 +9253,18 @@ export class ObjectQL implements IObjectQLEngine {
       // actually serves — plugin-audit's `excludeObjects` face is the worked
       // example — is what would convert them into skips, and that is each
       // package's own card, not this one's.
+      //
+      // [#7933] Those first three were carried here UNVERIFIED when #7707
+      // corrected the `plugin-audit` entry, which was wrong on BOTH halves —
+      // hook name and term. All three have since been read against the
+      // function that binds them — `registerIdentityWriteGuard`,
+      // `bindRecordShareCascade`, `installFileReferenceHooks` — and all three
+      // match what is claimed above: same events, same object-less
+      // registration, same in-handler filter. Nothing above needed changing.
+      // The audit is recorded rather than left implicit because "never
+      // checked" and "checked and correct" read identically in prose, and
+      // re-deriving that distinction is most of the cost of trusting a list
+      // no gate and no test can fail.
       const deleteSchema = this._registry.getObject(object);
       const wantsPreImage =
         this.hasHooksFor('beforeDelete', object) ||
