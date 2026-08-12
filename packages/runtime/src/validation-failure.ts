@@ -1,79 +1,26 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Recognising a record-validation failure at an HTTP boundary.
+ * Moved to `@objectstack/types` (#8016) — re-exported here so every import site
+ * in this package keeps the name it always had.
  *
- * `ValidationError` (`@objectstack/objectql`'s record/rule validators) carries
- * `.code = 'VALIDATION_FAILED'` and `.fields[]` — one entry per offending
- * field — but deliberately carries NO `.status` / `.statusCode` and no
- * `.issues`. It is a plain domain error; deciding it means "400" is the job of
- * whichever boundary serves it.
+ * The recogniser had to become reachable from `@objectstack/rest`: the shared
+ * thrown-error resolver both `/api/v1/packages` doors now call
+ * (`resolveThrownHttpError`) answers "is this throw a validation failure?", and
+ * `rest` cannot import `runtime` — runtime depends on rest, so the arrow only
+ * points one way. `@objectstack/types` is where the repo already keeps the
+ * helpers every HTTP boundary shares.
  *
- * `@objectstack/rest` has always done that (`mapDataError` → 400 with
- * `fields[]`). The runtime dispatcher's two error exits did not (#3918): with
- * no `.status` to read they fell back to **500**, and both read only `.issues`
- * for structured detail — which a `ValidationError` never has — so `fields[]`
- * was dropped and the caller got a generic "internal error" for what was
- * really a user-input mistake. That forecloses per-field error display on every
- * surface the dispatcher serves.
- *
- * Matched by duck-typing on `code` / `name` — exactly the predicate
- * `mapDataError` uses — so this module stays free of a runtime dependency on
- * `objectql`, and so hand-rolled errors of the same shape (e.g. a hook that
- * throws `{ code: 'VALIDATION_FAILED', fields }`) are served identically.
+ * The module's own argument — why the predicate duck-types on `code`/`name`
+ * rather than importing objectql's `ValidationError`, and why the constructor
+ * sits beside the recogniser so the two cannot drift — travelled with it. Read
+ * it there: `packages/types/src/validation-failure.ts`.
  */
 
-/** The HTTP status a validation failure maps to when the error names none. */
-export const VALIDATION_FAILED_STATUS = 400;
-
-export interface ValidationFailureDetails {
-    code: 'VALIDATION_FAILED';
-    /** Per-field envelopes, passed through verbatim. `[]` when absent/malformed. */
-    fields: unknown[];
-}
-
-/**
- * Structured `details` for a thrown validation failure, or `undefined` when
- * `err` is not one. Callers use the `undefined` result as the predicate and the
- * returned object as the `details` payload, so the two can never disagree.
- */
-export function validationFailureDetails(err: any): ValidationFailureDetails | undefined {
-    if (!err) return undefined;
-    if (err.code !== 'VALIDATION_FAILED' && err.name !== 'ValidationError') return undefined;
-    return {
-        code: 'VALIDATION_FAILED',
-        fields: Array.isArray(err.fields) ? err.fields : [],
-    };
-}
-
-/**
- * [#3878/#3899] The CONSTRUCTOR for the shape {@link validationFailureDetails}
- * recognises — kept in the same module so the two can never drift. Thrown from
- * a domain handler, both dispatcher error exits map it to
- * `400 VALIDATION_FAILED` + `details.fields[]` (#3918) with no new error
- * channel and no runtime dependency on objectql's `ValidationError` class.
- * First built inline by the analytics domain; hoisted here when notifications
- * and automation grew the same entry gates rather than a third copy.
- */
-export function validationFailure(message: string, fields: unknown[]): Error {
-    const err = new Error(message) as Error & { code: string; fields: unknown[] };
-    err.name = 'ValidationError';
-    err.code = 'VALIDATION_FAILED';
-    err.fields = fields;
-    return err;
-}
-
-/**
- * Zod issues → the dispatcher's `fields[]` envelope entries
- * (`{ field, code, message }`). `'(body)'` names a root-level failure — a body
- * that is the wrong TYPE entirely has no path to point at.
- */
-export function fieldsFromZodIssues(
-    issues: Array<{ path: Array<string | number | symbol>; code: string; message: string }>,
-): Array<{ field: string; code: string; message: string }> {
-    return issues.map((issue) => ({
-        field: issue.path.length > 0 ? issue.path.join('.') : '(body)',
-        code: issue.code,
-        message: issue.message,
-    }));
-}
+export {
+    VALIDATION_FAILED_STATUS,
+    validationFailureDetails,
+    validationFailure,
+    fieldsFromZodIssues,
+    type ValidationFailureDetails,
+} from '@objectstack/types';
