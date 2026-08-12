@@ -43,8 +43,10 @@ roster —— `ListAgents` 列不到、`SendMessage` 直投 not-reachable 是设
 **push 授权 ≠ API 可达,两者独立失败**:org 未接通 Claude GitHub App 时,
 `create_session` 云 dev 推分支一切正常,而 PR/评论/issue 的每一次 API 调用都被
 org 策略拦下。失败**安静且昂贵**:dev 把活干完、发布不出去、停在 need_input 等
-人 —— 实测一班五张云卡五次全中:五条分支推出、dev 侧零个 PR、其中一张在
-need_input 空等近两小时。App 未接通期间,四条硬规则:
+人 —— 实测一班六张云卡中五张:分支照推、dev 侧开不出 PR,其中一张在 need_input
+空等近两小时;**最早一张(~05:25Z)自己开出了 PR、立了卡,~08:00Z 起的派发全部
+403** —— 可达性是**班中翻转**的,不是从未配置,诊断先问「什么时候变的」,不问
+「有没有配过」。API 不可达期间,四条硬规则:
 
 - **完整派发令随 prompt 携带;issue 评论照发,但只作公共存档**。「⛔ 不整段粘贴
   issue 正文」的前提是 dev 读得到 GitHub —— API 不可达时前提不成立,prompt 是唯
@@ -59,8 +61,12 @@ need_input 空等近两小时。App 未接通期间,四条硬规则:
 - **`get_session` 的状态不是完成度**:`review_ready` / `need_input` 只说明 dev
   停了,不说明有东西可复核 —— 分支(`ls-remote`)与 PR 独立核验。
 
-整套回落是 App 未接通期间的代偿,不是长期方案 —— **org 管理员把 Claude GitHub
-App 接到 org 上,这一节整体作废**;读到本节的维护者优先做接通,不维护绕行。
+整套回落是 API 不可达期间的代偿,不是长期方案 —— **修复是 org 管理员把 Claude
+GitHub App 接到 org 上**,读到本节的维护者优先做接通,不维护绕行。两个边界:①
+**存量会话不继承新接通的 App**(实测:接通后长命容器的 API 读写仍 403,报文明说
+not enabled for this session;git push 照常)—— 接通后新建的会话才拿到,别拿旧容
+器的 403 判「接通没生效」;② 本节在 App 接通期间**休眠不删除** —— 可达性在一班
+之内翻转过一次,再见 403 先认这个形状。
 
 ## 接手中断的 dev(worktree 接手协议)
 
