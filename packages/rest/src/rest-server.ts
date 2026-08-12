@@ -9507,6 +9507,20 @@ export class RestServer {
      * Routes return 501 when the `security` service is not registered
      * (deployment without plugin-security). Typed service errors carry their
      * HTTP status (403 permission / 404 not found / 409 state).
+     *
+     * ## One envelope for every refusal these three routes make (#7981)
+     *
+     * Every arm below answers the ADR-0112 D5 body — `{ error: { code,
+     * message } }`, semantic code nested, HTTP status on the transport — and
+     * emits it through the ONE `respondError` helper, so the three cannot
+     * drift apart again. Before this they answered three mutually
+     * incompatible shapes on routes a single client calls in sequence:
+     * `{ error: { code, message } }` from the validation refusals,
+     * `{ code, message }` from the 501, and `{ code, error: '<string>' }`
+     * from the thrown-service-error arm — the bare-string `error` dialect
+     * #7035 (PR #7293) retired from this file's `/meta` 501s. So `error.code`
+     * read `undefined` on exactly the arm carrying the typed 403/404/409
+     * codes a consumer is most likely to branch on.
      */
     private registerSecurityEndpoints(basePath: string): void {
         const dataPath = basePath;
@@ -9519,17 +9533,32 @@ export class RestServer {
                 return svc && typeof svc.listAudienceBindingSuggestions === 'function' ? svc : undefined;
             } catch { return undefined; }
         };
-        const respond501 = (res: any) => res.status(501).json({
-            code: 'NOT_IMPLEMENTED',
-            message: 'Security service is not configured on this deployment',
-        });
+        /**
+         * The ONE refusal emitter for this route family (#7981) — every arm
+         * goes through it, so "the three answer the same shape" is a property
+         * of the code rather than of three literals that happen to agree.
+         * `refuseRepeatedQueryParams` writes the identical body from
+         * `query-multiplicity.ts`; that helper is shared with the whole file
+         * and stays the reference point rather than being re-implemented here.
+         */
+        const respondError = (res: any, status: number, code: string, message: string) =>
+            res.status(status).json({ error: { code, message } });
+        const respond501 = (res: any) => respondError(
+            res, 501, 'NOT_IMPLEMENTED', 'Security service is not configured on this deployment',
+        );
         const handleError = (err: any, res: any, defaultCode: string) => {
             const status = typeof err?.statusCode === 'number' ? err.statusCode : 500;
             if (status !== 500) {
-                return res.status(status).json({ code: err?.code ?? defaultCode, error: String(err?.message ?? err) });
+                // The typed arm: plugin-security's PermissionDeniedError (403),
+                // SuggestionNotFoundError (404) and SuggestionStateError (409)
+                // each carry `code` + `statusCode`. The status mapping is
+                // unchanged — only the position of the code moves.
+                return respondError(res, status, err?.code ?? defaultCode, String(err?.message ?? err));
             }
             logError(`[REST] suggested-bindings ${defaultCode}:`, err);
-            return res.status(500).json({ code: defaultCode, error: String(err?.message ?? err).slice(0, 500) });
+            // The 500 arm keeps its 500-char cap: an unexpected fault's message
+            // is not a contract, and truncating it stays a sanitization step.
+            return respondError(res, 500, defaultCode, String(err?.message ?? err).slice(0, 500));
         };
 
         // LIST (reconciles against installed packages / declared sets first)
@@ -9557,12 +9586,13 @@ export class RestServer {
                     // the vocabulary.
                     const status = req.query?.status ? String(req.query.status) : undefined;
                     if (status !== undefined && !isAudienceBindingSuggestionStatus(status)) {
-                        return res.status(400).json({
-                            error: {
-                                code: 'VALIDATION_ERROR',
-                                message: unknownAudienceBindingSuggestionStatusMessage(status),
-                            },
-                        });
+                        // [#7981] Same body as before — emitted through the
+                        // shared helper now, so this arm is the reference
+                        // point by construction instead of by coincidence.
+                        return respondError(
+                            res, 400, 'VALIDATION_ERROR',
+                            unknownAudienceBindingSuggestionStatusMessage(status),
+                        );
                     }
                     const result = await svc.listAudienceBindingSuggestions(context ?? {}, {
                         status,
