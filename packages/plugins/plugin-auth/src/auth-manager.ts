@@ -959,6 +959,31 @@ export class AuthManager {
         //     template; 「策略按 better-auth 常规」 is the single-step default,
         //     so the two-step variant stays a deliberate future design.
         //
+        // ── #8019 — the OLD address is NOTIFIED, and still not gated ───────
+        // Maintainer ruling 2026-08-12 (later the same day, and deliberately
+        // narrower than the one above): 「notify the OLD address — do not gate
+        // on it」. #7735's ruling keeps governing the CONFIRMATION option; this
+        // one adds only the notice. So `sendChangeEmailConfirmation` stays
+        // absent above — and that is a measured decision, not an omission:
+        //
+        //   `user.changeEmail` in better-auth 1.7.0-rc.2 declares EXACTLY three
+        //   members (`@better-auth/core/src/types/init-options.ts:946-971`):
+        //   `enabled`, `sendChangeEmailConfirmation`, and
+        //   `updateEmailWithoutVerification`. There is NO notify-only hook, and
+        //   `sendChangeEmailConfirmation` is not one: in `update-user.mjs:457`
+        //   it becomes `canSendConfirmation`, and the branch at :495 RETURNS
+        //   right after invoking it — the new address is never mailed until the
+        //   old one clicks. Setting it is therefore structurally the approval
+        //   gate the ruling refuses, not a way to notify.
+        //
+        // The notice is consequently sent by the framework, from the global
+        // `after` hook on `/change-email` (search `__osChangeEmailFrom`), using
+        // the `auth.email_change_notice` template. It is failure-isolated by
+        // construction: it runs after better-auth has already produced the
+        // response, and its own errors are swallowed, so a dead mailbox cannot
+        // turn a notification into a block. That is the "do not gate" half,
+        // enforced mechanically rather than promised in prose.
+        //
         // No email transport wired ⇒ the `emailVerification` block below is
         // absent ⇒ better-auth answers 400 "Verification email isn't enabled".
         // That is the honest answer for a deployment with no mailbox, and a
@@ -1286,6 +1311,38 @@ export class AuthManager {
             // fall through to the path's own handling below
           }
 
+          // ── #8019: capture the address a change-email would move AWAY from ──
+          // The notice goes out from the after-hook, but the OLD address only
+          // exists BEFORE the endpoint runs — and `ctx.context.session` is not
+          // it: better-auth's own `sensitiveSessionMiddleware` populates that,
+          // and endpoint middleware runs AFTER this global before-hook, so the
+          // field is still empty here. Resolve the session explicitly, the same
+          // hook-order-independent way `/oauth2/authorize` below has to.
+          //
+          // Stashed, never sent from here: at this point the request has not
+          // been accepted yet (it can still fail on `newEmail` equal to the
+          // current address, on rate limiting, or on a missing transport), and
+          // a notice for a request better-auth then refuses would be a false
+          // alarm about an identity move that never happened.
+          if (ctx?.path === '/change-email') {
+            try {
+              const { getSessionFromCtx } = await import('better-auth/api');
+              const s: any = await getSessionFromCtx(ctx as any).catch(() => null);
+              const from = s?.user?.email;
+              if (typeof from === 'string' && from) {
+                ctx.context.__osChangeEmailFrom = {
+                  email: from,
+                  ...(typeof s?.user?.name === 'string' && s.user.name ? { name: s.user.name } : {}),
+                  ...(typeof s?.user?.id === 'string' && s.user.id ? { id: s.user.id } : {}),
+                };
+              }
+            } catch {
+              // Unresolvable session → no stash → no notice. better-auth's own
+              // session middleware still rejects the request with 401, so this
+              // never silently drops a notice for a change that proceeds.
+            }
+          }
+
           // ── ADR-0024: admin-gate self-service SSO provider registration ──
           // `@better-auth/sso`'s POST /sso/register only checks org-admin when
           // `body.organizationId` is present (index.mjs: `if (ctx.body
@@ -1504,6 +1561,47 @@ export class AuthManager {
             }
             delete ctx.context.__osPwChangeUserId;
             delete ctx.context.__osPwHistory;
+            return;
+          }
+
+          // ── #8019: tell the OLD address, without gating on it ──────────────
+          // Maintainer ruling 2026-08-12 — 「notify the OLD address — do not
+          // gate on it」. See the `changeEmail` config site for why this cannot
+          // be `sendChangeEmailConfirmation` (that option IS the gate).
+          //
+          // Why HERE is the whole design:
+          //   • after-hook ⇒ better-auth has already produced its response, so
+          //     nothing this code does can change the endpoint's outcome. The
+          //     "does not gate" property is structural, not a promise;
+          //   • gated on success ⇒ a refused request sends nothing;
+          //   • `sendChangeEmailNotice` swallows its own failures ⇒ a dead
+          //     mailbox, an unseeded template or a missing transport cannot
+          //     turn the notification into a block. That inversion — a security
+          //     notice that takes the flow down with it — is precisely the
+          //     failure mode the ruling exists to avoid.
+          //
+          // Sent at REQUEST time, which is also the strongest moment available:
+          // the owner learns while the attacker still has to prove control of
+          // the new mailbox, so the warning arrives inside the window where it
+          // can still be acted on. It is also the only moment that exists
+          // exactly once per attempt — the apply step (`GET /verify-email`)
+          // does not carry the old address, and better-auth mints a fresh
+          // session there when the link is opened without one, so an
+          // apply-time notice would silently miss that path.
+          if (ctx?.path === '/change-email') {
+            const from = ctx?.context?.__osChangeEmailFrom;
+            delete ctx.context.__osChangeEmailFrom;
+            let succeeded: boolean;
+            try {
+              const { isAPIError } = await import('better-auth/api');
+              succeeded = !isAPIError(ctx?.context?.returned);
+            } catch {
+              succeeded = !(ctx?.context?.returned instanceof Error);
+            }
+            const newEmail = typeof ctx?.body?.newEmail === 'string' ? ctx.body.newEmail : '';
+            if (succeeded && from?.email && newEmail) {
+              await this.sendChangeEmailNotice(from, newEmail);
+            }
             return;
           }
 
@@ -2864,6 +2962,66 @@ export class AuthManager {
   /** @internal Used by callback closures. */
   private getEmailService(): IEmailService | undefined {
     return this.config.emailService;
+  }
+
+  /**
+   * #8019 — mail the address a change-email request would move the account
+   * AWAY from. Maintainer ruling 2026-08-12: 「notify the OLD address — do not
+   * gate on it」.
+   *
+   * ⛔ **This method must never throw, and must never be awaited for its
+   * effect on the flow.** It is the "do not gate" half of the ruling, and the
+   * enforcement lives right here: every failure — no transport wired, template
+   * not seeded, SMTP down, a `status: 'failed'` delivery — is swallowed. The
+   * sibling auth callbacks above do the opposite ON PURPOSE (a verification
+   * mail that cannot be sent must surface, or the user is stuck on a verify
+   * screen forever); this one is a notification about a change that proceeds
+   * either way, so letting it raise would convert the notice into exactly the
+   * blocking step the ruling refuses.
+   *
+   * ⛔ No undo/rollback link is passed, and the template declares no hole for
+   * one: a one-click revert is a separate flow and a separate decision.
+   *
+   * No `locale` is named, so `EmailService`'s ladder resolves the `en-US` row
+   * (`email-service.ts` — "no locale means the DOCUMENTED default"). The other
+   * three locale rows ship with it and are selected the moment a caller or a
+   * tenant overlay names a locale; the platform has no per-recipient locale to
+   * pass here yet (`sys_user` carries no locale column, and every other auth
+   * template is likewise en-US-only), so naming one would be inventing a
+   * preference rather than honouring one.
+   */
+  private async sendChangeEmailNotice(
+    from: { email: string; name?: string; id?: string },
+    newEmail: string,
+  ): Promise<void> {
+    try {
+      const email = this.getEmailService();
+      if (!email) return;
+      // The endpoint lower-cases `newEmail` before it does anything with it
+      // (`update-user.mjs`: `ctx.body.newEmail.toLowerCase()`), so the raw body
+      // spelling is not what would become the account identity. Report the
+      // address that would actually land.
+      const target = newEmail.trim().toLowerCase();
+      if (!target) return;
+      await email.sendTemplate({
+        template: 'auth.email_change_notice',
+        to: { address: from.email, ...(from.name ? { name: from.name } : {}) },
+        data: {
+          user: { name: from.name || from.email, email: from.email, ...(from.id ? { id: from.id } : {}) },
+          newEmail: target,
+          appName: this.getAppName(),
+        },
+        relatedObject: 'sys_user',
+        ...(from.id ? { relatedId: from.id } : {}),
+      });
+    } catch (err) {
+      // Best-effort by design — see the ⛔ above. Logged so an operator can see
+      // a notice was lost; never rethrown, so the change-email flow cannot be
+      // taken down by its own security notification.
+      this.config.logger?.warn?.('AuthManager: change-email notice to the previous address failed', {
+        error: (err as Error)?.message,
+      });
+    }
   }
 
   /**
