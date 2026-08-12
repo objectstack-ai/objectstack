@@ -250,16 +250,21 @@ What a widget contributes is the state on the control it renders
 
 ## Performance
 
-There is **no** performance block anywhere in this contract. Virtualization for
-large datasets is configured on the **view**: set the boolean `virtualScroll` on a
-list-shaped view (`ListViewSchema` in `packages/spec/src/ui/view.zod.ts`). That is
-the only virtual-scrolling switch objectui reads.
+There is **no** performance block anywhere in this contract — and since 17.0.0
+(#7176) there is no authorable virtual-scrolling switch anywhere else either.
+The view-level boolean `virtualScroll` this section used to point at was retired
+under ADR-0049 enforce-or-remove: every measured reader only copied the key
+forward and the grid renderer never applied it, so authoring it was a
+parse-clean no-op. Large datasets page via the view's `pagination` block.
 
 <Callout type="info">
   `widget.performance` was removed at the #3896 audit close-out and its tombstone
   was subsumed by #5055 when the manifest that carried it was itself removed — so
   there is no longer a key to reject, because there is no longer a shape to author
-  it into. Use the view's `virtualScroll`.
+  it into. The view-level `virtualScroll` it used to defer to was itself retired
+  at #7176 (pass-through-only — copied by every bridge, applied by nothing); real
+  list virtualization is an implementation card first, and the key stays retired
+  pending it.
 </Callout>
 
 ## Theme

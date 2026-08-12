@@ -641,12 +641,6 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       resizable: {
         label: "Redimensionable"
       },
-      striped: {
-        label: "Con franjas"
-      },
-      bordered: {
-        label: "Con borde"
-      },
       compactToolbar: {
         label: "Barra compacta"
       },
