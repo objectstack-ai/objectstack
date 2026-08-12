@@ -3,7 +3,14 @@
 import type { IDataEngine, IRealtimeService, RealtimeEventPayload } from '@objectstack/spec/contracts';
 import type { WebhookTriggerType } from '@objectstack/spec/automation';
 import type { EnqueueHttpInput } from '@objectstack/service-messaging';
-import { WEBHOOK_SECRET_FIELD, readLegacySecret, resolveWebhookSecret } from './webhook-secret.js';
+import {
+    WEBHOOK_SECRET_FIELD,
+    WEBHOOK_SECRET_REFUSAL_CODE,
+    WEBHOOK_SECRET_REFUSAL_STATUS,
+    onCryptoProviderChange,
+    readLegacySecret,
+    resolveWebhookSecret,
+} from './webhook-secret.js';
 
 /**
  * The authored trigger vocabulary, taken from the spec rather than restated
@@ -116,6 +123,16 @@ export class AutoEnqueuer {
     private refreshTimer: ReturnType<typeof setInterval> | undefined;
     private running = false;
     private refreshing: Promise<void> | undefined;
+    /** [#8022] Detach for the engine's crypto-registration listener. */
+    private unbindCryptoListener: (() => void) | undefined;
+    /**
+     * [#8022] Webhook ids currently dropped for an unresolvable signing key.
+     * Held so the loud first report is said ONCE per outage (AGENTS.md
+     * "Degradation log levels": *say it once, at the first degradation*) and
+     * again if the same webhook breaks after recovering — not once per row per
+     * refresh, forever.
+     */
+    private readonly droppedForSecret = new Set<string>();
 
     constructor(
         private readonly engine: IDataEngine,
@@ -134,6 +151,17 @@ export class AutoEnqueuer {
     async start(): Promise<void> {
         if (this.running) return;
         this.running = true;
+
+        // [#8022] Bound BEFORE the first build, not after: on every host the
+        // composition root wires the CryptoProvider after `runtime.start()`
+        // returns, i.e. after the `kernel:ready` handler that runs this method
+        // — so the registration we need to hear about can land at any point
+        // from here on, including while the await below is still in flight.
+        // Subscribing first makes that unmissable; subscribing after the
+        // refresh would reintroduce the same race in miniature.
+        this.unbindCryptoListener = onCryptoProviderChange(this.engine, () =>
+            this.rearmAfterCryptoRegistered(),
+        );
 
         await this.refresh();
 
@@ -167,9 +195,38 @@ export class AutoEnqueuer {
         if (this.subId) await this.realtime.unsubscribe(this.subId);
         if (this.subIdSelfHeal) await this.realtime.unsubscribe(this.subIdSelfHeal);
         if (this.refreshTimer) clearInterval(this.refreshTimer);
+        this.unbindCryptoListener?.();
         this.subId = undefined;
         this.subIdSelfHeal = undefined;
         this.refreshTimer = undefined;
+        this.unbindCryptoListener = undefined;
+    }
+
+    /**
+     * [#8022] The engine just gained a CryptoProvider — rebuild the cache so
+     * subscriptions dropped for an unresolvable signing key re-arm now, instead
+     * of at the next periodic refresh up to {@link refreshIntervalMs} away.
+     *
+     * It deliberately does NOT call {@link refresh} directly. `refresh()`
+     * coalesces onto an in-flight build, and the build most likely to be in
+     * flight right now is the one from `start()` — the very build whose rows
+     * were read while there was no provider. Joining it would return "refreshed"
+     * having re-armed nothing, which is this issue with an extra step. So: let
+     * whatever is running finish, then read again.
+     */
+    private rearmAfterCryptoRegistered(): void {
+        const inFlight = this.refreshing ?? Promise.resolve();
+        void inFlight
+            // A failed in-flight refresh already logged; it must not stop the
+            // re-arm, which is the whole point of this callback.
+            .catch(() => undefined)
+            .then(() => (this.running ? this.refresh() : undefined))
+            .catch((err) =>
+                this.logger.warn?.(
+                    '[webhook-auto-enqueuer] re-arm after CryptoProvider registration failed',
+                    err,
+                ),
+            );
     }
 
     /**
@@ -258,15 +315,13 @@ export class AutoEnqueuer {
             const stored = await resolveWebhookSecret(this.engine, row, this.subscriptionsObject);
             if (stored) {
                 sub.secret = stored;
+                // Recovered — a later break is a new outage and gets said loudly
+                // again rather than being swallowed as a repeat.
+                this.droppedForSecret.delete(sub.id);
                 return true;
             }
         } catch (err) {
-            this.logger.warn?.(
-                `[webhook-auto-enqueuer] webhook '${sub.name}' holds an encrypted signing secret that ` +
-                    `could not be decrypted — the subscription is DROPPED rather than delivered unsigned ` +
-                    `(#7799). Deliveries resume once the sys_secret row and CryptoProvider are reachable.`,
-                { id: sub.id, field: WEBHOOK_SECRET_FIELD, err: (err as Error)?.message ?? err },
-            );
+            this.reportDrop(sub, err);
             return false;
         }
 
@@ -281,7 +336,70 @@ export class AutoEnqueuer {
             );
             sub.secret = legacy;
         }
+        this.droppedForSecret.delete(sub.id);
         return true;
+    }
+
+    /**
+     * [#8022] Report a subscription dropped for an unresolvable signing key.
+     *
+     * ## Why `error`, and why only the first time
+     * AGENTS.md decides the level with one question: *after the degradation,
+     * does the system still look normal from the outside while something the
+     * system claims is happening is not?* Here the answer is yes, and it is the
+     * whole defect — `GET /api/v1/data/sys_webhook` keeps reading
+     * `active: true`, Setup keeps showing the webhook armed, and every matching
+     * record change is discarded with no delivery and no `sys_http_delivery`
+     * row to find afterwards. That is a durability degradation wearing a
+     * functional degradation's clothes, so it owes the two things an `error`
+     * owes: the consequence, concretely, and the fix.
+     *
+     * Said ONCE per outage per webhook, per the same section. The cache is
+     * rebuilt every {@link refreshIntervalMs}; an unfixed misconfiguration would
+     * otherwise print this line every 60s forever, which is how an `error`
+     * channel becomes unreadable — the failure mode that made the founding
+     * incident's `warn` invisible. Repeats drop to `debug`; a recovery clears
+     * the id, so a re-break is loud again.
+     *
+     * ADR-0112: `code` + `status` travel in the meta so a consumer branches on
+     * the pair, not on message text. Same pair the seeder's refusal carries for
+     * the same underlying cause.
+     */
+    private reportDrop(sub: CachedSubscription, err: unknown): void {
+        const meta = {
+            id: sub.id,
+            webhook: sub.name,
+            field: WEBHOOK_SECRET_FIELD,
+            code: WEBHOOK_SECRET_REFUSAL_CODE,
+            status: WEBHOOK_SECRET_REFUSAL_STATUS,
+            err: (err as Error)?.message ?? err,
+        };
+        if (this.droppedForSecret.has(sub.id)) {
+            this.logger.debug?.(
+                `[webhook-auto-enqueuer] webhook '${sub.name}' is still dropped for an unresolvable ` +
+                    'signing secret (#7799/#8022)',
+                meta,
+            );
+            return;
+        }
+        this.droppedForSecret.add(sub.id);
+        const message =
+            `[webhook-auto-enqueuer] webhook '${sub.name}' holds an encrypted signing secret that ` +
+            'could not be decrypted — the subscription is DROPPED rather than delivered unsigned ' +
+            '(#7799), so every matching record change is discarded with NO delivery and NO ' +
+            'sys_http_delivery row, while the row keeps reading active:true in Setup. Fix: register a ' +
+            'CryptoProvider (engine.setCryptoProvider — LocalCryptoProvider in dev, KMS/Vault in ' +
+            'production) with the same key the secret was written under, and make sure the sys_secret ' +
+            'row is reachable; the subscription re-arms on registration (#8022) and at the next ' +
+            'periodic refresh.';
+        // The logger surface is a subset of console/kernel logger — `error` is
+        // optional on it, so fall back rather than silently losing the report
+        // on a logger that only implements `warn`.
+        if (typeof this.logger.error === 'function') {
+            this.logger.error(message, err, meta);
+        } else {
+            this.logger.warn?.(message, meta);
+        }
     }
 
     private parseRow(row: any): CachedSubscription | null {

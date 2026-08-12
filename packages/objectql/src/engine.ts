@@ -1661,6 +1661,16 @@ export class ObjectQL implements IObjectQLEngine {
   // persists cleartext). Injected by the host via setCryptoProvider().
   private cryptoProvider?: ICryptoProvider;
 
+  // [#8022] Listeners notified when a crypto provider is (re)registered.
+  // Server-side consumers that dereference a secret at BOOT — the webhook
+  // auto-enqueuer's subscription cache is the one this was built for — run
+  // inside `kernel:ready`, which every host completes BEFORE its composition
+  // root injects a provider. Their first read therefore fails closed against a
+  // capability that is about to exist, and without a notification the only way
+  // back is to poll. The engine is the sole party that knows the moment it
+  // arrives, so the notification belongs here.
+  private readonly cryptoProviderListeners = new Set<() => void>();
+
   // [ADR-0105 D2 / #3623] Posture accessor for driver-scope widening under the
   // `group` posture. Injected by SecurityPlugin via setTenancyPostureProvider();
   // absent = equality scoping (fail toward isolation).
@@ -4613,10 +4623,51 @@ export class ObjectQL implements IObjectQLEngine {
    * Mirrors the Settings subsystem's ICryptoProvider wiring; the host (e.g.
    * `serve`) injects `LocalCryptoProvider` in dev and a KMS/Vault-backed
    * provider in production.
+   *
+   * Notifies {@link onCryptoProviderChange} listeners AFTER the provider is in
+   * place, so a listener that immediately re-reads a secret sees the new
+   * capability rather than the state that made it fail (#8022).
    */
   setCryptoProvider(provider: ICryptoProvider): void {
     this.cryptoProvider = provider;
     this.logger.info('CryptoProvider configured for secret fields');
+    // A listener is a re-arm, never part of this call's contract: one that
+    // throws must not fail the host's composition root, and must not stop the
+    // listeners behind it from re-arming.
+    for (const listener of [...this.cryptoProviderListeners]) {
+      try {
+        listener();
+      } catch (err) {
+        this.logger.warn('CryptoProvider registration listener failed', {
+          error: (err as Error)?.message ?? String(err),
+        });
+      }
+    }
+  }
+
+  /**
+   * [#8022] Observe crypto-provider registration.
+   *
+   * Exists for consumers that must dereference a `secret` field on a schedule
+   * they do not control — the boot path. `secret` reads are fail-closed by
+   * design (#7799), which is correct, but "no provider" at boot is a
+   * *transient* state on every host: `kernel:ready` runs plugins, and only
+   * after `runtime.start()` returns does the composition root call
+   * {@link setCryptoProvider}. A consumer whose cache was built in that gap is
+   * wrong until it rebuilds, and polling is the only alternative to being told.
+   *
+   * Fires on every registration, including a later replacement (a KMS provider
+   * swapped in over the dev one) — a listener that re-reads is correct in both
+   * cases, and a re-read is cheap next to signing with a key from the wrong
+   * provider.
+   *
+   * @returns an unsubscribe function; call it when the listener's owner stops.
+   */
+  onCryptoProviderChange(listener: () => void): () => void {
+    this.cryptoProviderListeners.add(listener);
+    return () => {
+      this.cryptoProviderListeners.delete(listener);
+    };
   }
 
   /**
