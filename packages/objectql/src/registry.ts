@@ -10,6 +10,12 @@ import {
   TENANT_SCOPE_FIELD_DEF,
   OWNER_FIELD_DEF,
   OWNING_BUSINESS_UNIT_FIELD_DEF,
+  // [#7774] The i18n-bundle identity table and its value reader, sunk into
+  // metadata-core so this registry and the `/meta` list merge in
+  // `@objectstack/metadata-protocol` answer "what is this type's identity?"
+  // from one place. Re-exported below under its original name.
+  ITEM_KEY_DISCRIMINATORS,
+  readDiscriminatorValue as discriminatorValue,
 } from '@objectstack/metadata-core';
 import { SystemFieldName } from '@objectstack/spec/system';
 import { resolveTenancyPosture, resolveSearchPinyinEnabled } from '@objectstack/types';
@@ -901,34 +907,26 @@ function isCodeArtifactBody(item: unknown): boolean {
  *
  * `registerItem` keys every item by `name` (composite `<packageId>:<name>` when
  * a package ships it). For most types that IS the identity. `email_template`
- * declares otherwise: `EmailTemplateDefinitionSchema` states that "multiple
- * rows with the same `name` but different `locale` form an i18n bundle; the
- * service picks the best match for the recipient's locale, falling back to
- * `en-US`" (`packages/spec/src/system/email-template.zod.ts`), and its header
- * says a template "is resolved by `(name, locale)`". A name-only key cannot
- * hold that: the second locale collided with the first and overwrote it
- * through the `[Registry] Overwriting …` path, so a stack authoring en-US and
- * zh-CN copies materialized ONE row into `sys_email_template` — declared, not
- * enforced.
+ * declares otherwise — see the table's own TSDoc for the schema clause it
+ * enforces and for why the discriminator is declared per type.
  *
- * The discriminator is declared PER TYPE rather than duck-typed off a `locale`
- * property, because the key computation is generic to every registered
- * metadata type: reading whatever `item.locale` happened to be set would
- * silently re-key any other type that grows a locale-ish field, which is a much
- * larger contract change than the one this table makes. `email_template` is the
- * only type on `main` whose schema declares a top-level `locale` that is part
- * of its identity (`grep '  locale:' packages/spec/src/**\/*.zod.ts` — the
- * other hits are SCIM users, execution context, discovery and translation
- * payloads, none of which is a registered metadata type).
+ * [#7774] The table itself now lives in `@objectstack/metadata-core` and is
+ * re-exported here unchanged. It moved because this registry is not the only
+ * layer that keys metadata by name: `@objectstack/metadata-protocol`'s
+ * unscoped `/meta/<type>` list merge keys by `(package, name)` too, and a
+ * bundle that survives registration only to collapse in that merge is still
+ * collapsed. objectql depends on metadata-protocol, so the protocol package
+ * cannot import from here; metadata-core is the package both already depend
+ * on. The re-export is deliberate and load-bearing —
+ * `registry-i18n-bundle-key.test.ts` imports `ITEM_KEY_DISCRIMINATORS` from
+ * this module by name.
  *
- * `canonical` is the bundle member a bare-name read resolves to. It mirrors the
- * schema's own `locale` default and `sendTemplate`'s documented fallback, and
- * `registry-i18n-bundle-key.test.ts` pins the two together so this copy cannot
- * drift from the spec.
+ * The storage-key FORMAT below ({@link BUNDLE_KEY_SEPARATOR},
+ * {@link withDiscriminator}, {@link bundleBaseKey}, {@link collectBundle})
+ * stayed here on purpose: it encodes a discriminator into THIS registry's
+ * `<packageId>:<name>` Map keys, which no other package reads or writes.
  */
-export const ITEM_KEY_DISCRIMINATORS: Readonly<Record<string, { field: string; canonical: string }>> = {
-  email_template: { field: 'locale', canonical: 'en-US' },
-};
+export { ITEM_KEY_DISCRIMINATORS };
 
 /**
  * Separator between an item's name and its bundle discriminator inside a
@@ -941,13 +939,6 @@ export const ITEM_KEY_DISCRIMINATORS: Readonly<Record<string, { field: string; c
  * AFTER the last `:`.
  */
 const BUNDLE_KEY_SEPARATOR = '@';
-
-/** The discriminator value an item declares, trimmed; `''` when it declares none. */
-function discriminatorValue(item: unknown, field: string): string {
-  const holder = item as Record<string, any> | null | undefined;
-  const raw = holder?.[field] ?? holder?.content?.[field];
-  return typeof raw === 'string' ? raw.trim() : '';
-}
 
 /** `pkg:auth.welcome` + `zh-CN` → `pkg:auth.welcome@zh-CN`. */
 function withDiscriminator(baseKey: string, value: string): string {
