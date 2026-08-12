@@ -1461,13 +1461,63 @@ export class SchemaRegistry {
    * the same way rather than growing a second, drifting copy.
    */
   private foldExtenders(contributors: ObjectContributor[], base: ObjectContributor): ServiceObject {
-    let merged = { ...base.definition };
+    return this.foldExtendersOntoDefinition(contributors, base.definition);
+  }
+
+  /**
+   * The fold itself, over a base DEFINITION rather than a base contributor, so
+   * {@link foldObjectExtendersOnto} can apply it to a body that never came
+   * from this registry without growing a second copy of the merge.
+   */
+  private foldExtendersOntoDefinition(
+    contributors: ObjectContributor[],
+    baseDefinition: ServiceObject,
+  ): ServiceObject {
+    let merged = { ...baseDefinition };
     for (const contrib of contributors) {
       if (contrib.ownership === 'extend') {
         merged = mergeObjectDefinitions(merged, contrib.definition);
       }
     }
     return merged;
+  }
+
+  /**
+   * [#7556] Fold this object's `extend` contributors onto a base body the
+   * CALLER supplies — the same fold {@link resolveObject} (D9.2) and
+   * {@link resolveOwnerLayer} (D9.6) apply, exposed for a base layer that did
+   * not come from this registry.
+   *
+   * Why this is public API rather than the protocol reaching for the
+   * contributor list: `GET /meta/object/:name` reaches an object body through a
+   * source this registry never sees — the copy `MetadataPlugin` registers into
+   * the `metadata` SERVICE when a deployment ingests a compiled artifact, where
+   * `objects` and `objectExtensions` are stored as SEPARATE collections. That
+   * body is ONE LAYER, and serving a layer as the resolved schema is what
+   * dropped every `objectExtensions` field from the by-name read (and from both
+   * layers of `?layers=true`) while `GET /meta/object` — which reads
+   * `resolveObject` — kept them. Two folds would re-open exactly that seam one
+   * level down, so there is one.
+   *
+   * Returns `base` untouched when nothing extends the name, so a caller may
+   * apply it unconditionally.
+   *
+   * NOT idempotent, by construction: {@link mergeObjectDefinitions} CONCATENATES
+   * `validations` and `indexes`, so folding an already-folded body would
+   * duplicate both. Callers must apply this only to a base that has not been
+   * through the fold — which is why the protocol applies it to the
+   * MetadataService body and never to a registry-resolved one.
+   */
+  foldObjectExtendersOnto<T>(name: string, base: T): T {
+    if (base === null || typeof base !== 'object') return base;
+    const fqn = this.resolveObjectKey(name);
+    if (fqn === undefined) return base;
+    const contributors = this.objectContributors.get(fqn);
+    if (!contributors || !contributors.some((c) => c.ownership === 'extend')) return base;
+    return this.foldExtendersOntoDefinition(
+      contributors,
+      base as unknown as ServiceObject,
+    ) as unknown as T;
   }
 
   /**

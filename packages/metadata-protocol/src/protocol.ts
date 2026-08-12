@@ -4117,6 +4117,53 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#7556] Resolve an OBJECT body that came from the MetadataService into the
+     * object's resolved schema, by folding the registry's `extend` contributors
+     * onto it.
+     *
+     * The two readers of a single object — this file's by-name read and its
+     * layered view — consult {@link readItemFromMetadataService} BEFORE the
+     * SchemaRegistry, because that service is the HMR-fresh copy. For every
+     * other metadata type that ordering is free. For `object` it is not: an
+     * object's resolved schema is DEFINED (ADR-0029 D9.2 / D9.6) as a base layer
+     * with its `extend` contributors folded on, and the MetadataService copy is
+     * only the base layer. A deployment that ingests a compiled artifact
+     * (`artifactSource`, i.e. every sealed/served runtime) registers `objects`
+     * and `objectExtensions` into that service as SEPARATE collections, so the
+     * body this method receives is the owner's declaration with no extender in
+     * it. Serving it unfolded is what made the showcase's three
+     * `objectExtensions` fields readable through `GET /meta/object`, writable
+     * through the data API, and absent from `GET /meta/object/:name` — the read
+     * the edit and new forms derive from.
+     *
+     * The list read needs no counterpart: it reads `registry.listItems`, whose
+     * object branch resolves through the same fold, so it was never wrong.
+     * This method exists to make the two AGREE at their one point of
+     * divergence, not to give the by-name route a rule of its own.
+     *
+     * Applied ONLY to a MetadataService body. A registry-sourced body has
+     * already been folded, and the fold concatenates `validations`/`indexes`
+     * (see {@link SchemaRegistry.foldObjectExtendersOnto}), so applying it twice
+     * would duplicate both.
+     */
+    private foldObjectExtendersFromRegistry(type: string, name: string, body: unknown): unknown {
+        const singular = PLURAL_TO_SINGULAR[type] ?? type;
+        if (singular !== 'object') return body;
+        if (body === null || typeof body !== 'object') return body;
+        const registry = (this.engine as any)?.registry;
+        // Partial registry doubles in tests predate this method; a host that
+        // cannot fold answers exactly as it did before.
+        if (!registry || typeof registry.foldObjectExtendersOnto !== 'function') return body;
+        try {
+            return registry.foldObjectExtendersOnto(name, body);
+        } catch {
+            // The fold is a read over in-memory contributors; a failure here
+            // must not turn a served schema into a 5xx.
+            return body;
+        }
+    }
+
+    /**
      * [#5840] Read ONE item from the `metadata` service, keeping the ADR-0110
      * D3 verdict instead of flattening it into `undefined`.
      *
@@ -4754,7 +4801,12 @@ export class ObjectStackProtocolImplementation implements
                     request.packageId,
                 );
                 if (fromService.data !== undefined && fromService.data !== null) {
-                    item = fromService.data;
+                    // [#7556] A layer, not a resolved schema — see
+                    // {@link foldObjectExtendersFromRegistry}. No-op for every
+                    // type but `object`, and for an object nothing extends.
+                    item = this.foldObjectExtendersFromRegistry(
+                        request.type, request.name, fromService.data,
+                    );
                 } else if (fromService.degraded) {
                     serviceDegraded = fromService;
                 }
@@ -4967,7 +5019,15 @@ export class ObjectStackProtocolImplementation implements
                 request.packageId,
             );
             if (fromService.data !== undefined && fromService.data !== null) {
-                code = fromService.data;
+                // [#7556] The CODE layer of an object is D9.6's "owner's
+                // declaration with its extenders folded on", so the
+                // MetadataService copy is its base, not the layer itself.
+                // `effective` is `overlay ?? code`, so an object with no
+                // overlay row — the ordinary shape — is corrected by this
+                // single fold on both layers the diagnostic reports.
+                code = this.foldObjectExtendersFromRegistry(
+                    request.type, request.name, fromService.data,
+                );
             } else if (fromService.degraded) {
                 // [#5840] Kept, not swallowed — acted on after the registry
                 // fallback below, which may still produce a real code layer.
@@ -11809,6 +11869,7 @@ export class ObjectStackProtocolImplementation implements
     async deletePackage(request: {
         packageId: string;
         organizationId?: string;
+        allTenants?: boolean;
         actor?: string;
         keepData?: boolean;
     }): Promise<{
@@ -11819,6 +11880,78 @@ export class ObjectStackProtocolImplementation implements
         failed: Array<{ type: string; name: string; error: string; code?: string }>;
         cleanups: UninstallCleanupOutcome[];
     }> {
+        // [#7780] A cross-tenant uninstall must be DECLARED, never inferred from
+        // an absent parameter. Maintainer ruling (2026-08-12):
+        // 跨租户卸载必须显式声明,缺省缺参永远不等于「全部租户」.
+        //
+        // Before this gate, `{ packageId }` with no org matched EVERY
+        // organization's rows — measured during #7705 at 5 of 5 deleted,
+        // including a foreign org's. The two doors disagreed on which semantic
+        // that was: the direct-mount REST registrar
+        // (`packages/rest/src/package-routes.ts`) passes no org and got the
+        // cross-tenant read, while the dispatcher twin
+        // (`packages/runtime/src/domains/packages.ts`) resolves one and got the
+        // org-scoped read. Nobody chose that split; it fell out of a missing
+        // argument.
+        //
+        // Why a flag and not a convention: `resolveActiveOrganizationId`
+        // (#4127) is entirely `catch`-wrapped, so ANY throw on the auth seam
+        // returns `undefined`. An accidental org-less call and a deliberate
+        // env-wide one are byte-identical at the call site, and the widest
+        // possible reading of a destructive operation is the one that must
+        // never be reachable by accident. `allTenants: true` is the carrier
+        // that makes the two distinguishable.
+        //
+        // ⛔ NOT narrowed to `organization_id IS NULL` — #7705 proved that
+        // revives the orphaned-row defect on the other door. The remedy here is
+        // explicitness, not narrowing: with the flag, the no-org branch stays
+        // package-wide exactly as it was.
+        //
+        // Mirrors the `force: true` / `DESTRUCTIVE_CHANGE` opt-in this same
+        // class already uses for `saveMetaItem` — refuse, name the remedy in the
+        // message, and carry a ledger-declared code plus an explicit status.
+        // Two ways to violate ONE contract — "the uninstall's tenant scope must be
+        // readable off the request" — so both answer in the same family, with the
+        // same code and status, and each names the parameters that produced it.
+        //
+        // (a) CONTRADICTORY. `organizationId` says "this tenant", `allTenants`
+        // says "every tenant". Rejecting beats picking a winner, because both
+        // silent resolutions are worse than a refusal: resolving narrow-first
+        // makes `allTenants: true` silently INERT (the caller believes they
+        // asked for a cross-tenant uninstall and quietly gets a scoped one,
+        // discovering it only when the rows they expected gone are still
+        // there); resolving explicit-first silently IGNORES a named
+        // organization and deletes every tenant's rows — the original defect
+        // wearing a flag. Rejecting is also the only reading that stays correct
+        // when a request is COMPOSED from two places (a resolver supplying the
+        // org, config supplying the flag), which is exactly the accidental
+        // composition `resolveActiveOrganizationId` makes real.
+        if (request.organizationId && request.allTenants === true) {
+            const err = new Error(
+                `[tenant_scope_required] Refusing to uninstall '${request.packageId}':`
+                + ` organizationId ('${request.organizationId}') and allTenants: true are mutually exclusive —`
+                + ` one scopes the uninstall to a single tenant, the other clears every tenant's rows.`
+                + ` — pass organizationId alone to scope it, or allTenants: true alone to confirm the cross-tenant uninstall.`
+            );
+            (err as any).code = 'TENANT_SCOPE_REQUIRED';
+            (err as any).status = 400;
+            throw err;
+        }
+        // (b) UNDECLARED. Note `!== true`: an explicit `allTenants: false` lands
+        // here with absent, deliberately. `false` is not a request for
+        // cross-tenant semantics, so it cannot authorise them — only the
+        // affirmative `true` does.
+        if (!request.organizationId && request.allTenants !== true) {
+            const err = new Error(
+                `[tenant_scope_required] Refusing to uninstall '${request.packageId}' with no organization scope:`
+                + ` an uninstall that names neither an organization nor an explicit cross-tenant intent would delete`
+                + ` EVERY organization's rows for this package.`
+                + ` — pass organizationId to scope it, or allTenants: true to confirm the cross-tenant uninstall.`
+            );
+            (err as any).code = 'TENANT_SCOPE_REQUIRED';
+            (err as any).status = 400;
+            throw err;
+        }
         const where: Record<string, unknown> = { package_id: request.packageId };
         // [#7705] Surface BOTH org-scoped rows and env-wide (`organization_id
         // IS NULL`) rows to an org-scoped uninstall. A strict
@@ -11845,7 +11978,15 @@ export class ObjectStackProtocolImplementation implements
         // registrar, `packages/rest/src/package-routes.ts`) passes no
         // `organizationId` at all, and restricting it to env-wide rows would
         // orphan every org-scoped row — the same bug, re-created on the other
-        // door. Absent an org, a full uninstall stays package-wide.
+        // door. Absent an org, a full uninstall stays package-wide — and since
+        // #7780 that branch is reachable only with `allTenants: true`, so the
+        // width is now something a caller ASKED for rather than something a
+        // missing argument selected.
+        //
+        // There is no tie-break for "both supplied" because that combination
+        // never reaches here — it is refused above. A destructive operation
+        // whose scope is stated twice, contradictorily, has no reading that is
+        // safe to guess.
         if (request.organizationId) {
             where.$or = [
                 { organization_id: request.organizationId },
@@ -12037,7 +12178,38 @@ export class ObjectStackProtocolImplementation implements
         if (request.organizationId) {
             const byKey = new Map<string, any>();
             for (const row of scanned) {
-                const key = `${row?.type}\u0000${row?.name}`;
+                // [#7932] …and for a bundled type the slot is
+                // `(type, name, discriminator)`. Same shape #7774 gave
+                // {@link metaItemKey}: the discriminator is appended ONLY
+                // when the type declares one, so every undiscriminated type
+                // keeps a byte-identical two-component key and this
+                // change's blast radius is provable rather than argued.
+                //
+                // Within ONE org the collapse cannot happen —
+                // `sys_metadata`'s overlay uniqueness is
+                // `(type, name, organization_id, package_id)` and the table
+                // has no locale column, so one org cannot hold two rows
+                // differing only by body locale. Across the two tiers it
+                // can, and this scan is the one place they meet: an
+                // env-wide `auth.welcome` customized in `en-US` and THIS
+                // org's `zh-CN` customization are two different members of
+                // one bundle (`EmailTemplateDefinitionSchema` resolves a
+                // template by `(name, locale)`), and keying them together
+                // let the org row displace the env-wide one — the
+                // duplicate then shipped one locale of a two-locale
+                // customization, reporting success. Precedence is unchanged
+                // where it was ever meaningful: an org row still wins over
+                // the env-wide row of the SAME member.
+                //
+                // The discriminator is read off the RAW stored body rather
+                // than the converted one, which is safe because no ADR-0087
+                // conversion entry touches `email_template` — re-checked
+                // against `packages/spec/src/conversions/registry.ts`,
+                // whose surfaces are flow/page/object/view/app/… and never
+                // this type.
+                const disc = storedRowDiscriminator(String(row?.type), row);
+                const base = `${row?.type}\u0000${row?.name}`;
+                const key = disc === undefined ? base : `${base}\u0000${disc}`;
                 const kept = byKey.get(key);
                 const keptIsEnvWide = kept != null && (kept.organization_id ?? null) === null;
                 if (kept == null || (keptIsEnvWide && (row?.organization_id ?? null) !== null)) {
