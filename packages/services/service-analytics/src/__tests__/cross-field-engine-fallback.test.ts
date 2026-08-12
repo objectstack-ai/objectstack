@@ -66,8 +66,8 @@ import {
   CROSS_FIELD_ROWS,
 } from '@objectstack/driver-sql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
-import type { Cube, FilterCondition } from '@objectstack/spec/data';
-import type { AnalyticsQuery } from '@objectstack/spec/contracts';
+import type { AggregationNode, Cube, FilterCondition } from '@objectstack/spec/data';
+import type { AnalyticsQuery, DriverQuery } from '@objectstack/spec/contracts';
 
 import { AnalyticsService } from '../analytics-service.js';
 import { findCrossFieldComparand } from '../comparand-shape.js';
@@ -119,21 +119,29 @@ describe('[#7598] cross-field `$field` on the analytics face — served via the 
       // `aggregate`, which is what that engine call reaches. The filter is
       // forwarded VERBATIM — no normalisation, no stringification — because the
       // claim under test is that the reference survives this hop intact.
-      executeAggregate: async (objectName, options) =>
-        (await driver.aggregate(objectName, {
+      executeAggregate: async (objectName, options) => {
+        // `{field, method, alias}` → `{field, function, alias}`: the analytics
+        // strategy speaks the contract's `method`, the Query Protocol's
+        // `AggregationNodeSchema` spells it `function`, and `engine.aggregate`
+        // is what renames it in production. Mapped here rather than worked
+        // around, so the bridge stays the shape a real host writes.
+        //
+        // The query is typed `DriverQuery` — not `as any` — so this bridge stays
+        // inside the contract it is standing in for. Only `method` needs a cast,
+        // because the analytics contract types it a plain `string` while
+        // `AggregationNode.function` is the closed `AggregationFunction` enum;
+        // narrowing the cast to that one field keeps every other key checked.
+        const query: DriverQuery = {
           where: options.filter as FilterCondition,
           groupBy: options.groupBy,
-          // `{field, method, alias}` → `{field, function, alias}`: the analytics
-          // strategy speaks the contract's `method`, the Query Protocol's
-          // `AggregationNodeSchema` spells it `function`, and `engine.aggregate`
-          // is what renames it in production. Mapped here rather than worked
-          // around, so the bridge stays the shape a real host writes.
           aggregations: options.aggregations?.map(({ field, method, alias }) => ({
             field,
-            function: method,
+            function: method as AggregationNode['function'],
             alias,
           })),
-        } as any)) as Record<string, unknown>[],
+        };
+        return (await driver.aggregate(objectName, query)) as Record<string, unknown>[];
+      },
       getReadScope: () => readScope ?? undefined,
     });
   });
