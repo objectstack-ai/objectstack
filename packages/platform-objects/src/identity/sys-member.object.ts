@@ -164,6 +164,27 @@ export const SysMember = ObjectSchema.create({
     user_id: Field.lookup('sys_user', {
       label: 'User',
       required: true,
+      // [#7724] A membership without its user is meaningless, so deleting the
+      // user takes its memberships with it. This must be DECLARED: a `lookup`
+      // defaults to `set_null`, and the engine escalates a *defaulted*
+      // `set_null` on a REQUIRED foreign key to `restrict` (you cannot null a
+      // NOT NULL column). That escalation vetoed every `sys_user` delete on any
+      // deployment where the membership reconciler had run — i.e. all of them,
+      // since `reconcile-membership.ts` binds every user to the default org at
+      // sign-up, and (since #7796) invitation acceptance ADOPTS that same row.
+      // So `/admin/remove-user` could never succeed, and the operator could not
+      // clear the blocker by hand either: `enable.apiMethods` below is read-only.
+      //
+      // Audited before declaring it, because the engine's own error naming
+      // `deleteBehavior:'cascade'` is a suggestion, not an audit: nothing
+      // depends on the restrict. In particular it is NOT an accidental
+      // last-administrator guard — that invariant is enforced by a `beforeDelete`
+      // hook registered on `sys_member` itself (ADR-0024 D5.2,
+      // `last-admin-guard.ts`), and the engine's cascade recurses through the
+      // PUBLIC `delete()` precisely so the child's own hooks and events fire.
+      // The guard therefore still refuses a cascade that would take the last
+      // administrator's standing away; it simply refuses it one row deeper.
+      deleteBehavior: 'cascade',
     }),
     
     // [ADR-0108 / #3723] The framework's four roles — the WHOLE list. Nothing

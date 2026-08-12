@@ -460,6 +460,92 @@ describe('withValidationErrorMapping – ObjectQL ValidationError → better-aut
     await expect(adapter.update()).rejects.toBe(boom);
   });
 
+  // [#7724] The third arm. A referential veto is raised by the ENGINE, well
+  // below the layers that know better-auth exists, so it carried neither the
+  // validation envelope nor the policy-refusal code and fell through to
+  // `throw err` — reaching an admin as a 500 with an EMPTY body for a refusal
+  // the engine had explained in full.
+  describe('a referential delete restriction (DELETE_RESTRICTED) → 409', () => {
+    // Faithful mimic of the engine's envelope (`packages/objectql/src/engine.ts`,
+    // ADR-0112 + #7307's message split).
+    const restricted = () => {
+      const err: any = new Error('Cannot delete User: 1 or more Member records still reference it.');
+      err.code = 'DELETE_RESTRICTED';
+      err.status = 409;
+      err.object = 'sys_user';
+      err.dependentObject = 'sys_member';
+      err.dependentCount = 3;
+      err.developerMessage =
+        'Cannot delete sys_user: 3 dependent sys_member record(s) reference it via user_id ' +
+        "(user_id is required, so it cannot be cleared). Delete or reassign them first, " +
+        "or set deleteBehavior:'cascade' on sys_member.user_id.";
+      return err;
+    };
+
+    it('maps it to a 409 APIError instead of letting it escape as a bodyless 500', async () => {
+      const adapter = withValidationErrorMapping({
+        delete: async () => {
+          throw restricted();
+        },
+      });
+
+      let caught: any;
+      try {
+        await adapter.delete();
+      } catch (e) {
+        caught = e;
+      }
+
+      // Both halves of the envelope, per ADR-0112: a throw alone cannot tell
+      // "refused with the wrong envelope" apart from "refused correctly" —
+      // the unfixed path throws too, it just throws something better-auth
+      // cannot render.
+      expect(isAPIError(caught)).toBe(true);
+      expect(caught.statusCode).toBe(409);
+      expect(caught.body).toMatchObject({
+        code: 'DELETE_RESTRICTED',
+        message: 'Cannot delete User: 1 or more Member records still reference it.',
+      });
+    });
+
+    it('carries the structured half through — the remedy stays reachable', async () => {
+      // #7307's reasoning at the REST mapping, applied to this transport:
+      // dropping `developerMessage` here would move the defect rather than fix
+      // it, and it discloses nothing `dependentObject` does not already.
+      const adapter = withValidationErrorMapping({
+        delete: async () => {
+          throw restricted();
+        },
+      });
+
+      const caught: any = await adapter.delete().catch((e: unknown) => e);
+      expect(caught.body.dependentObject).toBe('sys_member');
+      expect(caught.body.dependentCount).toBe(3);
+      expect(caught.body.developerMessage).toContain("deleteBehavior:'cascade'");
+    });
+
+    it('omits the structured keys when the engine did not supply them', async () => {
+      // A bare `DELETE_RESTRICTED` must still map — the arm keys off `code`,
+      // not off the optional detail — and must not invent `dependentCount: 0`,
+      // which would read as "no dependents" on the error that exists to say
+      // there are some.
+      const bare: any = new Error('Cannot delete: dependent records exist');
+      bare.code = 'DELETE_RESTRICTED';
+      const adapter = withValidationErrorMapping({
+        delete: async () => {
+          throw bare;
+        },
+      });
+
+      const caught: any = await adapter.delete().catch((e: unknown) => e);
+      expect(caught.statusCode).toBe(409);
+      expect(caught.body.code).toBe('DELETE_RESTRICTED');
+      expect(caught.body).not.toHaveProperty('dependentObject');
+      expect(caught.body).not.toHaveProperty('dependentCount');
+      expect(caught.body).not.toHaveProperty('developerMessage');
+    });
+  });
+
   it('passes successful results through untouched and leaves non-function props alone', async () => {
     const adapter = withValidationErrorMapping({
       create: async (x: number) => x + 1,
