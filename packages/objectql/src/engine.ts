@@ -4853,6 +4853,33 @@ export class ObjectQL implements IObjectQLEngine {
    *    not one. `isSystem` is server-derived (never client input), the same
    *    trust the read-only strips on the write path already place in it.
    *
+   * ## Why this door is SILENT where the `$searchFields` door returns a 400
+   *
+   * Asked on #7876 and ruled there on 2026-08-12 (direction C): the divergence
+   * is intended, and it is not reopenable on symmetry alone. The two doors are
+   * two KINDS of surface.
+   *
+   *  - `$searchFields` is AUTHORING input — it tells the server how to RUN the
+   *    query. A value the server will not honour has to be said out loud, or
+   *    the caller gets a WIDER answer than the one they narrowed to, in a
+   *    response with nothing to distinguish it from a satisfied one. That is
+   *    why `assertSearchFieldsAreSearchable` refuses the name with a 400
+   *    (#4254) — the refusal is protecting the ROW SET.
+   *  - `select` is a READ PROJECTION — it names what the caller would like
+   *    back. Dropping a column the caller may not see leaves the answer
+   *    correct: the rows are still the rows that were asked for, one key
+   *    lighter. {@link omitInternalFields} directly above answers
+   *    `?select=id,key` exactly this way, for exactly this reason (#7728), so
+   *    silence here is the platform's existing read-path rule, not an
+   *    exception to it.
+   *
+   * ⛔ Do not add a refusal here to make the two doors agree. That was option B
+   * on #7876, weighed and declined: it turns a request that answers 200
+   * today into a failure, for tidiness, on a spelling no non-system caller in
+   * this tree uses — the companion's only deliberate reader is the backfill
+   * carved out above. If a REAL caller is ever burned by the silent drop, that
+   * measurement reopens it; the asymmetry by itself does not.
+   *
    * ⚠️ `requestedFields` must be the CALLER's `fields`, captured before
    * `planFormulaProjection` — that pass rewrites the projection to every stored
    * column when a formula is in play, companion included.
