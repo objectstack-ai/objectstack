@@ -69,6 +69,12 @@ Translation data for a single field
 
 ---
 
+## Locale
+
+BCP-47 Language Tag (e.g. en-US, zh-CN)
+
+**Type:** `string`
+
 
 ---
 
@@ -91,6 +97,12 @@ Translation data for a single object
 
 
 ---
+
+## TranslationBundle
+
+Map of locale codes to translation data
+
+**Type:** `Record<string, { objects?: Record<string, object>; apps?: Record<string, object>; messages?: Record<string, string>; globalActions?: Record<string, object>; … }>`
 
 
 ---
