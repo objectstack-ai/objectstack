@@ -143,7 +143,7 @@ export interface AuthRouteLedgerEntry {
 }
 
 export const AUTH_ROUTE_LEDGER: readonly AuthRouteLedgerEntry[] = [
-  { route: 'POST /api/v1/auth/change-email', family: 'core-auth', source: 'better-auth', disposition: 'sdk', client: 'auth.changeEmail', note: 'live since #7735: auth-manager.ts sets user.changeEmail.enabled, and the confirmation link rides emailVerification.sendVerificationEmail to the NEW address' },
+  { route: 'POST /api/v1/auth/change-email', family: 'core-auth', source: 'better-auth', disposition: 'sdk', client: 'auth.changeEmail', note: 'live since #7735: auth-manager.ts sets user.changeEmail.enabled, and the confirmation link rides emailVerification.sendVerificationEmail to the NEW address; since #8019 the OLD address also gets an auth.email_change_notice (notification only — sendChangeEmailConfirmation stays off, it is a gate not a notifier)' },
   { route: 'POST /api/v1/auth/change-password', family: 'core-auth', source: 'better-auth', disposition: 'sdk', client: 'auth.changePassword' },
   // #7735 — self-service account deletion is NOT wired, and this row says so
   // rather than booking it as a live SDK surface. Maintainer ruling

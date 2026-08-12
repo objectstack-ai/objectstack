@@ -331,8 +331,17 @@ export const CROSS_FIELD_AUTHORED_CASES: readonly CrossFieldAuthoredCase[] = [
  * SECURITY surface rather than a capability one.
  *
  * Every entry must throw `INVALID_FILTER` / 400 (ADR-0112) on BOTH SQL
- * drivers. `messageIncludes` pins the part of the wording a caller needs to
- * act on; the tests assert the envelope regardless.
+ * drivers. `diagnosticIncludes` pins the wording that says WHICH ruling bit;
+ * the tests assert the envelope regardless.
+ *
+ * [#7929, maintainer ruling 2026-08-12] That wording moved. It used to be
+ * `messageIncludes` — substrings of the message the CALLER receives — and the
+ * rename is the change, not a tidy-up: those sentences name the two columns of
+ * the comparison, and on a read-scope refusal both were written by an
+ * administrator whose policy the tenant never saw. The refusal now answers the
+ * caller with an operand-free sentence and puts this text in the server log, so
+ * these fragments are asserted against the LOGGED diagnostic. A test that finds
+ * one of them in `error.message` is finding the disclosure this card closed.
  *
  * Read this table together with {@link CROSS_FIELD_CASES}: what makes the
  * refusals defensible is that the supported arm above is proven equivalent, so
@@ -342,8 +351,11 @@ export const CROSS_FIELD_AUTHORED_CASES: readonly CrossFieldAuthoredCase[] = [
 export interface CrossFieldRefusalCase {
   name: string;
   filter: unknown;
-  /** Substrings the refusal message must contain. */
-  messageIncludes: string[];
+  /**
+   * Substrings the SERVER-LOG diagnostic must contain (#7929) — never the
+   * caller-visible message, which names no operand at all.
+   */
+  diagnosticIncludes: string[];
   /**
    * Why the shape is refused — surfaced in failure output. Optional because
    * several entries are one spelling of a reason the entry above them states
@@ -358,13 +370,13 @@ export const CROSS_FIELD_REFUSALS: readonly CrossFieldRefusalCase[] = [
   {
     name: 'a dotted relation path is refused',
     filter: { amount: { $gt: { $field: 'account.budget' } } },
-    messageIncludes: ['dotted path', 'same-table'],
+    diagnosticIncludes: ['dotted path', 'same-table'],
     note: 'Maintainer ruling (2026-08-06) point 1 = A: no JOIN planning (disproportionate) and no alias-qualified columns (no alias contract). The memory evaluator DOES walk the path, so this is a deliberate, loudly-reported asymmetry rather than a silent one.',
   },
   {
     name: 'a dotted path is refused even when its head names a real column',
     filter: { amount: { $gt: { $field: 'budget.nested' } } },
-    messageIncludes: ['dotted path'],
+    diagnosticIncludes: ['dotted path'],
     note: 'The refusal is on the SHAPE, not on whether the first segment happens to resolve — otherwise the check would depend on data the compiler cannot see.',
   },
 
@@ -372,13 +384,13 @@ export const CROSS_FIELD_REFUSALS: readonly CrossFieldRefusalCase[] = [
   {
     name: 'an undeclared column is refused at compile time',
     filter: { amount: { $gt: { $field: 'no_such_column' } } },
-    messageIncludes: ['not a declared field'],
+    diagnosticIncludes: ['not a declared field'],
     note: 'The `$field` value lands in a SQL IDENTIFIER position. cloud#1051: letting it through unchecked is dismantling the guard rail — and a compile-time refusal is what makes AI-authored metadata wrong at authoring time rather than in the database.',
   },
   {
     name: 'an undeclared TARGET field is refused too',
     filter: { no_such_column: { $gt: { $field: 'budget' } } },
-    messageIncludes: ['not a declared field'],
+    diagnosticIncludes: ['not a declared field'],
     note: 'A comparison is one surface — validating only the referent would leave half of it unchecked, and the type-class rule below needs both declarations anyway.',
   },
 
@@ -386,13 +398,13 @@ export const CROSS_FIELD_REFUSALS: readonly CrossFieldRefusalCase[] = [
   {
     name: 'the tenant-isolation column is refused as the REFERENT',
     filter: { stage: { $eq: { $field: 'organization_id' } } },
-    messageIncludes: ['tenant-isolation column'],
+    diagnosticIncludes: ['tenant-isolation column'],
     note: 'The named ruling. A comparison against the isolation column is a privilege-escalation comparison surface: it lets a filter probe the tenant boundary the driver injects rather than being scoped by it.',
   },
   {
     name: 'the tenant-isolation column is refused as the TARGET',
     filter: { organization_id: { $eq: { $field: 'stage' } } },
-    messageIncludes: ['tenant-isolation column'],
+    diagnosticIncludes: ['tenant-isolation column'],
     note: 'Closed because the operands of `=` COMMUTE — a ban that a swap of the two sides walks around is not a ban. Ruling names the referent; this is the same surface spelled backwards.',
   },
 
@@ -400,38 +412,38 @@ export const CROSS_FIELD_REFUSALS: readonly CrossFieldRefusalCase[] = [
   {
     name: 'a TEXT column compared to a numeric column is refused (the measured divergence)',
     filter: { stage: { $gt: { $field: 'amount' } } },
-    messageIncludes: ['stored as'],
+    diagnosticIncludes: ['stored as'],
     note: 'THE case that proves the class check is load-bearing, and it is directional. Measured with the check disabled: SQLite answers rows 1,2,3,5 — it orders by STORAGE CLASS first, so every TEXT sorts above every INTEGER — while the in-memory evaluator answers NONE, because JS coerces `"won" > 10` to a NaN comparison. Four rows of difference on one filter.',
   },
   {
     name: 'a numeric column compared to a text column is refused (the mirrored spelling)',
     filter: { amount: { $gt: { $field: 'stage' } } },
-    messageIncludes: ['stored as'],
+    diagnosticIncludes: ['stored as'],
     note: 'The mirror of the case above, and measured to AGREE (both answer nothing) — kept in the refusal arm anyway, because a guard that admitted exactly the pairings one fixture measured as agreeing would be a rule about this data rather than about the types.',
   },
   {
     name: 'a date column compared to a text column is refused',
     filter: { starts_on: { $gt: { $field: 'stage' } } },
-    messageIncludes: ['stored as'],
+    diagnosticIncludes: ['stored as'],
     note: 'Both are TEXT physically, so this one WOULD have compiled — and measured, both paths agree. It is refused because they agree by lexicographic accident rather than by any temporal reading, which is also why the class check reads declared TYPES rather than physical affinity.',
   },
   {
     name: 'a numeric column compared to a date column is refused',
     filter: { amount: { $gt: { $field: 'starts_on' } } },
-    messageIncludes: ['stored as'],
+    diagnosticIncludes: ['stored as'],
   },
 
   // ── Columns with no scalar stored form ──────────────────────────────────
   {
     name: 'a multi-valued (JSON) column is refused as the referent',
     filter: { amount: { $gt: { $field: 'tags' } } },
-    messageIncludes: ['no scalar stored'],
+    diagnosticIncludes: ['no scalar stored'],
     note: 'A JSON column holds a serialized array; SQL comparison operators have no element-wise reading of it, and #7398 already refuses the scalar operators on such a column for a value comparand.',
   },
   {
     name: 'a formula (virtual) column is refused as the referent',
     filter: { amount: { $gt: { $field: 'projected_total' } } },
-    messageIncludes: ['no scalar stored'],
+    diagnosticIncludes: ['no scalar stored'],
     note: 'A formula field is virtual — `createColumn` emits no column at all, so there is nothing to reference. Declared-only enumeration alone would have ADMITTED it, which is why the class check is a second gate rather than a restatement of the first.',
   },
 
@@ -458,24 +470,24 @@ export const CROSS_FIELD_REFUSALS: readonly CrossFieldRefusalCase[] = [
   {
     name: 'a $field member of an $in list is refused',
     filter: { amount: { $in: [{ $field: 'budget' }, 1] } },
-    messageIncludes: ['index 0'],
+    diagnosticIncludes: ['index 0'],
     note: 'Before #5041 this did not even crash: it compiled, ran, and returned ZERO ROWS. The index is named because it is the only thing distinguishing the bad member from its legitimate neighbours.',
   },
   {
     name: 'a $field member of a $nin list is refused',
     filter: { amount: { $nin: [{ $field: 'budget' }] } },
-    messageIncludes: ['index 0'],
+    diagnosticIncludes: ['index 0'],
     note: 'The $nin direction is the dangerous one — a lost member drops an EXCLUSION the caller wrote, widening the result set.',
   },
   {
     name: 'a $field lower bound of a $between is refused',
     filter: { amount: { $between: [{ $field: 'budget' }, 100] } },
-    messageIncludes: ['index 0'],
+    diagnosticIncludes: ['index 0'],
   },
   {
     name: 'a $field upper bound of a $between is refused',
     filter: { amount: { $between: [0, { $field: 'budget' }] } },
-    messageIncludes: ['index 1'],
+    diagnosticIncludes: ['index 1'],
   },
 
   // ── String operators — refused in v1, and the reason is a filter bypass ──
@@ -489,27 +501,59 @@ export const CROSS_FIELD_REFUSALS: readonly CrossFieldRefusalCase[] = [
   {
     name: '$startsWith against a field reference is refused',
     filter: { stage: { $startsWith: { $field: 'owner' } } },
-    messageIncludes: ['$field'],
+    diagnosticIncludes: ['$field'],
     note: 'v1 refusal: a column-side LIKE pattern cannot be metacharacter-escaped portably, and an unescaped one is the `%`-matches-every-row bypass.',
   },
   {
     name: '$contains against a field reference is refused',
     filter: { stage: { $contains: { $field: 'owner' } } },
-    messageIncludes: ['$field'],
+    diagnosticIncludes: ['$field'],
   },
   {
     name: '$endsWith against a field reference is refused',
     filter: { stage: { $endsWith: { $field: 'owner' } } },
-    messageIncludes: ['$field'],
+    diagnosticIncludes: ['$field'],
   },
   {
     name: '$notContains against a field reference is refused',
     filter: { stage: { $notContains: { $field: 'owner' } } },
-    messageIncludes: ['$field'],
+    diagnosticIncludes: ['$field'],
   },
   {
     name: '$icontains against a field reference is refused',
     filter: { stage: { $icontains: { $field: 'owner' } } },
-    messageIncludes: ['$field'],
+    diagnosticIncludes: ['$field'],
   },
 ] as const;
+
+/**
+ * [#7929] Every column name a {@link CROSS_FIELD_REFUSALS} entry can put in its
+ * operands — the list a CALLER-VISIBLE refusal message must contain none of.
+ *
+ * The corpus's own filters are the source: the declared columns of
+ * {@link CROSS_FIELD_OBJECT_FIELDS} that appear on either side of a refused
+ * comparison, plus the three names that are refused precisely because the
+ * object does NOT declare them. Both sides matter — on a read-scope refusal the
+ * administrator wrote the target column as surely as the referenced one, so a
+ * check that watched only the `$field` value would pass a message still naming
+ * half the policy.
+ *
+ * `id` is deliberately absent. No refusal case references it, and a two-letter
+ * substring search over English prose reports a disclosure for words like
+ * "considered" — an assertion that fails for reasons unrelated to what it
+ * claims is worse than no assertion. Add a name here when a case adds one.
+ */
+export const CROSS_FIELD_OPERAND_NAMES: readonly string[] = [
+  'amount',
+  'budget',
+  'stage',
+  'owner',
+  'starts_on',
+  'ends_on',
+  'organization_id',
+  'tags',
+  'projected_total',
+  'account.budget',
+  'budget.nested',
+  'no_such_column',
+];

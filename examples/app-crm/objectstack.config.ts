@@ -21,6 +21,7 @@ import {
   RepLeadSharingRule,
   WonDealActivitySharingRule,
 } from './src/security/index.js';
+import { registerCrmPositionBindings } from './src/security/bind-position-sets.js';
 import { CrmSeedData } from './src/data/index.js';
 import { CrmDatasource, CrmAnalyticsDatasource } from './src/datasources/crm.datasource.js';
 import { CrmTranslationBundle } from './src/translations/crm.translation.js';
@@ -110,3 +111,12 @@ export default defineStack({
   // Seed data
   data: CrmSeedData,
 });
+
+/**
+ * [#8060] Ensure the persona position↔permission-set bindings exist after the
+ * security bootstraps (cannot be a seed — see bind-position-sets.ts). Mirrors
+ * app-showcase's own `onEnable` wiring.
+ */
+export const onEnable = async (ctx: unknown): Promise<void> => {
+  registerCrmPositionBindings(ctx as Parameters<typeof registerCrmPositionBindings>[0]);
+};

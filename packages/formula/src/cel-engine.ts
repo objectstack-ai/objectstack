@@ -855,8 +855,12 @@ function wrapInDate(node: CelNode): CelNode {
  * actually happened — the ~99% case that needs no rewrite evaluates the original
  * source untouched. Memoized per source string; a parse fault returns the source
  * unchanged (compile()/evaluate() report it).
+ *
+ * This arm is a pure function of the SOURCE, which is why it is memoized under
+ * the source alone. The Date-valued-BINDING arm (#7168) cannot be — see
+ * {@link rewriteTemporalEquality}.
  */
-export function rewriteTemporalEquality(source: string): string {
+function rewriteTemporalCallEquality(source: string): string {
   if (typeof source !== 'string' || !source.trim()) return source;
   const cached = temporalRewriteCache.get(source);
   if (cached !== undefined) return cached;
@@ -903,6 +907,165 @@ function rememberRewrite(source: string, rewritten: string): void {
     if (first !== undefined) temporalRewriteCache.delete(first);
   }
   temporalRewriteCache.set(source, rewritten);
+}
+
+/**
+ * A `==`/`!=` occurrence whose verdict depends on the SCOPE and not on the
+ * source: BOTH operands name a scope path, so which one (if either) holds a
+ * Date at evaluation time is unknowable from the AST. See
+ * {@link bindingEqualityCandidates}.
+ */
+type BindingEqualityCandidate = { readonly a: readonly string[]; readonly b: readonly string[] };
+
+/**
+ * Every `<path> ==/!= <path>` occurrence in `source`, as the two scope paths.
+ *
+ * This is the part of the #7168 analysis that IS a pure function of the source,
+ * so it is parsed once per source and memoized — which is what keeps the
+ * scope-aware arm off the hot path. A source with no such occurrence (a literal
+ * comparison, an arithmetic operand, no equality at all) can never need the
+ * binding rewrite, and that verdict is final for every row.
+ */
+function bindingEqualityCandidates(source: string): readonly BindingEqualityCandidate[] {
+  const cached = bindingEqCandidateCache.get(source);
+  if (cached !== undefined) return cached;
+  const out: BindingEqualityCandidate[] = [];
+  // Cheap gate first: no equality operator, no candidate — and no parse.
+  if (source.includes('==') || source.includes('!=')) {
+    try {
+      const ast = (recordScopeEnv ??= buildScopedEnv([])).parse(source).ast;
+      const visit = (node: unknown): void => {
+        if (!isCelNode(node)) return;
+        if ((node.op === '==' || node.op === '!=') && Array.isArray(node.args) && node.args.length === 2) {
+          const a = scopePath(node.args[0]);
+          const b = scopePath(node.args[1]);
+          if (a && b) out.push({ a, b });
+        }
+        if (Array.isArray(node.args)) for (const child of node.args) visit(child);
+      };
+      visit(ast);
+    } catch {
+      // A parse fault is compile()/evaluate()'s to report; no candidates here.
+      out.length = 0;
+    }
+  }
+  rememberCandidates(source, out);
+  return out;
+}
+
+/** Bounded memo of source → its {@link BindingEqualityCandidate}s (#7168). */
+const bindingEqCandidateCache = new Map<string, readonly BindingEqualityCandidate[]>();
+function rememberCandidates(source: string, candidates: readonly BindingEqualityCandidate[]): void {
+  if (bindingEqCandidateCache.size >= TEMPORAL_REWRITE_CACHE_MAX) {
+    const first = bindingEqCandidateCache.keys().next().value;
+    if (first !== undefined) bindingEqCandidateCache.delete(first);
+  }
+  bindingEqCandidateCache.set(source, candidates);
+}
+
+/**
+ * True when this occurrence is the #7168 shape **in this scope**: one side holds
+ * a `Date` and the other an ISO-8601 temporal string. Both conditions are read
+ * off the values in hand — never off a static type, which under
+ * `unlistedVariablesAreDyn` says nothing.
+ */
+function isDateBindingPair(c: BindingEqualityCandidate, scope: Record<string, unknown>): boolean {
+  const va = resolveScopePath(scope, c.a);
+  const vb = resolveScopePath(scope, c.b);
+  return (vb instanceof Date && coercionFor(va, 'temporal') === 'date')
+    || (va instanceof Date && coercionFor(vb, 'temporal') === 'date');
+}
+
+/**
+ * #7168 — wrap the ISO-string operand of a `<path> ==/!= <path>` whose
+ * counterpart is a **Date-valued binding**, so the comparison is Timestamp vs
+ * Timestamp instead of string vs Timestamp.
+ *
+ * Same three-condition discipline as {@link rewriteFaultedOperands}, and the
+ * middle one is what keeps the fix from becoming the mirror-image defect:
+ *  1. the operand is a scope path — never a literal, a call, or an arith
+ *     sub-tree, so its value is readable before deciding;
+ *  2. the counterpart is a `Date` **in this scope** — not a temporal call (the
+ *     {@link rewriteTemporalCallEquality} arm owns that), not a `date(...)`
+ *     call, not a date-shaped string;
+ *  3. this operand's own value is an ISO-8601 temporal string that parses
+ *     ({@link coercionFor}).
+ *
+ * Condition 3 is load-bearing and deliberately strict. `date()` is `toDate` —
+ * `new Date(String(v))` — so wrapping unconditionally would coerce operands that
+ * are not dates at all, and JS date parsing is lenient enough to invent
+ * equalities: `"5"` and `"05"` are different strings but BOTH parse to
+ * 2001-05-01, turning a correct `false` into a silent `true`. Requiring an
+ * ISO-8601 string leaves every non-date comparison exactly as it answers today.
+ *
+ * Deliberately NOT covered: a date-ONLY string (`"2026-06-20"`) against a Date
+ * carrying wall-clock time (`2026-06-20T14:33:00Z`) stays `false`. `date()`
+ * parses, it does not truncate to a calendar day, and those two operands are
+ * genuinely different instants. Truncating both sides to a day would make
+ * `record.dt == previous.dt` a day-granularity comparison — the same
+ * silent-wrong-answer defect pointing the other way.
+ *
+ * Returns the rewritten source, or null when no operand qualifies.
+ */
+function rewriteDateBindingEquality(source: string, scope: Record<string, unknown>): string | null {
+  let ast: unknown;
+  try {
+    ast = (recordScopeEnv ??= buildScopedEnv([])).parse(source).ast;
+  } catch {
+    return null;
+  }
+  let changed = false;
+  const visit = (node: unknown): void => {
+    if (!isCelNode(node)) return;
+    if ((node.op === '==' || node.op === '!=') && Array.isArray(node.args) && node.args.length === 2) {
+      const args = node.args as unknown[];
+      for (const side of [0, 1] as const) {
+        const path = scopePath(args[side]);
+        if (!path) continue;
+        const counterpartPath = scopePath(args[1 - side]);
+        if (!counterpartPath) continue;
+        if (!(resolveScopePath(scope, counterpartPath) instanceof Date)) continue;
+        if (coercionFor(resolveScopePath(scope, path), 'temporal') !== 'date') continue;
+        args[side] = wrapInCall('date', args[side] as CelNode);
+        changed = true;
+      }
+    }
+    if (Array.isArray(node.args)) for (const child of node.args) visit(child);
+  };
+  visit(ast);
+  return changed ? serialize(ast as Parameters<typeof serialize>[0]) : null;
+}
+
+/**
+ * The temporal-equality rewrite: coerce a date-string field operand so `==`/`!=`
+ * against a Timestamp compares instants instead of silently never matching.
+ *
+ * Two arms, layered so they compose on one expression:
+ *  - **temporal CALL** counterpart (#3183) — `record.due == today()`. A pure
+ *    function of the source, memoized per source string;
+ *  - **Date-valued BINDING** counterpart (#7168) — `record.due == previous.due`
+ *    where `previous.due` arrived from the driver as a `Date` and `record.due`
+ *    from a JSON payload as `"2026-06-20"`. Same logical field, same instant,
+ *    and the comparison answered a silent `false` — `{ ok: true, value: false }`,
+ *    no fault, no log line. Runs only when a `scope` is supplied.
+ *
+ * Why the second arm needs the scope, and why it is NOT memoized under the
+ * source: a binding's runtime type is not in the AST. `record.due` and
+ * `previous.due` are the same shape whether either holds a `Date`, a string, or
+ * null, and under `unlistedVariablesAreDyn` the static type says nothing either.
+ * The verdict is therefore a property of the ROW, not of the expression — so
+ * caching it under the source key would apply row 1's verdict to row 2. What IS
+ * cached per source is the *analysis* ({@link bindingEqualityCandidates}): the
+ * occurrences whose verdict could depend on a scope at all. Sources without one
+ * — the overwhelming majority — take the memoized static path and never reparse.
+ */
+export function rewriteTemporalEquality(source: string, scope?: Record<string, unknown>): string {
+  const out = rewriteTemporalCallEquality(source);
+  if (!scope) return out;
+  const candidates = bindingEqualityCandidates(out);
+  if (candidates.length === 0) return out;
+  if (!candidates.some((c) => isDateBindingPair(c, scope))) return out;
+  return rewriteDateBindingEquality(out, scope) ?? out;
 }
 
 /** True when `node` is the CEL `null` literal (`{ op: 'value', args: null }`). */
@@ -1450,10 +1613,14 @@ export const celEngine: DialectEngine = {
       // temporal function (`date(record.d) == today()`), so a `Field.date` string
       // matches the Timestamp instead of silently never equalling it. No-op (and
       // no reserialize) for any source without such a comparison.
+      // #7168 — `scope` extends that to a Date-valued BINDING counterpart
+      // (`record.due == previous.due`, `previous` hydrated by the driver): the
+      // runtime type of a binding is not in the AST, so this arm is decided per
+      // row against the values in hand. Non-date operands are untouched.
       // #3306 — then relax the null-guard idiom `cond ? <value> : null` so a
       // nullable numeric/string formula evaluates instead of faulting cel-js's
-      // ternary unifier. Both rewrites are no-ops for sources that don't need them.
-      const evalSource = rewriteNullableTernary(rewriteTemporalEquality(source));
+      // ternary unifier. All rewrites are no-ops for sources that don't need them.
+      const evalSource = rewriteNullableTernary(rewriteTemporalEquality(source, scope));
       try {
         const raw = env.evaluate(evalSource, scope);
         return { ok: true, value: coerce(raw) as T };
