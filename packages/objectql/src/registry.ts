@@ -142,6 +142,27 @@ function mergeObjectDefinitions(base: ServiceObject, extension: Partial<ServiceO
 }
 
 /**
+ * [#8027] Key-order-insensitive JSON, for comparing two `validations` /
+ * `indexes` entries BY VALUE — see
+ * {@link SchemaRegistry.subtractExtenderContributions}.
+ *
+ * Plain `JSON.stringify` would report the same rule as two different rules
+ * whenever the two copies were built by different code paths (a stored overlay
+ * row that went through `JSON.parse` vs the contributor's in-memory literal),
+ * which is exactly the pair being compared, so key order cannot be assumed.
+ * Arrays keep their order — an index's `fields` list is ordered and two
+ * spellings of it are genuinely two different indexes.
+ */
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([, v]) => v !== undefined)
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${stableStringify(v)}`).join(',')}}`;
+}
+
+/**
  * Global Schema Registry
  * Unified storage for all metadata types (Objects, Apps, Flows, Layouts, etc.)
  * 
@@ -1502,11 +1523,36 @@ export class SchemaRegistry {
    * Returns `base` untouched when nothing extends the name, so a caller may
    * apply it unconditionally.
    *
-   * NOT idempotent, by construction: {@link mergeObjectDefinitions} CONCATENATES
-   * `validations` and `indexes`, so folding an already-folded body would
-   * duplicate both. Callers must apply this only to a base that has not been
-   * through the fold — which is why the protocol applies it to the
-   * MetadataService body and never to a registry-resolved one.
+   * [#8027] IDEMPOTENT, by construction — and it has to be, because the
+   * "callers must only pass an unfolded base" precondition this method carried
+   * when #7556 introduced it is not one any caller can honour.
+   *
+   * {@link mergeObjectDefinitions} CONCATENATES `validations` and `indexes`
+   * (`fields` is a key-keyed spread and the scalar props are last-writer-wins,
+   * so those were always safe). A second fold therefore used to duplicate both,
+   * and two shipped call sites already handed it a folded base:
+   *
+   *  1. The MetadataService body on an IN-PROCESS boot. ObjectQL's
+   *     `bridgeObjectsToMetadataService` seeds that service from
+   *     `registry.getAllObjects()` — bodies that are already resolved — so the
+   *     by-name read and the layered `code` layer folded a folded body and
+   *     served every extender-contributed validation and index TWICE. #7556's
+   *     own pin could not see it: it compares FIELD NAMES, and the field spread
+   *     is idempotent.
+   *  2. A `sys_metadata` overlay row (#8027). The write path persists the
+   *     request body verbatim (ADR-0005 §Validation), so the ordinary Studio
+   *     GET → edit → PUT round-trip stores whatever the read served — and since
+   *     #7556 that read is folded. The row is DEFINED by D9.2 as the base
+   *     layer, but nothing enforces it, and legacy/seeded/imported rows are
+   *     unconstrained besides.
+   *
+   * So the precondition is dropped rather than documented harder: an entry the
+   * `extend` contributors are about to add, already sitting in `base`, is
+   * removed from the base first and then re-added by the fold exactly once.
+   * Extenders are still concatenated against EACH OTHER — two contributors
+   * declaring an identical rule still yield two, matching {@link resolveObject}
+   * — so this narrows nothing the fold was doing on an unfolded base, and such
+   * a base is returned byte-identically to before.
    */
   foldObjectExtendersOnto<T>(name: string, base: T): T {
     if (base === null || typeof base !== 'object') return base;
@@ -1516,8 +1562,46 @@ export class SchemaRegistry {
     if (!contributors || !contributors.some((c) => c.ownership === 'extend')) return base;
     return this.foldExtendersOntoDefinition(
       contributors,
-      base as unknown as ServiceObject,
+      this.subtractExtenderContributions(contributors, base as unknown as ServiceObject),
     ) as unknown as T;
+  }
+
+  /**
+   * [#8027] Remove from `base` the `validations` / `indexes` entries the
+   * `extend` contributors are about to contribute — the half of
+   * {@link foldObjectExtendersOnto} that makes the fold idempotent.
+   *
+   * Only the two CONCATENATING keys are considered; `fields` and the scalar
+   * props already re-apply cleanly. Matching is by deep value equality on the
+   * serialised entry, so it fires only on an entry byte-identical to the one
+   * the extender declares — an entry the author merely gave the same `name` is
+   * a different rule and is left where it is.
+   *
+   * Returns `base` BY REFERENCE when nothing matched, which is the ordinary
+   * case (an unfolded base), so the pre-#8027 body is preserved exactly.
+   */
+  private subtractExtenderContributions(
+    contributors: ObjectContributor[],
+    base: ServiceObject,
+  ): ServiceObject {
+    const key = (entry: unknown): string => stableStringify(entry);
+    let out: ServiceObject | undefined;
+    for (const listKey of ['validations', 'indexes'] as const) {
+      const baseList = (base as Record<string, unknown>)[listKey];
+      if (!Array.isArray(baseList) || baseList.length === 0) continue;
+      const contributed = new Set<string>();
+      for (const contrib of contributors) {
+        if (contrib.ownership !== 'extend') continue;
+        const list = (contrib.definition as unknown as Record<string, unknown>)[listKey];
+        if (Array.isArray(list)) for (const entry of list) contributed.add(key(entry));
+      }
+      if (contributed.size === 0) continue;
+      const kept = baseList.filter((entry) => !contributed.has(key(entry)));
+      if (kept.length === baseList.length) continue;
+      out ??= { ...base };
+      (out as unknown as Record<string, unknown>)[listKey] = kept;
+    }
+    return out ?? base;
   }
 
   /**
