@@ -249,6 +249,7 @@ export const ERROR_CODE_LEDGER = {
   ],
   '@objectstack/plugin-sharing': [
     'AUDIENCE_NOT_ALLOWED',
+    'ELIGIBILITY_UNEVALUABLE',    // [#7861] publicSharing.eligibility would not compile / faulted on the record — refused, never issued past an unanswered policy
     'EXPIRED_OR_REVOKED',
     'EXPIRY_IN_PAST',
     'EXPIRY_TOO_LONG',
@@ -260,6 +261,7 @@ export const ERROR_CODE_LEDGER = {
     'NOT_FOUND',
     'PERMISSION_NOT_ALLOWED',     // share level would grant a verb the sharer lacks
     'RECORD_GONE',
+    'RECORD_NOT_ELIGIBLE',        // [#7861] publicSharing.eligibility returned false for this record
     'SHARING_NOT_ENABLED',
     'SIGN_IN_REQUIRED',
     'UNSUPPORTED',

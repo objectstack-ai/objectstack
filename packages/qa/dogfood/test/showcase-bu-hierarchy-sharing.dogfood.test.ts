@@ -9,6 +9,14 @@
 // rows; a non-owner in the unit subtree can then read a private record.
 //
 // @proof: showcase-bu-hierarchy-sharing
+//
+// ADR-0056 D10 — the authz-conformance matrix rows this file is the cited proof
+// for; `authz-conformance.test.ts` asserts the pairing is mutual (#7976). Two
+// rows on two assertions: the criteria rule MATERIALISING into sys_record_share
+// (`sharing-rules`, here via the `business_unit` recipient), and the subordinate
+// unit's member reading through the tree (`hierarchy-widening`).
+// authz-row: sharing-rules
+// authz-row: hierarchy-widening
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack from '@objectstack/example-showcase';

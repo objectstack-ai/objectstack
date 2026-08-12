@@ -36,7 +36,12 @@ export type {
 // ADR-0060 — reusable conformance-ledger helper (static complement to the
 // runtime harness): classify every declarable property, fail closed on drift.
 export { checkLedger } from './conformance.js';
-export type { ConformanceRow, ConformanceState, CheckLedgerOptions } from './conformance.js';
+export type {
+  ConformanceRow,
+  ConformanceState,
+  CheckLedgerOptions,
+  ProofAttributionOptions,
+} from './conformance.js';
 
 // Driver read-coercion conformance: a stored value must read back as its
 // declared type on every driver (the case_escalation `1 != true` invariant).

@@ -3,7 +3,7 @@
 import type {
     DataProtocol, MetadataProtocol, PackageProtocol,
 } from '@objectstack/spec/api';
-import { IDataEngine, engineCanRollBack } from '@objectstack/core';
+import { IDataEngine, engineCanRollBack, recordNotFoundError } from '@objectstack/core';
 import { readEnvWithDeprecation, resolveTenancyPosture } from '@objectstack/types';
 // [#6285] ADR-0105 D1's authority on "does this deployment wall organizations?".
 // `resolveMultiOrgEnabled()` is DEMOTED and its own doc comment says answering
@@ -640,43 +640,22 @@ export function zodIssuesToMetadataIssues(issues: unknown): MetadataIssueEntry[]
 }
 
 /**
- * [#4435] The 404 a single-record operation answers when the id names no row.
+ * [#4435/#5138] The 404 a single-record operation answers when the id names no
+ * row — the repo's ONE `RECORD_NOT_FOUND` envelope.
  *
- * Extracted so the READ and the two WRITE paths cannot disagree about it. They
- * did: `getData` answered `404 RECORD_NOT_FOUND` while `updateData` returned
- * `200 { record: null }` and `deleteData` returned `200 { success: true }` for
- * any string in the path — so a typo'd id, an already-deleted row and a real
- * deletion were indistinguishable, and a client PATCHing a concurrently deleted
- * record was told its write had landed.
+ * [#7867] The body moved to `@objectstack/core`
+ * (`utils/record-not-found.ts` — full provenance lives there); this is a
+ * re-export, so every existing importer of
+ * `@objectstack/metadata-protocol`'s `recordNotFoundError` is unchanged and
+ * the three producers still share one function object.
  *
- * That is the same silent-no-op shape the v17 train removed everywhere else
- * this window (#4240/#4303/#4315 refuse missing fields, #4169 refuses unknown
- * params, #4190 stopped dropping filters) — a write that touched zero rows
- * reporting 200 is that shape one level up, on the verb where it costs the
- * most.
- *
- * [#5138] EXPORTED, for the same "cannot disagree about it" reason one layer
- * out. `@objectstack/runtime`'s `callData` is protocol-first with an ObjectQL
- * FALLBACK, and the fallback had reinvented this fact three incompatible ways
- * (`get` → `null`, `update` → a bare `Error` with no status ⇒ 500, `delete` →
- * no check at all ⇒ `200 { deleted: true }` for a row that never existed). It
- * now calls THIS function, so the two paths behind one `callData` answer a
- * missing id identically — which is the only reason a caller may stop caring
- * which of them served it. Re-spelling the envelope there would have been a
- * second not-found envelope; `RECORD_NOT_FOUND` (#5088) is the one this repo
- * has.
+ * ⛔ Do not re-declare it here. It moved because a THIRD producer needed it and
+ * could not reach this package: `ObjectQL.update()`/`delete()`'s by-id gate
+ * lives in `packages/objectql`, whose `/core` entry closure is forbidden by
+ * ADR-0076 D2's boundary ratchet from importing `@objectstack/metadata-protocol`
+ * at all. A local copy here would be the second spelling #5138 ruled out.
  */
-export function recordNotFoundError(object: string, id: string | number): Error {
-    const err = new Error(`Record ${id} not found in ${object}`) as Error & {
-        code?: string;
-        status?: number;
-        object?: string;
-    };
-    err.code = 'RECORD_NOT_FOUND';
-    err.status = 404;
-    err.object = object;
-    return err;
-}
+export { recordNotFoundError };
 
 /**
  * A 400 for a `$filter` ARRAY that looks like a filter AST but is not one.
@@ -4117,6 +4096,57 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#7556] Resolve an OBJECT body that came from the MetadataService into the
+     * object's resolved schema, by folding the registry's `extend` contributors
+     * onto it.
+     *
+     * The two readers of a single object — this file's by-name read and its
+     * layered view — consult {@link readItemFromMetadataService} BEFORE the
+     * SchemaRegistry, because that service is the HMR-fresh copy. For every
+     * other metadata type that ordering is free. For `object` it is not: an
+     * object's resolved schema is DEFINED (ADR-0029 D9.2 / D9.6) as a base layer
+     * with its `extend` contributors folded on, and the MetadataService copy is
+     * only the base layer. A deployment that ingests a compiled artifact
+     * (`artifactSource`, i.e. every sealed/served runtime) registers `objects`
+     * and `objectExtensions` into that service as SEPARATE collections, so the
+     * body this method receives is the owner's declaration with no extender in
+     * it. Serving it unfolded is what made the showcase's three
+     * `objectExtensions` fields readable through `GET /meta/object`, writable
+     * through the data API, and absent from `GET /meta/object/:name` — the read
+     * the edit and new forms derive from.
+     *
+     * The list read needs no counterpart: it reads `registry.listItems`, whose
+     * object branch resolves through the same fold, so it was never wrong.
+     * This method exists to make the two AGREE at their one point of
+     * divergence, not to give the by-name route a rule of its own.
+     *
+     * Applied ONLY to a MetadataService body. A registry-sourced body has
+     * already been folded, and the fold concatenates `validations`/`indexes`
+     * (see {@link SchemaRegistry.foldObjectExtendersOnto}), so applying it twice
+     * would duplicate both.
+     */
+    private foldObjectExtendersFromRegistry(type: string, name: unknown, body: unknown): unknown {
+        const singular = PLURAL_TO_SINGULAR[type] ?? type;
+        if (singular !== 'object') return body;
+        if (body === null || typeof body !== 'object') return body;
+        // [#8027] The list caller reads the name off the ROW rather than off a
+        // request, and a row with no usable `name` has no contributor list to
+        // look up — `mergePackageAwareOverlay` skips such rows too.
+        if (typeof name !== 'string' || name === '') return body;
+        const registry = (this.engine as any)?.registry;
+        // Partial registry doubles in tests predate this method; a host that
+        // cannot fold answers exactly as it did before.
+        if (!registry || typeof registry.foldObjectExtendersOnto !== 'function') return body;
+        try {
+            return registry.foldObjectExtendersOnto(name, body);
+        } catch {
+            // The fold is a read over in-memory contributors; a failure here
+            // must not turn a served schema into a 5xx.
+            return body;
+        }
+    }
+
+    /**
      * [#5840] Read ONE item from the `metadata` service, keeping the ADR-0110
      * D3 verdict instead of flattening it into `undefined`.
      *
@@ -4333,7 +4363,19 @@ export class ObjectStackProtocolImplementation implements
                         const patch = viewIdentityPatch(data as Record<string, unknown>, prev);
                         if (patch) Object.assign(data as Record<string, unknown>, patch);
                     }
-                    return data;
+                    // [#8027] The list half of the same rule the by-name read
+                    // applies to its own overlay adoption. This merge REPLACES a
+                    // base item with the overlay body wholesale (it is a
+                    // per-slot layer pick, not a field merge), so for `object` —
+                    // whose resolved schema is D9.2's base-plus-extenders — the
+                    // winning row has to be resolved the same way `resolveObject`
+                    // resolves the base it displaced, or the two reads of one
+                    // object disagree the moment a row exists. Both routes were
+                    // wrong here together, which is why #7556's byName===listed
+                    // pin stayed green through this defect.
+                    return this.foldObjectExtendersFromRegistry(
+                        request.type, (data as { name?: unknown } | null)?.name, data,
+                    );
                 });
 
                 // Only hydrate the global registry for unscoped (control-plane)
@@ -4730,6 +4772,30 @@ export class ObjectStackProtocolImplementation implements
             };
         }
 
+        // [#8027] An OBJECT's overlay row is a BASE LAYER, not a resolved
+        // schema. ADR-0029 D9.2 defines the resolution as `overlay ?? own` with
+        // the `extend` contributors folded ON — which is what
+        // `SchemaRegistry.resolveObject` does for an overlay it knows about, and
+        // what step 2 below already does (#7556) for the MetadataService copy.
+        // Step 1 was the one adopter that served its layer verbatim, so a single
+        // customisation row — an admin renaming the object's label in Studio —
+        // silently dropped every extension-contributed field from this read, and
+        // therefore from every writable form derived from it, while the data API
+        // kept accepting and persisting those same fields.
+        //
+        // Placed AFTER the draft return on purpose: a draft is a pending edit of
+        // the base layer, and folding it would show an author extension fields
+        // inside the document they are editing and about to PUT back. Drafts were
+        // never folded (before #7556 nothing was), so this leaves that asymmetry
+        // exactly where it already was rather than widening this fix into it.
+        //
+        // No-op for every type but `object`, for an object nothing extends, and
+        // for an item with no overlay row (`item` is still undefined here, and
+        // step 2 / step 3 fold their own sources).
+        if (item !== undefined) {
+            item = this.foldObjectExtendersFromRegistry(request.type, request.name, item);
+        }
+
         // 2. MetadataService (runtime-registered items: HMR-updated view/page/
         //    dashboard/agent/tool, plus FilesystemLoader-sourced items). This
         //    is consulted BEFORE the in-memory SchemaRegistry because the
@@ -4754,7 +4820,12 @@ export class ObjectStackProtocolImplementation implements
                     request.packageId,
                 );
                 if (fromService.data !== undefined && fromService.data !== null) {
-                    item = fromService.data;
+                    // [#7556] A layer, not a resolved schema — see
+                    // {@link foldObjectExtendersFromRegistry}. No-op for every
+                    // type but `object`, and for an object nothing extends.
+                    item = this.foldObjectExtendersFromRegistry(
+                        request.type, request.name, fromService.data,
+                    );
                 } else if (fromService.degraded) {
                     serviceDegraded = fromService;
                 }
@@ -4967,7 +5038,15 @@ export class ObjectStackProtocolImplementation implements
                 request.packageId,
             );
             if (fromService.data !== undefined && fromService.data !== null) {
-                code = fromService.data;
+                // [#7556] The CODE layer of an object is D9.6's "owner's
+                // declaration with its extenders folded on", so the
+                // MetadataService copy is its base, not the layer itself.
+                // `effective` is `overlay ?? code`, so an object with no
+                // overlay row — the ordinary shape — is corrected by this
+                // single fold on both layers the diagnostic reports.
+                code = this.foldObjectExtendersFromRegistry(
+                    request.type, request.name, fromService.data,
+                );
             } else if (fromService.degraded) {
                 // [#5840] Kept, not swallowed — acted on after the registry
                 // fallback below, which may still produce a real code layer.
@@ -5092,7 +5171,21 @@ export class ObjectStackProtocolImplementation implements
         // customised), and a Studio diff showing `code`'s declaration next to
         // `effective`'s governed value is the platform override made visible,
         // not a defect.
-        const effective: unknown | null = governServedItem(request.type, overlay ?? code);
+        // [#8027] …and `effective` is "what `getMetaItem` would return", so when
+        // the overlay wins it is that read's BASE LAYER, resolved the same way:
+        // D9.2's base-plus-extenders. Without this the single `?layers=true`
+        // response contradicted itself — `code` carried the extension fields
+        // (#7556 folds it) and `effective` did not, with the `overlay` layer
+        // showing a customisation that explained none of the difference.
+        //
+        // ⛔ The fold lands on the EFFECTIVE base only. `overlay` stays the row
+        // the tenant actually stored: a code-declared extension is not a tenant
+        // customisation, and #7556 drew that boundary deliberately (the same
+        // reason `governServedItem` is called here and never on `overlay`).
+        const effectiveBase: unknown | null = overlay !== null
+            ? this.foldObjectExtendersFromRegistry(request.type, request.name, overlay)
+            : code;
+        const effective: unknown | null = governServedItem(request.type, effectiveBase);
 
         const _diagnostics =
             effective !== null && effective !== undefined

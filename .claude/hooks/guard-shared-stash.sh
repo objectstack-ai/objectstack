@@ -29,10 +29,16 @@
 # mirroring discipline guard-main-checkout-bash.sh already documents.
 #
 # Alternatives — no shared state, all of these work inside your own worktree:
-#   1. clean re-read     git checkout origin/main -- <path>   (restore: git checkout <branch> -- <path>)
+#   1. temporary commit  git commit -am wip                (git reset --soft HEAD~1)
 #   2. patch file        git diff > /tmp/wip.patch && git checkout -- <paths>
 #                        git apply /tmp/wip.patch          (git apply -R to undo again)
-#   3. temporary commit  git commit -am wip                (git reset --soft HEAD~1)
+#   3. reverse verification: COMMIT THE FIX FIRST, then take it out with
+#                        git checkout origin/main -- <path>
+#                        git checkout <your-branch> -- <path>   (restore from the commit)
+#      Against an UNCOMMITTED edit that same checkout silently DISCARDS the only copy at
+#      exit 0 — the working tree is the only place the change exists, and this hook has
+#      already ruled out the stash. Commit first; the restore then pulls the file back
+#      out of a commit that really exists (AGENTS.md carries the same rule).
 #   4. a second worktree for the comparison checkout
 #
 # Allowed through, deliberately:
@@ -167,11 +173,13 @@ show up in your git status, which is why objectui#3430 swapped two agents' in-fl
 changes without an error.
 
 Use instead — no shared state, all inside your own worktree:
-  1. clean re-read    git checkout origin/main -- <path>
-                      git checkout <your-branch> -- <path>   # put your version back
+  1. temporary commit git commit -am wip                # git reset --soft HEAD~1
   2. patch file       git diff > /tmp/wip.patch && git checkout -- <paths>
                       git apply /tmp/wip.patch          # git apply -R to undo again
-  3. temporary commit git commit -am wip                # git reset --soft HEAD~1
+  3. reverse verification: COMMIT THE FIX FIRST, then
+                      git checkout origin/main -- <path>
+                      git checkout <your-branch> -- <path>   # restore from the commit
+     (against an UNCOMMITTED edit that checkout silently discards the only copy, exit 0)
   4. a second worktree for the comparison checkout
 
 Already allowed, no flag needed:

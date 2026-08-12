@@ -77,7 +77,23 @@ describe('registerDatasourceAdminRoutes (real HonoHttpServer)', () => {
     const res = await app.fetch(json('/api/v1/datasources/demo_ext/remote-tables'));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ success: true, data: { tables: [{ name: 'customers', columnCount: 4 }] } });
-    expect(listRemoteTables).toHaveBeenCalledWith('demo_ext');
+    // No `?schema=` ⇒ the options bag carries no filter (#7955). The bag itself
+    // is always passed; `{ schema: undefined }` is what the service reads as
+    // "unfiltered", and it is the same value the federation twin hands it.
+    expect(listRemoteTables).toHaveBeenCalledWith('demo_ext', { schema: undefined });
+  });
+
+  // The forwarding half of #7955 at THIS spelling. The cross-package half —
+  // that the two spellings answer the same SET — is
+  // `packages/rest/src/remote-tables-twin.equivalence.test.ts`, which has to
+  // live where both registrars are reachable; this case is what fails first if
+  // the query stops being read here at all.
+  it('GET /api/v1/datasources/:name/remote-tables forwards ?schema= to the service', async () => {
+    const listRemoteTables = vi.fn().mockResolvedValue([]);
+    const app = mount({ listRemoteTables });
+    const res = await app.fetch(json('/api/v1/datasources/demo_ext/remote-tables?schema=public'));
+    expect(res.status).toBe(200);
+    expect(listRemoteTables).toHaveBeenCalledWith('demo_ext', { schema: 'public' });
   });
 
   it('POST /api/v1/datasources/:name/object-draft generates a draft (400 without table)', async () => {

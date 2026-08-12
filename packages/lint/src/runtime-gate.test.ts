@@ -491,3 +491,95 @@ describe('the views[] visibility-predicate family at the runtime publish gate (#
     expect(sawAdvisory, 'the corpus must contain an advisory').toBe(true);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────
+// #7815 — the layer the gate judges a schema-bound form at.
+//
+// A separate block, added at the end rather than woven into the family suite
+// above (#7576 serialization): nothing in that suite is touched.
+// ─────────────────────────────────────────────────────────────────────
+
+describe('the publish gate judges a schema-bound form at its own layer (#7815)', () => {
+  it('a correctly `data.`-rooted form is SILENT — no advisory, no refusal', () => {
+    // The finding. `authoring-rules.ts` calls `validateVisibilityPredicates(stack)`
+    // with no options, so every view was judged at the `'runtime'` default and
+    // this exact body — correct metadata — came back with an advisory telling
+    // its author to write `record.`, on a surface that binds no `record` at all.
+    // Nothing went red then and nothing goes red now; the difference is only
+    // what the author is told, which is the whole harm of the class.
+    const result = gateView(schemaBoundForm("data.type == 'text'"));
+    expect(result.errors, JSON.stringify(result.errors)).toEqual([]);
+    expect(result.advisories, JSON.stringify(result.advisories)).toEqual([]);
+    // "clean" and "nothing ran" must stay distinguishable.
+    expect(result.rulesRun).toEqual([
+      'validateVisibilityPredicates',
+      'validatePredicatePathRefs',
+    ]);
+  });
+
+  it('the runtime view one fixture-line away still draws it — the rule is live', () => {
+    // The negative control. Standing an advisory down and going blind look
+    // identical from the inside, so the case above is only worth its ink beside
+    // one that still fires: same predicate root, same gate, opposite verdict,
+    // decided by the `data:` source alone.
+    const f = gateView(runtimeView("data.status == 'open'"))
+      .advisories.find((a) => a.rule === 'visibility-root-mislayered');
+    expect(f, 'a wrong-layer paste on a RUNTIME view is still a wrong-layer paste').toBeDefined();
+    expect(f!.severity).toBe('warning');
+  });
+
+  it('a `record.`-rooted form now draws the advisory the OTHER way', () => {
+    // ADR-0089 D3's second direction, unreachable at this door until now: told
+    // `'runtime'`, the rule forbids `data.` and has nothing to say about
+    // `record.`, so a form predicate that can never match published in silence.
+    // Not new behaviour — the rule's existing metadata arm, finally addressed.
+    const result = gateView(schemaBoundForm("record.type == 'text'"));
+    expect(result.errors, 'still advisory-only: acceptance is untouched').toEqual([]);
+    const f = result.advisories.find((a) => a.rule === 'visibility-root-mislayered');
+    expect(f, 'a predicate that never matches must reach the author').toBeDefined();
+    expect(f!.severity).toBe('warning');
+    expect(f!.hint).toMatch(/data/);
+  });
+
+  it('prescribes the root the surface actually binds when it REFUSES', () => {
+    // The second half of the finding: the layer default also chose the root
+    // quoted inside `visibility-bare-identifier`'s hint, so the loudest finding
+    // on this surface — the one that BLOCKS the publish — told the author to
+    // write `record.status` on a form that binds `data`. Same id, same
+    // severity, same input: only the prescription moved.
+    const f = gateView(schemaBoundForm('status == active'))
+      .errors.find((e) => e.rule === 'visibility-bare-identifier');
+    expect(f, 'a bare word on the LEFT is still refused').toBeDefined();
+    expect(f!.severity).toBe('error');
+    expect(f!.hint).toContain('`data.status`');
+    expect(f!.hint).not.toContain('`record.status`');
+  });
+
+  it('moves NO finding across the error/advisory boundary', () => {
+    // The acceptance guarantee this card is bounded by, as a property over the
+    // schema-bound half of the family corpus: the derivation may only ever
+    // change which ADVISORIES are emitted. Asserted as exact error sets — each
+    // one is what the `'runtime'` reading produced on the same input — so a
+    // later edit to the layer plumbing that promoted or demoted anything goes
+    // red here rather than at a tenant's publish door.
+    const cases: Array<[string, string[]]> = [
+      ["data.type == 'text'", []],
+      ["record.type == 'text'", []],
+      ['data.type == active', []],
+      ['status == active', ['visibility-bare-identifier']],
+      ['data.name == active && active', ['visibility-bare-identifier']],
+      ['active == data.type', ['predicate-rhs-path-shaped', 'visibility-bare-identifier']],
+      ["data.tpye == 'text'", ['predicate-path-unresolved']],
+      ["type == 'text'", ['predicate-path-unrooted']],
+      ['data.type == data.label', ['predicate-rhs-path-shaped']],
+      ["country === 'USA'", ['visibility-predicate-syntax']],
+    ];
+    for (const [predicate, expected] of cases) {
+      expect(
+        gateView(schemaBoundForm(predicate)).errors.map((e) => e.rule).sort(),
+        `the refusal set for \`${predicate}\` changed — the #7815 layer derivation is `
+          + `advisory-only by construction, so anything moving here is a scope breach`,
+      ).toEqual([...expected].sort());
+    }
+  });
+});

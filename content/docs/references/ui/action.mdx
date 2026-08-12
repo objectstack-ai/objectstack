@@ -75,7 +75,7 @@ const result = ActionSchema.parse(data);
 | **params** | `{ name?: string; field?: string; objectOverride?: string; label?: string \| Record<string, string>; … }[]` | optional | Input parameters required from user — an ActionParam[] DEFINITION array, never a payload map (a static request body goes in `bodyExtra`). |
 | **variant** | `Enum<'primary' \| 'secondary' \| 'danger' \| 'ghost' \| 'link'>` | optional | Button visual variant for styling (primary = highlighted, danger = destructive, ghost = transparent) |
 | **order** | `number` | optional | Sort order within a location group (lower = higher). Promotes/demotes an action toward the record_header primary button; stable, so actions without `order` keep their registration order. |
-| **confirmText** | `string \| Record<string, string>` | optional | Confirmation message before execution |
+| **confirmText** | `string \| Record<string, string>` | optional | Confirmation message before execution. On a registered action, pairing this with a non-empty `params` is refused (#7428) — that opens a second dialog for one decision; put the question on `description` instead. Correct on a param-LESS action, where the confirm is the only dialog there is. |
 | **successMessage** | `string \| Record<string, string>` | optional | Success message to show after execution |
 | **errorMessage** | `string \| Record<string, string>` | optional | Error message to show when the action fails (overrides the raw error). |
 | **refreshAfter** | `boolean` | optional | Refresh view after execution |
@@ -245,7 +245,7 @@ const result = ActionSchema.parse(data);
 | **method** | `Enum<'POST' \| 'PATCH' \| 'PUT' \| 'DELETE'>` | optional | HTTP method for type:"api" actions. Defaults to POST. |
 | **params** | `{ name?: string; field?: string; objectOverride?: string; label?: string \| Record<string, string>; … }[]` | optional | Input parameters required from user — an ActionParam[] DEFINITION array, never a payload map (a static request body goes in `bodyExtra`). |
 | **bodyExtra** | `Record<string, any>` | optional | Static request-body fields for a type:"api" action, merged last (overrides user params). `{{page.<var>}}` tokens are resolved by the runtime. This — not `params` — is where a payload goes. |
-| **confirmText** | `string \| Record<string, string>` | optional | Confirmation message before execution |
+| **confirmText** | `string \| Record<string, string>` | optional | Confirmation message before execution. On a registered action, pairing this with a non-empty `params` is refused (#7428) — that opens a second dialog for one decision; put the question on `description` instead. Correct on a param-LESS action, where the confirm is the only dialog there is. |
 | **successMessage** | `string \| Record<string, string>` | optional | Success message to show after execution |
 | **errorMessage** | `string \| Record<string, string>` | optional | Error message to show when the action fails (overrides the raw error). |
 | **refreshAfter** | `boolean` | optional | Refresh view after execution |

@@ -3,6 +3,14 @@
 // Master-detail "controlled by parent" RLS proof (ADR-0055 P2), end-to-end
 // through the real HTTP + security stack.
 //
+// ADR-0056 D10 — the authz-conformance matrix row this file is the cited proof
+// for; `authz-conformance.test.ts` asserts the pairing is mutual (#7976). The
+// claim rests on this file's OWN evidence, as re-decided in PR #7975:
+// `fixtures/cbp-fixture.ts` grants the member full CRUD on BOTH master and
+// detail, so the derived READ and by-id WRITE denials asserted below are the
+// derived record gate answering, never the object gate.
+// authz-row: controlled-by-parent
+//
 // @proof: cbp-controlled-by-parent
 // ADR-0055 runtime proof for derived master-detail access. Referenced by the
 // liveness ledger entry `object.sharingModel` (packages/spec/liveness/object.json);

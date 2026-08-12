@@ -2,6 +2,12 @@
 //
 // @proof: readonly-static-write
 //
+// ADR-0056 D10 — the authz-conformance matrix row this file is the cited proof
+// for; `authz-conformance.test.ts` asserts the pairing is mutual (#7976). Note
+// the two vocabularies coincide here by accident, not by rule: the `@proof:`
+// id above is an ADR-0054 liveness id, `authz-row:` below is a matrix row id.
+// authz-row: readonly-static-write
+//
 // #2948 / #3003 (UPDATE) + #3043 (INSERT) — static `readonly: true` is
 // SERVER-enforced on BOTH write paths, not a UI-only affordance. The #3003
 // field report: an approval-flow object declared `approval_status` /

@@ -690,15 +690,39 @@ describe('[#5941] break-glass: the last unbanned administrator cannot be DELETED
     // `usr_member`'s membership carries no administrative grade, so removing it
     // takes no standing away — the standing halves (#5978) below judge every
     // `sys_member` delete, and this is what "judged and allowed" looks like.
-    await seedUser(engine, 'usr_member', { role: 'member' });
+    // The account row is what the second half of this case deletes.
+    await seedUser(engine, 'usr_member', { role: 'member', accountProvider: 'credential' });
 
     await expect(
       engine.delete('sys_member', { where: { id: 'mem_usr_member' }, ...SYSTEM }),
     ).resolves.toBeDefined();
-    // …and a table this guard reads but does not write-guard is untouched.
+    // …and a table this guard reads but does not write-guard is untouched: the
+    // delete goes through.
+    //
+    // [#7867] This half used to delete the id `'nope'` — a row that was never
+    // seeded — and assert it RESOLVED. That passed for a reason unrelated to
+    // this guard: `ObjectQL.delete()` had no existence gate on its by-id path,
+    // so a delete naming no row was a silent no-op that reported success. The
+    // engine now answers `RECORD_NOT_FOUND` there, which is the change #7867
+    // landed, so the old line would have been asserting the absence of a guard
+    // by way of a defect.
+    //
+    // Deleting a REAL `sys_account` row states the same thing without borrowing
+    // that defect, and states it more strongly: the guard does not merely fail
+    // to fire on a write that touched nothing — it lets a write that really
+    // removes a row on this object through.
     await expect(
-      engine.delete('sys_account', { where: { id: 'nope' }, ...SYSTEM }),
+      engine.delete('sys_account', { where: { id: 'acc_usr_member' }, ...SYSTEM }),
     ).resolves.toBeDefined();
+    // The other half of "not this guard's business", kept explicit: a ghost id
+    // on this object is refused by the ENGINE, not by the last-admin guard —
+    // so the refusal above staying absent is about the guard, and this refusal
+    // is about existence. Two different questions, two different answers.
+    const ghost = await engine
+      .delete('sys_account', { where: { id: 'nope' }, ...SYSTEM })
+      .then(() => null, (e: any) => e);
+    expect(ghost?.code).toBe('RECORD_NOT_FOUND');
+    expect(String(ghost?.message ?? '')).not.toMatch(/last administrator/i);
   });
 
   // NOTE (#5978): the case that used to live here asserted the OPPOSITE — that

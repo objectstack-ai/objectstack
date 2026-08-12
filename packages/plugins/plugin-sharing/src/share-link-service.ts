@@ -18,6 +18,11 @@ import type {
  * `systemPermissions` and `tabPermissions` are all read.
  */
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+import type { Expression } from '@objectstack/spec';
+// [#7861] The record-level CEL seam — the same `@objectstack/formula` engine the
+// server-side validation and hook-condition gates evaluate predicates through.
+// See `assertEligible` for why this and not `compileCelToFilter`.
+import { ExpressionEngine } from '@objectstack/formula';
 import type { SharingEngine } from './sharing-service.js';
 import {
   deleteRowsForDeletedRecords,
@@ -78,6 +83,7 @@ function getPolicy(schema: any): {
   allowedPermissions: ShareLinkPermission[];
   maxExpiryDays?: number;
   redactFields: string[];
+  eligibility?: string;
 } {
   const raw = schema?.publicSharing;
   if (!raw || raw.enabled !== true) {
@@ -94,7 +100,33 @@ function getPolicy(schema: any): {
     allowedPermissions: (raw.allowedPermissions as ShareLinkPermission[] | undefined) ?? ['view'],
     maxExpiryDays: typeof raw.maxExpiryDays === 'number' ? raw.maxExpiryDays : undefined,
     redactFields: Array.isArray(raw.redactFields) ? (raw.redactFields as string[]) : [],
+    eligibility:
+      typeof raw.eligibility === 'string' && raw.eligibility.trim() ? raw.eligibility : undefined,
   };
+}
+
+/**
+ * [#7861] Bind the candidate record's DECLARED fields before evaluating, so a
+ * predicate over a field the driver simply did not return is not a fault.
+ *
+ * The same materialisation the two server-side CEL gates in `@objectstack/objectql`
+ * do (`materializeDeclaredFields`, behind the validation and hook-condition
+ * evaluators). It matters more here than there: several drivers omit NULL
+ * columns entirely, so `record.status == 'published'` on a row whose `status`
+ * is null would fault — and this gate FAILS CLOSED, so a fault is a refusal.
+ * Without this, an eligibility policy would refuse links for exactly the rows
+ * whose field is empty rather than judging them. Declared-and-absent therefore
+ * binds to `null`, which is what the row means; an UNdeclared key still faults,
+ * because that one really is an author typo.
+ */
+function bindDeclaredFields(record: Record<string, unknown>, schema: any): Record<string, unknown> {
+  const declared = schema?.fields;
+  if (!declared || typeof declared !== 'object') return record;
+  const bound: Record<string, unknown> = { ...record };
+  for (const name of Object.keys(declared)) {
+    if (!(name in bound)) bound[name] = null;
+  }
+  return bound;
 }
 
 /** Parse `expiresAt` as either an ISO string or a relative duration like "7d", "24h", "30m". */
@@ -175,6 +207,101 @@ async function defaultVerifyPassword(password: string, hash: string): Promise<bo
     return hex === expected;
   }
   return false;
+}
+
+/**
+ * [#7861] Enforce `publicSharing.eligibility` against the candidate record.
+ *
+ * ## Why this evaluator, and not the sharing-rule filter compiler
+ *
+ * The key's TSDoc promises "the same evaluator sharing rules use", and a
+ * sharing rule's CEL `condition` is lowered by `compileCelToFilter`. That is
+ * the PUSHDOWN path, and it is the wrong instrument here — measured, not
+ * assumed:
+ *
+ *   compileCelToFilter("has(record.owner_id)")  → REJECTED (`unsupported`)
+ *   celEngine.evaluate  ("has(record.owner_id)") → true
+ *
+ * The two answer different questions. A sharing rule asks *which records does
+ * this rule share?* and must become a `WHERE` clause the driver can run, so its
+ * vocabulary is bounded by what every backend can push down. Eligibility asks
+ * *may THIS record, already fetched, be published?* — a verdict on one record
+ * in hand, where no lowering is needed and the pushdown subset would only
+ * amputate the predicate.
+ *
+ * Both are nonetheless the SAME evaluator in the sense the contract means:
+ * `@objectstack/formula`'s CEL, through the one canonical front end
+ * (`parseCelToAstWithReason`) that `cel-to-filter.ts` was moved onto in #6132 —
+ * `cel-to-filter-parse-convergence.test.ts` is the pin that both parse alike.
+ * Same dialect, same parse, different lowering. So the declared contract text
+ * needed no change to be honoured, and `.describe()`'s "must evaluate to true
+ * on the target record" is satisfied exactly.
+ *
+ * ## Why every failure is a refusal
+ *
+ * This is a restrictive policy, and the schema's own history note beside the
+ * block states the standard it is held to: *"On a policy whose whole job is to
+ * be restrictive, a silently dropped key fails OPEN."* An eligibility predicate
+ * that cannot be compiled, or that faults on the record, is an UNANSWERED
+ * question — and an unanswered question must not mint a capability token that
+ * `resolveToken` will go on to serve anonymously. Same direction
+ * `recordStillExists` already takes below, and the same call the declarative
+ * hook-condition evaluator makes (#4775: fail LOUD, never `false`).
+ *
+ * The two failure kinds keep separate codes because the fix differs: a false
+ * verdict is about THIS record (it does not qualify yet), while an unevaluable
+ * predicate is broken for every record of the object until its author fixes it.
+ */
+function assertEligible(
+  source: string,
+  record: Record<string, unknown>,
+  schema: any,
+  object: string,
+): void {
+  const expr: Expression = { dialect: 'cel', source };
+
+  const compiled = ExpressionEngine.compile(expr);
+  if (!compiled.ok) {
+    throw makeError(
+      422,
+      'ELIGIBILITY_UNEVALUABLE',
+      `Object '${object}' declares a publicSharing.eligibility predicate that does not compile ` +
+        `(${celFault(compiled.error)}) — no link can be issued until it is fixed: ${source}`,
+    );
+  }
+
+  const verdict = ExpressionEngine.evaluate<unknown>(expr, {
+    record: bindDeclaredFields(record, schema),
+  });
+  if (!verdict.ok) {
+    throw makeError(
+      422,
+      'ELIGIBILITY_UNEVALUABLE',
+      `Object '${object}' could not evaluate its publicSharing.eligibility predicate ` +
+        `(${celFault(verdict.error)}) — refusing the link rather than issuing one past an ` +
+        `unanswered policy: ${source}`,
+    );
+  }
+
+  // Strictly `true`. A predicate resolving to a truthy non-boolean (a string, a
+  // number) has not answered the question it was asked, so it is refused with
+  // the other codes' direction rather than coerced into consent.
+  if (verdict.value !== true) {
+    throw makeError(
+      422,
+      'RECORD_NOT_ELIGIBLE',
+      `Record is not eligible for link sharing under '${object}'s publicSharing.eligibility policy: ${source}`,
+    );
+  }
+}
+
+/**
+ * One line out of a CEL fault. The engine appends a source excerpt and a caret
+ * line, which is right for a log and wrong for an API message.
+ */
+function celFault(error: { kind: string; message: string }): string {
+  const first = String(error.message ?? '').split('\n')[0]!.trim();
+  return `${error.kind}: ${first || 'unknown error'}`;
 }
 
 function makeError(status: number, code: string, message: string): Error {
@@ -305,9 +432,15 @@ export class ShareLinkService implements IShareLinkService {
     // `org_user_ids`, and `posture` travels with the context rather than being
     // re-derived here (ADR-0095 D2). Rebuilding a subset at this seam is what
     // made this check answer 403 for every `group`-posture caller.
+    //
+    // [#7861] When an eligibility predicate is declared, this same read is the
+    // one that fetches the record it judges — the projection widens instead of
+    // a second query being issued, and it widens ONLY then, so an object
+    // without the key keeps the exact `id`-only read it always had.
+    const eligibility = policy.enabled ? policy.eligibility : undefined;
     const exists = await this.engine.find(input.object, {
       where: { id: input.recordId },
-      fields: ['id'],
+      ...(eligibility ? {} : { fields: ['id'] }),
       limit: 1,
       context: context.isSystem ? SYSTEM_CTX : context,
     } as any);
@@ -316,6 +449,21 @@ export class ShareLinkService implements IShareLinkService {
       throw context.isSystem
         ? makeError(404, 'RECORD_NOT_FOUND', `${input.object}/${input.recordId} does not exist`)
         : makeError(403, 'FORBIDDEN', `Not permitted to share ${input.object}/${input.recordId}`);
+    }
+
+    // [#7861] The declared eligibility gate. Placed AFTER the visibility read
+    // (it needs the record, and a caller who cannot see the row must not learn
+    // anything about its contents from the refusal) and BEFORE the insert, so
+    // an ineligible link is never MINTED — which is the only placement that
+    // helps, since `resolveToken` serves an existing row anonymously under
+    // `SYSTEM_CTX` with no auth check to fall back on.
+    if (eligibility) {
+      assertEligible(
+        eligibility,
+        (exists[0] ?? {}) as Record<string, unknown>,
+        schema,
+        input.object,
+      );
     }
 
     const maxDays = policy.maxExpiryDays ?? DEFAULT_MAX_EXPIRY_DAYS;

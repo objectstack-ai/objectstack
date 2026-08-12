@@ -50,7 +50,16 @@ describe('validateComponentProps — undeclared keys', () => {
     expect(f.severity).toBe('warning');
     expect(f.path).toBe('pages[0].regions[0].components[0].properties.titel');
     expect(f.where).toBe('page "probe_page" · page:header');
-    expect(f.message).toContain('Did you mean `title`?');
+    // ⚠️ The rename PHRASING moved at #4001 batch A and the assertion follows
+    // the fact rather than the wording: a strip-mode shape got the walker's
+    // `Did you mean \`title\`?`, a `strictObject` gets its error map's
+    // `Did you mean \`titel\` → \`title\`?` — which echoes the offending
+    // spelling as well as the fix. Asserted as both spellings present, so this
+    // pin measures the diagnostic's content rather than which of the two
+    // channels produced it.
+    expect(f.message).toContain('`titel`');
+    expect(f.message).toContain('`title`');
+    expect(f.message).toContain('Did you mean');
   });
 
   it('is silent on a fully declared props bag', () => {
@@ -133,7 +142,10 @@ describe('validateComponentProps — the second layer (union arm below an array)
     expect(unknownKeys(findings)[0].path).toBe(
       'pages[0].regions[0].components[0].properties.fields.0.readOnly',
     );
-    expect(unknownKeys(findings)[0].message).toContain('Did you mean `readonly`?');
+    // Same phrasing move as above (#4001 batch A) — content, not wording.
+    expect(unknownKeys(findings)[0].message).toContain('`readOnly`');
+    expect(unknownKeys(findings)[0].message).toContain('`readonly`');
+    expect(unknownKeys(findings)[0].message).toContain('Did you mean');
   });
 
   it('leaves a bare string field name alone (the union\'s other arm)', () => {
@@ -460,5 +472,49 @@ describe('validateComponentProps — wiring', () => {
     expect(mine).toHaveLength(1);
     expect(mine[0].severity).toBe('warning');
     expect(mine[0].rule).toBe(COMPONENT_PROPS_UNKNOWN_KEY);
+  });
+});
+
+/**
+ * #4001 batch A closed all 31 `ComponentPropsMap` shapes, including two UNION
+ * ARMS. An arm's rejection travels a different road out of zod than an object's,
+ * and this block pins both that it arrives and that it is not over-claimed.
+ */
+describe('validateComponentProps — a STRICT union arm reports as an unknown key (#4001 batch A)', () => {
+  const highlights = (fields: unknown) =>
+    validateComponentProps(stackWith([{ type: 'record:highlights', properties: { fields } }]));
+
+  it('routes an arm-level `unrecognized_keys` to the unknown-key rule, with the surface and the rename intact', () => {
+    const findings = highlights([{ name: 'status', labell: 'Status' }]);
+    expect(findings).toHaveLength(1);
+    // The rule id is the point: a closed arm and a closed object are ONE
+    // diagnostic for the author, not two with different hints.
+    expect(findings[0].rule).toBe(COMPONENT_PROPS_UNKNOWN_KEY);
+    expect(findings[0].path).toBe('pages[0].regions[0].components[0].properties.fields.0.labell');
+    // Zod collapses arm failures into one `invalid_union` whose own message is
+    // the bare "Invalid input" — everything below survives only because
+    // `zod-issue-format.ts` unpacks the arm. Delete that unpacking and these
+    // three assertions go red while `packages/spec`'s own suite stays green,
+    // which is exactly the blind spot they exist for.
+    expect(findings[0].message).toContain('record:highlights` field');
+    expect(findings[0].message).toContain('`labell`');
+    expect(findings[0].message).toContain('label');
+    expect(findings[0].message).not.toContain('Invalid input —');
+  });
+
+  it('does NOT claim a rename when the author may have meant another arm', () => {
+    // The bare-string arm is legal here, so a value that fails BOTH arms for
+    // key reasons cannot be attributed to one of them. It falls through to the
+    // value verdict, which prints every arm's own message rather than guessing.
+    const findings = highlights([{ labell: 'Status' }]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(COMPONENT_PROPS_INVALID);
+    // Still legible — the arms are unpacked, just not attributed.
+    expect(findings[0].message).toContain('no accepted form matched');
+  });
+
+  it('positive control — the string arm and the full object arm both stay silent', () => {
+    expect(highlights(['status'])).toEqual([]);
+    expect(highlights([{ name: 'status', label: 'Status', readonly: true }])).toEqual([]);
   });
 });

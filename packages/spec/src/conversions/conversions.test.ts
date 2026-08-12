@@ -998,15 +998,36 @@ describe('conversion layer (ADR-0087 D2)', () => {
     /**
      * The premise pin, and the one test that fails if the alias ever comes
      * BACK. This conversion is only correct while the spec declares exactly one
-     * spelling: `PageHeaderProps` accepts `subtitle` and silently strips
-     * `description` (the schema is not `.strict()`), which is precisely why an
-     * authored `description` needed a conversion rather than an error.
+     * spelling.
+     *
+     * ⚠️ The SECOND half of this pin changed at #4001 batch A, and the change
+     * is the point rather than an accommodation of it. It used to assert that
+     * `PageHeaderProps` *silently strips* `description` — "which is precisely
+     * why an authored `description` needed a conversion rather than an error".
+     * That reading was upside down: the silent strip is what left the
+     * conversion as the ONLY thing between an author and a dropped key, and
+     * `conversions/walk.ts` records the consequence in as many words — a
+     * `description` at a nested site got no diagnostic from any layer, because
+     * the conversion did not fire there, `PageSchema` stayed green, and the
+     * props gate is CLI-only.
+     *
+     * With the shape closed there are two lines of defence rather than one: the
+     * conversion still canonicalizes on every load and rehydration (the tests
+     * above, unchanged), and a `description` that reaches this parse
+     * unconverted is now rejected BY NAME carrying the rename. The alias entry
+     * is what makes the second one useful rather than merely loud.
      */
     it('the canonical props schema declares `subtitle` and no `description`', () => {
       expect(PageHeaderProps.parse({ title: 'Leads', subtitle: 'All open leads' }).subtitle)
         .toBe('All open leads');
-      expect(PageHeaderProps.parse({ title: 'Leads', description: 'All open leads' }))
-        .not.toHaveProperty('description');
+
+      const rejected = PageHeaderProps.safeParse({ title: 'Leads', description: 'All open leads' });
+      expect(rejected.success).toBe(false);
+      const message = rejected.error!.issues.map((i) => i.message).join('\n');
+      expect(message).toContain('`description`');
+      // The rename the conversion performs, said out loud to the author who is
+      // typing the key right now.
+      expect(message).toContain('subtitle');
     });
 
     /**
