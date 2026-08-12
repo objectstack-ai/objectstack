@@ -7723,8 +7723,15 @@ export class ObjectQL implements IObjectQLEngine {
           const preserveAudit = opCtx.context?.preserveAudit === true;
           for (let i = 0; i < rows.length; i++) {
             if (rowErrors[i] !== undefined) continue;
+            // [#8214] The insert side carries the same claim and the same
+            // sequencing — this pass logs, the `ReadonlyFieldRejectedError`
+            // below throws before any driver dispatch. Measured on
+            // `origin/main`: `driverCreates 0` while the line said the write
+            // was "COMMITTED WITHOUT IT". The card marked this half UNVERIFIED;
+            // it reproduces, so the flag is threaded here too.
             const stripped = stripRuntimeOwnedFields(
-              schemaForValidation as any, rows[i], suppliedPerRow[i] ?? {}, this.logger, { preserveAudit },
+              schemaForValidation as any, rows[i], suppliedPerRow[i] ?? {}, this.logger,
+              { preserveAudit, strictReadonlyWrites: options?.strictReadonlyWrites === true },
             ) as Record<string, unknown>;
             if (stripped === rows[i]) continue;
             for (const k of Object.keys(rows[i])) {
@@ -8709,7 +8716,15 @@ export class ObjectQL implements IObjectQLEngine {
                // insert-side sibling), which is what keeps those byte-identical.
                if (!opCtx.context?.isSystem) {
                    const preRo = hookContext.input.data as Record<string, unknown>;
-                   hookContext.input.data = stripReadonlyFields(updateSchema as any, preRo, suppliedValues, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true, addressKey: idAddressesThisRow ? 'id' : undefined }) as any;
+                   // [#8214] `strictReadonlyWrites` is threaded INTO the strip
+                   // rather than consulted only at `assertNoStrictDrops()`
+                   // below: the strip logs from inside, the refusal happens
+                   // afterwards, and until the strip knew the flag its line
+                   // told a refused caller the update had been "COMMITTED
+                   // WITHOUT IT" while `driverWrites` was 0. The seam that
+                   // composes the sentence has to know the mode the sentence
+                   // describes; nothing else here can tell it.
+                   hookContext.input.data = stripReadonlyFields(updateSchema as any, preRo, suppliedValues, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true, addressKey: idAddressesThisRow ? 'id' : undefined, strictReadonlyWrites }) as any;
                    reportDroppedFields(preRo, hookContext.input.data as Record<string, unknown>, 'readonly');
                }
                // [#5126] Both strip passes are done; refuse now if the caller
@@ -8856,7 +8871,11 @@ export class ObjectQL implements IObjectQLEngine {
                // rejected upstream by the tenant write wall, #2946).
                if (!opCtx.context?.isSystem) {
                    const preRoMulti = hookContext.input.data as Record<string, unknown>;
-                   hookContext.input.data = stripReadonlyFields(updateSchema as any, preRoMulti, suppliedValues, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true }) as any;
+                   // [#8214] Same threading as the by-id branch; the multi
+                   // branch still passes no `addressKey` (nothing addresses a
+                   // row by key here), which is what keeps it byte-identical
+                   // to #8141 in every other respect.
+                   hookContext.input.data = stripReadonlyFields(updateSchema as any, preRoMulti, suppliedValues, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true, strictReadonlyWrites }) as any;
                    reportDroppedFields(preRoMulti, hookContext.input.data as Record<string, unknown>, 'readonly');
                }
                // [#5126] Same refusal on the predicate path. A bulk strip is
