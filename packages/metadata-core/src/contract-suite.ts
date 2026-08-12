@@ -38,6 +38,64 @@ const refOf = (overrides: Partial<MetaRef> = {}): MetaRef => ({
 
 const spec = (label: string) => ({ label, columns: ['a', 'b'] });
 
+/** A value whose `toJSON` collapses it to something other than its own keys. */
+class Money {
+  constructor(
+    private readonly cents: number,
+    private readonly currency: string,
+  ) {}
+
+  toJSON(): string {
+    return `${(this.cents / 100).toFixed(2)} ${this.currency}`;
+  }
+}
+
+/**
+ * Spec shapes for the #7856 identity pin, spanning the ways a value's
+ * serialised form can differ from its in-memory object graph.
+ *
+ * Deliberately a TABLE and not one hand-picked `Date`. The defect was never
+ * about `Date` — it was about `canonicalize` walking own enumerable keys
+ * while the disk received whatever `JSON.stringify` produced — and a
+ * single-case pin is exactly what lets the next value in this class through.
+ * `Date` is merely its most reachable instance; a `toJSON` returning a
+ * string, an object, or sitting under an array index are the same defect
+ * wearing different clothes, and each row below failed differently before
+ * the fix (see the PR's per-arm table).
+ *
+ * The control row matters as much as the rest: it is what proves a fix here
+ * did not simply change every hash.
+ */
+const SERIALISATION_SHAPES: ReadonlyArray<{
+  label: string;
+  spec: () => Record<string, unknown>;
+}> = [
+  {
+    label: 'control — plain JSON, no toJSON anywhere in the graph',
+    spec: () => ({ label: 'Home', columns: ['a', 'b'], nested: { n: 1, ok: true, nil: null } }),
+  },
+  {
+    label: 'Date at a top-level key',
+    spec: () => ({ label: 'Home', createdAt: new Date('2024-01-01T00:00:00.000Z') }),
+  },
+  {
+    label: 'Date under an array index',
+    spec: () => ({ label: 'Audit', stamps: [new Date('2020-06-01T12:00:00.000Z')] }),
+  },
+  {
+    label: 'class instance whose toJSON collapses it to a string',
+    spec: () => ({ label: 'Price', amount: new Money(1250, 'USD') }),
+  },
+  {
+    label: 'object literal carrying its own toJSON',
+    spec: () => ({ label: 'Range', span: { toJSON: () => ({ from: 1, to: 9 }) } }),
+  },
+  {
+    label: 'toJSON nested inside an array element',
+    spec: () => ({ rows: [{ at: new Date('2022-02-02T02:02:02.000Z') }] }),
+  },
+];
+
 /** Drain at most `n` events from an async iterable with a timeout. */
 async function take<T>(iter: AsyncIterable<T>, n: number, timeoutMs = 1000): Promise<T[]> {
   const out: T[] = [];
@@ -102,6 +160,64 @@ export function runRepositoryContractTests(
         await repo.put(ref, { z: 1, a: 2, m: [3, 1, 2] }, { parentVersion: null, actor: 't' });
         const got = await repo.get(ref);
         expect(got!.hash).toBe(hashSpec(got!.body));
+      });
+
+      // ── #7856 — the version identifies the STORED BYTES ───────────
+      //
+      // Table-driven on purpose; see SERIALISATION_SHAPES. Every row
+      // asserts BOTH faces of the same invariant, because the two
+      // implementations in this repo broke DIFFERENT ones:
+      //
+      //   put().version === get().hash
+      //       the face FileSystemRepository broke — it hashed the spec it
+      //       was handed, wrote `JSON.stringify` of it, and re-hashed the
+      //       parse on the way back out.
+      //   get().hash === hashSpec(get().body)
+      //       invariant 4's face, the one InMemoryRepository broke — it
+      //       stores `body` already serialised (`clonePlain`) while
+      //       hashing the in-memory spec, so the item it hands back
+      //       disagrees with its own hash.
+      //
+      // Asserting only one face would have left the other implementation's
+      // divergence unpinned, which is the whole reason this lives in the
+      // shared contract suite rather than beside either bug.
+      describe('serialized-form identity (#7856)', () => {
+        for (const shape of SERIALISATION_SHAPES) {
+          it(`version identifies the stored bytes — ${shape.label}`, async () => {
+            const repo = await factory();
+            const ref = refOf();
+            const put = await repo.put(ref, shape.spec(), {
+              parentVersion: null,
+              actor: 't',
+            });
+
+            const got = await repo.get(ref);
+            expect(got).not.toBeNull();
+            expect(got!.hash).toBe(put.version);
+            expect(got!.hash).toBe(hashSpec(got!.body));
+          });
+
+          it(`re-putting the same spec is a no-op — ${shape.label}`, async () => {
+            const repo = await factory();
+            const ref = refOf();
+            const first = await repo.put(ref, shape.spec(), {
+              parentVersion: null,
+              actor: 't',
+            });
+
+            // Chains on the version the caller was HANDED. When that
+            // version does not identify the stored bytes, the head index
+            // it is compared against holds the other hash and this second
+            // write is not recognised as the no-op it is — it either
+            // conflicts or republishes the item as a fresh revision.
+            const second = await repo.put(ref, shape.spec(), {
+              parentVersion: first.version,
+              actor: 't',
+            });
+            expect(second.version).toBe(first.version);
+            expect(second.seq).toBe(first.seq);
+          });
+        }
       });
 
       it('returns null for missing item', async () => {

@@ -10,8 +10,11 @@ import {
   formatReport,
   runRlsProofs,
   formatRlsReport,
+  provisionRlsProbePersona,
+  rlsProbeSecurity,
   type VerifyReport,
   type RlsReport,
+  type RlsProbeDescriptor,
 } from '@objectstack/verify';
 import { loadConfig } from '../utils/config.js';
 
@@ -106,22 +109,50 @@ export default class Verify extends Command {
     // proving its authorization.
     let rls: RlsReport | undefined;
     if (flags.rls) {
-      const rlsStack = await bootStack(config, { multiTenant });
+      // [#7685] The by-id-write class is only REACHABLE for a persona holding
+      // the object-level grants AND standing outside the record scope. A bare
+      // `signUp()` member holds no grants, so `checkObjectPermission` answers
+      // 403 before record scope is consulted and every probe was masked — 11 of
+      // 13 "consistent" showcase verdicts were that 403, an unfalsifiable green.
+      // `rlsProbeSecurity` registers the capability #7665's acceptance
+      // criterion 2 names (object read+edit, owner-scoped SELECT only) and
+      // carries the app's declared default profile through unchanged.
+      const rlsStack = await bootStack(config, { multiTenant, security: rlsProbeSecurity(config) });
       try {
         const adminToken = await rlsStack.signIn();
-        const memberToken = await rlsStack.signUp('verify-member@objectstack.test');
-        rls = await runRlsProofs(rlsStack, adminToken, memberToken, config);
+        let probeToken: string;
+        let probe: RlsProbeDescriptor;
+        try {
+          const persona = await provisionRlsProbePersona(rlsStack, config);
+          probeToken = persona.token;
+          probe = { label: persona.email, grantedObjects: persona.grantedObjects };
+        } catch (e) {
+          // Prefer failing to falling back (Route & surface ownership §3): a
+          // weaker persona still produces a report, so the degradation is
+          // recorded on the report itself AND counted as a hard failure below.
+          // Silently probing with an ungranted member is the exact false green
+          // this issue exists to remove.
+          probeToken = await rlsStack.signUp('verify-member@objectstack.test');
+          probe = {
+            label: 'verify-member@objectstack.test',
+            degraded: `probe persona provisioning failed: ${(e as Error).message}`,
+          };
+        }
+        rls = await runRlsProofs(rlsStack, adminToken, probeToken, config, { probe });
       } finally {
         await rlsStack.stop();
       }
     }
 
     // Failure contract: a "real" runtime break the app's author must see.
+    // A degraded RLS probe counts: the run reported verdicts it could not have
+    // established, which is worse than no verifier at all.
     const hardFailures =
       crud.summary.createFailed +
       crud.summary.readFailed +
       crud.summary.fidelityGaps +
-      (rls?.summary.holes ?? 0);
+      (rls?.summary.holes ?? 0) +
+      (rls?.probe.degraded ? 1 : 0);
 
     if (flags.json) {
       this.log(JSON.stringify({ app: crud.app, config: absolutePath, multiTenant, crud, rls, hardFailures }, null, 2));

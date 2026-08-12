@@ -12037,7 +12037,38 @@ export class ObjectStackProtocolImplementation implements
         if (request.organizationId) {
             const byKey = new Map<string, any>();
             for (const row of scanned) {
-                const key = `${row?.type}\u0000${row?.name}`;
+                // [#7932] …and for a bundled type the slot is
+                // `(type, name, discriminator)`. Same shape #7774 gave
+                // {@link metaItemKey}: the discriminator is appended ONLY
+                // when the type declares one, so every undiscriminated type
+                // keeps a byte-identical two-component key and this
+                // change's blast radius is provable rather than argued.
+                //
+                // Within ONE org the collapse cannot happen —
+                // `sys_metadata`'s overlay uniqueness is
+                // `(type, name, organization_id, package_id)` and the table
+                // has no locale column, so one org cannot hold two rows
+                // differing only by body locale. Across the two tiers it
+                // can, and this scan is the one place they meet: an
+                // env-wide `auth.welcome` customized in `en-US` and THIS
+                // org's `zh-CN` customization are two different members of
+                // one bundle (`EmailTemplateDefinitionSchema` resolves a
+                // template by `(name, locale)`), and keying them together
+                // let the org row displace the env-wide one — the
+                // duplicate then shipped one locale of a two-locale
+                // customization, reporting success. Precedence is unchanged
+                // where it was ever meaningful: an org row still wins over
+                // the env-wide row of the SAME member.
+                //
+                // The discriminator is read off the RAW stored body rather
+                // than the converted one, which is safe because no ADR-0087
+                // conversion entry touches `email_template` — re-checked
+                // against `packages/spec/src/conversions/registry.ts`,
+                // whose surfaces are flow/page/object/view/app/… and never
+                // this type.
+                const disc = storedRowDiscriminator(String(row?.type), row);
+                const base = `${row?.type}\u0000${row?.name}`;
+                const key = disc === undefined ? base : `${base}\u0000${disc}`;
                 const kept = byKey.get(key);
                 const keptIsEnvWide = kept != null && (kept.organization_id ?? null) === null;
                 if (kept == null || (keptIsEnvWide && (row?.organization_id ?? null) !== null)) {

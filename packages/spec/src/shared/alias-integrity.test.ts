@@ -657,6 +657,56 @@ const PROSE_TARGET_SURFACE = /^this `[a-z]+` navigation item$/;
 const isProseTarget = (surface: string, target: string): boolean =>
   PROSE_TARGET_SURFACE.test(surface) && PROSE_ALIAS_TARGETS.has(target);
 
+/**
+ * Alias rows made UNREACHABLE by a `guidanceSet` in the same strict options
+ * table (#7889).
+ *
+ * `strictUnknownKeyError` (`suggestions.zod.ts`) consults three channels per
+ * unrecognized key, in order: exact `guidance`, then `guidanceSets`, and only
+ * THEN the `aliases` rename fallback. A `guidanceSets` match `continue`s past
+ * the alias lookup entirely — it never runs for that key. So an alias row
+ * whose WRITTEN key also matches a guidanceSet declared on the same table is
+ * dead on arrival: the set answers first, every time, and the alias entry
+ * reads as coverage for a spelling nobody is actually helped with.
+ *
+ * Not hypothetical: PR #7884 had to place its one view-family alias
+ * (`disabled → readonly`, `ui/view.zod.ts`) OUTSIDE `VISIBILITY_KEY_PATTERN`'s
+ * reach by hand, because nothing checked it — a `visible: 'visibleWhen'` or
+ * `showWhen: 'visibleWhen'` row on the same table would have shipped exactly
+ * as dead, with every existing gate green (#7889).
+ *
+ * The pattern-vs-list asymmetry the checks above already draw — an enumerated
+ * `keys: string[]` can be judged against the DECLARED shape, a `keys: RegExp`
+ * cannot (`VISIBILITY_KEY_PATTERN` deliberately also matches the canonical
+ * `visibleWhen`, which the shape declares and which therefore never reaches
+ * either channel) — does not apply here. An alias's written key is a concrete
+ * authored string, not a member of the shape, so it can be tested against a
+ * pattern set exactly as a real rejected key would be: `keySetMatches` is the
+ * same function `strictUnknownKeyError` itself calls.
+ *
+ * Reads only `options.aliases` and `options.guidanceSets` — never `.shape` —
+ * so it composes with (and does not duplicate) the declared-key checks above.
+ */
+function unreachableAliasRows(surfaces: readonly StrictObjectDeclaration[]): string[] {
+  const dead: string[] = [];
+  for (const s of surfaces) {
+    const sets = s.options.guidanceSets ?? [];
+    if (sets.length === 0) continue;
+    for (const [written, target] of Object.entries(s.options.aliases ?? {})) {
+      const set = sets.find((candidate) => keySetMatches(candidate, written));
+      if (set) {
+        dead.push(
+          `"${s.options.surface}": alias \`${written}\` -> \`${target}\` is unreachable — `
+          + `guidanceSet \`${set.name}\` already matches \`${written}\` and consumes it before `
+          + 'the alias table is ever consulted (drop the alias row, or fold '
+          + `\`${written}\` into \`${set.name}\`'s prescription instead)`,
+        );
+      }
+    }
+  }
+  return dead;
+}
+
 describe('alias integrity — every table is a true claim about its schema', () => {
   it('no alias key is itself a declared key (a dead entry that can never fire)', () => {
     // An alias is consulted only from the `unrecognized_keys` path. A key the
@@ -825,6 +875,89 @@ describe('alias integrity — every table is a true claim about its schema', () 
       }
     }
     expect(broken.sort()).toEqual([]);
+  });
+
+  it('no alias row is dead on arrival because a guidanceSet in the same table already consumes it (#7889)', () => {
+    // The live-table verdict. If this ever turns red on a real schema, the fix
+    // is at the authoring site (drop the row, or fold the key into the set's
+    // prescription) — never here, and never a change to the predicate that
+    // makes the row stop being found.
+    expect(unreachableAliasRows(SURFACES).sort()).toEqual([]);
+
+    // The acceptance shape's second half: the one existing view-family alias
+    // row (`disabled -> readonly` on `FormFieldSchema`, `ui/view.zod.ts:1775`)
+    // is confirmed to exist and to sit on `VISIBILITY_STRICT_OPTIONS`'s
+    // `VISIBILITY_KEY_PATTERN` table — so the assertion above is judging the
+    // real, live, non-trivial case (a table that DOES carry a pattern-matching
+    // guidanceSet), not an empty one that would pass vacuously.
+    const visibilityTablesWithThisAlias = SURFACES.filter(
+      (s) =>
+        s.options.aliases?.disabled === 'readonly'
+        && (s.options.guidanceSets ?? []).some((set) => set.name === 'VISIBILITY_KEY_PATTERN'),
+    );
+    expect(
+      visibilityTablesWithThisAlias.length,
+      'the FormFieldSchema `disabled -> readonly` row should exist and carry VISIBILITY_KEY_PATTERN',
+    ).toBeGreaterThan(0);
+  });
+
+  it('the guidanceSet-reachability check can actually go red — a planted dead row, no live schema touched (#7889)', () => {
+    // Self-test, per the triage ruling: prove the gate can fail before trusting
+    // that it passing on the live table means anything. Entirely synthetic —
+    // `unreachableAliasRows` only reads `options.aliases` / `options.guidanceSets`,
+    // so `shape` is never inspected and can be an empty stand-in.
+    const emptyShape = {} as StrictObjectDeclaration['shape'];
+
+    const planted: StrictObjectDeclaration[] = [{
+      options: {
+        surface: 'synthetic reachability probe',
+        history: 'n/a — planted for #7889 self-test',
+        aliases: { visibleIf: 'visibleWhen' },
+        guidanceSets: [{
+          name: 'SYNTHETIC_VIS_PATTERN',
+          keys: /vis/i,
+          examples: ['visibleIf'],
+          prescription: 'n/a',
+        }],
+      },
+      shape: emptyShape,
+    }];
+    const dead = unreachableAliasRows(planted);
+    expect(dead).toHaveLength(1);
+    expect(dead[0]).toContain('visibleIf');
+    expect(dead[0]).toContain('SYNTHETIC_VIS_PATTERN');
+
+    // Control: the identical alias row with NO guidanceSet on the table is
+    // reachable — proves the planted row above went red because of the
+    // pattern match, not because of anything else about the shape.
+    const reachable: StrictObjectDeclaration[] = [{
+      options: {
+        surface: 'synthetic reachability probe (no set)',
+        history: 'n/a — planted for #7889 self-test',
+        aliases: { visibleIf: 'visibleWhen' },
+      },
+      shape: emptyShape,
+    }];
+    expect(unreachableAliasRows(reachable)).toEqual([]);
+
+    // Second control: a guidanceSet present but NOT matching the alias key —
+    // proves the row is judged by an actual pattern match, not merely by the
+    // presence of a guidanceSets array on the table.
+    const nonMatching: StrictObjectDeclaration[] = [{
+      options: {
+        surface: 'synthetic reachability probe (non-matching set)',
+        history: 'n/a — planted for #7889 self-test',
+        aliases: { disabled: 'readonly' },
+        guidanceSets: [{
+          name: 'SYNTHETIC_VIS_PATTERN',
+          keys: /vis/i,
+          examples: ['visibleIf'],
+          prescription: 'n/a',
+        }],
+      },
+      shape: emptyShape,
+    }];
+    expect(unreachableAliasRows(nonMatching)).toEqual([]);
   });
 
   it('the three #6416 hand-written maps are FOLDED and judged here — the blind spot stays closed (#6619)', () => {

@@ -432,7 +432,7 @@
       "title": "os test: a Quality Protocol suite is validated at LOAD, executed against a booted app, and its verdict is the exit code — capture/interpolation thread state, an unevaluable assertion FAILS",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "cli",
       "personas": ["operator (local shell)", "suite author (writes qa/*.test.json)"],
@@ -445,7 +445,8 @@
           "a scratch directory with its own qa/ for the negative and variant probes — deliberately broken suites are STAGED per run, never committed, so the repo's own suite stays green"
         ],
         "knownGaps": [
-          "five of the eight action types cannot reach a stock server at all (see `negative`): `HttpTestAdapter` builds `${baseUrl}/api/data/:object` while the server serves `{basePath}/data/:object` with basePath `/api/v1`. The variant sweep therefore records five refusals, and that is the honest verdict — not a fixture gap to work around by rewriting the probes as `api_call`",
+          "`run_script` has no adapter branch and fails by name (`Unsupported action type in HttpAdapter: run_script`) — the variant sweep records ONE refusal and that is the honest verdict, not a fixture gap to work around. The other seven members execute since #7848; the five record-shaped ones did not until then (see `negative`), so a sweep transcript predating that fix shows five 404s and is not comparable",
+          "the record action types address the Data Protocol at its DEFAULT mount only (`{apiPath}{crud.dataPrefix}` = `/api/v1/data`). A deployment that sets `api.apiPath` or `crud.dataPrefix` moves the mount out from under them; the fixture boot uses stock config, so this does not bite here — a run against a re-prefixed host must write those steps as `api_call`",
           "no scenario SELECTION exists: `os test` has exactly two flags (--url, --token), `scenario.tags` filters nothing and `scenario.requires` is never checked (packages/spec/liveness/qa.json rows `tags`/`requires`), so the whole glob always runs and a suite cannot declare a precondition it will be skipped for"
         ]
       },
@@ -514,20 +515,20 @@
         }
       ],
       "negative": [
-        "a zero-match glob prints `No test files found matching: <pattern>` and exits **0** (measured 2026-08-11) — a green exit from a run that loaded no suite. A run record that ticks this item without quoting a `Found N test suites.` line with N > 0 is the false positive this item exists to prevent, and a CI job wired to `os test` with a typo'd path would report success forever",
+        "a zero-match glob prints `Found 0 test suites.` + `No test files found matching: <pattern>` and exits **0** — a green exit from a run that loaded no suite. Since #7848 that is a DECLARED posture (stated in `--help`, opt out with `--fail-on-empty`, which exits 1) rather than an accident, but the default is unchanged and so is the trap: a CI job wired to `os test` with a typo'd path still reports success forever unless it passes the flag. A run record that ticks this item without quoting a `Found N test suites.` line with N > 0 is the false positive this item exists to prevent",
         "a malformed suite that REACHES the runner — reported passed having executed nothing, or dying as a TypeError inside runSuite with no file named — is the #6247 regression",
         "a `contains` against a path the result does not carry reporting ✅ is the #7256 regression",
-        "the five record-shaped action types (`create_record`, `read_record`, `update_record`, `delete_record`, `query_records`) answer **HTTP 404** against a stock server: `HttpTestAdapter` builds `${baseUrl}/api/data/:object` while the server serves `{basePath}/data/:object` with basePath `/api/v1` (and `update_record` issues PUT where the route is PATCH). Measured 2026-08-11 on showcase. A run must record those four-oh-fours as the measured verdict — recording them as 'not applicable' hides the finding, and a future run that finds them PASSING means the adapter was repaired, which is a revision of this item rather than a silent green",
+        "the five record-shaped action types (`create_record`, `read_record`, `update_record`, `delete_record`, `query_records`) **round-trip** against a stock server, and an **HTTP 404** from any of them is now the regression this clause names. They answered 404 until #7848 — `HttpTestAdapter` built `${baseUrl}/api/data/:object` where the server serves `{apiPath}/data/:object` with `apiPath` = `/api/v1`, and `update_record` issued PUT where the route is PATCH. Both are fixed and the prefix is derived from `RestApiConfigSchema` + `CrudEndpointsConfigSchema` rather than written down, so this cannot regress by a literal drifting. Re-measured 2026-08-12 on showcase, one scenario per member with no shared setup: 7 of 8 execute and assert, `run_script` refuses by name",
         "satisfying this item by executing the unit pins in `source` instead of driving a booted app is not a run: those pins cover the load boundary, the glob resolver and one assertion operator, and none of them proves a suite reaches a real server — which is why this item carries no `automated` entry"
       ],
       "variants": [
         "api_call — the only action type that reaches the real API surface (target is a path or absolute URL; `payload.method`/`payload.body` shape the request)",
         "wait — local, no HTTP; resolves `{ waited: <ms> }` from `payload.duration`",
-        "create_record — refused: POST ${baseUrl}/api/data/:object → 404 (see `negative`)",
-        "read_record — refused: GET ${baseUrl}/api/data/:object/:id → 404",
-        "update_record — refused: PUT ${baseUrl}/api/data/:object/:id → 404 (and PUT, where the route is PATCH)",
-        "delete_record — refused: DELETE ${baseUrl}/api/data/:object/:id → 404",
-        "query_records — refused: POST ${baseUrl}/api/data/:object/query → 404",
+        "create_record — POST {apiPath}/data/:object → 201 `{ object, id, record }` (404 before #7848)",
+        "read_record — GET {apiPath}/data/:object/:id → `{ object, id, record }`; the id comes from `payload.id`",
+        "update_record — PATCH {apiPath}/data/:object/:id with `payload.id` peeled off the body (it addresses the record, it is not a column write); issued PUT to a route that has no PUT sibling before #7848",
+        "delete_record — DELETE {apiPath}/data/:object/:id → `{ object, id, success }`",
+        "query_records — POST {apiPath}/data/:object/query with the QueryAST as the body → `{ object, records }`",
         "run_script — declared in the enum with NO adapter branch: `Unsupported action type in HttpAdapter: run_script` (loud, recorded in packages/spec/liveness/qa.json)"
       ],
       "enumSource": {
@@ -539,7 +540,7 @@
       "source": [
         "packages/cli/src/commands/test.ts (the shipped `os test`: the #7363 lazy segment-directed glob with its prune list, `loadTestSuite`'s #6247 boundary parse, the per-scenario report, and the exit 0/1 summary)",
         "packages/core/src/qa/runner.ts (scenario sequencing, `capture` + `{{var}}` interpolation, the assertion operators, setup/teardown semantics, the #7256 unevaluable-`contains` fix)",
-        "packages/core/src/qa/http-adapter.ts (the action-type switch — its case labels ARE the enum values; the `/api/data/...` record routes this item's variants measure against the server's `/api/v1/data/...`)",
+        "packages/core/src/qa/http-adapter.ts (the action-type switch — its case labels ARE the enum values; the record routes derive their prefix from RestApiConfigSchema + CrudEndpointsConfigSchema rather than spelling `/api/v1/data` out, #7848)",
         "packages/spec/src/qa/testing.zod.ts (TestSuiteSchema — the shape enforced at load; TestActionTypeSchema pinned above)",
         "packages/spec/liveness/qa.json (the ADR-0049 ledger whose existence this item is coverage.json's mapping for — its dead `tags`/`requires` rows are why no scenario selection exists)",
         "packages/cli/test/qa-suite-schema-load.test.ts, packages/cli/test/resolve-glob-lazy-walk.test.ts, packages/core/src/qa/runner.test.ts (the three unit pins — cited so a run knows what is already covered, NOT a substitute for driving a booted app)",
@@ -547,7 +548,8 @@
         "examples/app-showcase/qa/platform-smoke.test.json (the fixture suite this item drives)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-11", "change": "new item: the `qa` capability's coverage.json mapping, authored rather than waived (#7347 triage ruling). `os test` is a shipped, documented CLI command, so the honest mapping is a surface:cli item that authors a real qa/*.test.json suite and drives it against a booted app — the fixture suite examples/app-showcase/qa/platform-smoke.test.json lands with this item and is the repo's first Quality Protocol suite. Every clause was measured on showcase before it was written: the green path, capture/interpolation, the #6247 load refusal, the #7256 unevaluable-contains failure, teardown-after-failure, the 8-member action-type sweep and the #7363 glob. `since: v17` records the release in which the surface became GOVERNED (liveness ledger seeded + TestSuiteSchema enforced at the load site, #6247 / PR #7255); the command itself predates it. No `automated` entry: the three unit pins cover pieces, none of them proves a suite reaches a real server", "ref": "#7347" }
+        { "revision": 1, "date": "2026-08-11", "change": "new item: the `qa` capability's coverage.json mapping, authored rather than waived (#7347 triage ruling). `os test` is a shipped, documented CLI command, so the honest mapping is a surface:cli item that authors a real qa/*.test.json suite and drives it against a booted app — the fixture suite examples/app-showcase/qa/platform-smoke.test.json lands with this item and is the repo's first Quality Protocol suite. Every clause was measured on showcase before it was written: the green path, capture/interpolation, the #6247 load refusal, the #7256 unevaluable-contains failure, teardown-after-failure, the 8-member action-type sweep and the #7363 glob. `since: v17` records the release in which the surface became GOVERNED (liveness ledger seeded + TestSuiteSchema enforced at the load site, #6247 / PR #7255); the command itself predates it. No `automated` entry: the three unit pins cover pieces, none of them proves a suite reaches a real server", "ref": "#7347" },
+        {"revision": 2, "date": "2026-08-12", "change": "the adapter was repaired, which this item's own `negative` clause declared to be a revision rather than a silent green (#7848). Item 1: the five record-shaped action types now round-trip against a stock server — the `${baseUrl}/api/data/:object` literal became a prefix DERIVED from the two schemas RestServer itself resolves from (RestApiConfigSchema `apiPath ?? {basePath}/{version}` + CrudEndpointsConfigSchema.dataPrefix), and `update_record` PATCHes where it used to PUT a route that has no PUT sibling. Re-measured on a booted showcase, one scenario per member with NO shared setup so no member's verdict is inferred from a sibling: 7 of 8 execute and assert, `run_script` still refuses by name. The `negative` clause is inverted accordingly — a 404 from a record action type is the regression now — and the knownGap it rested on is replaced by the narrower one that survives: the record types address the DEFAULT mount only, so a host that moves it with `api.apiPath`/`crud.dataPrefix` still needs `api_call`. Item 2: a zero-match glob still exits 0, deliberately (a repo that legitimately ships no suites must not start failing CI), but the posture is now DECLARED — stated in `--help`, opt out with the new `--fail-on-empty`, and `Found N test suites.` is emitted on EVERY run including `Found 0 test suites.`, which is the line this item's first acceptance clause already asks a run record to quote", "ref": "#7848"}
       ]
     },
     {

@@ -1,7 +1,11 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
-import { BUILTIN_MEMBERSHIP_ROLE_OPTIONS, MEMBERSHIP_ROLE_MEMBER } from '@objectstack/spec/identity';
+import {
+  BUILTIN_MEMBERSHIP_ROLE_OPTIONS,
+  InvitationStatus,
+  MEMBERSHIP_ROLE_MEMBER,
+} from '@objectstack/spec/identity';
 
 /**
  * sys_invitation — System Invitation Object
@@ -211,7 +215,13 @@ export const SysInvitation = ObjectSchema.create({
       defaultValue: MEMBERSHIP_ROLE_MEMBER,
     }),
     
-    status: Field.select(['pending', 'accepted', 'rejected', 'expired', 'canceled'], {
+    // [#7726] Same list as the spec's `InvitationStatus`, from that enum — the
+    // two definitions of this vocabulary had already drifted once (the object
+    // shipped `canceled`, which better-auth writes on cancel-invitation, while
+    // the enum stopped at four values and so rejected a canceled row). Reading
+    // the options from the enum makes a repeat impossible rather than merely
+    // discouraged; `sys-invitation.status-vocabulary.test.ts` pins the rest.
+    status: Field.select([...InvitationStatus.options], {
       label: 'Status',
       required: true,
       defaultValue: 'pending',
