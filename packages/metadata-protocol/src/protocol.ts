@@ -8709,13 +8709,95 @@ export class ObjectStackProtocolImplementation implements
      * Used by the two-tier authorization model to distinguish
      * "overlaying a packaged item" (requires `allowOrgOverride`) from
      * "authoring a DB-only item" (requires only `allowRuntimeCreate`).
+     *
+     * [#7743] …and it must answer that question about the artifact as SHIPPED,
+     * not about how the registry happens to key it. See
+     * {@link isNestedArtifactField} for the one declared type whose artifacts
+     * are not standalone registry items at all.
      */
     private isArtifactBacked(type: string, name: string): boolean {
         // `lookupArtifactItem` only returns items whose `_packageId` marks a
         // genuine code package (the `'sys_metadata'` rehydration sentinel is
         // excluded), and — via `SchemaRegistry.getArtifactItem` — is immune
         // to plain-key shadows hydrated from overlay rows.
-        return this.lookupArtifactItem(type, name) !== undefined;
+        if (this.lookupArtifactItem(type, name) !== undefined) return true;
+        return this.isNestedArtifactField(type, name);
+    }
+
+    /**
+     * [#7743] Is `(field, '<object>.<field>')` a field a code package ships?
+     *
+     * ## Why this predicate needs a second resolver at all
+     *
+     * `field` is the ONE type in `DEFAULT_METADATA_TYPE_REGISTRY` whose
+     * artifacts are not standalone registry items. Its `filePatterns`
+     * (`**\/*.field.ts`) match nothing in any app — fields are authored INSIDE
+     * the object (`ObjectSchema.fields`, a `z.record(name, FieldSchema)`), so
+     * the object's loader registers one `object` item and no `field` items at
+     * all. `getArtifactItem('field', 'showcase_task.title')` therefore misses
+     * on a field the package unambiguously ships.
+     *
+     * That miss is not cosmetic — it is a load-bearing authorization input.
+     * `isArtifactBacked` is what picks the write INTENT for
+     * `SysMetadataRepository.assertAllowed` (`override-artifact` vs
+     * `runtime-only`) and what arms `saveMetaItem`'s own `NOT_OVERRIDABLE`
+     * gate. With the lookup empty, an override of a packaged field was
+     * classified as a runtime-only CREATE, and `field` carries
+     * `allowRuntimeCreate: true` — so `allowOrgOverride: false` was never
+     * consulted, and `PUT /api/v1/meta/field/showcase_task.title` answered
+     * **200** on a write the registry forbids. Measured on the showcase before
+     * this fix: 200 `state:'active'`, the row reading back with
+     * `_diagnostics.valid=true`.
+     *
+     * ## Why this is `field`-only and not a general nesting rule
+     *
+     * Measured across the whole registry on a booted showcase (#7743): every
+     * other declared type either registers its artifacts standalone with a
+     * `_packageId` — `action` (70), `page` (33), `permission` (16), `dataset`
+     * (9), `doc` (9), `hook` (4), `report` (4), `mapping`/`book`/
+     * `email_template` (1 each) — or genuinely ships no artifacts at all
+     * (`position`, `tool`, `skill`, `seed`, `translation`,
+     * `external_catalog`), where "not artifact-backed" is the TRUE answer and
+     * the runtime-create tier is the right one. `action` is the instructive
+     * one: it is also nested inside the object document, yet it IS registered
+     * standalone, so it was already refused correctly (403) in the same run.
+     * `field` is the only name where the registry's answer and the shipped
+     * artifact disagree, so widening this to a class would be widening it past
+     * what was measured.
+     *
+     * ## Shape decisions
+     *
+     *  - **Containment, not a synthetic envelope.** This returns a boolean
+     *    rather than routing through {@link lookupArtifactItem}, because a
+     *    field sub-document is a bare `{ name, label, type, … }` with no
+     *    `_packageId` / `_lock` envelope. The other `lookupArtifactItem`
+     *    callers (lock resolution, `mergeArtifactProtection`, the layered
+     *    read) consume that envelope, and handing them a field body would make
+     *    them assert provenance nobody stamped. The authorization question —
+     *    "does a package ship this?" — is answerable without one.
+     *  - **The OBJECT is resolved through the artifact-only lookup**, so an
+     *    overlay row hydrated under the plain key cannot manufacture *or* mask
+     *    an artifact field (ADR-0010 §3.3, the same shadow-immunity the
+     *    standalone path relies on).
+     *  - **`fields` is read in its one canonical form** — a record keyed by
+     *    field name (`object.zod.ts`, `z.record(...)`). No array fallback:
+     *    Prime Directive #12 keeps one contract rather than two dialects.
+     *  - **A brand-new field stays creatable.** A name the object's artifact
+     *    does not carry answers `false` here, keeps the `runtime-only` intent,
+     *    and is still accepted under `allowRuntimeCreate: true` — the
+     *    declaration has two tiers and this closes only the overlay one.
+     */
+    private isNestedArtifactField(type: string, name: string): boolean {
+        if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'field') return false;
+        // `<object>.<field>` — both halves are snake_case and carry no dot of
+        // their own, so the FIRST separator is the only one.
+        const sep = name.indexOf('.');
+        if (sep <= 0 || sep === name.length - 1) return false;
+        const objectArtifact = this.lookupArtifactItem('object', name.slice(0, sep)) as
+            { fields?: Record<string, unknown> } | undefined;
+        const fields = objectArtifact?.fields;
+        if (!fields || typeof fields !== 'object') return false;
+        return Object.prototype.hasOwnProperty.call(fields, name.slice(sep + 1));
     }
 
     // ───────────────────────────────────────────────────────────────────

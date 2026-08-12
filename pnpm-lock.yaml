@@ -1784,6 +1784,9 @@ importers:
       '@objectstack/metadata-core':
         specifier: workspace:*
         version: link:../../metadata-core
+      '@objectstack/objectql':
+        specifier: workspace:*
+        version: link:../../objectql
       '@types/node':
         specifier: ^26.1.2
         version: 26.1.2

@@ -11,6 +11,7 @@ import type { EnqueueHttpInput } from '@objectstack/service-messaging';
 import { AutoEnqueuer, type AutoEnqueuerOptions } from './auto-enqueuer.js';
 import { SysWebhook } from './sys-webhook.object.js';
 import { bootstrapDeclaredWebhooks } from './bootstrap-declared-webhooks.js';
+import { migrateLegacyWebhookSecrets } from './migrate-webhook-secrets.js';
 import { bindWebhookProvenanceStamp, unbindWebhookProvenanceStamp } from './webhook-provenance.js';
 
 /**
@@ -192,6 +193,19 @@ export class WebhookOutboxPlugin implements Plugin {
             await bootstrapDeclaredWebhooks(engine, metadataService, ctx.logger as any);
         } catch (err: any) {
             ctx.logger.warn?.('[webhook] declared-webhook bootstrap failed (dispatcher still serves admin rows)', {
+                error: err?.message ?? String(err),
+            });
+        }
+        // [#7799] Then heal the rows the seeder cannot touch. Package rows are
+        // rewritten above; `managed_by: 'admin'` and `customized: true` rows are
+        // deliberately frozen against re-seeding, and those are precisely the
+        // ones holding hand-authored production keys in cleartext. Runs AFTER
+        // the seeder so a row it just rewrote is already secret-free and the
+        // sweep is a no-op on it.
+        try {
+            await migrateLegacyWebhookSecrets(engine, ctx.logger as any);
+        } catch (err: any) {
+            ctx.logger.warn?.('[webhook] legacy signing-secret sweep failed (rows left unchanged)', {
                 error: err?.message ?? String(err),
             });
         }
