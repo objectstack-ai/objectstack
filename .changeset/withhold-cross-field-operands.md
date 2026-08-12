@@ -1,6 +1,6 @@
 ---
-"@objectstack/driver-sql": patch
-"@objectstack/driver-turso": patch
+"@objectstack/driver-sql": minor
+"@objectstack/driver-turso": minor
 ---
 
 fix(driver-sql,driver-turso): a cross-field `$field` refusal stops naming the two columns it compared (#7929, #7988)
