@@ -602,9 +602,13 @@ const TEST_DEBT = {
       + '(#5278 option A).',
   },
   '@objectstack/plugin-auth': {
-    errors: 108,
+    errors: 111,
     note: 'TS2493 x42 (tuple index out of range), TS18048 x24, TS2740 x19, TS2322 x11, TS2532 x9, '
-      + 'TS2339 x8, TS2741 x8. '
+      + 'TS2339 x8, TS2741 x8. Lowered 131 -> 111 at b16dcb45 (#7888); the intermediate 108 in this PR\'s '
+      + 'first commit was measured at b5e09b21 and was already stale when the merge queue built it -- the '
+      + 'package took +3 inside the hour, which is the same "a ledger number is a number about a moment" '
+      + 'race that kicked #5278 three times, and 111 is the merge-queue run\'s own re-measure on the ref '
+      + 'this PR actually lands on. Composition below predates both and is NOT re-tallied at 111. '
       + 'Measured 124 -> 129 (5ab08428, composition unchanged in shape) -> 131 (e8db1a230). Half of the '
       + 'latest +2 is a TS2554 in src/last-admin-guard.test.ts, a file added by #5941 / PR #5993 '
       + '(the break-glass delete guard); the other 1 landed in a file that already existed and is not '
