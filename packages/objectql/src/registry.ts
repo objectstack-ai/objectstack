@@ -1774,28 +1774,53 @@ export class SchemaRegistry {
 
   /**
    * Unregister all objects contributed by a package.
-   * 
+   *
+   * [#7970] **Refuses before it mutates.** If any object this package owns is
+   * extended by another package (ADR-0029), the call throws having removed
+   * nothing — the refusal is decided across every object first. Callers may
+   * therefore treat a throw as a no-op, which is what lets
+   * {@link uninstallPackage} run this verb ahead of its own mutations.
+   *
    * @throws Error if trying to uninstall an owner that has extenders
    */
   unregisterObjectsByPackage(packageId: string, force: boolean = false): void {
+    // [#7970] REFUSAL PASS — the whole decision, taken before a single
+    // contribution is removed. This check used to live inline in the mutation
+    // walk below, one object at a time, so a package owning `account` (free)
+    // and `contact` (extended by another package) lost `account` on the way to
+    // refusing over `contact`: the guard that exists to keep a registry whole
+    // was itself reached through a mutation, and nothing rolled it back. Same
+    // predicate and same iteration order as the inline check it replaces, so
+    // the same object still refuses with the same message — what changed is
+    // only that no removal precedes the throw.
+    if (!force) {
+      for (const [fqn, contributors] of this.objectContributors.entries()) {
+        const ownedHere = contributors.some(
+          c => c.packageId === packageId && c.ownership === 'own'
+        );
+        if (!ownedHere) continue;
+        // Extenders from other packages
+        const otherExtenders = contributors.filter(
+          c => c.packageId !== packageId && c.ownership === 'extend'
+        );
+        if (otherExtenders.length > 0) {
+          throw new Error(
+            `Cannot uninstall package "${packageId}": object "${fqn}" is extended by ` +
+            `${otherExtenders.map(c => c.packageId).join(', ')}. Uninstall extenders first.`
+          );
+        }
+      }
+    }
+
+    // MUTATION PASS — carries no refusal of its own; the pass above already
+    // proved every removal below is allowed. Keep it that way: a second copy of
+    // the predicate here is the two-places-that-must-agree shape this ordering
+    // fix was chosen over.
     for (const [fqn, contributors] of this.objectContributors.entries()) {
       // Find this package's contributions
       const packageContribs = contributors.filter(c => c.packageId === packageId);
-      
-      for (const contrib of packageContribs) {
-        if (contrib.ownership === 'own' && !force) {
-          // Check if there are extenders from other packages
-          const otherExtenders = contributors.filter(
-            c => c.packageId !== packageId && c.ownership === 'extend'
-          );
-          if (otherExtenders.length > 0) {
-            throw new Error(
-              `Cannot uninstall package "${packageId}": object "${fqn}" is extended by ` +
-              `${otherExtenders.map(c => c.packageId).join(', ')}. Uninstall extenders first.`
-            );
-          }
-        }
 
+      for (const contrib of packageContribs) {
         // Remove contribution
         const idx = contributors.indexOf(contrib);
         if (idx !== -1) {
@@ -2640,13 +2665,22 @@ export class SchemaRegistry {
       return false;
     }
 
+    // [#7970] Unregister objects FIRST — this is the one step that can REFUSE
+    // (ADR-0029: the package owns an object another package `extend`s), so
+    // every mutation below is downstream of the refusal point and a refused
+    // uninstall removes nothing at all. The namespace release used to sit
+    // ABOVE this line, which meant reaching the guard that exists to keep a
+    // registry whole cost the namespace on the way in: the package stayed
+    // installed with its objects and its record intact, while its namespace no
+    // longer resolved, for the life of the process. Safe as the first step
+    // because the verb reads `objectContributors` only — it depends on nothing
+    // the steps below establish.
+    this.unregisterObjectsByPackage(id);
+
     // Unregister namespace
     if (pkg.manifest.namespace) {
       this.unregisterNamespace(pkg.manifest.namespace, id);
     }
-
-    // Unregister objects (will throw if extenders exist)
-    this.unregisterObjectsByPackage(id);
 
     // [#7221] …and everything else the package shipped. The object verb above
     // reaches `objectContributors` only, so without this an uninstall dropped

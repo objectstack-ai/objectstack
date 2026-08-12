@@ -357,6 +357,37 @@ describe('SchemaRegistry', () => {
                 registry.unregisterObjectsByPackage('com.owner', true);
             }).not.toThrow();
         });
+
+        it('[#7970] refuses before removing anything — a free sibling object survives', () => {
+            // `free` is walked FIRST (Map insertion order) and used to be spliced
+            // out on the way to refusing over `important`, so the refusal that
+            // exists to keep the registry whole half-tore it down instead.
+            registry.registerObject({ name: 'free', fields: {} }, 'com.owner', 'base', 'own');
+            registry.registerObject({ name: 'important', fields: {} }, 'com.owner', 'base', 'own');
+            registry.registerObject({ name: 'important', fields: {} }, 'com.ext', undefined, 'extend');
+
+            expect(() => {
+                registry.unregisterObjectsByPackage('com.owner');
+            }).toThrow(/object "important" is extended by com\.ext/);
+
+            expect(registry.getObject('free')).toBeDefined();
+            expect(registry.getObject('important')).toBeDefined();
+        });
+
+        it('[#7970] force still removes the owner even with a free sibling ahead of it', () => {
+            registry.registerObject({ name: 'free', fields: {} }, 'com.owner', 'base', 'own');
+            registry.registerObject({ name: 'important', fields: {} }, 'com.owner', 'base', 'own');
+            registry.registerObject({ name: 'important', fields: {} }, 'com.ext', undefined, 'extend');
+
+            registry.unregisterObjectsByPackage('com.owner', true);
+
+            // The refusal pass is skipped under `force`, and the mutation pass is
+            // unchanged: both of the package's contributions are gone, and the
+            // extender's own contribution is left where it was.
+            expect(registry.getObject('free')).toBeUndefined();
+            expect(registry.getObjectOwner('important')).toBeUndefined();
+            expect(registry.getObjectContributors('important')).toHaveLength(1);
+        });
     });
 
     // ==========================================
@@ -425,6 +456,64 @@ describe('SchemaRegistry', () => {
             registry.uninstallPackage('com.test');
             expect(registry.getPackage('com.test')).toBeUndefined();
             expect(registry.getNamespaceOwner('test')).toBeUndefined();
+        });
+
+        /**
+         * [#7970] The uninstall's ONE refusable step is `unregisterObjectsByPackage`
+         * (ADR-0029: you may not uninstall the owner of an object another package
+         * extends). It now runs before every mutation, so reaching that refusal
+         * costs nothing. The namespace is the limb that measured this: the release
+         * used to run FIRST, so a refused uninstall left the package installed —
+         * record, objects and items all intact — while its namespace no longer
+         * resolved, for the life of the process. No test refused and then inspected
+         * the namespace, which is exactly why the defect was invisible.
+         *
+         * Latent by grade: no in-tree caller reaches the refusal path today.
+         */
+        it('[#7970] a refused uninstall leaves the namespace still resolving', () => {
+            registry.installPackage({ id: 'com.crm', name: 'CRM', namespace: 'crm', version: '1.0.0' } as any);
+            registry.registerObject({ name: 'contact', fields: {} }, 'com.crm', 'crm', 'own');
+            registry.registerObject({ name: 'contact', fields: {} }, 'com.analytics', undefined, 'extend');
+
+            expect(registry.getNamespaceOwner('crm')).toBe('com.crm');
+
+            expect(() => registry.uninstallPackage('com.crm')).toThrow(
+                /Cannot uninstall package "com\.crm".*extended by com\.analytics/,
+            );
+
+            // The assertion the card names: refused ⇒ the namespace still resolves.
+            expect(registry.getNamespaceOwner('crm')).toBe('com.crm');
+            expect(registry.getNamespaceOwners('crm')).toEqual(['com.crm']);
+        });
+
+        it('[#7970] a refused uninstall leaves the whole package intact, not just the namespace', () => {
+            registry.installPackage({ id: 'com.crm', name: 'CRM', namespace: 'crm', version: '1.0.0' } as any);
+            // Registered ahead of the extended object, so the object walk reaches
+            // this one before it can refuse.
+            registry.registerObject({ name: 'account', fields: {} }, 'com.crm', 'crm', 'own');
+            registry.registerObject({ name: 'contact', fields: {} }, 'com.crm', 'crm', 'own');
+            registry.registerObject({ name: 'contact', fields: {} }, 'com.analytics', undefined, 'extend');
+            registry.registerItem('page', { name: 'home' }, 'name', 'com.crm');
+
+            expect(() => registry.uninstallPackage('com.crm')).toThrow(/extended by com\.analytics/);
+
+            // Every limb `uninstallPackage` mutates, in the order it mutates them.
+            expect(registry.getNamespaceOwner('crm')).toBe('com.crm');
+            expect(registry.getObject('account')).toBeDefined();
+            expect(registry.getObject('contact')).toBeDefined();
+            expect(registry.getItem('page', 'home')).toMatchObject({ name: 'home' });
+            expect(registry.getPackage('com.crm')).toBeDefined();
+        });
+
+        it('[#7970] the successful path still releases the namespace after the object verb', () => {
+            registry.installPackage({ id: 'com.crm', name: 'CRM', namespace: 'crm', version: '1.0.0' } as any);
+            registry.registerObject({ name: 'contact', fields: {} }, 'com.crm', 'crm', 'own');
+
+            expect(registry.uninstallPackage('com.crm')).toBe(true);
+
+            expect(registry.getNamespaceOwner('crm')).toBeUndefined();
+            expect(registry.getObject('contact')).toBeUndefined();
+            expect(registry.getPackage('com.crm')).toBeUndefined();
         });
 
         it('updatePackageManifest merges editable fields, preserving lifecycle state', () => {
