@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { StrictObjectOptions } from './strict-object';
+import type { KeySetGuidance } from './suggestions.zod';
 
 /**
  * # Conditional-visibility predicate normalization (ADR-0089)
@@ -136,5 +137,89 @@ export const VISIBILITY_STRICT_OPTIONS: StrictObjectOptions = {
         + '`visibleWhen` (ADR-0089) — `visibleOn` (view form) and `visibility` (page '
         + 'component) are still accepted as deprecated aliases.',
     },
+  ],
+};
+
+/**
+ * The editability vocabulary an author reaches for on a shape that gates
+ * **visibility only** (#7887).
+ *
+ * Every spelling here is rejected by `FormSectionSchema` and
+ * `PageComponentSchema` today and stays rejected: this set changes the MESSAGE,
+ * never the verdict. `readOnly` sits alongside `readonly` because set
+ * membership is matched case-sensitively (the rename channel is what folds
+ * case, and a set match `continue`s past it).
+ */
+const EDITABILITY_BOUNDARY_KEYS = [
+  'disabled',
+  'disabledWhen',
+  'readonly',
+  'readOnly',
+  'readonlyWhen',
+  'editable',
+] as const;
+
+/**
+ * The maintainer's 2026-08-12 ruling on #7887, rendered as the thing an author
+ * actually reads: **boundary, not gap.**
+ *
+ * A form section and a page component gate *visibility*; **editability lives on
+ * fields**. No `disabled` / `readonly` / `readonlyWhen` slot is added to either
+ * shape, and no alias row is registered for them either — an alias names a key
+ * the shape must then accept, and one the runtime does not honour is the
+ * ADR-0049 declared-but-unenforced class this repo is retiring. What the author
+ * gets instead is a prescription telling them where the key *does* belong.
+ *
+ * Deliberately points at **`readonlyWhen`** and not at `disabledWhen`:
+ * `field.zod.ts` renames `disabled → readonly` and records in its own comment
+ * that "a field has `readonlyWhen`, not `disabledWhen`" (#7832). Naming
+ * `disabledWhen` here would send an author to a key that exists on no field
+ * surface at all.
+ */
+const EDITABILITY_BOUNDARY_GUIDANCE: KeySetGuidance = {
+  name: 'EDITABILITY_BOUNDARY_KEYS',
+  keys: EDITABILITY_BOUNDARY_KEYS,
+  prescription:
+    'Editability is a FIELD-level concern. This shape gates VISIBILITY only — a '
+    + 'deliberate boundary, not a missing key (#7887): a section / page component has '
+    + 'no read-only semantics of its own to enforce. Write `readonly: true` (or the '
+    + 'conditional `readonlyWhen` predicate) on the form field(s) inside it instead; to '
+    + 'hide the whole section or component, use `visibleWhen`.',
+};
+
+/**
+ * {@link VISIBILITY_STRICT_OPTIONS} for the two shapes that gate visibility and
+ * **nothing else** — `FormSectionSchema` (`ui/view.zod.ts`) and
+ * `PageComponentSchema` (`ui/page.zod.ts`).
+ *
+ * ## Why the boundary prescription is filed HERE and not in the shared table
+ *
+ * `VISIBILITY_STRICT_OPTIONS` has **three** consumers, and the third —
+ * `FormFieldSchema` — is the one view/page shape that *does* answer `disabled`,
+ * through its own `aliases: { disabled: 'readonly' }` row (`view.zod.ts`, the
+ * comment at that site rejects shared-table filing for exactly this reason).
+ * Adding `EDITABILITY_BOUNDARY_KEYS` to the shared options would land it on that
+ * table too, and the consequences are not cosmetic:
+ *
+ * - `strictUnknownKeyError` consults exact `guidance` → `guidanceSets` →
+ *   `aliases`, and a set match `continue`s past the rename. The field author who
+ *   writes `disabled` would stop seeing *"Did you mean `disabled` → `readonly`?"*
+ *   and start being told editability is somewhere else — on the one surface
+ *   where it is right there.
+ * - `alias-integrity.test.ts` would go **red**, not quietly wrong: its #7889
+ *   check fails any alias row a guidanceSet on the same table already consumes.
+ *
+ * So the two visibility-only shapes take these options and `FormFieldSchema`
+ * keeps the bare ones. The prescription text itself is written once, here.
+ */
+export const VISIBILITY_ONLY_STRICT_OPTIONS: StrictObjectOptions = {
+  ...VISIBILITY_STRICT_OPTIONS,
+  guidanceSets: [
+    // Declaration order decides among sets. Nothing in
+    // `EDITABILITY_BOUNDARY_KEYS` matches `VISIBILITY_KEY_PATTERN`
+    // (`/vis|conceal|hidden|show.?when/i`), so the order is not load-bearing —
+    // pinned in `editability-boundary.test.ts` so it cannot quietly become so.
+    ...(VISIBILITY_STRICT_OPTIONS.guidanceSets ?? []),
+    EDITABILITY_BOUNDARY_GUIDANCE,
   ],
 };
