@@ -1179,10 +1179,27 @@ export class EmailService implements IEmailService {
       }
     }
 
-    // Render holes with the recipient's locale + reference timezone so
+    // Render holes with the RESOLVED ROW's locale + reference timezone so
     // `{{ ts | datetime }}` shows the right wall-clock (ADR-0053 Phase 2).
+    //
+    // The row is the single locale authority (#7801). Leaving this unset when
+    // the caller named no locale handed the format filters to `formatValue`'s
+    // own `?? 'en-US'` default, so a no-locale send landing on a non-en-US row
+    // — a bundle with no en-US row at all, the ladder's last rung above — put
+    // en-US dates and numbers inside zh-CN body text. One artefact, one locale.
+    // (The card reported the mirror image, "filters follow the RUNTIME locale";
+    // they never did — `formatValue` hard-defaults to en-US — which is why the
+    // split was invisible whenever the row itself happened to be en-US.)
+    //
+    // An explicit `input.locale` still WINS: the row is the authority only when
+    // the caller named nobody, so `locale: 'fr-FR'` falling back to the en-US
+    // row still formats fr-FR. `preferred`, not `input.locale`, because it is
+    // the trimmed spelling the ladder actually resolved on — a padded
+    // `' zh-CN '` must not reach `Intl`, which throws a RangeError on it and
+    // took the whole send down.
+    const locale = preferred || row.locale;
     const renderOpts = {
-      ...(input.locale ? { locale: input.locale } : {}),
+      ...(locale ? { locale } : {}),
       ...(input.timezone ? { timeZone: input.timezone } : {}),
     };
     const subject = renderTemplate(row.subject, data, renderOpts);

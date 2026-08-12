@@ -256,6 +256,133 @@ describe('sendTemplate over the real loader (the #7731 reproduction)', () => {
   });
 });
 
+// ── the format filters' locale (#7801) ─────────────────────────────────────
+//
+// #7731 (above) made the no-locale send resolve the right ROW. It left the
+// render pass' `renderOpts.locale` unset, so the locale-sensitive format
+// filters (`{{ ts | datetime }}`, `{{ amt | number:2 }}`) fell through to
+// `formatValue`'s own `?? 'en-US'` default instead of following the row. Two
+// independent locale sources in one message; the maintainer ruled the row is
+// the single authority and the split is a defect.
+//
+// NOTE for anyone re-reading the card: its stated symptom — "format filters
+// render under the RUNTIME locale" — does not hold. `formatValue` hard-defaults
+// to `en-US`, never to the host's locale, so the split is invisible while the
+// row happens to BE en-US. It bites the other way round: a bundle with no en-US
+// row resolves (say) zh-CN and renders en-US dates inside zh-CN body text.
+// That is why the pin below that fails without the fix is the zh-CN one.
+
+/** A row whose subject/body are made of locale-sensitive format filters. */
+function fmtRow(locale: string): Row {
+  return {
+    id: `fmt-${locale}`,
+    name: 'receipt',
+    locale,
+    subject: `[${locale}] {{ ts | datetime }}`,
+    body_html: `<p>{{ amt | number:2 }}</p>`,
+    active: true,
+  };
+}
+
+const TS = '2026-03-05T14:30:00Z';
+const AMT = 1234.5;
+const FMT_DATA = { ts: TS, amt: AMT };
+
+/** What `{{ ts | datetime }}` / `{{ amt | number:2 }}` render as under `locale`. */
+function expected(locale: string) {
+  return {
+    when: new Intl.DateTimeFormat(locale, {
+      dateStyle: 'short', timeStyle: 'short', timeZone: 'UTC',
+    }).format(new Date(TS)),
+    amount: new Intl.NumberFormat(locale, {
+      minimumFractionDigits: 2, maximumFractionDigits: 2,
+    }).format(AMT),
+  };
+}
+
+/** Mirror of the template engine's escaper — the rendered output is escaped. */
+const esc = (s: string) => s
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+describe('sendTemplate — format filters follow the RESOLVED ROW\'s locale (#7801)', () => {
+  // Pin (a) of the ruling. Passes on `main` too, vacuously: with the locale
+  // unset the formatters' own default is also en-US. Kept because it is the
+  // half of the ruling a future "just drop the locale again" change would
+  // silently break once that default ever moves.
+  it('a no-locale send resolving the en-US row formats en-US', async () => {
+    const { svc, transport } = serviceWith(exactLoader([fmtRow('en-US'), fmtRow('zh-CN')]));
+
+    await svc.sendTemplate({ template: 'receipt', to: 'a@x.test', timezone: 'UTC', data: FMT_DATA });
+
+    const en = expected('en-US');
+    expect(transport.sent[0].subject).toBe(`[en-US] ${esc(en.when)}`);
+    expect(transport.sent[0].html).toContain(esc(en.amount));
+  });
+
+  // Pin (a), the direction that actually fails without the fix: the ladder's
+  // last rung resolves a non-en-US row, and the body text and the numbers in
+  // it must agree about which locale they are in.
+  it('a no-locale send resolving a zh-CN row formats zh-CN, not en-US', async () => {
+    const transport = new CaptureTransport();
+    const svc = new EmailService({
+      transport,
+      defaultFrom: { address: 'no-reply@x.test' },
+      // zh-CN-only bundle: no en-US row exists, so the ladder falls through to
+      // the loader's own no-locale answer and lands on zh-CN.
+      templateLoader: createSysEmailTemplateLoader(fakeEngine([fmtRow('zh-CN')])),
+    });
+
+    await svc.sendTemplate({ template: 'receipt', to: 'a@x.test', timezone: 'UTC', data: FMT_DATA });
+
+    const zh = expected('zh-CN');
+    expect(transport.sent[0].subject).toBe(`[zh-CN] ${esc(zh.when)}`);
+    expect(transport.sent[0].subject).not.toContain(esc(expected('en-US').when));
+  });
+
+  // Pin (b): the row is the authority only when the caller named NOBODY.
+  it('an explicit input.locale still wins over the resolved row', async () => {
+    const { svc, transport } = serviceWith(exactLoader([fmtRow('en-US'), fmtRow('de-DE')]));
+
+    await svc.sendTemplate({
+      template: 'receipt', to: 'a@x.test', locale: 'de-DE', timezone: 'UTC', data: FMT_DATA,
+    });
+
+    const de = expected('de-DE');
+    expect(transport.sent[0].subject).toBe(`[de-DE] ${esc(de.when)}`);
+    expect(transport.sent[0].html).toContain(esc(de.amount));
+  });
+
+  // Pin (b), the sharp edge: the caller's locale has no row, so the ladder
+  // renders the en-US ROW — and the caller's locale must still drive the
+  // filters. This is the assertion that stops the fix from over-reaching into
+  // "the row always wins".
+  it('an explicit locale with no row still formats in THAT locale, on the en-US row', async () => {
+    const { svc, transport } = serviceWith(exactLoader([fmtRow('en-US')]));
+
+    await svc.sendTemplate({
+      template: 'receipt', to: 'a@x.test', locale: 'de-DE', timezone: 'UTC', data: FMT_DATA,
+    });
+
+    const de = expected('de-DE');
+    expect(transport.sent[0].subject).toBe(`[en-US] ${esc(de.when)}`);
+    expect(transport.sent[0].html).toContain(esc(de.amount));
+  });
+
+  // Falls out of binding to `preferred` (the trimmed spelling the ladder
+  // resolved on) rather than to the raw `input.locale`: `Intl` throws a
+  // RangeError on a padded tag, which would have taken the whole send down.
+  it('a padded explicit locale renders rather than throwing out of Intl', async () => {
+    const { svc, transport } = serviceWith(exactLoader([fmtRow('en-US'), fmtRow('de-DE')]));
+
+    await svc.sendTemplate({
+      template: 'receipt', to: 'a@x.test', locale: '  de-DE  ', timezone: 'UTC', data: FMT_DATA,
+    });
+
+    expect(transport.sent[0].subject).toBe(`[de-DE] ${esc(expected('de-DE').when)}`);
+  });
+});
+
 // ── the wiring: the plugin must install THIS loader ────────────────────────
 
 describe('EmailServicePlugin wiring', () => {
