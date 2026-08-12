@@ -481,6 +481,62 @@ function sizeDistinctSet(values: readonly unknown[]): number {
 }
 
 /**
+ * [#7853] A `JSON.stringify` replacer that renders a `RegExp` operand instead of
+ * dropping it — the one value type the pipeline dump carries that
+ * `JSON.stringify` erases.
+ *
+ * ## What was lost
+ *
+ * A `RegExp` has no own enumerable properties, so `JSON.stringify` renders it as
+ * `{}`. Three operators put one into the `$match` stage — `contains` and
+ * `icontains` as `{$regex: …}`, `notContains` as `{$not: {$regex: …}}` (measured:
+ * those three and no others, out of the twelve this face declares) — so
+ * `{name: {$contains: 'Industries'}}` dumped as
+ *
+ * ```
+ * /* Stage 1: $match *\/ {"name":{"$regex":{}}}
+ * ```
+ *
+ * The one field an author debugging a chart is looking for is the one the dump
+ * dropped. This is lost information on a transparency surface, not the #5333
+ * class: the dump is explicitly NOT SQL (its header says so) and `{}` reads as
+ * "something is missing here" rather than as a working predicate, which is why
+ * it is graded below #7117 rather than beside it.
+ *
+ * ## Why the pattern's own literal syntax and not `{"$regex":"…","$options":"…"}`
+ *
+ * The mongo-shaped form is what the rest of the dump speaks, and it was the
+ * first candidate. It cannot be reached from a value replacer, and the reason is
+ * structural rather than cosmetic: the `RegExp` sits AT the `$regex` key, so
+ * replacing it with `{$regex, $options}` renders the doubled
+ * `{"name":{"$regex":{"$regex":"Industries","$options":""}}}` — a shape no mongo
+ * query has. Flattening it into the real mongo spelling means rewriting the
+ * PARENT object, which would make the dump disagree with the pipeline it claims
+ * to be dumping: what mingo executes is a JS `RegExp` object at that key, not a
+ * source/options pair. Trading a degenerate rendering for a plausible-but-wrong
+ * one is the #5333 direction, and this card is explicitly not that.
+ *
+ * So the value is rendered as the JS literal it is, `/source/flags`, which is
+ * also the only one-token form that keeps the FLAGS. Flags are not decoration
+ * here: `$icontains`' fold lives in the pattern SOURCE (#6520) while `$contains`
+ * is case-EXACT (#7723, #4706 Q2 = A), so a rendering that dropped `i` would
+ * recreate a smaller copy of this same information loss on the one axis those
+ * two operators differ.
+ *
+ * ## What it deliberately does not touch
+ *
+ * Every other value on this path already renders faithfully, measured rather
+ * than assumed: a `Date` comparand is canonicalized to an ISO string by
+ * {@link MemoryAnalyticsService.comparandsFor} before it reaches here, and
+ * `toJSON` runs BEFORE a replacer in any case, so dates are unchanged. A
+ * `BigInt` comparand does throw — but out of mingo's own `Query.compile` during
+ * EXECUTION, before this dump is ever built, so no replacer here reaches it.
+ */
+function pipelineDumpReplacer(_key: string, value: unknown): unknown {
+  return value instanceof RegExp ? `/${value.source}/${value.flags}` : value;
+}
+
+/**
  * Configuration for MemoryAnalyticsService
  */
 export interface MemoryAnalyticsConfig {
@@ -1280,9 +1336,13 @@ export class MemoryAnalyticsService implements IAnalyticsService {
   private generateSqlFromPipeline(table: string, pipeline: Record<string, any>[]): string {
     // Simplified SQL generation for debugging
     // This is a basic representation of the aggregation pipeline
+    //
+    // [#7853] The replacer is what keeps a `RegExp` operand from rendering as
+    // `{}` — see {@link pipelineDumpReplacer} for why the pattern's own literal
+    // syntax and not the mongo-shaped `{$regex, $options}`.
     const stages = pipeline.map((stage, idx) => {
       const op = Object.keys(stage)[0];
-      return `/* Stage ${idx + 1}: ${op} */ ${JSON.stringify(stage[op])}`;
+      return `/* Stage ${idx + 1}: ${op} */ ${JSON.stringify(stage[op], pipelineDumpReplacer)}`;
     }).join('\n');
     
     return `-- MongoDB Aggregation Pipeline on table: ${table}\n${stages}`;
