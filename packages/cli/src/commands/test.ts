@@ -231,8 +231,39 @@ export function loadTestSuite(file: string): QA.TestSuite {
   return result.data as QA.TestSuite;
 }
 
+/**
+ * The suite-count line, in the ONE spelling a caller may match on (#7848).
+ *
+ * `Found N test suites.` was already printed — but only when N was positive, so
+ * the single number a CI step needs in order to tell "every suite passed" from
+ * "there were no suites" was missing from exactly the run where it mattered.
+ * It is emitted on every run now, `Found 0 test suites.` included, and the
+ * wording lives here rather than inline so an edit to the prose has to notice
+ * it is editing a machine-readable surface.
+ */
+export function foundSuitesLine(count: number): string {
+  return `Found ${count} test suites.`;
+}
+
 export default class Test extends Command {
-  static override description = 'Run Quality Protocol test scenarios against a running server';
+  /**
+   * The empty-match posture is stated in the help text on purpose (#7848).
+   *
+   * `os test 'qa/nothing-matches-*.test.json'` exits 0 — a green exit from a run
+   * that executed nothing, which is the #7347 `coverage.json` shape (a check that
+   * checked nothing, reporting success). The exit status is nevertheless kept as
+   * it is: a repository that legitimately ships no suites must not start failing
+   * CI because we changed our minds about a number nobody documented. So the
+   * posture becomes DECLARED, and `--fail-on-empty` makes the strict reading
+   * available to the callers that want it.
+   */
+  static override description =
+    'Run Quality Protocol test scenarios against a running server.\n' +
+    'A pattern that matches no suite is NOT a failure by default: the run prints ' +
+    '"Found 0 test suites." and exits 0, so a repository that legitimately ships no ' +
+    'suites does not fail CI. Pass --fail-on-empty for the strict reading, where a ' +
+    'pattern that has stopped matching (a renamed directory, a moved suite) fails the ' +
+    'step instead of reporting success forever.';
 
   static override args = {
     files: Args.string({ description: 'Glob pattern for test files (e.g. "qa/*.test.json")', required: false, default: 'qa/*.test.json' }),
@@ -241,6 +272,10 @@ export default class Test extends Command {
   static override flags = {
     url: Flags.string({ description: 'Target base URL', default: 'http://localhost:3000' }),
     token: Flags.string({ description: 'Authentication token' }),
+    'fail-on-empty': Flags.boolean({
+      description: 'Exit non-zero when the pattern matches no test suite (default: matching nothing exits 0)',
+      default: false,
+    }),
   };
 
   async run(): Promise<void> {
@@ -259,12 +294,19 @@ export default class Test extends Command {
     const testFiles: string[] = resolveGlob(filesPattern);
 
     if (testFiles.length === 0) {
+        // The count line comes FIRST and unconditionally: a caller parsing stdout
+        // gets the same statement on an empty run as on a full one.
+        console.log(foundSuitesLine(0));
         console.warn(chalk.yellow(`No test files found matching: ${filesPattern}`));
-        // Create a demo test file if none exist?
+        if (flags['fail-on-empty']) {
+            console.error(chalk.red(`--fail-on-empty: a run that loaded no suite is a failed run.`));
+            process.exit(1);
+        }
+        console.log(chalk.dim(`Exiting 0 — an empty match is not a failure. Pass --fail-on-empty to make it one.`));
         return;
     }
 
-    console.log(`Found ${testFiles.length} test suites.`);
+    console.log(foundSuitesLine(testFiles.length));
 
     // 3. Run Tests
     let totalPassed = 0;
