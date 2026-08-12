@@ -41,6 +41,7 @@
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { SqlDriver } from '@objectstack/driver-sql';
+import type { DriverQuery } from '@objectstack/spec/contracts';
 // The producer's OWN dispatch predicate: a double that opens its write verbs
 // with this cannot accept a call the real engine refuses
 // (`check:engine-double-contract`).
@@ -132,7 +133,11 @@ async function boot(article: any = ARTICLE) {
 
 /** Every row currently in the share-link table — the thing that must stay empty. */
 async function mintedLinks(driver: SqlDriver): Promise<any[]> {
-  return driver.find('sys_share_link', {} as any);
+  // The unfiltered read keeps its declared driver-side type rather than an
+  // `as any` erasure — `query-options/no-any-erasure` (#4674/#4918) counts
+  // test-side calls too.
+  const everyRow: DriverQuery = {};
+  return driver.find('sys_share_link', everyRow);
 }
 
 /**
