@@ -67,3 +67,12 @@ defect pointed the other way. The remedy here is explicitness, not narrowing.
 Any caller of `deletePackage` that omits `organizationId` and intends an
 environment-wide uninstall must now pass `allTenants: true`. The refusal message
 names both remedies.
+
+Registered on the ADR-0087 migration chain (step 17,
+`package-uninstall-explicit-all-tenants`) rather than exempted: a consumer really
+does have to act — an uninstall that succeeded yesterday now answers 400 until it
+states its tenant scope — and which scope it meant is an intent no transform can
+recover, which is the same disposition `rest-requireauth-default-flip` took for
+its own default flip.
+
+<!-- adr-0087: registered package-uninstall-explicit-all-tenants -->
