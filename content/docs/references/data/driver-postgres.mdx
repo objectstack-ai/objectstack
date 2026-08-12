@@ -45,7 +45,7 @@ PostgreSQL connection configuration
 | **port** | `integer` | ✅ | Port number |
 | **database** | `string` | optional | Database name |
 | **username** | `string` | optional | Authentication user |
-| **password** | `never` | optional | Set through the connection form's secret field or `external.credentialsRef` — encrypted into `sys_secret`, never stored in `config` (#7990) |
+| **password** | `string` | optional | Authentication password (prefer external.credentialsRef) |
 | **ssl** | `boolean` | optional | Enable TLS. Certificates go in the datasource-level `ssl` block. |
 | **schema** | `string` | ✅ | Default schema (knex searchPath) |
 | **applicationName** | `string` | optional | Postgres application_name |
