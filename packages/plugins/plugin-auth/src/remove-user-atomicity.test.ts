@@ -237,6 +237,11 @@ const makeManager = (engine: MemoryEngine) =>
     dataEngine: engine as any,
     membershipPolicy: 'auto',
     getTenancy: () => singleOrgTenancy(),
+    // `/admin/remove-user` is the better-auth admin plugin's route, and the
+    // plugin is opt-in (`admin: pluginConfig.admin ?? scimEffective`). Without
+    // this the route 404s and every assertion below would be measuring the
+    // absence of an endpoint rather than the behaviour of one.
+    plugins: { admin: true },
   });
 
 const cookieFrom = (response: Response): string =>
