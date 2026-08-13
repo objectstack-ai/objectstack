@@ -153,3 +153,147 @@ describe('GET/POST /security/explain (ADR-0090 D6)', () => {
     expect(res.body.error.message).toBe('boom');
   });
 });
+
+// ── [#8326] batch form — recordIds on the same request shape ─────────────────
+
+/**
+ * A deterministic fake security service: the record verdict is a pure function
+ * of the recordId, so "batch answer ≡ N singular answers" is checkable as data
+ * rather than as mock-call bookkeeping. `r_gone` plays the missing record —
+ * the engine's fail-closed answer is `visible: false` with no `decidedBy`.
+ */
+function deterministicExplain() {
+  return vi.fn(async (request: any) => {
+    const base = { ...DECISION, object: request.object, operation: request.operation };
+    if (!request.recordId) return base;
+    if (request.recordId === 'r_gone') {
+      return { ...base, record: { recordId: request.recordId, visible: false } };
+    }
+    const visible = request.recordId.endsWith('_ok');
+    return {
+      ...base,
+      record: { recordId: request.recordId, visible, decidedBy: visible ? 'sharing' : 'rls' },
+    };
+  });
+}
+
+describe('[#8326] POST/GET /security/explain with recordIds (batch form)', () => {
+  it('answers records[i] for recordIds[i] — same order, same length, duplicates per position', async () => {
+    const explain = deterministicExplain();
+    const { post } = buildServer(async () => ({ explain }), { callerCtx: CALLER });
+    const res = mockRes();
+    const recordIds = ['a_ok', 'b_no', 'r_gone', 'a_ok'];
+    await post!.handler({ method: 'POST', params: {}, headers: {}, body: { object: 'task', operation: 'update', recordIds } } as any, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.records).toEqual([
+      { recordId: 'a_ok', visible: true, decidedBy: 'sharing' },
+      { recordId: 'b_no', visible: false, decidedBy: 'rls' },
+      { recordId: 'r_gone', visible: false }, // missing record: fail closed, no decider
+      { recordId: 'a_ok', visible: true, decidedBy: 'sharing' },
+    ]);
+    // The object-level trace rides along, without a singular `record` verdict.
+    expect(res.body.allowed).toBe(true);
+    expect(res.body.record).toBeUndefined();
+    // Evaluation is the singular pipeline per unique id + one object-level
+    // pass — the service never sees `recordIds`.
+    for (const call of explain.mock.calls) expect(call[0].recordIds).toBeUndefined();
+    expect(explain.mock.calls.map((c: any[]) => c[0].recordId).sort((a: any, b: any) => String(a).localeCompare(String(b))))
+      .toEqual([undefined, 'a_ok', 'b_no', 'r_gone'].sort((a: any, b: any) => String(a).localeCompare(String(b))));
+  });
+
+  it('AGREEMENT: the batch answer equals N singular answers for the same records', async () => {
+    const recordIds = ['a_ok', 'b_no', 'r_gone', 'c_ok'];
+
+    // N singular round trips through the REAL handler.
+    const singularVerdicts: unknown[] = [];
+    for (const recordId of recordIds) {
+      const { post } = buildServer(async () => ({ explain: deterministicExplain() }), { callerCtx: CALLER });
+      const res = mockRes();
+      await post!.handler({ method: 'POST', params: {}, headers: {}, body: { object: 'task', operation: 'update', recordId } } as any, res);
+      expect(res.statusCode).toBe(200);
+      singularVerdicts.push(res.body.record);
+    }
+
+    // One batch round trip through the REAL handler, same service semantics.
+    const { post } = buildServer(async () => ({ explain: deterministicExplain() }), { callerCtx: CALLER });
+    const res = mockRes();
+    await post!.handler({ method: 'POST', params: {}, headers: {}, body: { object: 'task', operation: 'update', recordIds } } as any, res);
+    expect(res.statusCode).toBe(200);
+
+    expect(res.body.records).toEqual(singularVerdicts);
+  });
+
+  it('refuses a batch over the 200-id cap with 400 VALIDATION_FAILED (never truncates)', async () => {
+    const explain = deterministicExplain();
+    const { post } = buildServer(async () => ({ explain }), { callerCtx: CALLER });
+    const res = mockRes();
+    const recordIds = Array.from({ length: 201 }, (_, i) => `r_${i}_ok`);
+    await post!.handler({ method: 'POST', params: {}, headers: {}, body: { object: 'task', operation: 'update', recordIds } } as any, res);
+
+    // The refusal envelope: code AND status (ADR-0112 D5 position).
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_FAILED');
+    expect(explain).not.toHaveBeenCalled();
+  });
+
+  it('refuses recordId + recordIds together with 400 (loud, no silent precedence) and an empty batch too', async () => {
+    const explain = deterministicExplain();
+    const { post } = buildServer(async () => ({ explain }), { callerCtx: CALLER });
+
+    let res = mockRes();
+    await post!.handler({ method: 'POST', params: {}, headers: {}, body: { object: 'task', operation: 'update', recordId: 'a_ok', recordIds: ['a_ok'] } } as any, res);
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_FAILED');
+
+    res = mockRes();
+    await post!.handler({ method: 'POST', params: {}, headers: {}, body: { object: 'task', operation: 'update', recordIds: [] } } as any, res);
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_FAILED');
+    expect(explain).not.toHaveBeenCalled();
+  });
+
+  it('POST does NOT wrap a bare-string recordIds — the JSON body can spell an array, so a string is a 400', async () => {
+    const explain = deterministicExplain();
+    const { post } = buildServer(async () => ({ explain }), { callerCtx: CALLER });
+    const res = mockRes();
+    await post!.handler({ method: 'POST', params: {}, headers: {}, body: { object: 'task', operation: 'update', recordIds: 'a_ok' } } as any, res);
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_FAILED');
+    expect(explain).not.toHaveBeenCalled();
+  });
+
+  it('GET wraps a single repeated query param (a query string cannot spell a one-element array)', async () => {
+    const explain = deterministicExplain();
+    const { get } = buildServer(async () => ({ explain }), { callerCtx: CALLER });
+    const res = mockRes();
+    await get!.handler({ method: 'GET', params: {}, headers: {}, query: { object: 'task', operation: 'update', recordIds: 'a_ok' } } as any, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.records).toEqual([{ recordId: 'a_ok', visible: true, decidedBy: 'sharing' }]);
+  });
+
+  it('a singular request stays byte-compatible: no records[] key appears on the response', async () => {
+    const explain = deterministicExplain();
+    const { post } = buildServer(async () => ({ explain }), { callerCtx: CALLER });
+    const res = mockRes();
+    await post!.handler({ method: 'POST', params: {}, headers: {}, body: { object: 'task', operation: 'update', recordId: 'a_ok' } } as any, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.record).toEqual({ recordId: 'a_ok', visible: true, decidedBy: 'sharing' });
+    expect('records' in res.body).toBe(false);
+    expect(explain).toHaveBeenCalledTimes(1);
+    expect(explain).toHaveBeenCalledWith({ object: 'task', operation: 'update', recordId: 'a_ok' }, CALLER);
+  });
+
+  it('fail-closes per record when the service predates record-grained explain (no record verdict answered)', async () => {
+    // A pre-C2 service ignores recordId and returns object-level decisions only.
+    const explain = vi.fn().mockResolvedValue(DECISION);
+    const { post } = buildServer(async () => ({ explain }), { callerCtx: CALLER });
+    const res = mockRes();
+    await post!.handler({ method: 'POST', params: {}, headers: {}, body: { object: 'task', operation: 'update', recordIds: ['a', 'b'] } } as any, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.records).toEqual([
+      { recordId: 'a', visible: false },
+      { recordId: 'b', visible: false },
+    ]);
+  });
+});

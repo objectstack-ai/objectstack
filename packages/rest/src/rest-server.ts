@@ -9045,7 +9045,14 @@ export class RestServer {
      * explain engine (framework#2696).
      *
      *   GET  {basePath}/security/explain?object=…&operation=…&userId=…
-     *   POST {basePath}/security/explain   body: { object, operation, userId? }
+     *   POST {basePath}/security/explain   body: { object, operation, userId?,
+     *                                              recordId? | recordIds? }
+     *
+     * [#8326] `recordIds` (max 200, exclusive with `recordId`) is the batch
+     * form of the record-grained question: one `(object, operation)` pair
+     * answered per record in one round trip — `records[i]` answers
+     * `recordIds[i]`; each entry is the verdict the singular form returns for
+     * that id (see `ExplainRequestSchema`'s TSDoc for the full contract).
      *
      * Delegates to the security service's `explain(request, callerContext)`
      * (`SecurityPlugin.explainAccessForCaller`) — the same code paths the
@@ -9150,6 +9157,14 @@ export class RestServer {
                 // refusal gate is imitating, so there is nothing to add here.
                 const src = req.method === 'GET' ? (req.query ?? {}) : (req.body ?? {});
                 const { ExplainRequestSchema } = await import('@objectstack/spec/security');
+                // [#8326] GET-transport normalization ONLY: a query string
+                // cannot spell a one-element array (`?recordIds=a` parses to
+                // the bare string), so a lone string is wrapped on GET. On
+                // POST the body is JSON and can say what it means — a string
+                // where the contract says array stays a 400, not a wrap.
+                const rawRecordIds = req.method === 'GET' && typeof src.recordIds === 'string' && src.recordIds !== ''
+                    ? [src.recordIds]
+                    : src.recordIds;
                 const parsed = (ExplainRequestSchema as any).safeParse({
                     object: src.object,
                     operation: src.operation ?? 'read',
@@ -9157,17 +9172,45 @@ export class RestServer {
                     // [C2 / ADR-0095] Optional record id — explains ONE concrete
                     // row at record granularity; omitted stays object-level.
                     ...(src.recordId != null && src.recordId !== '' ? { recordId: src.recordId } : {}),
+                    // [#8326] Optional batch of record ids — the schema owns the
+                    // cap (200), the min (1), and recordId/recordIds mutual
+                    // exclusion, so every refusal is the one 400 below.
+                    ...(rawRecordIds != null ? { recordIds: rawRecordIds } : {}),
                 });
                 if (!parsed.success) {
                     return respondError(
                         res, 400, 'VALIDATION_FAILED',
-                        'Invalid explain request — expected { object: string, operation: read|create|update|delete|transfer|restore|purge, userId?: string, recordId?: string }.',
+                        'Invalid explain request — expected { object: string, operation: read|create|update|delete|transfer|restore|purge, userId?: string, recordId?: string, recordIds?: string[] (max 200, exclusive with recordId) }.',
                         String(parsed.error?.message ?? '').slice(0, 1000),
                     );
                 }
 
-                const decision = await svc.explain(parsed.data, context);
-                res.json(decision);
+                const { recordIds, ...singularRequest } = parsed.data as { recordIds?: string[] } & Record<string, unknown>;
+                if (!recordIds) {
+                    // Singular / object-level — the pre-#8326 path, byte-identical.
+                    const decision = await svc.explain(parsed.data, context);
+                    return res.json(decision);
+                }
+
+                // [#8326] Batch form — transport amortization of the SINGULAR
+                // evaluation, not a new semantic: the object-level trace is one
+                // object-level explain, and each per-record verdict is the
+                // singular record-grained explain for that id, relayed
+                // verbatim. "Batch answer ≡ N singular answers" is therefore a
+                // property of the construction, and the agreement test pins it
+                // from staying that way by accident.
+                const decision = await svc.explain(singularRequest, context);
+                const verdictById = new Map<string, unknown>();
+                for (const id of new Set(recordIds)) {
+                    const single = await svc.explain({ ...singularRequest, recordId: id }, context);
+                    // A service without record-grained support answers no
+                    // record verdict; fail CLOSED (a hidden button beats a
+                    // shown-then-403), with no decidedBy fabricated.
+                    verdictById.set(id, single?.record ?? { recordId: id, visible: false });
+                }
+                // Ordering contract: records[i] answers recordIds[i] — same
+                // order, same length, duplicates answered per position.
+                res.json({ ...decision, records: recordIds.map((id) => verdictById.get(id)) });
             } catch (error: any) {
                 const msg = String(error?.message ?? error ?? '');
                 if (
