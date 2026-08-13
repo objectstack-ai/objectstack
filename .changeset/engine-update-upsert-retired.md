@@ -41,3 +41,5 @@ The retirement kit:
 No runtime behaviour changes for any in-tree caller — zero production call
 sites passed the flag (measured in #8057); the only references were the spec's
 own schema tests, now re-pointed to assert the refusal.
+
+<!-- adr-0087: registered engine-update-upsert-retired -->
