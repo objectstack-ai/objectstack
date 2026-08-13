@@ -65,6 +65,13 @@ import {
 } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
+// [#8422] The repo's ONE single-record 404 (#4435/#5138/#7867). Imported from
+// `@objectstack/core` rather than re-minted here or reached via
+// `@objectstack/metadata-protocol`'s re-export: this package already declares
+// a direct `@objectstack/core` dependency (`plugin.ts` imports from it too),
+// and `@objectstack/core` is the lowest package that carries the factory, so
+// there is no reason to add a second import path to the same function.
+import { recordNotFoundError } from '@objectstack/core';
 import type { McpDataBridge, McpObjectSummary } from './mcp-http-tools.js';
 
 /** What {@link createStdioDataBridge} needs from the host plugin. */
@@ -117,18 +124,6 @@ async function findById(
 ): Promise<Record<string, unknown> | null> {
   const res = await engine.find(object, { where: { id }, limit: 1 }, { context });
   return unwrapRows(res)[0] ?? null;
-}
-
-/**
- * The "this id names no row" refusal, raised BEFORE a write is attempted.
- *
- * A write path that answers success for an id that matched nothing is the
- * #5138 / #5581 defect the HTTP path already paid for: an integrator reading
- * a success receipt records the change as landed. `registerObjectTools` turns
- * a throw into a tool error, so the caller is told.
- */
-function recordNotFound(object: string, id: string): Error {
-  return new Error(`Record "${id}" not found in "${object}"`);
 }
 
 /**
@@ -342,12 +337,21 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
 
     async update(object, id, data) {
       const context = await resolvePrincipal();
-      // Before the existence probe, not after: `recordNotFound` vs. a hit is an
-      // observable difference, so gating second would answer "that id names no
-      // row" for an object the author declared unexposed.
+      // Before the existence probe, not after: refusing on exposure vs. on a
+      // miss is an observable difference, so gating second would answer "that
+      // id names no row" for an object the author declared unexposed.
       await enforceApiExposure(metadataService, object, GATED_ACTIONS.update, context);
       const existing = await findById(engine, object, id, context);
-      if (!existing) throw recordNotFound(object, id);
+      // The "this id names no row" refusal, raised BEFORE the write is
+      // attempted — a write path that answered success for an id that matched
+      // nothing is the #5138/#5581 defect the HTTP path already paid for: an
+      // integrator reading a success receipt records the change as landed.
+      // `registerObjectTools` turns a throw into a tool error, so the caller
+      // is told. [#8422] Throws the repo's ONE not-found envelope
+      // (`recordNotFoundError`, `@objectstack/core`) rather than a bare
+      // `Error`, so a stdio caller sees the same `RECORD_NOT_FOUND` / 404 the
+      // HTTP bridge's `callData` path throws for the identical miss.
+      if (!existing) throw recordNotFoundError(object, id);
       await engine.update(object, data, { where: { id }, context });
       return { object, id, record: { ...existing, ...data } };
     },
@@ -357,7 +361,8 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       // Gated before the probe, for the reason `update` states.
       await enforceApiExposure(metadataService, object, GATED_ACTIONS.remove, context);
       const existing = await findById(engine, object, id, context);
-      if (!existing) throw recordNotFound(object, id);
+      // Same shared envelope as `update`, above.
+      if (!existing) throw recordNotFoundError(object, id);
       await engine.delete(object, { where: { id }, context });
       // `success`, not `deleted` — the spec's `DeleteDataResponse` key (#5581).
       return { object, id, success: true };

@@ -720,21 +720,28 @@ function scanSource(fileName, text, slice = SLICES[0]) {
 // #5138, #5581, #7867). A narrower gate that could not be written is not a
 // better gate than a wide one that can.
 //
-// ## Deliberately NOT asserted yet: WHICH not-found envelope (#8194)
+// ## WHICH not-found envelope (#8194, tightened to SHARED_ONLY by #8422)
 //
-// Three of the four seams reach `recordNotFoundError` -- the repo's ONE
-// not-found envelope (`@objectstack/core`, moved there by #7867 for exactly
-// the "two layers cannot disagree about it" reason its header argues). The
-// fourth, `packages/mcp/src/stdio-data-bridge.ts`, mints its own local
-// `recordNotFound` returning a bare `Error` with neither `code` nor `status`.
+// #8194 measured all four seams and found three reaching `recordNotFoundError`
+// -- the repo's ONE not-found envelope (`@objectstack/core`, moved there by
+// #7867 for exactly the "two layers cannot disagree about it" reason its
+// header argues) -- while the fourth, `packages/mcp/src/stdio-data-bridge.ts`,
+// minted its own local `recordNotFound` returning a bare `Error` with neither
+// `code` nor `status`.
 //
-// That is a real divergence and it is filed as its own card, not laundered
-// through a ledger entry here: this gate would have opened RED on a defect
-// outside the change that introduced the gate, which is the one way to teach
-// readers that a red run means "someone else's problem". So the verdict below
-// records WHICH envelope each seam reaches and prints it, and requiring the
-// shared one is a one-line tightening the day that card lands -- `SHARED_ONLY`
-// is the switch, and the seam list is already both-directions complete.
+// That was a real divergence and #8194 filed it as its own card rather than
+// laundering it through a ledger entry here: opening this gate RED on a
+// defect outside the change that introduced it would have taught readers that
+// a red run means "someone else's problem". So the verdict recorded WHICH
+// envelope each seam reached and printed it, with `refusal: 'local'` as the
+// visible-but-not-failing state -- deliberately not `!x.refusal` (that already
+// failed) and not silence either.
+//
+// #8422 fixed the fourth seam, so all four now reach the shared envelope --
+// the SHARED_ONLY tightening below is that one-line change, made the day the
+// seam list actually went both-directions complete. `refusal !== 'shared'`
+// now fails on EITHER a local mint or no refusal at all: a future fifth seam
+// that reinvents the envelope reddens here instead of shipping unnoticed.
 
 /** Where the repo's ONE not-found envelope may be imported from (#7867). */
 const ENVELOPE_MODULES = [
@@ -1240,11 +1247,18 @@ function audit() {
     );
   }
 
+  // SHARED_ONLY (#8422): a seam must reach the shared envelope specifically --
+  // `refusal !== 'shared'` catches both a local mint (`refusal === 'local'`)
+  // and no refusal at all (`refusal === null`), so a seam that merely throws
+  // SOME error no longer reads as compliant.
   for (const { file, seams } of seamFiles) {
-    for (const s of seams.filter((x) => !x.refusal)) {
+    for (const s of seams.filter((x) => x.refusal !== 'shared')) {
+      const state = s.refusal === 'local'
+        ? 'refuses through a locally minted error rather than the shared envelope'
+        : 'does not refuse anywhere before it';
       errors.push(
         `REFUSES: ${file}:${s.line} — ${s.fn}() performs a by-id ${s.verb} on a caller-supplied id `
-          + 'and then answers a success receipt, without refusing anywhere before it. A write that '
+          + `and then answers a success receipt, and ${state}. A write that `
           + 'touched zero rows reporting success is the #4435/#5138/#7867 defect: a typo\'d id, an '
           + 'already-deleted row and a real write become indistinguishable, and an integrator '
           + 'reading the receipt records the change as landed. Refuse before you answer — probe '
