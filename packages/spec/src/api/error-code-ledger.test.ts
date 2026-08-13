@@ -2,7 +2,16 @@
 
 import { describe, it, expect } from 'vitest';
 import { StandardErrorCode } from './errors.zod';
-import { ERROR_CODE_LEDGER, REGISTERED_ERROR_CODES, ErrorCode } from './error-code-ledger.zod';
+import {
+  ERROR_CODE_LEDGER,
+  REGISTERED_ERROR_CODES,
+  ErrorCode,
+  STANDARD_SYNONYM_WAIVERS,
+  StandardSynonymWaiverSchema,
+  standardSynonymOf,
+  standardSynonymViolations,
+  type StandardSynonymWaiver,
+} from './error-code-ledger.zod';
 
 /**
  * Ledger admission rules (ADR-0112 D3). These are the invariants that make a
@@ -44,6 +53,116 @@ describe('ERROR_CODE_LEDGER', () => {
   it('REGISTERED_ERROR_CODES is the deduped, sorted union', () => {
     const union = [...new Set(entries.flatMap(([, codes]) => [...codes]))].sort();
     expect([...REGISTERED_ERROR_CODES]).toEqual(union);
+  });
+
+  it('no registered code is an unwaived semantic synonym of a standard member (#8211)', () => {
+    // The ledger header's "use the standard catalog instead of registering a
+    // synonym" was prose only, and four synonyms accumulated under it without
+    // anyone deciding to allow them. This is its mechanical form (option C,
+    // adjudicated 2026-08-12): a synonym registers only with a recorded
+    // STANDARD_SYNONYM_WAIVERS entry naming the member it shadows.
+    expect(standardSynonymViolations(ERROR_CODE_LEDGER, STANDARD_SYNONYM_WAIVERS)).toEqual([]);
+  });
+});
+
+describe('standard-synonym detection (#8211)', () => {
+  it('flags the grandfathered synonyms, each against the member it shadows', () => {
+    expect(standardSynonymOf('CONFLICT')).toBe('RESOURCE_CONFLICT');
+    expect(standardSynonymOf('NOT_FOUND')).toBe('RESOURCE_NOT_FOUND');
+    expect(standardSynonymOf('FORBIDDEN')).toBe('PERMISSION_DENIED');
+    expect(standardSynonymOf('INTERNAL')).toBe('INTERNAL_ERROR');
+    // Surfaced by the detector beyond the four #8211 named — same class
+    // (401 reason phrase), grandfathered by the same rationale.
+    expect(standardSynonymOf('UNAUTHORIZED')).toBe('UNAUTHENTICATED');
+  });
+
+  it('does not flag domain-prefixed or catalog-uncovered codes', () => {
+    // A domain prefix carries a token no standard member has — exactly the
+    // shape the registration instructions endorse.
+    expect(standardSynonymOf('FORM_NOT_FOUND')).toBeUndefined();
+    expect(standardSynonymOf('ATTACHMENT_DOWNLOAD_DENIED')).toBeUndefined();
+    // 413 is deliberately judged against the explicit HttpStatusErrorCodeMap,
+    // never the bucket fallback: no standard member covers its condition, so
+    // its reason phrase is a legitimate registration, not a synonym.
+    expect(standardSynonymOf('PAYLOAD_TOO_LARGE')).toBeUndefined();
+    // Near-misses stay admitted: FAILED is not a token of VALIDATION_ERROR.
+    expect(standardSynonymOf('VALIDATION_FAILED')).toBeUndefined();
+    expect(standardSynonymOf('UNSUPPORTED')).toBeUndefined();
+  });
+
+  it('REJECTS a newly-introduced synonym of a standard member — both prongs', () => {
+    // The hard constraint this card adopted from review: a detector that only
+    // passes on today's tree is the exact failure mode the prose rule already
+    // had. Prove the SAME function that gates the real ledger goes red when a
+    // new synonym lands, once per detection prong.
+    // Prong 1 — reason-phrase alias (429 → RATE_LIMIT_EXCEEDED):
+    const withReasonPhrase = {
+      ...ERROR_CODE_LEDGER,
+      '@objectstack/rest': [...ERROR_CODE_LEDGER['@objectstack/rest'], 'TOO_MANY_REQUESTS'],
+    };
+    expect(standardSynonymViolations(withReasonPhrase, STANDARD_SYNONYM_WAIVERS)).toEqual([
+      { package: '@objectstack/rest', code: 'TOO_MANY_REQUESTS', shadows: 'RATE_LIMIT_EXCEEDED' },
+    ]);
+    // Prong 2 — token subset (RATE_LIMIT ⊆ RATE_LIMIT_EXCEEDED):
+    const withTokenSubset = {
+      ...ERROR_CODE_LEDGER,
+      '@objectstack/core': [...ERROR_CODE_LEDGER['@objectstack/core'], 'RATE_LIMIT'],
+    };
+    expect(standardSynonymViolations(withTokenSubset, STANDARD_SYNONYM_WAIVERS)).toEqual([
+      { package: '@objectstack/core', code: 'RATE_LIMIT', shadows: 'RATE_LIMIT_EXCEEDED' },
+    ]);
+  });
+
+  it('a waiver admits exactly the (code, shadows) pair it records', () => {
+    const withNew = {
+      ...ERROR_CODE_LEDGER,
+      '@objectstack/rest': [...ERROR_CODE_LEDGER['@objectstack/rest'], 'TOO_MANY_REQUESTS'],
+    };
+    const rightWaiver: StandardSynonymWaiver = {
+      code: 'TOO_MANY_REQUESTS',
+      shadows: 'RATE_LIMIT_EXCEEDED',
+      reason: 'test fixture: recorded reason',
+    };
+    expect(standardSynonymViolations(withNew, [...STANDARD_SYNONYM_WAIVERS, rightWaiver]))
+      .toEqual([]);
+    // A waiver naming the WRONG member does not admit the code — the recorded
+    // reason must be about the member actually shadowed.
+    const wrongWaiver: StandardSynonymWaiver = {
+      code: 'TOO_MANY_REQUESTS',
+      shadows: 'QUOTA_EXCEEDED',
+      reason: 'test fixture: wrong member on purpose',
+    };
+    expect(standardSynonymViolations(withNew, [...STANDARD_SYNONYM_WAIVERS, wrongWaiver]))
+      .toHaveLength(1);
+  });
+
+  it('every waiver is well-formed, still registered, and names the member the detector derives', () => {
+    const seen = new Set<string>();
+    for (const waiver of STANDARD_SYNONYM_WAIVERS) {
+      const parsed = StandardSynonymWaiverSchema.safeParse(waiver);
+      expect(parsed.success, `${waiver.code} waiver parses`).toBe(true);
+      expect(seen.has(waiver.code), `duplicate waiver for ${waiver.code}`).toBe(false);
+      seen.add(waiver.code);
+      // Stale-waiver guard: a waiver for a code no longer registered, or one
+      // the detector no longer flags as a synonym of exactly the member it
+      // names, is dead weight — it must come out with the condition it waived.
+      expect(REGISTERED_ERROR_CODES, `${waiver.code} is still registered`).toContain(waiver.code);
+      expect(standardSynonymOf(waiver.code), `${waiver.code} shadows`).toBe(waiver.shadows);
+    }
+  });
+
+  it('dropping a waiver reddens the gate for every package registering that code', () => {
+    // Reverse direction, asserted rather than hand-run: the grandfather
+    // entries are load-bearing, not decorative.
+    const withoutForbidden = STANDARD_SYNONYM_WAIVERS.filter((w) => w.code !== 'FORBIDDEN');
+    const violations = standardSynonymViolations(ERROR_CODE_LEDGER, withoutForbidden);
+    expect(violations.map((v) => v.package).sort()).toEqual([
+      '@objectstack/plugin-approvals',
+      '@objectstack/plugin-sharing',
+      '@objectstack/rest',
+    ]);
+    expect(new Set(violations.map((v) => v.code))).toEqual(new Set(['FORBIDDEN']));
+    expect(new Set(violations.map((v) => v.shadows))).toEqual(new Set(['PERMISSION_DENIED']));
   });
 });
 
