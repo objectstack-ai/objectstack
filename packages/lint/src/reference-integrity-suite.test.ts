@@ -22,6 +22,7 @@ describe('reference-integrity suite — membership', () => {
       'validateChartBindings',
       'validateNavAccess',
       'validateNavTargetRefs',
+      'validateNavObjectServability',
       'validateTranslationReferences',
       'validateTranslatableSections',
       'validateFlowTemplatePaths',
@@ -63,6 +64,18 @@ describe('reference-integrity suite — every member actually runs', () => {
         // ADR-0061 declaration is stale — the engine drops it and searches a
         // narrower set than the object declares.
         searchableFields: ['name', 'budget'],
+        permissions: {},
+      },
+      // validateNavObjectServability (#7912): an object the app puts in its
+      // navigation while its own `enable` block refuses every API operation.
+      // A SEPARATE object from `crm_lead` on purpose — putting the dead
+      // `enable` on the object every other member reads would let this one go
+      // silent behind their findings, and would change what `nav_leads` means
+      // to `validateNavAccess`.
+      {
+        name: 'crm_secret_token',
+        fields: { name: { type: 'text', label: 'Name' } },
+        enable: { apiEnabled: false, apiMethods: [] },
         permissions: {},
       },
     ],
@@ -151,7 +164,13 @@ describe('reference-integrity suite — every member actually runs', () => {
     apps: [
       {
         name: 'crm_app',
-        navigation: [{ id: 'nav_leads', type: 'object', objectName: 'crm_lead' }],
+        navigation: [
+          { id: 'nav_leads', type: 'object', objectName: 'crm_lead' },
+          // validateNavObjectServability: the destination answers 404
+          // `OBJECT_API_DISABLED` for every persona, so the row is dead however
+          // it is permissioned.
+          { id: 'nav_tokens', type: 'object', objectName: 'crm_secret_token' },
+        ],
       },
     ],
     // validateNavAccess: a declared permission set that grants nothing on the
@@ -237,6 +256,7 @@ describe('reference-integrity suite — every member actually runs', () => {
     expect(rules).toContain('page-field-unknown');
     expect(rules).toContain('chart-measure-unknown');
     expect(rules).toContain('nav-object-ungranted');
+    expect(rules).toContain('nav-object-unservable');
     expect(rules).toContain('translation-target-unknown');
     expect(rules).toContain('translation-section-name-missing');
     expect(rules).toContain('flow-template-unknown-field');
