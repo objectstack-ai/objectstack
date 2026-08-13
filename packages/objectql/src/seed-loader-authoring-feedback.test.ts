@@ -133,7 +133,7 @@ async function seedLoaderOverRealEngine() {
     const engine = new ObjectQL();
     engine.registerDriver(makeMemoryDriver().driver, true);
     await engine.init();
-    engine.registry.registerObject(ACCT as never);
+    engine.registry.registerObject(ACCT as never, 'com.objectstack.test.8442');
     const metadata = { getObject: async () => ACCT, listObjects: async () => [ACCT] };
     const logger = { info() {}, warn() {}, error() {}, debug() {} };
     return new SeedLoaderService(engine as never, metadata as never, logger as never);

@@ -115,7 +115,7 @@ describe('[#8442] a REAL driver constraint violation is withheld from the seed r
     engine = new ObjectQL();
     engine.registerDriver(driver, true);
     await engine.init();
-    engine.registry.registerObject(ACCT as any);
+    engine.registry.registerObject(ACCT as any, 'com.objectstack.test.8442');
 
     const logger = { info() {}, warn() {}, error: (() => {
       const calls: string[] = [];

@@ -403,7 +403,7 @@ describe('[#8442] the harness is non-vacuous', () => {
     it('the validation double is recognised by `validationFailureDetails` and declares NO status', () => {
         const err = validationFault('Plan must be at most 4 characters.', [
             { field: 'plan', code: 'max_length', message: 'Plan must be at most 4 characters.' },
-        ])() as Record<string, unknown>;
+        ])() as unknown as Record<string, unknown>;
 
         // The exact own-property set measured from the real class.
         expect(Object.getOwnPropertyNames(err).sort())
@@ -417,7 +417,7 @@ describe('[#8442] the harness is non-vacuous', () => {
 
         // The driver fixture carries its dialect on a PROPERTY, not only in the
         // sentence — and is NOT mistaken for a validation failure.
-        const driver = driverFault() as Record<string, unknown>;
+        const driver = driverFault() as unknown as Record<string, unknown>;
         expect(driver.code).toBe('SQLITE_ERROR');
         expect(driver.errno).toBe(1);
         expect(driver.status).toBeUndefined();
