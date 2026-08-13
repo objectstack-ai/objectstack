@@ -259,20 +259,39 @@ export async function bootstrapSystemCapabilities(
       });
       if (created) seeded += 1;
       else if (!isDerived) {
-        // [#8470] The curated row is absent AND could not be written. On the
-        // reachable path that is the NULL-organization bucket already holding
-        // the name under another author — the collision the scoped lookup
-        // declines to resolve by overwriting. Report it: a curated capability
-        // missing from the registry is the harm this card is about, and an
-        // unreported one is indistinguishable from a clean boot.
+        // [#8470] The curated row is absent AND could not be written — the
+        // NULL-organization bucket already holds the name under a row the
+        // scoped lookup did not match. Report it: a curated capability missing
+        // from the registry is the harm this card is about, and an unreported
+        // one is indistinguishable from a clean boot (`tryInsert` swallows the
+        // engine's unique-constraint refusal).
+        //
+        // The diagnostic states what was OBSERVED, and it costs one extra read
+        // — on this branch only — to be able to. The seeder knows two things:
+        // no row matched `managed_by:'platform' AND organization_id IS NULL`,
+        // and the insert was refused. It does NOT know who authored the row
+        // that blocked it, so it must not say "a row this pass does not own":
+        // that is an ownership verdict, and on a hypothetical platform row
+        // carrying some other `managed_by` the sentence would be false, printed
+        // every boot. Read the blocking row's provenance and name it instead.
+        //
+        // Note this REPORTS the distinction; it deliberately does not ACT on
+        // it. Adopting a differently-stamped row into the platform's identity
+        // would reverse the #5876 ruling that "not provably ours" resolves to
+        // leave-it-alone, and backfilling a stamp is a data migration. Both are
+        // maintainer calls, and neither is made here.
         blockedCurated += 1;
+        const blocking = (await tryFind(ql, 'sys_capability', { name: def.name, organization_id: null }, 1))[0];
+        const provenance = blocking?.managed_by == null
+          ? 'a row carrying no managed_by value'
+          : `a row with managed_by='${String(blocking.managed_by)}'`;
         options.logger?.warn?.(
           `[security] curated capability "${def.name}" has no platform row and could not be seeded — ` +
-            'a row this pass does not own already holds the name in the platform (NULL-organization) ' +
-            'bucket. The platform definition is missing from sys_capability installation-wide; the ' +
-            'other row was left as its author wrote it (ADR-0066 D1 asset ownership). Grants and ' +
+            `${provenance} already holds the name in the platform (NULL-organization) bucket, and the ` +
+            'declared unique key admits only one. The platform definition is missing from sys_capability ' +
+            'installation-wide, and the blocking row was left exactly as it is. Grants and ' +
             'requiredPermissions referencing the name are unaffected — they resolve by name, not by row.',
-          { name: def.name },
+          { name: def.name, blockingRowId: blocking?.id, blockingManagedBy: blocking?.managed_by ?? null },
         );
       }
     }

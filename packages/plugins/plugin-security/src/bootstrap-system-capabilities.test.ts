@@ -380,26 +380,84 @@ describe('[#8470] the curated half owns its row, not whichever row shares the na
     expect(out.blockedCurated).toBe(0);
   });
 
-  // ── The case the fix newly DECLINES to resolve, and must not do silently ──
-  it('reports a curated name held by another author in the platform bucket', async () => {
+  // ── The PLATFORM-BUCKET provenance matrix ─────────────────────────────────
+  //
+  // Every case above is about a name with too MANY candidates. This block is
+  // the other axis: one row, in the platform's own bucket, varying only by
+  // `managed_by`. It exists because the scoped predicate is a CONJUNCTION, and
+  // a conjunction can also match ZERO rows where it should match one.
+  //
+  // `managed_by: 'platform'` is the row the seeder owns and must still find —
+  // the NEGATIVE case, and the one that would catch the predicate excluding the
+  // platform's own row on an installation that predates something.
+  //
+  // Reachability of the other three, measured rather than assumed:
+  //  - `admin` — REACHABLE and ordinary. `organization_id` auto-stamping lives
+  //    in the enterprise `@objectstack/organizations` runtime, which is also
+  //    what ACTIVATES every walled posture. A deployment without it is `single`
+  //    posture with no stamper, so EVERY Setup-authored capability row lands in
+  //    the NULL-organization bucket. This is the default community shape, not
+  //    an edge case.
+  //  - `package` — REACHABLE via name promotion: `bootstrapDeclaredCapabilities`
+  //    refuses a name in `PLATFORM_CAPABILITY_NAMES`, but a package that
+  //    declared a name BEFORE the platform curated it (`setup.write` and
+  //    `manage_sharing` were both added to the curated set after the fact) left
+  //    a `managed_by:'package'` row in that bucket.
+  //  - no value at all — NOT reachable through the engine: `managed_by` is
+  //    `required: true` with `defaultValue: 'admin'`, and `applyFieldDefaults`
+  //    resolves defaults on insert BEFORE the beforeInsert hooks, so an insert
+  //    omitting it stores `'admin'`, never null. Kept as a pin anyway because
+  //    the diagnostic must not assert an ownership verdict it cannot observe —
+  //    which is the whole reason the message names the value it READ.
+  it.each([
+    ['platform — the row the seeder OWNS', 'platform', 'matched'],
+    ['admin    — Setup-authored, single-posture deployment', 'admin', 'blocked'],
+    ['package  — declared before the name was curated', 'package', 'blocked'],
+    ['(absent) — not engine-reachable; the message must still be truthful', undefined, 'blocked'],
+  ])('platform-bucket row, managed_by=%s', async (_label, managedBy, expected) => {
     const ql = makeQl();
-    // No `organization_id`: a Setup-authored row on a single-organization
-    // deployment sits in the SAME bucket as the platform's would-be row, so the
-    // declared unique key refuses the curated insert. Pre-#8470 the seeder
-    // "resolved" this by overwriting the admin's row.
-    ql.rows.push({ id: 'aaa_admin_global', ...ORG_AUTHORED });
+    const PRE = {
+      id: 'aaa_pre_existing',
+      name: 'manage_users',
+      label: 'PRE-EXISTING LABEL',
+      description: 'written by whoever owns this row',
+      scope: 'platform' as const,
+      active: true,
+      ...(managedBy === undefined ? {} : { managed_by: managedBy }),
+    };
+    ql.rows.push({ ...PRE });
     const warn = vi.fn();
     const out = await bootstrapSystemCapabilities(ql, [], { logger: { warn } });
+    const row = ql.rows.find((r) => r.id === 'aaa_pre_existing')!;
 
-    expect(out.blockedCurated).toBe(1);
+    if (expected === 'matched') {
+      // The platform's own row is found by the conjunction and reconciled.
+      expect(out.blockedCurated).toBe(0);
+      expect(warn).not.toHaveBeenCalled();
+      expect(row).toMatchObject({ label: CURATED.label, description: CURATED.description });
+      expect(out.updated).toBeGreaterThanOrEqual(1);
+    } else {
+      expect(out.blockedCurated).toBe(1);
+      // Declining is the point — the blocking row is untouched…
+      expect(row).toEqual(PRE);
+      // …and reported. The message names the provenance it READ rather than
+      // asserting who authored the row: on a row carrying some other
+      // `managed_by`, "a row this pass does not own" would be a false sentence
+      // printed on every boot.
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0][0]).toContain('manage_users');
+      expect(warn.mock.calls[0][0]).toContain(
+        managedBy === undefined ? 'a row carrying no managed_by value' : `managed_by='${managedBy}'`,
+      );
+      expect(warn.mock.calls[0][0]).not.toContain('does not own');
+      expect(warn.mock.calls[0][1]).toEqual({
+        name: 'manage_users',
+        blockingRowId: 'aaa_pre_existing',
+        blockingManagedBy: managedBy ?? null,
+      });
+    }
+    // Either way the other 7 curated names are unaffected.
     expect(out.seeded).toBe(KNOWN_CAPABILITIES.length - 1);
-    // The admin's row survives — declining is the point, silence is not.
-    expect(ql.rows.find((r) => r.id === 'aaa_admin_global')).toEqual({
-      id: 'aaa_admin_global', ...ORG_AUTHORED,
-    });
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn.mock.calls[0][0]).toContain('manage_users');
-    expect(warn.mock.calls[0][1]).toEqual({ name: 'manage_users' });
   });
 
   // A clean install must not pay for any of this: no collision, no warn, no
