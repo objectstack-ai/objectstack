@@ -30,6 +30,12 @@ import {
 } from './auth-session-audit.js';
 import { SESSION_ERASURE_PATHS } from './session-tombstone.js';
 import {
+  ADMIN_SESSION_COOKIE_KEY,
+  STOP_IMPERSONATING_PATH,
+  rotateCallerBearerOnImpersonation,
+  withBearerAdminSessionRecovery,
+} from './impersonation-bearer-rotation.js';
+import {
   invitationRoleCapFailure,
   isPlainMemberInvitation,
   isOrgAdminGrade,
@@ -1557,6 +1563,18 @@ export class AuthManager {
           }
         }),
         after: createAuthMiddleware(async (ctx: any) => {
+          // ── #8243: impersonation must actually take effect for a bearer ──
+          // FIRST among the after-hooks that touch the response, because the
+          // bearer plugin's own after-hook runs behind this one and must see
+          // what we stage: it re-reads `Access-Control-Expose-Headers` to add
+          // `set-auth-token`, so the recovery header we expose here survives
+          // only by being merged before it. See
+          // `impersonation-bearer-rotation.ts` for the mechanism — the short
+          // version is that `bearer()` converts the caller's token back into
+          // the ADMIN's session cookie on every later request, so without
+          // rotating that token, `/admin/impersonate-user` is a 200 no-op.
+          await rotateCallerBearerOnImpersonation(ctx);
+
           // ── ADR-0069 D2: account lockout (counter) ──────────────────
           // better-auth catches an INVALID_EMAIL_OR_PASSWORD APIError and runs
           // the after-hook with it on `ctx.context.returned`; a success leaves
@@ -3335,6 +3353,35 @@ export class AuthManager {
     }
 
     const auth = await this.getOrCreateAuth();
+
+    // [#8243] Let a bearer client carry the `admin_session` recovery credential
+    // back out of impersonation. better-auth's `/admin/stop-impersonating`
+    // resolves the admin through the `admin_session` COOKIE alone, so in a
+    // cookie-blocked deployment — the exact context `bearer()` exists for — the
+    // exit path is dead. We accept the credential on a header and write it into
+    // the request's own `Cookie` before better-auth sees it; the vendor route
+    // then runs completely unmodified, checking everything it always checked.
+    //
+    // The REQUEST seam, not a before-hook: `bearer()`'s before-hook rebuilds
+    // the header set from `c.request.headers`, so a `Cookie` injected by any
+    // hook is clobbered by whichever hook sorts after it. Written into the
+    // request itself, `bearer()`'s parse-mutate-serialize keeps it.
+    if (this.betterAuthEndpointPath(request) === STOP_IMPERSONATING_PATH) {
+      try {
+        const authContext: any = await (auth as any).$context;
+        const adminCookieName: string | undefined =
+          authContext?.createAuthCookie?.(ADMIN_SESSION_COOKIE_KEY)?.name;
+        if (adminCookieName) {
+          request = await withBearerAdminSessionRecovery(request, adminCookieName);
+        }
+      } catch {
+        // Cookie name unresolvable (e.g. a dynamic-baseURL context we cannot
+        // reach here) → leave the request alone. The vendor route then answers
+        // exactly as it does today for a missing cookie: a loud failure, never
+        // a silent wrong identity.
+      }
+    }
+
     // better-auth's HTTP entrypoint (`createBetterAuth.handler`) wraps execution
     // in `runWithAdapter` but NOT `runWithRequestState`. Endpoints that read
     // request-state via `defineRequestState()` (e.g. `should-session-refresh`,
