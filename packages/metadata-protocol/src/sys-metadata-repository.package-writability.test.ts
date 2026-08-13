@@ -37,24 +37,19 @@
  *  - **delete is untouched** — #6960 moved the delete side deliberately and
  *    warns against symmetrising; `DeleteOptions` carries no `packageId`.
  *
- * ## ⛔ `OS_METADATA_WRITABLE` is deliberately UNCOVERED here (#8146)
+ *  - **[#8146] the hatch is type-level** — `OS_METADATA_WRITABLE` no longer
+ *    unlocks a write that NAMES a read-only base. See that block's own
+ *    docblock; it carries the ruling and the measurement NARROW rests on.
  *
- * The absence is a decision, not an oversight, so do not "complete" this suite
- * by adding a case for it. A hatch write into a read-only package currently
- * SUCCEEDS — re-measured on `main` while #7682 was in flight: `success: true`,
- * with the row landing at `package_id = com.example.showcase`, i.e. bound INTO
- * the read-only package rather than as the per-org override the variable's own
- * documentation describes (`content/docs/deployment/environment-variables.mdx`
- * — "treats them as `allowOrgOverride: true`", a TYPE-level unlock). The
- * maintainer ruling of 2026-08-12 on #8146 holds that this should refuse, so
- * any test of it here would be green *because the bug is present*, and that is
- * a shape this repo does not merge (PM ruling, PR #8185 patch round).
+ * ## [#8146] `OS_METADATA_WRITABLE` — from "deliberately uncovered" to pinned
  *
- * #7682 does not touch that path — the hatch limb returns before the new
- * package door, exactly as it did before — and #8146 already names its own
- * deliverable as "the refusal plus a rejection pin asserting `code` and
- * `status`". That pin belongs to #8146, written against the fixed behaviour;
- * nothing is lost by this suite staying silent until then.
+ * An earlier revision of this docblock told the next reader NOT to add a hatch
+ * case, because on `main` a hatch write into a read-only package SUCCEEDED and
+ * any test of it would have been green *because the bug was present* (a shape
+ * this repo does not merge — PM ruling, PR #8185 patch round). That is no
+ * longer the state of the file: #8146 landed the refusal, so the pin it always
+ * owed is written below against the FIXED behaviour. The prohibition is
+ * discharged, not still standing — do not read the history as a live warning.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -89,8 +84,15 @@ function makeFakeEngine() {
   const rows = new Map<string, Row>();
   const historyRows: Row[] = [];
 
-  const keyOf = (w: Record<string, unknown>) =>
-    `${String(w.type)}|${String(w.name)}|${String(w.organization_id ?? 'null')}|${String(w.state ?? 'active')}`;
+  // [#8146] Keyed by TABLE as well as identity. `recordMetadataAudit` inserts
+  // an audit row carrying the same `type`/`name`/`organization_id`, so a
+  // table-blind key let the audit row overwrite the `sys_metadata` row it
+  // describes — measured while verifying #8146's premise, where it made a
+  // correctly-bound row read back as `package_id: null`. Only a test that
+  // reads the row BACK (the preservation cases below) can see this, which is
+  // why it survived until a case needed the binding rather than the throw.
+  const keyOf = (w: Record<string, unknown>, table = 'sys_metadata') =>
+    `${table}|${String(w.type)}|${String(w.name)}|${String(w.organization_id ?? 'null')}|${String(w.state ?? 'active')}`;
 
   const findRow = (where: Record<string, unknown>) => {
     if (where.id !== undefined) {
@@ -130,8 +132,8 @@ function makeFakeEngine() {
         historyRows.push(h);
         return { id: h.id as string };
       }
-      const k = keyOf(data);
-      const row: Row = { id: `r_${rows.size + 1}`, ...data };
+      const k = keyOf(data, table);
+      const row: Row = { id: `r_${rows.size + 1}`, __table: table, ...data };
       rows.set(k, row);
       return { id: row.id as string };
     },
@@ -156,6 +158,17 @@ function makeFakeEngine() {
 }
 
 const objectBody = { name: 'showcase_task', label: 'Task', fields: { name: { type: 'text', label: 'Name' } } };
+
+/**
+ * [#8146] A spec-VALID permission set — the QA run's `showcase_contributor`.
+ *
+ * It has to parse, because `saveMetaItem` runs the Zod gate BEFORE the
+ * authorization door: an invalid body answers `INVALID_METADATA` / 422 and
+ * never reaches `assertAllowed`, which would make a refusal pin green for
+ * entirely the wrong reason. (Measured — the first draft of this fixture used
+ * `permissions: {}` and every case came back 422 from the schema.)
+ */
+const permissionBody = { name: 'showcase_contributor', label: 'Contributor', objects: {} };
 
 /**
  * `put` with everything but the base fixed, so each case differs in ONE way.
@@ -311,6 +324,176 @@ describe('#7682 — the refusal discriminates on package writability', () => {
     });
   });
 
+  // ── [#8146] the hatch unlocks the TYPE, never the PACKAGE ─────────────
+
+  /**
+   * #8146 — `OS_METADATA_WRITABLE` answered 200 on a read-only package while
+   * Studio rendered the same matrix disabled with a "Read-only" badge.
+   *
+   * **Maintainer ruling, 2026-08-12 (option B):** the badge is telling the
+   * truth and the server should refuse. The hatch is a TYPE-level unlock by
+   * its own shipped documentation — `environment-variables.mdx:305` defines it
+   * as treating named types "as `allowOrgOverride: true` … overridden per-org"
+   * — so it says nothing about the PACKAGE dimension.
+   *
+   * **How far the refusal reaches: NARROW** (PM ruling, veto window unopposed).
+   * Only a write that NAMES a read-only base is refused; a package-less hatch
+   * write still lands the overlay the documentation promises. NARROW is only
+   * honest if that overlay is real, so it was measured on this topology before
+   * the fix was written, and both halves are pinned below as PRESERVATION
+   * cases: package-less lands `{ package_id: null, organization_id: null }`
+   * env-wide, and `{ package_id: null, organization_id: <org> }` under an org
+   * kernel — the documented per-org override, intact.
+   *
+   * ⛔ The BROADER reading (the hatch never unlocks a write against an item a
+   * read-only package provides, named or not) is NOT implemented and must not
+   * be "completed" here: it retires the hatch's only documented use and needs a
+   * maintainer decision plus a docs/ADR change.
+   *
+   * One measurement worth carrying, because it narrows what this card proves:
+   * `{ package_id: <read-only>, organization_id: null }` is ALSO what a genuine
+   * `allowOrgOverride` overlay writes whenever the caller names the package it
+   * customizes (the `view` case in "no allow decision moves" above). So the
+   * defect was never "the hatch writes a row shape nothing else produces" — it
+   * is precisely the ruling's own sentence: a type-level unlock reached the
+   * package dimension.
+   */
+  describe('#8146 — OS_METADATA_WRITABLE does not unlock a read-only package', () => {
+    /** Open the hatch for `permission`, the type the QA run used. */
+    function openHatch(types = 'permission') {
+      process.env.OS_METADATA_WRITABLE = types;
+      resetEnvWritableMetadataTypes();
+      ObjectStackProtocolImplementation.resetEnvWritableCache();
+    }
+
+    // ── the refusal: both halves of the ADR-0112 envelope ───────────────
+
+    it('the card\'s reproduction is refused: ITEM_LOCKED / 403, where it used to answer 200', async () => {
+      openHatch();
+      const err = await putWith(repo, {
+        type: 'permission', name: 'showcase_contributor',
+        intent: 'override-artifact', packageId: READ_ONLY_PKG,
+      });
+
+      // `code` AND `status` — the ruling names both, and a message-only
+      // assertion cannot tell this refusal from the type door's.
+      expect(err).toMatchObject({ code: 'ITEM_LOCKED', status: 403 });
+      // A refusal, not a report: nothing may reach `sys_metadata`.
+      expect(Array.from(engine.rows.values())).toEqual([]);
+    });
+
+    it('read-only-by-SCOPE is the same door — the hatch does not discriminate between the two signals', async () => {
+      openHatch();
+      const err = await putWith(repo, {
+        type: 'permission', name: 'showcase_contributor',
+        intent: 'override-artifact', packageId: PLATFORM_PKG,
+      });
+      expect(err).toMatchObject({ code: 'ITEM_LOCKED', status: 403, packageId: PLATFORM_PKG });
+    });
+
+    it('a runtime-only hatch write into a read-only base: WRITABLE_PACKAGE_REQUIRED / 422', async () => {
+      // `job` has neither channel, so the hatch is the only thing that could
+      // have allowed this. Naming a read-only base takes it back — with the
+      // code whose prescription is TRUE for a create (a writable base helps).
+      openHatch('job');
+      const err = await putWith(repo, {
+        type: 'job', name: 'nightly', intent: 'runtime-only', packageId: READ_ONLY_PKG,
+      });
+      expect(err).toMatchObject({ code: 'WRITABLE_PACKAGE_REQUIRED', status: 422, packageId: READ_ONLY_PKG });
+    });
+
+    it('does NOT prescribe the hatch that is already set — the false-prescription trap', async () => {
+      // Before #8146 this message ended "…or set OS_METADATA_WRITABLE=permission
+      // to grant a runtime escape hatch". Emitted while that variable IS set,
+      // it prescribes the step the caller already took — the shape that makes
+      // an automated client (or an AI agent) retry the same request forever.
+      openHatch();
+      const err = await putWith(repo, {
+        type: 'permission', name: 'showcase_contributor',
+        intent: 'override-artifact', packageId: READ_ONLY_PKG,
+      }) as { message?: string };
+      const message = String(err.message);
+
+      expect(message).not.toMatch(/set OS_METADATA_WRITABLE/);
+      // …and it states the true remedy the measurement below proves exists.
+      expect(message).toContain('does not apply here');
+      expect(message).toContain("Retry without '?package='");
+    });
+
+    // ── PRESERVATION: what NARROW deliberately keeps working ────────────
+
+    it('a package-less hatch write still lands the env-wide overlay, bound to NO package', async () => {
+      // THE PREMISE. If this ever goes red, NARROW is preserving nothing and
+      // the fork (NARROW vs BROAD) goes back to the maintainer — it is not a
+      // test to "repair" by relaxing it.
+      openHatch();
+      const err = await putWith(repo, {
+        type: 'permission', name: 'showcase_contributor', intent: 'override-artifact',
+      });
+
+      expect(err).toBeNull();
+      const metaRows = Array.from(engine.rows.values()).filter((r) => r.__table === 'sys_metadata');
+      expect(metaRows).toHaveLength(1);
+      expect(metaRows[0]).toMatchObject({ package_id: null, organization_id: null });
+    });
+
+    it('a package-less hatch write under an ORG kernel lands the per-org override the docs promise', async () => {
+      // `environment-variables.mdx:305` — the hatch treats named types "as
+      // `allowOrgOverride: true` … overridden per-org". This is that sentence,
+      // executed: the row binds to the org and to no package.
+      openHatch();
+      const orgRepo = new SysMetadataRepository({
+        engine: engine as never, organizationId: 'org_acme', orgLabel: 'org_acme',
+      });
+      const err = await putWith(orgRepo, {
+        type: 'permission', name: 'showcase_contributor', intent: 'override-artifact',
+      });
+
+      expect(err).toBeNull();
+      const metaRows = Array.from(engine.rows.values()).filter((r) => r.__table === 'sys_metadata');
+      expect(metaRows).toHaveLength(1);
+      expect(metaRows[0]).toMatchObject({ package_id: null, organization_id: 'org_acme' });
+    });
+
+    it('a hatch write naming a WRITABLE base still lands — the door reads writability, not the hatch', async () => {
+      openHatch();
+      const err = await putWith(repo, {
+        type: 'permission', name: 'showcase_contributor',
+        intent: 'override-artifact', packageId: WRITABLE_PKG,
+      });
+
+      expect(err).toBeNull();
+      const metaRows = Array.from(engine.rows.values()).filter((r) => r.__table === 'sys_metadata');
+      expect(metaRows[0]).toMatchObject({ package_id: WRITABLE_PKG });
+    });
+
+    it('the ADR-0005 overlay is untouched: a registry-allowed type still overlays a read-only package', async () => {
+      // The limb ordering IS the fix, so it needs a pin on BOTH sides of the
+      // door. `view` is allowOrgOverride and returns at the registry limb —
+      // above the door — with the hatch open for an unrelated type. If the
+      // door had been placed one limb higher, this goes red and the whole
+      // overlay model closes.
+      openHatch();
+      const err = await putWith(repo, {
+        type: 'view', name: 'case_grid', intent: 'override-artifact', packageId: READ_ONLY_PKG,
+      });
+      expect(err).toBeNull();
+      const metaRows = Array.from(engine.rows.values()).filter((r) => r.__table === 'sys_metadata');
+      expect(metaRows[0]).toMatchObject({ package_id: READ_ONLY_PKG });
+    });
+
+    it('with the hatch CLOSED the refusal still offers it — the prescription is chosen, not deleted', async () => {
+      // The other side of the false-prescription pin: opening the hatch (on a
+      // package-less write) remains a real answer, so the sentence must
+      // survive when the hatch is not already set.
+      const err = await putWith(repo, {
+        type: 'permission', name: 'showcase_contributor',
+        intent: 'override-artifact', packageId: READ_ONLY_PKG,
+      }) as { message?: string };
+      expect(String(err.message)).toContain('set OS_METADATA_WRITABLE=permission');
+    });
+  });
+
   // ── the delete verb is deliberately not symmetrised (#6960) ───────────
 
   it('delete keeps its own codes — DeleteOptions names no base', async () => {
@@ -333,11 +516,13 @@ describe('#7682 — the refusal discriminates on package writability', () => {
  *
  * ⚠️ On a SCOPED kernel (`environmentId` set) the protocol refuses first, with
  * `NOT_OVERRIDABLE`, and this fix is not reachable — that second refusal point
- * lives in `protocol.ts`, which this card is not authorised to edit. Filed
- * separately; the asymmetry is stated here so the next reader measures it
- * instead of assuming this suite covers both kernels.
+ * lives in `protocol.ts`, which neither #7682 nor #8146 is authorised to edit.
+ * It is filed as **#8184**, and it is deliberately NOT covered here: this file
+ * pins ONE kernel. ⛔ Do not read a green run of this suite as evidence that
+ * the scoped kernel refuses too — it does not, and #8146's hatch refusal below
+ * inherits exactly the same boundary.
  */
-describe('#7682 — through saveMetaItem on the host-config topology', () => {
+describe('#7682 / #8146 — through saveMetaItem on the host-config topology', () => {
   function boot() {
     const engine = makeFakeEngine() as unknown as Record<string, unknown>;
     (engine as { registry: Record<string, unknown> }).registry = {
@@ -347,9 +532,12 @@ describe('#7682 — through saveMetaItem on the host-config topology', () => {
       listItems: () => [],
       getItem: () => undefined,
       // A hit here is what makes the name artifact-backed, i.e. an
-      // `override-artifact` intent — the card's `showcase_task`.
+      // `override-artifact` intent — #7682's `showcase_task`, and [#8146]
+      // `showcase_contributor`, the permission set the QA run drove the hatch
+      // against. Both ship from the read-only package.
       getArtifactItem: (type: string, name: string) =>
-        type === 'object' && name === 'showcase_task'
+        (type === 'object' && name === 'showcase_task')
+        || (type === 'permission' && name === 'showcase_contributor')
           ? { name, _packageId: READ_ONLY_PKG }
           : undefined,
     };
@@ -386,5 +574,53 @@ describe('#7682 — through saveMetaItem on the host-config topology', () => {
 
     expect(readOnly).toMatchObject({ code: 'ITEM_LOCKED', status: 403 });
     expect(writable).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+  }, 30_000);
+
+  /**
+   * [#8146] The QA run's own request, verbatim, through the same door.
+   *
+   * `PUT /api/v1/meta/permission/showcase_contributor?package=com.example.showcase`
+   * with `OS_METADATA_WRITABLE=permission` answered **200** on `main` — measured
+   * again on this tree before the fix, landing
+   * `{ package_id: 'com.example.showcase', organization_id: null }`. That is the
+   * write the ruling calls a bug, and this is where it is now refused.
+   */
+  it('[#8146] the hatch write the QA run measured is refused: ITEM_LOCKED / 403, nothing persisted', async () => {
+    const { engine, protocol } = boot();
+    process.env.OS_METADATA_WRITABLE = 'permission';
+    resetEnvWritableMetadataTypes();
+    ObjectStackProtocolImplementation.resetEnvWritableCache();
+
+    const err = await protocol
+      .saveMetaItem({
+        type: 'permission', name: 'showcase_contributor',
+        item: permissionBody, packageId: READ_ONLY_PKG,
+      })
+      .then(() => null, (e: unknown) => e);
+
+    expect(err).toMatchObject({ code: 'ITEM_LOCKED', status: 403, packageId: READ_ONLY_PKG });
+    const metaRows = Array.from((engine as unknown as { rows: Map<string, Row> }).rows.values())
+      .filter((r) => r.__table === 'sys_metadata');
+    expect(metaRows).toEqual([]);
+  }, 30_000);
+
+  it('[#8146] the same hatch write WITHOUT ?package= still lands, bound to no package', async () => {
+    // The preservation half, end to end. NARROW refuses the named base and
+    // nothing else; this is the behaviour `environment-variables.mdx` promises
+    // and the reason the broad reading was not taken.
+    const { engine, protocol } = boot();
+    process.env.OS_METADATA_WRITABLE = 'permission';
+    resetEnvWritableMetadataTypes();
+    ObjectStackProtocolImplementation.resetEnvWritableCache();
+
+    const err = await protocol
+      .saveMetaItem({ type: 'permission', name: 'showcase_contributor', item: permissionBody })
+      .then(() => null, (e: unknown) => e);
+
+    expect(err).toBeNull();
+    const metaRows = Array.from((engine as unknown as { rows: Map<string, Row> }).rows.values())
+      .filter((r) => r.__table === 'sys_metadata');
+    expect(metaRows).toHaveLength(1);
+    expect(metaRows[0]).toMatchObject({ package_id: null, organization_id: null });
   }, 30_000);
 });
