@@ -420,11 +420,11 @@ async function refuseUnrelatedScreenRead(
  * `invalid_value`, the ADR-0114 catalog's "rejected for a reason no other
  * member names".
  *
- * ⚠️ The Zod branch's per-issue `code` is whatever {@link fieldsFromZodIssues}
- * produces, which today is Zod's own vocabulary rather than the ADR-0114 D3
- * catalog. That pass-through is this package's, not this route's — `/analytics`
- * and `/notifications` emit through the same helper — so it is filed as #8124
- * rather than forked here into a third dialect.
+ * The Zod branch's per-issue `code` is whatever {@link fieldsFromZodIssues}
+ * produces — since #8124 that is the ADR-0114 D3 catalog: the helper maps
+ * through `zodIssuesToFields` (`@objectstack/spec`), the same table the REST
+ * transport applies, so `/analytics`, `/notifications` and this route speak
+ * one field-code vocabulary instead of leaking Zod's.
  */
 function flowDefinitionRefusal(err: any): unknown {
     // The producer declared its class; the boundary does not overrule it.
@@ -767,7 +767,11 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 if (unknownKeys.length > 0) {
                     throw validationFailure(
                         `Unknown key${unknownKeys.length > 1 ? 's' : ''} ${unknownKeys.map((k) => `\`${k}\``).join(', ')} — the toggle body is { enabled?: boolean }`,
-                        unknownKeys.map((k) => ({ field: k, code: 'unrecognized_keys', message: 'not a toggle field — did you mean `enabled`?' })),
+                        // `unknown_field` — the ADR-0114 catalog member for "a
+                        // key the target does not declare"; this entry used to
+                        // hand-spell Zod's `unrecognized_keys`, a code outside
+                        // the closed catalog (#8124).
+                        unknownKeys.map((k) => ({ field: k, code: 'unknown_field', message: 'not a toggle field — did you mean `enabled`?' })),
                     );
                 }
                 if ('enabled' in toggleBody && typeof (toggleBody as Record<string, unknown>).enabled !== 'boolean') {

@@ -165,7 +165,7 @@ Format validation errors so the client can map them to specific form fields:
 ```typescript
 import { z } from 'zod';
 import { Hook } from '@objectstack/spec/data';
-import { zodIssuesToFields } from '@objectstack/rest';
+import { zodIssuesToFields } from '@objectstack/spec/api';
 
 // Map a ZodError onto an AppError carrying field-level errors.
 //
