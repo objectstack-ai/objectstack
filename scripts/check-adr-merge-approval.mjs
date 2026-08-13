@@ -2,11 +2,13 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 //
 // check-adr-merge-approval -- a PR whose diff touches docs/adr/** must not be
-// mergeable without an APPROVED review on it. Any account's approval counts.
+// mergeable without an APPROVED review on it, and must not be sitting on an
+// armed auto-merge. Any account's approval counts; no account's arming does.
 //
 //   node scripts/check-adr-merge-approval.mjs               # gate mode (CI and local)
 //   node scripts/check-adr-merge-approval.mjs --pr 6671     # replay a PR via the live API
 //   node scripts/check-adr-merge-approval.mjs --files-json f.json --reviews-json r.json
+//                                            [--pull-json p.json]  # optional arming input
 //   node scripts/check-adr-merge-approval.mjs --self-test   # the checker itself
 //
 // ## The ruling this enforces (maintainer, 2026-08-12, verbatim)
@@ -28,10 +30,15 @@
 //                                        | this gate. That is the accepted cost of
 //                                        | the 2026-08-12 ruling, stated out loud.
 //   -------------------------------------+----------------------------------------
-//   the approval is CURRENT, not         | that a human performed the merge. This
-//   historical: a later CHANGES_REQUESTED| gate reads reviews only; it does not
-//   or DISMISSED revokes it and the      | look at who merges, and does not block
-//   gate goes red again                  | auto-merge being ARMED (#8012)
+//   the approval is CURRENT, not         | that the approver is not also the
+//   historical: a later CHANGES_REQUESTED| author's own seat, and that the person
+//   or DISMISSED revokes it and the      | who merges is the maintainer. This gate
+//   gate goes red again                  | reads STATE, never actors.
+//   -------------------------------------+----------------------------------------
+//   a docs/adr/** diff cannot reach a    | that auto-merge cannot be armed inside
+//   mergeable state while auto-merge is  | the seconds before this gate re-runs and
+//   ARMED on the PR -- armed is RED,     | goes red. See "the window this does NOT
+//   approved or not (#8012)              | close" below; it needs the ruleset side.
 //
 // The 2026-08-12 ruling SUPERSEDES the account-identity proxy this file used
 // to implement. That proxy came from #6741 (maintainer, verbatim)
@@ -61,8 +68,10 @@
 // ## The decision rule
 //
 //   diff does not touch docs/adr/**  -> PASS, with ZERO API lookups
-//   diff touches docs/adr/**         -> PASS only if the PR's latest
-//                                       state-setting review is APPROVED
+//   diff touches docs/adr/**         -> PASS only if BOTH hold:
+//                                        (1) the PR's latest state-setting
+//                                            review is APPROVED, and
+//                                        (2) auto-merge is NOT armed on the PR
 //
 // "Latest state-setting" rather than "any APPROVED review has ever existed":
 // an unrevokable approval would be a one-way door -- approve once, force-push
@@ -71,6 +80,99 @@
 // runs over ALL reviewers, which is the strict direction on both edges: a
 // CHANGES_REQUESTED from a SECOND reviewer revokes a first reviewer's
 // approval (red), and it takes a fresh approval -- from anyone -- to clear it.
+//
+// ## Clause (2): armed auto-merge is itself a RED state on docs/adr/** (#8012)
+//
+// Measured live on PR #7960 at ~11:15Z on 2026-08-12: an AI seat submitted an
+// approving review and then ENABLED AUTO-MERGE on the PR while this gate was
+// red. Nothing merged -- a human noticed and disarmed it two minutes later --
+// but the state it left behind is the defect. Auto-merge is not a merge; it is
+// a STANDING INSTRUCTION TO MERGE LATER, and no gate fires when one is issued.
+// The next approving review would have turned this check green and GitHub would
+// have merged the PR unattended, with every check reporting success.
+//
+// So the pass condition gained clause (2), and clause (2) fires WHETHER OR NOT
+// the PR is approved. That "whether or not" is the entire mechanism, not a
+// flourish of strictness -- the two states are worth spelling out because only
+// one of them is the defect:
+//
+//   armed + NOT approved -> ALREADY red, for the missing approval. A rule that
+//     fires only here cannot change any verdict: every input it rejects was
+//     rejected already. It is a no-op that reads like a fix, and it leaves the
+//     defect untouched, because the defect materialises one event LATER.
+//   armed + approved     -> the state the incident was one review away from,
+//     and the ONLY state in which the unattended merge actually happens. This
+//     is what clause (2) makes red. Under the review-only rule it was green.
+//
+// `--self-test` pins that distinction directly (`armed-clause-changes-a-verdict-
+// that-would-otherwise-be-green`): two runs over IDENTICAL reviews, differing
+// only in the arming bit, must land on opposite verdicts. An assertion suite
+// for clause (2) that still passes when clause (2) is deleted would be an empty
+// instrument, and this family has already paid four times for fixes that only
+// looked like fixes.
+//
+// 「人工合并」 -- the second half of the #6741 ruling, the half an approving
+// review was only ever a proxy for -- is now machine-enforced in the only form
+// a status check can express it. This gate cannot read who merges: when it
+// reports, the merge has not happened. It reads whether a MACHINE HAS ALREADY
+// BEEN TOLD TO, and it is green only while the merge still needs a person.
+//
+// Deliberately NOT a deadlock (#8161's lesson, which cost this same gate a
+// week): every red here is cleared by an action any account can take -- disable
+// auto-merge -- and disabling it re-runs this gate through the workflow's
+// `auto_merge_disabled` trigger, so the check clears itself with no push, no
+// re-review and no admin. Contrast #8161, where the sole account that could
+// clear the gate was the one GitHub forbade from clearing it.
+//
+// Non-ADR PRs are untouched: arming auto-merge is ordinary, useful practice
+// here (the release PR runs on it) and the clean path still returns before any
+// lookup happens. Only docs/adr/** is governed.
+//
+// ## The window this does NOT close, stated rather than assumed
+//
+// GitHub offers auto-merge only on a PR that cannot be merged immediately
+// ("The option to enable auto-merge is shown only on pull requests that cannot
+// be merged immediately", docs, verbatim). Two consequences, both load-bearing:
+//
+//   - DISARM-THEN-REARM buys nothing. This gate reads the LIVE arming state on
+//     every run and keeps no memory between runs, so a rearmed PR is judged
+//     armed the next time it runs; there is no earlier green to launder. And
+//     while the PR is green here and otherwise mergeable, GitHub itself refuses
+//     the rearm. Pinned as `arming-is-read-fresh-so-rearming-is-red-again`.
+//   - WHAT REMAINS: a PR that is approved, green HERE, and still waiting on some
+//     OTHER required check can be armed in that window. `auto_merge_enabled`
+//     re-runs this gate, which then goes red -- but if the other check goes
+//     green first, the merge fires before the red lands. The race needs the
+//     arming to be the last blocking action, and it is NOT closed here. Closing
+//     it belongs to the repository ruleset (#8012's option 2: disallow
+//     auto-merge, or constrain the merge actor), which no CI job can perform.
+//
+// ## Reading the arming state: the LIVE PR object, never the event payload
+//
+// Read from `GET /repos/{owner}/{repo}/pulls/{n}`: `auto_merge` is null when
+// disarmed and an object (`enabled_by`, `merge_method`, ...) when armed. Both
+// shapes were measured against this repository on 2026-08-13 -- the armed
+// capture in `--self-test` is a real one, not a hand-written imitation -- and
+// `pull-requests: read`, which the workflow already grants for the review list,
+// covers it. No new permission, no new token scope.
+//
+// The webhook payload is deliberately NOT trusted for this. GitHub does not
+// document `auto_merge` as a member of the `pull_request` object carried by
+// `pull_request_review`, and at least one PR projection in use in this
+// environment (the `pull_request_read` MCP tool) omits the field entirely. A
+// projection that merely LACKS the key would read as "not armed" and turn this
+// clause into the phantom check it exists to prevent, so `armingFrom()` refuses
+// a payload with no `auto_merge` key instead of defaulting it: absent and null
+// are different facts, and only one of them means disarmed (#4690).
+//
+// Not judged on `merge_group` builds, on purpose. By then the PR has already
+// passed this gate at the PR level, which is where auto-merge waits, so a red
+// on a queue build adds no safety -- it only evicts. And if GitHub's "merge
+// when ready" sets `auto_merge` as part of enqueueing, judging it there would
+// make ADR PRs permanently unqueueable: the #8161 deadlock shape, recreated on
+// the other side. The verdict RECORDS that the question was not asked
+// (`arming.judged === false`, `arming.armed === null`) and the output says so,
+// rather than quietly answering it "no".
 //
 // ## Never a filtered trigger, never a silent skip
 //
@@ -113,6 +215,15 @@ export const ADR_PATH_PREFIX = 'docs/adr/';
 
 /** Review states that SET the reviewer's standing; COMMENTED/PENDING do not. */
 const STATE_SETTING = new Set(['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED']);
+
+/**
+ * The explicit "this build does not judge the arming question" sentinel for
+ * `decide()`'s `getArming`. It exists so that NOT ASKING is something a caller
+ * has to say out loud: `decide()` throws on a missing `getArming` rather than
+ * defaulting it, because a forgotten argument that reads as "auto-merge is off"
+ * would silently restore the hole this clause closes (#8012).
+ */
+export const ARMING_NOT_JUDGED = 'arming-not-judged';
 
 // -- pure decision functions --------------------------------------------------
 // Pure over their inputs so `--self-test` and the replay modes drive the REAL
@@ -172,21 +283,85 @@ export function approverLogins(reviews) {
 }
 
 /**
+ * The PR's auto-merge arming, from a REST pull-request object.
+ *
+ * `auto_merge` is `null` when disarmed and an object when armed -- both
+ * measured against this repo's live API, and the armed capture is pinned as a
+ * fixture in `--self-test`. A payload with NO `auto_merge` key is REFUSED, not
+ * read as disarmed: that shape is a lossy projection (the `pull_request_read`
+ * MCP tool is one), and letting a missing key mean "not armed" is exactly how a
+ * gate becomes a phantom check (#4690). Absent and null are different facts.
+ *
+ * @param {object} pull a REST pull-request object
+ * @returns {{armed: boolean, by: string|null, method: string|null}}
+ */
+export function armingFrom(pull) {
+  if (pull === null || typeof pull !== 'object' || Array.isArray(pull)) {
+    throw new Error(
+      `the pull request payload is ${Array.isArray(pull) ? 'an array' : String(pull === null ? 'null' : typeof pull)}, ` +
+        'not an object -- refusing to guess whether auto-merge is armed',
+    );
+  }
+  if (!Object.hasOwn(pull, 'auto_merge')) {
+    throw new Error(
+      'the pull request payload carries no `auto_merge` key, so it is a PROJECTION that dropped the field,\n' +
+        '    not a pull request with auto-merge off. Absent and null are different facts and only null means\n' +
+        '    disarmed. Read the PR from the REST API (GET /repos/{owner}/{repo}/pulls/{n}), which carries the\n' +
+        '    key in both states -- see the header (#8012).',
+    );
+  }
+  const autoMerge = pull.auto_merge;
+  if (autoMerge === null) return { armed: false, by: null, method: null };
+  if (typeof autoMerge !== 'object' || Array.isArray(autoMerge)) {
+    throw new Error(
+      `\`auto_merge\` is ${Array.isArray(autoMerge) ? 'an array' : typeof autoMerge}, neither null nor an object -- ` +
+        'refusing to guess the arming state from a shape this gate does not recognise',
+    );
+  }
+  return {
+    armed: true,
+    by: autoMerge.enabled_by?.login ?? '(unknown)',
+    method: autoMerge.merge_method ?? '(unknown)',
+  };
+}
+
+/**
  * The whole judgement. `getReviews` is a LAZY async thunk: on a diff that does
  * not touch docs/adr/** it is never invoked, which is how "PASS with zero API
  * lookups" is a structural property rather than a promise -- the self-test
  * passes a thunk that throws, proving the clean path cannot look anything up.
  *
+ * `getArming` is the same lazy shape for clause (2) and is MANDATORY -- either a
+ * thunk resolving to `{armed}` (use `armingFrom()` on a REST PR object), or the
+ * `ARMING_NOT_JUDGED` sentinel to state out loud that this build does not ask.
+ * Omitting it throws: a caller that forgets must fail here, never coast on a
+ * default that reads as "auto-merge is off" (#8012).
+ *
+ * Both clauses are evaluated, so a red names EVERY reason it is red -- being
+ * told to disarm only to discover the approval is also missing is two round
+ * trips for one verdict.
+ *
  * @param {object} input
  * @param {string[]} input.changedPaths repo-relative changed paths
  * @param {() => Promise<object[]>} input.getReviews lazy review-list fetch
- * @returns {Promise<{ok: boolean, kind: string, adrFiles: string[], checked: number,
- *   state?: string|null, approvals?: string[]}>}
+ * @param {(() => Promise<{armed: boolean}>)|'arming-not-judged'} input.getArming
+ * @returns {Promise<{ok: boolean, kind: string, reasons: string[], adrFiles: string[],
+ *   checked: number, state?: string|null, approvals?: string[],
+ *   arming?: {judged: boolean, armed: boolean|null, by: string|null, method: string|null}}>}
  */
-export async function decide({ changedPaths, getReviews }) {
+export async function decide({ changedPaths, getReviews, getArming }) {
+  if (typeof getArming !== 'function' && getArming !== ARMING_NOT_JUDGED) {
+    throw new Error(
+      'decide() needs an explicit `getArming`: a lazy thunk resolving to {armed: boolean}, or the\n' +
+        `    ARMING_NOT_JUDGED sentinel ('${ARMING_NOT_JUDGED}') to declare that this build does not judge the\n` +
+        `    arming question. Got ${getArming === undefined ? 'nothing' : JSON.stringify(getArming)}. Refusing to default it:\n` +
+        '    a forgotten argument must not silently read as "auto-merge is off" (#8012).',
+    );
+  }
+
   const adrFiles = adrFilesIn(changedPaths);
   const checked = changedPaths.length;
-  if (adrFiles.length === 0) return { ok: true, kind: 'no-adr-diff', adrFiles, checked };
+  if (adrFiles.length === 0) return { ok: true, kind: 'no-adr-diff', reasons: [], adrFiles, checked };
 
   const reviews = await getReviews();
   if (!Array.isArray(reviews)) {
@@ -194,8 +369,31 @@ export async function decide({ changedPaths, getReviews }) {
   }
   const state = latestReviewState(reviews);
   const approvals = approverLogins(reviews);
-  if (state === 'APPROVED') return { ok: true, kind: 'approved', adrFiles, checked, state, approvals };
-  return { ok: false, kind: 'missing-approval', adrFiles, checked, state, approvals };
+
+  let arming;
+  if (getArming === ARMING_NOT_JUDGED) {
+    // `armed: null`, never `false` -- "not asked" must not be readable as "asked
+    // and off" by anything downstream, including the report.
+    arming = { judged: false, armed: null, by: null, method: null };
+  } else {
+    const read = await getArming();
+    if (read === null || typeof read !== 'object' || typeof read.armed !== 'boolean') {
+      throw new Error(
+        `the auto-merge read answered ${JSON.stringify(read)}, not {armed: boolean} -- refusing to guess\n` +
+          '    (see header: a missing input fails loud, it never passes).',
+      );
+    }
+    arming = { judged: true, armed: read.armed, by: read.by ?? null, method: read.method ?? null };
+  }
+
+  // Clause order is the reading order of the red message: the arming is the
+  // surprising fact and the actionable one, so it comes first.
+  const reasons = [];
+  if (arming.armed === true) reasons.push('auto-merge-armed');
+  if (state !== 'APPROVED') reasons.push('missing-approval');
+
+  const ok = reasons.length === 0;
+  return { ok, kind: ok ? 'approved' : reasons.join('+'), reasons, adrFiles, checked, state, approvals, arming };
 }
 
 /**
@@ -340,33 +538,48 @@ export function changedFiles(root, base) {
 
 // -- GitHub API ---------------------------------------------------------------
 
+const apiHeaders = (token) => ({
+  accept: 'application/vnd.github+json',
+  'x-github-api-version': '2022-11-28',
+  ...(token ? { authorization: `Bearer ${token}` } : {}),
+});
+
+/** One GET, with every failure raised. Shared by the list and single-object
+ *  readers so both fail in exactly the same direction: loud. */
+async function apiGet(url, token) {
+  let res;
+  try {
+    res = await fetch(url, { headers: apiHeaders(token) });
+  } catch (error) {
+    throw new Error(`GET ${url} failed: ${error?.message ?? error}`);
+  }
+  if (!res.ok) {
+    const body = (await res.text().catch(() => '')).slice(0, 300);
+    throw new Error(`GET ${url} answered HTTP ${res.status}${body ? `:\n    ${body}` : ''}`);
+  }
+  return res.json();
+}
+
 /** GETs every page of a list endpoint. Any non-2xx, non-array or network
  *  failure throws -- the caller turns that into exit 1, never a pass. */
 async function apiGetAllPages(url, token) {
   const out = [];
   for (let page = 1; ; page++) {
     const pageUrl = `${url}${url.includes('?') ? '&' : '?'}per_page=100&page=${page}`;
-    let res;
-    try {
-      res = await fetch(pageUrl, {
-        headers: {
-          accept: 'application/vnd.github+json',
-          'x-github-api-version': '2022-11-28',
-          ...(token ? { authorization: `Bearer ${token}` } : {}),
-        },
-      });
-    } catch (error) {
-      throw new Error(`GET ${pageUrl} failed: ${error?.message ?? error}`);
-    }
-    if (!res.ok) {
-      const body = (await res.text().catch(() => '')).slice(0, 300);
-      throw new Error(`GET ${pageUrl} answered HTTP ${res.status}${body ? `:\n    ${body}` : ''}`);
-    }
-    const batch = await res.json();
+    const batch = await apiGet(pageUrl, token);
     if (!Array.isArray(batch)) throw new Error(`GET ${pageUrl} answered a non-array body`);
     out.push(...batch);
     if (batch.length < 100) return out;
   }
+}
+
+/** GETs a single-object endpoint (the PR itself, for its arming state). */
+async function apiGetObject(url, token) {
+  const body = await apiGet(url, token);
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+    throw new Error(`GET ${url} answered ${Array.isArray(body) ? 'an array' : String(body === null ? 'null' : typeof body)}, not an object`);
+  }
+  return body;
 }
 
 function apiContext(env) {
@@ -383,46 +596,85 @@ const fetchPrFiles = ({ apiUrl, repo, token }, pull) =>
   apiGetAllPages(`${apiUrl}/repos/${repo}/pulls/${pull}/files`, token);
 const fetchAssociatedPrs = ({ apiUrl, repo, token }, sha) =>
   apiGetAllPages(`${apiUrl}/repos/${repo}/commits/${sha}/pulls`, token);
+/** The PR itself -- read for `auto_merge`, which the webhook payload is not
+ *  trusted to carry (see the header). Same `pull-requests: read` scope. */
+const fetchPull = ({ apiUrl, repo, token }, pull) =>
+  apiGetObject(`${apiUrl}/repos/${repo}/pulls/${pull}`, token);
 
 // -- reporting ----------------------------------------------------------------
 
 const RULING = '「门禁改成只要求「APPROVED review 存在」」/「不要指定具体的人」 (maintainer, 2026-08-12, verbatim; #8161)';
 
-function reportVerdict(verdict, { source }) {
+/** How the verdict describes the arming half, on both the green and red paths. */
+function armingSentence(arming, armingNote) {
+  if (!arming || arming.judged !== true) {
+    return `the auto-merge arming question was NOT judged on this build${armingNote ? ` (${armingNote})` : ''}`;
+  }
+  return arming.armed ? 'auto-merge is ARMED' : 'auto-merge is OFF';
+}
+
+function reportVerdict(verdict, { source, armingNote = null }) {
   if (verdict.ok && verdict.kind === 'no-adr-diff') {
     console.log(
       `✅  No files under ${ADR_PATH_PREFIX} in this diff (${verdict.checked} changed file(s), ${source}). ` +
-        'Reviews were not consulted -- zero API lookups on the clean path.',
+        'Neither reviews nor auto-merge state were consulted -- zero API lookups on the clean path.',
     );
     return 0;
   }
   if (verdict.ok) {
     const who = (verdict.approvals ?? []).map((s) => `'${s}'`).join(', ');
     console.log(
-      `✅  ${verdict.adrFiles.length} file(s) under ${ADR_PATH_PREFIX} and the PR's current review standing is ` +
-        `APPROVED${who ? ` (approved by ${who})` : ''} (${source}).\n` +
+      `✅  ${verdict.adrFiles.length} file(s) under ${ADR_PATH_PREFIX}; the PR's current review standing is ` +
+        `APPROVED${who ? ` (approved by ${who})` : ''} and ${armingSentence(verdict.arming, armingNote)} (${source}).\n` +
         verdict.adrFiles.map((f) => `      • ${f}`).join('\n'),
     );
     return 0;
   }
+
   const approvals = verdict.approvals ?? [];
+  const blocks = [];
+
+  if (verdict.arming?.armed === true) {
+    blocks.push(
+      `AUTO-MERGE IS ARMED on this pull request (enabled by '${verdict.arming.by ?? '(unknown)'}', ` +
+        `method: ${verdict.arming.method ?? '(unknown)'}).\n` +
+        '\n    An armed auto-merge turns the next approving review into an UNATTENDED MERGE: the approval\n' +
+        '    re-runs this gate, the gate goes green, and GitHub merges with nobody pressing a button. That\n' +
+        "    bypasses 「人工合并」 -- the second half of #6741's ruling -- while every check reports success.\n" +
+        '    Measured live on PR #7960 at 11:15Z on 2026-08-12 (#8012), disarmed by hand before it fired.\n' +
+        '\n    This is red WHETHER OR NOT the PR is approved. An approval does not make an armed auto-merge\n' +
+        '    acceptable -- it is precisely the trigger the arming is waiting for.\n' +
+        '\n    Fix: DISABLE auto-merge on this PR, then merge it in person once it is approved. Disabling it\n' +
+        '    re-runs this gate on its own (the `auto_merge_disabled` trigger), so nothing else is needed.',
+    );
+  }
+
+  if (verdict.state !== 'APPROVED') {
+    blocks.push(
+      "The PR's current review standing is not APPROVED.\n" +
+        (verdict.state
+          ? `\n    The latest state-setting review on this PR is ${verdict.state}, not APPROVED.\n`
+          : '\n    No state-setting review (APPROVED / CHANGES_REQUESTED / DISMISSED) has been submitted at all.\n') +
+        (approvals.length > 0
+          ? `\n    APPROVED review(s) from ${approvals.map((s) => `'${s}'`).join(', ')} exist but no longer stand:\n` +
+            `    a later ${verdict.state} superseded them. An approval is revocable by design -- see the header.\n`
+          : '') +
+        '\n    Fix: anyone with review rights on this repo approves the PR; that approval re-runs this check\n' +
+        '    via the pull_request_review trigger. This gate does NOT check who approved.',
+    );
+  }
+
+  const numbered = blocks.length > 1;
   console.error(
-    `\n❌  This change touches ${ADR_PATH_PREFIX} and the PR's current review standing is not APPROVED.\n\n` +
+    `\n❌  This change touches ${ADR_PATH_PREFIX} and this PR is not in a mergeable state under the ADR rules.\n\n` +
       verdict.adrFiles.map((f) => `      • ${f}`).join('\n') +
+      '\n\n' +
+      blocks.map((b, i) => `    ${numbered ? `[${i + 1}] ` : ''}${b}`).join('\n\n') +
       '\n\n    The ruling being enforced: ' +
       RULING +
-      '\n    Drafting and pushing this PR was fine and stays fine -- only the MERGE is gated.\n' +
-      (verdict.state
-        ? `\n    The latest state-setting review on this PR is ${verdict.state}, not APPROVED.\n`
-        : '\n    No state-setting review (APPROVED / CHANGES_REQUESTED / DISMISSED) has been submitted at all.\n') +
-      (approvals.length > 0 && verdict.state !== 'APPROVED'
-        ? `\n    APPROVED review(s) from ${approvals.map((s) => `'${s}'`).join(', ')} exist but no longer stand:\n` +
-          `    a later ${verdict.state} superseded them. An approval is revocable by design -- see the header.\n`
-        : '') +
-      '\n    Green path: anyone with review rights on this repo approves the PR; that approval re-runs this\n' +
-      '    check via the pull_request_review trigger and it goes green with no further action. This gate does\n' +
-      '    NOT check who approved: see the two-clause table in scripts/check-adr-merge-approval.mjs, which\n' +
-      "    states what it guarantees and what it leaves to convention (#6741's 「维护者自己确认」/「人工合并」).",
+      '\n    Drafting and pushing this PR was fine and stays fine -- only the MERGE is gated. What this gate\n' +
+      '    does and does not guarantee is stated in full in the table at the head of\n' +
+      "    scripts/check-adr-merge-approval.mjs (#6741's 「维护者自己确认」/「人工合并」, #8012).",
   );
   return 1;
 }
@@ -447,6 +699,7 @@ async function main() {
   // --self-test.
   const filesJson = argOf('--files-json');
   const reviewsJson = argOf('--reviews-json');
+  const pullJson = argOf('--pull-json');
   if (filesJson || reviewsJson) {
     if (!filesJson || !reviewsJson) {
       console.error('❌  --files-json and --reviews-json must be given together.');
@@ -454,11 +707,21 @@ async function main() {
     }
     const changedPaths = normalizeFileList(JSON.parse(readFileSync(resolve(filesJson), 'utf8')));
     const reviews = normalizeReviewList(JSON.parse(readFileSync(resolve(reviewsJson), 'utf8')));
-    const verdict = await decide({ changedPaths, getReviews: async () => reviews });
-    return reportVerdict(verdict, { source: `replayed from ${filesJson} + ${reviewsJson}` });
+    // `--pull-json` is optional, and its ABSENCE is reported rather than
+    // silently treated as "auto-merge is off" -- the sentinel says so, and
+    // the verdict line repeats it.
+    const getArming = pullJson
+      ? async () => armingFrom(JSON.parse(readFileSync(resolve(pullJson), 'utf8')))
+      : ARMING_NOT_JUDGED;
+    const verdict = await decide({ changedPaths, getReviews: async () => reviews, getArming });
+    return reportVerdict(verdict, {
+      source: `replayed from ${filesJson} + ${reviewsJson}${pullJson ? ` + ${pullJson}` : ''}`,
+      armingNote: pullJson ? null : 'no --pull-json was given to this offline replay',
+    });
   }
 
-  // Live replay: judge an arbitrary PR by its API file list + review list.
+  // Live replay: judge an arbitrary PR by its API file list, review list and
+  // arming state.
   const prArg = argOf('--pr');
   if (prArg) {
     const pull = Number(prArg);
@@ -467,7 +730,11 @@ async function main() {
       return 1;
     }
     const changedPaths = normalizeFileList(await fetchPrFiles(ctx, pull));
-    const verdict = await decide({ changedPaths, getReviews: () => fetchReviews(ctx, pull) });
+    const verdict = await decide({
+      changedPaths,
+      getReviews: () => fetchReviews(ctx, pull),
+      getArming: async () => armingFrom(await fetchPull(ctx, pull)),
+    });
     return reportVerdict(verdict, { source: `PR #${pull} via the API` });
   }
 
@@ -503,8 +770,12 @@ async function main() {
     return 1;
   }
 
-  const getReviews = async () => {
-    // Reached only when the diff touches docs/adr/**.
+  // Resolved once and shared by both lazy reads below, so a gated build costs
+  // one resolution and not one per clause. Reached only when the diff touches
+  // docs/adr/** -- the clean path returns before either thunk is invoked.
+  let resolvedPr = null;
+  const resolvePrOnce = async () => {
+    if (resolvedPr) return resolvedPr;
     let pr = resolvePullNumber({ event, ref: env.GITHUB_REF ?? '' });
     if (!pr) {
       const subjectPr = pullNumberFromSubject(gitQuiet(root, ['log', '-1', '--format=%s', 'HEAD']));
@@ -525,22 +796,45 @@ async function main() {
     }
     if (env.GITHUB_ACTIONS === 'true' && !ctx.token) {
       throw new Error(
-        'GITHUB_TOKEN is not set, so the review list cannot be fetched. Wire\n' +
+        'GITHUB_TOKEN is not set, so the review list and auto-merge state cannot be fetched. Wire\n' +
           '    `GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}` into the workflow step env.',
       );
     }
+    resolvedPr = pr;
+    return pr;
+  };
+
+  const getReviews = async () => {
+    const pr = await resolvePrOnce();
     console.log(`    docs/adr/** touched -- consulting reviews of PR #${pr.number} (resolved via ${pr.how}).`);
     return fetchReviews(ctx, pr.number);
   };
 
+  // Clause (2) is judged on pull-request-shaped builds only. On a merge_group
+  // build the PR already passed this gate at the PR level -- where auto-merge
+  // waits -- so a red here would add no safety and could deadlock the queue
+  // (see the header's merge_group note). Declared with the sentinel so the
+  // verdict and the output both say the question was not asked.
+  const onMergeGroup = env.GITHUB_EVENT_NAME === 'merge_group';
+  const armingNote = onMergeGroup
+    ? 'merge_group build -- arming is judged at the pull-request level, see the script header'
+    : null;
+  const getArming = onMergeGroup
+    ? ARMING_NOT_JUDGED
+    : async () => {
+        const pr = await resolvePrOnce();
+        console.log(`    docs/adr/** touched -- reading the auto-merge state of PR #${pr.number}.`);
+        return armingFrom(await fetchPull(ctx, pr.number));
+      };
+
   let verdict;
   try {
-    verdict = await decide({ changedPaths, getReviews });
+    verdict = await decide({ changedPaths, getReviews, getArming });
   } catch (error) {
     console.error(`❌  ${error.message}\n\n    Missing input fails loud, never exit 0 (#4690, #4928).`);
     return 1;
   }
-  return reportVerdict(verdict, { source: `git diff against ${base.how}` });
+  return reportVerdict(verdict, { source: `git diff against ${base.how}`, armingNote });
 }
 
 if (invokedDirectly && !process.argv.includes('--self-test')) {
@@ -597,6 +891,37 @@ async function selfTest() {
   const forbiddenLookup = async () => {
     throw new Error('getReviews was invoked on a diff that does not touch docs/adr/**');
   };
+  /** The same, for clause (2): the clean path must not read arming either. */
+  const forbiddenArming = async () => {
+    throw new Error('the auto-merge state was read on a diff that does not touch docs/adr/**');
+  };
+
+  // Arming postures, spelled at every call site rather than defaulted — the
+  // whole point of `getArming` being mandatory is that a fixture cannot forget
+  // to say which state it is describing.
+  const DISARMED = async () => ({ armed: false, by: null, method: null });
+  const ARMED_BY = (by, method = 'merge') => async () => ({ armed: true, by, method });
+
+  /**
+   * A REAL capture: `GET /repos/objectstack-ai/objectstack/pulls/6208` on
+   * 2026-08-13, an open PR armed by an AI seat. `enabled_by` is trimmed to the
+   * two fields anything here reads; every other value is verbatim, including
+   * `commit_title: null` and the empty `commit_message`. Kept as a captured
+   * payload rather than a hand-written literal so the parser is proven against
+   * the shape GitHub actually sends, the same way HISTORICAL_VIOLATIONS pins
+   * the review lists.
+   */
+  const CAPTURED_ARMED_PULL = {
+    number: 6208,
+    auto_merge: {
+      enabled_by: { login: 'os-zhuang', id: 277994282 },
+      merge_method: 'merge',
+      commit_title: null,
+      commit_message: '',
+    },
+  };
+  /** The same endpoint's disarmed shape: the key is present, the value null. */
+  const CAPTURED_DISARMED_PULL = { number: 7960, auto_merge: null };
 
   try {
     // ── the guarded surface ──────────────────────────────────────────────────
@@ -612,13 +937,14 @@ async function selfTest() {
       const v = await decide({
         changedPaths: ['.github/workflows/adr-merge-approval.yml', 'scripts/check-adr-merge-approval.mjs', '.github/CODEOWNERS', 'package.json'],
         getReviews: forbiddenLookup,
+        getArming: forbiddenArming,
       });
       assert('non-adr-diff-is-green-without-lookups', v.ok && v.kind === 'no-adr-diff', JSON.stringify(v));
     }
 
     // ── ADR diff, no reviews at all → RED (predicted: RED) ──────────────────
     {
-      const v = await decide({ changedPaths: ['docs/adr/0001-x.md'], getReviews: async () => [] });
+      const v = await decide({ changedPaths: ['docs/adr/0001-x.md'], getReviews: async () => [], getArming: DISARMED });
       assert('adr-diff-without-reviews-is-red', !v.ok && v.kind === 'missing-approval', JSON.stringify(v));
       assert('no-reviews-leaves-the-standing-null', v.state === null, `expected a null standing, got ${JSON.stringify(v.state)}`);
     }
@@ -628,6 +954,7 @@ async function selfTest() {
       const v = await decide({
         changedPaths: ['docs/adr/0001-x.md'],
         getReviews: async () => [review(HOTLONG, 'APPROVED', '2026-08-08T15:00:00Z')],
+        getArming: DISARMED,
       });
       assert('maintainer-approval-is-green', v.ok && v.kind === 'approved', JSON.stringify(v));
     }
@@ -642,6 +969,7 @@ async function selfTest() {
         const v = await decide({
           changedPaths: ['docs/adr/0001-x.md'],
           getReviews: async () => [review(seat, 'APPROVED', '2026-08-08T15:00:00Z')],
+          getArming: DISARMED,
         });
         assert(`approval-from-${seat.login}-is-green`, v.ok && v.kind === 'approved', JSON.stringify(v));
       }
@@ -650,6 +978,7 @@ async function selfTest() {
       const v = await decide({
         changedPaths: ['docs/adr/0001-x.md'],
         getReviews: async () => [review({ login: 'nobody-has-ever-heard-of-this-one', id: 1 }, 'APPROVED', '2026-08-08T15:00:00Z')],
+        getArming: DISARMED,
       });
       assert('approval-from-an-unknown-account-is-green', v.ok, JSON.stringify(v));
       assert('the-verdict-names-who-approved', (v.approvals ?? []).includes('nobody-has-ever-heard-of-this-one'), JSON.stringify(v.approvals));
@@ -667,6 +996,7 @@ async function selfTest() {
           review(OS_ZHUANG, 'APPROVED', '2026-08-08T15:00:00Z'),
           review(OS_ZHUANG, 'CHANGES_REQUESTED', '2026-08-08T15:05:00Z'),
         ],
+        getArming: DISARMED,
       });
       assert('approval-then-changes-requested-is-red', !v.ok && v.state === 'CHANGES_REQUESTED', JSON.stringify(v));
       assert('a-superseded-approval-is-still-named', (v.approvals ?? []).includes('os-zhuang'), JSON.stringify(v.approvals));
@@ -677,6 +1007,7 @@ async function selfTest() {
       const v = await decide({
         changedPaths: ['docs/adr/0001-x.md'],
         getReviews: async () => [review(HOTLONG, 'COMMENTED', '2026-08-08T15:00:00Z')],
+        getArming: DISARMED,
       });
       assert('commented-alone-is-red', !v.ok && v.state === null, JSON.stringify(v));
     }
@@ -714,6 +1045,177 @@ async function selfTest() {
       );
     }
 
+    // ── clause (2): the arming parser ────────────────────────────────────────
+    // Directions predicted before running: the two REAL captures must read as
+    // armed / disarmed respectively, and every shape the parser cannot read
+    // must THROW rather than resolve to "not armed".
+    {
+      const armed = armingFrom(CAPTURED_ARMED_PULL);
+      assert('captured-armed-pull-reads-as-armed', armed.armed === true, JSON.stringify(armed));
+      assert('captured-armed-pull-names-who-armed-it', armed.by === 'os-zhuang', JSON.stringify(armed));
+      assert('captured-armed-pull-names-the-merge-method', armed.method === 'merge', JSON.stringify(armed));
+      assert('captured-disarmed-pull-reads-as-disarmed', armingFrom(CAPTURED_DISARMED_PULL).armed === false, 'auto_merge: null is the disarmed shape');
+
+      const throws = (label, fn, wanted) => {
+        let message = null;
+        try {
+          fn();
+        } catch (error) {
+          message = String(error?.message ?? error);
+        }
+        assert(label, message !== null && (!wanted || message.includes(wanted)), message === null ? 'did not throw' : `threw, but without ${JSON.stringify(wanted)}: ${message}`);
+      };
+      // THE projection trap, and the reason this parser exists at all: a PR
+      // payload that simply LACKS `auto_merge` (the `pull_request_read` MCP
+      // projection is one) must not read as disarmed. Absent != null.
+      throws('a-payload-without-an-auto_merge-key-is-refused-not-read-as-disarmed', () => armingFrom({ number: 1, title: 'x' }), 'auto_merge');
+      throws('a-non-object-pull-payload-is-refused', () => armingFrom('nope'));
+      throws('a-null-pull-payload-is-refused', () => armingFrom(null));
+      throws('an-array-pull-payload-is-refused', () => armingFrom([]));
+      throws('a-scalar-auto_merge-is-refused', () => armingFrom({ auto_merge: true }));
+      throws('an-undefined-auto_merge-value-is-refused', () => armingFrom({ auto_merge: undefined }));
+    }
+
+    // ── clause (2): the verdict ──────────────────────────────────────────────
+    // The whole point of #8012. Predicted directions stated per assertion; the
+    // load-bearing one is `armed-and-approved-is-red`, which was GREEN under
+    // the review-only rule and is the exact state PR #7960 was one review away
+    // from at 11:15Z on 2026-08-12.
+    {
+      const approved = [review(HOTLONG, 'APPROVED', '2026-08-08T15:00:00Z')];
+      const adr = ['docs/adr/0001-x.md'];
+
+      // armed + APPROVED → RED (predicted: RED; this is the new behaviour)
+      const armedApproved = await decide({ changedPaths: adr, getReviews: async () => approved, getArming: ARMED_BY('os-zhuang') });
+      assert('armed-and-approved-is-red', !armedApproved.ok, JSON.stringify(armedApproved));
+      assert(
+        'armed-and-approved-is-red-FOR-THE-ARMING-not-the-approval',
+        armedApproved.reasons.includes('auto-merge-armed') && !armedApproved.reasons.includes('missing-approval'),
+        JSON.stringify(armedApproved.reasons),
+      );
+      assert('the-verdict-names-who-armed-it', armedApproved.arming?.by === 'os-zhuang', JSON.stringify(armedApproved.arming));
+
+      // disarmed + APPROVED → GREEN (predicted: GREEN — the legitimate path)
+      const disarmedApproved = await decide({ changedPaths: adr, getReviews: async () => approved, getArming: DISARMED });
+      assert('disarmed-and-approved-is-green', disarmedApproved.ok, JSON.stringify(disarmedApproved));
+
+      // ⚠️ THE EMPTINESS PROOF. Identical reviews, identical files; the ONLY
+      // difference is the arming bit, and the two verdicts must be opposite.
+      // Delete clause (2) — or narrow it to the literal "armed AND not
+      // approved" wording, which cannot fire on an approved PR — and this
+      // assertion fails. It is what makes the rest of this block an
+      // instrument rather than decoration.
+      assert(
+        'armed-clause-changes-a-verdict-that-would-otherwise-be-green',
+        armedApproved.ok === false && disarmedApproved.ok === true,
+        `armed=${armedApproved.ok}, disarmed=${disarmedApproved.ok} over identical reviews — clause (2) changed nothing`,
+      );
+
+      // armed + NOT approved → RED naming BOTH reasons (predicted: RED, 2
+      // reasons). One verdict, both fixes, so a reader is not sent round twice.
+      const armedUnapproved = await decide({ changedPaths: adr, getReviews: async () => [], getArming: ARMED_BY('os-project-manager') });
+      assert(
+        'armed-and-unapproved-is-red-for-both-reasons',
+        !armedUnapproved.ok && armedUnapproved.reasons.includes('auto-merge-armed') && armedUnapproved.reasons.includes('missing-approval'),
+        JSON.stringify(armedUnapproved.reasons),
+      );
+
+      // disarmed + NOT approved → RED for the approval only (predicted: RED,
+      // 1 reason). Pins that clause (2) does not bleed into the old verdict.
+      const disarmedUnapproved = await decide({ changedPaths: adr, getReviews: async () => [], getArming: DISARMED });
+      assert(
+        'disarmed-and-unapproved-is-red-for-the-approval-only',
+        !disarmedUnapproved.ok && disarmedUnapproved.reasons.join() === 'missing-approval',
+        JSON.stringify(disarmedUnapproved.reasons),
+      );
+
+      // The disarm/re-arm wrinkle the card asked to be measured rather than
+      // assumed. `decide()` holds no state between runs, so the sequence
+      // green → rearm → red → disarm → green is judged fresh each time: there
+      // is no earlier green for a re-arm to inherit (predicted: alternating).
+      const rearmed = await decide({ changedPaths: adr, getReviews: async () => approved, getArming: ARMED_BY('os-zhuang') });
+      const disarmedAgain = await decide({ changedPaths: adr, getReviews: async () => approved, getArming: DISARMED });
+      assert(
+        'arming-is-read-fresh-so-rearming-is-red-again',
+        disarmedApproved.ok === true && rearmed.ok === false && disarmedAgain.ok === true,
+        `green→rearm→disarm gave ${disarmedApproved.ok}, ${rearmed.ok}, ${disarmedAgain.ok}`,
+      );
+
+      // The parser and the verdict, wired end to end on the real capture
+      // (predicted: RED) — proves clause (2) fires on the shape GitHub sends,
+      // not merely on the hand-built {armed:true} the other fixtures use.
+      const fromCapture = await decide({
+        changedPaths: adr,
+        getReviews: async () => approved,
+        getArming: async () => armingFrom(CAPTURED_ARMED_PULL),
+      });
+      assert('a-real-captured-armed-payload-is-red-end-to-end', !fromCapture.ok && fromCapture.arming?.by === 'os-zhuang', JSON.stringify(fromCapture));
+
+      // #8012's incident, replayed: ADR tombstone diff, an AI seat's approval,
+      // and that same seat's armed auto-merge — the 11:15Z state on PR #7960.
+      // Under the review-only rule this was GREEN and would have merged
+      // unattended. Predicted, and pinned: RED (see HISTORICAL_VIOLATIONS for
+      // the same idiom applied to the 2026-08-08 merges).
+      const incident = await decide({
+        changedPaths: ['docs/adr/0001-withdrawn-metadata-service-architecture.md'],
+        getReviews: async () => [review(OS_ZHUANG, 'APPROVED', '2026-08-12T11:14:00Z')],
+        getArming: async () => armingFrom(CAPTURED_ARMED_PULL),
+      });
+      assert('the-7960-incident-state-replays-red', !incident.ok && incident.reasons.includes('auto-merge-armed'), JSON.stringify(incident));
+    }
+
+    // ── clause (2): not judged is not "judged and off" ───────────────────────
+    // merge_group builds pass the sentinel. The verdict must record that the
+    // question was NOT ASKED, so nothing downstream can read the green as
+    // "arming was checked" (predicted: GREEN on an approved PR, judged=false,
+    // armed=null rather than false).
+    {
+      const v = await decide({
+        changedPaths: ['docs/adr/0001-x.md'],
+        getReviews: async () => [review(HOTLONG, 'APPROVED', '2026-08-08T15:00:00Z')],
+        getArming: ARMING_NOT_JUDGED,
+      });
+      assert('not-judged-arming-still-decides-on-the-approval', v.ok, JSON.stringify(v));
+      assert('not-judged-arming-is-recorded-as-not-judged', v.arming?.judged === false, JSON.stringify(v.arming));
+      assert(
+        'not-judged-arming-is-null-never-false',
+        v.arming?.armed === null,
+        `armed must be null when unasked, so it cannot be misread as "checked and off", got ${JSON.stringify(v.arming?.armed)}`,
+      );
+    }
+
+    // ── clause (2): a caller that forgets `getArming` FAILS ──────────────────
+    // The mutation guard for the whole design: were the argument optional, any
+    // future call site could silently reintroduce #8012 by omission. Predicted:
+    // throws, on the ADR path AND on the clean path (it is a programming
+    // error, not an input, so it is caught before the diff is even consulted).
+    {
+      const rejects = async (label, input, wanted) => {
+        let message = null;
+        try {
+          await decide(input);
+        } catch (error) {
+          message = String(error?.message ?? error);
+        }
+        assert(label, message !== null && (!wanted || message.includes(wanted)), message === null ? 'did not throw' : `threw without ${JSON.stringify(wanted)}: ${message}`);
+      };
+      await rejects('omitting-getArming-throws', { changedPaths: ['docs/adr/0001-x.md'], getReviews: async () => [] }, 'getArming');
+      await rejects('omitting-getArming-throws-on-a-clean-diff-too', { changedPaths: ['README.md'], getReviews: forbiddenLookup }, 'getArming');
+      await rejects('a-non-thunk-getArming-throws', { changedPaths: ['docs/adr/0001-x.md'], getReviews: async () => [], getArming: true }, 'getArming');
+      // A thunk that answers something other than {armed: boolean} is a broken
+      // input, and a broken input fails loud rather than reading as disarmed.
+      await rejects(
+        'an-arming-read-that-answers-the-wrong-shape-throws',
+        { changedPaths: ['docs/adr/0001-x.md'], getReviews: async () => [], getArming: async () => ({ enabled: true }) },
+        'not {armed: boolean}',
+      );
+      await rejects(
+        'an-arming-read-that-answers-null-throws',
+        { changedPaths: ['docs/adr/0001-x.md'], getReviews: async () => [], getArming: async () => null },
+        'not {armed: boolean}',
+      );
+    }
+
     // ── PR resolution ────────────────────────────────────────────────────────
     {
       const cases = [
@@ -748,7 +1250,7 @@ async function selfTest() {
 
     // ── historical replay: the two measured violations (predicted: RED) ─────
     for (const { pr, files, reviews } of HISTORICAL_VIOLATIONS) {
-      const v = await decide({ changedPaths: files, getReviews: async () => reviews });
+      const v = await decide({ changedPaths: files, getReviews: async () => reviews, getArming: DISARMED });
       assert(`historical-pr-${pr}-is-red-under-this-gate`, !v.ok, `PR #${pr} merged with no maintainer approval must replay RED, got ${JSON.stringify(v)}`);
     }
     // The same two, had ANY account approved → GREEN (predicted: GREEN): pins
@@ -760,6 +1262,7 @@ async function selfTest() {
       const v = await decide({
         changedPaths: files,
         getReviews: async () => [review(OS_ZHUANG, 'APPROVED', '2026-08-08T15:00:00Z')],
+        getArming: DISARMED,
       });
       assert(`historical-pr-${pr}-with-any-approval-is-green`, v.ok, JSON.stringify(v));
     }
