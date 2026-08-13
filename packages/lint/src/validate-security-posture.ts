@@ -13,7 +13,7 @@
  * | security-external-wider       (error)   | ADR-0090 D11 external ≤ internal|
  * | security-wildcard-vama        (error)   | ADR-0066 superuser wildcard     |
  * | security-anchor-high-privilege(error)   | ADR-0090 D5/D9 anchors          |
- * | security-role-word            (error)   | ADR-0090 D3 vocabulary freeze   |
+ * | security-role-word            (error)   | ADR-0090 D3 vocabulary freeze — own function/registry entry since #8310 |
  * | security-book-audience-unknown-set(warn)| ADR-0046 §6.7 { permissionSet } |
  * | security-private-no-readscope (info)    | admin-intent mismatch class     |
  * | security-master-detail-ungranted(warn)  | framework#2700 os-tianshun-mtc#43|
@@ -430,65 +430,17 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
     }
   }
 
-  // ── D3: the word "role" is reserved-forbidden ────────────────────────
-  // Scope: security-relevant identifiers/labels (objects, fields, actions,
-  // permission sets, positions, apps). Pages/views/components are NOT
-  // scanned — `role` there is HTML/ARIA semantics, not permission vocabulary.
-  // The sole platform exception (better-auth `sys_member.role`) is a system
-  // object, which app stacks never author.
-  const flagRole = (kind: string, name: unknown, label: unknown, where: string, path: string) => {
-    if (identifierHasRoleToken(name)) {
-      findings.push({
-        severity: 'error',
-        rule: SECURITY_ROLE_WORD,
-        where,
-        path,
-        message:
-          `${kind} name "${String(name)}" uses the reserved word "role" — the platform vocabulary ` +
-          `is permission_set (capability), position (distribution), business_unit (hierarchy) (ADR-0090 D3).`,
-        hint: `Rename using 'position' for distribution groups or a domain word (e.g. 'function', 'duty').`,
-      });
-    } else if (labelHasRoleWord(label)) {
-      findings.push({
-        severity: 'error',
-        rule: SECURITY_ROLE_WORD,
-        where,
-        path: `${path.replace(/\.name$/, '')}.label`,
-        message: `${kind} label "${String(label)}" uses the reserved word "role" (ADR-0090 D3).`,
-        hint: `Relabel with 'Position' (distribution) or a domain word — admins must meet ONE vocabulary.`,
-      });
-    }
-  };
-
-  for (let i = 0; i < objects.length; i++) {
-    const obj = objects[i];
-    if (!obj || typeof obj !== 'object' || isSystemObject(obj)) continue;
-    const objName = typeof obj.name === 'string' ? obj.name : `(object ${i})`;
-    flagRole('object', obj.name, obj.label, `object "${objName}"`, `objects[${i}].name`);
-    for (const f of asArray(obj.fields)) {
-      flagRole('field', f.name, f.label, `field "${objName}.${String(f.name ?? '?')}"`, `objects[${i}].fields.${String(f.name ?? '?')}.name`);
-    }
-    for (const [ai, action] of asArray(obj.actions).entries()) {
-      flagRole('action', action.name, action.label, `action "${objName}.${String(action.name ?? '?')}"`, `objects[${i}].actions[${ai}].name`);
-    }
-  }
-  for (let i = 0; i < permissionSets.length; i++) {
-    const ps = permissionSets[i];
-    if (!ps || typeof ps !== 'object') continue;
-    flagRole('permission set', ps.name, ps.label, `permission set "${String(ps.name ?? i)}"`, `permissions[${i}].name`);
-  }
-  for (const [i, pos] of asArray(stack.positions).entries()) {
-    flagRole('position', pos.name, pos.label, `position "${String(pos.name ?? i)}"`, `positions[${i}].name`);
-  }
-  for (const [i, app] of asArray(stack.apps).entries()) {
-    flagRole('app', app.name, app.label, `app "${String(app.name ?? i)}"`, `apps[${i}].name`);
-  }
-  for (const [i, book] of asArray(stack.books).entries()) {
-    // Books entered the security-relevant set when `book.audience` became a
-    // permission-model reference (ADR-0046 §6.7 / ADR-0090): their names and
-    // labels are access-adjacent UI copy.
-    flagRole('book', book.name, book.label, `book "${String(book.name ?? i)}"`, `books[${i}].name`);
-  }
+  // ── D3 (`security-role-word`) lives in `validateSecurityRoleWord` below ──
+  // [#8310] Extracted into its own registry entry when the rest of this block
+  // crossed onto the runtime publish surface. The rule judges six collections
+  // (objects — names, fields, actions —, permission sets, positions, apps,
+  // books), and the per-write snapshot neither carries nor maps `positions` /
+  // `apps` — so it crosses that wall WHOLE or stays behind (#7220), and it
+  // stays behind. Keeping it inside this function would have wired it for a
+  // strict subset of its collections the moment this block's `runtimeTypes`
+  // widened: a door that refuses a permission set named `role_manager` while
+  // a position named `sales_role` walks through — the exact split the
+  // registry's #7220 pin refuses to build.
 
   // ── Book audience → permission-set reference must resolve ────────────
   // A `{ permissionSet }` book audience names a set the reader must hold
@@ -691,6 +643,95 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
         }
       }
     }
+  }
+
+  return findings;
+}
+
+/**
+ * [ADR-0090 D3] The `security-role-word` vocabulary freeze, as its own rule.
+ *
+ * Scope: security-relevant identifiers/labels across SIX collections — objects
+ * (names, field names, action names), permission sets, positions, apps, books.
+ * Pages/views/components are NOT scanned — `role` there is HTML/ARIA
+ * semantics, not permission vocabulary. The sole platform exception
+ * (better-auth `sys_member.role`) is a system object, which app stacks never
+ * author. Books entered the security-relevant set when `book.audience` became
+ * a permission-model reference (ADR-0046 §6.7 / ADR-0090).
+ *
+ * ## Why this is a separate function from {@link validateSecurityPosture}
+ *
+ * [#8310] Not taste — a surface boundary. When the rest of the D7 block
+ * crossed onto the runtime publish surface (`runtimeTypes: ['seed',
+ * 'permission', 'book']` — `object` measured dirty and is escalated, see the
+ * registry comment), this rule could not go with it: the per-write snapshot
+ * (`runtime-gate.ts`) neither carries nor maps `positions` / `apps`, both of
+ * which are `allowRuntimeCreate: true` — so wiring it through the shared
+ * entry would have enforced ONE rule id for a strict subset of its six
+ * collections. That is the #7220 failure shape (a door that refuses a
+ * permission set named `role_manager` while a position named `sales_role`
+ * walks through), and
+ * the registry refuses to build it in either direction. The rule therefore
+ * stays behind WHOLE, on its own CLI-only registry entry, until the snapshot
+ * carries `positions`/`apps` and both types are gated — at which point it
+ * crosses whole, in one edit, as its own entry.
+ */
+export function validateSecurityRoleWord(stack: AnyRec): SecurityFinding[] {
+  const findings: SecurityFinding[] = [];
+  if (!stack || typeof stack !== 'object') return findings;
+
+  const objects = asArray(stack.objects);
+  const permissionSets = asArray(stack.permissions);
+
+  const flagRole = (kind: string, name: unknown, label: unknown, where: string, path: string) => {
+    if (identifierHasRoleToken(name)) {
+      findings.push({
+        severity: 'error',
+        rule: SECURITY_ROLE_WORD,
+        where,
+        path,
+        message:
+          `${kind} name "${String(name)}" uses the reserved word "role" — the platform vocabulary ` +
+          `is permission_set (capability), position (distribution), business_unit (hierarchy) (ADR-0090 D3).`,
+        hint: `Rename using 'position' for distribution groups or a domain word (e.g. 'function', 'duty').`,
+      });
+    } else if (labelHasRoleWord(label)) {
+      findings.push({
+        severity: 'error',
+        rule: SECURITY_ROLE_WORD,
+        where,
+        path: `${path.replace(/\.name$/, '')}.label`,
+        message: `${kind} label "${String(label)}" uses the reserved word "role" (ADR-0090 D3).`,
+        hint: `Relabel with 'Position' (distribution) or a domain word — admins must meet ONE vocabulary.`,
+      });
+    }
+  };
+
+  for (let i = 0; i < objects.length; i++) {
+    const obj = objects[i];
+    if (!obj || typeof obj !== 'object' || isSystemObject(obj)) continue;
+    const objName = typeof obj.name === 'string' ? obj.name : `(object ${i})`;
+    flagRole('object', obj.name, obj.label, `object "${objName}"`, `objects[${i}].name`);
+    for (const f of asArray(obj.fields)) {
+      flagRole('field', f.name, f.label, `field "${objName}.${String(f.name ?? '?')}"`, `objects[${i}].fields.${String(f.name ?? '?')}.name`);
+    }
+    for (const [ai, action] of asArray(obj.actions).entries()) {
+      flagRole('action', action.name, action.label, `action "${objName}.${String(action.name ?? '?')}"`, `objects[${i}].actions[${ai}].name`);
+    }
+  }
+  for (let i = 0; i < permissionSets.length; i++) {
+    const ps = permissionSets[i];
+    if (!ps || typeof ps !== 'object') continue;
+    flagRole('permission set', ps.name, ps.label, `permission set "${String(ps.name ?? i)}"`, `permissions[${i}].name`);
+  }
+  for (const [i, pos] of asArray(stack.positions).entries()) {
+    flagRole('position', pos.name, pos.label, `position "${String(pos.name ?? i)}"`, `positions[${i}].name`);
+  }
+  for (const [i, app] of asArray(stack.apps).entries()) {
+    flagRole('app', app.name, app.label, `app "${String(app.name ?? i)}"`, `apps[${i}].name`);
+  }
+  for (const [i, book] of asArray(stack.books).entries()) {
+    flagRole('book', book.name, book.label, `book "${String(book.name ?? i)}"`, `books[${i}].name`);
   }
 
   return findings;

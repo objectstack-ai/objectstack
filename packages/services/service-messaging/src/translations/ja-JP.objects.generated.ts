@@ -371,7 +371,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "Response Body (capped)"
       },
       error: {
-        label: "Error"
+        label: "Error",
+        help: "Why this row is not a delivered callout: the last transport error, or — on a row with 0 attempts — why the delivery could never be prepared (#8069)."
       },
       created_at: {
         label: "Created At"

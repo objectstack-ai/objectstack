@@ -54,8 +54,18 @@ describe('metadata create seeds validate against their spec schemas', () => {
     // identity types legitimately have no static minimal create literal.
     const KNOWN_UNSEEDED = new Set([
       'report',        // canvas-create: dataset/measures picked interactively
-      'app', 'field', 'seed', 'job', 'datasource', 'doc', 'book',
+      'app', 'seed', 'job', 'datasource', 'doc', 'book',
       'permission', 'position', 'agent', 'tool', 'skill', 'email_template',
+      // [#7893] `field` is code-only by declaration as of 2026-08-12
+      // (`allowRuntimeCreate: false` + `allowOrgOverride: false`, ADR-0049
+      // remove side): a standalone `field` write minted a row no read path
+      // ever composed into its parent object, so there is no runtime create
+      // surface for a create seed to seed. A pre-filled "New Field" form whose
+      // save can only 403 is the UI half of the same false compliance. Fields
+      // are authored inside their object — `object` has the create seed, and
+      // its `fields: {}` is where a new field goes. Same category as
+      // `capability` / `api`, not deferred work.
+      'field',
       // [#5961] `capability` is code-only by declaration
       // (`allowRuntimeCreate: false` + `allowOrgOverride: false`, ADR-0066 D1):
       // there is no runtime create surface for a create seed to seed. It is on

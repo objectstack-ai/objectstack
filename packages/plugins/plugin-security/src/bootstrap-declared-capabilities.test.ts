@@ -11,15 +11,27 @@ function makeQl(declared: any[] = []) {
     rows,
     // readDeclared() reads engine.registry.listItems(type); stub it so
     // capabilities are surfaced without a metadata service.
+    //
+    // [#8378] Items are surfaced as the real engine surfaces them — the
+    // document itself, not a `{ content: <item> }` box that nothing produces.
     registry: {
       listItems(type: string) {
-        return type === 'capability' ? declared.map((c) => ({ content: c })) : [];
+        return type === 'capability' ? [...declared] : [];
       },
     },
     async find(object: string, q: any) {
       if (object !== 'sys_capability') return [];
       const where = q?.where ?? {};
-      return rows.filter((r) => Object.entries(where).every(([k, v]) => r[k] === v));
+      // [#8470] A `null` comparand is IS NULL, not `=== null`: `driver-sql`
+      // compiles `{ field: null }` to `IS NULL`, `driver-memory`'s matcher uses
+      // `value == condition`, and MongoDB matches null-or-missing — none of them
+      // is strict equality against an ABSENT key. `bootstrapSystemCapabilities`
+      // (called by several cases below) scopes its curated lookup with
+      // `organization_id: null`, which strict `===` would make unsatisfiable
+      // here while it works in production.
+      return rows.filter((r) =>
+        Object.entries(where).every(([k, v]) => (v === null ? r[k] == null : r[k] === v)),
+      );
     },
     async insert(object: string, data: any) {
       if (object !== 'sys_capability') return null;
@@ -59,7 +71,7 @@ describe('bootstrapDeclaredCapabilities (ADR-0066 D1 package declaration)', () =
     await bootstrapDeclaredCapabilities(ql, null);
     // Ship a new label on the next boot.
     (ql as any).registry.listItems = (t: string) =>
-      t === 'capability' ? [{ content: { name: 'billing.refund', label: 'Issue Refund', _packageId: 'com.acme.billing' } }] : [];
+      t === 'capability' ? [{ name: 'billing.refund', label: 'Issue Refund', _packageId: 'com.acme.billing' }] : [];
     const out2 = await bootstrapDeclaredCapabilities(ql, null);
     expect(out2.seeded).toBe(0);
     expect(out2.updated).toBe(1);

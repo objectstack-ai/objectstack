@@ -136,6 +136,14 @@ export const CrmTranslationBundle = defineTranslationBundle({
           all: { label: '全部商机' },
           pipeline: { label: '商机看板' },
         },
+        // Form section heading of `ui/views/opportunity.view.ts` `default`.
+        // Declares a stable `name`, which is the only thing that makes the
+        // heading translatable — otherwise it renders the English `label` in
+        // every locale (#8231). Bare object word, matching this bundle's own
+        // `label` above.
+        _sections: {
+          opportunity: { label: '商机' },
+        },
       },
       crm_lead: {
         label: '线索',
@@ -153,6 +161,18 @@ export const CrmTranslationBundle = defineTranslationBundle({
           all: { label: '全部线索' },
           pipeline: { label: '线索看板' },
         },
+        // Form section headings of `ui/views/lead.view.ts` (public web-to-lead
+        // `contact_us`, plus the four `default` groups). Each section declares
+        // a stable `name`, the only thing that makes the heading translatable
+        // (#8231). `conversion` reuses this bundle's own `messages` vocabulary
+        // for "convert" (`crm.lead.convert.success` already reads 转化).
+        _sections: {
+          contact_us: { label: '联系我们' },
+          lead_information: { label: '线索信息' },
+          qualification: { label: '资格审查' },
+          conversion: { label: '转化' },
+          notes: { label: '备注' },
+        },
       },
       crm_activity: {
         label: '活动',
@@ -169,6 +189,14 @@ export const CrmTranslationBundle = defineTranslationBundle({
         _views: {
           all: { label: '全部活动' },
           calendar: { label: '活动日历' },
+        },
+        // Form section headings of `ui/views/activity.view.ts` `default`. Each
+        // declares a stable `name`, the only thing that makes the heading
+        // translatable (#8231).
+        _sections: {
+          activity_details: { label: '活动详情' },
+          related_records: { label: '相关记录' },
+          notes: { label: '备注' },
         },
       },
     },

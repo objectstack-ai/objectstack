@@ -416,7 +416,11 @@ describe('validateComponentProps — value verdicts', () => {
  * leniency (the maintainer's ruling on #5068).
  */
 describe('validateComponentProps — unregistered types are skipped', () => {
-  it.each(['record:line_items', 'flex', 'object-metric', 'record:quick_actions'])(
+  // `object-metric` left this list at #7751 — the `object-*` family is
+  // registered now. `object-chart` replaces it: deliberately still absent from
+  // the map (two-vocabulary problem — see component.zod.ts's object-block
+  // section header), so it is the family's own living proof the skip survives.
+  it.each(['record:line_items', 'flex', 'object-chart', 'record:quick_actions'])(
     'says nothing about `%s`, whatever its props carry',
     (type) => {
       const findings = validateComponentProps(
@@ -425,6 +429,100 @@ describe('validateComponentProps — unregistered types are skipped', () => {
       expect(findings).toEqual([]);
     },
   );
+});
+
+/**
+ * ── #7751: the gate's dispatch now FINDS the `object-*` family ──────────────
+ *
+ * No semantic change to this rule — `PROPS_SCHEMAS` is `ComponentPropsMap`, so
+ * the new entries are reachable by construction. What must be pinned from THIS
+ * side is behaviour through the real door:
+ *
+ *  1. anti-vacuity — the warning FIRES on the #7750 specimen shape (an
+ *     `object-grid` authored with plural `filters`), with the rename named;
+ *  2. the clean-corpus control — the showcase pages' actual authored nodes
+ *     (copied, not imported) stay finding-free, so registering the family did
+ *     not turn working pages red.
+ */
+describe('validateComponentProps — object-* blocks are dispatched (#7751)', () => {
+  it('FIRES on the #7750 specimen: object-grid authored with plural `filters`', () => {
+    const findings = validateComponentProps(
+      stackWith([{
+        type: 'object-grid',
+        properties: {
+          objectName: 'showcase_task',
+          columns: ['title', 'project', 'status', 'priority', 'due_date'],
+          filters: [['owner_id', '=', '{current_user_id}']],
+        },
+      }]),
+    );
+    expect(unknownKeys(findings)).toHaveLength(1);
+    const [f] = unknownKeys(findings);
+    expect(f.severity).toBe('warning');
+    expect(f.path).toBe('pages[0].regions[0].components[0].properties.filters');
+    expect(f.where).toBe('page "probe_page" · object-grid');
+    expect(f.message).toContain('`filters`');
+    expect(f.message).toContain('Did you mean `filters` → `filter`?');
+    // Warning tier only — the error upgrade stays gated on the #5068
+    // inventory; this card did not move that gate (ruling 2026-08-12).
+    expect(invalid(findings)).toEqual([]);
+  });
+
+  it('stays SILENT on the corrected #7750 node and the corpus metric shapes (clean-corpus control)', () => {
+    const findings = validateComponentProps(
+      stackWith([
+        {
+          type: 'object-grid',
+          properties: {
+            objectName: 'showcase_task',
+            columns: ['title', 'project', 'status', 'priority', 'due_date'],
+            filter: [['owner_id', '=', '{current_user_id}']],
+          },
+        },
+        {
+          type: 'object-metric',
+          properties: { objectName: 'showcase_task', label: 'Open Tasks', icon: 'list-checks', colorVariant: 'blue', description: 'not done', aggregate: { field: 'id', function: 'count' }, filter: { status: { $ne: 'done' } } },
+        },
+        {
+          type: 'object-metric',
+          properties: { objectName: 'showcase_project', label: 'Projects', colorVariant: 'purple', variant: 'bare', aggregate: { field: 'id', function: 'count' }, format: '0,0' },
+        },
+        {
+          type: 'object-form',
+          properties: {
+            objectName: 'showcase_project',
+            mode: 'create',
+            formType: 'wizard',
+            showStepIndicator: true,
+            title: 'Create a Project',
+            description: 'A three-step wizard.',
+            sections: [{ label: 'Basics', description: 'Name it.', fields: ['name'] }],
+            submitBehavior: { kind: 'thank-you', title: 'Project created', message: 'Ready.' },
+          },
+        },
+        {
+          type: 'object-master-detail-form',
+          properties: {
+            objectName: 'showcase_project',
+            mode: 'create',
+            formType: 'simple',
+            submitText: 'Create Project + Tasks',
+            fields: ['name', 'account'],
+            details: [{ title: 'Tasks', childObject: 'showcase_task', addLabel: 'Add task' }],
+          },
+        },
+      ]),
+    );
+    expect(findings).toEqual([]);
+  });
+
+  it("answers the designer's dead `groupField` with the `groupBy` the board reads", () => {
+    const findings = validateComponentProps(
+      stackWith([{ type: 'object-kanban', properties: { objectName: 'task', groupField: 'status' } }]),
+    );
+    expect(unknownKeys(findings)).toHaveLength(1);
+    expect(unknownKeys(findings)[0].message).toContain('Did you mean `groupField` → `groupBy`?');
+  });
 });
 
 /**

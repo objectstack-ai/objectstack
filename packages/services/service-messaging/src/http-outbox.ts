@@ -23,6 +23,20 @@
  * `secret`→`signingSecret`.
  */
 
+/**
+ * Lifecycle state of a delivery row.
+ *
+ * [#8069] Deliberately UNCHANGED by the drop-record work. A subscription
+ * dropped for an unresolvable signing secret is recorded as `dead` carrying
+ * its cause in {@link HttpDelivery.error}, not as a new never-sendable member
+ * of this union — the maintainer's ruling of 2026-08-12 admits a new lifecycle
+ * state only if the reason column cannot carry the cause, and it can (`error`
+ * is an unbounded textarea already surfaced by `sys_http_delivery`'s
+ * "Failures" list view, which filters `status in (failed, dead)` and shows
+ * `error` as a column). What distinguishes a parked row from a row the
+ * dispatcher killed is {@link HttpDelivery.attempts} — see
+ * {@link assertHttpRedeliverable}.
+ */
 export type HttpDeliveryStatus =
     | 'pending'
     | 'in_flight'
@@ -93,7 +107,19 @@ export interface HttpDelivery {
 
     /** Lifecycle state. */
     status: HttpDeliveryStatus;
-    /** Number of attempts made so far (0 before first attempt). */
+    /**
+     * Number of attempts made so far (0 before first attempt).
+     *
+     * [#8069] **Load-bearing beyond diagnostics.** `ack()` — the only writer of
+     * a terminal status — increments this unconditionally, so a row that is
+     * terminal (`success` / `failed` / `dead`) with `attempts === 0` never came
+     * from the dispatch path: it was **parked** by
+     * {@link IHttpOutbox.recordUndeliverable} and has never existed on the
+     * wire. {@link assertHttpRedeliverable} reads exactly that pair, which is
+     * why this counter is part of the contract and not an implementation
+     * detail. See {@link HttpDeliveryStatus} for why the pair is used instead
+     * of a new lifecycle state.
+     */
     attempts: number;
     /** Node id currently working on this row, when `status = in_flight`. */
     claimedBy?: string;
@@ -132,7 +158,63 @@ export interface EnqueueHttpInput {
     signingSecret?: string;
     timeoutMs?: number;
     payload: unknown;
+    /**
+     * [#8069] Transport-only discriminator for the ONE seam that carries both
+     * kinds of write — `MessagingService.enqueueHttp()`, the single function a
+     * producer plugin is handed. When set, this is **not a delivery**: the
+     * producer could not obtain the credentials this delivery needed, and the
+     * seam routes the input to {@link IHttpOutbox.recordUndeliverable} instead
+     * of {@link IHttpOutbox.enqueue}.
+     *
+     * ⛔ It never reaches `enqueue()`. Both implementations reject it there
+     * (see {@link assertEnqueueDeliverable}) rather than ignoring it, because
+     * an ignored discriminator is exactly how a row that must never be sent
+     * gets minted `pending` — the shape this issue exists to prevent.
+     */
+    undeliverableReason?: string;
 }
+
+/**
+ * [#8069] Input for a PARKED row — a delivery that was never sendable, written
+ * so the drop leaves a durable record instead of only a log line.
+ *
+ * `signingSecret` is structurally absent, not merely unused: a parked row is
+ * parked *because* the secret could not be resolved, so there is nothing to
+ * sign with, and a signature on such a row would be a lie. `undeliverableReason`
+ * is absent too — the cause travels as the required {@link reason} here.
+ */
+export interface UndeliverableHttpInput
+    extends Omit<EnqueueHttpInput, 'signingSecret' | 'undeliverableReason'> {
+    /**
+     * Why this delivery can never be sent. Lands verbatim in
+     * {@link HttpDelivery.error} — the existing reason column, which the
+     * `sys_http_delivery` "Failures" list view already renders.
+     *
+     * Owes what an AGENTS.md `error` owes: the consequence, concretely, and the
+     * fix. An operator reading this row is the person who has to repair the
+     * misconfiguration.
+     */
+    reason: string;
+}
+
+/**
+ * Verdict function consulted by {@link IHttpOutbox.redeliver} BEFORE it resets
+ * a row — the seam through which a producer that owns configuration the outbox
+ * cannot see (a webhook's `sys_webhook` row and its encrypted signing secret)
+ * gets to refuse a replay.
+ *
+ * Returns a human-readable refusal reason, or `undefined` to allow.
+ *
+ * [#8069] It exists because "is the signing configuration still available?" is
+ * not answerable from the delivery row: `service-messaging` deliberately knows
+ * nothing about `sys_webhook`. Putting the question here — rather than in the
+ * `POST /api/v1/webhooks/redeliver` route — means every caller of
+ * `redeliver()` is covered, not just the audited HTTP door. A guard that throws
+ * refuses the redelivery: the row is left untouched.
+ */
+export type RedeliverGuard = (
+    row: HttpDelivery,
+) => Promise<string | undefined> | string | undefined;
 
 export interface HttpClaimOptions {
     /** Identifier of the node doing the claim (for `claimedBy`). */
@@ -179,10 +261,119 @@ export type HttpAckResult = HttpAckSuccess | HttpAckFailure;
 export class HttpRedeliverError extends Error {
     constructor(
         message: string,
-        readonly code: 'RESOURCE_NOT_FOUND' | 'DELIVERY_NOT_ELIGIBLE',
+        readonly code: 'RESOURCE_NOT_FOUND' | 'DELIVERY_NOT_ELIGIBLE' | 'DELIVERY_NEVER_SENT',
     ) {
         super(message);
         this.name = 'HttpRedeliverError';
+    }
+}
+
+/**
+ * [#8069] The `redeliver()` refusal, in ONE place both implementations call.
+ *
+ * ## What it refuses, and why that predicate
+ * `redeliver` means *send this again*. A terminal row with `attempts === 0` was
+ * never sent a first time — {@link IHttpOutbox.ack}, the only writer of a
+ * terminal status, increments `attempts` unconditionally, so the pair
+ * (terminal, 0 attempts) is reachable only through
+ * {@link IHttpOutbox.recordUndeliverable}. Such a row is a **record of a
+ * delivery that was refused before it ever existed on the wire**, and resetting
+ * it to `pending` is not a replay: it is a FIRST delivery conjured by an
+ * operator button, bypassing every check the enqueue path applies.
+ *
+ * ## Why this is a security refusal and not a tidiness one
+ * A parked row has no {@link HttpDelivery.signature}, because the signature is
+ * computed at enqueue from the very secret that could not be resolved (#7722,
+ * #7799). `POST /api/v1/webhooks/redeliver` is reachable by any authenticated
+ * user. Without this refusal, making the drop durable would hand that user a
+ * button that delivers the webhook UNSIGNED — reopening #7799 through a door
+ * nobody would think to audit. **An unsigned redelivery is strictly worse than
+ * an unrecorded drop**, which is why this guard lands with — and logically
+ * before — the durable record itself.
+ *
+ * ## Why `attempts`, not "row has no signature"
+ * `signature === undefined` is AMBIGUOUS: it also means "authored unsigned",
+ * which is a legitimate configuration (`secret` is optional on the webhook
+ * envelope), and refusing those would break a working feature. `attempts === 0`
+ * on a terminal row is unambiguous and needs no new column and no new lifecycle
+ * state. It is also fail-closed under the ambiguity that remains: a parked row
+ * that somehow carried a signature would still be refused.
+ */
+export function assertHttpRedeliverable(row: HttpDelivery): void {
+    if (row.status !== 'success' && row.status !== 'failed' && row.status !== 'dead') {
+        throw new HttpRedeliverError(
+            `Delivery row '${row.id}' is '${row.status}', expected one of: success, failed, dead`,
+            'DELIVERY_NOT_ELIGIBLE',
+        );
+    }
+    if (row.attempts === 0) {
+        throw new HttpRedeliverError(
+            `Delivery row '${row.id}' was never sent — it is a PARKED record of a delivery that `
+                + 'could not be prepared (0 attempts), not a delivery that failed. Reason recorded on '
+                + `the row: ${row.error ?? '(none recorded)'}. Redelivering it would send the payload `
+                + 'for the first time, and a parked row carries no HMAC signature because the signing '
+                + 'secret it needed could not be resolved — so the delivery would go out UNSIGNED '
+                + '(#7799, #8069). Fix the underlying configuration instead; the subscription re-arms '
+                + 'on its own and future events are delivered signed.',
+            'DELIVERY_NEVER_SENT',
+        );
+    }
+}
+
+/**
+ * [#8069] The full pre-write refusal for `redeliver()`: the row-local check
+ * above, then the producer's {@link RedeliverGuard}.
+ *
+ * Ordering is deliberate — the row-local refusal never needs I/O and never
+ * needs a guard to be wired, so a deployment whose producer registered no guard
+ * still refuses parked rows. The guard adds what the row cannot answer: whether
+ * the configuration this delivery was signed against still exists.
+ *
+ * A guard that THROWS refuses the redelivery. That is fail-closed on purpose:
+ * a guard whose own lookup failed does not know the configuration is available,
+ * and "we could not check" must never read as "allowed".
+ */
+export async function assertRedeliverAllowed(
+    row: HttpDelivery,
+    guard?: RedeliverGuard,
+): Promise<void> {
+    assertHttpRedeliverable(row);
+    if (!guard) return;
+    let refusal: string | undefined;
+    try {
+        refusal = await guard(row);
+    } catch (err) {
+        throw new HttpRedeliverError(
+            `Delivery row '${row.id}' cannot be redelivered: its producer's configuration check `
+                + `failed, so it is unknown whether this delivery can still be signed — refusing `
+                + `rather than sending (#8069). Cause: ${(err as Error)?.message ?? String(err)}`,
+            'DELIVERY_NOT_ELIGIBLE',
+        );
+    }
+    if (refusal !== undefined) {
+        throw new HttpRedeliverError(
+            `Delivery row '${row.id}' cannot be redelivered: ${refusal}`,
+            'DELIVERY_NOT_ELIGIBLE',
+        );
+    }
+}
+
+/**
+ * [#8069] Reject a parked-row discriminator that reached the delivery door.
+ *
+ * {@link EnqueueHttpInput.undeliverableReason} is routed away by
+ * `MessagingService.enqueueHttp()`. If it arrives here anyway, the routing was
+ * bypassed or broken, and the row about to be minted is a `pending` unsigned
+ * delivery for a subscription whose credentials are missing. Refuse loudly
+ * rather than silently dropping the flag.
+ */
+export function assertEnqueueDeliverable(input: EnqueueHttpInput): void {
+    if (input.undeliverableReason !== undefined) {
+        throw new Error(
+            'IHttpOutbox.enqueue: input carries `undeliverableReason` — a row that must NEVER be sent '
+                + 'cannot be minted `pending`. Route it to recordUndeliverable() instead (#8069). '
+                + `Reason was: ${input.undeliverableReason}`,
+        );
     }
 }
 
@@ -198,6 +389,26 @@ export interface IHttpOutbox {
      * or new).
      */
     enqueue(input: EnqueueHttpInput): Promise<string>;
+
+    /**
+     * [#8069] Record a delivery that can **never** be sent, so a dropped
+     * subscription leaves a durable trace instead of only a log line.
+     *
+     * Writes the row terminal on arrival — `status: 'dead'`, `attempts: 0`,
+     * `error: input.reason`, no signature — and it is therefore never claimed
+     * by a dispatcher and never redeliverable (see
+     * {@link assertHttpRedeliverable}). Same `(source, dedupKey)` uniqueness as
+     * {@link enqueue}, so the same event cannot produce two records.
+     *
+     * ## Why a second door rather than a flag on `enqueue()`
+     * `enqueue()`'s contract is "insert a delivery row that the dispatcher will
+     * send". A mode flag that sometimes makes it mint a terminal non-delivery
+     * would make the name lie, and the failure mode of a *missed* flag is the
+     * exact catastrophe this issue is about — a `pending`, unsigned row for a
+     * subscription whose secret could not be resolved. Two named doors make the
+     * dangerous outcome unreachable by omission rather than merely discouraged.
+     */
+    recordUndeliverable(input: UndeliverableHttpInput): Promise<string>;
 
     /**
      * Atomically claim up to `limit` rows whose `nextRetryAt <= now` (or null)
@@ -228,6 +439,14 @@ export interface IHttpOutbox {
      * the dispatcher re-sends it. Resets `attempts=0`; URL / payload / signature
      * are NOT touched (byte-for-byte replay — the same body carries the same
      * signature). Throws {@link HttpRedeliverError}.
+     *
+     * [#8069] Implementations MUST call {@link assertHttpRedeliverable} before
+     * writing anything, and MUST consult `guard` — the producer's verdict on
+     * whether the configuration this row depends on is still available — with
+     * the same "refuse before you write" ordering. A refused redelivery leaves
+     * the row exactly as it was.
+     *
+     * @param guard Optional producer verdict; see {@link RedeliverGuard}.
      */
-    redeliver(id: string): Promise<HttpDelivery>;
+    redeliver(id: string, guard?: RedeliverGuard): Promise<HttpDelivery>;
 }

@@ -108,10 +108,25 @@
  *      flags the exact shape a careful author writes when EXPLAINING that they
  *      deliberately did not use the keyword.
  *
- * Reading 4 is measured for inline spans; fenced blocks are stripped by the
- * same rule but were NOT independently measured — stated so a later reading can
- * revise it rather than inherit it as fact. Both directions of that choice are
- * documented at `stripMarkdownCode`.
+ *   5. keyword + `#N` inside a FENCED BLOCK does not close either — and the
+ *      closing link is created at PR-OPEN time, not at merge. Both were settled
+ *      by one controlled reading on 2026-08-13 (#8476 step 1). A throwaway PR
+ *      (#8523, empty commit, closed unmerged) carried three arms in ONE body at
+ *      one moment: `Fixes #8520` inside a fenced block, `Fixes #8521` inside an
+ *      inline span, and a plain-prose `Fixes #8522`. Read seconds after that PR
+ *      opened, `closed_by_pull_requests` was EMPTY on #8520 and on #8521, and
+ *      carried #8523 (state OPEN) on #8522. The prose arm is the positive
+ *      control that makes the two nulls readable at all: without it, "no link
+ *      on the fenced arm" cannot be told apart from "closing links only
+ *      materialize on merge".
+ *
+ * So the strip rule is a false negative in neither direction, and the merge is
+ * no part of the mechanism: the contradiction exists, and is fixable, from the
+ * moment a PR opens. That is what lets the same predicate back a PR-scoped
+ * BLOCKING gate (`scripts/check-partof-closing-keyword.mjs`, which imports
+ * `h7PartOfWithClosingKeyword` from here) as well as this report-only sweep.
+ * H7 stays in the sweep regardless — patrol coverage of PRs whose CI predates
+ * that gate — and nothing about this file's report-only contract changes.
  *
  * Scope of the remedy that lands HERE: this is the report-only detector, not a
  * suppression. Suppressing at source means telling authors not to put a closing
@@ -320,13 +335,20 @@ function partOfRe() {
  * report every author who correctly explains that they did NOT use the keyword
  * — turning the guard into noise on precisely the careful PRs.
  *
- * Fenced blocks are stripped by the same rule but were NOT independently
- * measured. The choice is deliberate and its cost is stated rather than hidden:
- * if GitHub does fire inside fences, this is a false NEGATIVE — the direction
- * this card exists to prevent. It is taken because a PR body routinely quotes
- * whole other bodies, templates and logs in fences, and scanning those would
- * bury real findings under quoted text. A single live reading of a fenced
- * `Fixes #N` against `closed_by_pull_requests` settles it either way.
+ * MEASURED for fenced blocks too, as of 2026-08-13 (#8476 step 1): a throwaway
+ * PR (#8523) carried `Fixes #8520` inside a fence, `Fixes #8521` inside an
+ * inline span and a plain-prose `Fixes #8522` in ONE body, and seconds after it
+ * opened — unmerged — `closed_by_pull_requests` was empty on the fenced and
+ * inline targets while the prose target already carried the link. The prose arm
+ * is the positive control: it proves the link mechanism was live and readable
+ * during the reading, so the two nulls mean "the parser does not fire here" and
+ * not "links appear only on merge".
+ *
+ * That closes the one unknown this doc used to carry (the fence rule was
+ * previously taken on the argument that PR bodies routinely quote whole other
+ * bodies, templates and logs, and scanning those would bury real findings under
+ * quoted text). Both spellings are now measured, so stripping is correct rather
+ * than merely reasonable, and a blocking gate may rely on it.
  *
  * Lines are replaced by empty strings rather than deleted so that nothing is
  * spliced together across a stripped block into an accidental match.

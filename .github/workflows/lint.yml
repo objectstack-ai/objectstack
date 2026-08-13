@@ -193,6 +193,58 @@ jobs:
       - name: PM dispatch-gates self-test
         run: pnpm check:pm-dispatch-gates
 
+      # Part-of/closing-keyword guard self-test (#8476). The guard itself is a
+      # PR-scoped blocking check in its own workflow — it needs a pull request
+      # body to judge, which this job does not have — so what runs HERE is its
+      # self-test, which is the half with a verdict independent of any PR.
+      # Unconditional for the same reason as the two steps above: a self-test
+      # that runs only when someone remembers is a check whose coverage is a
+      # function of who remembered, and the failure it hides is quiet — a break
+      # in the verdict layer lands green and surfaces later as a card silently
+      # closed by the sentence written to keep it open.
+      #
+      # The self-test also pins the WIRING (the guard workflow still invokes
+      # the script, still subscribes to `edited`, still passes the body through
+      # `env:`), so unwiring the gate reddens here rather than going quiet.
+      # Imports one sibling module, reads two files; ~0.1s.
+      - name: Part-of closing-keyword guard self-test
+        run: pnpm check:partof-closing-keyword
+
+      # PM half-state sweeper self-test (#8528). `scripts/pm/check-half-states.mjs`
+      # carried a 79-case --self-test — the H1..H7 predicates, the seat-sticker
+      # parser, the transport classifier and its measured container classes —
+      # that NO job ran: it executed only when a human or an agent typed it.
+      # Fourth member of the same family as the three steps above, and the one
+      # with a blocking consumer: since #8527 the H7 predicate
+      # (`h7PartOfWithClosingKeyword` and `stripMarkdownCode` beneath it) is
+      # imported by the PR-scoped guard whose self-test runs in the step above,
+      # so a break there now reddens — or silently greens — every PR in the repo.
+      # That incidental coverage is real but bounded: it pins only the H7
+      # behaviours the guard depends on. H1..H6, the seat parser and the whole
+      # transport classifier had none. Unconditional for the family's reason: an
+      # exemption is what a self-test must not have, or the gap simply moves.
+      #
+      # The gate runs the SELF-TEST only. The live sweep
+      # (`node scripts/pm/check-half-states.mjs`) reads a shared board over the
+      # GitHub API, is report-only by design (a completed sweep exits 0 whether
+      # it found 0 or 40 half-states), and its non-zero exits classify the
+      # ENVIRONMENT — no token, exhausted quota, unreachable host — which is not
+      # a verdict about the PR running it. The script's own header argues both
+      # halves. The self-test is offline: no network, no token, ~0.05s.
+      #
+      # Pointed straight at the script, with no gate file in between, unlike
+      # `check:pm-dispatch-gates` next door — that one needs its own file because
+      # the tool's fixtures are path strings that become watch hints and
+      # fabricate MATCHED leads across the tree. Measured here on the current
+      # tree, under the module-body masking that now blanks comments and
+      # self-tests before the scan: this script yields exactly ONE hint, the repo
+      # slug in its API base, which is not a repo path and covers no input path.
+      # The fixtures are issue-shaped objects and prose, and they sit inside the
+      # masked self-test. So the pollution that forced a separate file there does
+      # not exist here, and the direct entry is the same shape as the step above.
+      - name: PM half-state sweeper self-test
+        run: pnpm check:pm-half-states
+
       # Docs/skills authoring guard (#2035 / ADR-0059): TS code blocks in
       # Markdown/MDX are not type-checked or ESLinted, so skills/ and
       # content/docs/ can drift back to teaching the bare `: Page = {}` literal

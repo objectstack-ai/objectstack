@@ -9,6 +9,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  buildRuntimeWriteSnapshots,
   runRuntimeAuthoringRules,
   runtimeAuthoringRulesFor,
   runtimeGatedTypes,
@@ -196,6 +197,61 @@ describe('runtime publish gate (#4463)', () => {
     expect(runtimeGatedTypes()).toContain('flow');
     expect(stackKeyForType('flow')).toBe('flows');
     expect(stackKeyForType('no_such_type')).toBeNull();
+    // [#8309] The two mappings that landed ahead of their registration (#8310)
+    // — the `seed` order (#7576 → #8307) repeated. Inert until a rule declares
+    // the type, because dispatch filters by `runtimeTypes` before this table.
+    expect(stackKeyForType('permission')).toBe('permissions');
+    expect(stackKeyForType('book')).toBe('books');
+  });
+
+  // ── #8309: the per-write snapshot carries the sibling collections ────
+
+  describe('buildRuntimeWriteSnapshots (#8309)', () => {
+    const context = {
+      objects: [{ name: 'acct' }],
+      permissions: [{ name: 'ops' }, { name: 'sales' }],
+      books: [{ name: 'guide' }],
+    };
+
+    it('returns null for an unmapped type or a non-object body', () => {
+      expect(buildRuntimeWriteSnapshots({ type: 'translation', item: { name: 'x' }, context })).toBeNull();
+      expect(buildRuntimeWriteSnapshots({ type: 'flow', item: 'not-an-object', context })).toBeNull();
+    });
+
+    it('carries every context collection IDENTICALLY in both passes for a non-context write', () => {
+      // The isolation property PR #8390's seed proof rests on, now for all
+      // three collections: a `flow` write may only differ from its baseline in
+      // its own collection, so any finding derived from objects/permissions/
+      // books cancels in the gate's diff.
+      const s = buildRuntimeWriteSnapshots({ type: 'flow', item: { name: 'f1' }, context })!;
+      for (const key of ['objects', 'permissions', 'books'] as const) {
+        expect(s.baseline[key]).toEqual(context[key]);
+        expect(s.candidate[key]).toEqual(context[key]);
+      }
+      expect(s.baseline).not.toHaveProperty('flows');
+      expect(s.candidate.flows).toEqual([{ name: 'f1' }]);
+    });
+
+    it('REPLACES the stored self for a write into a context collection', () => {
+      // The replace-not-erase rule, generalized from `objects` to every
+      // context collection: updating `ops` judges a universe with ONE `ops`.
+      const s = buildRuntimeWriteSnapshots({
+        type: 'permission',
+        item: { name: 'ops', objects: {} },
+        context,
+      })!;
+      expect(s.baseline.permissions).toEqual([{ name: 'sales' }]);
+      expect(s.candidate.permissions).toEqual([{ name: 'sales' }, { name: 'ops', objects: {} }]);
+      // The sibling collections ride along untouched, in both passes.
+      expect(s.baseline.objects).toEqual(context.objects);
+      expect(s.candidate.books).toEqual(context.books);
+    });
+
+    it('an absent context still yields empty collections, never a throw', () => {
+      const s = buildRuntimeWriteSnapshots({ type: 'book', item: { name: 'b1' } })!;
+      expect(s.baseline).toEqual({ objects: [], permissions: [], books: [] });
+      expect(s.candidate.books).toEqual([{ name: 'b1' }]);
+    });
   });
 
   it('a rule that throws degrades to a warning instead of failing the write', () => {

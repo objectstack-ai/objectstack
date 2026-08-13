@@ -1111,6 +1111,93 @@ function readBaseline() {
   return JSON.parse(readFileSync(BASELINE_PATH, 'utf8'));
 }
 
+// ── The ratchet-remedy authority convention (#8435) ──────────────────────────
+//
+// Four independent PRs, four authors, four brand-new test files, one shift --
+// all four tripped this gate on a hand-rolled `update` double, and all four
+// were told about it for the first time by CI. That half is a DISCOVERY-POINT
+// problem this message cannot fix: the author writes the double first and meets
+// the requirement only when the gate rejects it.
+//
+// The half this message CAN fix is which remedy it teaches. The text below
+// offers two, and it used to offer them symmetrically -- pin the fake, "Or add
+// a MEASURED entry to scripts/engine-double-contract.baseline.json". That
+// baseline is SHRINK-ONLY, so the second path is not a fix: it is a ratchet
+// weakening, and a maintainer action rather than an author's. All four devs
+// took the correct path, but they had been told so out of band; a dev reading
+// only this output had nothing to go on. Marking the privileged path is the
+// cheap, unconditional half of #8435.
+//
+// Measured as a FARM-LEVEL shape, not a one-gate nit -- see the twin block in
+// check-type-check-coverage.mjs for the other instance this PR fixes, and the
+// report/finding for the three it does not
+// (check-durability-degradation-log-level.mjs, check-role-word.mjs,
+// check-driver-conformance.mjs). check-driver-memory-census.mjs is the
+// precedent worth copying: it already refuses the weakening remedy outright.
+//
+// ⛔ Strengthens ratchet governance; weakens nothing. No threshold moves, no
+// baseline entry is added, and the verdicts this gate reaches are unchanged --
+// this edits the diagnostic text only.
+
+/** Kept identical to the twin gate's token so the convention is greppable. */
+const RATCHET_AUTHORITY_MARKER = '⛔ MAINTAINER-ONLY';
+
+/** The baseline as the message spells it (BASELINE_PATH is absolute). */
+const BASELINE_REL = 'scripts/engine-double-contract.baseline.json';
+
+/**
+ * How this gate OFFERS the privileged path. A detector rather than a string
+ * compare, so the self-test can prove it still reaches its subject: a reworded
+ * offer that stopped matching would make the convention check below pass
+ * vacuously on every message.
+ */
+const RATCHET_EXPANSION_OFFER = new RegExp(
+  `add a MEASURED entry to\\s+${BASELINE_REL.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`,
+);
+
+/**
+ * The convention: a message that hands the author the baseline-expanding path
+ * must say in the same breath that the path is not theirs. Messages that offer
+ * no such path are unaffected -- RECONCILED tells the author to DELETE or lower
+ * an entry, which is the ratchet tightening and squarely the author's job.
+ *
+ * @param {string} message
+ * @returns {boolean}
+ */
+function ratchetRemedyCarriesAuthority(message) {
+  if (!RATCHET_EXPANSION_OFFER.test(message)) return true;
+  return message.includes(RATCHET_AUTHORITY_MARKER);
+}
+
+/**
+ * PINNED's text, named and pure so the self-test can assert on the exact string
+ * the author reads. Extracted from the audit loop by #8435 for that reason --
+ * a message built inline is a message no assertion can reach.
+ *
+ * @param {{verb: string, symbols: Set<string>, producer: string, pinCall: string}} slice
+ * @param {string} file
+ * @param {Array<{line: number}>} unguarded
+ * @returns {string}
+ */
+function pinnedMessage(slice, file, unguarded) {
+  return (
+    `PINNED [${slice.verb}]: ${file} declares ${unguarded.length} engine double(s) whose `
+      + `${slice.verb}() does not route through ${[...slice.symbols][0]} `
+      + `(line${unguarded.length > 1 ? 's' : ''} ${unguarded.map((d) => d.line).join(', ')}). `
+      + `A fake looser than ${slice.producer} is how #4434 shipped a dead REST route with its `
+      + `suite green. Open the fake's ${slice.verb} with \`${slice.pinCall}\` from `
+      + "'@objectstack/metadata-core' (where the predicate lives since #5619) or from "
+      + "'@objectstack/objectql' (which re-exports it) — add whichever you pick as a "
+      + 'devDependency if the package lacks it, and prefer metadata-core when '
+      + '@objectstack/objectql DEPENDS ON the package you are pinning, since that reverse edge '
+      + 'is a cycle turbo refuses. That is the fix, and the only one of the two you can take on '
+      + `your own. ${RATCHET_AUTHORITY_MARKER}, NOT a co-equal option: add a MEASURED entry to `
+      + `${BASELINE_REL} saying why not — with `
+      + `"verb": ${JSON.stringify(slice.verb)}. That baseline is shrink-only, so an entry weakens a `
+      + 'ratchet and needs a maintainer to agree first — do not take this path to get CI green.'
+  );
+}
+
 // ── Audit ───────────────────────────────────────────────────────────────────
 
 /** One slice's scan over the whole tree. */
@@ -1180,20 +1267,7 @@ function audit() {
         continue;
       }
       if (!entry) {
-        errors.push(
-          `PINNED [${slice.verb}]: ${file} declares ${unguarded.length} engine double(s) whose `
-            + `${slice.verb}() does not route through ${[...slice.symbols][0]} `
-            + `(line${unguarded.length > 1 ? 's' : ''} ${unguarded.map((d) => d.line).join(', ')}). `
-            + `A fake looser than ${slice.producer} is how #4434 shipped a dead REST route with its `
-            + `suite green. Open the fake's ${slice.verb} with \`${slice.pinCall}\` from `
-            + "'@objectstack/metadata-core' (where the predicate lives since #5619) or from "
-            + "'@objectstack/objectql' (which re-exports it) — add whichever you pick as a "
-            + 'devDependency if the package lacks it, and prefer metadata-core when '
-            + '@objectstack/objectql DEPENDS ON the package you are pinning, since that reverse edge '
-            + 'is a cycle turbo refuses. Or add a MEASURED entry to '
-            + 'scripts/engine-double-contract.baseline.json saying why not — with '
-            + `"verb": ${JSON.stringify(slice.verb)}.`,
-        );
+        errors.push(pinnedMessage(slice, file, unguarded));
         continue;
       }
       if (unguarded.length > entry.unguarded) {
@@ -1969,6 +2043,33 @@ class Svc {
   expect('discovery reaches protocol.updateData/deleteData — the seam #8194 names',
     seamFiles.some((f) => f.file === 'packages/metadata-protocol/src/protocol.ts'
       && f.seams.some((x) => x.fn === 'updateData') && f.seams.some((x) => x.fn === 'deleteData')));
+
+  // ── The ratchet-remedy authority convention (#8435) ────────────────────────
+  //
+  // Three assertions, deliberately non-overlapping, so each way this can rot is
+  // caught by exactly one NAMED failure: (1) the detector still reaches its
+  // subject, (2) the real message carries the marker, (3) an unmarked offer is
+  // REJECTED. (3) is what makes (2) worth having -- a predicate that approved
+  // everything would keep (2) green with the convention gone. Its fixture is
+  // SYNTHETIC rather than the real message with the marker stripped: derived,
+  // it also fired on a rewording and misdescribed the cause.
+  const pinned = pinnedMessage(
+    { verb: 'update', symbols: new Set(['assertEngineUpdateDispatch']),
+      producer: 'ObjectQL.update', pinCall: 'assertEngineUpdateDispatch(data, options)' },
+    'packages/plugins/plugin-auth/src/a.test.ts',
+    [{ line: 72 }],
+  );
+  expect('#8435 — the ratchet-offer DETECTOR still matches PINNED (else the check below is vacuous)',
+    RATCHET_EXPANSION_OFFER.test(pinned));
+  expect(`#8435 — PINNED marks the baseline path ${RATCHET_AUTHORITY_MARKER} (it is shrink-only, so `
+    + 'adding an entry is a maintainer action, not the author\'s second option)',
+    ratchetRemedyCarriesAuthority(pinned));
+  const unmarkedOffer = `PINNED: add a MEASURED entry to ${BASELINE_REL} saying why not.`;
+  expect('#8435 — the synthetic unmarked-offer fixture is still recognised as an offer',
+    RATCHET_EXPANSION_OFFER.test(unmarkedOffer));
+  expect('#8435 — ratchetRemedyCarriesAuthority() REJECTS an offer carrying no marker (proves the '
+    + 'predicate discriminates rather than approving everything)',
+    !ratchetRemedyCarriesAuthority(unmarkedOffer));
 
   if (failures.length) {
     for (const f of failures) console.error(`  x self-test: ${f}`);

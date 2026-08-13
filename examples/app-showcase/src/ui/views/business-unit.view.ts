@@ -44,7 +44,7 @@ export const BusinessUnitViews = defineView({
       type: 'simple',
       data,
       sections: [
-        { label: 'Unit', columns: 2, fields: ['name', 'parent', 'kind', 'manager', 'headcount'] },
+        { name: 'unit', label: 'Unit', columns: 2, fields: ['name', 'parent', 'kind', 'manager', 'headcount'] },
       ],
     },
   },

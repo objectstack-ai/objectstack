@@ -29,6 +29,15 @@ type WebhookTrigger = WebhookTriggerType;
  * Enqueue callback into the shared `service-messaging` HTTP outbox (ADR-0018 M3).
  * The plugin supplies one bound to `messaging.enqueueHttp(...)`; webhooks no
  * longer own a delivery outbox/dispatcher — they share the generic substrate.
+ *
+ * [#8069] It MUST be `MessagingService.enqueueHttp`, not `IHttpOutbox.enqueue`.
+ * The enqueuer now emits two kinds of input through this one door — an ordinary
+ * delivery, and a PARKED event whose subscription lost its credentials — and
+ * only the messaging seam routes the second to `recordUndeliverable()`. Wired
+ * to the raw outbox instead, the parked input is refused at the delivery door
+ * (correctly — the alternative is a `pending` unsigned row) and the durable
+ * record is lost; {@link AutoEnqueuer} reports that at `error` rather than
+ * letting it pass as an ordinary enqueue failure.
  */
 export type HttpEnqueueFn = (input: EnqueueHttpInput) => Promise<string>;
 
@@ -98,6 +107,20 @@ interface CachedSubscription {
     headers?: Record<string, string>;
     secret?: string;
     timeoutMs?: number;
+    /**
+     * [#8069] Set when a credential this subscription needs could not be
+     * recovered. The subscription stays CACHED — that is the change — but every
+     * event it matches is written to `sys_http_delivery` as a parked `dead` row
+     * carrying this text, instead of being discarded with nothing to find.
+     *
+     * Before this, `attachCredentials` returning false removed the row from the
+     * cache entirely, so matching events found no subscription and vanished:
+     * fail-closed and correct, but leaving an operator with a log line (#8043)
+     * and no durable trace. A parked subscription is still fail-closed —
+     * {@link secret} and {@link headers} stay unset, so nothing can be sent —
+     * it is merely no longer silent.
+     */
+    parkedReason?: string;
 }
 
 export interface AutoEnqueuerOptions {
@@ -315,9 +338,11 @@ export class AutoEnqueuer {
             // them here, on the 60s refresh, rather than per event: the cache
             // already holds the plaintext in memory (it always did), so this
             // changes where the values come FROM, not how long they are held. A
-            // row whose credentials cannot be recovered is DROPPED — see
+            // row whose credentials cannot be recovered is PARKED — cached with
+            // `parkedReason` set and no credentials, so its events are recorded
+            // as undeliverable instead of silently discarded (#8069). See
             // `attachCredentials`.
-            if (!(await this.attachCredentials(sub, row))) continue;
+            await this.attachCredentials(sub, row);
             // Empty objectName == "any object" → indexed under '*'.
             const key = sub.objectName ?? '*';
             const arr = next.get(key) ?? [];
@@ -380,6 +405,80 @@ export class AutoEnqueuer {
     }
 
     /**
+     * [#8069] Mark a subscription parked and strip anything sendable off it.
+     *
+     * Called from the two `attachX` failure paths, which each already reported
+     * the drop at `error` (say-once, #8022). The credentials are cleared rather
+     * than merely "not set": `attachSecret` can succeed and `attachHeaders`
+     * fail, and a parked row must not carry the header map — that map is the
+     * ordinary place an `Authorization: Bearer …` goes (#7986), and copying it
+     * onto a row that will sit in `sys_http_delivery` for the full 30d
+     * retention window without ever being sent is a credential copy bought for
+     * nothing.
+     */
+    /**
+     * [#8069] Report a failed outbox write off the hot path, at the level the
+     * loss actually deserves.
+     *
+     * AGENTS.md decides that with one question — *does the system still look
+     * normal from the outside while something it claims is persisted has not
+     * landed?* For a PARKED subscription the answer is unambiguously yes, and
+     * worse than for an ordinary enqueue failure: the durable record is the
+     * only trace this event ever existed, so losing the write puts us back
+     * exactly where this issue started, silently. So `error` there, and the
+     * pre-existing `warn` for an ordinary enqueue, where the delivery itself is
+     * the thing that did not happen and the subscription is otherwise healthy.
+     *
+     * The realistic cause of the parked branch is a host that wired
+     * {@link HttpEnqueueFn} straight to `IHttpOutbox.enqueue` instead of
+     * `MessagingService.enqueueHttp`: only the messaging seam routes a parked
+     * input to `recordUndeliverable()`, and the raw delivery door refuses the
+     * discriminator rather than minting a `pending` unsigned row from it. The
+     * message names that, because it is not guessable from "enqueue failed".
+     */
+    private reportWriteFailure(
+        sub: CachedSubscription,
+        eventId: string,
+        err: unknown,
+        verb: string,
+    ): void {
+        const meta = { webhook: sub.name, eventId, err: (err as Error)?.message ?? err };
+        if (!sub.parkedReason) {
+            this.logger.warn?.(`[webhook-auto-enqueuer] ${verb} failed`, meta);
+            return;
+        }
+        const message =
+            `[webhook-auto-enqueuer] could not record the undeliverable event for webhook `
+            + `'${sub.name}' — the subscription is parked for an unresolvable credential, and this `
+            + `event is now DISCARDED WITH NO TRACE in sys_http_delivery, which is the durability `
+            + `gap #8069 closes. Most likely cause: the enqueue callback was wired directly to `
+            + `IHttpOutbox.enqueue instead of MessagingService.enqueueHttp — only the messaging seam `
+            + `routes a parked event to recordUndeliverable(), and the delivery door refuses it `
+            + `rather than minting a pending row that would be sent UNSIGNED.`;
+        if (typeof this.logger.error === 'function') {
+            this.logger.error(message, err, meta);
+        } else {
+            this.logger.warn?.(message, meta);
+        }
+    }
+
+    private park(sub: CachedSubscription, err: unknown, credential: DropReason): void {
+        sub.secret = undefined;
+        sub.headers = undefined;
+        sub.parkedReason =
+            `[${WEBHOOK_SECRET_REFUSAL_CODE}/${WEBHOOK_SECRET_REFUSAL_STATUS}] webhook '${sub.name}' `
+            + `holds ${credential.article} that could not be decrypted, so this event was NOT `
+            + `delivered — recording it here rather than ${credential.ratherThan} (${credential.issue}, `
+            + `#8069). This row was never sent and cannot be redelivered: it carries no HMAC signature, `
+            + `because the ${credential.noun} that would have produced one is exactly what is missing. `
+            + `Fix: register a CryptoProvider (engine.setCryptoProvider — LocalCryptoProvider in dev, `
+            + `KMS/Vault in production) with the same key the ${credential.noun} was written under, and `
+            + `make sure the sys_secret row is reachable; the subscription re-arms on registration `
+            + `(#8022) and at the next periodic refresh, and later events are delivered normally. `
+            + `Cause: ${(err as Error)?.message ?? String(err)}`;
+    }
+
+    /**
      * [#7799] Resolve `sub.secret`. Returns `false` when the subscription must
      * be dropped.
      *
@@ -409,6 +508,7 @@ export class AutoEnqueuer {
             }
         } catch (err) {
             this.reportDrop(sub, err, SIGNING_SECRET_CREDENTIAL);
+            this.park(sub, err, SIGNING_SECRET_CREDENTIAL);
             return false;
         }
 
@@ -451,6 +551,7 @@ export class AutoEnqueuer {
             }
         } catch (err) {
             this.reportDrop(sub, err, CUSTOM_HEADERS_CREDENTIAL);
+            this.park(sub, err, CUSTOM_HEADERS_CREDENTIAL);
             return false;
         }
 
@@ -516,11 +617,20 @@ export class AutoEnqueuer {
             return;
         }
         this.droppedForSecret.add(sub.id);
+        // [#8069] The consequence clause used to end "…with NO delivery and NO
+        // sys_http_delivery row". The second half is no longer true — that is
+        // precisely what this card changed — and an `error` that misdescribes
+        // the consequence sends an operator looking in the wrong place, which
+        // is worse than the old accurate-but-bleaker line. It now names where
+        // the evidence IS.
         const message =
             `[webhook-auto-enqueuer] webhook '${sub.name}' holds ${credential.article} that ` +
-            `could not be decrypted — the subscription is DROPPED rather than ${credential.ratherThan} ` +
-            `(${credential.issue}), so every matching record change is discarded with NO delivery and NO ` +
-            'sys_http_delivery row, while the row keeps reading active:true in Setup. Fix: register a ' +
+            `could not be decrypted — the subscription is PARKED rather than ${credential.ratherThan} ` +
+            `(${credential.issue}), so every matching record change is discarded with NO delivery, ` +
+            'while the row keeps reading active:true in Setup. Each discarded event IS recorded in ' +
+            'sys_http_delivery as a dead row with 0 attempts carrying this cause (#8069) — look there ' +
+            'for the backlog; those rows can never be sent or redelivered, because a parked row has no ' +
+            'HMAC signature. Fix: register a ' +
             'CryptoProvider (engine.setCryptoProvider — LocalCryptoProvider in dev, KMS/Vault in ' +
             `production) with the same key the ${credential.noun} was written under, and make sure the ` +
             'sys_secret row is reachable; the subscription re-arms on registration (#8022) and at the ' +
@@ -706,6 +816,12 @@ export class AutoEnqueuer {
                 method: sub.method,
                 headers: sub.headers,
                 signingSecret: sub.secret,
+                // [#8069] Set only for a PARKED subscription, and then this is
+                // not an enqueue at all: the messaging seam routes it to
+                // `recordUndeliverable()`, which writes a terminal `dead` row
+                // with this reason and no signature. Undefined for every healthy
+                // subscription, so the delivery path is byte-identical to before.
+                undeliverableReason: sub.parkedReason,
                 timeoutMs: sub.timeoutMs,
                 // [#3946] Envelope keys are written LAST so the event payload
                 // cannot rewrite them. Behaviour-neutral for the engine's own
@@ -724,13 +840,7 @@ export class AutoEnqueuer {
                     action,
                     timestamp: event.timestamp,
                 },
-            }).catch((err) =>
-                this.logger.warn?.('[webhook-auto-enqueuer] enqueue failed', {
-                    webhook: sub.name,
-                    eventId,
-                    err: (err as Error)?.message ?? err,
-                }),
-            );
+            }).catch((err) => this.reportWriteFailure(sub, eventId, err, 'enqueue'));
         }
     }
 
@@ -802,6 +912,9 @@ export class AutoEnqueuer {
                 method: sub.method,
                 headers: sub.headers,
                 signingSecret: sub.secret,
+                // [#8069] See the per-record path — parked subscriptions record
+                // an undeliverable row instead of enqueuing a delivery.
+                undeliverableReason: sub.parkedReason,
                 timeoutMs: sub.timeoutMs,
                 // [#3946] Envelope keys last so the payload cannot rewrite them.
                 payload: {
@@ -811,13 +924,7 @@ export class AutoEnqueuer {
                     action,
                     timestamp: event.timestamp,
                 },
-            }).catch((err) =>
-                this.logger.warn?.('[webhook-auto-enqueuer] bulk enqueue failed', {
-                    webhook: sub.name,
-                    eventId,
-                    err: (err as Error)?.message ?? err,
-                }),
-            );
+            }).catch((err) => this.reportWriteFailure(sub, eventId, err, 'bulk enqueue'));
         }
     }
 

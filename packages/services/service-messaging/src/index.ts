@@ -119,8 +119,15 @@ export type {
     HttpAckResult,
     HttpAckSuccess,
     HttpAckFailure,
+    UndeliverableHttpInput,
+    RedeliverGuard,
 } from './http-outbox.js';
-export { HttpRedeliverError } from './http-outbox.js';
+export {
+    HttpRedeliverError,
+    assertHttpRedeliverable,
+    assertRedeliverAllowed,
+    assertEnqueueDeliverable,
+} from './http-outbox.js';
 export { SqlHttpOutbox, type SqlHttpOutboxOptions } from './sql-http-outbox.js';
 export { MemoryHttpOutbox } from './memory-http-outbox.js';
 export { HttpDispatcher } from './http-dispatcher.js';

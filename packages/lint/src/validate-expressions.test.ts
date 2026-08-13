@@ -12,6 +12,10 @@ import { SharingRuleSchema } from '@objectstack/spec/security';
 
 import { validateStackExpressions } from './validate-expressions.js';
 import type { ExprIssue } from './validate-expressions.js';
+// [#8405] Cross-site pin only — see the describe block at the bottom of this
+// file. Not otherwise used here; validate-semantic-roles.test.ts owns the
+// rest of this rule's coverage.
+import { validateSemanticRoles, SEMANTIC_ROLE_FIELD_UNPROVISIONED } from './validate-semantic-roles.js';
 
 describe('validateStackExpressions (ADR-0032 build-time)', () => {
   const objects = [
@@ -2909,5 +2913,69 @@ describe('validateStackExpressions — unprovisioned injected anchors (#8116)', 
     expect(warnings).toHaveLength(2);
     expect(warnings.some((i) => i.where.includes('readonlyWhen'))).toBe(true);
     expect(warnings.some((i) => i.where.includes('expression'))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#8405] Cross-site behavioural pin.
+//
+// #8405 set out to converge this file's `warnUnprovisionedAnchors` and
+// `validate-semantic-roles.ts`'s `unprovisionedPointer` onto the shared
+// `unprovisionedAnchorCause`/`unprovisionedAnchorHint` builders in
+// `system-fields.ts` (#8340). Diffing the emitted text byte-for-byte first
+// (the card's own acceptance bar) found BOTH sites had already drifted from
+// the shared builders — and from each other — despite the issue's premise
+// that "the three copies currently agree": this file says `'<field>', an
+// injected system column…`, `validate-semantic-roles.ts` says `"<field>", an
+// injected system column…` (double quotes, lower-case "no", a differently
+// worded/ordered reason clause, and a different hint ending entirely). Wiring
+// either site to call the shared builders as-is would therefore have changed
+// its emitted diagnostic text — exactly what the card's ruling says to stop
+// and report instead of shipping. See the #8405 dev report for the full
+// character-level diff.
+//
+// What survives regardless of how that wording question is resolved: the two
+// sites must keep reporting the SAME finding — same object, same column, same
+// reason — even while their exact phrasing differs. This pins that content
+// invariant so a future edit to either site's message can drift in wording
+// freely but not silently drop the object name, the field name, or the
+// ADR-0015 citation that makes the finding actionable.
+// ---------------------------------------------------------------------------
+describe('cross-site unprovisioned-anchor convergence (#8405)', () => {
+  const objectName = 'ext_deal';
+  const field = 'organization_id';
+  const remoteObject = {
+    name: objectName,
+    external: { remoteName: 'deals' },
+    fields: { email: { type: 'email' } },
+  };
+
+  it('validate-expressions and validate-semantic-roles name the same object, column and reason', () => {
+    const exprIssues = validateStackExpressions({
+      objects: [{
+        ...remoteObject,
+        validations: [{ name: 'r1', type: 'script', condition: `record.${field} != null` }],
+      }],
+    });
+    const exprWarning = exprIssues.find((i) => i.severity === 'warning');
+    expect(exprWarning).toBeDefined();
+
+    const roleFindings = validateSemanticRoles({
+      objects: [{ ...remoteObject, highlightFields: [field] }],
+    });
+    const roleFinding = roleFindings.find((f) => f.rule === SEMANTIC_ROLE_FIELD_UNPROVISIONED);
+    expect(roleFinding).toBeDefined();
+
+    // `where` carries the object name on both sites (the message bodies don't
+    // agree on whether to repeat it — see the comment above), so check the
+    // union of `where` + `message`, the actual surface an author reads.
+    const exprText = `${exprWarning!.where} ${exprWarning!.message}`;
+    const roleText = `${roleFinding!.where} ${roleFinding!.message}`;
+    for (const text of [exprText, roleText]) {
+      expect(text).toContain(objectName);
+      expect(text).toContain(field);
+      expect(text).toContain('ADR-0015');
+      expect(text.toLowerCase()).toContain('storage');
+    }
   });
 });

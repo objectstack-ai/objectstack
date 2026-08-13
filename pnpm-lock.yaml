@@ -2616,6 +2616,9 @@ importers:
       '@objectstack/driver-sql':
         specifier: workspace:*
         version: link:../../drivers/driver-sql
+      '@objectstack/formula':
+        specifier: workspace:*
+        version: link:../../formula
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../objectql

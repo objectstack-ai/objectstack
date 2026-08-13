@@ -25,8 +25,8 @@ export const SettingsPage = definePage({
           type: 'record:details',
           properties: {
             sections: [
-              { label: 'Appearance', columns: 2, fields: ['theme', 'compact_density', 'default_landing', 'items_per_page'] },
-              { label: 'Notifications', columns: 2, fields: ['notifications_enabled', 'email_digest'] },
+              { name: 'appearance', label: 'Appearance', columns: 2, fields: ['theme', 'compact_density', 'default_landing', 'items_per_page'] },
+              { name: 'notifications', label: 'Notifications', columns: 2, fields: ['notifications_enabled', 'email_digest'] },
             ],
           },
         },

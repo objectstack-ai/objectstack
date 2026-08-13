@@ -229,6 +229,24 @@ export const ShowcaseTranslationBundle = {
           by_status: { label: '按状态' },
           budget_chart: { label: '按客户预算' },
         },
+        // Section headings from two surfaces: `ui/views/project.view.ts`'s
+        // `edit` form (`project` / `budget_schedule`) and
+        // `ui/pages/project-detail.page.ts`'s `record:details` tab
+        // (`overview` / `financials` / `timeline`). Each declares a stable
+        // `name`, the only thing that makes the heading translatable
+        // (#8231). Wording reuses vocabulary this bundle already established
+        // elsewhere: `预算` (fields.budget above), `排期` (showcase_task
+        // `_sections.schedule` below), `概览` (showcase_task
+        // `_sections.overview`), `财务信息` (showcase_semantic_zoo
+        // `_sections.money`), `时间线` (showcase_task `_views.timeline`,
+        // "活动时间线").
+        _sections: {
+          project: { label: '项目' },
+          budget_schedule: { label: '预算与排期' },
+          overview: { label: '概览' },
+          financials: { label: '财务信息' },
+          timeline: { label: '时间线' },
+        },
       },
       showcase_task: {
         label: '任务',
@@ -438,6 +456,14 @@ export const ShowcaseTranslationBundle = {
           notifications_enabled: { label: '启用通知' },
           compact_density: { label: '紧凑密度' },
         },
+        // `ui/pages/settings.page.ts` `record:details` sections. Each
+        // declares a stable `name`, the only thing that makes the heading
+        // translatable (#8231). `通知` reuses `fields.notifications_enabled`
+        // ("启用通知") above.
+        _sections: {
+          appearance: { label: '外观' },
+          notifications: { label: '通知' },
+        },
       },
       showcase_product: {
         label: '产品', pluralLabel: '产品',
@@ -465,11 +491,24 @@ export const ShowcaseTranslationBundle = {
           default: { label: '客户询问' },
           triage: { label: '询问分流' },
         },
+        // The public web-to-lead form's single section
+        // (`ui/views/inquiry.view.ts` `formViews.contact`). Declares a stable
+        // `name`, the only thing that makes the heading translatable
+        // (#8231).
+        _sections: {
+          tell_us_about_yourself: { label: '介绍一下您自己' },
+        },
       },
       showcase_business_unit: {
         _views: {
           default: { label: '全部单元' },
           org_chart: { label: '组织架构图' },
+        },
+        // `ui/views/business-unit.view.ts` `edit` form's single section.
+        // Declares a stable `name`, the only thing that makes the heading
+        // translatable (#8231). Bare object word, matching `全部单元` above.
+        _sections: {
+          unit: { label: '单元' },
         },
       },
       // `_sections` only, on the same footing as the two `_views`-only blocks

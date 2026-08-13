@@ -20,11 +20,14 @@ function makeFakeEngine(schemas: Record<string, any>) {
 
   function matches(row: FakeRow, filter: any): boolean {
     if (!filter || typeof filter !== 'object') return true;
-    if (filter.$or && Array.isArray(filter.$or)) {
-      return filter.$or.some((f: any) => matches(row, f));
+    // `$or` / `$and` are conjoined WITH their sibling keys, the way a real
+    // driver ANDs them — a short-circuiting `return` here would discard every
+    // sibling equality key in the same object. See #7620.
+    if (filter.$or && Array.isArray(filter.$or) && !filter.$or.some((f: any) => matches(row, f))) {
+      return false;
     }
-    if (filter.$and && Array.isArray(filter.$and)) {
-      return filter.$and.every((f: any) => matches(row, f));
+    if (filter.$and && Array.isArray(filter.$and) && !filter.$and.every((f: any) => matches(row, f))) {
+      return false;
     }
     for (const [k, v] of Object.entries(filter)) {
       if (k === '$or' || k === '$and') continue;

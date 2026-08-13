@@ -64,6 +64,28 @@
  * condition is generic (not found / permission / validation / rate limit),
  * use the standard catalog instead of registering a synonym.
  *
+ * Since #8211 (adjudicated 2026-08-12, option C) that last sentence is
+ * MECHANICAL, not prose: the admission gate (`error-code-ledger.test.ts`)
+ * refuses a new code that {@link standardSynonymOf} maps to a standard-catalog
+ * member, unless the code carries a {@link STANDARD_SYNONYM_WAIVERS} entry
+ * recording why it stays and which member it shadows. Four synonyms had
+ * accumulated by the time the rule got teeth precisely because nothing was
+ * checking; they (plus a fifth the detector surfaced on landing) are
+ * grandfathered via waivers below — their wire values are unchanged, and
+ * consolidating any of them onto its standard member is a deliberate wire
+ * change DEFERRED by the #8211 adjudication (option B) until a specific code
+ * has a measured victim.
+ *
+ * One rule, two doors (#8087): registration here is the ADMISSION door — what
+ * the vocabulary may contain. The DISPATCHER door is ruled (#8087, option
+ * B-as-a-gate, maintainer 2026-08-12) to parse every body it emits against the
+ * closed vocabulary; until that gate lands, `resolveThrownHttpError`
+ * (`@objectstack/types`, PR #8088) carries `code` (narrowed) / `declaredCode`
+ * (verbatim) across the gap. Both doors state the same rule: a code either IS
+ * the standard member for its condition, or it is registered here — and if it
+ * merely re-spells a standard member, that registration is a recorded waiver,
+ * never drift.
+ *
  * A code emitted by several packages is listed once per emitting package —
  * the union dedupes; the per-package rows are provenance, not identity.
  *
@@ -94,7 +116,7 @@
  */
 
 import { z } from 'zod';
-import { StandardErrorCode } from './errors.zod';
+import { StandardErrorCode, HttpStatusErrorCodeMap } from './errors.zod';
 
 export const ERROR_CODE_LEDGER = {
   '@objectstack/rest': [
@@ -335,6 +357,7 @@ export const ERROR_CODE_LEDGER = {
     'AUTH_CONFIG_ERROR',             // auth service threw while the adapter mounted it
   ],
   '@objectstack/service-messaging': [
+    'DELIVERY_NEVER_SENT',           // [#8069] terminal delivery row with 0 attempts — a PARKED record of a delivery that could never be prepared, not one that failed. Redelivering it would be a FIRST send, and the row carries no HMAC signature because the secret that would have produced one is exactly what went missing, so it would go out unsigned (#7799). Distinct from DELIVERY_NOT_ELIGIBLE: that one says "wrong state, try when it settles"; this one says "never, fix the configuration instead"
     'DELIVERY_NOT_ELIGIBLE',         // delivery row is in a non-terminal state
   ],
   '@objectstack/trigger-api': [
@@ -438,3 +461,201 @@ export const ErrorCode = z.enum(
 ) as z.ZodType<StandardErrorCode | RegisteredErrorCode>;
 
 export type ErrorCode = StandardErrorCode | RegisteredErrorCode;
+
+// ==========================================
+// Standard-synonym admission rule (#8211)
+// ==========================================
+
+/**
+ * RFC 9110 / RFC 6585 HTTP reason phrases spelled as SCREAMING_SNAKE — the
+ * spellings a producer reaches for when naming a condition after its status
+ * line. Where the phrase was renamed across RFC editions both spellings are
+ * listed (413, 422). Deliberately the FULL table, not just the statuses the
+ * catalog names: whether a phrase is a synonym is decided against
+ * {@link HttpStatusErrorCodeMap} at detection time, so extending that map
+ * automatically extends this gate — no second list to keep in sync.
+ */
+const HTTP_REASON_PHRASE_STATUS: Record<string, number> = {
+  BAD_REQUEST: 400,
+  UNAUTHORIZED: 401,
+  PAYMENT_REQUIRED: 402,
+  FORBIDDEN: 403,
+  NOT_FOUND: 404,
+  METHOD_NOT_ALLOWED: 405,
+  NOT_ACCEPTABLE: 406,
+  PROXY_AUTHENTICATION_REQUIRED: 407,
+  REQUEST_TIMEOUT: 408,
+  CONFLICT: 409,
+  GONE: 410,
+  LENGTH_REQUIRED: 411,
+  PRECONDITION_FAILED: 412,
+  PAYLOAD_TOO_LARGE: 413,
+  CONTENT_TOO_LARGE: 413,
+  URI_TOO_LONG: 414,
+  UNSUPPORTED_MEDIA_TYPE: 415,
+  RANGE_NOT_SATISFIABLE: 416,
+  EXPECTATION_FAILED: 417,
+  MISDIRECTED_REQUEST: 421,
+  UNPROCESSABLE_ENTITY: 422,
+  UNPROCESSABLE_CONTENT: 422,
+  LOCKED: 423,
+  FAILED_DEPENDENCY: 424,
+  TOO_EARLY: 425,
+  UPGRADE_REQUIRED: 426,
+  PRECONDITION_REQUIRED: 428,
+  TOO_MANY_REQUESTS: 429,
+  REQUEST_HEADER_FIELDS_TOO_LARGE: 431,
+  UNAVAILABLE_FOR_LEGAL_REASONS: 451,
+  INTERNAL_SERVER_ERROR: 500,
+  NOT_IMPLEMENTED: 501,
+  BAD_GATEWAY: 502,
+  SERVICE_UNAVAILABLE: 503,
+  GATEWAY_TIMEOUT: 504,
+  HTTP_VERSION_NOT_SUPPORTED: 505,
+  VARIANT_ALSO_NEGOTIATES: 506,
+  INSUFFICIENT_STORAGE: 507,
+  LOOP_DETECTED: 508,
+  NOT_EXTENDED: 510,
+  NETWORK_AUTHENTICATION_REQUIRED: 511,
+};
+
+/**
+ * The standard-catalog member a registered code is a SEMANTIC SYNONYM of, or
+ * `undefined` when it is not one (#8211).
+ *
+ * A CLOSED, mechanical criterion — two prongs, no distance metrics, no
+ * wordlists, so every verdict is reproducible from this file alone:
+ *
+ * 1. **Reason-phrase alias.** The code is the SCREAMING_SNAKE spelling of an
+ *    HTTP reason phrase whose status {@link HttpStatusErrorCodeMap} maps to a
+ *    standard member: `FORBIDDEN` → 403 → `PERMISSION_DENIED`. Deliberately
+ *    judged against the explicit map only, never the
+ *    `standardErrorCodeForHttpStatus` bucket fallback — a phrase for a status
+ *    the catalog does not name (`PAYLOAD_TOO_LARGE`, 413) is NOT a synonym,
+ *    because no member covers its condition.
+ * 2. **Token subset.** Every `_`-token of the code appears in one standard
+ *    member's name (`CONFLICT` ⊆ `RESOURCE_CONFLICT`, `INTERNAL` ⊆
+ *    `INTERNAL_ERROR`): the code says nothing the member's own name does not
+ *    already say. First match in catalog order wins — the generic member leads
+ *    each status block by construction. A domain-prefixed code
+ *    (`FORM_NOT_FOUND`) carries a token no member has, and is exactly the
+ *    shape the registration instructions endorse.
+ *
+ * Under-matching is the accepted cost of a closed criterion: a synonym neither
+ * prong catches (`CONCURRENT_UPDATE` beside `CONCURRENT_MODIFICATION`) is
+ * admitted. Extend a prong deliberately when a new class is measured — never
+ * with fuzz. A detector that only passes on today's tree would be this card's
+ * own failure mode; the admission gate pins rejection of a newly-introduced
+ * synonym for both prongs.
+ */
+export function standardSynonymOf(code: string): StandardErrorCode | undefined {
+  const status = HTTP_REASON_PHRASE_STATUS[code];
+  if (status !== undefined) {
+    const member = HttpStatusErrorCodeMap[status];
+    if (member !== undefined && member !== code) return member;
+  }
+  const tokens = code.split('_');
+  for (const member of StandardErrorCode.options) {
+    if (member === code) continue;
+    const memberTokens = new Set<string>(member.split('_'));
+    if (tokens.every((token) => memberTokens.has(token))) return member;
+  }
+  return undefined;
+}
+
+/**
+ * A recorded admission waiver: why a registered code that
+ * {@link standardSynonymOf} flags as a semantic synonym of a standard-catalog
+ * member stays registered anyway (#8211). A waiver names the member it
+ * shadows and carries a reviewable reason — admission is a decision on the
+ * record, never drift. It keeps a WIRE VALUE registered; it does not endorse
+ * the spelling for new code.
+ */
+export const StandardSynonymWaiverSchema = z.object({
+  code: z.string().regex(/^[A-Z][A-Z0-9_]*$/)
+    .describe('The registered extension code the waiver keeps admissible'),
+  shadows: StandardErrorCode
+    .describe('The standard-catalog member whose condition the code re-spells'),
+  reason: z.string().min(1)
+    .describe('Why the synonym stays registered — recorded so admission is a decision, not drift'),
+});
+
+export type StandardSynonymWaiver = z.input<typeof StandardSynonymWaiverSchema>;
+
+/**
+ * The grandfathered pre-gate synonyms (#8211, adjudicated 2026-08-12, option
+ * C). Every entry is on the wire today; consolidating any onto the member it
+ * shadows would change what clients read (`@objectstack/client` surfaces
+ * `error.code` verbatim) and is DEFERRED — option B — until a specific code
+ * has a measured victim. The admission gate holds each waiver live: a waiver
+ * whose code is no longer registered, or that the detector no longer flags as
+ * a synonym of exactly the member it names, fails the suite and comes out.
+ */
+export const STANDARD_SYNONYM_WAIVERS: readonly StandardSynonymWaiver[] = [
+  {
+    code: 'CONFLICT',
+    shadows: 'RESOURCE_CONFLICT',
+    reason: 'Pre-gate synonym on the wire (respondSharingError 409 arm; registered by #8111). ' +
+      'Wire value kept; consolidation deferred per #8211.',
+  },
+  {
+    code: 'FORBIDDEN',
+    shadows: 'PERMISSION_DENIED',
+    reason: 'Pre-gate synonym on the wire from @objectstack/rest, plugin-sharing and ' +
+      'plugin-approvals. Wire value kept; consolidation deferred per #8211.',
+  },
+  {
+    code: 'INTERNAL',
+    shadows: 'INTERNAL_ERROR',
+    reason: 'Pre-gate synonym on the wire from five packages. Wire value kept; ' +
+      'consolidation deferred per #8211.',
+  },
+  {
+    code: 'NOT_FOUND',
+    shadows: 'RESOURCE_NOT_FOUND',
+    reason: 'Pre-gate synonym on the wire from @objectstack/rest and plugin-sharing. ' +
+      'Wire value kept; consolidation deferred per #8211.',
+  },
+  {
+    code: 'UNAUTHORIZED',
+    shadows: 'UNAUTHENTICATED',
+    reason: 'Pre-gate synonym (401 reason phrase) on the wire from @objectstack/rest — ' +
+      'surfaced by the detector when the #8211 gate landed, beyond the four the card named; ' +
+      'same class, same grandfather rationale. Wire value kept; consolidation deferred per #8211.',
+  },
+];
+
+/** One unwaived semantic-synonym registration, as reported by {@link standardSynonymViolations}. */
+export interface StandardSynonymViolation {
+  /** The ledger owner key registering the offending code. */
+  package: string;
+  /** The registered code that re-spells a standard member's condition. */
+  code: string;
+  /** The standard-catalog member the code is a synonym of. */
+  shadows: StandardErrorCode;
+}
+
+/**
+ * Every ledger row whose code {@link standardSynonymOf} flags as a semantic
+ * synonym of a standard-catalog member without a matching
+ * {@link STANDARD_SYNONYM_WAIVERS} entry (#8211). Empty on an admissible
+ * ledger — the admission gate in `error-code-ledger.test.ts` asserts exactly
+ * that, and pins that this same function goes red when a new synonym lands.
+ * A waiver admits only the exact `(code, shadows)` pair it records.
+ */
+export function standardSynonymViolations(
+  ledger: Record<string, readonly string[]> = ERROR_CODE_LEDGER,
+  waivers: readonly StandardSynonymWaiver[] = STANDARD_SYNONYM_WAIVERS,
+): StandardSynonymViolation[] {
+  const waived = new Map(waivers.map((waiver) => [waiver.code, waiver.shadows]));
+  const violations: StandardSynonymViolation[] = [];
+  for (const [pkg, codes] of Object.entries(ledger)) {
+    for (const code of codes) {
+      const shadows = standardSynonymOf(code);
+      if (shadows === undefined) continue;
+      if (waived.get(code) === shadows) continue;
+      violations.push({ package: pkg, code, shadows });
+    }
+  }
+  return violations;
+}

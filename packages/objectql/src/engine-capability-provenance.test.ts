@@ -24,8 +24,10 @@
  * Consequence before the fix: `plugin-security`'s `bootstrapDeclaredCapabilities`
  * resolves the owner as `cap._packageId ?? cap.packageId` and reads its input
  * with `readDeclared(ql, 'capability')`, which is
- * `engine.registry.listItems('capability')` mapped through `i?.content ?? i`
- * (`packages/plugins/plugin-security/src/bootstrap-declared-permissions.ts:61-69`).
+ * `engine.registry.listItems('capability')`, filtered
+ * (`packages/plugins/plugin-security/src/bootstrap-declared-permissions.ts`).
+ * That read used to map through `i?.content ?? i`; #8378 retired the unwrap
+ * across this family after measuring the envelope has no producer.
  * With `capabilities` outside the seam that list was ALWAYS empty, so the
  * `_packageId` half of that `??` could never be satisfied and the author-side
  * `packageId` — documented in `CapabilityDeclarationSchema` as the *fallback*
@@ -48,11 +50,15 @@ import { ObjectQL } from './engine';
 /**
  * The exact read `bootstrapDeclaredCapabilities` performs on the engine, kept
  * in one place so the shape this suite depends on is stated once:
- * `readDeclared(ql, type)` → `registry.listItems(type)` unwrapped by
- * `content ?? item`.
+ * `readDeclared(ql, type)` → `registry.listItems(type)`, filtered.
+ *
+ * [#8378] The `content ?? item` unwrap this helper used to mirror is gone from
+ * the production read. It was a no-op here — these tests drive a REAL
+ * `ObjectQL`, whose `registerMetadataCollections` registers each item as-is —
+ * which is exactly the measurement that retired it.
  */
 function readDeclaredShape(engine: ObjectQL, type: string): any[] {
-  return (engine.registry.listItems<any>(type) ?? []).map((i: any) => i?.content ?? i).filter(Boolean);
+  return (engine.registry.listItems<any>(type) ?? []).filter(Boolean);
 }
 
 const PKG = 'com.acme.exporter';

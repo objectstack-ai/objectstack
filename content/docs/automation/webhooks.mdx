@@ -504,13 +504,20 @@ The plugin mounts exactly **one** custom endpoint:
 
 | Method | Path                        | Body              | Purpose                                          |
 |--------|-----------------------------|-------------------|--------------------------------------------------|
-| POST   | `/api/v1/webhooks/redeliver` | `{ deliveryId }`  | Re-queue a previously failed/dead delivery.      |
+| POST   | `/api/v1/webhooks/redeliver` | `{ deliveryId }`  | Re-queue a delivery that was **attempted** and failed. A row that was never attempted cannot be redelivered. |
 
 It delegates to `messaging.redeliverHttp(deliveryId)` and is guarded by the
 better-auth session (any authenticated user). Failures answer in the declared
 envelope — `{ success: false, error: { code, message } }` — with `401`
 `UNAUTHENTICATED`, `400` `INVALID_REQUEST` or `MISSING_REQUIRED_FIELD`, `404`
-`RESOURCE_NOT_FOUND`, `409` `DELIVERY_NOT_ELIGIBLE` (ADR-0112). There are no
+`RESOURCE_NOT_FOUND`, `409` `DELIVERY_NOT_ELIGIBLE`, or `409`
+`DELIVERY_NEVER_SENT` (ADR-0112). The last one is the refusal behind the table
+row above: a row with `attempts = 0` is a durable record of a delivery that
+could never be prepared — its webhook's signing secret could not be decrypted —
+so it carries **no HMAC signature**, and re-queuing it would not replay
+anything, it would send the payload for the first time and send it unsigned.
+Fix the signing configuration instead; the subscription re-arms on its own and
+subsequent events are delivered signed. There are no
 `/webhooks/:id/test`, `/rotate`, `/deliveries`, or per-delivery redeliver routes.
 
 ## 9. Concurrency & rate-limiting

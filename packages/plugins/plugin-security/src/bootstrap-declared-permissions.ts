@@ -57,12 +57,27 @@ interface SeedOptions {
  * items provenance-stamped with `_packageId`) is the reliable source in every
  * boot path; the metadata-service facade only surfaces these once the
  * compiled-artifact loader runs (serve.ts).
+ *
+ * [#8378] The registered item IS the authoring document — there is no
+ * `{ name, content }` envelope to unwrap, so the `i?.content ?? i` this read
+ * used to carry is gone. Same measurement #7519 made for `MetadataFacade`,
+ * re-taken at this seam: `registerMetadataCollections` (objectql `engine.ts`)
+ * registers each stack-collection element as-is, and `loadMetaFromDb` registers
+ * `convertStoredItem(JSON.parse(record.metadata))` — the parsed body, never the
+ * `sys_metadata` row. Nothing in the tree produces the envelope.
+ *
+ * Removal is a FIX, not a tidy-up. The types read through here (`permission`,
+ * `capability`, `object`) all reject `content` as an unrecognized key, so
+ * whenever the key did appear the unwrap replaced a whole authoring document
+ * with one of its values — and `''`, falsy but non-nullish, passed `??` and
+ * then died at the `filter(Boolean)` below, dropping the item with no
+ * diagnostic at all.
  */
 export function readDeclared(engine: any, type: string): any[] {
   try {
     const reg = engine?.registry;
     if (reg?.listItems) {
-      return (reg.listItems(type) ?? []).map((i: any) => i?.content ?? i).filter(Boolean);
+      return (reg.listItems(type) ?? []).filter(Boolean);
     }
   } catch { /* fall through */ }
   return [];

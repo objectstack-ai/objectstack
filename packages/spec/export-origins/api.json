@@ -834,6 +834,7 @@
     "RuntimeAuthoringIssue": "src/api/protocol.zod.ts#RuntimeAuthoringIssue (type)",
     "RuntimeAuthoringIssueSchema": "src/api/protocol.zod.ts#RuntimeAuthoringIssueSchema (const)",
     "SERVICE_SELF_INFO_KEY": "src/api/discovery.zod.ts#SERVICE_SELF_INFO_KEY (const)",
+    "STANDARD_SYNONYM_WAIVERS": "src/api/error-code-ledger.zod.ts#STANDARD_SYNONYM_WAIVERS (const)",
     "SaveMetaItemRequest": "src/api/protocol.zod.ts#SaveMetaItemRequest (type)",
     "SaveMetaItemRequestSchema": "src/api/protocol.zod.ts#SaveMetaItemRequestSchema (const)",
     "SaveMetaItemResponse": "src/api/protocol.zod.ts#SaveMetaItemResponse (type)",
@@ -873,6 +874,9 @@
     "SingleRecordResponseSchema": "src/api/contract.zod.ts#SingleRecordResponseSchema (const)",
     "StandardApiContracts": "src/api/contract.zod.ts#StandardApiContracts (const)",
     "StandardErrorCode": "src/api/errors.zod.ts#StandardErrorCode (type)",
+    "StandardSynonymViolation": "src/api/error-code-ledger.zod.ts#StandardSynonymViolation (interface)",
+    "StandardSynonymWaiver": "src/api/error-code-ledger.zod.ts#StandardSynonymWaiver (type)",
+    "StandardSynonymWaiverSchema": "src/api/error-code-ledger.zod.ts#StandardSynonymWaiverSchema (const)",
     "StorageApiContracts": "src/api/storage.zod.ts#StorageApiContracts (const)",
     "SubscribeMessage": "src/api/websocket.zod.ts#SubscribeMessage (type)",
     "SubscribeMessageSchema": "src/api/websocket.zod.ts#SubscribeMessageSchema (const)",
@@ -998,6 +1002,8 @@
     "readServiceSelfInfo": "src/api/discovery.zod.ts#readServiceSelfInfo (function)",
     "resolveDiscoveryEnvironment": "src/api/discovery.zod.ts#resolveDiscoveryEnvironment (function)",
     "standardErrorCodeForHttpStatus": "src/api/errors.zod.ts#standardErrorCodeForHttpStatus (function)",
+    "standardSynonymOf": "src/api/error-code-ledger.zod.ts#standardSynonymOf (function)",
+    "standardSynonymViolations": "src/api/error-code-ledger.zod.ts#standardSynonymViolations (function)",
     "validateApiEndpointDeclarations": "src/api/endpoint-publish-gate.ts#validateApiEndpointDeclarations (function)",
     "zodIssuesToFields": "src/api/zod-issues-to-fields.ts#zodIssuesToFields (function)"
   }

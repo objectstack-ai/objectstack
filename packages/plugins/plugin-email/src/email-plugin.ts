@@ -1168,7 +1168,13 @@ export class EmailServicePlugin implements Plugin {
         ? await evt.metadataService?.get?.('email_template', String(evt.name))
         : undefined);
       if (!raw) return;
-      await upsertDeclaredEmailTemplate(engine, (raw as any)?.content ?? raw, undefined, ctx.logger as any);
+      // [#8378] `evt.body` / `metadataService.get` hand back the authoring
+      // document itself — there is no `{ name, content }` envelope. Unwrapping
+      // could only have replaced the template with one of its values, and on
+      // this door `content` cannot even arrive: `saveMetaItem` validates every
+      // `email_template` write against `EmailTemplateDefinitionSchema` and
+      // refuses the key with 422 `INVALID_METADATA` before persisting.
+      await upsertDeclaredEmailTemplate(engine, raw, undefined, ctx.logger as any);
       ctx.logger.info(`EmailServicePlugin: email template '${evt.name}' materialized from a runtime write`);
     } catch (err: any) {
       ctx.logger.warn(
@@ -1228,7 +1234,9 @@ export class EmailServicePlugin implements Plugin {
     }
     if (!answered) return FAILED_READ;
     if (!item) return undefined;
-    return stripReadDecorations((item as any)?.content ?? item);
+    // [#8378] The effective read answers the template document itself; no
+    // `{ name, content }` envelope exists to unwrap on this path either.
+    return stripReadDecorations(item);
   }
 
   async dispose(): Promise<void> {

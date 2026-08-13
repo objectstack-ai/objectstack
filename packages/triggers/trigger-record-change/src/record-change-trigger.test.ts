@@ -3,6 +3,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import type { HookContext } from '@objectstack/spec/data';
+import { ExpressionEngine } from '@objectstack/formula';
 import {
     RecordChangeTrigger,
     triggerTypeToHookEvent,
@@ -12,6 +13,13 @@ import {
     type TriggerLogger,
 } from './record-change-trigger.js';
 import { RecordChangeTriggerPlugin } from './plugin.js';
+
+/** CEL-evaluate `source` against `record` — the SAME engine the automation
+ *  service and rule-validator use, so a `record.a != null` fault/pass here is
+ *  the real fault a flow's start/edge condition would hit, not a stand-in. */
+function evalCel(source: string, ctx: { record?: Record<string, unknown>; previous?: Record<string, unknown> }) {
+    return ExpressionEngine.evaluate<boolean>({ dialect: 'cel', source }, ctx);
+}
 
 // ─── Test doubles ───────────────────────────────────────────────────
 
@@ -311,7 +319,15 @@ describe('RecordChangeTrigger', () => {
     // put back (`data` sits first in the read, so it wins either way), so the
     // NEGATIVE case is the one carrying the weight — it goes red the moment any
     // alias limb returns.
-    it('seeds the record from input.data when result is absent (e.g. before-hooks)', async () => {
+    //
+    // [#4953, services half] The expected object grew an `_id` and `assignee`
+    // that `hookCtx()`'s default `previous` carries and `data` does not touch —
+    // a before-hook's `record` now layers the prior row as its BASE (so an
+    // untouched declared field keeps its real persisted value instead of going
+    // missing/`null`), and `data`'s own `status` still wins over `previous`'s
+    // stale one. That `status` win is what this test still pins: the payload
+    // key read is `data`, never `doc`.
+    it('seeds the record from input.data OVER previous when result is absent (e.g. before-hooks)', async () => {
         const { engine, hooks } = fakeEngine();
         const trigger = new RecordChangeTrigger(engine, silentLogger());
         let captured: AutomationContext | undefined;
@@ -322,7 +338,7 @@ describe('RecordChangeTrigger', () => {
 
         await hooks[0].handler(hookCtx({ event: 'beforeUpdate', result: undefined }));
 
-        expect(captured?.record).toEqual({ status: 'done' });
+        expect(captured?.record).toEqual({ _id: 't1', status: 'done', assignee: 'u1' });
     });
 
     it('does NOT read a `doc` alias off input — no engine path produces that key', async () => {
@@ -671,15 +687,23 @@ describe('RecordChangeTrigger — skipTriggers suppression', () => {
     });
 });
 
-// ─── Computed-field hydration guards (#3426 follow-up) ──────────────
+// ─── Computed-field hydration guards (#3426 follow-up, #8482) ───────
 //
 // The hydration re-read (#3426, #3445) is gated two ways: skipped when the
 // object declares no `formula` field, and memoized so N flows on one write
-// share a single re-read. These drive a fakeEngine with findOne/getObjectConfig
+// share a single re-read. These drive a fakeEngine with findOne/getObject
 // spies and a hook ctx whose result carries a real `id` (the default hookCtx
 // uses `_id`, so hydration's `record.id` is undefined and never re-reads).
+//
+// `getObject` — not a separate `getObjectConfig` — is the schema-gate
+// accessor since #8482: it is the ONE object-schema accessor the concrete
+// ObjectQL engine actually implements (confirmed by
+// `record-change-integration.test.ts`'s "hydration schema gate — real
+// ObjectQL engine findOne count" block below, which runs this exact gate
+// against a REAL engine rather than a hand-attached mock — the vacuity these
+// fakeEngine tests alone cannot rule out).
 
-describe('RecordChangeTrigger computed-field hydration guards (#3426 follow-up)', () => {
+describe('RecordChangeTrigger computed-field hydration guards (#3426 follow-up, #8482)', () => {
     /** A hook ctx whose after-row has a real `id`, so hydration proceeds. */
     function idCtx(overrides: Partial<HookContext> = {}): HookContext {
         return hookCtx({ event: 'afterUpdate', result: { id: 't1', status: 'done' }, ...overrides });
@@ -688,22 +712,22 @@ describe('RecordChangeTrigger computed-field hydration guards (#3426 follow-up)'
     it('skips the re-read when the object declares no formula field (schema gate)', async () => {
         const { engine, hooks } = fakeEngine();
         const findOne = vi.fn().mockResolvedValue({ id: 't1', full_name: 'X' });
-        const getObjectConfig = vi.fn().mockReturnValue({ fields: { title: { type: 'text' } } });
-        Object.assign(engine, { findOne, getObjectConfig });
+        const getObject = vi.fn().mockReturnValue({ fields: { title: { type: 'text' } } });
+        Object.assign(engine, { findOne, getObject });
         const trigger = new RecordChangeTrigger(engine, silentLogger());
 
         trigger.start(binding(), async () => {});
         await hooks[0].handler(idCtx());
 
-        expect(getObjectConfig).toHaveBeenCalledWith('showcase_task');
+        expect(getObject).toHaveBeenCalledWith('showcase_task');
         expect(findOne).not.toHaveBeenCalled();
     });
 
     it('re-reads and hydrates when the object declares a formula field', async () => {
         const { engine, hooks } = fakeEngine();
         const findOne = vi.fn().mockResolvedValue({ id: 't1', status: 'done', full_name: 'Ada Lovelace' });
-        const getObjectConfig = vi.fn().mockReturnValue({ fields: { full_name: { type: 'formula' } } });
-        Object.assign(engine, { findOne, getObjectConfig });
+        const getObject = vi.fn().mockReturnValue({ fields: { full_name: { type: 'formula' } } });
+        Object.assign(engine, { findOne, getObject });
         const trigger = new RecordChangeTrigger(engine, silentLogger());
         let seen: AutomationContext | undefined;
 
@@ -717,10 +741,10 @@ describe('RecordChangeTrigger computed-field hydration guards (#3426 follow-up)'
         expect((seen?.record as Record<string, unknown>).status).toBe('done');
     });
 
-    it('re-reads unconditionally when the engine has no getObjectConfig (prior behavior)', async () => {
+    it('re-reads unconditionally when the engine has no getObject (prior behavior)', async () => {
         const { engine, hooks } = fakeEngine();
         const findOne = vi.fn().mockResolvedValue({ id: 't1', full_name: 'X' });
-        Object.assign(engine, { findOne }); // no getObjectConfig surface
+        Object.assign(engine, { findOne }); // no getObject surface
         const trigger = new RecordChangeTrigger(engine, silentLogger());
 
         trigger.start(binding(), async () => {});
@@ -732,8 +756,8 @@ describe('RecordChangeTrigger computed-field hydration guards (#3426 follow-up)'
     it('memoizes the re-read across N flows sharing one write (single findOne)', async () => {
         const { engine, hooks } = fakeEngine();
         const findOne = vi.fn().mockResolvedValue({ id: 't1', full_name: 'X' });
-        const getObjectConfig = vi.fn().mockReturnValue({ fields: { full_name: { type: 'formula' } } });
-        Object.assign(engine, { findOne, getObjectConfig });
+        const getObject = vi.fn().mockReturnValue({ fields: { full_name: { type: 'formula' } } });
+        Object.assign(engine, { findOne, getObject });
         const trigger = new RecordChangeTrigger(engine, silentLogger());
 
         // Two flows on the same object/event → two hooks, one trigger instance.
@@ -752,8 +776,8 @@ describe('RecordChangeTrigger computed-field hydration guards (#3426 follow-up)'
     it('re-reads again for a DIFFERENT write (distinct ctx, not cross-write cached)', async () => {
         const { engine, hooks } = fakeEngine();
         const findOne = vi.fn().mockResolvedValue({ id: 't1', full_name: 'X' });
-        const getObjectConfig = vi.fn().mockReturnValue({ fields: { full_name: { type: 'formula' } } });
-        Object.assign(engine, { findOne, getObjectConfig });
+        const getObject = vi.fn().mockReturnValue({ fields: { full_name: { type: 'formula' } } });
+        Object.assign(engine, { findOne, getObject });
         const trigger = new RecordChangeTrigger(engine, silentLogger());
 
         trigger.start(binding(), async () => {});
@@ -761,5 +785,168 @@ describe('RecordChangeTrigger computed-field hydration guards (#3426 follow-up)'
         await hooks[0].handler(idCtx()); // a fresh ctx object = a new write
 
         expect(findOne).toHaveBeenCalledTimes(2);
+    });
+});
+
+// ─── declared-field materialization (#4953, services half) ──────────
+//
+// Measured mechanism (matches the issue's own repro, run here through the
+// SAME `@objectstack/formula` CEL engine the automation service and
+// rule-validator use — not a stand-in):
+//
+//   evalCel('record.a != null', { record: { a: null } })  → { ok: true,  value: false }
+//   evalCel('record.a != null', { record: {} })            → { ok: false, error: 'No such key: a' }
+//
+// So whether a declared field is a present key (even holding `null`) decides
+// whether a flow's `record.x != null` start/edge condition evaluates at all.
+describe('RecordChangeTrigger materializes declared fields (#4953, services half)', () => {
+    /** fakeEngine + a `getObject` returning the given field map (the ONE
+     *  method actually wired on the real ObjectQL engine — `getObjectConfig`
+     *  is not, see the interface doc on `RecordChangeDataEngine`). */
+    function fakeEngineWithSchema(fields: Record<string, unknown>) {
+        const base = fakeEngine();
+        const getObject = vi.fn().mockReturnValue({ fields });
+        const engine: RecordChangeDataEngine = { ...base.engine, getObject };
+        return { engine, hooks: base.hooks, getObject };
+    }
+
+    it('RED before the fix, reproduced directly: the OLD raw merge faults on an untouched declared field', () => {
+        // What `buildContext` used to hand CEL for this exact scenario — the
+        // driver's after-row + payload, with NO prior-row fold-in and no
+        // materialization. `a` is declared on the object but this write never
+        // mentions it and the driver didn't echo it back.
+        const oldShapeRecord = { ...{ b: 'new' }, ...{ id: 'r1', b: 'new' } }; // { id, b } — no `a`
+        const res = evalCel('record.a != null', { record: oldShapeRecord });
+        expect(res.ok).toBe(false);
+        expect(String((res as { error?: { message?: string } }).error?.message)).toMatch(/no such key/i);
+    });
+
+    it('GREEN after the fix: an untouched declared field resolves to its REAL persisted value, not null (no fabrication)', async () => {
+        const { engine, hooks } = fakeEngineWithSchema({ a: { type: 'text' }, b: { type: 'text' } });
+        const trigger = new RecordChangeTrigger(engine, silentLogger());
+        let captured: AutomationContext | undefined;
+
+        trigger.start(binding({ event: 'record-after-update' }), async (ctx) => { captured = ctx; });
+        // Update touches only `b`. The driver's after-row echoes `id` + `b`
+        // ONLY (the #1872 gap) — but `a`'s real value ('orig') is known from
+        // `previous`, the row the engine fetched ahead of dispatch (#7867).
+        await hooks[0].handler(hookCtx({
+            event: 'afterUpdate',
+            input: { id: 'r1', data: { b: 'new' } },
+            result: { id: 'r1', b: 'new' },
+            previous: { id: 'r1', a: 'orig', b: 'old' },
+        }));
+
+        const record = captured?.record as Record<string, unknown>;
+        // Folded from `previous`, NOT materialized to null — materialization
+        // only fills what is GENUINELY unknown, never overrides a known value.
+        expect(record.a).toBe('orig');
+        expect(record.b).toBe('new'); // the write's own value still wins
+
+        const res = evalCel('record.a != null', { record });
+        expect(res).toEqual({ ok: true, value: true });
+    });
+
+    it('GREEN after the fix: a field never set anywhere materializes to null (has() true, != null false — no fault)', async () => {
+        const { engine, hooks } = fakeEngineWithSchema({ a: { type: 'text' }, b: { type: 'text' }, c: { type: 'text' } });
+        const trigger = new RecordChangeTrigger(engine, silentLogger());
+        let captured: AutomationContext | undefined;
+
+        trigger.start(binding({ event: 'record-after-update' }), async (ctx) => { captured = ctx; });
+        // Neither `previous` nor this write ever mentions `c` — it genuinely
+        // has no value, so `null` here is a materialised absence, not a
+        // fabrication.
+        await hooks[0].handler(hookCtx({
+            event: 'afterUpdate',
+            input: { id: 'r1', data: { b: 'new' } },
+            result: { id: 'r1', b: 'new' },
+            previous: { id: 'r1', a: 'x', b: 'old' },
+        }));
+
+        const record = captured?.record as Record<string, unknown>;
+        expect(record.c).toBeNull();
+        expect(evalCel('record.c != null', { record })).toEqual({ ok: true, value: false });
+        // The documented, PINNED consequence (#4649 contract, unchanged here):
+        // has() on a declared field is uniformly true once materialised — it
+        // guards an undeclared KEY, never an empty value.
+        expect(evalCel('has(record.c)', { record })).toEqual({ ok: true, value: true });
+    });
+
+    it('does NOT materialize on update when the prior row is unavailable (no fabrication without ground truth)', async () => {
+        const { engine, hooks } = fakeEngineWithSchema({ a: { type: 'text' }, b: { type: 'text' } });
+        const trigger = new RecordChangeTrigger(engine, silentLogger());
+        let captured: AutomationContext | undefined;
+
+        trigger.start(binding({ event: 'record-after-update' }), async (ctx) => { captured = ctx; });
+        await hooks[0].handler(hookCtx({
+            event: 'afterUpdate',
+            input: { id: 'r1', data: { b: 'new' } },
+            result: { id: 'r1', b: 'new' },
+            previous: undefined, // prior row not in hand
+        }));
+
+        const record = captured?.record as Record<string, unknown>;
+        expect('a' in record).toBe(false); // left sparse, not fabricated
+        const res = evalCel('record.a != null', { record });
+        expect(res.ok).toBe(false); // fails closed, same policy as the validation seam
+    });
+
+    it('materializes unconditionally on insert (absence genuinely means "no value")', async () => {
+        const { engine, hooks } = fakeEngineWithSchema({ a: { type: 'text' }, b: { type: 'text' } });
+        const trigger = new RecordChangeTrigger(engine, silentLogger());
+        let captured: AutomationContext | undefined;
+
+        trigger.start(binding({ event: 'record-after-create' }), async (ctx) => { captured = ctx; });
+        await hooks[0].handler(hookCtx({
+            event: 'afterInsert',
+            input: { data: { b: 'new' } },
+            result: { id: 'r1', b: 'new' },
+            previous: undefined,
+        }));
+
+        const record = captured?.record as Record<string, unknown>;
+        expect(record.a).toBeNull();
+        expect(evalCel('record.a != null', { record })).toEqual({ ok: true, value: false });
+    });
+
+    it('materializes the `previous` root too, WITHOUT mutating the shared ctx.previous (no cross-binding leakage)', async () => {
+        const { engine, hooks } = fakeEngineWithSchema({ a: { type: 'text' }, b: { type: 'text' } });
+        const trigger = new RecordChangeTrigger(engine, silentLogger());
+        let captured: AutomationContext | undefined;
+        // The SAME object the engine would hand to every OTHER flow binding
+        // sharing this write's HookContext.
+        const sharedPrevious: Record<string, unknown> = { id: 'r1', b: 'old' }; // `a` never set
+
+        trigger.start(binding({ event: 'record-after-update' }), async (ctx) => { captured = ctx; });
+        await hooks[0].handler(hookCtx({
+            event: 'afterUpdate',
+            input: { id: 'r1', data: { b: 'new' } },
+            result: { id: 'r1', b: 'new' },
+            previous: sharedPrevious,
+        }));
+
+        expect((captured?.previous as Record<string, unknown>).a).toBeNull();
+        // The shared object itself must be untouched — a second binding on the
+        // same write must not see a materialised null it never asked for.
+        expect('a' in sharedPrevious).toBe(false);
+    });
+
+    it('is a no-op when the engine has no getObject (structural fallback, no crash)', async () => {
+        const { engine, hooks } = fakeEngine(); // no getObject surface at all
+        const trigger = new RecordChangeTrigger(engine, silentLogger());
+        let captured: AutomationContext | undefined;
+
+        trigger.start(binding({ event: 'record-after-update' }), async (ctx) => { captured = ctx; });
+        await hooks[0].handler(hookCtx({
+            event: 'afterUpdate',
+            input: { id: 'r1', data: { b: 'new' } },
+            result: { id: 'r1', b: 'new' },
+            previous: { id: 'r1', a: 'orig', b: 'old' },
+        }));
+
+        const record = captured?.record as Record<string, unknown>;
+        // previous is still folded in as the base layer (that part doesn't
+        // need field declarations) — only the null-fill step is skipped.
+        expect(record.a).toBe('orig');
     });
 });

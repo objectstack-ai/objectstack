@@ -5,12 +5,16 @@ import { hashPartition } from './backoff.js';
 import { deliveryBody, signBody } from './http-sender.js';
 import {
     HttpRedeliverError,
+    assertEnqueueDeliverable,
+    assertRedeliverAllowed,
     type EnqueueHttpInput,
     type HttpAckResult,
     type HttpClaimOptions,
     type HttpDelivery,
     type HttpDeliveryStatus,
     type IHttpOutbox,
+    type RedeliverGuard,
+    type UndeliverableHttpInput,
 } from './http-outbox.js';
 
 /**
@@ -30,6 +34,29 @@ export class MemoryHttpOutbox implements IHttpOutbox {
     private readonly dedup = new Map<string, string>();
 
     async enqueue(input: EnqueueHttpInput): Promise<string> {
+        assertEnqueueDeliverable(input);
+        return this.insert(input, {
+            signature: input.signingSecret
+                ? signBody(deliveryBody(input.payload), input.signingSecret)
+                : undefined,
+            status: 'pending',
+            error: undefined,
+        });
+    }
+
+    /**
+     * [#8069] Park a delivery that can never be sent — same row shape the SQL
+     * outbox writes, so a test that inspects a parked row here is looking at
+     * what production persists.
+     */
+    async recordUndeliverable(input: UndeliverableHttpInput): Promise<string> {
+        return this.insert(input, { signature: undefined, status: 'dead', error: input.reason });
+    }
+
+    private insert(
+        input: Omit<EnqueueHttpInput, 'signingSecret' | 'undeliverableReason'>,
+        terminal: { signature: string | undefined; status: HttpDeliveryStatus; error?: string },
+    ): string {
         const dedupKey = `${input.source}::${input.dedupKey}`;
         const existing = this.dedup.get(dedupKey);
         if (existing) return existing;
@@ -45,13 +72,12 @@ export class MemoryHttpOutbox implements IHttpOutbox {
             url: input.url,
             method: input.method ?? 'POST',
             headers: input.headers,
-            signature: input.signingSecret
-                ? signBody(deliveryBody(input.payload), input.signingSecret)
-                : undefined,
+            signature: terminal.signature,
             timeoutMs: input.timeoutMs,
             payload: input.payload,
-            status: 'pending',
+            status: terminal.status,
             attempts: 0,
+            error: terminal.error,
             createdAt: now,
             updatedAt: now,
         };
@@ -130,17 +156,14 @@ export class MemoryHttpOutbox implements IHttpOutbox {
         return all;
     }
 
-    async redeliver(id: string): Promise<HttpDelivery> {
+    async redeliver(id: string, guard?: RedeliverGuard): Promise<HttpDelivery> {
         const row = this.rows.get(id);
         if (!row) {
             throw new HttpRedeliverError(`Delivery row '${id}' not found`, 'RESOURCE_NOT_FOUND');
         }
-        if (row.status !== 'success' && row.status !== 'failed' && row.status !== 'dead') {
-            throw new HttpRedeliverError(
-                `Delivery row '${id}' is '${row.status}', expected one of: success, failed, dead`,
-                'DELIVERY_NOT_ELIGIBLE',
-            );
-        }
+        // [#8069] Refuse BEFORE any mutation — a refused redelivery must leave
+        // the row byte-identical, including its `dead` status and its reason.
+        await assertRedeliverAllowed({ ...row }, guard);
         const now = Date.now();
         row.status = 'pending';
         row.attempts = 0;

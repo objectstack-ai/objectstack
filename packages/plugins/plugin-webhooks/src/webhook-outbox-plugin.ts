@@ -12,6 +12,7 @@ import { AutoEnqueuer, type AutoEnqueuerOptions } from './auto-enqueuer.js';
 import { SysWebhook } from './sys-webhook.object.js';
 import { bootstrapDeclaredWebhooks } from './bootstrap-declared-webhooks.js';
 import { migrateLegacyWebhookSecrets } from './migrate-webhook-secrets.js';
+import { createWebhookRedeliverGuard } from './redeliver-guard.js';
 import { bindWebhookProvenanceStamp, unbindWebhookProvenanceStamp } from './webhook-provenance.js';
 
 /**
@@ -24,6 +25,17 @@ interface MessagingHttpSurface {
     isHttpDeliveryReady(): boolean;
     enqueueHttp(input: EnqueueHttpInput): Promise<string>;
     redeliverHttp(id: string): Promise<{ id: string; status: string }>;
+    /**
+     * [#8069] Where this plugin's veto over redelivering `source: 'webhook'`
+     * rows is installed. Declared REQUIRED on this structural view even though
+     * the import is type-only: a messaging build without it cannot enforce the
+     * refusal, and {@link WebhookOutboxPlugin.installRedeliverGuard} says so at
+     * `error` rather than arming the endpoint with a guarantee nothing keeps.
+     */
+    registerRedeliverGuard(
+        source: string,
+        guard: (row: { source: string; refId: string }) => Promise<string | undefined>,
+    ): void;
 }
 
 export interface WebhookOutboxPluginOptions {
@@ -233,6 +245,10 @@ export class WebhookOutboxPlugin implements Plugin {
         }
 
         const enqOpts = (typeof opt === 'object' ? opt : {}) as AutoEnqueuerOptions;
+        // [#8069] Install the redelivery veto BEFORE the enqueuer starts
+        // writing rows, so no delivery row can ever exist while the refusal
+        // that protects it does not.
+        this.installRedeliverGuard(ctx, messaging, engine, enqOpts.subscriptionsObject);
         this.autoEnqueuer = new AutoEnqueuer(
             engine,
             realtime,
@@ -242,6 +258,42 @@ export class WebhookOutboxPlugin implements Plugin {
         await this.autoEnqueuer.start();
         ctx.registerService('webhook.autoEnqueuer', this.autoEnqueuer);
         ctx.logger.info?.('[webhook-auto-enqueuer] started (enqueues source=webhook onto sys_http_delivery)');
+    }
+
+    /**
+     * [#8069] Register {@link createWebhookRedeliverGuard} with messaging, so
+     * `redeliver()` refuses a webhook row whose signing configuration is no
+     * longer available — for EVERY caller, not just the
+     * `POST /api/v1/webhooks/redeliver` route.
+     *
+     * Absence is loud, and `error` is the right level by AGENTS.md's one
+     * question: with no guard installed the endpoint still answers 200 and the
+     * dispatcher still reports a delivery, while the fail-closed signing
+     * guarantee the system claims (#7799) is not actually being kept. That is a
+     * durability/consistency degradation wearing a functional one's clothes.
+     */
+    private installRedeliverGuard(
+        ctx: PluginContext,
+        messaging: MessagingHttpSurface,
+        engine: IDataEngine,
+        subscriptionsObject?: string,
+    ): void {
+        if (typeof messaging.registerRedeliverGuard !== 'function') {
+            ctx.logger.error?.(
+                '[webhook-outbox] messaging service exposes no registerRedeliverGuard() — redelivery '
+                    + 'of a webhook whose signing configuration is gone CANNOT be refused, so an operator '
+                    + 'pressing redeliver may send a delivery that can no longer be authenticated '
+                    + '(#7799, #8069). The POST /api/v1/webhooks/redeliver endpoint is reachable by any '
+                    + 'authenticated user. Fix: upgrade @objectstack/service-messaging to a build that '
+                    + 'implements registerRedeliverGuard.',
+            );
+            return;
+        }
+        messaging.registerRedeliverGuard(
+            'webhook',
+            createWebhookRedeliverGuard(engine, subscriptionsObject),
+        );
+        ctx.logger.debug?.('[webhook-outbox] redeliver guard installed for source=webhook');
     }
 
     private tryGetService<T>(ctx: PluginContext, names: string[]): T | undefined {
@@ -301,7 +353,15 @@ export class WebhookOutboxPlugin implements Plugin {
                 if (code === 'RESOURCE_NOT_FOUND') {
                     return c.json({ success: false, error: { code, message: err.message } }, 404);
                 }
-                if (code === 'DELIVERY_NOT_ELIGIBLE') {
+                // [#8069] `DELIVERY_NEVER_SENT` is a refusal, not a server
+                // fault: the row is a parked record of a delivery that was
+                // never prepared, and re-sending it would be a FIRST delivery —
+                // unsigned, because the secret that would have signed it is
+                // what went missing. 409 alongside the eligibility refusal, so
+                // an operator tool can present both the same way; without this
+                // arm it would surface as a 500 and read as a transient glitch
+                // worth retrying.
+                if (code === 'DELIVERY_NOT_ELIGIBLE' || code === 'DELIVERY_NEVER_SENT') {
                     return c.json({ success: false, error: { code, message: err.message } }, 409);
                 }
                 ctx.logger.error?.('[webhook-outbox] redeliver failed', err as Error);

@@ -237,6 +237,7 @@ export type { SeedStateMachineFinding, SeedStateMachineSeverity } from './valida
 
 export {
   validateSecurityPosture,
+  validateSecurityRoleWord,
   SECURITY_OWD_UNSET,
   SECURITY_OWD_ALIAS,
   SECURITY_EXTERNAL_WIDER,
@@ -637,6 +638,7 @@ export type {
 // `@objectstack/lint/runtime` subpath — the entry the kernel boot path imports,
 // so a consumer there never names the graph that reaches the source parsers.
 export {
+  buildRuntimeWriteSnapshots,
   runRuntimeAuthoringRules,
   runtimeAuthoringRulesFor,
   runtimeGatedTypes,
