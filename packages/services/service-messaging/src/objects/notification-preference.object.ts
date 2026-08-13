@@ -83,7 +83,24 @@ export const NotificationPreference = ObjectSchema.create({
     },
 
     indexes: [
-        { fields: ['user_id', 'topic', 'channel'], unique: true },
+        // [#8554] Scope spelled EXPLICITLY (ADR-0120 D1). On a DECLARED index
+        // bare `unique: true` is the positional spelling of `'global'` — the
+        // listed columns VERBATIM — so `(user_id, topic, channel)` was an
+        // installation-wide key on a tenant-scoped object. This is the near-exact
+        // analogue of `sys_user_preference` (#8323): a user who belongs to two
+        // organizations could not hold INDEPENDENT per-topic toggles, because the
+        // first organization's row claimed the triple for the whole installation.
+        // Measured live before the fix: org_jia creates
+        // (user_u1, billing.invoice, email) 201 / org_yi the SAME triple 409
+        // UNIQUE_VIOLATION / org_yi the same pair on `push` 201 / org_yi a
+        // different topic on `email` 201 / org_yi's own GET on the colliding
+        // triple 0 rows.
+        //
+        // ⚠️ `managedBy: 'system-data'` is NOT a reason to exempt this object.
+        // The already-ruled `sys_user_preference` is `system-data` too; the
+        // ruling's phrase is ADMIN-AUTHORED CONTENT — the provenance of the
+        // rows, not the management mode of the object.
+        { fields: ['user_id', 'topic', 'channel'], unique: 'organization' },
         { fields: ['topic'] },
     ],
 });

@@ -380,8 +380,14 @@ export const PermissionSetSchema = lazySchema(() => strictObject(
       'believed a capability boundary was declared that the runtime never saw.',
   },
   {
-  /** Unique permission set name */
-  name: SnakeCaseIdentifierSchema.describe('Permission set unique name (lowercase snake_case)'),
+  // [#8554] "unique per organization", not bare "unique". This `describe()` is
+  // the SOURCE of the generated reference page
+  // (`content/docs/references/security/permission.mdx`), so the bare wording had
+  // already reached authors as published contract — the same route the
+  // `sys_position` accident took (#8468). `sys_permission_set` is tenant-scoped
+  // and the declared index is now `unique: 'organization'`.
+  /** Permission set name, unique per organization */
+  name: SnakeCaseIdentifierSchema.describe('Permission set name, unique per organization (lowercase snake_case)'),
   
   /** Display label */
   label: z.string().optional().describe('Display label'),
