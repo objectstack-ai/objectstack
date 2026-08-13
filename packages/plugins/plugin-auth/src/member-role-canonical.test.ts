@@ -33,7 +33,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { assertEngineUpdateDispatch } from '@objectstack/objectql';
@@ -55,7 +55,33 @@ import { BUILTIN_MEMBERSHIP_ROLES } from '@objectstack/spec/identity';
 // The vendor's three owner-tests, extracted from the installed package
 // ---------------------------------------------------------------------------
 
-const require_ = createRequire(import.meta.url);
+/**
+ * Locate this package by walking up from the CWD — the idiom
+ * `rate-limit-storage-isolation.test.ts` established here and states the reason
+ * for: plugin-auth is CJS-typed (no `"type": "module"`, it publishes
+ * `dist/index.js` as CommonJS), so under `module: NodeNext` `import.meta` is a
+ * TS1470 in this package however well it runs under vitest.
+ */
+function findUp(predicate: (dir: string) => boolean, what: string): string {
+  let dir = process.cwd();
+  for (;;) {
+    if (predicate(dir)) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) throw new Error(`could not locate ${what}`);
+    dir = parent;
+  }
+}
+
+const PKG = findUp((dir) => {
+  const manifest = join(dir, 'package.json');
+  if (!existsSync(manifest)) return false;
+  const { name } = JSON.parse(readFileSync(manifest, 'utf8')) as { name?: string };
+  return name === '@objectstack/plugin-auth';
+}, 'the @objectstack/plugin-auth package root');
+
+// Resolved from THIS package, so the file read is the better-auth this package
+// is pinned to — not whatever a hoist happens to put at the repo root.
+const require_ = createRequire(join(PKG, 'probe.js'));
 /** `…/better-auth/dist/index.mjs` → `…/better-auth/dist`. */
 const VENDOR_DIST = dirname(require_.resolve('better-auth'));
 const CRUD_MEMBERS = join(VENDOR_DIST, 'plugins', 'organization', 'routes', 'crud-members.mjs');
