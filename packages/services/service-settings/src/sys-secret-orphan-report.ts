@@ -220,15 +220,31 @@ export function collectEncryptedSpecifierRefs(
     const namespace = manifest?.namespace;
     if (!namespace) continue;
     for (const specifier of manifest.specifiers ?? []) {
-      if (specifier && (specifier as { encrypted?: unknown }).encrypted === true) {
-        out.push({ namespace, key: specifier.key });
-      }
+      if (!specifier || (specifier as { encrypted?: unknown }).encrypted !== true) continue;
+      // `key` is optional on the spec type (layout-only specifiers such as
+      // section headers carry none). A keyless specifier addresses no stored
+      // value, so it can never have produced a `sys_secret` row — skipping it
+      // keeps the attribution set to pairs that could really exist.
+      const key = specifier.key;
+      if (typeof key !== 'string' || key === '') continue;
+      out.push({ namespace, key });
     }
   }
   return out;
 }
 
-const refKey = (namespace: string, key: string) => `${namespace} ${key}`;
+/**
+ * Composite map key for a `(namespace, key)` pair.
+ *
+ * The separator is a NUL, written as the ESCAPE `\u0000` and never as the raw
+ * byte (`scripts/check-nul-bytes.mjs`; the same convention as `rest-server.ts`)
+ * -- byte-identical at run time. NUL rather than a printable separator because
+ * neither a settings namespace nor a specifier key can contain one, so no two
+ * distinct pairs can collide into one composite. A `.` or `/` separator would
+ * let ('a.b','c') and ('a','b.c') alias, and an aliased pair here silently
+ * changes a row's VERDICT.
+ */
+const refKey = (namespace: string, key: string) => `${namespace}\u0000${key}`;
 
 /**
  * Classify every `sys_secret` row against the settings subsystem's references.
