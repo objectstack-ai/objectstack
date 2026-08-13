@@ -84,6 +84,21 @@ function findSqlDriver(kernel: any): SqlDriverLike | null {
 }
 
 /**
+ * The same lookup, for callers that already hold a booted kernel (#8368's
+ * artifact-boot migration gate) instead of booting one through
+ * {@link bootSchemaStack}.
+ *
+ * Exported rather than re-derived at the call site so there stays ONE list of
+ * SQL-driver service names: a second copy would silently stop finding a driver
+ * the day a kind is added here, and "no SQL driver" is this gate's own
+ * everything-is-fine answer — the quietest possible way for a boot policy to
+ * stop running.
+ */
+export function findSqlDriverForKernel(kernel: unknown): SqlDriverLike | null {
+  return findSqlDriver(kernel);
+}
+
+/**
  * Arms the SQL driver's deferred-DDL mode before boot schema-sync can run
  * (#3917).
  *

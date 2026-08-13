@@ -171,6 +171,32 @@ export {
 export { loadArtifactBundle, mergeRuntimeModule, isHttpUrl, readArtifactSource } from './load-artifact-bundle.js';
 export type { LoadArtifactBundleOptions } from './load-artifact-bundle.js';
 
+// Artifact-pinned boot (#8368) — `OS_ARTIFACT_URL`, the SRI-style `#sha256=`
+// fragment pin, and the verified local materialisation the boot reads.
+export {
+    OS_ARTIFACT_URL_ENV,
+    DEFAULT_ARTIFACT_FETCH_TIMEOUT_MS,
+    ArtifactReferenceError,
+    parseArtifactReference,
+    resolveArtifactReference,
+    resolveArtifactFetchTimeoutMs,
+    assertArtifactProtocolCompatible,
+    redactArtifactUrl,
+    makeArtifactUrlScrubber,
+    sha256Hex,
+    artifactCacheDir,
+    pinnedCachePath,
+    stagedArtifactPath,
+} from './artifact-reference.js';
+export type {
+    ArtifactOrigin,
+    ArtifactReferenceErrorCode,
+    ArtifactReferenceKind,
+    ParsedArtifactReference,
+    ResolveArtifactReferenceOptions,
+    ResolvedArtifactReference,
+} from './artifact-reference.js';
+
 // ── ObjectOS Cloud Runtime (artifact-fetching shared multi-tenant host) ───────
 // Multi-tenant / cloud-operations code is NOT part of the framework
 // (ADR-0006). The MULTI-TENANT runtime — createObjectOSStack, the kernel
