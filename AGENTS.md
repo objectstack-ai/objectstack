@@ -204,7 +204,10 @@ your own fix, in a PR whose body accurately describes a change it does not conta
 real PR had 157 such deletions staged, caught only by the `MM`). Restore with
 `git checkout HEAD -- <path>` or `git restore --source=HEAD --staged --worktree <path>`
 — both reset index *and* tree — and read `git status --porcelain` before you commit;
-⛔ never trust `git diff HEAD` alone after a checkout-from-ref.
+⛔ never trust `git diff HEAD` alone after a checkout-from-ref. Better still, don't
+stage it at all: `git restore --source=<ref> -- <path>` (no `--staged`) writes the tree
+only — porcelain shows a lone unstaged `M`, not `MM` — so prefer it when standing
+another ref's version up for a counterfactual.
 
 **Claim the issue BEFORE you write any code.** Assign it to yourself
 (`gh issue edit <n> --add-assignee @me`, or `issue_write` with `assignees`) as the
