@@ -2814,7 +2814,7 @@ describe('ListViewSchema — retired striped/bordered/virtualScroll (#7176 pass-
   it('REJECTS the retired `striped` with the prescription', () => {
     expect(() => ListViewSchema.parse({
       type: 'grid', columns: ['name'], striped: true,
-    })).toThrow(/`view\.striped`.*removed.*no renderer ever applied it.*Delete the key/s);
+    })).toThrow(/`view\.striped`.*removed.*no renderer ever applied it.*delete the key/s);
   });
   it('REJECTS the retired `bordered` with the prescription', () => {
     expect(() => ListViewSchema.parse({
