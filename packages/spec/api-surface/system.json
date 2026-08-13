@@ -717,6 +717,7 @@
     "TrainingPlanSchema (const)",
     "TrainingRecord (type)",
     "TrainingRecordSchema (const)",
+    "TranslateDocumentOptions (interface)",
     "TranslationBundle (type)",
     "TranslationBundleSchema (const)",
     "TranslationConfig (type)",
