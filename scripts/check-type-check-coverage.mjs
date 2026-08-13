@@ -2637,12 +2637,24 @@ function selfTest() {
     );
   }
   {
-    const unmarked = driftMessage.split(RATCHET_AUTHORITY_MARKER).join('(unmarked)');
-    if (ratchetRemedyCarriesAuthority(unmarked)) {
+    // (3)'s fixture is SYNTHETIC, not the real message with the marker stripped
+    // out. Derived from the real message, this assertion also fired whenever the
+    // offer was reworded -- two named failures for one rot, and the second one
+    // misdescribed the cause ("the predicate is not discriminating" when in fact
+    // the detector had simply stopped matching). Built here from the same
+    // constant the detector is, it stays green under a rewording, so (1) owns
+    // that failure alone. Measured, not assumed: this exact case is why.
+    const unmarkedOffer = `TEST_DEBT drifted upward. raise the entry in ${SELF} AND rewrite its note.`;
+    if (!RATCHET_EXPANSION_OFFER.test(unmarkedOffer)) {
+      failures.push(
+        '#8435 convention — the synthetic unmarked-offer fixture is no longer recognised as an offer, ' +
+          'so it cannot test discrimination at all. Re-spell it to match RATCHET_EXPANSION_OFFER.',
+      );
+    } else if (ratchetRemedyCarriesAuthority(unmarkedOffer)) {
       failures.push(
         '#8435 convention — ratchetRemedyCarriesAuthority() ACCEPTED a message that offers the ' +
-          'ratchet-raising path with the marker stripped out. The predicate is not discriminating, so ' +
-          'the assertion above proves nothing.',
+          'ratchet-raising path with no marker at all. The predicate is not discriminating, so the ' +
+          'assertion above proves nothing.',
       );
     }
   }
