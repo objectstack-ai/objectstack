@@ -91,10 +91,15 @@
 //   - stubbing the very thing under assertion (objectui#3129) and missing
 //     counterparts (objectui#3134). Both live in the `objectui` repo, which
 //     this script cannot see, and #3134 names no double at all.
-//   - the READ side and the option surface (`find` filter semantics,
-//     unknown-option rejection). Same family, but each needs its own
-//     producer-side predicate extracted first -- the two write verbs have one
-//     because #4434 and #5480 paid for them.
+//   - the option surface (unknown-option rejection). Same family, but it needs
+//     its own producer-side predicate extracted first -- the two write verbs
+//     have one because #4434 and #5480 paid for them.
+//   - the READ side (`find` filter semantics) is no longer uncovered:
+//     `scripts/check-where-matcher-conformance.mjs` (#8494) holds it. It could
+//     not follow this gate's pattern, because extracting the producer-side
+//     predicate a read slice would need -- a shared `matchesWhere` -- was ruled
+//     NO on #7620 for these doubles specifically. So it asks each independent
+//     double a behavioural question instead of handing it an implementation.
 //   - a scoped repository that declares NO repository-only member. Measured on
 //     the corpus this landed against: `packages/runtime/src/action-body-identity
 //     .test.ts:71` is a real scoped facade (`createContext().object(name)`)
