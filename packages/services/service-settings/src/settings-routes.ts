@@ -25,6 +25,7 @@ import { SettingsService } from './settings-service.js';
 // mask shape and why it mirrors ADR-0100's encrypted-field convention.
 import { dropEchoedSecretMasks, redactSecretValues } from './settings-secret-redaction.js';
 import {
+  SettingsCryptoUnavailableError,
   SettingsForbiddenError,
   SettingsLockedError,
   SettingsValidationError,
@@ -162,6 +163,17 @@ export function registerSettingsRoutes(
         // for the same reason.
         sendError(res, 400, 'SETTINGS_VALIDATION', err.message, {
           details: { namespace: err.namespace, fields: err.fields },
+        });
+      } else if (err instanceof SettingsCryptoUnavailableError) {
+        // #8273 — the fail-closed refusal (#8026) gets its wire spelling. The
+        // status stays 500 on purpose: this is a server-side misconfiguration
+        // (no confidential crypto wired), not the caller's fault, and not a
+        // 503 — no retry succeeds until an operator wires a cryptoProvider, so
+        // inviting one would be dishonest. The registered code is what lets the
+        // Setup UI render "reconfigure the deployment" instead of "the server
+        // crashed"; the message carries the operator's fix.
+        sendError(res, 500, 'SETTINGS_CRYPTO_UNAVAILABLE', err.message, {
+          details: { namespace: err.namespace, key: err.key },
         });
       } else {
         sendError(res, 500, 'INTERNAL_ERROR', err?.message ?? 'Failed to write namespace');
