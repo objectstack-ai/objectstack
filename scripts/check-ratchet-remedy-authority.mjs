@@ -58,6 +58,12 @@
 // inside its message, so the literal 24-character token appears in the source
 // ONLY at the `const` declaration — nowhere near the offer text it governs.
 //
+// Presence is nonetheless checked in AUTHOR-FACING text, never raw source. A gate
+// whose header merely discusses the convention has told the author nothing, and
+// counting that as compliance was a real hole: it was found by stripping the token
+// from a real gate and watching this detector stay green, because that file's own
+// header names the token in a comment. See {@link carriesAuthorityToken}.
+//
 // ── The control corpus is part of the deliverable ──────────────────────────
 //
 // A first cut of the prototype behind #8540 spelled its gap class `[^.;]`, which
@@ -479,6 +485,27 @@ export function offerIsRefused(offer) {
   return REFUSAL_BOUND.test(offer.context) || REFUSAL_PREDICATION.test(offer.context);
 }
 
+/**
+ * Does this gate actually CARRY the authority token — in the text an author
+ * reads, not merely somewhere in the file?
+ *
+ * ⛔ The distinction is the whole assertion, and a raw `src.includes(…)` gets it
+ * wrong. Measured: strip the token from check-role-word.mjs's marker const and a
+ * source-wide search still finds it, because the file's own header COMMENT
+ * mentions the convention by name. The gate would then have gone silent for every
+ * author who trips it while this detector reported the farm clean — the exact
+ * shape of failure the convention exists to prevent, reproduced by its detector.
+ *
+ * Comments are maintainer-facing. A gate that discusses the token has not told
+ * the author anything; a gate that puts it in a string has.
+ *
+ * @param {string} src
+ * @returns {boolean}
+ */
+export function carriesAuthorityToken(src) {
+  return authorFacingMessages(src).some((m) => m.includes(RATCHET_AUTHORITY_MARKER));
+}
+
 // ── Classification ──────────────────────────────────────────────────────────
 
 /**
@@ -510,7 +537,7 @@ export function classify(src) {
     return { verdict: refused.length > 0 ? 'refused' : 'excluded', live, refused, anchors };
   }
   return {
-    verdict: src.includes(RATCHET_AUTHORITY_MARKER) ? 'marked' : 'unmarked',
+    verdict: carriesAuthorityToken(src) ? 'marked' : 'unmarked',
     live,
     refused,
     anchors,
@@ -896,6 +923,24 @@ function selfTest() {
   expect(`positive control at corpus scale — the sweep still REACHES every known instance; it no `
     + `longer reaches: ${unreached.join(', ') || '(none)'}`,
     unreached.length === 0);
+
+  // (18) Compliance is carried in AUTHOR-FACING text, not in commentary. Found by
+  // reverse verification: stripping the token from a real gate left this detector
+  // green, because that gate's header mentions the token in a comment.
+  const commentaryOnly = `// this gate marks the path ${RATCHET_AUTHORITY_MARKER} per #8435\n`
+    + `const m = 'Fix it properly. Or ${ADD} a MEASURED entry to the baseline saying why not. That baseline is shrink-only.';`;
+  expect('compliance — a gate that only MENTIONS the token in a comment does not count as carrying '
+    + 'it (a source-wide search reads a gate\'s own commentary as compliance, so a gate could go '
+    + 'silent for authors while this detector reported the farm clean)',
+    classify(commentaryOnly).verdict === 'unmarked');
+
+  // (19) …and the mirror: the token in a string literal DOES count. Paired with
+  // (18) by construction, so exactly one of the two can fire on a broken check.
+  const inLiteral = `const T = '${RATCHET_AUTHORITY_MARKER}';\n`
+    + `const m = 'Fix it properly. Or ${ADD} a MEASURED entry to the baseline saying why not. That baseline is shrink-only.';`;
+  expect('compliance — the token declared as a string literal DOES count as carrying it, which is '
+    + 'how all six instrumented gates spell it',
+    classify(inLiteral).verdict === 'marked');
 
   // (17) This gate must not be an instance of its own convention.
   expect('self-classification — this gate is NOT an instance of the convention it enforces (its '
