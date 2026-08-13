@@ -38,6 +38,17 @@ branch-early、draft-PR 时点报告、transcript 复活与 worktree 接手协�
 roster —— `ListAgents` 列不到、`SendMessage` 直投 not-reachable 是设计而非故障(维
 护者 2026-08-11 裁定:事件驱动架构即长期方案),⛔ 不复测 roster 路径。
 
+## subagent 批(`mode:subagent`)派发前置:先快进本地检出
+
+subagent 在 PM 自己的容器内运行,agent 定义与技能文本读的是**本地检出**,不是
+`origin/main` —— 云卡逐卡 clone 换来的新鲜度,subagent 后端连同容器开销一起省掉
+了。派发 subagent 批之前,先快进本地检出:
+`git -C <repo-root> pull --ff-only origin main`(或核对 `HEAD` 等于
+`origin/main`)。检出过期,整批 subagent 拿到的都是过期的 agent 定义与技能文本
+(实测:os-dev 定义重写已合入 origin/main 的当天,容器检出仍停在重写前的提交,首
+批 subagent 加载了旧定义)。用 `--ff-only`,让脏或分叉的检出大声失败,而不是静默
+合并。
+
 ## 接手中断的 dev(worktree 接手协议)
 
 先试 SendMessage 复活(从 transcript 带全部上下文恢复),resume 不可用才接手。⛔

@@ -5159,6 +5159,95 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * Privileged: recover the stored values of ONE `internal: true` field for a
+   * batch of rows, keyed by record id.
+   *
+   * [#8118] {@link omitInternalFields} deletes a flagged field from every row
+   * the engine hands back — with NO system carve-out, by explicit design
+   * (#7728): an escape hatch nobody needs is a hole in a non-exposure
+   * guarantee. The same ruling names the shape a legitimate system reader uses
+   * when one finally appears: it reads the column through a purpose-built
+   * privileged accessor, the way {@link resolveSecret} does for `secret`. This
+   * method is that accessor. Its first consumer is the outbound-HTTP
+   * dispatcher's claim path (`SqlHttpOutbox.claim()` in
+   * `@objectstack/service-messaging`): `sys_http_delivery.headers_json` — the
+   * authored header map, the ordinary place an `Authorization: Bearer …` goes —
+   * is flagged `internal` so the generic data API returns rows without it,
+   * while the dispatcher must hand exactly that map to the wire VERBATIM (a
+   * delivery that goes out missing a header is not self-announcing: against an
+   * endpoint that does not require it, the delivery succeeds while silently
+   * deviating from the authored configuration).
+   *
+   * Batch-shaped, deliberately, where {@link resolveSecretField} is
+   * single-record: its consumer claims up to a full batch per dispatcher tick,
+   * and #8118's triage rejected the `Field.secret()` route partly BECAUSE that
+   * shape costs a driver read plus a decrypt per row per tick. One driver read
+   * serves the whole claim batch; a single record is the batch of one. This is
+   * the sibling of {@link resolveSecretField}'s pattern — guard first, then a
+   * driver-level read — not a second divergent privileged-read path.
+   *
+   * The rows are read at DRIVER level on purpose — the only layer where the
+   * value still exists — so this bypasses read hooks, field-level security and
+   * sharing: the same trust {@link resolveSecret} and {@link resolveSecretField}
+   * place in their callers, and the same reason all three are explicit,
+   * separately-named privileged verbs rather than an option on `find`. No
+   * query string reaches this, so it cannot be turned on from outside the
+   * process.
+   *
+   * Refuses (ADR-0112 `code` + `status`) any field not declared
+   * `internal: true` on the object. Without that guard this would be a generic
+   * read-protection bypass — over `password` plaintext in particular, which is
+   * masked deliberately (ADR-0100) — rather than the internal channel's
+   * dereference. A `secret`-typed field is likewise refused unless it is also
+   * flagged, and even then this returns the stored `secret:<id>` ref, never a
+   * plaintext: decryption stays with {@link resolveSecretField}.
+   *
+   * Returns the stored value per id — `null` when the column is unset. An id
+   * whose row does not exist is absent from the map; what a missing row means
+   * belongs to the caller (for the dispatcher: a row deleted mid-claim). No
+   * decrypt is involved: `internal` is a read-side omission flag, not an
+   * encrypted channel — the at-rest story is the object's own (for
+   * `sys_http_delivery`, 30d telemetry retention; encrypting the delivery row
+   * was measured and rejected on #8118).
+   */
+  async resolveInternalField(
+    object: string,
+    recordIds: readonly string[],
+    field: string,
+  ): Promise<Map<string, unknown>> {
+    const schema = this._registry.getObject(object);
+    if (!collectInternalReadFields(schema).includes(field)) {
+      const err: Error & { code?: string; status?: number; object?: string; field?: string } =
+        new Error(
+          `Cannot resolve internal field "${object}.${field}": it is not declared \`internal: true\`. `
+            + 'Only fields the engine omits from the generic read path are dereferenceable here — '
+            + 'anything else either comes back on find/findOne already, or is protected by its own '
+            + 'channel (`secret` refs via resolveSecretField; `password` is masked deliberately, '
+            + 'ADR-0100, so dereferencing one here would be a mask bypass).',
+        );
+      err.code = 'INVALID_FIELD';
+      err.status = 400;
+      err.object = object;
+      err.field = field;
+      throw err;
+    }
+    const out = new Map<string, unknown>();
+    if (recordIds.length === 0) return out;
+    const driver = this.getDriver(object);
+    const found = await driver.find(object, {
+      where: { id: { $in: [...recordIds] } },
+      fields: ['id', field],
+    });
+    for (const row of Array.isArray(found) ? found : [found]) {
+      if (!row || typeof row !== 'object') continue;
+      const id = (row as Record<string, unknown>).id;
+      if (typeof id !== 'string' && typeof id !== 'number') continue;
+      out.set(String(id), (row as Record<string, unknown>)[field] ?? null);
+    }
+    return out;
+  }
+
+  /**
    * Helper to get object definition
    */
   getSchema(objectName: string): ServiceObject | undefined {

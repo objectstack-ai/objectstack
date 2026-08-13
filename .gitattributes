@@ -17,6 +17,22 @@
 # stay routed here as directories: the driver still owns a same-category
 # collision, which is the residue sharding cannot remove.
 #
+# Two entries below are still SINGLE files — spec-changes.json and
+# docs/protocol-upgrade-guide.md — and #8344 asked what the driver-less queue does
+# to them. MEASURED (2026-08-13, the real in-flight case plus four synthetic pairs,
+# each merged in a clone with no merge.os-regen.driver): it never leaves them
+# stale-but-clean. Both are sorted unions and an ADR-0087 registration is
+# insertion-only, so the queue's text merge either takes both sides — byte-identical
+# to the regeneration, gates green — or conflicts outright. It conflicts only when
+# the two in-flight entries are ADJACENT in registry sort order; one existing entry
+# between them is already enough to merge clean AND current.
+#
+# Sharding them would not buy back an ejection, which is why they are still single
+# files: every conflicting case also conflicts in
+# packages/spec/src/migrations/registry.ts — generated, committed, unsharded,
+# NOT_DRIVER_MANAGED — and every registration touches it by construction. The table
+# and the reproduction are in packages/spec/src/migrations/entries/README.md.
+#
 # `merge=os-regen` hands those paths to `scripts/git-merge-regen.mjs`, which does
 # NOT text-merge them. See that file for why it also does not regenerate them
 # in place (git runs merge drivers BEFORE the sources are merged, so anything

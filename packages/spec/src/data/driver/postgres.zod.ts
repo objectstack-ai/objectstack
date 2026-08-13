@@ -18,6 +18,7 @@ import { z } from 'zod';
 import { lazySchema } from '../../shared/lazy-schema';
 import { strictObject } from '../../shared/strict-object';
 import {
+  credentialFreeUrl,
   driverConfigJsonSchema,
   DriverSslToggleSchema,
   INLINE_CREDENTIAL_REFUSED,
@@ -84,11 +85,16 @@ export const PostgresConfigSchema = lazySchema(() => strictObject(
   {
   /**
    * Connection URI. When present it supersedes `host`/`port`/`database`/
-   * `username`, and a datasource secret (`external.credentialsRef`) still
-   * overrides any password embedded in it.
-   * Format: `postgresql://[user[:password]@][host][:port][/dbname][?params]`
+   * `username`. Credential-free by contract since #8082: a `user:password@`
+   * userinfo is refused at publish exactly like an inline `password` (#7990) —
+   * bind the secret (`external.credentialsRef` / the connection form's secret
+   * field) and it is injected at connect time. A bare username (`user@host`)
+   * stays writable. Runtime-environment DSNs (`OS_DATABASE_URL`) never pass
+   * through this schema and are unaffected.
+   * Format: `postgresql://[user@][host][:port][/dbname][?params]`
    */
-  url: z.string().optional().describe('Connection URI (supersedes the discrete fields)')
+  url: credentialFreeUrl(z.string(), 'url').optional()
+    .describe('Connection URI (supersedes the discrete fields; must not embed a password — bind the secret instead)')
     .meta({ title: 'Connection URL' }),
 
   /** Hostname or IP address. */

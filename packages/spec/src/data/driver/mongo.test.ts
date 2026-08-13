@@ -11,12 +11,14 @@ describe('MongoConfigSchema', () => {
   });
 
   it('should accept config with connection URI', () => {
+    // Credential-free URL since #8082: a `user:password@` userinfo is refused
+    // at publish (see driver-credential-refusal.test.ts for the family pins).
     const config = MongoConfigSchema.parse({
-      url: 'mongodb://user:pass@host1:27017/mydb?authSource=admin',
+      url: 'mongodb://user@host1:27017/mydb?authSource=admin',
       database: 'mydb',
     });
 
-    expect(config.url).toBe('mongodb://user:pass@host1:27017/mydb?authSource=admin');
+    expect(config.url).toBe('mongodb://user@host1:27017/mydb?authSource=admin');
   });
 
   it('should accept config with all fields', () => {

@@ -590,6 +590,7 @@
     "TursoDriverSpec (const)",
     "TursoTransportMode (type)",
     "TursoTransportModeSchema (const)",
+    "URL_EMBEDDED_CREDENTIAL_REFUSED (const)",
     "UniqueScope (type)",
     "UniqueScopeSchema (const)",
     "UnknownAuthoringKeyFinding (interface)",
@@ -608,6 +609,7 @@
     "checkManagedApiMethodAffordances (function)",
     "classifyFilterToken (function)",
     "countAuthorableFields (function)",
+    "credentialFreeUrl (function)",
     "defaultAggregateFor (function)",
     "defaultValueTokenIssue (function)",
     "defineCube (function)",
@@ -701,6 +703,7 @@
     "stripLegacyApiMethods (function)",
     "suggestDefaultValueToken (function)",
     "suggestFieldTypeForSqlType (function)",
+    "urlUserinfoPassword (function)",
     "utcInstantMs (function)",
     "validateDriverConfig (function)",
     "valueSchemaFor (function)"
