@@ -64,6 +64,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 // `@objectstack/objectql`: objectql DEPENDS ON this package, so that import
 // would close a dependency cycle turbo rejects outright.
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import type { MetaRef } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import { SysMetadataRepository, resetEnvWritableMetadataTypes } from './sys-metadata-repository.js';
 
@@ -156,10 +157,22 @@ function makeFakeEngine() {
 
 const objectBody = { name: 'showcase_task', label: 'Task', fields: { name: { type: 'text', label: 'Name' } } };
 
-/** `put` with everything but the base fixed, so each case differs in ONE way. */
+/**
+ * `put` with everything but the base fixed, so each case differs in ONE way.
+ *
+ * `type` is `MetaRef['type']`, not `string`: that field is a literal union, and
+ * a widened `string` here is a real `tsc --noEmit` error even though `vitest`
+ * runs the file happily (this package's type surface is judged by the DEBT
+ * ledger in CI, never by the test run).
+ */
 async function putWith(
   repo: SysMetadataRepository,
-  opts: { type: string; name: string; intent: 'override-artifact' | 'runtime-only'; packageId?: string },
+  opts: {
+    type: MetaRef['type'];
+    name: string;
+    intent: 'override-artifact' | 'runtime-only';
+    packageId?: string;
+  },
 ): Promise<unknown> {
   return repo
     .put(
