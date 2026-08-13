@@ -1451,16 +1451,29 @@ export class SettingsService {
       await this.reapRotatedSecret(previousEnc, storedEnc);
 
       if (this.audit) {
-        await this.audit.record({
-          namespace,
-          key,
-          scope,
-          userId: ctx.userId,
-          action: isNull ? 'reset' : 'set',
-          valueDigest: isEncrypted ? '<encrypted:' + digest + '>' : digest,
-          encrypted: isEncrypted,
-          requestId: ctx.requestId,
-        });
+        try {
+          await this.audit.record({
+            namespace,
+            key,
+            scope,
+            userId: ctx.userId,
+            // [#8145] The ledger row's tenant context. Its absence is what makes
+            // an audit row invisible to RLS readers — see `SettingsAuditSink`.
+            tenantId: ctx.tenantId,
+            action: isNull ? 'reset' : 'set',
+            valueDigest: isEncrypted ? '<encrypted:' + digest + '>' : digest,
+            encrypted: isEncrypted,
+            requestId: ctx.requestId,
+          });
+        } catch {
+          // [#8145] Never fail a write because a ledger is unhappy — the same
+          // rule `auditWriter` below has always had, now applied to both sinks.
+          // Load-bearing rather than defensive: this sink writes `sys_audit_log`,
+          // owned by the OPTIONAL plugin-audit, so on a deployment without that
+          // plugin the insert throws on every single settings write. The sink
+          // the plugin supplies swallows and reports on its own; this guard is
+          // what protects a HOST-supplied sink from taking down the write path.
+        }
       }
 
       if (this.auditWriter) {

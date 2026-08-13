@@ -1340,7 +1340,16 @@ const step17: MigrationStep = {
     + "means nobody placed the action — which is what `packages/lint`'s `action-no-placement` "
     + 'warns about. An object-less action, whose only reason for declaring `global_nav` was that '
     + 'it has no row and no record header to render on, is therefore migrated to the '
-    + 'declaration it always meant.',
+    + 'declaration it always meant.\n\n'
+    + 'It also removes the three pass-through-only list-view display keys `striped` / '
+    + '`bordered` / `virtualScroll` (#7176, ADR-0049 enforce-or-remove, maintainer ruling '
+    + '2026-08-10). All three were graded live on reads that turned out to be forwarding '
+    + 'copies: the react spec-bridge, plugin-list and plugin-view/app-shell each copy the '
+    + 'key onto the next node, and the chain ends at ObjectGrid, which never spells any of '
+    + 'the three — so an author who wrote `striped: true` got a parse-clean no-op, the exact '
+    + 'silent-no-op shape enforce-or-remove exists to end. Copy-without-apply is dead in '
+    + 'effect; per the ruling, if objectui wants one of these as real behavior, that is an '
+    + 'implementation card filed first, and the key stays retired pending it.',
   conversionIds: [
     'action-execute-to-target',
     'field-conditionalRequired-to-requiredWhen',
@@ -1361,6 +1370,7 @@ const step17: MigrationStep = {
     'action-inert-keys-removed',
     'flow-inert-keys-removed',
     'view-inert-keys-removed',
+    'view-list-passthrough-keys-removed',
     'dashboard-inert-keys-removed',
     'agent-knowledge-removed',
     'skill-trigger-phrases-removed',
@@ -4670,6 +4680,44 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     'ui/ElementRecordPickerProps:displayField',
     'ui/ElementRecordPickerProps:multiple',
     'ui/ElementRecordPickerProps:searchFields',
+    // #7176 — pass-through-only (ADR-0049 enforce-or-remove, maintainer ruling
+    // 2026-08-10): every measured reader copied the key forward and the chain ends
+    // at ObjectGrid, which never spells it; the grid frame is the renderer's own
+    // constant (`borderless`), never this key. Distinct from the LIVE
+    // `ui/PageCardProps:bordered`, a different surface on the page-card container.
+    // Conversion `view-list-passthrough-keys-removed` strips it from sources.
+    'ui/ListView:bordered',
+    // #7176 — pass-through-only (ADR-0049 enforce-or-remove, maintainer ruling
+    // 2026-08-10): every measured reader (react spec-bridge, plugin-list,
+    // plugin-view/app-shell) copied the key forward and the chain ends at
+    // ObjectGrid, which never spells it — copy-without-apply is dead in effect.
+    // Conversion `view-list-passthrough-keys-removed` strips it from sources.
+    'ui/ListView:striped',
+    // #7176 — pass-through-only (ADR-0049 enforce-or-remove, maintainer ruling
+    // 2026-08-10): every measured reader copied the key forward and the chain ends
+    // at ObjectGrid, which never spells it. objectui's VirtualGrid genuinely
+    // virtualizes but is only exported, never instantiated by ObjectGrid, and its
+    // props carry no `virtualScroll` member — so no grid ever virtualized off this
+    // key. Conversion `view-list-passthrough-keys-removed` strips it from sources.
+    'ui/ListView:virtualScroll',
+    // #7176 — the `ObjectListViewSchema` copy of `ui/ListView:bordered`: the def is
+    // `ListViewSchema.omit({userFilters}).extend(…)`, so the tombstone lands in
+    // this walked shape too and `authorable-surface/` marks it `[RETIRED]`
+    // separately. Registered per key, as gate (b) reads them — nothing radiates
+    // from the base (the `shared/FieldMapping:transform` precedent).
+    'ui/ObjectListView:bordered',
+    // #7176 — the `ObjectListViewSchema` copy of `ui/ListView:striped`: the def is
+    // `ListViewSchema.omit({userFilters}).extend(…)`, so the tombstone lands in
+    // this walked shape too and `authorable-surface/` marks it `[RETIRED]`
+    // separately. Registered per key, as gate (b) reads them — nothing radiates
+    // from the base (the `shared/FieldMapping:transform` precedent).
+    'ui/ObjectListView:striped',
+    // #7176 — the `ObjectListViewSchema` copy of `ui/ListView:virtualScroll`: the
+    // def is `ListViewSchema.omit({userFilters}).extend(…)`, so the tombstone lands
+    // in this walked shape too and `authorable-surface/` marks it `[RETIRED]`
+    // separately. Registered per key, as gate (b) reads them — nothing radiates
+    // from the base (the `shared/FieldMapping:transform` precedent).
+    'ui/ObjectListView:virtualScroll',
     // #6946 — three SDUI page-component props, retired by maintainer ruling
     // 2026-08-09 (decision-inbox round, 「全部接受」): objectui#3829 route (c)
     // for the first two, objectui#3818 for the third. Registered per key, as

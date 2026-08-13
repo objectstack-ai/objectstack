@@ -14,6 +14,7 @@ import { SysAuditLog, SysActivity, SysComment } from './objects/index.js';
 // @objectstack/service-storage for the same ownership reason (ADR-0052 §3: a
 // file↔record link belongs with storage, not the compliance ledger).
 import { installAuditWriters, type AuditI18nSurface, type MessagingEmitSurface } from './audit-writers.js';
+import { createAuthEventAuditSink } from './auth-event-audit.js';
 import { installCommentAccessHooks, installCommentReadVisibility } from './comment-access-hooks.js';
 
 /**
@@ -30,6 +31,13 @@ export class AuditPlugin implements Plugin {
   type = 'standard';
   version = '1.0.0';
   dependencies = ['com.objectstack.engine.objectql'];
+  /**
+   * [#8144] The `audit` slot — the ledger's WRITE ingress for events that are
+   * not CRUD (`login`/`logout` today). Declared here because `init()` registers
+   * it unconditionally, which is what ADR-0116 / `plugin-order.ts` reads this
+   * field to mean.
+   */
+  providesServices = ['audit'];
 
   async init(ctx: PluginContext): Promise<void> {
     // Register audit system objects via the manifest service.
@@ -55,6 +63,31 @@ export class AuditPlugin implements Plugin {
         },
       ],
     });
+
+    // [#8144] The non-CRUD write ingress. Registered in init() — plugin-auth
+    // resolves it lazily and calls it from better-auth's session lifecycle
+    // hooks, i.e. at request time, so the engine is resolved per call rather
+    // than captured: the service exists from init() while `objectql` only
+    // resolves at kernel:ready, and every caller arrives long after both.
+    ctx.registerService(
+      'audit',
+      createAuthEventAuditSink({
+        getEngine: () => {
+          try {
+            return ctx.getService<IDataEngine>('objectql');
+          } catch {
+            // Same fallback alias `start()` uses below — some kernels register
+            // the engine as `data`.
+            try {
+              return ctx.getService<IDataEngine>('data');
+            } catch {
+              return undefined;
+            }
+          }
+        },
+        logger: ctx.logger,
+      }),
+    );
 
     // ADR-0029 D8 — contribute this plugin's object translations to the i18n
     // service on kernel:ready (the i18n plugin may register after this one).

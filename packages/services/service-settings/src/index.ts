@@ -59,7 +59,21 @@ export {
 export {
   SettingsServicePlugin,
   type SettingsServicePluginOptions,
+  // #8145 — the settings-shaped ledger writer, published alongside the generic
+  // sink below so a host that binds its own engine can wire BOTH halves of the
+  // dual write rather than half of it.
+  buildSettingAuditWriter,
 } from './settings-service-plugin.js';
+// #8145 — the `sys_audit_log` `config_change` sink the plugin wires. Published
+// because a host that binds its own engine (control-plane mocks, embedded
+// runtimes) has to be able to get the SAME ledger row rather than re-deriving
+// its shape; the action value and target-object constants travel with it for the
+// same reason a pin must not spell them by hand.
+export {
+  buildConfigChangeAuditSink,
+  CONFIG_CHANGE_ACTION,
+  CONFIG_CHANGE_OBJECT_NAME,
+} from './config-change-audit.js';
 export {
   registerSettingsRoutes,
   type SettingsRoutesOptions,

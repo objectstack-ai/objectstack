@@ -64,12 +64,14 @@
           "note": "objectui: ObjectGrid.tsx (audit L15)."
         },
         "striped": {
-          "status": "live",
-          "note": "objectui: ObjectGrid.tsx (audit L15)."
+          "status": "dead",
+          "verifiedAt": "2026-08-12",
+          "note": "REMOVED 2026-08-12 (#7176, ADR-0049 enforce-or-remove) — the L15 citation was pass-through-only: every measured reader (spec-bridge, plugin-list, plugin-view/app-shell) copied the key forward and ObjectGrid, where the chain ends, never spells it. Tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from sources by the protocol-17 view-list-passthrough-keys-removed conversion. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); there is no authorable striped-rows switch — delete the key."
         },
         "bordered": {
-          "status": "live",
-          "note": "objectui: ObjectGrid.tsx (audit L15)."
+          "status": "dead",
+          "verifiedAt": "2026-08-12",
+          "note": "REMOVED 2026-08-12 (#7176, ADR-0049 enforce-or-remove) — the L15 citation was pass-through-only: every measured reader copied the key forward and ObjectGrid never spells it (the grid frame is the renderer's own borderless constant; DataTable's only 'bordered' hit is a comment). Tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from sources by the protocol-17 view-list-passthrough-keys-removed conversion. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); delete the key."
         },
         "compactToolbar": {
           "status": "live",
@@ -166,8 +168,9 @@
           "note": "objectui: ListView.tsx:1343 forwards rich defs to ObjectGrid (BulkActionDialog). Dispatch: useBulkExecutor.ts run() — per-record fan-out by default; execution:'aggregate' defs go through the ONE-call bulkCall branch injecting params._selectedIds (ObjectGrid.runBulkActionAggregate, objectui#3139). Verified objectui@4bf612c. #4457 gave the def a SHAPE (it was z.record(z.any())): the entry schema is BulkActionDefSchema, strict, and it refuses the combinations that parse but the executor never reads — so this row's liveness now covers the keys inside a def, not just the array."
         },
         "virtualScroll": {
-          "status": "live",
-          "note": "objectui: ObjectGrid.tsx (audit L15)."
+          "status": "dead",
+          "verifiedAt": "2026-08-12",
+          "note": "REMOVED 2026-08-12 (#7176, ADR-0049 enforce-or-remove) — the L15 citation was pass-through-only: every measured reader copied the key forward and ObjectGrid never spells it; VirtualGrid genuinely virtualizes but is only exported, never instantiated, and its props have no virtualScroll member. Tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from sources by the protocol-17 view-list-passthrough-keys-removed conversion. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); large datasets page via pagination — delete the key."
         },
         "conditionalFormatting": {
           "status": "live",

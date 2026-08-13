@@ -2266,6 +2266,68 @@ const viewInertKeysRemoved: MetadataConversion = {
   },
 };
 
+/**
+ * View container: list-shaped entries lose `striped`/`bordered`/`virtualScroll`
+ * (#7176, ADR-0049 enforce-or-remove, maintainer ruling 2026-08-10). Every
+ * measured reader was a forwarding copy — react spec-bridge → plugin-list →
+ * plugin-view/app-shell — and the chains end at ObjectGrid, which never spells
+ * any of the three: copy-without-apply is dead in effect. List-shaped slots
+ * only (`list` + named `listViews`); form-shaped entries never declared them.
+ */
+const viewListPassthroughKeysRemoved: MetadataConversion = {
+  id: 'view-list-passthrough-keys-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'view.list.striped / view.list.bordered / view.list.virtualScroll',
+  summary: "view list keys removed (#7176): 'striped'/'bordered'/'virtualScroll' — every measured reader copied the key forward and none applied it (pass-through-only; ADR-0049 enforce-or-remove)",
+  apply(stack, emit) {
+    const LIST_KEYS = ['striped', 'bordered', 'virtualScroll'] as const;
+    return mapCollection(stack, 'views', (view, path) => {
+      let touched = false;
+      const next: Record<string, unknown> = { ...view };
+      const list = next.list;
+      if (list && typeof list === 'object' && !Array.isArray(list)) {
+        const cleaned = stripKeys(list as Record<string, unknown>, LIST_KEYS, emit, `${path}.list`);
+        if (cleaned !== list) { next.list = cleaned; touched = true; }
+      }
+      const named = next.listViews;
+      if (named && typeof named === 'object' && !Array.isArray(named)) {
+        const rebuilt: Record<string, unknown> = { ...(named as Record<string, unknown>) };
+        let subTouched = false;
+        for (const [name, lv] of Object.entries(rebuilt)) {
+          if (lv && typeof lv === 'object' && !Array.isArray(lv)) {
+            const cleaned = stripKeys(lv as Record<string, unknown>, LIST_KEYS, emit, `${path}.listViews.${name}`);
+            if (cleaned !== lv) { rebuilt[name] = cleaned; subTouched = true; }
+          }
+        }
+        if (subTouched) { next.listViews = rebuilt; touched = true; }
+      }
+      return touched ? next : view;
+    });
+  },
+  fixture: {
+    before: {
+      views: [{
+        object: 'crm_lead',
+        list: { type: 'grid', columns: ['name'], resizable: true, striped: true, bordered: true, virtualScroll: true },  // resizable survives
+        listViews: {
+          all: { type: 'grid', columns: ['name'], striped: false },
+        },
+      }],
+    },
+    after: {
+      views: [{
+        object: 'crm_lead',
+        list: { type: 'grid', columns: ['name'], resizable: true },
+        listViews: {
+          all: { type: 'grid', columns: ['name'] },
+        },
+      }],
+    },
+    expectedNotices: 4,
+  },
+};
+
 /** dashboard.aria / dashboard.performance / widgets[].performance. */
 const dashboardInertKeysRemoved: MetadataConversion = {
   id: 'dashboard-inert-keys-removed',
@@ -6346,6 +6408,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     actionInertKeysRemoved,
     flowInertKeysRemoved,
     viewInertKeysRemoved,
+    viewListPassthroughKeysRemoved,
     dashboardInertKeysRemoved,
     dashboardWidgetResponsiveRemoved,
     dashboardWidgetActionAriaRemoved,

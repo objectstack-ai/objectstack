@@ -160,6 +160,23 @@ describe('lintLivenessProperties', () => {
     expect(msgs.some((m) => m.includes('form.data'))).toBe(false);
   });
 
+  // list.striped / list.bordered / list.virtualScroll left the surface with
+  // the #7176 retirement (pass-through-only; keys REMOVED, the strict parse
+  // owns them now). Their ledger rows are dead WITHOUT authorWarn, so the
+  // advisory lint must stay silent — the tombstone's rejection is the channel.
+  it('the #7176 pass-through-only list keys do not warn (the strict parse owns them now)', () => {
+    const findings = lintLivenessProperties({
+      views: [{
+        object: 'task',
+        list: { type: 'grid', striped: true, bordered: true, virtualScroll: true },
+      }],
+    });
+    const msgs = paths(findings);
+    expect(msgs.some((m) => m.includes('list.striped'))).toBe(false);
+    expect(msgs.some((m) => m.includes('list.bordered'))).toBe(false);
+    expect(msgs.some((m) => m.includes('list.virtualScroll'))).toBe(false);
+  });
+
   it('stays silent on a clean grid view', () => {
     const findings = lintLivenessProperties({
       views: [{ object: 'task', list: { type: 'grid', columns: ['title'] } }],

@@ -28,6 +28,7 @@ import {
 } from './auth-manager.js';
 import { ensureDefaultOrganization } from './ensure-default-organization.js';
 import { runAttributedToUser } from './auth-actor-attribution.js';
+import type { AuthEventAuditSurface } from './auth-session-audit.js';
 import type { ResolvedSocialProvider } from './backfill-account-issuer.js';
 import { createTenancyService, type TenancyService } from './tenancy-service.js';
 import {
@@ -344,6 +345,20 @@ export class AuthPlugin implements Plugin {
       getTenancy: () => {
         try {
           return ctx.getService<TenancyService>('tenancy');
+        } catch {
+          return undefined;
+        }
+      },
+      // [#8144] The compliance ledger's non-CRUD ingress, resolved LAZILY at
+      // session-hook fire time (i.e. per request, long after boot). AuditPlugin
+      // is an optional pair in the CLI, so a miss is the ordinary case, not a
+      // degradation to report: no audit plugin means no `login`/`logout` rows,
+      // which is exactly the behaviour before this card. Deliberately NOT an
+      // `optionalDependencies` entry — nothing in `init()` consumes it, so
+      // there is no boot ordering to constrain.
+      getAuditSink: () => {
+        try {
+          return ctx.getService<AuthEventAuditSurface>('audit');
         } catch {
           return undefined;
         }
