@@ -1068,7 +1068,17 @@ async function selfTest() {
       // THE projection trap, and the reason this parser exists at all: a PR
       // payload that simply LACKS `auto_merge` (the `pull_request_read` MCP
       // projection is one) must not read as disarmed. Absent != null.
+      //
+      // ⚠️ Asserted on the PROJECTION diagnosis specifically, not merely on
+      // "it threw mentioning auto_merge". Mutation-tested 2026-08-13: deleting
+      // the `Object.hasOwn` guard still throws — `undefined` falls through to
+      // the not-an-object branch — so the looser assertion PASSED ON THE
+      // MUTANT and pinned nothing. The safety property survives either way;
+      // what the guard buys is the operator being told which of the two
+      // situations they are in, and that is what must not be deletable.
       throws('a-payload-without-an-auto_merge-key-is-refused-not-read-as-disarmed', () => armingFrom({ number: 1, title: 'x' }), 'auto_merge');
+      throws('a-missing-auto_merge-key-is-diagnosed-as-a-projection-not-as-a-bad-value', () => armingFrom({ number: 1, title: 'x' }), 'PROJECTION');
+      throws('the-projection-diagnosis-names-the-endpoint-that-carries-the-field', () => armingFrom({ number: 1, title: 'x' }), 'GET /repos/');
       throws('a-non-object-pull-payload-is-refused', () => armingFrom('nope'));
       throws('a-null-pull-payload-is-refused', () => armingFrom(null));
       throws('an-array-pull-payload-is-refused', () => armingFrom([]));
