@@ -67,16 +67,20 @@
  *    changed) and section 3's `[GUARD]` (a declared 4xx refusal quoted
  *    verbatim — true before and after).
  *
- * Predicted **4 failed | 2 passed**. Measured: PLACEHOLDER_PRIMARY.
+ * Predicted **4 failed | 2 passed**. Measured **4 failed | 2 passed**, and
+ * every red failed on the TEXT — `expected 'SQLITE_ERROR: no such table:
+ * sys_metadata' to be 'seed apply failed'` — not on a vague "it changed".
  *
  * The `[GUARD]` earns its place under a DIFFERENT variant, which is the run
  * that makes it load-bearing: with `clientFacingFailureText` forced to withhold
  * unconditionally (never quoting, so the rule becomes a blanket blank), the
  * predicted casualties are section 2's two quotes and section 3's guard —
- * **3 failed | 3 passed**. Measured: PLACEHOLDER_VARIANT. Without them this
- * file would be satisfied by "withhold everything", which deletes the
- * self-correcting refusals #4277 exists for and the authoring feedback #8333
- * went out of its way to preserve.
+ * **3 failed | 3 passed**. Measured **3 failed | 3 passed**, those exact three.
+ * Without them this file would be satisfied by "withhold everything", which
+ * deletes the self-correcting refusals #4277 exists for and the authoring
+ * feedback #8333 went out of its way to preserve.
+ *
+ * Both predictions held; there is no missed prediction to record on this card.
  *
  * ⛔ Never a bare `toThrow()` here: this door does not throw, it REPORTS, and
  * the whole defect is what the report says.
