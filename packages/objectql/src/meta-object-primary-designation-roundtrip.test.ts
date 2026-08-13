@@ -37,6 +37,19 @@
  * REAL `SchemaRegistry` and the REAL protocol write agreeing, and only this
  * package has both — `@objectstack/objectql` depends on
  * `@objectstack/metadata-protocol`, never the reverse.
+ *
+ * ## The divergence this file MEASURES but does not close
+ *
+ * [#8381] The strip is exactness-bounded, and `nameField` is a single string, so
+ * an author's EXPLICIT pointer that coincides with the derivation is
+ * indistinguishable from one the read added — and is dropped by the first save
+ * that carries it, before any read or round trip. Ruled by the PM
+ * as acceptable to ship (option A): `registerObject` re-derives the designation
+ * over every base layer at load, so no resolved answer changes now or at any
+ * future boot; what is lost is stability of intent against a later edit that
+ * adds a higher-ranked field. #8381 closes it by making the strip
+ * stored-row-aware. Pinned in the last case below so that fix fails this file
+ * deliberately instead of drifting past it.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -44,6 +57,9 @@ import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protoco
 // [#5619] The producer's OWN write-verb dispatch decisions, so the fake engine
 // below cannot accept a call ObjectQL refuses.
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+// The seam's own designation function, so the divergence case below compares
+// against what the platform would derive rather than against a transcription.
+import { provisionPrimary } from '@objectstack/spec/data';
 import { SchemaRegistry } from './registry.js';
 
 interface Row {
@@ -242,5 +258,70 @@ describe('[#8268] the write path takes back the `nameField` the read added (#432
         } as never);
 
         expect(host.storedBody()).toEqual(firstStored);
+    });
+
+    // ── The divergence this strip MEASURES but does not close ───────────────
+
+    it('MEASURES that an author pointer identical to the derivation is never STORED — filed as #8381', async () => {
+        // The residual gap in the shipped strip, pinned here so it fails
+        // deliberately the day #8381 closes it rather than drifting silently.
+        //
+        // `nameField` is a single string, so "the author wrote nameField: 'name'"
+        // and "the read derived nameField: 'name'" are THE SAME BYTES in the
+        // served document. The strip is exactness-bounded and therefore cannot
+        // tell them apart, and it drops the pointer. The case above — a pointer
+        // naming a DIFFERENT field — is the one it can tell apart, and keeps.
+        //
+        // ⚠️ NOT the same trade `stripProvisionedSearchCompanionFrom` makes:
+        // that one compares against a platform-canonical field DEFINITION, where
+        // coincidence with an author's own writing is implausible. Here
+        // coincidence is the COMMON case — an author choosing `name` as the
+        // title on an object that has a `name` field writes exactly what the
+        // derivation produces.
+        //
+        // Harmless today, and that is why option A shipped: `registerObject`
+        // re-runs `provisionPrimary` over every base layer at load, so the
+        // resolved answer is identical with or without the stored key, now and
+        // at every future boot. What is lost is stability of INTENT — a later
+        // edit that adds a higher-ranked field moves the title, where a stored
+        // explicit pointer would have held it. #8381 closes that by making the
+        // strip stored-row-aware (option C), which is reachable now that #8184
+        // has landed and `saveMetaItem` is no longer fenced.
+        // ⚠️ Measured, and it is EARLIER than "does not survive a round trip":
+        // the strip runs on EVERY save, so the author's pointer never reaches
+        // the row at all. It is dropped by the FIRST write that carries it —
+        // no read, no round trip, no `/meta` involvement required. Written this
+        // way because the first shape of this pin asserted the pointer was
+        // stored and then lost, and that assertion failed: there is nothing to
+        // lose because nothing was ever stored.
+        const derived = (provisionPrimary(
+            { ...clone(AUTHORED) } as never, { synthesize: false },
+        ) as { nameField?: string }).nameField;
+        // The pointer the author writes below really is the one the derivation
+        // produces — otherwise this case measures the wrong thing.
+        expect(derived).toBe('name');
+
+        const host = await seed({ ...clone(AUTHORED), nameField: 'name' });
+
+        // The divergence: the author declared it on the way in and the row
+        // does not have it.
+        expect(host.storedBody()!.nameField).toBeUndefined();
+
+        // …while the RESOLVED answer is unchanged, which is why this is a
+        // fidelity gap in what gets PERSISTED and not a behaviour regression:
+        // `registerObject` re-derives the same designation at load.
+        expect(host.registry.getObject(AUTHORED.name)?.nameField).toBe('name');
+
+        // …and the read still serves it, so no consumer sees a difference.
+        const served: any = (await host.protocol.getMetaItem({
+            type: 'object', name: AUTHORED.name,
+        })).item;
+        expect(served.nameField).toBe('name');
+
+        // Stable rather than oscillating: a further round trip changes nothing.
+        await host.protocol.saveMetaItem({
+            type: 'object', name: AUTHORED.name, item: served,
+        } as never);
+        expect(host.storedBody()!.nameField).toBeUndefined();
     });
 });
