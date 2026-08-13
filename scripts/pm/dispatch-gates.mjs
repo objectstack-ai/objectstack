@@ -483,6 +483,86 @@ export function hintCovers(hint, inputPath) {
   return inputPath.startsWith(plain) || plain.startsWith(inputPath);
 }
 
+/**
+ * The key that makes one check family relevant to one input path, or null —
+ * the family's OWN script files first, then the path literals scanned out of
+ * those files.
+ *
+ * ## Why a gate's own script files are match keys (#8509)
+ *
+ * `derive` resolves every family to the script FILES that implement it and
+ * stores them on `entry.files`, then used to compare only `entry.hints` — the
+ * literals scanned from those files' CONTENTS. So the most direct relationship
+ * the tool has was the one it never used: *this gate IS this file*. A card
+ * editing `scripts/check-empty-changeset.mjs` derived nothing at all, because
+ * the gate that runs that script names it in **package.json**, not in the
+ * script's own source.
+ *
+ * Measured on this tree the day this landed: of the 70 gate scripts the
+ * workflows resolve to, 8 derived any family when edited — and those eight only
+ * because they happen to quote their own filename in their module body, which
+ * was never a feature. The blind spot is self-shaped: it is exactly the class of
+ * card that edits gate tooling, which is the work most likely to break a gate.
+ *
+ * Nothing is listed to close it. `entry.files` is resolved at runtime from
+ * package.json, so the identity key follows the same derived-never-listed
+ * contract as the rest of this script: a gate script added tomorrow is matched
+ * by the next run with nothing to update here.
+ *
+ * ## Why identity is consulted FIRST, and why the two cannot fight
+ *
+ * Both key sets are compared with the same `hintCovers` and only one answer is
+ * taken per path, so a family can never print twice. Ordering therefore decides
+ * one thing only: which provenance the `matched via` column shows when both
+ * fire. Identity is the more specific of the two claims — the input IS this
+ * file, not a literal that happens to cover it — so it goes first
+ * (`check:nul-bytes` against `scripts/check-nul-bytes.mjs` is the live
+ * specimen: the same single line, now attributed to the file itself).
+ *
+ * Where only one fires, order changes nothing, and this tool's own gate is the
+ * specimen for that: `scripts/pm/check-dispatch-gates.mjs` is a thin file whose
+ * one module-body constant is the tool it runs, so a card editing the TOOL
+ * still matches through that constant while a card editing the GATE FILE
+ * matches through identity. They answer different inputs.
+ */
+export function coveringHint(entry, inputPath) {
+  const identity = (entry.files ?? []).find((f) => hintCovers(f, inputPath));
+  if (identity) return identity;
+  return (entry.hints ?? []).find((h) => hintCovers(h, inputPath)) ?? null;
+}
+
+/**
+ * Place one check family against a card's whole file surface: `matched` (with
+ * the hits to print), `undetermined` (the honest "this derivation cannot place
+ * the gate" bucket), or `silent`.
+ *
+ * ## Why the undetermined bucket still counts SCANNED hints only
+ *
+ * The one-line spelling of the identity match — push `entry.files` into
+ * `entry.hints` — also quietly empties this bucket, because a family whose
+ * source names no path whatsoever still resolves to a script file, so
+ * `hints.length === 0` would stop being true for it. Measured on this tree: 35
+ * families have no discoverable path literals and 16 of them resolve to a
+ * script file, so that spelling would move 16 gates out of the output's honest
+ * half and into silence — a gate the derivation cannot mention at all, the one
+ * output shape this script's contract forbids.
+ *
+ * The two questions are simply different. Matching asks "is this family
+ * relevant to these paths?", which identity answers directly. The bucket asks
+ * "does this family's source name any path at all?", which identity does not
+ * answer for anybody's card but the one editing that very script. So identity
+ * decides matching, and the bucket keeps reading `entry.hints`.
+ */
+export function classifyEntry(entry, paths) {
+  const hits = [];
+  for (const p of paths) {
+    const hint = coveringHint(entry, p);
+    if (hint) hits.push({ path: p, hint });
+  }
+  if (hits.length) return { verdict: 'matched', hits };
+  return { verdict: (entry.hints ?? []).length === 0 ? 'undetermined' : 'silent', hits };
+}
+
 // ---------------------------------------------------------------------------
 // Change-kind derivation — the gates a path match can never reach
 // ---------------------------------------------------------------------------
@@ -749,13 +829,9 @@ function derive(paths) {
   const matched = new Map();
   const undetermined = [];
   for (const [check, entry] of byCheck) {
-    const hits = [];
-    for (const p of paths) {
-      const hint = entry.hints.find((h) => hintCovers(h, p));
-      if (hint) hits.push({ path: p, hint });
-    }
-    if (hits.length) matched.set(check, { entry, hits });
-    else if (entry.hints.length === 0) undetermined.push(check);
+    const { verdict, hits } = classifyEntry(entry, paths);
+    if (verdict === 'matched') matched.set(check, { entry, hits });
+    else if (verdict === 'undetermined') undetermined.push(check);
   }
 
   console.log(`dispatch-gates: ${byCheck.size} check famil(ies) discovered across ${workflows.length} workflow file(s) — derived at runtime, nothing listed in this script.\n`);
@@ -1119,6 +1195,57 @@ function selfTest() {
   const ownHints = readHints('scripts/pm/dispatch-gates.mjs');
   t('this tool still hints the workflow directory it reads', covers(ownHints, '.github/workflows/lint.yml'));
   t('this tool no longer hints the spec paths its own fixtures name', !covers(ownHints, 'packages/spec/src/data/filter.zod.ts'));
+
+  // ── A family's OWN script files as match keys (#8509) ─────────────────────
+  //
+  // Both directions are the product, and both are pinned: a card editing a
+  // gate's script must derive that gate, and a card that touches nothing of the
+  // gate's must gain nothing from the new key. The over-match direction is the
+  // expensive one here — this key is added to EVERY discovered family at once,
+  // so a key that covered too much would fabricate leads across the whole farm
+  // rather than in one gate.
+  const identityEntry = { files: ['scripts/check-empty-changeset.mjs'], hints: [] };
+  t(
+    'a gate script derives its own family, with the file path itself as provenance',
+    coveringHint(identityEntry, 'scripts/check-empty-changeset.mjs') === 'scripts/check-empty-changeset.mjs',
+  );
+  t('an unrelated path gains nothing from the identity key', coveringHint(identityEntry, 'packages/rest/src/server.ts') === null);
+  t('another gate script does not match through this one identity', coveringHint(identityEntry, 'scripts/check-adr-0087-registration.mjs') === null);
+  t('a family that resolves to no file at all matches nothing by identity', coveringHint({ files: [], hints: [] }, 'scripts/check-empty-changeset.mjs') === null);
+  // Precedence, in both of its directions. One answer per path either way — the
+  // question is only which provenance a reader is shown when both keys fire.
+  const bothKeys = { files: ['scripts/pm/check-x.mjs'], hints: ['scripts/pm'] };
+  t('identity outranks a scanned hint that also covers', coveringHint(bothKeys, 'scripts/pm/check-x.mjs') === 'scripts/pm/check-x.mjs');
+  t('a scanned hint still answers a path identity does not cover', coveringHint(bothKeys, 'scripts/pm/other.mjs') === 'scripts/pm');
+  // The live thin-gate-file specimen, both directions. This tool's own gate is
+  // one file whose single module-body constant is the tool it runs, so the two
+  // keys answer DIFFERENT inputs and neither displaces the other. If that gate
+  // is renamed or its file moves, re-point these cases rather than deleting
+  // them — they are the evidence that the two keys compose.
+  const gateEntry = { files: ['scripts/pm/check-dispatch-gates.mjs'], hints: readHints('scripts/pm/check-dispatch-gates.mjs') };
+  t('the gate FILE now derives its own family', coveringHint(gateEntry, 'scripts/pm/check-dispatch-gates.mjs') === 'scripts/pm/check-dispatch-gates.mjs');
+  t('the TOOL it runs still derives it through the module-body constant', coveringHint(gateEntry, 'scripts/pm/dispatch-gates.mjs') === 'scripts/pm/dispatch-gates.mjs');
+  // The card's own specimen, resolved through the REAL root package.json: the
+  // gate whose entire job is running that script's self-test names the script
+  // there and nowhere in the script's source, which is why the identity key is
+  // the only thing that can reach it.
+  const liveRootScripts = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).scripts ?? {};
+  const selfTestGateFiles = resolveCheckToFiles('check:changeset-gate-self-tests', liveRootScripts);
+  t('the changeset self-test gate really resolves to the script the card named', selfTestGateFiles.includes('scripts/check-empty-changeset.mjs'));
+  t(
+    'so a card editing that script now derives that gate end to end',
+    coveringHint({ files: selfTestGateFiles, hints: [] }, 'scripts/check-empty-changeset.mjs') === 'scripts/check-empty-changeset.mjs',
+  );
+
+  // The bucket the one-line spelling would empty. A family whose source names
+  // no path still resolves to a script file, so identity must decide matching
+  // WITHOUT being allowed to answer "does this gate's source name a path?".
+  const noLiterals = { files: ['scripts/check-silent.mjs'], hints: [] };
+  t('a family with no scanned hints stays undetermined for an unrelated card', classifyEntry(noLiterals, ['packages/rest/src/server.ts']).verdict === 'undetermined');
+  t('the same family is MATCHED, not undetermined, for a card editing its script', classifyEntry(noLiterals, ['scripts/check-silent.mjs']).verdict === 'matched');
+  t('a family whose scanned hints all miss is neither matched nor undetermined', classifyEntry({ files: [], hints: ['packages/spec/src'] }, ['docs/adr/0112-x.md']).verdict === 'silent');
+  const identityHits = classifyEntry(noLiterals, ['scripts/check-silent.mjs', 'packages/rest/src/server.ts']).hits;
+  t('an identity hit carries the path and the key that covered it, once', identityHits.length === 1 && identityHits[0].path === 'scripts/check-silent.mjs' && identityHits[0].hint === 'scripts/check-silent.mjs');
 
   // The table's own rot detector: a name no live run discovers must say so,
   // never disappear quietly.
