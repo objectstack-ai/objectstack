@@ -4,7 +4,7 @@ import type {
     DataProtocol, MetadataProtocol, PackageProtocol,
 } from '@objectstack/spec/api';
 import { IDataEngine, engineCanRollBack, recordNotFoundError } from '@objectstack/core';
-import { readEnvWithDeprecation, resolveTenancyPosture } from '@objectstack/types';
+import { readEnvWithDeprecation, resolveTenancyPosture, resolveThrownHttpError } from '@objectstack/types';
 // [#6285] ADR-0105 D1's authority on "does this deployment wall organizations?".
 // `resolveMultiOrgEnabled()` is DEMOTED and its own doc comment says answering
 // this question with it is a bug (cloud#1020, #5233) — so the posture, and only
@@ -1480,17 +1480,40 @@ type BatchDataRowResult = BatchOperationResult;
  * conformance pin exists to catch loudly rather than ship). Otherwise it
  * derives from the HTTP status when the error carries one, falling back to
  * INTERNAL_ERROR — an unclassified engine throw is a 500 in row form.
+ *
+ * `message` is {@link clientFacingRowFailureText}'s decision (#8502): a caught
+ * sentence reaches a caller only when its producer declared a client-facing
+ * refusal. `fallback` is what the row says otherwise — it names the operation
+ * and quotes nothing.
+ *
+ * ⛔ `fallback` is REQUIRED, not defaulted. All three catches that build a row
+ * know their operation, and a default would let a fourth one be added that
+ * silently reports the wrong verb.
  */
-function toRowApiError(err: any): ApiError {
+function toRowApiError(err: any, fallback: string): ApiError {
     const thrown = typeof err?.code === 'string' && ErrorCode.safeParse(err.code).success
         ? (err.code as ApiError['code'])
         : undefined;
     const status = typeof err?.status === 'number' ? err.status : undefined;
     return {
         code: thrown ?? (status !== undefined ? standardErrorCodeForHttpStatus(status) : 'INTERNAL_ERROR'),
-        message: typeof err?.message === 'string' && err.message.length > 0 ? err.message : String(err),
+        message: clientFacingRowFailureText(err, fallback),
         ...(status !== undefined ? { httpStatus: status } : {}),
     };
+}
+
+/**
+ * [#8502] The stable sentence a failed batch row says when nothing may be
+ * quoted — the operation, named, and no interpolation of any kind.
+ *
+ * One vocabulary for all three loops, so a caller reconciling a mixed batch is
+ * not reading three phrasings of one condition. Deliberately says where the
+ * reason IS (the server log), because the row itself is the caller's only
+ * channel here: a batch row rides response DATA on a 200, so there is no `cause`
+ * for a boundary to print and no 5xx withhold anywhere above it.
+ */
+function rowOperationFailureFallback(operation: string): string {
+    return `The ${operation} of this record failed. The reason is in the server log.`;
 }
 
 /**
@@ -1647,6 +1670,100 @@ function clientFacingFailureText(err: unknown, fallback: string): string {
         const declared = (err as { message?: unknown } | null | undefined)?.message;
         if (typeof declared === 'string' && declared.length > 0) return declared;
     }
+    return fallback;
+}
+
+/**
+ * [#8502] The per-row `errors[].message` a bulk data write puts on its
+ * response — the producer's own refusal when it declared one, otherwise a
+ * stable sentence naming the operation.
+ *
+ * The third sink in this family, after #8333's `failed[].error` and #8442's
+ * seed `errors[].message`, and the same defect: `toRowApiError` interpolated
+ * `err.message` unconditionally, so a driver fault under `deleteManyData`
+ * answered `{ code: 'INTERNAL_ERROR', message: 'SQLITE_ERROR: no such table:
+ * leave_request' }` on a per-row result riding a **200**. No HTTP boundary's
+ * 5xx withhold reaches it, because it is not the response's message — it is
+ * response DATA. It also multiplies: `reconcileStoppedBatch` and
+ * `buildRolledBackBatchResponse` interpolate the causal row's message into
+ * every `NOT_ATTEMPTED` / `ROLLED_BACK` sibling, so one leaked sentence is
+ * repeated across the batch.
+ *
+ * ## Why this asks the BOUNDARY RESOLVER rather than {@link declaresClientRefusal}
+ *
+ * The question is #8136's, unchanged: **did a producer author this sentence
+ * for a caller?** What differs is the population that answers it. This sink
+ * sits under `engine.insert` / `update` / `delete`, so it receives every
+ * refusal the data path can raise — and MEASURED on the real stack (a real
+ * `ObjectQL` over a real `SqlDriver`, driven through all three loops), that
+ * population declares itself in THREE spellings, only one of which
+ * `declaresClientRefusal` reads:
+ *
+ * | producer | code | `status` | `statusCode` | validation shape |
+ * |---|---|---|---|---|
+ * | {@link rowRequiredIdError} | VALIDATION_FAILED | **400** | — | no |
+ * | `recordNotFoundError` (`@objectstack/core`) | RECORD_NOT_FOUND | **404** | — | no |
+ * | objectql `ValidationError` | VALIDATION_FAILED | — | — | **yes** |
+ * | plugin-approvals' record lock | RECORD_LOCKED | — | **409** | no |
+ * | an app hook throwing a bare `Error` | — | — | — | no |
+ * | driver fault (`SqliteError`, …) | SQLITE_* | — | — | no |
+ *
+ * The first two are the only ones a `status`-only test admits. The third is
+ * the population #8442 met on the seed channel: an objectql `ValidationError`
+ * carries `code: 'VALIDATION_FAILED'` and deliberately NO `status`, because
+ * per `@objectstack/types`' `validation-failure.ts` deciding it means 400 is
+ * "the job of whichever boundary serves it". The fourth is this sink's own,
+ * and neither sibling card met it: `plugin-approvals` binds a GLOBAL
+ * `beforeUpdate` hook whose `lockedError` throws `statusCode` — the spelling
+ * `resolveThrownHttpError` reads "because both are produced in this repo",
+ * after reading only one of them made `/api/v1/data` answer 500 to a
+ * deliberate `409 RECORD_LOCKED` (#7525).
+ *
+ * So the test is not "does it carry `status` 4xx" but **"would the boundary
+ * that serves this throw call it a client refusal?"** — and that question
+ * already has exactly one implementation, {@link resolveThrownHttpError},
+ * which folds all three declarations into one status. It is IMPORTED, never
+ * re-spelled: a fourth local spelling of "this is a 4xx" is how a batch row
+ * and the single-record `PATCH` of the same object would start disagreeing
+ * about the same error. ⛔ Do not replace this with a hand-written
+ * `status ?? statusCode ?? validation` chain for being cheaper to read.
+ *
+ * ## ⛔ Still a POSITIVE list — the undeclared case is withheld
+ *
+ * A hook that throws a bare `Error` has its sentence withheld, and that is the
+ * measured cost of the rule, not an oversight: at this sink an undeclared hook
+ * throw is indistinguishable from an undeclared driver throw, which is the
+ * whole hole. The remedy is at the producer and now has three accepted
+ * spellings — a 4xx `status`, a 4xx `statusCode`, or the `VALIDATION_FAILED`
+ * shape `validationFailure()` builds — so declaring is cheaper than the
+ * workaround, which is the direction that makes authored code hard to get
+ * wrong. The same reasoning #8333 applied when it fixed P9's undeclared
+ * `ZodError` at the producer rather than loosening the collector.
+ *
+ * ## The operator half
+ *
+ * The withheld sentence never leaves the server: it is logged here, at the one
+ * point where the decision is made, so no call site can withhold without
+ * logging. `console.warn` and not `error` deliberately — nothing claimed to be
+ * persisted was silently dropped (the row reports `success: false` and the
+ * counters reconcile), which is the AGENTS.md judgment question the durability
+ * levels turn on.
+ */
+function clientFacingRowFailureText(err: unknown, fallback: string): string {
+    // 500 as the fallback status: an error that declared nothing is a server
+    // fault in row form, exactly what `toRowApiError`'s own code limb assumes.
+    const { status } = resolveThrownHttpError(err, 500);
+    if (status >= 400 && status < 500) {
+        const declared = (err as { message?: unknown } | null | undefined)?.message;
+        if (typeof declared === 'string' && declared.length > 0) return declared;
+    }
+    console.warn(
+        '[Protocol] Withheld a caught error\'s text from a batch row (#8502): the producer declared no '
+        + 'client-facing refusal (no 4xx status or statusCode, and not the VALIDATION_FAILED shape), so its '
+        + 'sentence must not be quoted back on response data. The row says: '
+        + `"${fallback}" — cause (withheld from the response):`,
+        err,
+    );
     return fallback;
 }
 
@@ -8686,7 +8803,9 @@ export class ObjectStackProtocolImplementation implements
                         failed++;
                 }
             } catch (err: any) {
-                results.push({ id: record.id, success: false, index, errors: [toRowApiError(err)] });
+                // [#8502] `operation` is the request's own verb, so a mixed
+                // batch's withheld rows each name what THEY were doing.
+                results.push({ id: record.id, success: false, index, errors: [toRowApiError(err, rowOperationFailureFallback(operation))] });
                 failed++;
                 if (atomic) {
                     // Abort on the first failure; the caller rolls back. Atomic
@@ -9053,7 +9172,7 @@ export class ObjectStackProtocolImplementation implements
                 results.push({ id: record.id, success: true, data: updated, index, ...(dropped.length > 0 ? { droppedFields: dropped } : {}) });
                 succeeded++;
             } catch (err: any) {
-                results.push({ id: record.id, success: false, index, errors: [toRowApiError(err)] });
+                results.push({ id: record.id, success: false, index, errors: [toRowApiError(err, rowOperationFailureFallback('update'))] });
                 failed++;
                 if (atomic) {
                     // Abort on the first failure; the caller rolls back.
@@ -9226,7 +9345,7 @@ export class ObjectStackProtocolImplementation implements
                 results.push({ id: String(id), success: true, index });
                 succeeded++;
             } catch (err: any) {
-                results.push({ id: String(id), success: false, index, errors: [toRowApiError(err)] });
+                results.push({ id: String(id), success: false, index, errors: [toRowApiError(err, rowOperationFailureFallback('delete'))] });
                 failed++;
                 // Same stop semantics as `batchData`: `atomic` aborts the rest on
                 // the first failure (the caller rolls back), and without
