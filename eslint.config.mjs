@@ -252,6 +252,25 @@ const ENGINE_QUERY_READ_METHODS = ['find', 'findOne', 'count', 'aggregate'];
 // erase the type to construct input `tsc` would otherwise refuse. A blocking
 // rule there would fight the tests that prove the contract is enforced, so the
 // test surface is held by a COUNT instead — see the ratchet.
+//
+// ⚠️ #8210, stated honestly because it was previously assumed rather than
+// measured: shrinking that count does not put every counted site behind a
+// working guard. `QUERY_OPTIONS_ANY_MESSAGE` below is accurate for the sites
+// this rule actually BLOCKS (non-test code, where `tsc` is the real, live
+// channel), but roughly 60% of today's test-surface sites live in packages
+// whose OWN `tsconfig.json` excludes `**/*.test.ts` — for those, typing the
+// options removes an `any` that would blind an editor's language service (and
+// is a precondition for the day the exclusion lifts), but neither `tsc` nor
+// this repo's ESLint config catches a wrong key there today: this repo runs
+// one `eslint.config.mjs`, which never enables type-aware linting
+// (no `parserOptions.project`, no typed `@typescript-eslint` rules) for ANY
+// file, test or not. Measured with a positive control (a typed, wrong-keyed
+// `EngineAggregateOptions` planted in an excluded `objectql` test file: both
+// `pnpm --filter @objectstack/objectql typecheck` and `pnpm exec eslint
+// --no-inline-config` on that file stayed silent) and cross-checked against
+// PR #8406, where the identical shape independently surfaced in
+// `packages/lint` on the same day. See the measurement and the file/package
+// split in `scripts/check-query-options-erasure-ratchet.mjs`'s header.
 export const QUERY_OPTIONS_TEST_GLOBS = [
   '**/*.test.{ts,tsx,mts,cts}',
   '**/*.spec.{ts,tsx,mts,cts}',
