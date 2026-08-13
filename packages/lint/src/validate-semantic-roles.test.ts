@@ -7,6 +7,7 @@ import {
   FIELD_GROUP_EMPTY,
   FIELD_GROUP_SHADOWED,
   SEMANTIC_ROLE_FIELD_UNKNOWN,
+  SEMANTIC_ROLE_FIELD_UNPROVISIONED,
 } from './validate-semantic-roles';
 
 const stack = (objects: unknown) => ({ objects });
@@ -323,5 +324,84 @@ describe('validateSemanticRoles — injected system columns (#5378)', () => {
     // `basic` has two declared members, neither hoisted into the strip, so no
     // FIELD_GROUP_SHADOWED — and no injected column is counted as its member.
     expect(findings).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#8116] Semantic-role pointers at UNPROVISIONED injected anchors warn.
+//
+// The #5378 widening above makes an injected anchor a legal pointer target —
+// right for every platform-provisioned object, and exactly wrong on an
+// ADR-0015 `external` one, where the anchor is registered with no storage
+// behind it (#7865): the pointer resolves, and every consumer renders a blank.
+// The provenance derivation moved to `@objectstack/spec/data` so this package
+// can tell the two apart (maintainer ruling on #8116, option 1).
+// ---------------------------------------------------------------------------
+describe('validateSemanticRoles — unprovisioned anchors on external objects (#8116)', () => {
+  const externalObject = (extra: Record<string, unknown> = {}) => ({
+    name: 'ext_customer',
+    external: { remoteName: 'customers' },
+    fields: { email: { type: 'email' }, status: { type: 'select' } },
+    ...extra,
+  });
+
+  it('warns on a highlightFields entry naming an injected anchor', () => {
+    const findings = validateSemanticRoles(stack([
+      externalObject({ highlightFields: ['email', 'owner_id'] }),
+    ]));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      severity: 'warning',
+      rule: SEMANTIC_ROLE_FIELD_UNPROVISIONED,
+      path: 'objects[0].highlightFields',
+    });
+    expect(findings[0].message).toContain('owner_id');
+    expect(findings[0].message).toContain('external');
+    expect(findings[0].hint).toContain('columnMap');
+  });
+
+  it('warns on a stageField naming an injected anchor', () => {
+    const findings = validateSemanticRoles(stack([
+      externalObject({ stageField: 'created_by' }),
+    ]));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      severity: 'warning',
+      rule: SEMANTIC_ROLE_FIELD_UNPROVISIONED,
+      path: 'objects[0].stageField',
+    });
+  });
+
+  it('stays silent on the local twin — provenance, not existence, carries the verdict', () => {
+    const findings = validateSemanticRoles(stack([{
+      name: 'customer',
+      highlightFields: ['email', 'owner_id'],
+      stageField: 'created_by',
+      fields: { email: { type: 'email' } },
+    }]));
+    expect(findings).toEqual([]);
+  });
+
+  it("stays silent on an author-DECLARED column of the same name (#7859's security direction)", () => {
+    const findings = validateSemanticRoles(stack([
+      externalObject({
+        highlightFields: ['organization_id'],
+        fields: {
+          email: { type: 'email' },
+          organization_id: { type: 'text', label: 'Remote Org Key' },
+        },
+      }),
+    ]));
+    expect(findings).toEqual([]);
+  });
+
+  it('a withheld anchor still gets the UNKNOWN finding, never the provenance one', () => {
+    // `ownership: 'none'` ⇒ no owner_id anywhere ⇒ rule (c)'s existence warning
+    // owns the defect. One pointer, one finding, the right one.
+    const findings = validateSemanticRoles(stack([
+      externalObject({ ownership: 'none', highlightFields: ['owner_id'] }),
+    ]));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(SEMANTIC_ROLE_FIELD_UNKNOWN);
   });
 });

@@ -78,11 +78,11 @@
  * `validate-expressions.test.ts` pins that with no tracked exceptions left.
  */
 
-import { validateExpression, collectCelRootIdentifiers, SCOPE_ROOTS } from '@objectstack/formula';
+import { validateExpression, collectCelRootIdentifiers, parseCelToAst, SCOPE_ROOTS } from '@objectstack/formula';
 import { collectFlowGraphs, resolveFlowNodeExpressions } from '@objectstack/spec/automation';
 import type { FlowNodeParsed } from '@objectstack/spec/automation';
 
-import { injectedColumnsFor } from './system-fields.js';
+import { injectedColumnsFor, unprovisionedInjectedColumnsFor } from './system-fields.js';
 import { findUnguardedNullableOperands, nullGuardMessage } from './validate-null-guards.js';
 import type { NullGuardOutcome } from './validate-null-guards.js';
 
@@ -142,6 +142,73 @@ function buildFieldIndex(objects: AnyRec[]): Map<string, string[]> {
     idx.set(name, [...new Set([...names, ...injectedColumnsFor(obj)])]);
   }
   return idx;
+}
+
+/**
+ * [#8116] The roots this file's unprovisioned-anchor warning resolves against
+ * the bound object — the same pair the #4763 null-guard gate resolves, for the
+ * same reason: both bind the object's record shape, so a single-segment member
+ * read off either names one of the object's columns.
+ */
+const BOUND_RECORD_ROOTS = ['record', 'previous'] as const;
+
+/** Minimal structural view of a `parseCelToAst` node (`{ op, args }`). */
+type CelNodeLike = { op?: string; args?: unknown };
+
+function isCelNode(v: unknown): v is CelNodeLike {
+  return !!v && typeof v === 'object' && typeof (v as CelNodeLike).op === 'string';
+}
+
+/**
+ * [#8116] Every single-segment `record.<f>` / `previous.<f>` member read in
+ * the source, as `field → operand-as-written` (first spelling wins). Empty
+ * when the source does not parse — the syntax pass owns that defect, and one
+ * broken predicate must produce one finding, not two.
+ *
+ * Deliberately NEVER a bare identifier: in a flattened flow scope a bare name
+ * may be a flow variable, and a false finding here is the trust-killer
+ * ADR-0072 D1 names. A `has(record.x)` guard is covered for free — `record.x`
+ * is an ordinary member-read node inside the call's argument list. Nested
+ * traversal (`record.owner_id.name`) contributes its FIRST segment, which is
+ * the column the query engine must resolve on this object.
+ */
+function collectBoundRecordReads(source: string): Map<string, string> {
+  const out = new Map<string, string>();
+  const ast = parseCelToAst(source);
+  if (!ast) return out;
+  // NB: local names are chosen to stay out of the #5017 meta-guard's receiver
+  // scan (`node` is a METADATA receiver there — flow `nodes[]` — and this walk
+  // reads AST internals, not metadata keys).
+  const pending: unknown[] = [ast];
+  while (pending.length > 0) {
+    const celNode = pending.pop();
+    if (!isCelNode(celNode)) continue;
+    if (
+      (celNode.op === '.' || celNode.op === '.?') &&
+      Array.isArray(celNode.args) &&
+      celNode.args.length >= 2
+    ) {
+      const [celRecv, seg] = celNode.args as [unknown, unknown];
+      if (
+        typeof seg === 'string' &&
+        isCelNode(celRecv) &&
+        celRecv.op === 'id' &&
+        typeof celRecv.args === 'string' &&
+        (BOUND_RECORD_ROOTS as readonly string[]).includes(celRecv.args)
+      ) {
+        if (!out.has(seg)) out.set(seg, `${celRecv.args}.${seg}`);
+      }
+    }
+    const celArgs = celNode.args;
+    if (isCelNode(celArgs)) pending.push(celArgs);
+    else if (Array.isArray(celArgs)) {
+      for (const a of celArgs) {
+        if (isCelNode(a)) pending.push(a);
+        else if (Array.isArray(a)) for (const b of a) if (isCelNode(b)) pending.push(b);
+      }
+    }
+  }
+  return out;
 }
 
 /**
@@ -345,6 +412,64 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
   const fieldTypeIndex = buildFieldTypeIndex(objects);
   const nullableIndex = buildNullableFieldIndex(objects);
 
+  // [#8116] object name → the injected anchors registered with NO storage
+  // behind them (non-empty only for ADR-0015 `external` objects). The other
+  // half of {@link buildFieldIndex}'s #5378 widening: the anchors ARE
+  // addressable — the field-existence pass rightly resolves them — but on a
+  // federated object nothing backs them, so a predicate over one silently
+  // matches nothing. Existence stays green; provenance warns.
+  const unprovisionedIndex = new Map<string, ReadonlySet<string>>();
+  for (const obj of objects) {
+    const name = typeof obj.name === 'string' ? obj.name : undefined;
+    if (!name) continue;
+    const anchors = unprovisionedInjectedColumnsFor(obj);
+    if (anchors.size > 0) unprovisionedIndex.set(name, anchors);
+  }
+
+  /**
+   * [#8116] The unprovisioned-anchor warning — the author-time half of the
+   * #7865 provenance marker (runtime halves: #7833 / #7859 / #7858). Fires on
+   * a `record.<anchor>` / `previous.<anchor>` read where the anchor is an
+   * injected system column the platform registers on this `external` object
+   * but provisions no storage for.
+   *
+   * `warning`, not `error`, on the #7219 family's criterion: an error needs a
+   * closed oracle, and this pass cannot see the remote table — it knows the
+   * anchor has no PLATFORM storage, not what the deployment's remote schema or
+   * a runtime plugin might resolve. The runtime degradation is also non-fatal
+   * (silently empty results), the class this package reports advisorily; and
+   * the security-critical member of the class is already fenced at runtime by
+   * the #7859/#7858 guards. An author-DECLARED column of the same name is the
+   * author's (`'author'` provenance — it maps a remote column they vouch for)
+   * and never enters the index, so the tenant-wall case #7859 protects stays
+   * silent here too.
+   */
+  const warnUnprovisionedAnchors = (where: string, raw: unknown, objectName?: string): void => {
+    if (!objectName) return;
+    const anchors = unprovisionedIndex.get(objectName);
+    if (!anchors) return;
+    const source = celSourceOf(raw);
+    if (!source) return;
+    for (const [field, operand] of collectBoundRecordReads(source)) {
+      if (!anchors.has(field)) continue;
+      issues.push({
+        where,
+        message:
+          `\`${operand}\` reads '${field}', an injected system column with NO storage behind it: ` +
+          `'${objectName}' is an external object (ADR-0015), so the remote database owns its schema ` +
+          `and the platform registers this anchor without provisioning a column. The predicate can ` +
+          `never match a real value — on SQLite it silently degrades to constant-false (HTTP 200, ` +
+          `zero rows, no error). If the remote table really carries this column, declare '${field}' ` +
+          `in the object's own fields (mapped through the external binding's columnMap) so the ` +
+          `reference resolves to a column you vouch for; otherwise drop the reference, or opt the ` +
+          `object out of the injection (\`ownership: 'none'\` for the ownership anchors, ` +
+          `\`systemFields: { audit: false }\` for the audit family).`,
+        source,
+        severity: 'warning',
+      });
+    }
+  };
+
   /**
    * The #4763 null-guard gate. Wired to exactly those surfaces whose predicates
    * CEL evaluates over a record made **total** for every declared field
@@ -406,6 +531,11 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
       objectName ? { objectName, fields, fieldTypes, scope } : { scope });
     for (const e of res.errors) issues.push({ where, message: e.message, source: e.source, severity: 'error' });
     for (const w of res.warnings) issues.push({ where, message: w.message, source: w.source, severity: 'warning' });
+    // [#8116] Provenance rides every object-bound predicate this helper
+    // validates, whichever scope: the `record`/`previous` roots are explicit
+    // in the source, so flattened flow conditions are covered without ever
+    // judging a bare identifier.
+    warnUnprovisionedAnchors(where, raw, objectName);
   };
 
   /**
@@ -1030,6 +1160,9 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
         const fieldWhere = `object '${objectName}' · field '${fname}' expression`;
         for (const e of res.errors) issues.push({ where: fieldWhere, message: e.message, source: e.source, severity: 'error' });
         for (const w of res.warnings) issues.push({ where: fieldWhere, message: w.message, source: w.source, severity: 'warning' });
+        // [#8116] Formulas read the same record binding the predicates do, so
+        // a `record.<anchor>` read inside one degrades identically.
+        warnUnprovisionedAnchors(fieldWhere, f.expression, objectName);
       }
     }
   }

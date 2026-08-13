@@ -162,6 +162,7 @@ export {
   FIELD_GROUP_EMPTY,
   FIELD_GROUP_SHADOWED,
   SEMANTIC_ROLE_FIELD_UNKNOWN,
+  SEMANTIC_ROLE_FIELD_UNPROVISIONED,
 } from './validate-semantic-roles.js';
 export type { SemanticRoleFinding, SemanticRoleSeverity } from './validate-semantic-roles.js';
 
