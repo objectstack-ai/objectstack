@@ -80,7 +80,7 @@
  * row with `"case_number":null` (or `""` for the empty-string case) inside it.
  */
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { TursoDriver } from './index.js';
 import { RemoteTransport } from './remote-transport.js';
 import { makeLibsqlSqliteStub, type LibsqlSqliteStub } from './libsql-sqlite-stub.testkit.js';
@@ -152,6 +152,25 @@ async function makeReplica() {
   expect(driver.transportMode).toBe('replica');
   await driver.initObjects([NUMBERED_OBJECT as any]);
   return driver;
+}
+
+/**
+ * [#7099] Watch the sink the driver actually writes operator diagnostics to.
+ *
+ * `TursoDriver` inherits `SqlDriver.logger` and `TursoDriver`'s own remote
+ * constructor forwards it to `RemoteTransport.setDiagnosticSink`, so this ONE
+ * spy sees a warning raised on either layer — which is what makes the assertion
+ * a statement about the operator's experience rather than about a call site.
+ * Filtered to `auto_number` lines so an unrelated warning (a tenant audit, a
+ * backfill) can neither satisfy nor break the pin.
+ */
+function watchAutoNumberWarnings(driver: TursoDriver) {
+  const sink = (driver as unknown as { logger: { warn: (msg: string, meta?: unknown) => void } }).logger;
+  const spy = vi.spyOn(sink, 'warn');
+  return {
+    lines: () => spy.mock.calls.map((c) => String(c[0])).filter((m) => /auto_number/.test(m)),
+    restore: () => spy.mockRestore(),
+  };
 }
 
 const rowCount = (stub: LibsqlSqliteStub, table: string) =>
@@ -308,20 +327,88 @@ describe('[#6944] REMOTE: what is deliberately NOT refused', () => {
     expect(row.title).toBe('n');
   });
 
-  it('[known residue, not fixed] an id-bearing upsert that INSERTS still writes NULL', async () => {
-    // Stated as an assertion rather than a comment so it cannot quietly become
-    // untrue in either direction. `RemoteTransport.upsert` emits
-    // `INSERT … ON CONFLICT DO UPDATE`, and whether that statement merges or
-    // inserts is knowable only after it runs — a round trip this refusal exists
-    // to avoid. So the leg stays open, on the same deferred half (A) as the rest
-    // of remote autonumber generation.
+  it('[#7099] an id-bearing upsert that INSERTS still writes NULL — and now says so', async () => {
+    // Both halves are asserted, and the pairing is the point.
+    //
+    // ① The NULL is UNCHANGED. #7099 restored observability on this leg, it did
+    //    not change what the remote face accepts: refusing after the write has
+    //    landed is a different act from the pre-write gate, and it stays out of
+    //    scope. If this half ever flips, the change was a refusal or a
+    //    generator, not a warning, and it owes the appetite-door conversation
+    //    (#6944 disposition A).
+    //
+    // ② The silence is GONE. The premise the residue was recorded under —
+    //    "whether that statement merges or inserts is knowable only after it
+    //    runs, a round trip this refusal exists to avoid" — was measured false:
+    //    `RemoteTransport.upsert` already pays that `SELECT` unconditionally
+    //    and hands the row back, so the driver reads the NULL off a row it
+    //    already holds. The warning names the object, the column and the id,
+    //    because "some row somewhere lost its number" is not repairable.
     const { driver } = await makeRemote();
+    const warnings = watchAutoNumberWarnings(driver);
     const inserted = await driver.upsert('crm_case', {
       id: 'never-seen',
       organization_id: 'orgA',
       title: 'inserted by upsert',
     });
     expect(inserted.case_number).toBeNull();
+
+    const lines = warnings.lines();
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('"crm_case"');
+    expect(lines[0]).toContain('case_number');
+    expect(lines[0]).toContain('never-seen');
+    warnings.restore();
+  });
+
+  it('[#7099] the MERGE leg stays silent — the warning does not cry wolf on a working path', async () => {
+    // The false-positive control, and the reason the check reads the RESULT row
+    // rather than the request: a merging upsert leaves the slot empty in the
+    // request too, so a request-shaped rule would warn on the one leg #6944
+    // measured as correct. Nothing is wrong here — the row kept the number it
+    // already had — and an operator must not be told otherwise.
+    const { driver } = await makeRemote();
+    await driver.create('crm_case', {
+      id: 'fixed3',
+      organization_id: 'orgA',
+      title: 'seeded',
+      case_number: 'CASE-00044',
+    });
+    const warnings = watchAutoNumberWarnings(driver);
+    const merged = await driver.upsert('crm_case', { id: 'fixed3', organization_id: 'orgA', title: 'edited' });
+    expect(merged.case_number).toBe('CASE-00044');
+    expect(warnings.lines()).toEqual([]);
+    warnings.restore();
+  });
+
+  it('[#7099] an object with no auto_number field never reaches the report', async () => {
+    // The other half of "no wolf": the registry lookup is keyed by object, so
+    // the overwhelming majority of remote upserts — objects with no record
+    // number at all — cost one map read and say nothing. A rule that warned on
+    // any NULL column would fire here, on a column that is simply absent.
+    const { driver } = await makeRemote();
+    const warnings = watchAutoNumberWarnings(driver);
+    const row = await driver.upsert('crm_note', { id: 'note1', organization_id: 'orgA', title: 'n' });
+    expect(row.title).toBe('n');
+    expect(warnings.lines()).toEqual([]);
+    warnings.restore();
+  });
+
+  it('[#7099] a caller-supplied number on the same leg is silent too', async () => {
+    // The seed-replay / import path crosses exactly this leg (id-bearing, no
+    // matching row) and is deliberately not refused. It must not be warned
+    // about either: the slot is filled, so there is nothing to report.
+    const { driver } = await makeRemote();
+    const warnings = watchAutoNumberWarnings(driver);
+    const imported = await driver.upsert('crm_case', {
+      id: 'imported-1',
+      organization_id: 'orgA',
+      title: 'replayed',
+      case_number: 'CASE-00777',
+    });
+    expect(imported.case_number).toBe('CASE-00777');
+    expect(warnings.lines()).toEqual([]);
+    warnings.restore();
   });
 });
 
