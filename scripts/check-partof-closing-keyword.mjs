@@ -312,6 +312,25 @@ function selfTest() {
   t('the wiring passes the body through env, never through shell interpolation', /env:[\s\S]{0,200}?PR_BODY:/.test(wiring), true);
   t('the wiring passes the PR number too (the wired-ness witness)', /PR_NUMBER:/.test(wiring), true);
 
+  // This gate installs no package manager, and that is a property of the JOB,
+  // not a preference. Measured the hard way: the first draft used a setup-node
+  // major whose package-manager-cache default is on, which reads packageManager
+  // out of package.json and shells out to pnpm to find its store. The job died
+  // in the setup step with "Unable to locate executable file: pnpm", before the
+  // script ran at all — a failure that names a tool the workflow source never
+  // mentions. The wording of the pin is deliberately about the WORKFLOW naming
+  // a package manager, since a comment explaining the incident has to be able
+  // to say the word; only the executable lines are scanned.
+  const wiringCommands = wiring
+    .split('\n')
+    .filter((line) => !/^\s*#/.test(line))
+    .join('\n');
+  t(
+    'the guard job invokes no package manager (it needs node and nothing else)',
+    /\b(pnpm|corepack|yarn|npm)\b/.test(wiringCommands),
+    false,
+  );
+
   // --- The predicate source this gate reuses must still be there to reuse.
   t('the predicate source exists', existsSync(join(ROOT, PREDICATE_SOURCE)), true);
 

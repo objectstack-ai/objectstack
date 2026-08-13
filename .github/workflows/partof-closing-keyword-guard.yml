@@ -48,10 +48,30 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
+      # Pinned to the same major and spelling as every other setup-node in this
+      # repo, and for a measured reason rather than tidiness. The first draft of
+      # this file used `actions/setup-node@v5` with `node-version-file`, and the
+      # job died IN THIS STEP, before the script ever ran:
+      #
+      #   ##[error]Unable to locate executable file: pnpm.
+      #
+      # v5 defaults `package-manager-cache: true` (the run log echoes it as an
+      # input), which reads `packageManager: pnpm@...` out of package.json and
+      # shells out to pnpm to locate the store to cache. This job installs no
+      # package manager on purpose — the script is dependency-free and imports
+      # one sibling module — so pnpm is not on PATH and the action hard-errors.
+      # The failure is worth naming because nothing in the step that failed
+      # mentions pnpm: it is an implicit default of the action, invisible in the
+      # workflow source, and the misleading first read is that the `run:` line
+      # below invoked a package manager. It does not, and never did.
+      #
+      # The adr-merge-approval gate is the known-good shape this now matches
+      # exactly: checkout, setup-node, one `node scripts/check-*.mjs` call, no
+      # install and no corepack. It is green on this repo today.
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
-          node-version-file: .nvmrc
+          node-version: '22'
 
       # The body reaches the script through `env:`, never through `${{ }}`
       # inside the `run:` script. An expression interpolated into a shell line
