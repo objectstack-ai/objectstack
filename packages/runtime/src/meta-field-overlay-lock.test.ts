@@ -609,6 +609,38 @@ describe('#7743 — PUT /meta/field/<object>.<field> honours the registry overla
         expect(metaRow(engine, 'field', 'showcase_task.title')).toBeUndefined();
     });
 
+    it('#7894 x #7893 — the plural spelling folds onto the CREATE lock too, not just the overlay one', async () => {
+        // ⚠️ The case above folds a plural OVERRIDE (`showcase_task.title` is
+        // a field the package ships), so it is pinned on #7743's overlay tier
+        // and answers NOT_OVERRIDABLE. It therefore says nothing about the
+        // tier THIS card closed, and measurably so: reverting
+        // `allowRuntimeCreate` to `true` leaves the case above GREEN while the
+        // two create cases go red. Two independent gates reachable through the
+        // same URL fold, and only one of them had a plural pin.
+        //
+        // This is that missing half — plural + brand-new name, so the fold
+        // lands on the CREATE lock. Without it, a future change to
+        // PLURAL_TO_SINGULAR could reopen `PUT /meta/fields/<o>.<n>` as a
+        // create door while every existing pin here stayed green.
+        const { engine, dispatcher } = makeStack();
+
+        const res = responseOf(await dispatcher.handleMetadata(
+            '/fields/showcase_task.zz_plural_probe', ctx(), 'PUT',
+            { name: 'zz_plural_probe', label: 'Probe', type: 'text' },
+        ));
+
+        // ADR-0112 — code AND status. NOT_CREATABLE, not NOT_OVERRIDABLE:
+        // nothing ships `zz_plural_probe`, so the fold arrives at the create
+        // tier and earns the retirement's own refusal, prescription included.
+        expect(res.status).toBe(403);
+        expect(res.body?.error?.code).toBe('NOT_CREATABLE');
+        expect(res.body?.error?.message).toContain('PUT /api/v1/meta/object/:object');
+        // Neither namespace is minted — the plural spelling cannot be used to
+        // route around the retirement into a second inert row.
+        expect(metaRow(engine, 'fields', 'showcase_task.zz_plural_probe')).toBeUndefined();
+        expect(metaRow(engine, 'field', 'showcase_task.zz_plural_probe')).toBeUndefined();
+    });
+
     it('#7894 — the other three unmapped types answer as their singular does', async () => {
         // `seed` / `external_catalog` / `translation` were unmapped alongside
         // `field`. The assertion is deliberately body-AGNOSTIC: what the card is

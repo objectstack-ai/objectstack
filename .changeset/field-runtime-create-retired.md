@@ -70,4 +70,8 @@ The retirement kit:
   `**/*.field.ts` names a route that has never worked, so `codeOnlySourceHint`
   gives fragment types their real remedy instead.
 - `field` auto-enrolled into the derived code-only refusal suite (both kernel
-  topologies), and the plural spelling is pinned as folding onto the same gate.
+  topologies), and the plural spelling is pinned as folding onto the same gate —
+  on the CREATE tier as well as the overlay one (#7894 closed the plural door;
+  this card verifies the fold reaches the tier it retired).
+
+<!-- adr-0087: registered field-runtime-create-withdrawn -->
