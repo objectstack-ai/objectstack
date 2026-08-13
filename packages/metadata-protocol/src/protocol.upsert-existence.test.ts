@@ -155,16 +155,25 @@ describe('[#5099] batchData upsert — the fork asks EXISTENCE, not visibility',
 
     it('a real update failure surfaces ITSELF — no fallback insert to mask it (non-atomic)', async () => {
         const t = makeRlsEngine();
-        t.engine.update = vi.fn(async () => { throw new Error('update exploded'); });
+        const explodingUpdate = vi.fn(async () => { throw new Error('update exploded'); });
+        t.engine.update = explodingUpdate;
         const p = new ObjectStackProtocolImplementation(t.engine);
 
         const res: any = await upsert(p, [{ id: 'mine_1', data: { progress: 1 } }], { continueOnError: true });
 
         // The old non-atomic fallback inserted here, buried 'update exploded'
         // under a duplicate-key error, and reported THAT to the caller.
+        // [#8502] The message no longer discriminates: `update exploded` is a
+        // bare `Error`, so its sentence is withheld, and the fallback insert's
+        // duplicate-key text would be withheld too. `.not.toContain('duplicate
+        // key')` alone would therefore pass for the WRONG reason — it would
+        // pass even if the fallback had run. So the claim is carried by the
+        // structural pair, which is strictly stronger than the string ever
+        // was: the update WAS attempted, and no insert followed it.
+        expect(explodingUpdate).toHaveBeenCalledTimes(1);
         expect(t.insert).not.toHaveBeenCalled();
         expect(res.results[0].success).toBe(false);
-        expect(res.results[0].errors?.[0]?.message).toContain('update exploded');
+        expect(res.results[0].errors?.[0]?.message).toBe('The upsert of this record failed. The reason is in the server log.');
         expect(res.results[0].errors?.[0]?.message).not.toContain('duplicate key');
     });
 

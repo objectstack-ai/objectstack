@@ -104,8 +104,15 @@ describe('batchData atomic — rollback is real and the response admits it (ADR-
         // "Attempted, undone" vs "never ran" is a CODE, not a message-prefix
         // regex (#4793) — the message keeps the human-readable cause.
         expect(res.results[0].errors?.[0]?.code).toBe('ROLLED_BACK');
-        expect(res.results[0].errors?.[0]?.message).toContain('insert exploded'); // carries the cause
-        expect(res.results[1].errors?.[0]?.message).toBe('insert exploded');      // the causal row, verbatim
+        // [#8502] `insert exploded` is a BARE `Error` — it declares no client
+        // refusal, so its sentence is withheld and the row says the stable
+        // operation-named line instead. The claim under test is unchanged and
+        // is about PROPAGATION: whatever the causal row says, the rolled-back
+        // row quotes it, so a caller reading row 0 learns why row 1 stopped
+        // the batch. Asserted against the causal row's own message rather than
+        // a literal, so the two cannot drift apart.
+        expect(res.results[1].errors?.[0]?.message).toBe('The create of this record failed. The reason is in the server log.');
+        expect(res.results[0].errors?.[0]?.message).toContain(res.results[1].errors?.[0]?.message); // carries the cause
         expect(res.results[2].errors?.[0]?.code).toBe('NOT_ATTEMPTED');
         // Rows correlate to the request array by `index` (#4793).
         expect(res.results.map((r: any) => r.index)).toEqual([0, 1, 2]);
@@ -162,7 +169,8 @@ describe('batchData atomic — rollback is real and the response admits it (ADR-
         expect(res.succeeded).toBe(0);
         expect(res.results[0].errors?.[0]?.code).toBe('ROLLED_BACK');
         expect(res.results[0].id).toBe('rec-1'); // ids survive so a caller can reconcile
-        expect(res.results[1].errors?.[0]?.message).toBe('update exploded');
+        // [#8502] withheld: a bare `Error` declares no client refusal.
+        expect(res.results[1].errors?.[0]?.message).toBe('The update of this record failed. The reason is in the server log.');
     });
 });
 
@@ -236,7 +244,13 @@ describe('batchData atomic — precedence and opt-in (ADR-0119 D4)', () => {
 
         expect(t.rollbacks).toHaveLength(1);
         expect(t.insert).not.toHaveBeenCalled();          // no blind fallback
-        expect(res.results[0].errors?.[0]?.message).toBe('update exploded'); // the real cause survives
+        // [#8502] The cause is withheld from the RESPONSE (bare `Error`), so
+        // "the real cause survives" is now carried by the two structural
+        // assertions above — the update was attempted and no fallback insert
+        // ran — plus the row naming the UPSERT it was doing. What must never
+        // appear is the fallback insert's duplicate-key text.
+        expect(res.results[0].errors?.[0]?.message).toBe('The upsert of this record failed. The reason is in the server log.');
+        expect(res.results[0].errors?.[0]?.message).not.toContain('duplicate key');
     });
 });
 

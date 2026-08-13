@@ -129,7 +129,11 @@ describe('batchData rows conform to BatchOperationResultSchema (#4793)', () => {
         expectConformantResponse(res, 3);
         expect(res.results[0].data).toMatchObject({ title: 'A' });
         // An unclassified engine throw is a 500 in row form.
-        expect(res.results[1].errors[0]).toMatchObject({ code: 'INTERNAL_ERROR', message: 'insert exploded' });
+        // [#8502] `code` is unchanged; the message is the withheld stable line.
+        expect(res.results[1].errors[0]).toMatchObject({
+            code: 'INTERNAL_ERROR',
+            message: 'The create of this record failed. The reason is in the server log.',
+        });
         expect(res.results[1].data).toBeUndefined();
     });
 
@@ -185,8 +189,9 @@ describe('batchData rows conform to BatchOperationResultSchema (#4793)', () => {
 
         expectConformantResponse(res, 3);
         expect(res.results[0].errors[0].code).toBe('ROLLED_BACK');
-        expect(res.results[0].errors[0].message).toContain('insert exploded'); // human-readable cause
-        expect(res.results[1].errors[0].message).toBe('insert exploded');      // causal row keeps its own error
+        // [#8502] Same propagation claim, against the causal row's own text.
+        expect(res.results[1].errors[0].message).toBe('The create of this record failed. The reason is in the server log.');
+        expect(res.results[0].errors[0].message).toContain(res.results[1].errors[0].message); // human-readable cause
         expect(res.results[2].errors[0].code).toBe('NOT_ATTEMPTED');
         // No reverted write may carry a record payload.
         for (const row of res.results) expect(row.data).toBeUndefined();
@@ -210,7 +215,7 @@ describe('updateManyData rows conform to BatchOperationResultSchema (#4793)', ()
 
         expectConformantResponse(res, 3);
         expect(res.results[0].data).toMatchObject({ id: 'a', title: 'a-new' });
-        expect(res.results[1].errors[0].message).toBe('update exploded');
+        expect(res.results[1].errors[0].message).toBe('The update of this record failed. The reason is in the server log.'); // [#8502]
     });
 
     it('atomic rollback — all three row classes, as codes', async () => {

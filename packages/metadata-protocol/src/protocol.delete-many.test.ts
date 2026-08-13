@@ -139,8 +139,9 @@ describe('deleteManyData — partial-failure semantics (#3897)', () => {
     expect(res.results[1]).toEqual({
       id: 'b', success: false, index: 1,
       // A thrown error with no code of its own maps to the unclassified-500
-      // row form; the message survives verbatim (#4793).
-      errors: [{ code: 'INTERNAL_ERROR', message: 'RLS: not visible' }],
+      // row form (#4793) — and since it declares no client refusal, #8502
+      // withholds its sentence and the row names the operation instead.
+      errors: [{ code: 'INTERNAL_ERROR', message: 'The delete of this record failed. The reason is in the server log.' }],
     });
     expect(res.results[2]).toMatchObject({ id: 'c', success: false, index: 2 });
     expect(res.results[2].errors[0].code).toBe('NOT_ATTEMPTED');
