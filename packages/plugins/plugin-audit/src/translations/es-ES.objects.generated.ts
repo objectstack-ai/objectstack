@@ -24,7 +24,6 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           create: "Crear",
           update: "Actualizar",
           delete: "Eliminar",
-          restore: "Restaurar",
           login: "Inicio de sesión",
           logout: "Cierre de sesión",
           config_change: "Cambio de configuración",
