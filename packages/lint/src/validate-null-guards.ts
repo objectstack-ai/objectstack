@@ -71,7 +71,7 @@
  * Surface ledger (each verdict traced to the code that decides it, so the next
  * author does not have to re-derive it — #4811). `binding` is the measured
  * shape TODAY; `verdict` is whether this gate runs there. Those are two
- * questions, and since #6454 they have come apart on one row:
+ * questions, and since #6454 they have come apart on two rows:
  *
  * | surface                        | binding | evidence                                                    | verdict |
  * |:-------------------------------|:--------|:------------------------------------------------------------|:--------|
@@ -80,7 +80,7 @@
  * | field `requiredWhen`           | TOTAL   | same `merged` in `evaluateValidationRules` — fail-OPEN, so an unguarded predicate enforces NOTHING in silence | covered (#4811) |
  * | field `readonlyWhen`           | TOTAL   | `rule-validator.ts` `readonlyWhenBindings` materialises BOTH roots (#4953 clause 1, landed in #6454) | excluded — NOT on totality; see below |
  * | action `visible` / `disabled`  | sparse  | evaluated client-side; no materialization exists in `objectui` | excluded (decided — #4953 clause 2) |
- * | flow / edge `condition`        | sparse  | `record-change-trigger.ts` seeds `{...(inputData ?? {}), ...after}` — #4953 clause 1's other half, not yet wired | excluded (not yet) |
+ * | flow / edge `condition`        | TOTAL   | `record-change-trigger.ts` `buildContext` layers `previous` under the payload/after-row then runs BOTH `record` and `previous` through a structural-mirror `materializeDeclaredFields` (#4953 clause 1's other half, services lane) | excluded — NOT on totality; see below |
  * | sharing-rule `condition`       | n/a     | compiled to a SQL filter; `NULL > x` is three-valued, never faults | excluded |
  * | field `expression` (`Field.formula`) | n/a | product judgement, not a wiring gap — see below              | excluded |
  *
@@ -98,10 +98,14 @@
  *    (`stripReadonlyWhenFields` merging `{...previous, ...data}` raw)
  *    describes code that no longer exists. What keeps the row excluded is
  *    clause 3 of the same ruling: the gate widens once BOTH server-side seams
- *    are total, and the other one — flow trigger-record seeding, services
- *    lane — is not wired yet. Widening this face alone would also mean the
- *    `binding` column had stopped being the thing that decides coverage,
- *    which is the property #4811 bought.
+ *    are total. The other one — flow trigger-record seeding, services lane —
+ *    is ALSO wired now (#4953 clause 1's other half; see the `flow / edge
+ *    condition` row below), so both server-side seams the ruling named are
+ *    total as of that landing. The actual gate widening clause 3 promises is
+ *    tracked separately (#4811) rather than folded into either seam's own
+ *    PR — this row (and the one below) stay excluded here on purpose, so the
+ *    `binding` column keeps meaning what #4811 needs it to mean: a fact about
+ *    the surface, not a verdict this module renders on itself.
  *
  *    Two facts to carry into that widening; neither is bookkeeping:
  *
@@ -142,20 +146,35 @@
  *    The ruling's replacement action for this face is the MIRROR of this gate
  *    — flag `!= null` on a sparse binding — and it is an evaluation owed by
  *    the devx / objectui lanes, never a widening of `checkNullGuards`.
- *  - **Flow / edge `condition`.** #4811 excluded these for flattened-scope
- *    ambiguity ("a bare identifier may be a flow variable"). That reason does
- *    not actually apply to this module — {@link findUnguardedNullableOperands}
- *    only ever resolves `record.<f>` / `previous.<f>` and never a bare
- *    identifier, and the engine binds `record` / `previous` unconditionally.
- *    The real blocker is totality: the trigger seeds the record as
- *    `{...(inputData ?? {}), ...after}` — spelled `inputDoc` here until #5671
- *    dropped that alias read — so a declared column the write never mentioned
- *    is an ABSENT key, and the `!= null` this gate prescribes would fault.
- *    Since #4953 that sparseness is a NOT-YET rather than a decision: clause 1
- *    puts this seam under the same server-side totality guarantee as
- *    `readonlyWhen`, and only the services-lane wiring is outstanding. When it
- *    lands, this row and the `readonlyWhen` row flip together — which is
- *    exactly what clause 3 asks for.
+ *  - **Flow / edge `condition` — the row where `binding` and `verdict` came
+ *    apart, same shape as `readonlyWhen` above.** #4811 originally excluded
+ *    these for flattened-scope ambiguity ("a bare identifier may be a flow
+ *    variable"). That reason does not actually apply to this module —
+ *    {@link findUnguardedNullableOperands} only ever resolves `record.<f>` /
+ *    `previous.<f>` and never a bare identifier, and the engine binds
+ *    `record` / `previous` unconditionally. The real blocker was totality:
+ *    the trigger used to seed the record as `{...(inputData ?? {}), ...after}`
+ *    — spelled `inputDoc` here until #5671 dropped that alias read — so a
+ *    declared column the write never mentioned was an ABSENT key, and the
+ *    `!= null` this gate prescribes would fault.
+ *
+ *    #4953 (services half) closed that gap: `record-change-trigger.ts`
+ *    `buildContext` now layers `previous` under the payload/after-row (so an
+ *    untouched field reads its REAL persisted value instead of going
+ *    missing) and runs the result through a structural-mirror
+ *    `materializeDeclaredFields` for whatever is still absent — gated on the
+ *    same `groundTruth` rule `evaluateValidationRules` uses (insert always;
+ *    update/delete only once the prior row was fetched), so a write whose
+ *    prior row genuinely cannot be read is left sparse rather than
+ *    fabricating a `null` over an unknown real value. Both `record` and
+ *    `previous` are covered. The totality criterion above is therefore
+ *    SATISFIED here too, and the evidence this row used to carry (the raw
+ *    `{...(inputData ?? {}), ...after}` seed) describes code that no longer
+ *    exists.
+ *
+ *    What keeps the row excluded is the SAME clause-3 reason the
+ *    `readonlyWhen` row states: the gate's actual widening is tracked
+ *    separately (#4811), not folded into this seam's own PR.
  *    (The flattened-scope ambiguity is real for a *bare-identifier* checker —
  *    flow inputs shadow record fields, and a node's `outputVariable` can
  *    overwrite either — but that is a different, unbuilt pass.)

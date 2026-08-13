@@ -6,20 +6,27 @@
  * Shared by the SERVER-side places that evaluate a CEL expression against "the
  * record": object-level validation predicates + field `requiredWhen` +
  * option `visibleWhen` (`validation/rule-validator.ts`, #1871 / #4649),
- * declarative hook `condition`s (`hook-wrappers.ts`, #4770), and the field
+ * declarative hook `condition`s (`hook-wrappers.ts`, #4770), the field
  * `readonlyWhen` strips on the write path (`validation/rule-validator.ts`
- * `readonlyWhenBindings`, #4953). They used to disagree — a predicate saw a
- * total record while a hook condition saw only the fields the current write
- * happened to carry — which is precisely the drift this module exists to
- * prevent: an author cannot be expected to know that the same `record.done ==
- * true` means two different things depending on which surface reads it.
+ * `readonlyWhenBindings`, #4953, PR #6454), and — since #4953's services
+ * half — the flow-trigger record seeded in
+ * `packages/triggers/trigger-record-change/src/record-change-trigger.ts`.
+ * They used to disagree — a predicate saw a total record while a hook
+ * condition saw only the fields the current write happened to carry — which
+ * is precisely the drift this module exists to prevent: an author cannot be
+ * expected to know that the same `record.done == true` means two different
+ * things depending on which surface reads it.
  *
- * Two bindings are still sparse, and the difference between them matters:
+ * The flow-trigger seam is a STRUCTURAL MIRROR of this exact function, not an
+ * import of it: `trigger-record-change` keeps zero build-time dependency on
+ * `@objectstack/objectql` (the same reason it re-declares `FlowTriggerBinding`
+ * locally), so it carries its own copy with the identical algorithm and
+ * contract — see that file's own `materializeDeclaredFields` doc comment for
+ * the duplication rationale. This doc comment stays the canonical statement
+ * of the RULE; the copy defers to it rather than re-deriving.
  *
- *  - The flow trigger record (`packages/triggers/trigger-record-change`) is a
- *    server seam the same ruling puts on this list; it is simply not wired yet
- *    (services lane, #4953 item 1's other half). Do not read its absence as a
- *    decision.
+ * One binding is still sparse, and by decision rather than by gap:
+ *
  *  - objectui's action `visible` / `disabled` binds whatever record the client
  *    already fetched. That one is a DECISION (#4953 item 2): making it total
  *    would mean every REST read padding out all declared columns, so it stays

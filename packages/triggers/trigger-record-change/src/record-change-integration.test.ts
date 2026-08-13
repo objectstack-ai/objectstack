@@ -162,6 +162,30 @@ const objectDef = (name: string) => ({
 });
 
 /**
+ * #4953 (services half) — a `record-before-*` flow's `record` used to be
+ * JUST the incoming patch (`inputData`, see `record-change-trigger.ts`
+ * `buildContext`), never merged with the prior row and never materialized
+ * over the object's declared fields. `tag` here is untouched by the update
+ * below (only `note` is written), so BEFORE the fix `record.tag != null`
+ * read a record with no `tag` key at all and FAULTED — the flow's own
+ * error-isolation try/catch (`RecordChangeTrigger.start`'s handler) swallows
+ * that fault, so the only observable symptom was "the flow silently never
+ * fires", never a visible error.
+ */
+const beforeHookObjectDef = (name: string) => ({
+  name,
+  label: name,
+  fields: {
+    tag: { name: 'tag', label: 'Tag', type: 'text' },
+    note: { name: 'note', label: 'Note', type: 'text' },
+    // Declared, but never given a value anywhere below — the "genuinely no
+    // value" case `materializeDeclaredFields` fills with an explicit `null`
+    // rather than leaving it an absent (fault-on-access) key.
+    nickname: { name: 'nickname', label: 'Nickname', type: 'text' },
+  },
+});
+
+/**
  * #3760 — the fail-open this trigger was the dominant carrier of.
  *
  * `isSystem` does NOT suppress trigger dispatch (only `skipTriggers` does), and
@@ -397,5 +421,74 @@ describe('record-change trigger — end-to-end (#1491)', () => {
     await data.update('wid5', { id: lowId, priority: 'urgent' }, { context: { userId: 'u_trigger' } });
     await sleep(200);
     expect((await data.findOne('wid5', { where: { id: lowId } }))?.alerted).toBe('yes');
+  }, 15000);
+
+  /**
+   * #4953 (services half) — a REAL-engine (SqlDriver) measurement of the
+   * `record-before-*` seam. `record-before-write` dispatches on `beforeUpdate`
+   * BEFORE the driver has anything to echo back (`ctx.result` is unset), so
+   * `hydrateComputedFields` never runs either — this leg is entirely on
+   * `buildContext`'s own prior-row fold + `materializeDeclaredFields` to be
+   * total, with no assist from the after-row merge #1872 fixed.
+   */
+  it('a record-before-write start condition sees an UNTOUCHED declared field\'s real value, and a NEVER-SET one as null — not a fault (#4953)', async () => {
+    const kernel = new ObjectKernel({ logLevel: 'silent' });
+    await kernel.use(new ObjectQLPlugin());
+    await kernel.use(new AutomationServicePlugin());
+    await kernel.use(new RecordChangeTriggerPlugin());
+    await kernel.bootstrap();
+
+    const objectql = kernel.getService('objectql') as any;
+    const data = kernel.getService('data') as any;
+    const automation = kernel.getService<AutomationEngine>('automation');
+
+    await attachSqlite(objectql);
+    objectql.registry.registerObject(beforeHookObjectDef('bfw'), 'test', 'test');
+    objectql.registry.registerObject(
+      { name: 'bfw_audit', label: 'bfw audit', fields: { seen_tag: { name: 'seen_tag', label: 'T', type: 'text' } } },
+      'test', 'test',
+    );
+    await objectql.syncSchemas();
+
+    automation.registerFlow('before_write_probe', {
+      name: 'before_write_probe', label: 'Before-update probe', type: 'record_change',
+      nodes: [
+        {
+          id: 'start', type: 'start', label: 'Start',
+          // `record-before-update` ONLY (not `-write`, which would also bind
+          // `beforeInsert` — the insert leg would trivially satisfy this same
+          // condition too and double the audit count, muddying the measurement).
+          config: {
+            objectName: 'bfw', triggerType: 'record-before-update',
+            // `tag` is NOT in THIS write's payload (only `note` is written) —
+            // BEFORE the fix this read a record with no `tag` key and
+            // FAULTED. `nickname` is declared but never given a value
+            // ANYWHERE (not on insert, not on this update): a materialized
+            // `null`, not a fabrication.
+            condition: "record.tag != null && record.nickname == null",
+          },
+        },
+        {
+          id: 'log', type: 'create_record', label: 'Log',
+          config: { objectName: 'bfw_audit', fields: { seen_tag: '{record.tag}' } },
+        },
+        { id: 'end', type: 'end', label: 'End' },
+      ],
+      edges: [{ id: 'e1', source: 'start', target: 'log' }, { id: 'e2', source: 'log', target: 'end' }],
+    } as any);
+
+    const created = await data.insert('bfw', { tag: 'keep', note: 'x' }, { context: { userId: 'u_trigger' } });
+    const id = Array.isArray(created) ? created[0]?.id : created?.id ?? created;
+    await sleep(200);
+
+    // Update touches ONLY `note` — `tag` never appears in this write's payload.
+    await data.update('bfw', { id, note: 'y' }, { context: { userId: 'u_trigger' } });
+    await sleep(200);
+
+    const audit: any[] = await data.find('bfw_audit', {});
+    expect(audit).toHaveLength(1);
+    // The condition read `record.tag`'s REAL persisted value ('keep', folded
+    // from the prior row) — not a fabricated null, and not a fault.
+    expect(audit[0]?.seen_tag).toBe('keep');
   }, 15000);
 });

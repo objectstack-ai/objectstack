@@ -23,6 +23,7 @@
   },
   "devDependencies": {
     "@objectstack/driver-sql": "workspace:*",
+    "@objectstack/formula": "workspace:*",
     "@objectstack/objectql": "workspace:*",
     "@objectstack/service-automation": "workspace:*",
     "@types/node": "^26.1.2",
