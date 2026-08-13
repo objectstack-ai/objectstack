@@ -363,7 +363,6 @@
     "api/SimplePresenceState",
     "api/SingleRecordResponse",
     "api/StandardErrorCode",
-    "api/StandardSynonymWaiver",
     "api/SubscribeMessage",
     "api/Subscription",
     "api/SubscriptionEvent",
