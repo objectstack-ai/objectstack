@@ -15,6 +15,14 @@ export { recordNotFoundError } from './protocol.js';
 // still be quoted (a malformed seed body). Exporting is enabling-only — no
 // behaviour in this package changes.
 export { clientFacingFailureText, seedRequestValidationError } from './protocol.js';
+// [#7823] The write-response half of the `internal: true` guarantee — THE
+// single helper every generic write ingress routes its response records
+// through (A-prime ruling, 2026-08-13). Tripwire-enforced; see the module
+// header for why it lives at the ingress and not in the engine.
+export {
+  omitInternalFieldsFromWriteResponse,
+  collectInternalWriteResponseFields,
+} from './write-response-internal-fields.js';
 export { createMetadataProtocolPlugin, assembleMetadataProtocol } from './plugin.js';
 export type { MetadataProtocolPluginOptions, AssembleMetadataProtocolOptions } from './plugin.js';
 // [#6710] The declared authoring channel — the explicit expression of ADR-0005's

@@ -191,8 +191,41 @@ export class DbJobAdapter implements IJobService {
     }));
   }
 
+  /**
+   * Release every timer this adapter owns — BOTH halves of it.
+   *
+   * This is the far end of the kernel eviction chain
+   * (`KernelManager.evict()` -> `kernel.shutdown()` -> `plugin.destroy()` ->
+   * `JobServicePlugin.destroy()` -> here), and eviction is routine rather than
+   * exceptional in the cloud runtime: a freshness probe runs every few seconds
+   * and every auto-publish bumps freshness. Until #8362 this method destroyed
+   * `inner` and never `cron`, so each evicted kernel left its croner timers
+   * running and holding their PROCESS-GLOBAL names for the life of the
+   * process. The rebuilt kernel then failed to bind that flow — permanently,
+   * reproduced across four consecutive rebuilds — and the only signal was one
+   * WARN from the trigger.
+   *
+   * `IJobService` does not declare `destroy()`, so the call is structural,
+   * exactly like the `cancel` forwarding above.
+   */
   async destroy(): Promise<void> {
     await this.inner.destroy();
+    const cron = this.cron as (IJobService & { destroy?: () => Promise<void> }) | undefined;
+    if (!cron || typeof cron.destroy !== 'function') return;
+    try {
+      await cron.destroy();
+    } catch (err) {
+      // Runtime state now disagrees with every other surface: the kernel is
+      // gone, its cron timers are not, and nothing else in the system looks
+      // wrong — so this is the durability class, not the functional one.
+      const report = this.logger?.error?.bind(this.logger) ?? this.logger?.warn?.bind(this.logger);
+      report?.(
+        'DbJobAdapter: the cron adapter failed to shut down — its croner jobs stay ALIVE holding their ' +
+          'process-global names, so scheduled flows will silently fail to re-bind after this kernel is ' +
+          'rebuilt, while every other surface keeps reporting them healthy. Restart the process to clear them.',
+        err as any,
+      );
+    }
   }
 
   // ── Internals ────────────────────────────────────────────────────

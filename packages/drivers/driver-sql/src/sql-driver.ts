@@ -4831,6 +4831,51 @@ export class SqlDriver implements IDataDriver {
    * logical fields via `external.columnMap`), matching the
    * `applyWriteColumnMap`-processed row the merge column list is derived from;
    * `created_at` stays the literal post-map key it has always been filtered as.
+   *
+   * ## What that identifier guarantees: unique and monotonic, NOT gapless (#8283)
+   *
+   * Immutable-once-assigned is one half of the contract; this is the other. It
+   * is a **decided** property, not an undocumented default — ruled by the
+   * maintainer on 2026-08-13 (#8283), which weighed and rejected both reserving
+   * the number only after the row is known to be insertable, and an opt-in
+   * gapless mode.
+   *
+   * Per counter — the `(table, tenant, field, scope)` key
+   * {@link getNextSequenceValue} issues from — an autonumber is:
+   *
+   *  - **unique**: no two rows are issued the same value;
+   *  - **monotonic**: each value issued is greater than the last;
+   *  - **NOT gapless**: the series may skip values, permanently.
+   *
+   * **A rejected write consumes the number it reserved.** The value is reserved
+   * before the INSERT is attempted, so any rejection after that point burns it:
+   * a unique violation on another field, a validation rule, a `beforeInsert`
+   * hook that throws. That number is issued to no row and will never be issued
+   * again — the next write gets the one after it. `TK-0001`, a failed insert,
+   * then `TK-0003` is this contract behaving correctly (measured on both
+   * SQLite and Postgres in #8283).
+   *
+   * Why it cannot be taken back: {@link getNextSequenceValue} commits the
+   * reservation in **its own transaction** (`runner.transaction` over
+   * `parentTrx ?? this.knex`), deliberately independent of the caller's insert
+   * — which is what makes a forward-only counter meaningful and what the batch
+   * paths' re-seed logic stands on. With no caller transaction the reservation
+   * is already committed when the insert fails, and nothing reclaims it.
+   * (Inside a caller transaction it nests, rolling back with the refused
+   * insert, so that path burns nothing — measured, and relied on at the
+   * `upsert` retry site below.)
+   *
+   * This is ordinary sequence semantics — every standard database sequence
+   * behaves this way — and **not a defect to repair**. Do not add reclamation,
+   * reservation-reordering, or a "return the number on a clean rejection" path:
+   * that shape was rejected in #8283 because it only narrows gaps rather than
+   * closing them (a crash after reservation still burns a number) while having
+   * to compose with the savepoint structure at both speculative sites.
+   *
+   * For callers: an autonumber is sound as a business identifier and must not
+   * be presented as a **gapless** series (an audit-grade invoice or contract
+   * number). A customer with a compliance-grade gapless requirement is the
+   * recorded restart condition for an opt-in gapless mode — it is not built.
    */
   protected insertOnlyUpsertColumns(object: string): Set<string> {
     // Same config resolution as `fillAutoNumberFields`: object name first,

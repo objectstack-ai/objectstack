@@ -9,6 +9,8 @@ import {
   credentialFreeUrl,
   driverConfigJsonSchema,
   INLINE_CREDENTIAL_REFUSED,
+  placeholderFree,
+  placeholderFreeDeep,
   READ_ONLY_BELONGS_ON_DATASOURCE,
   refusedInlineCredentialKey,
   SCHEMA_MODE_BELONGS_ON_DATASOURCE,
@@ -76,28 +78,33 @@ export const MongoConfigSchema = lazySchema(() => strictObject(
    * a `username:password@` userinfo is refused at publish exactly like an
    * inline `password` (#7990) — bind the secret (`external.credentialsRef` /
    * the connection form's secret field) and it is injected at connect time. A
-   * bare username (`user@host1`) stays writable. Runtime-environment DSNs
+   * bare username (`user@host1`) stays writable. Placeholder-free since
+   * #8336: a `${…}` span anywhere in the value is refused — placeholders in
+   * authored metadata are resolved by nothing. Runtime-environment DSNs
    * (`OS_DATABASE_URL`) never pass through this schema and are unaffected.
    * Format: `mongodb://[username@]host1[:port1][,…][/[db][?options]]`
    */
-  url: credentialFreeUrl(z.string(), 'url').optional()
+  url: placeholderFree(credentialFreeUrl(z.string(), 'url'), 'url').optional()
     .describe('Connection URI (supersedes the discrete fields; must not embed a password — bind the secret instead)')
     .meta({ title: 'Connection URI' }),
 
   /**
    * Database name — the logical database holding the collections.
-   * Required unless `url` carries it.
+   * Required unless `url` carries it. Placeholder-free since #8336.
    */
-  database: z.string().min(1).optional().describe('Database name').meta({ title: 'Database' }),
+  database: placeholderFree(z.string().min(1), 'database').optional()
+    .describe('Database name').meta({ title: 'Database' }),
 
-  /** Hostname. Used only when `url` is absent. */
-  host: z.string().default('localhost').describe('Host address').meta({ title: 'Host' }),
+  /** Hostname. Used only when `url` is absent. Placeholder-free since #8336. */
+  host: placeholderFree(z.string(), 'host').default('localhost')
+    .describe('Host address').meta({ title: 'Host' }),
 
   /** Port. Used only when `url` is absent. */
   port: z.number().int().default(27017).describe('Port number').meta({ title: 'Port' }),
 
-  /** Authentication user. Used only when `url` is absent. */
-  username: z.string().optional().describe('Authentication user').meta({ title: 'User' }),
+  /** Authentication user. Used only when `url` is absent. Placeholder-free since #8336. */
+  username: placeholderFree(z.string(), 'username').optional()
+    .describe('Authentication user').meta({ title: 'User' }),
 
   /**
    * Authentication password — REFUSED inline since #7990 (see postgres.zod.ts:
@@ -106,15 +113,19 @@ export const MongoConfigSchema = lazySchema(() => strictObject(
    */
   password: refusedInlineCredentialKey('password', 'Password'),
 
-  /** Authentication database, when it differs from `database`. */
-  authSource: z.string().optional().describe('Authentication database')
+  /** Authentication database, when it differs from `database`. Placeholder-free since #8336. */
+  authSource: placeholderFree(z.string(), 'authSource').optional()
+    .describe('Authentication database')
     .meta({ title: 'Auth source' }),
 
   /**
    * Passthrough options handed to the MongoDB client verbatim
-   * (`replicaSet`, `tls`, timeouts, …).
+   * (`replicaSet`, `tls`, timeouts, …). Placeholder-free since #8336, judged
+   * DEEP: every nested string value reaches the client, and this passthrough
+   * is exactly where a refusal on `url`/`host` would otherwise displace the
+   * placeholder to.
    */
-  options: z.record(z.string(), z.unknown()).optional()
+  options: placeholderFreeDeep(z.record(z.string(), z.unknown()), 'options').optional()
     .describe('Extra MongoClient options (replicaSet, tls, timeouts, …)'),
 })
   .describe('MongoDB Connection Configuration')

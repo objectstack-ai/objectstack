@@ -11,6 +11,12 @@
  * Contract: when no field metadata is available (schema lookup failed or carried
  * no fields) every helper is a pass-through, so the export stays byte-for-byte
  * identical to the un-formatted behaviour.
+ *
+ * Second contract, on the clock (#8373): a `datetime` cell renders in the
+ * request's business timezone — the `timezone` the route's already-resolved
+ * `ExecutionContext` carries — and falls back to UTC when there is none, which
+ * is byte-identical to the pre-#8373 output. A `date` cell is a timezone-naive
+ * calendar day and never reads it (ADR-0053). See {@link formatDate}.
  */
 
 export interface ExportFieldMeta {
@@ -162,6 +168,74 @@ function pad2(n: number): string {
   return n < 10 ? `0${n}` : String(n);
 }
 
+/**
+ * `Intl.DateTimeFormat` instances keyed by IANA zone, with `null` memoizing a
+ * zone the platform rejected. A 50k-row export formats one cell per datetime
+ * column per row, so constructing a formatter per cell is the difference
+ * between a stream and a stall; the key set is bounded by the deployment's
+ * configured zones.
+ */
+const ZONED_FORMATTERS = new Map<string, Intl.DateTimeFormat | null>();
+
+function zonedFormatter(timezone: string): Intl.DateTimeFormat | null {
+  const cached = ZONED_FORMATTERS.get(timezone);
+  if (cached !== undefined) return cached;
+  let fmt: Intl.DateTimeFormat | null = null;
+  try {
+    fmt = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      // `h23` (not `hour12: false`) — midnight must read `00`, never `24`.
+      hourCycle: 'h23',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+  } catch {
+    fmt = null; // not a valid IANA zone → callers fall back to UTC
+  }
+  ZONED_FORMATTERS.set(timezone, fmt);
+  return fmt;
+}
+
+/**
+ * The wall clock an instant shows in `timezone` — `YYYY-MM-DD` + `HH:mm:ss`,
+ * split so callers can use either half.
+ *
+ * Reads the calendar components from `Intl.DateTimeFormat().formatToParts()`
+ * so DST transitions come from the platform's tz database rather than
+ * hand-rolled offset arithmetic (the same primitive `@objectstack/core`'s
+ * `calendarPartsInTz` and `@objectstack/spec`'s autonumber date tokens use).
+ *
+ * Falls back to the UTC wall clock whenever `timezone` is absent, `'UTC'`, or
+ * not a zone this platform knows — the pre-#8373 behaviour, kept as the
+ * backward-compatibility contract for deployments that never set one.
+ */
+function wallClock(d: Date, timezone?: string): { ymd: string; hms: string } {
+  if (timezone && timezone !== 'UTC') {
+    const fmt = zonedFormatter(timezone);
+    if (fmt) {
+      const parts = fmt.formatToParts(d);
+      const get = (t: string) => parts.find((p) => p.type === t)?.value;
+      const y = get('year');
+      const mo = get('month');
+      const da = get('day');
+      const h = get('hour');
+      const mi = get('minute');
+      const s = get('second');
+      if (y && mo && da && h && mi && s) {
+        return { ymd: `${y}-${mo}-${da}`, hms: `${h}:${mi}:${s}` };
+      }
+    }
+  }
+  return {
+    ymd: `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`,
+    hms: `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}:${pad2(d.getUTCSeconds())}`,
+  };
+}
+
 function toDate(value: unknown): Date | null {
   if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
   if (typeof value === 'number' || typeof value === 'string') {
@@ -171,13 +245,39 @@ function toDate(value: unknown): Date | null {
   return null;
 }
 
-/** `YYYY-MM-DD` (date) or `YYYY-MM-DD HH:mm:ss` (datetime), in UTC. */
-function formatDate(value: unknown, withTime: boolean): unknown {
+/**
+ * `YYYY-MM-DD` (date) or `YYYY-MM-DD HH:mm:ss` (datetime).
+ *
+ * The two branches read DIFFERENT clocks, because ADR-0053 gives the two field
+ * types different meanings:
+ *
+ * - **`datetime` is an instant**, rendered in a reference timezone — so it is
+ *   rendered here in the caller's business timezone (`ExecutionContext.timezone`,
+ *   the platform-default → global → tenant cascade), matching what the UI shows.
+ *   Before #8373 this was hardcoded to UTC while the UI rendered the business
+ *   zone, so an export of `2026-08-01 06:00 +08` read `2026-07-31 22:00` — a
+ *   row that crossed a day boundary crossed a MONTH boundary with it, and a
+ *   downstream monthly reconciliation stopped balancing. `getUTC*` ignores the
+ *   process `TZ`, so there was no deployment-side workaround either.
+ * - **`date` is a timezone-naive calendar day** — never re-projected into a
+ *   zone. `@objectstack/driver-sql`'s `toDateOnly` is the single source of
+ *   truth for what a `date` *is* (`YYYY-MM-DD`, a `Date` collapsed on its UTC
+ *   calendar day) and the filter/write/read paths all agree with it. Passing a
+ *   date-only value through a zone would shift `2026-08-01` to `2026-07-31` for
+ *   every deployment west of UTC — inventing the very off-by-one-day defect
+ *   ADR-0053 removed. So this branch is deliberately unchanged.
+ *
+ * `timezone` absent (or unknown to the platform) ⇒ UTC, i.e. exactly the
+ * pre-#8373 output.
+ */
+function formatDate(value: unknown, withTime: boolean, timezone?: string): unknown {
   const d = toDate(value);
   if (!d) return value;
-  const ymd = `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`;
-  if (!withTime) return ymd;
-  return `${ymd} ${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}:${pad2(d.getUTCSeconds())}`;
+  if (!withTime) {
+    return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`;
+  }
+  const { ymd, hms } = wallClock(d, timezone);
+  return `${ymd} ${hms}`;
 }
 
 function optionLabel(value: unknown, options?: Array<{ label?: string; value?: unknown }>): unknown {
@@ -233,8 +333,18 @@ function formatReference(value: unknown, displayField?: string): unknown {
   return one(value);
 }
 
-/** Format one storage value into a display value using its field metadata. */
-export function formatCellValue(value: unknown, meta?: ExportFieldMeta): unknown {
+/**
+ * Format one storage value into a display value using its field metadata.
+ *
+ * `timezone` is the request's business timezone (`ExecutionContext.timezone`).
+ * It reaches only the `datetime` branch; absent, the cell renders in UTC —
+ * see {@link formatDate} for why `date` never reads it at all.
+ */
+export function formatCellValue(
+  value: unknown,
+  meta?: ExportFieldMeta,
+  timezone?: string,
+): unknown {
   if (value === null || value === undefined) return value;
   if (!meta || !meta.type) return value;
   const t = meta.type;
@@ -249,18 +359,24 @@ export function formatCellValue(value: unknown, meta?: ExportFieldMeta): unknown
     return arr.map((v) => optionLabel(v, meta.options)).join(', ');
   }
   if (t === 'date') return formatDate(value, false);
-  if (t === 'datetime') return formatDate(value, true);
+  if (t === 'datetime') return formatDate(value, true, timezone);
   if (REFERENCE_TYPES.has(t)) return formatReference(value, meta.displayField);
   return value;
 }
 
-/** Ordered display cells for one row — the CSV / XLSX column path. */
+/**
+ * Ordered display cells for one row — the CSV / XLSX column path.
+ *
+ * `timezone` is threaded straight through to {@link formatCellValue}; the
+ * export route reads it off the `ExecutionContext` it already resolved.
+ */
 export function formatRowCells(
   row: Record<string, unknown>,
   fields: string[],
   metaMap: Map<string, ExportFieldMeta>,
+  timezone?: string,
 ): unknown[] {
-  return fields.map((f) => formatCellValue(row?.[f], metaMap.get(f)));
+  return fields.map((f) => formatCellValue(row?.[f], metaMap.get(f), timezone));
 }
 
 /**
@@ -271,13 +387,14 @@ export function formatRowCells(
 export function formatRowForJson(
   row: Record<string, unknown>,
   metaMap: Map<string, ExportFieldMeta>,
+  timezone?: string,
 ): Record<string, unknown> {
   if (metaMap.size === 0 || !row || typeof row !== 'object') return row;
   let copy: Record<string, unknown> | null = null;
   for (const key of Object.keys(row)) {
     const meta = metaMap.get(key);
     if (!meta) continue;
-    const formatted = formatCellValue(row[key], meta);
+    const formatted = formatCellValue(row[key], meta, timezone);
     if (formatted !== row[key]) {
       if (!copy) copy = { ...row };
       copy[key] = formatted;

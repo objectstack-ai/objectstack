@@ -232,23 +232,36 @@ describe('#7728: the `internal` field flag omits a value from the generic data p
     });
   });
 
-  describe('the write-response surfaces', () => {
-    it('omits the flagged field from the create body', async () => {
+  describe('the write-response surfaces (RELOCATED to the ingress — #7823 A-prime)', () => {
+    // These two pins used to assert the OPPOSITE: that the engine omitted the
+    // flagged field from its own insert/update results. That conflated "never
+    // returned on the generic data path" with "never returned to the
+    // engine-level caller that performed the write" — and for
+    // `sys_session.token` those are opposite requirements: better-auth's
+    // `createWithHooks` reads the minted session row back off the insert
+    // result, so the engine-side strip broke `signIn`/`signUp` outright
+    // (measured: `verify signIn: no token in response`). Under the 2026-08-13
+    // A-prime ruling the ENGINE keeps write results whole, and the external
+    // 201/200 bodies are stripped at the generic-data-path ingress
+    // (`omitInternalFieldsFromWriteResponse` in @objectstack/metadata-protocol,
+    // held there by its own tripwire test across every `*Data` face — that is
+    // where #7728's fourth surface, the sys_api_key PATCH body, stays closed).
+    //
+    // The assertions below are the LIVENESS half of that ruling: they go RED
+    // if anyone re-adds an engine-level write-response strip, which is the
+    // exact regression that broke authentication.
+    it('the create RESULT keeps the flagged field — mint reads it back off this value', async () => {
       const created = await seed();
-      expect(Object.keys(created)).not.toContain('key');
-      // The create still returns a usable record — the mint path reads `id`
-      // off exactly this value.
+      expect(created.key).toBe(HASH);
       expect(created.id).toBeTruthy();
     });
 
-    it('omits the flagged field from the by-id update body', async () => {
-      // The surface measured leaking on `sys_api_key` itself: that object has
-      // `update` open (#7727) and its revoke/restore row actions PATCH it.
+    it('the by-id update RESULT keeps the flagged field — engine callers are privileged writers', async () => {
       const created = await seed();
       const updated = await ctx.engine.update('itest_api_key', { id: created.id, revoked: true }, {
         context: { isSystem: true },
       } as any);
-      expect(Object.keys(updated)).not.toContain('key');
+      expect(updated.key).toBe(HASH);
       expect(updated.revoked).toBe(true);
     });
   });

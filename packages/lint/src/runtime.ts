@@ -22,6 +22,7 @@
  */
 
 export {
+  buildRuntimeWriteSnapshots,
   runRuntimeAuthoringRules,
   runtimeAuthoringRulesFor,
   runtimeGatedTypes,

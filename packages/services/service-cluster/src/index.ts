@@ -72,4 +72,6 @@ export {
     checkMultiNodeAllowed,
     __resetMultiNodeGate,
     type MultiNodeGate,
+    type MultiNodeVerdict,
+    type ResolvedMultiNodeVerdict,
 } from './multi-node-gate.js';

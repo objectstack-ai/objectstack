@@ -131,6 +131,9 @@ export const INLINE_CREDENTIAL_REFUSED = (key: string): string =>
  *    metadata placeholders are resolved by nothing and reach the client
  *    verbatim, so "put a placeholder in the URL" is a broken escape that
  *    recreates the masked-failure shape (#8082's ruling names this binding).
+ *    Since #8336 the message no longer merely warns: placeholder syntax in
+ *    connection-material keys is itself refused at publish (maintainer-ruled
+ *    direction 2, 2026-08-13), so the sentence now points at that refusal.
  *  - It must state the runtime-DSN carve-out explicitly (maintainer ruling):
  *    a DSN that arrives via the RUNTIME ENVIRONMENT (`OS_DATABASE_URL` and
  *    friends) is translated into a driver config by the boot hosts and handed
@@ -152,7 +155,8 @@ export const URL_EMBEDDED_CREDENTIAL_REFUSED = (key: string): string =>
   + '`external.credentialsRef`. The resolved secret is injected at connect time and wins over '
   + 'anything embedded in the URL. Do NOT substitute a `${…}` placeholder into the URL: '
   + 'placeholders in authored metadata are resolved by nothing and reach the database client '
-  + 'verbatim (#8078, measured). Runtime-environment DSNs (`OS_DATABASE_URL` and friends) do '
+  + 'verbatim (#8078, measured), and are themselves refused at publish (#8336). '
+  + 'Runtime-environment DSNs (`OS_DATABASE_URL` and friends) do '
   + 'not pass through this publish door and are unaffected.';
 
 /**
@@ -210,6 +214,131 @@ export function credentialFreeUrl<S extends z.ZodString>(schema: S, key: string)
       ctx.addIssue({ code: 'custom', message: URL_EMBEDDED_CREDENTIAL_REFUSED(key) });
     }
   });
+}
+
+/**
+ * Refusal prescription for a `${…}` placeholder written into a
+ * connection-material driver-config value (#8336, maintainer-ruled direction 2
+ * 2026-08-13 — refuse loudly at publish rather than implement resolution).
+ *
+ * The defect this closes (#7990 census, measured during #8078): a placeholder
+ * such as `config.url: 'postgresql://${DB_HOST}/db'` is resolved by NOTHING —
+ * it is stored verbatim in `sys_metadata` and handed verbatim to the database
+ * client at connect. The author believes environment substitution happens; the
+ * connection then fails (or connects somewhere unintended) with no error
+ * naming the unresolved placeholder — the masked-failure shape. Until #8336
+ * the syntax looked supported: it parsed green, stored fine, and failed at a
+ * distance. Two shipped refusals (#8078's inline-credential message, #8082's
+ * URL-userinfo message) had to warn AROUND the broken escape instead of
+ * pointing through it; this refusal makes the non-capability explicit
+ * (declared = enforced), and implementing real resolution — a capability with
+ * an env-exfiltration security surface and no measured pull — was explicitly
+ * rejected for now.
+ *
+ * The message names every working escape so it can serve as the migration doc
+ * for whoever hits it (very often an AI author):
+ *
+ *  - the literal value, for non-secret connection material;
+ *  - the datasource secret binder / `external.credentialsRef`, for secret
+ *    material (the #7990/#8082 family's mechanisms, injected at connect time);
+ *  - the runtime environment itself (`OS_DATABASE_URL` and friends) for
+ *    environment-driven deployments — those DSNs are translated into driver
+ *    config by the boot hosts and never pass through this authoring schema,
+ *    so they are unaffected by construction (the same carve-out #8082 states).
+ */
+export const UNRESOLVED_PLACEHOLDER_REFUSED = (key: string): string =>
+  `this \`${key}\` contains a \`\${…}\` placeholder, and placeholders are not resolved here `
+  + '(#8336): nothing in the platform substitutes `${…}` in authored datasource config — '
+  + 'placeholders in authored metadata are resolved by nothing, are stored verbatim in '
+  + '`sys_metadata`, and reach the database client verbatim (#8078, measured), so the '
+  + 'connection fails (or connects somewhere unintended) with no error naming the unresolved '
+  + 'placeholder. Write the literal value instead. For secret material, bind it: the Setup → '
+  + "Datasources connection form's secret field hands it to the datasource secret binder, "
+  + 'which encrypts it into `sys_secret` and stores only an opaque handle at '
+  + '`external.credentialsRef` — the resolved secret is injected at connect time. For '
+  + 'environment-driven connections, configure the runtime environment itself: '
+  + '`OS_DATABASE_URL` and friends are translated into driver config by the boot hosts and '
+  + 'never pass through this publish door, so they are unaffected.';
+
+/**
+ * Does this authored string contain a complete `${…}` placeholder span?
+ *
+ * The boundary is placeholder-by-INTENT for the one convention the census
+ * measured (`${NAME}` — shell/compose-style interpolation), judged as a
+ * complete span rather than a token grammar:
+ *
+ *  - `${anything}` matches, whatever is inside the braces — a placeholder
+ *    carrying a non-word character is still a placeholder attempt, and letting
+ *    it through as "not a placeholder" is the `context-tokens.zod.ts` #5586
+ *    lesson one surface over;
+ *  - a bare `$VAR`, a brace pair without the dollar (`{name}`), and an
+ *    unclosed `${` do NOT match — none of them is the convention authors were
+ *    measured writing, and widening the refusal past the measured defect would
+ *    trade a masked failure for false rejections of legitimate literals.
+ */
+export function containsUnresolvedPlaceholder(value: string): boolean {
+  return /\$\{[^}]*\}/.test(value);
+}
+
+/**
+ * Attach the #8336 placeholder refusal to a connection-material driver-config
+ * string key.
+ *
+ * One shared check for every connection-material string key on the driver
+ * schemas — the same single-mechanism construction as {@link credentialFreeUrl}
+ * (#8082), so the policy cannot drift per driver or per key. Composes with
+ * that check on the URL-bearing keys: `placeholderFree(credentialFreeUrl(…))`
+ * judges both facts, and an input violating both reports both.
+ */
+export function placeholderFree<S extends z.ZodString>(schema: S, key: string) {
+  return schema.superRefine((value, ctx) => {
+    if (typeof value !== 'string') return;
+    if (containsUnresolvedPlaceholder(value)) {
+      ctx.addIssue({ code: 'custom', message: UNRESOLVED_PLACEHOLDER_REFUSED(key) });
+    }
+  });
+}
+
+/**
+ * The #8336 placeholder refusal for a connection-material PASSTHROUGH slot —
+ * mongo's `options`, a record handed to the MongoDB client verbatim.
+ *
+ * The deep walk exists because the passthrough is exactly where the refusal
+ * would otherwise steer authors: refuse `${RS_NAME}` at `config.url` and the
+ * green escape becomes `options: { replicaSet: '${RS_NAME}' }` — the same
+ * one-syntax-over displacement #8078 measured for credentials. Every string
+ * value in the record (nested objects and arrays included) reaches the client,
+ * so every one is judged; non-string values carry no placeholder and pass
+ * untouched. Each finding is reported at its own path so the author is pointed
+ * at the exact entry, not at the record as a whole.
+ */
+export function placeholderFreeDeep<S extends z.ZodType>(schema: S, key: string) {
+  return schema.superRefine((value, ctx) => {
+    for (const path of unresolvedPlaceholderPaths(value)) {
+      ctx.addIssue({
+        code: 'custom',
+        path,
+        message: UNRESOLVED_PLACEHOLDER_REFUSED([key, ...path].join('.')),
+      });
+    }
+  });
+}
+
+/** Paths of every string value under `value` carrying a `${…}` span. */
+function unresolvedPlaceholderPaths(
+  value: unknown,
+  path: readonly (string | number)[] = [],
+): (string | number)[][] {
+  if (typeof value === 'string') {
+    return containsUnresolvedPlaceholder(value) ? [[...path]] : [];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap((entry, index) => unresolvedPlaceholderPaths(entry, [...path, index]));
+  }
+  if (value !== null && typeof value === 'object') {
+    return Object.entries(value).flatMap(([k, v]) => unresolvedPlaceholderPaths(v, [...path, k]));
+  }
+  return [];
 }
 
 /**
