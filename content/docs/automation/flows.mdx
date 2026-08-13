@@ -1251,8 +1251,8 @@ value before the condition.
 
 <Callout type="info">
 **`record` / `previous` are *total* over the object's declared fields** — the
-same guarantee [validation predicates](/docs/data-modeling/validation#has-x-is-not-a-null-guard)
-carry. A field this write didn't touch (and, for `record`, a field the driver
+same guarantee [validation predicates](/docs/data-modeling/validation)
+carry (see the `has(x)` is not a null guard callout under "Basic Structure"). A field this write didn't touch (and, for `record`, a field the driver
 didn't echo back) still reads as an explicit `null` rather than dropping out
 of scope, so `record.discount != null` and `previous.stage != previous_stage`
 evaluate cleanly instead of aborting with `No such key`. `has(record.x)` is
