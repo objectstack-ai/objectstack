@@ -467,12 +467,15 @@ describe('[#8470] the curated half owns its row, not whichever row shares the na
   // general shape of a rejected write: `tryInsert` returns null on ANY engine
   // refusal, not only a duplicate key.
   it('says so when the insert was refused but no blocking row is visible', async () => {
-    const ql = {
-      rows: [] as any[],
+    // Built by OVERRIDING the file's one double rather than declaring a second:
+    // `check:engine-double-contract` counts unguarded engine doubles per file
+    // against a shrink-only baseline, and a fresh literal declaring the engine
+    // verbs would raise it. Overriding states the same fixture — this is that
+    // double, with the write refused and nothing stored.
+    const ql = Object.assign(makeQl(), {
       async find() { return []; },
-      async insert() { return null; }, // every write refused; nothing stored
-      async update() { /* unreachable */ },
-    };
+      async insert() { return null; },
+    });
     const warn = vi.fn();
     const out = await bootstrapSystemCapabilities(ql, [], { logger: { warn } });
 
