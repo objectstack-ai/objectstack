@@ -360,13 +360,16 @@ class MockHttp implements IHttpServer {
 }
 
 describe('#8026 — the refusal on the REST boundary', () => {
-  it('PUT answers the declared envelope: status 500, code INTERNAL_ERROR, actionable message', async () => {
-    // There is no dedicated wire code yet — `SETTINGS_CRYPTO_UNAVAILABLE` would
-    // have to be registered in `ERROR_CODE_LEDGER` (`packages/spec`) first, and
-    // that is out of this card's scope. So the refusal takes the same
-    // `500 INTERNAL_ERROR` arm every unmapped service error takes; what this
-    // case pins is that it does so INSIDE the envelope, carrying the operator's
-    // fix, and that the request wrote nothing.
+  it('PUT answers the declared envelope: status 500, code SETTINGS_CRYPTO_UNAVAILABLE, actionable message', async () => {
+    // #8273 — the wire spelling #8026 left out of scope. The code is registered
+    // in `ERROR_CODE_LEDGER` (`packages/spec`) and mapped by the PUT handler,
+    // so a client (the Setup UI) can branch on "the deployment cannot encrypt
+    // secrets, reconfigure it" instead of reading a generic server crash. The
+    // status stays 500 (server misconfiguration; deliberately not 503 — no
+    // retry succeeds until an operator wires a cryptoProvider). This case pins
+    // BOTH halves of the ADR-0112 envelope — `code` AND `status` — plus the
+    // located details, the operator's fix in the message, and that the request
+    // wrote nothing.
     const { svc, rowFor } = await bootProviderless();
     const http = new MockHttp();
     registerSettingsRoutes(http, svc, {
@@ -393,7 +396,9 @@ describe('#8026 — the refusal on the REST boundary', () => {
 
     expect(state.status).toBe(500);
     expect(state.body.success).toBe(false);
-    expect(state.body.error.code).toBe('INTERNAL_ERROR');
+    expect(state.body.error.code).toBe('SETTINGS_CRYPTO_UNAVAILABLE');
+    // The refusal is located: which namespace/key was refused (never the value).
+    expect(state.body.error.details).toEqual({ namespace: 'crypto_ns', key: 'api_key' });
     expect(state.body.error.message).toContain('fail-closed');
     expect(state.body.error.message).toContain('cryptoProvider');
     // Nothing leaked the submitted secret back over the wire, and nothing landed.
