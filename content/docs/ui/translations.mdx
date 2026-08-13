@@ -72,7 +72,8 @@ export default defineStack({
 | Action result dialogs (title / description / acknowledge / field labels) | `objects.<name>._actions.<action>.resultDialog` |
 | Form sections | `objects.<name>._sections.<section>` |
 | App navigation | `apps.<app>.navigation.<id>.label` |
-| Dashboards and widgets | `dashboards.<name>` |
+| Dashboard label / description | `dashboards.<name>.label` / `description` |
+| Dashboard widget title / description / sub-caption | `dashboards.<name>.widgets.<widgetId>.title` / `description` / `subCaption` |
 | Page labels and `page:header` copy | `pages.<name>.label` / `description` / `title` / `subtitle` |
 | Screen-flow wizards (flow label, screen headings, screen field copy) | `flows.<flow>.label` / `flows.<flow>.screens.<node_id>.title` / `.fields.<field>.label` / `.placeholder` — see the boundary note below |
 | Global actions, settings, messages | `globalActions`, `settings`, `messages` |
@@ -84,6 +85,16 @@ document, and so are the labels of any actions the object declares inline
 labels untouched: `sys_approval_request`'s Approve / Reject rendered in English
 in a zh-CN workspace for every consumer except the Console, which happened to
 re-resolve them client-side against its own copy of the bundle.
+
+<Callout type="info">
+**A widget's `subtitle` alias resolves to `subCaption`, not `description`
+(#5428 item 4, #7862).** The metric widget's sub-caption — the string under
+the number — is the authored `widget.options.description`, a *different*
+authored field from `widget.description` (the copy under the card header).
+Two authored fields get two keys (「两个作者字段两个 key」): `description`
+translates `widget.description`, `subCaption` translates
+`widget.options.description`, and neither reaches the other's field.
+</Callout>
 
 <Callout type="info">
 **Page headers are keyed by page name (#3589).** A page's `page:header`

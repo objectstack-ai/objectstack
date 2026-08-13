@@ -8,6 +8,16 @@ import { SysAuditLog } from './index.js';
  * `sys_audit_log.action` enum (maintainer ruling 2026-08-12 on #7675, ADR-0049
  * enforce-or-remove, registered under ADR-0087 as `audit-log-action-enum-retired`).
  *
+ * #8315 — `restore` joins them, under the same ruling carried by triage and
+ * registered as `audit-log-action-restore-retired`. It was the last unresolved
+ * value from #7675's survey, and the least ambiguous of the three: `actionFor()`
+ * in `audit-writers.ts` returns `'create' | 'update' | 'delete' | null`, so the
+ * record-level writer could not have produced it even by accident. What made it
+ * worth a card rather than a tidy-up is that two shipped declarations asserted
+ * the opposite — the `writes_only` list view offered it as a filter value, and
+ * `auth-event-audit.ts`'s module docblock named it as one of the actions the
+ * writer covers. Both are corrected here and in that file.
+ *
  * This file exists because **nothing else in the repo can detect a regression
  * here.** The enum is not enforced on writes at all: `validateRecord` skips
  * `readonly` fields (`record-validator.ts`, insert branch) and every
@@ -41,6 +51,33 @@ const RETIRED_ACTIONS: ReadonlyArray<readonly [action: string, prescription: str
       + 'emits create/update/delete and nothing else. A filter on this value matched '
       + 'nothing on every deployment that has ever run.',
   ],
+  [
+    'restore',
+    'no writer anywhere in the repo emits it, and the record-level writer structurally '
+      + "cannot: `actionFor()` in audit-writers.ts is typed `'create' | 'update' | "
+      + "'delete' | null` and its caller early-returns on null. Undelete/restore is an "
+      + 'unbuilt capability (parked on #1883 and #3146); if it ships, this value comes '
+      + 'back WITH its writer, never on its own (#8315).',
+  ],
+];
+
+/**
+ * The enum's positive half: every action this object declares, with the writer
+ * that emits it. Written as literals — the whole point of #7675, #8147 and
+ * #8315 is that a declared action with no writer is a permanently empty view,
+ * and a list derived from the object itself could not detect one.
+ *
+ * Adding a row here is a claim that a writer exists at the named location. Add
+ * the writer first.
+ */
+const ACTIONS_WITH_WRITERS: ReadonlyArray<readonly [action: string, writer: string]> = [
+  ['create', 'plugin-audit/src/audit-writers.ts — actionFor(afterInsert)'],
+  ['update', 'plugin-audit/src/audit-writers.ts — actionFor(afterUpdate)'],
+  ['delete', 'plugin-audit/src/audit-writers.ts — actionFor(afterDelete)'],
+  ['login', 'plugin-audit/src/auth-event-audit.ts — createAuthEventAuditSink (#8144)'],
+  ['logout', 'plugin-audit/src/auth-event-audit.ts — createAuthEventAuditSink (#8144)'],
+  ['config_change', 'service-settings/src/config-change-audit.ts — CONFIG_CHANGE_ACTION (#8145)'],
+  ['import', 'plugin-auth/src/admin-import-users.ts — run-level row, record_id null'],
 ];
 
 /** Option values declared by the `action` select field. */
@@ -73,7 +110,8 @@ describe('sys_audit_log — retired actions stay retired (#8147)', () => {
     (action, prescription) => {
       expect(
         actionValues(),
-        `sys_audit_log.action '${action}' was retired under ADR-0049 (#8147) — ${prescription}`,
+        `sys_audit_log.action '${action}' was retired under ADR-0049 (#8147 / #8315) `
+          + `— ${prescription}`,
       ).not.toContain(action);
     },
   );
@@ -100,6 +138,34 @@ describe('sys_audit_log — retired actions stay retired (#8147)', () => {
         + 'permanently empty — the visible product defect the 2026-08-12 ruling named '
         + '(空 widget + 永远查不到东西的过滤器是可见产品缺陷). Narrow the filter with the enum.',
     ).toEqual([]);
+  });
+
+  /**
+   * The positive invariant, and the one that would have caught this whole
+   * family at the source (#8315). `auth-event-audit.ts` carried it as a
+   * SENTENCE — "`create`/`update`/`delete`/`restore` and nothing else" — which
+   * was false the day it was written and stayed false through two cards,
+   * because a comment enforces nothing (#8011). This is the same claim with a
+   * detector under it.
+   *
+   * Set equality on purpose, in both directions. Adding a value to the enum
+   * without a writer goes red here, which is the defect #7675 surveyed; adding
+   * a writer without declaring its action also goes red, which is the strictly
+   * worse inverse — a row the platform writes and the object does not declare.
+   */
+  it('the action enum declares exactly the actions that have a writer', () => {
+    const declared = [...actionValues()].sort();
+    const withWriters = ACTIONS_WITH_WRITERS.map(([action]) => action).sort();
+    expect(
+      declared,
+      'sys_audit_log.action and the writer inventory in this file disagree. A declared '
+        + 'action with no writer is a permanently empty list view and a lie on a '
+        + 'compliance surface (审计面宁窄勿谎, ruling 2026-08-12); an undeclared action '
+        + 'that IS written is worse still, because the row exists and the contract '
+        + 'denies it — and nothing rejects it, since every field here is `readonly` and '
+        + '`validateRecord` skips readonly fields. Writers on record:\n'
+        + ACTIONS_WITH_WRITERS.map(([a, w]) => `  ${a} ← ${w}`).join('\n'),
+    ).toEqual(withWriters);
   });
 
   /**

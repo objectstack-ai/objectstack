@@ -24,7 +24,6 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           create: "create",
           update: "update",
           delete: "delete",
-          restore: "restore",
           login: "login",
           logout: "logout",
           config_change: "config_change",

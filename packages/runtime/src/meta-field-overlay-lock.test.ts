@@ -71,7 +71,14 @@
  *   view override     200     200, unchanged                           → GREEN
  *   dashboard         200     200, unchanged                           → GREEN
  *   job               403     403, unchanged                           → GREEN
- *   plural spelling   200     200, unchanged (KNOWN GAP #7894)         → GREEN
+ *   plural spelling   403     200, row under type='fields' (#7894)     → RED
+ *
+ * The last row INVERTED when #7894 landed. It used to assert the defect (200,
+ * plus a row under the plural key) and carried instructions to flip it; the
+ * flip is done, and because the old case had really measured that 200, the new
+ * 403 cannot be passing by never reaching the boundary. See the #7894 block at
+ * the bottom of this file for the plural fold, its positive controls, and the
+ * refusal limb.
  *
  * The greens are NOT slack. Four of them are the negative direction the card
  * demanded: `object` / `view` / `dashboard` / `job` were measured as ALREADY
@@ -478,34 +485,17 @@ describe('#7743 — PUT /meta/field/<object>.<field> honours the registry overla
         expect(metaRow(engine, 'job', JOB.name)).toBeUndefined();
     });
 
-    // ── A HOLE THIS CARD DOES NOT CLOSE, pinned so it cannot go quiet ─────
+    // ── #7894 — THE HOLE ABOVE, NOW CLOSED ────────────────────────────────
+    //
+    // This block replaces a case that deliberately asserted the DEFECT
+    // (`expect(res.status).toBe(200)` plus a row under `type='fields'`) and
+    // instructed its successor to "flip it to `expectNotOverridable(res)` and
+    // delete the row assertion". That inversion is this file's anti-vacuity
+    // proof and it costs nothing to state: the harness demonstrably REACHED
+    // this boundary before the fix, because it measured the 200 here. A fresh
+    // test asserting 403 could pass by never arriving; this one cannot.
 
-    it('KNOWN GAP #7894 — the PLURAL url spelling still walks around this lock', async () => {
-        // ⚠️ This case asserts a DEFECT, deliberately. It was written expecting
-        // 403, measured 200, and confirmed against the live showcase: with the
-        // fix in place, `/meta/field/showcase_task.title` is refused while
-        // `/meta/fields/showcase_task.title` is accepted and persists a row.
-        //
-        // The cause is one layer up and is NOT `field`-specific.
-        // `canonicalMetaType` (#4432) folds plural→singular through
-        // `PLURAL_TO_SINGULAR`, which is the MANIFEST COLLECTION map — and it
-        // has no `fields` key (nor `seeds`, `external_catalogs`,
-        // `translations`). An unmapped spelling is therefore read as an
-        // unregistered PLUGIN type, which every gate treats as permissive by
-        // construction: `assertAllowed` returns early on
-        // `!STATIC_REGISTRY_TYPES.has('fields')`, and `orgScopedWriteRefusal`
-        // says so in as many words. Each of those is correct for a type that
-        // really is plugin-registered; `'fields'` just is not one.
-        //
-        // ⛔ The one-word fix — teaching `isNestedArtifactField` to accept
-        // `'fields'` — is the WRONG shape and was rejected: it is a
-        // spelling-tolerant lookup below the boundary (the exact pattern
-        // #4432's own doc comment rejects) and would still mint the row under a
-        // second namespace, `type='fields'`. The remedy belongs at the boundary
-        // map and spans four types, so it is #7894's, not this card's.
-        //
-        // When #7894 lands this test goes RED. That is its job: flip it to
-        // `expectNotOverridable(res)` and delete the row assertion.
+    it('#7894 — the PLURAL url spelling folds onto the same lock', async () => {
         const { engine, dispatcher } = makeStack();
 
         const res = responseOf(await dispatcher.handleMetadata(
@@ -513,12 +503,115 @@ describe('#7743 — PUT /meta/field/<object>.<field> honours the registry overla
             { name: 'title', label: 'Tampered', type: 'text' },
         ));
 
-        expect(res.status).toBe(200);
-        // The mechanism, not just the status: the row lands under the PLURAL
-        // type key — a second namespace for the same item.
-        expect(metaRow(engine, 'fields', 'showcase_task.title')).toBeDefined();
-        // …and the singular namespace stays clean, which is why the singular
-        // route's own refusal above is not weakened by this gap.
+        // Measurement 1. Note it converges on the SINGULAR route's answer
+        // rather than producing a refusal that names the spelling `fields`:
+        // folding is what closes this, so `/meta/fields/…` is now the same
+        // request as `/meta/field/…` and earns the same verdict. Plural REST
+        // paths are the documented legitimate spelling (`/meta/actions` folds
+        // and must keep folding), so refusing this one specifically would give
+        // `field` a URL contract unlike every other type's.
+        expectNotOverridable(res);
+        // Measurement 3, the mechanism rather than the status: NO second
+        // namespace is minted. This is the assertion the old case inverted.
+        expect(metaRow(engine, 'fields', 'showcase_task.title')).toBeUndefined();
         expect(metaRow(engine, 'field', 'showcase_task.title')).toBeUndefined();
+    });
+
+    it('#7894 — the other three unmapped types answer as their singular does', async () => {
+        // `seed` / `external_catalog` / `translation` were unmapped alongside
+        // `field`. The assertion is deliberately body-AGNOSTIC: what the card is
+        // about is that the plural URL stops being a SEPARATE door, so the test
+        // is "both spellings reach the same verdict, and only the singular
+        // namespace can ever be minted" — not a hardcoded status per type.
+        //
+        // Worth recording, because it is the fold made visible: `seeds` with
+        // this body answers 422, because it is now judged by the real
+        // `SeedSchema` (which requires `object`/`records`). Before the fix it
+        // answered 200 — an unmapped spelling has no schema to be judged by, so
+        // it sailed past validation as well as past authorization.
+        for (const [plural, singular] of [
+            ['seeds', 'seed'],
+            ['translations', 'translation'],
+            ['external_catalogs', 'external_catalog'],
+        ] as const) {
+            const body = { name: 'thing_x', label: 'X' };
+
+            const viaPlural = makeStack();
+            const pluralRes = responseOf(await viaPlural.dispatcher.handleMetadata(
+                `/${plural}/thing_x`, ctx(), 'PUT', body,
+            ));
+
+            const viaSingular = makeStack();
+            const singularRes = responseOf(await viaSingular.dispatcher.handleMetadata(
+                `/${singular}/thing_x`, ctx(), 'PUT', body,
+            ));
+
+            expect(pluralRes.status, `${plural} must answer exactly as ${singular} does`)
+                .toBe(singularRes.status);
+            // …and whatever the verdict, no second namespace is ever minted.
+            expect(metaRow(viaPlural.engine, plural, 'thing_x'), `${plural} must not mint a namespace`)
+                .toBeUndefined();
+        }
+    });
+
+    // ── POSITIVE CONTROL — plugin registration must still work ────────────
+    //
+    // Every gate #7894 names is CORRECT behaviour for a genuinely
+    // plugin-registered runtime type. A refusal that also caught those would be
+    // a worse defect than the bypass it closed, so this is pinned, not assumed.
+
+    it('#7894 POSITIVE CONTROL — a plugin-registered runtime type is still permitted', async () => {
+        const { engine, dispatcher } = makeStack();
+
+        // `theme` has no `DEFAULT_METADATA_TYPE_REGISTRY` entry at all.
+        const singular = responseOf(await dispatcher.handleMetadata(
+            '/theme/midnight', ctx(), 'PUT', { name: 'midnight', label: 'Midnight' },
+        ));
+        expect(singular.status).toBe(200);
+        expect(metaRow(engine, 'theme', 'midnight')).toBeDefined();
+
+        // …and via its plural spelling, which the URL map carries from the
+        // manifest map's limb — still one namespace, the singular one.
+        const plural = responseOf(await dispatcher.handleMetadata(
+            '/themes/twilight', ctx(), 'PUT', { name: 'twilight', label: 'Twilight' },
+        ));
+        expect(plural.status).toBe(200);
+        expect(metaRow(engine, 'theme', 'twilight')).toBeDefined();
+        expect(metaRow(engine, 'themes', 'twilight')).toBeUndefined();
+    });
+
+    it('#7894 POSITIVE CONTROL — a kind the platform has never heard of is still permitted', async () => {
+        // The strongest form: a name in NO map and NO registry — exactly what a
+        // third-party plugin registering a novel kind looks like. The refusal
+        // must not fire, and it cannot, by construction: it only triggers when a
+        // spelling's singular is a type the platform itself DECLARES.
+        const { engine, dispatcher } = makeStack();
+
+        const res = responseOf(await dispatcher.handleMetadata(
+            '/my_plugin_kind/widget_a', ctx(), 'PUT', { name: 'widget_a', label: 'Widget A' },
+        ));
+
+        expect(res.status).toBe(200);
+        expect(metaRow(engine, 'my_plugin_kind', 'widget_a')).toBeDefined();
+    });
+
+    // ── The refusal limb — an unrecognised spelling of a DECLARED type ────
+
+    it('#7894 — an unrecognised plural of a declared type is refused, not forwarded', async () => {
+        const { engine, dispatcher } = makeStack();
+
+        const res = responseOf(await dispatcher.handleMetadata(
+            '/capabilitys/some_cap', ctx(), 'PUT', { name: 'some_cap', label: 'Some Cap' },
+        ));
+
+        // ADR-0112 — code AND status, never "it threw".
+        expect(res.status).toBe(400);
+        expect(res.body?.error?.code).toBe('INVALID_REQUEST');
+        // It names the offending spelling AND the canonical one.
+        expect(res.body?.error?.message).toContain('capabilitys');
+        expect(res.body?.error?.message).toContain('capability');
+        // Never answers 200, so no namespace is minted under the typo.
+        expect(metaRow(engine, 'capabilitys', 'some_cap')).toBeUndefined();
+        expect(metaRow(engine, 'capability', 'some_cap')).toBeUndefined();
     });
 });

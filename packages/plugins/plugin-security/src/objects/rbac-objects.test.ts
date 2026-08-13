@@ -112,6 +112,13 @@ describe('default permission sets', () => {
       // `organization_id`, so unlike the two above this is not "Layer 0 is
       // inert here": Layer 0 was engaged and correctly org-scoped, and the org
       // is precisely the audience the row must be hidden from.
+      //
+      // [#8240] `sys_invitation_issuer` is its sibling and the ONE entry in this
+      // list that is not a `_self` shape: it keys on the OTHER end of the row
+      // (`inviter_id`), so a `delegated_admin` can review the invitations it
+      // issued. It sorts ahead of `_self` alphabetically; the pair is
+      // deliberate, not a duplicate to be collapsed.
+      'sys_invitation_issuer',
       'sys_invitation_self',
       'sys_notification_receipt_self',
       'sys_oauth_access_token_self',

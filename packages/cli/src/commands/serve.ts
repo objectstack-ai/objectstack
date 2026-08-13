@@ -396,6 +396,52 @@ export default class Serve extends Command {
   ];
 
   /**
+   * Identities of the server-pushed runtime-config surface
+   * (`RuntimeConfigPlugin`), matched EXACTLY by {@link Serve.providesCapability}.
+   *
+   * Same job as {@link Serve.INSTALL_LOCAL_IDENTITIES}, one plugin over, and
+   * the stakes are higher: `RuntimeConfigPlugin` carries the host's branding
+   * (product name, logo, PWA colors) AND the open-core `resolveFeatures` seam.
+   * `kernel.use` keys by name (`Kernel.use` -> `this.plugins.set(name, meta)`),
+   * so an unguarded mount does not double-mount — it REPLACES, and a host that
+   * wired its own would lose its white-label chrome and its distribution's
+   * feature policy at once, reporting the framework defaults instead.
+   */
+  static readonly RUNTIME_CONFIG_IDENTITIES: readonly string[] = [
+    'com.objectstack.runtime.runtime-config',
+    'RuntimeConfigPlugin',
+  ];
+
+  /**
+   * Constructor options for the `RuntimeConfigPlugin` the marketplace wiring
+   * mounts — ONE object, shared by both arms on purpose (#8389).
+   *
+   * The offline arm's payload is meant to be the cloud arm's payload minus
+   * whatever the runtime genuinely lacks, and `features.marketplace` is now
+   * derived per request from the serving app's route table (#8356) rather than
+   * declared here. So the difference between the two arms must come from what
+   * is MOUNTED, never from a second copy of these options drifting away from
+   * the first. Two literals would let exactly that happen silently.
+   *
+   * `controlPlaneUrl: ''` is deliberate and is NOT the trap
+   * {@link Serve.OFFLINE_CONTROL_PLANE} exists for: `RuntimeConfigPlugin`'s
+   * constructor special-cases the empty string as "stay on this origin" and
+   * bypasses `resolveCloudUrl()` entirely, while `MarketplaceInstallLocalPlugin`
+   * re-resolves what it is handed and would substitute the PUBLIC default
+   * cloud. The two neighbouring mounts therefore need DIFFERENT spellings of
+   * "no cloud"; harmonising them in either direction breaks one of them.
+   */
+  static readonly RUNTIME_CONFIG_OPTIONS: Readonly<{
+    controlPlaneUrl: string;
+    singleEnvironment: boolean;
+    installLocal: boolean;
+  }> = Object.freeze({
+    controlPlaneUrl: '',
+    singleEnvironment: true,
+    installLocal: true,
+  });
+
+  /**
    * The `controlPlaneUrl` the offline install-local mount is constructed with.
    *
    * A named constant rather than an inline `'off'` so a test can assert the
@@ -426,24 +472,47 @@ export default class Serve extends Command {
    *    branch reads no URL at all, so a control plane is precisely what it
    *    does NOT need; gating it on one is what left a self-hosted EE box with
    *    no install route at all.
+   *  - `offlineRuntimeConfig` — the server-pushed runtime config that lets the
+   *    Console DISCOVER the above (#8389). Also reads no control plane: it
+   *    reports this origin (`controlPlaneUrl: ''`), and since #8356
+   *    `features.marketplace` is derived from the serving app's route table,
+   *    so on a runtime with no proxy it reports `false` by observation. That
+   *    derivation is what unblocked this mount: before it, reporting
+   *    install-local truthfully would have cost a false browse claim, which is
+   *    why #8343 shipped the offline arm with install-local ALONE and left the
+   *    working route undiscoverable.
+   *
+   * The two offline flags are computed INDEPENDENTLY rather than sharing one
+   * gate, because each guards a different host-owned plugin and the two
+   * host configurations are not the same configuration. A host that wires its
+   * own install-local (so this rule leaves it alone) may still have no
+   * runtime-config at all — that box has the #8389 defect just as much as an
+   * unconfigured one, and one shared gate would silently exclude it.
    *
    * `isRuntimeHostKernel` is restated here (the call site checks it too, to
    * skip the dynamic import) so this function is the whole rule in one place:
    * the cloud distribution wires its own marketplace on the host kernel, so
-   * NEITHER arm mounts there.
+   * NO arm mounts there.
    */
   static planMarketplaceWiring(input: {
     isRuntimeHostKernel: boolean;
     marketplaceUrl: string;
     plugins: readonly unknown[];
-  }): { cloudSurfaces: boolean; offlineInstallLocal: boolean } {
-    if (input.isRuntimeHostKernel) return { cloudSurfaces: false, offlineInstallLocal: false };
-    if (input.marketplaceUrl) return { cloudSurfaces: true, offlineInstallLocal: false };
+  }): { cloudSurfaces: boolean; offlineInstallLocal: boolean; offlineRuntimeConfig: boolean } {
+    if (input.isRuntimeHostKernel) {
+      return { cloudSurfaces: false, offlineInstallLocal: false, offlineRuntimeConfig: false };
+    }
+    if (input.marketplaceUrl) {
+      return { cloudSurfaces: true, offlineInstallLocal: false, offlineRuntimeConfig: false };
+    }
     return {
       cloudSurfaces: false,
       // A host config that wires its own install-local keeps it — see the
       // call site for why replacing it would be a silent downgrade.
       offlineInstallLocal: !Serve.providesCapability(input.plugins, Serve.INSTALL_LOCAL_IDENTITIES),
+      // Same rule, same reason, for the runtime-config surface — replacing a
+      // host's own would drop its branding and its resolveFeatures policy.
+      offlineRuntimeConfig: !Serve.providesCapability(input.plugins, Serve.RUNTIME_CONFIG_IDENTITIES),
     };
   }
 
@@ -1824,10 +1893,13 @@ export default class Serve extends Command {
             await kernel.use(createCloudConnectionPlugin({ singleEnvironment: true, controlPlaneUrl: marketplaceUrl }));
             // Server-pushed runtime config so the Console knows marketplace +
             // install-local are live (same-origin; install into THIS kernel).
-            await kernel.use(new RuntimeConfigPlugin({ controlPlaneUrl: '', singleEnvironment: true, installLocal: true }));
+            await kernel.use(new RuntimeConfigPlugin({ ...Serve.RUNTIME_CONFIG_OPTIONS }));
             trackPlugin('Marketplace');
-          } else if (wiring.offlineInstallLocal) {
-            // Cloud explicitly disabled -> mount the OFFLINE half only.
+          } else if (wiring.offlineInstallLocal || wiring.offlineRuntimeConfig) {
+            // Cloud explicitly disabled -> mount the OFFLINE surfaces only:
+            // the install route, and the runtime config that makes it
+            // discoverable. Neither dials out. Each is mounted under its own
+            // flag, because a host may already provide one and not the other.
             //
             // OFFLINE_CONTROL_PLANE, never the `''` sitting in `marketplaceUrl`:
             // the plugin re-resolves whatever it is handed through
@@ -1842,8 +1914,37 @@ export default class Serve extends Command {
             // that was constructed with an explicit control-plane URL —
             // silently downgrading that host's catalog capability. A host that
             // wires its own keeps it.
-            await kernel.use(new MarketplaceInstallLocalPlugin({ controlPlaneUrl: Serve.OFFLINE_CONTROL_PLANE }));
-            trackPlugin('MarketplaceInstallLocal');
+            if (wiring.offlineInstallLocal) {
+              await kernel.use(new MarketplaceInstallLocalPlugin({ controlPlaneUrl: Serve.OFFLINE_CONTROL_PLANE }));
+              trackPlugin('MarketplaceInstallLocal');
+            }
+            // ...and the runtime config that lets the Console SEE it (#8389).
+            //
+            // Without this, #8343's fix left an air-gapped box in a state that
+            // reads as "feature missing" from every UI: a working
+            // /api/v1/marketplace/install-local route and NO
+            // /api/v1/runtime/config at all, so the SPA cannot learn the route
+            // exists and renders no install affordance for a capability that
+            // works. Discovery is half of shipping the capability.
+            //
+            // #8343 could not mount this here: the plugin hardcoded
+            // `features.marketplace: true`, so telling the Console the truth
+            // about install-local meant asserting a browse capability that is
+            // definitively absent on this runtime — trading the reported bug
+            // for its mirror image. #8356 removed that constraint by deriving
+            // the flag from the serving app's route table, so this mount now
+            // reports `installLocal: true` AND `marketplace: false` on its own,
+            // with no knob and nothing for the wiring to keep in step.
+            //
+            // Guarded for the same reason the install-local mount above is:
+            // `kernel.use` keys by name, so an unconditional mount REPLACES a
+            // host's own RuntimeConfigPlugin — silently dropping the branding
+            // and the resolveFeatures policy it was constructed with. A host
+            // that wires its own keeps it.
+            if (wiring.offlineRuntimeConfig) {
+              await kernel.use(new RuntimeConfigPlugin({ ...Serve.RUNTIME_CONFIG_OPTIONS }));
+              trackPlugin('RuntimeConfig');
+            }
           }
         } catch (err: any) {
           console.warn(chalk.yellow(`  \u26a0 Marketplace/cloud-connection wiring failed: ${err?.message ?? err}`));

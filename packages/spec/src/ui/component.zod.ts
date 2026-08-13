@@ -584,6 +584,25 @@ export const PageTabsProps = strictObject({
        * tokens that move the moment the item list changes.
        */
       key: 'value',
+      /**
+       * Action-side spellings (#8382) — an author who learned `visible` /
+       * `showWhen` from `ui/action.zod.ts` and reaches for the same words
+       * here. One landing key, no boolean sibling, so per this package's
+       * alias/guidance rule (`visible-when-alias-guidance.test.ts` header)
+       * this is the simple rename case, not guidance prose.
+       */
+      visible: 'visibleWhen',
+      showWhen: 'visibleWhen',
+      /**
+       * `visibility` / `visibleOn` (#8382) — the ADR-0089 spellings this
+       * surface deliberately does NOT fold in (see the docblock below): they
+       * stay rejected, but an author who used them correctly on a page
+       * component or view form is reaching for the identical intent here, so
+       * the rejection still points at the one key that lands it. A pointer is
+       * a message, not acceptance — nothing below changes what parses.
+       */
+      visibility: 'visibleWhen',
+      visibleOn: 'visibleWhen',
     },
   }, {
     label: I18nLabelSchema,
@@ -596,10 +615,15 @@ export const PageTabsProps = strictObject({
      * Binds the same environment as page-component `visibleWhen`: `record` +
      * `current_user`, plus page state as `page.<var>` (re-evaluated live).
      * Canonical `*When` name per ADR-0089 — this key is new, so the deprecated
-     * `visibility` / `visibleOn` aliases are NOT accepted on tab items.
+     * `visibility` / `visibleOn` aliases are NOT ACCEPTED on tab items: unlike
+     * the view/page surfaces that fold them into `visibleWhen` via
+     * `normalizeVisibleWhen`, none of `visible` / `showWhen` / `visibility` /
+     * `visibleOn` parses here — all four are rejected. #8382 gave the
+     * rejection a pointer at this key for all four spellings (message only:
+     * being pointed AT `visibleWhen` is not the same as being accepted).
      */
     visibleWhen: ExpressionInputSchema.optional().describe(
-      'Visibility predicate (CEL) — the whole tab (header + panel) is omitted when FALSE; the renderer falls back to the first visible tab when the active one is hidden. Binds `record`, `current_user`, `page.<var>`. ADR-0089 canonical name (`visibility`/`visibleOn` aliases are not accepted here).',
+      'Visibility predicate (CEL) — the whole tab (header + panel) is omitted when FALSE; the renderer falls back to the first visible tab when the active one is hidden. Binds `record`, `current_user`, `page.<var>`. ADR-0089 canonical name — `visible`/`showWhen`/`visibility`/`visibleOn` are all rejected here (not folded in), each with a pointer at this key.',
     ),
     /**
      * Stable URL token for this tab — the value `?tab=` carries and the

@@ -204,11 +204,34 @@ export const DataEngineInsertOptionsSchema = lazySchema(() => BaseEngineOptionsS
 // 4. method: UPDATE (QueryAST-aligned)
 // ==========================================================================
 
+/**
+ * Exported (like {@link QUERY_CURSOR_REMOVED}) because ONE prescription serves
+ * three rejection sites: both update-options schemas below re-declare the key
+ * as a tombstone, and the objectql engine's unknown-option gate
+ * (`ENGINE_RETIRED_OPTION_MESSAGES` in `engine.ts`) quotes the same string at
+ * the runtime entry point, where the untyped option bag never parses.
+ *
+ * No `os migrate meta` sentence, deliberately: an ADR-0087 D2 conversion
+ * rewrites an authored source or a stored `sys_metadata` row, and this key is
+ * call-time only — nobody authors an engine option bag and nothing persists
+ * one. The removal reaches consumers as the protocol-17 semantic migration
+ * `engine-update-upsert-retired` plus this tombstone (the
+ * `BatchOptions.validateOnly` / `ListNotificationsRequest.cursor` disposition).
+ */
+export const ENGINE_UPDATE_UPSERT_REMOVED =
+  '`update.options.upsert` was removed in @objectstack/spec 17 (#8057, ADR-0049) — it was '
+  + 'declared and allowlisted but never implemented: no engine or driver path ever read it, so '
+  + '`{ upsert: true }` was accepted and silently dropped and the update stayed a plain update. '
+  + 'Delete the key. Express create-if-absent explicitly: a by-id update whose id names no row '
+  + "throws RECORD_NOT_FOUND (#7867's not-found gate) rather than inserting, so read the row "
+  + 'first (`findOne`) and call `insert` or `update` on what you find. A first-class upsert, if '
+  + 'ever built, must reconcile with that gate by design rather than through this silent flag.';
+
 export const EngineUpdateOptionsSchema = lazySchema(() => BaseEngineOptionsSchema.extend({
   /** Filter conditions to identify records to update — standard QueryAST `where` */
   where: z.union([z.record(z.string(), z.unknown()), FilterConditionSchema]).optional(),
-  /** Perform an upsert? If true, insert if not found. */
-  upsert: z.boolean().default(false).optional(),
+  /** Upsert flag — REMOVED (#8057): declared-but-unenforced (ADR-0049); the tombstone carries the prescription. */
+  upsert: retiredKey(ENGINE_UPDATE_UPSERT_REMOVED),
   /** Update multiple records? If false, only the first match is updated. Default: false */
   multi: z.boolean().default(false).optional(),
   /** Return the updated record(s)? Default: false (returns update count/status) */
@@ -289,7 +312,8 @@ export const DroppedFieldsEventSchema = lazySchema(() => z.object({
 export const DataEngineUpdateOptionsSchema = lazySchema(() => BaseEngineOptionsSchema.extend({
   /** @deprecated Use `where` (EngineUpdateOptionsSchema) */
   filter: DataEngineFilterSchema.optional(),
-  upsert: z.boolean().default(false).optional(),
+  /** Upsert flag — REMOVED (#8057); same tombstone as `EngineUpdateOptionsSchema.upsert`. */
+  upsert: retiredKey(ENGINE_UPDATE_UPSERT_REMOVED),
   multi: z.boolean().default(false).optional(),
   returning: z.boolean().default(false).optional(),
 }).describe('Options for DataEngine.update operations'));

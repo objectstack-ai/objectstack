@@ -70,6 +70,7 @@ export default defineConfig({
       { find: '@objectstack/spec/ui', replacement: path.resolve(__dirname, '../spec/src/ui/index.ts') },
       // [ADR-0105 D1] Reached transitively via `@objectstack/types` (tenancy posture).
       { find: '@objectstack/spec/security', replacement: path.resolve(__dirname, '../spec/src/security/index.ts') },
+      { find: '@objectstack/spec/qa', replacement: path.resolve(__dirname, '../spec/src/qa/index.ts') },
       { find: '@objectstack/spec', replacement: path.resolve(__dirname, '../spec/src/index.ts') },
       { find: '@objectstack/types', replacement: path.resolve(__dirname, '../types/src/index.ts') },
       // Dev-only: app-plugin.jobs.test.ts drives the REAL CronJobAdapter, so

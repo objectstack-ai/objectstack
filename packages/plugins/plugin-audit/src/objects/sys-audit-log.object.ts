@@ -52,7 +52,10 @@ export const SysAuditLog = ObjectSchema.create({
       label: 'Writes',
       data: { provider: 'object', object: 'sys_audit_log' },
       columns: ['created_at', 'action', 'object_name', 'record_id', 'user_id'],
-      filter: [{ field: 'action', operator: 'in', value: ['create', 'update', 'delete', 'restore'] }],
+      // `restore` removed (#8315): the value is retired from the enum, so the
+      // filter would have matched nothing for the rest of time. The three that
+      // remain are exactly what `actionFor()` in `audit-writers.ts` can emit.
+      filter: [{ field: 'action', operator: 'in', value: ['create', 'update', 'delete'] }],
       sort: [{ field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 50 },
     },
@@ -114,6 +117,17 @@ export const SysAuditLog = ObjectSchema.create({
     // is an empty widget and a filter that can never match: 审计面宁窄勿谎.
     // Permission-object writes are already on the ledger as create/update rows.
     //
+    // ADR-0087 retirement (#8315, the same ruling carried by triage): `restore`
+    // left this enum for the same reason and by the same measurement. It was
+    // never a near-miss — `actionFor()` in `audit-writers.ts` returns
+    // `'create' | 'update' | 'delete' | null`, so the record-level writer
+    // STRUCTURALLY cannot produce it, and no other writer in the repo emits it
+    // either. ⚠ This is not a product stance against undelete: soft
+    // delete/restore is an unbuilt capability parked on #1883 (`pm:on-hold`)
+    // and #3146 (`status:parked`). If it lands, this value returns WITH its
+    // writer — the emission point, its tests, and the view that surfaces it —
+    // never as a bare enum row again.
+    //
     // ⚠ `import` was named in the same ruling but is NOT retired: it has a live,
     // deliberate writer (`plugin-auth/src/admin-import-users.ts`, run-level row
     // with `record_id: null`) pinned by dogfood case W4. Retiring it would make
@@ -122,7 +136,7 @@ export const SysAuditLog = ObjectSchema.create({
     // `validateRecord` skips readonly fields, so nothing would ever go red.
     // See #8147 for the escalation.
     action: Field.select(
-      ['create', 'update', 'delete', 'restore', 'login', 'logout', 'config_change', 'import'],
+      ['create', 'update', 'delete', 'login', 'logout', 'config_change', 'import'],
       {
         label: 'Action',
         required: true,

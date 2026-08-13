@@ -13,6 +13,7 @@
     "CorsConfigSchema": "src/shared/http.zod.ts#CorsConfigSchema (const)",
     "CronExpressionInput": "src/shared/expression.zod.ts#CronExpressionInput (type)",
     "CronExpressionInputSchema": "src/shared/expression.zod.ts#CronExpressionInputSchema (const)",
+    "DECLARED_META_TYPES": "src/shared/metadata-url-spelling.ts#DECLARED_META_TYPES (const)",
     "EXTERNAL_ERROR_CODES": "src/shared/external-errors.ts#EXTERNAL_ERROR_CODES (const)",
     "EXTERNAL_ERROR_HTTP_STATUS": "src/shared/external-errors.ts#EXTERNAL_ERROR_HTTP_STATUS (const)",
     "EventName": "src/shared/identifiers.zod.ts#EventName (type)",
@@ -48,6 +49,7 @@
     "KeySetGuidance": "src/shared/suggestions.zod.ts#KeySetGuidance (interface)",
     "MAP_SUPPORTED_FIELDS": "src/shared/metadata-collection.zod.ts#MAP_SUPPORTED_FIELDS (const)",
     "METADATA_ALIASES": "src/shared/metadata-collection.zod.ts#METADATA_ALIASES (const)",
+    "META_URL_TO_SINGULAR": "src/shared/metadata-url-spelling.ts#META_URL_TO_SINGULAR (const)",
     "MapSupportedField": "src/shared/metadata-collection.zod.ts#MapSupportedField (type)",
     "MetadataCollectionInput": "src/shared/metadata-collection.zod.ts#MetadataCollectionInput (type)",
     "MetadataFormat": "src/shared/metadata-types.zod.ts#MetadataFormat (type)",
@@ -96,6 +98,7 @@
     "ViewNameParsed": "src/shared/branded-types.zod.ts#ViewNameParsed (type)",
     "ViewNameSchema": "src/shared/branded-types.zod.ts#ViewNameSchema (const)",
     "applyProtection": "src/shared/protection.zod.ts#applyProtection (function)",
+    "canonicalMetaUrlType": "src/shared/metadata-url-spelling.ts#canonicalMetaUrlType (function)",
     "cel": "src/shared/expression.zod.ts#cel (function)",
     "cron": "src/shared/expression.zod.ts#cron (function)",
     "expression": "src/shared/expression.zod.ts#expression (function)",
@@ -114,10 +117,12 @@
     "pluralToSingular": "src/shared/metadata-collection.zod.ts#pluralToSingular (function)",
     "renderDiffMessage": "src/shared/external-errors.ts#renderDiffMessage (function)",
     "resilientFetch": "src/shared/resilient-fetch.ts#resilientFetch (function)",
+    "restPluralOfMetaType": "src/shared/metadata-url-spelling.ts#restPluralOfMetaType (function)",
     "safeParsePretty": "src/shared/error-map.zod.ts#safeParsePretty (function)",
     "singularToPlural": "src/shared/metadata-collection.zod.ts#singularToPlural (function)",
     "strictUnknownKeyError": "src/shared/suggestions.zod.ts#strictUnknownKeyError (function)",
     "suggestFieldType": "src/shared/suggestions.zod.ts#suggestFieldType (function)",
-    "tmpl": "src/shared/expression.zod.ts#tmpl (function)"
+    "tmpl": "src/shared/expression.zod.ts#tmpl (function)",
+    "unmappedDeclaredTypeSpelling": "src/shared/metadata-url-spelling.ts#unmappedDeclaredTypeSpelling (function)"
   }
 }
