@@ -23,10 +23,10 @@ text: a constraint dump naming physical tables and columns.
 
 Fixed at the producer, which is the only place that closes it. A 5xx message withhold
 already exists at this door, but it is applied when an error is *thrown*, and this
-failure was *returned* — so it never met the withhold at any status. The withhold is also
-a phrasing heuristic, and `no such table: sys_packages` trips none of its keywords, so
-reclassifying alone would have moved the driver line from a 400 to a 500 and left it on
-the wire (measured, both).
+failure was *returned* — so it never met the withhold at any status. Reclassifying alone
+would have moved the driver line from a 400 to a 500 and left it on the wire; that is
+measured, and it stays true against the widened leak predicate that now recognises this
+phrasing, because nothing on the returned path ever consults one.
 
 Now the driver's text goes to the log and nowhere else — it was already logged, so nothing
 an operator sees changes — and the caller gets a stable sentence that names what happened

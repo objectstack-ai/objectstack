@@ -21,17 +21,24 @@
  * ## Why fixing the status did not fix the message
  *
  * The dispatch's load-bearing assumption was that once this path is a 5xx,
- * #8086's withhold covers it "with no new rule". Both halves of that are
- * measured false here, in sections 3 and 4, because it is the reason the fix
- * had to reach the producer:
+ * #8086's withhold covers it "with no new rule". It is measured false in §3,
+ * and that is why the fix had to reach the producer: the withhold is applied
+ * by `sendThrownError`, which a RETURNED failure never reaches — `sendError`
+ * carries no predicate at any status.
  *
- *  - the withhold is applied by `sendThrownError`, which a RETURNED failure
- *    never reaches — `sendError` has no predicate in it at any status;
- *  - and `looksLikeInternalErrorLeak('no such table: sys_packages')` is
- *    **false** — the commonest real failure of the `INSERT INTO sys_packages`
- *    statement names no keyword the heuristic knows.
+ * When this was written there was a second, independent reason:
+ * `looksLikeInternalErrorLeak('no such table: sys_packages')` was **false**,
+ * so even routed through the withhold the line would have travelled. #8132 has
+ * since taught the predicate that phrasing, which retires that argument and
+ * turns §4 from "the heuristic would miss it" into "the heuristic now catches
+ * it, and the returned path still never asks it". §4 carries the full note.
  *
- * So the producer now emits a stable sentence and no driver text at all
+ * ⚠️ The fix is NOT redundant with #8132, and the temptation to conclude
+ * otherwise is exactly what §4's second case exists to refuse. Re-measured
+ * against the widened predicate, `main`'s producer with only the status
+ * corrected still answers `500 {"message":"no such table: sys_packages"}`.
+ *
+ * So the producer emits a stable sentence and no driver text at all
  * (`service-package/src/publish-driver-fault.test.ts` drives that with a real
  * SQLite engine). This file pins the door's half: the classification, and the
  * 4xx paths that must NOT move.
@@ -305,31 +312,72 @@ describe('[#8131] the 5xx withhold does NOT cover a RETURNED failure', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 4. …and the heuristic would have missed it anyway
+// 4. The heuristic caught up — and the producer fix is required anyway
 // ---------------------------------------------------------------------------
+//
+// ## This section was INVERTED, deliberately, and is worth reading before
+// ## trusting either half of it
+//
+// As first written, these two cases asserted `looksLikeInternalErrorLeak('no
+// such table: sys_packages') === false`, and that was the truth at the time:
+// the message names no `sqlite_`, no `sqlstate`, no `constraint failed`, and
+// does not start with a statement keyword. It was half of why the fix had to
+// reach the producer.
+//
+// #8132 then landed on `main` and taught the predicate the bare-SQLite and
+// Postgres phrasings (`/\bno such (?:table|column):/i` and the quoted-relation
+// forms). These cases went red on the merge — which is precisely the signal
+// both #8086's ceiling note and this file's own instruction predicted, and the
+// instruction was "delete or invert it; do not repair it to green".
+//
+// So they are INVERTED to the new fact rather than deleted: the knowledge that
+// this phrasing is judged, and by whom, is worth keeping pinned. What is NOT
+// done is quietly flipping an expectation to match reality while leaving the
+// prose claiming a gap that no longer exists.
+//
+// ⚠️ **The load-bearing point survives #8132 untouched, and it is §3, not this
+// section.** The producer fix was never redundant with a smarter predicate: a
+// RETURNED failure reaches `sendError`, which consults no predicate at all.
+// Re-measured against the widened predicate, `main`'s producer with only the
+// status corrected to 500 still answers
+//
+//     500 {"code":"PACKAGE_PUBLISH_FAILED",
+//          "message":"no such table: sys_packages"}
+//
+// — the driver line still on the wire, with a predicate that recognises it
+// perfectly, because nothing on that path ever asks. §3 is the pin for that,
+// and it is the one that must never be weakened.
 
-describe('[#8131] looksLikeInternalErrorLeak does not recognise this statement’s commonest failure', () => {
-  it('`no such table: sys_packages` is measured FALSE', () => {
-    // The same ceiling #8086 pinned for the Postgres phrasing, hit by SQLite
-    // too: the message names no `sqlite_`, no `sqlstate`, no `constraint
-    // failed`, and does not START with a statement keyword. So even routed
-    // through `sendThrownError` at 500 it would have travelled whole.
-    //
-    // ⛔ Do not "fix" this by widening the predicate — that is a phrasing arms
-    // race across every dialect, and #8136 rules it out explicitly. The cure
-    // is the producer, which is where #8131 put it.
-    expect(looksLikeInternalErrorLeak('no such table: sys_packages')).toBe(false);
-
-    // Its sibling DOES trip, which is what makes the case above a real gap
-    // rather than a claim that the predicate never works.
+describe('[#8131 / #8132] the predicate now judges this phrasing — and the returned path still never asks it', () => {
+  it('`no such table: sys_packages` is recognised as of #8132 (was FALSE when #8131 was written)', () => {
+    expect(looksLikeInternalErrorLeak('no such table: sys_packages')).toBe(true);
+    // The sibling that always tripped, kept so this reads as a statement about
+    // the predicate rather than about one string.
     expect(looksLikeInternalErrorLeak('NOT NULL constraint failed: sys_packages.tenant_ref')).toBe(true);
+    // #8132's other half, pinned here because #8086's ceiling note named it as
+    // the case that would go red when the gap closed.
+    expect(looksLikeInternalErrorLeak('relation "sys_packages" does not exist')).toBe(true);
   });
 
-  it('this case goes red the day the predicate learns the phrasing — that is the signal', () => {
-    // Stated positively so the day it changes is visible, per #8086's ceiling
-    // note. A reader arriving because this went red should delete it, not
-    // repair it.
-    expect(looksLikeInternalErrorLeak('no such table: sys_packages')).toBe(false);
+  it('a predicate that knows the phrasing STILL does not reach a returned failure', () => {
+    // The whole point, in one case: recognition is necessary for the thrown
+    // path and irrelevant to this one. If someone ever concludes from the
+    // green above that #8132 made #8131's producer fix redundant, this is the
+    // case that says otherwise.
+    const leak = 'no such table: sys_packages';
+    expect(looksLikeInternalErrorLeak(leak)).toBe(true);
+
+    const captured: Captured = { status: 0, body: undefined };
+    const res: any = {
+      json(d: any) { captured.body = d; }, send() {},
+      status(c: number) { captured.status = c; return res; }, header() { return res; },
+    };
+    sendError(res, 500, 'PACKAGE_PUBLISH_FAILED', leak);
+
+    // Verbatim, at 500, with the predicate calling it a leak.
+    expect(captured.status).toBe(500);
+    expect(captured.body?.error?.message).toBe(leak);
+    expect(captured.body?.error?.message).not.toBe(INTERNAL_ERROR_MESSAGE);
   });
 });
 
@@ -391,13 +439,21 @@ describe('[#8131] the producer re-throws exactly what the shared rule can map', 
     expect(resolved.status).toBe(0);
     expect(declaredStatus(driverError)).toBe(false);
 
-    // And had it been re-thrown, this is what the door would have answered:
-    // a 500 whose message is the driver line verbatim, because the heuristic
-    // does not recognise this phrasing.
+    // And had it been re-thrown, the door would have resolved it as an
+    // UNDECLARED server fault — a 500 whose code derives from the status, not
+    // from the driver's `ERR_SQLITE_ERROR`, which the ledger does not know.
+    //
+    // Note what this case no longer claims. It used to add "…and the heuristic
+    // does not recognise this phrasing, so the message ships"; since #8132 the
+    // predicate DOES recognise it, so on the thrown path the prose would now
+    // be withheld. That does not make re-throwing correct here: it would still
+    // turn a driver fault into a generic `INTERNAL_ERROR` and discard
+    // `PACKAGE_PUBLISH_FAILED`, and it would still leave the returned path
+    // (§3, §4) unprotected. The discriminant is about WHO declared the answer,
+    // and that is independent of the predicate.
     const asThrown = resolveThrownHttpError(driverError);
     expect(asThrown.status).toBe(500);
     expect(asThrown.code).toBe('INTERNAL_ERROR');
-    expect(looksLikeInternalErrorLeak(asThrown.message)).toBe(false);
     expect(asThrown.message).toBe('no such table: sys_packages');
   });
 });

@@ -26,23 +26,24 @@
  * ## Why the PRODUCER half is the load-bearing one
  *
  * The dispatch assumed that reclassifying this path to 5xx would put it inside
- * #8086's withhold "with no new rule". Measured, that is false **twice**:
+ * #8086's withhold "with no new rule". Measured, that is false: the withhold
+ * lives in the door's `sendThrownError`, and a failure that is *returned*
+ * reaches `sendError` directly, which consults no predicate at any status.
+ * Classification alone changes 400 to 500 and leaves the driver line exactly
+ * where it was.
  *
- *  1. **Structurally** — the withhold lives in the door's `sendThrownError`.
- *     A failure that is *returned* reaches `sendError` directly and never
- *     meets it, at any status. Classification alone changes 400 to 500 and
- *     leaves the driver line exactly where it was.
- *  2. **Semantically** — even routed through the withhold,
- *     `looksLikeInternalErrorLeak('no such table: sys_packages')` is **false**
- *     (it names no `sqlite_`, no `sqlstate`, no `constraint failed`, and does
- *     not start with a statement keyword). That is the commonest real failure
- *     of this very statement. Pinned at the door in
- *     `package-publish-status-classification.test.ts`, where the predicate
- *     lives.
+ * When this was written there was a second, independent reason —
+ * `looksLikeInternalErrorLeak('no such table: sys_packages')` was **false**,
+ * so the line would have survived the withhold even if it had been reached.
+ * #8132 has since taught the predicate that phrasing, retiring that half of
+ * the argument. It changes nothing here: re-measured against the widened
+ * predicate, the classification-only counterfactual still answers
+ * `500 {"message":"no such table: sys_packages"}`, because nothing on the
+ * returned path asks. The door's suite carries that case.
  *
  * So the disclosure is closed HERE, at the producer, where no heuristic is
  * involved and no dialect's phrasing has to be recognised — option C of #8086,
- * for this producer.
+ * for this producer, and the reason it does not depend on #8132 holding.
  *
  * ## The driver is real on purpose
  *

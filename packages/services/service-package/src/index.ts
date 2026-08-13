@@ -230,10 +230,12 @@ export class PackageServicePlugin implements Plugin {
           // ⚠️ This is the half that actually closes the disclosure, and it
           // has to be: the 5xx withhold (#8086) lives in the door's
           // `sendThrownError`, which a RETURNED failure never reaches at any
-          // status — and even reached, `looksLikeInternalErrorLeak` is
-          // measured FALSE for `no such table: sys_packages`, the commonest
-          // real failure of this very statement. Correct classification alone
-          // would have left the text on the wire.
+          // status. `sendError` consults no predicate, so correct
+          // classification alone leaves the text on the wire — measured
+          // against the POST-#8132 predicate, which recognises
+          // `no such table: sys_packages` perfectly and is never asked.
+          // A smarter heuristic does not make this redundant; nothing on this
+          // path calls one.
           return {
             success: false,
             driverFault: { message: PACKAGE_PUBLISH_DRIVER_FAULT_MESSAGE },
