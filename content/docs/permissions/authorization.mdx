@@ -227,11 +227,21 @@ one of two doors, each writing only what it owns:
   **refuses** any payload that forges package provenance (insert or update,
   single or array) and the lifecycle ops with no overlay translation
   (`transfer`/`restore`/`purge`) on package rows, failing closed ahead of the
-  CRUD check — even a `modifyAllRecords` super-user is blocked. Ordinary
-  admin-door **edits of a packaged set are no longer refused**: the ADR-0094
-  write-through translates them into the standard ADR-0005 env-scope
-  **overlay** — the record projects the effective body while the package keeps
-  owning the row, and "delete" resets to the shipped declaration. System /
+  CRUD check — even a `modifyAllRecords` super-user is blocked. An ordinary
+  admin-door **edit of a set whose definition ships as a code artifact is
+  refused with `403 not_overridable`**, loudly, at the moment of the write:
+  the ADR-0094 write-through still translates the edit into a metadata save,
+  but `permission` declares `allowOrgOverride: false` (ADR-0005's security
+  row — overlays of the authorization surface would create silent privilege
+  drift), so the tier gate refuses it and no env-scope overlay is minted. The
+  supported channel is the one ADR-0086 two-doors always named: **edit the
+  package and re-publish**. (ADR-0094 D5's 2026-07-14 direction — translate
+  such an edit into a first-class ADR-0005 env-scope overlay — was **retired
+  on 2026-08-09**; see ADR-0094 D5-R.) A set authored through the data door,
+  whose definition lives only in `sys_metadata`, rides the still-open
+  `allowRuntimeCreate` tier and stays editable. A "delete" of a packaged set
+  through this door still degrades to a **reset** to the shipped declaration —
+  the admin door can never remove a packaged definition. System /
   boot writes carry `isSystem` and bypass it, so the seeder and materializer
   are never self-blocked. That bypass is not local to this gate — the full set
   of behaviours the flag changes is catalogued in

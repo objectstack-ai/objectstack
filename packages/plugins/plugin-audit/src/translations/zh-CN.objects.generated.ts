@@ -24,7 +24,6 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           create: "创建",
           update: "更新",
           delete: "删除",
-          restore: "恢复",
           login: "登录",
           logout: "登出",
           config_change: "配置变更",

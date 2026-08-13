@@ -502,11 +502,19 @@ const EXEMPT = {
 //     same one `packages/metadata-core` uses for the structurally identical hole.
 //   - `@objectstack/example-showcase` took the widened-`include` route (#7312's
 //     shape for app-crm / app-todo), because its `rootDir` is already `.` and
-//     nothing needed neutralising. Its glob is `e2e/**/*.spec.ts` and NOT
+//     nothing needed neutralising. Its glob was `e2e/**/*.spec.ts` and NOT
 //     `e2e/**/*`, holding the same line the deleted entry's note drew: the
 //     wholesale glob would pull in `e2e/global-setup.ts`, a fixture rather than a
-//     test, and bill the test layer 6 errors that are not its own. That file is
-//     still read by no tsc program and is filed rather than folded in here.
+//     test, and bill the test layer 6 errors that are not its own.
+//     (historical: until #8062 / PR #8178, that file sat read by no tsc program
+//     at all. The package's own tsconfig now takes the wholesale `e2e/**/*`
+//     glob directly, and the 6 errors are fixed at their source -- a file-local
+//     `declare const process` plus `mkdirSync`/`writeFileSync` on the `node:fs`
+//     shim in `examples/app-showcase/types/node-shim.d.ts` -- so
+//     `global-setup.ts` is now read and type-checks clean. The lesson survives
+//     the fix: widen a hidden test layer's `include` one file at a time and
+//     measure each addition, because a wholesale glob can bill the layer for a
+//     non-test file it never asked to cover.)
 // `@objectstack/cli` (188 raw across 56 files) is deliberately NOT part of that
 // graduation -- it is a programme rather than a sitting, and its entry stands.
 const TEST_DEBT = {
@@ -1705,6 +1713,13 @@ function defaultTypeRoots(pkgAbs, rootAbs) {
  * directory glob -- `e2e/**\/*` would have pulled `e2e/global-setup.ts` into
  * app-showcase's measurement and billed the test layer 6 errors from a file that
  * is not a test.
+ * (historical: until #8062 / PR #8178, app-showcase held the narrow
+ * `e2e/**\/*.spec.ts` glob for exactly this reason. That card fixed the 6
+ * errors at their source instead and moved the package to the wholesale
+ * `e2e/**\/*` glob directly, so `global-setup.ts` is now in the program and
+ * type-checks clean. The general point stands regardless: widen a hidden test
+ * layer one file at a time and measure each addition, because a wholesale glob
+ * can bill the layer for a non-test file it never asked to cover.)
  *
  * `rootDir` goes with them. It is `src` in most of these packages, so widening
  * `include` past it makes tsc answer with one TS6059 per added file and nothing

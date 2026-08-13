@@ -188,7 +188,29 @@ export class MetadataFacade {
   }
 
   /**
-   * Get a metadata item by type and name.
+   * Get a metadata item by type and name — the STORED document, verbatim from
+   * the registry.
+   *
+   * [#7519] An `item?.content ?? item` unwrap used to sit on this return (and
+   * on {@link list} / {@link listNames}), presuming `content` was this
+   * facade's own storage envelope. But `content` is a REAL authorable field —
+   * `doc.zod.ts` (raw Markdown) and `knowledge-document.zod.ts` both declare
+   * it — so `register('doc', n, document)` → `get('doc', n)` answered the
+   * Markdown STRING instead of the document: truthy, string-typed, and silent
+   * (downstream `?.name` reads yield `undefined` rather than throwing) —
+   * exactly the silent non-round-trip the #7378 ruling forbids
+   * (`register(t, n, d)` → `get(t, n)` round-trips or is refused loudly).
+   *
+   * The envelope the unwrap presumed has NO producer. Measured, not assumed:
+   * the only writer that ever produced one was this class's own interim
+   * `{ name, content }` boxing of non-object values (#7511 cell 3), which
+   * #8349 removed in favour of the shared guard's loud refusal (see
+   * {@link toKeyedDefinition}); DB hydration (`loadMetaFromDb`,
+   * metadata-protocol) parses the `sys_metadata.metadata` column and registers
+   * the document itself; every other in-tree `registerItem` caller stores the
+   * document as-is. With no envelope on any write path, an unwrap on the read
+   * path can only corrupt — so there is none, and no replacement envelope key
+   * either (any key chosen would just collide with the next authorable field).
    *
    * `currentPackageId` (ADR-0048) opts into package-scoped resolution: when two
    * installed packages ship an item of the same `type`/`name`, the registry
@@ -198,23 +220,28 @@ export class MetadataFacade {
    */
   async get(type: string, name: string, currentPackageId?: string): Promise<any> {
     // [#7378 row 2] Read the store `register` wrote: the canonical type.
-    const item = this.registry.getItem(canonicalMetadataServiceType(type), name, currentPackageId) as any;
-    return item?.content ?? item;
+    return this.registry.getItem(canonicalMetadataServiceType(type), name, currentPackageId);
   }
 
   /**
-   * Get the raw entry (with metadata wrapper)
+   * Get the raw stored entry, synchronously and without package-scoped
+   * resolution. ([#7519] Historically documented as "with metadata wrapper" —
+   * there is no wrapper; {@link get} returns the same stored document. This
+   * member survives as the sync, scope-free variant.)
    */
   getEntry(type: string, name: string): any {
     return this.registry.getItem(canonicalMetadataServiceType(type), name);
   }
 
   /**
-   * List all items of a type
+   * List all items of a type — the stored documents, verbatim.
+   *
+   * [#7519] The former `item?.content ?? item` map is gone for the reason
+   * {@link get}'s header carries in full: `content` is a real authorable
+   * field, and the envelope the unwrap presumed has no producer.
    */
   async list(type: string): Promise<any[]> {
-    const items = this.registry.listItems(canonicalMetadataServiceType(type));
-    return items.map((item: any) => item?.content ?? item);
+    return this.registry.listItems(canonicalMetadataServiceType(type));
   }
 
   /**
@@ -252,11 +279,20 @@ export class MetadataFacade {
   }
 
   /**
-   * List all names of metadata items of a given type
+   * List all names of metadata items of a given type.
+   *
+   * [#7519] The former `item?.content?.name` fallback limb was the same
+   * envelope presumption {@link get}'s header retires, one member over — and
+   * it was dead in both directions: on an envelope-shaped entry nothing
+   * produces it would have read a name out of the wrapper, and on a real
+   * `doc` (whose `content` is a Markdown STRING) `content?.name` is
+   * `undefined` anyway. Every admitted document carries `name` —
+   * {@link toKeyedDefinition} sets it from the argument on this class's own
+   * writes, and every in-tree `registerItem` caller keys by `name`.
    */
   async listNames(type: string): Promise<string[]> {
     const items = this.registry.listItems(canonicalMetadataServiceType(type));
-    return items.map((item: any) => item?.name ?? item?.content?.name ?? '').filter(Boolean);
+    return items.map((item: any) => item?.name ?? '').filter(Boolean);
   }
 
   /**

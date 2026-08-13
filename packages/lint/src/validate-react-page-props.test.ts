@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest';
 import {
   validateReactPageProps,
   REACT_CHART_FIELD_UNKNOWN,
+  REACT_CHART_FIELD_UNPROVISIONED,
   REACT_CHART_AGGREGATE_INVALID,
   REACT_CHART_AXIS_UNKNOWN,
   REACT_CHART_DRILLDOWN_INVALID,
@@ -13,7 +14,7 @@ import {
   SEARCHABLE_FIELD_UNKNOWN,
   SEARCHABLE_FIELD_UNSEARCHABLE,
 } from './validate-searchable-fields.js';
-import { PAGE_FIELD_UNKNOWN } from './validate-page-field-bindings.js';
+import { PAGE_FIELD_UNKNOWN, PAGE_FIELD_UNPROVISIONED } from './validate-page-field-bindings.js';
 // The gate PARSES `ChartAggregateSchema` since #5020, so the function
 // vocabulary lives in the schema and nowhere in the rule. Imported here to pin
 // the test table against it — see the `aggregate` block near the bottom.
@@ -1135,5 +1136,83 @@ describe('validateReactPageProps — <ObjectChart aggregate> PARSED (#5020)', ()
       chartPage(`function Page(){ const g = useG(); return <ObjectChart objectName="invoice" aggregate={{ function: 'count', groupBy: g }} />; }`),
     );
     expect(f.filter((x) => x.rule === REACT_CHART_AGGREGATE_INVALID)).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// Unprovisioned injected anchors on the react surface (#8340)
+// ─────────────────────────────────────────────────────────────────────────
+
+describe('validateReactPageProps — unprovisioned injected anchors (#8340)', () => {
+  /**
+   * An ADR-0015 `external` object: the remote database owns the table, so the
+   * platform's injected anchors (`owner_id`, the audit family, …) are
+   * registered and never provisioned. `extra` breaks each half of the
+   * derivation independently.
+   */
+  const extCustomer = (extra: Record<string, unknown> = {}) => ({
+    name: 'ext_customer',
+    external: { remoteName: 'customers' },
+    fields: [{ name: 'email' }, { name: 'tier' }],
+    ...extra,
+  });
+  const extPage = (source: string, objects: unknown[] = [extCustomer()]) => ({
+    objects,
+    pages: [{ name: 'p', kind: 'react', source }],
+  });
+
+  it('warns on an aggregate.groupBy over an anchor, and the existence rule stays silent', () => {
+    const f = validateReactPageProps(
+      extPage(chart(`objectName="ext_customer" aggregate={{ field: 'email', function: 'count', groupBy: 'owner_id' }}`)),
+    );
+    expect(f.filter((x) => x.rule === REACT_CHART_FIELD_UNKNOWN)).toHaveLength(0);
+    const warned = f.filter((x) => x.rule === REACT_CHART_FIELD_UNPROVISIONED);
+    expect(warned).toHaveLength(1);
+    expect(warned[0].severity).toBe('warning');
+    expect(warned[0].message).toContain('aggregate.groupBy "owner_id"');
+    expect(warned[0].message).toContain('external object (ADR-0015)');
+    expect(warned[0].message).toContain('one empty bucket');
+    expect(warned[0].hint).toContain('columnMap');
+  });
+
+  it('is silent on the local twin — platform storage is real (mutation: drop `external`)', () => {
+    const f = validateReactPageProps(
+      extPage(
+        chart(`objectName="ext_customer" aggregate={{ field: 'email', function: 'count', groupBy: 'owner_id' }}`),
+        [extCustomer({ external: undefined })],
+      ),
+    );
+    expect(f.filter((x) => x.rule === REACT_CHART_FIELD_UNPROVISIONED)).toHaveLength(0);
+  });
+
+  it('is silent when the author DECLARES the column (#7859)', () => {
+    const f = validateReactPageProps(
+      extPage(
+        chart(`objectName="ext_customer" aggregate={{ field: 'email', function: 'count', groupBy: 'owner_id' }}`),
+        [extCustomer({ fields: [{ name: 'email' }, { name: 'owner_id' }] })],
+      ),
+    );
+    expect(f.filter((x) => x.rule === REACT_CHART_FIELD_UNPROVISIONED)).toHaveLength(0);
+  });
+
+  it('reaches the FILTER position through the shared core — the #8340 headline case', () => {
+    // `<ListView filters>` is the react surface's filter position: the ref goes
+    // to a QUERY, so the message names the silent-zero degradation.
+    const f = validateReactPageProps(
+      extPage(`function Page(){ return <ListView objectName="ext_customer" filters={['owner_id', '=', 'x']} />; }`),
+    );
+    expect(f.filter((x) => x.rule === PAGE_FIELD_UNKNOWN)).toHaveLength(0);
+    const warned = f.filter((x) => x.rule === PAGE_FIELD_UNPROVISIONED);
+    expect(warned).toHaveLength(1);
+    expect(warned[0].severity).toBe('warning');
+    expect(warned[0].message).toContain('constant-false');
+    expect(warned[0].path).toBe('pages[0].source › filters[0]');
+  });
+
+  it('is silent on a declared field in the same filter position', () => {
+    const f = validateReactPageProps(
+      extPage(`function Page(){ return <ListView objectName="ext_customer" filters={['tier', '=', 'gold']} />; }`),
+    );
+    expect(f).toEqual([]);
   });
 });

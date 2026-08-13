@@ -53,6 +53,20 @@ import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { resolveAuthzContext } from '@objectstack/core';
 import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
+import { assertArmed, principalArmed } from './armed.js';
+
+/**
+ * [#8074] The control every case below measures, and the default that silences
+ * it. The first fixture written for #8023 was org-less and PASSED against the
+ * known-broken build; `assertArmed` in `beforeAll` is what now makes that
+ * impossible rather than merely documented.
+ */
+const WRITE_FLOOR =
+  "the platform's wildcard row-level write floor (`owner_only_writes`, positions ['org_member'])";
+const WRITE_FLOOR_DISARM =
+  'an org-less harness: no organization ⇒ no `sys_member` row ⇒ a fresh sign-up holds only ' +
+  "`['everyone']` ⇒ the positions-gated floor never applies and every case here passes on the " +
+  'broken build. `orgContext: true` in the boot options above is what arms it.';
 
 // ── the three objects, identical but for the OWD ───────────────────────────
 
@@ -229,6 +243,35 @@ describe('[#8023] a public_read_write OWD opens row-level writes (and nothing el
     await bindSet(bobId, 'owdw_editor');
     await bindSet(mallyId, 'owdw_viewer');
     await bindSet(carolId, 'owdw_scoped');
+
+    // [#8074] The precondition the header above records in prose, now read off
+    // the live stack and enforced BEFORE anything is measured. It is asserted
+    // here rather than in an `it()` on purpose: a disarmed fixture must produce
+    // ZERO green cells, and #8023's harm was exactly one green cell in a
+    // 124-cell matrix re-drive. The `[integrity]` case below keeps its own copy
+    // of the positions check — it is redundant with this gate by design, since
+    // it also proves the facts this gate cannot (who created which row, and
+    // that the three objects differ only by their OWD).
+    await assertArmed([
+      principalArmed({
+        stack,
+        token: bobToken,
+        who: 'bob (the edit:true persona)',
+        positions: ['org_member'],
+        permissions: ['owdw_editor'],
+        control: WRITE_FLOOR,
+        disarmedBy: WRITE_FLOOR_DISARM,
+      }),
+      principalArmed({
+        stack,
+        token: carolToken,
+        who: 'carol (the #7792 select-narrowed persona)',
+        positions: ['org_member'],
+        permissions: ['owdw_scoped'],
+        control: WRITE_FLOOR,
+        disarmedBy: WRITE_FLOOR_DISARM,
+      }),
+    ]);
 
     // Rows are created over HTTP by ALICE so `created_by` is genuinely hers —
     // a system-context seed would stamp no creator and the floor under test

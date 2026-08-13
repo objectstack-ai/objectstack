@@ -974,7 +974,7 @@ a `tsc` error at the call site.
 
 | Removed | Why | Use instead |
 |---|---|---|
-| `fields[]` object form `{ field, fields, alias }` | inert end to end — every reader treats the list as `string[]`, so it was dropped by the SQL and memory drivers, projected as a column named `"[object Object]"` by MongoDB, and refused by the REST ingress | `expand`, or a dotted path for a single related column (`fields: ['owner.name']`) |
+| `fields[]` object form `{ field, fields, alias }` | inert end to end — every reader treats the list as `string[]`, so it was dropped by the SQL and memory drivers, projected as a column named `"[object Object]"` by MongoDB, and refused by the REST ingress | `expand`, keeping the reference column in the projection (`fields: ['title', 'owner']` plus `expand`) |
 | `query.joins` | no engine or driver ever read it; the name squatted on the reserved REST parameter set (the `JoinNode`/`JoinType`/`JoinStrategy` cluster goes with it) | `expand` — the engine resolves it via batch `$in` queries |
 | `query.windowFunctions` | `find()` never applied one, so every OVER clause was silently dropped; `WindowFunctionNode` declared `field`/`over`/`frame` members the live door never read | `aggregations` + `groupBy`; embedders on a SQL datasource call `SqlDriver.findWithWindowFunctions()` |
 | `query.cursor` | no driver implemented keyset pagination — the cursor was accepted and ignored, so every page came back identical and a caller looping "until `hasMore` is false" never terminates | a `where` predicate on your sort key (`{ created_at: { $gt: last.created_at } }`) with the matching `orderBy` |

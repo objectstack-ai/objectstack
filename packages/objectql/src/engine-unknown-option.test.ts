@@ -142,6 +142,20 @@ describe('unknown engine option keys are rejected (#4371 option 2)', () => {
             .rejects.toThrow(/#4286, ADR-0049/);
     });
 
+    it('update `upsert` is rejected with its #8057 tombstone — it was accepted and silently dropped', async () => {
+        // [#8057] `upsert` sat on the update allowlist while nothing read it
+        // (declared-but-unenforced, ADR-0049). The refusal quotes the spec's
+        // prescription: delete the key; create-if-absent is explicit now that
+        // the by-id branch throws on a missing row (#7867's not-found gate).
+        await expect(engine.update('task', { title: 'Z' }, { where: { id: a.id }, upsert: true } as any))
+            .rejects.toThrow(/`update\.options\.upsert` was removed .*#8057, ADR-0049.*never implemented.*Delete the key.*not-found gate/s);
+    });
+
+    it('a null-valued `upsert` stays a withdrawal — no intent a drop could lose', async () => {
+        const updated = await engine.update('task', { title: 'A4' }, { where: { id: a.id }, upsert: null } as any);
+        expect(updated).toBeDefined();
+    });
+
     // ── null stays a withdrawal ─────────────────────────────────────────
 
     it('a null-valued unknown key is a withdrawal, not a rejection', async () => {
@@ -203,7 +217,7 @@ describe('unknown engine option keys are rejected (#4371 option 2)', () => {
     // ── drift pin: legal sets stay glued to the spec schemas ────────────
 
     it('each legal set covers its schema shape (minus tombstones) and only the documented extras', () => {
-        const TOMBSTONES = new Set(['cursor', 'distinct']);
+        const TOMBSTONES = new Set(['cursor', 'distinct', 'upsert']);
         const PASSTHROUGH = ['transaction', 'tenantId', 'tenantIds', 'timezone', 'bypassTenantAudit', 'preserveAudit'];
         const expectSetMatches = (
             setName: string,

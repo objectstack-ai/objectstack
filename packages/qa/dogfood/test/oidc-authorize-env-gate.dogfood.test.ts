@@ -65,6 +65,7 @@ import { createHash } from 'node:crypto';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack from '@objectstack/example-showcase';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { assertArmed, authSettingArmed } from './armed.js';
 
 // Must be on before the AuthPlugin builds its plugin list (kernel.use during
 // bootStack), or /oauth2/authorize is not mounted and every assertion below
@@ -185,6 +186,24 @@ describe('#8102: the D5.1 /oauth2/authorize env-access gate runs on every creden
         return false;
       },
     });
+
+    // [#8074] The comment above says it in prose; this reads it back off the
+    // live manager. `this.config.oidcAuthorizeGate` is consulted only when it
+    // is truthy, so an unset gate means the branch under test never executes
+    // and "the request was refused" cannot be told from "there was no gate".
+    await assertArmed([
+      authSettingArmed({
+        stack,
+        setting: 'oidcAuthorizeGate',
+        armed: (v) => typeof v === 'function',
+        control: 'the cloud control-plane OIDC authorize gate',
+        disarmedBy:
+          '`oidcAuthorizeGate` is unset in open editions, so the hook never runs and every ' +
+          'assertion in this file passes on the broken build. Install one through ' +
+          '`applyConfigPatch`.',
+        describe: (v) => (typeof v === 'function' ? 'a function (installed)' : String(v)),
+      }),
+    ]);
 
     const user = (await ql.find(
       'sys_user',

@@ -6,14 +6,31 @@
  *
  * ## The gap this closes
  *
- * `sys_audit_log.action` declares ten values. `audit-writers.ts` subscribes to
- * the ObjectQL wildcard `before*`/`after*` CRUD lifecycle, so it can emit
- * `create`/`update`/`delete`/`restore` and nothing else — four of the declared
- * values had no writer anywhere in the repo. Two of them are auth session
- * events, and the whole trace a sign-in left behind was an **unattributed**
- * `update sys_user` row diffing `last_login_at` (`user_id` null). The shipped
- * `auth_events` list view and two `system_overview` dashboard widgets were
- * therefore permanently empty, by construction.
+ * `sys_audit_log.action` declared ten values when this landed. `audit-writers.ts`
+ * subscribes to the ObjectQL wildcard `before*`/`after*` CRUD lifecycle, and its
+ * `actionFor()` returns `'create' | 'update' | 'delete' | null` — so it emits
+ * exactly those three and nothing else. Several of the declared values had no
+ * writer anywhere in the repo. Two of them are auth session events, and the
+ * whole trace a sign-in left behind was an **unattributed** `update sys_user`
+ * row diffing `last_login_at` (`user_id` null). The shipped `auth_events` list
+ * view and two `system_overview` dashboard widgets were therefore permanently
+ * empty, by construction.
+ *
+ * ⚠ CORRECTION (#8315). This paragraph used to read that `audit-writers.ts`
+ * "can emit `create`/`update`/`delete`/`restore` and nothing else". The
+ * `restore` in that list was never true: `actionFor()`'s return type has no
+ * `restore` arm and the caller early-returns on `null`, so the record-level
+ * writer structurally cannot produce it, and no other writer in the repo did
+ * either. The claim survived because it is a COMMENT — the exact #8011 shape,
+ * a declaration sitting next to a mechanism with nothing enforcing it — and a
+ * declaration-reading audit stopped here and scored `restore` as covered.
+ * `restore` has since been retired from the enum (#8315); the sentence above
+ * now names what `actionFor()`'s signature actually says.
+ *
+ * The enum-side invariant this paragraph is really about — every declared
+ * action has a writer — is pinned mechanically in
+ * `objects/sys-audit-log-retired-actions.test.ts`, not asserted here. A comment
+ * is not a control; that is the whole lesson of this correction.
  *
  * ## Why the row is built HERE and not at the auth seam
  *

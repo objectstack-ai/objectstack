@@ -377,10 +377,10 @@ flagged inline below.
 | **D4** Shape B (packages ship own sets; union; shared slices env-only) | **Adopted, reinforced; subtract layer upgraded** | ADR-0090 D9 / Alt #6 reject package-written shared/builtin sets for the same reasons. Composition is now anchored at the **position** ("bind several packages' sets to one position"), ADR-0094 D5. **Subtract layer changed** — see ⚠️ below. |
 | **D5** `bootstrapDeclaredPermissions` | **Implemented; `isDefault` semantics refined by ADR-0090 D5** | `plugin-security/src/bootstrap-declared-permissions.ts` (invoked at `kernel:ready`, `security-plugin.ts`); seeds `managed_by:'package'` + `package_id`, idempotent/upgrade-aware; closes the ADR-0078 inert-metadata smell the D5 header calls out. `isDefault` no longer means "profile fallback": app-level default sets **auto-bind to the `everyone` position**; package-level default sets materialize a `sys_audience_binding_suggestion` an admin confirms (new object). |
 | **D6** package Access door under draft/publish | **Implemented** | objectui writes the package door as `mode:'draft', packageId` (`PermissionMatrixEditor.tsx`); env door stays live and, per ADR-0094 D3, that "live" save is itself redirected into a metadata overlay. |
-| **D7** two doors | **Implemented; gate narrowed by ADR-0094 D5** | Package door edits the package slice (scoped, draft); env-admin door keeps the cross-package matrix + assignment (live). ADR-0094 narrows the two-doors *gate* to what stays structurally true: the admin door can never **forge** package provenance, and package-row lifecycle ops with no overlay translation stay refused — but an env edit of a package set is now a first-class overlay, not a flat 403. |
+| **D7** two doors | **Implemented; ADR-0094 D5's gate narrowing is RETIRED (D5-R, 2026-08-09)** | Package door edits the package slice (scoped, draft); env-admin door keeps the cross-package matrix + assignment (live). ADR-0094 D5 had narrowed the two-doors *gate* so that an env edit of a package set became a first-class overlay "not a flat 403" — **that narrowing is retired as of 2026-08-09 (see ADR-0094 D5-R)**: `permission` rolled back to `allowOrgOverride: false`, so an env edit of an artifact-backed set is refused with `403 not_overridable` and this ADR's original two-doors channel stands — edit the package and re-publish. What ADR-0094 left standing either way: the admin door can never **forge** package provenance, package-row lifecycle ops with no overlay translation stay refused, and a data-door "delete" of a packaged set degrades to a reset rather than removing it. |
 | **P0** objectui scope + slice-merge | **Done** (objectui #2505/#2508) | `permission-slice.ts` + `mergePermissionSlice`; matrix loads `client.list('object', { packageId })`, fields lazy per-object; save re-reads a fresh layered record and merges only the package slice, byte-for-byte preserving other packages. ⚠️ realized against the ADR-0094 store — see below. |
 | **P1** framework `packageId` + seeder | **Done** | = D3 + D5 above. |
-| **P2** two doors + overlay/subtract | **Largely done** | Two doors shipped (D6/D7). Subtract layer landed as **ADR-0005 first-class overlay** (ADR-0094 D5), not the Salesforce-muting/explicit-deny path this ADR sketched. The ADR-0066 precedence-step-4 explicit-deny layer remains deferred and **evidence-gated** — the whole-document overlay-wins customization covers today's need. |
+| **P2** two doors + overlay/subtract | **Two doors done; the overlay subtract layer is RETIRED for `permission`** | Two doors shipped (D6/D7). The subtract layer had landed as an **ADR-0005 first-class overlay** (ADR-0094 D5) rather than the Salesforce-muting/explicit-deny path this ADR sketched — **retired 2026-08-09 (ADR-0094 D5-R)**, so for an artifact-backed set there is no overlay customization channel at all. The ADR-0066 precedence-step-4 explicit-deny layer remains deferred and **evidence-gated**; with the overlay channel withdrawn, a package set is customized by editing the package and re-publishing. |
 
 ### ⚠️ Two mechanisms in the original text are superseded by a better realization
 
@@ -397,13 +397,25 @@ flagged inline below.
    a package's slice unambiguous still holds and underpins both slice-merge and overlay.*
 
 2. **D4's "Salesforce muting / clone-to-customize" subtract layer → ADR-0005 whole-document
-   overlay.** ADR-0094 D5 (revised 2026-07-14) makes an environment overlay of a
-   package-owned set a **first-class ADR-0005 customization** (overlay-wins, `managed_by:
-   'package'` + `package_id` preserved; a data-door "delete" is an overlay reset to the shipped
-   declaration). This is strictly better than muting/forking: the customization keeps receiving
-   the vendor's baseline security tightenings and retains the code-vs-overlay diff. The trade
-   it accepts (an overlay pins a name against a later vendor tightening until reset) is the same
-   trade every overlayable type makes and is covered by ADR-0091 recertification.
+   overlay — ⛔ RETIRED 2026-08-09, see ADR-0094 D5-R.** ADR-0094 D5 (revised 2026-07-14) had
+   made an environment overlay of a package-owned set a **first-class ADR-0005 customization**
+   (overlay-wins, `managed_by: 'package'` + `package_id` preserved; a data-door "delete" an
+   overlay reset to the shipped declaration), argued as strictly better than muting/forking
+   because the customization kept receiving the vendor's baseline security tightenings and
+   retained the code-vs-overlay diff. **That direction is retired.** #6483 / PR #6608 rolled
+   `permission` back to `allowOrgOverride: false` (ADR-0005's security row: overlays of the
+   authorization surface would create silent privilege drift), and ADR-0094 D5-R followed
+   through: for a set whose definition ships as a code artifact the ADR-0005 overlay is no
+   longer a customization channel of any kind, and the write is refused with `403
+   not_overridable` at the moment it is made. **So this ADR's own D4/D7 answer stands
+   unsuperseded** — customize a packaged set by editing the package and re-publishing. Two
+   narrow carry-overs: a data-door "delete" of a packaged set still degrades to a reset (the
+   env door can never remove a packaged definition), and `supportsOverlay: true` is unchanged,
+   so a pre-rollback overlay row still merges overlay-wins at read time — legacy state to be
+   lifted by an operator, not a supported channel. Sets authored through the data door, whose
+   definition lives only in `sys_metadata`, ride the still-open `allowRuntimeCreate` tier;
+   ADR-0094 D5-R records that tier as the surviving neighbour, explicitly **not** D5's
+   successor (it edits one stored definition in place — no code-vs-overlay layering).
 
 ### D1 classification table — restated in current (ADR-0090) vocabulary
 

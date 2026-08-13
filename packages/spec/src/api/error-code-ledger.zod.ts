@@ -363,6 +363,7 @@ export const ERROR_CODE_LEDGER = {
   '@objectstack/service-settings': [
     'INTERNAL',
     'SETTINGS_ACTION_FAILED',        // a declared action ran and reported ok:false
+    'SETTINGS_CRYPTO_UNAVAILABLE',   // [#8273] fail-closed write refusal: declared-encrypted value, nothing confidential wired to encrypt it — a SERVER fault (500, deliberately not 503: no retry succeeds until an operator wires a cryptoProvider; the message carries that fix)
     'SETTINGS_FORBIDDEN',
     'SETTINGS_LOCKED',
     'SETTINGS_UNKNOWN_KEY',

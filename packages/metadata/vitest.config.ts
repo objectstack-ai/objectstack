@@ -16,6 +16,7 @@ export default defineConfig({
       '@objectstack/spec/shared': path.resolve(__dirname, '../spec/src/shared/index.ts'),
       // [ADR-0105 D1] Reached transitively via `@objectstack/types` (tenancy posture).
       '@objectstack/spec/security': path.resolve(__dirname, '../spec/src/security/index.ts'),
+      '@objectstack/spec/qa': path.resolve(__dirname, '../spec/src/qa/index.ts'),
       '@objectstack/spec': path.resolve(__dirname, '../spec/src/index.ts'),
       '@objectstack/types': path.resolve(__dirname, '../types/src/index.ts'),
     },

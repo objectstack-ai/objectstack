@@ -385,6 +385,26 @@ describe.each(IMPLEMENTATIONS)('#7378 ruled behaviour, beyond the table [$label]
         expect(await service.exists('view', 'pin_agreeing')).toBe(true);
     });
 
+    it('#7519: a document carrying a REAL `content` field round-trips WHOLE — `content` is authorable (doc.zod.ts / knowledge-document.zod.ts), never a storage envelope', async () => {
+        // MetadataFacade unwrapped `item?.content ?? item` on every read, so a
+        // registered doc came back as its Markdown STRING — truthy and defined,
+        // which is why the assertion below names the document's keys rather
+        // than stopping at toBeDefined(). The other three subjects always
+        // passed this; it pins the whole family to one answer.
+        const service = implementation.create();
+        const markdown = '# Pin\n\nThe content field belongs to the author, not the store.';
+        await service.register('doc', 'pin_content_field', {
+            name: 'pin_content_field',
+            label: 'Content pin',
+            content: markdown,
+        });
+        const got = (await service.get('doc', 'pin_content_field')) as Record<string, unknown> | undefined;
+        expect(got).toBeDefined();
+        expect(got).toMatchObject({ name: 'pin_content_field', content: markdown });
+        expect(await service.exists('doc', 'pin_content_field')).toBe(true);
+        expect(await service.listNames('doc')).toContain('pin_content_field');
+    });
+
     it("row 2 converges in BOTH directions: register('object', …) is readable through the plural spelling", async () => {
         // The table's ruled row covers plural-write → singular-read; this is
         // the reverse read, so the fold cannot be a write-side special case —

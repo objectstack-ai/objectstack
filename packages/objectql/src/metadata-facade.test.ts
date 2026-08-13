@@ -228,3 +228,99 @@ describe('MetadataFacade object write/read round-trip', () => {
         await expect(facade.unregister('object', 'absent')).resolves.toBeUndefined();
     });
 });
+
+/**
+ * [#7519] `content` is a REAL authorable field, not this facade's storage
+ * envelope.
+ *
+ * Every read member used to unwrap `item?.content ?? item`, presuming
+ * `content` marked the facade's own wrapper — but `doc.zod.ts` (raw Markdown)
+ * and `knowledge-document.zod.ts` both declare `content` as an authored
+ * field, so a doc registered through the facade read back as its Markdown
+ * STRING: truthy and string-typed, so nothing threw and downstream `?.name`
+ * reads silently yielded `undefined`. That is the silent non-round-trip the
+ * #7378 ruling (2026-08-12) forbids: `register(t, n, d)` → `get(t, n)`
+ * round-trips or refuses loudly.
+ *
+ * The envelope the unwrap presumed has NO producer (measured on `main`, not
+ * assumed — the full ledger is in `get`'s header in metadata-facade.ts), so
+ * the fix removes the unwrap rather than renaming the envelope key: any
+ * replacement key would merely reschedule this collision onto the next
+ * authorable field.
+ */
+describe('MetadataFacade reads return the stored document, not its `content` field (#7519)', () => {
+    let registry: SchemaRegistry;
+    let facade: MetadataFacade;
+
+    beforeEach(() => {
+        registry = new SchemaRegistry({ multiTenant: false });
+        facade = new MetadataFacade(registry);
+    });
+
+    const MARKDOWN = '# Getting started\n\nWrite your first object.';
+    const docDocument = () => ({
+        name: 'getting_started',
+        label: 'Getting started',
+        content: MARKDOWN,
+    });
+
+    it('get returns the registered doc document, not its Markdown string', async () => {
+        await facade.register('doc', 'getting_started', docDocument());
+
+        const got = (await facade.get('doc', 'getting_started')) as any;
+        // The defect shape was `got === MARKDOWN` — truthy and defined, so a
+        // bare toBeDefined() would have passed. Assert the DOCUMENT came back.
+        expect(got).toBeDefined();
+        expect(got).not.toBe(MARKDOWN);
+        expect(got.name).toBe('getting_started');
+        expect(got.content).toBe(MARKDOWN);
+    });
+
+    it('list returns doc documents, not Markdown strings', async () => {
+        await facade.register('doc', 'getting_started', docDocument());
+        await facade.register('doc', 'faq', { name: 'faq', content: '# FAQ' });
+
+        const listed = (await facade.list('doc')) as any[];
+        expect(listed).toHaveLength(2);
+        expect(listed.map((d) => d?.name).sort()).toEqual(['faq', 'getting_started']);
+        expect(listed.every((d) => typeof d === 'object' && d !== null)).toBe(true);
+    });
+
+    it('listNames reads names off the documents themselves', async () => {
+        await facade.register('doc', 'getting_started', docDocument());
+
+        expect(await facade.listNames('doc')).toEqual(['getting_started']);
+    });
+
+    it('exists and getEntry agree the document is there, whole', async () => {
+        await facade.register('doc', 'getting_started', docDocument());
+
+        expect(await facade.exists('doc', 'getting_started')).toBe(true);
+        const entry = facade.getEntry('doc', 'getting_started') as any;
+        expect(entry.content).toBe(MARKDOWN);
+    });
+
+    it('a knowledge_document with a `content` field round-trips whole too', async () => {
+        // The second live type the issue names (knowledge-document.zod.ts) —
+        // pinned so the fix cannot be read as doc-specific.
+        await facade.register('knowledge_document', 'onboarding_kb', {
+            name: 'onboarding_kb',
+            content: 'Answer the onboarding questions from this corpus.',
+        });
+
+        const got = (await facade.get('knowledge_document', 'onboarding_kb')) as any;
+        expect(got.name).toBe('onboarding_kb');
+        expect(typeof got.content).toBe('string');
+    });
+
+    it('a document WITHOUT a `content` field still round-trips unchanged (the surviving path)', async () => {
+        // The other direction pinned: removing the unwrap must not trade one
+        // class of correct read for another. Content-less items were read
+        // correctly before this fix (the `??` fell through) and must stay so.
+        await facade.register('view', 'plain_view', { name: 'plain_view', label: 'Plain', type: 'grid' });
+
+        const got = (await facade.get('view', 'plain_view')) as any;
+        expect(got).toMatchObject({ name: 'plain_view', label: 'Plain', type: 'grid' });
+        expect(await facade.listNames('view')).toEqual(['plain_view']);
+    });
+});
