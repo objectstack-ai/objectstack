@@ -1,17 +1,28 @@
 name: ADR Merge Approval
 
-# Machine enforcement of the #6741 ruling (maintainer, verbatim):
-# 「adr 只能由维护者自己确认,人工合并,ai 不得擅自合并。」
+# Machine enforcement of the 2026-08-12 ruling (maintainer, verbatim):
+# 「门禁改成只要求「APPROVED review 存在」」/「不要指定具体的人」
 #
-# A PR whose diff touches docs/adr/** must carry an APPROVED review from the
-# maintainer's OWN account before it is mergeable; approvals from the shared
-# bot/agent identities deliberately do not count. Prose enforcement was
-# measured insufficient the day the ruling landed — two different AI-operated
-# seats merged docs/adr/** PRs within the following hour (#6671, #6732; the
-# full record and both replays live in scripts/check-adr-merge-approval.mjs
-# and its --self-test). Drafting ADR PRs stays open to every seat; only the
-# merge is reserved, and the maintainer's own approval + merge is the intended
-# zero-extra-friction green path.
+# A PR whose diff touches docs/adr/** must carry an APPROVED review before it
+# is mergeable. The gate does NOT check WHO approved: any account with review
+# rights on this repo — including an AI seat — satisfies it, which is the
+# accepted cost of the ruling and is stated in full in the two-clause table at
+# the head of scripts/check-adr-merge-approval.mjs. The approval must be
+# current: a later CHANGES_REQUESTED or DISMISSED revokes it.
+#
+# This supersedes the account-identity rule this workflow used to describe
+# (#6741 「adr 只能由维护者自己确认,人工合并,ai 不得擅自合并。」, enforced by
+# matching the maintainer's numeric account id). That proxy became
+# unsatisfiable once cloud sessions began authoring PRs under the maintainer's
+# own account, since GitHub forbids self-approval (#8161). #6741's two halves
+# survive as convention, not as anything this workflow can measure.
+#
+# Prose enforcement was measured insufficient the day #6741 landed — two
+# different AI-operated seats merged docs/adr/** PRs within the following hour
+# (#6671, #6732; the full record and both replays live in
+# scripts/check-adr-merge-approval.mjs and its --self-test). Both had ZERO
+# reviews of any kind, so both stay red under the widened rule too. Drafting
+# ADR PRs stays open to every seat; only the merge is gated.
 #
 # Deliberately NO `paths` filter, on either trigger — the same choice
 # changeset-presence.yml made in objectui (#3769) and for the same reason
@@ -30,9 +41,11 @@ on:
   pull_request:
     branches: [main]
   # An approval does not fire `pull_request`, so without this trigger the
-  # failed check would sit red after the maintainer approves until someone
-  # re-ran it by hand. Subscribing to reviews makes the maintainer's approval
-  # itself re-run the gate — the zero-friction green path the card requires.
+  # failed check would sit red after the approval lands until someone re-ran
+  # it by hand. Subscribing to reviews makes the approval itself re-run the
+  # gate — the zero-friction green path the card requires. `pull-requests:
+  # read` below covers listing reviews from ANY account, so the widened rule
+  # needs no extra permission or token scope.
   # (On non-ADR PRs a review re-runs the cheap clean path; harmless.)
   pull_request_review:
     types: [submitted, edited, dismissed]
@@ -55,6 +68,14 @@ permissions:
 
 jobs:
   adr-merge-approval:
+    # ⛔ Do NOT rename this job. Its name IS the required status-context string
+    # in the `main` ruleset (#7022), and it is registered under that exact
+    # spelling in scripts/check-required-contexts.mjs — renaming it here alone
+    # leaves the ruleset waiting for a context that never reports, which hangs
+    # the merge queue until the 60-minute timeout. The word "maintainer" now
+    # over-claims (see this file's header: any approver counts); correcting it
+    # is a settings action nobody in CI can perform, so it is tracked as
+    # follow-up work rather than done here.
     name: ADR maintainer approval
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -77,7 +98,7 @@ jobs:
       # install, no build. The self-test runs first (repo convention), then
       # the gate. GITHUB_TOKEN is only read on the gated path (a docs/adr/**
       # diff needs the PR's review list); the clean path does zero lookups.
-      - name: Require the maintainer's own approval on docs/adr/** diffs
+      - name: Require an APPROVED review on docs/adr/** diffs
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/check-adr-merge-approval.mjs --self-test && node scripts/check-adr-merge-approval.mjs
