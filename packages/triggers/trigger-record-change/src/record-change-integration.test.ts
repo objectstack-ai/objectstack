@@ -28,7 +28,30 @@ import { ObjectKernel } from '@objectstack/core';
 import { ObjectQLPlugin } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { AutomationServicePlugin, type AutomationEngine } from '@objectstack/service-automation';
+import type { IDataEngine, IObjectQLEngine } from '@objectstack/spec/contracts';
 import { RecordChangeTriggerPlugin } from './plugin.js';
+
+/**
+ * `check:slot-lookup` (#4251) — a NEW `kernel.getService(...)` site must carry
+ * the slot's real contract type, never an `as any` erasure (this file's other
+ * lookups predate the ratchet and are grandfathered by count, not by file —
+ * see `scripts/slot-lookup-baseline.json`).
+ *
+ * `IObjectQLEngine` covers everything the `objectql` slot's PUBLISHED contract
+ * promises. Two things the test below also calls are real, public methods on
+ * the concrete `ObjectQL` engine but are deliberately NOT part of that
+ * contract — `syncSchemas()` (a boot-time operation, not a slot consumer's
+ * concern) and `registry.registerObject` (the registry's TEST-time seam;
+ * `bulk-write-per-row-context.test.ts` in this same package casts the same
+ * gap separately as `TestObjectRegistry`). Naming both here, once, keeps the
+ * lookup itself fully typed rather than reaching back for `any`.
+ */
+type TestObjectQLEngine = IObjectQLEngine & {
+  syncSchemas(): Promise<void>;
+  registry: IObjectQLEngine['registry'] & {
+    registerObject(schema: unknown, packageId?: string, namespace?: string): void;
+  };
+};
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -432,14 +455,26 @@ describe('record-change trigger — end-to-end (#1491)', () => {
    * total, with no assist from the after-row merge #1872 fixed.
    */
   it('a record-before-write start condition sees an UNTOUCHED declared field\'s real value, and a NEVER-SET one as null — not a fault (#4953)', async () => {
-    const kernel = new ObjectKernel({ logLevel: 'silent' });
+    // `{ logger: { level: 'silent' } }`, not this file's OTHER `{ logLevel:
+    // 'silent' }` — `ObjectKernelConfig` declares only `logger`
+    // (`packages/core/src/kernel.ts`); the sibling spelling is an untyped
+    // excess property `tsc` never catches on this test-hiding package (a
+    // pre-existing `check:type-check-debt` TEST_DEBT site, not this PR's to
+    // sweep) and, measurably, does NOTHING — `createLogger(config.logger)`
+    // never reads it, so every sibling `it` below actually logs at its
+    // default level despite the option.
+    const kernel = new ObjectKernel({ logger: { level: 'silent' } });
     await kernel.use(new ObjectQLPlugin());
     await kernel.use(new AutomationServicePlugin());
     await kernel.use(new RecordChangeTriggerPlugin());
     await kernel.bootstrap();
 
-    const objectql = kernel.getService('objectql') as any;
-    const data = kernel.getService('data') as any;
+    // Typed via the slot's contract (`check:slot-lookup` ratchet, #4251) —
+    // see the `TestObjectQLEngine` doc comment at the top of this file for
+    // why it is `IObjectQLEngine` PLUS the two concrete-engine members the
+    // published contract omits, rather than `as any`.
+    const objectql = kernel.getService<TestObjectQLEngine>('objectql');
+    const data = kernel.getService<IDataEngine>('data');
     const automation = kernel.getService<AutomationEngine>('automation');
 
     await attachSqlite(objectql);

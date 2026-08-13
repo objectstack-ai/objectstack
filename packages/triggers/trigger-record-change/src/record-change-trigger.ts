@@ -134,8 +134,16 @@ export interface TriggerLogger {
  * returns it. Callers that must not mutate a shared object — this file's own
  * `ctx.previous`, observed by every OTHER binding sharing the same
  * HookContext — pass a shallow copy in.
+ *
+ * Exported (module-scope only — NOT re-exported from `index.ts`, so this
+ * stays off the package's published API) so
+ * `materialize-declared-fields-parity.test.ts` can run it head-to-head
+ * against the canonical copy in `@objectstack/objectql`'s
+ * `declared-fields.ts` and fail the moment the two disagree — a duplicated
+ * algorithm with nothing checking it stays duplicated is exactly the
+ * declared-vs-enforced gap this platform treats as a bug.
  */
-function materializeDeclaredFields(
+export function materializeDeclaredFields(
     record: Record<string, unknown>,
     fields: Record<string, unknown> | undefined | null,
 ): Record<string, unknown> {

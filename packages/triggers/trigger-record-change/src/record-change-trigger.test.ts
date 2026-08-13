@@ -17,7 +17,7 @@ import { RecordChangeTriggerPlugin } from './plugin.js';
 /** CEL-evaluate `source` against `record` — the SAME engine the automation
  *  service and rule-validator use, so a `record.a != null` fault/pass here is
  *  the real fault a flow's start/edge condition would hit, not a stand-in. */
-function evalCel(source: string, ctx: { record?: unknown; previous?: unknown }) {
+function evalCel(source: string, ctx: { record?: Record<string, unknown>; previous?: Record<string, unknown> }) {
     return ExpressionEngine.evaluate<boolean>({ dialect: 'cel', source }, ctx);
 }
 
