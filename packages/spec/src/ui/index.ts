@@ -21,6 +21,9 @@ export * from './responsive.zod';
 export * from './app.zod';
 export * from './bulk-action.zod';
 export * from './view.zod';
+// [#5320] The assembled-manifest channel for non-container view artifacts —
+// the `viewItems:` vocabulary and its producer-side partition helper.
+export * from './assembled-views.zod';
 export * from './dashboard.zod';
 export * from './report.zod';
 export * from './dataset.zod';

@@ -249,6 +249,37 @@ export const ObjectStackDefinitionSchema = lazySchema(() => z.object({
   // LayoutDispatcher, NavigationBuilder or ThemeProvider ever consumed it).
   // Author external-user UI with apps/views + positions & permission sets.
   views: z.array(ViewSchema).optional().describe('List Views'),
+  /**
+   * [#5320] MACHINE-ASSEMBLED ONLY — not an authoring surface.
+   *
+   * Runtime-assembled manifests (`GET /packages/:id/export`, environment
+   * artifact bundles) carry their non-container view artifacts — tenant-
+   * authored standalone ViewItems, flattened overlays, expanded items a
+   * travelling container cannot re-derive — under this key, judged by
+   * `AssembledViewArtifactSchema` (`ui/assembled-views.zod.ts`). Authored
+   * stack sources never write it: views are authored as `defineView`
+   * containers in `views:`, and a standalone view is authored through the
+   * metadata door (Studio / `PUT /api/v1/meta/view`), not in stack source.
+   *
+   * Declared here as an always-refusing key — the `retiredKey()` mechanism,
+   * applied to a key that is machine-only rather than removed — for the same
+   * reason the tombstones exist (#3855): this schema is not `.strict()`, so an
+   * UNDECLARED `viewItems:` would be silently stripped and the author would
+   * learn nothing. Declared-refusing, the mistake fails `tsc` (input type
+   * `never`) and the parse refusal carries the prescription itself.
+   */
+  viewItems: z.never({
+    error: () =>
+      '`viewItems` is the machine-assembled channel for non-container view artifacts in '
+      + 'runtime-assembled manifests (package export, environment artifacts) — it is not an '
+      + 'authoring surface. Author views as `defineView` containers in `views:`; author a '
+      + 'standalone view through the metadata door (Studio / `PUT /api/v1/meta/view`) instead '
+      + 'of stack source.',
+  }).optional().describe(
+    '[MACHINE-ASSEMBLED] Non-container view artifacts of a runtime-assembled manifest '
+    + '(standalone ViewItems, flattened overlays) — written by package export and artifact '
+    + 'factories, refused in authored stack sources (#5320).',
+  ),
   pages: z.array(PageSchema).optional().describe('Custom Pages'),
   dashboards: z.array(DashboardSchema).optional().describe('Dashboards'),
   reports: z.array(ReportSchema).optional().describe('Analytics Reports'),
@@ -1674,6 +1705,11 @@ const COMPOSE_KEY_DISPOSITIONS: Record<keyof ObjectStackDefinition, ComposeDispo
   objectExtensions: 'concat',
   apps: 'concat',
   views: 'concat',
+  // [#5320] Machine-assembled channel (never authorable — the schema types it
+  // `never`, so no authored stack reaches composition carrying it). Assembled
+  // manifests are not `composeStacks` inputs today; if two ever were, their
+  // non-container view artifacts would concatenate like every other collection.
+  viewItems: 'concat',
   pages: 'concat',
   dashboards: 'concat',
   reports: 'concat',
