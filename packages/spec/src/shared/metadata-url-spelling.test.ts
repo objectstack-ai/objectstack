@@ -47,7 +47,7 @@ describe('#7894 INVARIANT 1 — no spelling that worked before may stop working'
     // Named explicitly because losing them is the specific regression the
     // union-vs-pure-derivation choice was made to avoid, and a reader needs to
     // see the population rather than infer it.
-    const registryTypes = new Set(DEFAULT_METADATA_TYPE_REGISTRY.map((e) => e.type));
+    const registryTypes = new Set<string>(DEFAULT_METADATA_TYPE_REGISTRY.map((e) => e.type));
     const pluginOnly = Object.entries(PLURAL_TO_SINGULAR).filter(([, s]) => !registryTypes.has(s));
     expect(pluginOnly.map(([p]) => p).sort()).toEqual(
       ['analyticsCubes', 'connectors', 'ragPipelines', 'sharingRules', 'themes', 'webhooks'],
