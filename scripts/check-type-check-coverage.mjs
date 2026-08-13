@@ -1414,6 +1414,17 @@ function staleClosure(roots, graph) {
 }
 
 /**
+ * Whether a file name is one a package's `dist/*.d.ts` can be generated from.
+ * Named, rather than inlined into the walk below, so the self-test asserts the
+ * predicate the walk actually applies instead of a copy of it.
+ *
+ * @param {string} name basename
+ */
+function isBuildSource(name) {
+  return SOURCE_FILE.test(name) && !TEST_FILE.test(name);
+}
+
+/**
  * The newest mtime among the TypeScript sources a package's `dist/*.d.ts` is
  * generated from, or 0 when it has none.
  *
@@ -1449,7 +1460,7 @@ function newestSourceMtime(dir) {
         walk(child);
         continue;
       }
-      if (!SOURCE_FILE.test(entry.name) || TEST_FILE.test(entry.name)) continue;
+      if (!isBuildSource(entry.name)) continue;
       const { mtimeMs } = statSync(child);
       if (mtimeMs > newest) newest = mtimeMs;
     }
@@ -2710,7 +2721,7 @@ function selfTest() {
     { label: 'a .json fixture is not', name: 'fixture.json', expect: false },
   ];
   for (const c of sourceFileCases) {
-    const got = SOURCE_FILE.test(c.name) && !TEST_FILE.test(c.name);
+    const got = isBuildSource(c.name);
     if (got !== c.expect) {
       failures.push(`source-file read — ${c.label}: expected ${c.expect}, got ${got}`);
     }
