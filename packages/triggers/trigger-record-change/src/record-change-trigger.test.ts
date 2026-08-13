@@ -687,15 +687,23 @@ describe('RecordChangeTrigger — skipTriggers suppression', () => {
     });
 });
 
-// ─── Computed-field hydration guards (#3426 follow-up) ──────────────
+// ─── Computed-field hydration guards (#3426 follow-up, #8482) ───────
 //
 // The hydration re-read (#3426, #3445) is gated two ways: skipped when the
 // object declares no `formula` field, and memoized so N flows on one write
-// share a single re-read. These drive a fakeEngine with findOne/getObjectConfig
+// share a single re-read. These drive a fakeEngine with findOne/getObject
 // spies and a hook ctx whose result carries a real `id` (the default hookCtx
 // uses `_id`, so hydration's `record.id` is undefined and never re-reads).
+//
+// `getObject` — not a separate `getObjectConfig` — is the schema-gate
+// accessor since #8482: it is the ONE object-schema accessor the concrete
+// ObjectQL engine actually implements (confirmed by
+// `record-change-integration.test.ts`'s "hydration schema gate — real
+// ObjectQL engine findOne count" block below, which runs this exact gate
+// against a REAL engine rather than a hand-attached mock — the vacuity these
+// fakeEngine tests alone cannot rule out).
 
-describe('RecordChangeTrigger computed-field hydration guards (#3426 follow-up)', () => {
+describe('RecordChangeTrigger computed-field hydration guards (#3426 follow-up, #8482)', () => {
     /** A hook ctx whose after-row has a real `id`, so hydration proceeds. */
     function idCtx(overrides: Partial<HookContext> = {}): HookContext {
         return hookCtx({ event: 'afterUpdate', result: { id: 't1', status: 'done' }, ...overrides });
@@ -704,22 +712,22 @@ describe('RecordChangeTrigger computed-field hydration guards (#3426 follow-up)'
     it('skips the re-read when the object declares no formula field (schema gate)', async () => {
         const { engine, hooks } = fakeEngine();
         const findOne = vi.fn().mockResolvedValue({ id: 't1', full_name: 'X' });
-        const getObjectConfig = vi.fn().mockReturnValue({ fields: { title: { type: 'text' } } });
-        Object.assign(engine, { findOne, getObjectConfig });
+        const getObject = vi.fn().mockReturnValue({ fields: { title: { type: 'text' } } });
+        Object.assign(engine, { findOne, getObject });
         const trigger = new RecordChangeTrigger(engine, silentLogger());
 
         trigger.start(binding(), async () => {});
         await hooks[0].handler(idCtx());
 
-        expect(getObjectConfig).toHaveBeenCalledWith('showcase_task');
+        expect(getObject).toHaveBeenCalledWith('showcase_task');
         expect(findOne).not.toHaveBeenCalled();
     });
 
     it('re-reads and hydrates when the object declares a formula field', async () => {
         const { engine, hooks } = fakeEngine();
         const findOne = vi.fn().mockResolvedValue({ id: 't1', status: 'done', full_name: 'Ada Lovelace' });
-        const getObjectConfig = vi.fn().mockReturnValue({ fields: { full_name: { type: 'formula' } } });
-        Object.assign(engine, { findOne, getObjectConfig });
+        const getObject = vi.fn().mockReturnValue({ fields: { full_name: { type: 'formula' } } });
+        Object.assign(engine, { findOne, getObject });
         const trigger = new RecordChangeTrigger(engine, silentLogger());
         let seen: AutomationContext | undefined;
 
@@ -733,10 +741,10 @@ describe('RecordChangeTrigger computed-field hydration guards (#3426 follow-up)'
         expect((seen?.record as Record<string, unknown>).status).toBe('done');
     });
 
-    it('re-reads unconditionally when the engine has no getObjectConfig (prior behavior)', async () => {
+    it('re-reads unconditionally when the engine has no getObject (prior behavior)', async () => {
         const { engine, hooks } = fakeEngine();
         const findOne = vi.fn().mockResolvedValue({ id: 't1', full_name: 'X' });
-        Object.assign(engine, { findOne }); // no getObjectConfig surface
+        Object.assign(engine, { findOne }); // no getObject surface
         const trigger = new RecordChangeTrigger(engine, silentLogger());
 
         trigger.start(binding(), async () => {});
@@ -748,8 +756,8 @@ describe('RecordChangeTrigger computed-field hydration guards (#3426 follow-up)'
     it('memoizes the re-read across N flows sharing one write (single findOne)', async () => {
         const { engine, hooks } = fakeEngine();
         const findOne = vi.fn().mockResolvedValue({ id: 't1', full_name: 'X' });
-        const getObjectConfig = vi.fn().mockReturnValue({ fields: { full_name: { type: 'formula' } } });
-        Object.assign(engine, { findOne, getObjectConfig });
+        const getObject = vi.fn().mockReturnValue({ fields: { full_name: { type: 'formula' } } });
+        Object.assign(engine, { findOne, getObject });
         const trigger = new RecordChangeTrigger(engine, silentLogger());
 
         // Two flows on the same object/event → two hooks, one trigger instance.
@@ -768,8 +776,8 @@ describe('RecordChangeTrigger computed-field hydration guards (#3426 follow-up)'
     it('re-reads again for a DIFFERENT write (distinct ctx, not cross-write cached)', async () => {
         const { engine, hooks } = fakeEngine();
         const findOne = vi.fn().mockResolvedValue({ id: 't1', full_name: 'X' });
-        const getObjectConfig = vi.fn().mockReturnValue({ fields: { full_name: { type: 'formula' } } });
-        Object.assign(engine, { findOne, getObjectConfig });
+        const getObject = vi.fn().mockReturnValue({ fields: { full_name: { type: 'formula' } } });
+        Object.assign(engine, { findOne, getObject });
         const trigger = new RecordChangeTrigger(engine, silentLogger());
 
         trigger.start(binding(), async () => {});

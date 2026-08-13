@@ -23,7 +23,7 @@
  * that only ever held keys somebody set.
  */
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { ObjectKernel } from '@objectstack/core';
 import { ObjectQLPlugin } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
@@ -525,5 +525,166 @@ describe('record-change trigger — end-to-end (#1491)', () => {
     // The condition read `record.tag`'s REAL persisted value ('keep', folded
     // from the prior row) — not a fabricated null, and not a fault.
     expect(audit[0]?.seen_tag).toBe('keep');
+  }, 15000);
+});
+
+/**
+ * #8482 — the hydration schema gate's "measured on a real engine" claim,
+ * actually measured on a real engine.
+ *
+ * `objectHasFormulaField` (record-change-trigger.ts) used to gate on a
+ * `getObjectConfig` method the concrete ObjectQL engine never implemented, so
+ * on every real deployment the gate always took its `true` fallback and
+ * `hydrateComputedFields` re-read via `findOne` on EVERY afterInsert /
+ * afterUpdate dispatch — even for objects declaring no `formula` field, where
+ * the re-read (per the code's own doc comment) adds nothing. The trigger's
+ * OWN unit tests (`record-change-trigger.test.ts`, "computed-field hydration
+ * guards") only ever proved the gate against a HAND-ATTACHED mock
+ * (`Object.assign(engine, { getObjectConfig })`) — a true statement about the
+ * trigger's own logic that said nothing about the real engine, which is
+ * exactly how a gate that never engaged in production kept a green suite.
+ *
+ * This block re-proves the (now `getObject`-based) gate against the REAL
+ * ObjectQL engine, wired the exact way production is (this file's own
+ * kernel-boot harness: ObjectQLPlugin + AutomationServicePlugin +
+ * RecordChangeTriggerPlugin + `@objectstack/driver-sql` on better-sqlite3
+ * `:memory:`), by spying on the engine's PUBLIC `findOne` — the same method
+ * `RecordChangeDataEngine.findOne` structurally types, and the ONLY thing the
+ * hydration re-read calls. The engine's own by-id-update prior-row fetch
+ * (`engine.ts` `update()`) reads through `driver.findOne` directly, never the
+ * public engine method, so this spy counts exactly the trigger's hydration
+ * re-reads and nothing else — confirmed by the "no formula field" case below
+ * asserting a hard zero, not just "fewer than before".
+ *
+ * Each `it` targets a DIFFERENT write than the flow's own effect (an audit
+ * object, not the triggering object) so the flow's own write-back can never
+ * re-fire itself — the self-trigger re-entrancy guard the `record-after-write`
+ * tests above exercise is deliberately not in play here, so the only variable
+ * under test is the schema gate.
+ */
+describe('hydration schema gate — real ObjectQL engine findOne count (#8482)', () => {
+  const plainObjectDef = (name: string) => ({
+    name,
+    label: name,
+    fields: {
+      status: { name: 'status', label: 'Status', type: 'text' as const },
+    },
+  });
+
+  const formulaObjectDef = (name: string) => ({
+    name,
+    label: name,
+    fields: {
+      status: { name: 'status', label: 'Status', type: 'text' as const },
+      full_name: {
+        name: 'full_name',
+        label: 'Full Name',
+        type: 'formula' as const,
+        expression: { dialect: 'cel', source: "'computed'" },
+      },
+    },
+  });
+
+  const auditObjectDef = (name: string) => ({
+    name,
+    label: name,
+    fields: {
+      note: { name: 'note', label: 'Note', type: 'text' as const },
+    },
+  });
+
+  /** A `record-after-update` flow whose own write targets a DIFFERENT object
+   *  (an audit log) — proof the flow actually fired lives in the audit
+   *  table, not in the triggering object, so nothing here can self-fire. */
+  function afterUpdateAuditFlow(name: string, object: string, auditObject: string) {
+    return {
+      name,
+      label: name,
+      type: 'record_change',
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start', config: { objectName: object, triggerType: 'record-after-update' } },
+        { id: 'log', type: 'create_record', label: 'Log', config: { objectName: auditObject, fields: { note: 'seen' } } },
+        { id: 'end', type: 'end', label: 'End' },
+      ],
+      edges: [
+        { id: 'e1', source: 'start', target: 'log' },
+        { id: 'e2', source: 'log', target: 'end' },
+      ],
+    };
+  }
+
+  it('does NOT re-read via findOne on update for an object with no formula field', async () => {
+    // `{ logger: { level: 'silent' } }`, NOT this file's other `{ logLevel:
+    // 'silent' }` — see the doc comment on the #4953 test above for why (a
+    // pre-existing TS2353 in the frozen TEST_DEBT ledger this new test must
+    // not add to).
+    const kernel = new ObjectKernel({ logger: { level: 'silent' } });
+    await kernel.use(new ObjectQLPlugin());
+    await kernel.use(new AutomationServicePlugin());
+    await kernel.use(new RecordChangeTriggerPlugin());
+    await kernel.bootstrap();
+
+    const objectql = kernel.getService<TestObjectQLEngine>('objectql');
+    const data = kernel.getService<IDataEngine>('data');
+    const automation = kernel.getService<AutomationEngine>('automation');
+
+    await attachSqlite(objectql);
+    objectql.registry.registerObject(plainObjectDef('gate_plain'), 'test', 'test');
+    objectql.registry.registerObject(auditObjectDef('gate_plain_audit'), 'test', 'test');
+    await objectql.syncSchemas();
+    automation.registerFlow(
+      'gate_plain_audit_flow',
+      afterUpdateAuditFlow('gate_plain_audit_flow', 'gate_plain', 'gate_plain_audit') as any,
+    );
+
+    const created = await data.insert('gate_plain', { status: 'new' }, { context: { userId: 'u_trigger' } });
+    const id = Array.isArray(created) ? created[0]?.id : (created as any)?.id ?? created;
+    await sleep(200);
+
+    const findOneSpy = vi.spyOn(objectql, 'findOne');
+    await data.update('gate_plain', { id, status: 'done' }, { context: { userId: 'u_trigger' } });
+    await sleep(200);
+
+    // Proof the flow actually dispatched (the gate skipped the RE-READ, not
+    // the trigger itself).
+    const audit: any[] = await data.find('gate_plain_audit', {});
+    expect(audit).toHaveLength(1);
+
+    expect(findOneSpy).not.toHaveBeenCalled();
+  }, 15000);
+
+  it('DOES re-read via findOne on update for an object that declares a formula field', async () => {
+    const kernel = new ObjectKernel({ logger: { level: 'silent' } });
+    await kernel.use(new ObjectQLPlugin());
+    await kernel.use(new AutomationServicePlugin());
+    await kernel.use(new RecordChangeTriggerPlugin());
+    await kernel.bootstrap();
+
+    const objectql = kernel.getService<TestObjectQLEngine>('objectql');
+    const data = kernel.getService<IDataEngine>('data');
+    const automation = kernel.getService<AutomationEngine>('automation');
+
+    await attachSqlite(objectql);
+    objectql.registry.registerObject(formulaObjectDef('gate_calc'), 'test', 'test');
+    objectql.registry.registerObject(auditObjectDef('gate_calc_audit'), 'test', 'test');
+    await objectql.syncSchemas();
+    automation.registerFlow(
+      'gate_calc_audit_flow',
+      afterUpdateAuditFlow('gate_calc_audit_flow', 'gate_calc', 'gate_calc_audit') as any,
+    );
+
+    const created = await data.insert('gate_calc', { status: 'new' }, { context: { userId: 'u_trigger' } });
+    const id = Array.isArray(created) ? created[0]?.id : (created as any)?.id ?? created;
+    await sleep(200);
+
+    const findOneSpy = vi.spyOn(objectql, 'findOne');
+    await data.update('gate_calc', { id, status: 'done' }, { context: { userId: 'u_trigger' } });
+    await sleep(200);
+
+    const audit: any[] = await data.find('gate_calc_audit', {});
+    expect(audit).toHaveLength(1);
+
+    expect(findOneSpy).toHaveBeenCalledTimes(1);
+    expect(findOneSpy).toHaveBeenCalledWith('gate_calc', expect.objectContaining({ where: { id } }));
   }, 15000);
 });

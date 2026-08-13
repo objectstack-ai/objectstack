@@ -45,8 +45,8 @@ export interface RecordChangeDataEngine {
     unregisterHooksByPackage?(packageId: string): number;
     /**
      * Optional object-schema accessor (the ObjectQL engine's `getObject`,
-     * `IObjectQLEngine.getObject` — confirmed WIRED on the concrete engine,
-     * unlike {@link getObjectConfig} below). Two independent consumers:
+     * `IObjectQLEngine.getObject` — confirmed WIRED on the concrete engine).
+     * Three independent consumers:
      *
      *  1. {@link RecordChangeTrigger.start} probes existence to call out a
      *     flow whose `objectName` matches no registered object — a hook
@@ -56,11 +56,18 @@ export interface RecordChangeDataEngine {
      *     result to make the seeded `record` / `previous` CEL roots TOTAL
      *     over the object's DECLARED fields (#4953 services half) — see
      *     {@link materializeDeclaredFields}.
+     *  3. {@link RecordChangeTrigger.objectHasFormulaField} reads `.fields`
+     *     off the result to SKIP {@link hydrateComputedFields}'s re-read for
+     *     objects that declare no `formula` field — the only thing that
+     *     re-read adds (#8482). This consumer used to gate on a separate
+     *     `getObjectConfig` member the concrete engine never implemented, so
+     *     the skip was unreachable in production; retired in favor of this
+     *     already-wired accessor.
      *
      * Typed loosely (not `ServiceObject`) so this plugin keeps its zero
      * build-time dependency on objectql; a fixture that returns only what a
      * probe needs (e.g. `{ name }`) is still a valid implementation for
-     * consumer (1) and simply contributes no fields to consumer (2).
+     * consumer (1) and simply contributes no fields to consumers (2)/(3).
      */
     getObject?(name: string): { fields?: Record<string, { type?: unknown } | undefined> } | undefined;
     /**
@@ -77,29 +84,6 @@ export interface RecordChangeDataEngine {
         object: string,
         options: { where?: Record<string, unknown>; fields?: string[]; context?: unknown },
     ): Promise<Record<string, unknown> | null | undefined>;
-    /**
-     * Optional object-config accessor (`getObjectConfig`). When present,
-     * {@link RecordChangeTrigger} uses it to SKIP the hydration re-read for
-     * objects that declare no `formula` field — the only thing the re-read
-     * adds (`summary` fields are stored on write, not read-time computed).
-     * Returns the object's field map; typed loosely so this plugin keeps its
-     * zero build-time dependency on objectql. Absent (or unsure) ⇒ the
-     * trigger re-reads unconditionally (prior behavior — correctness over the
-     * optimization).
-     *
-     * ⚠️ Measured while wiring #4953 (services half): the concrete ObjectQL
-     * engine does NOT implement a method named `getObjectConfig` — only
-     * `getObject` (above) exists there. So on the real engine this optional
-     * hook is always absent and {@link objectHasFormulaField} always takes
-     * its `true` fallback; the schema-gate skip it describes is unreachable
-     * in production (harmless — "correctness over the optimization" is
-     * exactly the documented fallback — but it is dead code, not a working
-     * gate). Out of scope here (a hydration-perf question, not a
-     * materialization one); filed separately rather than folded into this
-     * fix. Left as-is, and deliberately NOT reused for #4953's field lookup —
-     * {@link getObject} is the one actually wired.
-     */
-    getObjectConfig?(object: string): { fields?: Record<string, { type?: unknown } | undefined> } | undefined;
 }
 
 /** Minimal logger surface (matches core's `ctx.logger`). */
@@ -499,8 +483,9 @@ export class RecordChangeTrigger implements FlowTrigger {
      *
      * Two guards keep the re-read off the hot path (#3426 follow-up):
      *  - Schema gate: skip entirely when the object declares no `formula` field —
-     *    the only thing the re-read adds. Most objects have none. Needs the
-     *    engine's optional `getObjectConfig`; when unsure, re-reads (see
+     *    the only thing the re-read adds. Most objects have none. Uses the
+     *    engine's `getObject` accessor (the same one {@link buildContext}'s
+     *    materialization step uses, #8482); when unsure, re-reads (see
      *    {@link objectHasFormulaField}).
      *  - Per-write memoization: N flows bound to the same written record share
      *    one re-read, keyed on the shared HookContext (see {@link hydrationCache}
@@ -539,18 +524,23 @@ export class RecordChangeTrigger implements FlowTrigger {
     /**
      * True unless the engine can POSITIVELY confirm `object` declares no
      * read-time `formula` field — the only thing {@link hydrateComputedFields}'s
-     * re-read adds. Uses the engine's synchronous optional `getObjectConfig`;
-     * when that surface is absent, returns nothing usable, or throws, returns
-     * `true` so hydration still runs (correctness over the optimization). Not
-     * cached: `getObjectConfig` is an in-memory lookup, and skipping a cache
-     * avoids a stale answer if an object's schema is hot-registered with a
-     * formula field after first use.
+     * re-read adds. Uses the engine's synchronous optional `getObject` — the
+     * SAME accessor {@link buildContext}'s materialization step already reads
+     * (#8482; previously this gated on a separate `getObjectConfig` member the
+     * concrete ObjectQL engine never implemented, so on the real engine this
+     * always fell through to the `true` fallback below and the re-read ran
+     * unconditionally on every afterInsert/afterUpdate dispatch). When
+     * `getObject` is absent, returns nothing usable, or throws, returns `true`
+     * so hydration still runs (correctness over the optimization). Not cached:
+     * `getObject` is an in-memory lookup, and skipping a cache avoids a stale
+     * answer if an object's schema is hot-registered with a formula field
+     * after first use.
      */
     private objectHasFormulaField(object: string): boolean {
-        const getCfg = this.engine.getObjectConfig;
-        if (typeof getCfg !== 'function') return true;
+        const getObj = this.engine.getObject;
+        if (typeof getObj !== 'function') return true;
         try {
-            const cfg = getCfg.call(this.engine, object);
+            const cfg = getObj.call(this.engine, object);
             const fields = cfg?.fields;
             if (!fields || typeof fields !== 'object') return true;
             for (const f of Object.values(fields)) {
