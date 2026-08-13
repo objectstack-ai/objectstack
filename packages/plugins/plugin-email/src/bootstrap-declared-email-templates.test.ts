@@ -356,3 +356,77 @@ describe('mapTemplateToRow', () => {
     expect(row).not.toHaveProperty('variables_json');
   });
 });
+
+// ---------------------------------------------------------------------------
+// [#8378] The retired `i?.content ?? i` unwrap
+// ---------------------------------------------------------------------------
+
+/**
+ * `content` is a spelling an author really can write on an email template —
+ * `EmailTemplateDefinitionSchema` lists it in its `strictObject` **aliases**
+ * table (`content: 'bodyHtml'`). That table is a REJECTION facility, not a
+ * conversion: it feeds `strictUnknownKeyError`, which runs only on the
+ * `unrecognized_keys` path and only builds a *message*. Nothing rewrites the
+ * key — the ADR-0087 conversion registry has zero `email_template` entries, so
+ * `normalizeStackInput` emits no notice and leaves `content` where it was
+ * written.
+ *
+ * So when the key reaches this bridge (a `defineStack(…, { strict: false })`
+ * load, a hand-built manifest, a direct registry write — every validating door
+ * refuses it first), the schema is ready with the author's fix. The unwrap was
+ * the one thing standing between the author and their own prescription: it
+ * replaced the document with the HTML string, and a string cannot carry a
+ * key-level rejection.
+ *
+ * Both cases below put a `content` key genuinely IN PLAY — the point of the
+ * fixture. A template that never spells `content` exercises the unwrap's
+ * `?? i` arm only, and would pass against a completely unfixed tree.
+ */
+describe('declared email templates carrying the `content` alias spelling (#8378)', () => {
+  it('reaches the schema as a DOCUMENT, so the rejection carries the `content` → `bodyHtml` fix', async () => {
+    const engine = new FakeEngine({
+      declared: {
+        email_template: [
+          // `bodyHtml` deliberately absent — `content` is the author's attempt
+          // at it, which is exactly what the alias table exists to answer.
+          { name: 'auth.welcome', label: 'Welcome', subject: 'Hi', content: '<h1>Welcome</h1>' },
+        ],
+      },
+    });
+    const warn = vi.fn();
+
+    const result = await bootstrapDeclaredEmailTemplates(engine as any, undefined, { warn });
+
+    expect(result).toEqual({ seeded: 0, skipped: 1 });
+    expect(rowsOf(engine)).toHaveLength(0);
+    expect(warn).toHaveBeenCalledTimes(1);
+
+    const [, meta] = warn.mock.calls[0];
+    // The unwrap used to hand `.parse()` a bare string, so the diagnostic could
+    // name neither the offending key nor the template it came from.
+    expect(meta.name).toBe('auth.welcome');
+    expect(meta.error).toContain('content');
+    expect(meta.error).toContain('bodyHtml');
+    expect(meta.error).not.toContain('expected object, received string');
+  });
+
+  it('does not silently vanish when `content` is the empty string', async () => {
+    const engine = new FakeEngine({
+      declared: {
+        email_template: [
+          // `''` is falsy but NON-nullish, so it passed `??` and was then
+          // dropped by the reader's own `filter(Boolean)` — the template
+          // disappeared with no warning, no count and no row.
+          { name: 'ops.digest', label: 'Digest', subject: 'Daily', content: '' },
+        ],
+      },
+    });
+    const warn = vi.fn();
+
+    const result = await bootstrapDeclaredEmailTemplates(engine as any, undefined, { warn });
+
+    expect(result).toEqual({ seeded: 0, skipped: 1 });
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][1].name).toBe('ops.digest');
+  });
+});
