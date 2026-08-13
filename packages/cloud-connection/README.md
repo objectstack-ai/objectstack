@@ -43,6 +43,9 @@ const plugins = [
   // NOT cloud-gated: features.marketplace is derived from what is actually
   // mounted, not from this constructor call, so a cloud-less runtime reports
   // marketplace: false on its own — there is nothing here to keep in sync.
+  // `''` here, unlike its neighbor above, is correct as-is: this plugin does
+  // NOT re-resolve controlPlaneUrl through resolveCloudUrl(), so '' means
+  // "stay on this origin" rather than "unset" — do not "fix" it to 'off'.
   new RuntimeConfigPlugin({ controlPlaneUrl: '', singleEnvironment: true, installLocal: true }),
 ];
 ```
