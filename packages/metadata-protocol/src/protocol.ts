@@ -1487,6 +1487,115 @@ function carryCatalogedErrorCode(target: Error, source: unknown): void {
 }
 
 /**
+ * [#8136] Whether a caught error **declared itself a client-facing refusal** —
+ * a 4xx `status` in the ADR-0112 envelope — and its sentence may therefore be
+ * quoted back to the caller.
+ *
+ * ## The rule this answers, and why it is a POSITIVE list
+ *
+ * This package used to interpolate whatever it caught into the message it
+ * threw (`Failed to delete customization overlay: ${err.message}`) and into the
+ * `error` strings it collects for a caller. A driver failure on `sys_metadata`
+ * therefore reached a client verbatim — `SQLITE_ERROR: no such table:
+ * sys_metadata` on a 500, and the same text inside `failed[].error` on the
+ * `PACKAGE_DELETE_PARTIAL` 400, where no message-level withhold at any HTTP
+ * boundary can reach it because it is not the message. Three downstream
+ * sanitizers each had a hole because of it.
+ *
+ * The cure is Prime Directive #12's: pay the consumer-side tolerance down at
+ * the producer. So the question asked here is **not** "does this text look like
+ * a driver dump?" — that is `looksLikeInternalErrorLeak`, a heuristic over
+ * phrasing, and a phrasing test can only ever know the dialects someone has
+ * met. It is the inverse and bounded question: **did we author this sentence
+ * for a caller?** A producer that declared 4xx has said the failure is the
+ * caller's to fix and has written the remedy into the message — the
+ * self-correcting refusals `SysMetadataRepository` raises (`[item_locked]`,
+ * `[writable_package_required]`, `[no_draft]`, …) are exactly that, and they
+ * must survive intact. Everything else is withheld by DEFAULT, so a dialect
+ * this repo has never run is handled correctly without anyone having enumerated
+ * it.
+ *
+ * ## ⛔ NOT the complement of `declaresServerFault`
+ *
+ * The obvious-looking `!declaresServerFault(err)` (`@objectstack/types`, #5811)
+ * is the wrong direction and would reinstate the whole defect: a bare `Error`
+ * from a driver declares NOTHING, so it fails that test and would be quoted —
+ * and a bare driver `Error` is precisely the case measured here. The two
+ * predicates answer different halves and neither is the other's negation:
+ * `declaresServerFault` asks a BOUNDARY whether to withhold a declared fault's
+ * detail; this asks a PRODUCER whether it is allowed to quote at all, and an
+ * undeclared error is never allowed.
+ *
+ * ## Why `status` alone, when the sibling code rule also checks the catalog
+ *
+ * {@link carryCatalogedErrorCode} gates on membership in `StandardErrorCode ∪
+ * ERROR_CODE_LEDGER` because it writes `ApiErrorSchema.code`, a closed union a
+ * driver's own dialect must never enter. A message is free text, so the
+ * catalog does not bound it, and the two readings coincide on every refusal
+ * that reaches these exits today (each declares both halves). Where they could
+ * differ, status-alone is the safe direction: requiring a catalogued code too
+ * would blank an authored refusal that happens to carry an uncatalogued one —
+ * deleting a #4277 self-correcting message, which is a usability regression in
+ * exchange for no disclosure gain.
+ *
+ * The withheld text never leaves the server: every call site rides the original
+ * error on `cause`, which `handleRouteError` / `logWithheldServerFault` print
+ * whole — the same posture {@link metadataStoreUnavailableError} already takes.
+ */
+function declaresClientRefusal(err: unknown): boolean {
+    const status = (err as { status?: unknown } | null | undefined)?.status;
+    return typeof status === 'number' && status >= 400 && status < 500;
+}
+
+/**
+ * [#8136] The client-facing sentence for a failed overlay delete: the caller's
+ * own refusal when they declared one, and otherwise a stable line that names
+ * the operation and quotes nothing.
+ *
+ * Both of {@link ObjectStackProtocolImplementation.deleteMetaItem}'s re-wrap
+ * exits share it, for the reason {@link carryCatalogedErrorCode} gives about
+ * `code`: the envelope must not vary by which path served the delete.
+ *
+ * The `Failed to delete customization overlay` prefix is unchanged, byte for
+ * byte — it is the operation description a caller needs and several pins read
+ * it. What changes is what follows the colon.
+ */
+function overlayDeleteFailureMessage(err: unknown, type: string, name: string): string {
+    if (declaresClientRefusal(err)) {
+        const declared = (err as { message?: unknown } | null | undefined)?.message;
+        if (typeof declared === 'string' && declared.length > 0) {
+            return `Failed to delete customization overlay: ${declared}`;
+        }
+    }
+    return `Failed to delete customization overlay for ${type}/${name}. `
+        + 'The metadata store rejected the delete; the reason is in the server log. '
+        + 'Retry once the metadata database is reachable.';
+}
+
+/**
+ * [#8136] The per-item `error` string a collector puts on its response — the
+ * caller's own refusal when they declared one, otherwise a stable fallback.
+ *
+ * The counterpart of {@link overlayDeleteFailureMessage} for the paths that
+ * report failure as DATA rather than by throwing. That distinction is why the
+ * producer is the only place this can be fixed: `deletePackage`'s `failed[]`
+ * and `cleanups[]` ride onto a `PACKAGE_DELETE_PARTIAL` 400 inside `details`,
+ * so no 5xx message withhold at any HTTP boundary ever sees them.
+ *
+ * @param fallback - what to say when nothing may be quoted. Already the
+ *   existing no-message fallback at every call site (`'delete failed'`,
+ *   `'cleanup failed'`), so the withheld case reuses the sentence the caller
+ *   could already receive rather than inventing a second vocabulary.
+ */
+function clientFacingFailureText(err: unknown, fallback: string): string {
+    if (declaresClientRefusal(err)) {
+        const declared = (err as { message?: unknown } | null | undefined)?.message;
+        if (typeof declared === 'string' && declared.length > 0) return declared;
+    }
+    return fallback;
+}
+
+/**
  * A batch row that names no record id for an operation that needs one — a
  * caller error, so it carries VALIDATION_FAILED / 400 rather than falling
  * through {@link toRowApiError}'s unclassified-throw default (#4793).
@@ -12073,6 +12182,11 @@ export class ObjectStackProtocolImplementation implements
                 });
                 discarded.push({ type: d.type, name: d.name });
             } catch (e: any) {
+                // [#8136] Same source, same reasoning as `deletePackage`'s
+                // `failed[]` collector below: this `try` wraps only
+                // `deleteMetaItem`, whose exits all now either declare a
+                // refusal or withhold at the source. Clean derivatively; no
+                // filter of its own.
                 failed.push({
                     type: d.type,
                     name: d.name,
@@ -12230,7 +12344,37 @@ export class ObjectStackProtocolImplementation implements
                 { organization_id: null },
             ];
         }
-        const rows = (await this.engine.find('sys_metadata', { where })) as any[];
+        // [#8136] This read is the uninstall's FIRST database touch, and until
+        // now it sat outside every `try` in this method — the per-item `catch`
+        // below wraps only the `deleteMetaItem` loop. So a driver failure here
+        // propagated whole, out of the protocol and onto the wire: measured as
+        // `500 INTERNAL_ERROR / "SQLITE_ERROR: no such table: sys_metadata"`
+        // from `DELETE /api/v1/packages/:id`, a physical table name shipped to
+        // a client.
+        //
+        // Declared rather than swallowed: {@link metadataStoreUnavailableError}
+        // is this file's EXISTING answer for "a `sys_metadata` read failed" —
+        // 503 / `SERVICE_UNAVAILABLE`, a message that quotes nothing, and the
+        // driver error carried on `cause` so the operator still gets it whole.
+        // Reusing it rather than minting a second sentence for one condition is
+        // the point; see its docblock for why the verdict is 503.
+        //
+        // ⛔ Deliberately NOT routed through {@link
+        // rethrowUnlessMetadataStoreUnprovisioned}, which returns normally for
+        // `isMissingTableError` and would license the caller to treat the
+        // overlay as absent. On a READ that is right — there are genuinely no
+        // rows. Here it would turn an unreachable store into `rows = []`, and
+        // this method reports that as a completed uninstall that deleted
+        // nothing. An outage answered as "there was nothing to remove" is the
+        // ADR-0110 D3 confusion in its most damaging direction, on a
+        // destructive verb. Every failure stays a failure; only the disclosure
+        // changes.
+        let rows: any[];
+        try {
+            rows = (await this.engine.find('sys_metadata', { where })) as any[];
+        } catch (e) {
+            throw metadataStoreUnavailableError(e);
+        }
 
         const dropStorage = request.keepData !== true;
         // Delete drafts before active so an object's table is dropped once (on
@@ -12253,6 +12397,27 @@ export class ObjectStackProtocolImplementation implements
                 });
                 deleted.push({ type: row.type, name: row.name, state });
             } catch (e: any) {
+                // [#8136] NO filter here, deliberately, and this comment is why
+                // the absence is a decision rather than an oversight.
+                //
+                // This `try` wraps exactly one call, and every exit
+                // `deleteMetaItem` has is now either a refusal it DECLARED
+                // (its two-tier authorization block and `assertLockAllowsDelete`
+                // — 4xx with a catalogued code) or one of its two re-wraps,
+                // which withhold at the source via {@link
+                // overlayDeleteFailureMessage}. Its one engine touch outside
+                // its own `try`, `getEffectiveLock`, has been fail-closed
+                // through `rethrowUnlessMetadataStoreUnprovisioned` since
+                // #5706, so that arrives as the non-quoting 503 too.
+                //
+                // So `failed[].error` — which rides onto the
+                // `PACKAGE_DELETE_PARTIAL` 400 inside `details`, out of reach
+                // of any boundary's message withhold — is clean BECAUSE the
+                // producer is, which is the whole shape of this fix. Adding a
+                // second filter here would be consumer-side tolerance over a
+                // producer that no longer needs it (Prime Directive #12), and
+                // it would blank the per-item refusals that make a partial
+                // uninstall actionable.
                 failed.push({
                     type: row.type,
                     name: row.name,
@@ -12313,7 +12478,18 @@ export class ObjectStackProtocolImplementation implements
                     ...(r?.error ? { error: r.error } : {}),
                 });
             } catch (e: any) {
-                cleanups.push({ name, success: false, removed: 0, error: e?.message ?? 'cleanup failed' });
+                // [#8136] A cleanup is arbitrary plugin code that goes straight
+                // at the engine (plugin-security deletes `sys_permission_set`
+                // rows and their bindings), so a driver failure lands here
+                // verbatim — and this outcome rides on the RESPONSE by design,
+                // inside `details`, where no boundary's message withhold can
+                // reach it. Quoted only when the cleanup declared a refusal.
+                cleanups.push({
+                    name,
+                    success: false,
+                    removed: 0,
+                    error: clientFacingFailureText(e, 'cleanup failed'),
+                });
                 console.warn(
                     `[protocol.deletePackage] uninstall cleanup '${name}' failed for '${request.packageId}': ${e?.message}`,
                 );
@@ -13856,8 +14032,19 @@ export class ObjectStackProtocolImplementation implements
                     (conflict as any).actualHead = err.actualHead;
                     throw conflict;
                 }
-                const e = new Error(`Failed to delete customization overlay: ${err.message ?? err}`);
+                // [#8136] The message quotes `err` only when `err` DECLARED
+                // itself a caller-facing refusal — see {@link
+                // declaresClientRefusal}. Every engine touch in the `try` above
+                // (`repo.get`, `repo.delete`, `restoreArtifactRegistryView`,
+                // `dropObjectStorage`, `recordMetadataAudit`, the projector)
+                // can land a bare driver `Error` in this catch, and this exit
+                // used to interpolate it whole.
+                const e = new Error(overlayDeleteFailureMessage(err, request.type, request.name));
                 (e as any).status = err?.status ?? 500;
+                // The withheld text is not lost, it is relocated: `cause` is
+                // what `handleRouteError` / `logWithheldServerFault` print, the
+                // same posture {@link metadataStoreUnavailableError} takes.
+                (e as any).cause = err;
                 // [#7426] …and the SAME treatment for `code`, gated on the
                 // declared vocabulary. This is the exit a control-plane
                 // kernel's repository refusal leaves by — `NOT_OVERRIDABLE` /
@@ -13948,8 +14135,15 @@ export class ObjectStackProtocolImplementation implements
                     : `Deleted ${singularTypeForRepo} '${request.name}' — it no longer exists.`,
             };
         } catch (err: any) {
-            const e = new Error(`Failed to delete customization overlay: ${err.message}`);
+            // [#8136] Same rule as the repository path's exit above — one
+            // sentence-selection rule for both, so the envelope does not vary
+            // by which path served the delete. This path is deliberately
+            // ungated (#5264), so in practice everything reaching here is a
+            // fault and nothing is quoted; the shared helper is what keeps that
+            // true if a declared refusal ever does arrive.
+            const e = new Error(overlayDeleteFailureMessage(err, request.type, request.name));
             (e as any).status = 500;
+            (e as any).cause = err;
             // [#7426] The SECOND re-wrap exit, and it gets the same `code` rule
             // — otherwise the verb would answer an envelope that varies by
             // which path served the delete, which is harder to reason about
