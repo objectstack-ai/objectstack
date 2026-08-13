@@ -169,16 +169,283 @@ export function resolveCheckToFiles(checkName, scriptsMap) {
 }
 
 /**
- * Scan a check script's source for the path-ish string literals it operates
- * on. A hint is a quoted string that contains a `/` (or names a top-level
- * dotted dir) and looks like a repo path rather than a URL or a regex.
+ * Identifier characters, for the regex-vs-division decision in `scanSource`.
+ */
+const IDENT_CHAR = /[\w$]/;
+
+/**
+ * The keywords after which a `/` opens a REGEX rather than dividing. Every
+ * other case is decided by the preceding character: a `/` that follows a value
+ * (identifier, number, `)`, `]`, or a closed literal) divides; anything else
+ * opens a regex.
+ */
+const REGEX_AFTER_KEYWORD = new Set([
+  'return', 'typeof', 'instanceof', 'in', 'of', 'case', 'delete', 'void',
+  'yield', 'await', 'new', 'do', 'else', 'throw',
+]);
+
+/**
+ * One left-to-right pass over a JS source, flagging every character as COMMENT
+ * content and/or LITERAL content (inside a string, template or regex). Both
+ * come back as same-length byte arrays, so a caller can blank a span without
+ * moving any other offset.
+ *
+ * ## Why a scan, and why it has to know about regex literals
+ *
+ * The two questions the callers below ask — "is this `//` a comment or the
+ * middle of a URL?" and "is this `}` the end of a function or a character in a
+ * fixture?" — are precisely the ones a regex over raw text cannot answer.
+ * Measured on this tree, both traps are real: `release-github-releases.mjs`
+ * carries `'https://github.com'` in its module body (a `//` a line-comment rule
+ * would swallow the rest of the line for), and its own markdown regex
+ * `/^(#{1,6})\s(.*)$|^(`{3,})/gm` contains a BACKTICK — a scanner that skipped
+ * regex literals would open a template literal there and treat everything to
+ * the next backtick, hundreds of lines later, as string content. This file's
+ * hint regex below puts all three quote characters inside a regex literal for
+ * the same reason. Regex literals also carry unbalanced `{`/`}` (`{1,6}`), so
+ * the brace counting in `maskSelfTests` needs them flagged too.
+ *
+ * The literal flag covers a literal's CONTENT, not its delimiters, so a caller
+ * blanking comments still sees every string intact. Template interiors are
+ * treated as literal through `${…}` as well: an interpolation's braces are
+ * balanced by construction, so ignoring them is right for depth counting, and
+ * the hint scan reads the raw characters either way.
+ *
+ * A shape this scan gets wrong fails toward masking MORE than it should, which
+ * costs recall (a real hint dropped) and cannot fabricate a lead — the
+ * direction this whole file's "22 leads is the same as none" note asks for.
+ */
+function scanSource(source) {
+  const n = source.length;
+  const comment = new Uint8Array(n);
+  const literal = new Uint8Array(n);
+  let i = 0;
+  let prev = ''; // last significant CODE character
+  let word = ''; // …and the identifier it is the tail of, if any
+
+  // A shebang is a comment to node; it is also the one line whose slashes are
+  // neither division nor a regex.
+  if (source.startsWith('#!')) {
+    while (i < n && source[i] !== '\n') comment[i++] = 1;
+  }
+
+  while (i < n) {
+    const c = source[i];
+    const next = source[i + 1];
+
+    if (c === '/' && next === '/') {
+      while (i < n && source[i] !== '\n') comment[i++] = 1;
+      continue;
+    }
+    if (c === '/' && next === '*') {
+      comment[i++] = 1;
+      comment[i++] = 1;
+      while (i < n && !(source[i] === '*' && source[i + 1] === '/')) comment[i++] = 1;
+      if (i < n) comment[i++] = 1;
+      if (i < n) comment[i++] = 1;
+      continue;
+    }
+    if (c === "'" || c === '"') {
+      i++; // the opening quote is code, so the hint scan can still pair it
+      while (i < n && source[i] !== c && source[i] !== '\n') {
+        literal[i] = 1;
+        if (source[i] === '\\' && i + 1 < n) literal[++i] = 1;
+        i++;
+      }
+      if (i < n && source[i] === c) i++;
+      prev = 'x'; // a value just ended
+      word = '';
+      continue;
+    }
+    if (c === '`') {
+      i++;
+      while (i < n && source[i] !== '`') {
+        literal[i] = 1;
+        if (source[i] === '\\' && i + 1 < n) literal[++i] = 1;
+        i++;
+      }
+      if (i < n) i++;
+      prev = 'x';
+      word = '';
+      continue;
+    }
+    if (c === '/' && !(IDENT_CHAR.test(prev) || prev === ')' || prev === ']')) {
+      i++; // regex literal: `/` after anything that is not a value
+      let inClass = false;
+      while (i < n && source[i] !== '\n') {
+        const ch = source[i];
+        if (ch === '\\' && i + 1 < n) {
+          literal[i] = 1;
+          literal[++i] = 1;
+          i++;
+          continue;
+        }
+        if (ch === '[') inClass = true;
+        else if (ch === ']') inClass = false;
+        else if (ch === '/' && !inClass) break;
+        literal[i] = 1;
+        i++;
+      }
+      if (i < n && source[i] === '/') i++;
+      prev = 'x';
+      word = '';
+      continue;
+    }
+    if (c === '/' && REGEX_AFTER_KEYWORD.has(word)) {
+      // `return /x/` — a value character precedes, but it is a keyword.
+      prev = '';
+      word = '';
+      continue; // re-read this `/` with prev cleared, as a regex
+    }
+    if (!/\s/.test(c)) {
+      prev = c;
+      word = IDENT_CHAR.test(c) ? word + c : '';
+    }
+    i++;
+  }
+  return { comment, literal };
+}
+
+/** Replace every flagged character with a space, keeping newlines and offsets. */
+function blank(source, flags) {
+  const out = source.split('');
+  for (let k = 0; k < out.length; k++) if (flags[k] && out[k] !== '\n') out[k] = ' ';
+  return out.join('');
+}
+
+/**
+ * The source with its COMMENT spans blanked — line, block and shebang.
+ *
+ * ## Why comments must not contribute hints
+ *
+ * A gate's header discusses the tree at length, and the hint scan accepts
+ * backticks, so every backticked path in a header used to be read as a path the
+ * gate operates on. Measured, and self-inflicted: the first draft of
+ * `scripts/pm/check-dispatch-gates.mjs` explained this very pollution with each
+ * path in backticks, and that header alone produced ten hints — reproducing,
+ * from the file documenting the problem, the exact false MATCHED leads it was
+ * written to avoid. It ships today with its paths deliberately unquoted, a
+ * workaround this function retires: naming a path is not reading it.
+ */
+export function maskComments(source) {
+  return blank(source, scanSource(source).comment);
+}
+
+/**
+ * A top-level self-test function DECLARATION. The anchor is structural, not a
+ * comment convention: `function selfTest() {` at column 0, optionally `export`
+ * and/or `async`, with any name that spells self-test (`selfTest`,
+ * `fixtureSelfTest`, `selfTestReadSeams`, `prePushIsArmedSelfTest`,
+ * `decisionTableSelfTest` — the five spellings this tree actually uses).
+ *
+ * Measured across the 61 scripts under `scripts/` that carry one: 53 write
+ * `function selfTest() {`, 7 write `async function selfTest() {`, and the four
+ * remaining names are the compound ones above — 61 of 61 at column 0, none of
+ * them an arrow-function const. If a script ever spells one as
+ * `const selfTest = () => {`, widen this pattern rather than reaching for a
+ * comment marker; a declaration is a thing the language guarantees, a marker
+ * comment is a thing an author has to remember.
+ */
+const SELF_TEST_DECL =
+  /^(?:export[ \t]+)?(?:async[ \t]+)?function[ \t]+[A-Za-z0-9_$]*[Ss]elf[_]?[Tt]est[A-Za-z0-9_$]*[ \t]*\(/gm;
+
+/**
+ * The source with the BODY of every top-level self-test function blanked.
+ *
+ * ## Why the self-test is not part of what a gate reads
+ *
+ * A check script's self-test is made of fixture paths — it has to be, since the
+ * thing under test is a judgment about paths. The hint scan could not tell a
+ * fixture from a literal the gate really opens, so a gate was printed in the
+ * MATCHED column for most of the tree. The three worst specimens, measured on
+ * this branch's base: `scripts/pm/dispatch-gates.mjs` (46 coverage-capable
+ * hints, 2 real), `scripts/check-empty-changeset.mjs` (36), and
+ * `scripts/check-adr-0087-registration.mjs` (34) — the last two also reached
+ * through `check:changeset-gate-self-tests`, which resolves to all three
+ * changeset gates at once and inherits the union of their fixtures.
+ *
+ * The end of the body is found by counting braces over code positions only, so
+ * a `}` inside a fixture string or a `{1,6}` inside a regex cannot close it
+ * early. A declaration whose braces never balance masks to end of file: recall
+ * loss on a malformed script, never a fabricated lead.
+ *
+ * Compose comment masking FIRST — otherwise a `function selfTest() {` written
+ * at column 0 inside a block comment (a docblock example, exactly the kind this
+ * file is full of) would anchor a mask over real code.
+ */
+export function maskSelfTests(source) {
+  const { comment, literal } = scanSource(source);
+  const flags = new Uint8Array(source.length);
+  for (const m of source.matchAll(SELF_TEST_DECL)) {
+    const start = m.index;
+    if (comment[start] || literal[start]) continue;
+    let depth = 0;
+    let opened = false;
+    let end = start;
+    for (; end < source.length; end++) {
+      if (comment[end] || literal[end]) continue;
+      if (source[end] === '{') {
+        depth++;
+        opened = true;
+      } else if (source[end] === '}') {
+        depth--;
+        if (opened && depth === 0) {
+          end++;
+          break;
+        }
+      }
+    }
+    for (let k = start; k < end; k++) flags[k] = 1;
+  }
+  return blank(source, flags);
+}
+
+/**
+ * Scan a check script's MODULE BODY for the path-ish string literals it
+ * operates on. A hint is a quoted string that contains a `/` (or names a
+ * top-level dotted dir) and looks like a repo path rather than a URL or a
+ * regex — read from the source with its comments and its self-test blanked, so
+ * a path the script merely NAMES is not read as a path it watches.
+ *
+ * ## Why the narrowing, and why it is the precision half of the product
+ *
+ * The MATCHED column is what a dispatch prompt pastes, and its error is
+ * one-directional in the expensive direction: a missing lead costs one card one
+ * CI round, while a fabricated lead is pasted into EVERY dispatch prompt whose
+ * file surface brushes a fixture path, and the dev who runs it cannot tell it
+ * from a real one. The "repo-wide / undetermined" bucket already exists for
+ * gates this derivation cannot place, and it is the honest home for a gate
+ * whose only claim on your path was a string in its own test.
+ *
+ * What this does NOT remove: a fixture constant defined at module scope and
+ * used only by the self-test still reads as a hint. That residue is bounded
+ * (measured below) and it is the same shape the scan has always had — a literal
+ * in the module body — rather than a boundary this function is pretending to
+ * draw.
+ *
+ * ## Why leading `../` is stripped
+ *
+ * Dropping the comments turned one gate's only surviving literal into a hint
+ * that could no longer match anything: `check:pm-skill-ratchet` reads
+ * `new URL('../../.claude/skills/pm-dispatch/SKILL.md', import.meta.url)`, and
+ * before this narrowing it matched a SKILL.md card through the copy of that
+ * path written in its own header — a real input reached by way of prose, which
+ * is the accident this function exists to stop relying on. The leading `../`
+ * segments are the SCRIPT's depth, not part of the watched path: a
+ * module-relative URL is how these scripts spell a repo path, and `hintCovers`
+ * compares against repo-relative inputs. So they are stripped, and a literal
+ * that is nothing but dots (`'../..'`, this file's own ROOT) names no file and
+ * is dropped outright.
  */
 export function extractWatchHints(scriptSource) {
+  const moduleBody = maskSelfTests(maskComments(scriptSource));
   const hints = new Set();
-  for (const m of scriptSource.matchAll(/['"`]([^'"`\n]{2,120})['"`]/g)) {
-    const s = m[1];
-    if (/^(https?:|[A-Z_]+=|-{1,2}\w)/.test(s)) continue;
-    if (!/^[\w.@][\w.@/*-]*$/.test(s)) continue;
+  for (const m of moduleBody.matchAll(/['"`]([^'"`\n]{2,120})['"`]/g)) {
+    const raw = m[1];
+    if (/^(https?:|[A-Z_]+=|-{1,2}\w)/.test(raw)) continue;
+    if (!/^[\w.@][\w.@/*-]*$/.test(raw)) continue;
+    const s = raw.replace(/^(?:\.\.?(?:\/|$))+/, '');
+    if (!s) continue;
     const looksPathy = s.includes('/') || /^\.(claude|changeset|github|gitattributes)\b/.test(s);
     if (!looksPathy) continue;
     hints.add(s.replace(/\/+$/, ''));
@@ -624,6 +891,93 @@ function selfTest() {
   t('skips urls', !hints.some((h) => h.includes('example.com')));
   t('skips flags and bare words', !hints.includes('--self-test') && !hints.includes('hello'));
 
+  // ── What a gate READS vs what its source MENTIONS (#8478) ─────────────────
+  //
+  // Both halves are pinned in both directions, because both directions are the
+  // product: a path in prose or in a fixture must NOT be a hint, and a path the
+  // module body really opens must still be one. The fabricated half is the
+  // expensive one — a false lead is pasted into every dispatch prompt whose
+  // surface brushes it — but a narrowing that also drops the real inputs would
+  // just move the dishonesty.
+  const commented = [
+    '/**',
+    ' * Reads `packages/spec/src` and .changeset/x.md — prose, not inputs.',
+    ' */',
+    "const REAL = 'packages/rest/src';   // twin of packages/core/src, says the comment",
+    "const U = 'https://example.com/a/b'; const AFTER_URL = 'packages/metadata/src';",
+    "const RE = /['\"`]/;",
+    "const AFTER_REGEX = 'packages/client/src';",
+  ].join('\n');
+  const commentHints = extractWatchHints(commented);
+  t('a backticked path in a block comment is not a hint', !commentHints.includes('packages/spec/src'));
+  t('a dotted path in a block comment is not a hint', !commentHints.some((h) => h.startsWith('.changeset')));
+  t('a path in a trailing line comment is not a hint', !commentHints.includes('packages/core/src'));
+  t('the module-body literal on that same line still is', commentHints.includes('packages/rest/src'));
+  // The two traps that make this a scan and not a regex: `//` inside a URL is
+  // not a comment, and a quote character inside a regex literal does not open a
+  // string. Either mistake blanks real code — silently, and only downstream.
+  t('a `//` inside a string does not start a comment', commentHints.includes('packages/metadata/src'));
+  t('a quote inside a regex literal does not open a string', commentHints.includes('packages/client/src'));
+  t('masking preserves every offset', maskComments(commented).length === commented.length);
+
+  // The self-test boundary. The fixture puts a column-0 `}` inside a template
+  // literal on purpose: that is the shape this tree really has (a check script
+  // whose self-test embeds TS sources as fixtures), and a boundary that stopped
+  // at the first column-0 `}` would end the mask there and leak every fixture
+  // after it — measured on `scripts/check-engine-double-contract.mjs`, whose
+  // self-test carries 24 such braces and whose last fixture path sits 400 lines
+  // past the first one.
+  const withSelfTest = [
+    "const REAL = 'packages/runtime/src';",
+    'function selfTest() {',
+    "  const FIXTURE = 'packages/spec/src/data/filter.zod.ts';",
+    '  const embedded = `',
+    '}',
+    "  const AFTER_BRACE = 'packages/objectql/src';",
+    '  `;',
+    '}',
+    "const TAIL = 'docs/adr';",
+  ].join('\n');
+  const bodyHints = extractWatchHints(withSelfTest);
+  t('a fixture path inside the self-test is not a hint', !bodyHints.includes('packages/spec/src/data/filter.zod.ts'));
+  t('a column-0 brace inside a fixture does not end the self-test', !bodyHints.includes('packages/objectql/src'));
+  t('the module body before the self-test still hints', bodyHints.includes('packages/runtime/src'));
+  t('the module body after the self-test still hints', bodyHints.includes('docs/adr'));
+  const otherSpellings = [
+    'async function selfTest() {',
+    "  const A = 'packages/aaa/src';",
+    '}',
+    'function fixtureSelfTest() {',
+    "  const B = 'packages/bbb/src';",
+    '}',
+    'const box = {',
+    '  run() {',
+    "    const NESTED = 'packages/ccc/src';",
+    '  },',
+    '};',
+  ].join('\n');
+  const spellingHints = extractWatchHints(otherSpellings);
+  t('an async self-test is masked too', !spellingHints.includes('packages/aaa/src'));
+  t('a compound self-test name is masked too', !spellingHints.includes('packages/bbb/src'));
+  t('an ordinary nested function is NOT masked', spellingHints.includes('packages/ccc/src'));
+  // Composition order: comments are masked first, so a self-test declaration
+  // QUOTED in a docblock (this file is full of them) cannot anchor a mask over
+  // real code below it.
+  const declInComment = [
+    '/*',
+    'function selfTest() {',
+    '*/',
+    "const REAL = 'packages/ddd/src';",
+  ].join('\n');
+  t('a self-test declaration inside a comment anchors nothing', extractWatchHints(declInComment).includes('packages/ddd/src'));
+  // Module-relative spellings: `new URL('../../x', import.meta.url)` is how
+  // these scripts name a repo path, and the leading segments are the script's
+  // own depth, not part of what it watches.
+  const relative = ["const P = new URL('../../.claude/agents/os-dev.md', import.meta.url);", "const R = '../..';"].join('\n');
+  const relHints = extractWatchHints(relative);
+  t('a module-relative path is normalised to repo-relative', relHints.includes('.claude/agents/os-dev.md'));
+  t('a literal that is nothing but dots names no file', !relHints.some((h) => h.startsWith('..')));
+
   t('hint covers deeper path', hintCovers('.claude/agents', '.claude/agents/os-dev.md'));
   t('collapsed glob prefix covers', hintCovers('packages/spec/src/**', 'packages/spec/src/data/filter.zod.ts'));
   t('input dir covers hint below it', hintCovers('packages/spec/scripts/check-x.mjs', 'packages/spec'));
@@ -711,6 +1065,54 @@ function selfTest() {
   // hint -> cover) rather than the parser alone.
   const adrHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-adr-0087-registration.mjs'), 'utf8'));
   t('a .changeset path is covered by the ADR-0087 gate own hints', adrHints.some((h) => hintCovers(h, '.changeset/some-breaking-change.md')));
+
+  // ── The measured population (#8478), against the REAL scripts ─────────────
+  //
+  // A fixture proves the boundary; only these files prove that THIS tree's
+  // gates land on the right side of it. Each pin names a path the card measured
+  // before the narrowing, so a regression reads as the specific claim it broke
+  // rather than as a count. If a gate is renamed or moves, re-point the case at
+  // its new home — deleting one deletes the evidence, not the problem.
+  //
+  // Measured on this branch's base (commit 3208222) and after, coverage-capable
+  // hints per script: dispatch-gates 46 -> 5, check-empty-changeset 36 -> 3,
+  // check-adr-0087-registration 34 -> 6, check-skill-id-lint 2 -> 2 (already
+  // clean, the control). Across all 66 discoverable gate scripts: 1144 hints ->
+  // 473, with no hint gained that any repo path can reach.
+  const readHints = (rel) => extractWatchHints(readFileSync(join(ROOT, rel), 'utf8'));
+  const covers = (hs, p) => hs.some((h) => hintCovers(h, p));
+
+  t(
+    'the ADR-0087 gate no longer claims a runtime path through its own fixtures',
+    !covers(adrHints, 'packages/runtime/src/index.ts'),
+  );
+  const emptyHints = readHints('scripts/check-empty-changeset.mjs');
+  t('the empty-changeset gate still reaches a .changeset path', covers(emptyHints, '.changeset/anything.md'));
+  t(
+    'the empty-changeset gate no longer claims a skills path through its own fixtures',
+    !covers(emptyHints, 'skills/demo/SKILL.md'),
+  );
+  // The load-bearing survivor: this gate's ONLY real literal is a module-
+  // relative URL, and before the narrowing it reached SKILL.md through the copy
+  // of that path in its own header — a real input carried by prose.
+  const ratchetHints = readHints('scripts/pm/check-skill-line-ratchet.mjs');
+  t('the skill ratchet still reaches the SKILL.md it counts', covers(ratchetHints, '.claude/skills/pm-dispatch/SKILL.md'));
+  t(
+    'the skill ratchet no longer claims references/, which it does not count',
+    !covers(ratchetHints, '.claude/skills/pm-dispatch/references/facts.md'),
+  );
+  // The control the card called "what a clean one looks like": two hints, both
+  // real, unchanged by the narrowing.
+  const idLintHints = readHints('scripts/pm/check-skill-id-lint.mjs');
+  t('the skill-id lint keeps both of its real inputs', covers(idLintHints, '.claude/skills/pm-dispatch/SKILL.md') && covers(idLintHints, '.claude/agents/os-dev.md'));
+  // This tool's own gate: its thin gate file's one literal is the tool, so a
+  // card editing the tool must still derive it.
+  t('the dispatch-gates gate still reaches the tool it runs', covers(readHints('scripts/pm/check-dispatch-gates.mjs'), 'scripts/pm/dispatch-gates.mjs'));
+  // And this file, the worst specimen in the card's table: the directory it
+  // really reads survives, the fixtures naming other packages do not.
+  const ownHints = readHints('scripts/pm/dispatch-gates.mjs');
+  t('this tool still hints the workflow directory it reads', covers(ownHints, '.github/workflows/lint.yml'));
+  t('this tool no longer hints the spec paths its own fixtures name', !covers(ownHints, 'packages/spec/src/data/filter.zod.ts'));
 
   // The table's own rot detector: a name no live run discovers must say so,
   // never disappear quietly.
