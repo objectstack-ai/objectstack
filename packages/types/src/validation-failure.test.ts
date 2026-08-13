@@ -57,7 +57,13 @@ describe('fieldsFromZodIssues — ADR-0114 D3 catalog codes, not Zod codes (#812
             [MarkNotificationsReadRequestSchema, { notificationIds: ['n1'] }],
             [MarkNotificationsReadRequestSchema, { ids: 'n1' }],
             [MarkNotificationsReadRequestSchema, []],
-            // The flow contract the automation domain parses (#8055).
+            // The flow contract the automation domain parses (#8055). The
+            // unknown-key fixture is the load-bearing one: reverse-verifying
+            // this file showed the OTHER fixtures produce only `invalid_type`,
+            // which Zod and the catalog spell identically — so without a
+            // fixture whose Zod code is outside the catalog, this test stayed
+            // green against the raw pass-through it exists to refuse.
+            [FlowSchema, { ...WELL_FORMED_FLOW, nodes: [{ id: 'n', type: 'notify', label: 'Notify', next: 'other' }] }],
             [FlowSchema, { ...WELL_FORMED_FLOW, nodes: [{ id: 'n', type: 'notify', config: {} }] }],
             [FlowSchema, 'not even an object'],
         ];
