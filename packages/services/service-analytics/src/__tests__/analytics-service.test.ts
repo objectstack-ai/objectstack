@@ -422,11 +422,18 @@ describe('AnalyticsService', () => {
       logger: silentLogger,
       queryCapabilities: () => ({ nativeSql: true, objectqlAggregate: true, inMemory: false }),
       executeRawSql: vi.fn().mockResolvedValue(mockRows),
+      // [#8286] The claim under test is ROUTING — which strategy served — and
+      // the echo is only the witness it reads: `ObjectQLStrategy` would have
+      // died here for want of an aggregate bridge, so a statement coming back
+      // means NativeSQL won. Since #8286 that witness has a precondition, so
+      // the precondition is stated. The echo's OWN behaviour, both sides of
+      // this switch, is pinned in `sql-echo-debug-gate.test.ts`.
+      debugSql: true,
     });
 
     const result = await service.query(baseQuery);
     expect(result.rows).toEqual(mockRows);
-    expect(result.sql).toBeDefined(); // NativeSQL always includes sql
+    expect(result.sql).toBeDefined(); // with the echo enabled, NativeSQL reports its statement
   });
 
   it('should fall back to ObjectQLStrategy when nativeSql is false', async () => {

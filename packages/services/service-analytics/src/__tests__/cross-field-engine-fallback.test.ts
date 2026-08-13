@@ -110,6 +110,16 @@ describe('[#7598] cross-field `$field` on the analytics face — served via the 
     readScope = null;
     service = new AnalyticsService({
       cubes: [CUBE],
+      // [#8286] The response-level SQL echo is now debug-gated and OFF by
+      // default outside development. It is enabled here on purpose, and the
+      // reason is the same one the header gives for declaring both
+      // capabilities: an assertion has to be a MEASUREMENT. The pin below —
+      // "`/analytics/query` serves the query while the echo declines" — would
+      // pass against a service that never echoes anything at all, i.e. it would
+      // stop measuring the renderer's decline and start measuring the gate.
+      // With the echo on, `sql` being absent again means what this file says it
+      // means: `generateSql` refused and `execute()` swallowed the refusal.
+      debugSql: true,
       // BOTH paths available — see the header. Native SQL wins unless it declines.
       queryCapabilities: () => ({ nativeSql: true, objectqlAggregate: true, inMemory: false }),
       executeRawSql: async (_object, sql) => {
