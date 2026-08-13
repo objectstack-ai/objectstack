@@ -485,7 +485,19 @@ describe('HttpDispatcher', () => {
             expect(mockAutomationService.getSuspendedScreen).toHaveBeenCalledWith('run_1');
             expect(result.response?.body?.data?.screen?.nodeId).toBe('collect');
             // `screen` must NOT be swallowed by the getRun route below it.
-            expect(mockAutomationService.getRun).not.toHaveBeenCalled();
+            //
+            // [#7968] Asserted on the ANSWER, not on `getRun` being unused: the
+            // screen route now reads the run to resolve its trigger identity
+            // for the read gate, so "getRun was never called" stopped being a
+            // proxy for "the path did not fall through". What the routing claim
+            // actually says is that the caller got the SCREEN envelope
+            // (`{ runId, screen }`) and not the `ExecutionLogEntry` the
+            // `/:name/runs/:runId` branch serves verbatim — which the mock
+            // makes distinguishable: that entry is `{ id: 'run_1', status:
+            // 'completed' }`, carrying neither key below.
+            expect(result.response?.body?.data?.runId).toBe('run_1');
+            expect(result.response?.body?.data?.id).toBeUndefined();
+            expect(result.response?.body?.data?.status).toBeUndefined();
         });
 
         it('should return 404 when the run is not awaiting a screen', async () => {

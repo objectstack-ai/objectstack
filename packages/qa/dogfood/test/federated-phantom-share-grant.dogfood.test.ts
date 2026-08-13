@@ -307,11 +307,17 @@ describe('[#8119] federated phantom anchor: single-record gates + share posture'
         { recipientId: adminId, accessLevel: 'edit' },
       );
       expect(res.status).toBe(422);
-      const body = await res.json() as { code?: string; error?: string };
-      expect(body.code).toBe('SHARING_NOT_ENABLED');
+      // [#8111] MIGRATED, not loosened: this route family converged onto the
+      // ADR-0112 D5 envelope, so the pair lives at `body.error.{code,message}`.
+      // It was written against the retired dialect (`{ code, error: '<string>' }`)
+      // because that is what the route emitted when #8119 landed. Asserting the
+      // D5 position ALONE is deliberate — accepting both shapes would re-admit
+      // the dialect this convergence retired.
+      const body = await res.json() as { error?: { code?: string; message?: string } };
+      expect(body.error?.code).toBe('SHARING_NOT_ENABLED');
       // The operator-facing half: "no owner_id field" would be false here and
       // would send them to add a column the platform already injected.
-      expect(body.error).toMatch(/federated/);
+      expect(body.error?.message).toMatch(/federated/);
     });
 
     it('CONTROL: a LOCAL private record is NOT refused by the posture guard', async () => {
@@ -339,7 +345,13 @@ describe('[#8119] federated phantom anchor: single-record gates + share posture'
         { recipientId: 'usr_grantee_8119', accessLevel: 'edit' },
       );
       expect(res.status).not.toBe(422);
-      expect((await res.json() as { code?: string }).code).not.toBe('SHARING_NOT_ENABLED');
+      // [#8111] Migrated with its sibling above. This one did not FAIL after the
+      // envelope moved — a negative assertion on the vacated flat position
+      // passes for free (`undefined !== 'SHARING_NOT_ENABLED'`) — which is
+      // exactly why it had to move too: left alone it would have gone on
+      // "passing" while reading a key no response carries any more.
+      expect((await res.json() as { error?: { code?: string } }).error?.code)
+        .not.toBe('SHARING_NOT_ENABLED');
     });
 
     it('CONTROL: the grandfathered shipped object still refuses as PUBLIC, unchanged', async () => {

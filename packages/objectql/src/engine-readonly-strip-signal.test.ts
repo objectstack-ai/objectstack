@@ -217,7 +217,7 @@ describe('static `readonly` write strip — caller-facing signal (#4903)', () =>
       probe,
     );
     expect(calls.map(([level]) => level)).toEqual(['warn']);
-    expect(calls[0][1]).toBe(readonlyStripWarning('work_duration', 'attendance'));
+    expect(calls[0][1]).toBe(readonlyStripWarning('work_duration', 'attendance', { preserveAuditApplies: true }));
   });
 
   it('omits the object clause when the schema carries no name', () => {

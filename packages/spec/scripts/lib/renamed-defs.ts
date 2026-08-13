@@ -74,7 +74,8 @@ export const RENAMED_DEFS: Readonly<Record<string, string>> = {
 
   // #4703 / ADR-0112 D9a — `FieldMapping` was published by THREE defs at once.
   // The two domain-specific sides take a domain prefix; `shared/FieldMapping`
-  // is the BASE that this rename's target (and `data/ExternalFieldMapping`)
+  // is the BASE that this rename's target (and, until #8075's whole-family
+  // retirement, `data/ExternalFieldMapping`)
   // extend, so it keeps the bare name and is deliberately absent from this
   // table. Note what an `extend` means for the invariants below: the target
   // def's key set is a superset of the base's, so every carried key is found,

@@ -166,6 +166,11 @@ const CASE_SETS = [
     marker: 'AGGREGATION_CASES',
     what: 'the value each declared AggregationFunction produces, dedup and NULLs included — #6409',
   },
+  {
+    file: 'filter-comparand-type-conformance.ts',
+    marker: 'FILTER_COMPARAND_TYPE_CASES',
+    what: 'the comparand-type door: the six accepted types compile everywhere, everything else is refused loudly — #7872',
+  },
 ];
 
 // ── The ledger ──────────────────────────────────────────────────────────────

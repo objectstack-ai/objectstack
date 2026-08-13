@@ -94,3 +94,74 @@ describe('default permission sets carry the managed denies (static baseline)', (
     expect(Object.keys(admin.objects)).toEqual(['*']);
   });
 });
+
+/**
+ * [#8095] The `sys_invitation` row scope — a DELETION TRIPWIRE, not the proof.
+ *
+ * The proof that the narrowing works lives over HTTP, in
+ * `packages/qa/dogfood/test/invitation-ledger-row-scope.dogfood.test.ts`: an
+ * assertion whose expectation and reality both come from this module cannot
+ * fail, so nothing here is evidence that a member is actually narrowed. What
+ * this block does buy is the one thing the HTTP fixture cannot — it names the
+ * predicate and the sets it must appear in, so removing a carve-out (or adding
+ * a managed object to `BETTER_AUTH_MANAGED_OBJECTS` and assuming the blanket
+ * read is safe for it) fails HERE, in the file being edited, instead of in a
+ * suite the author may not run.
+ *
+ * The predicate is written out rather than imported for the same reason.
+ */
+describe('sys_invitation is row-scoped to its addressee (#8095)', () => {
+  const SELF_PREDICATE = 'email == current_user.email';
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const policiesFor = (setName: string, object: string): any[] =>
+    (setByName(setName)?.rowLevelSecurity ?? []).filter((p: any) => p.object === object);
+
+  it.each(['member_default', 'viewer_readonly'])(
+    '%s scopes sys_invitation to the addressee — the blanket managed read is NOT the whole story',
+    (setName) => {
+      // The object-level read bit stays open: it is what makes the invitee's OWN
+      // row reachable, and closing it would break the accept flow rather than
+      // narrow it. The narrowing is the row predicate.
+      expect(setByName(setName).objects.sys_invitation.allowRead).toBe(true);
+
+      const scoped = policiesFor(setName, 'sys_invitation');
+      expect(scoped.map((p) => p.name)).toEqual(['sys_invitation_self']);
+      expect(scoped[0].using).toBe(SELF_PREDICATE);
+      // Read the operation off THIS policy. The same-named carve-outs across
+      // these sets do not all agree (`sys_api_key_self` is spelled three times
+      // at two different operations), so a sibling's value is not evidence.
+      expect(scoped[0].operation).toBe('select');
+      expect(scoped[0].enabled).not.toBe(false);
+    },
+  );
+
+  it('organization_admin keeps the ORG-wide ledger — the ruling narrowed members, not admins', () => {
+    // The other half of the ruling, and the half that is easy to get wrong:
+    // `member_default` resolves for admins too, so the member-side scope reaches
+    // them, and the two mechanisms that look like they already protect an admin
+    // are both absent on the DEFAULT `single` posture — the `viewAllRecords`
+    // short-circuit is withheld from `organization_admin_no_bypass` (ADR-0105
+    // D4), and `sys_invitation_org` is stripped as a platform tenant policy when
+    // org isolation is inactive (ADR-0105 D3). Only `sys_invitation_org_admin`
+    // survives both, which is why it must be present on BOTH variants.
+    for (const setName of ['organization_admin', 'organization_admin_no_bypass']) {
+      const scoped = policiesFor(setName, 'sys_invitation');
+      expect(scoped.map((p) => p.name).sort(), `${setName} sys_invitation policies`).toEqual([
+        'sys_invitation_org',
+        'sys_invitation_org_admin',
+      ]);
+
+      const admission = scoped.find((p) => p.name === 'sys_invitation_org_admin');
+      // No tenant token — that is what keeps the strip from taking it.
+      expect(admission.using).not.toContain('current_user.organization_id');
+      expect(admission.using).toBe('id != null');
+      // Domained to the org-administration identities, so it can only WIDEN.
+      // A principal it does not match keeps the addressee scope and fails
+      // closed; putting the domain on the narrowing instead would make "no
+      // matching position" mean "no policy" — i.e. no row filter at all.
+      expect(admission.positions.sort()).toEqual(['org_admin', 'org_owner']);
+      expect(admission.operation).toBe('select');
+    }
+  });
+});

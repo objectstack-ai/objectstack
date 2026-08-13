@@ -38,7 +38,6 @@
     "data/ExternalDatasourceSettings:allowWrites = false",
     "data/ExternalDatasourceSettings:queryTimeoutMs = 30000",
     "data/ExternalDatasourceSettings:validation = {\"checkOnBoot\":true,\"onMismatch\":\"fail\"}",
-    "data/ExternalFieldMapping:readonly = true",
     "data/Field:autonumberFormat = \"{0000}\"",
     "data/Field:deleteBehavior = \"set_null\"",
     "data/Field:externalId = false",

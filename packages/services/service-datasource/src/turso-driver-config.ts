@@ -84,7 +84,11 @@ export interface TursoDriverConfigInput {
 
 /** What every reader in {@link TURSO_CONFIG_READERS} is handed. */
 interface TursoConfigSource {
-  /** The whole spec — `schemaMode` is resolved from three places, not just `config`. */
+  /**
+   * The whole spec — two readers need more than `config`: `schemaMode` is
+   * resolved from three places, and `authToken` reads the connection's bound
+   * `spec.secret` ahead of `config` (#8152).
+   */
   spec: DatasourceConnectionSpec;
   /** `spec.config`, narrowed to a bag so each reader can type-test its own key. */
   config: Record<string, unknown>;
@@ -101,10 +105,14 @@ interface TursoConfigSource {
  * an absent option from an explicit `undefined` in places, and the open-core arm
  * this was lifted from had always spread-omitted.
  *
- * The type-tests are the open-core arm's, unchanged — including the truthiness
- * check on the string keys (an empty `authToken` / `syncUrl` / `encryptionKey` is
- * an unset one, never a credential of length zero) and its absence on the number
- * keys (`concurrency: 0` and `timeout: 0` are meaningful values the driver reads).
+ * The type-tests are the open-core arm's — including the truthiness check on the
+ * string keys (an empty `authToken` / `syncUrl` / `encryptionKey` is an unset one,
+ * never a credential of length zero) and its absence on the number keys
+ * (`concurrency: 0` and `timeout: 0` are meaningful values the driver reads).
+ *
+ * A reader is not obliged to read only `config`: `schemaMode` and `authToken`
+ * both consult the spec itself. `authToken`'s reason is a credential route, and
+ * is worth reading before changing it (#8152).
  */
 const TURSO_CONFIG_READERS: {
   readonly [K in keyof Required<TursoDriverConfigInput>]: (
@@ -112,8 +120,44 @@ const TURSO_CONFIG_READERS: {
   ) => TursoDriverConfigInput[K] | undefined;
 } = {
   url: ({ url }) => url,
-  authToken: ({ config }) =>
-    typeof config.authToken === 'string' && config.authToken ? config.authToken : undefined,
+  /**
+   * The BOUND credential first, the config key second (#8152).
+   *
+   * This reader used to consult `config.authToken` alone, and that was a hole
+   * rather than a preference: #7990/#8078 made `authToken` a refused inline key
+   * (`z.never()`) at every authoring door, so the only route an author has left
+   * is to bind the credential and reference it — and the resolved secret arrives
+   * as `spec.secret`, which nothing on the turso path read. A turso datasource
+   * created after #8078 therefore had NO working credential route: the inline
+   * one is refused at the door and the bound one was dropped here. Existing
+   * stored rows kept working (stored config bypasses the parse), which is what
+   * kept it invisible — only new authoring was dead.
+   *
+   * The precedence and the shape are exact parity with the SQL arms in
+   * `default-datasource-driver-factory.ts`
+   * (`spec.secret ? { password: spec.secret } : cfg.password ? { password: cfg.password } : {}`):
+   * a datasource's bound secret WINS over anything in `config`, and `config` is
+   * the fallback. `spec` is already on {@link TursoConfigSource} for `schemaMode`,
+   * so this needs no new plumbing — the credential was reaching this function
+   * all along.
+   *
+   * `config.authToken` stays readable, and deliberately: it is not only legacy
+   * stored rows. The host boot paths translate `OS_DATABASE_AUTH_TOKEN` /
+   * `TURSO_AUTH_TOKEN` into `config: { url, authToken }` on a definition they
+   * construct themselves (`packages/cli/src/utils/storage-driver.ts`), which
+   * never meets the authoring schema. Dropping this arm would break the `default`
+   * datasource's env credential — a live route, refused only for AUTHORS.
+   *
+   * The truthiness test carries over unchanged, now on both arms: an empty
+   * `spec.secret` is an unset one, and falls through to `config` rather than
+   * emitting a credential of length zero.
+   */
+  authToken: ({ spec, config }) =>
+    spec.secret
+      ? spec.secret
+      : typeof config.authToken === 'string' && config.authToken
+        ? config.authToken
+        : undefined,
   encryptionKey: ({ config }) =>
     typeof config.encryptionKey === 'string' && config.encryptionKey ? config.encryptionKey : undefined,
   concurrency: ({ config }) => (typeof config.concurrency === 'number' ? config.concurrency : undefined),
