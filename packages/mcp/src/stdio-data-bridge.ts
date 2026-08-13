@@ -54,8 +54,21 @@
  * transport-neutral data seam is filed as follow-up work rather than forked
  * here (route-ownership rule 1: a mirrored copy of `callData` would be a second
  * implementation that drifts).
+ *
+ * ⚠️ [#8497] ONE limb of that divergence WAS security, and the sentence above
+ * used to deny it. #7823 relocated the `internal: true` WRITE-RESPONSE strip
+ * from the engine to the protocol ingress — deliberately, and for measured
+ * reasons (credential mint reads its own insert result back). The engine
+ * therefore returns write results whole, and an engine-only bridge that echoes
+ * one hands the caller a field the flag promises is never returned on the
+ * generic data path (#7728). Measured on the `create` arm: the flagged column
+ * rode the tool response verbatim. The strip is applied below, through the same
+ * single helper every other write mouth uses; the read verbs are unaffected
+ * (the engine's read path still strips, unchanged). What remains of the
+ * divergence above is genuinely not security.
  */
 
+import { omitInternalFieldsFromWriteResponse } from '@objectstack/core';
 import {
   resolveEffectiveApiMethods,
   isApiOperationAllowed,
@@ -337,6 +350,13 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
         | Record<string, unknown>
         | undefined;
       const record = { ...data, ...(written ?? {}) };
+      // [#8497] `written` is the engine's WRITE result, which since #7823 keeps
+      // the stored row whole — flagged columns included. This is a generic data
+      // mouth answering an external caller, so it owns the response-body half
+      // of the `internal: true` guarantee (#7728) exactly as the protocol
+      // ingress and the REST batch arm do. Measured before the fix: a create
+      // returned `vault_secret` verbatim in `record`.
+      omitInternalFieldsFromWriteResponse(await metadataService.getObject(object), record);
       return { object, id: record.id, record };
     },
 
@@ -349,7 +369,18 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       const existing = await findById(engine, object, id, context);
       if (!existing) throw recordNotFound(object, id);
       await engine.update(object, data, { where: { id }, context });
-      return { object, id, record: { ...existing, ...data } };
+      const record = { ...(existing as Record<string, unknown>), ...data };
+      // [#8497] The engine's update RESULT is deliberately discarded here (this
+      // arm echoes the read-path row plus the caller's own patch), so no STORED
+      // flagged value can reach this line. The strip still runs, for the one
+      // remaining way an `internal: true` key can appear in the body: the
+      // caller put it in `data`. Echoing it back would answer a read of a field
+      // the flag says is never returned — using the caller's own bytes as the
+      // oracle for whether their guess matched storage. Cheap, and it makes the
+      // property literally true on every verb of this bridge rather than true-
+      // by-argument on one.
+      omitInternalFieldsFromWriteResponse(await metadataService.getObject(object), record);
+      return { object, id, record };
     },
 
     async remove(object, id) {
