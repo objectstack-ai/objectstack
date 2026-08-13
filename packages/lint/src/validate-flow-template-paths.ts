@@ -19,6 +19,18 @@
 //      note and #1872). So `record.account.name` walks `.name` on a string id
 //      and yields '' silently. Not resolved today; tracked on #3426.
 //
+//   3. `{record.<injected anchor>}` on an ADR-0015 `external` trigger object
+//      (#8340) — the head RESOLVES (it is a registry-injected system column, so
+//      case 1 rightly stays silent), but the remote database owns the table and
+//      the platform provisions no storage behind the anchor. The value is empty
+//      on every run, so the token renders '' with the same silence — reaching
+//      case 1's failure by a route case 1 structurally cannot see, because it
+//      judges the name against the object-independent `SYSTEM_FIELDS` union.
+//      Reported as a WARNING in both positions, filter included: the existence
+//      question has a closed oracle (the field is absent or it is not) and the
+//      provenance one does not — this pass knows the platform stores nothing,
+//      not what the deployment's remote schema holds (#8116's reasoning).
+//
 // A pure `(stack) => Finding[]` rule (ADR-0019), run from `os validate` and
 // reusable by AI authoring.
 //
@@ -55,7 +67,12 @@
 //   - Structured scalar heads (`json` / `composite` / `repeater` / `record`) may
 //     carry legitimate sub-paths — their `.<sub>` access is left alone.
 
-import { SYSTEM_FIELDS } from './system-fields.js';
+import {
+  SYSTEM_FIELDS,
+  unprovisionedInjectedColumnsFor,
+  unprovisionedAnchorCause,
+  unprovisionedAnchorHint,
+} from './system-fields.js';
 import { walkFlowNodes } from './flow-walk.js';
 
 export type FlowTemplatePathSeverity = 'error' | 'warning';
@@ -74,6 +91,7 @@ export interface FlowTemplatePathFinding {
 // Rule ids (registry entries).
 export const FLOW_TEMPLATE_UNKNOWN_FIELD = 'flow-template-unknown-field';
 export const FLOW_TEMPLATE_LOOKUP_TRAVERSAL = 'flow-template-lookup-traversal';
+export const FLOW_TEMPLATE_FIELD_UNPROVISIONED = 'flow-template-field-unprovisioned';
 
 type AnyRec = Record<string, unknown>;
 
@@ -301,6 +319,11 @@ export function validateFlowTemplatePaths(stack: AnyRec): FlowTemplatePathFindin
     if (!obj) return;
 
     const fieldTypes = fieldTypesOf(obj);
+    // [#8340] The injected anchors THIS trigger object registers with no
+    // storage behind them. Read off the object def already resolved above —
+    // there is no second lookup and no stack-level index, because this rule
+    // judges every token of a flow against ONE object (the trigger's).
+    const unprovisionedAnchors = unprovisionedInjectedColumnsFor(obj);
     const expandSet = declaredExpandOf(flow);
 
     // Every node, INCLUDING those nested in try_catch / loop / parallel regions
@@ -335,6 +358,7 @@ export function validateFlowTemplatePaths(stack: AnyRec): FlowTemplatePathFindin
       // Dedupe references so one repeated typo yields one finding per node.
       const seenUnknown = new Set<string>();
       const seenTraversal = new Set<string>();
+      const seenUnprovisioned = new Set<string>();
 
       for (const leaf of leaves) {
         const inFilter = leaf.inFilter;
@@ -345,6 +369,36 @@ export function validateFlowTemplatePaths(stack: AnyRec): FlowTemplatePathFindin
           const nextIsIdentifier = hasSubPath && !/^\d+$/.test(rest[1]);
 
           const isKnown = fieldTypes.has(head) || IMPLICIT_HEADS.has(head);
+
+          // [#8340] The head RESOLVES — `IMPLICIT_HEADS` keeps owning that
+          // decision, exactly as before — but on an ADR-0015 `external` trigger
+          // object the platform registers this anchor and stores nothing in it,
+          // so the interpolator reads an empty value from the flow record. In a
+          // filter position that is #3810's own failure reached by a second
+          // route: the token erases the authored condition and `resolveNodeFilter`
+          // refuses the node at run time. Warning, not error, on both positions:
+          // unlike a typo (a closed oracle — the field is simply absent) this
+          // pass cannot see whether the remote schema resolves the column.
+          if (unprovisionedAnchors.has(head)) {
+            if (!seenUnprovisioned.has(head)) {
+              seenUnprovisioned.add(head);
+              findings.push({
+                severity: 'warning',
+                rule: FLOW_TEMPLATE_FIELD_UNPROVISIONED,
+                where,
+                path: nodePath,
+                message:
+                  (inFilter ? `${nodeType} filter references ` : 'template references ') +
+                  `'{record.${rest.join('.')}}', and ${unprovisionedAnchorCause(objectName, head)} — ` +
+                  (inFilter
+                    ? `the token resolves to nothing on every run, which DROPS the condition from ` +
+                      `the query instead of narrowing it; the node then refuses to run at execution ` +
+                      `time (#3810).`
+                    : `the token resolves to an empty string on every run (silently).`),
+                hint: unprovisionedAnchorHint(objectName, head),
+              });
+            }
+          }
 
           if (!isKnown) {
             if (seenUnknown.has(head)) continue;

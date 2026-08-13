@@ -11,6 +11,7 @@ import {
   WIDGET_LEGACY_ANALYTICS_SHAPE,
   WIDGET_LEGACY_ANALYTICS_UNRENDERABLE,
   DASHBOARD_FILTER_FIELD_UNKNOWN,
+  DASHBOARD_FILTER_FIELD_UNPROVISIONED,
 } from './validate-widget-bindings.js';
 
 /** The downstream repro from issue #1719 — dataset with a count AND a sum
@@ -642,5 +643,122 @@ describe('validateWidgetBindings (dashboard-filter-field-unknown, issue #3365)',
 
   it('is silent on dashboards with no dashboard-level filters', () => {
     expect(only(validateWidgetBindings(stack({ dateRange: undefined })))).toHaveLength(0);
+  });
+});
+
+describe('validateWidgetBindings (dashboard-filter-field-unprovisioned, issue #8340)', () => {
+  const only = (findings: ReturnType<typeof validateWidgetBindings>) =>
+    findings.filter((f) => f.rule === DASHBOARD_FILTER_FIELD_UNPROVISIONED);
+  const unknownOnly = (findings: ReturnType<typeof validateWidgetBindings>) =>
+    findings.filter((f) => f.rule === DASHBOARD_FILTER_FIELD_UNKNOWN);
+
+  /**
+   * The #8340 repro: a dashboard filter on `owner_id` — a registry-injected
+   * system column, so #3365's existence error rightly stays silent — over a
+   * dataset bound to an ADR-0015 `external` object, where the platform
+   * registers the anchor and provisions no storage for it.
+   *
+   * `objectExtra` mutates the object (drop `external`, declare the column) so
+   * each half of the derivation can be broken independently.
+   */
+  function stack(
+    dash: Record<string, unknown> = {},
+    widget: Record<string, unknown> = {},
+    objectExtra: Record<string, unknown> = {},
+  ) {
+    return {
+      objects: [
+        {
+          name: 'ext_customer',
+          external: { remoteName: 'customers' },
+          fields: [{ name: 'email', type: 'text' }, { name: 'signed_up_on', type: 'date' }],
+          ...objectExtra,
+        },
+      ],
+      datasets: [
+        { name: 'customer_metrics', object: 'ext_customer',
+          dimensions: [{ name: 'email', field: 'email' }],
+          measures: [{ name: 'customer_count', aggregate: 'count' }] },
+      ],
+      dashboards: [{
+        name: 'federation_dashboard',
+        label: 'Federation',
+        globalFilters: [{ field: 'owner_id', type: 'select' }],
+        widgets: [{
+          id: 'total_customers', type: 'metric',
+          dataset: 'customer_metrics', values: ['customer_count'],
+          ...widget,
+        }],
+        ...dash,
+      }],
+    };
+  }
+
+  it('warns on the repro: an inherited filter over an unprovisioned injected anchor', () => {
+    const findings = only(validateWidgetBindings(stack()));
+    expect(findings).toHaveLength(1);
+    const f = findings[0];
+    expect(f.severity).toBe('warning');
+    expect(f.where).toContain('federation_dashboard');
+    expect(f.where).toContain('total_customers');
+    expect(f.message).toContain('owner_id');
+    expect(f.message).toContain('ext_customer');
+    expect(f.message).toContain('external object (ADR-0015)');
+    expect(f.message).toContain('constant-false');
+    expect(f.hint).toContain("columnMap");
+    expect(f.path).toBe('dashboards[0].widgets[0]');
+    // The existence rule is UNCHANGED — the name still resolves.
+    expect(unknownOnly(validateWidgetBindings(stack()))).toHaveLength(0);
+  });
+
+  it('is silent on the local twin — platform storage is real (mutation: drop `external`)', () => {
+    // Break the ADR-0015 half of the derivation: the same filter over a
+    // platform-stored object has a real `owner_id` column behind it.
+    const local = stack({}, {}, { external: undefined });
+    expect(only(validateWidgetBindings(local))).toHaveLength(0);
+    expect(unknownOnly(validateWidgetBindings(local))).toHaveLength(0);
+  });
+
+  it('is silent when the author DECLARES the column — it maps a remote column they vouch for', () => {
+    // #7859's security direction, and the second half of the derivation.
+    const declared = stack({}, {}, {
+      fields: [{ name: 'email', type: 'text' }, { name: 'owner_id', type: 'text' }],
+    });
+    expect(only(validateWidgetBindings(declared))).toHaveLength(0);
+  });
+
+  it('is silent on an ordinary declared field of the same external object', () => {
+    expect(only(validateWidgetBindings(stack({
+      globalFilters: [{ field: 'signed_up_on', type: 'date' }],
+    })))).toHaveLength(0);
+  });
+
+  it('warns with the explicit wording when filterBindings re-targets onto an anchor', () => {
+    const findings = only(validateWidgetBindings(stack(
+      { globalFilters: [{ name: 'owner', field: 'signed_up_on', type: 'date' }] },
+      { filterBindings: { owner: 'created_by' } },
+    )));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('via filterBindings');
+    expect(findings[0].message).toContain('created_by');
+  });
+
+  it('is silent when the widget opts the filter out entirely', () => {
+    expect(only(validateWidgetBindings(stack(
+      { globalFilters: [{ name: 'owner_id', field: 'owner_id', type: 'select' }] },
+      { filterBindings: { owner_id: false } },
+    )))).toHaveLength(0);
+  });
+
+  it('IS suppressible — it is advice, not a broken query', () => {
+    expect(only(validateWidgetBindings(stack({}, {
+      suppressWarnings: [DASHBOARD_FILTER_FIELD_UNPROVISIONED],
+    })))).toHaveLength(0);
+  });
+
+  it('cannot judge — and never false-positives — when the object is not in the stack', () => {
+    const s = stack();
+    delete (s as { objects?: unknown }).objects;
+    expect(only(validateWidgetBindings(s))).toHaveLength(0);
   });
 });

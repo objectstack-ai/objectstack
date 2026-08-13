@@ -60,7 +60,7 @@ import {
     type QueryAliasConflict, type QueryAliasSlot,
     type DroppedFieldsEvent, type QueryAST, type EngineQueryOptionsParsed,
 } from '@objectstack/spec/data';
-import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
+import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, unmappedDeclaredTypeSpelling, restPluralOfMetaType } from '@objectstack/spec/shared';
 import { applyConversionsToStoredItem, type ConversionNotice } from '@objectstack/spec';
 import { type FormView, isAggregatedViewContainer, expandViewContainer } from '@objectstack/spec/ui';
 import { METADATA_FORM_REGISTRY, CORE_SERVICE_PROVIDER, serviceUnavailableMessage, inProcessServiceMessage } from '@objectstack/spec/system';
@@ -147,13 +147,67 @@ const TYPE_TO_FORM: Readonly<Record<string, FormView>> = METADATA_FORM_REGISTRY;
  * not N dialects. Reads of data AT REST still try the other spelling as a
  * fallback — rows written under a plural `type` before this fix are real, and
  * nothing rewrites them on upgrade.
+ *
+ * ## [#7894] It folds through the URL map, NOT the manifest map
+ *
+ * This used to read `PLURAL_TO_SINGULAR`, which is a MANIFEST-COLLECTION map
+ * (`objects: [...]`, `apps: [...]`) that `metadata-authoring-lint.ts` iterates
+ * to decide which stack-level collections exist. Four registry types are
+ * legitimately absent from it because they are not stack collections —
+ * `field`, `seed`, `external_catalog`, `translation`. At this boundary that
+ * absence did not read as "not a collection", it read as "unknown type", and an
+ * unknown type takes the PLUGIN path, which every authorization gate is
+ * permissive toward by construction. So `PUT /meta/fields/showcase_task.title`
+ * answered 200 and persisted a row under `type='fields'` — a second namespace
+ * for the same item, the #4432 defect exactly — while `PUT /meta/field/...`
+ * answered 403 NOT_OVERRIDABLE. The plural URL was a door around the singular
+ * URL's lock.
+ *
+ * {@link canonicalMetaUrlType} reads a map DERIVED from
+ * `DEFAULT_METADATA_TYPE_REGISTRY` (unioned with every manifest spelling, so
+ * nothing that resolved before resolves differently), which is why a newly
+ * declared type cannot arrive unmapped. Adding the four missing keys to the
+ * manifest map by hand would have fixed only today's four — and would have
+ * advertised a `fields: [...]` stack collection that does not exist.
+ *
+ * ⛔ Do not "fix" a future instance of this by teaching a predicate one layer
+ * down (`isNestedArtifactField` and friends) to accept a plural. That is the
+ * spelling-tolerant lookup this comment has rejected since #4432, and it would
+ * still persist the row under the plural `type`.
  */
 function canonicalMetaType(type: string): string {
-    return PLURAL_TO_SINGULAR[type] ?? type;
+    return canonicalMetaUrlType(type);
 }
 
-/** {@link canonicalMetaType} applied to a `{ type }` request, without mutating the caller's object. */
+/**
+ * {@link canonicalMetaType} applied to a `{ type }` request, without mutating the
+ * caller's object — and the one checkpoint that REFUSES a spelling it cannot
+ * honour instead of forwarding it to the plugin path (#7894).
+ *
+ * Applied here rather than inside {@link canonicalMetaType} on purpose: this is
+ * the request boundary (all six `/meta` entry points funnel through it), while
+ * `canonicalMetaType` is also called on read EXITS by `governServedItem` and
+ * `stripServedSystemColumns`, where the type is already canonical and a throw
+ * would be a bug rather than a refusal.
+ *
+ * The refusal is deliberately narrow: {@link unmappedDeclaredTypeSpelling}
+ * fires only for a spelling whose singular is a type the platform itself
+ * DECLARES, so a plugin-registered runtime kind can never trip it. See that
+ * function for why the rule is static rather than a live-registry lookup.
+ */
 function canonicalizeMetaRequestType<T extends { type: string }>(request: T): T {
+    const declared = unmappedDeclaredTypeSpelling(request.type);
+    if (declared) {
+        const err = new Error(
+            `[invalid_request] '${request.type}' is not a recognised spelling of metadata type `
+            + `'${declared}'. Address it as '${declared}' or '${restPluralOfMetaType(declared)}'. `
+            + `Refused rather than treated as a plugin-registered type, because forwarding an unrecognised `
+            + `spelling of a declared type would create a second namespace under type='${request.type}'.`,
+        );
+        (err as any).code = 'INVALID_REQUEST';
+        (err as any).status = 400;
+        throw err;
+    }
     const type = canonicalMetaType(request.type);
     return type === request.type ? request : { ...request, type };
 }

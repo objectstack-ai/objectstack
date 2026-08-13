@@ -63,7 +63,12 @@ import {
 // since #5068 — see `zod-issue-format.ts` for why one copy matters here.
 import { describeIssue } from './zod-issue-format.js';
 
-import { SYSTEM_FIELDS } from './system-fields.js';
+import {
+  SYSTEM_FIELDS,
+  indexUnprovisionedAnchors,
+  unprovisionedAnchorCause,
+  unprovisionedAnchorHint,
+} from './system-fields.js';
 
 // The TypeScript compiler must NOT be imported at module top level: it is
 // ~9 MB of CJS (~70 ms+ to parse, worse on container cold starts), and
@@ -257,6 +262,7 @@ function filterAttrValue(tsc: typeof ts, sf: ts.SourceFile, attr: ts.JsxAttribut
 // way to write the same binding.
 
 export const REACT_CHART_FIELD_UNKNOWN = 'react-chart-field-unknown';
+export const REACT_CHART_FIELD_UNPROVISIONED = 'react-chart-field-unprovisioned';
 export const REACT_CHART_AGGREGATE_INVALID = 'react-chart-aggregate-invalid';
 export const REACT_CHART_AXIS_UNKNOWN = 'react-chart-axis-unknown';
 export const REACT_CHART_DRILLDOWN_INVALID = 'react-chart-drilldown-invalid';
@@ -420,6 +426,8 @@ function checkObjectChart(
   attrs: ChartAttrs,
   objectFields: Map<string, Set<string>>,
   findings: ReactPropFinding[],
+  // [#8340] `objectName -> its unprovisioned injected anchors`.
+  unprovisionedAnchors: ReadonlyMap<string, ReadonlySet<string>> = new Map(),
 ): void {
   const { values, where, path } = attrs;
   const push = (severity: ReactPropSeverity, rule: string, message: string, hint: string) =>
@@ -469,11 +477,30 @@ function checkObjectChart(
   // No object name, or an object declared in another package: unknowable here
   // — the same skip the widget/flow/page rules take.
   if (objectName && known) {
+    const anchors = unprovisionedAnchors.get(objectName);
     const fieldRef = (name: string | undefined, prop: string) => {
       if (!name) return;
       // A relationship path (`account.name`) is resolved by the query engine.
       if (name.includes('.')) return;
-      if (known.has(name) || SYSTEM_FIELDS.has(name)) return;
+      if (known.has(name) || SYSTEM_FIELDS.has(name)) {
+        // [#8340] The name resolves — the existence error stays silent and
+        // `SYSTEM_FIELDS` keeps owning that decision — but an injected anchor
+        // on an ADR-0015 `external` object has no column behind it. Aggregating
+        // or grouping by one returns a single empty bucket rather than an
+        // error, so the chart renders and says nothing true.
+        if (anchors?.has(name)) {
+          push(
+            'warning',
+            REACT_CHART_FIELD_UNPROVISIONED,
+            `aggregate.${prop} "${name}" resolves on object "${objectName}", but ` +
+              `${unprovisionedAnchorCause(objectName, name)} — the aggregate query reads a column ` +
+              `that is empty on every row, so the chart ${prop === 'groupBy' ? 'groups everything into one empty bucket' : 'aggregates nothing'} ` +
+              `instead of failing.`,
+            unprovisionedAnchorHint(objectName, name),
+          );
+        }
+        return;
+      }
       push(
         'error',
         REACT_CHART_FIELD_UNKNOWN,
@@ -804,6 +831,10 @@ function checkBlockFieldProps(
   objectFields: ReadonlyMap<string, Set<string>>,
   where: string,
   path: string,
+  // [#8340] Threaded straight through to the shared `checkFieldRefs` core —
+  // this surface asks the same two questions of the same refs as the metadata
+  // one, so it must hand over the same index rather than answer differently.
+  unprovisionedAnchors?: ReadonlyMap<string, ReadonlySet<string>>,
 ): ReactPropFinding[] {
   const objectName = strOf(values.get('objectName'));
   const out: PageFieldFinding[] = [];
@@ -811,18 +842,26 @@ function checkBlockFieldProps(
   const spec = REACT_FIELD_SPECS[tag];
   if (spec) {
     const { own, queried } = reactFieldRefs(spec, values, path);
-    out.push(...checkFieldRefs(own, objectName, objectFields, where));
-    out.push(...checkFieldRefs(queried, objectName, objectFields, where, 'queried'));
+    out.push(
+      ...checkFieldRefs(own, objectName, objectFields, where, 'skipped', unprovisionedAnchors),
+    );
+    out.push(
+      ...checkFieldRefs(queried, objectName, objectFields, where, 'queried', unprovisionedAnchors),
+    );
   }
 
   if (tag === 'ObjectForm') {
     const raw = values.get('subforms');
     const subs = subformFieldRefs(raw === NOT_STATIC ? undefined : raw, `${path}${PATH_SEP}subforms`);
     for (const sub of subs.child) {
-      out.push(...checkFieldRefs(sub.refs, sub.objectName, objectFields, where));
+      out.push(
+        ...checkFieldRefs(sub.refs, sub.objectName, objectFields, where, 'skipped', unprovisionedAnchors),
+      );
     }
     // `totalField` names the FORM object's field the child sum rolls up into.
-    out.push(...checkFieldRefs(subs.parent, objectName, objectFields, where));
+    out.push(
+      ...checkFieldRefs(subs.parent, objectName, objectFields, where, 'skipped', unprovisionedAnchors),
+    );
   }
 
   // `<Block type="element:form">` renders the registered component the author
@@ -836,6 +875,8 @@ function checkBlockFieldProps(
         objectName,
         objectFields,
         where,
+        'skipped',
+        unprovisionedAnchors,
       ),
     );
   }
@@ -921,6 +962,9 @@ function localComponentNames(tsc: typeof ts, sf: ts.SourceFile): Set<string> {
 export function validateReactPageProps(stack: AnyRec): ReactPropFinding[] {
   const findings: ReactPropFinding[] = [];
   const objectFields = indexObjectFields(stack);
+  // [#8340] The provenance index alongside the existence one — same keying,
+  // asked on the path where the existence check stays silent.
+  const unprovisionedAnchors = indexUnprovisionedAnchors(stack);
   // A separate index for the searchableFields check, built by the metadata
   // rule's own indexer: it keeps `null` for an object with no authored field
   // map (external / datasource-introspected), a distinction `indexObjectFields`
@@ -1020,7 +1064,7 @@ export function validateReactPageProps(stack: AnyRec): ReactPropFinding[] {
           // A spread can supply any of the bindings below, so the values we
           // can see are an incomplete picture — skip rather than guess.
           if (tag === 'ObjectChart' && !hasSpread) {
-            checkObjectChart({ values, where, path }, objectFields, findings);
+            checkObjectChart({ values, where, path }, objectFields, findings, unprovisionedAnchors);
           }
           // <ListView searchableFields> names fields on the bound object — the
           // react-surface twin of `searchable-field-unknown` (#4329) and, as a
@@ -1048,7 +1092,7 @@ export function validateReactPageProps(stack: AnyRec): ReactPropFinding[] {
           // non-static value is unresolvable rather than wrong.
           if (!hasSpread) {
             findings.push(
-              ...checkBlockFieldProps(tag, values, objectFields, where, path),
+              ...checkBlockFieldProps(tag, values, objectFields, where, path, unprovisionedAnchors),
             );
           }
         }
