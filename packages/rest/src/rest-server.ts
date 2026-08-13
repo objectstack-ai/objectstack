@@ -9668,8 +9668,21 @@ export class RestServer {
             // the evaluation needs to be told WHICH object and WHY, not handed
             // an opaque 500. Same code→status pair the per-record shares routes
             // already publish (`respondSharingError`), so no new contract.
+            //
+            // ⚠️ Built through the SHARED `sendError` envelope, unlike the three
+            // arms above it. Those are #7035's declared debt — `code` beside
+            // `error` instead of inside it, so `body.error.code` reads
+            // `undefined` — held down by the `check:route-envelope` ratchet,
+            // which only ticks DOWN. A new arm copying its neighbours' shape is
+            // exactly what that ratchet exists to stop, so this one answers the
+            // envelope `BaseResponseSchema` declares. The asymmetry is the
+            // ratchet working; converting the other three is #8111's unfinished
+            // half for this route family, not a rider on this card.
             if (msg.startsWith('SHARING_NOT_ENABLED')) {
-                return res.status(422).json({ code: 'SHARING_NOT_ENABLED', error: msg.replace(/^SHARING_NOT_ENABLED:\s*/, '') });
+                return sendEnvelopeError(
+                    res, 422, 'SHARING_NOT_ENABLED',
+                    msg.replace(/^SHARING_NOT_ENABLED:\s*/, ''),
+                );
             }
             logError(`[REST] sharing-rule ${defaultCode}:`, err);
             return res.status(500).json({ code: defaultCode, error: msg.slice(0, 500) });

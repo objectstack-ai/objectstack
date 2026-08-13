@@ -23,16 +23,21 @@
  * (`respondSharingError`'s `['SHARING_NOT_ENABLED', 422]`), so no new contract
  * is introduced — only a second route family reaching an existing one.
  *
- * ## The envelope SHAPE here is deliberately not the subject
+ * ## Why this arm's envelope differs from its neighbours
  *
- * `registerSharingRuleEndpoints` still answers the pre-#8111 flat dialect
- * (`{ code, error: '<string>' }`) on every one of its arms; #8111 converted the
- * per-record shares family only. These cases therefore assert the STATUS and
- * the code VALUE — the substance of the mapping — and read the code through a
- * helper that accepts either position, so the eventual ADR-0112 D5 conversion
- * of this route family changes one helper rather than going red on a card that
- * was never about the shape. What they do NOT do is pin the retired dialect as
- * if it were the contract.
+ * `registerSharingRuleEndpoints`'s other refusal arms answer the pre-#8111 flat
+ * dialect (`{ code, error: '<string>' }`) — `code` beside `error` instead of
+ * inside it, so `body.error.code` reads `undefined`. #8111 converted the
+ * per-record shares family only; these three are declared debt, held down by
+ * the `check:route-envelope` ratchet, which only ticks DOWN. A new arm copying
+ * its neighbours' shape is precisely what that ratchet exists to stop (it
+ * caught this one), so the arm added here is built through the shared
+ * `sendError` and answers the envelope `BaseResponseSchema` declares.
+ *
+ * The cases below therefore assert the NESTED pair for the new arm, and read
+ * the siblings through a position-tolerant helper — they are pinned for their
+ * STATUS, which is all this card claims about them, so converting them later
+ * does not go red on a card that was never about their shape.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -116,7 +121,13 @@ describe('[#8207] POST /sharing/rules/:idOrName/evaluate — the D7 inertness re
             answer.status,
             `expected 422, got ${answer.status} with body ${JSON.stringify(answer.body)}`,
         ).toBe(422);
-        expect(codeOf(answer.body)).toBe('SHARING_NOT_ENABLED');
+        // The ADR-0112 D5 pair at the position the schema declares — NESTED,
+        // because this arm is built through the shared `sendError` rather than
+        // copying its neighbours' retired flat dialect (see the file header).
+        expect(answer.body?.error?.code).toBe('SHARING_NOT_ENABLED');
+        expect(typeof answer.body?.error?.message).toBe('string');
+        expect(answer.body).not.toHaveProperty('code');
+        expect(answer.body?.success).toBe(false);
     });
 
     it('the message names the object and survives, minus the internal prefix', async () => {
