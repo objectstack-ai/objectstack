@@ -918,18 +918,47 @@ function refusalKindOf(fn, sf, envelopeNames, localFns, methodFns) {
     return hit;
   };
 
-  let earliest = Infinity;
-  const walkThrows = (n) => {
-    if (ts.isThrowStatement(n) && n.expression) {
-      const k = reaches(n.expression, 1);
-      if (k) {
-        if (k === 'shared' || !kind) kind = kind === 'shared' ? 'shared' : k;
-        earliest = Math.min(earliest, n.getStart(sf));
+  /** Does this function body throw a not-found DIRECTLY? */
+  const throwsDirectly = (node) => {
+    let k = null;
+    const visit = (n) => {
+      if (k === 'shared') return;
+      if (ts.isThrowStatement(n) && n.expression) {
+        const got = reaches(n.expression, 0);
+        if (got === 'shared') { k = 'shared'; return; }
+        if (got && !k) k = got;
       }
-    }
-    ts.forEachChild(n, walkThrows);
+      ts.forEachChild(n, visit);
+    };
+    visit(node);
+    return k;
   };
-  if (fn.body) walkThrows(fn.body);
+
+  let earliest = Infinity;
+  const note = (k, pos) => {
+    if (!k) return;
+    if (k === 'shared' || !kind) kind = kind === 'shared' ? 'shared' : k;
+    earliest = Math.min(earliest, pos);
+  };
+
+  const walk = (n) => {
+    // A throw in the seam's own body.
+    if (ts.isThrowStatement(n) && n.expression) note(reaches(n.expression, 1), n.getStart(sf));
+    // Or ONE hop: a call to a same-file helper that throws the not-found
+    // itself. `protocol`'s siblings refuse through
+    // `this.assertRecordExists(object, id)`, whose throw never appears in the
+    // seam at all — a scan reading only the seam's own `throw` statements
+    // would call that seam unrefusing and redden correct code.
+    if (ts.isCallExpression(n)) {
+      const e = n.expression;
+      const name = ts.isIdentifier(e) ? e.text
+        : (ts.isPropertyAccessExpression(e) && ts.isIdentifier(e.name) ? e.name.text : null);
+      const helper = name ? (localFns.get(name) ?? methodFns.get(name)) : null;
+      if (helper && helper !== fn && helper.body) note(throwsDirectly(helper.body), n.getStart(sf));
+    }
+    ts.forEachChild(n, walk);
+  };
+  if (fn.body) walk(fn.body);
   return { kind, at: earliest };
 }
 
@@ -1740,6 +1769,144 @@ const engine = {
       .some((f) => f.file === 'packages/plugins/plugin-sharing/src/sharing-rule.test.ts'),
   );
 
+  // ── The CONSUMER SEAMS (#8194) ────────────────────────────────────────────
+  //
+  // Driven on both sides of all four decisions the seam scan makes — the three
+  // conjuncts that admit a seam, and the refusal that clears it. The negative
+  // fixtures are A/B pairs wherever the claim is "not reported": a criterion
+  // that silenced everything would pass every bare negative here, so each one
+  // is the SAME source with one thing changed, and the control asserts the
+  // seam IS found without it.
+
+  const ENV = "import { recordNotFoundError } from '@objectstack/core';\n";
+  const seamSrc = (body, header = '') => `${header}
+class Ingress {
+  async updateData(request: { object: string, id: string, data: any }) {
+${body}
+  }
+}
+`;
+
+  // The shape every seam in the tree has: refuse, then answer.
+  let s = scanSeams('seam.ts', seamSrc(`
+    const current = await this.probe(request.object, request.id);
+    if (!current) throw recordNotFoundError(request.object, request.id);
+    await this.engine.update(request.object, request.data, { where: { id: request.id } });
+    return { object: request.object, id: request.id, success: true };`, ENV));
+  expect('a seam that refuses through the shared envelope is clean',
+    s.length === 1 && s[0].refusal === 'shared');
+
+  // ⚠️ THE DELIVERABLE'S PROOF (#8194's whole point): the same seam with the
+  // refusal deleted must be REPORTED. This is the hypothetical new consumer
+  // written without a probe — nothing else in this file catches it, and if this
+  // assertion ever passes vacuously the gate is worth nothing.
+  s = scanSeams('seam.ts', seamSrc(`
+    await this.engine.update(request.object, request.data, { where: { id: request.id } });
+    return { object: request.object, id: request.id, success: true };`, ENV));
+  expect('a seam that answers a receipt without refusing is reported',
+    s.length === 1 && s[0].refusal === null);
+
+  // Conjunct 2: an id read off a row this function already fetched cannot name
+  // a missing record. `reassignOrphanedMetadata` and `rebuildApproverIndex` are
+  // this shape and must stay out — they answer receipts and probe nothing.
+  const rowIdBody = `
+    const row = await this.engine.findOne(request.object, {});
+    await this.engine.update(request.object, request.data, { where: { id: row.id } });
+    return { object: request.object, id: row.id, success: true };`;
+  expect('an id read from a row is not a seam', scanSeams('r.ts', seamSrc(rowIdBody)).length === 0);
+  expect('…and the SAME function on a caller-supplied id IS a seam',
+    scanSeams('r.ts', seamSrc(rowIdBody.replace(/row\.id/g, 'request.id'))).length === 1);
+
+  // Conjunct 3: no receipt, no harm. `sql-http-outbox.ack(id)` is this shape,
+  // and the engine funnel refuses its ghost id anyway.
+  const noReceiptBody = `
+    await this.engine.update(request.object, request.data, { where: { id: request.id } });`;
+  expect('a by-id write that answers nothing is not a seam',
+    scanSeams('n.ts', seamSrc(noReceiptBody)).length === 0);
+  expect('…and the SAME write with a receipt IS a seam',
+    scanSeams('n.ts', seamSrc(`${noReceiptBody}
+    return { object: request.object, id: request.id, success: true };`)).length === 1);
+
+  // Conjunct 1, the scalar test: a `$in` predicate is a multi-row write, and a
+  // predicate write matching zero rows is legitimately "0 rows affected" — the
+  // line ObjectQL itself draws ("Scope: the BY-ID branch only").
+  expect('a multi-row $in predicate is not a by-id write',
+    scanSeams('m.ts', seamSrc(`
+    await this.engine.update(request.object, request.data, { where: { id: { $in: request.ids } } });
+    return { object: request.object, success: true };`)).length === 0);
+
+  // Discovery form 2 — the one the card's OWN named seam needs. Both
+  // `protocol.updateData` and `deleteData` bind `const opts = { where: { id:
+  // request.id } }` and pass the variable, so a scan reading only inline
+  // literals discovers neither and reports a tree it never looked at.
+  s = scanSeams('c.ts', seamSrc(`
+    const opts: any = { where: { id: request.id } };
+    await this.engine.update(request.object, request.data, opts);
+    return { object: request.object, id: request.id, success: true };`, ENV));
+  expect('the const-bound options form is discovered', s.length === 1 && s[0].refusal === null);
+
+  // Discovery form 3 — `callData`'s `findOpts({ where: { id } })` wrapper.
+  s = scanSeams('w.ts', seamSrc(`
+    await this.engine.update(request.object, request.data, findOpts({ where: { id: request.id } }));
+    return { object: request.object, id: request.id, record: request.data };`, ENV));
+  expect('the one-wrapper-call options form is discovered', s.length === 1);
+
+  // Refusal mechanism 2 — `protocol.deleteData` reads the DRIVER's boolean
+  // rather than probing. Mechanism-agnostic is the point: a gate demanding a
+  // probe would redden this correct code.
+  s = scanSeams('b.ts', seamSrc(`
+    const opts: any = { where: { id: request.id } };
+    const deleted = await this.engine.delete(request.object, opts);
+    if (deleted === false) throw recordNotFoundError(request.object, request.id);
+    return { object: request.object, id: request.id, success: true };`, ENV));
+  expect('a driver-boolean refusal counts, without any probe',
+    s.length === 1 && s[0].refusal === 'shared');
+
+  // One helper deep, through a `this` METHOD — `assertRecordExists` is not an
+  // import, so a scan that only followed top-level functions would miss it.
+  s = scanSeams('h.ts', `${ENV}
+class Ingress {
+  private async assertRecordExists(object: string, id: string) {
+    const current = await this.engine.findOne(object, {});
+    if (!current) throw recordNotFoundError(object, id);
+  }
+  async updateData(request: { object: string, id: string, data: any }) {
+    await this.assertRecordExists(request.object, request.id);
+    await this.engine.update(request.object, request.data, { where: { id: request.id } });
+    return { object: request.object, id: request.id, success: true };
+  }
+}
+`);
+  expect('a refusal one method-hop deep reaches the shared envelope',
+    s.length === 1 && s[0].refusal === 'shared');
+
+  // The envelope attribution must SEPARATE, or the `local` row that keeps the
+  // MCP divergence visible degrades into "everything is shared".
+  s = scanSeams('l.ts', seamSrc(`
+    const current = await this.probe(request.object, request.id);
+    if (!current) throw new Error('not found');
+    await this.engine.update(request.object, request.data, { where: { id: request.id } });
+    return { object: request.object, id: request.id, success: true };`));
+  expect('a locally minted error is NOT the shared envelope',
+    s.length === 1 && s[0].refusal === 'local');
+
+  // A refusal AFTER the receipt is no refusal — the caller has already been
+  // told the write landed.
+  s = scanSeams('a.ts', seamSrc(`
+    await this.engine.update(request.object, request.data, { where: { id: request.id } });
+    if (request.id) return { object: request.object, id: request.id, success: true };
+    throw recordNotFoundError(request.object, request.id);`, ENV));
+  expect('a refusal AFTER the receipt does not count', s.length === 1 && s[0].refusal === null);
+
+  // Wiring: the seam scan must reach the real tree, and specifically the seam
+  // the card names. Deliberately NOT asserted: that every seam refuses — that
+  // is the job of the run this self-test gates.
+  const { seamFiles } = audit();
+  expect('the seam scan discovers seams in the real tree', seamFiles.length > 0);
+  expect('discovery reaches protocol.updateData/deleteData — the seam #8194 names',
+    seamFiles.some((f) => f.file === 'packages/metadata-protocol/src/protocol.ts'
+      && f.seams.some((x) => x.fn === 'updateData') && f.seams.some((x) => x.fn === 'deleteData')));
+
   if (failures.length) {
     for (const f of failures) console.error(`  x self-test: ${f}`);
     console.error(`\ncheck-engine-double-contract --self-test: ${failures.length} failure(s).\n`);
@@ -1752,7 +1919,12 @@ const engine = {
       + "one helper deep) and never the other slice's, rejects unused imports, hand-mirrored guards "
       + 'and look-alikes, keeps an engine double in scope however many by-id helpers it declares, '
       + 'reports EXACTLY the engine double out of a fixture holding both shapes, and proves '
-      + 'discovery reaches the real tree for every slice.',
+      + 'discovery reaches the real tree for every slice; and, on the CONSUMER SEAMS, admits a '
+      + 'by-id write only when the id is caller-supplied AND a receipt is answered, reads the '
+      + 'inline / const-bound / one-wrapper options forms, refuses to read a $in predicate as '
+      + 'by-id, accepts a probe, a driver boolean and a one-method-hop helper as refusals alike, '
+      + 'separates the shared envelope from a local mint, discounts a refusal that lands after '
+      + 'the receipt, and REPORTS the seam that answers without refusing at all.',
   );
 }
 
