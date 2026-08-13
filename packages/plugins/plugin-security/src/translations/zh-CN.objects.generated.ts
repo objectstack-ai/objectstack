@@ -184,7 +184,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       name: {
         label: "API 名称",
-        help: "权限集的唯一机器名称"
+        help: "权限集的机器名称，在每个组织内唯一"
       },
       description: {
         label: "描述"
@@ -273,7 +273,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           },
           name: {
             label: "新 API 名称",
-            helpText: "唯一的 snake_case 机器名称"
+            helpText: "snake_case 机器名称，在每个组织内唯一"
           }
         }
       }

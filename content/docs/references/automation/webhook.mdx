@@ -58,7 +58,7 @@ const result = WebhookSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Webhook unique name (lowercase snake_case) |
+| **name** | `string` | ✅ | Webhook name, unique per organization (lowercase snake_case) |
 | **label** | `string` | optional | Human-readable webhook label |
 | **object** | `string` | optional | Object whose record events (create/update/delete, bulk_update/bulk_delete) trigger this webhook |
 | **triggers** | `Enum<'create' \| 'update' \| 'delete' \| 'bulk_update' \| 'bulk_delete'>[]` | optional | Events that trigger execution |

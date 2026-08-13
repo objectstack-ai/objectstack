@@ -19,7 +19,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       name: {
         label: "Nombre",
-        help: "Nombre snake_case único; se usa en los registros y en la auditoría."
+        help: "Nombre snake_case, único por organización; se usa en los registros y en la auditoría."
       },
       label: {
         label: "Nombre visible"

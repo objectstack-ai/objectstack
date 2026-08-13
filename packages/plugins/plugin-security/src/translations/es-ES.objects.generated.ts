@@ -184,7 +184,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       name: {
         label: "Nombre de API",
-        help: "Nombre técnico único del conjunto de permisos."
+        help: "Nombre técnico del conjunto de permisos, único por organización."
       },
       description: {
         label: "Descripción"
@@ -273,7 +273,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           },
           name: {
             label: "Nuevo nombre de API",
-            helpText: "Nombre de máquina snake_case único"
+            helpText: "Nombre de máquina snake_case, único por organización"
           }
         }
       }

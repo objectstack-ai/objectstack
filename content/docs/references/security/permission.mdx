@@ -121,7 +121,7 @@ const result = AdminScopeSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Permission set unique name (lowercase snake_case) |
+| **name** | `string` | ✅ | Permission set name, unique per organization (lowercase snake_case) |
 | **label** | `string` | optional | Display label |
 | **description** | `string` | optional | Human-readable description shown in Setup (persisted as sys_permission_set.description) |
 | **packageId** | `string` | optional | [ADR-0086 D3] Owning package id for a package-shipped set (absent = env-authored) |
