@@ -3669,7 +3669,7 @@ describe('AuthManager', () => {
     });
   });
 
-  // ADR-0081 D1 — default active-org stamp on session create.
+  // ADR-0093 D9 — default active-org stamp on session create.
   describe('composeDatabaseHooks – session.create.before active-org default', () => {
     const OWNER_ROW = { id: 'm1', organization_id: 'org_owner', user_id: 'u1', role: 'owner' };
     const MEMBER_ROW = { id: 'm2', organization_id: 'org_member', user_id: 'u1', role: 'member' };
