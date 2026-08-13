@@ -188,11 +188,17 @@ export function isCanonicalMemberRole(raw: unknown): boolean {
 // Write path — the hooks
 // ---------------------------------------------------------------------------
 
+/**
+ * The kernel `Logger` surface this module uses, structurally — including
+ * `error`'s three-parameter shape (`message, error?, meta?`), which is what the
+ * kernel's own contract declares. Spelling it any other way makes `ctx.logger`
+ * unassignable at the call site.
+ */
 type LoggerLike = {
-  info?(msg: string, meta?: Record<string, unknown>): void;
-  warn?(msg: string, meta?: Record<string, unknown>): void;
-  error?(msg: string, meta?: Record<string, unknown>): void;
-  debug?(msg: string, meta?: Record<string, unknown>): void;
+  info?(msg: string, meta?: Record<string, any>): void;
+  warn?(msg: string, meta?: Record<string, any>): void;
+  error?(msg: string, error?: Error, meta?: Record<string, any>): void;
+  debug?(msg: string, meta?: Record<string, any>): void;
 };
 
 export interface MemberRoleCanonicalizationOptions {
@@ -469,6 +475,7 @@ export async function canonicalizeStoredMemberRoles(
         `better-auth, so an org admin can remove or demote them (#8317). Fix: correct the row ` +
         `(lower-case and trim the role value) and restart, or re-run the boot pass — it is ` +
         `idempotent and converges.`,
+      undefined,
       { spellings: result.census.filter((c) => c.rewritten < c.count && c.canonical !== null).map((c) => ({ stored: c.stored, rows: c.count - c.rewritten })) },
     );
   }

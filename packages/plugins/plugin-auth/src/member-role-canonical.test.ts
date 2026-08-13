@@ -116,7 +116,6 @@ function vendorOwnerTest(branch: VendorBranch): (role: unknown, creatorRole: str
     );
   }
   const expression = `role${match[1] ?? ''}${match[2] ?? ''}`;
-  // eslint-disable-next-line no-new-func
   return new Function('role', 'creatorRole', `return ${expression};`) as (
     role: unknown,
     creatorRole: string,
