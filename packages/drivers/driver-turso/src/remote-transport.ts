@@ -28,6 +28,9 @@ import {
 // `SqlDriver`'s local emitter so this transport and its local twin cannot fork
 // on what a pattern means (the fork `turso-local-remote-*` suites exist to catch).
 import { hasDanglingLikeEscape, likePatternToGlobPattern } from '@objectstack/spec/data';
+// [#8220] The read-scope provenance mark's consumer half — same resolution the
+// SqlDriver family applies, so which transport answered stays unobservable.
+import { resolveFilterSubtreeProvenance } from '@objectstack/spec/data';
 // The DECLARED aggregate vocabulary (#5907) — read from the spec so this
 // transport's "the protocol has no such function" refusal cannot drift from what
 // `AggregationNodeSchema.function` admits, nor from the local driver's twin.
@@ -562,6 +565,16 @@ function invalidFilterError(message: string): Error {
 const WITHHELD_FILTER_DIAGNOSTIC = Symbol.for('objectstack.driver-sql.withheldFilterDiagnostic');
 
 /**
+ * [#8220] The other two keys of `driver-sql`'s withheld-refusal carrier, under
+ * the SAME global-registry names for the same reason as the diagnostic above:
+ * one deployment, two compilers, one error shape. `…Subtree` holds the filter
+ * node the refusal was raised from; `…AuthorText` holds the full message an
+ * `'author'`-marked subtree gets back.
+ */
+const WITHHELD_FILTER_SUBTREE = Symbol.for('objectstack.driver-sql.withheldFilterSubtree');
+const WITHHELD_FILTER_AUTHOR_TEXT = Symbol.for('objectstack.driver-sql.withheldFilterAuthorText');
+
+/**
  * [#7929, maintainer ruling 2026-08-12] An `INVALID_FILTER` whose caller-visible
  * message is `message` and whose operand-naming half is `diagnostic`.
  *
@@ -574,9 +587,21 @@ const WITHHELD_FILTER_DIAGNOSTIC = Symbol.for('objectstack.driver-sql.withheldFi
  * withholds the same way. Leaving one mode disclosing would make the exposure a
  * property of the connection string.
  */
-function withheldInvalidFilterError(message: string, diagnostic: string): Error {
+function withheldInvalidFilterError(
+  message: string,
+  diagnostic: string,
+  subtree?: unknown,
+  authorText?: string,
+): Error {
   const err = invalidFilterError(message);
   Object.defineProperty(err, WITHHELD_FILTER_DIAGNOSTIC, { value: diagnostic, enumerable: false });
+  if (subtree !== null && typeof subtree === 'object') {
+    Object.defineProperty(err, WITHHELD_FILTER_SUBTREE, { value: subtree, enumerable: false });
+  }
+  Object.defineProperty(err, WITHHELD_FILTER_AUTHOR_TEXT, {
+    value: authorText ?? diagnostic,
+    enumerable: false,
+  });
   return err;
 }
 
@@ -1732,6 +1757,50 @@ export class RemoteTransport {
     object: string,
     filters: any,
     path = 'where',
+  ): { whereClauses: string; args: any[] } {
+    // [#8220] Resolve a redacted refusal's provenance at the OUTERMOST frame
+    // only — `path === 'where'` is true exactly for the five external call
+    // sites, and the root they hand over is the tree the read-scope merge
+    // boundaries marked. Recursive frames rethrow untouched so one refusal is
+    // resolved once, against the whole tree. Fail-closed like the SqlDriver
+    // seam: 'author' swaps in the full text; 'policy', unmarked, unreachable
+    // and ambiguous all keep the redaction.
+    if (path === 'where') {
+      try {
+        return this.compileWhereSQL(object, filters, path);
+      } catch (err) {
+        throw this.resolveWithheldFilterRefusal(err, filters);
+      }
+    }
+    return this.compileWhereSQL(object, filters, path);
+  }
+
+  /**
+   * [#8220] The SqlDriver seam's remote twin: what a redacted refusal may say.
+   * `'author'` — positively marked by a merge boundary, resolved against this
+   * query's own `where` root — gets the full author-facing text back, same
+   * identity (`INVALID_FILTER` / 400). Everything else (policy, unmarked,
+   * ambiguous, no subtree carried) keeps the redaction; the mark is permission
+   * to reveal, never a requirement to prove secrecy.
+   */
+  private resolveWithheldFilterRefusal(err: unknown, rootFilter: unknown): unknown {
+    if (err === null || (typeof err !== 'object' && typeof err !== 'function')) return err;
+    const carrier = err as Record<symbol, unknown>;
+    if (typeof carrier[WITHHELD_FILTER_DIAGNOSTIC] !== 'string') return err;
+    const subtree = carrier[WITHHELD_FILTER_SUBTREE];
+    const provenance =
+      subtree === undefined ? null : resolveFilterSubtreeProvenance(rootFilter, subtree);
+    if (provenance !== 'author') return err;
+    const authorText = carrier[WITHHELD_FILTER_AUTHOR_TEXT];
+    return invalidFilterError(
+      typeof authorText === 'string' ? authorText : (carrier[WITHHELD_FILTER_DIAGNOSTIC] as string),
+    );
+  }
+
+  private compileWhereSQL(
+    object: string,
+    filters: any,
+    path: string,
   ): { whereClauses: string; args: any[] } {
     // "No filter" is spelled by ABSENCE, and that is the only spelling. All
     // five call sites hand this method `query?.where` (`query.where` in
@@ -2994,6 +3063,9 @@ export class RemoteTransport {
         `[RemoteTransport] Cross-field comparison is not supported in remote mode: ${target} ` +
         `${shown} compares a column against another column instead of against a value.`;
       this.diagnosticSink?.(diagnostic);
+      // [#8220] `value` is the `{ $field }` node itself — the reference the
+      // provenance resolver can locate under the query's `where` root, so an
+      // author-marked subtree gets the naming half back at the entry seam.
       return withheldInvalidFilterError(
         `[RemoteTransport] Cross-field comparison is not supported in remote mode: this filter ` +
           `compares a column against another column instead of against a value. The query DSL ` +
@@ -3003,6 +3075,9 @@ export class RemoteTransport {
           `after retrieval. The columns and the operator this filter used are withheld from the ` +
           `message (#7929); the full diagnostic is in the server log.`,
         diagnostic,
+        value,
+        `${diagnostic} No executor compiles this form in remote mode — compare against a ` +
+          `literal, or select both columns and compare after retrieval.`,
       );
     }
     return invalidFilterError(
