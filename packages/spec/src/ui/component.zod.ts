@@ -1601,6 +1601,8 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
   data: z.array(z.unknown()).optional().describe('Static inline rows — bypasses the object query'),
   staticData: z.array(z.unknown()).optional().describe('Alternate spelling of `data` the renderer also reads'),
 }));
+/** Author state (ADR-0122: the bare name is the author state). */
+export type ObjectGridProps = z.input<typeof ObjectGridPropsSchema>;
 
 /**
  * `object-metric` (objectui `plugin-dashboard/src/ObjectMetricWidget.tsx` @
@@ -1639,6 +1641,8 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
   drillDown: z.unknown().optional().describe('Click-through drill config — opens the underlying records'),
   compareTo: z.unknown().optional().describe("Period-over-period comparison ({ kind: 'previousPeriod' | 'previousYear' })"),
 }));
+/** Author state (ADR-0122: the bare name is the author state). */
+export type ObjectMetricProps = z.input<typeof ObjectMetricPropsSchema>;
 
 /**
  * `object-kanban` (objectui `plugin-kanban/src/ObjectKanban.tsx` +
@@ -1679,6 +1683,8 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
   coverImageField: z.string().optional().describe('Image field rendered as the card cover'),
   conditionalFormatting: z.unknown().optional().describe('Card conditional formatting rules'),
 }));
+/** Author state (ADR-0122: the bare name is the author state). */
+export type ObjectKanbanProps = z.input<typeof ObjectKanbanPropsSchema>;
 
 /**
  * The flat per-field spellings `ObjectCalendar` keeps reading as a
@@ -1728,6 +1734,8 @@ export const ObjectCalendarPropsSchema = lazySchema(() => strictObject({
   locale: z.string().optional().describe('Locale override for the calendar chrome'),
   loading: z.boolean().optional().describe('External loading state (honoured only alongside `data`)'),
 }));
+/** Author state (ADR-0122: the bare name is the author state). */
+export type ObjectCalendarProps = z.input<typeof ObjectCalendarPropsSchema>;
 
 /**
  * `object-form` (objectui `plugin-form/src/ObjectForm.tsx` @ `eb7f586b`, plus
@@ -1789,6 +1797,8 @@ export const ObjectFormPropsSchema = lazySchema(() => strictObject({
   initialData: z.record(z.string(), z.unknown()).optional().describe('Alternate spelling of `initialValues` the renderer also reads'),
   mobile: z.unknown().optional().describe('Mobile presentation overrides'),
 }));
+/** Author state (ADR-0122: the bare name is the author state). */
+export type ObjectFormProps = z.input<typeof ObjectFormPropsSchema>;
 
 /**
  * `object-master-detail-form` (objectui `plugin-form/src/MasterDetailForm.tsx`
@@ -1819,6 +1829,8 @@ export const ObjectMasterDetailFormPropsSchema = lazySchema(() => strictObject({
   initialData: z.record(z.string(), z.unknown()).optional().describe('Alternate spelling of `initialValues` the renderer also reads'),
   taxRateField: z.string().optional().describe('Child field holding the per-line tax rate (line-items totals)'),
 }));
+/** Author state (ADR-0122: the bare name is the author state). */
+export type ObjectMasterDetailFormProps = z.input<typeof ObjectMasterDetailFormPropsSchema>;
 
 /**
  * ----------------------------------------------------------------------
