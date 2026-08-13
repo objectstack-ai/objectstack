@@ -191,6 +191,14 @@
 import { ExpressionEngine, collectCelRootIdentifiers } from '@objectstack/formula';
 import type { Expression } from '@objectstack/spec';
 import { AUDIT_PROVENANCE_FIELDS, RUNTIME_OWNED_FIELD_TYPES } from '@objectstack/spec/data';
+// [#8215] The canonical spelling of the primary-key column — the sanctioned use
+// of this registry ("what is the canonical spelling of the column that plays
+// role X"). The role is structural, not per-object: the driver provisions `id`
+// as the primary key on every physical table (`resolveInjectedSystemColumns`
+// reports it unconditionally, even under `systemFields: false`), and the
+// engine's whole by-id addressing reads that key (`idAddressesThisRow`,
+// `addressKey: 'id'`).
+import { SystemFieldName } from '@objectstack/spec/system';
 import Ajv, { type ValidateFunction } from 'ajv';
 // #5029 — `format` is NOT built into ajv 8; it ships in this separate package.
 // See the `const ajv` note below for why the runtime registers it.
@@ -1400,8 +1408,43 @@ const AUDIT_TIMELINE_FIELDS: ReadonlySet<string> = new Set(AUDIT_PROVENANCE_FIEL
  * (`organization_id` / tenancy, generated columns): a historical import may
  * reinstate established facts, but must not forge tenancy or system-generated
  * values.
+ *
+ * ### [#8215] …and NEVER the row's own primary key
+ *
+ * The second limb used to read every platform object's `id` as an
+ * author-declared business field, because platform objects declare it
+ * `readonly: true` and nothing flags it `system` (`sys_user_preference`:
+ * `Field.text({ label: 'Preference ID', required: true, readonly: true })`).
+ * So on a `preserveAudit` by-id update the strip KEPT `id` and the driver
+ * received `SET id = 'rec_1' WHERE id = 'rec_1'` — from exactly the caller
+ * least able to diagnose it: a bulk historical import whose payload never
+ * named an `id` at all (the REST ingress folds the path id into every update
+ * body, #6479).
+ *
+ * The primary key fails both of the whitelist's own tests:
+ *  - it is the ADDRESS of the write, not a fact being restored — #3493 scoped
+ *    this flag to "reinstate the original timeline", and a row's address is
+ *    not part of its timeline;
+ *  - the strip protects it for a STORE-PORTABILITY reason, not an authorship
+ *    one — a same-value primary-key write is a no-op on SQL but an outright
+ *    rejection on stores with immutable primary keys (#6435 / #8141), so
+ *    "the author marked it readonly, the importer may reinstate it" never
+ *    described this column.
+ *
+ * Keyed on {@link SystemFieldName.ID}, the platform-wide primary-key role:
+ * the driver provisions `id` on every physical table, unconditionally
+ * (`resolveInjectedSystemColumns` reports it even under `systemFields:
+ * false`), so the name IS the role — there is no per-field `primaryKey`
+ * marker in the spec for a def-based test to read. Consulted before the
+ * audit-family limb to state priority, not to change it (`id` is not in the
+ * family). This also governs {@link stripRuntimeOwnedFields}: an `autonumber`
+ * primary key seeded under a `preserveAudit` insert is now stripped like any
+ * other caller-supplied record number — #5503's "reinstate legacy record
+ * numbers" case is the business identifier (`account_number`), which stays
+ * preservable; the record's address never was one.
  */
 function isPreservableUnderAudit(name: string, def: ConditionalFieldDef): boolean {
+  if (name === SystemFieldName.ID) return false;
   if (AUDIT_TIMELINE_FIELDS.has(name)) return true;
   return def.system !== true;
 }

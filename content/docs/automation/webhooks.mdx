@@ -141,7 +141,11 @@ at enqueue and replayed byte-for-byte by retries and redelivery, so the HMAC has
 exactly one correct value: the outbox computes it once at enqueue from the
 subscriber's `secret` and stores only the result — the same `sha256=<hex>` the
 receiver is handed on the wire. Reading a delivery row tells you what was sent,
-not how to forge it.
+not how to forge it. The same rule covers the authored headers: `headers_json`
+is the ordinary place a credential goes (`Authorization: Bearer …`), so the
+column is `internal` — omitted from every generic read, with no system
+carve-out — and only the dispatcher recovers it, through the engine's
+privileged accessor, when it claims the row for sending.
 
 | Field             | Type     | Notes                                                                        |
 |-------------------|----------|-----------------------------------------------------------------------------|
@@ -152,7 +156,7 @@ not how to forge it.
 | `label`           | text     | Diagnostic label / event type — surfaced on `X-Objectstack-Event`.          |
 | `url`             | text     | Target URL, snapshotted at enqueue so config edits do not rewrite live rows. |
 | `method`          | text     | HTTP method.                                                                 |
-| `headers_json`    | textarea | Custom headers, serialised.                                                  |
+| `headers_json`    | textarea | Custom headers, serialised. `internal` — never returned on the generic data path (list, get, an explicit `?select=`); recovered only by the dispatcher's privileged read at claim time. |
 | `signature`       | text     | The `X-Objectstack-Signature` value sent with this delivery, `sha256=<hex>` — computed at enqueue; the secret is not stored (see §6). |
 | `timeout_ms`      | number   | Per-attempt timeout.                                                         |
 | `payload_json`    | textarea | The full payload that will be POSTed.                                        |

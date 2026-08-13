@@ -382,6 +382,72 @@ export default class Serve extends Command {
   }
 
   /**
+   * Identities of the local-install surface (`MarketplaceInstallLocalPlugin`),
+   * matched EXACTLY by {@link Serve.providesCapability}.
+   *
+   * Used by the offline arm of the marketplace wiring (#8343) to leave a host
+   * config that already wires its own install-local strictly alone. Declared
+   * here rather than inline so the same drift test that pins
+   * CAPABILITY_PROVIDERS can pin these against the real plugin.
+   */
+  static readonly INSTALL_LOCAL_IDENTITIES: readonly string[] = [
+    'com.objectstack.runtime.marketplace-install-local',
+    'MarketplaceInstallLocalPlugin',
+  ];
+
+  /**
+   * The `controlPlaneUrl` the offline install-local mount is constructed with.
+   *
+   * A named constant rather than an inline `'off'` so a test can assert the
+   * property the call site depends on — `resolveCloudUrl(this) === ''`. The
+   * tempting value is the empty `marketplaceUrl` the wiring block already
+   * holds, and it is wrong in a way no local reading reveals: `resolveCloudUrl`
+   * treats `''` as "unset" and substitutes the PUBLIC default cloud, so an
+   * air-gapped runtime's catalog branch would dial out instead of answering
+   * 503. Spelled as one of the documented disable sentinels, it resolves to
+   * no cloud at all.
+   */
+  static readonly OFFLINE_CONTROL_PLANE = 'off';
+
+  /**
+   * Which half of the marketplace wiring this boot should mount (#8343).
+   *
+   * Pure + static so the decision is readable and testable on its own, the
+   * same reason {@link Serve.providesCapability} is: the call site sits deep
+   * inside `run()` behind a dynamic import, where the only way to observe a
+   * mounting rule is to boot a kernel.
+   *
+   * The two arms are deliberately asymmetric, because the two surfaces need
+   * different things:
+   *
+   *  - `cloudSurfaces` — proxy + cloud-connection + runtime-config. These
+   *    *are* the control plane's client, so a resolved URL is their precondition.
+   *  - `offlineInstallLocal` — the air-gapped install surface. Its inline
+   *    branch reads no URL at all, so a control plane is precisely what it
+   *    does NOT need; gating it on one is what left a self-hosted EE box with
+   *    no install route at all.
+   *
+   * `isRuntimeHostKernel` is restated here (the call site checks it too, to
+   * skip the dynamic import) so this function is the whole rule in one place:
+   * the cloud distribution wires its own marketplace on the host kernel, so
+   * NEITHER arm mounts there.
+   */
+  static planMarketplaceWiring(input: {
+    isRuntimeHostKernel: boolean;
+    marketplaceUrl: string;
+    plugins: readonly unknown[];
+  }): { cloudSurfaces: boolean; offlineInstallLocal: boolean } {
+    if (input.isRuntimeHostKernel) return { cloudSurfaces: false, offlineInstallLocal: false };
+    if (input.marketplaceUrl) return { cloudSurfaces: true, offlineInstallLocal: false };
+    return {
+      cloudSurfaces: false,
+      // A host config that wires its own install-local keeps it — see the
+      // call site for why replacing it would be a silent downgrade.
+      offlineInstallLocal: !Serve.providesCapability(input.plugins, Serve.INSTALL_LOCAL_IDENTITIES),
+    };
+  }
+
+  /**
    * Registry of `requires` token → built-in service-plugin provider for the
    * standalone serve path. Keys are canonical kebab-case platform capability
    * tokens — a drift test asserts every key is in the spec-owned
@@ -1695,12 +1761,38 @@ export default class Serve extends Command {
       // marketplace" but, with no config/artifact, has no host to carry the
       // wiring (the only place it can come from is the CLI itself).
       //
-      // Mirrors the objectos-ee single-env host wiring: proxy + install-local
-      // + cloud-connection only when `resolveCloudUrl()` is truthy
-      // (OS_CLOUD_URL=off -> nothing mounts, preserving the vanilla
-      // marketplace-less `objectstack dev`). Each plugin self-registers its
-      // own Setup nav bundle in start(), so no manual bundle registration is
+      // Mirrors the objectos-ee single-env host wiring: the CLOUD-DEPENDENT
+      // surfaces (proxy + cloud-connection + runtime-config) only when
+      // `resolveCloudUrl()` is truthy. Each plugin self-registers its own
+      // Setup nav bundle in start(), so no manual bundle registration is
       // needed here.
+      //
+      // install-local is DELIBERATELY NOT on that gate (#8343). It is the
+      // documented air-gapped path — `os package install ./dist/objectstack.json`
+      // hands the compiled artifact over inline, and `handleInstall`'s inline
+      // branch never reads `this.cloudUrl` at all — so gating it on a control
+      // plane withheld it from the one deployment that cannot have one. A
+      // self-hosted EE box could not install a package by ANY route: measured
+      // on objectos-ee 4.0.5-rc.1, both GET and POST /marketplace/install-local
+      // 404, while its own /runtime/config advertised `installLocal: true`.
+      // Note `off` is not an unusual choice there but the SHIPPED DEFAULT --
+      // that image's compose file reads `OS_CLOUD_URL: ${OS_CLOUD_URL:-off}`,
+      // so every self-hosted stack that does not override it landed here.
+      // The package README states the intended contract in as many words —
+      // "`OS_CLOUD_URL=off` disables every remote call; air-gapped installs
+      // keep working via inline manifests handed to `install-local`" — so the
+      // gate contradicted the contract rather than expressing it.
+      //
+      // What "preserving the vanilla marketplace-less `objectstack dev`" is
+      // worth here, measured rather than assumed: a plain `objectstack dev`
+      // sets NO OS_CLOUD_URL, and `resolveCloudUrl()` then returns
+      // DEFAULT_CLOUD_URL — truthy — so it already mounts install-local (and
+      // its "Installed Apps" nav) today. The only runs this changes are those
+      // that explicitly opted out (`off`/`none`/`local`/`disabled`), and for
+      // them the nav-ownership rule in marketplace-ui.ts ("the entry lives and
+      // dies with the capability -> no dead page") is SATISFIED, not violated:
+      // the entry now appears exactly when a working offline install surface
+      // is behind it. Nothing that makes a remote call mounts under `off`.
       //
       // SKIPPED in runtime/host-kernel mode: the cloud distribution
       // (objectos-stack) wires its own MarketplaceProxyPlugin on the host
@@ -1723,7 +1815,8 @@ export default class Serve extends Command {
             resolveCloudUrl,
           } = await import(/* webpackIgnore: true */ ccPkg);
           const marketplaceUrl = resolveCloudUrl();
-          if (marketplaceUrl) {
+          const wiring = Serve.planMarketplaceWiring({ isRuntimeHostKernel, marketplaceUrl, plugins });
+          if (wiring.cloudSurfaces) {
             await kernel.use(new MarketplaceProxyPlugin({ controlPlaneUrl: marketplaceUrl }));
             await kernel.use(new MarketplaceInstallLocalPlugin({ controlPlaneUrl: marketplaceUrl }));
             // Same-origin /cloud-connection/* surface (status + device-code
@@ -1733,6 +1826,24 @@ export default class Serve extends Command {
             // install-local are live (same-origin; install into THIS kernel).
             await kernel.use(new RuntimeConfigPlugin({ controlPlaneUrl: '', singleEnvironment: true, installLocal: true }));
             trackPlugin('Marketplace');
+          } else if (wiring.offlineInstallLocal) {
+            // Cloud explicitly disabled -> mount the OFFLINE half only.
+            //
+            // OFFLINE_CONTROL_PLANE, never the `''` sitting in `marketplaceUrl`:
+            // the plugin re-resolves whatever it is handed through
+            // `resolveCloudUrl()`, which treats an EMPTY string as "unset" and
+            // falls back to the PUBLIC DEFAULT_CLOUD_URL — pointing an
+            // air-gapped runtime's catalog branch at cloud.objectos.ai, the
+            // opposite of what `off` asked for. See the constant's own note.
+            //
+            // The presence check is load-bearing, not defensive: `kernel.use`
+            // keys plugins by name, so mounting unconditionally would let this
+            // `off`-pinned instance REPLACE a host config's own install-local
+            // that was constructed with an explicit control-plane URL —
+            // silently downgrading that host's catalog capability. A host that
+            // wires its own keeps it.
+            await kernel.use(new MarketplaceInstallLocalPlugin({ controlPlaneUrl: Serve.OFFLINE_CONTROL_PLANE }));
+            trackPlugin('MarketplaceInstallLocal');
           }
         } catch (err: any) {
           console.warn(chalk.yellow(`  \u26a0 Marketplace/cloud-connection wiring failed: ${err?.message ?? err}`));

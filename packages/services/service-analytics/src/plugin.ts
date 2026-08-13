@@ -154,6 +154,17 @@ export interface AnalyticsServicePluginOptions {
   getAllowedRelationships?: (cubeName: string) => Set<string> | undefined;
   /** Enable debug logging. */
   debug?: boolean;
+  /**
+   * [#8286] Echo the executed statement back to CALLERS in
+   * `AnalyticsResult.sql` (`/api/v1/analytics/query`).
+   *
+   * Distinct from {@link AnalyticsServicePluginOptions.debug} above, which is
+   * server-side log verbosity only: raising log level must never widen what
+   * travels to a tenant. Default and rationale live with the service config —
+   * see `AnalyticsServiceConfig.debugSql`. Undefined here means "no host
+   * choice", which the service resolves to development-only.
+   */
+  debugSql?: boolean;
 }
 
 /**
@@ -568,6 +579,11 @@ export class AnalyticsServicePlugin implements Plugin {
       coerceTemporalFilterColumn,
       relationshipResolver,
       labelResolver,
+      // [#8286] Passed through as authored — `undefined` is "this host did not
+      // choose", which the service resolves to development-only. Defaulting it
+      // here would be a second copy of that decision, drifting the moment one
+      // of the two moves.
+      debugSql: this.options.debugSql,
       // Source-field metadata behind the display chains on result columns:
       // ADR-0053 currency (`currencyConfig.defaultCurrency`) and percent scale
       // (`max`, which is what marks whole-percent storage — objectui#3136).

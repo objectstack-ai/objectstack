@@ -105,10 +105,19 @@ const taskHook: Hook = {
         // Could trigger notifications or integrations here
       }
 
-      // Check if task became overdue
-      if (data.is_overdue && previous && !previous.is_overdue) {
-        logger?.info?.(`Task ${ctx.input.id} is now overdue`);
-      }
+      // [#7226] A "task became overdue" leg USED TO SIT HERE, gated on
+      // `data.is_overdue && previous && !previous.is_overdue`. It could never
+      // run: `is_overdue` was a `readonly` boolean nothing ever wrote, so
+      // `data.is_overdue` was absent on every update and the branch was dead
+      // code that read as working automation.
+      //
+      // It is not re-armed against `due_date`, and that is deliberate. Becoming
+      // overdue is the passage of TIME, not a record write — a task nobody
+      // touches crosses its due date with no update to observe, so a record hook
+      // is structurally the wrong instrument and any version of this branch would
+      // fire late, or never. The clock-driven sweep already exists in the right
+      // place: `flows/task.flow.ts`'s `overdue_escalation`, a scheduled flow that
+      // runs daily and selects on `due_date` directly.
     }
   }
 };

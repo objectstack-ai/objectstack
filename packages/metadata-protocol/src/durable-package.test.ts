@@ -96,11 +96,24 @@ describe('deletePackage — uninstall cleanups (#2747)', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       const { impl } = makeImpl();
+      // [#8136] `db down` is a BARE error — it declares no ADR-0112 envelope,
+      // so the producer no longer quotes it onto the response. `cleanups[]`
+      // rides onto a `PACKAGE_DELETE_PARTIAL` 400 inside `details`, where no
+      // HTTP boundary's 5xx message withhold can reach it, so a cleanup that
+      // failed on a driver fault used to ship the driver's words to the client.
+      //
+      // This case's SUBJECT is unchanged and still asserted: a throwing cleanup
+      // is reported as `success: false` rather than aborting the uninstall.
+      // Only the text moved, and the counterpart — a cleanup that DECLARES a
+      // 4xx refusal keeps its sentence verbatim — is pinned in
+      // `protocol.driver-text-disclosure.test.ts`, so "reported as failed" and
+      // "reported in the driver's words" cannot collapse into one another.
       (impl as any).registerUninstallCleanup('boom', async () => { throw new Error('db down'); });
       const res: any = await (impl as any).deletePackage({ packageId: 'com.example.orders', allTenants: true });
       expect(res.cleanups).toEqual([
-        { name: 'boom', success: false, removed: 0, error: 'db down' },
+        { name: 'boom', success: false, removed: 0, error: 'cleanup failed' },
       ]);
+      expect(JSON.stringify(res)).not.toContain('db down');
     } finally {
       warn.mockRestore();
     }

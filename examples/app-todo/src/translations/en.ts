@@ -71,8 +71,6 @@ export const en: TranslationData = {
           },
         },
         recurrence_interval: { label: 'Recurrence Interval' },
-        is_completed: { label: 'Is Completed' },
-        is_overdue: { label: 'Is Overdue' },
         progress_percent: { label: 'Progress (%)' },
         estimated_hours: { label: 'Estimated Hours' },
         actual_hours: { label: 'Actual Hours' },

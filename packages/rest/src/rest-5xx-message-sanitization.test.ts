@@ -139,12 +139,41 @@ beforeEach(() => {
 });
 afterEach(() => { spy.mockRestore(); });
 
-/** Did ANY log line carry the given text (in its message or its arguments)? */
+/**
+ * Did ANY log line carry the given text (in its message, its `cause` chain, or
+ * its arguments)?
+ *
+ * [#8136] The `cause` traversal is not a convenience — it is where the driver
+ * text now lives. This helper used to read `a.message` only, which was
+ * sufficient while `metadata-protocol` interpolated the driver line INTO the
+ * message it threw. Option C stopped it doing that: the client-facing sentence
+ * names the operation and quotes nothing, and the original driver error is
+ * carried on `cause`. `console.error('[REST] Unhandled error:', err)` still
+ * receives it in full — Node formats an `Error`'s `[cause]` along with it — so
+ * the operator's half of the contract is unchanged.
+ *
+ * Measured at this seam after the producer fix, so the traversal is not
+ * speculative:
+ *
+ * ```
+ * [REST] Unhandled error: Error(Failed to delete customization overlay for
+ *   object/showcase_account. …) <<CAUSE>> SQLITE_ERROR: no such table: sys_metadata
+ * ```
+ *
+ * ⛔ Do NOT "fix" a future red here by deleting the `loggedText` assertions.
+ * They are the only thing in this file asserting that withholding text from the
+ * CLIENT did not also delete it from the LOG, which is the failure mode a
+ * disclosure fix is most likely to introduce.
+ */
 function loggedText(needle: string): boolean {
-    return logged.some((args) => args.some((a) => {
-        if (a instanceof Error) return a.message.includes(needle);
+    const carries = (a: unknown, depth = 0): boolean => {
+        if (depth > 5) return false;
+        if (a instanceof Error) {
+            return a.message.includes(needle) || carries((a as { cause?: unknown }).cause, depth + 1);
+        }
         return typeof a === 'string' && a.includes(needle);
-    }));
+    };
+    return logged.some((args) => args.some((a) => carries(a)));
 }
 
 // ---------------------------------------------------------------------------
@@ -231,11 +260,19 @@ describe('[#5437] a real sys_metadata failure, walked in process', () => {
     }, 60_000);
 
     it('the withheld text still reaches the server log, in full', async () => {
-        // The premise guard and the log guarantee in one assertion: the only
-        // way this text can reach the log is if the protocol really did
-        // interpolate the driver error into the message it threw. If the
-        // producer ever stops doing that, this goes red and the case above
-        // stops proving anything.
+        // [#8136] This case's own prediction came true, and it is corrected in
+        // place rather than deleted. It used to say "the only way this text can
+        // reach the log is if the protocol really did interpolate the driver
+        // error into the message it threw. If the producer ever stops doing
+        // that, this goes red" — and option C is the producer doing exactly
+        // that. It is no longer a premise guard for the case above.
+        //
+        // What survives, and is the reason the case stays, is the LOG
+        // GUARANTEE: the driver line still reaches the operator in full, now on
+        // the thrown error's `cause` rather than inside its message. That is
+        // the half a disclosure fix is most likely to break by accident —
+        // withholding from the client by simply dropping the diagnostic — so it
+        // is asserted here at the boundary as well as at the producer.
         const rest = await bootRealProtocol(SQLITE_NO_TABLE);
 
         await callRoute(rest, 'DELETE', META_ITEM, {

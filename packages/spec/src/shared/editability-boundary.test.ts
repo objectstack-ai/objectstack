@@ -1,7 +1,22 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #7887 — the section / page-component **editability boundary**, asserted.
+ * #7887 / #8202 / #8201 — the **editability boundary** and the surface strings
+ * that make it readable, asserted.
+ *
+ * Sections 1-4 are #7887's, unchanged in intent. Sections 5 and 6 finish the
+ * story #7887 started:
+ *
+ * - **§5 (#8202)** — each shape names ITSELF in its rejection. #7887 is what
+ *   made this load-bearing rather than cosmetic: the same key now gets two
+ *   deliberately contradictory answers depending on the shape (rename on a
+ *   field, boundary on a section / component), and a reader holding the wrong
+ *   one is told to move a key that is already in the right place.
+ * - **§6 (#8201)** — `SelectOptionSchema`, the third shape §3 of
+ *   `visible-when-alias-guidance.test.ts` pins as declaring no disabled-ish
+ *   key, gets the boundary too, with the destination that is true for an option
+ *   (withdraw it with `visibleWhen`) rather than the containers' (put the key
+ *   on the fields inside — an option has no inside).
  *
  * The maintainer's ruling of 2026-08-12, operative sentence: *"`FormSectionSchema`
  * / `PageComponentSchema` gate **visibility only**; editability lives on fields.
@@ -39,9 +54,11 @@
 
 import { describe, it, expect } from 'vitest';
 
+import { FieldSchema, SelectOptionSchema } from '../data/field.zod';
 import { FormFieldSchema, FormSectionSchema } from '../ui/view.zod';
 import { PageComponentSchema } from '../ui/page.zod';
-import { VISIBILITY_ONLY_STRICT_OPTIONS } from './editability-boundary';
+import { SELECT_OPTION_EDITABILITY_GUIDANCE, VISIBILITY_ONLY_STRICT_OPTIONS } from './editability-boundary';
+import { strictObjectDeclarations } from './strict-object';
 import { keySetMatches } from './suggestions.zod';
 
 /**
@@ -67,6 +84,8 @@ function unknownKeyMessage(
 const SECTION = { fields: [] } as const;
 const COMPONENT = { type: 'text' } as const;
 const FORM_FIELD = { field: 'probe' } as const;
+const OPTION = { label: 'A', value: 'aa' } as const;
+const FIELD = { name: 'probe', type: 'text' } as const;
 
 /** The two shapes the ruling names, and nothing else. */
 const VISIBILITY_ONLY: ReadonlyArray<[string, { safeParse: (v: unknown) => { success: boolean; error?: unknown } }, object]> = [
@@ -250,6 +269,205 @@ describe('#7887 — no acceptance change', () => {
     // The new set must claim the editability family and nothing beyond it: an
     // unrelated typo still gets the front matter plus history and no bullet.
     const m = unknownKeyMessage(schema, { ...base, totallyUnrelatedKey: true });
+    expect(m).toContain('`totallyUnrelatedKey`');
+    expect(m).not.toContain('  • ');
+  });
+});
+
+// ===========================================================================
+// 5. #8202 — every shape names ITSELF, so the two answers cannot be swapped
+// ===========================================================================
+describe('#8202 — the rejection says WHICH shape refused the key', () => {
+  /** Each shape, a probe body, and the name its rejection must give itself. */
+  const NAMED: ReadonlyArray<[string, { safeParse: (v: unknown) => { success: boolean; error?: unknown } }, object, string]> = [
+    ['FormFieldSchema', FormFieldSchema, FORM_FIELD, 'this form field'],
+    ['FormSectionSchema', FormSectionSchema, SECTION, 'this form section'],
+    ['PageComponentSchema', PageComponentSchema, COMPONENT, 'this page component'],
+    // Already named itself before this card; included because since #8201 its
+    // message carries a THIRD answer to `disabled`, so it joins the set of
+    // messages that must not be mistaken for one another.
+    ['SelectOptionSchema', SelectOptionSchema, OPTION, 'this select option'],
+  ];
+
+  it.each(NAMED)('%s opens with its own name, and names no sibling shape', (_n, schema, base, surface) => {
+    const m = unknownKeyMessage(schema, { ...base, disabled: true });
+    expect(m.startsWith(`Unrecognized key(s) on ${surface}: \`disabled\`.`)).toBe(true);
+    for (const other of NAMED.map((row) => row[3])) {
+      if (other === surface) continue;
+      expect(m, `${surface}'s message also names ${other}`).not.toContain(other);
+    }
+  });
+
+  it('the two contradictory answers to `disabled` are each stamped with their shape', () => {
+    // The defect #8202 records, asserted from both ends at once: these two
+    // messages tell the author OPPOSITE things about the same key, on purpose.
+    // Before this card both opened `Unrecognized key(s) on this view/page
+    // schema`, so an author holding the section answer while looking at a field
+    // was being told to move a key that was already in the right place.
+    const field = unknownKeyMessage(FormFieldSchema, { ...FORM_FIELD, disabled: true });
+    const section = unknownKeyMessage(FormSectionSchema, { ...SECTION, disabled: true });
+
+    expect(field).toContain('this form field');
+    expect(field).toContain('Did you mean `disabled` → `readonly`?');
+    expect(field).not.toContain('Editability is a FIELD-level concern');
+
+    expect(section).toContain('this form section');
+    expect(section).toContain('Editability is a FIELD-level concern');
+    expect(section).not.toContain('Did you mean');
+  });
+
+  it('no shape reports the shared family string any more', () => {
+    // The family name is what the three shapes shared until #8202. A consumer
+    // that forgets to override inherits it silently, which is a message going
+    // vague rather than a test going red — so it is asserted here, and
+    // repo-wide over every live declaration in `alias-integrity.test.ts`.
+    for (const [name, schema, base] of NAMED) {
+      expect(
+        unknownKeyMessage(schema, { ...base, zzNotAKey: true }),
+        `${name} still inherits the shared surface string`,
+      ).not.toContain('this view/page schema');
+    }
+  });
+
+  it('the shared table was not edited in place — it still carries the FAMILY name', () => {
+    // #8199's placement rule, read from the `surface` end: a table shared by
+    // several shapes may carry only what is true of all of them. Renaming the
+    // shared string to one shape's name would make it true of one consumer and
+    // wrong for the rest, which is the edit this assertion refuses.
+    expect(VISIBILITY_ONLY_STRICT_OPTIONS.surface).toBe('this view/page schema');
+  });
+});
+
+// ===========================================================================
+// 6. #8201 — `SelectOptionSchema` inherits the ruling, with its OWN answer
+// ===========================================================================
+describe('#8201 — an option is offered or withheld, never shown-but-unselectable', () => {
+  const OPTION_TEXT = 'Editability is not a per-OPTION concern';
+
+  it('`disabled` on an option reaches the boundary, rendered as the template bullet', () => {
+    const m = unknownKeyMessage(SelectOptionSchema, { ...OPTION, disabled: true });
+    expect(m).toContain(OPTION_TEXT);
+    expect(m).toContain(`\n  • ${OPTION_TEXT}`);
+  });
+
+  it('the whole editability family reaches it, once per message', () => {
+    for (const key of EDITABILITY_KEYS) {
+      expect(
+        unknownKeyMessage(SelectOptionSchema, { ...OPTION, [key]: 'x' }),
+        `\`${key}\` should reach the option boundary prescription`,
+      ).toContain(OPTION_TEXT);
+    }
+    const many = unknownKeyMessage(SelectOptionSchema, { ...OPTION, disabled: true, readonly: true, editable: false });
+    expect(many.split(OPTION_TEXT)).toHaveLength(2);
+    for (const key of ['disabled', 'readonly', 'editable']) expect(many).toContain(`\`${key}\``);
+  });
+
+  it('the history sentence still comes last', () => {
+    const m = unknownKeyMessage(SelectOptionSchema, { ...OPTION, disabled: true });
+    expect(m.indexOf(OPTION_TEXT)).toBeLessThan(m.indexOf('Until #4001 closed this shape'));
+  });
+
+  it('it is NOT the containers\' prescription — an option has no fields inside it', () => {
+    // The wrong turn this card was warned about: reusing #8199's text would
+    // tell an option author to "write `readonly` on the form field(s) inside
+    // it", and an option has no inside. The two texts must not cross over in
+    // either direction.
+    const option = unknownKeyMessage(SelectOptionSchema, { ...OPTION, disabled: true });
+    expect(option).not.toContain('Editability is a FIELD-level concern');
+    expect(option).not.toContain('the form field(s) inside');
+    for (const [name, schema, base] of VISIBILITY_ONLY) {
+      expect(
+        unknownKeyMessage(schema, { ...base, disabled: true }),
+        `${name} picked up the option prescription`,
+      ).not.toContain(OPTION_TEXT);
+    }
+  });
+
+  it('it points at per-option `visibleWhen`, and that predicate really parses HERE', () => {
+    // Prose must not claim what the schema does not honour. Both readings the
+    // prescription advertises are parsed back: a record-dependent predicate and
+    // the `current_user` one that only this surface binds (ADR-0068).
+    const m = unknownKeyMessage(SelectOptionSchema, { ...OPTION, disabled: true });
+    expect(m).toContain('per-option `visibleWhen`');
+    expect(m).toContain('`current_user` (ADR-0068)');
+    expect(SelectOptionSchema.safeParse({ ...OPTION, visibleWhen: 'record.country == "cn"' }).success).toBe(true);
+    expect(SelectOptionSchema.safeParse({ ...OPTION, visibleWhen: '"admin" in current_user.positions' }).success).toBe(true);
+  });
+
+  it('…and at the FIELD-level keys for the whole picker, which really parse THERE', () => {
+    const m = unknownKeyMessage(SelectOptionSchema, { ...OPTION, disabled: true });
+    expect(m).toContain('`readonly: true`');
+    expect(m).toContain('`readonlyWhen`');
+    expect(FieldSchema.safeParse({ ...FIELD, readonly: true }).success).toBe(true);
+    expect(FieldSchema.safeParse({ ...FIELD, readonlyWhen: 'record.locked' }).success).toBe(true);
+  });
+
+  it('never names `disabledWhen` in the prescription — no field surface declares it', () => {
+    const m = unknownKeyMessage(SelectOptionSchema, { ...OPTION, disabledWhen: 'record.locked' });
+    const prescription = m.slice(m.indexOf('\n  • '));
+    expect(prescription).not.toContain('disabledWhen');
+  });
+
+  it('says what is true TODAY and leaves the decision open', () => {
+    // Triage left real product pull for non-selectable field options open as a
+    // maintainer decision that would widen the accepted set. The prescription
+    // must not read as "never" — it names the route (a spec decision) instead
+    // of closing it, and this pin fails a rewrite that hardens it into a
+    // permanent refusal.
+    const m = unknownKeyMessage(SelectOptionSchema, { ...OPTION, disabled: true });
+    expect(m).toContain('spec decision to ask for');
+    expect(m).not.toMatch(/\bnever be\b|\bcannot ever\b/);
+  });
+
+  it('no alias row was registered for the family, and the existing renames still fire', () => {
+    // Same red line as the mother ruling: an alias names a key the shape must
+    // then accept. And the new set must not shadow the rename channel this
+    // table already had — a set match `continue`s past it, so a member that
+    // collided with an alias key would silently delete a working pointer.
+    SelectOptionSchema.safeParse(OPTION);
+    const decl = strictObjectDeclarations().find((d) => d.options.surface === 'this select option');
+    expect(decl, '`SelectOptionSchema` did not register a declaration').toBeDefined();
+    expect(decl!.options.guidanceSets?.map((s) => s.name))
+      .toContain('SELECT_OPTION_EDITABILITY_BOUNDARY_KEYS');
+    for (const key of EDITABILITY_KEYS) {
+      expect(decl!.options.aliases?.[key], `\`${key}\` must not have an alias row`).toBeUndefined();
+      expect(keySetMatches(SELECT_OPTION_EDITABILITY_GUIDANCE, key)).toBe(true);
+    }
+    for (const alias of Object.keys(decl!.options.aliases ?? {})) {
+      expect(
+        keySetMatches(SELECT_OPTION_EDITABILITY_GUIDANCE, alias),
+        `the boundary set swallows the \`${alias}\` alias before its rename can fire`,
+      ).toBe(false);
+    }
+    expect(unknownKeyMessage(SelectOptionSchema, { ...OPTION, visible: true }))
+      .toContain('Did you mean `visible` → `visibleWhen`?');
+    expect(unknownKeyMessage(SelectOptionSchema, { ...OPTION, colour: 'red' }))
+      .toContain('Did you mean `colour` → `color`?');
+  });
+
+  it('no acceptance change on the option — rejected stays rejected, accepted stays identical', () => {
+    for (const key of EDITABILITY_KEYS) {
+      expect(
+        SelectOptionSchema.safeParse({ ...OPTION, [key]: true }).success,
+        `\`${key}\` must stay rejected — this card curates messages, it does not widen the shape`,
+      ).toBe(false);
+    }
+    const authored = {
+      label: 'In Progress',
+      value: 'in_progress',
+      color: '#ff0000',
+      default: true,
+      visibleWhen: 'record.country == "cn"',
+    };
+    const r = SelectOptionSchema.safeParse(authored);
+    expect(r.success).toBe(true);
+    const parsed = r.data as { label: string; value: string; color?: string; default?: boolean; visibleWhen?: { source?: string } };
+    expect(Object.keys(parsed).sort()).toEqual(['color', 'default', 'label', 'value', 'visibleWhen']);
+    expect(parsed.visibleWhen?.source).toBe('record.country == "cn"');
+  });
+
+  it('an option key in no family at all still gets the bare message', () => {
+    const m = unknownKeyMessage(SelectOptionSchema, { ...OPTION, totallyUnrelatedKey: true });
     expect(m).toContain('`totallyUnrelatedKey`');
     expect(m).not.toContain('  • ');
   });

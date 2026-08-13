@@ -183,6 +183,9 @@ function makeStubEngine() {
 const objectBody = (name: string) => ({
     name,
     label: 'Project Task',
+    // [#8308] Authored OWD: the publish gate refuses an OWD-less custom object
+    // (`security-owd-unset`) once #8310 declares `object` in `runtimeTypes`.
+    sharingModel: 'private',
     fields: {
         title: { type: 'text', label: 'Title' },
         done: { type: 'boolean', label: 'Done' },

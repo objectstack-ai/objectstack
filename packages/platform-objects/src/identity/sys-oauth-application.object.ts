@@ -301,7 +301,12 @@ export const SysOauthApplication = ObjectSchema.create({
       label: 'Client Secret',
       required: false,
       maxLength: 1024,
-      description: 'OAuth client secret (hashed/encrypted at rest)',
+      // Citation, not a re-measurement: #8011 already verified by real
+      // round-trip that this column stores a SHA-256 digest and never
+      // receives cleartext (#8313). The description below exists so a
+      // declaration-reading survey can confirm the claim from the storage
+      // side instead of re-measuring it a third time.
+      description: 'OAuth client secret — stored as a SHA-256 digest, never plaintext (`@better-auth/oauth-provider`\'s `storeClientSecret`, which defaults to hashed whenever the jwt plugin is enabled; wired in plugin-auth\'s `AuthManager.buildPluginList()`, oidcProvider branch). Shown once at registration.',
       group: 'Credentials',
     }),
 

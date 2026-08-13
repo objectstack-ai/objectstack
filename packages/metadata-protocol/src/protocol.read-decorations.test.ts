@@ -118,6 +118,9 @@ const storedBody = (rows: Map<string, Row>, name: string) => {
 const objectBody = (name: string) => ({
     name,
     label: 'Invoice',
+    // [#8308] Authored OWD: the publish gate refuses an OWD-less custom object
+    // (`security-owd-unset`) once #8310 declares `object` in `runtimeTypes`.
+    sharingModel: 'private',
     fields: { amount: { type: 'currency', label: 'Amount' } },
 });
 

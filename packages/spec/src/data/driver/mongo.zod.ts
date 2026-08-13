@@ -6,6 +6,7 @@ import { lazySchema } from '../../shared/lazy-schema';
 import { strictObject } from '../../shared/strict-object';
 import type { DriverDefinition } from '../datasource.zod';
 import {
+  credentialFreeUrl,
   driverConfigJsonSchema,
   INLINE_CREDENTIAL_REFUSED,
   READ_ONLY_BELONGS_ON_DATASOURCE,
@@ -71,10 +72,16 @@ export const MongoConfigSchema = lazySchema(() => strictObject(
   /**
    * Connection URI (standard connection string). When present it supersedes
    * `host`/`port`/`database`/`username`/`authSource` — those are only used to
-   * COMPOSE a URI when none is given.
-   * Format: `mongodb://[username:password@]host1[:port1][,…][/[db][?options]]`
+   * COMPOSE a URI when none is given. Credential-free by contract since #8082:
+   * a `username:password@` userinfo is refused at publish exactly like an
+   * inline `password` (#7990) — bind the secret (`external.credentialsRef` /
+   * the connection form's secret field) and it is injected at connect time. A
+   * bare username (`user@host1`) stays writable. Runtime-environment DSNs
+   * (`OS_DATABASE_URL`) never pass through this schema and are unaffected.
+   * Format: `mongodb://[username@]host1[:port1][,…][/[db][?options]]`
    */
-  url: z.string().optional().describe('Connection URI (supersedes the discrete fields)')
+  url: credentialFreeUrl(z.string(), 'url').optional()
+    .describe('Connection URI (supersedes the discrete fields; must not embed a password — bind the secret instead)')
     .meta({ title: 'Connection URI' }),
 
   /**

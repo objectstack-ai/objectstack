@@ -971,10 +971,18 @@ describe('alias integrity — every table is a true claim about its schema', () 
     // re-opening the blind spot.
     const bySurface = new Map(SURFACES.map((s) => [s.options.surface, s]));
 
-    const visibility = [...SURFACES].filter((s) => s.options.surface === 'this view/page schema');
-    // Three call sites share the options: FormFieldBase (via strictObjectError),
-    // FormSection, PageComponent — distinct shapes, so distinct declarations.
+    // Three call sites share the OPTIONS; since #8202 they no longer share the
+    // `surface` string, so the selector names the three shapes instead of the
+    // one string they used to report. Same claim as before — those three
+    // declarations exist and each carries the ADR-0089 set — and a strictly
+    // stronger selector: it fails if a shape stops declaring through the
+    // folded table AND if one of them silently loses its own name.
+    const VISIBILITY_FAMILY = ['this form field', 'this form section', 'this page component'];
+    const visibility = [...SURFACES].filter((s) => VISIBILITY_FAMILY.includes(s.options.surface));
+    // FormFieldBase (via strictObjectError), FormSection, PageComponent —
+    // distinct shapes, so distinct declarations.
     expect(visibility.length).toBeGreaterThanOrEqual(3);
+    expect(new Set(visibility.map((s) => s.options.surface)).size).toBe(3);
     for (const v of visibility) {
       expect(v.options.guidanceSets?.map((g) => g.name)).toContain('VISIBILITY_KEY_PATTERN');
     }
@@ -990,6 +998,26 @@ describe('alias integrity — every table is a true claim about its schema', () 
     const tenancy = bySurface.get('`tenancy`');
     expect(tenancy, 'TenancyConfigSchema no longer declares through strictObject').toBeDefined();
     expect(Object.keys(tenancy!.options.guidance ?? {}).sort()).toEqual(['crossTenantAccess', 'strategy']);
+  });
+
+  it('no live surface still reports the shared view/page FAMILY name (#8202)', () => {
+    // `VISIBILITY_STRICT_OPTIONS.surface` is the family's name, and every
+    // consumer overrides it with its own shape's (`'this form field'` /
+    // `'this form section'` / `'this page component'`) — because since #7887
+    // the shapes answer the same key in two contradictory ways, and the answer
+    // is only readable if the message says which shape it came from.
+    //
+    // A fourth consumer that spreads the shared options and forgets the
+    // override inherits the family string silently: the message goes vague
+    // rather than wrong, so nothing else fails. This walk sees every table the
+    // package constructs, which makes it the one place that can notice.
+    const inherited = SURFACES
+      .filter((s) => s.options.surface === 'this view/page schema')
+      .map((s) => `${s.options.surface} (keys: ${Object.keys(s.shape).slice(0, 4).join(', ')}…)`);
+    expect(
+      inherited,
+      'these declarations spread the shared visibility options without naming their own shape',
+    ).toEqual([]);
   });
 
   it('the two maps #6619 MISSED are folded and judged here too (#6805)', () => {

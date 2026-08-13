@@ -28,9 +28,17 @@
  * both is not consumer leniency — a published tarball is immutable, so there is
  * no producer to fix. This repo's OWN surface is always the directory.
  *
- * `spec-changes.json` itself stays a single file, deliberately (#5837): it is
- * keyed by version, so two PRs append under different majors and it has never
- * been a conflict surface worth splitting.
+ * `spec-changes.json` itself stays a single file, deliberately (#5837), and #8344
+ * re-measured that call rather than inheriting it. The original reason — "two PRs
+ * append under different majors" — is not what actually holds: in-flight
+ * registrations land in the SAME (current) major, so what separates them is their
+ * distance in the registry's id sort order, not the major. What holds is the
+ * conclusion. This file is a sorted union of an insertion-only registration, so a
+ * driver-less server-side merge either takes both sides (byte-identical to the
+ * regeneration) or conflicts; it is never stale-but-clean, it conflicts only on
+ * ADJACENT ids, and in that case `src/migrations/registry.ts` — unsharded and
+ * outside the merge driver — conflicts too, so splitting this file would not save
+ * the PR. Measurement table: `../src/migrations/entries/README.md`.
  */
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';

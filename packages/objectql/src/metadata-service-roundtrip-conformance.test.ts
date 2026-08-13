@@ -25,6 +25,36 @@
  * subject is the one that would notice a `register` that threw, silently
  * skipped, or mutated the document on the way to `loader.save`.
  *
+ * ## All three rows are now RULED (#7378) — and the table lags the ruling
+ *
+ * This file's `// DIVERGENCE` era is over. The maintainer's three-cell ruling
+ * of 2026-08-12 (#7378, 裁定人:维护者 huangyiirene), quoted verbatim and
+ * untranslated:
+ *
+ * > 1. **Row 1(key 归属)= (c) 响亮拒绝。** `register(type, name, data)` 中
+ * >    `name` 参数与 `data.name` 不一致时,所有实现统一拒绝并报错定位。
+ * > 2. **Row 2(objects/object 别名)= 所有实现一个答案,与
+ * >    `check:meta-type-normalized` 收敛。**
+ * > 3. **Row 3(非对象 data 静默丢弃)= 响亮拒绝(throw)。**
+ * >
+ * > 三格的 `// DIVERGENCE` pin 在裁定 PR 内同步更新(该测试文件设计意图即如此)。
+ *
+ * Every shipped implementation now enforces it through ONE shared guard —
+ * `assertMetadataRegisterContract` / `canonicalMetadataServiceType`
+ * (`@objectstack/core/metadata-service-contract`), whose header carries the
+ * full ruling text and the row-2 convergence rationale (the direction is
+ * `check:meta-type-normalized`'s: normalize once at the entry, decide on the
+ * normalized value — the gate's header carries #3984/#5881/#6241).
+ *
+ * **{@link RULED_CONTRACT_ANSWERS} below overrides the table's `expected` for
+ * the five ruled case rows.** The table's own reference answers still describe
+ * the PRE-ruling reference semantics, because the table — and the contract's
+ * reference double beside it — live under `packages/spec/src/**`, whose half
+ * of this ruling is the `domain:spec` seat's, tracked on #7378. When that half
+ * lands (table rows re-ruled, reference double refusing/folding), the
+ * `table lags the ruling` wiring test below goes red on purpose: delete the
+ * override for each row it names and hold every subject to the table again.
+ *
  * ## Two assertion strengths, declared per subject
  *
  * `documentFidelity` says whether a subject hands back the document it was
@@ -32,32 +62,10 @@
  * reference (`verbatim`), so they are held to exact equality. `MetadataFacade`
  * resolves objects through `SchemaRegistry`, which answers the RUNTIME-EFFECTIVE
  * object — system fields (`organization_id`, `created_at`, …) injected,
- * extensions merged — and copies non-object documents while filling in `name`.
- * `toEqual(input)` is therefore the wrong assertion for it, exactly as #7223
- * predicted; it is held to a recursive-subset match plus every key/visibility
- * assertion the others get. The weaker match is scoped to the ONE subject that
- * needs it rather than applied to the whole table.
- *
- * ## Two rows were RULED (#7378); one is still a pinned divergence
- *
- * This file used to carry three `// DIVERGENCE` entries — three cases
- * `MetadataFacade` answered differently from every other implementation and
- * from the contract's reference double. The maintainer ruling of 2026-08-11
- * (#7378, option (a) — **the `name` argument is the effective key and
- * `data.name` never overrides it**) settled two of them, the contract TSDoc
- * now says so, and `MetadataFacade` was aligned to it:
- *
- *  - the effective key (`key-is-the-name-argument-object` / `-nonobject`) —
- *    now `RULED_1` below, asserting the ruled answer rather than the old
- *    `absent`;
- *  - the dropped non-object `data` (`primitive-data-roundtrips` and its array
- *    sibling) — no per-subject entry at all any more: the facade simply
- *    conforms, held to the table's own reference answer like every other
- *    subject.
- *
- * `DIVERGENCE_2` (the plural `objects` alias) survives, deliberately, with the
- * measurement for why the same ruling could not carry it — read it before
- * assuming it was overlooked.
+ * extensions merged. `toEqual(input)` is therefore the wrong assertion for it,
+ * exactly as #7223 predicted; it is held to a recursive-subset match plus every
+ * key/visibility assertion the others get. The weaker match is scoped to the
+ * ONE subject that needs it rather than applied to the whole table.
  *
  * If you are here because one of these tests failed after a behaviour change:
  * that is the pin working. A RULED row going red means an implementation
@@ -73,6 +81,7 @@ import {
     type MetadataRoundTripCase,
     type IMetadataService,
 } from '@objectstack/spec/contracts';
+import { StandardErrorCode } from '@objectstack/spec/api';
 import { SchemaRegistry } from './registry';
 import { MetadataFacade } from './metadata-facade';
 import { MetadataManager, type MetadataLoader } from '@objectstack/metadata';
@@ -95,31 +104,9 @@ type RoundTrippingService = Pick<IMetadataService, 'register' | 'get' | 'exists'
  */
 type DocumentFidelity = 'verbatim' | 'runtime-effective';
 
-/**
- * A per-subject answer that differs from the table's reference answer — either
- * because the subject DIVERGES from it (unruled, pinned as measured) or because
- * the ruling that settled the row prescribes a different observable shape for
- * this subject than the reference double's.
- *
- * - `absent` — the subject finds nothing under the key the case reads.
- * - `readable-as-last-write` — the document the case's final write carried.
- * - `readable-keyed-by-argument` — RULED (#7378): the authored document is
- *   readable under the `name` ARGUMENT, with its own `name` reconciled to that
- *   argument. This is what a document-keyed store must do to honour the ruling
- *   (see `MetadataFacade.toKeyedDefinition`), and it is a strictly STRONGER
- *   assertion than the `absent` pin it replaced: the document must come back,
- *   under the argument, carrying every other key it was authored with.
- */
-type SubjectAnswer =
-    | { readonly kind: 'absent'; readonly note: string }
-    | { readonly kind: 'readable-as-last-write'; readonly note: string }
-    | { readonly kind: 'readable-keyed-by-argument'; readonly note: string };
-
-interface PinnedImplementation {
+interface ShippedImplementation {
     readonly label: string;
     readonly documentFidelity: DocumentFidelity;
-    /** Keyed by {@link MetadataRoundTripCase.id}. Every key is checked to exist. */
-    readonly divergences?: Readonly<Record<string, SubjectAnswer>>;
     create(): RoundTrippingService;
 }
 
@@ -186,110 +173,37 @@ class WritableFixtureLoader implements MetadataLoader {
 }
 
 /**
- * ── RULED 1 — the effective key is the `name` ARGUMENT ──
+ * The RULED contract answer for a case, where the 2026-08-12 ruling and the
+ * table's (spec-side, still pre-ruling) `expected` disagree — see the header
+ * for why the two can disagree at all and for when each entry here dies.
  *
- * Cases `key-is-the-name-argument-object` / `-nonobject`. Was DIVERGENCE 1.
- *
- * `MetadataFacade.register` used to open with
- * `{ ...data, name: data.name ?? name }` and hand the DOCUMENT to
- * `SchemaRegistry.registerObject` / `registerItem`, which key on the document's
- * own `name`. The argument was therefore only a fallback for a document that
- * carried none: when the two disagreed the item landed under `data.name`, and
- * `get(type, <the name that was passed>)` answered `undefined`, `exists`
- * answered `false`, and `listNames` reported the other spelling.
- *
- * The maintainer ruling of 2026-08-11 (#7378, option (a)) settled it the other
- * way — the argument is the effective key, `data.name` never overrides it —
- * `IMetadataService.register` / `get` now say so, and the facade was aligned
- * (`toKeyedDefinition`). All five implementations answer this row the same way
- * today.
- *
- * What stays subject-specific is only the SHAPE of the answer, and only because
- * the facade's stores are keyed by the document itself: reconciling the
- * document to the argument means the `name` that comes back IS the argument,
- * where the verbatim subjects hand back the authored `name` under the argument
- * key. Both honour the ruling — the key is the argument in every case — so this
- * entry asserts the ruled answer rather than suppressing the row.
+ * - `refused` — `register` must reject the case's write with the ADR-0112
+ *   envelope (`code` AND `status`), a locating message, and NOTHING stored.
+ * - `readable` — the case's final write is readable back, even though the
+ *   table still says `absent`.
  */
-const RULED_1 = 'MetadataFacade keys on the `name` argument (#7378 ruling (a)); reconciling its document-keyed stores to that argument also normalizes the stored `name` to it.';
+type RuledAnswer =
+    | { readonly kind: 'refused'; readonly note: string }
+    | { readonly kind: 'readable'; readonly note: string };
 
-/**
- * ── DIVERGENCE 2 — the plural `objects` type is aliased to `object` ──
- *
- * Case `plural-objects-type-is-its-own-store`.
- *
- * `MetadataFacade`'s `isObjectType` treats `'object'` and `'objects'` as the
- * same type on the WRITE side (deliberately, per its header: #6725 left the
- * plural with the same read/write split the singular had). The consequence this
- * case measures is on the READ side: a `register('objects', n, …)` is visible
- * through `get('object', n)`, `exists('object', n)` and `listNames('object')`.
- *
- * `MetadataManager` and `createMemoryMetadata` key their type stores on the
- * string they are handed, so the two spellings are two stores and the item is
- * invisible under the singular.
- *
- * ── Why the #7378 ruling did NOT carry this row (measured 2026-08-11) ──
- *
- * The ruling aligned the facade on the other two rows and named this one with
- * them, but aligning it is not a facade-local change and the two candidate
- * routes are both worse than the divergence:
- *
- *  1. **The alias that decides this row is `SchemaRegistry`'s, not the
- *     facade's.** `registry.getItem` and `registry.listItems` special-case
- *     BOTH spellings straight to `getObject` / `getAllObjects`
- *     (`registry.ts`, "Special handling for 'object' and 'objects' types"), so
- *     the READ this case makes is aliased one layer below anything
- *     `metadata-facade.ts` controls. Narrowing the facade's own `isObjectType`
- *     to the singular would therefore make `register('objects', n, d)` write
- *     into `metadata['objects']` while `get('objects', n)` still resolves
- *     through `registry.getItem` → `getObject(n)` → `undefined`: the write
- *     lands nowhere any read looks. That is #6725 EXACTLY, re-opened for the
- *     plural spelling — the silent loss this whole table exists because of, and
- *     the row would go green while the bug got worse.
- *  2. **Removing the registry alias runs against the platform's own
- *     normalization direction.** Plural→singular folding is owned by the layers
- *     below this contract and is enforced there: `canonicalMetaType`
- *     (`PLURAL_TO_SINGULAR`) canonicalizes every `/meta` request type at the
- *     protocol boundary (#4432), `RestServer.metaTypeSingular` does it at the
- *     REST boundary, and `check:meta-type-normalized` is a CI gate whose whole
- *     job is to refuse a decision made on the un-normalized `:type` — three
- *     authorization bypasses (#3984, #5881, #6241) came from exactly that.
- *     `registry.test.ts` pins `listItems("objects")` as a deliberate alias.
- *     "The two spellings are one type" is a decided platform-wide position;
- *     this row asks for the opposite, and that is a ruling of its own, not an
- *     implementation detail this card can settle.
- *
- * So this stays pinned as measured, and the question — does `IMetadataService`
- * key its type stores on the raw string (reference semantics) or on the
- * canonical type (what the rest of the platform does)? — is escalated on #7378
- * rather than answered here.
- */
-const DIVERGENCE_2 = 'MetadataFacade aliases the plural `objects` type to `object` — through SchemaRegistry\'s own read-side special-case, not its own; the other implementations keep one store per type string. Still pinned as measured: the #7378 ruling did not carry this row (see the note above), and the open question is escalated there.';
+const RULED_1 =
+    'Row 1 (#7378, 2026-08-12): a data.name disagreeing with the name argument is REFUSED loudly by every implementation — silent resolution in either direction can misplace the item. Replaces the option-(a) argument-wins ruling of 2026-08-11 that the table still describes.';
 
-/**
- * ── RULED 3 — a non-object `data` value round-trips (no entry needed) ──
- *
- * Cases `primitive-data-roundtrips`, `array-data-roundtrips`. Was DIVERGENCE 3,
- * and is deliberately NOT replaced by an entry in `divergences` below: the
- * facade now conforms to the table's own reference answer, so the row is held
- * against it like every other subject's.
- *
- * What it used to measure: the contract declares `data: unknown`, and
- * `MetadataFacade.register` passed a non-object value through unchanged (its
- * `{ ...data }` branch is guarded on `typeof data === 'object' && data !== null`)
- * and then registered it under the document's own `name` — which a string does
- * not have. The write was ACCEPTED (no throw), the registry logged
- * `Registered setting: undefined`, and the value was readable back through
- * nothing. Silent loss, the same family as #6725.
- *
- * Under the #7378 ruling the argument is the key, so a value with no `name` of
- * its own HAS one; `toKeyedDefinition` boxes it as `{ name, content }`, which
- * is the shape this class's own reads already unwrap. The array row is the
- * sibling shape that `typeof data === 'object'` got wrong in the other
- * direction — spread into `{ 0: …, 1: … }` rather than dropped.
- */
+const RULED_2 =
+    "Row 2 (#7378, 2026-08-12): all implementations give ONE answer, converged with check:meta-type-normalized's enforced direction — plural folds to singular before any decision, so 'objects' and 'object' address one store. The table's `absent` still describes the pre-ruling reference semantics (raw-string type keys).";
 
-const IMPLEMENTATIONS: readonly PinnedImplementation[] = [
+const RULED_3 =
+    'Row 3 (#7378, 2026-08-12): a non-object data is REFUSED (throw) by every implementation — accept-then-drop was indefensible, and coercing into storability (the interim { name, content } box) is equally forbidden. The table still expects the value readable back.';
+
+const RULED_CONTRACT_ANSWERS: Readonly<Record<string, RuledAnswer>> = {
+    'key-is-the-name-argument-object': { kind: 'refused', note: RULED_1 },
+    'key-is-the-name-argument-nonobject': { kind: 'refused', note: RULED_1 },
+    'primitive-data-roundtrips': { kind: 'refused', note: RULED_3 },
+    'array-data-roundtrips': { kind: 'refused', note: RULED_3 },
+    'plural-objects-type-is-its-own-store': { kind: 'readable', note: RULED_2 },
+};
+
+const IMPLEMENTATIONS: readonly ShippedImplementation[] = [
     {
         label: 'MetadataManager (registry only)',
         documentFidelity: 'verbatim',
@@ -310,11 +224,6 @@ const IMPLEMENTATIONS: readonly PinnedImplementation[] = [
     {
         label: 'MetadataFacade',
         documentFidelity: 'runtime-effective',
-        divergences: {
-            'key-is-the-name-argument-object': { kind: 'readable-keyed-by-argument', note: RULED_1 },
-            'key-is-the-name-argument-nonobject': { kind: 'readable-keyed-by-argument', note: RULED_1 },
-            'plural-objects-type-is-its-own-store': { kind: 'readable-as-last-write', note: DIVERGENCE_2 },
-        },
         create: () => new MetadataFacade(new SchemaRegistry({ multiTenant: false })),
     },
 ];
@@ -325,43 +234,14 @@ function lastWrittenDocument(testCase: MetadataRoundTripCase): unknown {
 }
 
 /**
- * The answer this subject is held to for this case: the table's reference
- * answer, unless the subject declares a per-subject answer for it.
- */
-function expectationFor(
-    implementation: PinnedImplementation,
-    testCase: MetadataRoundTripCase,
-): { kind: 'readable'; document: unknown } | { kind: 'absent' } {
-    const answer = implementation.divergences?.[testCase.id];
-    if (!answer) return testCase.expected;
-    switch (answer.kind) {
-        case 'absent':
-            return { kind: 'absent' };
-        case 'readable-as-last-write':
-            return { kind: 'readable', document: lastWrittenDocument(testCase) };
-        case 'readable-keyed-by-argument':
-            // The authored document, with its own `name` reconciled to the
-            // effective key — see RULED_1. Every other authored key is asserted
-            // unchanged, so this cannot degrade into "something came back".
-            return {
-                kind: 'readable',
-                document: {
-                    ...(lastWrittenDocument(testCase) as Record<string, unknown>),
-                    name: testCase.read.name,
-                },
-            };
-    }
-}
-
-/**
  * The `name` a case's written document carries when that is NOT the key the
  * case reads — i.e. the spelling an implementation keying on `data.name` would
  * file the item under. `undefined` when the case does not pose the question.
  *
- * [#7378] Asserting this stale spelling is ABSENT from `listNames` is what
- * keeps the ruled rows from passing for the wrong reason: an implementation
- * that stored the item twice, or that kept the document's own name as a second
- * key, satisfies every other assertion on those rows and fails only this one.
+ * [#7378] On the refused rows this is what the locating message must NAME, and
+ * what the absence assertions probe: an implementation that "refused" but
+ * still filed the item under the document's own name satisfies the rejection
+ * assertion and fails only these.
  */
 function staleDocumentName(testCase: MetadataRoundTripCase): string | undefined {
     const written = lastWrittenDocument(testCase);
@@ -371,6 +251,51 @@ function staleDocumentName(testCase: MetadataRoundTripCase): string | undefined 
         : undefined;
 }
 
+/**
+ * Replay a REFUSED row (#7378 rows 1/3): the single write must reject with the
+ * ADR-0112 envelope — `code` AND `status`, a rejection test that checks one is
+ * not a rejection test — locate the problem in its message, and store NOTHING,
+ * neither under the argument key nor under the document's own name.
+ */
+async function assertRefused(service: RoundTrippingService, testCase: MetadataRoundTripCase): Promise<void> {
+    // The refused rows are single-write by construction; a second write would
+    // make "nothing stored" ambiguous about which write was refused.
+    expect(testCase.writes).toHaveLength(1);
+    const write = testCase.writes[0];
+
+    const error = await service.register(write.type, write.name, write.data).then(
+        () => undefined,
+        (thrown: unknown) => thrown as Error & { code?: string; status?: number },
+    );
+    expect(error, `register must REFUSE this write (#7378): ${testCase.id}`).toBeDefined();
+    expect(error).toMatchObject({
+        code: StandardErrorCode.enum.VALIDATION_ERROR,
+        status: 400,
+    });
+
+    // 报错定位 — the message names the write's coordinates…
+    const message = String(error?.message ?? '');
+    expect(message).toContain(`'${write.type}'`);
+    expect(message).toContain(`'${write.name}'`);
+    // …and, on the mismatch rows, BOTH disagreeing spellings.
+    const stale = staleDocumentName(testCase);
+    if (stale !== undefined) {
+        expect(message).toContain(`'${stale}'`);
+    }
+
+    // The refusal wrote nothing: absent under the argument key…
+    expect(await service.get(testCase.read.type, testCase.read.name)).toBeUndefined();
+    expect(await service.exists(testCase.read.type, testCase.read.name)).toBe(false);
+    const names = await service.listNames(testCase.read.type);
+    expect(names).not.toContain(testCase.read.name);
+    // …and never under the document's own name either — the misplacement the
+    // ruling exists to make impossible.
+    if (stale !== undefined) {
+        expect(await service.get(testCase.read.type, stale)).toBeUndefined();
+        expect(names).not.toContain(stale);
+    }
+}
+
 describe.each(IMPLEMENTATIONS)(
     'IMetadataService round-trip conformance [$label]',
     (implementation) => {
@@ -378,6 +303,12 @@ describe.each(IMPLEMENTATIONS)(
             '%s',
             async (_id, testCase) => {
                 const service = implementation.create();
+                const ruled = RULED_CONTRACT_ANSWERS[testCase.id];
+
+                if (ruled?.kind === 'refused') {
+                    await assertRefused(service, testCase);
+                    return;
+                }
 
                 for (const write of testCase.writes) {
                     await service.register(write.type, write.name, write.data);
@@ -389,7 +320,10 @@ describe.each(IMPLEMENTATIONS)(
                 const got = await service.get(testCase.read.type, testCase.read.name);
                 const exists = await service.exists(testCase.read.type, testCase.read.name);
                 const names = await service.listNames(testCase.read.type);
-                const expected = expectationFor(implementation, testCase);
+                const expected =
+                    ruled?.kind === 'readable'
+                        ? { kind: 'readable' as const, document: lastWrittenDocument(testCase) }
+                        : testCase.expected;
 
                 if (expected.kind === 'readable') {
                     // Anti-vacuity: `toMatchObject` against an absent document
@@ -424,26 +358,78 @@ describe.each(IMPLEMENTATIONS)(
     },
 );
 
+/**
+ * [#7378 rows 1/2] Driver-local pins the table does not carry (the table is the
+ * spec seat's half — see the header). These keep the ruled behaviour from
+ * passing for a wrong, narrower reason.
+ */
+describe.each(IMPLEMENTATIONS)('#7378 ruled behaviour, beyond the table [$label]', (implementation) => {
+    it('row 1 is a MISMATCH rule: a document with NO name of its own registers under the argument', async () => {
+        // The refusal must not widen into "data must carry a name": absence is
+        // not a disagreement, and the argument is the key either way.
+        const service = implementation.create();
+        await service.register('view', 'pin_nameless', { label: 'No name key at all', type: 'grid' });
+        const got = (await service.get('view', 'pin_nameless')) as Record<string, unknown> | undefined;
+        expect(got).toBeDefined();
+        expect(got).toMatchObject({ label: 'No name key at all' });
+        expect(await service.exists('view', 'pin_nameless')).toBe(true);
+        expect(await service.listNames('view')).toContain('pin_nameless');
+    });
+
+    it('row 1 is not refusal-happy: a data.name that AGREES with the argument registers', async () => {
+        // The negative pin the ruling's own wording implies: only 不一致 is
+        // refused. (The table's plain round-trip rows pin this too; stated
+        // here so the pair — refuse mismatch, admit match — sits together.)
+        const service = implementation.create();
+        await service.register('view', 'pin_agreeing', { name: 'pin_agreeing', label: 'Agrees', type: 'grid' });
+        expect(await service.exists('view', 'pin_agreeing')).toBe(true);
+    });
+
+    it("row 2 converges in BOTH directions: register('object', …) is readable through the plural spelling", async () => {
+        // The table's ruled row covers plural-write → singular-read; this is
+        // the reverse read, so the fold cannot be a write-side special case —
+        // the direction check:meta-type-normalized's incidents were about
+        // (#3984: the plural spelling walking past singular-literal gates).
+        const service = implementation.create();
+        await service.register('object', 'pin_both_ways', {
+            name: 'pin_both_ways',
+            label: 'Both spellings, one store',
+            fields: { title: { type: 'text', label: 'Title' } },
+        });
+        const viaPlural = (await service.get('objects', 'pin_both_ways')) as Record<string, unknown> | undefined;
+        expect(viaPlural).toBeDefined();
+        expect(viaPlural).toMatchObject({ name: 'pin_both_ways' });
+        expect(await service.exists('objects', 'pin_both_ways')).toBe(true);
+        expect(await service.listNames('objects')).toContain('pin_both_ways');
+    });
+});
+
 describe('round-trip conformance table wiring', () => {
-    it('declares no divergence for a case id the table does not contain', () => {
-        // A renamed case would otherwise turn its divergence override into a
-        // dead entry, and the subject would quietly be held to the reference
+    const ids = new Set(METADATA_ROUNDTRIP_CASES.map((testCase) => testCase.id));
+
+    it('declares no ruled override for a case id the table does not contain', () => {
+        // A renamed case would otherwise turn its override into a dead entry,
+        // and every subject would quietly be held to the pre-ruling reference
         // answer it is known to fail.
-        const ids = new Set(METADATA_ROUNDTRIP_CASES.map((testCase) => testCase.id));
-        for (const implementation of IMPLEMENTATIONS) {
-            for (const id of Object.keys(implementation.divergences ?? {})) {
-                expect(ids, `${implementation.label} → ${id}`).toContain(id);
-            }
+        for (const id of Object.keys(RULED_CONTRACT_ANSWERS)) {
+            expect(ids, id).toContain(id);
         }
     });
 
-    it('holds at least one implementation to every case', () => {
-        // Guards the opposite failure from the one above: a case that every
-        // subject declared a divergence for would be pinned by nobody against
-        // the reference answer.
-        for (const testCase of METADATA_ROUNDTRIP_CASES) {
-            const conforming = IMPLEMENTATIONS.filter((i) => !i.divergences?.[testCase.id]);
-            expect(conforming.length, testCase.id).toBeGreaterThan(0);
+    it('the table still lags the 2026-08-12 ruling — this red is the handoff signal', () => {
+        // The overrides above exist ONLY because the table and the reference
+        // double live under `packages/spec/src/**`, the `domain:spec` seat's
+        // half of #7378. When that half lands, each assertion here goes red:
+        // delete the corresponding RULED_CONTRACT_ANSWERS entry and let every
+        // subject be held to the table's (then-ruled) answer directly.
+        for (const [id, ruled] of Object.entries(RULED_CONTRACT_ANSWERS)) {
+            const testCase = METADATA_ROUNDTRIP_CASES.find((candidate) => candidate.id === id);
+            if (!testCase) continue; // the wiring test above owns this failure
+            if (ruled.kind === 'refused') {
+                expect(testCase.expected.kind, `${id}: table updated? delete its override`).toBe('readable');
+            } else {
+                expect(testCase.expected.kind, `${id}: table updated? delete its override`).toBe('absent');
+            }
         }
     });
 });

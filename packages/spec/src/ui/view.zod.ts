@@ -1236,10 +1236,81 @@ export const NavigationConfigSchema = lazySchema(() => strictObject({
   width: z.union([z.string(), z.number()]).optional().describe('[DEPRECATED → size] Pixel/percent width of the drawer/modal (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket.'),
 }));
 
+// `'pdf'` retirement prescription (#8010). Declared with `//` on purpose — the
+// hook-body precedent's placement note applies here too: build-docs takes a
+// file's first JSDoc per exported symbol, and this constant needs no doc page.
+const LIST_VIEW_EXPORT_PDF_RETIRED =
+  "'pdf' was removed from `view.exportOptions` formats in @objectstack/spec 17.0.0 (#8010; "
+  + 'PDF export itself was declined as #1301 NOT_PLANNED) — no renderer has ever produced a PDF '
+  + 'export: ObjectGrid dropped the declared format from the export menu with only a runtime '
+  + "console.warn, so authoring it was a parse-clean no-op. Delete the value; the surviving "
+  + "formats are 'csv', 'xlsx' and 'json'. "
+  + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.';
+
+/**
+ * Export formats the platform actually delivers (#8010): `csv`/`json` on both
+ * export paths, `xlsx` on the server stream only.
+ *
+ * `'pdf'` was REMOVED in 17 (#8010): PDF export was declined platform-side
+ * (#1301 NOT_PLANNED), so the enum member was a declared-but-unrenderable
+ * format whose only failure signal was a browser console line. This is an
+ * enum-VALUE narrowing, so there is no `retiredKey()` tombstone to hang the
+ * prescription on — the enum's own error map carries it
+ * ({@link LIST_VIEW_EXPORT_PDF_RETIRED}), keyed on `issue.input` so that only
+ * the value which used to be legal gets the "was removed" message (the
+ * `HookBodyCapability` / `object.managedBy: 'system'` precedent).
+ */
+const ListViewExportFormatSchema = z.enum(['csv', 'xlsx', 'json'], {
+  error: (issue) => (issue.input === 'pdf' ? LIST_VIEW_EXPORT_PDF_RETIRED : undefined),
+});
+
+/**
+ * Object form of `view.exportOptions` (#8010, maintainer ruling 2026-08-12 —
+ * option A). The declared key set is exactly what the only renderer reads,
+ * measured on objectui `origin/main@878140b` (`ObjectGrid.tsx:1596–1642`):
+ * `formats`, `maxRecords`, `includeHeaders`, `fileNamePrefix`, and the
+ * previously UNDECLARED `streaming` opt-out — declared here so no
+ * undeclared-but-read key survives the fix. Declaring anything more would be
+ * capability surface with no reader; declaring less recreates the defect.
+ */
+const ListViewExportOptionsSchema = strictObject({
+  surface: 'this export options block',
+  history: VIEW_HISTORY,
+}, {
+  formats: z.array(ListViewExportFormatSchema).optional()
+    .describe("Formats offered in the export menu (default: ['csv', 'json']). XLSX is delivered by the server stream only."),
+  maxRecords: z.number().int().nonnegative().optional()
+    .describe('Maximum number of records to export; 0 or absent = unlimited'),
+  includeHeaders: z.boolean().optional()
+    .describe('Include column headers in the exported file (default true)'),
+  fileNamePrefix: z.string().optional()
+    .describe('Download file name prefix — replaces the object label and suppresses the view label in the generated file name'),
+  streaming: z.boolean().optional()
+    .describe('Set false to force the client-side export path (csv/json only) instead of the server stream'),
+});
+
+/**
+ * Loud top-level refusal for a retired `'pdf'` anywhere in `exportOptions`
+ * (#8010). Without this, the prescription raised inside a union BRANCH is
+ * buried in `invalid_union` sub-errors; with it, the union's own message IS
+ * the prescription whenever the authored value — either spelling — declares
+ * `'pdf'`. Every other union failure keeps zod's default message, with the
+ * branch detail nested beneath it.
+ */
+const exportOptionsPdfUnionError = (issue: { input?: unknown }): string | undefined => {
+  const input = issue.input;
+  const declaresPdf = Array.isArray(input)
+    ? input.includes('pdf')
+    : (!!input && typeof input === 'object'
+        && Array.isArray((input as { formats?: unknown }).formats)
+        && ((input as { formats: unknown[] }).formats).includes('pdf'));
+  return declaresPdf ? LIST_VIEW_EXPORT_PDF_RETIRED : undefined;
+};
+
 /**
  * List View Schema (Expanded)
  * Defines how a collection of records is displayed to the user.
- * 
+ *
  * **NAMING CONVENTION:**
  * View names (when provided) are machine identifiers and must be lowercase snake_case.
  * 
@@ -1433,7 +1504,21 @@ export const ListViewSchema = lazySchema(() => strictObject({
   inlineEdit: z.boolean().optional().describe('Allow inline editing of records directly in the list view'),
 
   /** Export */
-  exportOptions: z.array(z.enum(['csv', 'xlsx', 'pdf', 'json'])).optional().describe('Available export format options'),
+  // Object form adopted at #8010 (maintainer ruling 2026-08-12 — option A):
+  // the spec published a bare format array while the only renderer (objectui
+  // ObjectGrid) read `exportOptions.formats` — no declaration was both
+  // type-legal and functional. The object form is now the contract; the legacy
+  // bare array stays accepted and LIFTS to `{ formats: [...] }` at parse
+  // (z.input keeps both spellings, z.output is the object form only).
+  // `'pdf'` left the format enum in the same change (#1301 NOT_PLANNED) — the
+  // enum error map and the union error above carry the prescription.
+  exportOptions: z.union([
+    z.array(ListViewExportFormatSchema).transform((formats) => ({ formats })), // Legacy: bare format array
+    ListViewExportOptionsSchema,
+  ], { error: exportOptionsPdfUnionError }).optional().describe(
+    'Export configuration for the list toolbar export menu: `{ formats?, maxRecords?, includeHeaders?, fileNamePrefix?, streaming? }`. '
+    + 'A bare format array is the legacy spelling and lifts to `{ formats: [...] }` at parse.',
+  ),
 
   /** User Actions (Airtable Interface parity) */
   userActions: UserActionsConfigSchema.optional().describe('User action toggles for the view toolbar'),
@@ -1786,6 +1871,16 @@ const FormFieldBaseSchema = lazySchema(() => {
   return z.object(shape, {
     error: strictObjectError({
       ...VISIBILITY_STRICT_OPTIONS,
+      // #8202 — this shape names ITSELF. The shared table's `'this view/page
+      // schema'` was harmless while all three of its consumers answered a key
+      // the same way; since #7887 they answer `disabled` in two contradictory
+      // ways on purpose (the rename below on a field, the boundary
+      // prescription on a section / page component), and the contradiction is
+      // only coherent if the message says which shape refused the key. A
+      // per-shape string is by definition not something a table shared by
+      // three shapes can carry, so it is filed here — the same placement rule
+      // #8199 drew for the prescription itself.
+      surface: 'this form field',
       extraKeys: ['fields'],
       // The one member of the `visibleWhen` family that can answer `disabled`
       // with a key of its own (#7832). `VISIBILITY_STRICT_OPTIONS` is shared
@@ -1900,7 +1995,15 @@ export const FormFieldSchema: z.ZodType<FormField, FormFieldInput> = lazySchema(
  * section non-editable, mark its fields `readonly`; to make it conditionally
  * non-editable, give each field a `readonlyWhen` predicate.
  */
-export const FormSectionSchema = lazySchema(() => strictObject(VISIBILITY_ONLY_STRICT_OPTIONS, {
+export const FormSectionSchema = lazySchema(() => strictObject({
+  ...VISIBILITY_ONLY_STRICT_OPTIONS,
+  // #8202 — see the note at `FormFieldBaseSchema`'s options: the boundary
+  // prescription this table carries tells the author to move an editability
+  // key to "the form field(s) inside", and the field's own message tells them
+  // to rename it in place. The reader can only tell which answer is theirs if
+  // the rejection names the shape, so each of the three shapes names itself.
+  surface: 'this form section',
+}, {
   /**
    * Stable identifier for translation lookup. snake_case convention.
    * When provided, translation bundles can target this section's `label`

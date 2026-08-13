@@ -121,6 +121,11 @@ const OVERLAYLESS_PROBES: Record<string, Record<string, unknown>> = {
     object: {
         name: 'rc5_acct',
         label: 'Account',
+        // [#8308] Authored OWD: the publish gate refuses an OWD-less custom
+        // object (`security-owd-unset`) once #8310 declares `object` in
+        // `runtimeTypes` — and this probe pins the RECEIPT wording, not that
+        // refusal.
+        sharingModel: 'private',
         fields: { name: { type: 'text', label: 'Name' } },
     },
     hook: { name: 'rc5_acct', object: 'task', events: ['beforeUpdate'] },

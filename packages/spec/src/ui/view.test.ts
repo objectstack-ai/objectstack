@@ -2865,6 +2865,82 @@ describe('ListViewSchema — retired striped/bordered/virtualScroll (#7176 pass-
   });
 });
 
+// ============================================================================
+// #8010: ListView.exportOptions — object form adopted (maintainer ruling
+// 2026-08-12, option A). The spec published a bare format array while the only
+// renderer read `exportOptions.formats`, so no declaration was both type-legal
+// and functional. The object form declares exactly the five renderer-read keys
+// (measured objectui origin/main@878140b, ObjectGrid.tsx:1596–1642); the
+// legacy bare array stays accepted and lifts to `{ formats }` at parse.
+// `'pdf'` left the enum in the same change (#1301 NOT_PLANNED).
+// ============================================================================
+describe('ListViewSchema.exportOptions — object form + array lift + pdf retirement (#8010)', () => {
+  it('accepts the object form with all five renderer-read keys, byte-preserved (no unrecognized_keys)', () => {
+    const exportOptions = {
+      formats: ['csv', 'xlsx', 'json'] as const,
+      maxRecords: 5000,
+      includeHeaders: false,
+      fileNamePrefix: 'contracts',
+      streaming: false,
+    };
+    const parsed = ListViewSchema.parse({ type: 'grid', columns: ['name'], exportOptions });
+    expect(parsed.exportOptions).toStrictEqual(exportOptions);
+  });
+
+  it('LIFTS the legacy bare array to `{ formats }` at parse (the back-compat normalization)', () => {
+    const parsed = ListViewSchema.parse({
+      type: 'grid', columns: ['name'], exportOptions: ['csv', 'xlsx'],
+    });
+    expect(parsed.exportOptions).toStrictEqual({ formats: ['csv', 'xlsx'] });
+  });
+
+  it("REJECTS 'pdf' in the legacy array form with the prescription naming #1301 and the survivors", () => {
+    let message = '';
+    try {
+      ListViewSchema.parse({ type: 'grid', columns: ['name'], exportOptions: ['xlsx', 'pdf'] });
+    } catch (e) { message = String((e as Error).message); }
+    expect(message).toMatch(/'pdf' was removed from `view\.exportOptions` formats/);
+    expect(message).toMatch(/#1301/);
+    expect(message).toMatch(/'csv', 'xlsx' and 'json'/);
+    expect(message).toMatch(/Run `os migrate meta --from 16` to rewrite existing sources automatically\./);
+  });
+
+  it("REJECTS 'pdf' in the object form's `formats` with the same prescription", () => {
+    expect(() => ListViewSchema.parse({
+      type: 'grid', columns: ['name'], exportOptions: { formats: ['csv', 'pdf'] },
+    })).toThrow(/'pdf' was removed from `view\.exportOptions` formats.*#1301/s);
+  });
+
+  it('a wrong format that was NEVER legal keeps the plain enum message, not the retirement text', () => {
+    let message = '';
+    try {
+      ListViewSchema.parse({ type: 'grid', columns: ['name'], exportOptions: ['docx'] });
+    } catch (e) { message = String((e as Error).message); }
+    expect(message).not.toMatch(/was removed/);
+  });
+
+  it('an unknown key on the object form is refused with the strict-surface suggestion', () => {
+    let message = '';
+    try {
+      ListViewSchema.parse({
+        type: 'grid', columns: ['name'], exportOptions: { formats: ['csv'], maxRecord: 10 },
+      });
+    } catch (e) { message = String((e as Error).message); }
+    expect(message).toMatch(/maxRecord/);
+    expect(message).toMatch(/maxRecords/);
+  });
+
+  it('ObjectListViewSchema (the .extend copy) lifts the array and rejects pdf identically', () => {
+    const parsed = ObjectListViewSchema.parse({
+      type: 'grid', columns: ['name'], exportOptions: ['json'],
+    });
+    expect(parsed.exportOptions).toStrictEqual({ formats: ['json'] });
+    expect(() => ObjectListViewSchema.parse({
+      type: 'grid', columns: ['name'], exportOptions: { formats: ['pdf'] },
+    })).toThrow(/'pdf' was removed from `view\.exportOptions` formats/s);
+  });
+});
+
 describe('HttpMethodSubsetSchema/HttpRequestSchema backward compat', () => {
   it('should still be importable from view.zod', () => {
     expect(HttpMethodSubsetSchema).toBeDefined();
@@ -3138,8 +3214,13 @@ describe('visibility unknown-key message order — fix before history (#6416 / #
 
   it('names the wrong key first, then the alias pointer, then the history', () => {
     const m = messageFor({ visibleWhenn: 'record.a == 1' });
-    // 1. which key is wrong — and nothing before it
-    expect(m.startsWith('Unrecognized key(s) on this view/page schema: `visibleWhenn`.')).toBe(true);
+    // 1. which key is wrong — and nothing before it.
+    //    The surface NAME moved with #8202 and the ORDER pin did not: this probe
+    //    is `FormFieldSchema`, which since #8202 names itself instead of
+    //    sharing `'this view/page schema'` with the section and the page
+    //    component. What is asserted here is unchanged — the key statement
+    //    comes first and nothing precedes it.
+    expect(m.startsWith('Unrecognized key(s) on this form field: `visibleWhenn`.')).toBe(true);
     // 2. the fix, immediately after it — this is the whole point of the reorder.
     //    Since #6619 the prescription arrives as the shared template's `  • `
     //    bullet (it rides the set-keyed guidance channel); the position is
@@ -3163,10 +3244,16 @@ describe('visibility unknown-key message order — fix before history (#6416 / #
     // No prescription branch — the sentence follows the key statement directly,
     // exactly as it always did. Full-message pin, so a stray separator or a
     // duplicated clause fails here.
+    //
+    // The surface reads `this form section` since #8202: this probe is a
+    // SECTION, and the three shapes that shared one string now each name
+    // themselves. Note that the pin above, on a form FIELD, reads a different
+    // string — the two literals disagreeing is #8202's whole content, and if a
+    // future edit makes them agree again, one of these two is now wrong.
     const res = FormSectionSchema.safeParse({ label: 'S', fields: [], bogusKey: true });
     expect(res.success).toBe(false);
     const m = res.error!.issues.find((i) => i.code === 'unrecognized_keys')!.message;
-    expect(m).toBe(`Unrecognized key(s) on this view/page schema: \`bogusKey\`. ${HISTORY}`);
+    expect(m).toBe(`Unrecognized key(s) on this form section: \`bogusKey\`. ${HISTORY}`);
   });
 
   it('emits the history exactly once, whatever the key count', () => {

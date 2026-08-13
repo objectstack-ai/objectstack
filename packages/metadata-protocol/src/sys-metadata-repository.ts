@@ -1077,23 +1077,41 @@ export class SysMetadataRepository implements MetadataRepository {
    *
    * What this reads, and what it deliberately does NOT:
    *
-   *  - **It changes no ALLOW decision.** Every allow limb above returns before
-   *    this point, so a write that succeeds today still succeeds — including
-   *    the ADR-0005 case that makes the naive "refuse writes into a read-only
-   *    package" gate wrong: an org overlay of a code-shipped item *always*
-   *    names the read-only package it customizes, and refusing that would
-   *    close the whole overlay model. The env hatch (`OS_METADATA_WRITABLE`)
-   *    returns two limbs above for the same reason — #7682's hatch-vs-Studio
-   *    -badge half is a separate maintainer decision (#8146) and must not move
-   *    as a side effect of this one. Pinned by the hatch case in
-   *    `sys-metadata-repository.package-writability.test.ts`.
-   *  - **It refuses nothing new.** This is the code-selection for writes that
-   *    are ALREADY refused; the difference is which true fact the refusal
-   *    reports. Making the package door an allow→deny gate here would extend
-   *    ADR-0070 D1 (measured on `saveMetaItem` creates) to `promoteDraft` /
-   *    `restoreVersion` / `revertCommit`, which route through {@link put} and
-   *    carry the row's OWN binding — i.e. it would break republishing and
-   *    repair of legacy package-bound rows, surfaces nobody measured.
+   *  - **It changes exactly ONE allow decision: the env hatch (#8146).** Every
+   *    REGISTRY limb still returns before this point, so a write allowed by
+   *    the type registry still succeeds — including the ADR-0005 case that
+   *    makes the naive "refuse writes into a read-only package" gate wrong: an
+   *    org overlay of a code-shipped item *always* names the read-only package
+   *    it customizes, and refusing that would close the whole overlay model.
+   *    What moved BELOW the door is `OS_METADATA_WRITABLE`, and only it.
+   *  - **Why that one moved — the #8146 ruling.** Maintainer ruling of
+   *    2026-08-12 (option B): Studio's "Read-only" badge is telling the truth
+   *    and the server should refuse, because the hatch is a **type**-level
+   *    unlock by its own shipped documentation
+   *    (`content/docs/deployment/environment-variables.mdx` — it treats named
+   *    types "as `allowOrgOverride: true` … overridden per-org") and the
+   *    package CHANGELOG's "deliberately does not unlock the org dimension".
+   *    A type-level unlock says nothing about the PACKAGE dimension, so a
+   *    hatch write that NAMES a read-only base is refused here.
+   *  - **How far that reaches — NARROW, and the measurement it rests on.** The
+   *    door reads the base the caller NAMED, so a package-LESS hatch write is
+   *    untouched and still lands the overlay the documentation promises. That
+   *    is measured, not assumed: on this topology a package-less hatch write
+   *    lands `{ package_id: null, organization_id: null }` env-wide and
+   *    `{ package_id: null, organization_id: <org> }` under an org kernel —
+   *    both pinned in `sys-metadata-repository.package-writability.test.ts`.
+   *    The BROADER reading (the hatch never unlocks a write against an item a
+   *    read-only package provides, named or not) would retire the hatch's only
+   *    documented use and is deliberately NOT implemented: it needs a
+   *    maintainer decision plus a docs/ADR change, not a code edit.
+   *  - **Beyond the hatch it still refuses nothing new.** For every other
+   *    intent this remains the code-selection for writes ALREADY refused; the
+   *    difference is which true fact the refusal reports. Widening it into a
+   *    general allow→deny gate would extend ADR-0070 D1 (measured on
+   *    `saveMetaItem` creates) to `promoteDraft` / `restoreVersion` /
+   *    `revertCommit`, which route through {@link put} and carry the row's OWN
+   *    binding — i.e. it would break republishing and repair of legacy
+   *    package-bound rows, surfaces nobody measured.
    *  - **Which code, by intent.** The two ledgered codes are not
    *    interchangeable, and each is the one whose prescription is TRUE for its
    *    case:
@@ -1153,19 +1171,25 @@ export class SysMetadataRepository implements MetadataRepository {
       }
     }
 
-    // Phase 3a-env-writable: env-var escape hatch.
+    // Phase 3a-env-writable: env-var escape hatch. [#8146] READ here but
+    // APPLIED below the package door — the door needs to know whether the
+    // hatch is what would otherwise have allowed this write, because that
+    // changes which remediation is true.
     const env = envWritableMetadataTypes();
-    if (env.has(singular) || env.has(type)) return;
+    const hatchOpen = env.has(singular) || env.has(type);
 
-    // [#7682] The package door. Only reached once every allow limb above has
-    // declined, so it re-reports an existing refusal — see the TSDoc for why
-    // it is a code selection and not a gate.
+    // [#7682 / #8146] The package door. Above the hatch limb, below every
+    // registry limb — see the TSDoc for why that is the whole ruling.
     const namedBase = typeof packageId === 'string' && packageId.length > 0;
     if (namedBase && !isWritablePackage(this.engine, packageId)) {
       throw intent === 'runtime-only'
-        ? SysMetadataRepository.readOnlyBaseCreateError(type, packageId as string)
-        : SysMetadataRepository.readOnlyBaseOverrideError(type, packageId as string);
+        ? SysMetadataRepository.readOnlyBaseCreateError(type, packageId as string, hatchOpen)
+        : SysMetadataRepository.readOnlyBaseOverrideError(type, packageId as string, hatchOpen);
     }
+
+    // [#8146] The hatch unlocks the TYPE — for a write that named no base, or
+    // named a writable one. It never reaches the package dimension.
+    if (hatchOpen) return;
 
     const allowed = [
       ...OVERLAY_ALLOWED_TYPES,
@@ -1195,11 +1219,18 @@ export class SysMetadataRepository implements MetadataRepository {
    * differently at each. The message stays user-actionable because here the
    * prescription is true — a writable base really is what this write needs.
    */
-  private static readOnlyBaseCreateError(type: string, packageId: string): Error {
+  private static readOnlyBaseCreateError(type: string, packageId: string, hatchOpen = false): Error {
     const err: any = new Error(
       `[writable_package_required] Cannot create ${type} in package '${packageId}': `
       + `that package is read-only (provided by code or an installed app), so it is not a writable base. `
-      + `Switch to a writable package in the package selector, or create a new one, and retry.`,
+      + `Switch to a writable package in the package selector, or create a new one, and retry.`
+      // [#8146] Said only when the hatch IS set, because otherwise it is noise.
+      // Without it the operator who just set the variable reads a refusal that
+      // looks like the variable was ignored, and sets it again.
+      + (hatchOpen
+        ? ` (OS_METADATA_WRITABLE is set for '${PLURAL_TO_SINGULAR[type] ?? type}': it unlocks the metadata `
+          + `TYPE, not package writability, so it does not make a read-only package a writable base.)`
+        : ''),
     );
     err.code = 'WRITABLE_PACKAGE_REQUIRED';
     err.status = 422;
@@ -1213,21 +1244,50 @@ export class SysMetadataRepository implements MetadataRepository {
    *
    * `ITEM_LOCKED` rather than `WRITABLE_PACKAGE_REQUIRED`: switching packages
    * cannot help — the artifact is code-shipped wherever the caller points —
-   * so the refusal states the lock and prescribes the two things that DO move
-   * it (edit the source and redeploy, or open the documented operator hatch).
+   * so the refusal states the lock and prescribes what DOES move it. [#8146]
+   * That prescription is now chosen by `hatchOpen`, because the two cases have
+   * genuinely different remedies: with the hatch CLOSED, opening it (on a
+   * package-less write) is one of the real answers; with it already OPEN, this
+   * door is refusing *despite* it — by ruling — and repeating "set
+   * OS_METADATA_WRITABLE" would be a false prescription of exactly the kind
+   * PR #8185's patch round rejected. Same code and status either way: the
+   * condition is one condition, and only the remedy differs.
    * `lockSource: 'package'` is ADR-0010's own reserved value for a lock the
    * PACKAGE layer asserts, which is what makes this distinguishable from the
    * item-level `_lock` refusal (`assertLockAllowsWrite`) that carries a `lock`
    * value read off the item. This one claims no `_lock`, because the item
    * declares none.
+   *
+   * @internal [#8184] Reachable from `protocol.ts` — deliberately, and it is
+   * the whole point of that card. `saveMetaItem` carries a SECOND refusal for
+   * this condition behind `environmentId !== undefined`, which shadowed this
+   * door on every scoped kernel and answered the undiscriminated
+   * `NOT_OVERRIDABLE` there. The two sites now share this ONE emitter rather
+   * than each spelling the sentence: two independently-authored refusals for
+   * one condition is how the `NOT_OVERRIDABLE`-everywhere problem started, and
+   * a copy in `protocol.ts` would drift from this one the first time either
+   * moves. ⛔ Do not re-privatise without deleting that call site.
    */
-  private static readOnlyBaseOverrideError(type: string, packageId: string): Error {
+  static readOnlyBaseOverrideError(type: string, packageId: string, hatchOpen = false): Error {
+    const singular = PLURAL_TO_SINGULAR[type] ?? type;
     const err: any = new Error(
       `[item_locked] Cannot overlay '${type}' in package '${packageId}': that package is read-only `
       + `(provided by code or an installed app) and the type has no per-org overlay channel `
       + `(allowOrgOverride=false), so this item is locked against runtime edits. `
-      + `Edit the source artifact and redeploy, or set OS_METADATA_WRITABLE=${PLURAL_TO_SINGULAR[type] ?? type} `
-      + `to grant a runtime escape hatch. See docs/adr/0010-metadata-protection-model.md.`,
+      // [#8146] The prescription is chosen by whether the hatch is ALREADY
+      // open, because "set OS_METADATA_WRITABLE" is FALSE once it is set —
+      // this door refuses with it set, by ruling. A refusal that prescribes
+      // the step the caller already took is what makes an automated client
+      // (and an AI agent) retry the same request forever.
+      + (hatchOpen
+        ? `OS_METADATA_WRITABLE=${singular} is set, and it does not apply here: the hatch unlocks the `
+          + `metadata TYPE (treating it as allowOrgOverride), never a package's writability. `
+          + `Retry without '?package=' to land the env-wide / per-org overlay the hatch does grant, `
+          + `or edit the source artifact and redeploy.`
+        : `Edit the source artifact and redeploy, or set OS_METADATA_WRITABLE=${singular} `
+          + `to grant a runtime escape hatch on this TYPE (it does not unlock package writability, `
+          + `so pair it with a package-less write).`)
+      + ` See docs/adr/0010-metadata-protection-model.md.`,
     );
     err.code = 'ITEM_LOCKED';
     err.status = 403;

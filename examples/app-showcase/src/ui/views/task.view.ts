@@ -66,7 +66,9 @@ export const TaskViews = defineView({
       data,
       columns: [{ field: 'title' }, { field: 'project' }, { field: 'assignee' }, { field: 'status' }, { field: 'priority' }, { field: 'due_date' }],
       filter: [{ field: 'status', operator: 'equals', value: 'in_progress' }],
-      exportOptions: ['csv', 'xlsx', 'json'],
+      // Object form (#8010): `formats` is what the renderer reads; the bare
+      // array is the legacy spelling and lifts to this shape at parse.
+      exportOptions: { formats: ['csv', 'xlsx', 'json'] },
     },
     urgent: {
       label: 'Urgent',
