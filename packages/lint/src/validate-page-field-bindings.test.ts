@@ -375,7 +375,7 @@ describe('validatePageFieldBindings — unprovisioned injected anchors (#8340)',
     object: 'ext_customer',
     regions: [{ name: 'main', components }],
   });
-  const only = (findings: { rule: string }[]) =>
+  const only = (findings: ReturnType<typeof validatePageFieldBindings>) =>
     findings.filter((f) => f.rule === PAGE_FIELD_UNPROVISIONED);
 
   it('warns on a highlights binding over an unprovisioned anchor, and the existence rule stays silent', () => {

@@ -446,7 +446,7 @@ describe('validateFlowTemplatePaths — unprovisioned injected anchors (#8340)',
       ],
     };
   }
-  const only = (findings: { rule: string }[]) =>
+  const only = (findings: ReturnType<typeof validateFlowTemplatePaths>) =>
     findings.filter((f) => f.rule === FLOW_TEMPLATE_FIELD_UNPROVISIONED);
 
   it('warns on a filter token over an unprovisioned anchor — the existence rule stays silent', () => {
