@@ -44,6 +44,7 @@
     "check:skill-frame-freshness": "node scripts/check-skill-frame-freshness.mjs --self-test && node scripts/check-skill-frame-freshness.mjs",
     "check:skill-compatibility": "node scripts/check-skill-compatibility-version.mjs --self-test && node scripts/check-skill-compatibility-version.mjs",
     "check:agent-model-declared": "node scripts/check-agent-model-declared.mjs --self-test && node scripts/check-agent-model-declared.mjs",
+    "check:ratchet-remedy-authority": "node scripts/check-ratchet-remedy-authority.mjs --self-test && node scripts/check-ratchet-remedy-authority.mjs",
     "check:pm-skill-ratchet": "node scripts/pm/check-skill-line-ratchet.mjs --self-test && node scripts/pm/check-skill-line-ratchet.mjs",
     "check:pm-skill-id-lint": "node scripts/pm/check-skill-id-lint.mjs --self-test && node scripts/pm/check-skill-id-lint.mjs",
     "check:pm-dispatch-gates": "node scripts/pm/check-dispatch-gates.mjs",
