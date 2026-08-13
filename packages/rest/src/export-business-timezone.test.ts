@@ -202,7 +202,10 @@ async function boot(timezone?: string) {
     true,
   );
   await engine.init();
-  engine.registry.registerObject(SHIFT as any);
+  // The engine facade (not `registry.registerObject`, which demands a
+  // packageId): one argument, sensible defaults, and it type-checks — this
+  // package's test layer sits at its `check:type-check-debt` ceiling.
+  engine.registerObject(SHIFT as any);
   await engine.syncSchemas();
   await engine.insert('shift', { id: '1', scanned_at: CROSS_MONTH_UTC, due: '2026-08-01' });
 
