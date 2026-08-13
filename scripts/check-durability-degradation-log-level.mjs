@@ -1597,6 +1597,73 @@ function readInventionKey(f) {
     return `${f.file}::${f.fn ?? '<anonymous>'}`;
 }
 
+// ── The ratchet-remedy authority convention (#8435) ──────────────────────────
+//
+// The read-seam report's `OR :` line hands the author the baseline-expanding
+// path. That baseline is shrink-only and hand-edited — the message said so, and
+// still presented the path as the second of two things the author may do. The
+// convention landed for check-engine-double-contract.mjs and
+// check-type-check-coverage.mjs; the twin blocks there are the reference.
+//
+// Deliberately NOT extended to this file's other two ledgers, both of which are
+// declaration registries rather than debt ratchets: FAILURE_PROPAGATION_CALLEES
+// / FAILURE_PROPAGATION_SITES record HOW a failure is delivered (declaring one
+// is the correct fix, not a weakening), and the two baselines' stale-entry
+// messages tell the author to DELETE an entry, which is the ratchet tightening
+// and squarely their job.
+//
+// ⛔ This STRENGTHENS ratchet governance and weakens nothing. No seam's verdict
+// moves, no baseline entry is added, and the findings this rule reports are
+// byte-for-byte the ones it reported before — only the diagnostic text changes.
+
+/** Kept identical to the other gates' token so the convention is greppable. */
+const RATCHET_AUTHORITY_MARKER = '⛔ MAINTAINER-ONLY';
+
+/** The baseline as the message spells it (the PATH constant is absolute). */
+const READ_INVENTION_BASELINE_REL = 'scripts/durability-read-invention.baseline.json';
+
+/**
+ * How this rule OFFERS the privileged path, as a detector rather than a string
+ * compare, so the self-test can prove it still reaches its subject: a reworded
+ * offer that stopped matching would make the convention check pass vacuously on
+ * every message. `\s+` rather than a space because the offer is wrapped across
+ * lines with a hanging indent.
+ */
+const RATCHET_EXPANSION_OFFER = new RegExp(
+    `add an entry naming why to\\s+${READ_INVENTION_BASELINE_REL.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`,
+);
+
+/**
+ * The convention: a message that hands the author the baseline-expanding path
+ * must say in the same breath that the path is not theirs. A message offering no
+ * such path is unaffected — this is an authority label, not a vocabulary ban.
+ *
+ * @param {string} message
+ * @returns {boolean}
+ */
+function ratchetRemedyCarriesAuthority(message) {
+    if (!RATCHET_EXPANSION_OFFER.test(message)) return true;
+    return message.includes(RATCHET_AUTHORITY_MARKER);
+}
+
+/**
+ * The `OR :` line's text, named and pure so the self-test can assert on the
+ * exact string the author reads. Extracted from the report loop for that reason
+ * — a message built inline is a message no assertion can reach.
+ *
+ * @returns {string}
+ */
+function readInventionBaselineOffer() {
+    return (
+        `    OR      : ${RATCHET_AUTHORITY_MARKER}, NOT a co-equal option — the fix above is the one\n` +
+        '              you can take on your own. If the seam is a REVIEWED, legitimate degradation,\n' +
+        `              add an entry naming why to ${READ_INVENTION_BASELINE_REL}.\n` +
+        '              That baseline is shrink-only and hand-edited, so an entry weakens a ratchet\n' +
+        '              and needs a maintainer to agree the degradation is legitimate first — do not\n' +
+        '              take this path to get CI green.\n'
+    );
+}
+
 /** Run the read-seam invention rule (#5186) over its narrowed scan scope. */
 function runReadSeamRule({ list = false } = {}) {
     const findings = [];
@@ -1698,10 +1765,7 @@ function runReadSeamRule({ list = false } = {}) {
                     '              that the failure be distinguishable, never that the value change.',
                 );
             }
-            console.error(
-                '    OR      : if the seam is a REVIEWED, legitimate degradation, add an entry naming why to\n' +
-                '              scripts/durability-read-invention.baseline.json (shrink-only, hand-edited).\n',
-            );
+            console.error(readInventionBaselineOffer());
         }
     }
 
@@ -3015,11 +3079,72 @@ function selfTestReadSeams() {
             console.log(`  ✓ ${c.name}`);
         }
     }
+    // ── The ratchet-remedy authority convention (#8435) ────────────────────────
+    //
+    // Three assertions, deliberately non-overlapping, so each way this can rot is
+    // caught by exactly one NAMED failure:
+    //
+    //   (1) the detector still reaches its subject — the only one that fails if
+    //       the offer is reworded out from under `RATCHET_EXPANSION_OFFER`, which
+    //       would make (3) pass vacuously forever after;
+    //   (2) the real emitted line carries the marker — the only one that fails if
+    //       the label is dropped from the `OR :` text;
+    //   (3) an offer WITHOUT the marker is REJECTED — the only one that fails if
+    //       the predicate stops discriminating (e.g. is reduced to `return true`).
+    //
+    // (3) is what makes (2) worth having: without it, a predicate that approves
+    // everything would keep this block green while the convention is gone.
+    const offer = readInventionBaselineOffer();
+    if (!RATCHET_EXPANSION_OFFER.test(offer)) {
+        failures++;
+        console.error(
+            '  ✗ #8435 convention — the ratchet-offer DETECTOR no longer matches the `OR :` line it is ' +
+                'written against. Either the offer was reworded (re-point RATCHET_EXPANSION_OFFER at the ' +
+                'new wording) or the baseline path was removed (delete the convention block). Until then ' +
+                'the convention check passes vacuously on every message.',
+        );
+    }
+    if (!ratchetRemedyCarriesAuthority(offer)) {
+        failures++;
+        console.error(
+            `  ✗ #8435 convention — the \`OR :\` line offers ${READ_INVENTION_BASELINE_REL} without the ` +
+                `${RATCHET_AUTHORITY_MARKER} marker. That baseline is shrink-only, so the path is a ` +
+                'maintainer action; presenting it unmarked next to the real fix is what let "add a ' +
+                'baseline entry" read as the author\'s second option.',
+        );
+    }
+    {
+        // (3)'s fixture is SYNTHETIC rather than the real line with the marker
+        // stripped out: derived, it also fires on a rewording — two named failures
+        // for one rot, and the second one misdescribes the cause.
+        const unmarkedOffer =
+            '    OR      : if the seam is a REVIEWED, legitimate degradation, add an entry naming why to\n' +
+            `              ${READ_INVENTION_BASELINE_REL} (shrink-only, hand-edited).\n`;
+        if (!RATCHET_EXPANSION_OFFER.test(unmarkedOffer)) {
+            failures++;
+            console.error(
+                '  ✗ #8435 convention — the synthetic unmarked-offer fixture is no longer recognised as an ' +
+                    'offer, so it cannot test discrimination at all. Re-spell it to match ' +
+                    'RATCHET_EXPANSION_OFFER.',
+            );
+        } else if (ratchetRemedyCarriesAuthority(unmarkedOffer)) {
+            failures++;
+            console.error(
+                '  ✗ #8435 convention — ratchetRemedyCarriesAuthority() ACCEPTED a message that offers the ' +
+                    'baseline-expanding path with no marker at all. The predicate is not discriminating, so ' +
+                    'the assertion above proves nothing.',
+            );
+        }
+    }
+
     if (failures > 0) {
         console.error(`\n✗ self-test (read-seam invention rule): ${failures} case(s) failed\n`);
         return 1;
     }
-    console.log(`\n✓ self-test (read-seam invention rule): ${cases.length} case(s) passed\n`);
+    console.log(
+        `\n✓ self-test (read-seam invention rule): ${cases.length} case(s) passed, and the baseline ` +
+            'offer stays marked maintainer-only (#8435)\n',
+    );
     return 0;
 }
 

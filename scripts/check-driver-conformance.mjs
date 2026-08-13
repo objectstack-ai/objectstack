@@ -440,6 +440,76 @@ const CASE_SETS = [
 const LEDGER = [];
 
 
+// ── The ratchet-remedy authority convention (#8435) ─────────────────────────
+//
+// The rule above is the authority rule, and until now it was written only here
+// — where a maintainer reading the script sees it and the author who trips the
+// gate never does. CONSUMED offered "write the suite, or add a ledger entry" as
+// two co-equal options, which is precisely the reading the LEDGER comment says
+// is wrong. The convention landed for check-engine-double-contract.mjs and
+// check-type-check-coverage.mjs; the twin blocks there are the reference.
+//
+// The words below are lifted from the LEDGER comment on purpose rather than
+// invented: one rule stated twice in two voices is two rules by the next
+// reading.
+//
+// ⛔ This STRENGTHENS ledger governance and weakens nothing. No cell's verdict
+// moves, no entry is added, and the matrix this gate reports is byte-for-byte
+// the one it reported before — only the diagnostic text changes.
+
+/** Kept identical to the other gates' token so the convention is greppable. */
+const RATCHET_AUTHORITY_MARKER = '⛔ MAINTAINER-ONLY';
+
+/** The ledger as the message spells it — this script IS the ledger's home. */
+const LEDGER_REL = 'scripts/check-driver-conformance.mjs';
+
+/**
+ * How this gate OFFERS the privileged path, as a detector rather than a string
+ * compare, so the self-test can prove it still reaches its subject: a reworded
+ * offer that stopped matching would make the convention check pass vacuously on
+ * every message.
+ *
+ * RECONCILED is deliberately out of its reach — that message tells the author to
+ * DELETE an entry, which is the ledger tightening and squarely the author's job.
+ */
+const RATCHET_EXPANSION_OFFER = new RegExp(
+  `add a measured DEBT/EXEMPT entry to the ledger in\\s+${LEDGER_REL.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`,
+);
+
+/**
+ * The convention: a message that hands the author the ledger-expanding path must
+ * say in the same breath that the path is not theirs. A message offering no such
+ * path is unaffected — this is an authority label, not a vocabulary ban.
+ *
+ * @param {string} message
+ * @returns {boolean}
+ */
+function ratchetRemedyCarriesAuthority(message) {
+  if (!RATCHET_EXPANSION_OFFER.test(message)) return true;
+  return message.includes(RATCHET_AUTHORITY_MARKER);
+}
+
+/**
+ * CONSUMED's text, named and pure so the self-test can assert on the exact
+ * string the author reads. Extracted from `audit()` for that reason — a message
+ * built inline is a message no assertion can reach.
+ *
+ * @param {string} driver
+ * @param {{marker: string, what: string}} caseSet
+ * @returns {string}
+ */
+function consumedMessage(driver, caseSet) {
+  return (
+    `CONSUMED: ${driver} does not run ${caseSet.marker} (${caseSet.what}). Add a suite that `
+    + 'drives the shared cases. That is the fix, and the only one of the two you can take on '
+    + `your own. ${RATCHET_AUTHORITY_MARKER}, NOT a co-equal option: add a measured DEBT/EXEMPT `
+    + `entry to the ledger in ${LEDGER_REL} saying why not. A ledger entry is a MEASURED, `
+    + 'tracked exception the maintainer has agreed to, never the cheaper half of "enroll the '
+    + 'driver" — do not take this path to get CI green.'
+  );
+}
+
+
 // ── Discovery ───────────────────────────────────────────────────────────────
 
 /** A declared scan root that could not be resolved to a directory. Carries the names. */
@@ -710,11 +780,7 @@ function audit() {
       } else if (entry) {
         rows.push({ driver, marker: c.marker, state: entry.kind.toLowerCase() });
       } else {
-        errors.push(
-          `CONSUMED: ${driver} does not run ${c.marker} (${c.what}). Add a suite that drives `
-            + 'the shared cases, or add a measured DEBT/EXEMPT entry to the ledger in '
-            + 'scripts/check-driver-conformance.mjs saying why not.',
-        );
+        errors.push(consumedMessage(driver, c));
         rows.push({ driver, marker: c.marker, state: 'MISSING' });
       }
     }
@@ -960,6 +1026,47 @@ function selfTest() {
     rmSync(tmpRoots, { recursive: true, force: true });
   }
 
+  // ── The ratchet-remedy authority convention (#8435) ────────────────────────
+  //
+  // Three assertions, deliberately non-overlapping, so each way this can rot is
+  // caught by exactly one NAMED failure:
+  //
+  //   (1) the detector still reaches its subject — the only one that fails if
+  //       the offer is reworded out from under `RATCHET_EXPANSION_OFFER`, which
+  //       would make (3) pass vacuously forever after;
+  //   (2) the real emitted message carries the marker — the only one that fails
+  //       if the label is dropped from CONSUMED's text;
+  //   (3) an offer WITHOUT the marker is REJECTED — the only one that fails if
+  //       the predicate stops discriminating (e.g. is reduced to `return true`).
+  //
+  // (3) is what makes (2) worth having: without it, a predicate that approves
+  // everything would keep this block green while the convention is gone.
+  const consumed = consumedMessage('driver-example', {
+    marker: 'PAGINATION_CASES',
+    what: 'a sorted paged read is a partition',
+  });
+  expect('#8435 — the ratchet-offer DETECTOR still matches CONSUMED (else the check below is '
+    + 'vacuous)',
+    RATCHET_EXPANSION_OFFER.test(consumed));
+  expect(`#8435 — CONSUMED marks the ledger path ${RATCHET_AUTHORITY_MARKER} (the LEDGER comment `
+    + 'calls an entry a MEASURED exception the maintainer has agreed to, so the author must be '
+    + 'told that where they read it, not only where a maintainer does)',
+    ratchetRemedyCarriesAuthority(consumed));
+
+  {
+    // (3)'s fixture is SYNTHETIC rather than the real message with the marker
+    // stripped out: derived, it also fires on a rewording — two named failures
+    // for one rot, the second misdescribing the cause.
+    const unmarkedOffer =
+      `CONSUMED: driver-example does not run PAGINATION_CASES. Add a suite that drives the shared `
+      + `cases, or add a measured DEBT/EXEMPT entry to the ledger in ${LEDGER_REL} saying why not.`;
+    expect('#8435 — the synthetic unmarked-offer fixture is still recognised as an offer',
+      RATCHET_EXPANSION_OFFER.test(unmarkedOffer));
+    expect('#8435 — ratchetRemedyCarriesAuthority() REJECTS an offer carrying no marker (proves '
+      + 'the predicate discriminates rather than approving everything)',
+      !ratchetRemedyCarriesAuthority(unmarkedOffer));
+  }
+
   if (failures.length) {
     for (const f of failures) console.error(`  x self-test: ${f}`);
     console.error(`\ncheck-driver-conformance --self-test: ${failures.length} failure(s).\n`);
@@ -967,8 +1074,9 @@ function selfTest() {
   }
   console.log(
     'OK  self-test: detects driven / unused / re-declared fixtures, discovers both axes, accounts for '
-      + 'every entry under DRIVERS_DIR (a dropped or manifestless row is red, not a smaller matrix), and '
-      + 'holds the dead-root hard error (red when a scan root is renamed, green when restored).',
+      + 'every entry under DRIVERS_DIR (a dropped or manifestless row is red, not a smaller matrix), '
+      + 'holds the dead-root hard error (red when a scan root is renamed, green when restored), and '
+      + 'keeps CONSUMED\'s ledger offer marked maintainer-only (#8435).',
   );
 }
 
