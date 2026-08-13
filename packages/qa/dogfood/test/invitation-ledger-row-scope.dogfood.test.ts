@@ -31,6 +31,27 @@
  *   3. and the OWNER still reads the full ledger, because a change that broke
  *      the object for everyone would pass 1 and 2 together.
  *
+ * ── [#8240] The fourth persona, and the second inviter ────────────────────────
+ *
+ * #8095's narrowing landed on owner/admin only, and left the ISSUING grade
+ * outside: `delegated_admin` (ADR-0105 D8 / #3697) is the one principal that can
+ * reach `/organization/invite-member` without being an org admin, and it
+ * normalizes to neither `org_owner` nor `org_admin`, so the admin admission
+ * missed it and it read ZERO of the ledger — including the invitations it had
+ * just issued itself. Maintainer ruling (2026-08-13), option C: it sees the
+ * invitations it issued (`inviter_id == current_user.id`), NOT the whole ledger.
+ * Option B (the whole ledger) was rejected for widening the audience beyond what
+ * #8095 ruled.
+ *
+ * That ruling is why this fixture now has TWO inviters. "The delegate can see an
+ * invitation" is satisfied identically by the ruled option and by the rejected
+ * one, so a single-inviter ledger cannot tell them apart — under option B the
+ * delegate would read every row and every such assertion would still be green.
+ * The rows below are therefore split by issuer: two written by the org-owner
+ * grade, one written by the delegate, and the delegate's assertions are
+ * two-sided — it reads its own row AND the other two stay invisible, by row
+ * count, by id, and by substring on the raw response.
+ *
  * Why over HTTP and not against the permission-set constant: an assertion whose
  * expectation and reality both come from `default-permission-sets.ts` cannot
  * fail. The narrowing is only real if it survives the whole resolved chain —
@@ -64,6 +85,14 @@ const MEMBER_EMAIL = 'member.8095@acme-test.example';
 const INVITEE_EMAIL = 'invitee.8095@acme-test.example';
 /** Invited as `admin`, never signed up (the card's `wangwu@` — the row that leaked). */
 const OUTSIDER_EMAIL = 'outsider.8095@acme-test.example';
+/**
+ * [#8240] The delegated issuer. NOT an org admin — that is the entire point of
+ * the grade — and NOT the addressee of anything, so every row it can read has to
+ * come from the issuer carve-out rather than from `sys_invitation_self`.
+ */
+const DELEGATE_EMAIL = 'delegate.8240@acme-test.example';
+/** The one invitation the DELEGATE issues — the only row it is entitled to. */
+const DELEGATE_INVITEE_EMAIL = 'invitee.8240@acme-test.example';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function findRows(ql: any, object: string, where: any, limit = 50): Promise<any[]> {
@@ -123,7 +152,7 @@ async function readLedger(stack: VerifyStack, token: string) {
   return { status: res.status, rows: rowsOf(body), raw };
 }
 
-describe('#8095: a member cannot read the org invitation ledger — only their own row', () => {
+describe('#8095/#8240: the sys_invitation ledger, read by four personas', () => {
   let stack: VerifyStack;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let ql: any;
@@ -131,6 +160,9 @@ describe('#8095: a member cannot read the org invitation ledger — only their o
   let ownerToken: string;
   let memberToken: string;
   let inviteeToken: string;
+  let delegateToken: string;
+  let delegateUserId: string;
+  let ownerUserId: string;
 
   beforeAll(async () => {
     stack = await bootStack(showcaseStack, {});
@@ -164,17 +196,34 @@ describe('#8095: a member cannot read the org invitation ledger — only their o
     }
     await setActiveOrg(ql, adminUserId, orgId);
 
-    // ── The three personas ────────────────────────────────────────────────
+    // ── The four personas ─────────────────────────────────────────────────
     // The org owner. A SEPARATE principal from the seeded platform admin on
     // purpose: `admin_full_access` would satisfy the owner assertion through
     // the platform-admin path and prove nothing about an ORG owner, which is
     // the persona the card compared against.
     ownerToken = await stack.signUp(OWNER_EMAIL, 'Owner!Pass123', 'Owner 8095');
-    const ownerUserId = await userIdOf(ql, OWNER_EMAIL);
+    ownerUserId = await userIdOf(ql, OWNER_EMAIL);
     const ownerMember = await waitForMembership(ql, ownerUserId);
     await ql.update('sys_member', { id: ownerMember.id, role: 'owner' }, { context: SYSTEM_CTX });
 
-    // The two invitations, written by the real better-auth endpoint.
+    // [#8240] The delegated issuer, provisioned BEFORE the ledger is written
+    // because it has to write part of it. Promoted out of the `member` role the
+    // sign-up reconciler assigns — never to owner/admin, which is the whole
+    // point of the grade and the reason #8095's admin admission misses it.
+    delegateToken = await stack.signUp(DELEGATE_EMAIL, 'Delegate!Pass123', 'Delegate 8240');
+    delegateUserId = await userIdOf(ql, DELEGATE_EMAIL);
+    const delegateMember = await waitForMembership(ql, delegateUserId);
+    expect(delegateMember.role, 'fixture: the reconciler default').toBe('member');
+    await ql.update(
+      'sys_member',
+      { id: delegateMember.id, role: 'delegated_admin' },
+      { context: SYSTEM_CTX },
+    );
+    await setActiveOrg(ql, delegateUserId, orgId);
+
+    // The two invitations from the ADMIN side, written by the real better-auth
+    // endpoint. Under #8240 these are the delegate's negative case — rows it
+    // must NOT see — so which principal issued them is load-bearing, not decor.
     for (const [email, role] of [
       [INVITEE_EMAIL, 'member'],
       [OUTSIDER_EMAIL, 'admin'],
@@ -187,6 +236,23 @@ describe('#8095: a member cannot read the org invitation ledger — only their o
       expect(res.status, `invite ${email} as ${role}: ${await res.clone().text()}`).toBe(200);
     }
 
+    // [#8240] …and the SECOND inviter's row, through the same real endpoint. A
+    // ledger with one inviter cannot distinguish "sees their own" from "sees
+    // everything", which is exactly the difference between the ruled option and
+    // the rejected one. `member` (not `admin`): the #3697 role cap refuses a
+    // delegate issuing above itself, and a 403 here would leave the fixture with
+    // no delegate-issued row at all.
+    const delegateInvite = await stack.apiAs(
+      delegateToken,
+      'POST',
+      '/auth/organization/invite-member',
+      { email: DELEGATE_INVITEE_EMAIL, role: 'member', organizationId: orgId },
+    );
+    expect(
+      delegateInvite.status,
+      `delegate invite: ${await delegateInvite.clone().text()}`,
+    ).toBe(200);
+
     // The addressee of one of them, who then joins as an ordinary member.
     inviteeToken = await stack.signUp(INVITEE_EMAIL, 'Invitee!Pass123', 'Invitee 8095');
     const inviteeUserId = await userIdOf(ql, INVITEE_EMAIL);
@@ -197,32 +263,54 @@ describe('#8095: a member cannot read the org invitation ledger — only their o
     const memberUserId = await userIdOf(ql, MEMBER_EMAIL);
     await waitForMembership(ql, memberUserId);
 
-    for (const uid of [ownerUserId, inviteeUserId, memberUserId]) {
+    for (const uid of [ownerUserId, inviteeUserId, memberUserId, delegateUserId]) {
       await setActiveOrg(ql, uid, orgId);
     }
 
-    // Fixture sanity: both rows really exist in the ledger. Without this, every
-    // "member sees nothing" assertion below would pass on an EMPTY table.
+    // Fixture sanity: all three rows really exist in the ledger. Without this,
+    // every "sees nothing" assertion below would pass on an EMPTY table.
     const ledger = await findRows(ql, 'sys_invitation', { organization_id: orgId }, 50);
-    expect(ledger.map((r) => r.email).sort()).toEqual([INVITEE_EMAIL, OUTSIDER_EMAIL].sort());
+    expect(ledger.map((r) => r.email).sort()).toEqual(
+      [INVITEE_EMAIL, OUTSIDER_EMAIL, DELEGATE_INVITEE_EMAIL].sort(),
+    );
+
+    // Fixture sanity, the #8240 half: the ledger really has TWO DISTINCT
+    // inviters, and the delegate really is the inviter of exactly one row. If
+    // better-auth ever stopped stamping `inviter_id` with the caller, the
+    // delegate's positive assertion would go green on an empty intersection and
+    // the negative one would go green on nothing at all — both vacuous.
+    const byDelegate = ledger.filter((r) => String(r.inviter_id) === delegateUserId);
+    expect(byDelegate.map((r) => r.email)).toEqual([DELEGATE_INVITEE_EMAIL]);
+    expect(new Set(ledger.map((r) => String(r.inviter_id))).size, 'two distinct inviters').toBe(2);
   }, 240_000);
 
   afterAll(async () => {
     await stack?.stop?.();
   });
 
-  it('the org OWNER still reads the full ledger — both rows, with role and inviter', async () => {
+  it('the org OWNER still reads the full ledger — every row, with role and inviter', async () => {
     // Asserted FIRST and deliberately: it is the control that keeps the two
     // narrowing assertions honest. A change that simply broke `sys_invitation`
     // for everyone satisfies "a member sees nothing" perfectly.
+    //
+    // [#8240] It is also the control for THIS card, in the direction the ruling
+    // named explicitly ("owner/admin visibility is unchanged"): the owner reads
+    // the delegate's row too, and reads it because it is in their organization,
+    // not because they issued it.
     const { status, rows } = await readLedger(stack, ownerToken);
     expect(status).toBe(200);
-    expect(rows.map((r) => r.email).sort()).toEqual([INVITEE_EMAIL, OUTSIDER_EMAIL].sort());
+    expect(rows.map((r) => r.email).sort()).toEqual(
+      [INVITEE_EMAIL, OUTSIDER_EMAIL, DELEGATE_INVITEE_EMAIL].sort(),
+    );
 
     const outsider = rows.find((r) => r.email === OUTSIDER_EMAIL);
     // The administrative fields the card names — an owner is entitled to them.
     expect(outsider.role).toBe('admin');
     expect(outsider.inviter_id).toBeTruthy();
+
+    // The owner issued NONE of these rows (the seeded dev admin and the delegate
+    // did), so their full-ledger read cannot be the issuer carve-out in disguise.
+    expect(rows.every((r) => String(r.inviter_id) !== ownerUserId)).toBe(true);
   }, 60_000);
 
   it('a plain MEMBER reads NONE of it — the exposure the card measured is gone', async () => {
@@ -239,6 +327,10 @@ describe('#8095: a member cannot read the org invitation ledger — only their o
     // the response — not in a record, not in a facet, not in an echoed filter.
     expect(raw).not.toContain(OUTSIDER_EMAIL);
     expect(raw).not.toContain(INVITEE_EMAIL);
+    // [#8240] …and the delegate's row is not a hole in the member narrowing
+    // either. The issuer carve-out is domained to `delegated_admin`; a plain
+    // member matching it would mean the domain is not being read.
+    expect(raw).not.toContain(DELEGATE_INVITEE_EMAIL);
   }, 60_000);
 
   it('the INVITEE still reads their own row — and only their own', async () => {
@@ -254,6 +346,101 @@ describe('#8095: a member cannot read the org invitation ledger — only their o
     expect(rows[0].status).toBeTruthy();
     // …and the carve-out is a row scope, not a blanket re-open.
     expect(raw).not.toContain(OUTSIDER_EMAIL);
+    expect(raw).not.toContain(DELEGATE_INVITEE_EMAIL);
+  }, 60_000);
+
+  it('[#8240] the DELEGATED_ADMIN reads the invitation it issued — and ONLY that one', async () => {
+    // The ruled option (C) and the rejected one (B) are both satisfied by "the
+    // delegate can see an invitation". Everything that distinguishes them is
+    // below the first assertion: the row it sees must be the one it ISSUED, and
+    // the two it did not issue must be absent.
+    const { status, rows, raw } = await readLedger(stack, delegateToken);
+
+    // 200 with rows, not 403 and not empty: before this card the delegate read
+    // `total: 0` here — it could create invitations it then could not list, and
+    // better-auth's own `list-invitations` route is owner/admin-gated too, so
+    // there was no second path back.
+    expect(status).toBe(200);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].email).toBe(DELEGATE_INVITEE_EMAIL);
+
+    // Keyed on the ISSUER. Asserting the email alone would still pass under a
+    // policy that admitted the row for some other reason.
+    expect(String(rows[0].inviter_id)).toBe(delegateUserId);
+
+    // ── The negative case — the whole reason this fixture has two inviters ──
+    // Under option B (`delegated_admin` added to the admin admission, or any
+    // predicate not bound to `current_user.id`) these two rows come back and the
+    // count above reads 3. This is the assertion that tells the shipped ruling
+    // apart from the one that was refused.
+    expect(rows.map((r) => r.email)).not.toContain(OUTSIDER_EMAIL);
+    expect(rows.map((r) => r.email)).not.toContain(INVITEE_EMAIL);
+    expect(raw).not.toContain(OUTSIDER_EMAIL);
+    expect(raw).not.toContain(INVITEE_EMAIL);
+
+    // The delegate is the addressee of NOTHING, so this row cannot have arrived
+    // through `sys_invitation_self`. Without this the test would still pass if
+    // the issuer policy were deleted and the fixture quietly addressed a row to
+    // the delegate instead.
+    expect(raw).not.toContain(DELEGATE_EMAIL);
+  }, 60_000);
+
+  it('[#8240] the ADR-0105 D8 checklist step reads correctly — and stops being vacuous', async () => {
+    // The D8 item (`docs/qa/platform-checklist/areas/identity-auth.json`,
+    // `identity-auth.invitation-scope-gates`) has two steps phrased as the
+    // delegate reading the data API: "capture the created sys_invitation row via
+    // the data API", and "immediately read sys_invitation via the API and verify
+    // NO row was left behind" by the REFUSED admin-role attempt. The ruling
+    // predicted both become correct as written under this card, and asked for it
+    // to be verified rather than assumed. This is that verification.
+    //
+    // The second step is the interesting one. Before this card the delegate read
+    // `total: 0` no matter what, so "verify no row was left behind" passed
+    // whether or not a row had been left behind — a check that could not fail.
+    // It is only a real check once the delegate can see its OWN issuances, which
+    // is exactly what a leaked row from a refused attempt would be.
+    const refused = await stack.apiAs(delegateToken, 'POST', '/auth/organization/invite-member', {
+      email: 'refused.8240@acme-test.example',
+      role: 'admin',
+      organizationId: orgId,
+    });
+    expect(refused.status, 'the #3697 role cap still refuses a delegate minting an admin').toBe(403);
+
+    // Step 2, run exactly as the checklist words it — as the delegate, over the
+    // data API. One row, the legitimate one; the refused attempt left nothing.
+    const { status, rows } = await readLedger(stack, delegateToken);
+    expect(status).toBe(200);
+    expect(rows.map((r) => r.email)).toEqual([DELEGATE_INVITEE_EMAIL]);
+    expect(rows.map((r) => r.email)).not.toContain('refused.8240@acme-test.example');
+
+    // And the step is now load-bearing: had the refusal leaked a row, it would
+    // carry the delegate's own `inviter_id` and therefore land INSIDE the scope
+    // this card just granted — so the read above would have returned two rows
+    // rather than silently returning zero like it used to.
+    const leaked = await findRows(ql, 'sys_invitation', { email: 'refused.8240@acme-test.example' }, 5);
+    expect(leaked).toHaveLength(0);
+  }, 60_000);
+
+  it("[#8240] the delegate's own scope does NOT open a by-id fetch of a row it did not issue", async () => {
+    // Same argument as the member's by-id probe: a row filter that engages only
+    // on the list path is not a row filter, and invitation ids travel in emails.
+    // Run for the delegate specifically because it is the persona whose policy
+    // this card ADDED — the one whose by-id path nothing covered before.
+    const [outsiderRow] = await findRows(ql, 'sys_invitation', { email: OUTSIDER_EMAIL }, 1);
+    expect(outsiderRow?.id, 'fixture: the outsider row exists to be fetched').toBeTruthy();
+
+    const denied = await stack.apiAs(delegateToken, 'GET', `/data/sys_invitation/${outsiderRow.id}`);
+    expect([403, 404]).toContain(denied.status);
+    expect(await denied.text()).not.toContain(OUTSIDER_EMAIL);
+
+    // …and the same route DOES serve the row it issued, so the refusal above is
+    // the row scope talking and not the object being closed to this persona.
+    const [ownRow] = await findRows(ql, 'sys_invitation', { email: DELEGATE_INVITEE_EMAIL }, 1);
+    expect(ownRow?.id, 'fixture: the delegate-issued row exists').toBeTruthy();
+
+    const allowed = await stack.apiAs(delegateToken, 'GET', `/data/sys_invitation/${ownRow.id}`);
+    expect(allowed.status, await allowed.clone().text()).toBe(200);
+    expect(await allowed.text()).toContain(DELEGATE_INVITEE_EMAIL);
   }, 60_000);
 
   it("the narrowing holds against a by-id fetch of another person's invitation", async () => {

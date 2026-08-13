@@ -3,7 +3,12 @@
 import { isIncoherentAggregate } from '@objectstack/spec/data';
 import { ChartTypeSchema } from '@objectstack/spec/ui';
 
-import { SYSTEM_FIELDS } from './system-fields.js';
+import {
+  SYSTEM_FIELDS,
+  indexUnprovisionedAnchors,
+  unprovisionedAnchorCause,
+  unprovisionedAnchorHint,
+} from './system-fields.js';
 
 /**
  * Build-time dashboard widget binding diagnostics (issues #1719, #1721).
@@ -70,6 +75,14 @@ import { SYSTEM_FIELDS } from './system-fields.js';
  *   single-form cutover removed. The dashboard renderer routes dataset-bound
  *   widgets through `DatasetWidget` and never reads these, so they are a
  *   silent no-op. Steers the author onto `dataset`+`dimensions`+`values`.
+ * - `dashboard-filter-field-unprovisioned` (#8340) — the filter's effective
+ *   field RESOLVES (it is a registry-injected system column, so
+ *   `dashboard-filter-field-unknown` above rightly stays silent) but the bound
+ *   object is ADR-0015 `external`, where the platform registers the anchor and
+ *   provisions no storage for it. The filter is still ANDed into the query, so
+ *   the widget renders empty instead of crashing — the silent-degradation half
+ *   of the same invariant, warned rather than errored because this pass cannot
+ *   see the remote schema (#8116's severity reasoning).
  *
  * Warnings can be deliberately suppressed per widget via
  * `suppressWarnings: ['<rule-id>']`; errors cannot — they describe a
@@ -86,6 +99,7 @@ export const MEASURE_AGGREGATE_INCOHERENT = 'measure-aggregate-incoherent';
 export const WIDGET_LEGACY_ANALYTICS_SHAPE = 'widget-legacy-analytics-shape';
 export const WIDGET_LEGACY_ANALYTICS_UNRENDERABLE = 'widget-legacy-analytics-unrenderable';
 export const DASHBOARD_FILTER_FIELD_UNKNOWN = 'dashboard-filter-field-unknown';
+export const DASHBOARD_FILTER_FIELD_UNPROVISIONED = 'dashboard-filter-field-unprovisioned';
 
 /**
  * Pre-ADR-0021 inline-analytics keys. The single-form cutover replaced them
@@ -319,6 +333,10 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
     }
     objectFieldTypes.set(o.name, fm);
   }
+  // [#8340] object name → the injected anchors it registers with NO storage
+  // behind them. Built once for the whole stack; empty for every object that is
+  // not ADR-0015 `external`, so the filter check below pays one map lookup.
+  const unprovisionedAnchors = indexUnprovisionedAnchors(stack);
   const datasetList = asArray(stack.datasets);
   for (let i = 0; i < datasetList.length; i++) {
     const ds = datasetList[i];
@@ -468,7 +486,9 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
         // object from another installed package is unknowable here — skip rather
         // than false-positive (mirrors the measure-aggregate check above).
         const objectFields = datasetObject ? objectFieldTypes.get(datasetObject) : undefined;
-        if (objectFields) {
+        // [#8340] The provenance half of the same question, for THIS object.
+        const anchors = datasetObject ? unprovisionedAnchors.get(datasetObject) : undefined;
+        if (objectFields && datasetObject) {
           for (const def of dashFilterDefs) {
             const eff = effectiveFilterField(w, def);
             if (!eff) continue; // opted out / not targeted → filter never applies
@@ -476,7 +496,36 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
             // A relationship path (`account.region`) is resolved by the query
             // engine, not a base column, so it can't be checked here — skip it.
             if (field.includes('.')) continue;
-            if (objectFields.has(field) || SYSTEM_FIELDS.has(field)) continue;
+            if (objectFields.has(field) || SYSTEM_FIELDS.has(field)) {
+              // The name RESOLVES — the existence error above is right to stay
+              // silent, and `SYSTEM_FIELDS` keeps that decision (#8340 adds a
+              // question, it does not replace the membership test). But a
+              // resolvable anchor on a federated object has no column behind
+              // it, so ANDing it into the widget's analytics query silently
+              // narrows the result to nothing instead of crashing. Warning,
+              // not error, on #4330's cost asymmetry: this pass cannot see the
+              // remote table, only that the PLATFORM provisions no storage.
+              if (anchors?.has(field)) {
+                push({
+                  severity: 'warning',
+                  rule: DASHBOARD_FILTER_FIELD_UNPROVISIONED,
+                  message:
+                    (eff.explicit
+                      ? `binds dashboard filter \`${def.name}\` to field \`${field}\` (via filterBindings), but `
+                      : `inherits dashboard filter \`${def.name}(${field})\`, but `) +
+                    `${unprovisionedAnchorCause(datasetObject, field)}. The filter is ANDed ` +
+                    `into this widget's analytics query (#2501), so it can never match a real value — ` +
+                    `on SQLite it silently degrades to constant-false and the widget renders empty ` +
+                    `(HTTP 200, zero rows, no error).`,
+                  hint:
+                    `${unprovisionedAnchorHint(datasetObject, field)} A widget can also opt out ` +
+                    `with filterBindings: { ${def.name}: false }. Suppress with ` +
+                    `suppressWarnings: ['${DASHBOARD_FILTER_FIELD_UNPROVISIONED}'] if the remote schema ` +
+                    `resolves it some other way.`,
+                });
+              }
+              continue;
+            }
             push({
               severity: 'error',
               rule: DASHBOARD_FILTER_FIELD_UNKNOWN,
