@@ -27,11 +27,22 @@ import {
 const cloudUrl = resolveCloudUrl(); // OS_CLOUD_URL, 'off' disables
 
 const plugins = [
+  // Cloud-gated: these ARE the control-plane client, so a resolved URL is
+  // their precondition. Skipped entirely when cloud is off.
   ...(cloudUrl ? [
     new MarketplaceProxyPlugin({ controlPlaneUrl: cloudUrl }),
-    new MarketplaceInstallLocalPlugin({ controlPlaneUrl: cloudUrl }),
     new CloudConnectionPlugin({ singleEnvironment: true, controlPlaneUrl: cloudUrl }),
   ] : []),
+  // NOT cloud-gated: this is the documented air-gapped path, so it mounts
+  // unconditionally. `cloudUrl || 'off'` — never the bare `cloudUrl` — because
+  // the constructor re-resolves whatever it is given through
+  // resolveCloudUrl(), which reads '' as "unset" and substitutes the public
+  // DEFAULT_CLOUD_URL. 'off' is one of the documented disable sentinels and
+  // is the value that actually resolves to no cloud.
+  new MarketplaceInstallLocalPlugin({ controlPlaneUrl: cloudUrl || 'off' }),
+  // NOT cloud-gated: features.marketplace is derived from what is actually
+  // mounted, not from this constructor call, so a cloud-less runtime reports
+  // marketplace: false on its own — there is nothing here to keep in sync.
   new RuntimeConfigPlugin({ controlPlaneUrl: '', singleEnvironment: true, installLocal: true }),
 ];
 ```
