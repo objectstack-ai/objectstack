@@ -1143,35 +1143,44 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   //    fail identically. That is RUNTIME_NEEDS_FULL_SNAPSHOT (#4463 P2), and it
   //    is a snapshot change in the protocol package, not a `runtimeTypes` edit.
   //
-  // The residue that IS ready: the two ADR-0091 seed rules
-  // (`security-grant-expired-at-authoring`, `security-delegation-missing-reason`)
-  // read only `stack.data[]` and cross the wall together as a whole sub-family,
-  // with zero measured trips. `runtime-gate.ts`'s `seed` stack key was corrected
-  // to `data` under this card so that slice is a one-line `runtimeTypes` edit
-  // when the rollout card takes it. `security-role-word` is deliberately NOT in
-  // that slice: it judges six collections, and wiring the two that need no
-  // snapshot would split ONE rule id across the wall — a door where a position
-  // named `sales_role` is refused and an object named `sales_role` is not, which
-  // is the #7220 failure this table already refuses to build.
+  // The residue that WAS ready, and now crosses (#8307): the two ADR-0091 seed
+  // rules (`security-grant-expired-at-authoring`, `security-delegation-missing-
+  // reason`) read only `stack.data[]` and cross the wall together as a whole
+  // sub-family, with zero measured trips (re-run for this card — see
+  // `validate-security-posture.runtime-surface.test.ts`). `security-role-word`
+  // is deliberately NOT in this slice: it judges six collections, and wiring the
+  // two that need no snapshot would split ONE rule id across the wall — a door
+  // where a position named `sales_role` is refused and an object named
+  // `sales_role` is not, which is the #7220 failure this table already refuses
+  // to build.
+  //
+  // `object` / `permission` / `book` remain UNDECLARED here (that is #8310,
+  // still blocked): (a) declaring `object` makes `security-owd-unset` refuse
+  // every OWD-less runtime object publish — 26 refusals across 8 files of
+  // `@objectstack/metadata-protocol`'s own suite, and `METADATA_CREATE_SEEDS.object`
+  // carries no `sharingModel` — so it is a strictness rollout (#4001), not a
+  // wiring fix; (b) `permission` / `book` need a second collection the per-write
+  // snapshot does not carry, and were measured inventing findings without it (38
+  // vs 4 over the shipped corpus) — RUNTIME_NEEDS_FULL_SNAPSHOT, #4463 P2. This
+  // entry is the WHOLE `validateSecurityPosture` function (all 13 rule ids), not
+  // a per-rule split: `runtimeTypes: ['seed']` is safe to declare on the whole
+  // entry ONLY because of `runtime-gate.ts`'s baseline/candidate differential —
+  // a `seed` write's candidate stack carries `objects` IDENTICAL to the
+  // baseline (only `data` differs), so every finding this function derives from
+  // `stack.objects` / `stack.permissions` / `stack.positions` / `stack.apps` /
+  // `stack.books` is produced, byte-identical, in BOTH passes and cancels in the
+  // diff — only the ADR-0091 pair's `stack.data[]` reads can differ. Splitting
+  // this entry into a seed-only registration is not needed for correctness; it
+  // would only be needed if a future rule in this function read `stack.data[]`
+  // in a way that also depended on `stack.objects` context (none does today).
   {
     name: 'validateSecurityPosture',
     tier: 'gating',
     input: 'parsed',
     commands: ALL,
     source: 'packages/lint/src/validate-security-posture.ts',
-    surfaces: CLI_ONLY,
-    surfaceReason:
-      'MEASURED, not inherited (#7576). The ADR-0094 `object` posture gate covers 1 of this block\'s 13 '
-      + 'rule ids (`security-external-wider-than-internal`, its R2) — the previous reason claimed all of '
-      + 'them, and its double-reporting worry was unreal: the two gates both THROW and this table runs '
-      + 'first, so a write earns one refusal either way. The move is blocked by two other things. (a) '
-      + 'Declaring `object` makes `security-owd-unset` refuse every OWD-less runtime object publish — 26 '
-      + 'refusals across 8 files of metadata-protocol\'s own suite, and `METADATA_CREATE_SEEDS.object` '
-      + 'carries no `sharingModel` — so it is a strictness rollout (#4001), not a wiring fix. (b) '
-      + '`permission` / `book` need a second collection the per-write snapshot does not carry, and were '
-      + 'measured inventing findings without it (38 vs 4 over the shipped corpus) — '
-      + 'RUNTIME_NEEDS_FULL_SNAPSHOT, #4463 P2. The four shipped stacks themselves are clean at both '
-      + 'surfaces; the ADR-0091 seed pair is snapshot-ready and crosses as a whole sub-family when (a) does.',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['seed'],
     run: (stack) => validateSecurityPosture(stack),
   },
   // ADR-0105 D6 — the org tree is a REPORTING dimension. An RLS policy or

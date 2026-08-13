@@ -47,6 +47,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createHmac } from 'node:crypto';
 import showcaseStack from '@objectstack/example-showcase';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { assertArmed, authSettingArmed } from './armed.js';
 
 const SYS = { context: { isSystem: true } };
 const ADMIN_PASSWORD = 'admin123';
@@ -137,6 +138,32 @@ describe('#3624 follow-up: better-auth 2FA lockout counts wrong codes', () => {
       lockoutThreshold: LOCKOUT_THRESHOLD,
       lockoutDurationMinutes: LOCKOUT_DURATION_MINUTES,
     });
+
+    // [#8074] Read the policy back off the live manager. `lockoutThreshold: 0`
+    // is the default and it disables lockout entirely (`recordFailedLogin`
+    // returns early on `Number(threshold) || 0`), so a patch that silently did
+    // not land would leave every "the account locks" assertion below measuring
+    // an account that can never lock — green, and meaningless.
+    await assertArmed([
+      authSettingArmed({
+        stack,
+        setting: 'lockoutThreshold',
+        armed: (v) => Number(v) === LOCKOUT_THRESHOLD,
+        control: 'the #3690 account-lockout policy the second factor must honour',
+        disarmedBy:
+          '`lockoutThreshold` defaults to 0, which disables lockout outright — the counter ' +
+          'never trips and no code path under test runs. Arm it through `applyConfigPatch`.',
+      }),
+      authSettingArmed({
+        stack,
+        setting: 'lockoutDurationMinutes',
+        armed: (v) => Number(v) === LOCKOUT_DURATION_MINUTES,
+        control: 'the lockout window this file asserts `locked_until` against',
+        disarmedBy:
+          'an unset duration makes the stamped window whatever the default is, so the ' +
+          'assertion on `locked_until` would be measuring a number nobody chose.',
+      }),
+    ]);
 
     const token = await stack.signIn();
     const me = await (await stack.apiAs(token, 'GET', '/auth/get-session')).json() as any;

@@ -55,6 +55,17 @@
  */
 
 export const PAGE_FIELD_UNKNOWN = 'page-field-unknown';
+/**
+ * [#8340] The reference RESOLVES to a registry-injected system column — so
+ * {@link PAGE_FIELD_UNKNOWN} is right to stay silent — but the bound object is
+ * ADR-0015 `external`, where the platform registers the anchor and provisions
+ * no storage behind it. Always `warning`, on both consequences and including
+ * the `queried` one that gates for a genuinely missing column: the existence
+ * question has a closed oracle here and the provenance question does not (this
+ * pass cannot see the remote schema, only that the platform stores nothing) —
+ * #8116's severity reasoning, unchanged.
+ */
+export const PAGE_FIELD_UNPROVISIONED = 'page-field-unprovisioned';
 
 export type PageFieldSeverity = 'error' | 'warning';
 
@@ -82,7 +93,12 @@ import { walkPageComponents, type AnyRec } from './page-walk.js';
 // Real pages DO reference registry-injected columns — e.g. `sys_user.page.ts`
 // lists `created_at` in a related-list's columns — so the shared set is load-
 // bearing here, not merely defensive.
-import { SYSTEM_FIELDS } from './system-fields.js';
+import {
+  SYSTEM_FIELDS,
+  indexUnprovisionedAnchors,
+  unprovisionedAnchorCause,
+  unprovisionedAnchorHint,
+} from './system-fields.js';
 
 function asArray(v: unknown): AnyRec[] {
   if (Array.isArray(v)) return v as AnyRec[];
@@ -331,16 +347,50 @@ export function checkFieldRefs(
   objectFields: ReadonlyMap<string, Set<string>>,
   where: string,
   consequence: FieldRefConsequence = 'skipped',
+  // [#8340] `objectName -> its unprovisioned injected anchors`
+  // ({@link indexUnprovisionedAnchors}). OPTIONAL, and its absence means
+  // exactly one thing: this caller did not build the index, so the provenance
+  // question goes unasked and only the existence one is answered — the
+  // pre-#8340 behaviour, preserved for out-of-repo callers of this exported
+  // core (cloud graph-lint, the AI authoring path). Every in-repo caller passes
+  // it; `check-cross-package-test-inputs` is what would notice if one stopped.
+  unprovisionedAnchors?: ReadonlyMap<string, ReadonlySet<string>>,
 ): PageFieldFinding[] {
   const findings: PageFieldFinding[] = [];
   if (!objectName) return findings; // nothing to resolve against
   const known = objectFields.get(objectName);
   if (!known) return findings; // cross-package object — unknowable here
+  const anchors = unprovisionedAnchors?.get(objectName);
   for (const ref of refs) {
     // A relationship path (`account.name`) is resolved by the query engine,
     // not a base column, so it cannot be judged here.
     if (ref.name.includes('.')) continue;
-    if (known.has(ref.name) || SYSTEM_FIELDS.has(ref.name)) continue;
+    if (known.has(ref.name) || SYSTEM_FIELDS.has(ref.name)) {
+      // [#8340] Existence answered "yes"; provenance is a second question, and
+      // the membership test above keeps owning the first one. An injected
+      // anchor on a federated object is addressable and empty: in a QUERY the
+      // predicate degrades to constant-false (an empty result that reads as
+      // "there is no data"), in a display binding the column renders blank on
+      // every record.
+      if (anchors?.has(ref.name)) {
+        findings.push({
+          severity: 'warning',
+          rule: PAGE_FIELD_UNPROVISIONED,
+          where,
+          path: ref.path,
+          message:
+            `field "${ref.name}" resolves on object "${objectName}", but ` +
+            `${unprovisionedAnchorCause(objectName, ref.name)}` +
+            (consequence === 'queried'
+              ? ' — it is used in a QUERY, so the predicate can never match a real value: on ' +
+                'SQLite it silently degrades to constant-false and the surface renders an empty ' +
+                'result that looks exactly like "there is no data".'
+              : ' — the component renders it, blank, on every record.'),
+          hint: unprovisionedAnchorHint(objectName, ref.name),
+        });
+      }
+      continue;
+    }
     findings.push({
       severity: consequence === 'queried' ? 'error' : 'warning',
       rule: PAGE_FIELD_UNKNOWN,
@@ -368,6 +418,9 @@ export function validatePageFieldBindings(stack: AnyRec): PageFieldFinding[] {
   // object name → its declared field names. Built with `asArray` so BOTH
   // `fields` shapes (array of `{name}` and name-keyed map) resolve.
   const objectFields = indexObjectFields(stack);
+  // [#8340] The provenance index alongside the existence one — same keying,
+  // asked on the path where the existence check stays silent.
+  const unprovisionedAnchors = indexUnprovisionedAnchors(stack);
 
   const pages = asArray(stack.pages);
   for (let pi = 0; pi < pages.length; pi++) {
@@ -376,7 +429,9 @@ export function validatePageFieldBindings(stack: AnyRec): PageFieldFinding[] {
     const pageName = strName(page.name) ?? `#${pi}`;
 
     const checkRefs = (refs: readonly FieldRef[], objectName: string | undefined, where: string) => {
-      findings.push(...checkFieldRefs(refs, objectName, objectFields, where));
+      findings.push(
+        ...checkFieldRefs(refs, objectName, objectFields, where, 'skipped', unprovisionedAnchors),
+      );
     };
 
     for (const { component, path, objectName } of walkPageComponents(page, `pages[${pi}]`)) {

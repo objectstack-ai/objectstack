@@ -23,6 +23,7 @@ export {
   WIDGET_LEGACY_ANALYTICS_SHAPE,
   WIDGET_LEGACY_ANALYTICS_UNRENDERABLE,
   DASHBOARD_FILTER_FIELD_UNKNOWN,
+  DASHBOARD_FILTER_FIELD_UNPROVISIONED,
 } from './validate-widget-bindings.js';
 export type { WidgetBindingFinding, WidgetBindingSeverity } from './validate-widget-bindings.js';
 
@@ -105,6 +106,7 @@ export {
   validateFlowTemplatePaths,
   FLOW_TEMPLATE_UNKNOWN_FIELD,
   FLOW_TEMPLATE_LOOKUP_TRAVERSAL,
+  FLOW_TEMPLATE_FIELD_UNPROVISIONED,
 } from './validate-flow-template-paths.js';
 export type {
   FlowTemplatePathFinding,
@@ -140,6 +142,7 @@ export type { ReactPageFinding, ReactPageSeverity } from './validate-react-pages
 export {
   validateReactPageProps,
   REACT_CHART_FIELD_UNKNOWN,
+  REACT_CHART_FIELD_UNPROVISIONED,
   REACT_CHART_AGGREGATE_INVALID,
   REACT_CHART_AXIS_UNKNOWN,
   REACT_CHART_DRILLDOWN_INVALID,
@@ -348,7 +351,11 @@ export type { ActionNameRefFinding, ActionNameRefSeverity } from './validate-act
 export { validateActionLocations, ACTION_NO_PLACEMENT } from './validate-action-locations.js';
 export type { ActionLocationsFinding, ActionLocationsSeverity } from './validate-action-locations.js';
 
-export { validatePageFieldBindings, PAGE_FIELD_UNKNOWN } from './validate-page-field-bindings.js';
+export {
+  validatePageFieldBindings,
+  PAGE_FIELD_UNKNOWN,
+  PAGE_FIELD_UNPROVISIONED,
+} from './validate-page-field-bindings.js';
 export type { PageFieldFinding, PageFieldSeverity } from './validate-page-field-bindings.js';
 
 export {

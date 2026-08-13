@@ -9724,6 +9724,52 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#7748] Audit an optimistic-concurrency refusal (the 409
+     * `METADATA_CONFLICT` envelope) — ONE spelling shared by all four routes
+     * that can raise it (save / publish / rollback / delete).
+     *
+     * ## Why this is a denial and not an absence
+     *
+     * The lock gate ({@link assertLockAllowsWrite}) already records the writes
+     * it refuses, so a compliance report could show a locked item's rejected
+     * saves. The 409 is refused OUTSIDE that helper — it comes back from the
+     * repository's parent-version check — and until this landed nothing on that
+     * route wrote a row at all. A caller repeatedly losing a race against
+     * another author was therefore indistinguishable, in the trail, from a
+     * caller who never tried: both leave nothing behind.
+     *
+     * A single helper rather than four copies is deliberate: the four call
+     * sites already carry four near-identical hand-written conflict `Error`s,
+     * and adding a fifth-through-eighth hand-written audit block is how one
+     * idea acquires four spellings that then drift apart.
+     */
+    private async recordOptimisticConflictAudit(args: {
+        type: string;
+        name: string;
+        organizationId?: string | null;
+        operation: 'save' | 'publish' | 'rollback' | 'delete';
+        actor?: string;
+        source: string;
+        requestId?: string;
+        expectedParent?: unknown;
+        actualHead?: unknown;
+    }): Promise<void> {
+        await this.recordMetadataAudit({
+            type: args.type,
+            name: args.name,
+            organizationId: args.organizationId ?? null,
+            operation: args.operation,
+            outcome: 'denied',
+            // adr0112-ok: D6b — persisted audit column, its own vocabulary
+            code: 'metadata_conflict',
+            ...(args.actor ? { actor: args.actor } : {}),
+            source: args.source,
+            ...(args.requestId ? { requestId: args.requestId } : {}),
+            note: `expected parent ${args.expectedParent ?? 'null'} but current is ${args.actualHead ?? 'null'}`,
+        });
+    }
+
+    /**
      * Mirror an object-type overlay write into the in-memory engine
      * registry so subsequent CRUD finds the new schema. Idempotent and
      * safe to call after a successful persistence call. For the legacy
@@ -11267,6 +11313,16 @@ export class ObjectStackProtocolImplementation implements
                 (conflict as any).status = 409;
                 (conflict as any).expectedParent = err.expectedParent;
                 (conflict as any).actualHead = err.actualHead;
+                await this.recordOptimisticConflictAudit({
+                    type: request.type,
+                    name: request.name,
+                    organizationId: orgId,
+                    operation: 'save',
+                    ...(request.actor ? { actor: request.actor } : {}),
+                    source: writeSource,
+                    expectedParent: err.expectedParent,
+                    actualHead: err.actualHead,
+                });
                 throw conflict;
             }
             throw err;
@@ -11682,6 +11738,34 @@ export class ObjectStackProtocolImplementation implements
         projectionApplied?: MutationProjectionOutcome;
     }> {
         const { singularType, orgId, result } = await this.promoteDraftForPublish(request);
+        // [#7748] ADR-0010 — success audit (best-effort), the same shape
+        // `saveMetaItem` and `deleteMetaItem` write on their allowed paths.
+        //
+        // Until this landed, the ONLY route from a publish to `recordMetadataAudit`
+        // was `assertLockAllowsWrite`, which records on the DENY path and returns
+        // before any write on allow. So a REFUSED publish was audited and a
+        // SUCCESSFUL one was not — the inverse of what an audit trail is for.
+        //
+        // Written here, after `promoteDraftForPublish` has committed the
+        // draft→active promotion and before the side effects: the same position
+        // the other two allowed-outcome sites take (persistence durable,
+        // projections not yet run). Deliberately NOT inside
+        // `promoteDraftForPublish` — `publishPackageDrafts` calls that inside ONE
+        // `engine.transaction()`, and an audit row that rolls back with the batch
+        // is a different contract from the two existing sites, which write after
+        // their repository transaction has closed. The batch path is therefore
+        // still unaudited; that is filed separately rather than smuggled in here.
+        await this.recordMetadataAudit({
+            type: request.type,
+            name: request.name,
+            organizationId: orgId,
+            operation: 'publish',
+            outcome: 'allowed',
+            code: 'ok',
+            ...(request.actor ? { actor: request.actor } : {}),
+            source: 'protocol.publishMetaItem',
+            note: 'active',
+        });
         const response: {
             success: boolean;
             version: string;
@@ -11819,6 +11903,16 @@ export class ObjectStackProtocolImplementation implements
                 conflict.status = 409;
                 conflict.expectedParent = err.expectedParent;
                 conflict.actualHead = err.actualHead;
+                await this.recordOptimisticConflictAudit({
+                    type: request.type,
+                    name: request.name,
+                    organizationId: orgId,
+                    operation: 'publish',
+                    ...(request.actor ? { actor: request.actor } : {}),
+                    source: 'protocol.publishMetaItem',
+                    expectedParent: err.expectedParent,
+                    actualHead: err.actualHead,
+                });
                 throw conflict;
             }
             throw err;
@@ -14027,6 +14121,22 @@ export class ObjectStackProtocolImplementation implements
                 // org-scoped restore must not graft the body process-wide.
                 organizationId: orgId,
             });
+            // [#7748] ADR-0010 — success audit (best-effort). Same position as
+            // `saveMetaItem`'s: persistence committed, registry write-through
+            // done, before the receipt. A rollback reached `recordMetadataAudit`
+            // only through `assertLockAllowsWrite`'s DENY path before this, so a
+            // refused rollback was recorded and a performed one was not.
+            await this.recordMetadataAudit({
+                type: request.type,
+                name: request.name,
+                organizationId: orgId,
+                operation: 'rollback',
+                outcome: 'allowed',
+                code: 'ok',
+                ...(request.actor ? { actor: request.actor } : {}),
+                source: 'protocol.rollbackMetaItem',
+                note: `restored from version ${request.toVersion}`,
+            });
             return {
                 success: true,
                 version: result.version,
@@ -14044,6 +14154,16 @@ export class ObjectStackProtocolImplementation implements
                 conflict.status = 409;
                 conflict.expectedParent = err.expectedParent;
                 conflict.actualHead = err.actualHead;
+                await this.recordOptimisticConflictAudit({
+                    type: request.type,
+                    name: request.name,
+                    organizationId: orgId,
+                    operation: 'rollback',
+                    ...(request.actor ? { actor: request.actor } : {}),
+                    source: 'protocol.rollbackMetaItem',
+                    expectedParent: err.expectedParent,
+                    actualHead: err.actualHead,
+                });
                 throw conflict;
             }
             throw err;
@@ -14458,6 +14578,16 @@ export class ObjectStackProtocolImplementation implements
                     (conflict as any).status = 409;
                     (conflict as any).expectedParent = err.expectedParent;
                     (conflict as any).actualHead = err.actualHead;
+                    await this.recordOptimisticConflictAudit({
+                        type: request.type,
+                        name: request.name,
+                        organizationId: orgId,
+                        operation: 'delete',
+                        ...(request.actor ? { actor: request.actor } : {}),
+                        source: 'protocol.deleteMetaItem',
+                        expectedParent: err.expectedParent,
+                        actualHead: err.actualHead,
+                    });
                     throw conflict;
                 }
                 // [#8136] The message quotes `err` only when `err` DECLARED
