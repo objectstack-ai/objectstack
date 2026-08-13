@@ -37,6 +37,9 @@
  * import site still reads the name it always did.
  */
 
+import { zodIssuesToFields } from '@objectstack/spec/api';
+import type { FieldErrorCode } from '@objectstack/spec/api';
+
 /** The HTTP status a validation failure maps to when the error names none. */
 export const VALIDATION_FAILED_STATUS = 400;
 
@@ -81,13 +84,34 @@ export function validationFailure(message: string, fields: unknown[]): Error {
  * Zod issues → the dispatcher's `fields[]` envelope entries
  * (`{ field, code, message }`). `'(body)'` names a root-level failure — a body
  * that is the wrong TYPE entirely has no path to point at.
+ *
+ * ## The `code` is an ADR-0114 `FieldErrorCode`, not Zod's (#8124)
+ *
+ * This used to assign `issue.code` verbatim, which put Zod's own vocabulary
+ * (`unrecognized_keys`, `too_small`, …) on a wire position
+ * `FieldErrorSchema.code` declares as a CLOSED catalog — the exact
+ * pass-through ADR-0114 D3 closed on the REST transport. It now maps through
+ * `zodIssuesToFields`, the one D3 implementation in the repo, which lives in
+ * `@objectstack/spec` beside the catalog it is total over (this package cannot
+ * import `@objectstack/rest`, where the compliant copy grew up — the
+ * dependency arrow points the other way, which is what #8124 moved it for).
+ *
+ * Two things ride along, both additive:
+ *
+ * - **The optional `input`** (the value that was parsed) buys the D3
+ *   `invalid_type` split: with it a MISSING required property is reported as
+ *   `required` instead of the `invalid_type` Zod spells it as. Callers without
+ *   the input at hand degrade per the D3 table — every code is still a
+ *   catalog member.
+ * - **Union expansion (#5014)**: a rejection behind a `z.union` yields the
+ *   union's own entry PLUS the branch entries that explain it, so entry count
+ *   is not issue count. Read `fields.length` as the number of field errors.
  */
 export function fieldsFromZodIssues(
   issues: Array<{ path: Array<string | number | symbol>; code: string; message: string }>,
-): Array<{ field: string; code: string; message: string }> {
-  return issues.map((issue) => ({
-    field: issue.path.length > 0 ? issue.path.join('.') : '(body)',
-    code: issue.code,
-    message: issue.message,
-  }));
+  ...input: [] | [unknown]
+): Array<{ field: string; code: FieldErrorCode; message: string }> {
+  return zodIssuesToFields(issues, ...input).map((entry) =>
+    entry.field === '' ? { ...entry, field: '(body)' } : entry,
+  );
 }

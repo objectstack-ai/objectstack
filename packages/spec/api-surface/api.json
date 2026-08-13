@@ -998,6 +998,7 @@
     "readServiceSelfInfo (function)",
     "resolveDiscoveryEnvironment (function)",
     "standardErrorCodeForHttpStatus (function)",
-    "validateApiEndpointDeclarations (function)"
+    "validateApiEndpointDeclarations (function)",
+    "zodIssuesToFields (function)"
   ]
 }

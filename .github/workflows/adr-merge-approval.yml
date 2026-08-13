@@ -6,9 +6,22 @@ name: ADR Merge Approval
 # A PR whose diff touches docs/adr/** must carry an APPROVED review before it
 # is mergeable. The gate does NOT check WHO approved: any account with review
 # rights on this repo — including an AI seat — satisfies it, which is the
-# accepted cost of the ruling and is stated in full in the two-clause table at
+# accepted cost of the ruling and is stated in full in the guarantee table at
 # the head of scripts/check-adr-merge-approval.mjs. The approval must be
 # current: a later CHANGES_REQUESTED or DISMISSED revokes it.
+#
+# Second clause (#8012): the PR must ALSO not be sitting on an armed
+# auto-merge. Arming is not merging — it is a standing instruction to merge
+# later — so no gate used to fire on it, and an AI seat armed one on a live
+# docs/adr/** PR at 11:15Z on 2026-08-12. The next approving review would have
+# turned this check green and GitHub would have merged the PR unattended, every
+# check reporting success. Armed is now RED whether or not the PR is approved:
+# the approved case is the only one in which the unattended merge actually
+# happens, so a rule that fired only on the unapproved case would change no
+# verdict at all. This is how 「人工合并」 becomes machine-enforced — the gate is
+# green only while the merge still requires a person to press the button.
+# It is not a deadlock: anyone can disable auto-merge, and doing so re-runs
+# this workflow (see the trigger below) and clears the check by itself.
 #
 # This supersedes the account-identity rule this workflow used to describe
 # (#6741 「adr 只能由维护者自己确认,人工合并,ai 不得擅自合并。」, enforced by
@@ -40,6 +53,21 @@ name: ADR Merge Approval
 on:
   pull_request:
     branches: [main]
+    # `opened`/`synchronize`/`reopened` are GitHub's default set and are
+    # RESTATED here because naming any `types:` replaces that default — dropping
+    # one would mean no check run on that activity, and a required context that
+    # never reports is permanent pending, not a skip (the same failure mode the
+    # `paths:` note below describes).
+    #
+    # The two auto-merge activities are the #8012 addition, and they are what
+    # make the arming clause observable at all:
+    #   auto_merge_enabled  — arming is otherwise a silent state change that
+    #     fires no event this workflow listens to, so the gate would keep
+    #     reporting its last green while the PR sat armed.
+    #   auto_merge_disabled — the zero-friction exit, and the reason the arming
+    #     clause is not a deadlock: disarming re-runs the gate, which then goes
+    #     green on its own with no push, no re-review and no admin action.
+    types: [opened, synchronize, reopened, auto_merge_enabled, auto_merge_disabled]
   # An approval does not fire `pull_request`, so without this trigger the
   # failed check would sit red after the approval lands until someone re-ran
   # it by hand. Subscribing to reviews makes the approval itself re-run the
@@ -63,7 +91,13 @@ concurrency:
 
 permissions:
   contents: read
-  # The gated path lists the PR's reviews via the REST API.
+  # The gated path lists the PR's reviews and reads the PR itself (for
+  # `auto_merge`) via the REST API. `read` covers both — the #8012 clause needs
+  # no new permission and no new token scope. The PR object is read LIVE rather
+  # than taken from the event payload: `auto_merge` is not documented as a
+  # member of the pull_request object carried by `pull_request_review`, and a
+  # projection that merely lacks the key would read as "not armed". The script
+  # refuses such a payload instead; see its header.
   pull-requests: read
 
 jobs:
@@ -97,8 +131,9 @@ jobs:
       # A checkout, setup-node, and one `node` call over `git diff` — no
       # install, no build. The self-test runs first (repo convention), then
       # the gate. GITHUB_TOKEN is only read on the gated path (a docs/adr/**
-      # diff needs the PR's review list); the clean path does zero lookups.
-      - name: Require an APPROVED review on docs/adr/** diffs
+      # diff needs the PR's review list and arming state); the clean path does
+      # zero lookups.
+      - name: Require an APPROVED review and no armed auto-merge on docs/adr/** diffs
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/check-adr-merge-approval.mjs --self-test && node scripts/check-adr-merge-approval.mjs
