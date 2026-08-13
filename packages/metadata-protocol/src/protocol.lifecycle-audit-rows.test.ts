@@ -61,13 +61,31 @@
 // ---------------------------------------------------------------------------
 // Reverse verification, direction predicted BEFORE running
 // ---------------------------------------------------------------------------
-// Ordinary red, and asymmetric by design: reverting the three production edits
-// must NOT disturb the `save` control (it is the site that already worked).
-// Predicted before running: the `save` control and the best-effort-swallow
-// case stay green, every publish / rollback / conflict assertion goes red on a
-// count of 0. Measured on the reverted tree: 5 red / 4 green, each red reading
-// `expected +0 to be +1` or `expected undefined to be 'publish'` — i.e. the
-// row is absent, not misspelled. Restored from the commit afterwards.
+// Ordinary red, and asymmetric by design: reverting the production edits must
+// NOT disturb the `save` control (it is the site that already worked).
+//
+// Predicted before running: `save` control green, best-effort-swallow case
+// green, the five publish / rollback / conflict assertions red.
+// MEASURED on the reverted tree (`git checkout origin/main -- protocol.ts`):
+// **6 red / 1 green**. The prediction was wrong on the swallow case, and the
+// correction is worth more than the guess was:
+//
+//   → expected [] to have a length of 1 but got +0
+//   → expected { save: 2 } to match object { save: 2, publish: 2, rollback: 1 }
+//   → expected [ 'save' ] to include 'publish'
+//   → expected false to be true          ← the swallow case
+//
+// The swallow case goes red because its load-bearing assertion is
+// `auditAttempts.some(a => a.operation === 'publish')` — under the defect no
+// publish audit write is ATTEMPTED at all, so there is nothing for the failing
+// table to reject. That is the correct direction: the case exists to separate
+// "attempted and rejected" from "never attempted", and the defect IS the
+// second. Only the `save` control stayed green, which is the asymmetry that
+// matters — the fix did not "fix" a site that was already right.
+//
+// Restored afterwards with `git checkout <branch> -- protocol.ts`; `git status`
+// clean against the commit, so the numbers above were taken against the same
+// bytes that ship.
 
 import { describe, expect, it, vi } from 'vitest';
 // [#5619] The producer's OWN write-verb dispatch decisions, imported from
