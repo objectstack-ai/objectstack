@@ -460,6 +460,35 @@ describe('[#8470] the curated half owns its row, not whichever row shares the na
     expect(out.seeded).toBe(KNOWN_CAPABILITIES.length - 1);
   });
 
+  // The THIRD branch of the diagnostic. The insert was refused, so something
+  // stopped it — but if the follow-up read then finds nothing, that is NOT an
+  // ordinary collision (a racing writer, or a refusal that was never the unique
+  // key) and must not be described as an unstamped row. Reachable here as the
+  // general shape of a rejected write: `tryInsert` returns null on ANY engine
+  // refusal, not only a duplicate key.
+  it('says so when the insert was refused but no blocking row is visible', async () => {
+    const ql = {
+      rows: [] as any[],
+      async find() { return []; },
+      async insert() { return null; }, // every write refused; nothing stored
+      async update() { /* unreachable */ },
+    };
+    const warn = vi.fn();
+    const out = await bootstrapSystemCapabilities(ql, [], { logger: { warn } });
+
+    expect(out.seeded).toBe(0);
+    expect(out.blockedCurated).toBe(KNOWN_CAPABILITIES.length);
+    expect(warn).toHaveBeenCalledTimes(KNOWN_CAPABILITIES.length);
+    expect(warn.mock.calls[0][0]).toContain('NO blocking row is visible');
+    expect(warn.mock.calls[0][0]).toContain('worth investigating');
+    // …and it must NOT borrow either of the other two branches' sentences.
+    expect(warn.mock.calls[0][0]).not.toContain('carrying no managed_by value');
+    expect(warn.mock.calls[0][0]).not.toContain('left exactly as it is');
+    expect(warn.mock.calls[0][1]).toEqual({
+      name: 'manage_users', blockingRowId: undefined, blockingManagedBy: null,
+    });
+  });
+
   // A clean install must not pay for any of this: no collision, no warn, no
   // counter. (A `blockedCurated` that fired on the happy path would make the
   // pin above green for the wrong reason.)

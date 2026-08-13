@@ -281,16 +281,27 @@ export async function bootstrapSystemCapabilities(
         // leave-it-alone, and backfilling a stamp is a data migration. Both are
         // maintainer calls, and neither is made here.
         blockedCurated += 1;
+        // THREE outcomes, not two. "No row came back" and "a row came back
+        // carrying no managed_by" are different observations, and collapsing
+        // them would repeat this branch's own defect one level down: the insert
+        // WAS refused, so something blocked it, and a follow-up read that finds
+        // nothing is a genuinely interesting state (a racing writer, or a
+        // refusal that was never the unique key) — not an ordinary unstamped
+        // row. Say which one was seen.
         const blocking = (await tryFind(ql, 'sys_capability', { name: def.name, organization_id: null }, 1))[0];
-        const provenance = blocking?.managed_by == null
-          ? 'a row carrying no managed_by value'
-          : `a row with managed_by='${String(blocking.managed_by)}'`;
+        const observation = blocking === undefined
+          ? 'NO blocking row is visible there at all — so the refusal was not the unique key, or the ' +
+            'row has gone since. That is not an ordinary collision and is worth investigating'
+          : blocking.managed_by == null
+            ? 'a row carrying no managed_by value already holds the name, and was left exactly as it is'
+            : `a row with managed_by='${String(blocking.managed_by)}' already holds the name, and was ` +
+              'left exactly as it is';
         options.logger?.warn?.(
-          `[security] curated capability "${def.name}" has no platform row and could not be seeded — ` +
-            `${provenance} already holds the name in the platform (NULL-organization) bucket, and the ` +
-            'declared unique key admits only one. The platform definition is missing from sys_capability ' +
-            'installation-wide, and the blocking row was left exactly as it is. Grants and ' +
-            'requiredPermissions referencing the name are unaffected — they resolve by name, not by row.',
+          `[security] curated capability "${def.name}" has no platform row and could not be seeded. ` +
+            'In the platform (NULL-organization) bucket, where the declared unique key admits one row ' +
+            `per name: ${observation}. The platform definition is therefore missing from sys_capability ` +
+            'installation-wide. Grants and requiredPermissions referencing the name are unaffected — ' +
+            'they resolve by name, not by row.',
           { name: def.name, blockingRowId: blocking?.id, blockingManagedBy: blocking?.managed_by ?? null },
         );
       }
