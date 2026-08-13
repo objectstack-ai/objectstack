@@ -39,9 +39,15 @@ class FakeEngine {
     if (seed?.declared) this.declared = JSON.parse(JSON.stringify(seed.declared));
   }
 
+  // [#8378] Registers items EXACTLY as the real engine does — the document
+  // itself. This fake used to box each one as `{ content: <item> }`, which made
+  // it the only producer of that envelope anywhere in the tree: a fiction that
+  // kept the production `i?.content ?? i` looking load-bearing while nothing
+  // real ever wrote the shape (`registerMetadataCollections` registers items
+  // as-is; `loadMetaFromDb` registers the parsed body, not the row).
   get _registry() {
     return {
-      listItems: (type: string) => (this.declared[type] ?? []).map((content) => ({ content })),
+      listItems: (type: string) => [...(this.declared[type] ?? [])],
     };
   }
 
@@ -261,7 +267,9 @@ describe('bootstrapDeclaredEmailTemplates', () => {
 
   it('falls back to the metadata service when the registry is empty', async () => {
     const engine = new FakeEngine();
-    const metadataService = { list: () => [{ content: declaredTemplate() }] };
+    // [#8378] `IMetadataService.list` answers the documents themselves; the
+    // `{ content: … }` box this fixture used to build had no producer.
+    const metadataService = { list: () => [declaredTemplate()] };
 
     const result = await bootstrapDeclaredEmailTemplates(engine as any, metadataService);
 

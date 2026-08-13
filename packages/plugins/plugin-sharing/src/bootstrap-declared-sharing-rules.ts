@@ -74,11 +74,20 @@ export function celToFilter(cel: unknown): Record<string, unknown> | null {
   return result.ok ? (result.filter as Record<string, unknown>) : null;
 }
 
+/**
+ * Read declared items straight off the engine's SchemaRegistry.
+ *
+ * [#8378] No `{ name, content }` unwrap: the registered item IS the authoring
+ * document. `SharingRuleSchema` declares no `content` key and rejects one as
+ * unrecognized, so the `i?.content ?? i` this read used to carry could only
+ * ever have replaced a rule document with one of its values — see
+ * `plugin-security/src/bootstrap-declared-permissions.ts` for the measurement.
+ */
 function readDeclared(engine: any, type: string): any[] {
   try {
     const reg = engine?._registry;
     if (reg?.listItems) {
-      return (reg.listItems(type) ?? []).map((i: any) => i?.content ?? i).filter(Boolean);
+      return (reg.listItems(type) ?? []).filter(Boolean);
     }
   } catch { /* fall through */ }
   return [];

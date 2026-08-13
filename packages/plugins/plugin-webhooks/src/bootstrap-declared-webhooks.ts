@@ -92,13 +92,23 @@ function uid(prefix: string): string {
 /**
  * Read declared `webhook` items from the ObjectQL registry (where the manifest
  * decomposition parks `stack.webhooks`), falling back to the metadata service.
- * Items may be wrapped as `{ content }` — unwrap to the raw authoring object.
+ *
+ * [#8378] Both reads hand back the authoring document itself. The sentence that
+ * used to stand here — "Items may be wrapped as `{ content }` — unwrap to the
+ * raw authoring object" — described an envelope with **no producer**:
+ * `registerMetadataCollections` (objectql `engine.ts`) registers each
+ * `stack.webhooks` element as-is, `loadMetaFromDb` registers the parsed body
+ * rather than the `sys_metadata` row, and `MetadataFacade` shed its own copy of
+ * this unwrap in #7519. `WebhookSchema` declares no `content` key and rejects
+ * one as unrecognized, so wherever the key did appear the unwrap replaced the
+ * whole webhook with one of its values — and `''` (falsy, non-nullish) passed
+ * `??` and then died at `filter(Boolean)`, dropping the webhook silently.
  */
 function readDeclared(engine: any, metadataService: any, type: string): any[] {
   try {
     const reg = engine?._registry;
     if (reg?.listItems) {
-      const items = (reg.listItems(type) ?? []).map((i: any) => i?.content ?? i).filter(Boolean);
+      const items = (reg.listItems(type) ?? []).filter(Boolean);
       if (items.length > 0) return items;
     }
   } catch {
@@ -107,7 +117,7 @@ function readDeclared(engine: any, metadataService: any, type: string): any[] {
   try {
     const listed = metadataService?.list?.(type);
     const arr = typeof (listed as any)?.then === 'function' ? [] : (listed ?? []);
-    return Array.isArray(arr) ? arr.map((i: any) => i?.content ?? i).filter(Boolean) : [];
+    return Array.isArray(arr) ? arr.filter(Boolean) : [];
   } catch {
     return [];
   }

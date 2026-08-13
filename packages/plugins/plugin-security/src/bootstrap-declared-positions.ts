@@ -47,12 +47,17 @@ interface SeedOptions {
  * (populated by `manifest.register` from the stack's `positions`/`sharingRules`
  * arrays) is the reliable source in every boot path; the metadata-service
  * facade only surfaces these once the compiled-artifact loader runs (serve.ts).
+ *
+ * [#8378] No `{ name, content }` unwrap: the registered item IS the authoring
+ * document. `PositionSchema` declares no `content` key and rejects one as
+ * unrecognized, so the unwrap could only ever have destroyed a document —
+ * see `bootstrap-declared-permissions.ts` for the full measurement.
  */
 function readDeclared(engine: any, type: string): any[] {
   try {
     const reg = engine?.registry;
     if (reg?.listItems) {
-      return (reg.listItems(type) ?? []).map((i: any) => i?.content ?? i).filter(Boolean);
+      return (reg.listItems(type) ?? []).filter(Boolean);
     }
   } catch { /* fall through */ }
   return [];
