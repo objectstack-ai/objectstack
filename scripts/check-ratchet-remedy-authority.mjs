@@ -805,9 +805,17 @@ function selfTest() {
     byPath.length > 0 && byPath[0].target.name === 'scripts/role-word-baseline.json');
 
   // (7) The descriptive-modal guard — the measured regen-artifacts.mjs case.
+  //
+  // The fixture keeps the tail of the real sentence, and that is the whole point:
+  // an earlier draft stopped at "a fresh gap gets a fresh line", which left NO
+  // target after the verb — so the offer failed for want of a target and the
+  // modal guard was never consulted at all. Mutation-testing caught it: deleting
+  // the guard left this assertion green. An assertion whose fixture cannot reach
+  // the mechanism it names is worse than no assertion, because it reads as cover.
   expect('offer grammar — "can WIDEN it" DESCRIBES a hazard and is not an offer '
     + '(the measured regen-artifacts.mjs false positive)',
-    offersIn("const m = 'a SHRINK-ONLY ratchet. Regenerating it can WIDEN it — a fresh gap gets a fresh line.';").length === 0);
+    offersIn("const m = 'a SHRINK-ONLY ratchet. Regenerating it can WIDEN it — a fresh gap gets a "
+      + "fresh exemption line, which is precisely how a ratchet quietly stops ratcheting.';").length === 0);
 
   // (8) Stage 2 discriminates. Same offer shape, no testimony → not a ratchet.
   // This is what keeps the ~20 declaration registries out, and it is what makes
