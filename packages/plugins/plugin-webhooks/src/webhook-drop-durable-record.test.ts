@@ -232,6 +232,51 @@ describe('dropped webhook subscription leaves a durable, unsendable record (#806
         expect(JSON.stringify(row)).not.toContain('whsec_live');
     });
 
+    /**
+     * The one wiring that can still lose a drop record, and the register it is
+     * reported in. Bound straight to `IHttpOutbox.enqueue`, the parked input is
+     * refused at the delivery door — correct, since the alternative is minting
+     * a `pending` unsigned row — but the record is then lost, which is the very
+     * gap this card closes. That is a durability degradation, so it owes an
+     * `error`, not the ordinary "enqueue failed" `warn`.
+     */
+    it('reports a lost drop record at error level, naming the mis-wiring', async () => {
+        const engine = makeEngine(
+            [subscriptionRow({ signing_secret: SECRET_REF })],
+            async () => { throw new Error('no CryptoProvider'); },
+        );
+        const outbox = new MemoryHttpOutbox();
+        const realtime = new FakeRealtime();
+        const errors: string[] = [];
+        const warns: string[] = [];
+        const enqueuer = new AutoEnqueuer(
+            engine,
+            realtime,
+            // ⛔ the unsupported wiring: the raw delivery door, not the seam.
+            (input: EnqueueHttpInput) => outbox.enqueue(input),
+            {
+                logger: {
+                    info() {}, debug() {},
+                    warn(m: string) { warns.push(m); },
+                    error(m: string) { errors.push(m); },
+                },
+            },
+        );
+        await enqueuer.start();
+        await realtime.publish(recordEvent('crm_order', { id: 'o6' }));
+        await new Promise((r) => setTimeout(r, 0));
+        await enqueuer.stop();
+
+        // Nothing was minted — in particular, no `pending` row that would have
+        // gone out unsigned. That is the half that must never regress.
+        expect(await outbox.list()).toHaveLength(0);
+        // …and the loss is loud, in the register AGENTS.md assigns it.
+        const lost = errors.find((m) => m.includes('could not record the undeliverable event'));
+        expect(lost).toBeDefined();
+        expect(lost).toContain('MessagingService.enqueueHttp');
+        expect(warns.some((m) => m.includes('enqueue failed'))).toBe(false);
+    });
+
     it('still delivers a legitimately unsigned webhook — the refusal is not a blanket', async () => {
         // `secret` is optional on the authoring envelope. A webhook that stores
         // no key is not parked, and its rows stay ordinary deliveries; without

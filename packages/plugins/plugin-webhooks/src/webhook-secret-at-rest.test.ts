@@ -30,13 +30,38 @@ import type {
     CryptoHandle,
     CryptoContext,
 } from '@objectstack/spec/contracts';
-import { MemoryHttpOutbox, HttpDispatcher, type FetchImpl } from '@objectstack/service-messaging';
+import {
+    MemoryHttpOutbox,
+    HttpDispatcher,
+    MessagingService,
+    type EnqueueHttpInput,
+    type FetchImpl,
+} from '@objectstack/service-messaging';
 import { AutoEnqueuer } from './auto-enqueuer.js';
 import { bootstrapDeclaredWebhooks } from './bootstrap-declared-webhooks.js';
 import { migrateLegacyWebhookSecrets } from './migrate-webhook-secrets.js';
 import { SysWebhook } from './sys-webhook.object.js';
 import { WEBHOOK_SECRET_FIELD, __objectqlSecretWireForms } from './webhook-secret.js';
 import { WEBHOOK_HEADERS_FIELD } from './webhook-headers.js';
+
+/**
+ * [#8069] The PRODUCTION enqueue wiring, as one helper.
+ *
+ * These tests used to bind the enqueuer straight to `outbox.enqueue`. That was
+ * indistinguishable from the real thing while a dropped subscription produced
+ * nothing at all; it no longer is. The enqueuer now emits two kinds of input —
+ * a delivery, and a parked event whose subscription lost its credentials — and
+ * only `MessagingService.enqueueHttp` routes the second to
+ * `recordUndeliverable()`. Bound to the raw outbox, these tests would assert
+ * fail-closed behaviour against a wiring the plugin never uses.
+ */
+function enqueueVia(outbox: MemoryHttpOutbox): (input: EnqueueHttpInput) => Promise<string> {
+    const messaging = new MessagingService({
+        logger: { info() {}, warn() {}, error() {}, debug() {} } as any,
+    });
+    messaging.setHttpOutbox(outbox);
+    return (input) => messaging.enqueueHttp(input);
+}
 
 const SECRET = 'whsec_7799_subscriber_key';
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
@@ -593,7 +618,7 @@ describe('boot ordering: the cache is built before the CryptoProvider (#8022)', 
         const outbox = new MemoryHttpOutbox();
         const errors: Array<{ msg: string; meta: any }> = [];
         const debugs: string[] = [];
-        const enqueuer = new AutoEnqueuer(engine, realtime, (i) => outbox.enqueue(i), {
+        const enqueuer = new AutoEnqueuer(engine, realtime, enqueueVia(outbox), {
             refreshIntervalMs: 0,
             logger: {
                 error: (msg: string, _err?: unknown, meta?: unknown) => { errors.push({ msg, meta: meta as any }); },
@@ -613,7 +638,17 @@ describe('boot ordering: the cache is built before the CryptoProvider (#8022)', 
         // The #7799 boundary: nothing is delivered, and nothing is delivered
         // UNSIGNED, which is the outcome this whole card must not buy.
         expect(calls).toHaveLength(0);
-        expect(await outbox.list()).toHaveLength(0);
+
+        // [#8069] What used to be `expect(list()).toHaveLength(0)` — the absence
+        // of durability that this card exists to remove. The fail-closed half is
+        // unchanged and asserted above; what changed is that the discarded event
+        // now leaves a PARKED record. Checking the row rather than dropping the
+        // assertion matters: an assertion that passes because nothing was
+        // produced stops testing anything the moment something is.
+        const [parked] = await outbox.list();
+        expect(parked).toMatchObject({ status: 'dead', attempts: 0 });
+        expect(parked.signature).toBeUndefined();
+        expect(parked.error).toMatch(/could not be decrypted/);
 
         // ADR-0112 — a consumer branches on the pair, not on message text.
         expect(errors).toHaveLength(1);
@@ -621,7 +656,10 @@ describe('boot ordering: the cache is built before the CryptoProvider (#8022)', 
         // An `error` owes the consequence and the fix (AGENTS.md), and owes
         // them ONCE: the second refresh repeats at debug, not at error, or an
         // unfixed deployment prints this every 60s until nobody reads `error`.
-        expect(errors[0].msg).toMatch(/NO delivery and NO sys_http_delivery row/);
+        // [#8069] The consequence clause changed with the behaviour: there IS a
+        // sys_http_delivery row now, and the message has to say where to look.
+        expect(errors[0].msg).toMatch(/NO delivery/);
+        expect(errors[0].msg).toMatch(/recorded in sys_http_delivery/);
         expect(errors[0].msg).toMatch(/setCryptoProvider/);
         expect(debugs.join('\n')).toMatch(/still dropped for an unresolvable signing secret/);
     });
@@ -847,7 +885,7 @@ describe('fail-closed and re-arm, extended to headers (#7986 × #7799/#8022)', (
         const realtime = new FakeRealtime();
         const outbox = new MemoryHttpOutbox();
         const errors: Array<{ msg: string; meta: any }> = [];
-        const enqueuer = new AutoEnqueuer(engine, realtime, (i) => outbox.enqueue(i), {
+        const enqueuer = new AutoEnqueuer(engine, realtime, enqueueVia(outbox), {
             refreshIntervalMs: 0,
             logger: {
                 error: (msg: string, _e?: unknown, meta?: unknown) => { errors.push({ msg, meta: meta as any }); },
@@ -867,7 +905,15 @@ describe('fail-closed and re-arm, extended to headers (#7986 × #7799/#8022)', (
         // and against an endpoint that does not require auth it even succeeds.
         // A subscription that stops is visible and gets investigated.
         expect(calls).toHaveLength(0);
-        expect(await outbox.list()).toHaveLength(0);
+        // [#8069] …and since this card, it is investigable from the delivery
+        // table too: the discarded event is parked, unsigned and unsendable.
+        // The parked row must NOT carry the header map — that map is the
+        // ordinary place an Authorization credential goes, and a row that will
+        // never be sent has no business holding one for the 30d retention.
+        const [parked] = await outbox.list();
+        expect(parked).toMatchObject({ status: 'dead', attempts: 0 });
+        expect(parked.headers).toBeUndefined();
+        expect(parked.signature).toBeUndefined();
         // ADR-0112 — one report, carrying the pair a consumer branches on.
         expect(errors).toHaveLength(1);
         expect(errors[0].meta).toMatchObject({ code: 'INTERNAL_ERROR', status: 500 });
