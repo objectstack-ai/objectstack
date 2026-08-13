@@ -201,6 +201,7 @@
     "DriverVocabularyEntry": "src/data/driver/config-registry.zod.ts#DriverVocabularyEntry (interface)",
     "DroppedFieldsEvent": "src/data/data-engine.zod.ts#DroppedFieldsEvent (type)",
     "DroppedFieldsEventSchema": "src/data/data-engine.zod.ts#DroppedFieldsEventSchema (const)",
+    "ENGINE_UPDATE_UPSERT_REMOVED": "src/data/data-engine.zod.ts#ENGINE_UPDATE_UPSERT_REMOVED (const)",
     "ESignatureConfig": "src/data/document.zod.ts#ESignatureConfig (type)",
     "ESignatureConfigParsed": "src/data/document.zod.ts#ESignatureConfigParsed (type)",
     "ESignatureConfigSchema": "src/data/document.zod.ts#ESignatureConfigSchema (const)",

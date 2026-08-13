@@ -17,6 +17,7 @@ import {
   foldQueryAliasSlots,
   QUERY_CURSOR_REMOVED,
   QUERY_DISTINCT_REMOVED,
+  ENGINE_UPDATE_UPSERT_REMOVED,
   type QueryAliasSlot,
   type DroppedFieldsEvent
 } from '@objectstack/spec/data';
@@ -328,9 +329,9 @@ const ENGINE_DRIVER_PASSTHROUGH_KEYS = [
  * wire-alias rejection above.
  *
  * Sources, in order: the method's `Engine*OptionsSchema` declared keys (minus
- * the `retiredKey` tombstones `cursor`/`distinct`, which get their tombstone
- * quoted instead of a generic rejection — the schema keeps them ONLY to carry
- * that message, and this runtime path never parses); `searchFields` (read by
+ * the `retiredKey` tombstones `cursor`/`distinct`/`upsert` (#8057), which get
+ * their tombstone quoted instead of a generic rejection — the schema keeps them
+ * ONLY to carry that message, and this runtime path never parses); `searchFields` (read by
  * `find` at the `$search` expansion, sent by the protocol layer);
  * `onFieldsDropped` and `strictReadonlyWrites` (`WriteObservabilityOptions` —
  * contract-declared, deliberately outside the serializable Zod schema: the
@@ -350,7 +351,7 @@ const ENGINE_FIND_OPTION_KEYS: ReadonlySet<string> = new Set([
   ...ENGINE_DRIVER_PASSTHROUGH_KEYS,
 ]);
 const ENGINE_UPDATE_OPTION_KEYS: ReadonlySet<string> = new Set([
-  'context', 'where', 'upsert', 'multi', 'returning', 'onFieldsDropped', 'strictReadonlyWrites',
+  'context', 'where', 'multi', 'returning', 'onFieldsDropped', 'strictReadonlyWrites',
   ...ENGINE_DRIVER_PASSTHROUGH_KEYS,
 ]);
 const ENGINE_DELETE_OPTION_KEYS: ReadonlySet<string> = new Set([
@@ -457,6 +458,12 @@ function readStoredAutonumberCounter(value: string, prefix: string, suffix: stri
 const ENGINE_RETIRED_OPTION_MESSAGES: Record<string, string> = {
   cursor: QUERY_CURSOR_REMOVED,
   distinct: QUERY_DISTINCT_REMOVED,
+  // [#8057] `update.options.upsert` — declared-but-unenforced (ADR-0049): the
+  // key sat on the update allowlist while nothing read it, so `{ upsert: true }`
+  // was accepted and silently dropped. Removed rather than implemented; the
+  // spec's tombstone carries the create-if-absent prescription (#7867's
+  // not-found gate is the semantics a caller must reconcile with).
+  upsert: ENGINE_UPDATE_UPSERT_REMOVED,
 };
 
 /**

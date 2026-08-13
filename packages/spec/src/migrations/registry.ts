@@ -2768,6 +2768,27 @@ const step17: MigrationStep = {
         + 'warning whose error text names one.',
     },
     {
+      id: 'engine-update-upsert-retired',
+      surface: 'data.engine.update options.upsert',
+      replacement:
+        '(removed — never implemented; express create-if-absent explicitly: `findOne` first, then '
+        + '`insert` or `update` on what you find)',
+      reason:
+        'The `upsert` flag promised insert-if-absent on `engine.update()` but no engine or driver '
+        + 'path ever read it: the key was declared on both update-options schemas and allowlisted by '
+        + 'the unknown-option gate, yet `ObjectQL.update()` never referenced it and it was not a '
+        + 'driver pass-through key — `{ upsert: true }` was accepted and silently dropped and the '
+        + 'update stayed a plain update (ADR-0049 declared-but-unenforced). There is no behaviour to '
+        + 'preserve and nothing stored to rewrite (it only ever appeared in a call-time option bag). '
+        + "Any future first-class upsert must reconcile with #7867's not-found gate — a by-id update "
+        + 'whose id names no row throws RECORD_NOT_FOUND rather than inserting — which is why the '
+        + 'flag is removed rather than implemented here.',
+      acceptanceCriteria:
+        'No caller passes `options.upsert` to `engine.update()`; a call that includes it is refused '
+        + 'loudly (the engine gate and both schemas quote the #8057 prescription) instead of '
+        + 'succeeding with the option silently ignored.',
+    },
+    {
       id: 'enhanced-api-error-field-errors-renamed',
       surface: 'api.enhancedApiError.fieldErrors',
       replacement: 'fields',
@@ -4726,6 +4747,29 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // takes (`query-joins-retired` / `query-cursor-retired` /
     // `query-distinct-retired` / `query-window-functions-retired`, #4286).
     'data/AggregationNode:distinct',
+    // #8057 — the deprecated legacy update-options schema re-declared the
+    // never-implemented `upsert` flag, so it is tombstoned with the SAME
+    // prescription as `data/EngineUpdateOptions:upsert` (one string, both
+    // schemas plus the engine's unknown-option gate): a capability is never
+    // half-deleted. See that entry's comment for the full disposition; no D2
+    // conversion, since an engine option bag is call-time only.
+    'data/DataEngineUpdateOptions:upsert',
+    // #8057 — the never-implemented upsert flag on `engine.update()`'s option
+    // surface, tombstoned on BOTH update-options schemas (this one and the
+    // deprecated `DataEngineUpdateOptions` sibling) with one prescription:
+    // `ENGINE_UPDATE_UPSERT_REMOVED` in `data/data-engine.zod.ts`, which the
+    // objectql engine's unknown-option gate quotes too. Declared-but-unenforced
+    // (ADR-0049): the key sat on the engine's update allowlist while no code path
+    // read it, so `{ upsert: true }` was accepted and silently dropped.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, and that asymmetry
+    // is the point rather than an omission: a D2 conversion rewrites an authored
+    // source or a stored `sys_metadata` row, and an engine option bag is call-time
+    // only — nobody authors one and nothing persists one. The prescription reaches
+    // consumers as the D3 semantic entry `engine-update-upsert-retired` plus this
+    // tombstone (the `BatchOptions.validateOnly` / `ListNotificationsRequest:cursor`
+    // disposition).
+    'data/EngineUpdateOptions:upsert',
     // #7990 — sibling of `data/PostgresConfig:password`, same ruling, same
     // disposition: tombstoned inline credential; the secret binder /
     // `external.credentialsRef` is the mechanism. See that entry for the reasoning
