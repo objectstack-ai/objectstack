@@ -53,17 +53,18 @@
 // EXPECTED so that the day either is fixed, this file fails and is updated
 // deliberately rather than silently drifting:
 //
-//  1. `indexes` — on a MULTI-TENANT deployment `applySystemFields` also stamps
-//     `indexes: [{ fields: ['organization_id'] }]`, and the read exit's
+//  1. [#8375] `indexes` — on a MULTI-TENANT deployment `applySystemFields` also
+//     stamps `indexes: [{ fields: ['organization_id'] }]`, and the read exit's
 //     `applyInjectedSystemColumns` converges the FIELDS MAP only. A fourth
-//     stamp of the same seam, in `metadata-core`.
-//  2. `__search` on an extended title-less base — `registerObject` materializes
-//     the BASE and `resolveObject` folds `extend` contributors on afterwards
-//     WITHOUT re-materializing, while the read exits transform the ALREADY
-//     FOLDED document. So a base with no title-eligible field that an extension
-//     gives a text field to gets a companion from both `/meta` reads and none
-//     from the registry. A POSITION defect of the seam, not a stamp defect,
-//     live since #8038 and unchanged here.
+//     stamp of the same seam, in `metadata-core`, and the one whose converger
+//     is a SECOND IMPLEMENTATION of its producer rather than a delegation to it.
+//  2. [#8376] `__search` on an extended title-less base — `registerObject`
+//     materializes the BASE and `resolveObject` folds `extend` contributors on
+//     afterwards WITHOUT re-materializing, while the read exits transform the
+//     ALREADY FOLDED document. So a base with no title-eligible field that an
+//     extension gives a text field to gets a companion from both `/meta` reads
+//     and none from the registry. A POSITION defect of the seam, not a stamp
+//     defect, live since #8038 and unchanged here.
 
 import { describe, it, expect, vi } from 'vitest';
 import { SchemaRegistry } from '@objectstack/objectql';
@@ -411,7 +412,7 @@ describe('[#8268] every /meta object read exit materializes the base the way the
     // Pinned as EXPECTED so the day either is fixed this file fails and is
     // updated deliberately. See the header for what each one is.
 
-    it('MEASURES the un-converged multi-tenant `indexes` stamp (not fixed here)', async () => {
+    it('MEASURES the un-converged multi-tenant `indexes` stamp — filed as #8375', async () => {
         const host = await measure({ serviceMode: 'artifact', multiTenant: true });
         expectNonEmptyRead(host);
 
@@ -424,7 +425,7 @@ describe('[#8268] every /meta object read exit materializes the base the way the
         expect(divergingKeys(host.byName, host.registryResolved)).toEqual(['indexes']);
     });
 
-    it('MEASURES the companion over-provisioned on an extended title-less base (not fixed here)', async () => {
+    it('MEASURES the companion over-provisioned on an extended title-less base — filed as #8376', async () => {
         // Reproduces on the REGISTRY-ONLY host too, so it is not the artifact
         // seam: it is the seam's POSITION relative to the extender fold.
         const host = await measure({ serviceMode: 'absent', untitled: true, extendWithText: true });
