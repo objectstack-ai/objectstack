@@ -31,6 +31,13 @@ import { OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES } from '@objectstack/metada
 // this defect existed precisely because the lifecycle routes had no copy of it,
 // and a second copy would be the next place it drifts.
 import { isWritablePackage } from '@objectstack/metadata-protocol';
+// [#8443] ADR-0112's disclosure rule (#8086 / #8136 / #8333), and the DECLARED
+// 422 that keeps the one quotable population quotable. Both imported from the
+// producer for the reason the line above is: this door's seed-apply fallback is
+// a second copy of `metadata-protocol`'s `applySeedBodies`, and a second
+// private restatement of "when may a caught sentence be quoted" is where the
+// two copies start answering differently.
+import { clientFacingFailureText, seedRequestValidationError } from '@objectstack/metadata-protocol';
 import { organizationIdForMetaWrite } from '../meta-write-org-scope.js';
 import { setPackageDisabled } from '../package-state-store.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
@@ -378,7 +385,33 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                                 );
                             }
                         } catch (e: any) {
-                            (result as any).seedApplied = { success: false, error: e?.message ?? 'seed apply failed' };
+                            // [#8443] ADR-0112: `seedApplied.error` rides on a
+                            // **200** publish response as DATA, so no HTTP
+                            // boundary's 5xx message withhold can reach it —
+                            // the same argument #8333's P9 makes about this
+                            // door's twin inside `metadata-protocol`, which
+                            // this fallback is a second copy of. Measured on
+                            // `origin/main` before the change: the loader's
+                            // dependency-graph read (`metadata.getObject`) is
+                            // unguarded, so a `sys_metadata` outage escaped
+                            // `applyPublishedSeeds` and this catch answered
+                            // `"error": "SQLITE_ERROR: no such table:
+                            // sys_metadata"` on a 200.
+                            //
+                            // The rule is IMPORTED, never re-spelled: quote the
+                            // caught sentence only when the error declared
+                            // itself a 4xx client refusal. The other population
+                            // this catch receives — a malformed seed body —
+                            // declares itself 422 at the `safeParse` inside
+                            // `applyPublishedSeeds`, so the author still gets
+                            // the curated issue summary.
+                            (deps.logger ?? console).warn(
+                                `[handlePackages] seed apply failed: ${e?.message ?? e}`,
+                            );
+                            (result as any).seedApplied = {
+                                success: false,
+                                error: clientFacingFailureText(e, 'seed apply failed'),
+                            };
                         }
                     }
                     // ADR-0045 §3: "Publish" makes the package live AND visible.
@@ -981,7 +1014,22 @@ _context: HttpProtocolContext,
                 item = await protocol.getMetaItem(args);
                 if (item) break;
             } catch (e) {
-                readErrors.push(`read ${name}: ${(e as Error)?.message ?? String(e)}`);
+                // [#8443] The SAME rule as the catch at the door, applied to
+                // the sibling key of the same field: `readErrors` becomes
+                // `seedApplied.errors[]` on that 200 response, so it is a
+                // client-facing payload too. Measured before the change: with
+                // `sys_metadata` unreachable this read fails FIRST — before the
+                // loader is ever constructed — and answered `"errors": ["read
+                // project_seed: SQLITE_ERROR: no such table: sys_metadata"]`,
+                // so fixing only the door's catch would have left the commonest
+                // outage shape disclosing exactly as before. A DECLARED 4xx
+                // refusal (`[item_locked]`, `[writable_package_required]`, …)
+                // still reaches the author verbatim — that is the point of the
+                // positive list.
+                (deps.logger ?? console).warn(
+                    `[applyPublishedSeeds] seed body read failed for "${name}": ${(e as Error)?.message ?? String(e)}`,
+                );
+                readErrors.push(`read ${name}: ${clientFacingFailureText(e, 'the reason is in the server log')}`);
             }
         }
         // protocol.getMetaItem returns a WRAPPER: `{ type, name, item, lock,
@@ -1008,7 +1056,18 @@ _context: HttpProtocolContext,
     const { SeedLoaderService } = await import('../seed-loader.js');
     const { SeedLoaderRequestSchema } = await import('@objectstack/spec/data');
     const loader = new SeedLoaderService(ql, metadata, deps.logger ?? console);
-    const request = SeedLoaderRequestSchema.parse({
+    // [#8443] `safeParse`, not `parse` — the same producer-side declaration
+    // #8333's P9 made next door, for the same reason. This catch's caller now
+    // withholds anything undeclared, and a raw `ZodError` declares nothing, so
+    // a malformed seed body would have been blanked to `seed apply failed`
+    // (measured before the change, it arrived as a multi-line dump of zod
+    // internals — authoring feedback, and the one population that must
+    // survive). Declaring it 422 at its own producer is what keeps BOTH true:
+    // the driver text is withheld and the author still learns which seed and
+    // which key. The envelope is minted by `metadata-protocol`'s own helper, so
+    // one authoring mistake cannot get two different envelopes depending on
+    // which protocol served the publish.
+    const parsedRequest = SeedLoaderRequestSchema.safeParse({
         seeds: datasets,
         config: {
             defaultMode: 'upsert',
@@ -1016,7 +1075,8 @@ _context: HttpProtocolContext,
             ...(organizationId ? { organizationId } : {}),
         },
     });
-    const r = await loader.load(request);
+    if (!parsedRequest.success) throw seedRequestValidationError(parsedRequest.error.issues);
+    const r = await loader.load(parsedRequest.data);
     return {
         success: r.success,
         inserted: r.summary.totalInserted,
