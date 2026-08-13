@@ -547,9 +547,15 @@ function selfTest() {
   // and the answer is to re-point it at a package that does, not to delete it.
   t('the measured incident path now derives the kind', isInI18nBundlePackage('packages/services/service-messaging/src/objects/http-delivery.object.ts', liveOwners));
 
+  // The name assertions below anchor on the rendered DELIMITERS (`- pnpm x   —`,
+  // `⚠ x: STALE`), not on a bare substring. Measured while reverse-verifying this
+  // entry: renaming the gate to `check:i18n-renamed-probe` made the live run
+  // print STALE exactly as designed, and a `includes('pnpm check:i18n')` pin
+  // stayed green through it — every prefix-preserving rename is invisible to a
+  // substring, which is the one class of rot the STALE branch exists to catch.
   const i18nHit = changeKindLines(['packages/services/service-messaging/src/objects/http-delivery.object.ts'], resolved);
   t('an owning-package path emits the i18n convention section', i18nHit.length === 2 && i18nHit[0].includes('owns an i18n-extract.config.ts'));
-  t('the i18n section names check:i18n, runnably', i18nHit.some((l) => l.includes('pnpm check:i18n')));
+  t('the i18n section names check:i18n exactly, runnably', i18nHit.some((l) => l.includes('- pnpm check:i18n   —')));
   t('a path outside every owning package emits no i18n section', !changeKindLines(['packages/objectql/src/engine.ts'], resolved).some((l) => l.includes('check:i18n')));
 
   // The table's own rot detector: a name no live run discovers must say so,
@@ -557,7 +563,7 @@ function selfTest() {
   const stale = changeKindLines(['a.test.ts'], () => null);
   t('an undiscoverable gate renders as STALE', stale.filter((l) => l.includes('STALE')).length === 2);
   const i18nStale = changeKindLines(['packages/services/service-messaging/scripts/i18n-extract.config.ts'], () => null);
-  t('an undiscoverable check:i18n renders as STALE', i18nStale.filter((l) => l.includes('STALE') && l.includes('check:i18n')).length === 1);
+  t('an undiscoverable check:i18n renders as STALE', i18nStale.filter((l) => l.includes('⚠ check:i18n: STALE')).length === 1);
   t('every declared convention gate carries a reason', CHANGE_KIND_GATES.every((k) => k.gates.every((g) => g.name && g.why)));
 
   let failed = 0;
