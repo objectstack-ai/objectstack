@@ -440,9 +440,15 @@ describe('Door 2 lowers FilterArray to FilterCondition before the driver (#5158)
       .rejects.toMatchObject({ status: 400 });
     await expect(engine.count('deal', { where } as unknown as EngineCountOptions))
       .rejects.toMatchObject({ status: 400 });
+    // Only `where` is off-contract in this call (FilterArray, deliberately —
+    // module note on `asFilterArrayQuery`); since #8032 `groupBy` and
+    // `aggregations` type-check honestly, so the cast is scoped to the one
+    // slot whose contract is being bypassed.
     await expect(engine.aggregate('deal', {
-      where, groupBy: ['stage'], aggregations: [{ function: 'count', field: 'id', alias: 'n' }],
-    } as unknown as EngineAggregateOptions)).rejects.toMatchObject({ status: 400 });
+      where: where as unknown as EngineAggregateOptions['where'],
+      groupBy: ['stage'],
+      aggregations: [{ function: 'count', field: 'id', alias: 'n' }],
+    })).rejects.toMatchObject({ status: 400 });
     await expect(engine.update('deal', { amount: 1 }, { where, multi: true } as any))
       .rejects.toMatchObject({ status: 400 });
     await expect(engine.delete('deal', { where, multi: true } as any))

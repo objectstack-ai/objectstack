@@ -48,12 +48,8 @@
  */
 
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import type { EngineAggregateOptions } from '@objectstack/spec/data';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
 import type { McpDataBridge, McpObjectSummary } from './mcp-http-tools.js';
-
-/** The engine's own aggregation-node list — see the cast note in `aggregate`. */
-type EngineAggregations = NonNullable<EngineAggregateOptions['aggregations']>;
 
 /** What {@link createStdioDataBridge} needs from the host plugin. */
 export interface StdioDataBridgeDeps {
@@ -210,27 +206,15 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
   if (typeof engine.aggregate === 'function') {
     bridge.aggregate = async (object, opts) => {
       const context = await resolvePrincipal();
-      // Two casts, one cause: `McpDataBridge.aggregate` declares a WIDER input
-      // than `EngineAggregateOptions` accepts, and the HTTP path never noticed
-      // because it reaches the engine through `callData`'s untyped `params`.
-      //
-      //  - `groupBy`: the bridge (and the `aggregate_records` tool schema)
-      //    allow `{ field, dateGranularity, alias }` objects; the engine option
-      //    declares `string[]` — while the `timezone` doc three lines below it
-      //    in that same schema describes "groupBy items carrying a
-      //    dateGranularity". The runtime contract is the object form.
-      //  - `aggregations`: the bridge declares `function: string`; the engine's
-      //    `AggregationNode` closes it to the six-name enum. The tool's own zod
-      //    schema already enforces exactly that enum before a value reaches
-      //    here, so the wide spelling is the interface's, never the caller's.
-      //
-      // Casting keeps this transport's request byte-identical to the HTTP one
-      // rather than narrowing the declared tool input on one transport only.
-      // The declaration mismatch itself is filed rather than papered over here.
+      // No casts: `McpDataBridge.aggregate` declares the engine's own
+      // `EngineAggregateOptions` slices since #8032, so the honest call
+      // compiles — the two `as unknown as` casts this line used to carry
+      // existed only because the engine option declared `groupBy: string[]`
+      // while reading structured buckets.
       const rows = await engine.aggregate(object, {
         ...(opts?.where ? { where: opts.where } : {}),
-        ...(opts?.groupBy ? { groupBy: opts.groupBy as unknown as string[] } : {}),
-        aggregations: opts.aggregations as unknown as EngineAggregations,
+        ...(opts?.groupBy ? { groupBy: opts.groupBy } : {}),
+        aggregations: opts.aggregations,
         ...(opts?.timezone ? { timezone: opts.timezone } : {}),
         context,
       });

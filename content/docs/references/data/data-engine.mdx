@@ -65,7 +65,7 @@ Options for DataEngine.aggregate operations
 | :--- | :--- | :--- | :--- |
 | **method** | `'aggregate'` | ✅ |  |
 | **object** | `string` | ✅ |  |
-| **query** | `{ context?: object; where?: Record<string, any> \| any; groupBy?: string[]; aggregations?: object[]; … }` | ✅ |  |
+| **query** | `{ context?: object; where?: Record<string, any> \| any; groupBy?: (string \| object)[]; aggregations?: object[]; … }` | ✅ |  |
 
 
 ---
@@ -328,7 +328,7 @@ This schema accepts one of the following structures:
 | :--- | :--- | :--- | :--- |
 | **method** | `'aggregate'` | ✅ |  |
 | **object** | `string` | ✅ |  |
-| **query** | `{ context?: object; where?: Record<string, any> \| any; groupBy?: string[]; aggregations?: object[]; … }` | ✅ |  |
+| **query** | `{ context?: object; where?: Record<string, any> \| any; groupBy?: (string \| object)[]; aggregations?: object[]; … }` | ✅ |  |
 
 ---
 
@@ -466,7 +466,7 @@ QueryAST-aligned options for DataEngine.aggregate operations
 | :--- | :--- | :--- | :--- |
 | **context** | `{ userId?: string; actor?: string; attributedUserId?: string; email?: string; … }` | optional |  |
 | **where** | `Record<string, any> \| any` | optional |  |
-| **groupBy** | `string[]` | optional |  |
+| **groupBy** | `(string \| { field: string; dateGranularity?: Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>; alias?: string })[]` | optional | GROUP BY targets (strings or `{field, dateGranularity?}` objects for date bucketing) |
 | **aggregations** | `{ function: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>; field?: string; alias: string; filter?: any }[]` | optional |  |
 | **having** | `any` | optional | HAVING — filter over the aggregated rows (aggregation aliases + groupBy projections); applied engine-side after aggregation |
 | **timezone** | `string` | optional |  |

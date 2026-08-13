@@ -88,6 +88,81 @@ describe('looksLikeInternalErrorLeak', () => {
 });
 
 /**
+ * [#8132] The shipped dialects' phrasings, both directions.
+ *
+ * The gap this pins: the keyword set caught SQLite's `SQLITE_ERROR: no such
+ * table: sys_metadata` (via the `sqlite_` limb) while the Postgres phrasing of
+ * *the same condition* — `relation "sys_metadata" does not exist` — returned
+ * FALSE and shipped a physical table name from every boundary that applies the
+ * predicate.
+ *
+ * Scope is deliberately the dialects this repo actually RUNS (SQLite/libsql and
+ * Postgres, via `driver-sql`), not a census of MySQL/MSSQL/Oracle spellings
+ * nobody here has met — the unbounded-list trap the module note argues against.
+ *
+ * The negative half is the load-bearing half. A bare `includes('does not
+ * exist')` would have matched "user does not exist" and started replacing
+ * ordinary business answers with "Internal server error", so every phrasing is
+ * anchored on the driver's own template (a QUOTED identifier, or the trailing
+ * colon) and the near-miss cases below are what prove that anchor is real
+ * rather than incidental.
+ */
+describe('looksLikeInternalErrorLeak — shipped-dialect phrasings (#8132)', () => {
+    it.each([
+        // Postgres 42P01. The exact string measured false on the shipping predicate.
+        ['postgres missing relation', 'relation "sys_metadata" does not exist'],
+        [
+            'postgres missing relation wrapped in a producer sentence',
+            'Failed to delete customization overlay: relation "sys_metadata" does not exist',
+        ],
+        // Postgres 42703, read path — no relation named, so the sub-object
+        // helpers in `relation-sub-object.ts` deliberately do not see it.
+        ['postgres missing column (read path)', 'column "bogus" does not exist'],
+        // Postgres 42703 write path / 42704: these carry a complete missing-TABLE
+        // phrase as a substring. For a LEAK verdict that overlap is harmless —
+        // both spellings are a leak — which is why this predicate needs none of
+        // the ordering care `matchMissingColumnOfRelation` exists to provide.
+        ['postgres missing column of relation', 'column "label" of relation "sys_team" does not exist'],
+        [
+            'postgres missing constraint of relation',
+            'constraint "uq_sys_team_name" of relation "sys_team" does not exist',
+        ],
+        // Postgres 42501 — names a physical table the caller never asked about.
+        ['postgres permission denied for table', 'permission denied for table sys_user'],
+        ['postgres permission denied for relation', 'permission denied for relation sys_user'],
+        // SQLite/libsql message-only errors: the same conditions with NO
+        // `SQLITE_` prefix to trip the existing limb. Measured shapes in this
+        // repo — `metadata/src/utils/schema-sync-errors.ts` documents both.
+        ['sqlite bare missing table', 'no such table: sys_metadata'],
+        ['sqlite bare missing table with a schema prefix', 'no such table: main.sys_metadata_history'],
+        ['sqlite bare missing column', 'no such column: bogus'],
+    ])('catches %s', (_label, message) => {
+        expect(looksLikeInternalErrorLeak(message)).toBe(true);
+    });
+
+    /**
+     * ⛔ The false-positive guard. Every one of these contains the tail of a
+     * phrasing above and is an ordinary message a caller is entitled to read.
+     * If someone later relaxes an anchor to a bare `includes(...)`, these go red
+     * — which is the whole point of writing them down.
+     */
+    it.each([
+        ['a business message about a missing user', 'user does not exist'],
+        ['a business message about a missing record', 'record does not exist'],
+        ['a sentence a hook author wrote', 'The customer you selected does not exist'],
+        // The quote anchor, stated as a test: unquoted prose that uses the same
+        // NOUN is not a driver line. The looser `includes('relation') &&
+        // includes('does not exist')` reading would match this one.
+        ['prose merely using the word relation', 'This relation does not exist in the diagram'],
+        ['prose merely using the word column', 'The column layout does not exist'],
+        // No physical object kind, so not Postgres' ACL template.
+        ['an ordinary permission refusal', 'Permission denied for this operation'],
+    ])('leaves %s alone', (_label, message) => {
+        expect(looksLikeInternalErrorLeak(message)).toBe(false);
+    });
+});
+
+/**
  * [#5811] The declaration half. `looksLikeInternalErrorLeak` asks whether a
  * message SOUNDS internal; this asks whether the producer SAID it was a server
  * fault. The read-scope RLS refusals are the family that needs the second
