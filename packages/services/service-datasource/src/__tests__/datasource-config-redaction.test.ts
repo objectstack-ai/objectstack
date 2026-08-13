@@ -310,11 +310,21 @@ describe('GREEN ON MAIN — #8078 is not weakened by anything above', () => {
     ).rejects.toThrow(/is a credential and is not accepted inline/);
   });
 
-  it('GREEN ON MAIN — a URL-embedded credential is still ACCEPTED at the write door', () => {
-    // #7990 left refusing these UNRULED and #8078 pinned the acceptance as a
-    // FACT. Redacting on the way out must not become refusing on the way in;
-    // this pin fails the moment that boundary moves without a ruling.
-    expect(validateDriverConfig('postgres', { url: 'postgresql://u:pass@h:5432/d' }))
+  it('a URL-embedded credential is now REFUSED at the write door (#8082 — the ruling this pin waited for)', () => {
+    // This pin used to assert the ACCEPTANCE, with the comment "this pin fails
+    // the moment that boundary moves without a ruling". The ruling arrived
+    // (#8082, maintainer 2026-08-12, Option A): the write door refuses a URL
+    // userinfo password, so the pin inverts. The REDACTED shape the read path
+    // serves (`u@h`) must stay accepted, or every untouched "Save" on a legacy
+    // row would 400 — the #8126 regression shape, re-checked here from the
+    // write side.
+    const refused = validateDriverConfig('postgres', { url: 'postgresql://u:pass@h:5432/d' });
+    expect(refused).toMatchObject({ known: true });
+    const issues = (refused as { issues: Array<{ path: unknown[]; message: string }> }).issues;
+    expect(issues.length).toBeGreaterThan(0);
+    expect(issues[0].path).toEqual(['url']);
+    expect(issues[0].message).toContain('external.credentialsRef');
+    expect(validateDriverConfig('postgres', { url: 'postgresql://u@h:5432/d' }))
       .toEqual({ known: true, issues: [] });
   });
 });

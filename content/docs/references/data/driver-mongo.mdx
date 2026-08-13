@@ -41,7 +41,7 @@ MongoDB Connection Configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **url** | `string` | optional | Connection URI (supersedes the discrete fields) |
+| **url** | `string` | optional | Connection URI (supersedes the discrete fields; must not embed a password — bind the secret instead) |
 | **database** | `string` | optional | Database name |
 | **host** | `string` | ✅ | Host address |
 | **port** | `integer` | ✅ | Port number |
