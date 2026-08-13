@@ -282,9 +282,12 @@ describe('#7682 — the refusal discriminates on package writability', () => {
     });
 
     it('a permission set belonging to a read-only package is refused by the package door', async () => {
-      // The card's own hatch case, minus the hatch — see the suite docblock for
-      // why the hatch half is deliberately uncovered here. With no hatch set,
-      // the read-only base is what the refusal names, which is #7682's whole
+      // The card's own hatch case, minus the hatch: this is #7682's half, so it
+      // holds with the hatch CLOSED and must keep holding independently of
+      // #8146. (The hatch half is no longer uncovered — it is pinned in the
+      // `#8146` describe below; this comment used to say otherwise, which
+      // #8185 wrote while that gap was still open.) With no hatch set, the
+      // read-only base is what the refusal names, which is #7682's whole
       // point, and `permission` is the type the QA run used.
       const err = await putWith(repo, {
         type: 'permission', name: 'showcase_contributor', intent: 'override-artifact', packageId: READ_ONLY_PKG,
