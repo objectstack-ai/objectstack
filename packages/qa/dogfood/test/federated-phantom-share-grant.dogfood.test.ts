@@ -81,6 +81,8 @@ const STAMPED = 'showcase_ext_customer';
 const LOCAL = 'showcase_private_note';
 /** A row that really exists in the remote `customers` table (fixture seed). */
 const REMOTE_ID = 'c1';
+/** The organization the harness admin is bound to (see the `beforeAll` note). */
+const ADMIN_ORG = 'org_8119_harness';
 
 const SYS = { isSystem: true } as ExecutionContext;
 
@@ -141,6 +143,44 @@ describe('[#8119] federated phantom anchor: single-record gates + share posture'
     });
     await registrar.syncObjectSchema(FEDERATED);
 
+    // [ADR-0123 D2] Bind the harness admin to an organization BEFORE the first
+    // sign-in. This stack boots `posture-only`, i.e. the Layer 0 wall is ACTIVE,
+    // and under a walled posture the open default-org bootstrap deliberately
+    // abstains — so nothing binds this admin and their session resolves with no
+    // active organization. Tenant-scoped writes are refused in that state
+    // (a 403 naming the missing organization), which the control note below is:
+    // the fixture used to get a 2xx and a row stamped `organization_id: null`
+    // that its own creator could not read back — #8208, which the refusal closes.
+    //
+    // Done by hand because there is no harness answer: `bootStack`'s
+    // `orgContext` option REFUSES to compose with `multiTenant` (under a walled
+    // posture it would be a no-op that reads like a feature — the #7762 vacuity
+    // class), so an org-bound caller here has to be built explicitly.
+    //
+    // This is fixture SETUP, not the subject: every assertion in this file is
+    // about the federated phantom anchor and share posture, and none of them
+    // reads the admin's organization. The bind exists so the setup step can
+    // reach the behaviour under test at all. The refusal itself is measured
+    // deliberately, on its own scenario, in
+    // `no-active-organization-write-refusal.dogfood.test.ts`.
+    {
+      const adminUser = (await ql.find('sys_user', {
+        where: { email: 'admin@objectos.ai' }, limit: 1, context: SYS,
+      })) as unknown;
+      const adminRow = (Array.isArray(adminUser) ? adminUser[0] : undefined) as { id?: unknown } | undefined;
+      const adminUserId = String(adminRow?.id ?? '');
+      expect(adminUserId, 'the seeded harness admin resolves').toBeTruthy();
+      await ql.insert('sys_organization', { id: ADMIN_ORG, name: 'Harness Org', slug: ADMIN_ORG }, { context: SYS });
+      await ql.insert(
+        'sys_member',
+        { id: 'mem_8119_admin', organization_id: ADMIN_ORG, user_id: adminUserId, role: 'owner' },
+        { context: SYS },
+      );
+    }
+
+    // Signed in AFTER the membership exists: `session.create.before` resolves the
+    // active organization at MINT time, so a token taken earlier would not carry
+    // one however the store looks afterwards.
     adminToken = await stack.signIn();
     adminCtx = await resolveAuthzContext({
       ql,

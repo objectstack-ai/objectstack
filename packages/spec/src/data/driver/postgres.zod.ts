@@ -22,6 +22,7 @@ import {
   driverConfigJsonSchema,
   DriverSslToggleSchema,
   INLINE_CREDENTIAL_REFUSED,
+  placeholderFree,
   READ_ONLY_BELONGS_ON_DATASOURCE,
   refusedInlineCredentialKey,
   SCHEMA_MODE_BELONGS_ON_DATASOURCE,
@@ -89,25 +90,30 @@ export const PostgresConfigSchema = lazySchema(() => strictObject(
    * userinfo is refused at publish exactly like an inline `password` (#7990) —
    * bind the secret (`external.credentialsRef` / the connection form's secret
    * field) and it is injected at connect time. A bare username (`user@host`)
-   * stays writable. Runtime-environment DSNs (`OS_DATABASE_URL`) never pass
+   * stays writable. Placeholder-free since #8336: a `${…}` span anywhere in
+   * the value is refused — placeholders in authored metadata are resolved by
+   * nothing. Runtime-environment DSNs (`OS_DATABASE_URL`) never pass
    * through this schema and are unaffected.
    * Format: `postgresql://[user@][host][:port][/dbname][?params]`
    */
-  url: credentialFreeUrl(z.string(), 'url').optional()
+  url: placeholderFree(credentialFreeUrl(z.string(), 'url'), 'url').optional()
     .describe('Connection URI (supersedes the discrete fields; must not embed a password — bind the secret instead)')
     .meta({ title: 'Connection URL' }),
 
-  /** Hostname or IP address. */
-  host: z.string().default('localhost').describe('Host address').meta({ title: 'Host' }),
+  /** Hostname or IP address. Placeholder-free since #8336. */
+  host: placeholderFree(z.string(), 'host').default('localhost')
+    .describe('Host address').meta({ title: 'Host' }),
 
   /** Port number. */
   port: z.number().int().default(5432).describe('Port number').meta({ title: 'Port' }),
 
-  /** Database name. Required unless `url` carries it. */
-  database: z.string().optional().describe('Database name').meta({ title: 'Database' }),
+  /** Database name. Required unless `url` carries it. Placeholder-free since #8336. */
+  database: placeholderFree(z.string(), 'database').optional()
+    .describe('Database name').meta({ title: 'Database' }),
 
-  /** Authentication user. Passed to `pg` as `user`. */
-  username: z.string().optional().describe('Authentication user').meta({ title: 'User' }),
+  /** Authentication user. Passed to `pg` as `user`. Placeholder-free since #8336. */
+  username: placeholderFree(z.string(), 'username').optional()
+    .describe('Authentication user').meta({ title: 'User' }),
 
   /**
    * Authentication password — REFUSED inline since #7990. Declared-unwritable
@@ -122,12 +128,21 @@ export const PostgresConfigSchema = lazySchema(() => strictObject(
   /** TLS settings, passed to `pg` verbatim. */
   ssl: DriverSslToggleSchema.optional().meta({ title: 'Use SSL/TLS' }),
 
-  /** Default schema for tables that do not name one — knex `searchPath`. */
-  schema: z.string().default('public').describe('Default schema (knex searchPath)')
+  /** Default schema for tables that do not name one — knex `searchPath`. Placeholder-free since #8336. */
+  schema: placeholderFree(z.string(), 'schema').default('public')
+    .describe('Default schema (knex searchPath)')
     .meta({ title: 'Schema' }),
 
-  /** `application_name` on the connection — how this stack shows up in `pg_stat_activity`. */
-  applicationName: z.string().optional().describe('Postgres application_name')
+  /**
+   * `application_name` on the connection — how this stack shows up in
+   * `pg_stat_activity`. Placeholder-free since #8336: a `${…}` here does not
+   * mask a connection failure, but it is authored under the same false belief
+   * and would report a literal `${SERVICE_NAME}` to every operator reading
+   * `pg_stat_activity` — and leaving one connection-material string key open
+   * is exactly the displacement door the class-wide refusal exists to close.
+   */
+  applicationName: placeholderFree(z.string(), 'applicationName').optional()
+    .describe('Postgres application_name')
     .meta({ title: 'Application name' }),
 
   /** `statement_timeout` in milliseconds — aborts any statement that runs longer. */

@@ -9,6 +9,7 @@ import {
   credentialFreeUrl,
   driverConfigJsonSchema,
   INLINE_CREDENTIAL_REFUSED,
+  placeholderFree,
   READ_ONLY_BELONGS_ON_DATASOURCE,
   refusedInlineCredentialKey,
   SCHEMA_MODE_BELONGS_ON_DATASOURCE,
@@ -128,7 +129,9 @@ export const TursoConfigSchema = lazySchema(() => strictObject(
      *
      * Credential-free by contract since #8082: a `user:password@` userinfo is
      * refused at publish exactly like an inline `authToken` (#7990) — bind the
-     * secret and it reaches the driver at connect time. Runtime-environment
+     * secret and it reaches the driver at connect time. Placeholder-free since
+     * #8336: a `${…}` span anywhere in the value is refused — placeholders in
+     * authored metadata are resolved by nothing. Runtime-environment
      * DSNs (`OS_DATABASE_URL` + `OS_DATABASE_AUTH_TOKEN`) never pass through
      * this schema and are unaffected.
      */
@@ -140,7 +143,7 @@ export const TursoConfigSchema = lazySchema(() => strictObject(
     // docs link checker resolves as an internationalised domain name, and
     // fails on (caught by CI on this very key). Concrete example URLs belong
     // in the TSDoc above the key, which the reference tables do not inline.
-    url: credentialFreeUrl(z.string().min(1), 'url')
+    url: placeholderFree(credentialFreeUrl(z.string().min(1), 'url'), 'url')
       .describe('libSQL endpoint or local file: a remote libsql/https Turso URL, a file path, or :memory:')
       .meta({ title: 'Database URL' }),
 
@@ -155,8 +158,13 @@ export const TursoConfigSchema = lazySchema(() => strictObject(
      */
     authToken: refusedInlineCredentialKey('authToken', 'Auth token'),
 
-    /** AES-256 key for the local database file; local/replica modes only. */
-    encryptionKey: z.string().optional()
+    /**
+     * AES-256 key for the local database file; local/replica modes only.
+     * Placeholder-free since #8336: an unresolved `${…}` here would encrypt
+     * the database with the literal placeholder string as its key — data
+     * unreadable under the key the author believed they set.
+     */
+    encryptionKey: placeholderFree(z.string(), 'encryptionKey').optional()
       .describe('AES-256 encryption key for the local database file (local/replica modes)')
       .meta({ title: 'Encryption key', format: 'password' }),
 
@@ -169,9 +177,10 @@ export const TursoConfigSchema = lazySchema(() => strictObject(
      * Remote sync endpoint that turns a local file into an embedded replica.
      * Judged by the same #8082 value-level parse as `url`: it is an authored
      * URL persisted into the identical `sys_metadata` sink, so a
-     * `user:password@` userinfo is refused the same way.
+     * `user:password@` userinfo is refused the same way — and by the same
+     * #8336 parse too (placeholder-free).
      */
-    syncUrl: credentialFreeUrl(z.string(), 'syncUrl').optional()
+    syncUrl: placeholderFree(credentialFreeUrl(z.string(), 'syncUrl'), 'syncUrl').optional()
       .describe('Remote sync URL for embedded-replica mode: a libsql or https Turso endpoint')
       .meta({ title: 'Sync URL' }),
 

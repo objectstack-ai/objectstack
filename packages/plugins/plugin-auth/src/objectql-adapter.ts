@@ -16,6 +16,10 @@ import {
   liftClientSecretForWrite,
   type SecretResolvingEngine,
 } from './sso-client-secret.js';
+import {
+  reattachSessionTokenOnRead,
+  type InternalFieldResolvingEngine,
+} from './session-token-readback.js';
 
 /**
  * Mapping from better-auth model names to ObjectStack protocol object names.
@@ -700,6 +704,13 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
   // privileged verb for exactly that reason (#7823), so it comes off the raw
   // engine. See `sso-client-secret.ts` for why the seam sits here at all.
   const secretEngine = rawDataEngine as unknown as SecretResolvingEngine;
+  // [#7823] Same access rule for the session-token readback seam:
+  // `resolveInternalField` (#8118) is the privileged batch accessor that
+  // recovers `sys_session.token` after the engine's `internal: true` read
+  // strip, so better-auth's lifecycle routes (revoke-other-sessions,
+  // sliding-expiry refresh, expired-session cleanup) see the row whole while
+  // the generic data API does not. See `session-token-readback.ts`.
+  const internalFieldEngine = rawDataEngine as unknown as InternalFieldResolvingEngine;
   // Field-name bridging for better-auth plugins that expose NO `schema` option
   // (e.g. @better-auth/sso): when a model is remapped via AUTH_MODEL_TO_PROTOCOL,
   // its camelCase model fields are also converted to snake_case columns on the
@@ -779,6 +790,17 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
         // and authenticates to the IdP with the plaintext; encrypt-on-write
         // without this breaks every federated login.
         await injectClientSecretOnRead(secretEngine, objectName, result);
+        // [#7823] Session rows come back token-less off the engine's generic
+        // read path (`internal: true`); better-auth reads `session.token` back
+        // off this result to re-sign cookies, refresh, sign out and revoke.
+        // Re-attach it through the privileged accessor. The projection guard
+        // uses the CALLER's select, not the tombstone-borrowed one above.
+        await reattachSessionTokenOnRead(
+          internalFieldEngine,
+          objectName,
+          result,
+          bridged && select ? select.map(camelToSnake) : select,
+        );
         const norm = normaliseLegacyDates(model, result);
         return (bridged ? remapKeys(norm, snakeToCamel) : norm) as T;
       },
@@ -808,6 +830,12 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
         // [#8009] Same read half, per row — better-auth reaches the provider
         // through findMany as well as findOne.
         for (const r of results) await injectClientSecretOnRead(secretEngine, objectName, r);
+        // [#7823] Same token readback, batched over the whole result — this is
+        // the read `revoke-other-sessions` filters by `session.token`, where a
+        // token-less row set made it answer `200 {status:true}` while revoking
+        // nothing (measured). One privileged read serves the page (#8118's
+        // batch shape); this verb has no projection, so no guard is needed.
+        await reattachSessionTokenOnRead(internalFieldEngine, objectName, results);
 
         return results.map((r) => {
           const norm = normaliseLegacyDates(model, r as Record<string, any>);

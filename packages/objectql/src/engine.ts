@@ -5003,6 +5003,19 @@ export class ObjectQL implements IObjectQLEngine {
    * already produced, so the predicate has been evaluated and the index used
    * before this method sees anything — which is precisely why authentication
    * keeps working.
+   *
+   * **READ path only** (#7823, maintainer ruling 2026-08-13 / A-prime). This
+   * used to run at the two write-response sites as well (the 201 create body
+   * and the by-id-update 200 body), which conflated "never returned on the
+   * generic data path" with "never returned to the engine-level caller that
+   * performed the write" — and broke authentication for `sys_session.token`,
+   * whose minted value better-auth reads back off the insert result. The
+   * write-response half of the guarantee now lives at the generic-data-path
+   * ingress (`omitInternalFieldsFromWriteResponse` in
+   * `@objectstack/metadata-protocol`, tripwire-enforced across every `*Data`
+   * write face); engine write results keep the stored row whole. Lifecycle
+   * consumers that need a flagged value back off a READ go through
+   * {@link resolveInternalField} — never a carve-out here.
    */
   private omitInternalFields(object: string, rows: any): void {
     if (!rows) return;
@@ -8179,12 +8192,23 @@ export class ObjectQL implements IObjectQLEngine {
           // AFTER the hook dispatch, matching the read path: `afterInsert`
           // handlers still observe the whole stored row.
           stripSearchCompanion(rowCtx.result);
-          // [#7728] Same position, same reason, for `internal` fields. A write
-          // has no projection to consult here either, so the omit is
-          // unconditional. This does NOT touch the show-once mint path: that
-          // route reads only `id` off the insert result and returns the
-          // plaintext it generated itself.
-          this.omitInternalFields(object, rowCtx.result);
+          // [#7823] `internal` fields are deliberately NOT stripped here. An
+          // earlier revision omitted them from this create result (#7728's
+          // "two write-response sites"), which conflated two different
+          // guarantees: "never returned on the generic data path" (the flag's
+          // sentence) and "never returned to the engine-level caller that
+          // performed the write". For `sys_session.token` those are OPPOSITE
+          // requirements — better-auth's `createWithHooks` reads the minted
+          // session row back off exactly this result, so the strip here broke
+          // `signIn`/`signUp` outright (measured: `verify signIn: no token in
+          // response`). Maintainer ruling 2026-08-13 (A-prime, #7823): the
+          // write-response strip lives at the GENERIC-DATA-PATH INGRESS —
+          // `omitInternalFieldsFromWriteResponse` in
+          // `@objectstack/metadata-protocol`, applied by every `*Data` write
+          // face and held there by a tripwire test — while engine-level write
+          // results keep the stored row whole for the privileged server-side
+          // caller that just wrote it. The generic READ path is unchanged:
+          // {@link omitInternalFields} still runs on every find/findOne.
         }
 
         // Roll-up: recompute parent summary fields that aggregate this object.
@@ -9259,16 +9283,21 @@ export class ObjectQL implements IObjectQLEngine {
            // an affected-row COUNT (#4639), which the strip skips as a
            // non-object.
            stripSearchCompanion(hookContext.result);
-           // [#7728] …and the same for `internal` fields, on the identical
-           // argument. This is not a hypothetical symmetry: `sys_api_key` is
-           // one of the few identity objects with a write verb open
-           // (`apiMethods: ['get','list','update']`, #7727) and its declared
-           // revoke/restore row actions PATCH it, so before this line a client
-           // revoking a key got the stored hash back in the 200 body — measured,
-           // and the fourth leaking surface on the object #7728 was filed
-           // against. A predicate update resolves to an affected-row COUNT
-           // (#4639), which the omit skips as a non-object.
-           this.omitInternalFields(object, hookContext.result);
+           // [#7823] `internal` fields are deliberately NOT stripped here —
+           // the write-response omit this line used to carry (#7728's fourth
+           // measured surface: a client revoking a `sys_api_key` got the
+           // stored hash back in the PATCH 200 body, `apiMethods:
+           // ['get','list','update']`, #7727) RELOCATED to the
+           // generic-data-path ingress under the 2026-08-13 A-prime ruling on
+           // #7823. That surface is still closed — `updateData` in
+           // `@objectstack/metadata-protocol` builds the PATCH 200 body and
+           // passes it through `omitInternalFieldsFromWriteResponse`, pinned
+           // by `api-key-hash-not-serialized.dogfood.test.ts` and the
+           // ingress tripwire test — while the engine-level result keeps the
+           // stored row whole for privileged server-side writers (the same
+           // reason as the insert path: a strip HERE also fired on writes no
+           // external caller ever sees). The generic READ path is unchanged:
+           // {@link omitInternalFields} still runs on every find/findOne.
            // The record IS updated; a summary that could not recompute after
            // retries must surface, not stay silent (framework#3147).
            if (summaryFailures.length > 0) throw new SummaryRecomputeError(summaryFailures, hookContext.result);

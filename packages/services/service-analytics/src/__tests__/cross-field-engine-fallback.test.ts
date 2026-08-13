@@ -283,23 +283,24 @@ describe('[#7598] cross-field `$field` on the analytics face — served via the 
         // Never a bind-layer accident dressed up as a refusal.
         expect(err).not.toBeInstanceOf(TypeError);
         expect(err.message).not.toContain('can only bind');
-        // [#7929, maintainer ruling 2026-08-12 — B] The ROUTED half is the one
-        // the ruling changed: those refusals are `driver-sql`'s, and the driver
-        // no longer echoes either operand, because on a read-scope query both
-        // columns were written by an administrator the caller never saw. This
-        // is the analytics face of that pin — the four captured response bodies
-        // on #7929 all came down this road.
+        // [#7929 — B, REWRITTEN by #8220 — A] These cases drive the CALLER's
+        // own `where` with NO read scope in play, so under A they are the
+        // AUTHOR's: `withReadScope` marks the strategy-built user filter
+        // 'author', and the routed driver refusal names the operands again —
+        // the corpus's `diagnosticIncludes` substrings are back ON THE WIRE
+        // for exactly this caller. B's blanket redaction pin here is
+        // superseded the same way the runtime byte-equality pin was
+        // (`cross-field-refusal-operand-withhold.test.ts` carries the full
+        // account). The withhold itself did not move: a POLICY-injected scope
+        // stays redacted — pinned just below, on this same road.
         //
-        // ⛔ The `routed === false` half is deliberately NOT asserted the same
-        // way. Those refusals never reach a driver: this package answers them
-        // itself (`fieldReferenceBetweenBoundMessage` and the `$in`/LIKE arms),
-        // with wording that still names both operands. That is a services-lane
-        // surface and B is scoped to the driver, so the gap is recorded rather
-        // than closed here — asserting it green would be asserting something
-        // this change did not do.
+        // ⛔ The `routed === false` half is still deliberately NOT asserted
+        // for disclosure the driver way. Those refusals never reach a driver:
+        // this package answers them itself with wording that always named
+        // both operands, before B and after A alike.
         if (routed) {
-          for (const column of CROSS_FIELD_OPERAND_NAMES) {
-            expect(err.message, `driver refusal names "${column}"${note}`).not.toContain(column);
+          for (const fragment of refusal.diagnosticIncludes) {
+            expect(err.message, `author-restored refusal lost "${fragment}"${note}`).toContain(fragment);
           }
         }
         // The native-SQL emitter never saw it either way — declined, or refused
@@ -317,6 +318,12 @@ describe('[#7598] cross-field `$field` on the analytics face — served via the 
       const err = await errorFrom(() => idsFor({}));
       expect(err.code).toBe('INVALID_FILTER');
       expect(err.status).toBe(400);
+      // [#8220] …and it stays REDACTED: the scope is marked 'policy' at
+      // `withReadScope`, so A's author-restore above must not leak here. The
+      // fail-closed pair of the disclosure assertions in the loop.
+      for (const column of CROSS_FIELD_OPERAND_NAMES) {
+        expect(err.message, `policy refusal names "${column}"`).not.toContain(column);
+      }
       expect(rawSqlCalls).toEqual([]);
       readScope = null;
     });

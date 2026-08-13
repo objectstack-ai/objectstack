@@ -24,6 +24,12 @@ export * from './filter-logic-conformance';
 // it: the table is data every backend is checked against, this is the shared
 // answer three of them now compute WITH.
 export * from './filter-verdict';
+// [#8220, A of #7929] Filter-subtree provenance — the mark the two read-scope
+// merge boundaries stamp on each side of `{ $and: [authorWhere, scope] }`, so
+// the SQL family's cross-field refusal can restore the author's full
+// diagnostic without re-disclosing policy. Fail direction is CLOSED by
+// declaration: unmarked or ambiguous withholds, exactly like `'policy'`.
+export * from './filter-subtree-provenance';
 // Canonical conformance cases for the filter TEXT operators — case folding
 // (ASCII-only, #4706 Q1), literal comparands (no LIKE wildcards, no regex
 // metacharacters), and the refusal of the retired `$regex`/`$options`. A

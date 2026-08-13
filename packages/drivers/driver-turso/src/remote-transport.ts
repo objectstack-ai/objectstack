@@ -28,11 +28,29 @@ import {
 // `SqlDriver`'s local emitter so this transport and its local twin cannot fork
 // on what a pattern means (the fork `turso-local-remote-*` suites exist to catch).
 import { hasDanglingLikeEscape, likePatternToGlobPattern } from '@objectstack/spec/data';
+// [#8220] The read-scope provenance mark's consumer half — same resolution the
+// SqlDriver family applies, so which transport answered stays unobservable.
+import { resolveFilterSubtreeProvenance } from '@objectstack/spec/data';
 // The DECLARED aggregate vocabulary (#5907) — read from the spec so this
 // transport's "the protocol has no such function" refusal cannot drift from what
 // `AggregationNodeSchema.function` admits, nor from the local driver's twin.
 import { AggregationFunction } from '@objectstack/spec/data';
 import type { DriverQuery } from '@objectstack/spec/contracts';
+// [#8413] What a `unique: true` FIELD becomes, from the one place that decides
+// it. `uniqueIndexesFromFields`' own contract is that it is "the ONLY place
+// field-level uniqueness becomes an index, so the create-table, alter-table,
+// SQLite-rebuild and drift-detection paths cannot disagree about what a
+// `unique: true` field is supposed to produce" — this transport is the fourth
+// such path and now reads the same answer instead of re-deriving a second one.
+// That is the whole anti-drift property: the index NAME and the KEY the remote
+// face creates are byte-identical to the ones `SqlDriver` creates locally and
+// the ones the drift differ looks for, so the two faces cannot fork on what the
+// declaration meant (#6203, which this driver has already paid for twice).
+import {
+  uniqueIndexesFromFields,
+  organizationKeyPartSql,
+  type ExpectedIndex,
+} from '@objectstack/driver-sql';
 import { nanoid } from 'nanoid';
 
 /**
@@ -548,6 +566,82 @@ function invalidFilterError(message: string): Error {
 }
 
 /**
+ * [#8413] Is this the "the conflict target is not a key" failure?
+ *
+ * The MESSAGE is the only channel SQLite fills for this condition — it is a
+ * plain `SQLITE_ERROR`, the same generic code a syntax error carries, so
+ * `code` cannot discriminate and a `code`-based test would either never fire or
+ * swallow every other statement failure as an unbacked conflict target. The
+ * text is SQLite's own, stable since the `ON CONFLICT` clause was introduced
+ * (3.24), and it is matched narrowly enough that no other failure shares it.
+ *
+ * ⚠️ Deliberately NOT `isUniqueViolationError` from `@objectstack/types`: that
+ * predicate answers the OPPOSITE condition (a unique index exists and the row
+ * violated it). Confusing the two would report a working constraint as a
+ * missing one.
+ */
+function isUnbackedConflictTargetError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return /ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint/i.test(message);
+}
+
+/**
+ * [#8413] A `conflictKeys` upsert whose target no unique index backs.
+ *
+ * # Why this refusal exists at all
+ *
+ * It is the safe answer for the case the DDL fix cannot reach: a remote table
+ * created BEFORE this driver emitted `unique` at all, whose rows may already
+ * contain the duplicates the missing constraint admitted. The index cannot be
+ * added over such a table without an operator first deciding what happens to
+ * those rows — a destructive migration this driver deliberately does not
+ * perform — so the honest outcome at the moment of use is a refusal that names
+ * the problem, rather than a crash the caller cannot classify.
+ *
+ * # Why `VALIDATION_ERROR` / 400
+ *
+ * ADR-0112's own selection line is *ask what reads it — a client branching on
+ * why its call failed*. Such a client needs two facts: **do not retry** (the
+ * next attempt fails identically; nothing is transient, so a 5xx would be a
+ * lie that invites a retry storm), and **this is not a row-level conflict**
+ * (nothing collided — the merge could not be attempted at all, which is why it
+ * is not `RESOURCE_CONFLICT`/409 or `DUPLICATE_VALUE`). `VALIDATION_ERROR` is
+ * the catalogued generic for a request argument that did not validate against
+ * the target, and `conflictKeys` is exactly that argument. It is spelled from
+ * the enum rather than as a literal so a rename in `@objectstack/spec` breaks
+ * this build instead of shipping a code the schema no longer knows.
+ *
+ * `status: 400` is the other half, for the reason {@link invalidFilterError}
+ * records: it puts the rejection on `@objectstack/rest`'s expected-rejection
+ * list, so a caller's un-satisfiable upsert stops being logged as an unhandled
+ * SERVER error once per request.
+ *
+ * ⚠️ The original error is kept as `cause` rather than discarded — the SQLite
+ * text is the ground truth an operator debugging the table will want, and
+ * nothing above this layer can recover it once it is replaced. It is ASSIGNED
+ * rather than passed to the `Error` constructor: this package compiles against
+ * a lib target without the ES2022 `ErrorOptions` overload, so the two-argument
+ * form does not type-check here (measured — `tsc --noEmit` rejects it).
+ */
+function refuseUnbackedConflictTarget(object: string, mergeKeys: string[], cause: unknown): Error {
+  const keys = mergeKeys.map((k) => `"${k}"`).join(', ');
+  const err = new Error(
+    `Cannot upsert into "${object}" on conflict keys (${keys}): no PRIMARY KEY or UNIQUE index ` +
+      `backs them, so the merge target does not exist and SQLite refuses the statement. This is ` +
+      `usually a table created before its "unique" declaration was emitted as DDL, or conflict ` +
+      `keys naming columns that were never declared unique. Fix by declaring the column(s) ` +
+      `"unique: true" and re-running schema sync so the unique index is created — if the table ` +
+      `already holds duplicate values the index cannot be created until they are resolved, and ` +
+      `this driver does not rewrite stored rows to force it. Alternatively upsert on the primary ` +
+      `key by supplying "id" and omitting conflictKeys.`,
+  ) as Error & { code?: string; status?: number; cause?: unknown };
+  err.code = StandardErrorCode.enum.VALIDATION_ERROR;
+  err.status = 400;
+  err.cause = cause;
+  return err;
+}
+
+/**
  * [#7929] The key `driver-sql` carries a REDACTED refusal's full diagnostic
  * under — the same global-registry symbol, deliberately, not a second one.
  *
@@ -562,6 +656,16 @@ function invalidFilterError(message: string): Error {
 const WITHHELD_FILTER_DIAGNOSTIC = Symbol.for('objectstack.driver-sql.withheldFilterDiagnostic');
 
 /**
+ * [#8220] The other two keys of `driver-sql`'s withheld-refusal carrier, under
+ * the SAME global-registry names for the same reason as the diagnostic above:
+ * one deployment, two compilers, one error shape. `…Subtree` holds the filter
+ * node the refusal was raised from; `…AuthorText` holds the full message an
+ * `'author'`-marked subtree gets back.
+ */
+const WITHHELD_FILTER_SUBTREE = Symbol.for('objectstack.driver-sql.withheldFilterSubtree');
+const WITHHELD_FILTER_AUTHOR_TEXT = Symbol.for('objectstack.driver-sql.withheldFilterAuthorText');
+
+/**
  * [#7929, maintainer ruling 2026-08-12] An `INVALID_FILTER` whose caller-visible
  * message is `message` and whose operand-naming half is `diagnostic`.
  *
@@ -574,9 +678,21 @@ const WITHHELD_FILTER_DIAGNOSTIC = Symbol.for('objectstack.driver-sql.withheldFi
  * withholds the same way. Leaving one mode disclosing would make the exposure a
  * property of the connection string.
  */
-function withheldInvalidFilterError(message: string, diagnostic: string): Error {
+function withheldInvalidFilterError(
+  message: string,
+  diagnostic: string,
+  subtree?: unknown,
+  authorText?: string,
+): Error {
   const err = invalidFilterError(message);
   Object.defineProperty(err, WITHHELD_FILTER_DIAGNOSTIC, { value: diagnostic, enumerable: false });
+  if (subtree !== null && typeof subtree === 'object') {
+    Object.defineProperty(err, WITHHELD_FILTER_SUBTREE, { value: subtree, enumerable: false });
+  }
+  Object.defineProperty(err, WITHHELD_FILTER_AUTHOR_TEXT, {
+    value: authorText ?? diagnostic,
+    enumerable: false,
+  });
   return err;
 }
 
@@ -866,6 +982,74 @@ export class RemoteTransport {
    */
   setDiagnosticSink(sink: (message: string) => void): void {
     this.diagnosticSink = sink;
+  }
+
+  /**
+   * [#8413] Where a DURABILITY degradation is written — deliberately a SECOND
+   * sink, not a level flag on {@link diagnosticSink}.
+   *
+   * The two carry different classes and AGENTS.md's "Degradation log levels"
+   * rule grades them differently, by one question: *after the degradation, does
+   * the system still look normal from the outside while something it claims is
+   * enforced is not?* A redacted refusal's withheld half (#7929) answers **no** —
+   * the caller was told, loudly, and `warn` is right. A declared UNIQUE index
+   * that could not be created answers **yes**: every write keeps succeeding,
+   * every read keeps returning rows, and the only thing that changed is that a
+   * constraint the metadata declares is silently not enforced. That is the
+   * `error` class, and routing it through the `warn` sink would file it under
+   * exactly the level the rule exists to keep readable.
+   *
+   * Absent, the degradation is not lost: {@link syncUniqueIndexes} still skips
+   * the index and the condition resurfaces as the enveloped refusal in
+   * {@link upsert}. `TursoDriver` wires this to `logger.error` at construction,
+   * the same way it wires the connect factory and the temporal column rule.
+   */
+  private durabilitySink: ((message: string) => void) | null = null;
+
+  /**
+   * Register where this transport reports a declared constraint it could not
+   * materialize (#8413). See {@link durabilitySink} for why it is not the
+   * diagnostic sink.
+   */
+  setDurabilitySink(sink: (message: string) => void): void {
+    this.durabilitySink = sink;
+  }
+
+  /**
+   * [#8413] The driver's tenancy rule, asked rather than re-derived.
+   *
+   * `uniqueIndexesFromFields` scopes a field-level `unique` by the table's
+   * tenant column (ADR-0120 D1/D3): with one, `unique: true` means unique
+   * *within the organization* and materializes as the NULL-safe composite
+   * `(COALESCE(<tenant>, '__global__'), <field>)`; without one it is the plain
+   * single-column index. Getting that wrong in EITHER direction is a real
+   * defect — a platform-wide index where the local face builds a tenant-scoped
+   * one would reject two organizations legitimately holding the same value,
+   * which is a fresh divergence rather than the one being fixed.
+   *
+   * The answer lives on `SqlDriver.computeTenantField`, which is a pure
+   * function of the schema and already the single source of truth for
+   * `initObjects` and `registerExternalObject` (they inlined it once and
+   * drifted). This transport asks it instead of growing a third copy.
+   *
+   * ⚠️ It has to be a resolver over the SCHEMA, not a lookup by table name:
+   * remote DDL runs BEFORE `registerRemoteFieldMetadata` populates the driver's
+   * `tenantFieldByTable`, so at the moment this is called the by-table registry
+   * is still empty for the object being created. Absent (a transport driven
+   * standalone — not a supported composition), it degrades to `null`, which is
+   * the same "no tenant column" arm the shared helper already documents (S11).
+   */
+  private tenantFieldResolver: ((schema: { fields?: Record<string, any>; tenancy?: any }) => string | null) | null =
+    null;
+
+  /**
+   * Register the driver's per-schema tenant-column rule (#8413) — see
+   * {@link tenantFieldResolver}.
+   */
+  setTenantFieldResolver(
+    resolver: (schema: { fields?: Record<string, any>; tenancy?: any }) => string | null,
+  ): void {
+    this.tenantFieldResolver = resolver;
   }
 
   /**
@@ -1244,7 +1428,17 @@ export class RemoteTransport {
       sql += ` DO NOTHING`;
     }
 
-    await this.client!.execute({ sql, args: values });
+    try {
+      await this.client!.execute({ sql, args: values });
+    } catch (e) {
+      // [#8413] SQLite requires an `ON CONFLICT` target to be backed by a
+      // PRIMARY KEY or UNIQUE index, and answers a bare `SqliteError`
+      // (`code: 'SQLITE_ERROR'`, no `status`) when it is not — not an ADR-0112
+      // envelope, so a caller could not branch on it and `mapDataError` shipped
+      // it as `{ "error": "<message>" }` with no code at all.
+      if (isUnbackedConflictTargetError(e)) throw refuseUnbackedConflictTarget(object, mergeKeys, e);
+      throw e;
+    }
 
     // Fetch the result row
     const result = await this.client!.execute({
@@ -1377,14 +1571,22 @@ export class RemoteTransport {
 
     if (!exists) {
       await this.client!.execute(this.buildCreateTableSQL(tableName, objectDef));
+      // [#8413] The table was created empty microseconds ago, so its unique
+      // indexes cannot fail on existing data — no isolation needed, and any
+      // error here is a real DDL fault that should surface.
+      for (const sql of this.buildUniqueIndexDDL(tableName, objectDef, this.materializedColumns(objectDef))) {
+        await this.client!.execute(sql);
+      }
     } else {
       // ALTER TABLE — add missing columns
+      const materialized = new Set<string>(BUILTIN_COLUMNS);
       if (objectDef.fields) {
         const columnsResult = await this.client!.execute({
           sql: `PRAGMA table_info("${tableName}")`,
           args: [],
         });
         const existingColumns = new Set(columnsResult.rows.map((r: any) => r.name));
+        for (const c of existingColumns) materialized.add(String(c));
 
         for (const [name, field] of Object.entries(objectDef.fields)) {
           if (existingColumns.has(name)) continue;
@@ -1393,9 +1595,30 @@ export class RemoteTransport {
           this.assertSafeIdentifier(name);
           const colType = this.mapFieldTypeToSQL(field);
           await this.client!.execute(`ALTER TABLE "${tableName}" ADD COLUMN "${name}" ${colType}`);
+          materialized.add(name);
         }
       }
+      // [#8413] The retrofit leg — this table may already hold the duplicates
+      // the missing constraint admitted, so it is isolated and reported, never
+      // forced. See {@link syncUniqueIndexes}.
+      await this.syncUniqueIndexes(this.buildUniqueIndexDDL(tableName, objectDef, materialized));
     }
+  }
+
+  /**
+   * [#8413] The columns a freshly-built `CREATE TABLE` actually materializes —
+   * the builtins plus every non-virtual declared field, mirroring
+   * {@link buildCreateTableSQL} exactly. Kept beside it so a change to what the
+   * builder emits cannot leave the index path indexing a column that no longer
+   * exists.
+   */
+  private materializedColumns(objectDef: { fields?: Record<string, any> }): Set<string> {
+    const columns = new Set<string>(BUILTIN_COLUMNS);
+    for (const [name, field] of Object.entries(objectDef.fields ?? {})) {
+      if (((field as any)?.type || 'string') === 'formula') continue;
+      columns.add(name);
+    }
+    return columns;
   }
 
   /**
@@ -1445,7 +1668,24 @@ export class RemoteTransport {
     for (const { object, schema } of newSchemas) {
       const objectDef = schema as { name: string; fields?: Record<string, any> };
       ddlStatements.push(this.buildCreateTableSQL(object, objectDef));
+      // [#8413] Rides the SAME batch, immediately behind its own CREATE TABLE
+      // (order matters — the index cannot precede the table). A brand-new table
+      // is empty, so these cannot fail on existing data and need none of the
+      // isolation the retrofit leg below gets: they belong in the batch, and
+      // cost this path zero extra round trips.
+      ddlStatements.push(
+        ...this.buildUniqueIndexDDL(object, objectDef, this.materializedColumns(objectDef)),
+      );
     }
+
+    // [#8413] Existing tables' unique indexes are collected here and applied
+    // AFTER the main batch — they must follow their table's `ALTER TABLE ADD
+    // COLUMN` (the column may be brand new), and they must not share a
+    // transaction with it: on a libsql `write` batch one statement's failure
+    // rolls back every other statement in the batch, so a single table holding
+    // duplicates would silently undo the schema sync of every OTHER object in
+    // the boot. That is the blast radius the separation exists to prevent.
+    const retrofitStatements: string[] = [];
 
     // Phase 2b: for existing tables, introspect columns in one batch
     if (existingSchemas.length > 0) {
@@ -1461,6 +1701,8 @@ export class RemoteTransport {
         if (!objectDef.fields) continue;
 
         const existingColumns = new Set(pragmaResults[i].rows.map((r: any) => r.name));
+        const materialized = new Set<string>(BUILTIN_COLUMNS);
+        for (const c of existingColumns) materialized.add(String(c));
 
         for (const [name, field] of Object.entries(objectDef.fields)) {
           if (existingColumns.has(name)) continue;
@@ -1469,7 +1711,10 @@ export class RemoteTransport {
           this.assertSafeIdentifier(name);
           const colType = this.mapFieldTypeToSQL(field);
           ddlStatements.push(`ALTER TABLE "${object}" ADD COLUMN "${name}" ${colType}`);
+          materialized.add(name);
         }
+
+        retrofitStatements.push(...this.buildUniqueIndexDDL(object, objectDef, materialized));
       }
     }
 
@@ -1477,6 +1722,11 @@ export class RemoteTransport {
     if (ddlStatements.length > 0) {
       await this.client!.batch(ddlStatements, 'write');
     }
+
+    // Phase 4 [#8413]: retrofit the existing tables' declared unique indexes,
+    // outside the batch above for the blast-radius reason stated at its
+    // declaration. Failures here are reported, never forced and never repaired.
+    await this.syncUniqueIndexes(retrofitStatements);
   }
 
   async dropTable(object: string): Promise<void> {
@@ -1551,6 +1801,139 @@ export class RemoteTransport {
 
     sql += ')';
     return sql;
+  }
+
+  /**
+   * [#8413] The UNIQUE indexes a schema's field-level `unique` declarations ask
+   * for, as executable DDL.
+   *
+   * # Why a companion index and not an inline `UNIQUE` column constraint
+   *
+   * Both spellings enforce the same thing on a NEW table, so the choice is
+   * decided by the two cases that are not new-table, and both point the same
+   * way:
+   *
+   *  1. **Retrofit.** SQLite cannot add a column constraint to an existing
+   *     table — `ALTER TABLE` has no `ADD CONSTRAINT`, so an inline `UNIQUE`
+   *     reaches an already-created table only through a full table rebuild
+   *     (create-copy-drop-rename). A `CREATE UNIQUE INDEX` is a single
+   *     statement that touches no row. Since the tables this defect has been
+   *     filling with duplicates all already exist, the inline form would have
+   *     made the fix unreachable exactly where it is needed.
+   *  2. **Parity.** `SqlDriver` materializes field-level `unique` as a UNIQUE
+   *     INDEX (`syncDeclaredIndexes`), never inline. Matching it means the two
+   *     faces converge on the same index NAME (`buildIndexName`) and the same
+   *     key, so `sqlite_master` on a remote database and on a local one read
+   *     alike — and the drift differ, which looks for those names, does not
+   *     report a remote database as drifted from its own declaration.
+   *
+   * # NULL semantics are inherited, not chosen here
+   *
+   * SQL UNIQUE is NULL-distinct, so rows with a NULL in the key stay mutually
+   * unconstrained; the tenant-scoped arm gets the NULL-SAFE key part
+   * (`COALESCE(<tenant>, '__global__')`) from the shared helper for the reason
+   * ADR-0120 D3 records. Neither rule is re-decided here.
+   *
+   * Columns that were never materialized (a virtual `formula` field) are
+   * skipped rather than emitted — the same choice `SqlDriver.syncDeclaredIndexes`
+   * makes, and for the same reason: DDL naming a column that does not exist
+   * fails the whole sync over an index nothing could have used.
+   */
+  private buildUniqueIndexDDL(
+    tableName: string,
+    objectDef: { fields?: Record<string, any>; tenancy?: any },
+    materializedColumns: Set<string>,
+  ): string[] {
+    const tenantField = this.tenantFieldResolver ? this.tenantFieldResolver(objectDef) : null;
+    const expected: ExpectedIndex[] = uniqueIndexesFromFields(
+      tableName,
+      objectDef.fields ?? {},
+      tenantField,
+    );
+
+    const statements: string[] = [];
+    for (const index of expected) {
+      const missing = index.columns.filter((c) => !materializedColumns.has(c));
+      if (missing.length > 0) {
+        this.diagnosticSink?.(
+          `[RemoteTransport] skipping declared unique index on "${tableName}" — ` +
+            `column(s) not materialized: ${missing.join(', ')}`,
+        );
+        continue;
+      }
+      this.assertSafeIdentifier(index.name);
+      for (const column of index.columns) this.assertSafeIdentifier(column);
+
+      const nullSafe = new Set(index.nullSafeColumns ?? []);
+      const parts = index.columns.map((c) =>
+        nullSafe.has(c) ? organizationKeyPartSql(`"${c}"`) : `"${c}"`,
+      );
+      // `IF NOT EXISTS` is what makes every sync after the first a no-op
+      // server-side, so re-syncing an object costs a statement rather than an
+      // error — and it is also what makes the per-statement retry in
+      // {@link syncUniqueIndexes} safe under EITHER libsql batch semantic
+      // (transactional: nothing was applied; non-transactional: re-applying is
+      // a no-op).
+      statements.push(
+        `CREATE UNIQUE INDEX IF NOT EXISTS "${index.name}" ON "${tableName}" (${parts.join(', ')})`,
+      );
+    }
+    return statements;
+  }
+
+  /**
+   * [#8413] Materialize unique indexes against a table that ALREADY EXISTS —
+   * the retrofit path, and the one that can legitimately fail.
+   *
+   * ⛔ **This must never repair data, and never gives up quietly.** Creating a
+   * UNIQUE index over a table that already holds duplicates fails, and those
+   * duplicates are precisely what this defect has been producing. Deleting,
+   * merging or rewriting any of those rows is a destructive migration and an
+   * operator's decision — never a side effect of a driver booting. So the only
+   * two outcomes here are *the index now exists* and *the index does not exist
+   * and somebody was told at `error`*, which is the level AGENTS.md's
+   * degradation rule requires for a declared constraint that is not enforced:
+   * from the outside nothing looks wrong, and the loss surfaces a release later.
+   *
+   * Reporting it is not the whole remedy, and is not meant to be — the operator
+   * with duplicates also gets {@link refuseUnbackedConflictTarget} on any
+   * `conflictKeys` upsert against the same table, which is a refusal at the
+   * moment of use rather than a log line at boot.
+   *
+   * **Round-trip cost, stated rather than hidden** (#7099 asked which trips are
+   * already paid): the happy path is ONE extra batch per sync that touches an
+   * existing table, and only when that table declares a unique field at all.
+   * The per-statement fallback runs only after a batch has already failed, i.e.
+   * only on a database that really does have a violated constraint — so the
+   * cost of precision is paid by the deployment that needs the diagnosis, not
+   * by every boot.
+   */
+  private async syncUniqueIndexes(statements: string[]): Promise<void> {
+    if (statements.length === 0) return;
+    try {
+      await this.client!.batch(statements, 'write');
+      return;
+    } catch {
+      // The batch told us SOMETHING failed, not which. Re-issue one at a time
+      // so the report names the index an operator has to act on — `IF NOT
+      // EXISTS` makes the ones that already succeeded no-ops either way.
+    }
+    for (const sql of statements) {
+      try {
+        await this.client!.execute(sql);
+      } catch (e) {
+        this.durabilitySink?.(
+          `[RemoteTransport] could not create the declared unique index — ` +
+            `${sql}. The constraint is NOT enforced on this table: existing rows already ` +
+            `violate it (the duplicates this face accepted while it emitted no UNIQUE at all), ` +
+            `or the index is otherwise unbuildable. Nothing looks broken from the outside and ` +
+            `duplicates will keep accumulating. Fix by de-duplicating the column's existing ` +
+            `values and re-running schema sync — this driver deliberately does NOT rewrite ` +
+            `stored rows to force the index through. Until then a conflictKeys upsert on this ` +
+            `table is refused rather than crashing. Cause: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
+    }
   }
 
   /**
@@ -1732,6 +2115,50 @@ export class RemoteTransport {
     object: string,
     filters: any,
     path = 'where',
+  ): { whereClauses: string; args: any[] } {
+    // [#8220] Resolve a redacted refusal's provenance at the OUTERMOST frame
+    // only — `path === 'where'` is true exactly for the five external call
+    // sites, and the root they hand over is the tree the read-scope merge
+    // boundaries marked. Recursive frames rethrow untouched so one refusal is
+    // resolved once, against the whole tree. Fail-closed like the SqlDriver
+    // seam: 'author' swaps in the full text; 'policy', unmarked, unreachable
+    // and ambiguous all keep the redaction.
+    if (path === 'where') {
+      try {
+        return this.compileWhereSQL(object, filters, path);
+      } catch (err) {
+        throw this.resolveWithheldFilterRefusal(err, filters);
+      }
+    }
+    return this.compileWhereSQL(object, filters, path);
+  }
+
+  /**
+   * [#8220] The SqlDriver seam's remote twin: what a redacted refusal may say.
+   * `'author'` — positively marked by a merge boundary, resolved against this
+   * query's own `where` root — gets the full author-facing text back, same
+   * identity (`INVALID_FILTER` / 400). Everything else (policy, unmarked,
+   * ambiguous, no subtree carried) keeps the redaction; the mark is permission
+   * to reveal, never a requirement to prove secrecy.
+   */
+  private resolveWithheldFilterRefusal(err: unknown, rootFilter: unknown): unknown {
+    if (err === null || (typeof err !== 'object' && typeof err !== 'function')) return err;
+    const carrier = err as Record<symbol, unknown>;
+    if (typeof carrier[WITHHELD_FILTER_DIAGNOSTIC] !== 'string') return err;
+    const subtree = carrier[WITHHELD_FILTER_SUBTREE];
+    const provenance =
+      subtree === undefined ? null : resolveFilterSubtreeProvenance(rootFilter, subtree);
+    if (provenance !== 'author') return err;
+    const authorText = carrier[WITHHELD_FILTER_AUTHOR_TEXT];
+    return invalidFilterError(
+      typeof authorText === 'string' ? authorText : (carrier[WITHHELD_FILTER_DIAGNOSTIC] as string),
+    );
+  }
+
+  private compileWhereSQL(
+    object: string,
+    filters: any,
+    path: string,
   ): { whereClauses: string; args: any[] } {
     // "No filter" is spelled by ABSENCE, and that is the only spelling. All
     // five call sites hand this method `query?.where` (`query.where` in
@@ -2994,6 +3421,9 @@ export class RemoteTransport {
         `[RemoteTransport] Cross-field comparison is not supported in remote mode: ${target} ` +
         `${shown} compares a column against another column instead of against a value.`;
       this.diagnosticSink?.(diagnostic);
+      // [#8220] `value` is the `{ $field }` node itself — the reference the
+      // provenance resolver can locate under the query's `where` root, so an
+      // author-marked subtree gets the naming half back at the entry seam.
       return withheldInvalidFilterError(
         `[RemoteTransport] Cross-field comparison is not supported in remote mode: this filter ` +
           `compares a column against another column instead of against a value. The query DSL ` +
@@ -3003,6 +3433,9 @@ export class RemoteTransport {
           `after retrieval. The columns and the operator this filter used are withheld from the ` +
           `message (#7929); the full diagnostic is in the server log.`,
         diagnostic,
+        value,
+        `${diagnostic} No executor compiles this form in remote mode — compare against a ` +
+          `literal, or select both columns and compare after retrieval.`,
       );
     }
     return invalidFilterError(

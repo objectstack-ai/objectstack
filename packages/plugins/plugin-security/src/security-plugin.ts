@@ -4,6 +4,9 @@ import { Plugin, PluginContext, POSTURE_LADDER } from '@objectstack/core';
 import type { PermissionSet, RowLevelSecurityPolicy } from '@objectstack/spec/security';
 import { describeHighPrivilegeBits, describeAnchorForbiddenBits, PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
 import { MCP_AGENT_PERMISSION_SET_RESTRICTED } from '@objectstack/spec/ai';
+// [#8220] The read-scope provenance mark: this middleware is one of the two
+// merge boundaries that stamp it (see the RLS injection below).
+import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 // [#7414] The SHARED operation-message catalog #7307 built for the data path's
 // operation-level refusals. Second consumer, same mechanism — a second remedy
 // for one defect class is what that module exists to prevent.
@@ -58,6 +61,7 @@ import { hasPhantomTenantAnchor } from './federated-phantom-anchors.js';
 import {
   normalizeTenancyPosture,
   postureEnforcesWall,
+  postureUsesUnionScope,
   type TenancyPosture,
 } from '@objectstack/spec/security';
 import {
@@ -286,6 +290,54 @@ interface RlsFilterOptions {
  * middleware can stamp state onto a shared object.
  */
 const AUTHORED_ROW_WRITE_PROBE_CONTEXT = { isSystem: true, positions: [], permissions: [] } as const;
+
+/**
+ * [ADR-0123 D2] Does this execution context carry ANY organization scope the
+ * tenant wall could enforce with?
+ *
+ * The answer is posture-shaped, and that is the whole reason this is a function
+ * rather than an `if (!ctx.tenantId)` at the call site: under `isolated` the
+ * scope is the ACTIVE organization (`tenantId`), under `group` it is the
+ * caller's MEMBERSHIP SET (`accessible_org_ids`) and the active organization no
+ * longer bounds anything (ADR-0105 D2). Asking only about `tenantId` would
+ * refuse every `group` caller who is legitimately scoped by membership; asking
+ * only about the set would let an `isolated` caller through on a set the
+ * `isolated` wall never reads.
+ *
+ * This is a cheap PRE-TEST, never the verdict. It exists so the common paths —
+ * the `single` posture, and any caller who does have an organization — skip the
+ * layered RLS compile entirely. The verdict is always
+ * {@link isTenantWallDenial} over the Layer 0 filter, which is the one place
+ * that knows about platform-admin exemptions, non-tenant objects and phantom
+ * anchors.
+ */
+function callerHasOrganizationScope(context: any, posture: TenancyPosture): boolean {
+  if (postureUsesUnionScope(posture)) {
+    const orgIds = context?.accessible_org_ids;
+    return Array.isArray(orgIds) && orgIds.length > 0;
+  }
+  const tenantId = context?.tenantId;
+  return tenantId != null && tenantId !== '';
+}
+
+/**
+ * [ADR-0123 D2] Is this Layer 0 filter the fail-closed DENY sentinel — i.e. "a
+ * walled posture on a tenant object, and the context carries no organization
+ * scope to enforce with"?
+ *
+ * Identity is decided on the sentinel's own value, not on shape: `RLS_DENY_FILTER`
+ * is a single `id` equality against a string no record can carry, and
+ * `computeTenantLayer0Filter` SPREADS it (`{ ...RLS_DENY_FILTER }`) rather than
+ * returning the frozen object, so a reference check would silently answer `false`
+ * for every real denial. Every other Layer 0 return is a real tenant predicate
+ * (`organization_id = …` / `organization_id $in […]`) or `null`, so no legitimate
+ * wall can collide with this test.
+ */
+function isTenantWallDenial(filter: Record<string, unknown> | null | undefined): boolean {
+  if (!filter) return false;
+  const keys = Object.keys(filter);
+  return keys.length === 1 && keys[0] === 'id' && filter.id === RLS_DENY_FILTER.id;
+}
 
 const SYSTEM_ROW_PROVENANCE: Record<
   string,
@@ -2103,6 +2155,94 @@ export class SecurityPlugin implements Plugin {
           !!r && typeof r === 'object' && !Array.isArray(r),
         );
 
+        // ── [ADR-0123 D2] NO ACTIVE ORGANIZATION → refuse the write, loudly ──
+        //
+        // The forge guard below validates SUPPLIED values only, and says so. It
+        // is the right shape for what it guards (a payload naming ANOTHER
+        // tenant), but it leaves the opposite case wide open: a payload naming
+        // NO tenant, written by a caller who HAS no tenant. Nothing downstream
+        // fills it either — auto-stamping lives in the enterprise
+        // `@objectstack/organizations` runtime and has nothing to stamp when the
+        // caller carries no active organization. So the row landed with
+        // `organization_id` NULL, and the read wall then hid it from EVERY
+        // reader including the author who had just created it: a write that
+        // succeeds and a record nobody can reach.
+        //
+        // Both halves were individually defensible, which is why this sat. The
+        // rule that resolves them (ADR-0123 D2, from the #8247 ruling): under an
+        // authenticated session with no active organization, tenant-scoped READS
+        // resolve to nothing (Layer 0's deny sentinel — unchanged, below in
+        // `computeTenantLayer0Filter`) and tenant-scoped WRITES are REFUSED,
+        // with a message that NAMES the missing active organization. If a write
+        // cannot say which tenant its row belongs to, it does not land.
+        //
+        // The verdict is DERIVED, never re-derived: `computeWriteTenantCheckFilter`
+        // is the same Layer 0 the read side computes, so every exemption stays in
+        // one place — a `tenancy.enabled:false` platform-global object, an object
+        // with no `organization_id` column, a federated phantom anchor (#7835), a
+        // true PLATFORM_ADMIN on a posture-permitting object (ADR-0095 D3), and
+        // the whole `single` posture all yield `null` here and are untouched.
+        // System / boot writes never reach this line at all (`isSystem`
+        // short-circuits the middleware). Under `group`, "no organization scope"
+        // means an EMPTY membership set — ADR-0105 D2's own fail-closed rule.
+        //
+        // The cheap posture/context pre-test comes first on purpose: the common
+        // deployment is `single` (Layer 0 inert), and the common caller HAS an
+        // active organization. Neither pays for the layered compile below.
+        //
+        // Ordered AHEAD of the forge guard deliberately. A caller with no
+        // organization scope at all who also supplies a foreign `organization_id`
+        // would satisfy both; "you have no active organization" is the actionable
+        // half — the supplied value is not the reason the write cannot land.
+        // `delete` is deliberately absent: it places no row and decides no
+        // tenant, so its target is selected through the Layer 0 ROW wall, which
+        // already resolves to nothing (ADR-0123 D2, stated there as a boundary
+        // rather than left as an omission).
+        if (this.orgScopingEnabled && !callerHasOrganizationScope(opCtx.context, this.tenancyPosture)) {
+          const callerWall = await this.computeWriteTenantCheckFilter(
+            permissionSets,
+            opCtx.object,
+            opCtx.operation,
+            opCtx.context,
+          );
+          // [ADR-0090 D10] The delegator is walled on its own context, exactly as
+          // the forge guard walls it — an on-behalf-of write may not land a row
+          // the delegator itself could not place.
+          const delegatorWall =
+            delegatorSets && !callerHasOrganizationScope(delegatorContext, this.tenancyPosture)
+              ? await this.computeWriteTenantCheckFilter(
+                  delegatorSets,
+                  opCtx.object,
+                  opCtx.operation,
+                  delegatorContext,
+                )
+              : null;
+          const denied = isTenantWallDenial(callerWall)
+            ? 'caller'
+            : isTenantWallDenial(delegatorWall)
+              ? 'delegator'
+              : null;
+          if (denied) {
+            const principal = denied === 'delegator' ? 'the delegating principal' : 'this session';
+            this.logger.warn?.(
+              `[Security] Layer 0 tenant wall REFUSED ${opCtx.operation} '${opCtx.object}' — ` +
+                `${principal} has no active organization to place the record in (ADR-0123 D2, fail-closed)`,
+            );
+            throw new PermissionDeniedError(
+              `[Security] Access denied: '${opCtx.object}' is scoped to an organization, and ` +
+                `${principal} has no active organization — so this ${opCtx.operation} has no ` +
+                `organization to place the record in. Join or select an active organization and retry.`,
+              { operation: opCtx.operation, object: opCtx.object, positions, permissionSets: explicitPermissionSets },
+              `[ADR-0123 D2] Tenant-scoped writes are refused when the execution context carries no active ` +
+                `organization: tenancy posture '${this.tenancyPosture}' walls '${opCtx.object}', and ` +
+                `${denied === 'delegator' ? "the delegator's" : "the caller's"} context resolved neither ` +
+                `\`tenantId\` nor a non-empty \`accessible_org_ids\`. Reads under this state resolve to nothing; ` +
+                `writes are refused rather than landing a row with a NULL organization that no reader — ` +
+                `including its own author — could ever see. System contexts and platform operators are unaffected.`,
+            );
+          }
+        }
+
         const suppliedRows = writeRows.filter(
           (r) => r.organization_id != null && r.organization_id !== '',
         );
@@ -2232,6 +2372,36 @@ export class SecurityPlugin implements Plugin {
           if (delRls) extra.push(delRls);
           const delCbp = await this.computeControlledByParentFilter(delegatorSets, opCtx.object, delegatorContext);
           if (delCbp) extra.push(delCbp);
+        }
+        // [#8220, A of #7929] This is one of the two read-scope MERGE
+        // BOUNDARIES, and the only frame that knows which subtree the caller
+        // did not write — so the provenance mark is stamped here, before the
+        // shapes blur into one `$and`.
+        //
+        //  - Every injected scope is marked `'policy'`: a cross-field refusal
+        //    raised from inside it keeps the #7929 redaction.
+        //  - The caller's own predicate is marked `'author'` — but ONLY when
+        //    this middleware can positively vouch for it: `opCtx.ast.where`
+        //    still IS `opCtx.options.where`, the caller's verbatim predicate
+        //    (the same identity step 2.9 above leans on). If a sibling
+        //    middleware (plugin-sharing) already composed its own filter in,
+        //    or the engine rewrote the tree (context tokens), identity fails
+        //    and NOTHING is vouched — the whole tree stays unmarked, which
+        //    withholds. Fail closed: the mark is permission to reveal, never
+        //    a guess; a wholesale mark on a tree that might contain another
+        //    plugin's policy would disclose it.
+        //
+        // Marking is on the OBJECTS, so it survives the `$and` wrapper below
+        // and any sibling's later wrapping by reference. `markFilterSubtreeProvenance`
+        // never overwrites an existing mark and no-ops on frozen input.
+        for (const scope of extra) markFilterSubtreeProvenance(scope, 'policy');
+        const callerWhere = opCtx.ast.where;
+        if (
+          callerWhere &&
+          typeof callerWhere === 'object' &&
+          callerWhere === (opCtx.options as { where?: unknown } | undefined)?.where
+        ) {
+          markFilterSubtreeProvenance(callerWhere, 'author');
         }
         if (extra.length) {
           opCtx.ast.where = opCtx.ast.where

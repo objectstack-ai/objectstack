@@ -203,7 +203,21 @@ export const SysCapability = ObjectSchema.create({
   },
 
   indexes: [
-    { fields: ['name'], unique: true },
+    // [ADR-0120 D1, #8323] `'organization'`, NOT bare `true`.
+    //
+    // Admins EXTEND this registry in Setup (`managed_by: 'admin'`, `scope:
+    // 'org'`), so a capability name is one holder per organization, not one
+    // across the installation. Bare `true` on a DECLARED index is the
+    // positional spelling of `'global'` (listed columns verbatim), which made
+    // `name` an installation-wide key: an organization could probe whether ANY
+    // other organization — or the platform seed — already held a name, by
+    // reading 409-vs-201 on a row it has no permission to see.
+    //
+    // Platform-seeded rows carry no organization, and the organization key part
+    // is NULL-safe (`COALESCE(organization_id, '__global__')`, ADR-0120 D3), so
+    // they remain unique among themselves and `bootstrapSystemCapabilities`'
+    // upsert-by-name is unaffected.
+    { fields: ['name'], unique: 'organization' },
     { fields: ['scope'] },
     { fields: ['active'] },
     // [ADR-0086 D3] uninstall/upgrade query: "this package's own capabilities".

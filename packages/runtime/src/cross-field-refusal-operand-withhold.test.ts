@@ -43,17 +43,32 @@
  * through a real `ObjectQL` engine with a security-middleware-shaped injection
  * for the CRUD face.
  *
- * ## The author's case is here on purpose
+ * ## [#8220] The byte-equality pin was REWRITTEN here, deliberately
  *
- * B withholds for EVERY caller, because the driver cannot tell an author's
- * filter from a policy's — `DriverQuery` carries no provenance and the two
- * messages were byte-identical before this change. So an author debugging their
- * own cross-field filter now gets the redacted message too. That is a real
- * diagnostic regression, ruled an accepted cost until #7929's follow-up (A: a
- * spec-declared provenance mark set at both boundaries) restores the
- * author-facing text behind a real mark. It is pinned below rather than left
- * implicit, so that "the author still sees the columns" cannot be restored by
- * accident — it would reopen the disclosure on every unmarked policy predicate.
+ * Until A landed, section (c) pinned a byte-EQUALITY: an author-written
+ * `$field` filter and a policy-injected one had to produce IDENTICAL messages,
+ * because the driver genuinely could not tell them apart — `DriverQuery`
+ * carried no provenance, and pinning the equality was the strongest available
+ * statement of that fact. A (#8220, the sanctioned follow-up of the same
+ * ruling) is precisely the change that makes them distinguishable: the two
+ * merge boundaries stamp the spec-declared filter-subtree provenance mark
+ * (`markFilterSubtreeProvenance`, `@objectstack/spec/data`) on each arm of
+ * their merge, and the driver restores the full author-facing diagnostic for
+ * a subtree POSITIVELY marked `'author'`.
+ *
+ * So the old equality is not a failing test to re-green — it is SUPERSEDED,
+ * and section (c) now pins its successor, the three-way split "Done means" on
+ * #8220 names:
+ *
+ *  1. a policy-injected predicate still withholds (unchanged from B);
+ *  2. an author's own filter, vouched at a real merge boundary, names its
+ *     columns again — the messages now DIFFER, by design;
+ *  3. an UNMARKED predicate — one no boundary ever vouched — still withholds,
+ *     byte-identical to the policy case. This is B's surviving half, and the
+ *     fail-closed invariant: the mark is permission to reveal, so "mark
+ *     missing" must never land on the disclosing branch. ⛔ Do not "restore
+ *     the author's columns" for this case; that reopens the disclosure on
+ *     every unmarked policy predicate.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -63,6 +78,7 @@ import { CROSS_FIELD_OBJECT_FIELDS, CROSS_FIELD_ROWS } from '@objectstack/driver
 import { AnalyticsService } from '@objectstack/service-analytics';
 import type { AnalyticsQuery, DriverQuery } from '@objectstack/spec/contracts';
 import type { AggregationNode, Cube, FilterCondition } from '@objectstack/spec/data';
+import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
 
@@ -280,6 +296,29 @@ describe('[#7929] a cross-field refusal keeps its envelope and stops disclosing 
       expect(String(res.body?.error?.message)).not.toContain('secret_policy_column');
       expect(rawSqlCalls).toEqual([]);
     });
+
+    it("[#8220] an AUTHOR-written `where` on this face names its columns again", async () => {
+      // No read scope in play: the strategy-built filter is the caller's own
+      // text, `withReadScope` marks it 'author', and the driver restores the
+      // full diagnostic through the same real route the withhold cases use.
+      logged = [];
+      rawSqlCalls = [];
+      readScope = null;
+      const res = await postAnalyticsQuery(analytics, {
+        cube: 'deals',
+        dimensions: ['id'],
+        measures: ['n'],
+        where: { amount: { $gt: { $field: 'secret_policy_column' } } },
+      } as unknown as AnalyticsQuery);
+
+      expect(res.body?.success).toBe(false);
+      expect(res.body?.error?.code).toBe('INVALID_FILTER');
+      expect(res.body?.error?.httpStatus ?? res.statusCode).toBe(400);
+      expect(rawSqlCalls, 'NativeSQLStrategy did not decline').toEqual([]);
+      const message = String(res.body?.error?.message ?? '');
+      expect(message).toContain('amount');
+      expect(message).toContain('secret_policy_column');
+    });
   });
 
   // ── (b) the CRUD face — #7988's measurement ──────────────────────────────
@@ -310,12 +349,21 @@ describe('[#7929] a cross-field refusal keeps its envelope and stops disclosing 
       // (`security-plugin.ts`: `ast.where = ast.where ? { $and: [ast.where,
       // …extra] } : extra[0]`), because the claim under test is about what
       // THAT produces — an admin predicate the caller never wrote, in the same
-      // `where` as the caller's own.
+      // `where` as the caller's own. [#8220] Including its marking half: the
+      // scope is stamped 'policy', and the caller's where is stamped 'author'
+      // under the same identity vouch the real boundary applies
+      // (`ast.where === options.where` — the caller's verbatim predicate).
       ql.registerMiddleware(async (ctx: any, next: () => Promise<void>) => {
-        if (['find', 'findOne', 'count', 'aggregate'].includes(ctx.operation) && crudScope) {
+        if (['find', 'findOne', 'count', 'aggregate'].includes(ctx.operation)) {
           const ast: any = ctx.ast ?? { object: ctx.object };
-          ast.where = ast.where ? { $and: [ast.where, crudScope] } : crudScope;
-          ctx.ast = ast;
+          if (ast.where && ast.where === ctx.options?.where) {
+            markFilterSubtreeProvenance(ast.where, 'author');
+          }
+          if (crudScope) {
+            markFilterSubtreeProvenance(crudScope, 'policy');
+            ast.where = ast.where ? { $and: [ast.where, crudScope] } : crudScope;
+            ctx.ast = ast;
+          }
         }
         await next();
       });
@@ -367,14 +415,34 @@ describe('[#7929] a cross-field refusal keeps its envelope and stops disclosing 
       expect(log).toContain('organization_id');
     });
 
-    // ── (c) the honest author pays the same price, deliberately ────────────
+    // ── (c) [#8220] the successor of B's byte-equality pin ─────────────────
+    //
+    // The old pin here asserted author-written === policy-injected, byte for
+    // byte, as the strongest statement of "the driver cannot tell them apart".
+    // A is the card that made them distinguishable — behind the spec-declared
+    // provenance mark, set by the boundary above — so the pin is REWRITTEN
+    // (not deleted, not weakened) into the three-way split #8220's "Done
+    // means" names. See the file header for the full account.
 
-    it('an AUTHOR-written `$field` filter gets the identical redacted message', async () => {
-      // The accepted cost of B, pinned as an equality rather than described.
-      // Byte-identical is the strongest available statement of "the driver
-      // cannot tell these apart", and it is also the regression guard for A:
-      // when the provenance mark lands, THIS assertion is the one that must be
-      // rewritten deliberately, in the card that restores the author's text.
+    it("an AUTHOR-written `$field` filter — vouched by the boundary — names its columns again", async () => {
+      // Same predicate as the policy case below, authored by the caller: the
+      // middleware marks it 'author' under the identity vouch, and the driver
+      // restores the full diagnostic — both columns, the operator, the
+      // boundary reason.
+      const authorWritten = await readWithScope(
+        null,
+        { amount: { $gt: { $field: 'secret_policy_column' } } } as FilterCondition,
+      );
+      expect(authorWritten.err.code).toBe('INVALID_FILTER');
+      expect(authorWritten.err.status).toBe(400);
+      expect(authorWritten.err.message).toContain('amount');
+      expect(authorWritten.err.message).toContain('secret_policy_column');
+      expect(authorWritten.err.message).toContain('not a declared field');
+      // Disclosed on the wire ⇒ nothing left to relocate to the server log.
+      expect(authorWritten.logged).not.toContain('secret_policy_column');
+    });
+
+    it('…and the messages now DIFFER from the policy-injected case, by design', async () => {
       const policyAuthored = await readWithScope(
         { amount: { $gt: { $field: 'secret_policy_column' } } } as FilterCondition,
       );
@@ -382,12 +450,35 @@ describe('[#7929] a cross-field refusal keeps its envelope and stops disclosing 
         null,
         { amount: { $gt: { $field: 'secret_policy_column' } } } as FilterCondition,
       );
-      expect(authorWritten.err.code).toBe('INVALID_FILTER');
-      expect(authorWritten.err.status).toBe(400);
-      expect(authorWritten.err.message).toBe(policyAuthored.err.message);
-      // The author's own diagnostic is not destroyed — it is relocated to the
-      // server log, which is where an operator can still answer their ticket.
-      expect(authorWritten.logged).toContain('secret_policy_column');
+      expect(authorWritten.err.message).not.toBe(policyAuthored.err.message);
+      // The policy case is still B's: redacted on the wire, full text in the log.
+      expect(policyAuthored.err.message).not.toContain('secret_policy_column');
+      expect(policyAuthored.logged).toContain('secret_policy_column');
+    });
+
+    it('⚠️ an UNMARKED predicate still withholds, byte-identical to the policy case', async () => {
+      // The fail-closed invariant, pinned as an equality exactly the way B's
+      // pin was: a predicate NO boundary vouched — here, one handed straight
+      // to the driver, the shape every other entry into the driver has — gets
+      // the same redacted message as an admin's read scope. The mark is
+      // permission to reveal; its absence must never disclose.
+      const policyAuthored = await readWithScope(
+        { amount: { $gt: { $field: 'secret_policy_column' } } } as FilterCondition,
+      );
+      let unmarkedErr: WireBearingError | null = null;
+      try {
+        await driver.find(OBJECT, {
+          where: { amount: { $gt: { $field: 'secret_policy_column' } } } as FilterCondition,
+        } as DriverQuery as never);
+      } catch (e) {
+        unmarkedErr = e as WireBearingError;
+      }
+      if (!unmarkedErr) throw new Error('expected the unmarked read to be refused');
+      expect(unmarkedErr.code).toBe('INVALID_FILTER');
+      expect(unmarkedErr.message).toBe(policyAuthored.err.message);
+      for (const policyName of ['secret_policy_column', 'amount']) {
+        expect(unmarkedErr.message, `the refusal names \"${policyName}\"`).not.toContain(policyName);
+      }
     });
   });
 });

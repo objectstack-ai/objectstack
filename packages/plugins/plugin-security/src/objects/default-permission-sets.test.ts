@@ -125,14 +125,33 @@ describe('sys_invitation is row-scoped to its addressee (#8095)', () => {
       // narrow it. The narrowing is the row predicate.
       expect(setByName(setName).objects.sys_invitation.allowRead).toBe(true);
 
+      // Named, not counted: `member_default` gained the #8240 issuer sibling
+      // and `viewer_readonly` did not, so an exact-array assertion over both
+      // would have to encode that asymmetry and would go red for the wrong
+      // reason. What each set must carry is the addressee scope; the issuer
+      // policy has its own block below.
       const scoped = policiesFor(setName, 'sys_invitation');
-      expect(scoped.map((p) => p.name)).toEqual(['sys_invitation_self']);
-      expect(scoped[0].using).toBe(SELF_PREDICATE);
+      const self = scoped.find((p) => p.name === 'sys_invitation_self');
+      expect(self, `${setName} must keep sys_invitation_self`).toBeTruthy();
+      expect(self.using).toBe(SELF_PREDICATE);
       // Read the operation off THIS policy. The same-named carve-outs across
       // these sets do not all agree (`sys_api_key_self` is spelled three times
       // at two different operations), so a sibling's value is not evidence.
-      expect(scoped[0].operation).toBe('select');
-      expect(scoped[0].enabled).not.toBe(false);
+      expect(self.operation).toBe('select');
+      expect(self.enabled).not.toBe(false);
+      // The addressee scope is UNDOMAINED, and that is load-bearing: it is the
+      // narrowing as well as the carve-out, so a `positions` domain on it would
+      // mean "no matching position ⇒ no policy ⇒ no row filter at all" — the
+      // wide read #8095 is about. Only the WIDENING policies carry a domain.
+      expect(self.positions ?? []).toEqual([]);
+      // No other set-level policy may quietly re-open the object here. Both
+      // sets are capped at the addressee scope plus (member_default only) the
+      // scope-bounded issuer sibling.
+      expect(scoped.map((p) => p.name).sort()).toEqual(
+        setName === 'member_default'
+          ? ['sys_invitation_issuer', 'sys_invitation_self']
+          : ['sys_invitation_self'],
+      );
     },
   );
 
@@ -162,6 +181,61 @@ describe('sys_invitation is row-scoped to its addressee (#8095)', () => {
       // matching position" mean "no policy" — i.e. no row filter at all.
       expect(admission.positions.sort()).toEqual(['org_admin', 'org_owner']);
       expect(admission.operation).toBe('select');
+    }
+  });
+
+  /**
+   * [#8240] The issuer carve-out — again a TRIPWIRE, not the proof. The proof is
+   * the four-persona matrix in the dogfood file, which is the only place the
+   * ruled option and the rejected one look different over the wire.
+   *
+   * What this block adds that the HTTP matrix cannot: the matrix is blind to a
+   * dropped `positions` domain (measured — mutation M3 of this card's ablation
+   * left all four personas green, because only owner/admin/delegated_admin can
+   * ever be an `inviter_id` and the first two already read everything). The
+   * domain exists for the principal DEMOTED out of an administrative grade, a
+   * state no fixture in this repo constructs. So it is pinned here, structurally.
+   */
+  it('member_default lets a delegated_admin read the invitations THEY issued — #8240, option C', () => {
+    const issuer = policiesFor('member_default', 'sys_invitation').find(
+      (p) => p.name === 'sys_invitation_issuer',
+    );
+    expect(issuer, 'member_default must carry the #8240 issuer carve-out').toBeTruthy();
+
+    // The predicate IS the ruling. Option B — `delegated_admin` reads the whole
+    // ledger — was REJECTED, and its shape (`id != null`, or anything else that
+    // does not bind a row to this caller) passes every "the delegate can see an
+    // invitation" assertion just as well. Written out rather than imported so
+    // that editing the module cannot edit the expectation with it.
+    expect(issuer.using).toBe('inviter_id == current_user.id');
+    expect(issuer.using).toContain('current_user.id');
+    expect(issuer.using).not.toBe('id != null');
+
+    // Scope-bounded issuance is about the ISSUING GRADE, not about everyone who
+    // ever held one. Without the domain a demoted ex-admin keeps a permanent
+    // window onto what they issued.
+    expect(issuer.positions).toEqual(['delegated_admin']);
+    // The domain must not have silently acquired the admin identities — that is
+    // option B wearing this policy's name, and it would widen the ledger's
+    // audience exactly as the ruling refused.
+    expect(issuer.positions).not.toContain('org_admin');
+    expect(issuer.positions).not.toContain('org_owner');
+
+    // Read-only, like every other policy on this object: the write classes are
+    // closed at the object layer, by the ADR-0092 D2 identity write guard, and
+    // by `apiMethods: ['get', 'list']`.
+    expect(issuer.operation).toBe('select');
+    expect(issuer.enabled).not.toBe(false);
+
+    // Owner/admin visibility is UNCHANGED by this card — the ruling said so in
+    // those words. Their admission still comes from `sys_invitation_org_admin`,
+    // which must not have been touched to make the delegate's case work.
+    for (const setName of ['organization_admin', 'organization_admin_no_bypass']) {
+      const names = policiesFor(setName, 'sys_invitation').map((p) => p.name).sort();
+      expect(names, `${setName} must be untouched by #8240`).toEqual([
+        'sys_invitation_org',
+        'sys_invitation_org_admin',
+      ]);
     }
   });
 });
