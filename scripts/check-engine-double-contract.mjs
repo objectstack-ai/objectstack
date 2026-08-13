@@ -1913,6 +1913,46 @@ class Ingress {
   expect('a locally minted error is NOT the shared envelope',
     s.length === 1 && s[0].refusal === 'local');
 
+  // The same claim on the two OTHER spellings a mint takes, because each
+  // reaches a different arm of `refusalKindOf` and a fixture only proves the
+  // arm it touches. Measured: with only the `new Error` fixture above,
+  // neutering the call-expression arm left the self-test GREEN.
+  //
+  // Spelling 2 — a local FACTORY function, which is `packages/mcp/src/
+  // stdio-data-bridge.ts`'s live shape: `throw recordNotFound(object, id)`
+  // where `recordNotFound` is a same-file function returning a bare `Error`.
+  s = scanSeams('lf.ts', `
+function recordNotFound(object: string, id: string): Error {
+  return new Error(\`Record "\${id}" not found in "\${object}"\`);
+}
+class Bridge {
+  async update(request: { object: string, id: string, data: any }) {
+    const existing = await this.engine.findOne(request.object, {});
+    if (!existing) throw recordNotFound(request.object, request.id);
+    await this.engine.update(request.object, request.data, { where: { id: request.id } });
+    return { object: request.object, id: request.id, record: request.data };
+  }
+}
+`);
+  expect('a local FACTORY call is a mint, not the shared envelope',
+    s.length === 1 && s[0].refusal === 'local');
+
+  // Spelling 3 — an imported factory this scan cannot resolve (plugin-sharing's
+  // `makeError(404, 'RECORD_NOT_FOUND', …)`). It refuses, so it clears the
+  // invariant; it is not the shared envelope, so it must not be counted as one.
+  s = scanSeams('if.ts', `${"import { makeError } from './errors.js';\n"}
+class Svc {
+  async deleteData(request: { object: string, id: string }) {
+    const existing = await this.engine.findOne(request.object, {});
+    if (!existing) throw makeError(404, 'RECORD_NOT_FOUND', 'gone');
+    await this.engine.delete(request.object, { where: { id: request.id } });
+    return { object: request.object, id: request.id, success: true };
+  }
+}
+`);
+  expect('an unresolvable imported error factory is a mint, not the shared envelope',
+    s.length === 1 && s[0].refusal === 'local');
+
   // A refusal AFTER the receipt is no refusal — the caller has already been
   // told the write landed.
   s = scanSeams('a.ts', seamSrc(`
