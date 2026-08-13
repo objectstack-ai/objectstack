@@ -36,11 +36,14 @@
 // something, so the casts belong in the diff too.
 //
 //   node scripts/check-type-check-coverage.mjs                # structural, sub-second
-//   node scripts/check-type-check-coverage.mjs --re-measure   # + runs tsc per ledger entry
+//   node scripts/check-type-check-coverage.mjs --re-measure   # + refreshes the
+//                                    #   ledgered packages' dependency closure,
+//                                    #   then runs tsc per ledger entry
 //   node scripts/check-type-check-coverage.mjs --re-measure --lower
 //                                    # + writes each measured number back into
-//                                    #   the ledger below (#6376). Needs the
-//                                    #   workspace built -- see BUILT CLOSURE.
+//                                    #   the ledger below (#6376). Refuses on a
+//                                    #   closure it cannot make current itself
+//                                    #   -- see BUILT CLOSURE.
 //   node scripts/check-type-check-coverage.mjs --self-test
 //
 // Invariants, per workspace package (the root workspace package included --
@@ -276,7 +279,7 @@
 // the exclusion from tsconfig.json and delete the entry here in the same PR.
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, posix, resolve } from 'node:path';
 
@@ -291,6 +294,9 @@ const TRACKING_ISSUE = 'https://github.com/objectstack-ai/objectstack/issues/431
 // "does this config steer tsc away from the test layer", not "which exact glob".
 const TEST_GLOB = /\*\.(test|spec)\.tsx?$/;
 const TEST_FILE = /\.(test|spec)\.tsx?$/;
+// A TypeScript source file, i.e. one whose content can reach a generated
+// `.d.ts`. Used only by the built-closure freshness read (#8271).
+const SOURCE_FILE = /\.([cm]?ts|tsx)$/;
 // A `@ts-expect-error` in DIRECTIVE position -- first thing on its own comment
 // line, where the compiler reads it. Prose that merely mentions the directive
 // (several files in this repo explain why they do NOT use one) must not count,
@@ -1279,6 +1285,39 @@ const SURPLUS_ISSUE = 'https://github.com/objectstack-ai/objectstack/issues/6376
 // debt -- the workspace root's note names TS2307 x17 -- and a gate that cannot
 // tell a recorded defect from a broken measurement would refuse the very
 // entries it exists to measure.
+//
+// PRESENT is not CURRENT (#8271). The precondition above asks whether a
+// `dist/*.d.ts` EXISTS, which is silent about whether it describes today's
+// source -- and the stale case is worse than the missing one, because nothing
+// fires. Measured: #8235 was filed in good faith as a `priority:p0` main-red
+// stanch off four errors (TS2614/TS2339/TS7006) this gate reported locally
+// against a `dist/` predating #8198, while CI's own re-measure was green on two
+// consecutive runs; the errors were not in the source and never had been. The
+// mirror direction is quieter and worse: a stale artifact can HIDE real drift
+// until CI finds it, which is the entire reason to run this locally.
+//
+// So the closure is now REFRESHED, not merely asserted -- `refreshBuiltClosure`
+// runs the same turbo command with the same filters lint.yml runs immediately
+// before this gate, which is why CI has never seen this failure and a local run
+// always could. Three measurements decided that shape over "detect staleness and
+// refuse", which was the other direction on the card:
+//
+//   9.5s    a closure build with everything already current (70/70 turbo cache
+//           hits), against a ~257s re-measure -- under 4% to remove the variable
+//   3m2s    ONE ledgered package's 7-task closure built COLD, which is why the
+//           refusal above still owns the nothing-is-built case rather than
+//           silently disappearing for minutes on a gate people run before pushing
+//   3 of 3  packages that an mtime read flagged as stale in the first worktree
+//           it was pointed at were false alarms (2 dated by a `*.test.ts` that
+//           no `dist/` is generated from, 1 by a `git checkout` that rewrote a
+//           file to byte-identical content) -- an error rate that is fine for a
+//           backstop and disqualifying for a refusal, because refusing costs a
+//           4-minute lap and the rebuild it would demand costs 9.5 seconds
+//
+// turbo decides what is genuinely out of date by hashing inputs, and its cache
+// replay rewrites the outputs it restores, so a refreshed closure reads as
+// current afterwards. The mtime read survives only as the backstop over what
+// those filters do not reach.
 // ---------------------------------------------------------------------------
 
 /**
@@ -1309,44 +1348,128 @@ function declaredTypeEntries(manifest) {
 }
 
 /**
- * Which workspace packages in the ledgered packages' dependency closure have no
- * built type entry point. Pure over a described graph -- `built` is decided by
- * the caller's fs read -- so the traversal (transitive, cycle-safe, and blind to
- * a package that declares no type entry at all) is pinned without a filesystem.
+ * Every workspace package reachable from the ledgered packages' dependencies.
+ * Pure over a described graph, so the traversal (transitive, cycle-safe) is
+ * pinned without a filesystem.
  *
- * The ROOTS themselves are never reported: measuring a package reads its own
+ * The ROOTS themselves are never members: measuring a package reads its own
  * SOURCES, so its own `dist` is irrelevant to its own number. A root appears
  * only when some other ledgered package depends on it, which is the case where
  * its `dist` really is the input.
  *
  * @param {string[]} roots ledgered package names
- * @param {Map<string, {deps: string[], typeEntries: string[], built: boolean}>} graph
+ * @param {Map<string, {deps: string[]}>} graph
  * @returns {string[]} sorted names
  */
-function unbuiltClosure(roots, graph) {
-  const unbuilt = new Set();
+function closureMembers(roots, graph) {
   const seen = new Set();
   const visit = (name) => {
     if (seen.has(name)) return;
     seen.add(name);
     const node = graph.get(name);
     if (!node) return; // not a workspace member -- node_modules, not our build
-    if (node.typeEntries.length > 0 && !node.built) unbuilt.add(name);
     for (const dep of node.deps) visit(dep);
   };
   for (const root of roots) {
     for (const dep of graph.get(root)?.deps ?? []) visit(dep);
   }
-  return [...unbuilt].sort();
+  return [...seen].filter((name) => graph.has(name)).sort();
+}
+
+/**
+ * Which packages in that closure have no built type entry point at all. Pure --
+ * `built` is decided by the caller's fs read -- and blind to a package that
+ * declares no type entry point in the first place.
+ *
+ * @param {string[]} roots ledgered package names
+ * @param {Map<string, {deps: string[], typeEntries: string[], built: boolean}>} graph
+ * @returns {string[]} sorted names
+ */
+function unbuiltClosure(roots, graph) {
+  return closureMembers(roots, graph).filter((name) => {
+    const node = graph.get(name);
+    return node.typeEntries.length > 0 && !node.built;
+  });
+}
+
+/**
+ * Which packages in that closure have a type entry point that is OLDER than the
+ * sources it is generated from -- present, so `unbuiltClosure` waves it through,
+ * and describing a package that no longer exists (#8271).
+ *
+ * Same shape and the same purity as its sibling: `stale` is the caller's fs
+ * read, this function only walks. A package with no type entry point on disk is
+ * `unbuiltClosure`'s finding, never this one's -- reporting it twice would name
+ * one package in two different remedies.
+ *
+ * @param {string[]} roots ledgered package names
+ * @param {Map<string, {deps: string[], typeEntries: string[], built: boolean, stale?: boolean}>} graph
+ * @returns {string[]} sorted names
+ */
+function staleClosure(roots, graph) {
+  return closureMembers(roots, graph).filter((name) => {
+    const node = graph.get(name);
+    return node.typeEntries.length > 0 && node.built && node.stale === true;
+  });
+}
+
+/**
+ * The newest mtime among the TypeScript sources a package's `dist/*.d.ts` is
+ * generated from, or 0 when it has none.
+ *
+ * Deliberately narrow on both axes, because every file it reads that cannot
+ * reach a declaration file is a false "your build is stale":
+ *   - `src/` when there is one, since that is this workspace's build root, and
+ *     a package-wide walk would let a README or a fixture date the build;
+ *   - `.ts`/`.tsx`/`.mts`/`.cts` only, and never a `*.test.ts` / `*.spec.ts` --
+ *     no test file is reachable from a package's entry point, so none of them
+ *     can change the emitted types. Measured before this exclusion existed:
+ *     3 packages read as stale in a worktree where 2 of the 3 were flagged by
+ *     nothing but a test file (driver-sqlite-wasm by
+ *     sqlite-wasm-cross-field-conformance.test.ts, service-analytics by
+ *     __tests__/cross-field-engine-fallback.test.ts).
+ *
+ * @param {string} dir package directory, repo-relative
+ * @returns {number} epoch ms
+ */
+function newestSourceMtime(dir) {
+  const from = existsSync(join(ROOT, dir, 'src')) ? join(ROOT, dir, 'src') : join(ROOT, dir);
+  let newest = 0;
+  const walk = (abs) => {
+    let entries;
+    try {
+      entries = readdirSync(abs, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.name.startsWith('.') || entry.name === 'node_modules' || entry.name === 'dist') continue;
+      const child = join(abs, entry.name);
+      if (entry.isDirectory()) {
+        walk(child);
+        continue;
+      }
+      if (!SOURCE_FILE.test(entry.name) || TEST_FILE.test(entry.name)) continue;
+      const { mtimeMs } = statSync(child);
+      if (mtimeMs > newest) newest = mtimeMs;
+    }
+  };
+  walk(from);
+  return newest;
 }
 
 /**
  * The observed build graph: every workspace member, its `workspace:` deps
- * (runtime, dev and peer -- a hidden test layer imports all three) and whether
- * any type entry point it declares exists on disk.
+ * (runtime, dev and peer -- a hidden test layer imports all three), whether any
+ * type entry point it declares exists on disk, and whether the ones that do
+ * predate the sources they are generated from.
+ *
+ * `stale` compares against the OLDEST existing entry, not the newest: a package
+ * that declares `dist/index.d.ts` and `dist/index.d.mts` has both written by one
+ * build, so the older of the two is when that build actually ran.
  *
  * @param {Array<{name: string, dir: string}>} packages
- * @returns {Map<string, {deps: string[], typeEntries: string[], built: boolean}>}
+ * @returns {Map<string, {deps: string[], typeEntries: string[], built: boolean, stale: boolean}>}
  */
 function workspaceBuildGraph(packages) {
   const graph = new Map();
@@ -1364,13 +1487,47 @@ function workspaceBuildGraph(packages) {
       }
     }
     const typeEntries = declaredTypeEntries(manifest);
+    const onDisk = typeEntries.filter((entry) => existsSync(join(ROOT, pkg.dir, entry)));
+    const builtAt = onDisk.length > 0
+      ? Math.min(...onDisk.map((entry) => statSync(join(ROOT, pkg.dir, entry)).mtimeMs))
+      : 0;
     graph.set(pkg.name, {
       deps: [...new Set(deps)].sort(),
       typeEntries,
-      built: typeEntries.some((entry) => existsSync(join(ROOT, pkg.dir, entry))),
+      built: onDisk.length > 0,
+      stale: onDisk.length > 0 && newestSourceMtime(pkg.dir) > builtAt,
     });
   }
   return graph;
+}
+
+/**
+ * Rebuild the ledgered packages' dependency closure, with the same command and
+ * the same filters `lint.yml` runs immediately before this gate. Parity is the
+ * whole point: two different build commands are two different worlds, and the
+ * ledger's discipline is that a number is reproducible.
+ *
+ * turbo decides what is actually out of date by hashing inputs, which is
+ * strictly better than the mtime read below and is why this runs FIRST and the
+ * freshness check is only a backstop over what it leaves behind.
+ */
+function refreshBuiltClosure() {
+  const bin = join(ROOT, 'node_modules', '.bin', 'turbo');
+  if (!existsSync(bin)) {
+    throw new Error(`--re-measure needs the workspace's own turbo at ${bin}; run \`pnpm install\` first.`);
+  }
+  const args = ['run', 'build', '--filter=./packages/*', '--filter=./packages/*/*'];
+  const run = spawnSync(bin, args, { cwd: ROOT, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+  if (run.error) throw new Error(`the closure build could not be run: ${run.error.message}`);
+  if (run.status !== 0) {
+    const output = `${run.stdout ?? ''}${run.stderr ?? ''}`.trim();
+    throw new Error(
+      `--re-measure cannot run: the ledgered packages' dependency closure does not build, so there is no `
+        + `world to measure against. Fix the build first -- every number in DEBT and TEST_DEBT is measured `
+        + `with tsc resolving workspace imports through each dependency's built \`dist/*.d.ts\`.\n`
+        + `  ${bin} ${args.join(' ')}\n${output.slice(-4000)}`,
+    );
+  }
 }
 
 /** @param {string} output */
@@ -1657,6 +1814,37 @@ function measureLedgers(packages, rootName, state) {
         + `ledger (${SURPLUS_ISSUE}).\n`
         + `Build the closure first, exactly as lint.yml does before this step:\n`
         + `  pnpm exec turbo run build --filter='./packages/*' --filter='./packages/*/*'`,
+    );
+  }
+
+  // PRESENT is not CURRENT (#8271). Every dependency having SOME `dist/*.d.ts`
+  // says nothing about whether it describes today's source, and the stale case
+  // is the silent one: the refusal above never fires, tsc resolves through an
+  // artifact of a package that no longer exists, and the drift it reports is
+  // not in the source at all. So the closure is refreshed rather than merely
+  // asserted -- the same command, with the same filters, that lint.yml runs
+  // immediately before this gate, which is why CI has never seen this failure.
+  refreshBuiltClosure();
+  // BACKSTOP, deliberately after the build and never before it. An mtime read
+  // is a guess (a `git checkout` that rewrites a file to identical content ages
+  // a `dist/` that is perfectly current, and 3 of 3 packages flagged in the
+  // first worktree measured this way were exactly that kind of false alarm), so
+  // it is not fit to decide whether to spend a build. After one, it is a
+  // different question with a different error rate: turbo has just rebuilt
+  // everything its filters reach, so anything still older than its own sources
+  // is a package the build did not cover, and naming it is the only remedy the
+  // caller can act on.
+  const stale = staleClosure(ledgered, workspaceBuildGraph(packages));
+  if (stale.length > 0) {
+    throw new Error(
+      `--re-measure cannot run: ${stale.length} workspace dependenc(ies) of the ledgered packages still have `
+        + `a type entry point OLDER than their own sources after a full closure build -- ${stale.join(', ')}.\n`
+        + `The build covers \`./packages/*\` and \`./packages/*/*\`, so a package that survives it is one those `
+        + `filters do not reach, or one whose build does not write the entry point its own manifest declares. `
+        + `Measuring now would resolve imports through a \`dist/*.d.ts\` describing a package that no longer `
+        + `exists, and a number recorded from there is not this package's debt (${SURPLUS_ISSUE}).\n`
+        + `Build the named package(s) directly, then re-run:\n`
+        + `  pnpm --filter ${stale[0]} build`,
     );
   }
 
@@ -2436,6 +2624,98 @@ function selfTest() {
     }
   }
 
+  // STALE CLOSURE (#8271) -- present but older than the source it describes,
+  // which is the case `built` alone cannot see and the one that reported four
+  // errors that were not in any source. Paired the same way its sibling is: the
+  // SAME graph asserted quiet and then with one `stale` flag flipped, because
+  // "nothing is reported" is a sentence an empty traversal also says.
+  //
+  // The first case is load-bearing beyond the pairing: `unbuiltClosure`'s own
+  // table describes nodes with no `stale` key at all, so it also pins that a
+  // graph read by the older function cannot be read as stale by this one.
+  const fresh = (deps, isStale = false) => ({ deps, typeEntries: ['dist/index.d.ts'], built: true, stale: isStale });
+  const staleGraph = (specStale) => new Map([
+    ['ledgered', fresh(['spec', 'formula'])],
+    ['spec', fresh([], specStale)],
+    ['formula', fresh(['spec'])],
+    ['untouched', fresh([], true)], // stale, but nothing in the closure needs it
+  ]);
+  const staleCases = [
+    { label: 'a current closure reports nothing, over a graph of 4 packages', roots: ['ledgered'], graph: staleGraph(false), expect: [] },
+    { label: 'flipping one dependency to stale reports exactly that one', roots: ['ledgered'], graph: staleGraph(true), expect: ['spec'] },
+    {
+      label: 'a transitive dependency counts — the closure is walked, not just the direct deps',
+      roots: ['ledgered'],
+      graph: new Map([['ledgered', fresh(['formula'])], ['formula', fresh(['spec'])], ['spec', fresh([], true)]]),
+      expect: ['spec'],
+    },
+    {
+      label: 'a ledgered package\'s OWN dist is irrelevant to its OWN number',
+      roots: ['ledgered'],
+      graph: new Map([['ledgered', fresh([], true)]]),
+      expect: [],
+    },
+    {
+      label: 'but it IS reported when another ledgered package depends on it',
+      roots: ['a', 'ledgered'],
+      graph: new Map([['a', fresh(['ledgered'])], ['ledgered', fresh([], true)]]),
+      expect: ['ledgered'],
+    },
+    {
+      label: 'a package that declares no type entry point is never stale',
+      roots: ['ledgered'],
+      graph: new Map([['ledgered', fresh(['console'])], ['console', { deps: [], typeEntries: [], built: false, stale: true }]]),
+      expect: [],
+    },
+    {
+      // The two findings are different remedies -- build it once, versus build
+      // it again -- so a package with nothing on disk must reach the caller as
+      // exactly one of them, and it is unbuiltClosure's.
+      label: 'an UNBUILT dependency is not also reported as stale',
+      roots: ['ledgered'],
+      graph: new Map([['ledgered', fresh(['spec'])], ['spec', { deps: [], typeEntries: ['dist/index.d.ts'], built: false, stale: true }]]),
+      expect: [],
+    },
+    {
+      label: 'a dependency cycle terminates instead of hanging the gate',
+      roots: ['ledgered'],
+      graph: new Map([['ledgered', fresh(['a'])], ['a', fresh(['b'])], ['b', fresh(['a'], true)]]),
+      expect: ['b'],
+    },
+    {
+      label: 'a dependency outside the workspace is npm\'s problem, not the build\'s',
+      roots: ['ledgered'],
+      graph: new Map([['ledgered', fresh(['zod'])]]),
+      expect: [],
+    },
+  ];
+  for (const c of staleCases) {
+    const got = staleClosure(c.roots, c.graph);
+    if (JSON.stringify(got) !== JSON.stringify(c.expect)) {
+      failures.push(`staleClosure — ${c.label}: expected ${JSON.stringify(c.expect)}, got ${JSON.stringify(got)}`);
+    }
+  }
+
+  // The freshness READ, as opposed to the traversal over its result. Two files
+  // decide it and they are not interchangeable: a source file dates the build,
+  // a test file must not, because no `dist/*.d.ts` is generated from one. This
+  // is the exclusion that took the first worktree's flag count from 3 to 1.
+  const sourceFileCases = [
+    { label: 'a plain source file is read', name: 'index.ts', expect: true },
+    { label: 'a .tsx source file is read', name: 'view.tsx', expect: true },
+    { label: 'an .mts source file is read', name: 'entry.mts', expect: true },
+    { label: 'a .test.ts file is not', name: 'engine.test.ts', expect: false },
+    { label: 'a .spec.tsx file is not', name: 'form.spec.tsx', expect: false },
+    { label: 'a non-TypeScript file is not', name: 'README.md', expect: false },
+    { label: 'a .json fixture is not', name: 'fixture.json', expect: false },
+  ];
+  for (const c of sourceFileCases) {
+    const got = SOURCE_FILE.test(c.name) && !TEST_FILE.test(c.name);
+    if (got !== c.expect) {
+      failures.push(`source-file read — ${c.label}: expected ${c.expect}, got ${got}`);
+    }
+  }
+
   // THE GENERATED RE-MEASURE PROJECT (#8218). The invariant is one sentence --
   // no path in this object may be relative -- and it is worth a case table
   // because the file is written into `os.tmpdir()`, where a relative path does
@@ -2650,7 +2930,8 @@ function selfTest() {
       `${namedCases.length + coverCases.length + unreadCases.length + accountedCases.length
         + derivedCases.length} observation case(s) + ` +
       `${driftCases.length + countCases.length + projectCases.length + setupErrorCases.length} re-measure case(s) + ` +
-      `${typeEntryCases.length + closureCases.length} built-closure case(s) + ` +
+      `${typeEntryCases.length + closureCases.length + staleCases.length + sourceFileCases.length} ` +
+      `built-closure case(s) + ` +
       `${planCases.length + rewriteCases.length} auto-lowering case(s) hold.`,
   );
 }
