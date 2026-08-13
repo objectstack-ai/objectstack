@@ -606,16 +606,24 @@ const CONTROL = {
     expect: 'refused',
     why: 'Refuses by binding a negation to the verb, over a shrink-only registry.',
   },
-  // Refuses by predication (the widening act named as subject and denied), and
-  // the refusal predicate does fire on that exact sentence — self-test (12) pins
-  // it. It still lands in `excluded` because stage 2 declines it FIRST: the
-  // sentence names its target as a bare noun and carries no shrink testimony in
-  // that message, so the target is never established as a ratchet. Recorded as
-  // `excluded` rather than `refused` because that is what is measured, not what
-  // the shape deserves — a control that flattered the detector would be worthless.
+  // The two gates below refuse by PREDICATION (the act named as subject and
+  // denied) — self-test (12) pins that predicate on their exact sentence.
+  //
+  // Until #8576 both were recorded here as `excluded`, and that was the honest
+  // reading: stage 2 declined them FIRST, because each named its target in a
+  // message carrying no testimony about the registry's nature — the testimony
+  // sat in a comment, where no author and no detector reads it. #8576 mirrored
+  // one clause of each gate's own shrink-only comment into that same message, so
+  // the target is now established as a ratchet and the refusal limb is reached.
+  // Growing the refusal limb's sample from one gate to three was the point: a
+  // regression in that limb used to be measured against a sample of one.
   'check-test-source-alias.mjs': {
-    expect: 'excluded',
-    why: 'A refusal-shaped gate that stage 2 declines before refusal is consulted. Not a violation by either route.',
+    expect: 'refused',
+    why: 'Refuses by predication. Its registry states its own nature in the same message since #8576, so stage 2 reaches it and the refusal limb is consulted.',
+  },
+  'check-type-source-resolution.mjs': {
+    expect: 'refused',
+    why: 'The other refusal precedent, refusing by the same predication shape. Its registry states its own nature in the same message since #8576, so stage 2 reaches it rather than declining on a path target.',
   },
 
   // ── Declaration registries and near-misses: recording the fact IS the fix ──
@@ -643,13 +651,15 @@ const CONTROL = {
     expect: 'excluded',
     why: 'Carries shrink-only registries, but its author-facing remedy names a declaration registry instead. Reached only when two unrelated diagnostics are allowed to merge, which is why messages are bounded.',
   },
+  // The third gate #8576 made reader-visible, and the one that did NOT move. Its
+  // testimony is governance, not shrink, and it now states that governance in
+  // author-facing text — yet the verdict is unchanged, for two reasons that are
+  // each about THIS DETECTOR rather than about the gate. Recorded rather than
+  // engineered around: the gate's wording is correct, and bending it to satisfy a
+  // grammar would be the control flattering the detector.
   'check-driver-memory-census.mjs': {
     expect: 'excluded',
-    why: 'Named in the #8540 ruling as a refusal precedent, and it does refuse. It lands here rather than in refused because its ledger carries no shrink or governance testimony, so stage 2 declines it first. Not a violation either way; recorded so the distinction stays measured rather than assumed.',
-  },
-  'check-type-source-resolution.mjs': {
-    expect: 'excluded',
-    why: 'The other refusal precedent. Its remedy points at a package tsconfig, which is not a ratchet, so stage 2 declines it. Reached only when a path target is allowed file-wide scope, which is why it is not.',
+    why: 'Named in the #8540 ruling as a refusal precedent, and it does refuse. Since #8576 it states its ledger governance in author-facing text too, yet it still lands here for two independent reasons: stage 1 finds no target inside the offer window of its refusal sentence, and its wording — a maintainer ruling — sits outside the governance vocabulary. Not a violation by any route; recorded so the distinction stays measured rather than assumed.',
   },
   'regen-artifacts.mjs': {
     expect: 'excluded',
