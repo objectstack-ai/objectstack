@@ -125,6 +125,13 @@ const CROSS_PACKAGE_TEST_INPUTS = {
       'packages/services/service-automation/src/**',
     ],
   },
+  '@objectstack/platform-objects': {
+    // src/managed-api-method-affordance-sweep.test.ts (#7934) imports every
+    // `*.object.ts` in the monorepo and runs `validateManagedApiMethods` over
+    // it — the population `os lint` never walks, because these objects ship as
+    // code rather than in an authored stack.
+    globs: ['packages/**/*.object.ts'],
+  },
   '@objectstack/plugin-auth': {
     // src/managed-extension-fields.test.ts walks every `*.object.ts`, and pins
     // core's api-key source alongside it.

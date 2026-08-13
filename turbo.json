@@ -77,6 +77,17 @@
         "$TURBO_ROOT$/packages/services/service-automation/src/**"
       ]
     },
+    "@objectstack/platform-objects#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/packages/**/*.object.ts"
+      ]
+    },
     "@objectstack/plugin-auth#test": {
       "dependsOn": ["^build"],
       "outputs": [],
