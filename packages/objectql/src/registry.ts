@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveInjectedSystemColumns, checkManagedApiMethodAffordances, LEGACY_API_METHODS, AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
+import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveInjectedSystemColumns, isInjectedColumnDefinition, checkManagedApiMethodAffordances, LEGACY_API_METHODS, AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
 // [#4513] The audit-family governance table, and [#6562] the injected-column
 // DEFINITION tables it governs — see the re-exports below for why both live in a
 // package `objectql` and `metadata-protocol` both depend on.
@@ -491,9 +491,6 @@ export function applySystemFields(
   // Platform-owned field settings that must WIN over a declared field, rather
   // than lose to it like `additions` does (#4447).
   const overrides: Record<string, any> = {};
-  // Platform-owned index declarations, appended to the object's `indexes[]` —
-  // the ONE surface an index is declared on in this system (#6810, below).
-  const indexAdditions: Array<{ fields: string[] }> = [];
 
   if (wantTenant && !schema.fields?.organization_id) {
     // [#6562] The authorable shape is the shared table's, spread verbatim.
@@ -517,28 +514,10 @@ export function applySystemFields(
     // invalid-metadata banners from.
     additions.organization_id = { ...TENANT_SCOPE_FIELD_DEF };
 
-    // [#6810] So the tenant index is declared where every other index in this
-    // system is declared: the object's `indexes[]`.
-    //
-    // This is also the first time the intent is actually ENFORCED. The sole
-    // reader of the old flag was one line in `driver-mongodb`
-    // (`mongodb-schema.ts`), while `driver-sql` — which every walled deployment
-    // runs — only ever materialized `indexes[]`, so the wall's hottest predicate
-    // ran unindexed no matter what the flag said.
-    //
-    // No `name`: each driver derives its own (SQL's `buildIndexName` is
-    // table-qualified, which a hardcoded name could not be without colliding
-    // across tables on Postgres; Mongo's index names are per-collection).
-    // `unique` is left at its default `false` — a plain lookup index, never a
-    // constraint.
-    //
-    // `multiTenant: false` declares NO index rather than a false one: on an
-    // unwalled stack nothing filters by organization, so the index is dead
-    // weight — the same intent the old flag's value carried, expressed as
-    // presence instead of a boolean.
-    if (opts.multiTenant && !declaresTenantIndex(schema)) {
-      indexAdditions.push({ fields: ['organization_id'] });
-    }
+    // [#6810] The tenant INDEX that goes with this column is no longer decided
+    // here. It is {@link provisionTenantScopeIndex}, called on the merged result
+    // at the tail of this function — see #8375 for why a decision spelled out at
+    // this one site could not be reached by the `/meta` read exits.
   }
 
   if (wantAudit) {
@@ -620,25 +599,131 @@ export function applySystemFields(
     additions[OWNING_BUSINESS_UNIT_FIELD] = { ...OWNING_BUSINESS_UNIT_FIELD_DEF };
   }
 
-  if (
-    Object.keys(additions).length === 0 &&
-    Object.keys(overrides).length === 0 &&
-    indexAdditions.length === 0
-  ) {
-    return schema;
+  // [#8375] The tenant INDEX is decided over the MERGED result, never over the
+  // input — so this function and the read-exit seam ask the same question of the
+  // same document shape. Both cases below route through it, including the one
+  // that adds no field at all (an object whose every system column is already
+  // declared still owes the index decision).
+  if (Object.keys(additions).length === 0 && Object.keys(overrides).length === 0) {
+    return provisionTenantScopeIndex(schema, opts);
   }
+
+  return provisionTenantScopeIndex(
+    {
+      ...schema,
+      // `additions` LOSE to an author's field (a declared `owner_id` is theirs);
+      // `overrides` WIN over it (the audit family's governance is not authorable).
+      fields: { ...additions, ...(schema.fields ?? {}), ...overrides },
+    },
+    opts,
+  );
+}
+
+/**
+ * [#6810, made shareable by #8375] Declare the platform's tenant-scope index on
+ * an object that carries a platform-provisioned `organization_id`, on a
+ * multi-tenant deployment — the ONE implementation of that decision.
+ *
+ * ## Why it is a function and not four lines inside `applySystemFields`
+ *
+ * It was those four lines, and that is precisely how the stamp diverged. The
+ * `/meta` read exits converge the injected system COLUMNS through
+ * `applyInjectedSystemColumns` (`@objectstack/metadata-core`, #6562) — which
+ * cannot reach `applySystemFields`: `@objectstack/objectql` depends on
+ * `@objectstack/metadata-protocol` depends on `@objectstack/metadata-core`, so
+ * the import runs UP the dependency graph. So the converger re-implemented the
+ * half it could reach (the fields map) and silently did not implement the half
+ * it could not (this index), and `GET /meta/object/:name` served a multi-tenant
+ * object reporting no tenant index while the registry's own answer carried one
+ * (#8375).
+ *
+ * The fix is not an `indexes` line added to that copy — a second implementation
+ * is what drifted in the first place. It is this: ONE function, called by the
+ * producer below and by {@link SchemaRegistry.materializeBaseLayer}, which is
+ * the seam #8268 built so a stamp converges at every read exit the day it is
+ * added. `__search` converges by delegating to the registry and has never
+ * drifted; this stamp now converges the same way.
+ *
+ * ## The predicate, stated exactly
+ *
+ * "The object carries a tenant column the PLATFORM provisioned" — not "this call
+ * just injected one". The distinction is the whole reason the decision moved out
+ * of the injection branch: at a read exit the column is ALREADY present
+ * (`governServedItem` runs `applyInjectedSystemColumns` before the seam), so a
+ * condition reading `!schema.fields?.organization_id` is false exactly where the
+ * convergence is needed. `isInjectedColumnDefinition` answers the question the
+ * old nesting was really asking, at either site, in either order.
+ *
+ * An author-declared `organization_id` of the author's own shape therefore still
+ * gets NO platform index, exactly as before. The one behaviour this widens is an
+ * author who declares the column BYTE-IDENTICAL to `TENANT_SCOPE_FIELD_DEF`
+ * (all eight keys, same values) and then gets the index — accepted for the
+ * reason `stripProvisionedSearchCompanionFrom` accepts its twin: the two are
+ * indistinguishable by construction, and the platform's own answer for that
+ * column is the one being served either way.
+ *
+ * `multiTenant: false` declares NO index rather than a false one: on an unwalled
+ * stack nothing filters by organization, so the index is dead weight — the same
+ * intent the retired `indexed` flag's value carried (#6810), expressed as
+ * presence instead of a boolean.
+ *
+ * No `name` on the entry: each driver derives its own (SQL's `buildIndexName` is
+ * table-qualified, which a hardcoded name could not be without colliding across
+ * tables on Postgres; Mongo's index names are per-collection). `unique` is left
+ * at its default `false` — a plain lookup index, never a constraint.
+ *
+ * Idempotent, via {@link declaresTenantIndex}: it runs twice on every
+ * registration (once at the tail of `applySystemFields`, once at the seam) and
+ * the second call is a no-op. Returns `schema` BY REFERENCE when nothing is
+ * owed, so a registry-sourced body pays a comparison and no copy.
+ */
+
+/**
+ * [#8375] The index entry the platform declares for the tenant scope column —
+ * the ONE spelling of it, so the stamp and its write-side strip cannot disagree
+ * about what "the platform's own entry" looks like.
+ */
+const TENANT_SCOPE_INDEX: { fields: string[] } = { fields: ['organization_id'] };
+
+function provisionTenantScopeIndex(
+  schema: ServiceObject,
+  opts: { multiTenant: boolean },
+): ServiceObject {
+  if (!opts.multiTenant) return schema;
+  if (!platformOwnsTenantColumn(schema)) return schema;
+  if (declaresTenantIndex(schema)) return schema;
 
   return {
     ...schema,
-    // `additions` LOSE to an author's field (a declared `owner_id` is theirs);
-    // `overrides` WIN over it (the audit family's governance is not authorable).
-    fields: { ...additions, ...(schema.fields ?? {}), ...overrides },
     // [#6810] Author-declared indexes keep their position; the platform's
     // tenant index is APPENDED, never merged into or reordering theirs.
-    ...(indexAdditions.length > 0
-      ? { indexes: [...((schema as any).indexes ?? []), ...indexAdditions] }
-      : {}),
-  };
+    // The write-side inverse depends on that append being at the END —
+    // see {@link SchemaRegistry.stripProvisionedTenantIndexFrom}.
+    indexes: [...((schema as any).indexes ?? []), { ...TENANT_SCOPE_INDEX }],
+  } as ServiceObject;
+}
+
+/**
+ * [#8375] Is this object's `organization_id` the PLATFORM's column rather than
+ * one the author declared?
+ *
+ * Two independent conditions, and both are load-bearing:
+ *
+ *  - the object must carry a tenant column at all — the spec's own derivation
+ *    (`resolveInjectedSystemColumns`, #5378), so `systemFields: false`,
+ *    `systemFields.tenant: false`, `tenancy.enabled: false` and
+ *    `managedBy: 'better-auth'` all withhold the index exactly as they withhold
+ *    the column. Re-deriving any of those rows here is the drift that plan
+ *    exists to prevent;
+ *  - the column present must be the platform's own definition, or absent
+ *    (the pre-injection shape). `isInjectedColumnDefinition` compares against
+ *    the shipped table byte-for-byte, which is the same exactness
+ *    `stripInjectedSystemColumns` uses to decide the same question in reverse.
+ */
+function platformOwnsTenantColumn(schema: ServiceObject): boolean {
+  if (!resolveInjectedSystemColumns(schema).tenant) return false;
+  const declared = (schema.fields as Record<string, unknown> | undefined)?.organization_id;
+  return declared === undefined || isInjectedColumnDefinition(declared, TENANT_SCOPE_FIELD_DEF);
 }
 
 /**
@@ -1613,6 +1698,15 @@ export class SchemaRegistry {
       out = provisionSearchCompanion(out);
     }
 
+    // [#8375] The tenant-scope index — the fourth stamp of this seam, and the
+    // first one added AFTER #8268 generalised it. It needed no new method here,
+    // no new method in the protocol and no new convergence at the read exits:
+    // being a step of this block IS the convergence, which is the property
+    // #8268 exists to provide. Runs LAST because it is the only stamp gated on
+    // a DEPLOYMENT flag rather than on the document, so nothing it appends can
+    // change the answer the two steps above reached over the fields map.
+    out = provisionTenantScopeIndex(out, { multiTenant: this.multiTenant });
+
     return out;
   }
 
@@ -1794,18 +1888,98 @@ export class SchemaRegistry {
    * regression that a landed round-trip pin catches, and this card measured
    * exactly that before adding this method.
    *
-   * ⛔ Strips in the REVERSE of the seam's order — companion first, then the
-   * title designation — because the companion's canonical definition is
-   * recomputed over a body that still carries the pointer, which is the state
-   * it was stamped in. Stripping the pointer first would ask
-   * `provisionSearchCompanion` a different question than the one it was
+   * ⛔ Strips in the REVERSE of the seam's order — tenant index first, then the
+   * companion, then the title designation — because each strip recomputes its
+   * canonical answer over a body that still carries every stamp applied AFTER
+   * it, which is the state it was stamped in. Stripping the pointer first would
+   * ask `provisionSearchCompanion` a different question than the one it was
    * answered with.
    *
    * Returns `base` by reference when nothing was owed.
    */
   stripMaterializedStampsFrom<T>(base: T): T {
     if (base === null || typeof base !== 'object') return base;
-    return this.stripProvisionedPrimaryFrom(this.stripProvisionedSearchCompanionFrom(base));
+    return this.stripProvisionedPrimaryFrom(
+      this.stripProvisionedSearchCompanionFrom(this.stripProvisionedTenantIndexFrom(base)),
+    );
+  }
+
+  /**
+   * [#8375] Remove the tenant-scope index entry {@link materializeBaseLayer}
+   * appended — and only that one.
+   *
+   * ## Why this strip is harder than the two beside it
+   *
+   * `indexes` is a CONCATENATING key under `mergeObjectDefinitions`, not a
+   * last-writer-wins scalar like `nameField` or a keyed record like `fields`.
+   * The two existing strips can ask "is this value the platform's?" of a single
+   * slot; here the platform's entry sits in a list beside the author's, entries
+   * may legitimately repeat, and a strip that removes "any entry that looks like
+   * the platform's" silently deletes an author's own declaration, while a strip
+   * that removes nothing bakes a phantom index into `sys_metadata.metadata`, its
+   * checksum and every history diff on the first Studio GET → edit → PUT
+   * (#4326).
+   *
+   * ## The bound, and why it is exact in BOTH directions
+   *
+   * Not "does an entry match" but "would the seam have produced EXACTLY this
+   * list": remove the LAST entry identical to the platform's own (the seam
+   * APPENDS, so its entry is the last matching one), re-stamp the remainder
+   * through `provisionTenantScopeIndex` — the stamping function itself, so the
+   * strip and the stamp cannot drift — and keep the removal only when the
+   * re-stamped list is byte-identical to the list that arrived. Anything else
+   * returns `base` untouched.
+   *
+   * That single comparison decides every case correctly, and each of these was
+   * measured:
+   *
+   *  - the platform's appended entry on a body with no `indexes` of its own →
+   *    removed, and the KEY is deleted rather than left as `indexes: []`, so the
+   *    round trip is byte-identical and not merely equivalent;
+   *  - an author's own `{ fields: ['organization_id'] }` on a SINGLE-TENANT
+   *    deployment → the re-stamp adds nothing, the lists differ, kept;
+   *  - an author's own tenant index declared BEFORE their other indexes → the
+   *    re-stamp appends at the end, the ORDER differs, kept;
+   *  - a named entry (`{ name: 'my_tenant_idx', fields: [...] }`) or a composite
+   *    → not identical to the platform's entry, never a candidate, kept.
+   *
+   * ⚠️ The one case it cannot separate, stated plainly because it is the same
+   * trade {@link stripProvisionedPrimaryFrom} documents: an author who declares
+   * `{ fields: ['organization_id'] }` as their LAST index on a MULTI-TENANT
+   * deployment has written exactly what the seam appends, so it is dropped on
+   * the first save that carries it. What bounds the harm is identical: the entry
+   * is RE-DERIVED at every load — `registerObject` runs this seam over every
+   * base layer — so the resolved answer, and the index the driver materializes,
+   * is the same with or without the stored entry, now and at every future boot.
+   *
+   * Returns `base` by reference when nothing was owed.
+   */
+  private stripProvisionedTenantIndexFrom<T>(base: T): T {
+    if (base === null || typeof base !== 'object') return base;
+    const present = (base as { indexes?: unknown }).indexes;
+    if (!Array.isArray(present) || present.length === 0) return base;
+
+    const platformEntry = stableStringify(TENANT_SCOPE_INDEX);
+    let at = -1;
+    for (let i = present.length - 1; i >= 0; i--) {
+      if (stableStringify(present[i]) === platformEntry) { at = i; break; }
+    }
+    if (at === -1) return base;
+
+    const kept = present.filter((_entry, i) => i !== at);
+    const without = { ...(base as Record<string, unknown>) };
+    // An emptied list is the ABSENCE of the key, not an empty array: the seam
+    // added `indexes` to a body that had none, so the inverse must take the key
+    // away again or the round trip stores a shape the author never wrote.
+    if (kept.length === 0) delete without.indexes;
+    else without.indexes = kept;
+
+    const restamped = provisionTenantScopeIndex(without as never, {
+      multiTenant: this.multiTenant,
+    }) as { indexes?: unknown };
+    if (stableStringify(restamped.indexes) !== stableStringify(present)) return base;
+
+    return without as unknown as T;
   }
 
   /**
