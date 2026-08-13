@@ -55,7 +55,20 @@ export interface HttpDelivery {
     url: string;
     /** HTTP method — defaults to POST. */
     method?: string;
-    /** Custom headers. */
+    /**
+     * Custom headers — the ordinary place a credential (`Authorization:
+     * Bearer …`) goes, whichever producer authored them (a `WebhookSchema`
+     * `headers` map, or a flow `http` node's per-run interpolated values).
+     *
+     * [#8118] On engine-backed storage the row column (`headers_json`) is
+     * declared `internal: true`, so the generic data path never returns it.
+     * Consequence for THIS field: `claim()` results carry the map VERBATIM —
+     * the dispatch path is fail-closed, a delivery never goes out missing an
+     * authored header — while `list()` / `redeliver()` results are the
+     * redacted view (`headers: undefined`) under a redacting engine. The
+     * in-memory outbox stores no engine-readable row, so it has nothing to
+     * redact.
+     */
     headers?: Record<string, string>;
     /**
      * Pre-computed `X-Objectstack-Signature` value (`sha256=<hex>`), or absent
@@ -190,13 +203,24 @@ export interface IHttpOutbox {
      * Atomically claim up to `limit` rows whose `nextRetryAt <= now` (or null)
      * and matching the partition predicate. Claimed rows MUST be marked
      * `in_flight` so concurrent claimers don't see them.
+     *
+     * [#8118] Claim results MUST carry {@link HttpDelivery.headers} verbatim —
+     * this is the dispatch path, and a delivery must never go out missing an
+     * authored header. An implementation whose storage redacts the column
+     * recovers it through a privileged read (see `SqlHttpOutbox`) or fails the
+     * claim loudly; it must not return the row with the map silently absent.
      */
     claim(opts: HttpClaimOptions): Promise<HttpDelivery[]>;
 
     /** Record the outcome of an attempt. */
     ack(id: string, result: HttpAckResult): Promise<void>;
 
-    /** Snapshot accessor for tests / admin tooling. */
+    /**
+     * Snapshot accessor for tests / admin tooling. [#8118] Not a dispatch
+     * path: under a redacting engine the rows come back WITHOUT
+     * {@link HttpDelivery.headers} (the redacted view), and callers must not
+     * expect the map here.
+     */
     list(filter?: { status?: HttpDeliveryStatus; source?: string }): Promise<HttpDelivery[]>;
 
     /**

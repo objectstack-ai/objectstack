@@ -123,7 +123,35 @@ export const HttpDelivery = ObjectSchema.create({
         }),
 
         method: Field.text({ label: 'Method', required: false, maxLength: 10 }),
-        headers_json: Field.textarea({ label: 'Headers JSON', required: false }),
+        // [#8118] `internal: true` — the authored header map is the ordinary
+        // place an `Authorization: Bearer …` goes (#7986), and this table is
+        // readable over the ordinary data API (`enable.apiMethods` below), so
+        // the engine OMITS the column from every generic read: list, get, an
+        // explicit `?select=headers_json`, the write-response bodies — with no
+        // system carve-out (#7728's explicit design). The redaction sits at
+        // the ROW layer on purpose: it covers `source: 'webhook'` rows
+        // (WebhookSchema-authored headers) and `source: 'flow'` rows (per-run
+        // interpolated headers that never pass through WebhookSchema) alike.
+        // The dispatcher — the one reader that must hand the map to the wire
+        // VERBATIM — reads it back through ObjectQL's purpose-built privileged
+        // accessor (`resolveInternalField`, the remedy #7728 itself names) on
+        // the claim path; see `SqlHttpOutbox.claim()`.
+        //
+        // Read-side only, deliberately. Storage is untouched: the row still
+        // carries the map in cleartext until the 30d telemetry retention above
+        // ages it out. `Field.secret()` was measured and REJECTED on #8118 —
+        // one orphan `sys_secret` row per delivery with no cascade or
+        // retention, a boot-window fail-open on the fire-and-forget enqueue,
+        // and a per-row decrypt on every dispatcher tick.
+        headers_json: Field.textarea({
+            label: 'Headers JSON',
+            required: false,
+            internal: true,
+            description:
+                'Authored request headers for this delivery — the ordinary place a credential goes, '
+                + 'so never returned on the generic data path (#8118). The dispatcher recovers it '
+                + "through the engine's privileged accessor on the claim path.",
+        }),
         // [#7722] The SIGNATURE, not the key that produced it. This column used
         // to be `signing_secret` — a verbatim copy of the subscriber's shared
         // secret on every attempt row — and this table is readable over the

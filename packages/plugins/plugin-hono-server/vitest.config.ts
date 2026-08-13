@@ -22,6 +22,13 @@ export default defineConfig({
       // nonsensical `spec/src/index.ts/security`.
       '@objectstack/spec/security': path.resolve(__dirname, '../../spec/src/security/index.ts'),
       '@objectstack/spec/system': path.resolve(__dirname, '../../spec/src/system/index.ts'),
+      // [#7378] Reached transitively: `@objectstack/core` (aliased to src above)
+      // resolves the metadata register contract's plural→singular fold from this
+      // subpath (`pluralToSingular`). An alias list matches by PREFIX, so without
+      // this entry the bare `@objectstack/spec` alias below wins and yields the
+      // nonsensical `spec/src/index.ts/shared` — ENOTDIR at import time for every
+      // test file that transitively loads `@objectstack/core`.
+      '@objectstack/spec/shared': path.resolve(__dirname, '../../spec/src/shared/index.ts'),
       '@objectstack/spec': path.resolve(__dirname, '../../spec/src/index.ts'),
     },
   },

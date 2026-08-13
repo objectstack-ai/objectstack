@@ -1,15 +1,24 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+import {
+  assertMetadataRegisterContract,
+  canonicalMetadataServiceType,
+} from '@objectstack/core';
 import { SchemaRegistry } from './registry.js';
 
 /**
- * The two spellings of the object metadata type. `SchemaRegistry.getItem` /
- * `listItems` special-case BOTH to the contributor path, so a write that
- * handled only the singular left the plural with the same read/write split
- * (#6725).
+ * Is this (already canonical) type the object metadata type?
+ *
+ * Every member of this class folds its `type` argument through
+ * `canonicalMetadataServiceType` first (#7378 row 2), so the plural spelling
+ * never reaches this predicate — `'objects'` arrives here as `'object'`.
+ * `SchemaRegistry.getItem` / `listItems` still special-case BOTH spellings to
+ * the contributor path (their own callers are not all folded), which is the
+ * read-side alias #6725's write fix had to match; the fold upstream makes the
+ * two layers agree instead of merely overlapping.
  */
 function isObjectType(type: string): boolean {
-  return type === 'object' || type === 'objects';
+  return type === 'object';
 }
 
 /**
@@ -22,48 +31,36 @@ function isObjectType(type: string): boolean {
 const RUNTIME_AUTHORED_PACKAGE_ID = 'sys_metadata';
 
 /**
- * [#7378] Reconcile a `register(type, name, data)` payload to the key the
- * contract says it is stored under: **the `name` ARGUMENT**.
+ * [#7378] Admit a `register(type, name, data)` payload and key it by the
+ * `name` ARGUMENT — under the maintainer's three-cell ruling of 2026-08-12
+ * (quoted verbatim in `assertMetadataRegisterContract`'s header,
+ * `@objectstack/core`), which supersedes the 2026-08-11 option-(a) ruling this
+ * seam previously implemented.
  *
- * `IMetadataService.register` (`@objectstack/spec/contracts`) rules that the
- * argument is the effective key and `data.name` never overrides it (maintainer
- * ruling 2026-08-11 on #7378, option (a)). Every store this class writes into
- * derives its key from the DOCUMENT — `SchemaRegistry.registerItem` reads
- * `item[keyField]`, `registerObject` keys `objectContributors` on the schema's
- * own `name` — so the only way to honour the argument here is to reconcile the
- * document to it before either store sees it. Two shapes, one rule:
+ *  - **Rows 1/3 — refuse, don't resolve.** A `data.name` that disagrees with
+ *    the argument, and a `data` that is not a plain object, are both refused
+ *    loudly by the shared guard before either store is touched. The previous
+ *    behaviours here — reconciling a disagreeing document to the argument, and
+ *    boxing a non-object value as `{ name, content }` — were each a silent
+ *    resolution the ruling forbids: the reconcile could file an item under a
+ *    key the author never intended to be the key, and the box coerced an
+ *    unstorable value into storability (colliding with `content` being a REAL
+ *    authorable field on `doc` / `knowledge_document`, the #7519 seam).
  *
- *  - **An object document** keeps every key it was authored with, with `name`
- *    set to the argument. This is the same normalization
- *    `ObjectQL.registerMetadataCollections` already applies on the plugin
- *    ingest path (`item.name === itemName ? item : { ...item, name: itemName }`,
- *    engine.ts), so a facade write and a plugin write agree about identity
- *    rather than each keying on a different field. It is also the only
- *    coherent answer for the `object` type specifically: an object's `name` IS
- *    its identity to `getObject`, to the data plane and to every driver, so a
- *    body whose `name` disagreed with its registry key would be dispatched on
- *    under one spelling and addressable under the other.
- *  - **Anything else** — a string, a number, a boolean, an array, `null` — is
- *    boxed as `{ name, content }`. `data` is declared `unknown`, not `object`,
- *    and a primitive has no `name` to key on: the previous code passed it
- *    through untouched, `registerItem` read `item['name']` off a string, and
- *    the value was filed under the literal key `undefined` — accepted with no
- *    throw and readable back through no member of this class (#7378 cell 3).
- *    The box is not a new convention: this class's own reads already unwrap it
- *    (`get`/`list` return `item?.content ?? item`, `listNames` reads
- *    `item?.name`), so the write half now produces exactly what the read half
- *    was already prepared to consume. Arrays are boxed rather than spread for
- *    the same reason — `{ ...[1, 2] }` is `{ 0: 1, 1: 2 }`, which is the same
- *    silent corruption one shape over.
- *
- * ⛔ Not a ruling on the DISAGREEMENT itself. Refusing `data.name !== name`
- * loudly (option (c)) is recorded on #7378 as the v18 strictness candidate and
- * is deliberately NOT implemented here.
+ *  - **What survives the refusals is pure keying.** An admitted document
+ *    either carries the argument as its own `name` already or carries none;
+ *    `{ ...data, name }` is then not a conflict resolution, only this class's
+ *    way of honouring the argument against two stores that derive their key
+ *    from the DOCUMENT — `SchemaRegistry.registerItem` reads
+ *    `item[keyField]`, `registerObject` keys `objectContributors` on the
+ *    schema's own `name`. It is the same fill-in
+ *    `ObjectQL.registerMetadataCollections` applies on the plugin ingest path
+ *    (`item.name === itemName ? item : { ...item, name: itemName }`,
+ *    engine.ts).
  */
-function toKeyedDefinition(name: string, data: unknown): any {
-  return typeof data === 'object' && data !== null && !Array.isArray(data)
-    ? { ...(data as Record<string, unknown>), name }
-    : { name, content: data };
+function toKeyedDefinition(type: string, name: string, data: unknown): any {
+  assertMetadataRegisterContract(type, name, data);
+  return { ...(data as Record<string, unknown>), name };
 }
 
 /**
@@ -84,15 +81,17 @@ export class MetadataFacade {
   constructor(private registry: SchemaRegistry) {}
 
   /**
-   * Register a metadata item under the `name` ARGUMENT.
+   * Register a metadata item under the `name` ARGUMENT and the CANONICAL type.
    *
-   * [#7378] The argument is the effective key and `data.name` never overrides
-   * it — the contract's ruling, and what {@link toKeyedDefinition} exists to
-   * honour against two document-keyed stores. Read that helper before changing
-   * either branch below.
+   * [#7378, ruling 2026-08-12] A `data.name` disagreeing with the argument and
+   * a non-document `data` are REFUSED loudly ({@link toKeyedDefinition} calls
+   * the shared guard — read its header before changing either branch below),
+   * and the type store is keyed on the canonical type, so
+   * `register('objects', …)` and `register('object', …)` write one store.
    */
   async register(type: string, name: string, data: any): Promise<void> {
-    const definition = toKeyedDefinition(name, data);
+    type = canonicalMetadataServiceType(type);
+    const definition = toKeyedDefinition(type, name, data);
     // Pass through the item's own source package id (when stamped by an
     // artifact loader) so provenance survives re-registration. Never
     // synthesize one here — unstamped items are runtime-authored by
@@ -198,7 +197,8 @@ export class MetadataFacade {
    * legacy context-free lookup.
    */
   async get(type: string, name: string, currentPackageId?: string): Promise<any> {
-    const item = this.registry.getItem(type, name, currentPackageId) as any;
+    // [#7378 row 2] Read the store `register` wrote: the canonical type.
+    const item = this.registry.getItem(canonicalMetadataServiceType(type), name, currentPackageId) as any;
     return item?.content ?? item;
   }
 
@@ -206,14 +206,14 @@ export class MetadataFacade {
    * Get the raw entry (with metadata wrapper)
    */
   getEntry(type: string, name: string): any {
-    return this.registry.getItem(type, name);
+    return this.registry.getItem(canonicalMetadataServiceType(type), name);
   }
 
   /**
    * List all items of a type
    */
   async list(type: string): Promise<any[]> {
-    const items = this.registry.listItems(type);
+    const items = this.registry.listItems(canonicalMetadataServiceType(type));
     return items.map((item: any) => item?.content ?? item);
   }
 
@@ -235,6 +235,8 @@ export class MetadataFacade {
    * encodes. It runs first so a refusal removes nothing at all.
    */
   async unregister(type: string, name: string): Promise<void> {
+    // [#7378 row 2] Same fold as register: one store per canonical type.
+    type = canonicalMetadataServiceType(type);
     if (isObjectType(type)) {
       this.registry.unregisterObject(name);
     }
@@ -245,7 +247,7 @@ export class MetadataFacade {
    * Check if a metadata item exists
    */
   async exists(type: string, name: string): Promise<boolean> {
-    const item = this.registry.getItem(type, name);
+    const item = this.registry.getItem(canonicalMetadataServiceType(type), name);
     return item !== undefined && item !== null;
   }
 
@@ -253,7 +255,7 @@ export class MetadataFacade {
    * List all names of metadata items of a given type
    */
   async listNames(type: string): Promise<string[]> {
-    const items = this.registry.listItems(type);
+    const items = this.registry.listItems(canonicalMetadataServiceType(type));
     return items.map((item: any) => item?.name ?? item?.content?.name ?? '').filter(Boolean);
   }
 

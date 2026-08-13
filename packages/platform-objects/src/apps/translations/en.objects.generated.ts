@@ -1217,7 +1217,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       client_secret: {
         label: "Client Secret",
-        help: "OAuth client secret (hashed/encrypted at rest)"
+        help: "OAuth client secret — stored as a SHA-256 digest, never plaintext (`@better-auth/oauth-provider`'s `storeClientSecret`, which defaults to hashed whenever the jwt plugin is enabled; wired in plugin-auth's `AuthManager.buildPluginList()`, oidcProvider branch). Shown once at registration."
       },
       redirect_uris: {
         label: "Redirect URIs",

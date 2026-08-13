@@ -49,15 +49,19 @@
  * ## URL-embedded credentials
  *
  * A `postgresql://user:pass@host/db` in `config.url` carries the same secret as
- * `config.password`, and #7990/#8078 left refusing it explicitly UNRULED — the
- * spec half pinned the behaviour as a fact rather than rejecting it. This
- * module does not disturb that: nothing here refuses a URL, at any door. But a
- * scrub that dropped `config.password` and then served the identical credential
- * one key over would be a scrub in name only — the same "claims a protection it
- * does not perform" shape #8081 exists to end. So the read path redacts the
- * PASSWORD COMPONENT of a URL's userinfo and leaves everything else, including
- * the username, byte-for-byte. Redacting a value on the way out is not the same
- * act as refusing it on the way in, and only the second one is unruled.
+ * `config.password`. When this module landed, refusing it was explicitly
+ * UNRULED (#7990/#8078 pinned the acceptance as a fact); #8082 has since ruled
+ * it (maintainer 2026-08-12, Option A), and the WRITE door now refuses a URL
+ * userinfo password via the spec's shared value-level parse
+ * (`urlUserinfoPassword`, `@objectstack/spec` `data/driver/common.zod.ts`).
+ * This module is still the READ half: a scrub that dropped `config.password`
+ * and then served the identical credential one key over would be a scrub in
+ * name only — the same "claims a protection it does not perform" shape #8081
+ * exists to end. So the read path redacts the PASSWORD COMPONENT of a URL's
+ * userinfo and leaves everything else, including the username, byte-for-byte —
+ * and the redacted shape it serves (`user@host`) is exactly what the write
+ * door still accepts, which is what keeps an untouched "Save" on a legacy row
+ * working.
  *
  * ## Why redaction must be reversible
  *

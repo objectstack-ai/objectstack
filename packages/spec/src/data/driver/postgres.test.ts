@@ -14,12 +14,14 @@ describe('PostgresConfigSchema', () => {
   });
 
   it('should accept config with connection URI', () => {
+    // Credential-free URL since #8082: a `user:password@` userinfo is refused
+    // at publish (see driver-credential-refusal.test.ts for the family pins).
     const config = PostgresConfigSchema.parse({
-      url: 'postgresql://user:pass@db.example.com:5432/production',
+      url: 'postgresql://user@db.example.com:5432/production',
       database: 'production',
     });
 
-    expect(config.url).toBe('postgresql://user:pass@db.example.com:5432/production');
+    expect(config.url).toBe('postgresql://user@db.example.com:5432/production');
   });
 
   it('should accept config with all fields', () => {
