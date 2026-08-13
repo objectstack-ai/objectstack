@@ -183,12 +183,6 @@
         "toMajor": 17
       },
       {
-        "surface": "view.list.striped / view.list.bordered / view.list.virtualScroll",
-        "to": "view list keys removed (#7176): 'striped'/'bordered'/'virtualScroll' — every measured reader copied the key forward and none applied it (pass-through-only; ADR-0049 enforce-or-remove)",
-        "conversionId": "view-list-passthrough-keys-removed",
-        "toMajor": 17
-      },
-      {
         "surface": "dashboard.aria / dashboard.performance / dashboard.widgets[].performance",
         "to": "dashboard keys 'aria'/'performance' and widget 'performance' removed (#3896 close-out — no renderer applied any of them)",
         "conversionId": "dashboard-inert-keys-removed",
@@ -1252,12 +1246,6 @@
           "surface": "view.list.responsive / view.list.performance / view.form.defaultSort / view.form.aria",
           "to": "view keys removed (#3896 close-out): list 'responsive'/'performance', form 'defaultSort'/'aria' — no renderer read them (list aria/data and form data stay live)",
           "conversionId": "view-inert-keys-removed",
-          "toMajor": 17
-        },
-        {
-          "surface": "view.list.striped / view.list.bordered / view.list.virtualScroll",
-          "to": "view list keys removed (#7176): 'striped'/'bordered'/'virtualScroll' — every measured reader copied the key forward and none applied it (pass-through-only; ADR-0049 enforce-or-remove)",
-          "conversionId": "view-list-passthrough-keys-removed",
           "toMajor": 17
         },
         {
