@@ -9,6 +9,11 @@ export { SettingsService } from './settings-service.js';
 export {
   type CryptoAdapter,
   NoopCryptoAdapter,
+  // #8026 — the predicate the write path asks before it agrees to hold a
+  // declared-secret value. Published with the interface it reads: an adapter
+  // author needs to be able to check their own `confidential` declaration the
+  // same way the service does, rather than re-deriving the two-arm rule.
+  providesConfidentiality,
 } from './crypto-adapter.js';
 // Default, KMS-free ICryptoProvider. AES-256-GCM keyed off `OS_SECRET_KEY`
 // (production) or a persisted dev key; fails loud in production rather than
@@ -32,6 +37,10 @@ export {
   type SettingsRow,
   type SettingsServiceOptions,
   envKeyOf,
+  // #8026 — thrown when a declared-encrypted write has nothing able to encrypt
+  // it. Exported so an in-process caller can branch on the refusal (there is no
+  // dedicated wire code for it yet; see the class doc).
+  SettingsCryptoUnavailableError,
   SettingsLockedError,
   SettingsValidationError,
   UnknownKeyError,
