@@ -27,6 +27,13 @@
  */
 
 import { describe, it, expect } from 'vitest';
+// The producer's OWN write-verb dispatch decisions, so the fake engine below
+// cannot accept a call ObjectQL itself would refuse — a double looser than the
+// real engine is how #4434 shipped a dead route with its suite green. Imported
+// from `@objectstack/metadata-core` rather than `@objectstack/objectql`
+// (which re-exports it): objectql depends on this side of the graph, so that
+// import would close a cycle turbo rejects outright.
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { MetadataManager } from '@objectstack/metadata';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { HttpDispatcher } from '../http-dispatcher.js';
@@ -101,6 +108,7 @@ function makeStubEngine() {
             return { id: row.id };
         },
         async update(_t: string, data: Record<string, unknown>, opts: { where: Record<string, unknown> }) {
+            assertEngineUpdateDispatch(data, opts);
             const found = findRow(opts.where);
             if (!found) return { id: null };
             const merged = { ...found.row, ...(data as any) };
@@ -109,6 +117,7 @@ function makeStubEngine() {
             return { id: found.row.id };
         },
         async delete(_t: string, opts: { where: Record<string, unknown> }) {
+            assertEngineDeleteDispatch(opts);
             const found = findRow(opts.where);
             if (!found) return { deleted: 0 };
             rows.delete(found.key);
