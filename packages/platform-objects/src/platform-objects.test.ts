@@ -38,7 +38,7 @@ import {
 import { SysSecret, SysSetting } from './system/index.js';
 import { ACCOUNT_APP, SETUP_APP, SETUP_NAV_CONTRIBUTIONS, STUDIO_APP } from './apps/index.js';
 import { AppSchema } from '@objectstack/spec/ui';
-import { resolveEffectiveApiMethods, isApiOperationAllowed } from '@objectstack/spec/data';
+import { resolveEffectiveApiMethods, isApiOperationAllowed, canServeApiOperation } from '@objectstack/spec/data';
 
 const systemObjects = [
   ['SysUser', SysUser, 'sys_user'],
@@ -387,11 +387,18 @@ describe('@objectstack/platform-objects', () => {
         return out;
       };
 
-      /** The rest-server gate order, over an object's declared `enable`. */
-      const canList = (enable: unknown): boolean => {
-        if ((enable as { apiEnabled?: unknown } | undefined)?.apiEnabled === false) return false;
-        return isApiOperationAllowed(resolveEffectiveApiMethods(enable as never), 'list');
-      };
+      /**
+       * The rest-server gate order, over an object's declared `enable`.
+       *
+       * [#7912] This USED to re-spell the two steps here. It no longer does:
+       * the order is the spec's own `canServeApiOperation`, the single export
+       * `filterAppForUser`'s nav prune and `os validate`'s
+       * `nav-object-unservable` rule both read. A local copy would let this
+       * gate keep passing while the server it claims to mirror had changed —
+       * exactly the drift #7544 asked for a single source to prevent.
+       */
+      const canList = (enable: unknown): boolean =>
+        canServeApiOperation(enable as never, 'list');
 
       it('every contributed object entry targets a listable object', () => {
         const entries = objectEntries();

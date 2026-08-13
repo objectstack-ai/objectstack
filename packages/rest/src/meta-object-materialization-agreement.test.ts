@@ -46,25 +46,34 @@
 // (2026-08-08, Option B): the read serves the EFFECTIVE runtime schema and the
 // stored-layer minority converges on the registry-backed majority.
 //
-// ## Two divergences this file MEASURES but does not fix
+// ## The stamp this file MEASURED as diverging, and now pins as converged
 //
-// Both were found by diffing whole keys rather than the fields map, both are
-// out of this card's region, and both are filed. They are pinned here as
-// EXPECTED so that the day either is fixed, this file fails and is updated
-// deliberately rather than silently drifting:
+// [#8375] `indexes` — on a MULTI-TENANT deployment the registry also stamps
+// `indexes: [{ fields: ['organization_id'] }]`, and the read exit's
+// `applyInjectedSystemColumns` converged the FIELDS MAP only. It was the fourth
+// stamp of this seam and the one whose converger was a SECOND IMPLEMENTATION of
+// its producer rather than a delegation to it — `applyInjectedSystemColumns`
+// lives in `@objectstack/metadata-core`, which cannot import the producer
+// (`applySystemFields`, `@objectstack/objectql`) without running UP the
+// dependency graph, so it re-implemented the half it could reach and silently
+// omitted the half it could not.
 //
-//  1. [#8375] `indexes` — on a MULTI-TENANT deployment `applySystemFields` also
-//     stamps `indexes: [{ fields: ['organization_id'] }]`, and the read exit's
-//     `applyInjectedSystemColumns` converges the FIELDS MAP only. A fourth
-//     stamp of the same seam, in `metadata-core`, and the one whose converger
-//     is a SECOND IMPLEMENTATION of its producer rather than a delegation to it.
-//  2. [#8376] `__search` on an extended title-less base — `registerObject`
-//     materializes the BASE and `resolveObject` folds `extend` contributors on
-//     afterwards WITHOUT re-materializing, while the read exits transform the
-//     ALREADY FOLDED document. So a base with no title-eligible field that an
-//     extension gives a text field to gets a companion from both `/meta` reads
-//     and none from the registry. A POSITION defect of the seam, not a stamp
-//     defect, live since #8038 and unchanged here.
+// This file MEASURED that divergence as EXPECTED rather than fixing it, so the
+// day it was fixed this file would fail and be updated deliberately instead of
+// drifting. That is what happened: #8375 moved the decision into ONE function
+// called by the producer and by `materializeBaseLayer` — the #8268 seam — and
+// the case below now pins agreement plus the single-tenant control, without
+// which "converged" would be indistinguishable from "always stamps an index".
+//
+// ## The divergence this file still MEASURES but does not fix
+//
+// [#8376] `__search` on an extended title-less base — `registerObject`
+// materializes the BASE and `resolveObject` folds `extend` contributors on
+// afterwards WITHOUT re-materializing, while the read exits transform the
+// ALREADY FOLDED document. So a base with no title-eligible field that an
+// extension gives a text field to gets a companion from both `/meta` reads and
+// none from the registry. A POSITION defect of the seam, not a stamp defect,
+// live since #8038 and unchanged here.
 
 import { describe, it, expect, vi } from 'vitest';
 import { SchemaRegistry } from '@objectstack/objectql';
@@ -408,21 +417,53 @@ describe('[#8268] every /meta object read exit materializes the base the way the
         expect(host.byName?.[NAME_FIELD]).toBe('name');
     });
 
-    // ── The two divergences this card measured and did NOT fix ──────────────
-    // Pinned as EXPECTED so the day either is fixed this file fails and is
-    // updated deliberately. See the header for what each one is.
+    // ── The multi-tenant `indexes` stamp, converged by #8375 ────────────────
+    // This case measured the divergence before #8375 and pins the agreement
+    // after it. See the header for what changed and why the fix was not an
+    // `indexes` line added to the converger.
 
-    it('MEASURES the un-converged multi-tenant `indexes` stamp — filed as #8375', async () => {
+    it('converges the multi-tenant `indexes` stamp — the seam’s fourth stamp (#8375)', async () => {
         const host = await measure({ serviceMode: 'artifact', multiTenant: true });
         expectNonEmptyRead(host);
 
-        // The stamp the registry applies and the read exit does not.
+        // Non-vacuous in both directions: the service's copy genuinely lacks the
+        // stamp, so agreement cannot be reached by this host having had nothing
+        // to converge…
+        expect(host.serviceBody?.indexes).toBeUndefined();
+        // …and the registry genuinely applies it, so it cannot be reached by the
+        // registry quietly dropping it either.
         expect(host.registryResolved?.indexes).toEqual([{ fields: ['organization_id'] }]);
-        expect(host.byName?.indexes).toBeUndefined();
 
-        // `indexes` is the ONLY key still diverging on this host — `nameField`
-        // is converged, which is what this card changed.
-        expect(divergingKeys(host.byName, host.registryResolved)).toEqual(['indexes']);
+        // The convergence, named explicitly so a failure says WHICH stamp moved.
+        expect(host.byName?.indexes).toEqual([{ fields: ['organization_id'] }]);
+
+        // …and at the level of the CLASS: no key diverges on this host at all.
+        // Before #8375 this read `toEqual(['indexes'])`.
+        expect(divergingKeys(host.byName, host.registryResolved)).toEqual([]);
+        expect(divergingKeys(host.byName, host.listed)).toEqual([]);
+        expect(divergingKeys(host.layerEffective, host.registryResolved)).toEqual([]);
+    });
+
+    it('stamps NO tenant index on a SINGLE-TENANT deployment — on either route', async () => {
+        // The control the convergence above is worthless without: a read exit
+        // that simply stamped an index on every object would pass every
+        // assertion in that case and fail every one of these. The index is
+        // deployment-gated (#6810: on an unwalled stack nothing filters by
+        // organization, so the index is dead weight), and the gate must survive
+        // being routed through the shared seam.
+        const host = await measure({ serviceMode: 'artifact', multiTenant: false });
+        expectNonEmptyRead(host);
+
+        // The tenant COLUMN still exists on both routes — only the index is
+        // gated, so this case cannot pass by the object having no tenancy at all.
+        expect(Object.keys((host.registryResolved?.fields ?? {}) as Record<string, unknown>))
+            .toContain('organization_id');
+        expect(Object.keys((host.byName?.fields ?? {}) as Record<string, unknown>))
+            .toContain('organization_id');
+
+        expect(host.registryResolved?.indexes).toBeUndefined();
+        expect(host.byName?.indexes).toBeUndefined();
+        expect(divergingKeys(host.byName, host.registryResolved)).toEqual([]);
     });
 
     it('MEASURES the companion over-provisioned on an extended title-less base — filed as #8376', async () => {

@@ -605,11 +605,597 @@ function scanSource(fileName, text, slice = SLICES[0]) {
   return doubles;
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// THE CONSUMER SEAMS (#8194, from #8058's audited sweep)
+// ════════════════════════════════════════════════════════════════════════════
+//
+// Everything above judges TEST DOUBLES. This section judges PRODUCTION code,
+// and it is a different subject reached by the same reasoning, so it is walled
+// off rather than folded into SLICES: a slice's verdict is "is this fake looser
+// than the producer", a seam's is "does this consumer answer a receipt it
+// cannot prove".
+//
+// ## Why the subject is the seam and not the double (the measurement)
+//
+// #8058 audited every data-access double in `packages/objectql/src` -- 154
+// doubles, 24,385 instrumented calls -- and found ZERO that took a by-id write
+// their own read side denied. What it did find is that 37 doubles in that one
+// package statically carry a read side that denies every row, and every one of
+// them is CORRECT: they simply never take a by-id write. So the obvious gate
+// over doubles ("read side unconditionally empty") would open with a 37-entry
+// exemption ledger in one package, which is the failure this file's own header
+// names -- a gate that reddens correct code and can only be digested through
+// its ledger grows the ledger into noise.
+//
+// The subject that IS decidable is the consumer. #8194 inverts it: rather than
+// ask which double could be handed a by-id write, ask which CONSUMER performs
+// one and then tells its caller the write landed.
+//
+// ## What "every consumer performing a by-id write probes first" measured to be
+//
+// FALSE, and the numbers are the reason this scan carries three conjuncts
+// instead of one. Measured on the tree this landed against:
+//
+//   45  by-id writes in production sources (`update`/`delete` carrying a
+//       scalar `where.id`), in 23 files
+//   ~40 of them correctly perform NO existence probe of their own
+//
+// Because #7867/#7989 put the gate at the funnel: `ObjectQL.update` and
+// `.delete` read the prior row UNCONDITIONALLY on their by-id branch and throw
+// `recordNotFoundError` when it is missing -- engine.ts says so in as many
+// words ("placed at the one point all of them funnel through, so it is not a
+// fourth site"). Every consumer that reaches the engine is therefore already
+// refused, and a gate demanding a second probe from each of them would redden
+// ~40 correct call sites -- the same 37-false-positive shape, one layer out.
+//
+// A `sql-http-outbox.ack(id)` or a `db-queue-adapter.purgeFailed(messageId)`
+// deletes by an id it was handed and returns nothing; there is no receipt for
+// it to get wrong, and the engine refuses the ghost id anyway. Those are not
+// seams and this scan must not report them.
+//
+// ## The three conjuncts, and what each one removes
+//
+// A SEAM is a function that does all three. Dropping any one of them puts
+// correct code in the report (the count after each is what the tree measured):
+//
+//   1. performs a BY-ID WRITE                                         45 sites
+//      `<x>.update|delete(…)` carrying a scalar `where: { id }` -- inline, or
+//      through a same-function `const` binding (`protocol.updateData` and
+//      `deleteData` both build `const opts = { where: { id: request.id } }`
+//      and pass the variable, so a scan reading only inline literals misses
+//      the card's own named seam), or through one wrapping helper call
+//      (`callData`'s `findOpts({ where: { id } })`).
+//      `where: { id: { $in: […] } }` is a MULTI-ROW predicate and is not a
+//      by-id write -- the same line `ObjectQL` itself draws.
+//
+//   2. on a CALLER-SUPPLIED id                                        16 sites
+//      the id expression's root is a parameter of the enclosing function, or a
+//      property of one (`request.id`, `params.id`). An id read off a row this
+//      function just fetched (`row.id`, `existing.id`) cannot name a missing
+//      record -- it came from one. This conjunct removes 29 sites, and it is
+//      the one that keeps `reassignOrphanedMetadata` and `rebuildApproverIndex`
+//      out: both answer a receipt, both write by an id they just read.
+//
+//   3. and ANSWERS A RECEIPT                                           4 sites
+//      returns an object literal carrying `success` / `record` / `deleted` /
+//      `updated` / `removed`. This is the harm: an integrator reading a success
+//      body records the change as landed. A function returning nothing cannot
+//      commit that error however missing the row was.
+//
+// Four seams, zero exemptions, and no ledger -- which is the whole reason this
+// invariant is worth having and the per-double one was not.
+//
+// ## What the seams must reach, and why it is REFUSAL rather than "probe"
+//
+// The four seams do NOT share a mechanism, and a gate demanding the one they
+// happen to share most often would redden correct code:
+//
+//   `protocol.updateData`   probes (`probeRecord`, #4435) -- and shares the
+//                           read with its OCC gate rather than issuing two
+//   `protocol.deleteData`   reads the DRIVER's `Promise<boolean>` (`=== false`
+//                           is the contract's own positive not-found signal)
+//   `callData`'s fallback   probes with a `find` (#5138)
+//   the MCP stdio bridge    probes with `findById`
+//
+// So the assertion is mechanism-agnostic: before the receipt is answered, the
+// function must REFUSE -- throw, on a guarded not-found path. How it learned
+// the row is missing is the consumer's business; that it answers a receipt
+// instead is not. This is the same contract-first shape as the slices above:
+// pin the decision that must be reached, not the spelling of the road to it.
+//
+// ## What this deliberately does NOT claim, and the one over-approximation
+//
+// The refusal test is FUNCTION-WIDE: it asks whether a throw that reaches a
+// not-found envelope sits before the receipt, not whether it guards this
+// verb's branch specifically. `callData` is the shape that makes the
+// difference visible — one function, an update fallback and a delete fallback,
+// each with its own probe — so a refusal in one branch is credited to the
+// other. Narrowing it would need per-branch reachability, which is the whole-
+// suite dataflow #8194 excluded on the double side for the same reason.
+//
+// What that costs is bounded and worth naming: this gate cannot catch a seam
+// that refuses on ONE of its verbs and answers blind on the other. What it does
+// catch — a receipt-answering by-id write with no refusal anywhere before it —
+// is the shape every instance of this defect family actually took (#4435,
+// #5138, #5581, #7867). A narrower gate that could not be written is not a
+// better gate than a wide one that can.
+//
+// ## Deliberately NOT asserted yet: WHICH not-found envelope (#8194)
+//
+// Three of the four seams reach `recordNotFoundError` -- the repo's ONE
+// not-found envelope (`@objectstack/core`, moved there by #7867 for exactly
+// the "two layers cannot disagree about it" reason its header argues). The
+// fourth, `packages/mcp/src/stdio-data-bridge.ts`, mints its own local
+// `recordNotFound` returning a bare `Error` with neither `code` nor `status`.
+//
+// That is a real divergence and it is filed as its own card, not laundered
+// through a ledger entry here: this gate would have opened RED on a defect
+// outside the change that introduced the gate, which is the one way to teach
+// readers that a red run means "someone else's problem". So the verdict below
+// records WHICH envelope each seam reaches and prints it, and requiring the
+// shared one is a one-line tightening the day that card lands -- `SHARED_ONLY`
+// is the switch, and the seam list is already both-directions complete.
+
+/** Where the repo's ONE not-found envelope may be imported from (#7867). */
+const ENVELOPE_MODULES = [
+  /^@objectstack\/core$/,
+  /^@objectstack\/metadata-protocol$/,
+  /record-not-found(\.js)?$/,
+];
+
+/** The envelope factory itself. */
+const ENVELOPE_SYMBOLS = new Set(['recordNotFoundError']);
+
+/**
+ * Keys whose presence in a returned object literal makes it a RECEIPT — a
+ * statement to the caller about what the write did.
+ *
+ * Taken from the shapes the spec actually declares for these responses:
+ * `DeleteDataResponseSchema` is `{ object, id, success }` (#5581) and
+ * `UpdateDataResponse` carries `record`. `deleted` / `updated` / `removed` are
+ * the off-spec spellings the same defect family produced before #5581 named
+ * one, kept so a consumer re-inventing them is still judged.
+ */
+const RECEIPT_KEYS = new Set(['success', 'record', 'deleted', 'updated', 'removed']);
+
+/** Production sources: the seams live in `src`, never in a test. */
+function productionFiles() {
+  const out = [];
+  const walkSrc = (dir) => {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (e.name === 'node_modules' || e.name === 'dist' || e.name === '.git' || e.name === '.cache') continue;
+      const p = join(dir, e.name);
+      if (e.isDirectory()) walkSrc(p);
+      else if (/\.(ts|tsx|mts)$/.test(e.name) && !/\.(test|spec|bench)\.(ts|tsx|mts)$/.test(e.name)) out.push(p);
+    }
+  };
+  walkSrc(join(ROOT, 'packages'));
+  return out.sort();
+}
+
+function objectLiteral(n) {
+  return n && ts.isObjectLiteralExpression(n) ? n : null;
+}
+
+/** A named property of an object literal, or null. */
+function propertyNamed(obj, name) {
+  for (const p of obj.properties) {
+    if (!p.name) continue;
+    const nm = ts.isIdentifier(p.name) || ts.isStringLiteral(p.name) ? p.name.text : null;
+    if (nm === name) return p;
+  }
+  return null;
+}
+
+/**
+ * The id expression of a SCALAR `where: { id: … }`, or null.
+ *
+ * `{ $in: [...] }` and an array both answer null: those are multi-row
+ * predicates, and a predicate write matching zero rows is legitimately
+ * "0 rows affected" rather than a missing record — the line `ObjectQL.delete`
+ * itself draws, quoted in engine.ts ("Scope: the BY-ID branch only").
+ */
+function scalarWhereIdOf(obj) {
+  const w = propertyNamed(obj, 'where');
+  if (!w || !ts.isPropertyAssignment(w)) return null;
+  const wo = objectLiteral(w.initializer);
+  if (!wo) return null;
+  const idp = propertyNamed(wo, 'id');
+  if (!idp) return null;
+  if (ts.isShorthandPropertyAssignment(idp)) return idp.name;
+  if (!ts.isPropertyAssignment(idp)) return null;
+  const init = idp.initializer;
+  if (ts.isObjectLiteralExpression(init) || ts.isArrayLiteralExpression(init)) return null;
+  return init;
+}
+
+/** The nearest enclosing function-ish node, or null. */
+function enclosingFunction(node) {
+  let cur = node.parent;
+  while (cur) {
+    if (ts.isFunctionDeclaration(cur) || ts.isMethodDeclaration(cur)
+      || ts.isArrowFunction(cur) || ts.isFunctionExpression(cur)) return cur;
+    cur = cur.parent;
+  }
+  return null;
+}
+
+/** Every parameter name of `fn`, including the members of a destructured one. */
+function parameterNames(fn) {
+  const names = new Set();
+  for (const p of fn.parameters ?? []) {
+    if (ts.isIdentifier(p.name)) names.add(p.name.text);
+    else if (ts.isObjectBindingPattern(p.name)) {
+      for (const el of p.name.elements) if (ts.isIdentifier(el.name)) names.add(el.name.text);
+    }
+  }
+  return names;
+}
+
+/**
+ * `const <name> = { where: { id: … } }` bindings inside `fn`.
+ *
+ * Required, not a nicety: `protocol.updateData` and `protocol.deleteData` —
+ * the seam this card is named after — both build their options into a variable
+ * and pass the variable, so a scan reading only inline literals discovers
+ * neither and reports a green tree it never looked at.
+ */
+function localWhereIdBindings(fn) {
+  const map = new Map();
+  const visit = (n) => {
+    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer) {
+      const o = objectLiteral(n.initializer);
+      if (o) {
+        const id = scalarWhereIdOf(o);
+        if (id) map.set(n.name.text, id);
+      }
+    }
+    ts.forEachChild(n, visit);
+  };
+  if (fn.body) visit(fn.body);
+  return map;
+}
+
+/** The root identifier of an expression: `request.id` → `request`. */
+function rootIdentifier(expr) {
+  let cur = expr;
+  for (;;) {
+    if (ts.isPropertyAccessExpression(cur)) { cur = cur.expression; continue; }
+    if (ts.isElementAccessExpression(cur)) { cur = cur.expression; continue; }
+    if (ts.isNonNullExpression(cur) || ts.isParenthesizedExpression(cur)) { cur = cur.expression; continue; }
+    if (ts.isAsExpression(cur)) { cur = cur.expression; continue; }
+    break;
+  }
+  return ts.isIdentifier(cur) ? cur.text : null;
+}
+
+/**
+ * Which not-found envelope a `throw` reaches: the shared factory, a local mint,
+ * or nothing.
+ *
+ * One helper deep, exactly as the slices' `bodyIsPinned` is, and for the same
+ * reason: `protocol.updateData`'s sibling ingresses refuse through
+ * `this.assertRecordExists(object, id)`, which is a method rather than an
+ * import. Two hops is not accepted — at that point the gate would be guessing.
+ */
+function refusalKindOf(fn, sf, envelopeNames, localFns, methodFns) {
+  let kind = null;
+  const reaches = (node, depth) => {
+    let hit = null;
+    const visit = (n) => {
+      if (hit === 'shared') return;
+      if (ts.isCallExpression(n)) {
+        const e = n.expression;
+        if (ts.isIdentifier(e) && envelopeNames.has(e.text)) { hit = 'shared'; return; }
+        if (ts.isPropertyAccessExpression(e) && ts.isIdentifier(e.name)
+          && envelopeNames.has(e.name.text)) { hit = 'shared'; return; }
+        if (depth > 0) {
+          const name = ts.isIdentifier(e) ? e.text
+            : (ts.isPropertyAccessExpression(e) && ts.isIdentifier(e.name) ? e.name.text : null);
+          const helper = name ? (localFns.get(name) ?? methodFns.get(name)) : null;
+          if (helper) {
+            const deeper = reaches(helper, depth - 1);
+            if (deeper === 'shared') { hit = 'shared'; return; }
+            if (deeper && !hit) hit = deeper;
+          }
+        }
+        if (!hit) hit = 'local';
+        return;
+      }
+      if (ts.isNewExpression(n) && ts.isIdentifier(n.expression) && /Error$/.test(n.expression.text)) {
+        if (!hit) hit = 'local';
+        return;
+      }
+      ts.forEachChild(n, visit);
+    };
+    visit(node);
+    return hit;
+  };
+
+  /** Does this function body throw a not-found DIRECTLY? */
+  const throwsDirectly = (node) => {
+    let k = null;
+    const visit = (n) => {
+      if (k === 'shared') return;
+      if (ts.isThrowStatement(n) && n.expression) {
+        const got = reaches(n.expression, 0);
+        if (got === 'shared') { k = 'shared'; return; }
+        if (got && !k) k = got;
+      }
+      ts.forEachChild(n, visit);
+    };
+    visit(node);
+    return k;
+  };
+
+  let earliest = Infinity;
+  const note = (k, pos) => {
+    if (!k) return;
+    if (k === 'shared' || !kind) kind = kind === 'shared' ? 'shared' : k;
+    earliest = Math.min(earliest, pos);
+  };
+
+  const walk = (n) => {
+    // A throw in the seam's own body.
+    if (ts.isThrowStatement(n) && n.expression) note(reaches(n.expression, 1), n.getStart(sf));
+    // Or ONE hop: a call to a same-file helper that throws the not-found
+    // itself. `protocol`'s siblings refuse through
+    // `this.assertRecordExists(object, id)`, whose throw never appears in the
+    // seam at all — a scan reading only the seam's own `throw` statements
+    // would call that seam unrefusing and redden correct code.
+    if (ts.isCallExpression(n)) {
+      const e = n.expression;
+      const name = ts.isIdentifier(e) ? e.text
+        : (ts.isPropertyAccessExpression(e) && ts.isIdentifier(e.name) ? e.name.text : null);
+      const helper = name ? (localFns.get(name) ?? methodFns.get(name)) : null;
+      if (helper && helper !== fn && helper.body) note(throwsDirectly(helper.body), n.getStart(sf));
+    }
+    ts.forEachChild(n, walk);
+  };
+  if (fn.body) walk(fn.body);
+  return { kind, at: earliest };
+}
+
+/** The position of the LAST receipt-shaped `return` in `fn`, or -1. */
+function receiptReturnPos(fn, sf) {
+  let pos = -1;
+  const visit = (n) => {
+    if (ts.isReturnStatement(n) && n.expression) {
+      const o = objectLiteral(n.expression);
+      if (o) {
+        for (const p of o.properties) {
+          if (!p.name) continue;
+          const nm = ts.isIdentifier(p.name) || ts.isStringLiteral(p.name) ? p.name.text : null;
+          if (nm && RECEIPT_KEYS.has(nm)) { pos = Math.max(pos, n.getStart(sf)); break; }
+        }
+      }
+    }
+    ts.forEachChild(n, visit);
+  };
+  if (fn.body) visit(fn.body);
+  return pos;
+}
+
+/** Class methods of this file, by name — for the `this.assertRecordExists` hop. */
+function classMethods(sourceFile) {
+  const map = new Map();
+  const visit = (n) => {
+    if ((ts.isClassDeclaration(n) || ts.isClassExpression(n))) {
+      for (const m of n.members) {
+        if (ts.isMethodDeclaration(m) && m.name && ts.isIdentifier(m.name)) map.set(m.name.text, m);
+      }
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sourceFile);
+  return map;
+}
+
+/** Local names bound to the shared envelope factory by an import. */
+function envelopeImportsOf(sourceFile) {
+  const found = new Set();
+  for (const st of sourceFile.statements) {
+    if (!ts.isImportDeclaration(st) || !ts.isStringLiteral(st.moduleSpecifier)) continue;
+    if (!ENVELOPE_MODULES.some((re) => re.test(st.moduleSpecifier.text))) continue;
+    const named = st.importClause?.namedBindings;
+    if (named && ts.isNamedImports(named)) {
+      for (const el of named.elements) {
+        const imported = (el.propertyName ?? el.name).text;
+        if (ENVELOPE_SYMBOLS.has(imported)) found.add(el.name.text);
+      }
+    }
+  }
+  return found;
+}
+
+/**
+ * Every CONSUMER SEAM in one file, with a verdict on whether it refuses before
+ * it answers.
+ *
+ * A seam is the three-conjunct object documented above: a by-id write, on a
+ * caller-supplied id, in a function that answers a receipt.
+ */
+function scanSeams(fileName, text) {
+  const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const envelopeNames = envelopeImportsOf(sf);
+  const localFns = localFunctions(sf);
+  const methodFns = classMethods(sf);
+  const seams = [];
+  const seen = new Set();
+
+  const visit = (n) => {
+    if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression)
+      && ts.isIdentifier(n.expression.name)) {
+      const verb = n.expression.name.text;
+      if (verb === 'update' || verb === 'delete') {
+        const fn = enclosingFunction(n);
+        if (fn) {
+          const bindings = localWhereIdBindings(fn);
+          let idExpr = null;
+          for (const arg of n.arguments) {
+            const direct = objectLiteral(arg);
+            if (direct) { idExpr = scalarWhereIdOf(direct); if (idExpr) break; }
+            // A same-function `const opts = { where: { id } }`, passed by name.
+            if (ts.isIdentifier(arg) && bindings.has(arg.text)) { idExpr = bindings.get(arg.text); break; }
+            // One wrapping helper call: `findOpts({ where: { id } })`.
+            if (ts.isCallExpression(arg)) {
+              for (const a of arg.arguments) {
+                const o = objectLiteral(a);
+                if (o) { const got = scalarWhereIdOf(o); if (got) { idExpr = got; break; } }
+              }
+              if (idExpr) break;
+            }
+          }
+          if (idExpr) {
+            const root = rootIdentifier(idExpr);
+            const params = parameterNames(fn);
+            if (root && params.has(root)) {
+              const receiptAt = receiptReturnPos(fn, sf);
+              if (receiptAt >= 0) {
+                // Keyed on (function, VERB), not on the function alone:
+                // `callData` is one function holding both the update and the
+                // delete fallback, and a per-function key reports only
+                // whichever the walk reached first. The refusal test below is
+                // still function-wide — see the header's note on what that
+                // over-approximates.
+                const fnStart = `${fn.getStart(sf)}:${verb}`;
+                if (!seen.has(fnStart)) {
+                  seen.add(fnStart);
+                  const { kind, at } = refusalKindOf(fn, sf, envelopeNames, localFns, methodFns);
+                  const name = fn.name && ts.isIdentifier(fn.name) ? fn.name.text : '<anonymous>';
+                  seams.push({
+                    line: sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1,
+                    fn: name,
+                    verb,
+                    // A refusal AFTER the receipt is no refusal: the caller has
+                    // already been told the write landed.
+                    refusal: kind && at < receiptAt ? kind : null,
+                  });
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return seams;
+}
+
+/** The seam scan over the whole tree. */
+function scanAllSeams() {
+  const found = [];
+  for (const abs of productionFiles()) {
+    const text = readFileSync(abs, 'utf8');
+    // Cheap pre-filter: no by-id options shape anywhere, nothing to parse.
+    if (!/where\s*:\s*\{\s*id/.test(text)) continue;
+    const seams = scanSeams(abs, text);
+    if (seams.length === 0) continue;
+    found.push({ file: relative(ROOT, abs).split(sep).join('/'), seams });
+  }
+  return found;
+}
+
 // ── Baseline ────────────────────────────────────────────────────────────────
 
 function readBaseline() {
   if (!existsSync(BASELINE_PATH)) return { entries: [] };
   return JSON.parse(readFileSync(BASELINE_PATH, 'utf8'));
+}
+
+// ── The ratchet-remedy authority convention (#8435) ──────────────────────────
+//
+// Four independent PRs, four authors, four brand-new test files, one shift --
+// all four tripped this gate on a hand-rolled `update` double, and all four
+// were told about it for the first time by CI. That half is a DISCOVERY-POINT
+// problem this message cannot fix: the author writes the double first and meets
+// the requirement only when the gate rejects it.
+//
+// The half this message CAN fix is which remedy it teaches. The text below
+// offers two, and it used to offer them symmetrically -- pin the fake, "Or add
+// a MEASURED entry to scripts/engine-double-contract.baseline.json". That
+// baseline is SHRINK-ONLY, so the second path is not a fix: it is a ratchet
+// weakening, and a maintainer action rather than an author's. All four devs
+// took the correct path, but they had been told so out of band; a dev reading
+// only this output had nothing to go on. Marking the privileged path is the
+// cheap, unconditional half of #8435.
+//
+// Measured as a FARM-LEVEL shape, not a one-gate nit -- see the twin block in
+// check-type-check-coverage.mjs for the other instance this PR fixes, and the
+// report/finding for the three it does not
+// (check-durability-degradation-log-level.mjs, check-role-word.mjs,
+// check-driver-conformance.mjs). check-driver-memory-census.mjs is the
+// precedent worth copying: it already refuses the weakening remedy outright.
+//
+// ⛔ Strengthens ratchet governance; weakens nothing. No threshold moves, no
+// baseline entry is added, and the verdicts this gate reaches are unchanged --
+// this edits the diagnostic text only.
+
+/** Kept identical to the twin gate's token so the convention is greppable. */
+const RATCHET_AUTHORITY_MARKER = '⛔ MAINTAINER-ONLY';
+
+/** The baseline as the message spells it (BASELINE_PATH is absolute). */
+const BASELINE_REL = 'scripts/engine-double-contract.baseline.json';
+
+/**
+ * How this gate OFFERS the privileged path. A detector rather than a string
+ * compare, so the self-test can prove it still reaches its subject: a reworded
+ * offer that stopped matching would make the convention check below pass
+ * vacuously on every message.
+ */
+const RATCHET_EXPANSION_OFFER = new RegExp(
+  `add a MEASURED entry to\\s+${BASELINE_REL.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`,
+);
+
+/**
+ * The convention: a message that hands the author the baseline-expanding path
+ * must say in the same breath that the path is not theirs. Messages that offer
+ * no such path are unaffected -- RECONCILED tells the author to DELETE or lower
+ * an entry, which is the ratchet tightening and squarely the author's job.
+ *
+ * @param {string} message
+ * @returns {boolean}
+ */
+function ratchetRemedyCarriesAuthority(message) {
+  if (!RATCHET_EXPANSION_OFFER.test(message)) return true;
+  return message.includes(RATCHET_AUTHORITY_MARKER);
+}
+
+/**
+ * PINNED's text, named and pure so the self-test can assert on the exact string
+ * the author reads. Extracted from the audit loop by #8435 for that reason --
+ * a message built inline is a message no assertion can reach.
+ *
+ * @param {{verb: string, symbols: Set<string>, producer: string, pinCall: string}} slice
+ * @param {string} file
+ * @param {Array<{line: number}>} unguarded
+ * @returns {string}
+ */
+function pinnedMessage(slice, file, unguarded) {
+  return (
+    `PINNED [${slice.verb}]: ${file} declares ${unguarded.length} engine double(s) whose `
+      + `${slice.verb}() does not route through ${[...slice.symbols][0]} `
+      + `(line${unguarded.length > 1 ? 's' : ''} ${unguarded.map((d) => d.line).join(', ')}). `
+      + `A fake looser than ${slice.producer} is how #4434 shipped a dead REST route with its `
+      + `suite green. Open the fake's ${slice.verb} with \`${slice.pinCall}\` from `
+      + "'@objectstack/metadata-core' (where the predicate lives since #5619) or from "
+      + "'@objectstack/objectql' (which re-exports it) — add whichever you pick as a "
+      + 'devDependency if the package lacks it, and prefer metadata-core when '
+      + '@objectstack/objectql DEPENDS ON the package you are pinning, since that reverse edge '
+      + 'is a cycle turbo refuses. That is the fix, and the only one of the two you can take on '
+      + `your own. ${RATCHET_AUTHORITY_MARKER}, NOT a co-equal option: add a MEASURED entry to `
+      + `${BASELINE_REL} saying why not — with `
+      + `"verb": ${JSON.stringify(slice.verb)}. That baseline is shrink-only, so an entry weakens a `
+      + 'ratchet and needs a maintainer to agree first — do not take this path to get CI green.'
+  );
 }
 
 // ── Audit ───────────────────────────────────────────────────────────────────
@@ -681,20 +1267,7 @@ function audit() {
         continue;
       }
       if (!entry) {
-        errors.push(
-          `PINNED [${slice.verb}]: ${file} declares ${unguarded.length} engine double(s) whose `
-            + `${slice.verb}() does not route through ${[...slice.symbols][0]} `
-            + `(line${unguarded.length > 1 ? 's' : ''} ${unguarded.map((d) => d.line).join(', ')}). `
-            + `A fake looser than ${slice.producer} is how #4434 shipped a dead REST route with its `
-            + `suite green. Open the fake's ${slice.verb} with \`${slice.pinCall}\` from `
-            + "'@objectstack/metadata-core' (where the predicate lives since #5619) or from "
-            + "'@objectstack/objectql' (which re-exports it) — add whichever you pick as a "
-            + 'devDependency if the package lacks it, and prefer metadata-core when '
-            + '@objectstack/objectql DEPENDS ON the package you are pinning, since that reverse edge '
-            + 'is a cycle turbo refuses. Or add a MEASURED entry to '
-            + 'scripts/engine-double-contract.baseline.json saying why not — with '
-            + `"verb": ${JSON.stringify(slice.verb)}.`,
-        );
+        errors.push(pinnedMessage(slice, file, unguarded));
         continue;
       }
       if (unguarded.length > entry.unguarded) {
@@ -722,11 +1295,45 @@ function audit() {
     }
   }
 
-  return { slices, baseline, errors };
+  // ── The consumer seams (#8194) ────────────────────────────────────────────
+  const seamFiles = scanAllSeams();
+  const seamCount = seamFiles.reduce((n, f) => n + f.seams.length, 0);
+
+  // SEAMS_DISCOVERED — the #4868 shape again, and the reason this is an ERROR
+  // rather than a quiet zero: REFUSES iterates the discovered set, so a scan
+  // that silently stops matching (a seam refactored to a shape the three
+  // conjuncts no longer read) makes this script print OK while checking
+  // nothing. Four seams is what the tree measured; zero is a broken scan.
+  if (seamCount === 0) {
+    errors.push(
+      'SEAMS_DISCOVERED: the consumer-seam scan found no by-id write seam anywhere in '
+        + 'packages/*/src. That is not a clean repo, it is a broken scan — REFUSES iterates this '
+        + 'set, so it passes vacuously and this script reports OK while reading nothing. '
+        + 'protocol.updateData/deleteData and callData\'s ObjectQL fallback are seams by '
+        + 'construction; if none is found, the three conjuncts have drifted off the code.',
+    );
+  }
+
+  for (const { file, seams } of seamFiles) {
+    for (const s of seams.filter((x) => !x.refusal)) {
+      errors.push(
+        `REFUSES: ${file}:${s.line} — ${s.fn}() performs a by-id ${s.verb} on a caller-supplied id `
+          + 'and then answers a success receipt, without refusing anywhere before it. A write that '
+          + 'touched zero rows reporting success is the #4435/#5138/#7867 defect: a typo\'d id, an '
+          + 'already-deleted row and a real write become indistinguishable, and an integrator '
+          + 'reading the receipt records the change as landed. Refuse before you answer — probe '
+          + '(`protocol.updateData`), read the driver\'s `=== false` (`protocol.deleteData`), or '
+          + 'read the prior row (`ObjectQL.update`) — and throw `recordNotFoundError` from '
+          + "'@objectstack/core' rather than minting a second not-found shape.",
+      );
+    }
+  }
+
+  return { slices, baseline, errors, seamFiles, seamCount };
 }
 
 function report() {
-  const { slices, baseline, errors } = audit();
+  const { slices, baseline, errors, seamFiles, seamCount } = audit();
 
   console.log('');
   let totalPinned = 0;
@@ -739,6 +1346,13 @@ function report() {
         + `${slice.producer}'s dispatch predicate, ${doubles - pinned} in the shrink-only baseline.`,
     );
   }
+  const shared = seamFiles.reduce((n, f) => n + f.seams.filter((s) => s.refusal === 'shared').length, 0);
+  const local = seamFiles.reduce((n, f) => n + f.seams.filter((s) => s.refusal === 'local').length, 0);
+  console.log(
+    `consumer seams: ${seamCount} in ${seamFiles.length} source file(s) — ${shared} refusing through `
+      + `recordNotFoundError, ${local} through a locally minted error, `
+      + `${seamCount - shared - local} not refusing at all.`,
+  );
   console.log('');
 
   if (errors.length) {
@@ -750,6 +1364,17 @@ function report() {
   for (const { slice, found } of slices) {
     for (const f of found.filter((f) => f.doubles.some((d) => d.pinned))) {
       console.log(`  pinned [${slice.verb}]  ${f.file}`);
+    }
+  }
+
+  // The seam list is printed in full, refusal spelling included. It is four
+  // rows, it is the whole subject of the #8194 invariant, and a `local` row is
+  // how the one remaining divergence stays visible without a ledger entry
+  // pretending it is accepted.
+  if (seamFiles.length) console.log('');
+  for (const { file, seams } of seamFiles) {
+    for (const s of seams) {
+      console.log(`  seam [${s.refusal ?? 'NONE'}]  ${file}:${s.line}  ${s.fn}() — by-id ${s.verb}`);
     }
   }
 
@@ -1218,6 +1843,234 @@ const engine = {
       .some((f) => f.file === 'packages/plugins/plugin-sharing/src/sharing-rule.test.ts'),
   );
 
+  // ── The CONSUMER SEAMS (#8194) ────────────────────────────────────────────
+  //
+  // Driven on both sides of all four decisions the seam scan makes — the three
+  // conjuncts that admit a seam, and the refusal that clears it. The negative
+  // fixtures are A/B pairs wherever the claim is "not reported": a criterion
+  // that silenced everything would pass every bare negative here, so each one
+  // is the SAME source with one thing changed, and the control asserts the
+  // seam IS found without it.
+
+  const ENV = "import { recordNotFoundError } from '@objectstack/core';\n";
+  const seamSrc = (body, header = '') => `${header}
+class Ingress {
+  async updateData(request: { object: string, id: string, data: any }) {
+${body}
+  }
+}
+`;
+
+  // The shape every seam in the tree has: refuse, then answer.
+  let s = scanSeams('seam.ts', seamSrc(`
+    const current = await this.probe(request.object, request.id);
+    if (!current) throw recordNotFoundError(request.object, request.id);
+    await this.engine.update(request.object, request.data, { where: { id: request.id } });
+    return { object: request.object, id: request.id, success: true };`, ENV));
+  expect('a seam that refuses through the shared envelope is clean',
+    s.length === 1 && s[0].refusal === 'shared');
+
+  // ⚠️ THE DELIVERABLE'S PROOF (#8194's whole point): the same seam with the
+  // refusal deleted must be REPORTED. This is the hypothetical new consumer
+  // written without a probe — nothing else in this file catches it, and if this
+  // assertion ever passes vacuously the gate is worth nothing.
+  s = scanSeams('seam.ts', seamSrc(`
+    await this.engine.update(request.object, request.data, { where: { id: request.id } });
+    return { object: request.object, id: request.id, success: true };`, ENV));
+  expect('a seam that answers a receipt without refusing is reported',
+    s.length === 1 && s[0].refusal === null);
+
+  // Conjunct 2: an id read off a row this function already fetched cannot name
+  // a missing record. `reassignOrphanedMetadata` and `rebuildApproverIndex` are
+  // this shape and must stay out — they answer receipts and probe nothing.
+  const rowIdBody = `
+    const row = await this.engine.findOne(request.object, {});
+    await this.engine.update(request.object, request.data, { where: { id: row.id } });
+    return { object: request.object, id: row.id, success: true };`;
+  expect('an id read from a row is not a seam', scanSeams('r.ts', seamSrc(rowIdBody)).length === 0);
+  expect('…and the SAME function on a caller-supplied id IS a seam',
+    scanSeams('r.ts', seamSrc(rowIdBody.replace(/row\.id/g, 'request.id'))).length === 1);
+
+  // Conjunct 3: no receipt, no harm. `sql-http-outbox.ack(id)` is this shape,
+  // and the engine funnel refuses its ghost id anyway.
+  const noReceiptBody = `
+    await this.engine.update(request.object, request.data, { where: { id: request.id } });`;
+  expect('a by-id write that answers nothing is not a seam',
+    scanSeams('n.ts', seamSrc(noReceiptBody)).length === 0);
+  expect('…and the SAME write with a receipt IS a seam',
+    scanSeams('n.ts', seamSrc(`${noReceiptBody}
+    return { object: request.object, id: request.id, success: true };`)).length === 1);
+
+  // Conjunct 1, the scalar test: a `$in` predicate is a multi-row write, and a
+  // predicate write matching zero rows is legitimately "0 rows affected" — the
+  // line ObjectQL itself draws ("Scope: the BY-ID branch only").
+  //
+  // Asserted on `scalarWhereIdOf` DIRECTLY rather than through `scanSeams`,
+  // and the difference is not stylistic. Through `scanSeams` this claim passes
+  // for the wrong reason: `rootIdentifier` answers null for an object literal
+  // too, so the seam is dropped by the caller-supplied conjunct and the
+  // scalar test is never what decided. Measured by neutering the scalar test
+  // and watching the end-to-end assertion stay GREEN — a phantom check, which
+  // is the one thing a gate must not ship. The rule keeps its named home here
+  // (`scalarWhereIdOf` is where "scalar" means something) and this pins it
+  // where a mutation can reach it.
+  const whereIdOf = (src) => {
+    const f = ts.createSourceFile('t.ts', src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    let lit = null;
+    const v = (n) => { if (!lit && ts.isObjectLiteralExpression(n) && propertyNamed(n, 'where')) lit = n; ts.forEachChild(n, v); };
+    v(f);
+    return lit ? scalarWhereIdOf(lit) : undefined;
+  };
+  expect('a multi-row $in predicate is not a scalar by-id write',
+    whereIdOf('const o = { where: { id: { $in: xs } } };') === null);
+  expect('an array of ids is not a scalar by-id write',
+    whereIdOf('const o = { where: { id: [1, 2] } };') === null);
+  expect('…and a plain scalar id IS one — the control for both',
+    whereIdOf('const o = { where: { id: request.id } };') !== null);
+  expect('a $in predicate never reaches the seam report end to end',
+    scanSeams('m.ts', seamSrc(`
+    await this.engine.update(request.object, request.data, { where: { id: { $in: request.ids } } });
+    return { object: request.object, success: true };`)).length === 0);
+
+  // Discovery form 2 — the one the card's OWN named seam needs. Both
+  // `protocol.updateData` and `deleteData` bind `const opts = { where: { id:
+  // request.id } }` and pass the variable, so a scan reading only inline
+  // literals discovers neither and reports a tree it never looked at.
+  s = scanSeams('c.ts', seamSrc(`
+    const opts: any = { where: { id: request.id } };
+    await this.engine.update(request.object, request.data, opts);
+    return { object: request.object, id: request.id, success: true };`, ENV));
+  expect('the const-bound options form is discovered', s.length === 1 && s[0].refusal === null);
+
+  // Discovery form 3 — `callData`'s `findOpts({ where: { id } })` wrapper.
+  s = scanSeams('w.ts', seamSrc(`
+    await this.engine.update(request.object, request.data, findOpts({ where: { id: request.id } }));
+    return { object: request.object, id: request.id, record: request.data };`, ENV));
+  expect('the one-wrapper-call options form is discovered', s.length === 1);
+
+  // Refusal mechanism 2 — `protocol.deleteData` reads the DRIVER's boolean
+  // rather than probing. Mechanism-agnostic is the point: a gate demanding a
+  // probe would redden this correct code.
+  s = scanSeams('b.ts', seamSrc(`
+    const opts: any = { where: { id: request.id } };
+    const deleted = await this.engine.delete(request.object, opts);
+    if (deleted === false) throw recordNotFoundError(request.object, request.id);
+    return { object: request.object, id: request.id, success: true };`, ENV));
+  expect('a driver-boolean refusal counts, without any probe',
+    s.length === 1 && s[0].refusal === 'shared');
+
+  // One helper deep, through a `this` METHOD — `assertRecordExists` is not an
+  // import, so a scan that only followed top-level functions would miss it.
+  s = scanSeams('h.ts', `${ENV}
+class Ingress {
+  private async assertRecordExists(object: string, id: string) {
+    const current = await this.engine.findOne(object, {});
+    if (!current) throw recordNotFoundError(object, id);
+  }
+  async updateData(request: { object: string, id: string, data: any }) {
+    await this.assertRecordExists(request.object, request.id);
+    await this.engine.update(request.object, request.data, { where: { id: request.id } });
+    return { object: request.object, id: request.id, success: true };
+  }
+}
+`);
+  expect('a refusal one method-hop deep reaches the shared envelope',
+    s.length === 1 && s[0].refusal === 'shared');
+
+  // The envelope attribution must SEPARATE, or the `local` row that keeps the
+  // MCP divergence visible degrades into "everything is shared".
+  s = scanSeams('l.ts', seamSrc(`
+    const current = await this.probe(request.object, request.id);
+    if (!current) throw new Error('not found');
+    await this.engine.update(request.object, request.data, { where: { id: request.id } });
+    return { object: request.object, id: request.id, success: true };`));
+  expect('a locally minted error is NOT the shared envelope',
+    s.length === 1 && s[0].refusal === 'local');
+
+  // The same claim on the two OTHER spellings a mint takes, because each
+  // reaches a different arm of `refusalKindOf` and a fixture only proves the
+  // arm it touches. Measured: with only the `new Error` fixture above,
+  // neutering the call-expression arm left the self-test GREEN.
+  //
+  // Spelling 2 — a local FACTORY function, which is `packages/mcp/src/
+  // stdio-data-bridge.ts`'s live shape: `throw recordNotFound(object, id)`
+  // where `recordNotFound` is a same-file function returning a bare `Error`.
+  s = scanSeams('lf.ts', `
+function recordNotFound(object: string, id: string): Error {
+  return new Error(\`Record "\${id}" not found in "\${object}"\`);
+}
+class Bridge {
+  async update(request: { object: string, id: string, data: any }) {
+    const existing = await this.engine.findOne(request.object, {});
+    if (!existing) throw recordNotFound(request.object, request.id);
+    await this.engine.update(request.object, request.data, { where: { id: request.id } });
+    return { object: request.object, id: request.id, record: request.data };
+  }
+}
+`);
+  expect('a local FACTORY call is a mint, not the shared envelope',
+    s.length === 1 && s[0].refusal === 'local');
+
+  // Spelling 3 — an imported factory this scan cannot resolve (plugin-sharing's
+  // `makeError(404, 'RECORD_NOT_FOUND', …)`). It refuses, so it clears the
+  // invariant; it is not the shared envelope, so it must not be counted as one.
+  s = scanSeams('if.ts', `${"import { makeError } from './errors.js';\n"}
+class Svc {
+  async deleteData(request: { object: string, id: string }) {
+    const existing = await this.engine.findOne(request.object, {});
+    if (!existing) throw makeError(404, 'RECORD_NOT_FOUND', 'gone');
+    await this.engine.delete(request.object, { where: { id: request.id } });
+    return { object: request.object, id: request.id, success: true };
+  }
+}
+`);
+  expect('an unresolvable imported error factory is a mint, not the shared envelope',
+    s.length === 1 && s[0].refusal === 'local');
+
+  // A refusal AFTER the receipt is no refusal — the caller has already been
+  // told the write landed.
+  s = scanSeams('a.ts', seamSrc(`
+    await this.engine.update(request.object, request.data, { where: { id: request.id } });
+    if (request.id) return { object: request.object, id: request.id, success: true };
+    throw recordNotFoundError(request.object, request.id);`, ENV));
+  expect('a refusal AFTER the receipt does not count', s.length === 1 && s[0].refusal === null);
+
+  // Wiring: the seam scan must reach the real tree, and specifically the seam
+  // the card names. Deliberately NOT asserted: that every seam refuses — that
+  // is the job of the run this self-test gates.
+  const { seamFiles } = audit();
+  expect('the seam scan discovers seams in the real tree', seamFiles.length > 0);
+  expect('discovery reaches protocol.updateData/deleteData — the seam #8194 names',
+    seamFiles.some((f) => f.file === 'packages/metadata-protocol/src/protocol.ts'
+      && f.seams.some((x) => x.fn === 'updateData') && f.seams.some((x) => x.fn === 'deleteData')));
+
+  // ── The ratchet-remedy authority convention (#8435) ────────────────────────
+  //
+  // Three assertions, deliberately non-overlapping, so each way this can rot is
+  // caught by exactly one NAMED failure: (1) the detector still reaches its
+  // subject, (2) the real message carries the marker, (3) an unmarked offer is
+  // REJECTED. (3) is what makes (2) worth having -- a predicate that approved
+  // everything would keep (2) green with the convention gone. Its fixture is
+  // SYNTHETIC rather than the real message with the marker stripped: derived,
+  // it also fired on a rewording and misdescribed the cause.
+  const pinned = pinnedMessage(
+    { verb: 'update', symbols: new Set(['assertEngineUpdateDispatch']),
+      producer: 'ObjectQL.update', pinCall: 'assertEngineUpdateDispatch(data, options)' },
+    'packages/plugins/plugin-auth/src/a.test.ts',
+    [{ line: 72 }],
+  );
+  expect('#8435 — the ratchet-offer DETECTOR still matches PINNED (else the check below is vacuous)',
+    RATCHET_EXPANSION_OFFER.test(pinned));
+  expect(`#8435 — PINNED marks the baseline path ${RATCHET_AUTHORITY_MARKER} (it is shrink-only, so `
+    + 'adding an entry is a maintainer action, not the author\'s second option)',
+    ratchetRemedyCarriesAuthority(pinned));
+  const unmarkedOffer = `PINNED: add a MEASURED entry to ${BASELINE_REL} saying why not.`;
+  expect('#8435 — the synthetic unmarked-offer fixture is still recognised as an offer',
+    RATCHET_EXPANSION_OFFER.test(unmarkedOffer));
+  expect('#8435 — ratchetRemedyCarriesAuthority() REJECTS an offer carrying no marker (proves the '
+    + 'predicate discriminates rather than approving everything)',
+    !ratchetRemedyCarriesAuthority(unmarkedOffer));
+
   if (failures.length) {
     for (const f of failures) console.error(`  x self-test: ${f}`);
     console.error(`\ncheck-engine-double-contract --self-test: ${failures.length} failure(s).\n`);
@@ -1230,7 +2083,12 @@ const engine = {
       + "one helper deep) and never the other slice's, rejects unused imports, hand-mirrored guards "
       + 'and look-alikes, keeps an engine double in scope however many by-id helpers it declares, '
       + 'reports EXACTLY the engine double out of a fixture holding both shapes, and proves '
-      + 'discovery reaches the real tree for every slice.',
+      + 'discovery reaches the real tree for every slice; and, on the CONSUMER SEAMS, admits a '
+      + 'by-id write only when the id is caller-supplied AND a receipt is answered, reads the '
+      + 'inline / const-bound / one-wrapper options forms, refuses to read a $in predicate as '
+      + 'by-id, accepts a probe, a driver boolean and a one-method-hop helper as refusals alike, '
+      + 'separates the shared envelope from a local mint, discounts a refusal that lands after '
+      + 'the receipt, and REPORTS the seam that answers without refusing at all.',
   );
 }
 

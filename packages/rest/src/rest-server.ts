@@ -72,8 +72,8 @@ import { preferredLocaleFromHeader } from '@objectstack/spec/system';
 import type { ISecurityService } from '@objectstack/spec/contracts';
 import {
     resolveEffectiveApiMethods,
-    isApiOperationAllowed,
     effectiveOperationsArray,
+    apiExposureDenialReason,
     DATA_ACTION_TO_API_OPERATION,
 } from '@objectstack/spec/data';
 // [#8013] The SHARED envelope writer (#3973), aliased: this module already has a
@@ -1422,6 +1422,22 @@ interface ApiAccessOpts {
 }
 
 /**
+ * [#7912] The nav-servability gate handed to `filterAppForUser`: given the
+ * `objectName` a `type: 'object'` entry targets (and the entry itself, for the
+ * diagnostic), answer whether the destination can serve a `list`.
+ *
+ * `true` = serve the entry. That includes every case this layer cannot judge —
+ * an object absent from metadata, or metadata that could not be read at all —
+ * because the gate is a SURFACE-AREA control, not an authorization boundary,
+ * and the same fail-open reasoning `loadObjectItems` records applies here.
+ *
+ * `appName` is passed in rather than captured because ONE gate serves the whole
+ * app list: the list route resolves object metadata once and gates every app
+ * with the same closure, so the app being filtered is a per-call fact.
+ */
+type NavServabilityGate = (objectName: string, entry: any, appName: string) => boolean;
+
+/**
  * Pure per-object API-exposure check: given an object's `enable` block, decide
  * whether `operation` is denied on the *external* REST surface (ADR-0049 /
  * #1889 / #3391). Returns the `{ status, body }` to send, or `null` when
@@ -1435,6 +1451,14 @@ interface ApiAccessOpts {
  * identically everywhere. The 405 body's `allowed` array is the EFFECTIVE
  * operation set (enum-ordered), the single "effective" channel the frontend
  * consumes — never the raw whitelist.
+ *
+ * [#7912] The two-step ORDER those primitives compose into — `apiEnabled`
+ * first and independently, the whitelist second — is now the spec's
+ * `apiExposureDenialReason`, and this function is its ENVELOPE half: it turns
+ * the reason into the 404/405 body this surface sends. The extraction is what
+ * lets the nav-servability prune below (and the authoring-time lint that warns
+ * about the same entry) reach the identical verdict without a second spelling
+ * of the order to drift from this one.
  */
 export function apiAccessDenialFromEnable(
     enable: any,
@@ -1442,8 +1466,13 @@ export function apiAccessDenialFromEnable(
     operation: string,
     opts?: ApiAccessOpts,
 ): { status: number; body: Record<string, unknown> } | null {
-    if (!enable) return null;
-    if (enable.apiEnabled === false) {
+    // Canonicalization stays HERE: `operation` arrives as a runtime action name
+    // on this surface, while the spec helper's contract is a canonical
+    // `ApiOperation`.
+    const canonical = DATA_ACTION_TO_API_OPERATION[operation] ?? operation;
+    const reason = apiExposureDenialReason(enable, canonical, opts);
+    if (!reason) return null;
+    if (reason === 'api-disabled') {
         return {
             status: 404,
             body: {
@@ -1453,18 +1482,13 @@ export function apiAccessDenialFromEnable(
             },
         };
     }
-    const eff = resolveEffectiveApiMethods(enable);
-    // Unrestricted (no whitelist) → default-allow, exactly as before.
-    if (eff.mode === 'unrestricted') return null;
-    const canonical = DATA_ACTION_TO_API_OPERATION[operation] ?? operation;
-    if (isApiOperationAllowed(eff, canonical, opts)) return null;
     return {
         status: 405,
         body: {
             error: `API operation '${operation}' is not allowed on object '${objectName}'`,
             code: 'OBJECT_API_METHOD_NOT_ALLOWED',
             object: objectName,
-            allowed: effectiveOperationsArray(eff),
+            allowed: effectiveOperationsArray(resolveEffectiveApiMethods(enable)),
         },
     };
 }
@@ -1676,17 +1700,21 @@ function formatCsvCell(value: any): string {
  * the header row uses field labels and cell values are formatted to readable
  * display values (lookup names, select labels, 是/否, formatted dates). With an
  * empty map the output is byte-identical to the raw, un-formatted behaviour.
+ *
+ * `timezone` (#8373) is the caller's business timezone, used to render
+ * `datetime` cells in the same clock the UI shows; absent, they render in UTC.
  */
 function rowsToCsv(
     fields: string[],
     rows: Array<Record<string, any>>,
     includeHeader: boolean,
     metaMap: Map<string, ExportFieldMeta>,
+    timezone?: string,
 ): string {
     const lines: string[] = [];
     if (includeHeader) lines.push(fields.map(f => formatCsvCell(headerLabel(f, metaMap))).join(','));
     for (const row of rows) {
-        lines.push(formatRowCells(row, fields, metaMap).map(formatCsvCell).join(','));
+        lines.push(formatRowCells(row, fields, metaMap, timezone).map(formatCsvCell).join(','));
     }
     return lines.join('\r\n') + (lines.length > 0 ? '\r\n' : '');
 }
@@ -1936,6 +1964,15 @@ export class RestServer {
      * in-flight Promise so concurrent callers share one resolution.
      */
     private readonly execCtxMemo = new WeakMap<object, Map<string, Promise<any | undefined>>>();
+    /**
+     * [#7912] De-duplication keys for the nav-servability prune log — one line
+     * per `app|entry|object|reason` per process. See
+     * {@link resolveNavServability}: a console session re-fetches `/meta/app`
+     * on every navigation, so an unthrottled warning would bury its own first
+     * occurrence. Process-lifetime by design (the set is bounded by the number
+     * of dead nav entries authored, not by traffic).
+     */
+    private readonly navPruneLogged = new Set<string>();
     private defaultEnvironmentIdProvider?: () => string | undefined;
     private authServiceProvider?: (environmentId?: string) => Promise<any | undefined>;
     private objectQLProvider?: (environmentId?: string) => Promise<any | undefined>;
@@ -2925,11 +2962,25 @@ export class RestServer {
      *   enforced by the shell alone: the entry (with its `objectName` /
      *   `pageName` / `componentRef` target) still shipped in the `/meta` body,
      *   so reading the JSON defeated it.
+     * - [#7912] SERVABILITY: drops a `type: 'object'` entry whose destination
+     *   object could not answer a `list` for anyone — see `servabilityGate`.
      *
      * NOT gated here: `visible` (CEL) at any level, and `requiresObject` — both
      * are still evaluated client-side only. That asymmetry is deliberate and
      * pinned in `rest.test.ts`: server-side CEL needs a bound `user` context
      * that this layer does not have, and is its own change.
+     *
+     * ⚠️ [#7912] `requiresObject` STAYS on that list, and the servability gate
+     * is not it wearing a new hat. `requiresObject` asks whether the named
+     * object is REGISTERED — a question about deployment composition, whose
+     * answer this filter deliberately leaves to the client (the maintainer
+     * ruling of 2026-08-12 rejected re-meaning the key server-side precisely
+     * because the docblock calls that asymmetry deliberate). The servability
+     * gate asks a different question of an object that IS registered: does its
+     * own `enable` block let the destination answer at all? An entry whose
+     * object this layer cannot find is therefore SERVED, not pruned — the
+     * `requiresObject` pin and #3770's "no declared policy ⇒ nothing to
+     * enforce" both survive unchanged.
      *
      * Returns `null` when the app should be withheld from the user entirely.
      * Returns a shallow copy with filtered `navigation` / `areas` otherwise —
@@ -2943,8 +2994,13 @@ export class RestServer {
      * `requiredPermissions` and the ADR-0057 D10 `requiresService` gate — which
      * is why this used to sniff the shape. There is one shape now.
      */
-    private filterAppForUser(item: any, sysPerms: Set<string>, serviceGate?: (name: string) => boolean): any | null {
-        return this.filterAppForUserWithReason(item, sysPerms, serviceGate).app;
+    private filterAppForUser(
+        item: any,
+        sysPerms: Set<string>,
+        serviceGate?: (name: string) => boolean,
+        servabilityGate?: NavServabilityGate,
+    ): any | null {
+        return this.filterAppForUserWithReason(item, sysPerms, serviceGate, servabilityGate).app;
     }
 
     /**
@@ -2995,6 +3051,7 @@ export class RestServer {
         item: any,
         sysPerms: Set<string>,
         serviceGate?: (name: string) => boolean,
+        servabilityGate?: NavServabilityGate,
     ): { app: any | null; withheld?: 'unpublished' | 'permission' | 'service' } {
         if (!item || typeof item !== 'object') return { app: item };
         // ADR-0045 §3 (as revised 2026-08, #4829) — the publish gate. An
@@ -3036,6 +3093,26 @@ export class RestServer {
                 const req = Array.isArray(e.requiredPermissions) ? e.requiredPermissions : [];
                 if (req.length > 0 && !req.every((p: string) => sysPerms.has(p))) continue;
                 if (typeof e.requiresService === 'string' && serviceGate && serviceGate(e.requiresService) === false) continue;
+                // [#7912] SERVABILITY — the gate this filter had no vocabulary
+                // for. A `type: 'object'` entry names its destination in
+                // `objectName`; the object's own `enable` block decides whether
+                // a `list` can be answered there, and that decision takes no
+                // user, no permissions and no context. So an entry whose
+                // destination is API-disabled (404 `OBJECT_API_DISABLED`) or
+                // whose whitelist omits `list` (405
+                // `OBJECT_API_METHOD_NOT_ALLOWED`) is dead for EVERY persona,
+                // platform admin included — which is why no combination of
+                // `requiredPermissions` on the entry could ever prune it
+                // (#7544 shipped exactly that combination for a year).
+                //
+                // The verdict comes from the same derivation the data route
+                // enforces (`apiExposureDenialReason`, #3391), reached through
+                // the gate the caller built — never a second reading of
+                // `enable` here.
+                if (servabilityGate && e.type === 'object' && typeof e.objectName === 'string') {
+                    const appName = typeof item.name === 'string' ? item.name : '(unnamed)';
+                    if (servabilityGate(e.objectName, e, appName) === false) continue;
+                }
                 // [#7380] A `group` is judged on what SURVIVES, never on how it
                 // got there. Both childless shapes render the same dead sidebar
                 // label, so both are dropped:
@@ -3209,6 +3286,92 @@ export class RestServer {
         const registered = new Set<string>();
         for (const name of wanted) { if (await probe(name)) registered.add(name); }
         return registered;
+    }
+
+    /**
+     * [#7912] Build the nav-servability gate for one request: which objects can
+     * actually answer a `list` on the external REST surface.
+     *
+     * ## Shape, and why it mirrors `resolveRegisteredServices`
+     *
+     * Same contract as the ADR-0057 D10 service gate one method up: resolve the
+     * facts ONCE per request, hand `filterAppForUser` a closure, and return
+     * `null` when the facts cannot be established so the caller skips the gate
+     * entirely. Nav filtering already runs over a whole app list; re-reading
+     * object metadata per entry would turn one read into dozens.
+     *
+     * ## Fail-open, in three distinct cases — each deliberate
+     *
+     *  1. **Metadata unreadable** — `loadObjectItems` answers `[]` and logs.
+     *     This method then answers `null` (no gate), so nothing is pruned. The
+     *     alternative fails CLOSED during every cold start, emptying the
+     *     sidebar of a healthy deployment; #3545 already settled that trade for
+     *     the data-route twin and the same reasoning binds harder here, where
+     *     the consequence is a user staring at an app with no navigation.
+     *  2. **Object not in metadata** — served. There is no declared exposure
+     *     policy to enforce (#3770), and "is this object registered at all?" is
+     *     `requiresObject`'s question, which this layer deliberately does not
+     *     answer (see {@link filterAppForUser}).
+     *  3. **No `enable` block** — served, by `apiExposureDenialReason`'s own
+     *     default-open contract. An object that declares nothing restricts
+     *     nothing.
+     *
+     * Only case (3)'s opposite — a declared `enable` that refuses `list` — ever
+     * prunes.
+     *
+     * ## The prune is LOGGED, never silent
+     *
+     * The maintainer ruling of 2026-08-12 makes the author-visible diagnostic a
+     * mandatory companion, not an optional one: "a prune the author cannot see
+     * is the same failure one layer over — no silent dead rows, and no silent
+     * repairs." The authoring-time half of that is
+     * `validate-nav-object-servability` in `@objectstack/lint`, which refuses
+     * the stack at `os validate` / `os build` / `os lint` before it can ever be
+     * served. This log is the serving-side half, for an entry that reached a
+     * running deployment anyway (a `sys_metadata` overlay row, or a stack built
+     * before the lint existed): it names the app, the entry id, the object AND
+     * the condition, so the pruned row is discoverable from the server log
+     * rather than being an unexplained gap in a menu.
+     *
+     * One line per `app|entry|object|reason` per process — a console session
+     * re-fetches `/meta/app` on every navigation, and an unthrottled log would
+     * bury the first occurrence under thousands of repeats.
+     */
+    private async resolveNavServability(
+        p: RestProtocol,
+        environmentId: string | undefined,
+    ): Promise<NavServabilityGate | null> {
+        const items = await this.loadObjectItems(p, environmentId);
+        // Case (1): nothing to judge with. `loadObjectItems` has already logged
+        // a THROWN read; a legitimately empty registry is silent and equally
+        // ungated, which is correct — an empty registry declares no policy.
+        if (items.length === 0) return null;
+        const enableByName = new Map<string, any>();
+        for (const o of items) {
+            if (o && typeof o.name === 'string') enableByName.set(o.name, o.enable);
+        }
+        return (objectName: string, entry: any, appName: string): boolean => {
+            // Case (2): unknown object → no declared policy to enforce here.
+            if (!enableByName.has(objectName)) return true;
+            const reason = apiExposureDenialReason(enableByName.get(objectName), 'list');
+            if (!reason) return true;
+            const entryId = (entry && (entry.id ?? entry.label)) ?? '(unnamed)';
+            const key = `${appName}|${entryId}|${objectName}|${reason}`;
+            if (!this.navPruneLogged.has(key)) {
+                this.navPruneLogged.add(key);
+                logWarn(
+                    `[REST] [#7912] nav entry '${entryId}' pruned from app '${appName}': its destination ` +
+                        `object '${objectName}' cannot serve a list — ` +
+                        (reason === 'api-disabled'
+                            ? `\`enable.apiEnabled: false\` (the list answers 404 OBJECT_API_DISABLED for every user).`
+                            : `\`enable.apiMethods\` does not grant \`list\` (the list answers 405 ` +
+                              `OBJECT_API_METHOD_NOT_ALLOWED for every user).`) +
+                        ` Remove the entry, or expose the object — \`os validate\` refuses this stack ` +
+                        `(nav-object-unservable).`,
+                );
+            }
+            return false;
+        };
     }
 
     /**
@@ -4850,8 +5013,12 @@ export class RestServer {
                                     );
                                     const registered = await this.resolveRegisteredServices((ctx as any).__kernel, list);
                                     const serviceGate = registered ? (n: string) => registered.has(n) : undefined;
+                                    // [#7912] Resolved ONCE for the whole list —
+                                    // object metadata is a per-request fact, not
+                                    // a per-app one.
+                                    const servabilityGate = await this.resolveNavServability(p, environmentId) ?? undefined;
                                     const filtered = list
-                                        .map((it: any) => this.filterAppForUser(it, sysPerms, serviceGate))
+                                        .map((it: any) => this.filterAppForUser(it, sysPerms, serviceGate, servabilityGate))
                                         .filter((it: any) => it != null);
                                     visible = Array.isArray(raw)
                                         ? filtered
@@ -5689,7 +5856,13 @@ export class RestServer {
                                     );
                                     const registered = await this.resolveRegisteredServices((ctx as any).__kernel, [visible]);
                                     const serviceGate = registered ? (n: string) => registered.has(n) : undefined;
-                                    const gated = this.filterAppForUserWithReason(visible, sysPerms, serviceGate);
+                                    // [#7912] Same gate as the list route — the
+                                    // by-name route must not serve a nav entry
+                                    // the list route prunes, or reading the
+                                    // single-app JSON defeats the filter (the
+                                    // #4722 lesson, one gate over).
+                                    const servabilityGate = await this.resolveNavServability(p, environmentId) ?? undefined;
+                                    const gated = this.filterAppForUserWithReason(visible, sysPerms, serviceGate, servabilityGate);
                                     visible = gated.app;
                                     if (visible == null) {
                                         // [#8013] A PERMISSION denial is reported as
@@ -7703,6 +7876,11 @@ export class RestServer {
         // their option label, booleans to 是/否, dates to YYYY-MM-DD. When the
         // schema is unavailable the raw stored values stream through unchanged.
         //
+        // [#8373] `datetime` cells render in the caller's BUSINESS timezone
+        // (`ExecutionContext.timezone`), so the file agrees with the screen;
+        // with no timezone resolved they render in UTC, as they always did.
+        // `date` stays a timezone-naive calendar day (ADR-0053).
+        //
         // A zero-row result still emits the header row when the column set is
         // authoritative (the security service's readable projection, or an explicit
         // `fields=`), so an empty export doubles as an import template. Without a
@@ -7894,6 +8072,18 @@ export class RestServer {
                     // (and thus a name). Batched $in inside findData — no N+1.
                     const expandFields = referenceFieldNames(metaMap);
 
+                    // [#8373] The clock every `datetime` cell below renders in.
+                    // The business timezone is ALREADY on the context resolved
+                    // at the top of this handler (`resolveLocalizationContext`'s
+                    // platform-default → global → tenant cascade, assembled onto
+                    // `ExecutionContext.timezone`) — the export formatter simply
+                    // never asked for it, so every date/datetime column streamed
+                    // UTC while the UI rendered the business zone. `undefined`
+                    // keeps the historical UTC rendering, byte for byte.
+                    const timezone = typeof (context as any)?.timezone === 'string' && (context as any).timezone
+                        ? String((context as any).timezone)
+                        : undefined;
+
                     // [#3547] Column projection ≡ list's field-level security — the
                     // LONG-TERM correct path. Ask the security service which fields the
                     // caller may READ under this context (the SAME field mask the read
@@ -8003,7 +8193,7 @@ export class RestServer {
                         }
 
                         if (format === 'csv') {
-                            const text = rowsToCsv(fields ?? [], rows, firstChunk && includeHeader, metaMap);
+                            const text = rowsToCsv(fields ?? [], rows, firstChunk && includeHeader, metaMap, timezone);
                             res.write(text);
                         } else if (format === 'xlsx') {
                             if (firstChunk && includeHeader) {
@@ -8011,7 +8201,7 @@ export class RestServer {
                             }
                             const cols = fields ?? [];
                             for (const row of rows) {
-                                const r = xlsx!.ws.addRow(formatRowCells(row, cols, metaMap));
+                                const r = xlsx!.ws.addRow(formatRowCells(row, cols, metaMap, timezone));
                                 if (styled) {
                                     cols.forEach((f, i) => {
                                         const argb = cellFontColor(row?.[f], metaMap.get(f));
@@ -8023,7 +8213,7 @@ export class RestServer {
                         } else {
                             for (let i = 0; i < rows.length; i++) {
                                 const prefix = (firstChunk && i === 0) ? '' : ',';
-                                res.write(prefix + JSON.stringify(formatRowForJson(rows[i], metaMap)));
+                                res.write(prefix + JSON.stringify(formatRowForJson(rows[i], metaMap, timezone)));
                             }
                         }
                         firstChunk = false;
@@ -9107,7 +9297,14 @@ export class RestServer {
      * explain engine (framework#2696).
      *
      *   GET  {basePath}/security/explain?object=…&operation=…&userId=…
-     *   POST {basePath}/security/explain   body: { object, operation, userId? }
+     *   POST {basePath}/security/explain   body: { object, operation, userId?,
+     *                                              recordId? | recordIds? }
+     *
+     * [#8326] `recordIds` (max 200, exclusive with `recordId`) is the batch
+     * form of the record-grained question: one `(object, operation)` pair
+     * answered per record in one round trip — `records[i]` answers
+     * `recordIds[i]`; each entry is the verdict the singular form returns for
+     * that id (see `ExplainRequestSchema`'s TSDoc for the full contract).
      *
      * Delegates to the security service's `explain(request, callerContext)`
      * (`SecurityPlugin.explainAccessForCaller`) — the same code paths the
@@ -9212,6 +9409,14 @@ export class RestServer {
                 // refusal gate is imitating, so there is nothing to add here.
                 const src = req.method === 'GET' ? (req.query ?? {}) : (req.body ?? {});
                 const { ExplainRequestSchema } = await import('@objectstack/spec/security');
+                // [#8326] GET-transport normalization ONLY: a query string
+                // cannot spell a one-element array (`?recordIds=a` parses to
+                // the bare string), so a lone string is wrapped on GET. On
+                // POST the body is JSON and can say what it means — a string
+                // where the contract says array stays a 400, not a wrap.
+                const rawRecordIds = req.method === 'GET' && typeof src.recordIds === 'string' && src.recordIds !== ''
+                    ? [src.recordIds]
+                    : src.recordIds;
                 const parsed = (ExplainRequestSchema as any).safeParse({
                     object: src.object,
                     operation: src.operation ?? 'read',
@@ -9219,17 +9424,45 @@ export class RestServer {
                     // [C2 / ADR-0095] Optional record id — explains ONE concrete
                     // row at record granularity; omitted stays object-level.
                     ...(src.recordId != null && src.recordId !== '' ? { recordId: src.recordId } : {}),
+                    // [#8326] Optional batch of record ids — the schema owns the
+                    // cap (200), the min (1), and recordId/recordIds mutual
+                    // exclusion, so every refusal is the one 400 below.
+                    ...(rawRecordIds != null ? { recordIds: rawRecordIds } : {}),
                 });
                 if (!parsed.success) {
                     return respondError(
                         res, 400, 'VALIDATION_FAILED',
-                        'Invalid explain request — expected { object: string, operation: read|create|update|delete|transfer|restore|purge, userId?: string, recordId?: string }.',
+                        'Invalid explain request — expected { object: string, operation: read|create|update|delete|transfer|restore|purge, userId?: string, recordId?: string, recordIds?: string[] (max 200, exclusive with recordId) }.',
                         String(parsed.error?.message ?? '').slice(0, 1000),
                     );
                 }
 
-                const decision = await svc.explain(parsed.data, context);
-                res.json(decision);
+                const { recordIds, ...singularRequest } = parsed.data as { recordIds?: string[] } & Record<string, unknown>;
+                if (!recordIds) {
+                    // Singular / object-level — the pre-#8326 path, byte-identical.
+                    const decision = await svc.explain(parsed.data, context);
+                    return res.json(decision);
+                }
+
+                // [#8326] Batch form — transport amortization of the SINGULAR
+                // evaluation, not a new semantic: the object-level trace is one
+                // object-level explain, and each per-record verdict is the
+                // singular record-grained explain for that id, relayed
+                // verbatim. "Batch answer ≡ N singular answers" is therefore a
+                // property of the construction, and the agreement test pins it
+                // from staying that way by accident.
+                const decision = await svc.explain(singularRequest, context);
+                const verdictById = new Map<string, unknown>();
+                for (const id of new Set(recordIds)) {
+                    const single = await svc.explain({ ...singularRequest, recordId: id }, context);
+                    // A service without record-grained support answers no
+                    // record verdict; fail CLOSED (a hidden button beats a
+                    // shown-then-403), with no decidedBy fabricated.
+                    verdictById.set(id, single?.record ?? { recordId: id, visible: false });
+                }
+                // Ordering contract: records[i] answers recordIds[i] — same
+                // order, same length, duplicates answered per position.
+                res.json({ ...decision, records: recordIds.map((id) => verdictById.get(id)) });
             } catch (error: any) {
                 const msg = String(error?.message ?? error ?? '');
                 if (
@@ -10663,13 +10896,27 @@ export class RestServer {
                                 }
                                 out.push(created?.record);
                             } else if (op.action === 'update') {
-                                // Update needs no ingress detour: the engine enforces
-                                // both static `readonly` (#2948) and `readonlyWhen`
-                                // (#3042) on its own update path, and reports them
-                                // through this listener.
+                                // Update needs no ingress detour for the WRITE half:
+                                // the engine enforces both static `readonly` (#2948)
+                                // and `readonlyWhen` (#3042) on its own update path,
+                                // and reports them through this listener.
                                 const onFieldsDropped = (e: DroppedFieldsEvent) => { dropped.push({ ...e, index }); };
                                 const id = op.id ?? data?.id;
-                                out.push(await ql.update(op.object, { ...data, id }, { context: trxCtx, onFieldsDropped }));
+                                const updated = await ql.update(op.object, { ...data, id }, { context: trxCtx, onFieldsDropped });
+                                // [#7823] …but the RESPONSE half moved to the ingress
+                                // (A-prime ruling, 2026-08-13): the engine no longer
+                                // strips `internal: true` fields from its write
+                                // results, so this direct-`ql.update` mouth must
+                                // apply the shared strip itself before the row rides
+                                // `results` out to the caller. Reached through the
+                                // protocol instance because this package does not
+                                // depend on `@objectstack/metadata-protocol` (same
+                                // duck-typing as the `createManyData` probes).
+                                // Dormant today — no `internal`-flagged object grants
+                                // `bulk` — wired so the flag's guarantee does not
+                                // depend on that staying true.
+                                (p as any).omitInternalWriteFields?.(op.object, updated);
+                                out.push(updated);
                             } else { // 'delete'
                                 out.push(await ql.delete(op.object, { where: { id: op.id }, context: trxCtx }));
                             }

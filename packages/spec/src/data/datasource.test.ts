@@ -303,6 +303,11 @@ describe('DatasourceSchema', () => {
   });
 
   it('should accept REST API datasource', () => {
+    // The `${API_KEY}` placeholder stays ACCEPTED here on purpose: `rest_api`
+    // ships no config contract, so its `config` is validated against nothing
+    // (#4410's honest boundary) — the #8336 placeholder refusal judges only
+    // the built-in driver schemas. Pinned as the boundary in
+    // driver/driver-placeholder-refusal.test.ts too.
     const datasource = DatasourceSchema.parse({
       name: 'external_api',
       driver: 'rest_api',
@@ -327,14 +332,15 @@ describe('DatasourceSchema', () => {
   });
 
 
-  it('should accept datasource with environment variables in config', () => {
-    // NOTE (#7990 census): nothing in the runtime resolves `${…}` placeholders
-    // in datasource config — these strings reach the client verbatim. Only
-    // NON-credential keys keep the placeholder convention; `config.password`
-    // is refused whatever its value, placeholder included (the placeholder was
-    // stored in cleartext in `sys_metadata` exactly like a real password, and
-    // connected with the literal string as the password when unresolved).
-    const datasource = DatasourceSchema.parse({
+  it('refuses datasource with environment variables in config — placeholders are not resolved here (#8336)', () => {
+    // INVERTED acceptance pin. This test used to pin (#7990 census) that
+    // `${…}` placeholders in NON-credential connection keys parse — recording
+    // the measured fact that nothing resolves them and the strings reach the
+    // client verbatim, the masked-failure shape. The #8336 ruling (direction
+    // 2, 2026-08-13) refuses the syntax at publish instead: same input,
+    // opposite verdict. The per-key family pins live in
+    // driver/driver-placeholder-refusal.test.ts.
+    const inverted = DatasourceSchema.safeParse({
       name: 'secure_db',
       driver: 'postgres',
       config: {
@@ -344,9 +350,14 @@ describe('DatasourceSchema', () => {
         username: '${DB_USER}',
       },
     });
+    expect(inverted.success).toBe(false);
+    const paths = inverted.error!.issues
+      .filter((i) => i.message.includes('placeholders are not resolved here'))
+      .map((i) => i.path.join('.'));
+    expect(paths.sort()).toEqual(['config.database', 'config.host', 'config.username']);
 
-    expect(datasource.config.username).toBe('${DB_USER}');
-
+    // Unchanged half: `config.password` is refused whatever its value,
+    // placeholder included — the KEY is the cleartext sink (#7990).
     const refused = DatasourceSchema.safeParse({
       name: 'secure_db',
       driver: 'postgres',

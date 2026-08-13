@@ -1,7 +1,8 @@
 {
   "file": "packages/plugins/plugin-auth/src/auth-manager.ts",
   "adrs": [
+    "ADR-0093",
     "ADR-0108"
   ],
-  "invariant": "better-auth's organization roles map registers the closed framework vocabulary ONLY. App-declared `position` / `permission` names are not organization roles — registering one makes it storable in `sys_member.role`, which `resolve-authz-context` projects into `current_user.positions`."
+  "invariant": "ADR-0108 — better-auth's organization roles map registers the closed framework vocabulary ONLY. App-declared `position` / `permission` names are not organization roles — registering one makes it storable in `sys_member.role`, which `resolve-authz-context` projects into `current_user.positions`.\n\nADR-0093 D2 — the membership reconciler is the SINGLE owner of the \"every user gets a membership\" invariant, and `settleMembership` is this manager's single assembly of its inputs. TWO seams call it and must never disagree: `user.create.after` (the creation seam every path flows through — email signup, admin create-user, bulk import, SSO JIT, none of which need a session) and `session.create.before` (which settles BEFORE resolving the session's active organization, so a user's first session is not minted tenant-less — #8245). Assembling the deps per call site would let them drift on the policy, which is a live platform setting read through `getMembershipPolicy()` (#5152): a captured option leaves one seam auto-binding after an admin switched the deployment to `invite-only`. The session-seam call must also stay a pure ORDERING change — same reconciler, same policy, same target-org resolution — so `invite-only` and multi-org still bind nobody and those sessions still mint with no active organization, which is the legal state the #8247 ruling declares."
 }

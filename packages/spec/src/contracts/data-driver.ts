@@ -37,6 +37,18 @@ import type { QueryAST } from '../data/query.zod.js';
  *   declaration would be lying about a value that is `undefined` at runtime.
  *   No driver in this repository reads it; the object name arrives as argument
  *   one, which is the whole point.
+ *
+ * [#8220] **Provenance crosses this boundary ON the `where` tree, not beside
+ * it.** A `where` subtree may carry the filter-subtree provenance mark
+ * (`data/filter-subtree-provenance.ts`) under its declared symbol key, stamped
+ * by a read-scope merge boundary to say who authored that subtree. This type
+ * deliberately grows no `provenance` slot for it: the merge produces one tree
+ * whose ARMS differ in provenance, so a positional slot out here would break
+ * the moment any layer re-shaped the filter — while the in-tree mark travels
+ * by reference and is dropped by exactly the operations (copy, serialize,
+ * rewrite) after which no attestation could be trusted anyway. A driver that
+ * consumes it MUST fail closed: unmarked or ambiguous reads as policy-authored
+ * (withhold), never as the author's.
  */
 export type DriverQuery = Omit<QueryAST, 'object'>;
 

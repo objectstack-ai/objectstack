@@ -104,7 +104,24 @@ export const SysUserPreference = ObjectSchema.create({
   },
 
   indexes: [
-    { fields: ['user_id', 'key'], unique: true },
+    // [ADR-0120 D1, #8323] `'organization'`, NOT bare `true`.
+    //
+    // A preference belongs to a (user, organization) pair, not to a user
+    // globally: the same person in two organizations keeps two independent
+    // `ui.recent` rows. Bare `true` on a DECLARED index is the positional
+    // spelling of `'global'` — the listed columns verbatim (see
+    // `normalizeDeclaredIndex`, which prepends the organization key part only
+    // for the explicit spelling). It is NOT the field-level `true`, which has
+    // meant per-organization since #3696; that divergence is "the #4986 trap"
+    // named in `packages/lint/src/data-model-rules.ts`, and this declaration
+    // was one of its two instances in the platform's own objects.
+    //
+    // Measured consequence of the bare spelling: a user belonging to two
+    // organizations could never persist a key they already used in the first
+    // one — the write was refused by an index whose colliding row they cannot
+    // read, and `data-objectstack`'s `userState.save()` swallows the failure by
+    // design, so the preference silently stopped persisting.
+    { fields: ['user_id', 'key'], unique: 'organization' },
     { fields: ['user_id'], unique: false },
   ],
 

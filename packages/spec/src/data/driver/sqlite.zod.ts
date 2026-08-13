@@ -23,6 +23,7 @@ import { lazySchema } from '../../shared/lazy-schema';
 import { strictObject } from '../../shared/strict-object';
 import {
   driverConfigJsonSchema,
+  placeholderFree,
   READ_ONLY_BELONGS_ON_DATASOURCE,
   SCHEMA_MODE_BELONGS_ON_DATASOURCE,
   SqlAutoMigrateSchema,
@@ -65,8 +66,11 @@ export const SqliteConfigSchema = lazySchema(() => strictObject(
   /**
    * Database file path, or `:memory:` for an ephemeral in-process database.
    * A relative path resolves against the server's working directory.
+   * Placeholder-free since #8336: an unresolved `${DATA_DIR}` would silently
+   * create and open a literal `./${DATA_DIR}/…` path — a database in the
+   * wrong place with every signal saying it is configured.
    */
-  filename: z.string().default(':memory:')
+  filename: placeholderFree(z.string(), 'filename').default(':memory:')
     .describe('Database file path, or ":memory:" for an ephemeral database')
     .meta({ title: 'Filename' }),
 
@@ -112,8 +116,9 @@ export const SqliteWasmConfigSchema = lazySchema(() => strictObject(
   /**
    * Database file path, or `:memory:` for an ephemeral in-process database.
    * A file-backed wasm database persists according to {@link SqliteWasmPersistModeSchema}.
+   * Placeholder-free since #8336, same as the native sqlite `filename`.
    */
-  filename: z.string().default(':memory:')
+  filename: placeholderFree(z.string(), 'filename').default(':memory:')
     .describe('Database file path, or ":memory:" for an ephemeral database')
     .meta({ title: 'Filename' }),
 

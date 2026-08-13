@@ -379,6 +379,19 @@ export const ScreenFieldConfigSchema = lazySchema(() => strictObject({
       + 'typo the whole undeclared-key ladder descends from — three diagnostic passes for a field that silently '
       + 'never hid.',
   },
+  aliases: {
+    /**
+     * Action-side spellings (#8382) — the same `visible` / `showWhen` gap
+     * #7832 closed on six other `visibleWhen` shapes. One landing key here,
+     * no boolean sibling, so this is the simple rename case per this
+     * package's alias/guidance rule (`visible-when-alias-guidance.test.ts`
+     * header). `visibleIf` stays on `guidance` above (an exact match wins
+     * over `aliases` and keeps its bespoke prose); these two are plain
+     * renames onto the same target.
+     */
+    visible: 'visibleWhen',
+    showWhen: 'visibleWhen',
+  },
 }, {
   /** Field name — an item with an empty name is dropped. */
   name: z.string().describe('Field name (the flow variable the value binds to)'),

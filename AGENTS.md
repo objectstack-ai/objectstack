@@ -192,6 +192,23 @@ being in the session transcript. If you ever retype a lost change, prove identit
 insertion count is **not** byte-identity — then re-run the reverse verification from
 the committed state, so the red/green numbers you report are trustworthy.
 
+**⛔ And `git checkout <ref> -- <path>` STAGES what it retrieves — putting the file
+back with `cp` undoes only half of it.** It writes the **index** as well as the working
+tree, so after `git checkout origin/main -- <path>` … `cp` your copy back, the index
+holds `main`'s content while the tree holds yours. Measured here:
+`git status --porcelain` shows `MM` (staged *and* unstaged modifications on one path)
+and `git show :<path>` reads back `main`'s copy — but `git diff HEAD` is **clean** (it
+compares the tree with HEAD and never consults the index), the tests pass because they
+read the tree, and a bare `git commit` builds from the **index**: a commit that deletes
+your own fix, in a PR whose body accurately describes a change it does not contain (one
+real PR had 157 such deletions staged, caught only by the `MM`). Restore with
+`git checkout HEAD -- <path>` or `git restore --source=HEAD --staged --worktree <path>`
+— both reset index *and* tree — and read `git status --porcelain` before you commit;
+⛔ never trust `git diff HEAD` alone after a checkout-from-ref. Better still, don't
+stage it at all: `git restore --source=<ref> -- <path>` (no `--staged`) writes the tree
+only — porcelain shows a lone unstaged `M`, not `MM` — so prefer it when standing
+another ref's version up for a counterfactual.
+
 **Claim the issue BEFORE you write any code.** Assign it to yourself
 (`gh issue edit <n> --add-assignee @me`, or `issue_write` with `assignees`) as the
 *first* action of the task — before the worktree, before the first read. An unassigned

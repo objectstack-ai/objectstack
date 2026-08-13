@@ -187,7 +187,7 @@ in `systemPermissions[]`. That derivation still runs for back-compat (a
 reference with no declaration keeps resolving as a `managed_by:'platform'`
 placeholder), but an explicit `defineCapability` takes precedence and — for a
 pre-existing derived placeholder — **claims** it, upgrading the row to package
-provenance with the authored label/description/scope. This is the ADR-0094 D5
+provenance with the authored label/description/scope. This is the ADR-0066 D1
 direction: retire the implicit `managed_by`-guessing back-doors in favour of
 explicit, attributable declarations.
 

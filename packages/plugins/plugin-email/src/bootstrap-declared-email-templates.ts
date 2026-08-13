@@ -104,14 +104,57 @@ function uid(prefix: string): string {
 /**
  * Read declared `email_template` items from the ObjectQL registry (where the
  * manifest decomposition parks `stack.emailTemplates`), falling back to the
- * metadata service. Items may be wrapped as `{ content }` — unwrap to the raw
- * authoring object.
+ * metadata service. Both reads hand back the authoring document itself.
+ *
+ * ## [#8378] Why there is no `i?.content ?? i` here any more
+ *
+ * The sentence this docblock used to end with — "Items may be wrapped as
+ * `{ content }` — unwrap to the raw authoring object" — described an envelope
+ * with **no producer**. Re-measured at this seam rather than inherited from
+ * #7519's measurement of `MetadataFacade`:
+ *
+ *  - `registerMetadataCollections` (objectql `engine.ts`) registers each
+ *    `stack.emailTemplates` element as-is — `registerItem(type, item, 'name')`,
+ *    no boxing;
+ *  - `loadMetaFromDb` (metadata-protocol) registers
+ *    `convertStoredItem(JSON.parse(record.metadata))` — the parsed body, never
+ *    the `sys_metadata` row (whose body column is `metadata`, not `content`);
+ *  - `MetadataFacade`'s own interim boxing of non-object values, the one writer
+ *    that ever produced the shape, was removed by #8349.
+ *
+ * ## …and why removing it is a FIX rather than a tidy-up
+ *
+ * `content` IS a spelling an author can write on an email template — but as a
+ * **rejection alias**, not a conversion. `EmailTemplateDefinitionSchema`'s
+ * `strictObject({ aliases: { content: 'bodyHtml', … } })` table feeds
+ * `strictUnknownKeyError`, which runs only on the `unrecognized_keys` path and
+ * only builds a *message*; it never rewrites the key. Nor does the ADR-0087
+ * conversion layer — `packages/spec/src/conversions/registry.ts` has zero
+ * `email_template` entries, so `normalizeStackInput` emits no notice and leaves
+ * `content` exactly where the author wrote it.
+ *
+ * So the key survives to this read only through a door that skips validation
+ * (`defineStack(…, { strict: false })`, a hand-built manifest, a direct
+ * registry write) — and on precisely that path the unwrap was actively harmful,
+ * in two ways:
+ *
+ *  1. **It destroyed the author's own prescription.** With the unwrap, the
+ *     string reached `EmailTemplateDefinitionSchema.parse()` and the template
+ *     was refused with `Invalid input: expected object, received string`, and
+ *     the boot warning's `name` field came back `undefined` — the operator
+ *     could not even tell which template failed. Without it the document
+ *     reaches the parse intact and the schema answers what it was built to
+ *     answer: *Unrecognized key(s) on this email template: `content`. Did you
+ *     mean `content` → `bodyHtml`?*
+ *  2. **`content: ''` vanished.** Falsy but non-nullish, so it passed `??` and
+ *     then died at the `filter(Boolean)` below — the template was dropped with
+ *     no warning, no count, nothing (the ADR-0078 silent-loss shape).
  */
 function readDeclared(engine: any, metadataService: any, type: string): any[] {
   try {
     const reg = engine?._registry;
     if (reg?.listItems) {
-      const items = (reg.listItems(type) ?? []).map((i: any) => i?.content ?? i).filter(Boolean);
+      const items = (reg.listItems(type) ?? []).filter(Boolean);
       if (items.length > 0) return items;
     }
   } catch {
@@ -120,7 +163,7 @@ function readDeclared(engine: any, metadataService: any, type: string): any[] {
   try {
     const listed = metadataService?.list?.(type);
     const arr = typeof (listed as any)?.then === 'function' ? [] : (listed ?? []);
-    return Array.isArray(arr) ? arr.map((i: any) => i?.content ?? i).filter(Boolean) : [];
+    return Array.isArray(arr) ? arr.filter(Boolean) : [];
   } catch {
     return [];
   }

@@ -178,8 +178,8 @@ export const ProjectViews = defineView({
       type: 'simple',
       data,
       sections: [
-        { label: 'Project', columns: 2, fields: ['name', 'account', 'status', 'health', 'owner'] },
-        { label: 'Budget & Schedule', columns: 2, fields: ['budget', 'spent', 'start_date', 'end_date'] },
+        { name: 'project', label: 'Project', columns: 2, fields: ['name', 'account', 'status', 'health', 'owner'] },
+        { name: 'budget_schedule', label: 'Budget & Schedule', columns: 2, fields: ['budget', 'spent', 'start_date', 'end_date'] },
       ],
       // No subforms here: the Tasks subtable is derived from the data model —
       // showcase_task.project declares `inlineEdit: true`, so every standard

@@ -190,11 +190,38 @@ export const SysSession = ObjectSchema.create({
     }),
 
     // ── Secret (hidden by default) ──────────────────────────────
+    //
+    // [#7823] `internal: true` is what makes the description below TRUE. It was
+    // false on every build before this flag existed: `hidden` is a UI contract
+    // ("Hidden from default UI"), never a serialization one, and the engine's
+    // credential read mask collects by field TYPE — so this `text` column was
+    // collected by nothing and the token came back on the generic data path.
+    //
+    // Measured on a real engine: an ADMIN caller got this column on list, on
+    // get-by-id for ANOTHER user's session, and on an explicit `?select=id,token`.
+    // The disclosure is admin-cross-user — a member's own reads are self-scoped
+    // and the `sys_session_self` RLS policy already answers 404 across users.
+    //
+    // This column is a LIVE BEARER CREDENTIAL, which is where it differs from
+    // its `sys_api_key.key` sibling (#7728): that one is a SHA-256 hash, while
+    // the value here was replay-proven — a member's token, read off the data API
+    // by an admin, authenticates as that member when sent as `Authorization:
+    // Bearer <token>`. Disclosure is impersonation, not merely exposure.
+    //
+    // Still `text`, deliberately. `Field.secret` would encrypt at rest and
+    // replace the column with a `sys_secret` ref, destroying the by-token
+    // session lookup better-auth performs on every authenticated request — i.e.
+    // it would break authentication to fix a disclosure. `password` is inert
+    // here: the read mask skips `password` on `managedBy: 'better-auth'`
+    // objects, and collects by TYPE anyway, so a `text` column is never
+    // collected regardless. `internal` is read-side only: storage, the unique
+    // index on `token` and the verifier's filter are all untouched.
     token: Field.text({
       label: 'Session Token',
       required: true,
       hidden: true,
       readonly: true,
+      internal: true,
       description: 'Opaque session token — never exposed in UI',
       group: 'Secret',
     }),

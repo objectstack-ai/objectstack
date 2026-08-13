@@ -15,6 +15,10 @@ export * from './suggestions.zod';
 export * from './error-map.zod';
 export * from './external-errors';
 export * from './metadata-collection.zod';
+// [#7894] The URL-spelling half of the metadata type key, split OUT of
+// metadata-collection.zod's manifest-collection map. Read by the `/meta`
+// boundary fold only.
+export * from './metadata-url-spelling';
 export * from './lazy-schema';
 export * from './expression.zod';
 export * from './visibility';

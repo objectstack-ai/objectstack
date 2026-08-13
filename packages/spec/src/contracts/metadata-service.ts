@@ -226,38 +226,47 @@ export interface IMetadataService {
      * `options.notify === false` — see {@link MetadataWriteOptions.notify}
      * before silencing it.
      *
-     * ## The `name` ARGUMENT is the effective key (#7378)
+     * ## The #7378 register contract (maintainer ruling 2026-08-12, three cells)
      *
-     * `name` — not `data.name` — is what this item is stored under, and it is
+     * `name` — the ARGUMENT — is what this item is stored under, and it is
      * what {@link get}, {@link exists}, {@link listNames} and
-     * {@link unregister} address it by. When a document carries a `name` of its
-     * own and the two disagree, **the argument wins and `data.name` never
-     * overrides it**: `register(t, n, d)` followed by `get(t, n)` holds for
-     * every `d`, including one whose own `name` says something else, and
-     * including a `data` that is not an object at all and so has no `name` to
-     * derive (`data` is declared `unknown`, not `object`).
+     * {@link unregister} address it by. The ruling closes the three ways an
+     * implementation used to bend that, and every shipped implementation
+     * enforces all three through one shared guard
+     * (`assertMetadataRegisterContract` / `canonicalMetadataServiceType`,
+     * `@objectstack/core` — its header carries the maintainer's verbatim
+     * ruling):
      *
-     * An implementation whose store derives the key from the document —
-     * `SchemaRegistry`, whose objects are keyed by their own identity — must
-     * reconcile the document to the argument rather than the other way round;
-     * what it may NOT do is accept the write and file it somewhere the
-     * caller's own `name` cannot reach it. `METADATA_ROUNDTRIP_CASES`
-     * (`./metadata-service-roundtrip-conformance`) is the executable form of
-     * this paragraph.
+     * - **A `data.name` disagreeing with the `name` argument is REFUSED
+     *   loudly** — the standard catalog's `VALIDATION_ERROR`, status 400, a
+     *   locating message naming the type, the argument and BOTH disagreeing
+     *   spellings, and nothing stored. A disagreement is almost always an
+     *   authoring bug, and resolving it silently in either direction can file
+     *   the item under a key the caller never wrote. A document with NO
+     *   `name` of its own registers under the argument — absence is not a
+     *   disagreement.
+     * - **A non-object `data` is REFUSED** (primitives, `null`, arrays) — the
+     *   same envelope — never accepted-and-dropped and never coerced into
+     *   storability. `data` is declared `unknown`, so this is a runtime
+     *   refusal, not a type error; arrays are refused with primitives because
+     *   an array carries no document identity and `{ ...[a, b] }` is
+     *   `{ 0: a, 1: b }` corruption.
+     * - **Type stores key on the CANONICAL type**: a plural manifest spelling
+     *   folds to the singular metadata type name (`PLURAL_TO_SINGULAR`,
+     *   `@objectstack/spec/shared`) before any store decision — converged
+     *   with `check:meta-type-normalized`'s enforced direction — so
+     *   `register('objects', n, d)` and `get('object', n)` address one store.
      *
-     * Maintainer ruling of 2026-08-11 on #7378, option (a), taken because it is
-     * what 4 of the 5 measured implementations already did and what this
-     * member's own `@param name` already implied. Option (c) — **refuse a
-     * `data.name !== name` disagreement loudly** instead of silently resolving
-     * it either way — is recorded there as the long-term strictness candidate
-     * and PARKED for v18 consideration: it is the only answer that cannot
-     * misplace an item, and it is a behaviour change on every implementation,
-     * so it is not this contract's rule today. Do not implement it ahead of
-     * that ruling.
+     * This supersedes the 2026-08-11 option-(a) ruling (argument silently
+     * wins over a disagreeing `data.name`; non-object `data` accepted), which
+     * an earlier revision of this TSDoc stated as current.
+     * `METADATA_ROUNDTRIP_CASES` (`./metadata-service-roundtrip-conformance`)
+     * is the executable form of this section, replayed against the contract's
+     * own reference double and every shipped implementation.
      *
-     * @param type - Metadata type (e.g. 'object', 'view', 'flow')
+     * @param type - Metadata type (e.g. 'object', 'view', 'flow'); a plural spelling folds to the canonical singular
      * @param name - Item name/identifier (snake_case) — the effective storage key
-     * @param data - The metadata definition to register; a `name` it carries does NOT displace the argument
+     * @param data - The metadata definition to register: a plain object whose own `name`, if present, agrees with the `name` argument — anything else is refused
      * @param options - Write options; `{ notify: false }` suppresses the watcher event
      */
     register(type: string, name: string, data: unknown, options?: MetadataWriteOptions): Promise<void>;
@@ -284,12 +293,13 @@ export interface IMetadataService {
     /**
      * Get a metadata item by type and name
      *
-     * `name` is the key {@link register} was called with — the ARGUMENT, never
-     * a `name` the stored document happens to carry (#7378, maintainer ruling
-     * 2026-08-11). So `register(t, n, d)` → `get(t, n)` resolves for every `d`,
-     * and the document's own `name` disagreeing with `n` changes nothing about
-     * where it is found. See {@link register} for the full statement and for
-     * the strictness option parked behind it.
+     * `name` is the key {@link register} was called with — the ARGUMENT. A
+     * `data.name` disagreeing with it is refused at register time (#7378,
+     * maintainer ruling 2026-08-12), so a stored document's own `name`, when
+     * it has one, always agrees with the key it is found under. `type` folds
+     * to the canonical singular spelling exactly as `register` folds it, so
+     * both spellings of a type address one store. See {@link register} for
+     * the full three-cell statement.
      *
      * `undefined` is AMBIGUOUS by construction — it means "not found" *and*
      * "every loader that could hold it failed". Prefer {@link getDiagnosed}

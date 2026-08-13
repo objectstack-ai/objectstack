@@ -16,21 +16,23 @@
 // nothing wires them), and the seed cases now measure the REAL gate instead of
 // a mirror of it.
 //
-// ## Why cases 1-3 still run a MIRROR of the gate
+// ## Why cases about unwired types consume the REAL snapshot builder
 //
 // No rule declares `object` / `permission` / `book` in `runtimeTypes` today —
 // that is the state #8310 is about — so `runRuntimeAuthoringRules` cannot be
 // asked what this block would find there: it filters the registry by declared
-// type and correctly returns nothing for them. The snapshot construction is
-// therefore mirrored from `runtime-gate.ts` in `wouldGateAdd()` below, and
-// `the mirror still matches the real gate` pins the two together against a type
-// that IS wired, so the mirror cannot drift into measuring something the gate
-// would not do.
+// type and correctly returns nothing for them. `wouldGateAdd()` below
+// therefore drives `buildRuntimeWriteSnapshots` — the gate's OWN construction,
+// exported under #8309 — through this block directly. Before #8309 this file
+// kept a hand-written mirror of the snapshot logic instead, which is exactly
+// the drift surface #8309's snapshot change would have invalidated silently;
+// `the mirror still matches the real gate` keeps pinning builder-vs-gate
+// parity against a type that IS wired.
 //
 // ## What each case is evidence FOR
 //
 //  1. `object` / `permission` / `book` / `position` / `app` still reach no rule
-//     here — the residual state #8310 will change, stated once so the mirrored
+//     here — the residual state #8310 will change, stated once so the builder
 //     cases below read as "what would happen", not "what happens".
 //  2. `an OWD-less object write would be REFUSED` — the positive control for the
 //     escalation. This is why the `object` half of the move is a strictness
@@ -38,12 +40,14 @@
 //     runtime create door emits (`METADATA_CREATE_SEEDS.object` carries no
 //     `sharingModel`), and declaring the type turned 26 writes into 422s across
 //     8 files of `@objectstack/metadata-protocol`'s suite when measured.
-//  3. `a permission-set write INVENTS findings` — the positive control for the
-//     other blocker. The three cross-collection rules compare against a
-//     collection `RuntimeStackContext` does not carry, so the per-write verdict
-//     is not a narrower version of the whole-stack verdict: it is a different
-//     and wrong one. Over the shipped corpus this was 38 findings against the
-//     whole-stack run's 4; the fixture reproduces the mechanism in miniature.
+//  3. `a permission-set write agrees with the whole-stack verdict` — #8309's
+//     acceptance. The three cross-collection rules compare against sibling
+//     collections the snapshot now carries (`permissions`/`books`), so the
+//     per-write verdict for them equals the whole-stack one. The case ALSO
+//     reproduces the pre-#8309 defect in miniature (an objects-only context
+//     still invents the phantom finding — the 38-vs-4 mechanism, PR #7886),
+//     which is the reverse verification kept live in-tree: deleting the
+//     enrichment turns the agreement half red, in the predicted direction.
 //  4. `the ADR-0091 seed pair now crosses the runtime publish gate (#8307)` —
 //     the pair enforces for `seed`-typed writes through the REAL gate, on the
 //     `seed` → `data` stack key corrected under #7886/#8308, and the diff
@@ -59,12 +63,15 @@ import { getMetadataCreateSeed } from '@objectstack/spec/kernel';
 
 import { AUTHORING_RULES } from './authoring-rules.js';
 import {
+  buildRuntimeWriteSnapshots,
   runRuntimeAuthoringRules,
   runtimeAuthoringRulesFor,
   runtimeGatedTypes,
   stackKeyForType,
+  type RuntimeStackContext,
 } from './runtime-gate.js';
 import {
+  SECURITY_BOOK_AUDIENCE_UNKNOWN_SET,
   SECURITY_DELEGATION_MISSING_REASON,
   SECURITY_GRANT_EXPIRED_AT_AUTHORING,
   SECURITY_MASTER_DETAIL_UNGRANTED,
@@ -82,33 +89,29 @@ const ENTRY = AUTHORING_RULES.find((r) => r.name === 'validateSecurityPosture')!
 const fingerprint = (f: SecurityFinding) => `${f.rule}\u0000${f.where}\u0000${f.path}\u0000${f.message}`;
 
 /**
- * What the runtime publish gate WOULD attribute to one write landing on
- * `stackKey`, against `contextObjects` as the live object universe.
+ * What the runtime publish gate WOULD attribute to one write of `type`,
+ * against `context` as the live universe — this block's verdict only.
  *
- * Mirrors `runRuntimeAuthoringRules`: same baseline/candidate construction,
- * same replace-not-erase rule when the written type IS the context collection,
- * same set difference. Pinned against the real function below.
- *
- * Takes the stack KEY rather than the metadata type because two of the
- * collections this block reads have no `TYPE_TO_STACK_KEY` entry at all — see
- * `the gate cannot address every collection this block reads`, which measures
- * that rather than papering over it with a speculative mapping.
+ * [#8309] Drives `buildRuntimeWriteSnapshots`, the gate's OWN baseline/
+ * candidate construction, rather than a hand-kept mirror of it: same
+ * replace-not-erase rule when the written type IS a context collection, same
+ * set difference. `the mirror still matches the real gate (flow)` pins this
+ * helper against `runRuntimeAuthoringRules` on a wired type, so the two ways
+ * of asking cannot drift apart.
  */
-function wouldGateAdd(stackKey: string, item: AnyRec, contextObjects: AnyRec[] = []): SecurityFinding[] {
-  const itemName = typeof item.name === 'string' ? item.name : undefined;
-  const writesIntoContext = stackKey === 'objects';
-  const baselineObjects = writesIntoContext
-    ? contextObjects.filter((o) => !itemName || o?.name !== itemName)
-    : contextObjects;
-  const baseline: AnyRec = { objects: baselineObjects };
-  const candidate: AnyRec = writesIntoContext
-    ? { objects: [...baselineObjects, item] }
-    : { objects: baselineObjects, [stackKey]: [item] };
-  const before = new Set(validateSecurityPosture(baseline).map(fingerprint));
-  return validateSecurityPosture(candidate).filter((f) => !before.has(fingerprint(f)));
+function wouldGateAdd(type: string, item: AnyRec, context: RuntimeStackContext = {}): SecurityFinding[] {
+  const snapshots = buildRuntimeWriteSnapshots({ type, item, context });
+  expect(snapshots, `no snapshot for type '${type}' — is its TYPE_TO_STACK_KEY entry gone?`).not.toBeNull();
+  const before = new Set(validateSecurityPosture(snapshots!.baseline).map(fingerprint));
+  return validateSecurityPosture(snapshots!.candidate).filter((f) => !before.has(fingerprint(f)));
 }
 
-/** Two permission sets that between them grant the detail — the ordinary shape. */
+/**
+ * Two permission sets that between them grant the detail, plus a book gated on
+ * one of them — the ordinary shape, and the miniature of PR #7886's 38-vs-4
+ * measurement: any per-write snapshot that drops a sibling collection makes
+ * one of the three cross-collection rules invent a finding here.
+ */
 const TWO_SET_STACK = {
   objects: [
     { name: 'shop_invoice', label: 'Invoice', sharingModel: 'private', fields: { title: { type: 'text', label: 'T' } } },
@@ -130,6 +133,16 @@ const TWO_SET_STACK = {
       },
     },
   ],
+  books: [
+    { name: 'billing_guide', label: 'Billing Guide', audience: { permissionSet: 'shop_billing' } },
+  ],
+};
+
+/** {@link TWO_SET_STACK} as the gate's live-universe context. */
+const TWO_SET_CONTEXT: RuntimeStackContext = {
+  objects: TWO_SET_STACK.objects,
+  permissions: TWO_SET_STACK.permissions,
+  books: TWO_SET_STACK.books,
 };
 
 describe('validateSecurityPosture at the runtime publish surface (#7576, crossed for `seed` under #8307)', () => {
@@ -177,26 +190,33 @@ describe('validateSecurityPosture at the runtime publish surface (#7576, crossed
     expect(runtimeGatedTypes()).toContain('seed');
   });
 
-  it('the gate cannot address every collection this block reads', () => {
-    // A second, independent way the move is not a one-field edit: `permission`
-    // and `book` are runtime-creatable metadata types, and the gate's
-    // type→stack-key table does not name them at all. Declaring either in
-    // `runtimeTypes` without adding the mapping fails the wiring guard's
-    // `every runtime-gated metadata type maps to a stack key` case — which is
-    // the guard working, since without a mapping `runRuntimeAuthoringRules`
-    // returns an empty verdict and the rules would be wired onto nothing.
-    expect(stackKeyForType('permission')).toBeNull();
-    expect(stackKeyForType('book')).toBeNull();
-    // The two the block CAN reach today, one of them corrected under this card.
+  it('[#8309] the gate can now address `permission` and `book` — the wiring half of the card', () => {
+    // Until #8309 this case pinned the OPPOSITE: `stackKeyForType` answered
+    // null for both, so declaring either in `runtimeTypes` would have wired
+    // the rules onto nothing (the state the wiring guard's `every
+    // runtime-gated metadata type maps to a stack key` case refuses). The
+    // mappings now exist AHEAD of the registration — the `seed` order (#7576 →
+    // #8307) repeated — so #8310's flip is a registry data edit. The entries
+    // are inert until then: `runRuntimeAuthoringRules` filters by declared
+    // type before consulting the table, and case 1 above pins that nothing
+    // declares these types yet.
+    expect(stackKeyForType('permission')).toBe('permissions');
+    expect(stackKeyForType('book')).toBe('books');
     expect(stackKeyForType('object')).toBe('objects');
     expect(stackKeyForType('seed')).toBe('data');
+    // The collections this block reads that stay UNMAPPED, measured: only the
+    // excluded-by-family `security-role-word` reads `positions`/`apps`, so
+    // #8309 deliberately does not carry or map them (whole family or not at
+    // all — #8310's call).
+    expect(stackKeyForType('position')).toBeNull();
+    expect(stackKeyForType('app')).toBeNull();
   });
 
   it('an OWD-less object write WOULD be refused — the strictness #8310 would escalate', () => {
     // The body `METADATA_CREATE_SEEDS.object` carried BEFORE #8308: name,
     // label, pluralLabel, fields — and no `sharingModel`. Kept literal as the
     // refusal's positive control.
-    const added = wouldGateAdd('objects', { name: 'new_object', label: 'New Object', fields: {} });
+    const added = wouldGateAdd('object', { name: 'new_object', label: 'New Object', fields: {} });
     expect(added.map((f) => f.rule)).toEqual([SECURITY_OWD_UNSET]);
     expect(added[0].severity).toBe('error');
     expect(added[0].path).toBe('objects[0].sharingModel');
@@ -204,7 +224,7 @@ describe('validateSecurityPosture at the runtime publish surface (#7576, crossed
     // And the same write with the OWD authored is clean, so the refusal is
     // about the missing decision and not about object writes as such.
     expect(
-      wouldGateAdd('objects', { name: 'new_object', label: 'New Object', sharingModel: 'private', fields: {} }),
+      wouldGateAdd('object', { name: 'new_object', label: 'New Object', sharingModel: 'private', fields: {} }),
     ).toEqual([]);
   });
 
@@ -217,23 +237,62 @@ describe('validateSecurityPosture at the runtime publish surface (#7576, crossed
     // re-opens THIS pin rather than passing silently.
     const seed = getMetadataCreateSeed('object') as AnyRec;
     expect(seed.sharingModel).toBe('private');
-    expect(wouldGateAdd('objects', seed)).toEqual([]);
+    expect(wouldGateAdd('object', seed)).toEqual([]);
   });
 
-  it('a permission-set write INVENTS a finding the whole-stack run does not', () => {
-    // Whole stack: `shop_clerk` grants the detail, so nothing is ungranted.
+  it('[#8309] a permission-set write AGREES with the whole-stack verdict — the phantom is gone', () => {
+    // Whole stack: `shop_clerk` grants the detail and the book's audience
+    // resolves, so the three cross-collection rules find nothing.
     expect(
       validateSecurityPosture(TWO_SET_STACK).filter((f) => f.rule === SECURITY_MASTER_DETAIL_UNGRANTED),
     ).toEqual([]);
 
-    // One write of the set that does NOT grant it, against the same objects:
-    // the snapshot cannot see `shop_clerk`, so the detail reads as ungranted by
-    // anyone. The verdict is not narrower than the whole-stack one — it is
-    // different, and wrong.
-    const added = wouldGateAdd('permissions', TWO_SET_STACK.permissions[0], TWO_SET_STACK.objects);
-    expect(added.map((f) => f.rule)).toEqual([SECURITY_MASTER_DETAIL_UNGRANTED]);
+    // The pre-#8309 defect, kept executable as the in-tree reverse
+    // verification (predicted direction: MORE findings than whole-stack, not
+    // fewer): a context carrying objects only — exactly what the gate used to
+    // build — cannot see `shop_clerk`, so the detail reads as ungranted by
+    // anyone. This is PR #7886's 38-vs-4 mechanism in miniature; deleting the
+    // snapshot enrichment makes the agreement half below fail INTO this shape.
+    const phantoms = wouldGateAdd('permission', TWO_SET_STACK.permissions[0], {
+      objects: TWO_SET_STACK.objects,
+    });
+    expect(phantoms.map((f) => f.rule)).toEqual([SECURITY_MASTER_DETAIL_UNGRANTED]);
+    expect(phantoms[0].severity).toBe('warning');
+    expect(phantoms[0].where).toBe('object "shop_invoice_line"');
+
+    // #8309's acceptance: the same write against the FULL context — the
+    // snapshot the gate now builds — adds nothing, agreeing with the
+    // whole-stack run. Both directions: the set that does not grant the
+    // detail, and the one that does.
+    expect(wouldGateAdd('permission', TWO_SET_STACK.permissions[0], TWO_SET_CONTEXT)).toEqual([]);
+    expect(wouldGateAdd('permission', TWO_SET_STACK.permissions[1], TWO_SET_CONTEXT)).toEqual([]);
+  });
+
+  it('[#8309] a permission-set UPDATE replaces its stored self — no duplicate-name double set', () => {
+    // Replace-not-erase now applies to `permissions` the way it always did to
+    // `objects`: re-publishing `shop_clerk` unchanged must judge a universe
+    // with ONE `shop_clerk`, not two, and attribute nothing to the write.
+    expect(wouldGateAdd('permission', { ...TWO_SET_STACK.permissions[1] }, TWO_SET_CONTEXT)).toEqual([]);
+  });
+
+  it('[#8309] a book write resolves its audience against the live permission sets', () => {
+    // The third cross-collection rule. Against the full context the audience
+    // resolves and the write is clean — agreeing with the whole-stack run.
+    const book = { name: 'clerk_handbook', label: 'Clerk Handbook', audience: { permissionSet: 'shop_clerk' } };
+    expect(wouldGateAdd('book', book, TWO_SET_CONTEXT)).toEqual([]);
+
+    // A genuinely dangling audience is still caught — enrichment kills the
+    // phantom, not the rule.
+    const dangling = { name: 'ghost_guide', label: 'Ghost Guide', audience: { permissionSet: 'no_such_set' } };
+    const added = wouldGateAdd('book', dangling, TWO_SET_CONTEXT);
+    expect(added.map((f) => f.rule)).toEqual([SECURITY_BOOK_AUDIENCE_UNKNOWN_SET]);
     expect(added[0].severity).toBe('warning');
-    expect(added[0].where).toBe('object "shop_invoice_line"');
+
+    // And the pre-#8309 shape for books, kept as the reverse-verification
+    // twin: with no `permissions` in the context every `{ permissionSet }`
+    // audience read as unknown, so a CLEAN book write drew the same warning.
+    const phantoms = wouldGateAdd('book', book, { objects: TWO_SET_STACK.objects });
+    expect(phantoms.map((f) => f.rule)).toEqual([SECURITY_BOOK_AUDIENCE_UNKNOWN_SET]);
   });
 
   it('[#8307] the ADR-0091 seed pair is REFUSED at the real runtime gate, on the corrected `data` stack key', () => {
@@ -256,7 +315,7 @@ describe('validateSecurityPosture at the runtime publish surface (#7576, crossed
     // real gate now that both are askable — this is the mirror/gate parity
     // pin `the mirror still matches the real gate (flow)` establishes for
     // `flow`, repeated for the type this card actually wires.
-    expect(wouldGateAdd(stackKeyForType('seed')!, expiredGrant).map((f) => f.rule)).toEqual(
+    expect(wouldGateAdd('seed', expiredGrant).map((f) => f.rule)).toEqual(
       real.errors.map((f) => f.rule),
     );
 
@@ -325,9 +384,9 @@ describe('validateSecurityPosture at the runtime publish surface (#7576, crossed
     // rules and the two seed rules are self-contained, and it is the THREE
     // cross-collection rules that need a snapshot the gate does not build. A
     // seed write reaches no permission-set rule and vice versa.
-    expect(wouldGateAdd('data', { object: 'crm_account', records: [{ name: 'a' }] })).toEqual([]);
+    expect(wouldGateAdd('seed', { object: 'crm_account', records: [{ name: 'a' }] })).toEqual([]);
     expect(
-      wouldGateAdd('objects', {
+      wouldGateAdd('object', {
         name: 'shop_line',
         label: 'Line',
         sharingModel: 'controlled_by_parent',

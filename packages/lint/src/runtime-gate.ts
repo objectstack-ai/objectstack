@@ -91,9 +91,30 @@ const TYPE_TO_STACK_KEY: Readonly<Record<string, string>> = {
   // over. The ADR-0091 seed pair now DOES declare `seed` (#8307), so this
   // mapping is load-bearing today, not merely inert-and-correct.
   seed: 'data',
+  // [#8309] `permission`/`book` map ahead of their registration (#8310), the
+  // same order `seed` arrived in: the mapping plus the enriched snapshot below
+  // are this card's halves, and the `runtimeTypes` flip is deliberately NOT —
+  // a mapping without a declaring rule is inert by construction (the gate
+  // filters by `runtimeTypes` before it ever consults this table), while a
+  // declaration without the mapping is the wired-onto-nothing state the wiring
+  // guard refuses. Landing the mapping first keeps #8310 a registry data edit.
+  permission: 'permissions',
+  book: 'books',
 };
 
-/** Everything the gate needs from the host runtime to build a snapshot. */
+/**
+ * Everything the gate needs from the host runtime to build a snapshot.
+ *
+ * [#8309] Each key here doubles as the stack key the collection occupies in
+ * the per-write snapshot — see {@link CONTEXT_STACK_KEYS}, which is derived
+ * from this shape and keeps the two from drifting. The set is deliberately
+ * BOUNDED to what the runtime-wired rules actually read (measured, not
+ * projected): the three cross-collection security rules compare
+ * objects × permissions × books, and nothing on the runtime surface reads
+ * `positions` / `apps` — so those are NOT carried. Widening the snapshot is a
+ * one-key edit here plus a `CONTEXT_STACK_KEYS` entry, made when a rule that
+ * reads the collection actually crosses the wall, never in advance.
+ */
 export interface RuntimeStackContext {
   /**
    * The live object declarations (registry + tenant overlay), as authored.
@@ -104,7 +125,36 @@ export interface RuntimeStackContext {
    * package's config file and has to hedge.
    */
   objects?: readonly unknown[];
+  /**
+   * The live permission-set declarations (stack key `permissions`).
+   *
+   * [#8309] The collection the three cross-collection security rules compare
+   * against. Without it a per-write snapshot holds exactly ONE permission set
+   * (the written item), so `security-master-detail-ungranted` reads every
+   * detail object the tenant's OTHER sets grant as ungranted — measured as 38
+   * phantom findings per-write vs 4 whole-stack over the shipped corpus
+   * (PR #7886). `security-book-audience-unknown-set` needs the set NAMES to
+   * resolve a book's `audience.permissionSet` for the same reason.
+   */
+  permissions?: readonly unknown[];
+  /**
+   * The live documentation-book declarations (stack key `books`).
+   *
+   * [#8309] Carried so a `book` write is judged with its siblings present and
+   * replace-not-erase semantics apply to it (an updated book must not read as
+   * a second book of the same name), and so book-derived findings cancel in
+   * the differential for every other write type.
+   */
+  books?: readonly unknown[];
 }
+
+/**
+ * The context collections the snapshot carries, in stack-key order. Derived
+ * facts: every entry is a key of {@link RuntimeStackContext} AND a stack key
+ * some runtime-wired rule reads (`runtime-gate.test.ts` pins membership).
+ */
+const CONTEXT_STACK_KEYS = ['objects', 'permissions', 'books'] as const satisfies
+  readonly (keyof RuntimeStackContext)[];
 
 /** One rule's verdict at the runtime surface, carrying which rule produced it. */
 export interface RuntimeGateResult {
@@ -145,6 +195,70 @@ export function stackKeyForType(type: string): string | null {
 
 /** Stable identity of a finding, so two rule passes can be set-differenced. */
 const fingerprint = (f: AuthoringFinding) => `${f.rule}\u0000${f.where}\u0000${f.path}\u0000${f.message}`;
+
+/**
+ * The baseline/candidate stack pair the gate judges one write against, or
+ * `null` when no snapshot can be built (unmapped type, non-object body).
+ *
+ * Exported (#8309) so the tests that measure per-write vs whole-stack
+ * agreement exercise the REAL construction instead of a hand-kept mirror —
+ * `validate-security-posture.runtime-surface.test.ts` used to mirror this
+ * logic in a local `wouldGateAdd`, which is exactly the drift surface a
+ * snapshot change here would have missed.
+ *
+ * Shape:
+ * - The baseline carries every context collection ({@link CONTEXT_STACK_KEYS})
+ *   WITHOUT the written item. Anything found there is somebody else's
+ *   pre-existing condition and is not this write's to answer for (#4463 D4 —
+ *   the gate blocks new writes, never stored rows). Carrying the sibling
+ *   collections in BOTH passes is what makes their findings cancel in the
+ *   diff — and what gives the cross-collection rules the sibling collection
+ *   they compare against, so the per-write verdict agrees with the
+ *   whole-stack one instead of inventing findings (the 38-vs-4 measurement,
+ *   PR #7886).
+ * - The candidate is the same context with this write's item added. When the
+ *   written type IS one of the context collections (an `object`, `permission`
+ *   or `book` write), the item REPLACES its stored self rather than appearing
+ *   beside it — otherwise an update reads as a duplicate name, and for
+ *   `objects` every lookup in the tenant's model would read as dangling. For
+ *   any other type the item is the sole member of its own collection, so
+ *   index-0 paths in the findings are unambiguously this write.
+ *
+ * Cost (the #4463 D2 question, measured rather than assumed): built per
+ * write, never cached. The construction is one filter + one spread over the
+ * written type's collection; the sibling collections are passed by reference.
+ * Over the shipped corpus (30 objects, 10 permission sets, 1 book) that is
+ * microseconds on a PUBLISH (never a draft autosave, D1) — a cache would buy
+ * nothing and would need cross-org invalidation the gate has no seam for.
+ */
+export function buildRuntimeWriteSnapshots(args: {
+  /** Singular metadata type of the item being written. */
+  type: string;
+  /** The item body as it will be persisted. */
+  item: unknown;
+  /** Live resolution context from the host runtime. */
+  context?: RuntimeStackContext;
+}): { baseline: AnyRec; candidate: AnyRec } | null {
+  const stackKey = stackKeyForType(args.type);
+  if (!stackKey) return null;
+  if (!args.item || typeof args.item !== 'object') return null;
+
+  const item = args.item as AnyRec;
+  const itemName = typeof item.name === 'string' ? item.name : undefined;
+
+  const baseline: AnyRec = {};
+  for (const key of CONTEXT_STACK_KEYS) {
+    const collection = (args.context?.[key] ?? []) as readonly AnyRec[];
+    baseline[key] = key === stackKey
+      ? collection.filter((o) => !itemName || o?.name !== itemName)
+      : collection;
+  }
+  const candidate: AnyRec = {
+    ...baseline,
+    [stackKey]: [...((baseline[stackKey] as readonly AnyRec[] | undefined) ?? []), item],
+  };
+  return { baseline, candidate };
+}
 
 function runRules(
   rules: readonly AuthoringRule[],
@@ -199,38 +313,22 @@ export function runRuntimeAuthoringRules(args: {
   const empty: RuntimeGateResult = { errors: [], advisories: [], rulesRun: [] };
   if (rules.length === 0) return empty;
 
-  const stackKey = stackKeyForType(args.type);
-  if (!stackKey) return empty;
-  if (!args.item || typeof args.item !== 'object') return empty;
+  // The baseline/candidate construction — replace-not-erase for a write into
+  // a context collection, the written item as sole member of its own
+  // collection otherwise, every context collection present in BOTH passes so
+  // sibling-derived findings cancel in the diff. See the builder's own
+  // docblock; it is exported precisely so tests exercise this construction
+  // and not a mirror of it.
+  const snapshots = buildRuntimeWriteSnapshots({
+    type: args.type,
+    item: args.item,
+    ...(args.context !== undefined ? { context: args.context } : {}),
+  });
+  if (!snapshots) return empty;
 
-  const item = args.item as AnyRec;
-  const itemName = typeof item.name === 'string' ? item.name : undefined;
-  const contextObjects = (args.context?.objects ?? []) as AnyRec[];
   const ctx: AuthoringRuleContext = { sduiManifest: args.sduiManifest };
-
-  // When the written type IS the context collection (an `object` write), the
-  // item must REPLACE its stored self rather than erase the other objects —
-  // otherwise every lookup in the tenant's model reads as dangling. Written
-  // generally so widening `runtimeTypes` to `object` is a data edit, not a
-  // rewrite of this function.
-  const writesIntoContext = stackKey === 'objects';
-  const baselineObjects = writesIntoContext
-    ? contextObjects.filter((o) => !itemName || o?.name !== itemName)
-    : contextObjects;
-
-  // Baseline: the resolution context WITHOUT the written item. Anything found
-  // here is somebody else's pre-existing condition and is not this write's to
-  // answer for (#4463 D4 — the gate blocks new writes, never stored rows).
-  const baseline: AnyRec = { objects: baselineObjects };
-  // Candidate: the same context with this write's item added. For a non-object
-  // type it is the SOLE member of its own collection, so index-0 paths in the
-  // findings are unambiguously this write.
-  const candidate: AnyRec = writesIntoContext
-    ? { objects: [...baselineObjects, item] }
-    : { objects: baselineObjects, [stackKey]: [item] };
-
-  const before = new Set(runRules(rules, baseline, ctx).map(fingerprint));
-  const added = runRules(rules, candidate, ctx).filter((f) => !before.has(fingerprint(f)));
+  const before = new Set(runRules(rules, snapshots.baseline, ctx).map(fingerprint));
+  const added = runRules(rules, snapshots.candidate, ctx).filter((f) => !before.has(fingerprint(f)));
 
   return {
     errors: added.filter((f) => f.severity === 'error'),

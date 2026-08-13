@@ -18,6 +18,7 @@
     "CriteriaSharingRule (type)",
     "CriteriaSharingRuleParsed (type)",
     "CriteriaSharingRuleSchema (const)",
+    "EXPLAIN_BATCH_MAX_RECORD_IDS (const)",
     "EffectiveObjectPermission (type)",
     "EffectiveObjectPermissionSchema (const)",
     "ExplainDecision (type)",

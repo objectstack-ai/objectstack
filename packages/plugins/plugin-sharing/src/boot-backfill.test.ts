@@ -26,8 +26,11 @@ function makeEngine() {
   const ensure = (n: string) => (tables[n] ??= []);
   function matches(row: Row, f: any): boolean {
     if (!f || typeof f !== 'object') return true;
-    if (Array.isArray(f.$or)) return f.$or.some((x: any) => matches(row, x));
-    if (Array.isArray(f.$and)) return f.$and.every((x: any) => matches(row, x));
+    // `$or` / `$and` are conjoined WITH their sibling keys, the way a real
+    // driver ANDs them — a short-circuiting `return` here would discard every
+    // sibling equality key in the same object. See #7620.
+    if (Array.isArray(f.$or) && !f.$or.some((x: any) => matches(row, x))) return false;
+    if (Array.isArray(f.$and) && !f.$and.every((x: any) => matches(row, x))) return false;
     for (const [k, v] of Object.entries(f)) {
       if (k === '$or' || k === '$and') continue;
       const rv = row[k];

@@ -2,6 +2,9 @@
 
 import type { AnalyticsQuery, AnalyticsResult } from '@objectstack/spec/contracts';
 import type { Cube } from '@objectstack/spec/data';
+// [#8220] The read-scope provenance mark: `withReadScope` below is one of the
+// two merge boundaries that stamp it.
+import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 import type { AnalyticsStrategy, StrategyContext } from './types.js';
 import {
   invalidFilterError,
@@ -454,11 +457,21 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     filter: Record<string, unknown>,
     ctx: StrategyContext,
   ): Record<string, unknown> | undefined {
-    const userFilter = Object.keys(filter).length > 0 ? filter : undefined;
+    // [#8220, A of #7929] This is the second read-scope MERGE BOUNDARY (the
+    // first is plugin-security's CRUD injection), so the provenance mark is
+    // stamped here: the scope is `'policy'` — a cross-field refusal from
+    // inside it keeps the #7929 redaction — and the strategy-built user filter
+    // is `'author'`: every name in it came from the caller's own query
+    // (dimensions, measures, `where`, time windows) through this class's own
+    // compilation, which is exactly the vouch the mark declares. Unmarked
+    // content anywhere else stays withheld downstream, by the mark's declared
+    // fail direction.
+    const userFilter =
+      Object.keys(filter).length > 0 ? markFilterSubtreeProvenance(filter, 'author') : undefined;
     if (typeof ctx.getReadScope !== 'function') return userFilter;
     const scope = ctx.getReadScope(objectName);
     if (scope === undefined || scope === null) return userFilter;
-    const scopeFilter = scope as Record<string, unknown>;
+    const scopeFilter = markFilterSubtreeProvenance(scope as Record<string, unknown>, 'policy');
     if (!userFilter) return scopeFilter;
     return { $and: [userFilter, scopeFilter] };
   }
@@ -694,6 +707,11 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     if (fkValues.length === 0 || typeof ctx.executeAggregate !== 'function') return map;
     const idFilter: Record<string, unknown> = { id: { $in: fkValues } };
     const scope = typeof ctx.getReadScope === 'function' ? ctx.getReadScope(refObject) : null;
+    // [#8220] Same boundary family as `withReadScope`: the scope arm is policy.
+    // `idFilter` is this method's own plumbing, not the caller's text — it
+    // stays unmarked, which withholds, and that is correct for a filter no
+    // author typed.
+    if (scope != null) markFilterSubtreeProvenance(scope, 'policy');
     const filter = scope != null ? { $and: [idFilter, scope] } : idFilter;
     const rows = await ctx.executeAggregate(refObject, {
       groupBy: ['id', attr],

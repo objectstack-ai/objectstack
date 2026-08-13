@@ -53,6 +53,7 @@ export const ActivityViews = defineView({
       type: 'simple',
       sections: [
         {
+          name: 'activity_details',
           label: 'Activity Details',
           columns: 2,
           fields: [
@@ -64,6 +65,7 @@ export const ActivityViews = defineView({
           ],
         },
         {
+          name: 'related_records',
           label: 'Related Records',
           columns: 2,
           fields: [
@@ -73,6 +75,7 @@ export const ActivityViews = defineView({
           ],
         },
         {
+          name: 'notes',
           label: 'Notes',
           columns: 1,
           fields: [

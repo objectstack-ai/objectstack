@@ -218,8 +218,11 @@ function makeEngine() {
   };
   const matches = (row: any, filter: any): boolean => {
     if (!filter || typeof filter !== 'object') return true;
-    if (Array.isArray(filter.$or)) return filter.$or.some((f: any) => matches(row, f));
-    if (Array.isArray(filter.$and)) return filter.$and.every((f: any) => matches(row, f));
+    // `$or` / `$and` are conjoined WITH their sibling keys, the way a real
+    // driver ANDs them — a short-circuiting `return` here would discard every
+    // sibling equality key in the same object. See #7620.
+    if (Array.isArray(filter.$or) && !filter.$or.some((f: any) => matches(row, f))) return false;
+    if (Array.isArray(filter.$and) && !filter.$and.every((f: any) => matches(row, f))) return false;
     for (const [k, v] of Object.entries(filter)) {
       if (k === '$or' || k === '$and') continue;
       if (v != null && typeof v === 'object' && '$in' in (v as any)) {

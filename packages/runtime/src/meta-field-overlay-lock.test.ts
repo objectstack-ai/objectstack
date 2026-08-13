@@ -65,21 +65,36 @@
  *   field override    403     200, row persisted                       → RED
  *   …on `status`      403     200, row persisted                       → RED
  *   …env kernel       403     200, row persisted                       → RED
- *   brand-new field   200     200, unchanged                           → GREEN
- *   field of a runtime-created object                                  → GREEN
+ *   brand-new field   403     200, row persisted (#7893)               → RED
+ *   field of a runtime-created object — same, 403 (#7893)              → RED
  *   object override   403     403, unchanged                           → GREEN
  *   view override     200     200, unchanged                           → GREEN
  *   dashboard         200     200, unchanged                           → GREEN
  *   job               403     403, unchanged                           → GREEN
- *   plural spelling   200     200, unchanged (KNOWN GAP #7894)         → GREEN
+ *   plural spelling   403     200, row under type='fields' (#7894)     → RED
+ *   object route creates AND composes (#7893 control)                  → GREEN
  *
- * The greens are NOT slack. Four of them are the negative direction the card
+ * Two rows INVERTED after #7743, and each inversion is this file's anti-vacuity
+ * proof rather than a rewrite of history:
+ *
+ *   • the plural spelling, when #7894 landed. It used to assert the defect
+ *     (200, plus a row under the plural key) and carried instructions to flip
+ *     it; because the old case had really measured that 200, the new 403 cannot
+ *     be passing by never reaching the boundary.
+ *   • the two brand-new-field rows, when #7893 landed. They used to assert
+ *     `200` under the banner "THE FEATURE — `allowRuntimeCreate: true` is real
+ *     and must survive", and the maintainer ruled on 2026-08-12 that the
+ *     feature was never real: the write persisted a standalone row that no read
+ *     path ever composed into its parent object. Same argument applies — those
+ *     cases demonstrably reached the write door, because they measured its 200.
+ *     See the #7893 block for the full record.
+ *
+ * The greens are NOT slack. Four of them are the negative direction #7743
  * demanded: `object` / `view` / `dashboard` / `job` were measured as ALREADY
  * CORRECT in the same QA run, so a fix that tightened any of them is over-reach
- * and must fail here. Two are the legitimate `field` write:
- * `allowRuntimeCreate: true` is real, and a fix that refused every `field` PUT
- * would pass a one-directional test while breaking the feature. The last is a
- * hole this card does NOT close and refuses to hide — see below.
+ * and must fail here. The last is #7893's positive control — the OBJECT route
+ * still creates a field AND reads it back, which is what makes the retirement a
+ * redirect rather than a lost capability.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -230,10 +245,26 @@ function makeEngine() {
             getPackage: () => undefined,
             isPackageDisabled: () => false,
             applyNavContributions: (app: unknown) => app,
-            registerItem: (type: string, name: string, item: unknown) => {
+            // [#7893] Signature mirrors the PRODUCER's call, not a convenient
+            // shape: the real `SchemaRegistry.registerItem` takes
+            // `(type, item, keyStrategy, ownerId?)` — the ITEM second — and
+            // `applyObjectRegistryMutation` calls it as
+            // `registerItem(type, item, 'name')`.
+            //
+            // ⚠️ This double previously declared `(type, name, item)`. Nothing
+            // failed: the call still "succeeded", storing the item object as the
+            // KEY and the string `'name'` as the VALUE, so the seeded entry was
+            // never replaced and every read served the stale body. A write-through
+            // that silently no-ops is exactly what an object-route control must be
+            // able to see, so the arity is pinned to the producer's here.
+            registerItem: (type: string, item: any, keyStrategy?: string, _ownerId?: string) => {
+                const key = keyStrategy === 'object'
+                    ? (item?.object as string)
+                    : (item?.name as string);
+                if (!key) return;
                 let byName = runtimeItems.get(type);
                 if (!byName) { byName = new Map(); runtimeItems.set(type, byName); }
-                byName.set(name, item);
+                byName.set(key, item);
             },
             registerObject: () => {},
         },
@@ -389,12 +420,35 @@ describe('#7743 — PUT /meta/field/<object>.<field> honours the registry overla
         expect(metaRow(engine, 'field', 'showcase_task.title')).toBeUndefined();
     });
 
-    // ── THE FEATURE — `allowRuntimeCreate: true` is real and must survive ──
+    // ── #7893 — THE FEATURE THAT WASN'T: the create tier is RETIRED ────────
+    //
+    // This block REPLACES two cases pinned under the banner "THE FEATURE —
+    // `allowRuntimeCreate: true` is real and must survive". Those pins were
+    // doing exactly their job: #7743 wrote them so that a later fix could not
+    // quietly retire runtime field authoring, and they predicted in their own
+    // comment that "a fix that refused every `field` PUT" would be the way this
+    // file went wrong. That prediction was correct about the MECHANISM and
+    // wrong about the PREMISE they shared — that there was a create door here
+    // worth protecting.
+    //
+    // There was not. Measured end-to-end through this same harness (#7893):
+    // `PUT /field/showcase_task.zz_probe` answered 200 `state=active` and
+    // persisted a row, and `GET /object/showcase_task` then listed
+    // `fields: ['title','status']` — the field ABSENT, forever. `field` is the
+    // one declared type with no standalone existence: the write minted a
+    // separate row keyed `('field','<object>.<name>')` and nothing composes
+    // fragment rows into their parent. The door opened onto nothing.
+    //
+    // Maintainer ruled REMOVE on 2026-08-12 (ADR-0049 enforce-or-remove), so
+    // the retirement is deliberate and on the record here, the way #5488
+    // retired `api`'s door in the change that flipped it.
+    //
+    // ⚠️ Adding a field at runtime is NOT lost — it moved to the route that
+    // actually composes. `object` keeps `allowRuntimeCreate: true`, so the
+    // remedy in the refusal body (`PUT /meta/object/:object` with the new field
+    // in `fields`) is a live capability, pinned by the CONTROL below.
 
-    it('CONTROL — a brand-new field on a packaged object is still CREATED (allowRuntimeCreate)', async () => {
-        // The registry declares two orthogonal tiers and this card closes only
-        // the overlay one. A fix that refused every `field` PUT would pass all
-        // four cases above and silently retire runtime field authoring.
+    it('#7893 — a brand-new field is REFUSED as code-only, naming the object route', async () => {
         const { engine, dispatcher } = makeStack();
 
         const res = responseOf(await dispatcher.handleMetadata(
@@ -402,15 +456,31 @@ describe('#7743 — PUT /meta/field/<object>.<field> honours the registry overla
             { name: 'zz_new_probe', label: 'Probe', type: 'text' },
         ));
 
-        expect(res.status).toBe(200);
-        expect(metaRow(engine, 'field', 'showcase_task.zz_new_probe')).toBeDefined();
+        // ADR-0112 — code AND status, never "it threw". `NOT_CREATABLE` rather
+        // than `NOT_OVERRIDABLE`: no package ships `zz_new_probe`, so this is a
+        // CREATE, and it is the create tier this card closed.
+        expect(res.status).toBe(403);
+        expect(res.body?.error?.code).toBe('NOT_CREATABLE');
+        // The prescription is the whole point of the refusal: a 403 that does
+        // not say where to go leaves the author exactly as stuck as the 200 did.
+        expect(res.body?.error?.message).toMatch(/code-only/);
+        expect(res.body?.error?.message).toContain('PUT /api/v1/meta/object/:object');
+        // ⚠️ It must NOT read `field`'s own `filePatterns` back — `**/*.field.ts`
+        // matches nothing in any app, so prescribing it would name a route that
+        // has never worked.
+        expect(res.body?.error?.message).not.toContain('*.field.ts');
+        // Nothing persisted: refused BEFORE the row is minted, so no new inert
+        // row can be created from today on.
+        expect(metaRow(engine, 'field', 'showcase_task.zz_new_probe')).toBeUndefined();
     });
 
-    it('CONTROL — a field of a RUNTIME-created object is not artifact-backed, so it stays writable', async () => {
-        // The boundary the predicate must draw: the object exists, but no
-        // package ships it, so neither does it ship the field. Resolving the
-        // parent through the artifact-only lookup is what keeps this true — a
-        // plain-key registry entry must not be able to manufacture an artifact.
+    it('#7893 — a field of a RUNTIME-created object is refused too: the tier is the type, not the parent', async () => {
+        // #7743 kept this one writable because the parent is not artifact-backed,
+        // so the write was a CREATE rather than an overlay. That reasoning was
+        // about which TIER applies; the create tier itself is now closed, so the
+        // answer flips here as well. Pinned separately because it is the case
+        // that would silently survive if someone gated on the parent's
+        // provenance instead of on the type's registry entry.
         const { engine, dispatcher } = makeStack();
 
         const res = responseOf(await dispatcher.handleMetadata(
@@ -418,8 +488,37 @@ describe('#7743 — PUT /meta/field/<object>.<field> honours the registry overla
             { name: 'note', label: 'Renamed', type: 'text' },
         ));
 
+        expect(res.status).toBe(403);
+        expect(res.body?.error?.code).toBe('NOT_CREATABLE');
+        expect(metaRow(engine, 'field', 'runtime_thing.note')).toBeUndefined();
+    });
+
+    it('#7893 POSITIVE CONTROL — the OBJECT route still creates, and still composes', async () => {
+        // The capability the retirement redirects to must be live, or the
+        // refusal's prescription is itself false compliance. `object` carries
+        // the IDENTICAL flag pair `field` used to (`supportsOverlay: false,
+        // allowRuntimeCreate: true`) — which is also what falsifies the card's
+        // stated root cause, that the read skip came from `supportsOverlay`.
+        // Same flags, opposite outcome ⇒ the flag was never the cause.
+        const { engine, dispatcher } = makeStack();
+
+        const res = responseOf(await dispatcher.handleMetadata(
+            '/object/runtime_thing', ctx(), 'PUT',
+            { ...RUNTIME_OBJECT, fields: { ...RUNTIME_OBJECT.fields, extra: { type: 'text', label: 'Extra' } } },
+        ));
+
         expect(res.status).toBe(200);
-        expect(metaRow(engine, 'field', 'runtime_thing.note')).toBeDefined();
+        expect(metaRow(engine, 'object', 'runtime_thing')).toBeDefined();
+
+        // …and the field is READ BACK, which is the half `field` never had.
+        const read = responseOf(await dispatcher.handleMetadata('/object/runtime_thing', ctx(), 'GET'));
+        const fields = Object.keys((read.body as any)?.data?.item?.fields ?? {});
+        expect(fields, 'the object route composes what the field route never did').toContain('extra');
+        // ANTI-VACUITY — the declared field is present in the same read, so an
+        // empty/dead read cannot be what makes the assertion above pass. This
+        // arm caught a false pass during #7893's investigation, where the body
+        // was read at `body.item` (undefined) instead of `body.data.item`.
+        expect(fields).toContain('note');
     });
 
     // ── THE NEGATIVE DIRECTION — the four types measured as ALREADY CORRECT ─
@@ -478,34 +577,17 @@ describe('#7743 — PUT /meta/field/<object>.<field> honours the registry overla
         expect(metaRow(engine, 'job', JOB.name)).toBeUndefined();
     });
 
-    // ── A HOLE THIS CARD DOES NOT CLOSE, pinned so it cannot go quiet ─────
+    // ── #7894 — THE HOLE ABOVE, NOW CLOSED ────────────────────────────────
+    //
+    // This block replaces a case that deliberately asserted the DEFECT
+    // (`expect(res.status).toBe(200)` plus a row under `type='fields'`) and
+    // instructed its successor to "flip it to `expectNotOverridable(res)` and
+    // delete the row assertion". That inversion is this file's anti-vacuity
+    // proof and it costs nothing to state: the harness demonstrably REACHED
+    // this boundary before the fix, because it measured the 200 here. A fresh
+    // test asserting 403 could pass by never arriving; this one cannot.
 
-    it('KNOWN GAP #7894 — the PLURAL url spelling still walks around this lock', async () => {
-        // ⚠️ This case asserts a DEFECT, deliberately. It was written expecting
-        // 403, measured 200, and confirmed against the live showcase: with the
-        // fix in place, `/meta/field/showcase_task.title` is refused while
-        // `/meta/fields/showcase_task.title` is accepted and persists a row.
-        //
-        // The cause is one layer up and is NOT `field`-specific.
-        // `canonicalMetaType` (#4432) folds plural→singular through
-        // `PLURAL_TO_SINGULAR`, which is the MANIFEST COLLECTION map — and it
-        // has no `fields` key (nor `seeds`, `external_catalogs`,
-        // `translations`). An unmapped spelling is therefore read as an
-        // unregistered PLUGIN type, which every gate treats as permissive by
-        // construction: `assertAllowed` returns early on
-        // `!STATIC_REGISTRY_TYPES.has('fields')`, and `orgScopedWriteRefusal`
-        // says so in as many words. Each of those is correct for a type that
-        // really is plugin-registered; `'fields'` just is not one.
-        //
-        // ⛔ The one-word fix — teaching `isNestedArtifactField` to accept
-        // `'fields'` — is the WRONG shape and was rejected: it is a
-        // spelling-tolerant lookup below the boundary (the exact pattern
-        // #4432's own doc comment rejects) and would still mint the row under a
-        // second namespace, `type='fields'`. The remedy belongs at the boundary
-        // map and spans four types, so it is #7894's, not this card's.
-        //
-        // When #7894 lands this test goes RED. That is its job: flip it to
-        // `expectNotOverridable(res)` and delete the row assertion.
+    it('#7894 — the PLURAL url spelling folds onto the same lock', async () => {
         const { engine, dispatcher } = makeStack();
 
         const res = responseOf(await dispatcher.handleMetadata(
@@ -513,12 +595,147 @@ describe('#7743 — PUT /meta/field/<object>.<field> honours the registry overla
             { name: 'title', label: 'Tampered', type: 'text' },
         ));
 
-        expect(res.status).toBe(200);
-        // The mechanism, not just the status: the row lands under the PLURAL
-        // type key — a second namespace for the same item.
-        expect(metaRow(engine, 'fields', 'showcase_task.title')).toBeDefined();
-        // …and the singular namespace stays clean, which is why the singular
-        // route's own refusal above is not weakened by this gap.
+        // Measurement 1. Note it converges on the SINGULAR route's answer
+        // rather than producing a refusal that names the spelling `fields`:
+        // folding is what closes this, so `/meta/fields/…` is now the same
+        // request as `/meta/field/…` and earns the same verdict. Plural REST
+        // paths are the documented legitimate spelling (`/meta/actions` folds
+        // and must keep folding), so refusing this one specifically would give
+        // `field` a URL contract unlike every other type's.
+        expectNotOverridable(res);
+        // Measurement 3, the mechanism rather than the status: NO second
+        // namespace is minted. This is the assertion the old case inverted.
+        expect(metaRow(engine, 'fields', 'showcase_task.title')).toBeUndefined();
         expect(metaRow(engine, 'field', 'showcase_task.title')).toBeUndefined();
+    });
+
+    it('#7894 x #7893 — the plural spelling folds onto the CREATE lock too, not just the overlay one', async () => {
+        // ⚠️ The case above folds a plural OVERRIDE (`showcase_task.title` is
+        // a field the package ships), so it is pinned on #7743's overlay tier
+        // and answers NOT_OVERRIDABLE. It therefore says nothing about the
+        // tier THIS card closed, and measurably so: reverting
+        // `allowRuntimeCreate` to `true` leaves the case above GREEN while the
+        // two create cases go red. Two independent gates reachable through the
+        // same URL fold, and only one of them had a plural pin.
+        //
+        // This is that missing half — plural + brand-new name, so the fold
+        // lands on the CREATE lock. Without it, a future change to
+        // PLURAL_TO_SINGULAR could reopen `PUT /meta/fields/<o>.<n>` as a
+        // create door while every existing pin here stayed green.
+        const { engine, dispatcher } = makeStack();
+
+        const res = responseOf(await dispatcher.handleMetadata(
+            '/fields/showcase_task.zz_plural_probe', ctx(), 'PUT',
+            { name: 'zz_plural_probe', label: 'Probe', type: 'text' },
+        ));
+
+        // ADR-0112 — code AND status. NOT_CREATABLE, not NOT_OVERRIDABLE:
+        // nothing ships `zz_plural_probe`, so the fold arrives at the create
+        // tier and earns the retirement's own refusal, prescription included.
+        expect(res.status).toBe(403);
+        expect(res.body?.error?.code).toBe('NOT_CREATABLE');
+        expect(res.body?.error?.message).toContain('PUT /api/v1/meta/object/:object');
+        // Neither namespace is minted — the plural spelling cannot be used to
+        // route around the retirement into a second inert row.
+        expect(metaRow(engine, 'fields', 'showcase_task.zz_plural_probe')).toBeUndefined();
+        expect(metaRow(engine, 'field', 'showcase_task.zz_plural_probe')).toBeUndefined();
+    });
+
+    it('#7894 — the other three unmapped types answer as their singular does', async () => {
+        // `seed` / `external_catalog` / `translation` were unmapped alongside
+        // `field`. The assertion is deliberately body-AGNOSTIC: what the card is
+        // about is that the plural URL stops being a SEPARATE door, so the test
+        // is "both spellings reach the same verdict, and only the singular
+        // namespace can ever be minted" — not a hardcoded status per type.
+        //
+        // Worth recording, because it is the fold made visible: `seeds` with
+        // this body answers 422, because it is now judged by the real
+        // `SeedSchema` (which requires `object`/`records`). Before the fix it
+        // answered 200 — an unmapped spelling has no schema to be judged by, so
+        // it sailed past validation as well as past authorization.
+        for (const [plural, singular] of [
+            ['seeds', 'seed'],
+            ['translations', 'translation'],
+            ['external_catalogs', 'external_catalog'],
+        ] as const) {
+            const body = { name: 'thing_x', label: 'X' };
+
+            const viaPlural = makeStack();
+            const pluralRes = responseOf(await viaPlural.dispatcher.handleMetadata(
+                `/${plural}/thing_x`, ctx(), 'PUT', body,
+            ));
+
+            const viaSingular = makeStack();
+            const singularRes = responseOf(await viaSingular.dispatcher.handleMetadata(
+                `/${singular}/thing_x`, ctx(), 'PUT', body,
+            ));
+
+            expect(pluralRes.status, `${plural} must answer exactly as ${singular} does`)
+                .toBe(singularRes.status);
+            // …and whatever the verdict, no second namespace is ever minted.
+            expect(metaRow(viaPlural.engine, plural, 'thing_x'), `${plural} must not mint a namespace`)
+                .toBeUndefined();
+        }
+    });
+
+    // ── POSITIVE CONTROL — plugin registration must still work ────────────
+    //
+    // Every gate #7894 names is CORRECT behaviour for a genuinely
+    // plugin-registered runtime type. A refusal that also caught those would be
+    // a worse defect than the bypass it closed, so this is pinned, not assumed.
+
+    it('#7894 POSITIVE CONTROL — a plugin-registered runtime type is still permitted', async () => {
+        const { engine, dispatcher } = makeStack();
+
+        // `theme` has no `DEFAULT_METADATA_TYPE_REGISTRY` entry at all.
+        const singular = responseOf(await dispatcher.handleMetadata(
+            '/theme/midnight', ctx(), 'PUT', { name: 'midnight', label: 'Midnight' },
+        ));
+        expect(singular.status).toBe(200);
+        expect(metaRow(engine, 'theme', 'midnight')).toBeDefined();
+
+        // …and via its plural spelling, which the URL map carries from the
+        // manifest map's limb — still one namespace, the singular one.
+        const plural = responseOf(await dispatcher.handleMetadata(
+            '/themes/twilight', ctx(), 'PUT', { name: 'twilight', label: 'Twilight' },
+        ));
+        expect(plural.status).toBe(200);
+        expect(metaRow(engine, 'theme', 'twilight')).toBeDefined();
+        expect(metaRow(engine, 'themes', 'twilight')).toBeUndefined();
+    });
+
+    it('#7894 POSITIVE CONTROL — a kind the platform has never heard of is still permitted', async () => {
+        // The strongest form: a name in NO map and NO registry — exactly what a
+        // third-party plugin registering a novel kind looks like. The refusal
+        // must not fire, and it cannot, by construction: it only triggers when a
+        // spelling's singular is a type the platform itself DECLARES.
+        const { engine, dispatcher } = makeStack();
+
+        const res = responseOf(await dispatcher.handleMetadata(
+            '/my_plugin_kind/widget_a', ctx(), 'PUT', { name: 'widget_a', label: 'Widget A' },
+        ));
+
+        expect(res.status).toBe(200);
+        expect(metaRow(engine, 'my_plugin_kind', 'widget_a')).toBeDefined();
+    });
+
+    // ── The refusal limb — an unrecognised spelling of a DECLARED type ────
+
+    it('#7894 — an unrecognised plural of a declared type is refused, not forwarded', async () => {
+        const { engine, dispatcher } = makeStack();
+
+        const res = responseOf(await dispatcher.handleMetadata(
+            '/capabilitys/some_cap', ctx(), 'PUT', { name: 'some_cap', label: 'Some Cap' },
+        ));
+
+        // ADR-0112 — code AND status, never "it threw".
+        expect(res.status).toBe(400);
+        expect(res.body?.error?.code).toBe('INVALID_REQUEST');
+        // It names the offending spelling AND the canonical one.
+        expect(res.body?.error?.message).toContain('capabilitys');
+        expect(res.body?.error?.message).toContain('capability');
+        // Never answers 200, so no namespace is minted under the typo.
+        expect(metaRow(engine, 'capabilitys', 'some_cap')).toBeUndefined();
+        expect(metaRow(engine, 'capability', 'some_cap')).toBeUndefined();
     });
 });

@@ -59,6 +59,41 @@ export interface TriggerLogger {
 const JOB_PREFIX = 'flow-schedule';
 
 /**
+ * Report a scheduled flow that failed to bind to the job service.
+ *
+ * **Why this is `error` and not `warn`** — the repo's degradation-log-level
+ * rule (AGENTS.md) decides the level with one question: after the degradation,
+ * does the system still look normal from the outside while something it claims
+ * is in place has not landed? Here it does, completely: the flow stays
+ * published and active in `sys_metadata`, Studio lists it, the metadata API
+ * serves it and `verify_build` passes — while nothing will ever fire it. That
+ * is persisted state and runtime state disagreeing, which the rule puts in the
+ * `error` class, not the functional-degradation class.
+ *
+ * The neighbouring composition branch — "no job service is registered at all" —
+ * deliberately stays at `warn`: the system is *visibly* smaller and the rule
+ * names that exact message as correctly a `warn`. The distinction is not the
+ * severity of the outcome, it is whether the outside can see it.
+ *
+ * An `error` here owes two things, both in the first line it prints: the
+ * concrete consequence (including that everything else keeps looking healthy)
+ * and the remedy. Kept in one helper so both triggers say it the same way.
+ */
+export function reportBindFailure(
+    logger: TriggerLogger,
+    tag: 'schedule' | 'time-relative',
+    flowName: string,
+    err: unknown,
+): void {
+    const report = logger.error?.bind(logger) ?? logger.warn.bind(logger);
+    report(
+        `[${tag}] flow '${flowName}' FAILED to bind to the job service: ${(err as Error)?.message ?? String(err)}. ` +
+            'The flow stays published and active — Studio, the metadata API and verify_build all keep reporting it ' +
+            'healthy — but nothing will fire it until it binds. Re-publish the flow (or restart the environment) to retry.',
+    );
+}
+
+/**
  * Normalize a flow's raw `schedule` descriptor into a {@link JobSchedule}, or
  * `null` if it can't be understood. Accepts the canonical
  * `{ type: 'cron'|'interval'|'once', ... }` shape plus a few ergonomic
@@ -193,9 +228,7 @@ export class ScheduleTrigger implements FlowTrigger {
             })
             .catch((err) => {
                 this.bound.delete(binding.flowName);
-                this.logger.warn(
-                    `[schedule] failed to schedule flow '${binding.flowName}': ${(err as Error)?.message ?? String(err)}`,
-                );
+                reportBindFailure(this.logger, 'schedule', binding.flowName, err);
             });
     }
 

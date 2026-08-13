@@ -36,6 +36,9 @@ import { isNowDefaultToken, isRuntimeDefaultToken } from '@objectstack/spec/data
 // sentence about `$regex` are five sentences that drift apart. This driver
 // prints `why` VERBATIM.
 import { RETIRED_FILTER_OPERATORS } from '@objectstack/spec/data';
+// [#8220] The read-scope provenance mark's consumer half: where a cross-field
+// refusal decides whether its full diagnostic may reach the caller.
+import { resolveFilterSubtreeProvenance } from '@objectstack/spec/data';
 // [#7872] The shared comparand-type door: the accepted six-type SET (this
 // driver's own allowlists delegate their membership to it) and the sentence
 // its refusals quote, so the set has one home instead of a copy per driver.
@@ -600,6 +603,25 @@ const WITHHELD_FILTER_DIAGNOSTIC = Symbol.for('objectstack.driver-sql.withheldFi
 const WITHHELD_FILTER_LOGGED = Symbol.for('objectstack.driver-sql.withheldFilterLogged');
 
 /**
+ * [#8220] The filter subtree the refusal was raised FROM — the reference the
+ * throw site held — so {@link SqlDriver.resolveWithheldFilterRefusal} can ask
+ * the spec's provenance resolver where that node sits under the query's own
+ * `where` root. A symbol for the same non-travel reason as the diagnostic:
+ * nothing that serialises or spreads the error can carry a live tree reference
+ * to a place that could misread it.
+ */
+const WITHHELD_FILTER_SUBTREE = Symbol.for('objectstack.driver-sql.withheldFilterSubtree');
+
+/**
+ * [#8220] The full author-facing message of a refusal whose subtree turns out
+ * to be positively marked `'author'` — the diagnostic plus the repair
+ * prescription the redacted message states only generically. Kept beside the
+ * diagnostic rather than derived from it at resolution time so each builder
+ * owns ONE composition of its own wording, redacted and restored alike.
+ */
+const WITHHELD_FILTER_AUTHOR_TEXT = Symbol.for('objectstack.driver-sql.withheldFilterAuthorText');
+
+/**
  * [#7929, maintainer ruling 2026-08-12, verbatim: 「接受你的全部建议。」 adopting
  * "B now, A next"] An `INVALID_FILTER` refusal that answers the caller with
  * `message` and keeps `diagnostic` — the half naming the operands — server-side.
@@ -627,17 +649,39 @@ const WITHHELD_FILTER_LOGGED = Symbol.for('objectstack.driver-sql.withheldFilter
  *
  * # The accepted cost, named rather than hidden
  *
- * An author debugging their OWN cross-field filter now gets the redacted
- * message too, and that is a real diagnostic regression B pays for containment.
- * #7929's follow-up card (A: a spec-declared provenance mark set at both merge
- * boundaries) is what restores the author-facing text behind a real mark.
- * ⛔ Do not "fix" this by re-adding the names, and ⛔ do not widen the REST
- * boundary's 5xx-only withhold to 4xx instead (ruled out: it would delete
- * #5367's tiering and #5667's legible-undeclared-5xx decision).
+ * An author debugging their OWN cross-field filter used to get the redacted
+ * message too — B's accepted cost. [#8220] (A of the same ruling) is what pays
+ * it back: the refusal carries the subtree it was raised from, and
+ * {@link SqlDriver.resolveWithheldFilterRefusal} swaps in the full diagnostic
+ * when — and ONLY when — that subtree is positively marked `'author'` by a
+ * read-scope merge boundary (`markFilterSubtreeProvenance`,
+ * `@objectstack/spec/data`). Unmarked or ambiguous stays exactly here, on the
+ * withholding branch — the mark is permission to reveal, never a duty to prove
+ * secrecy. ⛔ Do not "fix" the remaining redaction by re-adding the names
+ * unconditionally, and ⛔ do not widen the REST boundary's 5xx-only withhold
+ * to 4xx instead (ruled out: it would delete #5367's tiering and #5667's
+ * legible-undeclared-5xx decision).
+ *
+ * `subtree` is the node the throw site held (the reference comparand, the
+ * list member, the field-spec map). `authorText` is what an `'author'` verdict
+ * puts on the wire; it defaults to `diagnostic` so no builder can end up with
+ * a restored message emptier than its own server-log line.
  */
-function withheldFilterError(message: string, diagnostic: string): Error {
+function withheldFilterError(
+  message: string,
+  diagnostic: string,
+  subtree?: unknown,
+  authorText?: string,
+): Error {
   const err = unsupportedFilterError(message);
   Object.defineProperty(err, WITHHELD_FILTER_DIAGNOSTIC, { value: diagnostic, enumerable: false });
+  if (subtree !== null && typeof subtree === 'object') {
+    Object.defineProperty(err, WITHHELD_FILTER_SUBTREE, { value: subtree, enumerable: false });
+  }
+  Object.defineProperty(err, WITHHELD_FILTER_AUTHOR_TEXT, {
+    value: authorText ?? diagnostic,
+    enumerable: false,
+  });
   return err;
 }
 
@@ -1109,10 +1153,21 @@ function fieldReferenceOf(value: unknown): string | null {
  *
  * [#7929] The operands, the operator and the list index are withheld from the
  * caller-visible half and kept in the server-log half — see
- * {@link withheldFilterError} for why, and for what stays.
+ * {@link withheldFilterError} for why, and for what stays. [#8220] `subtree`
+ * is the offending node itself, so a positively author-marked filter gets the
+ * naming half back.
  */
-function crossFieldComparisonError(field: string, op: string, ref: string, index?: number): Error {
+function crossFieldComparisonError(
+  field: string,
+  op: string,
+  ref: string,
+  subtree?: unknown,
+  index?: number,
+): Error {
   const position = index === undefined ? '' : ` at index ${index} of its value list`;
+  const diagnostic =
+    `Operator "${op}" on field "${field}" compares against another field ` +
+    `({ "$field": "${ref}" })${position}, a position SQL push-down does not compile.`;
   return withheldFilterError(
     `A cross-field comparison ({ "$field": … }) in this filter sits in a position SQL ` +
       `push-down does not compile. Cross-field comparison compiles only as the whole comparand ` +
@@ -1120,8 +1175,11 @@ function crossFieldComparisonError(field: string, op: string, ref: string, index
       `declared columns. Compare against a literal value here, or evaluate the rule in memory ` +
       `(matchesFilter). The columns and the operator this filter used are withheld from the ` +
       `message (#7929); the full diagnostic is in the server log.`,
-    `Operator "${op}" on field "${field}" compares against another field ` +
-      `({ "$field": "${ref}" })${position}, a position SQL push-down does not compile.`,
+    diagnostic,
+    subtree,
+    `${diagnostic} Cross-field comparison compiles only as the whole comparand of a scalar ` +
+      `comparison operator ($eq/$ne/$gt/$gte/$lt/$lte) between two same-table declared columns. ` +
+      `Compare against a literal value here, or evaluate the rule in memory (matchesFilter).`,
   );
 }
 
@@ -1158,7 +1216,11 @@ function crossFieldComparisonError(field: string, op: string, ref: string, index
  * on a read-scope refusal hands the administrator's policy back to the tenant
  * as a suggestion. The SHAPE survives the redaction; the names do not.
  */
-function bareFieldReferenceError(field: string, ref: string): Error {
+function bareFieldReferenceError(field: string, ref: string, subtree?: unknown): Error {
+  const diagnostic =
+    `Field "${field}" is constrained by a bare field reference ({ "$field": "${ref}" }) with no ` +
+    `operator. The spelling that compiles is ` +
+    `{ "${field}": { "$eq": { "$field": "${ref}" } } }.`;
   return withheldFilterError(
     `A field in this filter is constrained by a bare field reference ({ "$field": … }) with no ` +
       `operator. Write the comparison explicitly — { "TARGET_FIELD": { "$eq": { "$field": ` +
@@ -1167,9 +1229,11 @@ function bareFieldReferenceError(field: string, ref: string): Error {
       `record), so compiling it here would make the two execution paths answer this filter ` +
       `differently. The columns this filter named are withheld from the message (#7929); the ` +
       `full diagnostic is in the server log.`,
-    `Field "${field}" is constrained by a bare field reference ({ "$field": "${ref}" }) with no ` +
-      `operator. The spelling that compiles is ` +
-      `{ "${field}": { "$eq": { "$field": "${ref}" } } }.`,
+    diagnostic,
+    subtree,
+    `${diagnostic} The bare form is refused because the in-memory evaluator does not read it as ` +
+      `an equality (it matches no record), so compiling it here would make the two execution ` +
+      `paths answer this filter differently.`,
   );
 }
 
@@ -1256,15 +1320,24 @@ function crossFieldComparisonClass(
  * contract statement that followed it names nothing and stays on the wire, so a
  * caller still learns the capability boundary without learning this filter.
  */
-function uncompilableFieldReferenceError(field: string, op: string, ref: string, reason: string): Error {
+function uncompilableFieldReferenceError(
+  field: string,
+  op: string,
+  ref: string,
+  reason: string,
+  subtree?: unknown,
+): Error {
+  const diagnostic =
+    `Operator "${op}" on field "${field}" compares against another field ` +
+    `({ "$field": "${ref}" }), which cannot be compiled here: ${reason}`;
   return withheldFilterError(
     `A cross-field comparison ({ "$field": … }) in this filter cannot be compiled here. ` +
       `Cross-field comparison on SQL push-down supports same-table columns the object ` +
       `declares, compared as the same type class, excluding the tenant-isolation column. ` +
       `The columns, the operator this filter used and the specific reason are withheld from ` +
       `the message (#7929); the full diagnostic is in the server log.`,
-    `Operator "${op}" on field "${field}" compares against another field ` +
-      `({ "$field": "${ref}" }), which cannot be compiled here: ${reason}`,
+    diagnostic,
+    subtree,
   );
 }
 
@@ -1440,7 +1513,7 @@ function isRenderableTextComparand(value: unknown): boolean {
  */
 function assertCompilableComparand(field: string, op: string, value: unknown): void {
   const ref = fieldReferenceOf(value);
-  if (ref !== null) throw crossFieldComparisonError(field, op, ref);
+  if (ref !== null) throw crossFieldComparisonError(field, op, ref, value);
 
   // [#5234] The pattern family answers first: an array IS an object here, so
   // the member scan below would otherwise report `{$contains: ['a', {}]}` as a
@@ -1452,7 +1525,7 @@ function assertCompilableComparand(field: string, op: string, value: unknown): v
   if (Array.isArray(value)) {
     for (const [index, member] of value.entries()) {
       const memberRef = fieldReferenceOf(member);
-      if (memberRef !== null) throw crossFieldComparisonError(field, op, memberRef, index);
+      if (memberRef !== null) throw crossFieldComparisonError(field, op, memberRef, member, index);
       // [#5234] Every member of a list operator's array is a comparand in its
       // own right and gets the same bind test the whole comparand gets. Scoped
       // to the operators for which an array is legitimate, so a scalar operator
@@ -2388,7 +2461,7 @@ function classifyFilterKey(key: string, value: unknown, here: string): FilterVer
     for (const [op, comparand] of Object.entries(value)) {
       if (CROSS_FIELD_COMPARISON_OPERATORS.has(op)) continue;
       const ref = fieldReferenceOf(comparand);
-      if (ref !== null) throw crossFieldComparisonError(key, op, ref);
+      if (ref !== null) throw crossFieldComparisonError(key, op, ref, comparand);
     }
   }
 
@@ -4758,6 +4831,51 @@ export class SqlDriver implements IDataDriver {
    * logical fields via `external.columnMap`), matching the
    * `applyWriteColumnMap`-processed row the merge column list is derived from;
    * `created_at` stays the literal post-map key it has always been filtered as.
+   *
+   * ## What that identifier guarantees: unique and monotonic, NOT gapless (#8283)
+   *
+   * Immutable-once-assigned is one half of the contract; this is the other. It
+   * is a **decided** property, not an undocumented default — ruled by the
+   * maintainer on 2026-08-13 (#8283), which weighed and rejected both reserving
+   * the number only after the row is known to be insertable, and an opt-in
+   * gapless mode.
+   *
+   * Per counter — the `(table, tenant, field, scope)` key
+   * {@link getNextSequenceValue} issues from — an autonumber is:
+   *
+   *  - **unique**: no two rows are issued the same value;
+   *  - **monotonic**: each value issued is greater than the last;
+   *  - **NOT gapless**: the series may skip values, permanently.
+   *
+   * **A rejected write consumes the number it reserved.** The value is reserved
+   * before the INSERT is attempted, so any rejection after that point burns it:
+   * a unique violation on another field, a validation rule, a `beforeInsert`
+   * hook that throws. That number is issued to no row and will never be issued
+   * again — the next write gets the one after it. `TK-0001`, a failed insert,
+   * then `TK-0003` is this contract behaving correctly (measured on both
+   * SQLite and Postgres in #8283).
+   *
+   * Why it cannot be taken back: {@link getNextSequenceValue} commits the
+   * reservation in **its own transaction** (`runner.transaction` over
+   * `parentTrx ?? this.knex`), deliberately independent of the caller's insert
+   * — which is what makes a forward-only counter meaningful and what the batch
+   * paths' re-seed logic stands on. With no caller transaction the reservation
+   * is already committed when the insert fails, and nothing reclaims it.
+   * (Inside a caller transaction it nests, rolling back with the refused
+   * insert, so that path burns nothing — measured, and relied on at the
+   * `upsert` retry site below.)
+   *
+   * This is ordinary sequence semantics — every standard database sequence
+   * behaves this way — and **not a defect to repair**. Do not add reclamation,
+   * reservation-reordering, or a "return the number on a clean rejection" path:
+   * that shape was rejected in #8283 because it only narrows gaps rather than
+   * closing them (a crash after reservation still burns a number) while having
+   * to compose with the savepoint structure at both speculative sites.
+   *
+   * For callers: an autonumber is sound as a business identifier and must not
+   * be presented as a **gapless** series (an audit-grade invoice or contract
+   * number). A customer with a compliance-grade gapless requirement is the
+   * recorded restart condition for an opt-in gapless mode — it is not built.
    */
   protected insertOnlyUpsertColumns(object: string): Set<string> {
     // Same config resolution as `fillAutoNumberFields`: object name first,
@@ -8743,9 +8861,52 @@ export class SqlDriver implements IDataDriver {
     try {
       this.compileFilters(builder, filters);
     } catch (err) {
-      this.logWithheldFilterDiagnostic(err);
-      throw err;
+      throw this.resolveWithheldFilterRefusal(err, filters);
     }
+  }
+
+  /**
+   * [#8220] Decide what a redacted refusal may say, now that the tree can
+   * carry the read-scope provenance mark — and return the error to throw.
+   *
+   * A refusal raised from a subtree POSITIVELY marked `'author'` (by
+   * `plugin-security`'s CRUD injection or `service-analytics`'
+   * `ObjectQLStrategy.withReadScope` — the two boundaries that know which arm
+   * of their merge the caller wrote) is swapped for its full author-facing
+   * text: both columns, the operator, the list index, the boundary reason.
+   * Same identity — `INVALID_FILTER` / 400 — different words.
+   *
+   * ⚠️ Everything else stays REDACTED and goes to the server log, exactly as
+   * #7929/B left it: a `'policy'` verdict, an UNMARKED tree (no boundary ever
+   * vouched), an AMBIGUOUS one (the node is unreachable from this query's
+   * `where` — e.g. rewritten between merge and refusal — or aliased under
+   * conflicting marks), and an error that never carried its subtree at all.
+   * The mark is permission to reveal, never a requirement to prove secrecy;
+   * inverting that default — treating "mark missing" as "safe to disclose" —
+   * silently restores the original disclosure on every unmarked policy
+   * predicate and is the one shape the #7929 triage rejected. Do not
+   * "simplify" the `=== 'author'` reading below into anything that discloses
+   * on a missing mark.
+   *
+   * The disclosed error is a fresh `unsupportedFilterError` carrying NO
+   * symbol keys: there is no diagnostic left to relocate, so the log seam has
+   * nothing to write for it, and an outer frame that resolves an
+   * already-resolved error passes it through untouched (the double-catch
+   * shape {@link SqlDriver.withWithheldFilterLog} exists for).
+   */
+  protected resolveWithheldFilterRefusal(err: unknown, rootFilter: unknown): unknown {
+    const diagnostic = withheldFilterDiagnosticOf(err);
+    if (diagnostic === null) return err;
+    const carrier = err as Record<symbol, unknown>;
+    const subtree = carrier[WITHHELD_FILTER_SUBTREE];
+    const provenance =
+      subtree === undefined ? null : resolveFilterSubtreeProvenance(rootFilter, subtree);
+    if (provenance === 'author') {
+      const authorText = carrier[WITHHELD_FILTER_AUTHOR_TEXT];
+      return unsupportedFilterError(typeof authorText === 'string' ? authorText : diagnostic);
+    }
+    this.logWithheldFilterDiagnostic(err);
+    return err;
   }
 
   /**
@@ -8781,12 +8942,17 @@ export class SqlDriver implements IDataDriver {
    * halves. {@link logWithheldFilterDiagnostic} marks the error, so an error
    * that passes two of these frames is still logged once.
    */
-  protected withWithheldFilterLog<T>(fn: () => T): T {
+  protected withWithheldFilterLog<T>(rootFilter: unknown, fn: () => T): T {
     try {
       return fn();
     } catch (err) {
-      this.logWithheldFilterDiagnostic(err);
-      throw err;
+      // [#8220] The same provenance resolution `applyFilters` applies, against
+      // the same `where` ROOT — threaded into this frame because a lazily
+      // invoked group callback is past that entry point's catch. Resolving
+      // against the local branch instead would lose every mark set on an
+      // ANCESTOR (the merge boundaries mark the arms of their own `$and`), so
+      // an author's nested `$or` refusal would stay redacted for no reason.
+      throw this.resolveWithheldFilterRefusal(err, rootFilter);
     }
   }
 
@@ -8825,7 +8991,7 @@ export class SqlDriver implements IDataDriver {
       );
 
       if (hasMongoOperators) {
-        this.applyFilterCondition(builder, filters, 'and', table);
+        this.applyFilterCondition(builder, filters, 'and', table, filters);
         return;
       }
 
@@ -9062,8 +9228,19 @@ export class SqlDriver implements IDataDriver {
    * compiled exactly as it always was — `{ a: 1 }` is `a = 1`, `$in` is `in (…)`
    * — so nothing on the majority path changed shape.
    */
-  protected applyFilterCondition(builder: Knex.QueryBuilder, condition: any, logicalOp: 'and' | 'or' = 'and', tableHint?: string | null) {
+  protected applyFilterCondition(
+    builder: Knex.QueryBuilder,
+    condition: any,
+    logicalOp: 'and' | 'or' = 'and',
+    tableHint?: string | null,
+    // [#8220] The query's `where` ROOT, threaded so the lazily invoked group
+    // callbacks below can resolve a refusal's provenance against the tree the
+    // merge boundaries actually marked. Defaults to this frame's own
+    // `condition` for any direct caller compiling a standalone tree.
+    rootFilter?: unknown,
+  ) {
     if (!condition || typeof condition !== 'object') return;
+    const root = rootFilter ?? condition;
     const table = tableHint ?? this.coercionKey(builder);
 
     // #5134 — shape-validate the whole tree and decide its boolean value first.
@@ -9093,7 +9270,7 @@ export class SqlDriver implements IDataDriver {
         (builder as any)[method]((qb: any) => {
           for (const sub of branches) {
             qb.where((subQb: any) => {
-              this.withWithheldFilterLog(() => this.applyFilterCondition(subQb, sub, 'and', table));
+              this.withWithheldFilterLog(root, () => this.applyFilterCondition(subQb, sub, 'and', table, root));
             });
           }
         });
@@ -9118,7 +9295,7 @@ export class SqlDriver implements IDataDriver {
             // read scope of the shape `{$or:[{owner,status},{shared_with}]}`
             // returned rows the scope excluded — see sql-driver-or-filter.test.ts.
             qb.orWhere((subQb: any) => {
-              this.withWithheldFilterLog(() => this.applyFilterCondition(subQb, sub, 'and', table));
+              this.withWithheldFilterLog(root, () => this.applyFilterCondition(subQb, sub, 'and', table, root));
             });
           }
         });
@@ -9144,7 +9321,12 @@ export class SqlDriver implements IDataDriver {
         const negated = nullSafeNegationOperand(value as Record<string, unknown>);
         const notMethod = logicalOp === 'or' ? 'orWhereNot' : 'whereNot';
         (builder as any)[notMethod]((qb: any) => {
-          this.withWithheldFilterLog(() => this.applyFilterCondition(qb, negated, 'and', table));
+          // [#8220] `negated` is a REWRITE — its nodes are new objects the
+          // provenance resolver cannot find under `root`, so a cross-field
+          // refusal inside a `$not` resolves ambiguous and stays withheld,
+          // for the author too. Fail-closed by construction; the walk-side
+          // refusals (raised on the ORIGINAL nodes, eagerly) are unaffected.
+          this.withWithheldFilterLog(root, () => this.applyFilterCondition(qb, negated, 'and', table, root));
         });
       } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
         const localField = this.mapSortField(key);
@@ -9166,11 +9348,14 @@ export class SqlDriver implements IDataDriver {
           // unsupported-operator arm, so the message can name the supported
           // spelling instead of listing fifteen operator names.
           if (rawOp === '$field' && typeof opValue === 'string') {
-            throw bareFieldReferenceError(field, opValue);
+            // [#8220] `value` — the field-spec map carrying the bare `$field`
+            // key — is the node the provenance resolver can find in the tree;
+            // `opValue` is only the referenced column's name.
+            throw bareFieldReferenceError(field, opValue, value);
           }
           const crossFieldRef = fieldReferenceOf(opValue);
           if (crossFieldRef !== null && CROSS_FIELD_COMPARISON_OPERATORS.has(rawOp)) {
-            this.applyCrossFieldComparison(builder, method, table, key, localField, field, rawOp, crossFieldRef);
+            this.applyCrossFieldComparison(builder, method, table, key, localField, field, rawOp, crossFieldRef, opValue);
             continue;
           }
           // #5041 — reject a comparand that cannot become a bind parameter
@@ -9434,40 +9619,43 @@ export class SqlDriver implements IDataDriver {
     targetColumn: string,
     op: string,
     ref: string,
+    // [#8220] The `{ $field }` comparand node itself, threaded so each refusal
+    // below can carry the subtree the provenance resolver locates in the tree.
+    refNode?: unknown,
   ): void {
     if (ref.includes('.')) {
       throw uncompilableFieldReferenceError(targetColumn, op, ref,
         `"${ref}" is a dotted path, and SQL push-down compiles same-table column references ` +
-        `only (no relation traversal, no alias-qualified columns).`);
+        `only (no relation traversal, no alias-qualified columns).`, refNode);
     }
     if (!table) {
       throw uncompilableFieldReferenceError(targetColumn, op, ref,
         `the target table of this query could not be resolved, so the reference cannot be ` +
-        `checked against any declared column set.`);
+        `checked against any declared column set.`, refNode);
     }
     const declared = this.declaredFieldsFor(table);
     if (!declared) {
       throw uncompilableFieldReferenceError(targetColumn, op, ref,
         `object "${table}" has no declared column set on this driver (an external/federated ` +
-        `or unregistered table), so referenced column names cannot be validated.`);
+        `or unregistered table), so referenced column names cannot be validated.`, refNode);
     }
     const tenantField = this.resolveTenantField(table);
     if (tenantField !== null && (ref === tenantField || targetKey === tenantField || targetLocalField === tenantField)) {
       throw uncompilableFieldReferenceError(targetColumn, op, ref,
         `"${tenantField}" is the tenant-isolation column of "${table}", which must not appear ` +
-        `on either side of a cross-field comparison.`);
+        `on either side of a cross-field comparison.`, refNode);
     }
     const hasOwn = (name: string) => Object.prototype.hasOwnProperty.call(declared, name);
     const refDeclaredName = hasOwn(ref) ? ref : this.mapSortField(ref);
     if (!hasOwn(refDeclaredName)) {
       throw uncompilableFieldReferenceError(targetColumn, op, ref,
-        `"${ref}" is not a declared field of "${table}" — only declared fields can be referenced.`);
+        `"${ref}" is not a declared field of "${table}" — only declared fields can be referenced.`, refNode);
     }
     const targetDeclaredName = hasOwn(targetKey) ? targetKey : targetLocalField;
     if (!hasOwn(targetDeclaredName)) {
       throw uncompilableFieldReferenceError(targetColumn, op, ref,
         `the target field "${targetKey}" is not a declared field of "${table}", so the two ` +
-        `columns' types cannot be checked as comparable.`);
+        `columns' types cannot be checked as comparable.`, refNode);
     }
     const refClass = crossFieldComparisonClass(declared[refDeclaredName] ?? {});
     const targetClass = crossFieldComparisonClass(declared[targetDeclaredName] ?? {});
@@ -9475,20 +9663,20 @@ export class SqlDriver implements IDataDriver {
       throw uncompilableFieldReferenceError(targetColumn, op, ref,
         `"${ref}" (type "${String(declared[refDeclaredName]?.type ?? 'string')}"` +
         `${declared[refDeclaredName]?.multiple ? ', multiple' : ''}) has no scalar stored ` +
-        `column a comparison can read.`);
+        `column a comparison can read.`, refNode);
     }
     if (targetClass === null) {
       throw uncompilableFieldReferenceError(targetColumn, op, ref,
         `the target field "${targetKey}" (type ` +
         `"${String(declared[targetDeclaredName]?.type ?? 'string')}"` +
         `${declared[targetDeclaredName]?.multiple ? ', multiple' : ''}) has no scalar stored ` +
-        `column a comparison can read.`);
+        `column a comparison can read.`, refNode);
     }
     if (refClass !== targetClass) {
       throw uncompilableFieldReferenceError(targetColumn, op, ref,
         `"${targetKey}" is stored as ${targetClass} but "${ref}" as ${refClass}, and a ` +
         `cross-class comparison answers differently in SQL (storage-class ordering) than in ` +
-        `memory (JS coercion) — compare same-class columns.`);
+        `memory (JS coercion) — compare same-class columns.`, refNode);
     }
 
     const refLocal = this.mapSortField(ref);
@@ -9536,7 +9724,7 @@ export class SqlDriver implements IDataDriver {
       }
       default:
         // Unreachable: the call site gates on CROSS_FIELD_COMPARISON_OPERATORS.
-        throw crossFieldComparisonError(targetColumn, op, ref);
+        throw crossFieldComparisonError(targetColumn, op, ref, refNode);
     }
   }
 

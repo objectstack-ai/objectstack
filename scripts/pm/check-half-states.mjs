@@ -63,6 +63,60 @@
  *       takeover-style compaction (edit history is the archive), never
  *       truncation. #6019 reached ~61 KB and exceeded tool read limits
  *       before this rule existed.
+ *   H7  an OPEN PULL REQUEST whose body declares `Part of #N` while ALSO
+ *       carrying a closing keyword bound to that same `#N` — contradictory by
+ *       construction. `Part of` is the protocol saying "merging this must NOT
+ *       close the card"; a closing keyword is GitHub being told it must.
+ *       GitHub wins, silently, on merge. This is the only item over PULL
+ *       REQUESTS rather than issues, because the PR body is the surface where
+ *       the fact is still fixable — see the next section.
+ *
+ * ## The close mechanism, measured (#8293)
+ *
+ * A half-delivered card (#8131) was closed `completed` two seconds after its
+ * PR (#8277) merged, although that PR's body opened with `Part of #8131` and
+ * carried an explicit warning against auto-closing it. The card was filed on
+ * the hypothesis that GitHub's *development-sidebar* link closes on merge
+ * "regardless of the description's wording", the keyword path having been ruled
+ * out by a scan for closing keywords.
+ *
+ * That hypothesis is REFUTED and the scan was wrong. The PR body's own warning
+ * sentence read, verbatim: "…the PM should close #8131 deliberately once #8136
+ * lands." GitHub's closing-keyword parser matches `close` + `#8131` and ignores
+ * every bit of the surrounding prose — the modal "should", the negation in the
+ * clause before it, the whole paragraph arguing the card must stay open. The
+ * sentence written to PREVENT the auto-close is what performed it.
+ *
+ * Four live readings pin the parser's actual shape, and each is a fixture in
+ * the self-test below:
+ *
+ *   1. keyword + `#N` in PROSE closes it — #8277's `close #8131`: closing link
+ *      created, card closed on merge.
+ *   2. the SAME body's `#8136`, one clause later behind the word "once" and no
+ *      keyword, got NO closing link and survived the merge untouched (it was
+ *      closed deliberately 3.5 h later). Same body, same merge, opposite
+ *      outcomes — which no sidebar-link hypothesis can explain, and which is
+ *      the measurement that refutes it.
+ *   3. `Part of #N` alone does NOT close — #8261/#8103, the same round's other
+ *      partial-delivery PR, which stayed open exactly as the protocol intends.
+ *      The "non-uniformity" the card flagged as its lead is fully explained by
+ *      the presence or absence of a keyword; nothing else differed.
+ *   4. keyword + `#N` inside INLINE CODE does NOT close — measured live on open
+ *      PR #8454, whose body says "the dispatch asked for `Fixes #8284`" inside
+ *      backticks while #8284 carries no closing link at all. This is why the
+ *      predicate strips markdown code before scanning: without that step it
+ *      flags the exact shape a careful author writes when EXPLAINING that they
+ *      deliberately did not use the keyword.
+ *
+ * Reading 4 is measured for inline spans; fenced blocks are stripped by the
+ * same rule but were NOT independently measured — stated so a later reading can
+ * revise it rather than inherit it as fact. Both directions of that choice are
+ * documented at `stripMarkdownCode`.
+ *
+ * Scope of the remedy that lands HERE: this is the report-only detector, not a
+ * suppression. Suppressing at source means telling authors not to put a closing
+ * keyword next to another card's number, which is protocol text living outside
+ * `scripts/pm/**` — deliberately left to the card that owns that text.
  *
  * The body half of H5 (the 「当前 PM」 paragraph) is NOT machine-checked here:
  * seat-sticker bodies are prose with no pinned grammar, and a fuzzy parser
@@ -218,6 +272,124 @@ export const SEAT_BODY_SOFT_LIMIT = 10_000;
 export function h6SeatBodyOversized(issue, limit = SEAT_BODY_SOFT_LIMIT) {
   if (!labelNames(issue).includes('pm:seat')) return false;
   return Buffer.byteLength(issue.body ?? '', 'utf8') > limit;
+}
+
+// ---------------------------------------------------------------------------
+// H7 — `Part of #N` contradicted by a closing keyword on the same PR body.
+//
+// Pure string predicates over a PR body, so the self-test drives them with the
+// real specimens from #8293 rather than with invented ones.
+// ---------------------------------------------------------------------------
+
+/**
+ * GitHub's closing keywords, exactly — `close`/`closes`/`closed`,
+ * `fix`/`fixes`/`fixed`, `resolve`/`resolves`/`resolved`.
+ *
+ * The `\b` after each alternative is load-bearing in the direction of FEWER
+ * findings: `closing` and `fixing` are NOT closing keywords, and both occur
+ * constantly in exactly the prose this predicate reads ("merging this and
+ * closing #8284 would drop the severe half" — open PR #8454, which must not be
+ * flagged for that sentence). A fresh regex per call: a module-level `/g`
+ * literal shared between `matchAll` calls is a `lastIndex` bug waiting to be
+ * introduced by the next reader.
+ *
+ * The separator is HORIZONTAL whitespace only (plus GitHub's optional colon),
+ * which is a deliberate narrowing in both directions. Allowing `\s*` lets the
+ * keyword bind to a reference on a LATER line — and since `stripMarkdownCode`
+ * blanks code lines rather than deleting them, a `close` before a fenced block
+ * then spliced onto a `#N` after it, producing a finding for two tokens that
+ * were never adjacent in the source. The self-test pins that splice. The cost
+ * is a keyword separated from its reference by a line break, a shape none of
+ * the measured specimens use.
+ */
+function closingKeywordRe() {
+  return /\b(clos(?:e|es|ed)|fix(?:es|ed)?|resolv(?:e|es|ed))\b[ \t]*:?[ \t]*#(\d+)\b/gi;
+}
+
+function partOfRe() {
+  return /\bPart of\s+#(\d+)\b/gi;
+}
+
+/**
+ * Blank out markdown code — fenced blocks and inline spans — so the scan sees
+ * only the text GitHub's own reference parser acts on.
+ *
+ * MEASURED for inline spans (#8293, reading 4): open PR #8454 carries
+ * "`Fixes #8284`" in backticks and #8284 has NO closing link, so GitHub does
+ * not fire inside a code span. Skipping this step would make the predicate
+ * report every author who correctly explains that they did NOT use the keyword
+ * — turning the guard into noise on precisely the careful PRs.
+ *
+ * Fenced blocks are stripped by the same rule but were NOT independently
+ * measured. The choice is deliberate and its cost is stated rather than hidden:
+ * if GitHub does fire inside fences, this is a false NEGATIVE — the direction
+ * this card exists to prevent. It is taken because a PR body routinely quotes
+ * whole other bodies, templates and logs in fences, and scanning those would
+ * bury real findings under quoted text. A single live reading of a fenced
+ * `Fixes #N` against `closed_by_pull_requests` settles it either way.
+ *
+ * Lines are replaced by empty strings rather than deleted so that nothing is
+ * spliced together across a stripped block into an accidental match.
+ */
+export function stripMarkdownCode(body) {
+  const out = [];
+  let fence = null;
+  for (const line of String(body ?? '').split('\n')) {
+    const m = /^[ \t]{0,3}(`{3,}|~{3,})/.exec(line);
+    if (fence !== null) {
+      // A fence closes on a marker of the same character, at least as long.
+      if (m && m[1][0] === fence[0] && m[1].length >= fence.length) fence = null;
+      out.push('');
+      continue;
+    }
+    if (m) {
+      fence = m[1];
+      out.push('');
+      continue;
+    }
+    out.push(line.replace(/`+[^`\n]*`+/g, ' '));
+  }
+  return out.join('\n');
+}
+
+/** The `#N` a body declares itself only PART of. */
+export function partOfTargets(body) {
+  return new Set([...stripMarkdownCode(body).matchAll(partOfRe())].map((m) => m[1]));
+}
+
+/** `#N` -> the closing keyword bound to it (first occurrence wins, for the message). */
+export function closingKeywordTargets(body) {
+  const found = new Map();
+  for (const m of stripMarkdownCode(body).matchAll(closingKeywordRe())) {
+    if (!found.has(m[2])) found.set(m[2], m[1]);
+  }
+  return found;
+}
+
+/**
+ * H7 — null when clean, else the finding sentence.
+ *
+ * Bound PER ISSUE NUMBER, never "body has `Part of` anywhere AND a keyword
+ * anywhere": a PR that is `Part of #A` and legitimately `Fixes #B` is a normal,
+ * correct shape and must stay clean. Open PR #8471 is the live specimen —
+ * `Part of #8247` with a keyword bound to #8245 — and it is not a finding.
+ */
+export function h7PartOfWithClosingKeyword(pr) {
+  const body = pr?.body ?? '';
+  const declared = partOfTargets(body);
+  if (declared.size === 0) return null;
+  const closing = closingKeywordTargets(body);
+  const clashes = [...declared].filter((n) => closing.has(n));
+  if (clashes.length === 0) return null;
+  return clashes
+    .map(
+      (n) =>
+        `body says \`Part of #${n}\` but also carries \`${closing.get(n)} #${n}\` — ` +
+        `GitHub's closing-keyword parser ignores the surrounding prose (negations and ` +
+        `modals included), so merging this closes #${n}. Reword to "#${n} is not ` +
+        `addressed here" / "out of scope: #${n}", or put the keyword in backticks.`,
+    )
+    .join('; ');
 }
 
 // ---------------------------------------------------------------------------
@@ -581,10 +753,11 @@ async function sweep() {
 
   const findings = [];
   const seen = new Map();
+  const seenPrs = new Map();
   try {
-    await sweepInto(findings, seen);
+    await sweepInto(findings, seen, seenPrs);
   } catch (err) {
-    err.sweptSoFar = seen.size;
+    err.sweptSoFar = seen.size + seenPrs.size;
     throw err;
   }
 
@@ -593,12 +766,23 @@ async function sweep() {
     console.log(`  ${code} #${issue.number} ${msg}\n     ${issue.html_url}`);
   }
   console.log(
-    `check-half-states: swept ${seen.size} open pm-labeled issue(s) in ${OWNER_REPO} — ` +
-      `${findings.length} half-state(s) found. Report-only: findings are patrol input, not a gate verdict.`,
+    `check-half-states: swept ${seen.size} open pm-labeled issue(s) and ${seenPrs.size} open PR(s) ` +
+      `in ${OWNER_REPO} — ${findings.length} half-state(s) found. ` +
+      `Report-only: findings are patrol input, not a gate verdict.`,
   );
 }
 
-async function sweepInto(findings, seen) {
+async function listOpenPullRequests() {
+  const out = [];
+  for (let page = 1; page <= 10; page++) {
+    const batch = await rest(`/repos/${OWNER_REPO}/pulls?state=open&per_page=100&page=${page}`);
+    out.push(...batch);
+    if (batch.length < 100) break;
+  }
+  return out;
+}
+
+async function sweepInto(findings, seen, seenPrs) {
   for (const label of ['pm:dispatched', 'pm:queue', 'pm:blocked', 'pm:seat']) {
     for (const issue of await listIssues(label)) seen.set(issue.number, issue);
   }
@@ -631,6 +815,16 @@ async function sweepInto(findings, seen) {
         findings.push([issue, 'H2', 'assignee set but no claim comment on the thread']);
       }
     }
+  }
+
+  // H7 — the PR side. Listed straight from `/pulls` rather than filtered out of
+  // the label pages above: PRs carry no `pm:*` label, so the issue sweep cannot
+  // see them (it discards them explicitly). Drafts are INCLUDED — a draft is
+  // exactly where this is still cheap to fix.
+  for (const pr of await listOpenPullRequests()) {
+    seenPrs.set(pr.number, pr);
+    const contradiction = h7PartOfWithClosingKeyword(pr);
+    if (contradiction) findings.push([pr, 'H7', contradiction]);
   }
 }
 
@@ -678,6 +872,122 @@ function selfTest() {
   // byte size the read-limit failure cares about (3 bytes per CJK char).
   t('H6: multi-byte body measured in bytes', h6SeatBodyOversized(issue(['pm:seat'], [], '账'.repeat(3_400), '[PM seat] domain:devx — ⏳ vacant')), true);
   t('H6: oversized body without pm:seat is out of scope', h6SeatBodyOversized(issue(['pm:queue'], [], 'x'.repeat(20_000), 'big card')), false);
+
+  // -- H7: `Part of` contradicted by a closing keyword (#8293) ---------------
+  // Every fixture below is a REAL body from the incident or from the open PRs
+  // at the time this landed, so the predicate is pinned against the shapes the
+  // protocol actually produces rather than against invented ones.
+  const pr = (body) => ({ body });
+
+  // Specimen 1 — PR #8277, the body that closed #8131. Its SECOND sentence, the
+  // one written to prevent the auto-close, is what performed it: `close #8131`.
+  const pr8277 = pr(
+    'Part of #8131\n\n' +
+      '⚠️ **Deliberately `Part of` and not `Fixes`.** This closes the card’s §1 only. ' +
+      'Its §2 is out of this card’s declared file surface and is the surface of the in-flight #8136. ' +
+      'Merging this must not auto-close a card with that half unaddressed; ' +
+      'the PM should close #8131 deliberately once #8136 lands.',
+  );
+  t('H7: the #8277 specimen is a finding', typeof h7PartOfWithClosingKeyword(pr8277), 'string');
+  t('H7: …and it names the card it will close', h7PartOfWithClosingKeyword(pr8277).includes('Part of #8131'), true);
+  // The measurement that refutes the sidebar hypothesis: the SAME body names
+  // #8136 one clause later with no keyword, and #8136 took no closing link.
+  // The predicate must reproduce that asymmetry, not blanket-flag both numbers.
+  t('H7: …and does NOT implicate #8136 from the same sentence', h7PartOfWithClosingKeyword(pr8277).includes('#8136'), false);
+
+  // Specimen 2 — PR #8261 (`Part of #8103`), the same round's other partial
+  // delivery, which stayed open. No keyword anywhere near its number.
+  t(
+    'H7: the #8261 specimen (Part of, no keyword) is clean',
+    h7PartOfWithClosingKeyword(
+      pr(
+        'Part of #8103 — the **non-destructive half** only. The deletion half stays open ' +
+          'and is being decided on #8259, which this PR does not address.',
+      ),
+    ),
+    null,
+  );
+
+  // Specimen 3 — open PR #8454. Its only keyword sits in an inline code span,
+  // and #8284 carries NO closing link: measured, and the reason the predicate
+  // strips code. Flagging this would punish the careful author.
+  t(
+    'H7: the #8454 specimen (keyword inside backticks) is clean',
+    h7PartOfWithClosingKeyword(
+      pr(
+        'Part of #8284\n\n⚠️ **Deliberately `Part of`, not `Fixes`** — the dispatch asked for ' +
+          '`Fixes #8284`, and this PR does not close it: one of the card’s two acceptance pins ' +
+          'does not invert. Merging this and closing #8284 would drop the severe half on the floor.',
+      ),
+    ),
+    null,
+  );
+  // …and the same body proves `closing` is not a closing keyword. GitHub's list
+  // is close/closes/closed, fix/fixes/fixed, resolve/resolves/resolved — the
+  // gerunds are not on it, and they are everywhere in this prose.
+  t(
+    'H7: "closing #N" is not a closing keyword',
+    h7PartOfWithClosingKeyword(pr('Part of #8284\n\nMerging this and closing #8284 would drop the severe half.')),
+    null,
+  );
+  t(
+    'H7: "fixing #N" is not a closing keyword either',
+    h7PartOfWithClosingKeyword(pr('Part of #900\n\nfixing #900 needs another round')),
+    null,
+  );
+
+  // Specimen 4 — open PR #8471: `Part of #8247` AND a keyword bound to #8245.
+  // Two different cards, so no contradiction. The binding is per number.
+  t(
+    'H7: Part of #A with Fixes #B (the #8471 shape) is clean',
+    h7PartOfWithClosingKeyword(pr('Part of #8247\n\nFixes #8245 as the actionable half.')),
+    null,
+  );
+  t(
+    'H7: Part of #A with Fixes #A on separate lines is a finding',
+    typeof h7PartOfWithClosingKeyword(pr('Part of #8247\n\nFixes #8247')),
+    'string',
+  );
+
+  // The parser ignores negation and modals — that is the whole incident.
+  t(
+    'H7: a NEGATED closing sentence still counts',
+    typeof h7PartOfWithClosingKeyword(pr('Part of #77\n\nThis does not fix #77.')),
+    'string',
+  );
+  t('H7: colon form `Closes: #N`', typeof h7PartOfWithClosingKeyword(pr('Part of #77\n\nCloses: #77')), 'string');
+  t('H7: case-insensitive', typeof h7PartOfWithClosingKeyword(pr('part of #77\n\nRESOLVED #77')), 'string');
+  // A PR with no `Part of` declaration is out of scope entirely: `Fixes #N` on
+  // its own is the normal, correct full-delivery shape.
+  t('H7: plain `Fixes #N` with no Part of is out of scope', h7PartOfWithClosingKeyword(pr('Fixes #77')), null);
+  t('H7: empty / missing body', h7PartOfWithClosingKeyword(pr(undefined)), null);
+
+  // stripMarkdownCode — the step reading 4 forced.
+  t('strip: inline span is blanked', stripMarkdownCode('a `Fixes #1` b').includes('#1'), false);
+  t('strip: prose outside spans survives', stripMarkdownCode('a `x` Fixes #1').includes('#1'), true);
+  t(
+    'strip: fenced block is blanked',
+    stripMarkdownCode('Part of #2\n\n```\nFixes #2\n```\n').includes('Fixes #2'),
+    false,
+  );
+  t(
+    'strip: tilde fence is blanked',
+    stripMarkdownCode('~~~md\nFixes #2\n~~~').includes('Fixes #2'),
+    false,
+  );
+  t(
+    'strip: text after a closed fence survives',
+    stripMarkdownCode('```\nquoted\n```\nFixes #3').includes('Fixes #3'),
+    true,
+  );
+  // Blanking keeps line structure, so nothing is spliced across a stripped
+  // block into a match that was never adjacent in the source.
+  t(
+    'strip: no splicing across a stripped fence',
+    h7PartOfWithClosingKeyword(pr('Part of #4\n\nclose\n```\nx\n```\n#4')),
+    null,
+  );
+  t('H7: a fenced-only keyword is not a finding', h7PartOfWithClosingKeyword(pr('Part of #5\n\n```\nFixes #5\n```')), null);
 
   // -- transport prerequisite (#7412) ---------------------------------------
   // The three container classes are REAL measurements, not invented fixtures;

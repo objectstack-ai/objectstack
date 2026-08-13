@@ -286,16 +286,26 @@ describe.each([true, false])('[#6562] /meta object read — effective schema (mu
             );
         expect(tenantIndexes(registryBacked)).toEqual(multiTenant ? [{ fields: ['organization_id'] }] : []);
 
-        // The one residual this fix leaves, recorded rather than left to be
-        // rediscovered: the DECLARATION does not converge the way the field set
-        // does. `divergences()` above compares fields, and the overlay-backed
-        // answer is rebuilt from the stored body, which declares no indexes. It
-        // is inert on this surface — a driver materializes from the REGISTERED
-        // schema, never from a served document (the same reasoning #6562 used to
-        // leave the flag at the injection site), and both answers parse green
-        // either way. If a served-document consumer of `indexes[]` ever appears,
-        // this is the line that says so.
-        expect(tenantIndexes(overlayBacked)).toEqual([]);
+        // [#8375 — FLIPPED, deliberately] This read `.toEqual([])`, under a note
+        // recording the residual #6562/#6810 left: "the DECLARATION does not
+        // converge the way the field set does… If a served-document consumer of
+        // `indexes[]` ever appears, this is the line that says so."
+        //
+        // It appeared, and the line said so. `GET /meta/object/:name` IS a
+        // served-document consumer of `indexes[]`: a caller reading the
+        // overlay-backed answer concluded the object has no tenant index, which
+        // is the input to migration planning, to index-advice tooling and to any
+        // consumer reasoning about query cost — while the platform does create
+        // the index and only this read denied it.
+        //
+        // What converges it is the registry's own materialization seam replayed
+        // onto the served body (`materializeServedObjectOnto`, #8268), so the two
+        // answers are ONE answer rather than two derivations that happen to
+        // agree — which is why the assertion is written against the registry's
+        // answer first and the literal second.
+        expect(tenantIndexes(overlayBacked)).toEqual(tenantIndexes(registryBacked));
+        expect(tenantIndexes(overlayBacked))
+            .toEqual(multiTenant ? [{ fields: ['organization_id'] }] : []);
     });
 
     it('the served correction never becomes a phantom customization', async () => {

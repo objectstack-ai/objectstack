@@ -75,9 +75,31 @@ export function isUniqueScopeDeclared(unique: unknown): boolean {
 }
 
 /**
- * The organization-scoped spellings: field-level `true` (unchanged since
- * #3696) and the explicit `'organization'` synonym (ADR-0120 D1) — on either
- * spelling (field-level `unique` or a declared index's `unique`).
+ * The organization-scoped spellings of a FIELD-level `unique`: bare `true`
+ * (the positional synonym, unchanged since #3696) and the explicit
+ * `'organization'` word (ADR-0120 D1). Pass a field's `unique`; do NOT pass a
+ * declared index's.
+ *
+ * This is NOT the scope judgment for a declared index, and it must not be
+ * reached for there. {@link normalizeDeclaredIndex} decides with a strict
+ * `idx?.unique === 'organization'` instead, so a declared index's bare `true`
+ * is taken VERBATIM as global — the `'global'` arm. That the two paths judge
+ * the same token differently is the answer to #4986, not an oversight: the
+ * spellings were authored under different contracts, and both halves are
+ * pinned (`sql-driver-declared-index-organization-respelling.test.ts`).
+ *
+ * Routing the declared-index branch through this predicate so code and comment
+ * agree is REJECTED — maintainer ruling 2026-08-13, option 1 of #8323. It
+ * would silently reinterpret every existing declared `unique: true` on
+ * deployed databases as organization-scoped: an unannounced index migration,
+ * landing a release BEFORE #5082 refuses the bare spelling — the
+ * two-migrations-with-contradictory-meanings sequence that ruling exists to
+ * avoid. Whether a declared index's bare `true` should be refused at all is
+ * PARKED on #5082 (v18 D2: bare `true` → `'global'` plus a loud refusal).
+ * Until that lands the divergence stays, surfaced to authors rather than
+ * silently repaired: lint `unique/unscoped-declared-index` warns on it
+ * (`packages/lint/src/data-model-rules.ts`) and `IndexSchema.unique`'s
+ * `describe()` states it (`packages/spec/src/data/object.zod.ts`).
  */
 export function isOrganizationScopedUnique(unique: unknown): boolean {
   return unique === true || unique === 'organization';
@@ -1042,6 +1064,20 @@ export interface LegacyUniqueReplacement {
   column: string;
   legacyNames: string[];
   replacement: ExpectedIndex;
+  /**
+   * The EXACT physical key columns the superseded index must have, in key
+   * order — the shape the replacement relaxes away from.
+   *
+   * For a field-level unique this is `[column]`: the pre-#3696 single-column
+   * global index. For a DECLARED index respelled from the global spelling to
+   * `'organization'` (#8323) it is the index's listed columns, which may be
+   * several — `sys_user_preference`'s `(user_id, key)` is the case that put
+   * this here. Matching on the name alone is not enough (an unrelated index
+   * may collide with the generated spelling), and matching on a single leading
+   * column is not enough either: `(user_id, key)` and `(user_id, tenant)` share
+   * one, and only one of them is the index being replaced.
+   */
+  legacyColumns: string[];
 }
 
 /**
@@ -1092,6 +1128,7 @@ export function legacyUniqueReplacements(args: {
     const columns = [tenantField, name];
     out.push({
       column: name,
+      legacyColumns: [name],
       legacyNames,
       // NULL-safe organization key part (ADR-0120 D3). Still a pure
       // relaxation to create from under the legacy GLOBAL single-column
@@ -1103,6 +1140,59 @@ export function legacyUniqueReplacements(args: {
         unique: true,
         nullSafeColumns: [tenantField],
       },
+    });
+  }
+
+  // ── Declared indexes respelled from the global spelling to 'organization' ──
+  //
+  // #8323: the same retirement, one level up. A declared index's bare
+  // `unique: true` is the positional spelling of `'global'` — the listed
+  // columns VERBATIM — so respelling it `'organization'` changes the
+  // materialized shape from `(…listed)` to `(COALESCE(tenant,'__global__'),
+  // …listed)`, and with it the generated NAME. On a deployed database that
+  // reads as two unrelated findings: the composite is missing (create, safe)
+  // and the old global index is an orphan (drop, DESTRUCTIVE, opt-in). An
+  // operator who applies only the safe half keeps the global index — and the
+  // global index is the defect, so the migration would look applied while the
+  // cross-organization refusal it exists to remove is still enforced.
+  //
+  // Routing it through the SAME `replace_unique_index` op the field-level
+  // retirement uses states it as what it is: one pure relaxation, categorised
+  // `safe`, applied CREATE-before-DROP so uniqueness is never unenforced in
+  // between, and dropping the old index only once the replacement is confirmed
+  // present. Any two rows colliding on `(tenant, …listed)` already collided on
+  // `(…listed)`, so the create cannot fail on existing data and no data is lost.
+  for (const idx of Array.isArray(declaredIndexes) ? declaredIndexes : []) {
+    if (idx?.unique !== 'organization') continue;
+    // An EXPLICITLY NAMED index keeps its name across the respelling, so there
+    // is no second name to retire — same name, new definition, which is
+    // `recreate_index`'s job (drop-then-create under one name). Emitting a
+    // replacement here as well would propose dropping the very index the
+    // recreate is rebuilding.
+    if (typeof idx?.name === 'string' && idx.name.trim()) continue;
+    const listed = Array.isArray(idx?.fields)
+      ? idx.fields.filter((f): f is string => typeof f === 'string' && f.length > 0)
+      : [];
+    if (listed.length === 0) continue;
+    // Every listed column must exist physically, or there is no index to match
+    // and nothing the replacement could be created from.
+    if (!listed.every((c) => physicalColumns.has(c))) continue;
+    const replacement = normalizeDeclaredIndex(table, idx, tenantField);
+    if (!replacement) continue;
+    const legacyName = buildIndexName(table, listed, true);
+    // The S6 hand-written composite already lists the tenant column, so
+    // `normalizeDeclaredIndex` prepends nothing and the "legacy" name IS the
+    // current name. Nothing was superseded; the D4 NULL-safe tightening path
+    // owns that transition.
+    if (legacyName === replacement.name) continue;
+    // An index the CURRENT metadata declares is by definition not legacy
+    // (#3955) — the same guard the field-level arm applies.
+    if (declaredNames.has(legacyName)) continue;
+    out.push({
+      column: listed[0],
+      legacyColumns: listed,
+      legacyNames: [legacyName],
+      replacement,
     });
   }
   return out;
@@ -1197,13 +1287,25 @@ export function diffManagedIndexes(args: {
 
   // ── 1. Legacy platform-wide unique superseded by a tenant composite ──
   for (const l of legacy) {
-    // Only a *single-column unique on that very column* is the legacy shape.
-    // Matching on the name alone would let an unrelated index that happens to
-    // collide with the legacy spelling be dropped.
+    // Only a *plain unique on exactly those columns, in key order* is the
+    // legacy shape. Matching on the name alone would let an unrelated index
+    // that happens to collide with the legacy spelling be dropped.
+    //
+    // `legacyColumns` is `[column]` for the field-level retirement and the
+    // declared index's listed columns for the #8323 respelling — the same
+    // question either way, asked once. The plainness guards matter for the
+    // multi-column arm: an index carrying an expression key part, a NULL-safe
+    // organization part or a WHERE predicate is NOT the verbatim global shape
+    // being relaxed, whatever its column identities read as.
     const present = l.legacyNames.filter((n) => {
       const p = byName.get(n);
       if (!p || p.primary || isRuntimeManagedIndex(p, runtimeCreated, tenantField)) return false;
-      return p.unique && p.columns.length === 1 && p.columns[0] === l.column;
+      if (!p.unique || p.partial === true) return false;
+      if ((p.expressions?.length ?? 0) > 0 || (p.nullSafeColumns?.length ?? 0) > 0) return false;
+      return (
+        p.columns.length === l.legacyColumns.length &&
+        p.columns.every((c, i) => c === l.legacyColumns[i])
+      );
     });
     if (present.length === 0) continue;
     for (const n of present) explained.add(n);
@@ -1213,7 +1315,7 @@ export function diffManagedIndexes(args: {
       table,
       column: l.column,
       expected: indexSignature(l.replacement.columns, true, l.replacement.nullSafeColumns),
-      actual: indexSignature([l.column], true),
+      actual: indexSignature(l.legacyColumns, true),
       severity: 'warning',
       category: 'safe',
       op: {
@@ -1226,7 +1328,7 @@ export function diffManagedIndexes(args: {
         ...(l.replacement.nullSafeColumns ? { nullSafeColumns: l.replacement.nullSafeColumns } : {}),
       },
       message:
-        `${table}.${l.column}: a legacy platform-wide UNIQUE index (${present.join(', ')}) still enforces ` +
+        `${table}.${l.legacyColumns.join('+')}: a legacy platform-wide UNIQUE index (${present.join(', ')}) still enforces ` +
         `uniqueness across ALL tenants, but metadata scopes it per '${l.replacement.columns[0]}' — a second ` +
         `tenant reusing the value is rejected on insert (#3696). Replacing it with ${indexSignature(l.replacement.columns, true, l.replacement.nullSafeColumns)} ` +
         `is a pure relaxation: run "os migrate apply".`,

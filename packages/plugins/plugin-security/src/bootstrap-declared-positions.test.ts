@@ -20,7 +20,9 @@ function makeQl(declared: any[] = []) {
   const rows: any[] = [];
   return {
     rows,
-    registry: { listItems: (type: string) => (type === 'position' ? declared.map((c) => ({ content: c })) : []) },
+    // [#8378] Items are surfaced as the real engine surfaces them — the
+    // document itself, not a `{ content: <item> }` box that nothing produces.
+    registry: { listItems: (type: string) => (type === 'position' ? [...declared] : []) },
     async find(object: string, q: any) {
       if (object !== 'sys_position') return [];
       const where = q?.where ?? {};
