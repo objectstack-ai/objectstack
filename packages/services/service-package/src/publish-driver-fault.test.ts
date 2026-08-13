@@ -57,7 +57,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { PackageServicePlugin, PACKAGE_PUBLISH_DRIVER_FAULT_MESSAGE, type PackageService } from './index.js';
 
 const MANIFEST = { id: 'com.acme.crm', version: '1.0.0' } as any;
-const METADATA = { author: 'acme' };
+const METADATA = { objects: [], views: [] };
 
 interface Booted {
   svc: PackageService;
@@ -163,7 +163,7 @@ describe('[#8131] a real INSERT INTO sys_packages failure', () => {
     const { svc } = await boot((db) => db.exec('DROP TABLE sys_packages'));
     const result = await svc.publish({ manifest: MANIFEST, metadata: METADATA });
     expect(Object.keys(result).sort()).toEqual(['driverFault', 'success']);
-    expect((result as Record<string, unknown>).error).toBeUndefined();
+    expect((result as unknown as Record<string, unknown>).error).toBeUndefined();
   });
 
   it('a healthy publish is unaffected (anti-vacuity for the whole section)', async () => {
@@ -321,7 +321,7 @@ describe('[#8131] the caller-facing sentence interpolates nothing', () => {
     });
     const second = await b.svc.publish({
       manifest: { id: 'com.other.app', version: '9.9.9' } as any,
-      metadata: { author: 'other' },
+      metadata: { objects: [] },
     });
 
     expect(first.driverFault?.message).toBe(second.driverFault?.message);
