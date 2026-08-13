@@ -63,6 +63,14 @@
 //   <!-- adr-0087: not-required (unpublished) <why> -->
 //   <!-- adr-0087: not-required (already-registered <id>[, <id>...]) <why> -->
 //   <!-- adr-0087: not-required (no-migration-prescription) <why> -->
+//   <!-- adr-0087: not-required (runtime-interface-only <path>#<Symbol>[, ...]) <why> -->
+//
+// The vocabulary is ratified in ADR-0087's addendum of 2026-08-13, and the two
+// halves are pinned to each other: `assertInputs` refuses to report a verdict
+// unless the categories documented there and the `CATEGORIES` below are the same
+// set, in both directions (#8299). A category the ADR does not describe cannot be
+// claimed, and a category the ADR describes that this file cannot check is a red
+// too -- which is the drift #8299 was filed about, closed at birth.
 //
 // An HTML comment rather than a visible line, for one reason: a changeset body is
 // copied VERBATIM into CHANGELOG.md and shipped to end users. The marker is for
@@ -116,9 +124,9 @@
 //
 // ## What keeps `not-required` honest -- re-validated on EVERY run
 //
-// A bare allow-list nobody re-checks is the failure mode to avoid, so three of the
-// four dispositions are checked against facts rather than taken on trust, and the
-// fourth is checked against the changeset's own prose:
+// A bare allow-list nobody re-checks is the failure mode to avoid, so four of the
+// five dispositions are checked against facts rather than taken on trust, and the
+// fifth is checked against the changeset's own prose:
 //
 //   registered            -- every id must resolve in the ADR-0087 registries at
 //                            HEAD, AND at least one must be NEW in this diff. A
@@ -138,6 +146,14 @@
 //                            is a self-contradiction, checked
 //                            statement-against-statement, not a retirement
 //                            detector.
+//   runtime-interface-only
+//                         -- every named `<path>#<Symbol>` must resolve to an
+//                            exported TS declaration at HEAD that is NOT itself a
+//                            metadata surface and is referenced by none, so
+//                            `objectstack migrate meta` provably has nothing to
+//                            rewrite. It ALSO inherits the prescription refusal
+//                            above; it is a narrowing of it, never an escape from
+//                            it. See the next section (#8299).
 //
 // That last check is the one that reaches #6048: its changeset carries a
 // `### 迁移:FROM → TO` section with a worked before/after block, so the catch-all
@@ -162,10 +178,97 @@
 // measured numbers and the deliberate residual blind spot are at
 // hasMigrationPrescription.
 //
+// ## The fifth category: `runtime-interface-only` (#8299)
+//
+// ### The shape the taxonomy had no word for
+//
+// Every category above reasons about METADATA: a Zod schema, a spec declaration,
+// a stored row -- something `objectstack migrate meta` can reach. PR #8277 changed
+// a shape outside that taxonomy entirely: a PUBLISHED RUNTIME TYPESCRIPT INTERFACE
+// with no metadata surface at all (`PackagePublishResult` in
+// `packages/services/service-package/src/index.ts` lost its `error` member). Its
+// argument for needing no ledger entry was, in the author's own words in the
+// changeset: no Zod schema, no `packages/spec` declaration, no stored
+// representation, so nothing exists for `objectstack migrate meta` to rewrite --
+// and the channel that actually reaches every affected consumer is the COMPILER
+// (`error TS2339: Property 'error' does not exist on type 'PackagePublishResult'`),
+// which is strictly more precise than a ledger line.
+//
+// That argument is correct and it was accepted. It was also PROSE, judged by hand,
+// and it rode on `no-migration-prescription` -- an exemption whose one mechanical
+// check is "your body carries no prescription". Measured on #8277's real changeset
+// (`.changeset/lucky-schools-smash.md`, merged as fc71b84):
+// `findMigrationPrescription` returns `null` on it, even though the body does tell
+// consumers "read `result.driverFault?.message` where you read `result.error`" --
+// there is no arrow and no migration framing, so branches 1-4 all miss it. So the
+// exemption was held by a DETECTOR MISS, not by a positive finding. That is the
+// #8299 complaint stated precisely: the next author either re-derives the argument
+// by hand, or pattern-matches the much looser "no metadata surface => no changeset
+// discipline", which is NOT what #8277 argued.
+//
+// ### What is checked, and why it is a NARROWING
+//
+// The claim names the symbols it is about, and each one is verified at HEAD:
+//
+//   1. it RESOLVES -- `<path>#<Symbol>` names an exported `interface`/`type`/
+//      `class`/`enum` that really exists at HEAD. An unverifiable claim is refused,
+//      never assumed true (#4690).
+//   2. its DECLARATION SITE is not a metadata surface -- not a `*.zod.ts`, not a
+//      file under `packages/spec/src/contracts/`, not an object definition.
+//   3. its declaration is not a PROJECTION of a Zod schema (`z.input<typeof X>` and
+//      friends) -- Prime Directive #1 makes that the normal spelling of "this type
+//      IS metadata", and it lives in ordinary `.ts` files as well as `*.zod.ts`.
+//   4. NO metadata surface REFERENCES it. Steps 2-3 only say where the symbol was
+//      born; a plain runtime interface pulled into a schema (`z.custom<Iface>()`)
+//      or into an object definition has a metadata surface anyway.
+//
+// It ALSO inherits the `no-migration-prescription` refusal, so it is a strict
+// NARROWING of that catch-all rather than a fifth way around it: everything the
+// prescription detector refuses today stays refused. What the author gains is that
+// the exemption now rests on a positive, re-checkable finding instead of on a
+// detector finding nothing.
+//
+// ### Why `<path>#<Symbol>` and not a bare name -- measured, and it decided this
+//
+// #8299 proposed the predicate as "the touched exported symbol appears in no
+// `*.zod.ts`, no spec `contracts/**` entry, and no object definition". Run
+// literally against its own worked example, that predicate REFUSES #8277:
+//
+//   git grep -l '\bPackagePublishResult\b' -- '*.zod.ts'
+//     packages/spec/src/system/metadata-persistence.zod.ts
+//   git grep -l '\bPackagePublishResult\b' -- 'packages/spec/src/contracts/**'
+//     packages/spec/src/contracts/metadata-service.ts
+//
+// Both hits are a HOMONYM. `packages/spec/src/system/metadata-persistence.zod.ts`
+// declares its own, unrelated `PackagePublishResult` (`z.input<typeof
+// PackagePublishResultSchema>`), and the contracts file merely imports THAT one
+// from `../system/metadata-persistence.zod`. Neither has anything to do with the
+// service interface #8277 changed. A bare name is not a symbol identity in this
+// repo, so the predicate is path-qualified -- the same `<path>#<Symbol>` notation
+// `packages/spec/export-origins/*.json` already uses -- and the reference scan in
+// step 4 clears a hit file that either declares the name itself or imports it from
+// somewhere other than the declaring module.
+//
+// The pair is the gate's own accept/refuse fixture, and it is real rather than
+// synthetic: the SAME NAME under two paths must come out opposite ways.
+//
+//   packages/services/service-package/src/index.ts#PackagePublishResult   ACCEPTED
+//   packages/spec/src/system/metadata-persistence.zod.ts#PackagePublishResult
+//                                                                        REFUSED
+//
+// ### What it deliberately does NOT check
+//
+// That the author named EVERY symbol their PR touched. Like `registered`, this
+// judges the claim that was made, not its completeness -- inferring the touched
+// surface is the cross-package retirement detector the 2026-08-07 ruling routes
+// around, and it is no more decidable here. What the category buys is that the
+// claim is now a checkable sentence about named symbols, which a reviewer can
+// re-run, rather than a paragraph they must re-derive.
+//
 // ## Absence is never a pass (#4690)
 //
 // A gate that cannot find its input and exits 0 is worse than no gate. Every input
-// is asserted non-empty before any verdict, and two of the assertions exist purely
+// is asserted non-empty before any verdict, and three of the assertions exist purely
 // to catch this gate rotting into a green no-op:
 //
 //   * PARSER ROT -- every `migrationId` in the generated `spec-changes.json` must
@@ -178,6 +281,13 @@
 //   * CONVENTION ROT -- at least one changeset in the current stock must match the
 //     breaking detector. If `**BREAKING**` / `major` / `feat!:` are ever reworded
 //     wholesale, this gate would match nothing and pass everything in silence.
+//   * VOCABULARY DRIFT (#8299) -- the categories `CATEGORIES` accepts and the ones
+//     ADR-0087 documents must be the SAME SET, checked both ways. A category this
+//     file accepts that the ADR never described is an exemption an author cannot
+//     look up; a category the ADR describes that this file rejects is a documented
+//     exemption nobody can claim. #8299 was filed because the second half of that
+//     pair had no home at all -- #8277's argument was correct, and there was no
+//     named category anywhere for it to cite.
 //
 // Zero third-party dependencies, so it can run in a minimal CI environment before
 // `pnpm install` -- the same constraint its neighbours in the Check Changeset job
@@ -204,8 +314,24 @@ const SPEC_CHANGES = 'packages/spec/spec-changes.json';
 /** Package roots holding workspace manifests, for the `unpublished` precondition. */
 const PACKAGE_ROOTS = ['packages', 'apps', 'examples'];
 
-/** The closed disposition vocabulary. Adding a category is a deliberate act. */
-export const CATEGORIES = ['unpublished', 'already-registered', 'no-migration-prescription'];
+/**
+ * The closed disposition vocabulary. Adding a category is a deliberate act.
+ *
+ * Deliberate in TWO places since #8299: a category added here and nowhere else is
+ * an exemption with no written description, so `assertInputs` refuses to report a
+ * verdict unless this list and the categories ADR-0087 documents are the same set.
+ * The ADR is where an author reads what a category means; this list is where the
+ * gate decides. They are one decision with two faces, and they fail together.
+ */
+export const CATEGORIES = [
+  'unpublished',
+  'already-registered',
+  'no-migration-prescription',
+  'runtime-interface-only',
+];
+
+/** The ADR whose disposition vocabulary this gate enforces (#8299). */
+const ADR_0087 = 'docs/adr/0087-metadata-protocol-upgrade-contract.md';
 
 // ---------------------------------------------------------------------------
 // Changeset reading
@@ -1146,6 +1272,22 @@ export function extractIds(source) {
   return [...source.matchAll(/^\s*id:\s*['"`]([A-Za-z][A-Za-z0-9._-]*)['"`]\s*,?\s*$/gm)].map((m) => m[1]);
 }
 
+/**
+ * Every `not-required` category ADR-0087 documents, read from its marker examples.
+ *
+ * Driven off the literal marker spelling rather than a prose list, for two reasons:
+ * the ADR then has to show an author the exact syntax they will type, and a section
+ * that merely NAMES a category in passing cannot satisfy the pin by accident.
+ *
+ * @param {string} adrText
+ * @returns {Set<string>}
+ */
+export function documentedCategories(adrText) {
+  const cats = new Set();
+  for (const m of adrText.matchAll(/adr-0087\s*:\s*not-required\s*\(\s*([a-z-]+)/g)) cats.add(m[1]);
+  return cats;
+}
+
 /** Every `migrationId` the generated projection carries. */
 export function projectedMigrationIds(specChangesJson) {
   const ids = [];
@@ -1350,6 +1492,43 @@ export function assertInputs({ cwd, head }) {
     );
   }
 
+  // (5) VOCABULARY DRIFT (#8299) -- the categories this gate accepts and the ones
+  //     ADR-0087 documents are ONE decision with two faces. Checked BOTH ways: an
+  //     undocumented category is an exemption an author cannot look up, and a
+  //     documented one this gate rejects is an exemption nobody can claim. #8299
+  //     exists because #8277's correct argument had no named category to cite.
+  const adrText = showOrNull(head, ADR_0087, cwd);
+  if (adrText === null) {
+    problems.push(
+      `ADR-0087 not found at HEAD: ${ADR_0087}\n` +
+      '    It is where an author reads what each `not-required` category means, and this gate\n' +
+      '    refuses to accept a vocabulary whose written half it cannot see. If the record moved,\n' +
+      '    update ADR_0087 in this script in the same PR.',
+    );
+  } else {
+    const documented = documentedCategories(adrText);
+    const undocumented = CATEGORIES.filter((c) => !documented.has(c));
+    const unimplemented = [...documented].filter((c) => !CATEGORIES.includes(c));
+    if (undocumented.length > 0) {
+      problems.push(
+        `category documented nowhere: ${undocumented.join(', ')}\n` +
+        `    CATEGORIES accepts ${undocumented.length === 1 ? 'it' : 'them'}, and ${ADR_0087} carries no\n` +
+        '    `<!-- adr-0087: not-required (<category>) ... -->` example for it. An exemption an author\n' +
+        '    cannot look up gets re-derived by hand or mis-generalised, which is #8299 exactly.\n' +
+        '    fix: describe it in the ADR -- when it may be claimed and what this gate checks -- in\n' +
+        '    the same PR that adds it here.',
+      );
+    }
+    if (unimplemented.length > 0) {
+      problems.push(
+        `category documented but not accepted: ${unimplemented.join(', ')}\n` +
+        `    ${ADR_0087} describes it and CATEGORIES does not list it, so any author who follows the\n` +
+        '    ADR is refused by this gate for writing exactly what the ADR told them to write.\n' +
+        '    fix: implement its check here, or remove it from the ADR.',
+      );
+    }
+  }
+
   return problems;
 }
 
@@ -1382,6 +1561,266 @@ export function workspacePackagesAt(rev, cwd) {
 }
 
 // ---------------------------------------------------------------------------
+// `runtime-interface-only` -- the metadata-surface predicate (#8299)
+//
+// The full argument is in the header section of the same name. This block is the
+// mechanism; every rule here has a sentence there and in ADR-0087's addendum of
+// 2026-08-13, deliberately in the same words.
+// ---------------------------------------------------------------------------
+
+/** Spec's service-contract directory: a declaration here IS a spec declaration. */
+const SPEC_CONTRACTS_DIR = 'packages/spec/src/contracts/';
+
+const TS_FILE_RE = /\.[cm]?tsx?$/;
+/** A test is not an authoring surface: it consumes metadata, it never declares any. */
+const TEST_FILE_RE = /\.(?:test|spec|bench|pin\.test)\.[cm]?tsx?$/;
+
+/**
+ * Is this path a metadata surface, and which kind?
+ *
+ * The three kinds are exactly the three #8299 names -- a Zod schema, a spec
+ * `contracts/**` entry, an object definition -- because those are the three ways a
+ * symbol becomes something `objectstack migrate meta` can reach. It is a PATH
+ * classifier and nothing more; what a file says about a symbol is step 4's job.
+ *
+ * @param {string} p repo-relative path
+ * @returns {string|null} a human-readable kind, or null when it is not a surface
+ */
+export function metadataSurfaceKind(p) {
+  if (!p || p.includes('node_modules/') || !TS_FILE_RE.test(p)) return null;
+  if (TEST_FILE_RE.test(p)) return null;
+  if (p.endsWith('.zod.ts')) return 'a Zod schema';
+  if (p.startsWith(SPEC_CONTRACTS_DIR)) return 'a spec contracts/** entry';
+  if (/\.object\.[cm]?ts$/.test(p) || /(?:^|\/)objects\/[^/]+\.[cm]?ts$/.test(p)) return 'an object definition';
+  return null;
+}
+
+/** Every metadata-surface path present at a rev. */
+function metadataSurfaceFilesAt(rev, cwd) {
+  let out;
+  try { out = git(['ls-tree', '-r', '--name-only', rev], cwd); } catch { return []; }
+  return out.split('\n').map((s) => s.trim()).filter((p) => metadataSurfaceKind(p) !== null);
+}
+
+const IDENT = '[A-Za-z_$][A-Za-z0-9_$]*';
+const IDENT_RE = new RegExp(`^${IDENT}$`);
+
+/** `path/to/file.ts#Symbol` -> its two halves, or null when it is not that shape. */
+export function parseSymbolRef(ref) {
+  const at = ref.indexOf('#');
+  if (at <= 0) return null;
+  const path = ref.slice(0, at);
+  const symbol = ref.slice(at + 1);
+  if (!IDENT_RE.test(symbol) || path.includes('#') || symbol.length === 0) return null;
+  return { path, symbol };
+}
+
+/**
+ * The EXPORTED type declaration of `symbol` in `text`, or null.
+ *
+ * Exported, because an unexported symbol reaches no consumer and needs no
+ * exemption; `const`/`function` are absent on purpose -- this category is about a
+ * TYPE surface the compiler carries, not about runtime values.
+ */
+export function exportedTypeDeclaration(text, symbol) {
+  const re = new RegExp(
+    `^[ \\t]*export[ \\t]+(?:declare[ \\t]+)?(?:abstract[ \\t]+)?(interface|type|class|enum)[ \\t]+${symbol}\\b([^\\n]*)`,
+    'm',
+  );
+  const m = re.exec(text);
+  return m ? { kind: m[1], rest: m[2] } : null;
+}
+
+/** Any declaration of the name at all, exported or not -- the homonym test. */
+function declaresLocally(text, symbol) {
+  const re = new RegExp(
+    `^[ \\t]*(?:export[ \\t]+)?(?:default[ \\t]+)?(?:declare[ \\t]+)?(?:abstract[ \\t]+)?` +
+    `(?:interface|type|class|enum|const|let|var|function)[ \\t]+${symbol}\\b`,
+    'm',
+  );
+  return re.test(text);
+}
+
+/**
+ * `z.input<typeof XSchema>` and its family: the house spelling of "this type IS
+ * metadata" under Prime Directive #1. Checked on the declaration's own tail, not
+ * on the whole file, so an unrelated schema elsewhere in the module says nothing.
+ */
+const ZOD_PROJECTION_RE = /\bz\s*\.\s*(?:input|infer|output)\s*</;
+
+/** Every module specifier that brings `symbol` into `text`. */
+export function importSpecifiersFor(text, symbol) {
+  const out = [];
+  const word = new RegExp(`\\b${symbol}\\b`);
+  for (const m of text.matchAll(/(?:^|\n)\s*(?:import|export)\s+([\s\S]*?)\s*from\s*['"]([^'"]+)['"]/g)) {
+    if (word.test(m[1])) out.push(m[2]);
+  }
+  return out;
+}
+
+/** The workspace package a path belongs to: the longest manifest prefix wins. */
+function owningPackageName(path, pkgs) {
+  let best = null;
+  for (const [name, info] of pkgs) {
+    const dir = info.file.slice(0, -'package.json'.length);
+    if (path.startsWith(dir) && (best === null || dir.length > best.dir.length)) best = { name, dir };
+  }
+  return best?.name ?? null;
+}
+
+const stripModuleSuffix = (p) => p.replace(TS_FILE_RE, '').replace(/\/index$/, '');
+
+/**
+ * Does `specifier`, written in `fromPath`, name the module that declares `declPath`?
+ *
+ * Relative specifiers are resolved positionally; a bare one is matched against the
+ * declaring path's own workspace package, subpath exports included. The subpath
+ * case is deliberately COARSE -- `@objectstack/x/anything` counts as the declaring
+ * module -- because the conservative direction here is to REFUSE the exemption.
+ */
+export function specifierNamesModule(specifier, fromPath, declPath, pkgs) {
+  if (specifier.startsWith('.')) {
+    return stripModuleSuffix(join(dirname(fromPath), specifier)) === stripModuleSuffix(declPath);
+  }
+  const owner = owningPackageName(declPath, pkgs);
+  if (!owner) return false;
+  return specifier === owner || specifier.startsWith(`${owner}/`);
+}
+
+/**
+ * Verify one `runtime-interface-only` claim.
+ *
+ * @param {string[]} refs the `<path>#<Symbol>` tokens the marker named
+ * @param {{ rev: string, cwd: string, packages: () => Map<string, {private: boolean, file: string}> }} ctx
+ * @returns {{ problems: string[], verified: {ref: string, kind: string}[] }}
+ */
+export function verifyRuntimeInterfaceOnly(refs, { rev, cwd, packages }) {
+  const problems = [];
+  const verified = [];
+  const HOW = (badRef) =>
+    '      fix: name the symbol as `<repo-relative-path>#<Symbol>`, e.g.\n' +
+    '        <!-- adr-0087: not-required (runtime-interface-only ' +
+    'packages/services/service-package/src/index.ts#PackagePublishResult) why -->\n' +
+    '      A BARE NAME is refused on purpose: `PackagePublishResult` names two unrelated symbols in\n' +
+    '      this repo -- one runtime interface and one Zod projection in `packages/spec` -- and only\n' +
+    `      the path tells them apart${badRef ? ` (got: ${badRef})` : ''}.`;
+
+  if (refs.length === 0) {
+    problems.push(
+      '`not-required (runtime-interface-only)` names no symbol.\n' +
+      '      The whole content of this exemption is WHICH symbol has no metadata surface, so an\n' +
+      '      unnamed one asserts nothing checkable (#4690).\n' +
+      HOW(null),
+    );
+    return { problems, verified };
+  }
+
+  const surfacePaths = metadataSurfaceFilesAt(rev, cwd);
+  if (surfacePaths.length === 0) {
+    problems.push(
+      '`not-required (runtime-interface-only)` cannot be verified: NO metadata-surface file\n' +
+      `      (\`*.zod.ts\`, \`${SPEC_CONTRACTS_DIR}**\`, object definitions) was found at HEAD.\n` +
+      '      The scan that would refuse this claim has nothing to read, so accepting it would be a\n' +
+      '      green no-op (#4690). If those surfaces moved, this gate moves with them.',
+    );
+    return { problems, verified };
+  }
+  let surfaceTexts = null;
+  const surfaces = () => (surfaceTexts ??= showManyOrNull(rev, surfacePaths, cwd));
+
+  for (const ref of refs) {
+    const parsedRef = parseSymbolRef(ref);
+    if (!parsedRef) {
+      problems.push(`\`runtime-interface-only\` names "${ref}", which is not a \`<path>#<Symbol>\` reference.\n${HOW(ref)}`);
+      continue;
+    }
+    const { path, symbol } = parsedRef;
+
+    // (1) it resolves
+    const text = showOrNull(rev, path, cwd);
+    if (text === null) {
+      problems.push(
+        `\`runtime-interface-only ${ref}\` names a path that does not exist at HEAD: ${path}\n` +
+        '      An exemption whose subject cannot be found is refused, never assumed true (#4690).',
+      );
+      continue;
+    }
+    const decl = exportedTypeDeclaration(text, symbol);
+    if (!decl) {
+      problems.push(
+        `\`runtime-interface-only ${ref}\`: ${path} exports no \`${symbol}\` type declaration at HEAD.\n` +
+        '      Searched for an exported `interface` / `type` / `class` / `enum` of that name. A symbol\n' +
+        '      that is not exported reaches no consumer and needs no exemption; one that is exported\n' +
+        '      from somewhere else should be named at ITS path.',
+      );
+      continue;
+    }
+
+    // (2) the declaration site is not itself a metadata surface
+    const ownKind = metadataSurfaceKind(path);
+    if (ownKind) {
+      problems.push(
+        `\`runtime-interface-only ${ref}\` is false: ${path} is ${ownKind}.\n` +
+        '      This category asserts the symbol has NO metadata surface, and a symbol declared in one\n' +
+        '      is the metadata surface. `objectstack migrate meta` reaches exactly these files, so the\n' +
+        '      ledger is the channel here, not the compiler.\n' +
+        '      fix: register the migration, or name the category that fits (`already-registered`).',
+      );
+      continue;
+    }
+
+    // (3) the declaration is not a projection of a Zod schema
+    if (decl.kind === 'type' && ZOD_PROJECTION_RE.test(decl.rest)) {
+      problems.push(
+        `\`runtime-interface-only ${ref}\` is false: \`${symbol}\` is declared as a projection of a Zod\n` +
+        `      schema --${decl.rest.trim().slice(0, 90)}\n` +
+        '      Under Prime Directive #1 that is the house spelling of "this type IS metadata": the\n' +
+        '      schema it projects is authorable, whatever the file is named.',
+      );
+      continue;
+    }
+
+    // (4) no metadata surface references it
+    const word = new RegExp(`\\b${symbol}\\b`);
+    let refused = false;
+    for (const [hitPath, hitText] of surfaces()) {
+      if (hitPath === path || !word.test(hitText)) continue;
+      // A file that declares the name itself is a HOMONYM, not a reference -- the
+      // measured `PackagePublishResult` pair in the header is exactly this case.
+      if (declaresLocally(hitText, symbol)) continue;
+      const specifiers = importSpecifiersFor(hitText, symbol);
+      const pkgs = packages();
+      if (specifiers.length > 0) {
+        if (!specifiers.some((s) => specifierNamesModule(s, hitPath, path, pkgs))) continue; // imported from elsewhere
+        problems.push(
+          `\`runtime-interface-only ${ref}\` is false: ${hitPath} (${metadataSurfaceKind(hitPath)})\n` +
+          `      IMPORTS \`${symbol}\` from the module that declares it.\n` +
+          '      A runtime interface pulled into a metadata surface HAS a metadata surface, wherever it\n' +
+          '      was declared. That is what step 4 of the predicate exists to catch.',
+        );
+        refused = true;
+        break;
+      }
+      const line = (hitText.split(/\r?\n/).find((l) => word.test(l)) ?? '').trim();
+      problems.push(
+        `\`runtime-interface-only ${ref}\` cannot be verified: ${hitPath} (${metadataSurfaceKind(hitPath)})\n` +
+        `      mentions \`${symbol}\` while neither declaring nor importing it:\n` +
+        `        ${line.slice(0, 140)}\n` +
+        '      Unresolvable, so refused rather than assumed unrelated (#4690). If it truly is a\n' +
+        '      different symbol, the honest disposition is one that can be checked.',
+      );
+      refused = true;
+      break;
+    }
+    if (refused) continue;
+
+    verified.push({ ref, kind: decl.kind });
+  }
+
+  return { problems, verified };
+}
+
+// ---------------------------------------------------------------------------
 // The scan
 // ---------------------------------------------------------------------------
 
@@ -1395,6 +1834,9 @@ const FIXIT = (ids) =>
     '        <!-- adr-0087: not-required (unpublished) why -->',
     '        <!-- adr-0087: not-required (already-registered SOME-MIGRATION-ID) why -->',
     '        <!-- adr-0087: not-required (no-migration-prescription) why -->',
+    '        <!-- adr-0087: not-required (runtime-interface-only path/to/file.ts#Symbol) why -->',
+    '',
+    '      Each category is described in ADR-0087, addendum of 2026-08-13.',
   ].join('\n');
 
 /**
@@ -1610,11 +2052,15 @@ export function scan({ cwd, base, head = 'HEAD' }) {
       continue;
     }
 
-    // no-migration-prescription
+    // The two remaining categories both assert that no consumer has a metadata
+    // rewrite to perform, so BOTH are refused by a body that prescribes one.
+    // `runtime-interface-only` inheriting this refusal is what makes it a NARROWING
+    // of `no-migration-prescription` rather than a fifth way around it (#8299):
+    // nothing the detector refuses today becomes claimable by renaming the category.
     const prescription = findMigrationPrescription(parsed.body);
     if (prescription) {
       push(
-        '`not-required (no-migration-prescription)` contradicts the changeset\'s own body, which carries\n' +
+        `\`not-required (${d.category})\` contradicts the changeset's own body, which carries\n` +
         '      a migration prescription.\n' +
         `      Evidence (${prescription.branch}):\n` +
         `        ${prescription.line.slice(0, 160)}\n` +
@@ -1623,10 +2069,25 @@ export function scan({ cwd, base, head = 'HEAD' }) {
         '      carried a worked `迁移:FROM → TO` block and the ledger got no entry.\n' +
         '      fix: register the migration, or -- if the prescription is genuinely for someone the\n' +
         '      ledger does not serve -- use a category that can be verified (`unpublished`,\n' +
-        '      `already-registered`).',
+        '      `already-registered`). `runtime-interface-only` is NOT an escape from this line: it\n' +
+        '      inherits this same refusal (#8299).',
       );
       continue;
     }
+
+    if (d.category === 'runtime-interface-only') {
+      const { problems: bad, verified } = verifyRuntimeInterfaceOnly(d.ids, { rev: head, cwd, packages });
+      if (bad.length > 0) {
+        for (const message of bad) push(message);
+        continue;
+      }
+      judged.push({
+        file, verdict: 'not-required', category: d.category, ids: d.ids, why: d.why, signals: decl.signals,
+        detail: verified.map((v) => `${v.ref} (${v.kind})`).join(', '),
+      });
+      continue;
+    }
+
     judged.push({ file, verdict: 'not-required', category: d.category, why: d.why, signals: decl.signals });
   }
 
@@ -1922,6 +2383,14 @@ function selfTest() {
    * git infers `R` from a delete plus an add of similar content, so the fixture
    * has to be able to say both halves.
    */
+  // The ADR half of the #8299 pin. Generated FROM `CATEGORIES` so an ordinary
+  // fixture can never fail assertion (5) for an unrelated reason; the cases that
+  // give that assertion teeth (V1/V2) override this file deliberately, and the
+  // REAL agreement is checked against the real ADR at HEAD on every CI run.
+  const ADR_DOC = (cats = CATEGORIES) =>
+    '# ADR-0087 (fixture)\n\n' +
+    cats.map((c) => `<!-- adr-0087: not-required (${c}) ... -->\n`).join('');
+
   const build = ({ baseIds = ['old-entry-one', 'old-entry-two'], headIds = null, files = {}, baseFiles = {}, pkgs = null }) => {
     const dir = mkdtempSync(join(tmpdir(), 'adr0087-'));
     const w = (rel, text) => {
@@ -1935,6 +2404,7 @@ function selfTest() {
     w(LEDGER_SOURCES[0], REG(baseIds));
     w(LEDGER_SOURCES[1], CONV(['a-conversion']));
     w(SPEC_CHANGES, SPEC_CHANGES_JSON(baseIds));
+    w(ADR_0087, ADR_DOC());
     // stock: one declared-breaking changeset so the convention-rot assertion holds
     w('.changeset/stock-breaking.md', CS({ body: 'stock\n\n**BREAKING** something\n' }));
     for (const [name, p] of Object.entries(pkgs ?? { '@objectstack/spec': { dir: 'packages/spec', private: false } })) {
@@ -2259,6 +2729,141 @@ function selfTest() {
     },
   })), [/contradicts the changeset's own body/, /Evidence \(from-to-label\)/, /mappings baked into it/]);
 
+  // ---- The #8299 category: `runtime-interface-only` -------------------------
+  //
+  // The fixture is the REAL shape, in miniature: `PackagePublishResult` names two
+  // unrelated symbols in this repo -- the runtime service interface PR #8277
+  // changed, and a Zod projection in `packages/spec` that a spec contract imports.
+  // Every accept/refuse pair below is driven off that collision on purpose: the
+  // predicate is only worth having if the SAME NAME under two paths comes out two
+  // different ways, which is what a bare-name grep cannot do.
+  const RIO_FILES = {
+    'packages/services/service-package/src/index.ts':
+      'export interface PackagePublishDriverFault { message: string }\n\n' +
+      'export interface PackagePublishResult {\n  success: boolean;\n  driverFault?: PackagePublishDriverFault;\n}\n',
+    'packages/spec/src/system/metadata-persistence.zod.ts':
+      "import { z } from 'zod';\n\n" +
+      'export const PackagePublishResultSchema = z.object({ success: z.boolean() });\n' +
+      'export type PackagePublishResult = z.input<typeof PackagePublishResultSchema>;\n',
+    'packages/spec/src/contracts/metadata-service.ts':
+      "import type { PackagePublishResult } from '../system/metadata-persistence.zod';\n\n" +
+      'export interface IMetadataService {\n  publishPackage(): Promise<PackagePublishResult>;\n}\n',
+  };
+  const RIO_PKGS = {
+    '@objectstack/spec': { dir: 'packages/spec', private: false },
+    '@objectstack/core': { dir: 'packages/core', private: false },
+    '@objectstack/service-package': { dir: 'packages/services/service-package', private: false },
+  };
+  const WHY = 'it has no Zod schema, no spec declaration and no stored form, so the compiler is the channel';
+  const RIO_CS = (inParens, extra = '') =>
+    CS({
+      bumps: [['@objectstack/service-package', 'major']],
+      body: `**BREAKING** the publish result drops its \`error\` member\n\n${extra}<!-- adr-0087: not-required (${inParens}) ${WHY} -->\n`,
+    });
+
+  // RIO-G1: THE #8277 CASE, ACCEPTED. The claim is path-qualified, so the homonym
+  // in `metadata-persistence.zod.ts` and its import in `contracts/metadata-service.ts`
+  // are correctly read as a DIFFERENT symbol.
+  green('RIO-G1 #8277 accepted: a runtime interface with no metadata surface', run(mk({
+    pkgs: RIO_PKGS,
+    files: {
+      ...RIO_FILES,
+      '.changeset/x.md': RIO_CS('runtime-interface-only packages/services/service-package/src/index.ts#PackagePublishResult'),
+    },
+  })));
+
+  // RIO-R1: THE OTHER HALF OF THE SAME PAIR, REFUSED. Same symbol NAME, declared in
+  // a `*.zod.ts` -- exactly what the category may never exempt.
+  red('RIO-R1 the same name declared in a *.zod.ts is refused', run(mk({
+    pkgs: RIO_PKGS,
+    files: {
+      ...RIO_FILES,
+      '.changeset/x.md': RIO_CS('runtime-interface-only packages/spec/src/system/metadata-persistence.zod.ts#PackagePublishResult'),
+    },
+  })), [/is false/, /is a Zod schema/]);
+
+  // RIO-R2: declared in a plain runtime file, but a Zod schema IMPORTS it. Steps
+  // 2-3 say where a symbol was born; this is why step 4 exists.
+  red('RIO-R2 a runtime interface a *.zod.ts imports is refused', run(mk({
+    pkgs: RIO_PKGS,
+    files: {
+      ...RIO_FILES,
+      'packages/core/src/ports.ts': 'export interface StoragePort { read(): Promise<string> }\n',
+      'packages/spec/src/data/storage.zod.ts':
+        "import { z } from 'zod';\nimport type { StoragePort } from '@objectstack/core';\n\n" +
+        'export const StorageSchema = z.object({ port: z.custom<StoragePort>() });\n',
+      '.changeset/x.md': RIO_CS('runtime-interface-only packages/core/src/ports.ts#StoragePort'),
+    },
+  })), [/is false/, /IMPORTS `StoragePort`/, /storage\.zod\.ts/]);
+
+  // RIO-R3: an object definition MENTIONS it, neither declaring nor importing it.
+  // Unresolvable, so refused rather than assumed unrelated (#4690).
+  red('RIO-R3 an unresolvable mention in an object definition is refused', run(mk({
+    pkgs: RIO_PKGS,
+    files: {
+      ...RIO_FILES,
+      'packages/core/src/ports.ts': 'export interface StoragePort { read(): Promise<string> }\n',
+      'examples/app-crm/src/objects/account.object.ts':
+        'export const account = {\n  name: "account",\n  // shaped by StoragePort at publish time\n};\n',
+      '.changeset/x.md': RIO_CS('runtime-interface-only packages/core/src/ports.ts#StoragePort'),
+    },
+  })), [/cannot be verified/, /account\.object\.ts/, /neither declaring nor importing/]);
+
+  // RIO-R4: a BARE NAME is refused. This is the predicate #8299 proposed, and it is
+  // refused precisely because it cannot tell RIO-G1 from RIO-R1.
+  red('RIO-R4 a bare symbol name is not a symbol reference', run(mk({
+    pkgs: RIO_PKGS,
+    files: { ...RIO_FILES, '.changeset/x.md': RIO_CS('runtime-interface-only PackagePublishResult') },
+  })), [/not a `<path>#<Symbol>` reference/, /names two unrelated symbols/]);
+
+  // RIO-R5: the claim names no symbol at all -- nothing to verify.
+  red('RIO-R5 no symbol named', run(mk({
+    pkgs: RIO_PKGS,
+    files: { ...RIO_FILES, '.changeset/x.md': RIO_CS('runtime-interface-only') },
+  })), [/names no symbol/]);
+
+  // RIO-R6: the path does not exist at HEAD.
+  red('RIO-R6 an unresolvable path', run(mk({
+    pkgs: RIO_PKGS,
+    files: { ...RIO_FILES, '.changeset/x.md': RIO_CS('runtime-interface-only packages/gone/src/index.ts#Ghost') },
+  })), [/does not exist at HEAD/]);
+
+  // RIO-R7: the path exists and exports no such type.
+  red('RIO-R7 the named symbol is not exported there', run(mk({
+    pkgs: RIO_PKGS,
+    files: {
+      ...RIO_FILES,
+      '.changeset/x.md': RIO_CS('runtime-interface-only packages/services/service-package/src/index.ts#NotHere'),
+    },
+  })), [/exports no `NotHere` type declaration/]);
+
+  // RIO-R8: a Zod projection living in an ordinary `.ts` file. The file name says
+  // runtime; the declaration says metadata, and the declaration wins.
+  red('RIO-R8 a z.input<> projection outside a *.zod.ts is refused', run(mk({
+    pkgs: RIO_PKGS,
+    files: {
+      ...RIO_FILES,
+      'packages/metadata/src/derived.ts':
+        "import type { z } from 'zod';\nimport { StoredPackageSchema } from './schemas';\n\n" +
+        'export type StoredPackage = z.input<typeof StoredPackageSchema>;\n',
+      '.changeset/x.md': RIO_CS('runtime-interface-only packages/metadata/src/derived.ts#StoredPackage'),
+    },
+  })), [/projection of a Zod\n\s+schema/]);
+
+  // RIO-R9: the category INHERITS the prescription refusal. Without this the new
+  // category would be a fifth way around the #6048 forcing function instead of a
+  // narrowing of it.
+  red('RIO-R9 a migration prescription refuses this category too', run(mk({
+    pkgs: RIO_PKGS,
+    files: {
+      ...RIO_FILES,
+      '.changeset/x.md': RIO_CS(
+        'runtime-interface-only packages/services/service-package/src/index.ts#PackagePublishResult',
+        '### 迁移\n\n`result.error` → `result.driverFault?.message`\n\n',
+      ),
+    },
+  })), [/contradicts the changeset's own body/, /NOT an escape from this line/]);
+
   // ---- G6: a changeset that was ALREADY breaking at base is inherited -------
   {
     const r = mk({ files: {} });
@@ -2406,6 +3011,35 @@ function selfTest() {
     git(['add', '-A'], dir); git(['commit', '-qm', 'base'], dir);
     const probs = assertInputs({ cwd: dir, head: 'HEAD' });
     assert(probs.some((p) => /ledger source not found/.test(p)), `I3: a missing ledger must be RED, got: ${probs.join('|')}`);
+  }
+  {
+    // V1/V2 (#8299): the vocabulary and its written description are ONE decision.
+    // Checked in both directions, because the two failures are different and both
+    // are real -- an exemption nobody can look up, and an exemption nobody can claim.
+    const r = mk({ files: {} });
+    writeFileSync(join(r.dir, ADR_0087), ADR_DOC(CATEGORIES.filter((c) => c !== 'runtime-interface-only')));
+    git(['commit', '-qam', 'undocument a category'], r.dir);
+    const probs = assertInputs({ cwd: r.dir, head: 'HEAD' });
+    assert(
+      probs.some((p) => /category documented nowhere/.test(p) && /runtime-interface-only/.test(p)),
+      `V1: a category CATEGORIES accepts and the ADR omits must be RED, got: ${probs.join('|')}`,
+    );
+
+    const r2 = mk({ files: {} });
+    writeFileSync(join(r2.dir, ADR_0087), ADR_DOC([...CATEGORIES, 'sounds-plausible']));
+    git(['commit', '-qam', 'document a category nothing implements'], r2.dir);
+    const probs2 = assertInputs({ cwd: r2.dir, head: 'HEAD' });
+    assert(
+      probs2.some((p) => /category documented but not accepted/.test(p) && /sounds-plausible/.test(p)),
+      `V2: a category the ADR describes and CATEGORIES rejects must be RED, got: ${probs2.join('|')}`,
+    );
+
+    // V3: the real repository is the case that matters -- this gate's own vocabulary
+    // and the real ADR must agree at the tip being tested, not just in fixtures.
+    const realAdr = readFileSync(join(REPO_ROOT, ADR_0087), 'utf8');
+    const documented = documentedCategories(realAdr);
+    for (const c of CATEGORIES) assert(documented.has(c), `V3: ${ADR_0087} must document the \`${c}\` category`);
+    for (const c of documented) assert(CATEGORIES.includes(c), `V3: ${ADR_0087} documents \`${c}\`, which CATEGORIES does not accept`);
   }
 
   // ---- Unit pins on the two pattern-shaped judgements ----------------------
@@ -2629,6 +3263,36 @@ function selfTest() {
     findMigrationPrescription('**Migration (FROM → TO).** Replace each legacy value with the primitive\n\nit is NOT a parse error: `stripLegacyApiMethods` strips it with a\nFROM→TO warning (canonicalize-and-warn)\n')?.line === '**Migration (FROM → TO).** Replace each legacy value with the primitive',
     'P61: a body holding a real label AND a wrapped mention keeps the LABEL as its evidence -- `apimethod-enum-shrink.md`, declared-breaking, the stock\'s own control for this arm',
   );
+
+  // ---- U1-U12 (#8299): unit pins on the runtime-interface-only primitives ----
+  //
+  // The path classifier is the half that decides what the reference scan even
+  // reads, so a silent narrowing of it would make the exemption easier to hold
+  // while every RIO case above stayed green.
+  assert(metadataSurfaceKind('packages/spec/src/ai/agent.zod.ts') === 'a Zod schema', 'U1: a *.zod.ts is a metadata surface');
+  assert(metadataSurfaceKind('packages/spec/src/contracts/data-driver.ts') === 'a spec contracts/** entry', 'U2: a spec contract is a metadata surface');
+  assert(metadataSurfaceKind('examples/app-crm/src/objects/account.object.ts') === 'an object definition', 'U3: an object definition is a metadata surface');
+  assert(metadataSurfaceKind('packages/services/service-package/src/index.ts') === null, 'U4: an ordinary runtime module is NOT a metadata surface');
+  assert(metadataSurfaceKind('packages/spec/src/contracts/data-driver.test.ts') === null, 'U5: a test is not an authoring surface');
+  assert(metadataSurfaceKind('node_modules/x/y.zod.ts') === null, 'U6: node_modules is never scanned');
+
+  assert(parseSymbolRef('a/b.ts#Sym')?.symbol === 'Sym', 'U7: a path-qualified reference parses');
+  assert(parseSymbolRef('PackagePublishResult') === null, 'U8: a bare name is not a symbol reference -- the measured #8277 homonym is why');
+  assert(parseSymbolRef('#Sym') === null, 'U9: a reference with no path is refused');
+
+  assert(exportedTypeDeclaration('export interface Foo { a: 1 }\n', 'Foo')?.kind === 'interface', 'U10: an exported interface resolves');
+  assert(exportedTypeDeclaration('interface Foo { a: 1 }\n', 'Foo') === null, 'U11: an UNexported declaration reaches no consumer and resolves to nothing');
+  {
+    const PKGS = new Map([['@objectstack/core', { private: false, file: 'packages/core/package.json' }]]);
+    assert(
+      specifierNamesModule('@objectstack/core', 'packages/spec/src/x.zod.ts', 'packages/core/src/ports.ts', PKGS),
+      'U12: a bare specifier resolves through the declaring path\'s own workspace package',
+    );
+    assert(
+      !specifierNamesModule('../system/metadata-persistence.zod', 'packages/spec/src/contracts/metadata-service.ts', 'packages/services/service-package/src/index.ts', PKGS),
+      'U12b: THE #8277 HOMONYM -- an import of the same NAME from another module names another module',
+    );
+  }
 
   // ---- S1-S5: the `--audit-stock` classifier (#6350) ------------------------
   //
@@ -2873,7 +3537,9 @@ if (resolve(process.argv[1] ?? '') === resolve(fileURLToPath(import.meta.url))) 
     } else {
       console.log(`✓ check-adr-0087-registration: ${n} declared-breaking changeset(s), each carrying an ADR-0087 disposition.`);
       for (const j of result.judged) {
-        const what = j.verdict === 'registered' ? `registered ${j.ids.join(', ')} (new here: ${j.fresh.join(', ')})` : `not-required (${j.category})`;
+        const what = j.verdict === 'registered'
+          ? `registered ${j.ids.join(', ')} (new here: ${j.fresh.join(', ')})`
+          : `not-required (${j.category})${j.detail ? ` -- verified: ${j.detail}` : ''}`;
         console.log(`    ${j.file}  [${j.signals.join('+')}]  ${what}`);
         if (j.why) {
           // Every exemption is printed AND annotated, on every run: an exemption

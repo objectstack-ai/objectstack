@@ -1,0 +1,7 @@
+{
+  "file": "scripts/check-adr-0087-registration.mjs",
+  "adrs": [
+    "ADR-0087"
+  ],
+  "invariant": "This gate enforces ADR-0087's changeset disposition: every changeset a PR newly declares breaking must carry exactly one `<!-- adr-0087: ... -->` marker, and every `not-required` category is RE-VERIFIED on every run — an allow-list nobody re-checks is the failure mode the whole mechanism exists to avoid. `CATEGORIES` is closed and is pinned to ADR-0087's addendum of 2026-08-13 in BOTH directions by `assertInputs`: a category the gate accepts and the ADR never describes is an exemption an author cannot look up; a category the ADR describes and the gate rejects is one nobody can claim (#8299). `runtime-interface-only` is a NARROWING of `no-migration-prescription`, never a fifth way around it — it inherits that refusal, and it names symbols as `<path>#<Symbol>` because a bare name is not a symbol identity here (`PackagePublishResult` is two unrelated symbols: the service interface PR #8277 changed, and a Zod projection in `packages/spec`). Never widen the exemptions here without the ADR half in the same PR, and never let this gate infer WHICH symbols a PR touched — that is the cross-package retirement detector the maintainer ruling of 2026-08-07 deliberately routes around."
+}

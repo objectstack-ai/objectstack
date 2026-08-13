@@ -563,3 +563,107 @@ re-entering `saveMetaItem` with already-canonical bodies pay nothing.
 
 Reads still skip flows, and now the loop is closed from the other side: a
 served legacy body is healed the moment it is saved back.
+
+## Addendum (2026-08-13) — the changeset disposition vocabulary, and its fifth category (#8299)
+
+Everything above is about the ledger itself. This addendum records the **question
+asked of every declared-breaking changeset** — *what did you do about the ADR-0087
+migration ledger?* — and the closed vocabulary of answers, because until now that
+vocabulary lived only in the gate that enforces it, and an author who disagreed with
+it had nothing to cite.
+
+The question is answered in the changeset body, in one HTML comment. It is a
+comment rather than a visible line because a changeset body is copied verbatim into
+`CHANGELOG.md` and shipped to end users; the marker is for this repo's authors and
+reviewers, and stays fully visible where they read — the PR diff, `git grep`, the
+gate's log and its `--list` output.
+
+```text
+<!-- adr-0087: registered <id>[, <id>...] -->
+<!-- adr-0087: not-required (unpublished) <why> -->
+<!-- adr-0087: not-required (already-registered <id>[, <id>...]) <why> -->
+<!-- adr-0087: not-required (no-migration-prescription) <why> -->
+<!-- adr-0087: not-required (runtime-interface-only <path>#<Symbol>[, ...]) <why> -->
+```
+
+**The vocabulary is closed, and every exemption is re-verified on every run** — an
+allow-list nobody re-checks is the failure mode this whole mechanism exists to
+avoid. `registered` must name ids that resolve *and* are new in the diff;
+`unpublished` requires every bumped package to be `private: true`;
+`already-registered` requires the named ids to pre-date the merge base;
+`no-migration-prescription` is refused by a body that carries a migration
+prescription; and `runtime-interface-only` is the subject of the rest of this
+addendum. The checks live in
+[`scripts/check-adr-0087-registration.mjs`](../../scripts/check-adr-0087-registration.mjs),
+which is also where each one's measured history is written down.
+
+### D7 — a published runtime TS interface with no metadata surface is compiler-carried, and needs no ledger entry
+
+Every other category reasons about **metadata**: a Zod schema, a spec declaration, a
+stored row — something `objectstack migrate meta` can reach. A published **runtime
+TypeScript interface** with none of those is outside that taxonomy, and it kept
+arriving anyway. The worked example is PR #8277, which removed the `error` member of
+`PackagePublishResult` in `packages/services/service-package/src/index.ts`. Its
+argument, in the changeset's own words: no Zod schema, no `packages/spec`
+declaration, no stored representation, so nothing exists for `objectstack migrate
+meta` to rewrite — and the channel that actually reaches every affected consumer is
+the **compiler** (`error TS2339: Property 'error' does not exist on type
+'PackagePublishResult'`), which is strictly more precise than a ledger line.
+
+**That argument is accepted, and it is now a named category.** It was accepted once
+before as prose, judged by hand, riding on `no-migration-prescription` — an
+exemption whose one mechanical check is that the body carries no prescription.
+Measured on #8277's real changeset, the prescription detector returns *nothing*, so
+the exemption was held by a detector **miss** rather than by a positive finding.
+That is why it was worth naming: the next author either re-derives the paragraph, or
+pattern-matches the much looser *"no metadata surface ⇒ no changeset discipline"*,
+which is **not** what #8277 argued and is not what this decision ratifies.
+
+An author may claim it when, for each symbol they name, all four hold at HEAD — and
+the gate checks all four:
+
+1. **it resolves** — `<path>#<Symbol>` names an exported `interface` / `type` /
+   `class` / `enum` that really exists. An unverifiable claim is refused, never
+   assumed true.
+2. **its declaration site is not a metadata surface** — not a `*.zod.ts`, not a file
+   under `packages/spec/src/contracts/`, not an object definition.
+3. **its declaration is not a projection of a Zod schema** — `z.input<typeof X>`
+   and its family. Under Prime Directive #1 that is the house spelling of *"this
+   type IS metadata"*, and it appears in ordinary `.ts` files too.
+4. **no metadata surface references it** — steps 2–3 only say where a symbol was
+   born; a runtime interface pulled into a schema or an object definition has a
+   metadata surface wherever it was declared.
+
+**It also inherits the `no-migration-prescription` refusal.** A body that prescribes
+a rewrite cannot claim this category either, so it is a **narrowing** of that
+catch-all and never a fifth way around it: nothing refused today becomes claimable
+by renaming the category. What the author gains is an exemption that rests on a
+positive, re-runnable finding.
+
+#### Why the symbol is path-qualified
+
+The obvious spelling — *"the touched symbol appears in no `*.zod.ts`, no spec
+`contracts/**` entry, and no object definition"* — is a bare-name grep, and run
+literally it **refuses its own worked example**. `PackagePublishResult` names two
+unrelated symbols in this repo: the service interface #8277 changed, and a Zod
+projection in `packages/spec/src/system/metadata-persistence.zod.ts` that
+`packages/spec/src/contracts/metadata-service.ts` imports. A bare name is not a
+symbol identity here, so a claim names `<path>#<Symbol>` — the notation
+`packages/spec/export-origins/*.json` already uses — and the reference scan clears a
+hit file that either declares the name itself or imports it from somewhere other
+than the declaring module. The pair is the gate's own accept/refuse fixture: the
+same name under two paths must come out two different ways.
+
+#### What this does not decide
+
+That the author named **every** symbol their PR touched. Like `registered`, the gate
+judges the claim that was made, not its completeness — inferring the touched surface
+is the cross-package retirement detector the 2026-08-07 ruling deliberately routes
+around, and it is no more decidable here. The gain is that the claim is a checkable
+sentence a reviewer can re-run, instead of a paragraph they must re-derive.
+
+**The text and the predicate are pinned to each other.** The gate refuses to report
+a verdict unless the categories listed above and the categories it accepts are the
+same set, checked in both directions. A category added to the gate and described
+nowhere is an exemption an author cannot look up; a category described here that the
+gate rejects is an exemption nobody can claim. Both are red.
