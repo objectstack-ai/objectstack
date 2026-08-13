@@ -29,7 +29,7 @@ const result = CurrencyConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **precision** | `integer` | ✅ | Decimal precision (default: 2) |
+| **precision** | `integer` | optional | Decimal precision (default: 2) |
 | **currencyMode** | `Enum<'dynamic' \| 'fixed'>` | ✅ | Currency mode: dynamic (user selectable) or fixed (single currency) |
 | **defaultCurrency** | `string` | ✅ | Default or fixed currency code (ISO 4217, e.g., USD, CNY, EUR) |
 

@@ -106,6 +106,13 @@ describe('default permission sets', () => {
       // `_self` shape for the same reason: no `organization_id`, so Layer 0 is
       // inert and these policies are the row scoping for their read grants.
       'sys_inbox_message_self',
+      // [#8095] The invitation ledger's row scope. Keyed on `email`, not
+      // `user_id`, because an invitation predates the account it invites — the
+      // addressee is identified by address. Its object DOES carry
+      // `organization_id`, so unlike the two above this is not "Layer 0 is
+      // inert here": Layer 0 was engaged and correctly org-scoped, and the org
+      // is precisely the audience the row must be hidden from.
+      'sys_invitation_self',
       'sys_notification_receipt_self',
       'sys_oauth_access_token_self',
       'sys_oauth_application_self',

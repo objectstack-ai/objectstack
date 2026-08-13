@@ -7723,8 +7723,15 @@ export class ObjectQL implements IObjectQLEngine {
           const preserveAudit = opCtx.context?.preserveAudit === true;
           for (let i = 0; i < rows.length; i++) {
             if (rowErrors[i] !== undefined) continue;
+            // [#8214] The insert side carries the same claim and the same
+            // sequencing — this pass logs, the `ReadonlyFieldRejectedError`
+            // below throws before any driver dispatch. Measured on
+            // `origin/main`: `driverCreates 0` while the line said the write
+            // was "COMMITTED WITHOUT IT". The card marked this half UNVERIFIED;
+            // it reproduces, so the flag is threaded here too.
             const stripped = stripRuntimeOwnedFields(
-              schemaForValidation as any, rows[i], suppliedPerRow[i] ?? {}, this.logger, { preserveAudit },
+              schemaForValidation as any, rows[i], suppliedPerRow[i] ?? {}, this.logger,
+              { preserveAudit, strictReadonlyWrites: options?.strictReadonlyWrites === true },
             ) as Record<string, unknown>;
             if (stripped === rows[i]) continue;
             for (const k of Object.keys(rows[i])) {
@@ -8149,9 +8156,70 @@ export class ObjectQL implements IObjectQLEngine {
      // read-only ones are (don't half-apply my payload), and the refusal error
      // composes its wording from `drops` so it never calls a stripped `id`
      // read-only. Route a new strip through here ⇒ own both halves.
+     //
+     // [#8093] ...and one thing is NOT a drop: the row's own primary key, when
+     // it is the address of the row this call is already writing. `droppedFields`
+     // has one declared meaning — fields the CALLER SUPPLIED and the engine
+     // REFUSED. An `id` that names the targeted row was refused nothing; it did
+     // its job. ADDRESSING IS NOT PAYLOAD.
+     //
+     // How a caller who sent no `id` gets one reported anyway: the REST ingress
+     // folds the path id INTO the write payload (`metadata-protocol`'s
+     // `updateData`: `{ ...request.data, id: request.id }`, #6479 — so a body
+     // `id` can no longer bind a different row than the one the URL, the OCC
+     // check and the receipt all name). That fold is correct and stays. But it
+     // lands in `data` BEFORE the `suppliedValues` snapshot above, so from here
+     // down the address is indistinguishable from something the caller typed —
+     // and on an object whose `id` is declared `readonly: true` (as platform
+     // objects' are), the static-`readonly` strip below then drops it and
+     // reports it. Measured on `main` through the real ingress:
+     // `PATCH /data/sys_user_preference/<id>` with the body `{"value":[...]}` —
+     // no `id` key in it — answered 200 carrying
+     // `droppedFields:[{fields:["id"],reason:"readonly"}]`.
+     //
+     // What that cost is not cosmetic. The console's internal "recent items"
+     // trace runs on every org switch, so every org switch popped a user-facing
+     // amber warning toast naming a field the user never touched. The damage is
+     // that the warning channel gets TRAINED TO BE IGNORED — a user who learns
+     // the amber toast is noise will ignore the one that matters. The identical
+     // failure mode is already on record one field over: #3431 / #3794 stopped
+     // `userState.ts` sending `updated_at` because doing so "made every
+     // recents/favorites write pop a scary warning about a field the user never
+     // touched, drowning the real signal the toast exists for."
+     //
+     // Deliberately the REPORT and not the strip. `id` still leaves the SET
+     // clause, and must: a same-value primary-key write is a harmless no-op on
+     // SQL but an outright rejection on stores with immutable primary keys, and
+     // #6435's block already ruled that widening the strip to the truthy-scalar
+     // case "is a separate decision, not a rider here". The payload handed to
+     // the driver is byte-identical before and after this change.
+     //
+     // Self-scoping to SINGLE-RECORD update by construction: `id` is bound only
+     // on the by-id branch, so a predicate/multi write — where nothing addresses
+     // a row by key — is untouched, and a caller-supplied `id` there is still
+     // reported. It cannot collide with the `primary_key` strips either: those
+     // fire only when the dispatch has ALREADY RULED the value is not a primary
+     // key, which is exactly when it cannot equal the bound key.
+     //
+     // Asked of `suppliedValues`, never of the live payload: this is a question
+     // about what the CALLER submitted, and the answer must survive a hook
+     // rewriting the key mid-write — the same reason that snapshot carries
+     // values at all (#5591).
+     //
+     // [#8141] #8093 wired this to the REPORT channel only, so the strip's own
+     // WARN went on calling the address a forged caller write on every
+     // single-record PATCH of every platform object. It now feeds BOTH channels
+     // — `reportDroppedFields` below and `stripReadonlyFields`' `addressKey`
+     // argument — from this ONE predicate. Deliberately not a second derivation:
+     // two notions of "this id is the address" that disagree in one edge case
+     // would be a worse defect than the log line either of them silences.
      const onFieldsDropped = options?.onFieldsDropped;
      const strictReadonlyWrites = options?.strictReadonlyWrites === true;
      const strictDrops: DroppedFieldsEvent[] = [];
+     const idAddressesThisRow =
+       id !== undefined && id !== null
+       && Object.prototype.hasOwnProperty.call(suppliedValues, 'id')
+       && Object.is(suppliedValues.id, id);
      const reportDroppedFields = (
        before: Record<string, unknown> | null | undefined,
        after: Record<string, unknown> | null | undefined,
@@ -8159,7 +8227,10 @@ export class ObjectQL implements IObjectQLEngine {
      ): void => {
        if ((!onFieldsDropped && !strictReadonlyWrites) || before === after || !before) return;
        const afterObj = (after ?? {}) as Record<string, unknown>;
-       const fields = Object.keys(before).filter((k) => !(k in afterObj));
+       const fields = Object.keys(before).filter(
+         // [#8093] The address the caller wrote to is not a field it lost.
+         (k) => !(k in afterObj) && !(idAddressesThisRow && k === 'id'),
+       );
        if (fields.length === 0) return;
        if (strictReadonlyWrites) {
          strictDrops.push({ object, fields, reason });
@@ -8634,9 +8705,26 @@ export class ObjectQL implements IObjectQLEngine {
                // read-only writes are dropped, never the server stamps — and
                // (#5591) never a stamp a hook wrote OVER a key the caller
                // happened to echo back.
+               //
+               // [#8141] `addressKey` carries the SAME fact `reportDroppedFields`
+               // is already keyed on — `idAddressesThisRow`, one predicate, both
+               // channels — so the log and the report can never disagree about
+               // what is an address. The strip is unchanged: `id` still leaves
+               // the SET clause, and the driver receives the identical payload;
+               // only the WARN that called the address a caller forgery is gone.
+               // Undefined on every other path (the multi branch below, and the
+               // insert-side sibling), which is what keeps those byte-identical.
                if (!opCtx.context?.isSystem) {
                    const preRo = hookContext.input.data as Record<string, unknown>;
-                   hookContext.input.data = stripReadonlyFields(updateSchema as any, preRo, suppliedValues, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true }) as any;
+                   // [#8214] `strictReadonlyWrites` is threaded INTO the strip
+                   // rather than consulted only at `assertNoStrictDrops()`
+                   // below: the strip logs from inside, the refusal happens
+                   // afterwards, and until the strip knew the flag its line
+                   // told a refused caller the update had been "COMMITTED
+                   // WITHOUT IT" while `driverWrites` was 0. The seam that
+                   // composes the sentence has to know the mode the sentence
+                   // describes; nothing else here can tell it.
+                   hookContext.input.data = stripReadonlyFields(updateSchema as any, preRo, suppliedValues, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true, addressKey: idAddressesThisRow ? 'id' : undefined, strictReadonlyWrites }) as any;
                    reportDroppedFields(preRo, hookContext.input.data as Record<string, unknown>, 'readonly');
                }
                // [#5126] Both strip passes are done; refuse now if the caller
@@ -8783,7 +8871,11 @@ export class ObjectQL implements IObjectQLEngine {
                // rejected upstream by the tenant write wall, #2946).
                if (!opCtx.context?.isSystem) {
                    const preRoMulti = hookContext.input.data as Record<string, unknown>;
-                   hookContext.input.data = stripReadonlyFields(updateSchema as any, preRoMulti, suppliedValues, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true }) as any;
+                   // [#8214] Same threading as the by-id branch; the multi
+                   // branch still passes no `addressKey` (nothing addresses a
+                   // row by key here), which is what keeps it byte-identical
+                   // to #8141 in every other respect.
+                   hookContext.input.data = stripReadonlyFields(updateSchema as any, preRoMulti, suppliedValues, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true, strictReadonlyWrites }) as any;
                    reportDroppedFields(preRoMulti, hookContext.input.data as Record<string, unknown>, 'readonly');
                }
                // [#5126] Same refusal on the predicate path. A bulk strip is

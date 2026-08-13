@@ -62,6 +62,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import {
   CROSS_FIELD_CASES,
   CROSS_FIELD_OBJECT_FIELDS,
+  CROSS_FIELD_OPERAND_NAMES,
   CROSS_FIELD_REFUSALS,
   CROSS_FIELD_ROWS,
 } from '@objectstack/driver-sql';
@@ -272,6 +273,25 @@ describe('[#7598] cross-field `$field` on the analytics face — served via the 
         // Never a bind-layer accident dressed up as a refusal.
         expect(err).not.toBeInstanceOf(TypeError);
         expect(err.message).not.toContain('can only bind');
+        // [#7929, maintainer ruling 2026-08-12 — B] The ROUTED half is the one
+        // the ruling changed: those refusals are `driver-sql`'s, and the driver
+        // no longer echoes either operand, because on a read-scope query both
+        // columns were written by an administrator the caller never saw. This
+        // is the analytics face of that pin — the four captured response bodies
+        // on #7929 all came down this road.
+        //
+        // ⛔ The `routed === false` half is deliberately NOT asserted the same
+        // way. Those refusals never reach a driver: this package answers them
+        // itself (`fieldReferenceBetweenBoundMessage` and the `$in`/LIKE arms),
+        // with wording that still names both operands. That is a services-lane
+        // surface and B is scoped to the driver, so the gap is recorded rather
+        // than closed here — asserting it green would be asserting something
+        // this change did not do.
+        if (routed) {
+          for (const column of CROSS_FIELD_OPERAND_NAMES) {
+            expect(err.message, `driver refusal names "${column}"${note}`).not.toContain(column);
+          }
+        }
         // The native-SQL emitter never saw it either way — declined, or refused
         // before a strategy was chosen.
         expect(rawSqlCalls).toEqual([]);
@@ -299,7 +319,7 @@ describe('[#7598] cross-field `$field` on the analytics face — served via the 
       // acceptance criterion.
       const routed = CROSS_FIELD_REFUSALS.filter((r) => findCrossFieldComparand(r.filter));
       const covers = (fragment: string) =>
-        routed.some((r) => r.messageIncludes.some((m) => m.includes(fragment)));
+        routed.some((r) => r.diagnosticIncludes.some((m) => m.includes(fragment)));
       expect(covers('dotted path'), 'ruling 1: same-table columns only').toBe(true);
       expect(covers('not a declared field'), 'ruling 2: declared-only enumeration').toBe(true);
       expect(covers('tenant-isolation column'), 'ruling 2, security half').toBe(true);
@@ -307,7 +327,7 @@ describe('[#7598] cross-field `$field` on the analytics face — served via the 
       // Both SIDES of the tenant ban — `=` commutes, so a ban a swap walks
       // around is not a ban.
       expect(
-        routed.filter((r) => r.messageIncludes.includes('tenant-isolation column')).length,
+        routed.filter((r) => r.diagnosticIncludes.includes('tenant-isolation column')).length,
       ).toBeGreaterThanOrEqual(2);
     });
   });

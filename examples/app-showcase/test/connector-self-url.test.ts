@@ -31,7 +31,7 @@ import {
  * detect the bug, so both halves are required.
  */
 
-// Ambient `process` with `env` — test/node-shim.d.ts declares the global as
+// Ambient `process` with `env` — types/node-shim.d.ts declares the global as
 // `{ cwd(): string }` only, and this module-scoped declaration shadows it
 // rather than widening the shared shim (the same idiom objectstack.config.ts
 // uses for its own env reads).

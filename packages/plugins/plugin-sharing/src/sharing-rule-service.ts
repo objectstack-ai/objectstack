@@ -12,6 +12,10 @@ import type {
 // has declared for every one of these context parameters since #6523 (the
 // #6206 ruling: no per-site subset contracts).
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+// [#7795] The built-in platform-operator position (ADR-0068 D2) — one of the
+// two spellings of platform authority the ruling names; see
+// {@link SharingRuleService.assertCanDeletePlatformGlobalRule}.
+import { BUILTIN_IDENTITY_PLATFORM_ADMIN } from '@objectstack/spec/identity';
 import type { SharingEngine } from './sharing-service.js';
 import type { SharingService } from './sharing-service.js';
 import { normalizeAccessLevel, normalizeStoredAccessLevel } from './access-level.js';
@@ -110,9 +114,239 @@ export class SharingRuleService implements ISharingRuleService {
   private assertCanManageRules(context: ExecutionContext): void {
     if (context?.isSystem) return;
     const caps = Array.isArray(context?.systemPermissions) ? context.systemPermissions : [];
-    if (caps.includes('manage_sharing') || caps.includes('manage_platform_settings')) return;
+    if (!caps.includes('manage_sharing') && !caps.includes('manage_platform_settings')) {
+      throw new Error(
+        'PERMISSION_DENIED: sharing-rule administration requires the manage_sharing capability (ADR-0111 D6)',
+      );
+    }
+    // [#8158] Holding the capability is not enough: an org-scoped capability
+    // needs an organization to be scoped BY. See
+    // {@link assertResolvableAdminScope}.
+    this.assertResolvableAdminScope(context);
+  }
+
+  /**
+   * The organization this caller operates in — the ONE spelling of that read.
+   *
+   * [#7136] Only the `tenantId` half is a declared field of the envelope;
+   * `organizationId` is not a field of `ExecutionContext` at all (its history
+   * is #5858 / `check:org-identifier`, and #7070 explicitly held it out of the
+   * envelope work), so it stays cast. The asymmetry is the visible marker of
+   * which of the two names the contract actually knows.
+   *
+   * [#8158] Was open-coded at three call sites (`listRules`, `getRule`,
+   * `defineRule`), with `findRuleRowByName` taking `getRule`'s result as a
+   * parameter. Three copies of a security-relevant read is how the fall-open
+   * below stayed invisible: each site could see "no org id", none could see
+   * whether that meant "system" or "authenticated caller who never selected
+   * one".
+   */
+  private callerOrgId(context: ExecutionContext): string | undefined {
+    return ((context as any)?.organizationId ?? context?.tenantId) || undefined;
+  }
+
+  /**
+   * [#8158] PLATFORM authority — the two spellings, one predicate.
+   *
+   * Extracted from {@link assertCanDeletePlatformGlobalRule} (#7795), whose
+   * doc block is the authority on WHY both spellings are accepted and why
+   * accepting either is the fail-safe reading: they are two independent
+   * channels by which the same unscoped `admin_full_access` grant reaches an
+   * `ExecutionContext` (a `scope: 'platform'` capability on
+   * `systemPermissions`; the ADR-0068 D2 built-in position on `positions`),
+   * and a hand-built context may carry only one.
+   *
+   * It is asked TWICE now — once to authorize destroying a platform-global
+   * rule, once to decide whether an org-less caller may read across tenants —
+   * so it is one predicate rather than two spellings that can drift apart.
+   */
+  private hasPlatformAuthority(context: ExecutionContext): boolean {
+    const caps = Array.isArray(context?.systemPermissions) ? context.systemPermissions : [];
+    if (caps.includes('manage_platform_settings')) return true;
+    const positions = Array.isArray(context?.positions) ? context.positions : [];
+    return positions.includes(BUILTIN_IDENTITY_PLATFORM_ADMIN);
+  }
+
+  /**
+   * [#8158] Refuse an authenticated, non-platform caller whose session
+   * resolves NO organization — the sharing-rule surface's fall-open.
+   *
+   * ## The defect
+   *
+   * {@link adminOrgScope} used to answer the unfiltered `where` for any caller
+   * with no org id (`if (!orgId) return where`). That branch exists for
+   * {@link SYSTEM_CTX} — boot seeding, hooks, backfills — which legitimately
+   * reads every tenant's rows. But it was reached on the ABSENCE OF AN ORG ID,
+   * never on system-ness, and {@link assertCanManageRules} admits any caller
+   * holding the org-scoped `manage_sharing` capability. So an authenticated,
+   * non-system caller arriving with neither `organizationId` nor `tenantId`
+   * got the system read scope: {@link listRules} returned EVERY organization's
+   * rules, {@link getRule} resolved any of them by id or name, and
+   * {@link evaluateRule} reached those rows too — a cross-tenant WRITE, since
+   * it reconciles `sys_record_share` grants. Same class #7761 closed for the
+   * by-id branch, through a different door: there the filter was missing, here
+   * it was skipped.
+   *
+   * ## That context is reachable (measured, not inferred)
+   *
+   * `resolveAuthzContext` derives the tenant from the session's active
+   * organization and stamps it only when truthy, and
+   * `resolveUserAuthzGrants` resolves an org-SCOPED permission-set grant
+   * whenever the caller has no active org to compare it against
+   * (`!(org && tenantId && org !== tenantId)`). A user holding an org-scoped
+   * `manage_sharing` grant with no `sys_member` row — a multi-org deployment
+   * (the membership reconciler binds nobody there), an `invite-only`
+   * deployment, a user removed from their org, an SSO JIT user pending
+   * placement — therefore logs in, resolves the capability, and carries no
+   * tenant. Driven end to end over HTTP in
+   * `packages/qa/dogfood/test/sharing-rule-org-less-caller.dogfood.test.ts`:
+   * before this guard that session listed both tenants' rules.
+   *
+   * ## Refuse, rather than answer empty
+   *
+   * Both are fail-closed; the difference is what the caller is told. An empty
+   * list is the #7676 shape — `{data: []}` over rules that exist and are
+   * actively granting access, which reads as "this deployment has no sharing
+   * rules" and sends the operator to look for the wrong bug. A 403 states the
+   * actual condition and its remedy. `manage_sharing` is declared
+   * `scope: 'org'` in the spec's capability registry: with no organization
+   * resolved there is no scope in which it grants anything, so the honest
+   * answer is a refusal, not an answer.
+   *
+   * Asserted in {@link assertCanManageRules}, which every verb already calls
+   * first — so `defineRule` is covered too, and an org-less caller can no
+   * longer mint an `organization_id: null` rule (a platform-global one, whose
+   * grants reach every tenant and which #7795 then forbids them to delete).
+   *
+   * ## Two classes keep the unfiltered read, deliberately
+   *
+   * - **System contexts** (`isSystem`) — the branch's original and only
+   *   intended reason: boot seeding, the reconcile hooks, the backfills.
+   * - **Platform operators** — `manage_platform_settings` or the
+   *   `platform_admin` position ({@link hasPlatformAuthority}). Their
+   *   cross-tenant read is what the Setup sharing pages are (the capability
+   *   is `scope: 'platform'`, and those pages are documented platform-only in
+   *   plugin-security's default permission sets), and they hold platform
+   *   authority whether or not an organization is selected. Refusing them
+   *   would be a functional regression dressed as a security fix — a
+   *   single-tenant deployment before its default org is bootstrapped, or one
+   *   running `autoDefaultOrganization: false`, has a platform admin with no
+   *   active organization and nothing else wrong with it.
+   */
+  private assertResolvableAdminScope(context: ExecutionContext): void {
+    if (this.callerOrgId(context)) return;
+    if (this.hasPlatformAuthority(context)) return;
     throw new Error(
-      'PERMISSION_DENIED: sharing-rule administration requires the manage_sharing capability (ADR-0111 D6)',
+      'PERMISSION_DENIED: sharing-rule administration requires an active organization — this ' +
+        'session carries none. manage_sharing is an ORG-scoped capability (ADR-0111 D6), so with ' +
+        'no organization resolved there is no tenant whose rules it authorizes, and answering ' +
+        'unscoped would expose every tenant’s rules (#8158). Select an active organization and ' +
+        'retry. Platform operators (manage_platform_settings or the platform_admin position) and ' +
+        'system contexts are unaffected.',
+    );
+  }
+
+  /**
+   * [#7795] DELETING a platform-global (`organization_id = null`) rule requires
+   * PLATFORM authority. Org-scoped `manage_sharing` does not authorize it.
+   *
+   * Maintainer ruling, 2026-08-12 (方向 B), quoted verbatim and untranslated:
+   *
+   * > **裁定:方向 B —— read/evaluate 保持开放,delete 需要平台级权限。**
+   * >
+   * > - `deleteRule` 对 `organization_id = null` 的行,要求调用者持有平台级权限
+   * >   (`manage_platform_settings` 或 `platform_admin` 位置);仅持 org 级
+   * >   `manage_sharing` 者拒绝。
+   * > - 错误面用 **403 `PERMISSION_DENIED`**,不是 404 —— 该行是有意可见的,
+   * >   404 会撒谎。
+   * > - #7760 开放的能力(列出、查看、评估种子规则)全部保持不动。
+   *
+   * ## Why only DELETE, and only this row class
+   *
+   * `manage_sharing` is declared `scope: 'org'` in the spec's capability
+   * registry, but a null-org rule belongs to no organization: its criteria
+   * query runs unscoped under {@link SYSTEM_CTX}, so {@link deleteRule}'s
+   * grant purge revokes EVERY tenant's `sys_record_share` rows, not just the
+   * caller's. That is the one act on this surface an org-level capability
+   * should not reach, and the two measurements the ruling rests on say why —
+   * both re-verified against this build before the guard was written:
+   *
+   * 1. **The delete is a revocation wearing removal's clothes.**
+   *    `bootstrapDeclaredSharingRules` re-seeds declared rules on every boot,
+   *    and {@link defineRule}'s existence lookup under a null org is `{name}` —
+   *    which matches nothing once the row is deleted, so the insert branch
+   *    mints a fresh `uid('srule')`. Measured: the rule returns after a
+   *    restart under a DIFFERENT id, with its grants re-materialised. The
+   *    profile of an outage, not of an administrative change.
+   * 2. **The safe lever is unavailable while the destructive one is not.**
+   *    An org admin cannot deactivate this row: `defineRule`'s existence
+   *    lookup is deliberately strict (`{name, organization_id: orgId}`, held
+   *    that way by #7676 so one org cannot upsert over a row other orgs read),
+   *    so `active: false` from an org admin creates a SECOND, org-stamped row
+   *    and leaves the shared one running. Measured: two rows, the null-org one
+   *    still `active: true`. Scoped + reversible refused, cross-tenant +
+   *    irreversible-until-reboot permitted — the inverse of the safe
+   *    arrangement, and closing the destructive lever is the structural fix.
+   *
+   * ## Two spellings of platform authority, and why BOTH are accepted
+   *
+   * They are not synonyms — they are two independent channels by which the
+   * SAME underlying grant (an unscoped `admin_full_access`) reaches an
+   * `ExecutionContext`:
+   *
+   * - `manage_platform_settings` — a `scope: 'platform'` CAPABILITY, arriving
+   *   on `context.systemPermissions`. `admin_full_access` carries it;
+   *   `organization_admin` deliberately withholds it (it gets only
+   *   `manage_org_users` / `setup.access` / `setup.write`), which is exactly
+   *   what makes it a discriminator between a platform operator and a tenant
+   *   admin — the same reasoning plugin-security's
+   *   `PLATFORM_ADMIN_ONLY_CAPABILITIES` probe encodes.
+   * - `platform_admin` — a built-in POSITION (ADR-0068 D2), arriving on
+   *   `context.positions`, DERIVED by the shared resolver from the unscoped
+   *   `admin_full_access` user grant (never a stored boolean).
+   *
+   * A context built by the shared authz resolver carries both. A HAND-BUILT
+   * context — the population ADR-0096 D3 is still eliminating, and which
+   * plugin-security's probe comment names the sharing service as part of —
+   * may carry only one. Accepting either is therefore the fail-safe reading of
+   * a ruling that names both, and refusing on the absence of both cannot
+   * silently over-refuse a genuine platform operator.
+   *
+   * ## The error surface is 403 `PERMISSION_DENIED`, deliberately not 404
+   *
+   * The row is DELIBERATELY visible: #7760 opened listing, reading and
+   * evaluating seeded rules to org admins on purpose, and this guard leaves
+   * all three untouched. A 404 here would be the platform lying about a row
+   * the caller could list and read one call earlier. The message prefix is
+   * what `rest-server.ts`'s sharing-rule `handleError` maps to HTTP 403 +
+   * `{code: 'PERMISSION_DENIED'}`, which is also the pairing the spec's own
+   * `HttpStatusErrorCodeMap[403]` records. ⛔ Do not "harden" this into a 404
+   * or a silent no-op — both re-open the lie this shape exists to avoid.
+   *
+   * Placed AFTER {@link getRule} resolves, so a row the caller cannot see at
+   * all keeps its existing silent-no-op behaviour rather than gaining a new
+   * refusal that would disclose the row's existence.
+   *
+   * ⚠️ Recorded consequence, accepted by the ruling: with delete closed, an org
+   * admin has NO lever at all over a platform-global rule. The ruling
+   * explicitly declines to pre-build a per-org suppression mechanism
+   * (「⛔ 不做 D」) absent measured demand — do not add one here.
+   */
+  private assertCanDeletePlatformGlobalRule(row: SharingRuleRow, context: ExecutionContext): void {
+    // Only the platform-global class is gated — an org's own rows are
+    // untouched, and so is every read verb.
+    if (row.organization_id != null) return;
+    // Boot seeding, hooks, backfills and the plugin machinery, as everywhere else.
+    if (context?.isSystem) return;
+    // [#8158] Both spellings, now through the shared predicate — see
+    // {@link hasPlatformAuthority}, which carries this block's reasoning.
+    if (this.hasPlatformAuthority(context)) return;
+    throw new Error(
+      'PERMISSION_DENIED: deleting a platform-global sharing rule requires platform authority — ' +
+        'the manage_platform_settings capability or the platform_admin position. Org-scoped ' +
+        'manage_sharing does not authorize it, because this rule belongs to no organization and ' +
+        'deleting it revokes every tenant’s grants under it (#7795). It remains listable, ' +
+        'readable and evaluable.',
     );
   }
 
@@ -136,13 +370,13 @@ export class SharingRuleService implements ISharingRuleService {
       throw new Error(`VALIDATION_FAILED: ${MATCH_ALL_CRITERIA_MESSAGE}`);
     }
 
-    // [#7136] Only the `tenantId` half of this read lost its cast: `tenantId`
-    // is a declared field of the envelope, `organizationId` is not a field of
-    // it at ALL. That spelling has its own history (#5858 /
-    // `check:org-identifier`) and was explicitly held out of this change
-    // (#7070) — so it stays cast, and the asymmetry above is now the visible
-    // marker of which of the two names the contract actually knows.
-    const orgId = (context as any)?.organizationId ?? context?.tenantId ?? null;
+    // [#7136 / #8158] One spelling of this read for the whole service — see
+    // {@link callerOrgId}. `null` (not `undefined`) is what a null-org row is
+    // STAMPED with, and only a system context or a platform operator reaches
+    // this line without an org id (`assertCanManageRules` above refuses the
+    // authenticated org-less caller, so a `manage_sharing` holder can no
+    // longer mint a platform-global rule by accident).
+    const orgId = this.callerOrgId(context) ?? null;
     const now = new Date().toISOString();
     // Authoring path — `full` normalises to `edit`, anything unrecognised is a
     // loud VALIDATION_FAILED alongside the required-field checks above (#3865).
@@ -256,9 +490,19 @@ export class SharingRuleService implements ISharingRuleService {
    * everything else was over-scoped. That was never a feature: unfiltered
    * meant an org admin could resolve — and, through {@link deleteRule},
    * destroy — another organization's rule from its id alone.
+   *
+   * [#8158] Takes the CONTEXT, not a bare org id. The unfiltered branch is
+   * for a system context (and, since #8158, a platform operator) — a fact
+   * only the context carries. Handed an org id alone, this function could not
+   * tell "boot seeding" from "an authenticated caller who never selected an
+   * organization" and answered unfiltered to both;
+   * {@link assertResolvableAdminScope} is where that distinction now lives,
+   * and this signature is what stops a future call site from re-conflating
+   * them.
    */
-  private adminOrgScope(where: Record<string, unknown>, orgId: string | null | undefined): Record<string, unknown> {
-    if (!orgId) return where;
+  private adminOrgScope(where: Record<string, unknown>, context: ExecutionContext): Record<string, unknown> {
+    const orgId = this.callerOrgId(context);
+    if (!orgId) return where; // system context / platform operator — asserted upstream
     return { ...where, $or: [{ organization_id: orgId }, { organization_id: null }] };
   }
 
@@ -270,10 +514,8 @@ export class SharingRuleService implements ISharingRuleService {
     const where: any = {};
     if (filter.object) where.object_name = filter.object;
     if (filter.activeOnly) where.active = true;
-    // `organizationId` is not on the envelope — see defineRule().
-    const orgId = (context as any)?.organizationId ?? context?.tenantId;
     const rows = await this.engine.find('sys_sharing_rule', {
-      where: this.adminOrgScope(where, orgId),
+      where: this.adminOrgScope(where, context),
       orderBy: [{ field: 'name', order: 'asc' }],
       limit: 1000,
       context: SYSTEM_CTX,
@@ -284,8 +526,6 @@ export class SharingRuleService implements ISharingRuleService {
   async getRule(idOrName: string, context: ExecutionContext): Promise<SharingRuleRow | null> {
     this.assertCanManageRules(context); // [ADR-0111 D6]
     if (!idOrName) return null;
-    // `organizationId` is not on the envelope — see defineRule().
-    const orgId = (context as any)?.organizationId ?? context?.tenantId;
     // [#7761] The by-id branch carries the SAME tenant scope as the by-name
     // path — it used to be a bare `{id: idOrName}`, resolved under SYSTEM_CTX
     // so nothing downstream re-scoped it. An org-scoped sharing admin holding
@@ -299,12 +539,12 @@ export class SharingRuleService implements ISharingRuleService {
     // A platform-global (`organization_id = null`) row stays reachable, for
     // symmetry with the by-name path — see {@link adminOrgScope}.
     const byId = await this.engine.find('sys_sharing_rule', {
-      where: this.adminOrgScope({ id: idOrName }, orgId),
+      where: this.adminOrgScope({ id: idOrName }, context),
       limit: 1,
       context: SYSTEM_CTX,
     });
     if (Array.isArray(byId) && byId[0]) return rowFromRule(byId[0]);
-    const byName = await this.findRuleRowByName(idOrName, orgId);
+    const byName = await this.findRuleRowByName(idOrName, context);
     if (byName) return rowFromRule(byName);
     return null;
   }
@@ -322,13 +562,21 @@ export class SharingRuleService implements ISharingRuleService {
    *
    * No `orgId` (SYSTEM_CTX — boot seeding, hooks, backfills) keeps the
    * unfiltered by-name lookup it has always had.
+   *
+   * [#8158] Third site of the same `if (!orgId)` shape, and takes the CONTEXT
+   * for the same reason {@link adminOrgScope} does: an authenticated caller
+   * with no organization used to resolve ANY tenant's rule by name here — the
+   * door a fix confined to `adminOrgScope` would have left open, since
+   * {@link getRule} falls through to this lookup whenever the by-id query
+   * misses (which is exactly what a by-NAME request does).
    */
-  private async findRuleRowByName(name: string, orgId: string | null | undefined): Promise<any | null> {
+  private async findRuleRowByName(name: string, context: ExecutionContext): Promise<any | null> {
+    const orgId = this.callerOrgId(context);
     const first = async (where: Record<string, unknown>): Promise<any | null> => {
       const rows = await this.engine.find('sys_sharing_rule', { where, limit: 1, context: SYSTEM_CTX });
       return Array.isArray(rows) && rows[0] ? rows[0] : null;
     };
-    if (!orgId) return first({ name });
+    if (!orgId) return first({ name }); // system context / platform operator — asserted upstream
     return (await first({ name, organization_id: orgId })) ?? (await first({ name, organization_id: null }));
   }
 
@@ -336,6 +584,9 @@ export class SharingRuleService implements ISharingRuleService {
     this.assertCanManageRules(context); // [ADR-0111 D6]
     const row = await this.getRule(idOrName, context);
     if (!row) return;
+    // [#7795] A platform-global row is visible to an org admin by design
+    // (#7760) but is NOT theirs to destroy — 403, never 404.
+    this.assertCanDeletePlatformGlobalRule(row, context);
     // Drop materialised grants first so we don't orphan them.
     //
     // [#4434] This used to be a predicate-shaped `engine.delete` on

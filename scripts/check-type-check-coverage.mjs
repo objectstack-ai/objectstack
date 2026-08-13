@@ -344,7 +344,7 @@ const DEBT = {
     note: 'code-tier 3 (TS2353) + 1 config-tier (TS2550 lib).',
   },
   '@objectstack/metadata': {
-    errors: 92,
+    errors: 89,
     note: 'code-tier 34 (TS2345 x30, TS2322 x4); config-tier 24 (TS2835); noise 34 (TS7006 x33, TS6133). '
       + 'Re-measured 92 at 5ab08428, up from 87. Composition moved as well as the count: the note used to '
       + 'name TS2353, which is gone, and TS2322 has taken its place. Two thirds of the pile sits in '
@@ -374,7 +374,7 @@ const DEBT = {
       + 'unremarked (#5278).',
   },
   '@objectstack/service-automation': {
-    errors: 5,
+    errors: 3,
     note: 'code-tier 5. Two are the TS2741 this note used to describe as the whole debt: '
       + 'engine.test.ts:2547/2577 build a descriptor literal missing a required field, the #4198 discovery '
       + 'that opened #4311 (the missing field TS names moved from resumeAuthority to handlerContract in '
@@ -396,7 +396,7 @@ const DEBT = {
       + 'in __tests__/knowledge-service.test.ts.',
   },
   '@objectstack/service-storage': {
-    errors: 52,
+    errors: 51,
     note: 'code-tier 8 (TS2339 x4, TS2347 x4); config-tier 21 (TS2835); noise 13 (TS7006 x11, TS6196, '
       + 'TS6133). This entry is the fourth bootstrap margin, and it earned the label the hard way inside '
       + 'one flight: 42 -> 41 at e8db1a230 (the spec half of the `IStorageService.list(prefix)` '
@@ -504,10 +504,23 @@ const EXEMPT = {
 // graduation -- it is a programme rather than a sitting, and its entry stands.
 const TEST_DEBT = {
   '@objectstack/plugin-approvals': {
-    errors: 547,
-    note: 'TS2339 x296, TS2345 x213, TS2550 x20, TS18048 x10. Re-measured 547 at 5ab08428, up from 467. '
-      + 'Still larger than driver-sql ever was, and still entirely test-only (src is clean), so nothing '
-      + 'but this ledger has ever seen it. 443 of the 547 are in one file, src/approval-service.test.ts.',
+    errors: 348,
+    note: 'TS2339 x296, TS2550 x20, TS2345 x16, TS18048 x10, plus 6 singletons (TS2554 x2, TS1470, '
+      + 'TS2352, TS2353, TS6133). Was 547 (re-measured at 5ab08428, up from 467; TS2345 x213 then). '
+      + 'Lowered 547 -> 348 at b5e09b21 (#7888), and the -199 is ONE CLASS COLLAPSING rather than a '
+      + 'measured surface shrinking -- the distinction the surplus finding asked to be settled before a '
+      + 'gap this size was written in as a floor. Three readings say collapse: (a) TS2339 x296, TS2550 '
+      + 'x20 and TS18048 x10 are unchanged TO THE UNIT against the 547 composition and only TS2345 moved, '
+      + '213 -> 16 -- a program that had DEGRADED instead (an unresolved import turning a type into any) '
+      + 'would have wiped the 296 property errors first, since property access on any is legal; (b) all '
+      + '21 test files are on disk and all 21 are in the program (tsc --listFiles), none deleted, and the '
+      + 'package\'s other test files gained 406 lines and lost 204 over the window -- the set grew; (c) '
+      + 'src/approval-service.test.ts, which holds 273 of the 348 as it held 443 of the 547, is '
+      + 'BYTE-IDENTICAL between 5ab08428 and b5e09b21 (blob 3fc272f, 3335 lines both ends). Same bytes, '
+      + '170 fewer errors, so the repair landed in a producer\'s types and no assertion was deleted to '
+      + 'get it. The 16 TS2345 that survive are still reported against a fully-resolved approver-config '
+      + 'union, so that parameter type is still strict -- the 197 that went were repaired, not loosened '
+      + 'away. Still entirely test-only (src is clean), so nothing but this ledger has ever seen it.',
   },
   '@objectstack/objectql': {
     errors: 355,
@@ -589,9 +602,13 @@ const TEST_DEBT = {
       + '(#5278 option A).',
   },
   '@objectstack/plugin-auth': {
-    errors: 131,
+    errors: 111,
     note: 'TS2493 x42 (tuple index out of range), TS18048 x24, TS2740 x19, TS2322 x11, TS2532 x9, '
-      + 'TS2339 x8, TS2741 x8. '
+      + 'TS2339 x8, TS2741 x8. Lowered 131 -> 111 at b16dcb45 (#7888); the intermediate 108 in this PR\'s '
+      + 'first commit was measured at b5e09b21 and was already stale when the merge queue built it -- the '
+      + 'package took +3 inside the hour, which is the same "a ledger number is a number about a moment" '
+      + 'race that kicked #5278 three times, and 111 is the merge-queue run\'s own re-measure on the ref '
+      + 'this PR actually lands on. Composition below predates both and is NOT re-tallied at 111. '
       + 'Measured 124 -> 129 (5ab08428, composition unchanged in shape) -> 131 (e8db1a230). Half of the '
       + 'latest +2 is a TS2554 in src/last-admin-guard.test.ts, a file added by #5941 / PR #5993 '
       + '(the break-glass delete guard); the other 1 landed in a file that already existed and is not '
@@ -599,7 +616,7 @@ const TEST_DEBT = {
       + 'src/admin-import-users.test.ts and 18 in src/admin-user-endpoints.test.ts.',
   },
   '@objectstack/mcp': {
-    errors: 63,
+    errors: 53,
     note: 'TS18046 x51 -- `json` is of type unknown, one `await res.json()` idiom repeated across four '
       + 'files (23 in mcp-server-runtime.http.test.ts, 14 in mcp-action-tools.test.ts, 8 in '
       + 'mcp-http-tools.scopes.test.ts, 6 in mcp-validate-expression.test.ts); TS6133 x1; TS2352 x1. '
@@ -635,7 +652,7 @@ const TEST_DEBT = {
       + "so none of the -33 is this PR's doing.",
   },
   '@objectstack/lint': {
-    errors: 42,
+    errors: 20,
     note: 'TS7006 x22, TS2835 x6, TS6059 x4. Measured 26 -> 30 (5ab08428, the +4 being TS6059, a file '
       + 'outside rootDir, a class the pre-#5278 note did not list) -> 32 (e8db1a230). The latest +2 are '
       + 'both TS7006 and both in files that already existed; three lint test files changed in this window '
@@ -645,14 +662,14 @@ const TEST_DEBT = {
       + 'measured at e8db1a230 and re-confirmed at 32 an hour later at 77c7c884b) -- tighten via the ℹ '
       + 'hint immediately after landing (#5278 option A).',
   },
-  '@objectstack/plugin-security': { errors: 21, note: 'TS2739 x8, TS2740 x5, TS2345/TS2322/TS2741 x2 each -- incomplete literals. Re-measured 21 at 5ab08428, up from 20, and still 21 at e8db1a230 after the package gained a test file -- the file count moved, the error count did not (which is why the file count is derived here rather than written down, #5826).' },
+  '@objectstack/plugin-security': { errors: 11, note: 'TS2739 x8, TS2740 x5, TS2345/TS2322/TS2741 x2 each -- incomplete literals. Re-measured 21 at 5ab08428, up from 20, and still 21 at e8db1a230 after the package gained a test file -- the file count moved, the error count did not (which is why the file count is derived here rather than written down, #5826).' },
   '@objectstack/formula': { errors: 17, note: 'TS2591 x6 (`process`), TS2345 x3, TS2352 x3, TS1470 x2, TS2339 x2. Re-measured 17 at 5ab08428, up from 12; the TS2591 half doubled, which is the missing `types:["node"]` again rather than five new defects.' },
   '@objectstack/trigger-record-change': { errors: 9, note: 'TS2353 x9 -- still the one unknown-property shape repeated, now in four files. Re-measured 9 at 5ab08428, up from 8.' },
   '@objectstack/verify': { errors: 8, note: 'TS2835 x4, TS7006 x4. Re-measured 8 at 5ab08428, up from 6; both classes are the NodeNext pair from the top-of-ledger note.' },
   '@objectstack/connector-mcp': { errors: 5, note: 'TS2339 x5. Re-measured 5 at 5ab08428, exact.' },
   '@objectstack/connector-openapi': { errors: 5, note: 'TS2339 x5. Re-measured 5 at 5ab08428, exact.' },
   '@objectstack/http-conformance': {
-    errors: 4,
+    errors: 3,
     note: 'TS2307 x2, TS2304 x1, TS2740 x1. Re-measured 4 at 5ab08428, up from 1. Worth knowing before '
       + 'anyone tries to graduate it: 2 of the 4 are reported inside node_modules `.d.ts` files '
       + '(@better-auth/core, @better-fetch/fetch), so this entry moves with the lockfile and not only with '

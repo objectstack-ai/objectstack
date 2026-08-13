@@ -105,8 +105,27 @@ export * from './seed-loader.zod';
 // Document Management Protocol
 export * from './document.zod';
 
-// External Lookup Protocol
-export * from './external-lookup.zod';
+// external-lookup.zod (ExternalDataSourceSchema / ExternalFieldMappingSchema /
+// ExternalLookupSchema + every type alias) was REMOVED per ADR-0049
+// enforce-or-remove (#8075). The module declared a real-time external-data
+// lookup protocol — a per-field external data source with an
+// `authentication.config` record whose own docblock example wrote an inline
+// `clientSecret` — and nothing anywhere consumed it: no metadata-type binding,
+// no stack collection, no object/field embedding (`object.external` binds
+// `ObjectExternalBindingSchema`, which carries no credentials), and zero
+// imports outside this package in objectstack. An exported schema with no
+// consumer reads as a capability to whoever finds it (#3950) — here it read as
+// an invitation to put OAuth client secrets in cleartext metadata.
+//
+// The live mechanism external data actually goes through: `object.external`
+// (`ObjectExternalBindingSchema` in object.zod.ts, ADR-0015/0062) names a
+// datasource by reference, and connection credentials live in the datasource
+// config (`datasource.zod.ts` / `driver/`), never inline in object metadata.
+// `external-catalog.zod.ts` below is that federated path's catalog surface and
+// is NOT part of this retirement. Real-time per-field lookup, if ever built,
+// returns via the enforce route of ADR-0049 through a new ADR — the executor
+// first, the vocabulary second. See the D3 record
+// `external-lookup-message-queue-families-retired`.
 export * from './datasource.zod';
 
 // Per-driver `datasource.config` contracts (#4410) — the enforcement half of

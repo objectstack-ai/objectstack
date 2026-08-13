@@ -39,4 +39,24 @@ for D in engine-core metadata drivers services identity devx spec spec-surface c
   gh label create "domain:$D" -R objectstack-ai/objectstack -c bfd4f2 -d "Domain lane — seat card indexed by label:pm:seat" 2>/dev/null || true
 done
 
+# Release board — `target:<major>` marks a release BLOCKER for that major
+# (SKILL.md "发版板"). Its consumer is a named query, one per backlog:
+# `label:target:<major> is:open`, and all three boards reading empty IS the
+# release condition — so the family belongs in all three repos, not just the
+# main one.
+#
+# Seed the CURRENT release window only. A major seeded ahead of its window puts
+# an empty board into every autocomplete with no producer behind it — the same
+# harm as recreating a retired lane above. At the start of a new window MOVE the
+# value here rather than accumulating them; a closed window's label object stays
+# in the repos as history and needs no entry.
+#
+# Creation is create-if-missing, so where these already exist this is a no-op
+# and their current colour and description are left exactly as they are.
+for V in v17; do
+  for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud; do
+    gh label create "target:$V" -R "$R" -c ededed -d "Release blocker for $V — stays on the release board until fixed, dropped as no longer valid, or explicitly accepted for GA" 2>/dev/null || true
+  done
+done
+
 echo "✓ ensure-pm-labels: label vocabulary ensured (idempotent)."

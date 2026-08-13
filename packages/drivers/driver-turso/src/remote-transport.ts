@@ -540,6 +540,39 @@ function invalidFilterError(message: string): Error {
 }
 
 /**
+ * [#7929] The key `driver-sql` carries a REDACTED refusal's full diagnostic
+ * under — the same global-registry symbol, deliberately, not a second one.
+ *
+ * `TursoDriver extends SqlDriver`, so one deployment can raise the refusal from
+ * either compiler depending on transport mode, and a host that reads the text
+ * off the error (`withheldFilterDiagnosticOf`, exported by
+ * `@objectstack/driver-sql`) must not have to know which one answered. A symbol
+ * rather than a string property for the reason stated there: `JSON.stringify`,
+ * object spread and structured clone all skip it, so no error mapper can put
+ * the withheld text back on the wire.
+ */
+const WITHHELD_FILTER_DIAGNOSTIC = Symbol.for('objectstack.driver-sql.withheldFilterDiagnostic');
+
+/**
+ * [#7929, maintainer ruling 2026-08-12] An `INVALID_FILTER` whose caller-visible
+ * message is `message` and whose operand-naming half is `diagnostic`.
+ *
+ * The remote twin of `driver-sql`'s `withheldFilterError`, and it exists for the
+ * same measured reason one package over: an administrator's CEL sharing rule
+ * compiles to `{ $field: … }` and is ANDed into the query by the security
+ * middleware, so a refusal that echoes the reference — and the column it was
+ * compared against — hands a tenant a policy they never saw. This transport is
+ * `TursoDriver`'s REMOTE compiler; local mode inherits `SqlDriver`'s, which
+ * withholds the same way. Leaving one mode disclosing would make the exposure a
+ * property of the connection string.
+ */
+function withheldInvalidFilterError(message: string, diagnostic: string): Error {
+  const err = invalidFilterError(message);
+  Object.defineProperty(err, WITHHELD_FILTER_DIAGNOSTIC, { value: diagnostic, enumerable: false });
+  return err;
+}
+
+/**
  * [#6409] How one declared aggregate function lowers into SQL — the twin of
  * `driver-sql`'s `SqlAggregateLowering`.
  *
@@ -804,6 +837,28 @@ export class RemoteTransport {
    * and every backfilled one resolves to anyway.
    */
   private filterColumnSql: FilterColumnSqlResolver | null = null;
+
+  /**
+   * [#7929] Where the withheld half of a redacted refusal is written.
+   *
+   * This class owns no logger — it never has — and #7929 is not the card that
+   * gives it one: inventing a logging subsystem here would be a second sink to
+   * configure, beside the one `SqlDriver` already exposes and hosts already
+   * wire. `TursoDriver` (which extends `SqlDriver`) hands its own
+   * `logger.warn` down during construction, exactly the way it hands down the
+   * connect factory and the temporal column rule. Absent, the diagnostic stays
+   * on the error's symbol key and reaches the log only if the host reads it —
+   * which is the honest degradation, not a silent one.
+   */
+  private diagnosticSink: ((message: string) => void) | null = null;
+
+  /**
+   * Register where this transport writes the server-side half of a refusal
+   * whose caller-visible message was redacted (#7929).
+   */
+  setDiagnosticSink(sink: (message: string) => void): void {
+    this.diagnosticSink = sink;
+  }
 
   /**
    * Set the @libsql/client instance used for all queries.
@@ -2925,12 +2980,24 @@ export class RemoteTransport {
     const target = `'${object}.${field}'`;
     const shown = `${op} ${preview(value)}`;
     if (isFieldReference(value)) {
-      return invalidFilterError(
-        `[RemoteTransport] Cross-field comparison is not supported in remote mode: ${target} ${shown} ` +
-          `compares a column against another column instead of against a value. The query DSL declares ` +
-          `this form (spec FieldReferenceSchema) but no executor compiles it, so it is refused here ` +
-          `rather than bound as the marker's JSON text — which is valid SQL that matches nothing ` +
-          `(#1058). Compare against a literal, or select both columns and compare after retrieval.`,
+      // [#7929] Both operands are withheld, not just the referenced one. On a
+      // read-scope refusal the administrator wrote the target column as surely
+      // as the reference — `{ amount: { $gt: { $field: 'secret_policy_col' } } }`
+      // is one predicate, authored once — so echoing `'deal.amount'` while
+      // hiding the reference would leave half the policy on the wire.
+      const diagnostic =
+        `[RemoteTransport] Cross-field comparison is not supported in remote mode: ${target} ` +
+        `${shown} compares a column against another column instead of against a value.`;
+      this.diagnosticSink?.(diagnostic);
+      return withheldInvalidFilterError(
+        `[RemoteTransport] Cross-field comparison is not supported in remote mode: this filter ` +
+          `compares a column against another column instead of against a value. The query DSL ` +
+          `declares this form (spec FieldReferenceSchema) but no executor compiles it, so it is ` +
+          `refused here rather than bound as the marker's JSON text — which is valid SQL that ` +
+          `matches nothing (#1058). Compare against a literal, or select both columns and compare ` +
+          `after retrieval. The columns and the operator this filter used are withheld from the ` +
+          `message (#7929); the full diagnostic is in the server log.`,
+        diagnostic,
       );
     }
     return invalidFilterError(

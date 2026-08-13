@@ -56,6 +56,11 @@ import type { DirectMountedRoute, MountedRouteSource } from './direct-mount.js';
 import { RestServerConfig, RestApiConfig, CrudEndpointsConfig, MetadataEndpointsConfig, BatchEndpointsConfig, RouteGenerationConfig } from '@objectstack/spec/api';
 import { DataProtocol, MetadataProtocol } from '@objectstack/spec/api';
 import type { FieldErrorCode } from '@objectstack/spec/api';
+// [#8073] The closed ADR-0112 error vocabulary, so the explain family's single
+// refusal emitter types its `code` parameter as the vocabulary rather than as
+// `string` — an invented code is a compile error at the call site instead of a
+// runtime surprise on whichever arm a test happens to drive.
+import type { ErrorCode } from '@objectstack/spec/api';
 // The async-import row ceiling has exactly one definition, in the spec, whose
 // TSDoc is its public statement (#6535). rest is the only enforcer, so it reads
 // that export rather than re-declaring the literal beside a "mirrors spec" comment.
@@ -9268,6 +9273,45 @@ export class RestServer {
             catch { return undefined; }
         };
 
+        /**
+         * [#8073] The ONE refusal emitter for this route family — every arm of
+         * both handlers goes through it, so "explain and my-delegable-scope
+         * answer the same shape" is a property of the code rather than of
+         * eight literals that happen to agree.
+         *
+         * Before this, the family carried BOTH dialects ADR-0112 D5 retires:
+         * the 401/501/400/403 arms were flat `{ code, message }` and the two
+         * 500s were `{ code, error: 'a bare string' }`, so `body.error.code` —
+         * the one position D5 declares — read `undefined` on all six. #7035
+         * (PR #7293) had already removed both from this file's `/meta`
+         * refusals and #7981 (PR #8071) from `registerSecurityEndpoints`, the
+         * immediately ADJACENT registrar: a client calling `explain` and then
+         * `suggested-bindings` met two shapes inside one `security` family.
+         *
+         * Emitted through the SHARED builder (`sendError` from
+         * `@objectstack/types`, imported as `sendEnvelopeError` because this
+         * module has a local `sendError` of its own — the sanitizing responder
+         * for THROWN errors, a different thing). That is what makes this the
+         * reference shape by construction rather than a ninth local literal
+         * agreeing with the eight it replaced, and it types `code` to the
+         * closed vocabulary for free.
+         *
+         * ⛔ Status codes are untouched: only the POSITION of `code` and
+         * `message` moves. `detail` — the 400 arm's Zod-issue dump — moves to
+         * `error.details`, the slot `ApiErrorSchema` actually declares for
+         * structured context; as a top-level sibling it was undeclared.
+         */
+        const respondError = (
+            res: any,
+            status: number,
+            code: ErrorCode,
+            message: string,
+            details?: unknown,
+        ): void => sendEnvelopeError(
+            res, status, code, message,
+            details === undefined ? undefined : { details },
+        );
+
         const handler = async (req: any, res: any) => {
             try {
                 const environmentId = isScoped ? req.params?.environmentId : undefined;
@@ -9276,18 +9320,18 @@ export class RestServer {
                 if (!context?.userId) {
                     // The explain surface stays authenticated-only — it is an
                     // admin diagnosis tool. (Anonymous is already 401ed above.)
-                    return res.status(401).json({
-                        code: 'UNAUTHORIZED',
-                        message: 'The access-explanation endpoint requires an authenticated caller.',
-                    });
+                    return respondError(
+                        res, 401, 'UNAUTHORIZED',
+                        'The access-explanation endpoint requires an authenticated caller.',
+                    );
                 }
 
                 const svc = await resolveService(environmentId, req);
                 if (!svc || typeof svc.explain !== 'function') {
-                    return res.status(501).json({
-                        code: 'NOT_IMPLEMENTED',
-                        message: 'Access explanation is not available on this deployment (no security service with explain).',
-                    });
+                    return respondError(
+                        res, 501, 'NOT_IMPLEMENTED',
+                        'Access explanation is not available on this deployment (no security service with explain).',
+                    );
                 }
 
                 // GET reads the request from the query string, POST from the
@@ -9310,11 +9354,11 @@ export class RestServer {
                     ...(src.recordId != null && src.recordId !== '' ? { recordId: src.recordId } : {}),
                 });
                 if (!parsed.success) {
-                    return res.status(400).json({
-                        code: 'VALIDATION_FAILED',
-                        message: 'Invalid explain request — expected { object: string, operation: read|create|update|delete|transfer|restore|purge, userId?: string, recordId?: string }.',
-                        detail: String(parsed.error?.message ?? '').slice(0, 1000),
-                    });
+                    return respondError(
+                        res, 400, 'VALIDATION_FAILED',
+                        'Invalid explain request — expected { object: string, operation: read|create|update|delete|transfer|restore|purge, userId?: string, recordId?: string }.',
+                        String(parsed.error?.message ?? '').slice(0, 1000),
+                    );
                 }
 
                 const decision = await svc.explain(parsed.data, context);
@@ -9326,10 +9370,13 @@ export class RestServer {
                     error?.name === 'PermissionDeniedError' ||
                     msg.startsWith('[Security] Access denied')
                 ) {
-                    return res.status(403).json({ code: 'PERMISSION_DENIED', message: msg.slice(0, 1000) });
+                    return respondError(res, 403, 'PERMISSION_DENIED', msg.slice(0, 1000));
                 }
                 logError('[REST] Security explain error:', error);
-                res.status(500).json({ code: 'EXPLAIN_FAILED', error: msg.slice(0, 500) });
+                // The 500 arm keeps its 500-char cap: an unexpected fault's
+                // message is not a contract, and truncating it stays a
+                // sanitization step — only the position of the words moves.
+                respondError(res, 500, 'EXPLAIN_FAILED', msg.slice(0, 500));
             }
         };
 
@@ -9369,25 +9416,25 @@ export class RestServer {
                 const context = await this.resolveExecCtx(environmentId, req);
                 if (this.enforceAuth(req, res, context)) return;
                 if (!context?.userId) {
-                    return res.status(401).json({
-                        code: 'UNAUTHORIZED',
-                        message: 'The delegable-scope endpoint requires an authenticated caller.',
-                    });
+                    return respondError(
+                        res, 401, 'UNAUTHORIZED',
+                        'The delegable-scope endpoint requires an authenticated caller.',
+                    );
                 }
 
                 const svc = await resolveService(environmentId, req);
                 if (!svc || typeof svc.describeDelegableScope !== 'function') {
-                    return res.status(501).json({
-                        code: 'NOT_IMPLEMENTED',
-                        message: 'Delegated administration is not available on this deployment (no security service with describeDelegableScope).',
-                    });
+                    return respondError(
+                        res, 501, 'NOT_IMPLEMENTED',
+                        'Delegated administration is not available on this deployment (no security service with describeDelegableScope).',
+                    );
                 }
 
                 res.json(await svc.describeDelegableScope(context));
             } catch (error: any) {
                 const msg = String(error?.message ?? error ?? '');
                 logError('[REST] Delegable scope error:', error);
-                res.status(500).json({ code: 'DELEGABLE_SCOPE_FAILED', error: msg.slice(0, 500) });
+                respondError(res, 500, 'DELEGABLE_SCOPE_FAILED', msg.slice(0, 500));
             }
         };
 
@@ -9412,16 +9459,55 @@ export class RestServer {
             try { return await this.sharingServiceProvider(environmentId); }
             catch { return undefined; }
         };
-        const respond501 = (res: any) => res.status(501).json({
-            code: 'NOT_IMPLEMENTED',
-            message: 'Sharing service is not configured on this deployment',
-        });
+        /**
+         * [#8111] The ONE refusal emitter for the record-sharing family — the
+         * 501, all five mapped verdicts and all three 500s go through it, so
+         * "list, grant and revoke answer the same shape" is a property of the
+         * code rather than of nine literals that happen to agree.
+         *
+         * Before this, the family carried BOTH dialects ADR-0112 D5 retires:
+         * `respond501` was flat `{ code, message }` and every other arm was
+         * `{ code, error: '<bare string>' }`, so `body.error.code` — the one
+         * position D5 declares — read `undefined` on all nine. #7035
+         * (PR #7293) had already removed both from this file's `/meta`
+         * refusals, #7981 (PR #8071) from `registerSecurityEndpoints` and
+         * #8073 (PR #8174) from the `/security/explain` pair.
+         *
+         * Emitted through the SHARED builder (`sendError` from
+         * `@objectstack/types`, imported as `sendEnvelopeError` because this
+         * module has a local `sendError` of its own — the sanitizing responder
+         * for THROWN errors, a different thing). That is what makes this the
+         * reference shape by construction rather than a tenth local literal
+         * agreeing with the nine it replaced, and it types `code` to the
+         * closed ADR-0112 vocabulary for free.
+         *
+         * ⛔ Status codes are untouched and no code VALUE moves: only the
+         * POSITION of `code` and `message` changes.
+         */
+        const respondError = (
+            res: any,
+            status: number,
+            code: ErrorCode,
+            message: string,
+        ): void => sendEnvelopeError(res, status, code, message);
+
+        const respond501 = (res: any) => respondError(
+            res, 501, 'NOT_IMPLEMENTED',
+            'Sharing service is not configured on this deployment',
+        );
         // [ADR-0111] The service enforces authorization (D1/D4/D5/D7) and
         // signals the verdict via message prefixes, the plugin's established
         // error idiom — this maps them onto HTTP. Returns true when handled.
+        //
+        // [#8111] The prefix is a SERVER-INTERNAL service→REST derivation: it
+        // is stripped below and never reaches the wire, so no consumer can
+        // read it (censused at claim — the only in-repo `startsWith(CODE)`
+        // readers are this file's own route mappings plus one
+        // `plugin-approvals` check on an error it threw itself in-process).
+        // It therefore stays exactly as it is; only the response SHAPE moved.
         const respondSharingError = (res: any, error: any): boolean => {
             const msg = String(error?.message ?? error ?? '');
-            const map: Array<[string, number]> = [
+            const map: Array<[ErrorCode, number]> = [
                 ['VALIDATION_FAILED', 400],
                 ['PERMISSION_DENIED', 403],
                 ['NOT_FOUND', 404],
@@ -9430,10 +9516,10 @@ export class RestServer {
             ];
             for (const [code, status] of map) {
                 if (msg.startsWith(code)) {
-                    res.status(status).json({
-                        code,
-                        error: msg.replace(new RegExp(`^${code}:\\s*`), ''),
-                    });
+                    respondError(
+                        res, status, code,
+                        msg.replace(new RegExp(`^${code}:\\s*`), ''),
+                    );
                     return true;
                 }
             }
@@ -9457,7 +9543,10 @@ export class RestServer {
                 } catch (error: any) {
                     if (respondSharingError(res, error)) return;
                     logError('[REST] List shares error:', error);
-                    res.status(500).json({ code: 'SHARES_LIST_FAILED', error: String(error?.message ?? error).slice(0, 500) });
+                    // The 500 arms keep their 500-char cap: an unexpected
+                    // fault's message is not a contract, and truncating it
+                    // stays a sanitization step — only the position moves.
+                    respondError(res, 500, 'SHARES_LIST_FAILED', String(error?.message ?? error).slice(0, 500));
                 }
             },
             metadata: { summary: 'List per-record sharing grants', tags: ['sharing'] },
@@ -9491,7 +9580,7 @@ export class RestServer {
                 } catch (error: any) {
                     if (respondSharingError(res, error)) return;
                     logError('[REST] Grant share error:', error);
-                    res.status(500).json({ code: 'SHARE_GRANT_FAILED', error: String(error?.message ?? error).slice(0, 500) });
+                    respondError(res, 500, 'SHARE_GRANT_FAILED', String(error?.message ?? error).slice(0, 500));
                 }
             },
             metadata: { summary: 'Grant a per-record share to a principal', tags: ['sharing'] },
@@ -9520,7 +9609,7 @@ export class RestServer {
                 } catch (error: any) {
                     if (respondSharingError(res, error)) return;
                     logError('[REST] Revoke share error:', error);
-                    res.status(500).json({ code: 'SHARE_REVOKE_FAILED', error: String(error?.message ?? error).slice(0, 500) });
+                    respondError(res, 500, 'SHARE_REVOKE_FAILED', String(error?.message ?? error).slice(0, 500));
                 }
             },
             metadata: { summary: 'Revoke a per-record share by id', tags: ['sharing'] },

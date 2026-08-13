@@ -7,6 +7,7 @@ import { strictObject, strictObjectError } from '../shared/strict-object';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { ExpressionInputSchema } from '../shared/expression.zod';
 import { normalizeVisibleWhen, VISIBILITY_STRICT_OPTIONS } from '../shared/visibility';
+import { VISIBILITY_ONLY_STRICT_OPTIONS } from '../shared/editability-boundary';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 import { ChartTypeSchema } from './chart.zod';
 import { SharingConfigSchema } from './sharing.zod';
@@ -1772,6 +1773,16 @@ const FormFieldBaseSchema = lazySchema(() => {
       // match `VISIBILITY_KEY_PATTERN` and are already answered by the shared
       // ADR-0089 prescription, which consumes the key before the rename channel
       // is consulted, so an alias for either would be dead on arrival.
+      //
+      // #7887 filed the OTHER half of that split from the same reasoning and in
+      // the same direction: the two sibling shapes now carry an editability
+      // BOUNDARY prescription (`shared/editability-boundary.ts`), and it is
+      // filed on those two rather than shared, because a `disabled`-matching
+      // guidanceSet on THIS table would consume the key before the rename below
+      // ever runs — killing the one pointer that is correct here, and turning
+      // `alias-integrity.test.ts`'s #7889 reachability check red. The two
+      // decisions are one rule read from both ends: the shared table may only
+      // carry what is true of all three surfaces.
       aliases: { disabled: 'readonly' },
     }, shape),
   });
@@ -1847,8 +1858,26 @@ export const FormFieldSchema: z.ZodType<FormField, FormFieldInput> = lazySchema(
  * set-keyed form and the conversion became the same one call every other closed
  * shape in this package makes. The `.transform()` that folds
  * `visibleOn` → `visibleWhen` is unchanged and still runs after the parse.
+ *
+ * ## A section gates VISIBILITY, not editability (#7887 — boundary, not gap)
+ *
+ * There is no `disabled`, `readonly` or `readonlyWhen` on a section, and that is
+ * a **deliberate boundary** ruled on 2026-08-12, not a slot nobody got round to
+ * adding: **editability lives on fields.** A section decides whether its fields
+ * are *shown* (`visibleWhen`, plus `collapsible` / `collapsed` for how); whether
+ * a shown field can be *edited* is the field's own `readonly` /
+ * {@link FormFieldSchema.readonlyWhen}, enforced by the field renderer that owns
+ * the input. Nothing in the platform reads a section-level read-only flag, so
+ * declaring one would ship the ADR-0049 declared-but-unenforced shape this repo
+ * is retiring elsewhere.
+ *
+ * Writing one anyway stays a loud parse error — unchanged — and since #7887 that
+ * error carries `EDITABILITY_BOUNDARY_KEYS`' prescription naming the field-level
+ * keys, so the author is redirected instead of merely refused. To make a whole
+ * section non-editable, mark its fields `readonly`; to make it conditionally
+ * non-editable, give each field a `readonlyWhen` predicate.
  */
-export const FormSectionSchema = lazySchema(() => strictObject(VISIBILITY_STRICT_OPTIONS, {
+export const FormSectionSchema = lazySchema(() => strictObject(VISIBILITY_ONLY_STRICT_OPTIONS, {
   /**
    * Stable identifier for translation lookup. snake_case convention.
    * When provided, translation bundles can target this section's `label`
