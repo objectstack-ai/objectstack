@@ -9660,6 +9660,17 @@ export class RestServer {
             if (msg.startsWith('RULE_NOT_FOUND')) {
                 return res.status(404).json({ code: 'RULE_NOT_FOUND', error: msg.replace(/^RULE_NOT_FOUND:?\s*/, '') });
             }
+            // [ADR-0111 D7 / #8207] `POST .../evaluate` reconciles through
+            // `SharingService.grant`, whose inertness guard now runs for the
+            // evaluator's system context too. A rule pointed at an object no
+            // sharing gate consults therefore refuses here instead of silently
+            // materialising rows nothing reads — and the admin who asked for
+            // the evaluation needs to be told WHICH object and WHY, not handed
+            // an opaque 500. Same code→status pair the per-record shares routes
+            // already publish (`respondSharingError`), so no new contract.
+            if (msg.startsWith('SHARING_NOT_ENABLED')) {
+                return res.status(422).json({ code: 'SHARING_NOT_ENABLED', error: msg.replace(/^SHARING_NOT_ENABLED:\s*/, '') });
+            }
             logError(`[REST] sharing-rule ${defaultCode}:`, err);
             return res.status(500).json({ code: defaultCode, error: msg.slice(0, 500) });
         };

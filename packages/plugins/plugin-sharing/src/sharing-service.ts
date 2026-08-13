@@ -862,35 +862,41 @@ export class SharingService implements ISharingService {
   }
 
   /**
-   * [ADR-0111 D7] The object must be one the sharing gates actually consult —
-   * otherwise the grant would persist a row no read/write decision ever reads
-   * (the ADR-0078 silently-inert trap, inverted: "share" succeeds and nothing
-   * is shared). Bypass objects, `controlled_by_parent` (a detail record's
-   * access follows its master, ADR-0055), public models, and owner-less
-   * objects all refuse with SHARING_NOT_ENABLED (REST: 422). An engine
-   * without schema access skips the check — it cannot know, and this guard is
-   * an inertness guard, not the authority gate.
+   * [ADR-0111 D7] Would a `sys_record_share` row on `object` ever be consulted
+   * by a read/write decision? Returns the REASON it could not be, or `null`
+   * when it could (which includes "this engine cannot tell").
+   *
+   * ## Why this is a verdict and not an assertion (#8207)
+   *
+   * This is an **inertness** check, not an authorization check — and the two
+   * differ in whether the answer may depend on WHO ASKS. An authorization
+   * check legitimately varies by caller; inertness does not. Whether a share
+   * row can ever be read is a property of the OBJECT: the gates that would
+   * consult it (`buildReadFilter`, `checkEdit`, `checkDelete`) never see the
+   * granter at all. So the verdict is computed here, caller-free, and the two
+   * pre-flights below decide only what to do with it.
+   *
+   * `null` for an engine that cannot answer — no `getSchema`, or a name it
+   * does not resolve. Absence of a schema is absence of EVIDENCE of inertness,
+   * not evidence of liveness, and this function's job is to name a certainty.
+   * The non-system pre-flight still turns an unresolvable name into NOT_FOUND
+   * ({@link assertSharingEnforced}); that is an EXISTENCE verdict, which is a
+   * different act and stays where it was.
    */
-  private assertSharingEnforced(object: string): void {
+  private inertGrantReason(object: string): string | null {
     if (this.bypassObjects.has(object)) {
-      throw new Error(
-        `SHARING_NOT_ENABLED: '${object}' bypasses record sharing; a share row on it would never be consulted`,
-      );
+      return `'${object}' bypasses record sharing; a share row on it would never be consulted`;
     }
-    if (typeof this.engine.getSchema !== 'function') return;
+    if (typeof this.engine.getSchema !== 'function') return null;
     const schema = this.engine.getSchema(object);
-    if (!schema) throw new Error(`NOT_FOUND: unknown object '${object}'`);
+    if (!schema) return null;
     const declared = schema?.sharingModel ?? schema?.security?.sharingModel;
     if (declared === 'controlled_by_parent') {
-      throw new Error(
-        `SHARING_NOT_ENABLED: '${object}' is controlled by its parent (master-detail); share the master record instead`,
-      );
+      return `'${object}' is controlled by its parent (master-detail); share the master record instead`;
     }
     if (effectiveSharingModel(schema) === 'public' || !hasOwnerField(schema)) {
-      throw new Error(
-        `SHARING_NOT_ENABLED: '${object}' is not under record-sharing enforcement `
-        + `(public sharing model or no '${OWNER_FIELD}' field); a share row on it would never be consulted`,
-      );
+      return `'${object}' is not under record-sharing enforcement `
+        + `(public sharing model or no '${OWNER_FIELD}' field); a share row on it would never be consulted`;
     }
     // [#8119] …and an `owner_id` the REGISTRY injected into a FEDERATED object is
     // not an owner column either — it is the one case `hasOwnerField` answers YES
@@ -925,12 +931,44 @@ export class SharingService implements ISharingService {
     // shares — see `federated-phantom-anchors.ts` for why this is a provenance
     // test and not an `external` test.
     if (hasPhantomOwnerAnchor(schema)) {
-      throw new Error(
-        `SHARING_NOT_ENABLED: '${object}' is federated (ADR-0015) and its '${OWNER_FIELD}' is the `
+      return `'${object}' is federated (ADR-0015) and its '${OWNER_FIELD}' is the `
         + `platform's injected anchor, not a remote column — the record-level gates read it off a `
-        + `table that does not have it, so a share row on it would never be consulted`,
-      );
+        + `table that does not have it, so a share row on it would never be consulted`;
     }
+    return null;
+  }
+
+  /**
+   * [ADR-0111 D7 / #8207] Refuse a grant whose row could never be consulted.
+   * The caller-independent half of the pre-flight — run for EVERY caller,
+   * system included (see {@link inertGrantReason} for why "who asks" is not an
+   * input to this question).
+   */
+  private assertNotInertGrant(object: string): void {
+    const reason = this.inertGrantReason(object);
+    if (reason) throw new Error(`SHARING_NOT_ENABLED: ${reason}`);
+  }
+
+  /**
+   * The NON-system pre-flight: the object must EXIST, and a share row on it
+   * must be one the gates would consult.
+   *
+   * The existence half is deliberately not part of {@link assertNotInertGrant}.
+   * A caller who names an object that does not resolve has made a mistake and
+   * deserves NOT_FOUND (REST: 404); the rule evaluator reconciling under a
+   * system context has a stored `object_name` and an engine that may not have
+   * that schema registered at this instant, and hard-failing its pass on that
+   * would break a legitimate write to answer a question nobody asked.
+   */
+  private assertSharingEnforced(object: string): void {
+    if (
+      !this.bypassObjects.has(object)
+      && typeof this.engine.getSchema === 'function'
+      && !this.engine.getSchema(object)
+    ) {
+      throw new Error(`NOT_FOUND: unknown object '${object}'`);
+    }
+    this.assertNotInertGrant(object);
   }
 
   /**
@@ -973,9 +1011,40 @@ export class SharingService implements ISharingService {
 
     // [ADR-0111 D1/D7] Authorization + posture, service-side so every caller
     // is covered (#3902 ③ — the REST route used to hand any signed-in user
-    // straight to this SYSTEM_CTX write path). System callers bypass: the
-    // rule evaluator materialises through here under its own validation.
-    if (!context?.isSystem) {
+    // straight to this SYSTEM_CTX write path).
+    //
+    // [#8207] The two halves are split by WHAT THEY ASK, not by convenience.
+    //
+    //   D1 (`assertCanManageShares`) is an AUTHORIZATION check: "may this
+    //   principal manage shares on this record?". A rule is not a principal
+    //   and has no ownership to prove, so the system context rightly skips it.
+    //
+    //   D7 (`assertNotInertGrant`) is an INERTNESS check: "would any gate ever
+    //   read this row?". Its answer does not depend on who asks — the gates
+    //   that would consult the row never see the granter — so exempting the
+    //   system context made the guard answer a question it was not asked.
+    //
+    // The comment this replaced justified the whole-block skip as "the rule
+    // evaluator materialises through here under its own validation". MEASURED
+    // on `origin/main` @ a7e94e990: it does not. A rule defined against a
+    // `public_read_write` object, an owner-less object, a
+    // `controlled_by_parent` detail, a federated phantom-anchor object
+    // (#8119), or a bypass object is accepted by `defineRule` and materialises
+    // real `sys_record_share` rows through `SharingRuleService.reconcile` —
+    // five for five, `grantsCreated: 1` each. The "own validation" the old
+    // comment relied on is not there, so the guard was the only thing standing
+    // between an authored rule and rows no verdict can ever consult.
+    //
+    // Refusing costs no live access, on either path: the row it declines to
+    // write could never have granted any. Every system caller of this method
+    // is the rule evaluator's reconcile (`reconcile` / `reconcileForRecord`),
+    // and each of its entry points already treats a per-rule throw as
+    // best-effort — the boot backfill, the object-wide re-grant and the
+    // bu-tree re-grant queue log and continue, and the write hooks catch so a
+    // user's insert/update is never failed by it.
+    if (context?.isSystem) {
+      this.assertNotInertGrant(input.object);
+    } else {
       this.assertSharingEnforced(input.object);
       await this.assertCanManageShares(input.object, input.recordId, context);
     }
