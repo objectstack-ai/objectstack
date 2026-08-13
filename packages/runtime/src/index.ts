@@ -16,6 +16,12 @@ export type { StandaloneStackConfig, StandaloneStackResult, ResolvedStandaloneDa
 // `loadTursoDriverFactory` and RE-EXPORTS `MissingDriverPackageError`, so
 // `serve.ts`'s `e instanceof MissingDriverPackageError` fatal branch tests one
 // class identity rather than one of two same-named twins.
+//
+// Since #7314 that class — and the package / install-command pair — is DECLARED
+// one layer down, in `@objectstack/service-datasource`, so the open-core loader
+// can raise it too. This export surface is deliberately unchanged: that is what
+// keeps every importer written against `@objectstack/runtime` compiling, and
+// against the same class object.
 export {
   loadTursoDriverFactory,
   isTursoDriverId,

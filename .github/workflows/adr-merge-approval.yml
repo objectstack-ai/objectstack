@@ -1,17 +1,41 @@
 name: ADR Merge Approval
 
-# Machine enforcement of the #6741 ruling (maintainer, verbatim):
-# 「adr 只能由维护者自己确认,人工合并,ai 不得擅自合并。」
+# Machine enforcement of the 2026-08-12 ruling (maintainer, verbatim):
+# 「门禁改成只要求「APPROVED review 存在」」/「不要指定具体的人」
 #
-# A PR whose diff touches docs/adr/** must carry an APPROVED review from the
-# maintainer's OWN account before it is mergeable; approvals from the shared
-# bot/agent identities deliberately do not count. Prose enforcement was
-# measured insufficient the day the ruling landed — two different AI-operated
-# seats merged docs/adr/** PRs within the following hour (#6671, #6732; the
-# full record and both replays live in scripts/check-adr-merge-approval.mjs
-# and its --self-test). Drafting ADR PRs stays open to every seat; only the
-# merge is reserved, and the maintainer's own approval + merge is the intended
-# zero-extra-friction green path.
+# A PR whose diff touches docs/adr/** must carry an APPROVED review before it
+# is mergeable. The gate does NOT check WHO approved: any account with review
+# rights on this repo — including an AI seat — satisfies it, which is the
+# accepted cost of the ruling and is stated in full in the guarantee table at
+# the head of scripts/check-adr-merge-approval.mjs. The approval must be
+# current: a later CHANGES_REQUESTED or DISMISSED revokes it.
+#
+# Second clause (#8012): the PR must ALSO not be sitting on an armed
+# auto-merge. Arming is not merging — it is a standing instruction to merge
+# later — so no gate used to fire on it, and an AI seat armed one on a live
+# docs/adr/** PR at 11:15Z on 2026-08-12. The next approving review would have
+# turned this check green and GitHub would have merged the PR unattended, every
+# check reporting success. Armed is now RED whether or not the PR is approved:
+# the approved case is the only one in which the unattended merge actually
+# happens, so a rule that fired only on the unapproved case would change no
+# verdict at all. This is how 「人工合并」 becomes machine-enforced — the gate is
+# green only while the merge still requires a person to press the button.
+# It is not a deadlock: anyone can disable auto-merge, and doing so re-runs
+# this workflow (see the trigger below) and clears the check by itself.
+#
+# This supersedes the account-identity rule this workflow used to describe
+# (#6741 「adr 只能由维护者自己确认,人工合并,ai 不得擅自合并。」, enforced by
+# matching the maintainer's numeric account id). That proxy became
+# unsatisfiable once cloud sessions began authoring PRs under the maintainer's
+# own account, since GitHub forbids self-approval (#8161). #6741's two halves
+# survive as convention, not as anything this workflow can measure.
+#
+# Prose enforcement was measured insufficient the day #6741 landed — two
+# different AI-operated seats merged docs/adr/** PRs within the following hour
+# (#6671, #6732; the full record and both replays live in
+# scripts/check-adr-merge-approval.mjs and its --self-test). Both had ZERO
+# reviews of any kind, so both stay red under the widened rule too. Drafting
+# ADR PRs stays open to every seat; only the merge is gated.
 #
 # Deliberately NO `paths` filter, on either trigger — the same choice
 # changeset-presence.yml made in objectui (#3769) and for the same reason
@@ -29,10 +53,27 @@ name: ADR Merge Approval
 on:
   pull_request:
     branches: [main]
+    # `opened`/`synchronize`/`reopened` are GitHub's default set and are
+    # RESTATED here because naming any `types:` replaces that default — dropping
+    # one would mean no check run on that activity, and a required context that
+    # never reports is permanent pending, not a skip (the same failure mode the
+    # `paths:` note below describes).
+    #
+    # The two auto-merge activities are the #8012 addition, and they are what
+    # make the arming clause observable at all:
+    #   auto_merge_enabled  — arming is otherwise a silent state change that
+    #     fires no event this workflow listens to, so the gate would keep
+    #     reporting its last green while the PR sat armed.
+    #   auto_merge_disabled — the zero-friction exit, and the reason the arming
+    #     clause is not a deadlock: disarming re-runs the gate, which then goes
+    #     green on its own with no push, no re-review and no admin action.
+    types: [opened, synchronize, reopened, auto_merge_enabled, auto_merge_disabled]
   # An approval does not fire `pull_request`, so without this trigger the
-  # failed check would sit red after the maintainer approves until someone
-  # re-ran it by hand. Subscribing to reviews makes the maintainer's approval
-  # itself re-run the gate — the zero-friction green path the card requires.
+  # failed check would sit red after the approval lands until someone re-ran
+  # it by hand. Subscribing to reviews makes the approval itself re-run the
+  # gate — the zero-friction green path the card requires. `pull-requests:
+  # read` below covers listing reviews from ANY account, so the widened rule
+  # needs no extra permission or token scope.
   # (On non-ADR PRs a review re-runs the cheap clean path; harmless.)
   pull_request_review:
     types: [submitted, edited, dismissed]
@@ -50,11 +91,25 @@ concurrency:
 
 permissions:
   contents: read
-  # The gated path lists the PR's reviews via the REST API.
+  # The gated path lists the PR's reviews and reads the PR itself (for
+  # `auto_merge`) via the REST API. `read` covers both — the #8012 clause needs
+  # no new permission and no new token scope. The PR object is read LIVE rather
+  # than taken from the event payload: `auto_merge` is not documented as a
+  # member of the pull_request object carried by `pull_request_review`, and a
+  # projection that merely lacks the key would read as "not armed". The script
+  # refuses such a payload instead; see its header.
   pull-requests: read
 
 jobs:
   adr-merge-approval:
+    # ⛔ Do NOT rename this job. Its name IS the required status-context string
+    # in the `main` ruleset (#7022), and it is registered under that exact
+    # spelling in scripts/check-required-contexts.mjs — renaming it here alone
+    # leaves the ruleset waiting for a context that never reports, which hangs
+    # the merge queue until the 60-minute timeout. The word "maintainer" now
+    # over-claims (see this file's header: any approver counts); correcting it
+    # is a settings action nobody in CI can perform, so it is tracked as
+    # follow-up work rather than done here.
     name: ADR maintainer approval
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -76,8 +131,9 @@ jobs:
       # A checkout, setup-node, and one `node` call over `git diff` — no
       # install, no build. The self-test runs first (repo convention), then
       # the gate. GITHUB_TOKEN is only read on the gated path (a docs/adr/**
-      # diff needs the PR's review list); the clean path does zero lookups.
-      - name: Require the maintainer's own approval on docs/adr/** diffs
+      # diff needs the PR's review list and arming state); the clean path does
+      # zero lookups.
+      - name: Require an APPROVED review and no armed auto-merge on docs/adr/** diffs
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/check-adr-merge-approval.mjs --self-test && node scripts/check-adr-merge-approval.mjs

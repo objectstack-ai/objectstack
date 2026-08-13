@@ -8,6 +8,10 @@
 // caller's RLS, so a member sees only their own rows, and an anonymous caller is
 // denied before any tool executes.
 //
+// ADR-0056 D10 — the authz-conformance matrix row this file is the cited proof
+// for; `authz-conformance.test.ts` asserts the pairing is mutual (#7976).
+// authz-row: mcp-http-identity
+//
 // The target object is `showcase_private_note` (OWD `private`, owner-only) — the
 // same object the declarative-OWD proof uses. Owner isolation is enforced by the
 // engine, so if the MCP tool ran unscoped (the stdio posture, mcp-stdio-authority)

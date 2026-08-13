@@ -49,7 +49,7 @@ const SERVICE_ERROR_CODE: Record<ServiceName, ErrorCode> = {
  * Served by `datasource-admin`:
  *
  *   GET    /datasources              → listDatasources (provenance + health)
- *   GET    /datasources/:name        → getDatasource (credential-stripped)
+ *   GET    /datasources/:name        → getDatasource (config credential-redacted)
  *   POST   /datasources/test         → testConnection (no persistence)
  *   POST   /datasources              → createDatasource (origin: 'runtime')
  *   PATCH  /datasources/:name        → updateDatasource (runtime only)
@@ -57,7 +57,7 @@ const SERVICE_ERROR_CODE: Record<ServiceName, ErrorCode> = {
  *
  * Served by `external-datasource`:
  *
- *   GET    /datasources/:name/remote-tables → listRemoteTables
+ *   GET    /datasources/:name/remote-tables → listRemoteTables (?schema= filters)
  *   POST   /datasources/:name/test          → testConnection (a SAVED datasource)
  *   POST   /datasources/:name/object-draft  → generateObjectDraft
  *
@@ -197,11 +197,28 @@ export function registerDatasourceAdminRoutes(
   // `POST /datasources/:name/object-draft` generates an ObjectStack object
   // definition draft for one table (introspect + type-map, no persistence —
   // the caller creates the object through the normal metadata channel).
+  //
+  // `?schema=` narrows the listing to one remote schema, and is forwarded here
+  // for the same reason #4249 gave the two spellings one FAILURE contract: they
+  // are one operation — `IExternalDatasourceService.listRemoteTables`, resolved
+  // from the same `external-datasource` slot — reached two ways. Until #7955
+  // this handler never read the query, so `?schema=public` came back UNFILTERED:
+  // neither the filtered answer nor a refusal, which is the "declared ≠
+  // enforced" shape (Prime Directive #10) in its quietest form — the twin one
+  // path over honoured the same parameter. The coercion below is copied from
+  // that twin (`packages/rest/src/external-datasource-routes.ts`) deliberately,
+  // down to what it does with a NON-string: a repeated `?schema=a&schema=b`
+  // reaches the handler as an array (the adapter surfaces repeated keys that
+  // way), and both spellings drop it to `undefined` — no filter. Whether an
+  // unusable query parameter should instead be REFUSED is the ingress-policy
+  // question #7606 owns globally; honouring it is correct under either answer,
+  // so this route does not pre-empt it.
   server.get(`${root}/:name/remote-tables`, async (req: any, res: any) => {
     const svc = resolve(res, 'external-datasource', 'listRemoteTables');
     if (!svc) return;
     try {
-      const tables = await svc.listRemoteTables(req.params.name);
+      const schema = typeof req.query?.schema === 'string' ? req.query.schema : undefined;
+      const tables = await svc.listRemoteTables(req.params.name, { schema });
       sendOk(res, { tables });
     } catch (err) {
       badRequest(res, 'external-datasource', err);
@@ -212,9 +229,12 @@ export function registerDatasourceAdminRoutes(
   // `datasource` `test_connection` action). Distinct from `POST /datasources/test`
   // which probes an unsaved draft carried inline. Registered before the generic
   // `:name` mutation routes.
-  // Read one datasource's full detail for the edit form (credential stripped;
-  // `config` is non-sensitive, plus a `hasSecret` flag). Registered after the
-  // static `/drivers` route so that literal segment is never captured as a name.
+  // Read one datasource's full detail for the edit form. `config` is redacted
+  // of every stored credential — including one embedded in a connection URL —
+  // and the response names what was withheld in `redactedConfigKeys`, alongside
+  // the `hasSecret` flag for the bound `sys_secret` handle (#8081). Registered
+  // after the static `/drivers` route so that literal segment is never captured
+  // as a name.
   server.get(`${root}/:name`, async (req: any, res: any) => {
     const svc = resolve(res, 'datasource-admin', 'getDatasource');
     if (!svc) return;

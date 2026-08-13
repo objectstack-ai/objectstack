@@ -20,7 +20,6 @@
     "driver-nosql",
     "driver-sql",
     "external-catalog",
-    "external-lookup",
     "---Documents & Seed---",
     "document",
     "feed",

@@ -84,6 +84,7 @@ import type {
   ApprovalDecisionResult,
 } from '@objectstack/spec/contracts';
 import type { ExecutionStatus } from '@objectstack/spec/automation';
+import type { InvitationStatus } from '@objectstack/spec/identity';
 import { Logger, createLogger } from '@objectstack/core/logger';
 import { RealtimeAPI } from './realtime-api';
 
@@ -2011,8 +2012,8 @@ export class ObjectStackClient {
      */
     invitations: {
       /**
-       * List pending/accepted/canceled invitations for an organization.
-       * Requires owner/admin role on that org.
+       * List pending/accepted/rejected/expired/canceled invitations for an
+       * organization. Requires owner/admin role on that org.
        *
        * better-auth: GET /organization/list-invitations?organizationId=…
        */
@@ -2023,11 +2024,16 @@ export class ObjectStackClient {
         );
         const data = await res.json();
         const invitations = Array.isArray(data) ? data : (data?.data ?? data?.invitations ?? []);
+        // [#7781] `status` is `InvitationStatus` (from `@objectstack/spec/identity`)
+        // rather than a hand-copied literal — the SDK previously restated the
+        // vocabulary and drifted from it (missing `expired`). Derived from the
+        // spec union, so a future value reaches here by construction; see
+        // `invitation-status-vocabulary.test.ts` for the pin.
         return { invitations: invitations as Array<{
           id: string;
           email: string;
           role: string;
-          status: 'pending' | 'accepted' | 'rejected' | 'canceled';
+          status: InvitationStatus;
           organizationId: string;
           inviterId: string;
           expiresAt: string;
@@ -2046,11 +2052,14 @@ export class ObjectStackClient {
         const res = await this.fetch(`${this.baseUrl}${route}/organization/list-user-invitations`);
         const data = await res.json();
         const invitations = Array.isArray(data) ? data : (data?.data ?? data?.invitations ?? []);
+        // [#7781] Was a bare `string` — inconsistent with `list()` above and
+        // just as untethered from the spec vocabulary. Same derivation as
+        // `list()`.
         return { invitations: invitations as Array<{
           id: string;
           email: string;
           role: string;
-          status: string;
+          status: InvitationStatus;
           organizationId: string;
           inviterId: string;
           expiresAt: string;
@@ -2934,6 +2943,11 @@ export class ObjectStackClient {
     /**
      * Resume an interrupted chunked upload.
      * Fetches current progress, then uploads remaining chunks and completes.
+     *
+     * Throws before uploading anything when the progress poll reports the
+     * session as `expired` — an `Error` carrying `code`
+     * `'UPLOAD_SESSION_EXPIRED'` and `httpStatus` 410, the same pair the server
+     * answers a chunk PUT against a dead session with (#7870).
      */
     resumeUpload: async (uploadId: string, file: Blob | ArrayBuffer, chunkSize: number, resumeToken: string): Promise<CompleteChunkedUploadResponse> => {
         const route = this.getRoute('storage');
@@ -2942,7 +2956,42 @@ export class ObjectStackClient {
         const progressRes = await this.fetch(`${this.baseUrl}${route}/upload/chunked/${uploadId}/progress`);
         const progress = await progressRes.json() as UploadProgress;
 
-        const { totalChunks, uploadedChunks } = progress.data;
+        const { totalChunks, uploadedChunks, status, expiresAt } = progress.data;
+
+        // [#7870] A session past its own `expires_at` is durably stamped
+        // `expired` by the server (#7667), and THIS poll is where it says so —
+        // `status` is a declared member of `UploadProgressSchema`, populated on
+        // every progress read. Before this check the value was fetched and
+        // dropped: resume walked straight into the chunk loop and learned the
+        // session was dead from the 410 `UPLOAD_SESSION_EXPIRED` its first
+        // chunk PUT came back with. Honest, but it spent a whole chunk upload
+        // to rediscover something the response already in hand had told it.
+        //
+        // The code and status deliberately MIRROR that 410 rather than naming a
+        // new condition: `UPLOAD_SESSION_EXPIRED` is the registered code the
+        // server answers this exact case with (error-code-ledger.zod.ts), so a
+        // caller's existing `err.code === 'UPLOAD_SESSION_EXPIRED'` branch
+        // fires identically whether the expiry was caught here or by the
+        // server. Same error shape as the `fetch` wrapper builds for a real
+        // non-2xx (message + `code`/`httpStatus`/`details`) — this is an
+        // earlier detection of one condition, not a second one.
+        //
+        // Compared with `=== 'expired'`, never truthiness: the other declared
+        // statuses (`in_progress`, `completing`, `completed`, `failed`) all
+        // proceed exactly as before — `failed` and wider status handling are
+        // deliberately out of scope — and an absent `status` from a server or
+        // fixture that omits it cannot misfire the short-circuit.
+        if (status === 'expired') {
+            const expiredError = new Error(
+                `Upload session ${uploadId} expired${expiresAt ? ` at ${expiresAt}` : ''}`
+                + '; start a new chunked upload',
+            ) as Error & { code: string; httpStatus: number; details: Record<string, any> };
+            expiredError.code = 'UPLOAD_SESSION_EXPIRED';
+            expiredError.httpStatus = 410;
+            expiredError.details = { uploadId, expiresAt };
+            throw expiredError;
+        }
+
         const parts: Array<{ chunkIndex: number; eTag: string }> = [];
 
         // 2. Upload remaining chunks

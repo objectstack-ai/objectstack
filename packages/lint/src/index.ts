@@ -75,6 +75,17 @@ export type {
   FunctionalCompletenessFinding,
   FunctionalCompletenessSeverity,
 } from './validate-functional-completeness.js';
+// [#7521] The managed-object `apiMethods` ⊆ affordances gate. All judgement
+// lives in the shared predicate in `@objectstack/spec/data`, which objectql's
+// `reconcileManagedApiMethods` reads too — so the boot-time strip and this
+// author-time gate cannot reach different verdicts. Exported so a repo that
+// ships object definitions in CODE (which `os lint` never walks) can run the
+// same rule over its own registry, instead of hand-rolling the table.
+export {
+  validateManagedApiMethods,
+  MANAGED_API_METHOD_UNAFFORDABLE,
+} from './validate-managed-api-methods.js';
+export type { ManagedApiMethodFinding } from './validate-managed-api-methods.js';
 export type { ListViewModeFinding, ListViewModeSeverity } from './validate-list-view-mode.js';
 export {
   validateFlowTriggerReadiness,
@@ -151,6 +162,7 @@ export {
   FIELD_GROUP_EMPTY,
   FIELD_GROUP_SHADOWED,
   SEMANTIC_ROLE_FIELD_UNKNOWN,
+  SEMANTIC_ROLE_FIELD_UNPROVISIONED,
 } from './validate-semantic-roles.js';
 export type { SemanticRoleFinding, SemanticRoleSeverity } from './validate-semantic-roles.js';
 

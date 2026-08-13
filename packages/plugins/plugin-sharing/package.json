@@ -20,13 +20,16 @@
   "dependencies": {
     "@objectstack/core": "workspace:*",
     "@objectstack/formula": "workspace:*",
+    "@objectstack/metadata-core": "workspace:*",
     "@objectstack/objectql": "workspace:*",
     "@objectstack/platform-objects": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*"
   },
   "devDependencies": {
+    "@objectstack/driver-sql": "workspace:*",
     "@types/node": "^26.1.2",
+    "better-sqlite3": "^13.0.2",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
   },

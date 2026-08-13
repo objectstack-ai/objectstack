@@ -11,6 +11,11 @@ import {
   hideRevokedSessionRow,
   reconcileSessionDelete,
 } from './session-tombstone.js';
+import {
+  injectClientSecretOnRead,
+  liftClientSecretForWrite,
+  type SecretResolvingEngine,
+} from './sso-client-secret.js';
 
 /**
  * Mapping from better-auth model names to ObjectStack protocol object names.
@@ -498,9 +503,50 @@ function isEnginePolicyRefusal(err: unknown): err is { code?: string; message?: 
 }
 
 /**
+ * [#7724] A REFERENTIAL refusal — the engine's `cascadeDeleteRelations` found
+ * dependent rows it may neither cascade nor null, so it vetoed the delete
+ * (`DELETE_RESTRICTED`, 409, ADR-0112).
+ *
+ * The third shape in this file, and the one that shows why the set had to be
+ * widened rather than left at two. The two arms above both map errors raised by
+ * code that *knows about better-auth* — the record validator and this package's
+ * own policy guards. A referential restrict is raised by the ENGINE, several
+ * layers below, and carries neither signature; `rethrowAsBetterAuthError` fell
+ * through to `throw err`, better-auth's router saw an unhandled fault, and the
+ * admin caller got a **500 with an empty body** for a refusal the engine had
+ * explained in full. The client is told nothing at all — not the status, not the
+ * dependent object, not the remedy.
+ *
+ * Mapped HERE, at the adapter, rather than at the REST transport: this is the
+ * seam where an engine error crosses into better-auth, so one arm covers every
+ * better-auth endpoint that deletes through the adapter. `rest-server.ts`'s
+ * `mapDataError` already maps the same code correctly for the generic data
+ * routes and is deliberately untouched — the two transports map the one engine
+ * error independently, exactly as they already do for the two arms above.
+ *
+ * The structured half of the envelope rides along unchanged (`developerMessage`
+ * / `dependentObject` / `dependentCount`), for the reason #7307 gives at the
+ * REST mapping: dropping the remedy at the transport moves the defect rather
+ * than fixing it, and the fields disclose nothing the envelope did not carry.
+ */
+function isReferentialDeleteRestriction(
+  err: unknown,
+): err is {
+  code?: string;
+  message?: string;
+  developerMessage?: string;
+  dependentObject?: string;
+  dependentCount?: number;
+} {
+  if (!err || typeof err !== 'object') return false;
+  return (err as { code?: unknown }).code === 'DELETE_RESTRICTED';
+}
+
+/**
  * Re-throw `err` as a better-auth `APIError` when it is an ObjectQL validation
- * failure or an engine policy refusal; otherwise re-throw it verbatim. Always
- * throws — the return type is `never`.
+ * failure (400), an engine policy refusal (403) or a referential delete
+ * restriction (409); otherwise re-throw it verbatim. Always throws — the return
+ * type is `never`.
  */
 async function rethrowAsBetterAuthError(err: unknown): Promise<never> {
   if (isObjectQLValidationError(err)) {
@@ -525,15 +571,31 @@ async function rethrowAsBetterAuthError(err: unknown): Promise<never> {
       code: 'PERMISSION_DENIED',
     });
   }
+  if (isReferentialDeleteRestriction(err)) {
+    const { APIError } = await import('better-auth/api');
+    throw new APIError('CONFLICT', {
+      message:
+        typeof err.message === 'string' && err.message.trim()
+          ? err.message
+          : 'Cannot delete: dependent records exist',
+      code: 'DELETE_RESTRICTED',
+      ...(typeof err.developerMessage === 'string' && err.developerMessage.length > 0
+        ? { developerMessage: err.developerMessage }
+        : {}),
+      ...(err.dependentObject ? { dependentObject: err.dependentObject } : {}),
+      ...(typeof err.dependentCount === 'number' ? { dependentCount: err.dependentCount } : {}),
+    });
+  }
   throw err;
 }
 
 /**
  * Wrap every function-valued method of a better-auth adapter so an ObjectQL
- * `ValidationError` (400) or an engine policy refusal (403) thrown from the
- * underlying engine surfaces as a 4xx `APIError` instead of an opaque 500.
- * Non-function properties pass through untouched, and every error that carries
- * neither signature is re-thrown verbatim.
+ * `ValidationError` (400), an engine policy refusal (403) or a referential
+ * delete restriction (409, #7724) thrown from the underlying engine surfaces as
+ * a 4xx `APIError` instead of an opaque 500. Non-function properties pass
+ * through untouched, and every error that carries none of those signatures is
+ * re-thrown verbatim.
  */
 export function withValidationErrorMapping<A extends Record<string, any>>(adapter: A): A {
   const out: Record<string, any> = {};
@@ -632,6 +694,12 @@ export const withSystemReadContext = withSystemContext;
  */
 export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
   const dataEngine = withSystemContext(rawDataEngine);
+  // [#8009] The OIDC `clientSecret` seam needs the engine's PRIVILEGED secret
+  // dereference, which `withSystemContext` deliberately does not carry (it
+  // exposes the CRUD verbs only). `resolveSecretField` is a separately-named
+  // privileged verb for exactly that reason (#7823), so it comes off the raw
+  // engine. See `sso-client-secret.ts` for why the seam sits here at all.
+  const secretEngine = rawDataEngine as unknown as SecretResolvingEngine;
   // Field-name bridging for better-auth plugins that expose NO `schema` option
   // (e.g. @better-auth/sso): when a model is remapped via AUTH_MODEL_TO_PROTOCOL,
   // its camelCase model fields are also converted to snake_case columns on the
@@ -667,6 +735,10 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
         const bridged = objectName !== model;
         const payload = normaliseIdentifierWrite(model, data);
         const row = bridged ? remapKeys(payload, camelToSnake) : payload;
+        // [#8009] Registration write door #1. Lift the OIDC `clientSecret` out
+        // of the cleartext JSON blob into the `secret`-typed column so the
+        // ENGINE encrypts it; `oidc_config` keeps everything else.
+        liftClientSecretForWrite(objectName, row);
         // [#7725] `sys_member` declares `{organization_id, user_id}` unique, and
         // the platform auto-binds every user at sign-up (ADR-0093 D1/D2), so
         // better-auth's accept-invitation `createMember` collides on a pair that
@@ -703,6 +775,10 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
         // [#7732] A revoked session is not a session — see `session-tombstone.ts`.
         if (await hideRevokedSessionRow(objectName, result)) return null;
         if (revokedAtIsBorrowed) delete (result as Record<string, unknown>).revoked_at;
+        // [#8009] Read half — MANDATORY. `/sso/callback` reads the provider back
+        // and authenticates to the IdP with the plaintext; encrypt-on-write
+        // without this breaks every federated login.
+        await injectClientSecretOnRead(secretEngine, objectName, result);
         const norm = normaliseLegacyDates(model, result);
         return (bridged ? remapKeys(norm, snakeToCamel) : norm) as T;
       },
@@ -729,6 +805,9 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
         });
         // [#7732] A revoked session is not a session — see `session-tombstone.ts`.
         const results = await filterRevokedSessionRows(objectName, found);
+        // [#8009] Same read half, per row — better-auth reaches the provider
+        // through findMany as well as findOne.
+        for (const r of results) await injectClientSecretOnRead(secretEngine, objectName, r);
 
         return results.map((r) => {
           const norm = normaliseLegacyDates(model, r as Record<string, any>);
@@ -758,6 +837,10 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
 
         const normalised = normaliseIdentifierWrite(model, update as any);
         const patch = bridged ? remapKeys(normalised, camelToSnake) : normalised;
+        // [#8009] Write door #2 — `/sso/update-provider`. A create-only seam
+        // would encrypt at registration and then write cleartext back on the
+        // first config edit, leaving a column that only LOOKS protected.
+        liftClientSecretForWrite(objectName, patch);
         const result = await dataEngine.update(objectName, { ...patch, id: record.id });
         if (!result) return null;
         const norm = normaliseLegacyDates(model, result);
@@ -775,6 +858,9 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
         const records = await dataEngine.find(objectName, { where: filter });
         const normalised = normaliseIdentifierWrite(model, update);
         const patch = bridged ? remapKeys(normalised, camelToSnake) : normalised;
+        // [#8009] Write door #3. Same column, same rule — a bulk edit must not
+        // be the one path that writes the secret back in cleartext.
+        liftClientSecretForWrite(objectName, patch);
         for (const record of records) {
           await dataEngine.update(objectName, { ...patch, id: record.id });
         }

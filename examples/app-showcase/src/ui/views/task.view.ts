@@ -66,7 +66,9 @@ export const TaskViews = defineView({
       data,
       columns: [{ field: 'title' }, { field: 'project' }, { field: 'assignee' }, { field: 'status' }, { field: 'priority' }, { field: 'due_date' }],
       filter: [{ field: 'status', operator: 'equals', value: 'in_progress' }],
-      exportOptions: ['csv', 'xlsx', 'json'],
+      // Object form (#8010): `formats` is what the renderer reads; the bare
+      // array is the legacy spelling and lifts to this shape at parse.
+      exportOptions: { formats: ['csv', 'xlsx', 'json'] },
     },
     urgent: {
       label: 'Urgent',
@@ -74,6 +76,33 @@ export const TaskViews = defineView({
       data,
       columns: [{ field: 'title' }, { field: 'project' }, { field: 'assignee' }, { field: 'status' }, { field: 'priority' }, { field: 'due_date' }],
       filter: [{ field: 'priority', operator: 'equals', value: 'urgent' }],
+
+      // ── The showcase's `emptyState` specimen (#7714) ──────────────────────
+      // Authored HERE, on a filtered saved view, and not on some unfiltered
+      // object list: emptiness means different things on the two. An empty
+      // unfiltered list is a SETUP state ("nothing exists yet") that the seed
+      // deliberately never produces; an empty filtered view is a STEADY state
+      // ("nothing matches right now") that a running deployment hits
+      // constantly — and on *this* filter it is the outcome you want, so the
+      // copy can report good news instead of nagging about missing data. That
+      // is the case per-view empty-state copy exists for, which makes this the
+      // spelling worth pinning as the fixture.
+      //
+      // It is also reachable without touching the seed: the two urgent seed
+      // rows are exactly what the `bulk_actions` view's `showcase_mark_done`
+      // is there to clear, so a demo user empties this view by using the app.
+      //
+      // Consumed as a translation surface at
+      // `objects.showcase_task._views.urgent.emptyState.{title,message}` —
+      // both locales are authored in `system/translations/index.ts`. Until
+      // this fixture existed the spec declared that key group with no
+      // reachable instance anywhere under `examples/`, so the i18n
+      // surface-matrix check had nothing to resolve and was waived rather
+      // than run.
+      emptyState: {
+        title: 'No urgent tasks',
+        message: 'Nothing needs immediate attention right now. A task appears here as soon as its priority is raised to Urgent.',
+      },
     },
     done: {
       label: 'Done',

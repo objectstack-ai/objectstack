@@ -45,9 +45,15 @@ const WRITE_PRIMITIVES = ['create', 'update', 'delete'] as const;
  * keyed by object name with the reason. Every other tightened whitelist in the
  * monorepo either grants `bulk` or grants no write verb at all.
  *
- * Adding an entry is a real decision — batch denial is invisible until a user
- * multi-selects rows and `data-objectstack` rethrows the 405 without falling
- * back to per-row writes. Write down why the object is worth that.
+ * Adding an entry is a real decision — but price it correctly per #3757's
+ * two corrections (that issue's premise was retracted by its own author and
+ * closed not planned). `data-objectstack` does rethrow the 405, but its only
+ * caller, `useBulkExecutor` → `executeBulkBatch`, falls back to per-row
+ * writes on ANY throw; and the grid's built-in bulk-delete entry gates on the
+ * child verb `delete`, not on `bulk` (gating it on `bulk` would be a
+ * regression). So an exemption costs a wasted round trip plus N per-row
+ * writes, not a hard user-visible error. Write down why the object is worth
+ * that.
  */
 const SINGLE_RECORD_WRITE_ONLY: Record<string, string> = {
   // #7802. `update` arrived in #7727/#7769 for exactly one gesture on exactly

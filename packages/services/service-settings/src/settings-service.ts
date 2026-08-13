@@ -15,6 +15,7 @@ import type {
 import {
   type CryptoAdapter,
   NoopCryptoAdapter,
+  providesConfidentiality,
 } from './crypto-adapter.js';
 import {
   type SettingsActionHandler,
@@ -24,6 +25,7 @@ import {
   type SettingsRow,
   type SettingsServiceOptions,
   envKeyOf,
+  SettingsCryptoUnavailableError,
   SettingsForbiddenError,
   SettingsLockedError,
   SettingsValidationError,
@@ -43,6 +45,20 @@ import {
 } from './visibility-eval.js';
 
 const DEFAULT_OBJECT = 'sys_setting';
+
+/**
+ * The execution context `SettingsService`'s own row writes run under (#8030).
+ *
+ * `sys_setting` is a platform-owned table with platform-owned columns
+ * (`value_enc`, `updated_by` are declared `readonly: true`), and this service
+ * is the only writer of them — after its own capability, lock and validation
+ * gates. See {@link SettingsService.upsertRow} for the full argument and for
+ * why the field stays `readonly` for everybody else.
+ *
+ * Frozen so a downstream engine adapter cannot mutate the service's posture by
+ * writing into the bag it was handed.
+ */
+const SETTINGS_SYSTEM_WRITE_CONTEXT = Object.freeze({ isSystem: true as const });
 
 /**
  * Value-bearing specifier types — drives which entries we expect to
@@ -524,6 +540,13 @@ export class SettingsService {
    * the value is part of the key and not just the var name.
    */
   private readonly reportedEnvOverrides = new Set<string>();
+  /**
+   * `<namespace>.<key>` pairs whose fail-closed encryption refusal (#8026) has
+   * already been reported to the logger. Deduped for the same reason
+   * {@link reportedEnvOverrides} is: a settings form that retries a save would
+   * otherwise repeat one operator-actionable line per attempt.
+   */
+  private readonly reportedCryptoRefusals = new Set<string>();
   /** In-memory fallback when no engine is wired. */
   private readonly memory: SettingsRow[] = [];
   /** Change subscribers, optionally scoped to a namespace. */
@@ -1231,6 +1254,49 @@ export class SettingsService {
   // Mutations
   // ---------------------------------------------------------------------
 
+  /**
+   * Fail-closed gate for `encryptedKeys` writes (#8026).
+   *
+   * Refuses when BOTH credential paths are unavailable: no
+   * `cryptoProvider` + `secretStore` pair (the Phase 3 `sys_secret` path), and
+   * an inline {@link CryptoAdapter} that declares no confidentiality — i.e.
+   * the `NoopCryptoAdapter` default, whose `encrypt()` is base64. Anything
+   * that CAN protect the value is left alone: an injected KMS-backed adapter
+   * keeps working exactly as before, and so does the `sys_secret` path the
+   * shipped plugin wires.
+   *
+   * ## Boot vs write
+   *
+   * The card asked for this to be loud at boot. It cannot be *refused* at
+   * boot: `SettingsServicePlugin` constructs the service in `init()` and binds
+   * the real provider later, at `kernel:ready`, so a construction-time throw
+   * would refuse every shipped deployment — and a namespace with no encrypted
+   * specifier needs no provider at all. The refusal therefore lands at the
+   * write, where the fact is finally knowable, and the LOUDNESS lands here:
+   * one operator-actionable line through the deployment's own logger the first
+   * time a given key is refused. A caller that swallows the thrown error still
+   * leaves that line behind.
+   *
+   * Reads are deliberately NOT gated: `NoopCryptoAdapter.decrypt` still
+   * decodes existing `b64:` rows, so a deployment that already wrote some can
+   * still read them, report them, and migrate them. Refusing those reads too
+   * would strand exactly the data this refusal exists to stop producing.
+   */
+  private assertEncryptionAvailable(namespace: string, key: string): void {
+    if (this.cryptoProvider && this.secretStore) return;
+    if (providesConfidentiality(this.crypto)) return;
+
+    const err = new SettingsCryptoUnavailableError(namespace, key);
+    const dedupeAt = `${namespace}.${key}`;
+    if (!this.reportedCryptoRefusals.has(dedupeAt)) {
+      this.reportedCryptoRefusals.add(dedupeAt);
+      const message = `[SettingsService] ${err.message}`;
+      if (this.logger?.error) this.logger.error(message);
+      else console.error(message);
+    }
+    throw err;
+  }
+
   /** Persist a single key. Throws SettingsLockedError when env-locked. */
   async set(
     namespace: string,
@@ -1291,6 +1357,26 @@ export class SettingsService {
     // validatePatch for the exact semantics.
     await this.validatePatch(namespace, patch, ctx);
 
+    // #8026 — a declared-encrypted key with nothing able to encrypt it fails
+    // the WHOLE batch, here, rather than part-way down the write loop below.
+    // The persist site enforces the same rule (that is the load-bearing half);
+    // this pass is what keeps a refused batch from leaving the namespace
+    // half-written.
+    //
+    // Ordered AFTER `validatePatch` deliberately. Both refuse the whole batch,
+    // but they address different people: a validation error names something the
+    // CALLER can fix in the form they are looking at, while this one names a
+    // deployment the caller cannot reconfigure. Checked first, it would mask
+    // every field-level diagnostic on a namespace that happens to carry a
+    // secret. Clearing a key (null/undefined) is exempt throughout: there is no
+    // plaintext to protect, and an operator must always be able to REMOVE a
+    // value on a deployment that cannot store one.
+    for (const [key, submitted] of Object.entries(patch)) {
+      if (submitted === null || typeof submitted === 'undefined') continue;
+      if (!reg.encryptedKeys.has(key)) continue;
+      this.assertEncryptionAvailable(namespace, key);
+    }
+
     for (const [key, rawValue] of Object.entries(patch)) {
       const scope = reg.scopes.get(key)!;
       // global rows are platform-wide (tenant_id=null, user_id=null);
@@ -1329,6 +1415,13 @@ export class SettingsService {
             storedEnc = handle.id;
             digest = this.cryptoProvider.digest(plain);
           } else {
+            // #8026 — the legacy inline-adapter path persists only through an
+            // adapter that declares real confidentiality. The base64 default
+            // is refused here rather than silently writing a reversible
+            // `value_enc` that reads as protected. Kept AT the write (not only
+            // in the pre-flight above) so no future caller can reach this
+            // branch and fall open.
+            this.assertEncryptionAvailable(namespace, key);
             storedEnc = await this.crypto.encrypt(plain, { namespace, key });
             digest = this.crypto.digest(plain);
           }
@@ -1338,7 +1431,7 @@ export class SettingsService {
         }
       }
 
-      await this.upsertRow({
+      const previousEnc = await this.upsertRow({
         namespace,
         key,
         scope,
@@ -1350,17 +1443,37 @@ export class SettingsService {
         updated_by: ctx.userId ?? null,
       });
 
+      // The handle the row USED to point at is now unreferenced — destroy the
+      // ciphertext it names (#8030). Ordered after the repoint on purpose, and
+      // never allowed to fail the write; see `reapRotatedSecret`. Not gated on
+      // `isEncrypted`: a key that STOPS being encrypted (a manifest edit) orphans
+      // its handle in exactly the same way, and the helper is self-guarding.
+      await this.reapRotatedSecret(previousEnc, storedEnc);
+
       if (this.audit) {
-        await this.audit.record({
-          namespace,
-          key,
-          scope,
-          userId: ctx.userId,
-          action: isNull ? 'reset' : 'set',
-          valueDigest: isEncrypted ? '<encrypted:' + digest + '>' : digest,
-          encrypted: isEncrypted,
-          requestId: ctx.requestId,
-        });
+        try {
+          await this.audit.record({
+            namespace,
+            key,
+            scope,
+            userId: ctx.userId,
+            // [#8145] The ledger row's tenant context. Its absence is what makes
+            // an audit row invisible to RLS readers — see `SettingsAuditSink`.
+            tenantId: ctx.tenantId,
+            action: isNull ? 'reset' : 'set',
+            valueDigest: isEncrypted ? '<encrypted:' + digest + '>' : digest,
+            encrypted: isEncrypted,
+            requestId: ctx.requestId,
+          });
+        } catch {
+          // [#8145] Never fail a write because a ledger is unhappy — the same
+          // rule `auditWriter` below has always had, now applied to both sinks.
+          // Load-bearing rather than defensive: this sink writes `sys_audit_log`,
+          // owned by the OPTIONAL plugin-audit, so on a deployment without that
+          // plugin the insert throws on every single settings write. The sink
+          // the plugin supplies swallows and reports on its own; this guard is
+          // what protects a HOST-supplied sink from taking down the write path.
+        }
       }
 
       if (this.auditWriter) {
@@ -1854,7 +1967,41 @@ export class SettingsService {
     );
   }
 
-  private async upsertRow(row: SettingsRow): Promise<void> {
+  /**
+   * Write one settings row, INSERT-or-UPDATE, and report the `value_enc` the
+   * row held **before** the write (`null` when there was no row, or the row
+   * carried no handle).
+   *
+   * ### Why the update is a SYSTEM write (#8030)
+   *
+   * `sys_setting.value_enc` and `sys_setting.updated_by` are declared
+   * `readonly: true` (`packages/platform-objects/src/system/sys-setting.object.ts`),
+   * and the engine STRIPS author-declared read-only columns from a
+   * **non-system** caller's UPDATE payload (`stripReadonlyFields`, gated on
+   * `if (!opCtx.context?.isSystem)` in `packages/objectql/src/engine.ts`). The
+   * INSERT path is deliberately exempt from that strip (#3413) — which is
+   * exactly why the FIRST write of a secret landed correctly and every later
+   * one silently did not: a rotation inserted a fresh `sys_secret` row, got its
+   * 200 with a redacted echo and an advanced `updated_at`, and left
+   * `value_enc` pointing at the ORIGINAL handle. The leaked credential an
+   * admin had just "rotated" was still the one in force.
+   *
+   * `SettingsService` is a privileged writer: it has already run the
+   * manifest's read/write capability gate (`assertPermitted`), the env-lock
+   * and upper-scope-lock pre-flight, and `validatePatch` before anything
+   * reaches here, and the columns in question are ones IT owns rather than
+   * ones a caller forged. So the write is elevated — the same posture, and for
+   * the same measured reason, as the roll-up recompute's elevation in
+   * `ObjectQL.recomputeSummaries` (#7673): a platform-owned read-only column
+   * whose only writer is the platform must be written as the platform.
+   *
+   * ⚠️ The elevation is deliberately scoped to THIS call and NOT to the field
+   * declaration: `value_enc` stays `readonly: true`, so an external caller
+   * reaching `sys_setting` directly still cannot repoint a secret handle. That
+   * flag is a security control, and removing it is the wrong direction on this
+   * defect.
+   */
+  private async upsertRow(row: SettingsRow): Promise<string | null> {
     if (this.engine) {
       const where: Record<string, unknown> = {
         namespace: row.namespace,
@@ -1872,15 +2019,17 @@ export class SettingsService {
         ...bypass,
       } as any);
       if (existing[0]) {
+        const previousEnc = (existing[0] as { value_enc?: unknown }).value_enc;
         await this.engine.update(this.objectName, {
           where,
           data: { ...row },
+          context: SETTINGS_SYSTEM_WRITE_CONTEXT,
           ...bypass,
         } as any);
-      } else {
-        await this.engine.insert(this.objectName, { ...row }, bypass as any);
+        return typeof previousEnc === 'string' && previousEnc !== '' ? previousEnc : null;
       }
-      return;
+      await this.engine.insert(this.objectName, { ...row }, bypass as any);
+      return null;
     }
     const idx = this.memory.findIndex(
       (r) =>
@@ -1889,8 +2038,59 @@ export class SettingsService {
         r.scope === row.scope &&
         (r.user_id ?? null) === (row.user_id ?? null),
     );
-    if (idx >= 0) this.memory[idx] = row;
-    else this.memory.push(row);
+    if (idx >= 0) {
+      const previousEnc = this.memory[idx].value_enc;
+      this.memory[idx] = row;
+      return typeof previousEnc === 'string' && previousEnc !== '' ? previousEnc : null;
+    }
+    this.memory.push(row);
+    return null;
+  }
+
+  /**
+   * Delete the `sys_secret` row a rotated-away handle pointed at (#8030).
+   *
+   * Reaping rather than accepting the orphans is the security answer, not a
+   * tidiness one: the whole point of rotating a leaked SMTP password or
+   * provider API key is that the old value stops existing. An orphan row is a
+   * decryptable copy of the credential the admin just retired, sitting in
+   * `sys_secret` under the same data key, reachable by anyone who can read the
+   * table — and it accumulates one row per rotation forever (the filer measured
+   * 7 → 8 → 9 across three writes), so the exposure grows with exactly the
+   * hygiene we ask operators to practise.
+   *
+   * Nothing else can reference the handle: ids are minted per `encrypt()` call,
+   * `sys_setting.value_enc` is the only column that holds one, and the audit
+   * trail records digests (`sha256:…`) rather than handles — so it stays
+   * readable after the ciphertext is gone.
+   *
+   * **Best-effort, and deliberately after the repoint.** The write has already
+   * committed by the time this runs; a store that cannot delete (the port's
+   * `delete` is optional, so pre-existing fakes and the legacy inline-crypto
+   * path simply have none) or a delete that throws must never turn a
+   * SUCCESSFUL rotation into an error — the new secret is already in force,
+   * which is the property that matters.
+   */
+  private async reapRotatedSecret(previousEnc: string | null, nextEnc: string | null): Promise<void> {
+    if (!previousEnc || previousEnc === nextEnc) return;
+    // Handles only. The legacy inline-crypto path stores the ciphertext ITSELF
+    // in `value_enc`, and there is no `sys_secret` row to reap for it.
+    if (!previousEnc.startsWith('sec_')) return;
+    const del = this.secretStore?.delete;
+    if (!del) return;
+    try {
+      await del.call(this.secretStore, previousEnc);
+    } catch (err: any) {
+      // Loud, because the operator's mental model after a rotation is "the old
+      // credential is gone" and this is the one branch where it is not.
+      const message =
+        `[SettingsService] rotated secret '${previousEnc}' could not be deleted from ` +
+        `sys_secret — the rotation itself SUCCEEDED (the new value is in force), but the ` +
+        `previous ciphertext is still stored and remains decryptable. ` +
+        `Reason: ${err?.message ?? err}`;
+      if (this.logger?.error) this.logger.error(message);
+      else console.error(message);
+    }
   }
 
   private async materialiseRow(row: SettingsRow): Promise<unknown> {

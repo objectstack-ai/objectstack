@@ -57,6 +57,17 @@
       "sharingModel": "public_read_write"
     },
     {
+      "permissionSet": "crm_sales_user",
+      "object": "crm_opportunity_line_item",
+      "create": true,
+      "read": true,
+      "edit": true,
+      "delete": false,
+      "viewAllRecords": false,
+      "modifyAllRecords": false,
+      "sharingModel": "controlled_by_parent"
+    },
+    {
       "permissionSet": "guest_portal",
       "object": "crm_lead",
       "create": true,

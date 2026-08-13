@@ -44,8 +44,19 @@ export * from './utils/migration-journal.js';
 // Export the runtime filter-placeholder resolver (framework#3582)
 export * from './utils/filter-tokens.js';
 
+// Export the shared single-record 404 (#4435/#5138, moved down here in #7867) —
+// the one `RECORD_NOT_FOUND` envelope `protocol.updateData`/`deleteData`,
+// `callData`'s ObjectQL fallback and the engine's own by-id write gate answer
+// with. `@objectstack/metadata-protocol` re-exports it from its original home.
+export * from './utils/record-not-found.js';
+
 // Export in-memory fallbacks for core-criticality services
 export * from './fallbacks/index.js';
+
+// [#7378] The IMetadataService register/read argument contract (three-cell
+// maintainer ruling, 2026-08-12) — shared by every shipped implementation so
+// the refusals and the canonical type fold have one home instead of three.
+export * from './metadata-service-contract.js';
 
 // Export Phase 2 components - Advanced lifecycle management
 export * from './health-monitor.js';

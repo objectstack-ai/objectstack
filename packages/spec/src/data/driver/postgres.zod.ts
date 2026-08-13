@@ -18,9 +18,12 @@ import { z } from 'zod';
 import { lazySchema } from '../../shared/lazy-schema';
 import { strictObject } from '../../shared/strict-object';
 import {
+  credentialFreeUrl,
   driverConfigJsonSchema,
   DriverSslToggleSchema,
+  INLINE_CREDENTIAL_REFUSED,
   READ_ONLY_BELONGS_ON_DATASOURCE,
+  refusedInlineCredentialKey,
   SCHEMA_MODE_BELONGS_ON_DATASOURCE,
   SqlAutoMigrateSchema,
   SSL_DETAIL_BELONGS_ON_DATASOURCE,
@@ -41,8 +44,6 @@ export const PostgresConfigSchema = lazySchema(() => strictObject(
       dbname: 'database',
       db: 'database',
       user: 'username',
-      passwd: 'password',
-      pwd: 'password',
       connectionstring: 'url',
       dsn: 'url',
       uri: 'url',
@@ -54,6 +55,13 @@ export const PostgresConfigSchema = lazySchema(() => strictObject(
       usessl: 'ssl',
     },
     guidance: {
+      // #7990 — former ALIASES of `password` (`passwd:`/`pwd:` used to rename
+      // onto it). Now that the key itself is unwritable they carry the refusal
+      // directly: an alias row pointing at a tombstoned key would send the
+      // author into a second rejection (`strict-object.ts`'s `triggerPhrase`
+      // lesson).
+      passwd: INLINE_CREDENTIAL_REFUSED('passwd'),
+      pwd: INLINE_CREDENTIAL_REFUSED('pwd'),
       pool: poolBelongsOnDatasource('pool', 'max'),
       min: poolBelongsOnDatasource('min', 'min'),
       max: poolBelongsOnDatasource('max', 'max'),
@@ -77,11 +85,16 @@ export const PostgresConfigSchema = lazySchema(() => strictObject(
   {
   /**
    * Connection URI. When present it supersedes `host`/`port`/`database`/
-   * `username`, and a datasource secret (`external.credentialsRef`) still
-   * overrides any password embedded in it.
-   * Format: `postgresql://[user[:password]@][host][:port][/dbname][?params]`
+   * `username`. Credential-free by contract since #8082: a `user:password@`
+   * userinfo is refused at publish exactly like an inline `password` (#7990) —
+   * bind the secret (`external.credentialsRef` / the connection form's secret
+   * field) and it is injected at connect time. A bare username (`user@host`)
+   * stays writable. Runtime-environment DSNs (`OS_DATABASE_URL`) never pass
+   * through this schema and are unaffected.
+   * Format: `postgresql://[user@][host][:port][/dbname][?params]`
    */
-  url: z.string().optional().describe('Connection URI (supersedes the discrete fields)')
+  url: credentialFreeUrl(z.string(), 'url').optional()
+    .describe('Connection URI (supersedes the discrete fields; must not embed a password — bind the secret instead)')
     .meta({ title: 'Connection URL' }),
 
   /** Hostname or IP address. */
@@ -97,13 +110,14 @@ export const PostgresConfigSchema = lazySchema(() => strictObject(
   username: z.string().optional().describe('Authentication user').meta({ title: 'User' }),
 
   /**
-   * Authentication password. Prefer `external.credentialsRef` — a secret-store
-   * reference — or an environment placeholder; a datasource secret always wins
-   * over this value.
+   * Authentication password — REFUSED inline since #7990. Declared-unwritable
+   * (`z.never()`) rather than deleted so the removal is audible in `tsc` and
+   * in the parse, and so the `format: 'password'` projection keeps rendering
+   * the connection form's secret input (which routes to the secret binder —
+   * the mechanism the refusal diverts to). The resolved
+   * `external.credentialsRef` secret is injected at connect time.
    */
-  password: z.string().optional()
-    .describe('Authentication password (prefer external.credentialsRef)')
-    .meta({ title: 'Password', format: 'password' }),
+  password: refusedInlineCredentialKey('password', 'Password'),
 
   /** TLS settings, passed to `pg` verbatim. */
   ssl: DriverSslToggleSchema.optional().meta({ title: 'Use SSL/TLS' }),

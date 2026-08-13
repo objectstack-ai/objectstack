@@ -65,6 +65,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "定義",
         help: "シリアライズされた Webhook JSON（@objectstack/spec/automation/webhook 参照）— ヘッダー/認証/リトライ/ペイロード設定を含む"
       },
+      headers_secret: {
+        label: "カスタムヘッダー",
+        help: "各配信で送信するカスタム HTTP ヘッダー。JSON オブジェクト形式（{\"Authorization\": \"Bearer …\"}）。保存時は sys_secret に暗号化され、読み取りではマスクのみが返りヘッダーは返りません。マスクをそのままにすると現在の値が維持されます。"
+      },
       signing_secret: {
         label: "署名シークレット",
         help: "配信の署名に使う HMAC-SHA256 キー（X-Objectstack-Signature）。保存時は sys_secret に暗号化され、読み取りではマスクのみが返りキーは返りません。マスクをそのままにすると現在の値が維持されます。"

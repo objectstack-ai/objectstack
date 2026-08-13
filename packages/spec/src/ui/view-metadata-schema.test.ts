@@ -122,7 +122,15 @@ describe('ViewMetadataSchema — genuine validation across the three runtime sha
       expect(r.success).toBe(true);
     });
 
-    it('accepts a raw list config with NO identity (adhoc PUT, no registry entry to inherit from)', () => {
+    it('REJECTS a raw list config with NO object binding — the #7741 dead row, with located guidance', () => {
+      // ⚠️ Deliberate inversion (#7741, ruled 2026-08-12, direction B). This
+      // test used to PIN acceptance of exactly this body ("adhoc PUT, no
+      // registry entry to inherit from") — and QA run #7695 measured what that
+      // acceptance produced: a stored row badged `valid: true` that expands to
+      // nothing and no object-bound read path can serve. The inline arms now
+      // REQUIRE `object` + `viewKind` (the pair `GET /meta/view?object=` and
+      // `getViewsByObject()` filter on), so the adhoc body is refused at the
+      // door with the same wrap guidance `defineView` gives.
       const r = ViewMetadataSchema.safeParse({
         type: 'grid',
         data: { provider: 'object', object: 'showcase_task' },
@@ -130,7 +138,14 @@ describe('ViewMetadataSchema — genuine validation across the three runtime sha
         sort: [{ field: 'estimate_hours', order: 'desc' }],
         name: 'adhoc.view',
       });
-      expect(r.success).toBe(true);
+      expect(r.success).toBe(false);
+      if (r.success) return;
+      const text = JSON.stringify(r.error.issues);
+      // The refusal is the MEMBERS' located guidance, not the identity
+      // precondition's "not a view" — the body genuinely speaks view keys.
+      expect(r.error.issues[0]!.code).toBe('invalid_union');
+      expect(text).toContain('names no `object`');
+      expect(text).toContain('Wrap it: `defineView({ list: { type, data, columns, … } })`');
     });
 
     it('accepts a raw form config overlay', () => {
@@ -236,22 +251,54 @@ describe('ViewMetadataSchema — genuine validation across the three runtime sha
     it('fails CLOSED, not open — it does not reject everything', () => {
       // Guards against the mirror-image defect: a precondition that rejects the
       // platform's own writes is strictly worse than the hole it closed.
-      expect(ViewMetadataSchema.safeParse({ type: 'simple' }).success).toBe(true);
+      // [#7741] The minimal accepted overlay now carries its binding pair.
+      expect(ViewMetadataSchema.safeParse({ type: 'simple', object: 'crm_lead', viewKind: 'form' }).success).toBe(true);
     });
 
     // Every shape the platform itself writes carries a declared key, so the
     // precondition is inert on all of them. These are the acceptance inputs the
     // #5074 trace established for `updateView`'s `{ ...current, ...partial }`.
+    //
+    // [#7741] Re-judged fixture by fixture when the inline arms gained the
+    // `object` + `viewKind` binding requirement. The realistic write-path body
+    // is the POST-normalize one: `saveMetaItem` runs `normalizeViewMetadata`
+    // before validation and `viewIdentityPatch` (#2555) inherits
+    // `viewKind`/`object`/`label` from the registry entry the overlay shadows —
+    // an expanded ViewItem always carries both — so a console PUT on a REAL
+    // view arrives bound, exactly as spelled here. The precondition-inertness
+    // claim is asserted separately below on the bare, baseline-less shapes.
     it.each([
-      ['a pin PUT with no stored item to merge', { isPinned: true }],
-      ['a switcher-reorder PUT', { sortOrder: 3 }],
-      ['a column-only overlay', { columns: ['name'] }],
-      ['a filter-only overlay', { filter: [{ field: 'name', operator: 'contains', value: 'x' }] }],
-      ['a hide PUT', { hidden: true }],
-      ['an order-only overlay', { order: 2 }],
-      ['a renamed view that still carries its config', { label: 'New name', columns: ['name'] }],
+      ['a pin PUT with no stored item to merge', { isPinned: true, object: 'crm_lead', viewKind: 'list' }],
+      ['a switcher-reorder PUT', { sortOrder: 3, object: 'crm_lead', viewKind: 'list' }],
+      ['a column-only overlay', { columns: ['name'], object: 'crm_lead', viewKind: 'list' }],
+      ['a filter-only overlay', { filter: [{ field: 'name', operator: 'contains', value: 'x' }], object: 'crm_lead', viewKind: 'form' }],
+      ['a hide PUT', { hidden: true, object: 'crm_lead', viewKind: 'form' }],
+      ['an order-only overlay', { order: 2, object: 'crm_lead', viewKind: 'form' }],
+      ['a renamed view that still carries its config', { label: 'New name', columns: ['name'], object: 'crm_lead', viewKind: 'list' }],
     ])('leaves %s alone', (_label, body) => {
       expect(ViewMetadataSchema.safeParse(body).success).toBe(true);
+    });
+
+    // [#7741] The same shapes with NO baseline to inherit identity from are now
+    // refused — that save would mint an unservable row badged `valid: true`,
+    // the exact receipt the ruling forbids. What this block pins is the
+    // REFUSAL'S OWNER: it is the union members' located binding guidance
+    // (`invalid_union`), never the identity precondition's "not a view" text —
+    // these bodies DO speak view vocabulary, so the precondition stays inert on
+    // them exactly as the block above always claimed.
+    it.each([
+      ['a baseline-less pin PUT', { isPinned: true }],
+      ['a baseline-less reorder PUT', { sortOrder: 3 }],
+      ['a baseline-less column-only overlay', { columns: ['name'] }],
+      ['a baseline-less hide PUT', { hidden: true }],
+    ])('REFUSES %s at the members, not the precondition', (_label, body) => {
+      const r = ViewMetadataSchema.safeParse(body);
+      expect(r.success).toBe(false);
+      if (r.success) return;
+      expect(r.error.issues[0]!.code).toBe('invalid_union');
+      const text = JSON.stringify(r.error.issues);
+      expect(text).not.toContain('Not a `view` body');
+      expect(text).toContain('names no `object`');
     });
 
     // ── identity is not shape ────────────────────────────────────────────────
@@ -293,8 +340,10 @@ describe('ViewMetadataSchema — genuine validation across the three runtime sha
     });
 
     it('…but identity PLUS any real view key is fine — leanness is not the bar', () => {
-      expect(ViewMetadataSchema.safeParse({ name: 'v', object: 'o', hidden: true }).success).toBe(true);
-      expect(ViewMetadataSchema.safeParse({ name: 'v', viewKind: 'list', isPinned: true }).success).toBe(true);
+      // [#7741] "identity" here means the FULL binding pair: `object` alone or
+      // `viewKind` alone is half a binding and the members refuse it now.
+      expect(ViewMetadataSchema.safeParse({ name: 'v', object: 'o', viewKind: 'form', hidden: true }).success).toBe(true);
+      expect(ViewMetadataSchema.safeParse({ name: 'v', object: 'o', viewKind: 'list', isPinned: true }).success).toBe(true);
     });
 
     it('leaves non-objects to the union — it judges objects only', () => {
@@ -309,7 +358,9 @@ describe('ViewMetadataSchema — genuine validation across the three runtime sha
     it('derives its vocabulary from the members, so a new arm key is admitted automatically', () => {
       // Not a hand-written list: every top-level key any member declares counts.
       // `splitSize` is a FormView key nobody would think to allow-list by hand.
-      expect(ViewMetadataSchema.safeParse({ splitSize: 30 }).success).toBe(true);
+      // ([#7741] full acceptance additionally needs the binding pair; the
+      // vocabulary question this test asks is unchanged.)
+      expect(ViewMetadataSchema.safeParse({ splitSize: 30, object: 'crm_lead', viewKind: 'form' }).success).toBe(true);
       // …and a key that exists only NESTED (inside `config`) is not top-level
       // vocabulary, so it cannot smuggle a garbage body through.
       expect(ViewMetadataSchema.safeParse({ groupByField: 'stage' }).success).toBe(false);
@@ -319,8 +370,9 @@ describe('ViewMetadataSchema — genuine validation across the three runtime sha
       // The ruling on #5599 kept every arm's `.strip()`: a body that speaks the
       // vocabulary still carries undeclared aux keys through without a 422.
       // This is the deliberate residue of the minimal fix, pinned so a later
-      // batch cannot mistake it for an oversight.
-      const r = ViewMetadataSchema.safeParse({ isPinned: true, someFutureStudioKey: 'x' });
+      // batch cannot mistake it for an oversight. ([#7741] bound form — the
+      // openness under test is about UNKNOWN keys, not the binding pair.)
+      const r = ViewMetadataSchema.safeParse({ isPinned: true, someFutureStudioKey: 'x', object: 'crm_lead', viewKind: 'list' });
       expect(r.success).toBe(true);
     });
   });

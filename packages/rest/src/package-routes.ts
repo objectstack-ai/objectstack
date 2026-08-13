@@ -8,8 +8,19 @@ import { IHttpServer, shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY
 // OUT. Same value it read before — no re-ruling by side effect.
 import { OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES } from '@objectstack/metadata-core';
 import type { PackageService } from '@objectstack/service-package';
-// The declared envelope is written in ONE place for the whole platform (#3973).
-import { sendOk, sendError } from '@objectstack/types';
+// The declared envelope is written in ONE place for the whole platform (#3973),
+// and so (#8016) is the rule that reads an HTTP answer off a THROWN error.
+// [#8086] `looksLikeInternalErrorLeak` / `INTERNAL_ERROR_MESSAGE` come from the
+// same package for the same reason: "do not ship driver internals to clients"
+// is a property of the HTTP boundary, not of one router, so every boundary
+// applies ONE predicate in its own envelope (#3867).
+import {
+  sendOk,
+  sendError,
+  resolveThrownHttpError,
+  looksLikeInternalErrorLeak,
+  INTERNAL_ERROR_MESSAGE,
+} from '@objectstack/types';
 import { mountDirectRoutes, type DirectMountedRoute } from './direct-mount.js';
 import { readSingleQueryValue, repeatedQueryParamMessage } from './query-multiplicity.js';
 
@@ -79,6 +90,111 @@ async function refusePackageRequest(
 }
 
 /**
+ * [#8016] The catch-all exit for every route in this registrar.
+ *
+ * ## What it replaced
+ *
+ * Four `catch` blocks, all spelling the same thing:
+ *
+ *     sendError(res, 500, 'INTERNAL_ERROR', (error as Error).message);
+ *
+ * i.e. status-blind and code-blind. `packageService.publish` / `.delete` and
+ * `protocol.deletePackage` run inside those blocks, and the metadata protocol
+ * throws CODED, status-carrying refusals from that call path — `409
+ * DESTRUCTIVE_CHANGE` is the established one. So a caller who was *refused*
+ * was told the platform had *broken*: a 500 is a server fault, it invites a
+ * retry that cannot succeed, and it hides the one thing the caller needed to
+ * act on (the code).
+ *
+ * It was also a disagreement rather than merely a bug. The dispatcher twin
+ * (`packages/runtime/src/domains/packages.ts` → `errorFromThrown`) has always
+ * read `.status` first and answered 409 for the same throw. Two doors serve
+ * `/api/v1/packages`; **this** registrar mounts first in the production stack
+ * (first-match-wins, see the module note above), so the wrong answer was the
+ * live one.
+ *
+ * ## Why it delegates instead of mapping here
+ *
+ * The mapping is one rule and this is its second door, so it is CALLED, not
+ * restated — a second `if (code === ...)` ladder here is how the divergence
+ * arose in the first place. `resolveThrownHttpError` (`@objectstack/types`) is
+ * that rule, and the dispatcher's `errorFromThrown` is now its other caller;
+ * the two doors agree by construction rather than by two suites agreeing about
+ * literals. It lives in `@objectstack/types` because it cannot live in
+ * `@objectstack/runtime`: that package depends on THIS one, so the import would
+ * only ever point the other way.
+ *
+ * ## The 500 survives
+ *
+ * A throw that declares no status and no registered code is a genuine fault and
+ * still answers `500 INTERNAL_ERROR` — `resolveThrownHttpError`'s fallback is
+ * this call's `500`, and the code derives from it. Mapping everything and
+ * leaving nothing on the default arm would trade one wrong answer for another
+ * and hide real faults.
+ *
+ * ## [#8086] …and a leaky 5xx message is withheld
+ *
+ * The paragraph that stood here recorded the gap as still open: "this door
+ * applies no `looksLikeInternalErrorLeak` withholding to 5xx bodies — that gap
+ * predates this change and is unchanged by it (filed separately)". Filed as
+ * #8086, and closed here.
+ *
+ * It was reachable, not theoretical, and was reproduced through this door
+ * before being fixed — a real `ObjectQL` engine and a real
+ * `ObjectStackProtocolImplementation` whose driver fails the `sys_metadata`
+ * read the way a missing table does. `DELETE /api/v1/packages/:id` with no
+ * `?version=` routes to `protocol.deletePackage`, whose FIRST database touch
+ * (`engine.find('sys_metadata', { where })`) sits outside that method's
+ * per-item `try`, so the driver line propagates whole and arrived here:
+ *
+ *     HTTP 500
+ *     {"success":false,"error":{"code":"INTERNAL_ERROR",
+ *      "message":"SQLITE_ERROR: no such table: sys_metadata"}}
+ *
+ * This is NOT a new rule — it is the rule this surface already follows, at the
+ * door that was missed. The dispatcher twin (`HttpDispatcher.error`,
+ * `packages/runtime/src/http-dispatcher.ts`) has run exactly this expression
+ * since #3867, and `rest-server.ts` runs the same predicate at three call
+ * sites. #5437 / PR #5464 closed this class one seam over and never reached
+ * this registrar, because it does not go through `resolveErrorResponse` at all.
+ * Two doors serve `/api/v1/packages` and this one mounts FIRST in the
+ * production stack, so the unfiltered answer was the live one.
+ *
+ * Scoped to 5xx, deliberately: a 4xx message is a caller-facing answer by
+ * design — the protocol's `[tenant_scope_required]` refusal names the very
+ * parameter to pass, a `409 DESTRUCTIVE_CHANGE` names the remedy — and
+ * withholding those would delete the self-correcting sentence, at exactly the
+ * boundary where disclosure costs nothing because the caller supplied the
+ * input. Only the PROSE is withheld: `status`, `code` and `details` are
+ * untouched, so #8016's mapping still answers and a client can still branch.
+ *
+ * ⚠️ Ceiling, stated because a green suite must not read as full coverage:
+ * `looksLikeInternalErrorLeak` is a heuristic over the message and recognises
+ * no Postgres `relation "…" does not exist` phrasing, so that dialect's line
+ * still travels — through this door and through the twin alike, since both run
+ * the same predicate. Widening it HERE would be a new rule at one door and
+ * would re-create the divergence this closes. The cure is option C — the
+ * producer (`metadata-protocol`) not interpolating driver text into
+ * client-facing messages at all — which is a separate card. Pinned as a live
+ * case in `package-door-5xx-message-sanitization.test.ts` so it goes red the
+ * day either lands.
+ */
+function sendThrownError(res: any, error: unknown): void {
+  const thrown = resolveThrownHttpError(error);
+  // The dispatcher twin's expression, byte for byte — one rule, two doors.
+  const message = thrown.status >= 500 && looksLikeInternalErrorLeak(thrown.message)
+    ? INTERNAL_ERROR_MESSAGE
+    : thrown.message;
+  sendError(
+    res,
+    thrown.status,
+    thrown.code,
+    message,
+    thrown.details ? { details: thrown.details } : undefined,
+  );
+}
+
+/**
  * The `?version=` multiplicity rule (#6307), now shared (#6877).
  *
  * Both helpers moved to `query-multiplicity.ts` when the same rule was applied
@@ -119,7 +235,10 @@ export interface PackageRoutesOptions {
    */
   protocol?: {
     getMetaItems?(req: { type: string }): Promise<{ items: any[] }>;
-    deletePackage?(req: { packageId: string; actor?: string }): Promise<{
+    // [#7780] `allTenants` is the explicit carrier for cross-tenant uninstall
+    // semantics; the protocol refuses a call that names neither it nor an
+    // `organizationId` (`TENANT_SCOPE_REQUIRED`, 400).
+    deletePackage?(req: { packageId: string; actor?: string; allTenants?: boolean }): Promise<{
       success: boolean;
       deletedCount: number;
       failedCount: number;
@@ -222,6 +341,17 @@ export interface PackageRoutesOptions {
  * `readSingleQueryValue`), an unexpected throw is `INTERNAL_ERROR`. Only
  * the package-specific outcomes are registered — `PACKAGE_MANIFEST_INVALID`,
  * `PACKAGE_PUBLISH_FAILED`, `PACKAGE_DELETE_PARTIAL`, `PACKAGE_DELETE_FAILED`.
+ *
+ * [#8016] "An **unexpected** throw is `INTERNAL_ERROR`" is the sentence above,
+ * and it was right — the CODE had drifted wider than it. Every one of the four
+ * catch-alls treated *every* throw as unexpected, so a coded, status-carrying
+ * refusal from below (`409 DESTRUCTIVE_CHANGE` out of the metadata protocol,
+ * reached through `packageService.publish` / `.delete`) was answered as a
+ * server fault. The word doing the work is "unexpected": a throw that DECLARES
+ * its own status and a registered code is not unexpected, it is a refusal, and
+ * it now leaves through {@link sendThrownError} carrying both. `INTERNAL_ERROR`
+ * is still exactly what an unexpected throw gets — the sentence is unchanged
+ * because it was never the thing that was wrong.
  */
 export function registerPackageRoutes(
   server: IHttpServer,
@@ -287,9 +417,41 @@ export function registerPackageRoutes(
         return;
       }
 
-      sendError(res, 400, 'PACKAGE_PUBLISH_FAILED', result.error ?? `Failed to publish ${manifest.id}.`);
+      // [#8131] A REPORTED publish failure is a DRIVER FAULT, and a driver
+      // fault is a **5xx**. This answered `400` for as long as it existed —
+      // telling a caller to fix a request that was never the problem, and
+      // hiding a real server fault from every dashboard that buckets by
+      // status. It is the mirror of what #8016 fixed on the throw path there
+      // (`a caller who was refused was told the platform had broken`); here
+      // the platform broke and the caller was told they had made a mistake.
+      //
+      // The CALLER's own errors on this route are unaffected and still 4xx:
+      // the missing-field and invalid-manifest refusals above are checked
+      // before `publish` is called at all, and a coded refusal thrown from
+      // below `publish` is re-thrown by the producer and answered by
+      // {@link sendThrownError} with its own status (#8016) — so a `409
+      // DESTRUCTIVE_CHANGE` is still a 409, not swept in here.
+      //
+      // The code stays `PACKAGE_PUBLISH_FAILED` rather than becoming
+      // `INTERNAL_ERROR`: it is registered, it is more informative than the
+      // generic fallback, and it discloses nothing (the *message* was the
+      // disclosure, and the producer no longer emits one). `envelopeViolations`
+      // imposes no code↔status agreement, so a registered code on a 5xx is
+      // conformant — `SERVICE_UNAVAILABLE` at 503 is the same shape.
+      //
+      // `result.driverFault.message` is a CONSTANT the producer owns and never
+      // interpolates into; the `??` arm is not a leniency alias but the answer
+      // for a `PackageService` implementation that reports failure without
+      // saying why, which is the one thing the old `error?: string` could not
+      // distinguish from a driver dump.
+      sendError(
+        res,
+        500,
+        'PACKAGE_PUBLISH_FAILED',
+        result.driverFault?.message ?? `Failed to publish ${manifest.id}.`,
+      );
     } catch (error) {
-      sendError(res, 500, 'INTERNAL_ERROR', (error as Error).message);
+      sendThrownError(res, error);
     }
     },
   };
@@ -359,7 +521,7 @@ export function registerPackageRoutes(
       const packages = Array.from(packagesMap.values());
       sendOk(res, { packages, total: packages.length });
     } catch (error) {
-      sendError(res, 500, 'INTERNAL_ERROR', (error as Error).message);
+      sendThrownError(res, error);
     }
     },
   },
@@ -405,7 +567,7 @@ export function registerPackageRoutes(
 
       sendError(res, 404, 'RESOURCE_NOT_FOUND', `Package "${packageId}" was not found.`);
     } catch (error) {
-      sendError(res, 500, 'INTERNAL_ERROR', (error as Error).message);
+      sendThrownError(res, error);
     }
     },
   },
@@ -437,7 +599,20 @@ export function registerPackageRoutes(
       // no ghost grants). A version-scoped delete keeps the narrow durable
       // registry semantics, as does a deployment without the protocol.
       if (!version && typeof options.protocol?.deletePackage === 'function') {
-        const result = await options.protocol.deletePackage({ packageId });
+        // [#7780] `allTenants: true` is stated, not implied. This registrar has
+        // no organization to resolve — `packages/rest` carries no
+        // `resolveActiveOrganizationId` and no org plumbing at all (the
+        // dispatcher twin owns that seam), so of the two doors the ruling
+        // allows — resolve an org, or declare the cross-tenant intent — only
+        // the second is available here.
+        //
+        // This preserves the behaviour this door has always had (a full
+        // uninstall through it is package-wide, which #7705 case 4 pinned on
+        // purpose); what changes is that the width is now DECLARED at the call
+        // site instead of being inferred from an argument nobody passed. The
+        // protocol now refuses the undeclared form outright, so the two doors
+        // can no longer disagree by accident.
+        const result = await options.protocol.deletePackage({ packageId, allTenants: true });
         // Zero metadata rows is still a successful uninstall (e.g. a
         // runtime-registered package that never published metadata) —
         // only per-item failures make it a failure.
@@ -479,7 +654,7 @@ export function registerPackageRoutes(
         `Failed to delete ${packageId}${version ? `@${version}` : ''}.`,
       );
     } catch (error) {
-      sendError(res, 500, 'INTERNAL_ERROR', (error as Error).message);
+      sendThrownError(res, error);
     }
     },
   },

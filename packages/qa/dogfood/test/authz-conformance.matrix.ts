@@ -6,10 +6,23 @@
 // primitive, each in EXACTLY ONE honest state (enforced / experimental /
 // removed). `enforced` rows name their runtime enforcement site; high-risk
 // enforced rows additionally reference an end-to-end dogfood proof. The
-// companion test (`authz-conformance.test.ts`) asserts the matrix is complete
-// and that every referenced proof file exists — so "the permission model is
-// landed" is a CHECKED artifact, not a one-time scan. A new fail-open (a
-// declared-but-unenforced primitive) or a deleted proof breaks CI.
+// companion test (`authz-conformance.test.ts`) asserts the matrix is complete,
+// that every referenced proof file exists, AND that the row ↔ proof pairing is
+// MUTUAL — so "the permission model is landed" is a CHECKED artifact, not a
+// one-time scan. A new fail-open (a declared-but-unenforced primitive) or a
+// deleted proof breaks CI.
+//
+// [#7976] Existence used to be the whole `proof` contract, which meant a row
+// could cite a file exercising a NEIGHBOURING primitive and stay green forever:
+// `rls-read` and `rls-by-id-write` cite the same file, and until PR #7975
+// nothing could tell whether it exercised one, the other, or both. "Does this
+// test prove this row" is not mechanically decidable and is deliberately NOT
+// attempted. The checkable question it is converted into: each proof file NAMES
+// the rows it is the proof for (a header `// authz-row: <id>` line), and the
+// checker asserts both directions — a cited file must claim the citing row, and
+// every claim must be reciprocated by the ledger. A shared proof file therefore
+// has to SAY which rows it covers, and a row whose proof will not claim it
+// loses the citation out loud instead of borrowing a sibling's credibility.
 
 export type AuthzState = 'enforced' | 'experimental' | 'removed';
 
@@ -37,7 +50,9 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
   { id: 'rls-read', summary: 'RLS `using` read filter', state: 'enforced',
     enforcement: 'plugin-security/security-plugin.ts computeRlsFilter (AND-injected)', proof: 'rls-fixture.dogfood.test.ts' },
   { id: 'rls-by-id-write', summary: 'by-id write enforcement (#1994)', state: 'enforced',
-    enforcement: 'plugin-security/security-plugin.ts pre-image re-read', proof: 'rls-fixture.dogfood.test.ts' },
+    enforcement: 'plugin-security/security-plugin.ts step 2.7 pre-image re-read, composed with computeRlsFilter\'s write-scope DERIVATION (#7665): when no update/delete-class policy applies, the write class is compiled from the caller\'s SELECT narrowing, so the pre-image gate has a predicate to enforce',
+    proof: 'rls-fixture.dogfood.test.ts',
+    note: '[#7685] Re-verified as `enforced`, both halves of the enforcement named because ONLY BOTH hold it. The pre-image re-read alone is a no-op under select-only authoring — that was #7665, and it is why the site had to be re-cited here: ablating the derivation while leaving the pre-image re-read fully in place turns 16 of 20 probed showcase objects into `rls-hole`. The proof is NOT vacuous for this row despite sharing `rls-fixture.dogfood.test.ts` with `rls-read`: since #7665/PR #7792 that file carries a dedicated select-only block whose member set grants FULL CRUD on `rls_note` (so a refusal is the record gate, never the object gate) asserting the by-id PATCH is refused with the row unchanged, plus that an in-scope write still lands. Second, independent measurement: `objectstack verify --rls`, whose probe persona reaches this class since #7685 — 20/23 showcase and 6/6 crm objects PROVEN, 0 holes, and 16 holes under the same ablation.' },
   { id: 'rls-write-check', summary: 'RLS `check` write post-image validation (ADR-0058 D4)', state: 'enforced',
     enforcement: 'plugin-security/security-plugin.ts step 3.6 — compileCelToFilter + matchesFilterCondition against the post-image (fail-closed)',
     note: 'Unit-proven in plugin-security/security-plugin.test.ts (RLS check enforcement); see ADR-0058 D7 ledger.' },
@@ -46,7 +61,8 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
   { id: 'owd-public-read', summary: 'OWD public_read (everyone reads, owner writes)', state: 'enforced',
     enforcement: 'plugin-sharing/sharing-service.ts (read model + canEdit)', proof: 'showcase-public-read-owd.dogfood.test.ts' },
   { id: 'controlled-by-parent', summary: 'master-detail controlled_by_parent', state: 'enforced',
-    enforcement: 'plugin-security/security-plugin.ts computeControlledByParentFilter + assertControlledByParentWrite', proof: 'controlled-by-parent.dogfood.test.ts' },
+    enforcement: 'plugin-security/security-plugin.ts computeControlledByParentFilter + assertControlledByParentWrite', proof: 'controlled-by-parent.dogfood.test.ts',
+    note: '[#7685] Re-verified as `enforced` on its OWN evidence, not by association with `rls-by-id-write`. The cited proof is DEDICATED and non-vacuous: `fixtures/cbp-fixture.ts` grants the member full CRUD on BOTH `cbp_account` and `cbp_note`, so every refusal it asserts is the derived record gate rather than the object gate, and the detail carries no authored RLS at all — access is derived from the owner-scoped master. It asserts the derived READ denial, the derived by-id WRITE denial with the row unchanged as ground truth, and that a note under a master the member owns stays readable AND writable (so the guard is not over-blocking). Second measurement: `verify --rls` probes `showcase_invoice_line` — a real `controlled_by_parent` detail — as `rls-consistent`, and it flips to `rls-hole` when the #7665 write-scope derivation its master depends on is ablated.' },
   { id: 'multi-tenant', summary: 'organization isolation', state: 'enforced',
     enforcement: '@objectstack/organizations (enterprise) + Layer 0 tenant wall (plugin-security/tenant-layer.ts, AND-composed ahead of business RLS — ADR-0095 D1)', proof: 'rls-multitenant.dogfood.test.ts' },
   { id: 'multi-tenant-write-postimage', summary: 'Layer 0 tenant post-image check on INSERT + UPDATE (#2937 / Finding 1 — a forged OR re-pointed organization_id cannot cross the tenant wall)', state: 'enforced',
@@ -185,7 +201,8 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
   { id: 'sharing-rules', summary: 'criteria sharing rules (recipients: user/team/position/unit_and_subordinates/business_unit)', state: 'enforced',
     enforcement: 'plugin-sharing/sharing-rule-service.ts (materialized into sys_record_share); every authorable recipient expands in expandRecipient. The never-enforced owner-type rules + group/guest recipients were removed from the authoring spec (ADR-0078; group renamed → team)', proof: 'showcase-bu-hierarchy-sharing.dogfood.test.ts' },
   { id: 'hierarchy-widening', summary: 'hierarchy widening — a unit + its subordinate units gain access', state: 'enforced',
-    enforcement: 'plugin-sharing/business-unit-graph.ts BusinessUnitGraphService subtree (business_unit recipient) — ADR-0057 D5 re-homed off the never-existent sys_position.parent', proof: 'showcase-bu-hierarchy-sharing.dogfood.test.ts' },
+    enforcement: 'plugin-sharing/business-unit-graph.ts BusinessUnitGraphService.expandUsers subtree (unit_and_subordinates recipient) — ADR-0057 D5 re-homed off the never-existent sys_position.parent. The narrower business_unit recipient resolves through expandUnitMembers (exactly one unit, no descent) and is pinned by the same proof file: #7807 narrowed the runtime to the declaration after both kinds shared one subtree walk',
+    proof: 'showcase-bu-hierarchy-sharing.dogfood.test.ts' },
   { id: 'rls-compiler-fail-closed', summary: 'uncompilable RLS predicate is surfaced/denied, not dropped', state: 'enforced',
     enforcement: 'plugin-security/rls-compiler.ts compileFilter (drop + warn + RLS_DENY_FILTER) on the shape gate formula/rls-predicate.ts isSupportedRlsExpression — hoisted out of plugin-security in #4983 so lint/validate-rls-predicate-enforceability.ts can REJECT the same predicate at authoring time (ADR-0056 D4), from the one definition' },
   { id: 'system-permissions', summary: 'systemPermissions / tab-app gating', state: 'enforced',
@@ -213,8 +230,7 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
     note: 'REMOVED from spec (rls.zod.ts — RLSConfigSchema/RLSAuditEventSchema/RLSAuditConfigSchema deleted). The enforced RLS path (plugin-security computeRlsFilter) never read them; per-policy RowLevelSecurityPolicySchema is the live surface and is unchanged.' },
   { id: 'requireAuth-removed', summary: 'anonymous access to object data is denied unconditionally (no opt-out)', state: 'enforced',
     enforcement: 'core/security/anonymous-deny.ts shouldDenyAnonymous — no `requireAuth` input; every seam denies an anonymous, non-system caller outside the control-plane allowlist. spec tombstones `api.requireAuth` (retiredKey).',
-    proof: 'showcase-anonymous-deny.dogfood.test.ts',
-    note: 'ADR-0056 D2 → #3963: the `requireAuth: false` opt-out is RETIRED, not merely defaulted-on. Legitimate session-less surfaces survive by DECLARATION, not by posture: public-form submission (publicFormGrant), share-links (token → SYSTEM read), and public-book reads (audience:public, §6.7). A stack that mounts no auth now FAILS AT BOOT (cli/serve.ts, plugin-dev) instead of getting an explicit fail-open.' },
+    note: 'ADR-0056 D2 → #3963: the `requireAuth: false` opt-out is RETIRED, not merely defaulted-on. Legitimate session-less surfaces survive by DECLARATION, not by posture: public-form submission (publicFormGrant), share-links (token → SYSTEM read), and public-book reads (audience:public, §6.7). A stack that mounts no auth now FAILS AT BOOT (cli/serve.ts, plugin-dev) instead of getting an explicit fail-open. [#7976] The `showcase-anonymous-deny.dogfood.test.ts` CITATION WAS DROPPED under mutual attribution — that file drives the platform default and observes 401, which is precisely what the `anonymous-deny` row (same file) already claims; it never authors `requireAuth: false`, never reads the spec tombstone and never boots an auth-less stack, so it cannot prove the distinguishing half of THIS row (that there is no opt-out). The retirement is pinned elsewhere and unit-side: the spec tombstone + the ADR-0087 conversion entry `stack.api.requireAuth` (conversions/registry.ts, which strips a surviving key) and rest/rest-auth-gate.test.ts. Not high-risk, so the row is sound without a dogfood proof; writing a real one (author `api: { requireAuth: false }` → expect the boot/authoring rejection) is the honest upgrade path, not re-citing the posture proof.' },
 
   // ── Removed — by ADR-0049 (roadmap M2) ─────────────────────────────────
   { id: 'allow-transfer-restore-purge', summary: 'transfer/restore/purge ops (RBAC gate pre-mapped)', state: 'removed',

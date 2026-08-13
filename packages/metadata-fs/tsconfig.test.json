@@ -1,0 +1,51 @@
+// The TEST-layer type-check program (#7923, via the mechanism #5286/PR #5478 set
+// for `packages/spec` and PR #5546 / #5476 carried to `packages/client` and
+// `packages/metadata-core`). `tsconfig.json` beside this one stays as it is: it
+// is the BUILD config, and `package.json`'s `typecheck` script NAMES this sibling
+// (`tsc --noEmit -p tsconfig.test.json`), because a config no script invokes is
+// exactly the phantom that mechanism exists to prevent.
+//
+// THE HOLE HERE IS THE INCLUDE-SHAPED ONE, structurally identical to
+// `packages/metadata-core`: nothing was ever excluded — `include` is
+// `["src/**/*"]` and all six test files live under a sibling `test/` tree,
+// outside that root. No `exclude` entry names them, so the pre-#7353
+// exclude-shaped detector never saw them either; #7353 taught TESTS_COVERED the
+// include-shaped form and this package surfaced with 6 hidden files.
+//
+// What differs from the build config, and what deliberately does NOT:
+//   - `rootDir` widens from `src` to the package root. It steers emit layout
+//     only, and this program emits nothing (`noEmit`), but inherited as `src` it
+//     reports TS6059 ("not under rootDir") for all six `test/**` files — the
+//     check being misconfigured, not the tests being wrong. Widening it in the
+//     BUILD config instead is not an option: `tsc` there emits (`dev`:
+//     `tsc --watch`, `outDir: dist`), so a package-root `rootDir` would relocate
+//     `dist/index.js` to `dist/src/index.js` — breaking `main`/`exports` — and
+//     start writing `dist/test/**/*.test.js`, which ci.yml gates against ("No
+//     compiled test files in any dist"). Emit constraints belong to the build
+//     config; this one has none.
+//   - MODULE SEMANTICS ARE UNTOUCHED. `@objectstack/metadata-core` is `"type":
+//     "module"` and so is this package, so the inherited NodeNext already reads
+//     these files as ESM — and it is the stricter reading, since it holds the
+//     `.js` import extensions this package must ship. Nothing to fix, so nothing
+//     is changed.
+//   - STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`, `noUnusedParameters`,
+//     `noImplicitReturns` and the rest are inherited from the root config.
+//     Nothing here may loosen a type rule; if a test does not compile, that is
+//     the finding. The five TS6133 this package's TEST_DEBT entry recorded were
+//     `noUnusedLocals` findings and were fixed in the tests, not silenced here.
+//
+// There is NO `test-typecheck-debt.json` beside this config, on purpose — same
+// reasoning as `packages/metadata-core`: the whole test layer compiles at ZERO
+// errors under it, so a per-file shrink-only ledger would hold nothing while
+// costing this package a `tsx` dependency and two more scripts. A bare
+// `tsc --noEmit -p tsconfig.test.json` is the strictly stronger gate at zero
+// residue: ANY error here is red immediately, with no ledger to be added to.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "include": ["src/**/*", "test/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

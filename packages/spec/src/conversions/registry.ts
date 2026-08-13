@@ -2266,6 +2266,183 @@ const viewInertKeysRemoved: MetadataConversion = {
   },
 };
 
+/**
+ * View container: list-shaped entries lose `striped`/`bordered`/`virtualScroll`
+ * (#7176, ADR-0049 enforce-or-remove, maintainer ruling 2026-08-10). Every
+ * measured reader was a forwarding copy — react spec-bridge → plugin-list →
+ * plugin-view/app-shell — and the chains end at ObjectGrid, which never spells
+ * any of the three: copy-without-apply is dead in effect. List-shaped slots
+ * only (`list` + named `listViews`); form-shaped entries never declared them.
+ */
+const viewListPassthroughKeysRemoved: MetadataConversion = {
+  id: 'view-list-passthrough-keys-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'view.list.striped / view.list.bordered / view.list.virtualScroll',
+  summary: "view list keys removed (#7176): 'striped'/'bordered'/'virtualScroll' — every measured reader copied the key forward and none applied it (pass-through-only; ADR-0049 enforce-or-remove)",
+  apply(stack, emit) {
+    const LIST_KEYS = ['striped', 'bordered', 'virtualScroll'] as const;
+    return mapCollection(stack, 'views', (view, path) => {
+      let touched = false;
+      const next: Record<string, unknown> = { ...view };
+      const list = next.list;
+      if (list && typeof list === 'object' && !Array.isArray(list)) {
+        const cleaned = stripKeys(list as Record<string, unknown>, LIST_KEYS, emit, `${path}.list`);
+        if (cleaned !== list) { next.list = cleaned; touched = true; }
+      }
+      const named = next.listViews;
+      if (named && typeof named === 'object' && !Array.isArray(named)) {
+        const rebuilt: Record<string, unknown> = { ...(named as Record<string, unknown>) };
+        let subTouched = false;
+        for (const [name, lv] of Object.entries(rebuilt)) {
+          if (lv && typeof lv === 'object' && !Array.isArray(lv)) {
+            const cleaned = stripKeys(lv as Record<string, unknown>, LIST_KEYS, emit, `${path}.listViews.${name}`);
+            if (cleaned !== lv) { rebuilt[name] = cleaned; subTouched = true; }
+          }
+        }
+        if (subTouched) { next.listViews = rebuilt; touched = true; }
+      }
+      return touched ? next : view;
+    });
+  },
+  fixture: {
+    before: {
+      views: [{
+        object: 'crm_lead',
+        list: { type: 'grid', columns: ['name'], resizable: true, striped: true, bordered: true, virtualScroll: true },  // resizable survives
+        listViews: {
+          all: { type: 'grid', columns: ['name'], striped: false },
+        },
+      }],
+    },
+    after: {
+      views: [{
+        object: 'crm_lead',
+        list: { type: 'grid', columns: ['name'], resizable: true },
+        listViews: {
+          all: { type: 'grid', columns: ['name'] },
+        },
+      }],
+    },
+    expectedNotices: 4,
+  },
+};
+
+/**
+ * The `'pdf'` export format leaves `view.exportOptions` (protocol 17, #8010 —
+ * maintainer ruling 2026-08-12).
+ *
+ * PDF export was declined platform-side (#1301 NOT_PLANNED), so the enum
+ * member was declared-but-unrenderable: ObjectGrid dropped the format from the
+ * export menu with only a runtime `console.warn`, so `exportOptions:
+ * ['xlsx', 'pdf']` type-checked, validated, and silently rendered a menu
+ * without PDF. The same ruling adopted the OBJECT form for `exportOptions`
+ * (`{ formats?, maxRecords?, includeHeaders?, fileNamePrefix?, streaming? }` —
+ * the key set the renderer actually reads); the legacy bare array stays
+ * accepted and lifts to `{ formats: [...] }` at parse, so this conversion does
+ * NOT rewrite the array form to the object form — the array is back-compat,
+ * not retired.
+ *
+ * This is an enum-VALUE retirement, so there is no `retiredKey()` tombstone to
+ * hang the prescription on — the format enum's own error map carries it
+ * (`LIST_VIEW_EXPORT_PDF_RETIRED`, ui/view.zod.ts), keyed on `issue.input` so
+ * only the value which used to be legal gets the "was removed" message, plus a
+ * union-level dispatch so the refusal is the TOP-level message in either
+ * authored spelling (the `hook-body-crypto-hash-removed` precedent, one level
+ * deeper again: the value sits inside either a bare array or an object's
+ * `formats`, so `stripKeys` cannot reach it).
+ *
+ * `retiredFromLoadPath`: the enum rejects the value outright, so a live author
+ * is taught at parse rather than silently rewritten. The entry exists so
+ * stored 16.x/17-rc rows replay clean (`applyConversionsToStoredItem`) and so
+ * `os migrate meta --from 16` rewrites author sources. As with `crypto.hash`,
+ * the strip keeps the surrounding declaration — an emptied `formats` array
+ * stays (an export menu configured to offer nothing is a declaration, not an
+ * accident this conversion may invent an answer for).
+ */
+const viewExportOptionsPdfRemoved: MetadataConversion = {
+  id: 'view-export-options-pdf-removed',
+  toMajor: 17,
+  retiredFromLoadPath: true,
+  surface: 'view.list.exportOptions / view.listViews.*.exportOptions',
+  summary:
+    "list-view export format 'pdf' removed (#8010 — PDF export was declined as #1301 NOT_PLANNED; "
+    + 'ObjectGrid dropped the declared format from the menu with only a runtime console.warn)',
+  apply(stack, emit) {
+    const stripPdf = (slot: unknown, path: string): unknown => {
+      if (!slot || typeof slot !== 'object' || Array.isArray(slot)) return slot;
+      const eo = (slot as Dict).exportOptions;
+      if (Array.isArray(eo) && eo.includes('pdf')) {
+        emit({ from: 'pdf', to: '(removed)', path: `${path}.exportOptions` });
+        return { ...(slot as Dict), exportOptions: eo.filter((f) => f !== 'pdf') };
+      }
+      if (eo && typeof eo === 'object' && !Array.isArray(eo)) {
+        const formats = (eo as Dict).formats;
+        if (Array.isArray(formats) && formats.includes('pdf')) {
+          emit({ from: 'pdf', to: '(removed)', path: `${path}.exportOptions.formats` });
+          return {
+            ...(slot as Dict),
+            exportOptions: { ...(eo as Dict), formats: formats.filter((f) => f !== 'pdf') },
+          };
+        }
+      }
+      return slot;
+    };
+    return mapCollection(stack, 'views', (view, path) => {
+      let touched = false;
+      const next: Record<string, unknown> = { ...view };
+      const list = stripPdf(next.list, `${path}.list`);
+      if (list !== next.list) { next.list = list; touched = true; }
+      const named = next.listViews;
+      if (named && typeof named === 'object' && !Array.isArray(named)) {
+        const rebuilt: Record<string, unknown> = { ...(named as Record<string, unknown>) };
+        let subTouched = false;
+        for (const [name, lv] of Object.entries(rebuilt)) {
+          const cleaned = stripPdf(lv, `${path}.listViews.${name}`);
+          if (cleaned !== lv) { rebuilt[name] = cleaned; subTouched = true; }
+        }
+        if (subTouched) { next.listViews = rebuilt; touched = true; }
+      }
+      return touched ? next : view;
+    });
+  },
+  fixture: {
+    before: {
+      views: [{
+        object: 'crm_contract',
+        // Legacy array spelling: 'pdf' is stripped, the survivors stay an array
+        // (the array form is back-compat, not retired — no lift here).
+        list: { type: 'grid', columns: ['name'], exportOptions: ['xlsx', 'pdf'] },
+        listViews: {
+          // Object spelling: 'pdf' leaves `formats`; the sibling keys survive.
+          archive: {
+            type: 'grid',
+            columns: ['name'],
+            exportOptions: { formats: ['csv', 'pdf'], maxRecords: 100 },
+          },
+          // No 'pdf' declared → untouched.
+          all: { type: 'grid', columns: ['name'], exportOptions: ['csv', 'json'] },
+        },
+      }],
+    },
+    after: {
+      views: [{
+        object: 'crm_contract',
+        list: { type: 'grid', columns: ['name'], exportOptions: ['xlsx'] },
+        listViews: {
+          archive: {
+            type: 'grid',
+            columns: ['name'],
+            exportOptions: { formats: ['csv'], maxRecords: 100 },
+          },
+          all: { type: 'grid', columns: ['name'], exportOptions: ['csv', 'json'] },
+        },
+      }],
+    },
+    expectedNotices: 2,
+  },
+};
+
 /** dashboard.aria / dashboard.performance / widgets[].performance. */
 const dashboardInertKeysRemoved: MetadataConversion = {
   id: 'dashboard-inert-keys-removed',
@@ -4468,7 +4645,14 @@ const connectorRateLimitConfigRemoved: MetadataConversion = {
  * source that can carry the key. `ExternalLookupSchema` is not referenced by
  * any stack collection or metadata type, so there is no external-lookup
  * document for the walker to visit; its authorable key is retired by the same
- * tombstone and needs no transform.
+ * tombstone and needs no transform. (That zero-consumer finding then became
+ * the whole family's verdict: #8075 retired `data/external-lookup.zod.ts`
+ * outright — route 3, D3 `external-lookup-message-queue-families-retired` —
+ * and the `data/ExternalFieldMapping:transform` retired-keys entry was
+ * subsumed by the def retirement, the WidgetManifest.performance way. The
+ * `externalLookup.…` clause in this entry's `surface` stays: it correctly
+ * documents what the v16→17 change list removed, and it composes with the def
+ * retirement into "delete the whole value".)
  *
  * `retiredFromLoadPath`: the key claims a transformation that never ran, the
  * `connector-rate-limit-config-removed` shape exactly. Absorbing it silently at
@@ -6339,6 +6523,8 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     actionInertKeysRemoved,
     flowInertKeysRemoved,
     viewInertKeysRemoved,
+    viewListPassthroughKeysRemoved,
+    viewExportOptionsPdfRemoved,
     dashboardInertKeysRemoved,
     dashboardWidgetResponsiveRemoved,
     dashboardWidgetActionAriaRemoved,

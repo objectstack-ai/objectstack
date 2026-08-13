@@ -63,7 +63,16 @@ function makeDriver() {
     connect: vi.fn().mockResolvedValue(undefined),
     disconnect: vi.fn().mockResolvedValue(undefined),
     find: vi.fn(async (_o: string, ast: any) => { seen.findAst = ast; return []; }),
-    findOne: vi.fn(async (_o: string, ast: any) => { seen.findOneAst = ast; return null; }),
+    // [#7867] Echoes back the id it was asked for, so a by-id write reaches the
+    // driver instead of dying at the not-found gate. `return null` here would
+    // make this double looser than the producer on exactly the write path the
+    // by-id case below measures; `seen.findOneAst`, which the read cases assert
+    // on, is captured exactly as before.
+    findOne: vi.fn(async (_o: string, ast: any) => {
+      seen.findOneAst = ast;
+      const id = ast?.where?.id;
+      return id === undefined || id === null ? null : { id, title: 'stored' };
+    }),
     count: vi.fn(async (_o: string, ast: any) => { seen.countAst = ast; return 0; }),
     aggregate: vi.fn(async (_o: string, ast: any) => { seen.aggregateAst = ast; return []; }),
     create: vi.fn(async (_o: string, d: any) => d),
@@ -151,12 +160,15 @@ describe('engine filter placeholders (framework#3582)', () => {
     await ql.aggregate('deal', {
       where: { close_date: { $gte: '{current_year_start}' } },
       groupBy: ['owner'],
-      aggregations: [{ func: 'count', field: 'id', alias: 'n' }],
+      aggregations: [{ function: 'count', field: 'id', alias: 'n' }],
       context: CTX,
-    } as any);
+    });
 
     expect(seen.aggregateAst?.where).toEqual({ close_date: { $gte: THIS_YEAR_START } });
     expect(seen.aggregateAst?.groupBy).toEqual(['owner']);
+    expect(seen.aggregateAst?.aggregations).toEqual([
+      { function: 'count', field: 'id', alias: 'n' },
+    ]);
   });
 
   it('throws on an unknown placeholder instead of matching nothing', async () => {

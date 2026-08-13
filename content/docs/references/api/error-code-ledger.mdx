@@ -80,7 +80,15 @@ while promising a client a code no response can carry. That is ADR-0112's
 "no silent fourth state" read backwards, and it is not hypothetical:
 `OVERLAY_PERSISTENCE_FAILED` outlived its only producer by one PR (#5264
 deleted `saveMetaItem`'s legacy raw-engine branch; #5783 unregistered the
-code). Before deleting a row, check that no producer remains repo-wide AND
+code). Nor does a row need to LOSE its producer to be in this class — a
+throw site whose error can never reach a response envelope was unemittable
+from birth: `MONGODB_MULTI_TENANT_UNSUPPORTED` (registered by #3724,
+unregistered by #8035) is a BOOT refusal — the CLI rethrows it pre-HTTP and
+aborts, and the one request-reachable trigger sits inside a documented
+best-effort catch that logs and continues. Its throw site and constant
+(`MULTI_TENANT_UNSUPPORTED_CODE`, `@objectstack/driver-mongodb`) live on:
+host boot matching is not wire vocabulary.
+Before deleting a row, check that no producer remains repo-wide AND
 that no consumer — including `objectui` and `cloud` — reads the literal;
 tests that merely CONSTRUCT the code are not producers, and a test pinned to
 a producerless code is pinning nothing (#4984's phantom-check family).
@@ -187,6 +195,7 @@ const result = ErrorCode.parse(data);
 * `CLOUD_UNCONFIGURED`
 * `COMMIT_NOT_FOUND`
 * `CONCURRENT_UPDATE`
+* `CONFLICT`
 * `CONFLICTING_MAPPING`
 * `CONNECTOR_UPSTREAM_UNAVAILABLE`
 * `CREATE_FAILED`
@@ -201,6 +210,7 @@ const result = ErrorCode.parse(data);
 * `DOMAIN_VERIFICATION_FAILED`
 * `DRIVER_UNAVAILABLE`
 * `DUPLICATE_REQUEST`
+* `ELIGIBILITY_UNEVALUABLE`
 * `EMAIL_SEND_FAILED`
 * `EMAIL_SERVICE_REQUIRED`
 * `ENQUEUE_FAILED`
@@ -268,7 +278,6 @@ const result = ErrorCode.parse(data);
 * `METADATA_CONFLICT`
 * `METADATA_NOT_FOUND`
 * `METADATA_SCHEMA_INVALID`
-* `MONGODB_MULTI_TENANT_UNSUPPORTED`
 * `NAMESPACE_PREFIX`
 * `NEEDS_PASSWORD`
 * `NODE_FAILURE`
@@ -312,6 +321,7 @@ const result = ErrorCode.parse(data);
 * `READ_SCOPE_COMPILE_FAILED`
 * `RECORD_GONE`
 * `RECORD_LOCKED`
+* `RECORD_NOT_ELIGIBLE`
 * `REPORTS_LIST_FAILED`
 * `REPORT_DELETE_FAILED`
 * `REPORT_GET_FAILED`
@@ -357,6 +367,7 @@ const result = ErrorCode.parse(data);
 * `SUGGESTION_NOT_FOUND`
 * `SUGGESTION_STATE`
 * `SUMMARY_RECOMPUTE_FAILED`
+* `TENANT_SCOPE_REQUIRED`
 * `UNAUTHORIZED`
 * `UNIQUE_VIOLATION`
 * `UNKNOWN_KEY`

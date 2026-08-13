@@ -13,10 +13,13 @@ import {
     shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
 } from '@objectstack/core';
 import { CoreServiceName } from '@objectstack/spec/system';
-import type { IAutomationService } from '@objectstack/spec/contracts';
+import type { IAutomationService, ISecurityService } from '@objectstack/spec/contracts';
 import { isServiceServeable } from '../service-serveable.js';
-import { validationFailure } from '../validation-failure.js';
+import {
+    validationFailure, validationFailureDetails, fieldsFromZodIssues, VALIDATION_FAILED_STATUS,
+} from '../validation-failure.js';
 import { ExecutionStatus } from '@objectstack/spec/automation';
+import { ListRunsRequestSchema } from '@objectstack/spec/api';
 import { parseEnumParam, parseIntegerParam, parseStringParam } from '../query-param.js';
 import { capabilityUnavailable } from './unavailable.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
@@ -108,6 +111,354 @@ export function createAutomationDomain(deps: DomainHandlerDeps): DomainRoute {
 }
 
 /**
+ * [#7900] The system object whose READ grant governs automation RUN STATE —
+ * the durable row `service-automation` writes for every suspended run, whose
+ * `variables_json` column holds the very snapshot `GET /:name/runs/:runId`
+ * hands back (`sys-automation-run.object.ts`).
+ *
+ * It is named here because the two are ONE policy with two doors, not two
+ * policies: reading the row through `/data/sys_automation_run` has always
+ * answered with this object's permissions, while the `/automation` door asked
+ * only "are you authenticated?".
+ */
+export const AUTOMATION_RUN_OBJECT = 'sys_automation_run';
+
+/** [#7900] Refusal vocabulary for the run-state read gate (ADR-0112: code AND status). */
+const RUN_READ_DENY_STATUS = 403;
+const RUN_READ_DENY_CODE = 'PERMISSION_DENIED';
+const RUN_READ_DENY_MESSAGE =
+    `Reading automation run state requires read access to '${AUTOMATION_RUN_OBJECT}'.`;
+
+/**
+ * [#7968] The screen route's own refusal text — same `code` and `status`, a
+ * different sentence, because a different question was asked.
+ *
+ * The two halves are BOTH named. A caller refused here is either the wrong
+ * person or an operator without the grant, and a message naming only the grant
+ * would tell the end user the flow paused for to go ask for operator tooling —
+ * the exact misdirection this route's gate exists to avoid. It still names no
+ * position, permission set or identity (#7450): what it lists is what would
+ * admit ANY caller, not what this one is missing.
+ */
+const SCREEN_READ_DENY_MESSAGE =
+    'Reading a paused run\'s screen requires being the identity that triggered the run, '
+    + `or read access to '${AUTOMATION_RUN_OBJECT}'.`;
+
+/**
+ * [#7900] Which `/automation` GET routes serve `sys_automation_run`-class data.
+ *
+ * Declared as ONE predicate rather than a check per branch on purpose — the
+ * whole point of the ruling is that this domain gets one policy, and a policy
+ * spelled out at three call sites is three policies that happen to agree today.
+ * `parts` is the flow-scoped path split (`parts[0]` is the flow name).
+ *
+ *   `/:name/runs`         → listRuns, an `ExecutionLogEntry[]`
+ *   `/:name/runs/:runId`  → getRun,   an `ExecutionLogEntry` served verbatim
+ *
+ * `/:name/runs/:runId/screen` is deliberately NOT here — [#7968] it is gated,
+ * but on a DIFFERENT question (`refuseUnrelatedScreenRead`): the run's own
+ * trigger identity, with this grant as an operator override. Adding it here
+ * would apply the grant alone and lock out the end user the flow paused for.
+ */
+function isRunStateRead(parts: string[], method: string): boolean {
+    if (method !== 'GET') return false;
+    if (parts.length < 2 || parts[1] !== 'runs') return false;
+    // `/:name/runs` (listRuns) and `/:name/runs/:runId` (getRun) — nothing deeper.
+    return parts.length === 2 || parts.length === 3;
+}
+
+/**
+ * [#7900] Ask the SAME question the other door answers with: may this caller
+ * READ `sys_automation_run`?
+ *
+ * The BOOLEAN the two gates in this file share. [#7968] split it out of
+ * {@link refuseUngrantedRunRead} when a second route needed the identical
+ * question under a different refusal sentence: the run-state reads refuse when
+ * the answer is no, while the screen route treats it as the OPERATOR OVERRIDE
+ * half of a two-half gate. Two refusals, one implementation — a second copy of
+ * the resolution/feature-detection/fail-closed logic would be a second policy
+ * that happens to agree today, which is the shape the #7900 ruling exists to
+ * remove.
+ *
+ * ## Why `explain`, and why nothing new was built
+ *
+ * `ISecurityService` is the contract for exactly this: "the query surface that
+ * lets code OUTSIDE the ObjectQL engine middleware ask the same questions the
+ * middleware answers when it enforces access", with a standing instruction that
+ * a consumer re-deriving any of these answers locally will drift. `explain` runs
+ * the same permission-set resolution, the same `PermissionEvaluator` and the
+ * same RLS compiler the middleware runs — `allowed` is `!capsDeny &&
+ * crudAllowed && !denyAll && !delegatorMissing` over that shared machinery — so
+ * this gate cannot answer differently from the `/data` door by drifting. The
+ * slot is already on `DomainHandlerDeps` (`domains/meta.ts` resolves it the same
+ * way for ADR-0106 masking), so no new cross-package seam exists to invent.
+ *
+ * ⛔ It is deliberately NOT a per-field filter of the run's `variables` map —
+ * rejected by the ruling, on the card's own measurement that the map's keys
+ * (`.`, `record`, `previous`, `$runId`, seeded inputs) are not decidably
+ * record fields.
+ *
+ * ## The three non-denials, each of which is a decision
+ *
+ * 1. **System context passes.** The middleware's very first act is
+ *    `if (opCtx.context?.isSystem) return next()`. A gate that refused what the
+ *    object read admits would not be convergence.
+ * 2. **No security service ⇒ no grant to require.** In a deployment without
+ *    `plugin-security` there is no object-permission system at all, so
+ *    `/data/sys_automation_run` is itself ungated: "authenticated is enough" is
+ *    what BOTH doors answer, and refusing here would make them disagree in the
+ *    other direction. The contract mandates this tolerance ("Consumers MUST
+ *    tolerate absence"). Same for a partial implementation that omits `explain`.
+ * 3. **An `explain` THROW is a denial, not a pass.** This is an
+ *    access-narrowing answer, so it fails CLOSED — the stance `plugin-security`
+ *    itself takes when an object's posture cannot be resolved (#3545).
+ *
+ * ## The one place this is STRICTER than the door it converges on
+ *
+ * The middleware skips its CRUD gate entirely for an authenticated caller whose
+ * permission-set resolution comes back EMPTY (`if (permissionSets.length > 0)`),
+ * while `explain` runs `checkObjectPermission` over that empty list and gets
+ * `false`. ADR-0090 D5's additive baseline plus the post-resolution fallback
+ * make an empty resolution reachable only on a deployment that configures NO
+ * baseline permission set at all — and on that deployment this surface refuses
+ * where `/data` falls open. Left as-is deliberately: the divergence is in the
+ * closed direction on the door this card was filed about, and closing it the
+ * other way would mean re-deriving the middleware's own empty-set rule here,
+ * which is the drift `ISecurityService` exists to prevent.
+ */
+async function mayReadRunState(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+): Promise<boolean> {
+    const ec = context?.executionContext;
+    if (ec?.isSystem === true) return true;
+
+    const security = await deps.resolveService(context, 'security').catch(() => undefined) as
+        Partial<ISecurityService> | undefined;
+    if (!security || typeof security.explain !== 'function') return true;
+
+    try {
+        const decision = await security.explain({ object: AUTOMATION_RUN_OBJECT, operation: 'read' }, ec);
+        return decision?.allowed === true;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * [#7900] The run-state read gate itself: {@link mayReadRunState} as a guard
+ * clause.
+ *
+ * Returns a refusal result when the answer is no, `undefined` when the read may
+ * proceed — so the caller reads as a guard clause and no route can accidentally
+ * consume a "denied" as a value.
+ */
+async function refuseUngrantedRunRead(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+): Promise<HttpDispatcherResult | undefined> {
+    if (await mayReadRunState(deps, context)) return undefined;
+
+    // The refusal names the GRANT it wants and nothing about the caller — no
+    // positions, no permission-set names (#7450: a denial must not answer the
+    // caller's authorization topology).
+    return {
+        handled: true,
+        response: deps.error(RUN_READ_DENY_MESSAGE, RUN_READ_DENY_STATUS, { code: RUN_READ_DENY_CODE }),
+    };
+}
+
+/**
+ * [#7968] The screen route's gate: **the run's own trigger identity, OR the
+ * `sys_automation_run` read grant as an operator override.**
+ *
+ * Maintainer ruling, 2026-08-12 (Option B). Acceptance, verbatim: *"stranger
+ * with valid auth + run id ⇒ denied; triggering user ⇒ screen; holder of
+ * `sys_automation_run` read ⇒ screen."*
+ *
+ * ## ⛔ Why this is NOT the grant check one route up
+ *
+ * The obvious gate — require the `sys_automation_run` grant, exactly as
+ * `/:name/runs/:runId` does — was **considered and ruled out for this route**,
+ * and the reason is the whole point of the card: it would **refuse the end user
+ * the flow paused for**. The pause exists because the flow is asking THIS
+ * caller to fill a form in; a screen served only to grant-holders is a screen
+ * served to everyone except its audience. So the grant is the OVERRIDE half
+ * here (operator tooling, support), never the whole question — and the
+ * over-block direction is pinned as hard as the under-block one
+ * (`automation-screen-read-gate.test.ts`).
+ *
+ * ## What the identity half reads, and why that field
+ *
+ * `ExecutionLogEntry.trigger.userId` — the caller whose request started the run,
+ * written by the engine's single `buildRunTrigger` chokepoint (#7533) at every
+ * site that records a run. It is the only identity the run itself carries, and
+ * it is the same axis `resume` answers on (`resumeAuthority`, #3801 / #5561),
+ * so read and write on one pause stay on one axis rather than the two unrelated
+ * permissions #7900 exists to remove.
+ *
+ * ⚠️ It is deliberately NOT the richer per-run authority question — "may this
+ * caller resume THIS suspension, per its declared `resumeAuthority`/assignee
+ * state". That is Option A, recorded as the coherent end state and ADR-0019
+ * class design work; B does not preclude it, because both refuse the same
+ * stranger and admit the same end user.
+ *
+ * ## Order of operations — the 404 comes FIRST, on purpose
+ *
+ * Unlike the #7900 gate (which fires before the automation service is consulted
+ * at all), this one runs AFTER `getSuspendedScreen`, and that ordering is a
+ * decision with two reasons:
+ *
+ *  1. **A nonexistent run id must keep answering exactly as it does today.**
+ *     The gate's identity half is derived from the run, so an unresolvable run
+ *     would have to fail CLOSED — turning today's `404 No pending screen for
+ *     run` into a 403 for every caller, including the honest ones who mistyped.
+ *     Deciding only where there IS a screen to disclose keeps every 404 path
+ *     byte-identical.
+ *  2. **It cannot be asked earlier anyway.** The identity is a property of the
+ *     run, so the run must be looked up before the question exists. Nothing is
+ *     disclosed by the lookup: a refused caller gets the refusal, never the
+ *     spec.
+ *
+ * The consequence, stated rather than hidden: a stranger can still tell a
+ * paused run id (403) from an unknown one (404). That existence oracle is the
+ * price of leaving the not-found behaviour untouched, it is strictly narrower
+ * than the disclosure it replaces (an id, not the record's values), and closing
+ * it means answering 404 for the refused caller — a different, defensible
+ * design that is not what was ruled.
+ *
+ * ## The non-denials it inherits
+ *
+ * Everything {@link mayReadRunState} decides: a system context passes, a
+ * deployment with no `plugin-security` (or a partial one) passes, and an
+ * `explain` that throws fails CLOSED — but only the OVERRIDE half fails closed,
+ * so the triggering user still gets their own screen while the permission
+ * subsystem is unavailable. That asymmetry is the point of a two-half gate: the
+ * end user's access does not depend on operator infrastructure.
+ */
+async function refuseUnrelatedScreenRead(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    automationService: Partial<IAutomationService>,
+    runId: string,
+): Promise<HttpDispatcherResult | undefined> {
+    const ec = context?.executionContext;
+    if (ec?.isSystem === true) return undefined;
+
+    // ── Half 1: the run's own trigger identity ───────────────────────────────
+    // Best-effort: `getRun` is optional on `IAutomationService`, and a service
+    // that cannot answer who triggered a run simply does not admit anyone on
+    // this half — it never admits everyone. A throw is the same: unresolved,
+    // not granted.
+    const callerId = typeof ec?.userId === 'string' && ec.userId !== '' ? ec.userId : undefined;
+    if (callerId && typeof automationService.getRun === 'function') {
+        const run = await automationService.getRun(runId).catch(() => undefined);
+        const triggerUserId = (run as { trigger?: { userId?: unknown } } | null | undefined)?.trigger?.userId;
+        if (typeof triggerUserId === 'string' && triggerUserId === callerId) return undefined;
+    }
+
+    // ── Half 2: the operator override, asked as ONE question with #7900 ──────
+    if (await mayReadRunState(deps, context)) return undefined;
+
+    return {
+        handled: true,
+        response: deps.error(SCREEN_READ_DENY_MESSAGE, RUN_READ_DENY_STATUS, { code: RUN_READ_DENY_CODE }),
+    };
+}
+
+/**
+ * [#8055] A refusal thrown by `registerFlow` is the CALLER's metadata being
+ * wrong — serve it as one.
+ *
+ * Every throw `registerFlow` can raise is a verdict on the definition in the
+ * request body: `FlowSchema.parse` (a missing `label`, an unknown node key),
+ * `validateControlFlow` (a malformed ADR-0031 region), `validateNodeConfigKeys`
+ * (#4277's undeclared config key) and `validateFlowExpressions` (ADR-0032's
+ * malformed predicate). None of them carries a `.status`, so both dispatcher
+ * error exits fell back to **500 INTERNAL_ERROR** for four measured bodies
+ * (#8055) — and 500 is the one thing the answer is not. Two costs, the same
+ * pair #7535 spelled out on the sibling `/toggle` route:
+ *
+ *  - A retry-on-5xx client re-sends a request that can never succeed.
+ *  - An agent authoring a flow reads "the server broke" instead of "your
+ *    metadata is wrong". Case 4 is the sharpest: #4277 shaped that message so
+ *    an authoring agent can SELF-CORRECT ("unknown config key `x` … not
+ *    declared by this node type's configSchema … Declared here: …"), and it
+ *    arrived under a status telling the agent to try again unchanged.
+ *
+ * ⛔ This changes the CLASS and the ENVELOPE only. Which bodies are refused is
+ * decided entirely inside the engine and is not touched here — a definition
+ * that registered before still registers, and every one that was refused is
+ * still refused, with the engine's own message intact (a 400 never reaches the
+ * #3867 5xx sanitiser, so the #4277 prescription survives verbatim).
+ *
+ * ## Why the whole call, rather than a recognised subset
+ *
+ * The alternative is to reclassify only the shapes this file can name — a
+ * `ZodError`, or an engine message matched by its prose. #7535's fix rejected
+ * exactly that ("teaching a shared catch to recognise one engine's message
+ * string would make every domain's not-found depend on that prose"), and here
+ * it would also be wrong on the merits: `registerFlow` IS the parse of a
+ * caller-supplied document, so "the definition is bad" is the honest default
+ * for a refusal it raises, not a guess about which one it raised.
+ *
+ * The escape hatch is the producer's, and it is the same precedence
+ * `errorFromThrown` already applies: an error that DECLARES its own class with
+ * `.status` / `.statusCode` keeps it. Nothing in the engine declares one today,
+ * so this is not a live branch — it is the seam that keeps a future engine-side
+ * "the flow store is unreachable" (a genuine 503) from being answered as the
+ * author's fault.
+ *
+ * ## Why a `fields[]` entry with no path for the non-Zod refusals
+ *
+ * The engine's own messages LOCATE the fault in prose (`node 'n' (notify):
+ * unknown config key \`totallyBogusKey\` at config.totallyBogusKey`), and
+ * re-deriving that location by parsing the sentence is the same prose
+ * dependency rejected above. So the entry addresses the body root — the
+ * convention {@link fieldsFromZodIssues} already uses for a failure with no
+ * path to point at — and carries the engine's text as its message. `code` is
+ * `invalid_value`, the ADR-0114 catalog's "rejected for a reason no other
+ * member names".
+ *
+ * The Zod branch's per-issue `code` is whatever {@link fieldsFromZodIssues}
+ * produces — since #8124 that is the ADR-0114 D3 catalog: the helper maps
+ * through `zodIssuesToFields` (`@objectstack/spec`), the same table the REST
+ * transport applies, so `/analytics`, `/notifications` and this route speak
+ * one field-code vocabulary instead of leaking Zod's.
+ */
+function flowDefinitionRefusal(err: any): unknown {
+    // The producer declared its class; the boundary does not overrule it.
+    if (typeof err?.status === 'number' || typeof err?.statusCode === 'number') return err;
+    // Already the house shape (a service that throws `validationFailure` itself)
+    // — re-wrapping would only duplicate the message.
+    if (validationFailureDetails(err)) return err;
+
+    // A Zod parse failure. The raw issue array must NOT reach the wire: it is
+    // Zod's internal shape on a position the house envelope owns, and
+    // `errorFromThrown` copies any `.issues` into `details` verbatim — which is
+    // precisely how `{expected:'string', code:'invalid_type', path:['nodes',0,
+    // 'label']}` was answered to a caller. Mapped to `fields[]` here, so the
+    // converted error carries no `.issues` for that branch to find.
+    const issues: unknown[] | undefined = Array.isArray(err?.issues) ? err.issues : undefined;
+    if (issues && issues.every((i: any) => Array.isArray(i?.path))) {
+        const fields = fieldsFromZodIssues(issues as Parameters<typeof fieldsFromZodIssues>[0]);
+        return validationFailure(
+            fields.length > 0
+                ? `Invalid flow definition: ${fields.map((f) => `${f.field}: ${f.message}`).join('; ')}`
+                : 'Invalid flow definition',
+            fields,
+        );
+    }
+
+    const message = typeof err?.message === 'string' && err.message.trim() !== ''
+        ? err.message
+        : 'Invalid flow definition';
+    return validationFailure(message, [
+        { field: '(body)', code: 'invalid_value', message },
+    ]);
+}
+
+/**
  * Handles Automation requests
  * path: sub-path after /automation/
  *
@@ -125,9 +476,13 @@ export function createAutomationDomain(deps: DomainHandlerDeps): DomainRoute {
  *   POST   /:name/toggle         → toggleFlow (unknown name → 404, #7535)
  *   GET    /:name/runs           → listRuns (query: limit, cursor — validated, #7300;
  *                                  status — validated AND honoured, #7359)
+ *                                  ⚑ run-state read — `sys_automation_run` grant (#7900)
  *   GET    /:name/runs/:runId    → getRun
+ *                                  ⚑ run-state read — `sys_automation_run` grant (#7900)
  *   POST   /:name/runs/:runId/resume → resume a paused run (screen input / ADR-0019)
  *   GET    /:name/runs/:runId/screen → the screen a paused run awaits
+ *                                  ⚑ run's trigger identity OR the
+ *                                    `sys_automation_run` grant (#7968)
  */
 export async function handleAutomationRequest(deps: DomainHandlerDeps, path: string, method: string, body: any, context: HttpProtocolContext, query?: any): Promise<HttpDispatcherResult> {
     // [#5519] ANONYMOUS BASELINE — the same floor `/data`, `/meta`, `/ai` and
@@ -160,6 +515,34 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
             };
         }
     }
+    const m = method.toUpperCase();
+    const parts = path.replace(/^\/+/, '').split('/').filter(Boolean);
+
+    // [#7900] RUN-STATE READ GATE — the maintainer ruling of 2026-08-12: the
+    // `/automation` read surface requires the same permission the
+    // `sys_automation_run` object read answers with. One policy, two doors, one
+    // answer.
+    //
+    // What it closes, measured: `GET /:name/runs/:runId` answered with
+    // `deps.success(run)` — the `ExecutionLogEntry` verbatim, no projection, no
+    // redaction, no masking — so any AUTHENTICATED caller who knew a run id read
+    // the triggering record's fields with that record's own FLS never applying.
+    // `listRuns` serves the same entries a page at a time and was gated the same
+    // (i.e. not at all).
+    //
+    // Placed with the #5519 anonymous floor and AHEAD of the service probe below
+    // for that gate's own reason, read one authorization tier up: which
+    // permission a route requires must not vary with which automation service a
+    // deployment happens to mount, and a 501-vs-403 should not be the thing that
+    // tells an ungranted caller whether automation is mounted here.
+    //
+    // Which routes: `isRunStateRead` above — deliberately one predicate, so the
+    // domain's policy cannot drift route by route the way the finding described.
+    if (isRunStateRead(parts, m)) {
+        const refusal = await refuseUngrantedRunRead(deps, context);
+        if (refusal) return refusal;
+    }
+
     const automationService = await deps.getService(context, CoreServiceName.enum.automation);
     // [#4058] Empty slot — or a slot filled by a self-declared non-handler
     // (`handlerReady: false`, ADR-0076 D12), which is the same amount of
@@ -172,9 +555,6 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     // mounted, so the dispatcher's ROUTE_NOT_FOUND exit ("No handler matched
     // this request") described neither half truthfully. See ./unavailable.ts.
     if (!isServiceServeable(automationService)) return capabilityUnavailable(deps, 'automation');
-
-    const m = method.toUpperCase();
-    const parts = path.replace(/^\/+/, '').split('/').filter(Boolean);
 
     // Legacy: POST /automation/trigger/:name — the shape
     // `client.automation.trigger()` calls. Same handling as
@@ -196,6 +576,18 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     }
 
     // GET / → listFlows
+    //
+    // [#7900 AUDIT — stays authenticated-only, with a reason] Together with
+    // `GET /:name`, `GET /actions`, `GET /connectors` and `GET /_status`, this
+    // serves FLOW-DEFINITION and REGISTRY data: names, definitions, the
+    // deployment's action/connector catalogs, per-flow enabled/bound state. None
+    // of it is `sys_automation_run`-class data — no run, no trigger record, no
+    // variable snapshot — so the grant the ruling names says nothing about it,
+    // and requiring it here would not be convergence but a SECOND policy
+    // invented for a different data class, which is precisely what the ruling
+    // forbids. Flow definitions are metadata and are governed on the metadata
+    // plane (`/meta`, ADR-0106); if their read posture should narrow, that is a
+    // metadata-plane decision and belongs to its own card.
     if (parts.length === 0 && m === 'GET') {
         if (typeof automationService.listFlows === 'function') {
             const names = await automationService.listFlows();
@@ -221,7 +613,22 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                     { field: 'name', code: body.name === undefined ? 'required' : 'invalid_type', message: 'expected a non-empty string' },
                 ]);
             }
-            automationService.registerFlow(body.name, body);
+            // [#8055] The engine's verdict on the definition is served as a
+            // 400, not a 500 — see `flowDefinitionRefusal` above for what that
+            // does and does not change. Caught and RETURNED (rather than
+            // rethrown) for the reason the resume branch below already returns
+            // its engine-originated refusals: `dispatch()` re-throws everything
+            // that is not a permission denial, so a transport calling it
+            // directly would otherwise get an exception where every other
+            // refusal on this domain hands back a response.
+            try {
+                automationService.registerFlow(body.name, body);
+            } catch (e) {
+                return {
+                    handled: true,
+                    response: deps.errorFromThrown(flowDefinitionRefusal(e), VALIDATION_FAILED_STATUS),
+                };
+            }
             return { handled: true, response: deps.success(body) };
         }
     }
@@ -360,7 +767,11 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 if (unknownKeys.length > 0) {
                     throw validationFailure(
                         `Unknown key${unknownKeys.length > 1 ? 's' : ''} ${unknownKeys.map((k) => `\`${k}\``).join(', ')} — the toggle body is { enabled?: boolean }`,
-                        unknownKeys.map((k) => ({ field: k, code: 'unrecognized_keys', message: 'not a toggle field — did you mean `enabled`?' })),
+                        // `unknown_field` — the ADR-0114 catalog member for "a
+                        // key the target does not declare"; this entry used to
+                        // hand-spell Zod's `unrecognized_keys`, a code outside
+                        // the closed catalog (#8124).
+                        unknownKeys.map((k) => ({ field: k, code: 'unknown_field', message: 'not a toggle field — did you mean `enabled`?' })),
                     );
                 }
                 if ('enabled' in toggleBody && typeof (toggleBody as Record<string, unknown>).enabled !== 'boolean') {
@@ -477,10 +888,29 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
 
         // GET /:name/runs/:runId/screen → the screen a paused run awaits
         // (refresh-safe re-fetch for the UI flow-runner).
+        //
+        // [#7968] GATED — the run's own trigger identity, OR the
+        // `sys_automation_run` read grant as an operator override. The audit
+        // that #7900 left here recorded, correctly, that the grant ALONE is the
+        // wrong gate for this route (it would refuse the end user the flow
+        // paused for) — and left the door authenticated-only as a result. The
+        // residual it named was measured and is real: a `ScreenSpec` carries
+        // `defaults` / `defaultValue` interpolated against the live flow
+        // variables (`builtin/screen-nodes.ts`), so a real screen flow over
+        // `{record.email}` / `{record.phone}` answered those values to ANY
+        // authenticated caller who knew a run id. The ruling of 2026-08-12
+        // closes it on the identity axis instead, keeping the end user in.
+        // Reasoning, the ordering, and what stays out of scope (Option A, the
+        // per-run `resumeAuthority` read gate): `refuseUnrelatedScreenRead`.
         if (parts[1] === 'runs' && parts[2] && parts[3] === 'screen' && m === 'GET') {
             if (typeof automationService.getSuspendedScreen === 'function') {
                 const screen = await automationService.getSuspendedScreen(parts[2]);
+                // Deliberately AHEAD of the gate: no screen ⇒ nothing to
+                // disclose ⇒ every not-found answer stays exactly what it was,
+                // for every caller. See the gate's "order of operations".
                 if (!screen) return { handled: true, response: deps.error('No pending screen for run', 404) };
+                const refusal = await refuseUnrelatedScreenRead(deps, context, automationService, parts[2]);
+                if (refusal) return refusal;
                 return { handled: true, response: deps.success({ runId: parts[2], screen }) };
             }
             return { handled: true, response: deps.error('Screen lookup not supported', 501) };
@@ -520,11 +950,29 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 //    first implementation that starts honouring cursors must not
                 //    be the one that discovers the type was never enforced.
                 //
-                // Out-of-range numbers are NOT refused — `?limit=1000` still
-                // reaches the engine as 1000 and is sliced there. Range is the
-                // service's declared business (`ListRunsRequestSchema` bounds it
-                // 1..100); this gate only refuses values that were never whole
-                // numbers.
+                // [#8054] `limit`'s RANGE — `ListRunsRequestSchema` has always
+                // declared `.min(1).max(100)`, and until now this gate only
+                // checked that the value was a whole number at all, never that
+                // it fell inside that declared range. `?limit=0` reached the
+                // engine as 0, and `store.listHistory(flowName, 0).slice(0, 0)`
+                // is `[]` — a confidently wrong "this flow has never run",
+                // exactly #7300's shape but from a value that WAS a valid
+                // integer. `?limit=101` reached the engine uncapped, so the
+                // declared upper bound was decorative.
+                //
+                // The bounds are READ off `ListRunsRequestSchema.shape.limit`
+                // rather than re-listed as `(1, 100)` here — the same
+                // discipline `status` already applies via
+                // `ExecutionStatus.options` two lines down. Re-listing the
+                // literals would make the boundary correct today and silently
+                // wrong again the moment the schema's own `.min()`/`.max()`
+                // changes; reading them makes declared == enforced true by
+                // construction, not by two call sites happening to agree.
+                //
+                // A value outside the range is refused in the same house shape
+                // as everything else in this module — `VALIDATION_FAILED` with
+                // an ADR-0114 field code, here `min_value` / `max_value`, the
+                // ones the property names already mirror.
                 //
                 // [#7359] `status` is the THIRD declared parameter, and until
                 // now the only one this handler never read. `ListRunsRequestSchema`
@@ -543,9 +991,13 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 // rather than a list copied into this file: the wire schema is
                 // built from that same enum, so a future member cannot be
                 // accepted by one and refused by the other.
+                const limitBounds = ListRunsRequestSchema.shape.limit.unwrap();
                 const options = query
                     ? {
-                        limit: parseIntegerParam('limit', query.limit),
+                        limit: parseIntegerParam('limit', query.limit, {
+                            min: limitBounds.minValue ?? undefined,
+                            max: limitBounds.maxValue ?? undefined,
+                        }),
                         cursor: parseStringParam('cursor', query.cursor),
                         status: parseEnumParam('status', query.status, ExecutionStatus.options),
                     }
@@ -580,7 +1032,19 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                         { field: '(body)', code: 'invalid_type', message: 'expected a flow definition object' },
                     ]);
                 }
-                automationService.registerFlow(name, definition);
+                // [#8123] Same class as POST /: the engine's verdict on the
+                // definition is served as a 400, not a 500 — reusing the
+                // same route-agnostic `flowDefinitionRefusal` helper POST
+                // uses above, so the two doors cannot disagree about the
+                // class of an identical refusal (#8055 wired POST only).
+                try {
+                    automationService.registerFlow(name, definition);
+                } catch (e) {
+                    return {
+                        handled: true,
+                        response: deps.errorFromThrown(flowDefinitionRefusal(e), VALIDATION_FAILED_STATUS),
+                    };
+                }
                 return { handled: true, response: deps.success(definition) };
             }
         }

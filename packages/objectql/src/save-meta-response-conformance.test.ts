@@ -152,7 +152,7 @@ async function makeProtocol() {
     return new ObjectStackProtocolImplementation(engine);
 }
 
-const viewBody = (label: string) => ({ name: 'cases', type: 'grid', label, columns: ['id'] });
+const viewBody = (label: string) => ({ name: 'cases', type: 'grid', label, columns: ['id'], object: 'case', viewKind: 'list' }); // [#7741] the inline arm requires the object binding pair
 
 /** Keys the producer emitted that the schema refused to carry through. */
 function strippedKeys(raw: Record<string, unknown>): string[] {

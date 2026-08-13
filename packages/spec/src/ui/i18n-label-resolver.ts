@@ -32,8 +32,8 @@
  * client-rendered one simply differ.
  *
  * The reference is objectui `packages/i18n/src/pickLocalized.ts` (read at
- * `origin/main` `50fa376`, blob `9e5d92a`, last touched by objectui#3278). Its
- * rule, mirrored here limb for limb:
+ * `origin/main` `d8d0d66`, blob `30fcb0a8`, last touched by objectui PR #4359 /
+ * objectui#3907). Its rule, mirrored here limb for limb:
  *
  * | # | limb | note |
  * |---|---|---|
@@ -71,30 +71,60 @@
  * `i18n-label-resolver.test.ts`; changing it is a two-repo decision, not a
  * detail to fix in passing.
  *
- * ## Two deliberate departures, both narrower than the rule above
+ * ## Rule departures — converged as of objectui#3907, zero remain
  *
- * 1. **Own properties only.** `pickLocalized` reads `map[locale]` with a bare
- *    bracket access, so a locale that happens to name an `Object.prototype`
- *    member (`constructor`, `toString`) resolves to that member and renders as
- *    its source text. In a browser the locale comes from the app's own language
- *    state; on a server it can come from an `Accept-Language` header, so this
- *    module reads own properties only. No language tag is an `Object.prototype`
- *    key, so no in-contract input can tell the two apart. Filed against the
- *    reference as objectui#3907.
- * 2. **Only `string` values are eligible, on every limb.** `pickLocalized`
- *    applies a `typeof === 'string'` filter on limbs 3 and 6 but not on 1, 2, 4,
- *    5, where a non-string value short-circuits the chain and is stringified
- *    (`[object Object]`). `InlineLocaleMapSchema` declares `z.record(<tag>,
- *    z.string())`, so no value that reaches either resolver in-contract is
- *    anything but a string, and the inconsistency is unobservable inside the
- *    declared domain. Out of contract, Prime Directive #12 says the producer is
- *    wrong and the consumer must not coerce a rendered `[object Object]` onto a
- *    screen — so the filter is applied uniformly and an off-spec value is
- *    treated as absent.
+ * This module shipped (objectstack#6765) with two deliberate narrowings of the
+ * reference's limb rule, both stated rather than silent. objectui#3907 (landed
+ * in objectui PR #4359) closed both upstream, so the two ends now agree limb
+ * for limb on every map input:
  *
- * Both are stated rather than silent because parity, not taste, is what this
- * module is for: everything a caller can observe with an `I18nLabel` that
- * `I18nLabelSchema` accepts is identical between the two ends.
+ * 1. **Own properties only.** Before objectui#3907, `pickLocalized` read
+ *    `map[locale]` with a bare bracket access, so a locale that happened to
+ *    name an `Object.prototype` member (`constructor`, `toString`) resolved to
+ *    that member and rendered as its source text. In a browser the locale
+ *    comes from the app's own language state; on a server it can come from an
+ *    `Accept-Language` header, so this module read own properties only from
+ *    the start. No language tag is an `Object.prototype` key, so no
+ *    in-contract input could ever tell the two apart — objectui#3907 landed
+ *    the same guard upstream regardless, closing the gap for out-of-contract
+ *    input too.
+ * 2. **Only `string` values are eligible, on every limb.** Before
+ *    objectui#3907, `pickLocalized` applied a `typeof === 'string'` filter on
+ *    limbs 3 and 6 but not on 1, 2, 4, 5, where a non-string value
+ *    short-circuited the chain and was stringified (`[object Object]`).
+ *    `InlineLocaleMapSchema` declares `z.record(<tag>, z.string())`, so no
+ *    value that reaches either resolver in-contract is anything but a string,
+ *    and the inconsistency was unobservable inside the declared domain — but
+ *    Prime Directive #12 says the producer is wrong and the consumer must not
+ *    coerce a rendered `[object Object]` onto a screen, and objectui#3907
+ *    applies the filter uniformly upstream now too.
+ *
+ * A guard makes its limb **miss**; it does not abort the resolution — an
+ * unusable entry falls through to the next limb exactly as an absent one does,
+ * on both sides. `pickLocalized({ en: 'Pricing' }, 'constructor')` is now
+ * `'Pricing'` (the chain falls through to the `en` limb), not `''` — `''` (or
+ * this module's `undefined`) only when NO limb hits at all, e.g. an empty map.
+ *
+ * ## What still differs
+ *
+ * Two differences survive the sync, both stated rather than silent because
+ * parity, not taste, is what this module is for — everything else a caller
+ * can observe with an `I18nLabel` that `I18nLabelSchema` accepts is identical
+ * between the two ends:
+ *
+ * * **The miss spelling.** `pickLocalized` answers a miss as `''`, because its
+ *   caller is a renderer writing into a text node. This module answers
+ *   `undefined` — see the return-shape note below. The two spellings are
+ *   bridged by one `?? ''`, pinned as an identity in the parity test.
+ * * **The top-level scalar pass-through.** `pickLocalized` accepts `unknown`
+ *   and stringifies a bare number or boolean (`pickLocalized(42, 'en')` is
+ *   `'42'`). This module's parameter is the declared `I18nLabel`
+ *   (`string | Record<string, string>`), so a number or boolean is a type
+ *   error at the call site, not a value to coerce at runtime —
+ *   `resolveI18nLabel(42, 'en')` is `undefined`, refused rather than
+ *   stringified (Prime Directive #12). This is a departure in the VALUE
+ *   parameter, not a limb of the map rule above, and objectui#3907 / PR
+ *   objectui#4359 did not touch it — it is not expected to converge.
  *
  * ## Relation to the other resolver in this package
  *

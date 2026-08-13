@@ -28,7 +28,12 @@ import type { ValidateDataIssue, ValidateDataResponse } from '@objectstack/spec/
 import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken, isNowDefaultToken } from '@objectstack/spec/data';
 // [#5158] Door 2's lowering sink — the SAME pair the protocol face (Door 1)
 // runs, so `FilterArray` has exactly one lowering in the product.
-import { isFilterAST, parseFilterAST, VALID_AST_OPERATORS } from '@objectstack/spec/data';
+import {
+  isFilterAST,
+  parseFilterAST,
+  normalizeFilterComparandTypes,
+  VALID_AST_OPERATORS,
+} from '@objectstack/spec/data';
 // [#5574] D6, executable. The ceiling and the refusal message live in
 // `packages/spec/src/data/bulk-write-hook-conformance.ts` so BOTH phases and
 // both verbs enforce one definition; the engine raises, the contract decides.
@@ -64,6 +69,11 @@ import {
   type RetryOptions,
   filterTokenContextFrom,
   resolveFilterTokens,
+  // [#7867] The repo's ONE single-record 404 (#4435/#5138). It lives in
+  // `@objectstack/core` precisely so this file can reach it: ADR-0076 D2's
+  // boundary ratchet forbids the `/core` entry closure — engine.ts included —
+  // from importing `@objectstack/metadata-protocol`, where it was written.
+  recordNotFoundError,
 } from '@objectstack/core';
 import { SummaryRecomputeError, type SummaryRecomputeFailure } from './summary-errors.js';
 import { CrossDatasourceTransactionWriteError, TransactionUnsupportedError } from './transaction-errors.js';
@@ -621,6 +631,19 @@ function lowerWhereFilterArray<T extends object | undefined>(
     // one either way — it reads the lowered condition, which is what both doors
     // produce.
     assertListComparandShapes(object, operation, where);
+    // [#7872] The comparand-type door, on the OBJECT form. `parseFilterAST`
+    // runs the same walk on everything it lowers or passes through, but
+    // NEITHER door routes an object-form filter through it — Door 1 gates on
+    // `isFilterAST` first and Door 2 is this very branch — so without this
+    // call the dominant form would bypass the door entirely (the #7956
+    // divergence matrix arrived through it). Shape gate first (#5869 keeps
+    // its pinned wording for the list-operator shapes), type door second;
+    // the walk is copy-on-write, so the common path allocates nothing and a
+    // narrowed bigint replaces the bag rather than editing the caller's.
+    const normalized = normalizeFilterComparandTypes(where, `${operation}('${object}')`);
+    if (normalized !== where) {
+      return { ...(bag as Record<string, unknown>), where: normalized } as T;
+    }
     return bag;
   }
 
@@ -762,13 +785,16 @@ function planFormulaProjection(
  * PAGE. It would pass every small-result-set test and be wrong the moment
  * pagination is involved.
  *
- * SCOPE — deliberately the third verdict only. `unknown` and `dotted` names are
- * NOT judged here: the ingress gate's precedence is `unknown` > `dotted` >
- * unmaterializable (#4226 / #4256 / #6994), and the engine has always tolerated
- * an unknown projection name by design (the `SELECT *` tolerance a few lines
- * below). Widening this door to those two is a separate posture change on two
- * more axes, not a free extension of this one — so a dotted path keeps reaching
- * the driver exactly as before, including one whose head is a formula field.
+ * SCOPE — deliberately the third verdict only, on the SORT axis. `unknown` and
+ * `dotted` SORT names are NOT judged here: the ingress gate's precedence is
+ * `unknown` > `dotted` > unmaterializable (#4226 / #4256 / #6994), and widening
+ * this door to those two is a separate posture change on two more axes, not a
+ * free extension of this one — so a dotted SORT path keeps reaching the driver
+ * exactly as before, including one whose head is a formula field. On the
+ * PROJECTION axis the engine still tolerates an unknown PLAIN name by design
+ * (the `SELECT *` tolerance a few lines below, kept by the #7589 ruling), but
+ * a dotted PROJECTION entry is refused since #7589 —
+ * {@link assertProjectionHasNoDottedPaths}, directly below.
  *
  * A registry-less host (`schema` undefined) returns early, exactly as the
  * ingress gate returns early when `resolveQueryFields` cannot answer: a door
@@ -817,6 +843,107 @@ function assertOrderByIsMaterializable(
   err.code = 'INVALID_SORT';
   err.field = first;
   err.fields = unmaterialized;
+  err.object = object;
+  throw err;
+}
+
+/**
+ * [#7589] A DOTTED projection entry — refused on the engine's own public
+ * boundary, the second half of #7532's ingress refusal.
+ *
+ * #7532 (PR #7588) closed this at `assertProjectionFieldsExist`
+ * (`400 INVALID_FIELD`), which covers everything reaching `findData`: the REST
+ * list route, `POST /data/:object/query`, the export route and the RPC
+ * dispatcher. It could not cover a caller that reaches {@link ObjectQL.find} /
+ * {@link ObjectQL.findOne} DIRECTLY — and that half was measured, not assumed
+ * (#7589): a flow-authored `get_record` node's `fields: ['name','account.name']`
+ * parses (`GetRecordConfigSchema` restricts nothing), travels verbatim into
+ * `data.find(...)`, cleared the head-only filter below on its head segment
+ * (`account` IS a field), and reached the driver as a projection column — where
+ * SQL renders `"account"."name"` against a table that was never joined, the DB
+ * answers `no such column`, and the #3821 recovery ladder retries `select('*')`.
+ * The caller asked to narrow and silently received EVERY field, byte-identical
+ * to no projection at all. A saved report's `query.fields` reaches this the
+ * same way (`plugin-reports` forwards it verbatim), as does every hook and
+ * internal caller.
+ *
+ * WHY A REFUSAL: ruled 2026-08-12 on #7589 (adopting the drivers seat's
+ * Option B) — a dotted entry the engine cannot resolve is refused loudly at
+ * this one site, covering every caller that reaches the engine. The head-only
+ * check this replaces was justified by a comment claiming the engine resolves
+ * relationship paths "via populate"; #7601 measured that NO populate step
+ * exists — the comment was the last place in the repo asserting dotted-path
+ * resolution does (after PR #7617) — so what is removed here is not a working
+ * feature but a path to widening, kept alive by a false premise. Both the typo
+ * (`titel.name`) and the genuine traversal intent (`account.name`) eat this
+ * refusal: nothing resolves either, they are not separable at this door, and
+ * the alternative is the over-return above (#5918's precedent, same as the
+ * ingress ruling).
+ *
+ * SCOPE — the dotted leg ONLY. The unknown-PLAIN-column tolerance a few lines
+ * below each call site is explicitly KEPT (same #7589 ruling): an unknown
+ * plain column is simply absent from each row, the "no records exist" failure
+ * that tolerance prevents is real, and it backstops registry-less hosts. A
+ * dotted path differs in kind — it is a projection no driver can structurally
+ * apply, and answering it with every column points away from both FLS and data
+ * minimisation. The two facts get two verdicts.
+ *
+ * A registry-less host (`schema.fields` undefined) returns early, exactly as
+ * the ingress gate returns early when `resolveQueryFields` cannot answer: a
+ * door that cannot see the field map must not invent a verdict about it. For
+ * that host the driver-side #3821 ladder remains the documented backstop
+ * (deliberately untouched — a driver-side carve-out is ruled measured-need
+ * only).
+ *
+ * The wording deliberately shares its core sentence and remedies with the
+ * ingress door's dotted refusal — one vocabulary across the doors, so a caller
+ * refused at the REST boundary and a caller refused here are not sent two
+ * different ways. Duplicated rather than imported because `metadata-protocol`
+ * is assembled FROM an engine, so the engine cannot import from it without
+ * inverting the layering; the agreement pin in
+ * `query-expression-conformance.test.ts` is what keeps the duplication honest
+ * (same mechanism as the sort axis' three-door remedy pin).
+ */
+function assertProjectionHasNoDottedPaths(
+  object: string,
+  operation: 'find' | 'findOne',
+  schema: any,
+  fields: unknown,
+): void {
+  if (!Array.isArray(fields) || fields.length === 0) return;
+  if (!schema?.fields) return;
+  const dotted = fields.filter(
+    (f): f is string => typeof f === 'string' && f.includes('.'));
+  if (dotted.length === 0) return;
+  const first = dotted[0];
+  const head = first.split('.')[0];
+  const headDef: any = (schema.fields as any)[head];
+  const crossesRelation = headDef != null && REFERENCE_VALUE_TYPES.has(headDef.type);
+  const err: any = new Error(
+    (crossesRelation
+      ? `ObjectQL.${operation}('${object}') projects '${first}', which follows the relationship `
+        + `'${head}' into another object — 'fields' reaches only columns of '${object}' itself`
+      : `ObjectQL.${operation}('${object}') projects '${first}', a dotted path — 'fields' reaches `
+        + `only whole columns of '${object}', not values inside them`)
+    + (dotted.length > 1 ? ` (also: ${dotted.slice(1).join(', ')})` : '')
+    + '. No driver resolves it: the path reaches the driver as a column name, matches no '
+    + 'column, and the projection falls back to EVERY field — a narrower request answered '
+    + 'with a wider response.'
+    + (crossesRelation
+      ? ` Read the related record with 'expand' (\`{ expand: { ${head}: { object: '<target>', `
+        + `fields: ['<column>'] } } }\` to choose its columns), or denormalise the value onto `
+        + `'${object}' (a stored field, written when the source changes) and name that.`
+      : ` Name the whole column ('${head}') and read into its value in the caller.`),
+  );
+  // `INVALID_FIELD`, not a new code, and 400 rather than 500 — the same
+  // reasoning `assertOrderByIsMaterializable` records for `INVALID_SORT`: one
+  // condition ("this projection was not applied as written") keeps ONE wire
+  // code however the caller reached it, so a host surfacing engine errors over
+  // HTTP answers the same envelope on both doors.
+  err.status = 400;
+  err.code = 'INVALID_FIELD';
+  err.field = first;
+  err.fields = dotted;
   err.object = object;
   throw err;
 }
@@ -1660,6 +1787,16 @@ export class ObjectQL implements IObjectQLEngine {
   // writing an object that declares a secret field fails closed (never
   // persists cleartext). Injected by the host via setCryptoProvider().
   private cryptoProvider?: ICryptoProvider;
+
+  // [#8022] Listeners notified when a crypto provider is (re)registered.
+  // Server-side consumers that dereference a secret at BOOT — the webhook
+  // auto-enqueuer's subscription cache is the one this was built for — run
+  // inside `kernel:ready`, which every host completes BEFORE its composition
+  // root injects a provider. Their first read therefore fails closed against a
+  // capability that is about to exist, and without a notification the only way
+  // back is to poll. The engine is the sole party that knows the moment it
+  // arrives, so the notification belongs here.
+  private readonly cryptoProviderListeners = new Set<() => void>();
 
   // [ADR-0105 D2 / #3623] Posture accessor for driver-scope widening under the
   // `group` posture. Injected by SecurityPlugin via setTenancyPostureProvider();
@@ -4613,10 +4750,51 @@ export class ObjectQL implements IObjectQLEngine {
    * Mirrors the Settings subsystem's ICryptoProvider wiring; the host (e.g.
    * `serve`) injects `LocalCryptoProvider` in dev and a KMS/Vault-backed
    * provider in production.
+   *
+   * Notifies {@link onCryptoProviderChange} listeners AFTER the provider is in
+   * place, so a listener that immediately re-reads a secret sees the new
+   * capability rather than the state that made it fail (#8022).
    */
   setCryptoProvider(provider: ICryptoProvider): void {
     this.cryptoProvider = provider;
     this.logger.info('CryptoProvider configured for secret fields');
+    // A listener is a re-arm, never part of this call's contract: one that
+    // throws must not fail the host's composition root, and must not stop the
+    // listeners behind it from re-arming.
+    for (const listener of [...this.cryptoProviderListeners]) {
+      try {
+        listener();
+      } catch (err) {
+        this.logger.warn('CryptoProvider registration listener failed', {
+          error: (err as Error)?.message ?? String(err),
+        });
+      }
+    }
+  }
+
+  /**
+   * [#8022] Observe crypto-provider registration.
+   *
+   * Exists for consumers that must dereference a `secret` field on a schedule
+   * they do not control — the boot path. `secret` reads are fail-closed by
+   * design (#7799), which is correct, but "no provider" at boot is a
+   * *transient* state on every host: `kernel:ready` runs plugins, and only
+   * after `runtime.start()` returns does the composition root call
+   * {@link setCryptoProvider}. A consumer whose cache was built in that gap is
+   * wrong until it rebuilds, and polling is the only alternative to being told.
+   *
+   * Fires on every registration, including a later replacement (a KMS provider
+   * swapped in over the dev one) — a listener that re-reads is correct in both
+   * cases, and a re-read is cheap next to signing with a key from the wrong
+   * provider.
+   *
+   * @returns an unsubscribe function; call it when the listener's owner stops.
+   */
+  onCryptoProviderChange(listener: () => void): () => void {
+    this.cryptoProviderListeners.add(listener);
+    return () => {
+      this.cryptoProviderListeners.delete(listener);
+    };
   }
 
   /**
@@ -4853,6 +5031,33 @@ export class ObjectQL implements IObjectQLEngine {
    *    not one. `isSystem` is server-derived (never client input), the same
    *    trust the read-only strips on the write path already place in it.
    *
+   * ## Why this door is SILENT where the `$searchFields` door returns a 400
+   *
+   * Asked on #7876 and ruled there on 2026-08-12 (direction C): the divergence
+   * is intended, and it is not reopenable on symmetry alone. The two doors are
+   * two KINDS of surface.
+   *
+   *  - `$searchFields` is AUTHORING input — it tells the server how to RUN the
+   *    query. A value the server will not honour has to be said out loud, or
+   *    the caller gets a WIDER answer than the one they narrowed to, in a
+   *    response with nothing to distinguish it from a satisfied one. That is
+   *    why `assertSearchFieldsAreSearchable` refuses the name with a 400
+   *    (#4254) — the refusal is protecting the ROW SET.
+   *  - `select` is a READ PROJECTION — it names what the caller would like
+   *    back. Dropping a column the caller may not see leaves the answer
+   *    correct: the rows are still the rows that were asked for, one key
+   *    lighter. {@link omitInternalFields} directly above answers
+   *    `?select=id,key` exactly this way, for exactly this reason (#7728), so
+   *    silence here is the platform's existing read-path rule, not an
+   *    exception to it.
+   *
+   * ⛔ Do not add a refusal here to make the two doors agree. That was option B
+   * on #7876, weighed and declined: it turns a request that answers 200
+   * today into a failure, for tidiness, on a spelling no non-system caller in
+   * this tree uses — the companion's only deliberate reader is the backfill
+   * carved out above. If a REAL caller is ever burned by the silent drop, that
+   * measurement reopens it; the asymmetry by itself does not.
+   *
    * ⚠️ `requestedFields` must be the CALLER's `fields`, captured before
    * `planFormulaProjection` — that pass rewrites the projection to every stored
    * column when a formula is in play, companion included.
@@ -4951,6 +5156,95 @@ export class ObjectQL implements IObjectQLEngine {
     const row: any = Array.isArray(found) ? found[0] : found;
     if (!row) return null;
     return this.resolveSecret(row[field], opts);
+  }
+
+  /**
+   * Privileged: recover the stored values of ONE `internal: true` field for a
+   * batch of rows, keyed by record id.
+   *
+   * [#8118] {@link omitInternalFields} deletes a flagged field from every row
+   * the engine hands back — with NO system carve-out, by explicit design
+   * (#7728): an escape hatch nobody needs is a hole in a non-exposure
+   * guarantee. The same ruling names the shape a legitimate system reader uses
+   * when one finally appears: it reads the column through a purpose-built
+   * privileged accessor, the way {@link resolveSecret} does for `secret`. This
+   * method is that accessor. Its first consumer is the outbound-HTTP
+   * dispatcher's claim path (`SqlHttpOutbox.claim()` in
+   * `@objectstack/service-messaging`): `sys_http_delivery.headers_json` — the
+   * authored header map, the ordinary place an `Authorization: Bearer …` goes —
+   * is flagged `internal` so the generic data API returns rows without it,
+   * while the dispatcher must hand exactly that map to the wire VERBATIM (a
+   * delivery that goes out missing a header is not self-announcing: against an
+   * endpoint that does not require it, the delivery succeeds while silently
+   * deviating from the authored configuration).
+   *
+   * Batch-shaped, deliberately, where {@link resolveSecretField} is
+   * single-record: its consumer claims up to a full batch per dispatcher tick,
+   * and #8118's triage rejected the `Field.secret()` route partly BECAUSE that
+   * shape costs a driver read plus a decrypt per row per tick. One driver read
+   * serves the whole claim batch; a single record is the batch of one. This is
+   * the sibling of {@link resolveSecretField}'s pattern — guard first, then a
+   * driver-level read — not a second divergent privileged-read path.
+   *
+   * The rows are read at DRIVER level on purpose — the only layer where the
+   * value still exists — so this bypasses read hooks, field-level security and
+   * sharing: the same trust {@link resolveSecret} and {@link resolveSecretField}
+   * place in their callers, and the same reason all three are explicit,
+   * separately-named privileged verbs rather than an option on `find`. No
+   * query string reaches this, so it cannot be turned on from outside the
+   * process.
+   *
+   * Refuses (ADR-0112 `code` + `status`) any field not declared
+   * `internal: true` on the object. Without that guard this would be a generic
+   * read-protection bypass — over `password` plaintext in particular, which is
+   * masked deliberately (ADR-0100) — rather than the internal channel's
+   * dereference. A `secret`-typed field is likewise refused unless it is also
+   * flagged, and even then this returns the stored `secret:<id>` ref, never a
+   * plaintext: decryption stays with {@link resolveSecretField}.
+   *
+   * Returns the stored value per id — `null` when the column is unset. An id
+   * whose row does not exist is absent from the map; what a missing row means
+   * belongs to the caller (for the dispatcher: a row deleted mid-claim). No
+   * decrypt is involved: `internal` is a read-side omission flag, not an
+   * encrypted channel — the at-rest story is the object's own (for
+   * `sys_http_delivery`, 30d telemetry retention; encrypting the delivery row
+   * was measured and rejected on #8118).
+   */
+  async resolveInternalField(
+    object: string,
+    recordIds: readonly string[],
+    field: string,
+  ): Promise<Map<string, unknown>> {
+    const schema = this._registry.getObject(object);
+    if (!collectInternalReadFields(schema).includes(field)) {
+      const err: Error & { code?: string; status?: number; object?: string; field?: string } =
+        new Error(
+          `Cannot resolve internal field "${object}.${field}": it is not declared \`internal: true\`. `
+            + 'Only fields the engine omits from the generic read path are dereferenceable here — '
+            + 'anything else either comes back on find/findOne already, or is protected by its own '
+            + 'channel (`secret` refs via resolveSecretField; `password` is masked deliberately, '
+            + 'ADR-0100, so dereferencing one here would be a mask bypass).',
+        );
+      err.code = 'INVALID_FIELD';
+      err.status = 400;
+      err.object = object;
+      err.field = field;
+      throw err;
+    }
+    const out = new Map<string, unknown>();
+    if (recordIds.length === 0) return out;
+    const driver = this.getDriver(object);
+    const found = await driver.find(object, {
+      where: { id: { $in: [...recordIds] } },
+      fields: ['id', field],
+    });
+    for (const row of Array.isArray(found) ? found : [found]) {
+      if (!row || typeof row !== 'object') continue;
+      const id = (row as Record<string, unknown>).id;
+      if (typeof id !== 'string' && typeof id !== 'number') continue;
+      out.set(String(id), (row as Record<string, unknown>)[field] ?? null);
+    }
+    return out;
   }
 
   /**
@@ -7039,16 +7333,29 @@ export class ObjectQL implements IObjectQLEngine {
     // dropped. `fillQueryAstDefaults` has already normalised `orderBy` into
     // `SortNode[]`, so the names read here are the ones the driver would get.
     assertOrderByIsMaterializable(object, 'find', _findSchema, ast.orderBy);
+    // [#7589] The projection's DOTTED leg, judged on the caller's own
+    // spellings BEFORE the formula planner rewrites the projection: a dotted
+    // entry is structurally unresolvable (no populate step exists — #7601)
+    // and is refused loudly instead of riding its head segment into the
+    // driver, where the #3821 ladder answered it with EVERY field.
+    assertProjectionHasNoDottedPaths(object, 'find', _findSchema, ast.fields);
     const _findFormula = planFormulaProjection(_findSchema, ast.fields);
     if (_findFormula.projected) ast.fields = _findFormula.projected;
 
-    // Drop any requested field that doesn't exist on the schema. Without
-    // this, drivers (notably SqlDriver) emit `SELECT unknown_col FROM ...`
-    // which the DB rejects ("no such column") — and SqlDriver swallows
-    // that error and returns `[]`, making a frontend bug (e.g. a generic
-    // view requesting `name`/`due_date` on every object) look like "no
-    // records exist". Silently filtering matches the existing OData
+    // Drop any requested PLAIN field that doesn't exist on the schema.
+    // Without this, drivers (notably SqlDriver) emit `SELECT unknown_col
+    // FROM ...` which the DB rejects ("no such column") — and SqlDriver
+    // swallows that error and returns `[]`, making a frontend bug (e.g. a
+    // generic view requesting `name`/`due_date` on every object) look like
+    // "no records exist". Silently filtering matches the existing OData
     // tolerance and Salesforce/Postgres behavior of `SELECT *` semantics.
+    //
+    // [#7589] This tolerance is for unknown PLAIN columns ONLY, and it is
+    // KEPT deliberately (ruled 2026-08-12): the "no records exist" failure it
+    // prevents is real, and the driver-side half of the same tolerance
+    // backstops registry-less hosts. A structurally unresolvable (dotted)
+    // projection is a different fact and no longer reaches this filter via
+    // the engine — `assertProjectionHasNoDottedPaths` above refused it.
     if (_findSchema?.fields && Array.isArray(ast.fields) && ast.fields.length > 0) {
       const known = new Set(Object.keys(_findSchema.fields));
       // Always allow the primary key + audit columns even if not present in
@@ -7057,12 +7364,9 @@ export class ObjectQL implements IObjectQLEngine {
       known.add('id');
       known.add('created_at');
       known.add('updated_at');
-      const filtered = ast.fields.filter(f => {
-        // Keep relationship paths like `owner.name` — the engine will
-        // resolve those via populate; only validate top-level segment.
-        const head = f.split('.')[0];
-        return known.has(head);
-      });
+      // Whole names, no head-splitting: only plain entries reach here (the
+      // dotted refusal above fired on anything carrying a '.').
+      const filtered = ast.fields.filter(f => known.has(f));
       // Guard against an empty projection — fall back to `*` so the
       // request still returns rows. An empty SELECT list would either
       // 400 in Postgres or silently project nothing.
@@ -7196,12 +7500,19 @@ export class ObjectQL implements IObjectQLEngine {
     // dropped sort does not merely reorder the answer, it returns a DIFFERENT
     // record, and the one it returns looks exactly as legitimate.
     assertOrderByIsMaterializable(objectName, 'findOne', _findOneSchema, ast.orderBy);
+    // [#7589] Same dotted-projection refusal as `find`, same position: on the
+    // caller's own spellings, before the formula planner rewrites them. The
+    // measured flow chain (`get_record` → `data.findOne`) reaches THIS verb
+    // whenever `limit` is absent or 1, so a hole here would be the same hole.
+    assertProjectionHasNoDottedPaths(objectName, 'findOne', _findOneSchema, ast.fields);
     // [#7642] Caller's own projection, before planning rewrites it — see `find`.
     const _findOneRequestedFields = Array.isArray(ast.fields) ? [...ast.fields] : undefined;
     const _findOneFormula = planFormulaProjection(_findOneSchema, ast.fields);
     if (_findOneFormula.projected) ast.fields = _findOneFormula.projected;
 
-    // Drop unknown fields — see equivalent block in `find()` for rationale.
+    // Drop unknown PLAIN fields — see the equivalent block in `find()` for
+    // the rationale, and for why this tolerance is plain-columns-only ([#7589]
+    // refused any dotted entry above, so none reaches this filter).
     if (_findOneSchema?.fields && Array.isArray(ast.fields) && ast.fields.length > 0) {
       const known = new Set(Object.keys(_findOneSchema.fields));
       // Always allow the primary key + audit columns even if not present
@@ -7209,7 +7520,7 @@ export class ObjectQL implements IObjectQLEngine {
       known.add('id');
       known.add('created_at');
       known.add('updated_at');
-      const filtered = ast.fields.filter(f => known.has(f.split('.')[0]));
+      const filtered = ast.fields.filter(f => known.has(f));
       ast.fields = filtered.length > 0 ? filtered : undefined;
     }
 
@@ -7640,8 +7951,15 @@ export class ObjectQL implements IObjectQLEngine {
           const preserveAudit = opCtx.context?.preserveAudit === true;
           for (let i = 0; i < rows.length; i++) {
             if (rowErrors[i] !== undefined) continue;
+            // [#8214] The insert side carries the same claim and the same
+            // sequencing — this pass logs, the `ReadonlyFieldRejectedError`
+            // below throws before any driver dispatch. Measured on
+            // `origin/main`: `driverCreates 0` while the line said the write
+            // was "COMMITTED WITHOUT IT". The card marked this half UNVERIFIED;
+            // it reproduces, so the flag is threaded here too.
             const stripped = stripRuntimeOwnedFields(
-              schemaForValidation as any, rows[i], suppliedPerRow[i] ?? {}, this.logger, { preserveAudit },
+              schemaForValidation as any, rows[i], suppliedPerRow[i] ?? {}, this.logger,
+              { preserveAudit, strictReadonlyWrites: options?.strictReadonlyWrites === true },
             ) as Record<string, unknown>;
             if (stripped === rows[i]) continue;
             for (const k of Object.keys(rows[i])) {
@@ -8066,9 +8384,70 @@ export class ObjectQL implements IObjectQLEngine {
      // read-only ones are (don't half-apply my payload), and the refusal error
      // composes its wording from `drops` so it never calls a stripped `id`
      // read-only. Route a new strip through here ⇒ own both halves.
+     //
+     // [#8093] ...and one thing is NOT a drop: the row's own primary key, when
+     // it is the address of the row this call is already writing. `droppedFields`
+     // has one declared meaning — fields the CALLER SUPPLIED and the engine
+     // REFUSED. An `id` that names the targeted row was refused nothing; it did
+     // its job. ADDRESSING IS NOT PAYLOAD.
+     //
+     // How a caller who sent no `id` gets one reported anyway: the REST ingress
+     // folds the path id INTO the write payload (`metadata-protocol`'s
+     // `updateData`: `{ ...request.data, id: request.id }`, #6479 — so a body
+     // `id` can no longer bind a different row than the one the URL, the OCC
+     // check and the receipt all name). That fold is correct and stays. But it
+     // lands in `data` BEFORE the `suppliedValues` snapshot above, so from here
+     // down the address is indistinguishable from something the caller typed —
+     // and on an object whose `id` is declared `readonly: true` (as platform
+     // objects' are), the static-`readonly` strip below then drops it and
+     // reports it. Measured on `main` through the real ingress:
+     // `PATCH /data/sys_user_preference/<id>` with the body `{"value":[...]}` —
+     // no `id` key in it — answered 200 carrying
+     // `droppedFields:[{fields:["id"],reason:"readonly"}]`.
+     //
+     // What that cost is not cosmetic. The console's internal "recent items"
+     // trace runs on every org switch, so every org switch popped a user-facing
+     // amber warning toast naming a field the user never touched. The damage is
+     // that the warning channel gets TRAINED TO BE IGNORED — a user who learns
+     // the amber toast is noise will ignore the one that matters. The identical
+     // failure mode is already on record one field over: #3431 / #3794 stopped
+     // `userState.ts` sending `updated_at` because doing so "made every
+     // recents/favorites write pop a scary warning about a field the user never
+     // touched, drowning the real signal the toast exists for."
+     //
+     // Deliberately the REPORT and not the strip. `id` still leaves the SET
+     // clause, and must: a same-value primary-key write is a harmless no-op on
+     // SQL but an outright rejection on stores with immutable primary keys, and
+     // #6435's block already ruled that widening the strip to the truthy-scalar
+     // case "is a separate decision, not a rider here". The payload handed to
+     // the driver is byte-identical before and after this change.
+     //
+     // Self-scoping to SINGLE-RECORD update by construction: `id` is bound only
+     // on the by-id branch, so a predicate/multi write — where nothing addresses
+     // a row by key — is untouched, and a caller-supplied `id` there is still
+     // reported. It cannot collide with the `primary_key` strips either: those
+     // fire only when the dispatch has ALREADY RULED the value is not a primary
+     // key, which is exactly when it cannot equal the bound key.
+     //
+     // Asked of `suppliedValues`, never of the live payload: this is a question
+     // about what the CALLER submitted, and the answer must survive a hook
+     // rewriting the key mid-write — the same reason that snapshot carries
+     // values at all (#5591).
+     //
+     // [#8141] #8093 wired this to the REPORT channel only, so the strip's own
+     // WARN went on calling the address a forged caller write on every
+     // single-record PATCH of every platform object. It now feeds BOTH channels
+     // — `reportDroppedFields` below and `stripReadonlyFields`' `addressKey`
+     // argument — from this ONE predicate. Deliberately not a second derivation:
+     // two notions of "this id is the address" that disagree in one edge case
+     // would be a worse defect than the log line either of them silences.
      const onFieldsDropped = options?.onFieldsDropped;
      const strictReadonlyWrites = options?.strictReadonlyWrites === true;
      const strictDrops: DroppedFieldsEvent[] = [];
+     const idAddressesThisRow =
+       id !== undefined && id !== null
+       && Object.prototype.hasOwnProperty.call(suppliedValues, 'id')
+       && Object.is(suppliedValues.id, id);
      const reportDroppedFields = (
        before: Record<string, unknown> | null | undefined,
        after: Record<string, unknown> | null | undefined,
@@ -8076,7 +8455,10 @@ export class ObjectQL implements IObjectQLEngine {
      ): void => {
        if ((!onFieldsDropped && !strictReadonlyWrites) || before === after || !before) return;
        const afterObj = (after ?? {}) as Record<string, unknown>;
-       const fields = Object.keys(before).filter((k) => !(k in afterObj));
+       const fields = Object.keys(before).filter(
+         // [#8093] The address the caller wrote to is not a field it lost.
+         (k) => !(k in afterObj) && !(idAddressesThisRow && k === 'id'),
+       );
        if (fields.length === 0) return;
        if (strictReadonlyWrites) {
          strictDrops.push({ object, fields, reason });
@@ -8160,9 +8542,9 @@ export class ObjectQL implements IObjectQLEngine {
        // Pre-update snapshot. Exposed to hooks via `hookContext.previous` in
        // BOTH phases now (the HookContext contract documents `previous` for
        // update/delete) and reused for object-level validation rules and the
-       // roll-up recompute. Fetched once, only for single-id updates, and only
-       // when something on THIS object actually consumes it — see
-       // `wantsPriorRecord` below.
+       // roll-up recompute. Fetched once, and only for single-id updates —
+       // [#7867] unconditionally there, since the not-found gate at the by-id
+       // branch below is a fourth consumer that every such write has.
        let priorRecord: Record<string, unknown> | null = null;
        // [#5038] The matched rows a PREDICATE write fires its per-row
        // `afterUpdate` contexts over. `[]` is meaningful and distinct from
@@ -8186,26 +8568,78 @@ export class ObjectQL implements IObjectQLEngine {
            // `ql.findOne` on every by-id update to bind exactly this value;
            // #5846 retires it, because the engine now binds `previous` before
            // any authored before-hook runs.
-           const wantsPriorRecord =
-             needsPriorRecord(updateSchema as any) ||
-             this.hasHooksFor('beforeUpdate', object) ||
-             this.hasHooksFor('afterUpdate', object) ||
-             this.getSummaryDescriptors(object).length > 0;
-           if (wantsPriorRecord) {
-               // `buildDriverOptions` is what carries the open transaction and
-               // the tenant scope onto a raw driver read — the same bag the
-               // post-phase write uses, built here because the write's own
-               // merge has not happened yet. `delete()`'s pre-image read does
-               // the same for the same reason.
-               const priorAst: QueryAST = { object, where: { id }, limit: 1 };
-               const preOpts = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any);
-               priorRecord = await driver.findOne(object, priorAst, preOpts);
-               // Never fabricate: a row that is not there leaves `previous`
-               // UNBOUND rather than `{}`/`null`, so a condition reading it
-               // faults loudly instead of answering for a record nobody read
-               // (#4649/#4775) — `delete()`'s `bindPreImage` rule, verbatim.
-               if (priorRecord) hookContext.previous = coerceBooleanFields(updateSchema as any, priorRecord as any) as any;
-           }
+           // [#7867] …and the read is now UNCONDITIONAL, because the gate below
+           // is a question only a read can answer. `wantsPriorRecord` — the
+           // #5284 narrowing this replaces — asked "does anything CONSUME the
+           // prior row?" and skipped the read when nothing did. Existence is a
+           // consumer it never counted, and it is the one consumer every by-id
+           // write has.
+           //
+           // What the narrowing actually bought, measured rather than assumed:
+           // its own #5929 twin in `delete()` enumerates the global registrants
+           // (plugin-sharing, service-storage, plugin-auth, plugin-audit — all
+           // registering with no `object`, hence matching every object), so on
+           // any kernel that loads them `wantsPriorRecord` was ALREADY true for
+           // everything and skipped nothing. The read becomes genuinely new
+           // only for a bare `@objectstack/objectql/core` embedder whose object
+           // has no hooks, no prior-reading validation rule and no roll-up —
+           // and that embedder is buying a 404 it did not have.
+           //
+           // ⚠️ It cannot be answered from the write's own return value
+           // instead. `IDataDriver.update` declares `Promise<Record<string,
+           // unknown>>` — no not-found signal in the contract at all — and the
+           // engine's post-write readback is `null` for a SECOND reason
+           // (`protocol.updateData`'s own note: a write that moves the row out
+           // of the caller's row scope, e.g. reassigning `owner_id` away from
+           // yourself under an owner-scoped policy, reads back null while
+           // having succeeded). Reading either as "not found" would answer 404
+           // to a write that landed. Both siblings ask existence BEFORE the
+           // write for exactly this reason; so does this.
+           //
+           // `buildDriverOptions` is what carries the open transaction and
+           // the tenant scope onto a raw driver read — the same bag the
+           // post-phase write uses, built here because the write's own
+           // merge has not happened yet. `delete()`'s pre-image read does
+           // the same for the same reason.
+           const priorAst: QueryAST = { object, where: { id }, limit: 1 };
+           const preOpts = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any);
+           priorRecord = await driver.findOne(object, priorAst, preOpts);
+           // ── [#7867] The not-found gate ──────────────────────────────────
+           //
+           // A by-id update whose id names no row was a SILENT NO-OP that
+           // resolved `null`: nothing on this path ever asked whether the row
+           // existed, so the write ran on into validation, the driver and the
+           // hook chain, and died on whichever of them complained first. The
+           // 400 class varied with the object's declarations — a
+           // `HookConditionError` on a hooked object, a required-field
+           // `VALIDATION_FAILED` on an unhooked one — while the missing 404 was
+           // the constant. Two sibling paths had this gate and an action body
+           // traverses neither: `protocol.updateData` (#4435) and `callData`'s
+           // ObjectQL fallback (#5138). This is the third, placed at the one
+           // point all of them funnel through, so it is not a fourth site.
+           //
+           // ⚠️ It throws BEFORE `triggerHooks('beforeUpdate')` deliberately,
+           // and that ordering is the fix rather than a detail of it. The
+           // reported symptom was an `afterUpdate` condition reading `previous`
+           // on a row that was never there; `if (priorRecord) …` below is
+           // CORRECT and stays untouched (ADR-0058 Addendum II / #4649 —
+           // never fabricate a prior state), it was simply running on a path
+           // that should never have been entered. Killing the producer is
+           // #5574's ruled remedy for this family, not specializing the
+           // message the symptom happened to produce.
+           //
+           // Scope: the BY-ID branch only. A `multi: true` predicate update
+           // that matches zero rows is legitimately "0 rows affected", not a
+           // missing record — same line both siblings draw.
+           if (!priorRecord) throw recordNotFoundError(object, id);
+           // Never fabricate: a row that is not there leaves `previous`
+           // UNBOUND rather than `{}`/`null`, so a condition reading it
+           // faults loudly instead of answering for a record nobody read
+           // (#4649/#4775) — `delete()`'s `bindPreImage` rule, verbatim.
+           // The guard is kept verbatim although the gate above now makes it
+           // permanently true here: it states the invariant, and the invariant
+           // outlives this call site.
+           if (priorRecord) hookContext.previous = coerceBooleanFields(updateSchema as any, priorRecord as any) as any;
            await this.triggerHooks('beforeUpdate', hookContext);
            // The retired lever, refused. Everything above — `previous`, and
            // below it the `readonlyWhen` strip and every validation rule — was
@@ -8499,9 +8933,26 @@ export class ObjectQL implements IObjectQLEngine {
                // read-only writes are dropped, never the server stamps — and
                // (#5591) never a stamp a hook wrote OVER a key the caller
                // happened to echo back.
+               //
+               // [#8141] `addressKey` carries the SAME fact `reportDroppedFields`
+               // is already keyed on — `idAddressesThisRow`, one predicate, both
+               // channels — so the log and the report can never disagree about
+               // what is an address. The strip is unchanged: `id` still leaves
+               // the SET clause, and the driver receives the identical payload;
+               // only the WARN that called the address a caller forgery is gone.
+               // Undefined on every other path (the multi branch below, and the
+               // insert-side sibling), which is what keeps those byte-identical.
                if (!opCtx.context?.isSystem) {
                    const preRo = hookContext.input.data as Record<string, unknown>;
-                   hookContext.input.data = stripReadonlyFields(updateSchema as any, preRo, suppliedValues, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true }) as any;
+                   // [#8214] `strictReadonlyWrites` is threaded INTO the strip
+                   // rather than consulted only at `assertNoStrictDrops()`
+                   // below: the strip logs from inside, the refusal happens
+                   // afterwards, and until the strip knew the flag its line
+                   // told a refused caller the update had been "COMMITTED
+                   // WITHOUT IT" while `driverWrites` was 0. The seam that
+                   // composes the sentence has to know the mode the sentence
+                   // describes; nothing else here can tell it.
+                   hookContext.input.data = stripReadonlyFields(updateSchema as any, preRo, suppliedValues, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true, addressKey: idAddressesThisRow ? 'id' : undefined, strictReadonlyWrites }) as any;
                    reportDroppedFields(preRo, hookContext.input.data as Record<string, unknown>, 'readonly');
                }
                // [#5126] Both strip passes are done; refuse now if the caller
@@ -8648,7 +9099,11 @@ export class ObjectQL implements IObjectQLEngine {
                // rejected upstream by the tenant write wall, #2946).
                if (!opCtx.context?.isSystem) {
                    const preRoMulti = hookContext.input.data as Record<string, unknown>;
-                   hookContext.input.data = stripReadonlyFields(updateSchema as any, preRoMulti, suppliedValues, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true }) as any;
+                   // [#8214] Same threading as the by-id branch; the multi
+                   // branch still passes no `addressKey` (nothing addresses a
+                   // row by key here), which is what keeps it byte-identical
+                   // to #8141 in every other respect.
+                   hookContext.input.data = stripReadonlyFields(updateSchema as any, preRoMulti, suppliedValues, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true, strictReadonlyWrites }) as any;
                    reportDroppedFields(preRoMulti, hookContext.input.data as Record<string, unknown>, 'readonly');
                }
                // [#5126] Same refusal on the predicate path. A bulk strip is
@@ -9253,11 +9708,41 @@ export class ObjectQL implements IObjectQLEngine {
       // actually serves — plugin-audit's `excludeObjects` face is the worked
       // example — is what would convert them into skips, and that is each
       // package's own card, not this one's.
+      // [#7867] ⚠️ RETIRED — the three-term `wantsPreImage` gate the paragraphs
+      // above describe is GONE, and the paragraphs are kept because what they
+      // record (which registrants hold which term open, and why an honest gate
+      // is not the same as a usually-false one) is still the reason the removal
+      // costs nothing measurable.
+      //
+      // It asked "does anything CONSUME the pre-image?" and skipped the read
+      // when nothing did. Existence is a consumer it never counted — and it is
+      // the one consumer EVERY by-id delete has, because a delete against an id
+      // that names no row must answer 404 rather than run. So the by-id branch
+      // below reads the pre-image unconditionally and gates on it; the
+      // predicate branch reads its doomed rows under its own `perRowBefore/
+      // AfterHooks` gate, which is untouched. On any kernel loading the global
+      // registrants enumerated above, term 1 or 2 was already true for every
+      // object, so this skipped nothing there anyway; the read becomes
+      // genuinely new only for a bare embedder whose object has no delete-side
+      // hook and no roll-up — and that embedder is buying a 404 it did not have.
+      //
+      // ⛔ Do not reintroduce it as a guard around the by-id read. A gate on
+      // whether to LOOK is not compatible with a rule about what to do when
+      // nothing is there. See `update()`'s twin.
+      //
+      // [#7933] The first three entries were carried here UNVERIFIED when
+      // #7707 corrected the `plugin-audit` one, which was wrong on BOTH halves
+      // — hook name and term. All three have since been read against the
+      // function that binds them — `registerIdentityWriteGuard`,
+      // `bindRecordShareCascade`, `installFileReferenceHooks` — and all three
+      // match what is claimed above: same events, same object-less
+      // registration, same in-handler filter. Nothing above needed changing.
+      // That audit is what the retirement note's "term 1 or 2 was already true
+      // for every object" stands on, so it is recorded here rather than left
+      // in a closed issue: the enumeration outlived the gate it was written
+      // for, and it is now load-bearing for a different claim than the one it
+      // was written to support.
       const deleteSchema = this._registry.getObject(object);
-      const wantsPreImage =
-        this.hasHooksFor('beforeDelete', object) ||
-        this.hasHooksFor('afterDelete', object) ||
-        this.getSummaryDescriptors(object).length > 0;
       // `buildDriverOptions` is what carries the open transaction and the
       // tenant scope onto a raw driver read. Skipping it here would read
       // outside this write's transaction and across the tenant boundary —
@@ -9300,10 +9785,29 @@ export class ObjectQL implements IObjectQLEngine {
       };
 
       if (isByIdDelete) {
-        if (wantsPreImage) {
-          priorRecord = await readPreImage(id);
-          bindPreImage(priorRecord);
-        }
+        // [#7867] Read first, then GATE — the twin of `update()`'s, and #5138's
+        // own record names `delete` as the worst of the three when the gate was
+        // missing: "the delete ran and the answer was `200 { deleted: true }`
+        // for any string in the path, so a typo'd id, an already-deleted row
+        // and a real deletion were indistinguishable" — the shape #4435 removed
+        // from `protocol.deleteData` and #5138 removed from `callData`, still
+        // live here on the path an action body's `.delete()` actually takes.
+        //
+        // The pre-image is the only honest place to ask. `IDataDriver.delete`
+        // does declare `Promise<boolean>` ("true if deleted, false if not
+        // found"), so the answer exists downstream — but downstream is AFTER
+        // `beforeDelete` has dispatched and after `cascadeDeleteRelations` has
+        // run, i.e. after handlers have fired and children have been touched
+        // for a parent that was never there. `IDataEngine.delete` also declares
+        // `Promise<any>` and passes its driver's result through the hook chain,
+        // so testing it for `=== false` here would read a signal this layer's
+        // contract does not promise — #5138's argument, unchanged.
+        priorRecord = await readPreImage(id);
+        if (!priorRecord) throw recordNotFoundError(object, id);
+        // Bound unconditionally now that the row is proven present.
+        // `bindPreImage`'s never-fabricate rule (#4649/#4775) is unchanged and
+        // still the reason the binding goes through it rather than around it.
+        bindPreImage(priorRecord);
         await this.triggerHooks('beforeDelete', hookContext);
         // [#6752] The retired lever, refused — the `update()` twin's check,
         // verbatim, because the rule is now ONE rule: a by-id target is
@@ -9559,14 +10063,31 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
-   * Fail-closed guard (ADR-0100 / #3171): refuse to aggregate over a credential
-   * field. `secret`/`password` values are masked on the generic read path so
-   * plaintext never leaves the engine, but `aggregate()` has no equivalent mask
-   * — a GROUP BY / MIN / MAX / array_agg over such a column would surface the
-   * stored `secret:<id>` ref or the password value, and post-hoc masking would
-   * corrupt group keys. So we reject instead. The check is unconditional
-   * (ignores `managedBy`): aggregating a credential is never legitimate, even on
-   * a better-auth object, where it would be an inference oracle over hashes.
+   * Fail-closed guard (ADR-0100 / #3171 / #7922): refuse to aggregate over a
+   * field whose value is withheld on the generic read path. Such fields reach
+   * this guard through **two independent collectors**, and it needs both:
+   *
+   *  - {@link collectCredentialFields} — keyed by field TYPE (`secret` /
+   *    `password`). A GROUP BY / MIN / MAX / array_agg over such a column would
+   *    surface the stored `secret:<id>` ref or the password value.
+   *  - {@link collectInternalReadFields} — keyed by the `internal: true` FLAG
+   *    (#7728). ADR-0100's third credential channel is a one-way hash living in
+   *    an ordinary `text` column, which no type-keyed collector can ever reach;
+   *    the flag is that channel's opt-in declaration. Without this half the
+   *    guard had the same type-vs-flag blind spot #7728 fixed on the read path:
+   *    a flagged column was omitted from `find`/`findOne` yet freely groupable
+   *    here, so the flag's promise ("never returned on the generic data path")
+   *    stopped at the edge of `aggregate()`.
+   *
+   * Post-hoc masking is not available on this path — the value is already a
+   * group key by the time there is a row, and masking group keys corrupts the
+   * result. So we reject instead.
+   *
+   * Neither collector carries a `managedBy` exemption, so the union does not
+   * acquire one, deliberately. Read-masking exempts `password` on better-auth
+   * objects so login reads still see the stored value; *aggregating* a
+   * credential is never legitimate, least of all on an identity table, where it
+   * is an inference oracle over hashes.
    *
    * Only the two output-bearing positions on `EngineAggregateOptions` carry
    * field names: `aggregations[].field` (skip COUNT(*) — undefined or '*') and
@@ -9574,26 +10095,31 @@ export class ObjectQL implements IObjectQLEngine {
    */
   private rejectCredentialAggregation(object: string, query: EngineAggregateOptions): void {
     const schema = this._registry.getObject(object);
-    const credentialFields = collectCredentialFields(schema);
-    if (credentialFields.length === 0) return;
+    // Deduped: one field can be reachable through both collectors (a `secret`
+    // column that is also flagged `internal`), and it must be named once.
+    const protectedFields = [
+      ...new Set([...collectCredentialFields(schema), ...collectInternalReadFields(schema)]),
+    ];
+    if (protectedFields.length === 0) return;
 
     const referenced = new Set<string>();
     for (const agg of query?.aggregations ?? []) {
       const field = (agg as { field?: string })?.field;
       if (field && field !== '*') referenced.add(field);
     }
-    for (const g of (query?.groupBy as unknown[]) ?? []) {
-      const field = typeof g === 'string' ? g : (g as { field?: string })?.field;
+    for (const g of query?.groupBy ?? []) {
+      const field = typeof g === 'string' ? g : g?.field;
       if (field) referenced.add(field);
     }
 
-    const hit = credentialFields.filter((f) => referenced.has(f));
+    const hit = protectedFields.filter((f) => referenced.has(f));
     if (hit.length > 0) {
       throw new Error(
         `Cannot aggregate credential field(s) ${hit.map((f) => `"${object}.${f}"`).join(', ')}: `
-          + 'secret/password fields are masked on read so plaintext never leaves the engine, and '
-          + 'aggregating them (group-by, min/max, array_agg, …) would surface the stored value. '
-          + 'Refusing (fail-closed) — see ADR-0100 / #3171.',
+          + 'secret/password fields are masked on read and `internal: true` fields are omitted '
+          + 'outright, so the value never leaves the engine on the generic data path; aggregating '
+          + 'them (group-by, min/max, array_agg, …) would surface it. '
+          + 'Refusing (fail-closed) — see ADR-0100 / #3171 / #7922.',
       );
     }
   }
@@ -9618,7 +10144,7 @@ export class ObjectQL implements IObjectQLEngine {
         ast: {
             object,
             where: query.where,
-            groupBy: query.groupBy as any,
+            groupBy: query.groupBy,
             aggregations: query.aggregations,
             // ENFORCED since #4286 (step 3). On the ast so the FLS predicate
             // guard walks its references (predicate-guard.ts) and a future
@@ -9645,11 +10171,11 @@ export class ObjectQL implements IObjectQLEngine {
         // supported we can push the aggregate down to the driver; otherwise
         // we fall back to driver.find() + in-memory bucketing so the result
         // remains correct on partial-support dialects (e.g. SQLite + week).
-        const groupByItems = Array.isArray(query.groupBy) ? (query.groupBy as any[]) : [];
+        const groupByItems = Array.isArray(query.groupBy) ? query.groupBy : [];
         const granularityCaps: Record<string, boolean> | undefined =
             drv?.supports?.queryDateGranularity;
         const structuredItems = groupByItems.filter((g) => typeof g !== 'string');
-        const allStructuredSupported = structuredItems.every((g: any) => {
+        const allStructuredSupported = structuredItems.every((g) => {
             if (!g?.dateGranularity) return true; // plain {field} object is fine
             return granularityCaps?.[g.dateGranularity] === true;
         });
@@ -9661,7 +10187,7 @@ export class ObjectQL implements IObjectQLEngine {
         // matching rows are fetched), but bucketing runs uniformly in JS so a
         // row near a tz day-boundary lands identically on every driver.
         const tz = query.timezone;
-        const hasDateBucket = structuredItems.some((g: any) => !!g?.dateGranularity);
+        const hasDateBucket = structuredItems.some((g) => !!g?.dateGranularity);
         const tzRequiresInMemory = !!tz && tz !== 'UTC' && hasDateBucket;
         if (typeof drv.aggregate === 'function' && allStructuredSupported && !tzRequiresInMemory) {
             // HAVING is engine-owned (#4286): applied AFTER aggregation, over

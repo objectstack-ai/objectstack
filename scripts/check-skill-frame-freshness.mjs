@@ -109,7 +109,15 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { AXIS_MAP, COPIES, analyzeCopy, runAllChecks } from './check-skill-frame-sync.mjs';
+import {
+  AXIS_MAP,
+  COPIES,
+  ENTRY_START,
+  analyzeCopy,
+  axisEntryStarts,
+  frameCountMentions,
+  runAllChecks,
+} from './check-skill-frame-sync.mjs';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -467,46 +475,6 @@ function render(verdict, { root = REPO_ROOT } = {}) {
 // self-test — real temp git repositories, never the network
 // ---------------------------------------------------------------------------
 
-/**
- * The mutation set that turns the REAL three-axis documents into a COHERENT
- * two-axis tree — the #5866 specimen. Coherent matters: every count sentence and
- * every in-file mention moves with the axes, which is precisely why the sync gate
- * stays green on it. The self-test asserts that green, so this table is validated
- * by the sync gate itself: an incomplete mutation makes sync red and fails the
- * case loudly instead of quietly weakening it.
- *
- * `drop` un-marks the business-need entry so it stops being an axis entry (a
- * leading space is enough — the sync gate's ENTRY_START is anchored at column 0),
- * which is the #5130 damage this whole family exists to prevent.
- */
-const TO_TWO_AXES = [
-  // counts, bindings and mentions — global, so one rule covers several copies
-  { from: /on three fixed axes/g, to: 'on two fixed axes' },
-  { from: /on the three fixed axes below/g, to: 'on the two fixed axes below' },
-  { from: /on all three axes/g, to: 'on both axes' },
-  { from: /on \*\*all three\*\* axes/g, to: 'on **both** axes' },
-  { from: /three-axis(\s+)analysis/g, to: 'two-axis$1analysis' },
-  { from: /three-axis decision frame/g, to: 'two-axis decision frame' },
-  { from: /沿三条固定评估轴/g, to: '沿两条固定评估轴' },
-  { from: /这三条轴给出理由;三轴冲突时/g, to: '这两条轴给出理由;两轴冲突时' },
-  // the axis entries themselves, one per copy
-  { from: '\n- **Real business need**: does this option serve', to: '\n  **Real business need**: does this option serve' },
-  { from: '\n   - **实际业务需求** — 每个方案先问', to: '\n     **实际业务需求** — 每个方案先问' },
-  { from: '\n**Axis ① — real business need.**', to: '\n _Axis ① — real business need._' },
-  { from: '\n- Real business need — does the option serve', to: '\n  Real business need — does the option serve' },
-];
-
-function applyRules(text, rules) {
-  let out = text;
-  const unapplied = [];
-  for (const { from, to } of rules) {
-    const next = out.replace(from, to);
-    if (next === out) unapplied.push(String(from));
-    out = next;
-  }
-  return { text: out, unapplied };
-}
-
 /** The real documents, as committed on this branch — fixtures are never synthetic. */
 function realFrameFiles() {
   const files = new Map();
@@ -514,24 +482,277 @@ function realFrameFiles() {
   return files;
 }
 
-function twoAxisFrameFiles() {
-  const files = new Map();
-  const unapplied = [];
-  for (const [file, text] of realFrameFiles()) {
-    const r = applyRules(text, TO_TWO_AXES);
-    files.set(file, r.text);
-    unapplied.push(...r.unapplied.map((u) => `${file}: ${u}`));
+// ---------------------------------------------------------------------------
+// the two-axis specimen — DERIVED from the real documents, never re-spelled
+// ---------------------------------------------------------------------------
+//
+// The specimen turns the REAL three-axis documents into a COHERENT two-axis tree
+// — the #5866 shape. Coherent matters: every count sentence and every in-file
+// mention moves with the axes, which is precisely why the SYNC gate stays green
+// on it. The self-test asserts that green, so the derivation below is validated
+// by the sync gate itself rather than by its own say-so.
+//
+// DERIVED, NOT RE-SPELLED (#8024)
+// -------------------------------
+// The first version of this fixture was a table of literal find/replace rules —
+// a second hand-kept copy of the very prose these gates exist to police, and it
+// failed the way hand-kept copies do. On 2026-08-12 a principles-only rewrite
+// reworded one axis line; the rule spelling the old wording matched nothing, the
+// fixture threw, and because package.json runs `--self-test && <the scan >` the
+// gate died BEFORE scanning anything. It stayed in the gate list — reading as
+// coverage while protecting nothing — and the skill files it guards were correct
+// the whole time. A guard that cannot run is worse than an absent one.
+//
+// So the mutation is now located the way the gates themselves read these
+// documents:
+//   • the two count sentences — through each copy's own `start`/`binding` anchor;
+//   • the axis entry to drop — through `axisEntryStarts()` + `AXIS_MAP`;
+//   • the in-file count mentions — through `frameCountMentions()`.
+// Nothing here spells a sentence of the frame, so a rewrite that keeps the
+// frame's STRUCTURE — any wording, any indentation, any reflow — carries the
+// fixture with it. A rewrite that changes the structure still fails, loudly and
+// on purpose, in `verifyDemoted()`, which names the file and line to look at.
+//
+// What that leaves untouched is narrative prose stating a count that NEITHER gate
+// reads ("analyzed on **all three** axes" in a lead-in paragraph, "三轴冲突时").
+// The old table re-spelled those too. Deriving them is not possible without
+// hand-copying prose again, and demoting every "three" in a watched file would
+// hit sentences about unrelated axes — so they stay, and the specimen is
+// deliberately a structurally faithful two-axis tree rather than a
+// copy-edited one. Nothing in either gate's criterion reads them.
+//
+// WHY THIS IS NOT THE TAUTOLOGY IT LOOKS LIKE
+// -------------------------------------------
+// "Derive the fixture from the live files" is vacuous when it makes a check
+// compare the files to themselves. It does not here, and the difference is worth
+// stating because the reasonable objection lands on the wrong half of the script:
+// what is derived is how the SPECIMEN IS MANUFACTURED, not what the gate compares.
+// The gate's own comparison (this tree's structure vs `origin/main`'s) never
+// touches any of this. The self-test still commits the demoted specimen and the
+// real documents as two different commits in a temp repo and demands the gate
+// call the older one BEHIND — a claim the derivation cannot fake: a demotion that
+// silently did nothing would make specimen and real identical, and case 1 would
+// fail with "expected error, got ok" instead of quietly passing.
+
+/**
+ * The axis the specimen drops. Named by AXIS_MAP id, never by its prose: it is
+ * the FIRST axis, which is the #5130 damage this whole gate family exists to
+ * prevent (a dev agent handed a frame with no business-need axis cannot tell).
+ */
+const DROPPED_AXIS = 'business-need';
+
+/**
+ * How each copy's language spells a count. This is a numeral vocabulary, not a
+ * copy of the frame's prose — the one thing a mutation that removes an axis has
+ * to write, and nothing a rewrite of the escalation section can strand. The
+ * spellings are read back through the sync gate's own parser by
+ * `verifyDemoted()`, which requires the demoted copy to parse as N-1 axes.
+ */
+const COUNT_WORDS = {
+  en: ['zero', 'one', 'two', 'three', 'four', 'five', 'six'],
+  zh: ['零', '一', '两', '三', '四', '五', '六'],
+};
+
+const lineOf = (text, index) => text.slice(0, index).split('\n').length;
+
+function fixtureError(where, message) {
+  return new Error(
+    `self-test fixture could not be derived from ${where}: ${message}\n` +
+    `  The specimen is derived from the live documents (#8024), so this is a change of ` +
+    `STRUCTURE, not of wording — reword the frame freely, but adding, removing or ` +
+    `reshaping an axis means editing the derivation in scripts/check-skill-frame-freshness.mjs.`,
+  );
+}
+
+/** Rewrite a captured numeral token (`three`, `三条`) to the count one lower. */
+function renumber(numeral, from, to) {
+  for (const words of Object.values(COUNT_WORDS)) {
+    if (words[from] && numeral.includes(words[from])) return numeral.replace(words[from], words[to]);
   }
-  // Each rule must land somewhere; a rule that matches nothing means the real
-  // document drifted and the fixture is no longer the frame it claims to be.
-  const everywhere = unapplied.filter((u) => {
-    const rule = u.slice(u.indexOf(': ') + 2);
-    return unapplied.filter((x) => x.endsWith(rule)).length === FRAME_FILES.length;
+  return null;
+}
+
+/**
+ * Un-mark an axis entry's first line so it stops being an entry. `ENTRY_START`
+ * admits exactly two shapes and this inverts whichever one the line is: a bullet
+ * loses its marker (the indent is preserved, so the prose still reads as part of
+ * the paragraph above), and an `**Axis …**` head is indented, which is enough
+ * because that alternative is anchored at column 0. The result is asserted
+ * against the real `ENTRY_START`, so a third shape added to the parser tomorrow
+ * fails here instead of silently producing a specimen that still has N axes.
+ */
+function unmarkEntryLine(line, where) {
+  let out = line.replace(/^(\s*)[-*](\s)/, '$1 $2');
+  if (out === line) out = ` ${line}`;
+  if (ENTRY_START.test(out)) {
+    throw fixtureError(where, `un-marking the axis entry left it still matching ENTRY_START: "${out.trim().slice(0, 80)}"`);
+  }
+  return out;
+}
+
+/**
+ * The edits that demote ONE copy by an axis. Offsets are into the real file text
+ * and applied later in one pass, so every edit is located in the untouched
+ * document and none of them can shift another out from under itself.
+ */
+function demotionEdits(copy, text, analysis) {
+  const edits = [];
+  const from = analysis.declared;
+  const to = from - 1;
+  const where = `${copy.file} (${copy.id})`;
+
+  // 1. the count sentences, found through the copy's own anchors.
+  for (const [what, anchor] of [['declaring', copy.start], ['binding', copy.binding]]) {
+    const hits = [...text.matchAll(new RegExp(anchor, 'g'))];
+    if (hits.length !== 1) {
+      throw fixtureError(where, `the ${what} anchor matched ${hits.length} time(s), expected exactly 1`);
+    }
+    const hit = hits[0];
+    const renumbered = renumber(hit[1], from, to);
+    if (renumbered == null) {
+      throw fixtureError(
+        `${where}:${lineOf(text, hit.index)}`,
+        `the ${what} sentence writes its count as "${hit[1]}", which is not ${from} in any ` +
+        `spelling COUNT_WORDS knows`,
+      );
+    }
+    let rewritten = hit[0].replace(hit[1], renumbered);
+    // English quantifies two as "both axes", never "all two axes" — the same
+    // idiom the sync gate's NUMERALS table records.
+    if (copy.lang === 'en' && to === 2) rewritten = rewritten.replace(/\ball\s+two\b/, 'both');
+    edits.push({ start: hit.index, end: hit.index + hit[0].length, text: rewritten, priority: 0 });
+  }
+
+  // 2. the axis entry itself, found through the shared entry parser.
+  const section = text.slice(analysis.sectionStart, analysis.sectionEnd);
+  const starts = axisEntryStarts(section);
+  if (starts.length !== analysis.ids.length) {
+    throw fixtureError(where, `${starts.length} entry line(s) for ${analysis.ids.length} parsed axes — the entry parser and this fixture disagree`);
+  }
+  const which = analysis.ids.indexOf(DROPPED_AXIS);
+  if (which < 0) {
+    throw fixtureError(where, `this copy has no \`${DROPPED_AXIS}\` axis to drop; it lists ${analysis.ids.join(' → ')}`);
+  }
+  const lineStart = analysis.sectionStart + starts[which];
+  const nl = text.indexOf('\n', lineStart);
+  const lineEnd = nl === -1 ? text.length : nl;
+  edits.push({
+    start: lineStart,
+    end: lineEnd,
+    text: unmarkEntryLine(text.slice(lineStart, lineEnd), `${where}:${lineOf(text, lineStart)}`),
+    priority: 0,
   });
-  if (everywhere.length > 0) {
-    throw new Error(`self-test fixture drifted — rule(s) matched nothing anywhere: ${[...new Set(everywhere)].join(', ')}`);
+
+  return edits;
+}
+
+/**
+ * Apply edits right-to-left. Anything overlapping an already-kept edit is
+ * dropped by priority: a count mention that IS the declaring sentence (the zh
+ * copy has exactly one) is already handled by the anchor edit, which rewrites
+ * the same numeral.
+ */
+function applyEdits(text, edits) {
+  const kept = [];
+  for (const e of [...edits].sort((a, b) => a.priority - b.priority || a.start - b.start)) {
+    if (kept.some((k) => e.start < k.end && k.start < e.end)) continue;
+    kept.push(e);
   }
+  let out = text;
+  for (const e of kept.sort((a, b) => b.start - a.start)) {
+    out = out.slice(0, e.start) + e.text + out.slice(e.end);
+  }
+  return out;
+}
+
+/**
+ * The specimen must really BE the frame it claims to be — one axis fewer, the
+ * survivors in the same order, still parseable by the gate that will judge it.
+ * This is where a structural change to the frame is reported, and it is the
+ * error a human is meant to act on.
+ */
+function verifyDemoted(files, expected) {
+  for (const copy of COPIES) {
+    const problems = [];
+    const got = analyzeCopy({ ...copy, text: files.get(copy.file) }, AXIS_MAP, problems);
+    const want = expected.get(copy.id);
+    const reads = got ? `${got.declared} axes ${got.ids.join(' → ')}` : `unparseable:\n    ${problems.join('\n    ')}`;
+    if (!got || got.declared !== want.length || got.ids.join(' → ') !== want.join(' → ')) {
+      throw fixtureError(
+        `${copy.file} (${copy.id})`,
+        `the demoted copy reads ${reads}\n  expected ${want.length} axes ${want.join(' → ')}`,
+      );
+    }
+  }
+}
+
+function twoAxisFrameFiles() {
+  const real = realFrameFiles();
+  const edits = new Map([...real.keys()].map((f) => [f, []]));
+  const expected = new Map();
+
+  for (const copy of COPIES) {
+    const text = real.get(copy.file);
+    const problems = [];
+    const analysis = analyzeCopy({ ...copy, text }, AXIS_MAP, problems);
+    if (!analysis) {
+      throw fixtureError(
+        `${copy.file} (${copy.id})`,
+        `the REAL document does not parse, so there is nothing to demote — this is a ` +
+        `\`pnpm check:skill-frame-sync\` failure first:\n    ${problems.join('\n    ')}`,
+      );
+    }
+    edits.get(copy.file).push(...demotionEdits(copy, text, analysis));
+    expected.set(copy.id, analysis.ids.filter((id) => id !== DROPPED_AXIS));
+  }
+
+  // Mentions are a per-FILE property: "the three-axis analysis" elsewhere in a
+  // watched file is what the sync gate's mention check reads, and a specimen
+  // that left them at three would be an incoherent tree rather than an older one.
+  for (const [file, text] of real) {
+    const declared = COPIES.filter((c) => c.file === file).map((c) => expected.get(c.id).length + 1);
+    for (const m of frameCountMentions(text)) {
+      if (!declared.includes(m.count)) continue; // already disagrees with the frame — the sync gate's business, not ours
+      const renumbered = renumber(m.numeral, m.count, m.count - 1);
+      if (renumbered == null) {
+        throw fixtureError(
+          `${file}:${lineOf(text, m.index)}`,
+          `a frame mention writes its count as "${m.numeral}", which is not ${m.count} in any ` +
+          `spelling COUNT_WORDS knows`,
+        );
+      }
+      edits.get(file).push({
+        start: m.index,
+        end: m.index + m.text.length,
+        text: m.text.replace(m.numeral, renumbered),
+        priority: 1,
+      });
+    }
+  }
+
+  const files = new Map([...real].map(([file, text]) => [file, applyEdits(text, edits.get(file))]));
+  verifyDemoted(files, expected);
   return files;
+}
+
+/**
+ * The real documents with ONE copy's declaring sentence deleted — a tree whose
+ * frame cannot be read at all. Located through that copy's own anchor for the
+ * same reason as everything above (#8024): a fixture that spelled the sentence
+ * out would stop breaking anything the day the sentence is reworded, and cases
+ * 8 and 9 would then be asserting on a document that parses perfectly.
+ */
+function withUnreadableCopy(real, copyId) {
+  const copy = COPIES.find((c) => c.id === copyId);
+  const text = real.get(copy.file);
+  const hits = [...text.matchAll(new RegExp(copy.start, 'g'))];
+  if (hits.length !== 1) {
+    throw fixtureError(`${copy.file} (${copy.id})`, `the declaring anchor matched ${hits.length} time(s), expected exactly 1`);
+  }
+  return new Map([...real]).set(
+    copy.file,
+    text.slice(0, hits[0].index) + text.slice(hits[0].index + hits[0][0].length),
+  );
 }
 
 function writeFiles(dir, files) {
@@ -696,14 +917,7 @@ function selfTest() {
 
   // --- 8: the frame moved on main, our anchors predate it ------------------
   {
-    const moved = new Map([...real]);
-    moved.set(
-      '.claude/agents/os-dev.md',
-      real.get('.claude/agents/os-dev.md').replace(
-        '**Analyze every option on three fixed axes',
-        '**Weigh every option on the standing axes',
-      ),
-    );
+    const moved = withUnreadableCopy(real, 'internal-dev');
     const { dir, b: current } = linear('anchors', real, moved);
     git(['checkout', '-q', git(['rev-parse', 'HEAD~1'], { cwd: dir }).stdout.trim()], { cwd: dir });
     setOriginMain(dir, current);
@@ -717,14 +931,7 @@ function selfTest() {
 
   // --- 9: our own tree does not parse --------------------------------------
   {
-    const broken = new Map([...real]);
-    broken.set(
-      '.claude/agents/os-dev.md',
-      real.get('.claude/agents/os-dev.md').replace(
-        '**Analyze every option on three fixed axes',
-        '**Weigh every option sensibly',
-      ),
-    );
+    const broken = withUnreadableCopy(real, 'internal-dev');
     const { dir, b: current } = linear('broken-here', broken, real);
     git(['checkout', '-q', git(['rev-parse', 'HEAD~1'], { cwd: dir }).stdout.trim()], { cwd: dir });
     setOriginMain(dir, current);

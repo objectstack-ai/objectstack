@@ -23,7 +23,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { ObjectQL } from './engine.js';
+import { ObjectQL, type EngineReadOptions } from './engine.js';
 import { collectInternalReadFields, SECRET_MASK } from './secret-fields.js';
 import type { ServiceObject } from '@objectstack/spec/data';
 
@@ -43,6 +43,12 @@ function makeStubDriver() {
     if (!where || typeof where !== 'object') return true;
     for (const [k, v] of Object.entries(where)) {
       if (k.startsWith('$')) continue;
+      // `$in` — the batch shape `resolveInternalField` reads by (#8118).
+      if (v && typeof v === 'object' && '$in' in (v as any)) {
+        const members = (v as any).$in;
+        if (!Array.isArray(members) || !members.includes(row[k] ?? null)) return false;
+        continue;
+      }
       const expected = (v && typeof v === 'object' && '$eq' in (v as any)) ? (v as any).$eq : v;
       if ((row[k] ?? null) !== (expected ?? null)) return false;
     }
@@ -144,6 +150,14 @@ async function buildEngine() {
 }
 
 const HASH = 'sha256:deadbeefcafe';
+
+/**
+ * Trailing read options for the aggregate cases below. Declared with its
+ * contract type rather than inlined `as any`: erasing a read method's options
+ * argument is what `query-options/no-any-erasure` bans and the #4918 ratchet
+ * counts (`scripts/check-query-options-erasure-ratchet.mjs`).
+ */
+const SYSTEM: EngineReadOptions = { context: { isSystem: true } };
 
 describe('#7728: the `internal` field flag omits a value from the generic data path', () => {
   let ctx: Awaited<ReturnType<typeof buildEngine>>;
@@ -278,6 +292,218 @@ describe('#7728: the `internal` field flag omits a value from the generic data p
       }
       const found = await ctx.engine.find('itest_api_key', { where: { key: HASH } });
       expect(found).toHaveLength(1);
+    });
+  });
+
+  /**
+   * [#7922] `aggregate()` has no strip: it groups and reduces the driver's raw
+   * rows, so a flagged column reached through `groupBy` or an aggregation
+   * measure would surface the very value the flag promises is "never returned
+   * on the generic data path". The type-keyed half of this guard has been in
+   * place since #3171 (see the `ADR-0100 / #3171` block in
+   * `secret-fields.test.ts`, which stays the floor for `secret` / `password`);
+   * what is pinned here is the flag-keyed half, which did not exist.
+   *
+   * The FIRST case is deliberately the negative one. A guard that refuses too
+   * much breaks analytics silently — nothing throws at the surface a reviewer
+   * looks at, the numbers just stop arriving — so the control that an
+   * unflagged column still aggregates has to be able to fail on its own.
+   */
+  describe('the aggregation guard', () => {
+    /** Two rows sharing a prefix and one on its own — enough for real buckets. */
+    const seedThree = async () => {
+      await ctx.engine.insert('itest_api_key', { name: 'k1', prefix: 'osk_', revoked: false, key: HASH }, { context: { isSystem: true } } as any);
+      await ctx.engine.insert('itest_api_key', { name: 'k2', prefix: 'osk_', revoked: false, key: `${HASH}-2` }, { context: { isSystem: true } } as any);
+      await ctx.engine.insert('itest_api_key', { name: 'k3', prefix: 'svc_', revoked: true, key: `${HASH}-3` }, { context: { isSystem: true } } as any);
+    };
+
+    it('CONTROL: an unflagged column on an object that HAS a flagged one still aggregates', async () => {
+      await seedThree();
+
+      // `prefix` is an ordinary text column on the same object as the flagged
+      // `key`. Grouping by it must keep working, and must return the real
+      // buckets — asserting only "does not throw" would still pass if the
+      // guard were replaced by a no-op that returned nothing.
+      const rows = await ctx.engine.aggregate('itest_api_key', {
+        aggregations: [{ function: 'count', alias: 'n' }],
+        groupBy: ['prefix'],
+      }, SYSTEM);
+
+      const byPrefix = Object.fromEntries(rows.map((r: any) => [r.prefix, Number(r.n)]));
+      expect(byPrefix).toEqual({ osk_: 2, svc_: 1 });
+    });
+
+    it('CONTROL: an object with NO flagged field aggregates untouched (the fast path)', async () => {
+      await ctx.engine.insert('itest_plain', { key: 'visible' });
+      await ctx.engine.insert('itest_plain', { key: 'visible' });
+      await ctx.engine.insert('itest_plain', { key: 'other' });
+
+      // `itest_plain.key` shares its NAME with the flagged column on the other
+      // object — a guard that collected field names globally rather than
+      // per-schema would refuse here.
+      const rows = await ctx.engine.aggregate('itest_plain', {
+        aggregations: [{ function: 'count', alias: 'n' }],
+        groupBy: ['key'],
+      });
+
+      const byKey = Object.fromEntries(rows.map((r: any) => [r.key, Number(r.n)]));
+      expect(byKey).toEqual({ visible: 2, other: 1 });
+    });
+
+    it('CONTROL: COUNT(*) on the flagged object is not a false positive', async () => {
+      await seedThree();
+      // The object merely HAS a flagged column; nothing references it.
+      const rows = await ctx.engine.aggregate('itest_api_key', {
+        aggregations: [{ function: 'count', alias: 'n' }],
+      }, SYSTEM);
+      expect(Number((rows[0] as any).n)).toBe(3);
+    });
+
+    it('rejects the flagged field as a string groupBy dimension', async () => {
+      await seedThree();
+      // The disclosure shape: one bucket per distinct hash, keyed BY the hash.
+      await expect(
+        ctx.engine.aggregate('itest_api_key', {
+          aggregations: [{ function: 'count', alias: 'n' }],
+          groupBy: ['key'],
+        }, SYSTEM),
+      ).rejects.toThrow(/key/);
+    });
+
+    it('rejects the flagged field as a structured {field} groupBy bucket', async () => {
+      await seedThree();
+      // The structured bucket form is ON-contract since #8032
+      // (`EngineAggregateOptions.groupBy` is the standard GroupByNodeSchema
+      // union) — this case type-checks honestly and pins that the guard walks
+      // the second spelling, not just the string form above.
+      await expect(
+        ctx.engine.aggregate('itest_api_key', {
+          aggregations: [{ function: 'count', alias: 'n' }],
+          groupBy: [{ field: 'key' }],
+        }, SYSTEM),
+      ).rejects.toThrow(/key/);
+    });
+
+    it('rejects the flagged field as an aggregation measure', async () => {
+      await seedThree();
+      // MIN/MAX over a credential is the inference oracle #3171 named.
+      await expect(
+        ctx.engine.aggregate('itest_api_key', {
+          aggregations: [{ function: 'max', field: 'key', alias: 'x' }],
+        }, SYSTEM),
+      ).rejects.toThrow(/key/);
+    });
+
+    it('rejects even though the object is `managedBy: better-auth`', async () => {
+      // The read path exempts better-auth from PASSWORD masking; neither
+      // collector feeding this guard has an exemption, so the union does not
+      // acquire one. `itest_api_key` is better-auth-managed and still refused.
+      expect((tokenObject as any).managedBy).toBe('better-auth');
+      await seedThree();
+      await expect(
+        ctx.engine.aggregate('itest_api_key', {
+          aggregations: [{ function: 'count', alias: 'n' }],
+          groupBy: ['key'],
+        }, SYSTEM),
+      ).rejects.toThrow(/itest_api_key\.key/);
+    });
+
+    it('names every refused field once, and only the refused ones', async () => {
+      await seedThree();
+      // Mixing a legitimate dimension with the flagged one refuses the whole
+      // query (fail-closed) but must not slander `prefix`.
+      const err = await ctx.engine.aggregate('itest_api_key', {
+        aggregations: [{ function: 'count', alias: 'n' }],
+        groupBy: ['prefix', 'key'],
+      }, SYSTEM).then(
+        () => null,
+        (e: unknown) => e as Error,
+      );
+      expect(err).toBeInstanceOf(Error);
+      expect(err!.message).toContain('itest_api_key.key');
+      expect(err!.message).not.toContain('prefix');
+      // Deduped: a field must not be listed twice if it is reachable through
+      // both collectors.
+      expect(err!.message.match(/itest_api_key\.key/g)).toHaveLength(1);
+    });
+  });
+
+  /**
+   * [#8118] `resolveInternalField` — the purpose-built privileged accessor
+   * #7728 itself named as the shape a legitimate system reader uses ("it reads
+   * the column through a purpose-built privileged accessor, the way
+   * `resolveSecret` does"). The omit above has NO system carve-out, so this is
+   * the ONLY supported door to a flagged value; its first consumer is the
+   * outbound-HTTP dispatcher's claim path, which must put
+   * `sys_http_delivery.headers_json` on the wire verbatim while the data API
+   * returns rows without it.
+   *
+   * Batch-shaped (ids in, `Map` out) because that consumer claims a batch per
+   * dispatcher tick — #8118's triage rejected `Field.secret()` partly for
+   * costing a per-row read on that tick, and the accessor must not re-acquire
+   * the rejected cost.
+   */
+  describe('#8118: resolveInternalField — the privileged dereference', () => {
+    it('resolves the flagged field for a batch of ids, straight from storage', async () => {
+      const a = await seed();
+      const b = await ctx.engine.insert('itest_api_key', {
+        name: 'k2', prefix: 'svc_', revoked: false, key: `${HASH}-2`,
+      }, { context: { isSystem: true } } as any);
+
+      const resolved = await ctx.engine.resolveInternalField('itest_api_key', [a.id, b.id], 'key');
+      expect(resolved.get(a.id)).toBe(HASH);
+      expect(resolved.get(b.id)).toBe(`${HASH}-2`);
+      expect(resolved.size).toBe(2);
+
+      // …while the generic read path, asked in the same breath, still omits —
+      // the accessor is a second DOOR, not a hole in the first one.
+      const viaFind = (await ctx.engine.find('itest_api_key', { where: { id: a.id } }))[0] as any;
+      expect(Object.keys(viaFind)).not.toContain('key');
+    });
+
+    it('an unset value resolves to null; a missing row is absent from the map', async () => {
+      const a = await ctx.engine.insert('itest_api_key', {
+        name: 'k-unset', prefix: 'osk_', revoked: false, key: null,
+      }, { context: { isSystem: true } } as any);
+
+      const resolved = await ctx.engine.resolveInternalField(
+        'itest_api_key', [a.id, 'r_does_not_exist'], 'key',
+      );
+      // Unset ≠ missing: the caller can tell "row exists, nothing stored"
+      // (null) from "no such row" (absent) — the dispatcher treats the latter
+      // as a row deleted mid-claim.
+      expect(resolved.has(a.id)).toBe(true);
+      expect(resolved.get(a.id)).toBeNull();
+      expect(resolved.has('r_does_not_exist')).toBe(false);
+    });
+
+    it('an empty batch resolves to an empty map without touching the driver', async () => {
+      const resolved = await ctx.engine.resolveInternalField('itest_api_key', [], 'key');
+      expect(resolved.size).toBe(0);
+    });
+
+    it('refuses a field not declared `internal: true` — ADR-0112 code AND status', async () => {
+      const created = await seed();
+      // `prefix` comes back on every find — dereferencing it here is not a
+      // privilege, and an accessor that allowed it would be a generic
+      // read-protection bypass one field-name away from `password`.
+      const err = await ctx.engine.resolveInternalField('itest_api_key', [created.id], 'prefix').then(
+        () => null,
+        (e: unknown) => e as Error & { code?: string; status?: number; field?: string },
+      );
+      expect(err).toBeInstanceOf(Error);
+      expect(err!.code).toBe('INVALID_FIELD');
+      expect(err!.status).toBe(400);
+      expect(err!.field).toBe('prefix');
+      expect(err!.message).toContain('itest_api_key.prefix');
+    });
+
+    it('refuses on an object with no flagged fields at all (guard before fast path)', async () => {
+      // The guard outranks the empty-ids fast path on purpose: a caller that
+      // wired the wrong object name hears about it deterministically, not only
+      // on the first non-empty batch.
+      await expect(ctx.engine.resolveInternalField('itest_plain', [], 'key'))
+        .rejects.toMatchObject({ code: 'INVALID_FIELD', status: 400 });
     });
   });
 });

@@ -46,10 +46,14 @@ import { bootstrapBuiltinRoles } from './bootstrap-builtin-positions.js';
 import { bootstrapSystemCapabilities } from './bootstrap-system-capabilities.js';
 import { normalizeManagedByVocab } from './normalize-managed-by.js';
 import { bootstrapDeclaredCapabilities } from './bootstrap-declared-capabilities.js';
-import { RLSCompiler, RLS_DENY_FILTER } from './rls-compiler.js';
+import { RLSCompiler, RLS_DENY_FILTER, policyDeclaresClause } from './rls-compiler.js';
 import { computeTenantLayer0Filter, andComposeLayers } from './tenant-layer.js';
 import { isPlatformTenantPolicy, isAuthoredTenantPolicy } from './platform-tenant-policies.js';
-import { isPlatformOwnershipFloorPolicy } from './platform-ownership-policies.js';
+import {
+  isPlatformOwnershipFloorPolicy,
+  owdDeclaresOpenRowWrites,
+  owdOpenWritesCoversOperation,
+} from './platform-ownership-policies.js';
 import { hasPhantomTenantAnchor } from './federated-phantom-anchors.js';
 import {
   normalizeTenancyPosture,
@@ -177,6 +181,18 @@ interface ObjectSecurityMeta {
    * real remote `organization_id` — both keep the tenant wall exactly as it is.
    */
   tenantAnchorIsPhantom: boolean;
+  /**
+   * [#8023] The object DECLARES `sharingModel: 'public_read_write'` — the one
+   * OWD that states row-level writes are open org-wide. Read from the author's
+   * declaration, never from `plugin-sharing`'s effective bucket; see
+   * `owdDeclaresOpenRowWrites` in `platform-ownership-policies.ts` for why the
+   * two must not be confused here.
+   *
+   * `false` when the schema does not resolve, so the floor stays (fail closed)
+   * — and `unresolved` meta is never cached, so a transient boot miss is
+   * retried rather than frozen into an over-strict answer.
+   */
+  owdOpensRowWrites: boolean;
   requiredPermissions: NormalizedRequiredPermissions;
   fieldRequiredPermissions: Record<string, string[]>;
   /**
@@ -2167,6 +2183,29 @@ export class SecurityPlugin implements Plugin {
       // safety + compile (incl. the fail-closed deny sentinel) is shared with
       // the public getReadFilter service via computeRlsFilter, so the engine
       // find-path and the analytics raw-SQL path enforce identical scoping.
+      //
+      // [#7809] `opCtx.operation` is passed RAW here — no `purge -> delete`,
+      // `transfer|restore -> update` normalisation like the 2.7 gate above
+      // does at `rlsOperation`. That asymmetry is deliberate and safe, but ONLY
+      // because of an invariant that lives in another package: the engine's
+      // middleware dispatch vocabulary (`OperationContext['operation']`) has
+      // seven members and none of them is a destructive lifecycle verb, and
+      // middleware is reachable only through the private
+      // `executeWithMiddleware(ctx: OperationContext, …)`. So no `purge` /
+      // `transfer` / `restore` can arrive here to be mis-derived.
+      //
+      // Measured, not assumed — a real engine driven through every public
+      // method dispatches exactly `find/findOne/count/aggregate` (with ast),
+      // `insert/update/delete` by-id (no ast) and bulk `update`/`delete` (with
+      // ast). The 2.7 gate normalises anyway because it is pre-wired for the
+      // M2 ops (#1883); this path is not, and does not need to be while the
+      // invariant holds.
+      //
+      // ⚠️ The invariant is PINNED, in the package that owns it:
+      // `packages/objectql/src/engine-middleware-operation-vocabulary.test.ts`.
+      // If a recycle bin (#3146) ever makes one of those verbs dispatchable,
+      // that pin goes red first — and THIS site and the D10 delegator half
+      // below are what must normalise before it can go green again.
       if (opCtx.ast) {
         const extra: Record<string, unknown>[] = [];
         const rlsFilter = await this.computeRlsFilter(
@@ -3058,12 +3097,29 @@ export class SecurityPlugin implements Plugin {
       // the same collection the compiler consumes, filtered by the same
       // provenance predicate, so the two cannot disagree about what "authored"
       // means.
+      //
+      // [#8059] The pre-check asks for an authored policy that ADMITS ROWS —
+      // one carrying a `using` scope predicate. A `check`-only policy declares
+      // no row scope at all (ADR-0058 D4: post-image validation), so it can
+      // admit nothing, and the verdict for a caller holding only check-only
+      // policies is `abstain` — which is the verdict this method already
+      // returned before #8059 and must keep returning after it. It got there
+      // by a route the fix removes: a check-only policy compiles to no `using`
+      // filter, so Layer 1 was null and the `layer1 == null → abstain` rule
+      // below fired. Site 1 now DERIVES a Layer 1 from the caller's select
+      // narrowing in exactly that case, so without this clause the derived
+      // readable-set scope would start answering `admit` — and `admit` is what
+      // the by-id widener uses to WIDEN. That is precisely the masquerade the
+      // doc comment above promises cannot happen (#5493 / #7281), so the
+      // promise is now kept by an explicit test rather than by the accident of
+      // a null Layer 1. Nothing narrows here: `abstain` changes nothing on its
+      // own, and the pre-image gate still refuses on its own terms.
       const authored = this.collectRLSPolicies(
         permissionSets,
         object,
         operation,
         (context?.positions ?? []) as string[],
-      ).filter((p) => !isPlatformOwnershipFloorPolicy(p));
+      ).filter((p) => !isPlatformOwnershipFloorPolicy(p) && policyDeclaresClause(p, 'using'));
       if (authored.length === 0) return 'abstain';
 
       const { layer0, layer1 } = await this.computeLayeredRlsFilter(
@@ -3995,6 +4051,41 @@ export class SecurityPlugin implements Plugin {
     let layer1: Record<string, unknown> | null = null;
     if (!(posturePermits && superuserBypass)) {
       let collected = this.collectRLSPolicies(permissionSets, object, operation, (context?.positions ?? []) as string[]);
+      // [#8023] An object whose author DECLARED `sharingModel:
+      // 'public_read_write'` does not inherit the platform's wildcard `update`
+      // ownership floor AT ALL. QA #7637 measured the contradiction it caused
+      // on the stock showcase: `showcase_project` declares that OWD, the access
+      // matrix grants `showcase_contributor` `edit: true`, no RLS is authored —
+      // and a PATCH of a row the persona had not created answered 403 with the
+      // record-level sentence. The floor is `member_default`'s
+      // `owner_only_writes` (object `'*'`, `created_by == current_user.id`,
+      // positions `['org_member']`), and it survived because the by-id gate
+      // only lets `ISharingService` REPLACE it on a positive `allow`, while a
+      // public object makes the service `abstain`.
+      //
+      // ⚠️ THE PLACEMENT IS THE FIX, not just where it reads best. Removing the
+      // floor HERE — before the #7665 derive-from-select branch below — leaves
+      // the update class EMPTY, so that branch then derives the write scope
+      // from the caller's SELECT narrowing and "you cannot mutate what you
+      // cannot see" still holds on this very object (#7792's by-id
+      // write-visibility property, which the card names as a non-regression
+      // criterion). Removing it at the `dropPlatformOwnershipFloor` filter
+      // further down would instead compile Layer 1 to null and hand back an
+      // UNGATED by-id write — the same hole #7665 closed, reopened by a fix for
+      // a different bug.
+      //
+      // Scope, stated twice because each half is load-bearing:
+      //   - only the PLATFORM's floor is dropped (provenance, ADR-0105 D3): an
+      //     app-authored policy spelling the identical predicate still reaches
+      //     the compiler and still refuses (ADR-0049);
+      //   - only `update` (`owdOpenWritesCoversOperation`): `owner_only_deletes`
+      //     stays, because `public_read_write` is "see and edit" and the alias
+      //     that also meant delete was removed for being wider than it.
+      // Layer 0 (the tenant wall) is untouched — a `public_read_write` object is
+      // org-wide open, never cross-tenant open.
+      if (meta.owdOpensRowWrites && owdOpenWritesCoversOperation(operation)) {
+        collected = collected.filter((p) => !isPlatformOwnershipFloorPolicy(p));
+      }
       // [#7665] The write-visibility floor: a write target must be inside the
       // caller's READABLE set. When NO policy of the write class applies to
       // this (principal, object, operation) — nothing authored for the class,
@@ -4032,8 +4123,28 @@ export class SecurityPlugin implements Plugin {
       //     of the read path's own Layer-1 short-circuit above, so the
       //     derived write scope can never be NARROWER than the read scope it
       //     is derived from.
+      //
+      // [#8059 site 1] The trigger asks whether a write-scope PREDICATE
+      // applies — NOT whether the applicable set is merely non-empty. Those
+      // read the same only while every write-class policy carries a `using`.
+      // A policy declaring `check` alone gates nothing about WHICH existing
+      // row may be targeted (it validates the post-image, ADR-0058 D4), yet
+      // it is fully applicable on object + `positions` + operation, so the
+      // emptiness test counted it and switched the derivation off. The
+      // collected policy then compiled to no row filter — it carries no
+      // `using` for the compiler to read — so Layer 1 was null exactly as it
+      // was before #7665, and every write-side row gate composed from it went
+      // back to being a no-op. Measured on the stock showcase: a contributor
+      // GET-404s `showcase_invoice` and PATCHes it by id, 200, row changed,
+      // because `invoice_owner_immutable` is `operation: 'update'` with
+      // `check` only. #7665 criterion 5 is a statement about PREDICATES, and
+      // this is it, spelled the way the criterion reads.
+      //
+      // The predicate test is a superset of the old emptiness test (an empty
+      // collection carries no `using` either), so every path #7665 pinned is
+      // reached on exactly the same inputs as before.
       if (
-        collected.length === 0 &&
+        !collected.some((p) => policyDeclaresClause(p, 'using')) &&
         (operation === 'update' || operation === 'delete') &&
         !(
           posturePermits &&
@@ -4137,9 +4248,25 @@ export class SecurityPlugin implements Plugin {
     ) {
       return null;
     }
-    const withCheck = this.collectRLSPolicies(permissionSets, object, operation).filter(
-      (p) => typeof (p as { check?: string }).check === 'string' && (p as { check?: string }).check!.trim() !== '',
-    );
+    // [#8059 site 2] `heldPositions` is threaded through, exactly as every
+    // other `collectRLSPolicies` call site threads it. Omitting it did not
+    // widen the check — it DELETED it: `getApplicablePolicies` evaluates the
+    // ADR-0090 P2 applicability domain against the positions it is given, so
+    // with `[]` every policy declaring `positions` failed the domain test and
+    // was filtered out of the post-image check FOR EVERY CALLER, holder and
+    // non-holder alike. A position-scoped `check` clause was therefore inert
+    // (ADR-0049 enforce-or-remove; the same class #3539 closed for org-scoped
+    // policies) — the showcase's `invoice_owner_immutable` among them, which
+    // is why the by-id write measured in #8059 was not stopped on the way out
+    // either once site 1 had let it past the row gate. The domain still
+    // decides: a non-holder is outside it and the policy still does not apply
+    // to them.
+    const withCheck = this.collectRLSPolicies(
+      permissionSets,
+      object,
+      operation,
+      (context?.positions ?? []) as string[],
+    ).filter((p) => policyDeclaresClause(p, 'check'));
     if (withCheck.length === 0) return null;
     return this.rlsCompiler.compileFilter(withCheck, context, 'check');
   }
@@ -4580,6 +4707,8 @@ export class SecurityPlugin implements Plugin {
       // [#7835] Federated object carrying the registry's INJECTED
       // `organization_id` — a column the platform provisions no storage for.
       tenantAnchorIsPhantom: hasPhantomTenantAnchor(obj),
+      // [#8023] The author's DECLARED OWD, not the effective sharing bucket.
+      owdOpensRowWrites: owdDeclaresOpenRowWrites(obj),
       requiredPermissions: normalizeRequiredPermissions((obj as any)?.requiredPermissions),
       fieldRequiredPermissions,
       unresolved: !obj,

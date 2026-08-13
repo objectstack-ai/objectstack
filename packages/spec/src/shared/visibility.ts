@@ -117,6 +117,27 @@ const VISIBILITY_KEY_PATTERN = /vis|conceal|hidden|show.?when/i;
  * What changed in the bytes is that the prescription is now rendered as the
  * template's `\n  • ` bullet rather than joined inline with a space, which is
  * how every other closed surface in this package already reads it.
+ *
+ * ## `surface` here is a FAMILY default that every consumer overrides (#8202)
+ *
+ * The three shapes on this table each name themselves — `'this form field'`,
+ * `'this form section'`, `'this page component'` — by spreading these options
+ * and setting `surface` at their own call site. The string below is what they
+ * shared until #8202, and it is kept only as the family's name: a table shared
+ * by three shapes cannot carry one shape's name, which is the same placement
+ * rule #8199 drew for the boundary prescription, read from the `surface` end.
+ *
+ * Why the shapes stopped sharing it: while all three answered a key identically
+ * the shared string cost nothing. Since #8199 they do not — on a field
+ * `disabled` gets a rename pointer toward `readonly`, on a section or component
+ * it gets the editability-boundary prescription telling the author to move the
+ * key to the fields inside. Those two answers contradict each other by design,
+ * and the contradiction only reads correctly if the message says which shape
+ * the author is on.
+ *
+ * A consumer that forgets to override inherits this string silently, so the
+ * inheritance is pinned rather than trusted: `editability-boundary.test.ts`
+ * asserts no live declaration on this family still reports it.
  */
 export const VISIBILITY_STRICT_OPTIONS: StrictObjectOptions = {
   surface: 'this view/page schema',

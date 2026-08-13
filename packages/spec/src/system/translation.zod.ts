@@ -467,6 +467,7 @@ const translationDataShape = () => ({
    *   dashboards.<name>.actions.<actionUrl>.label
    *   dashboards.<name>.widgets.<widgetId>.title
    *   dashboards.<name>.widgets.<widgetId>.description
+   *   dashboards.<name>.widgets.<widgetId>.subCaption
    */
   dashboards: z.record(z.string(), strictObject({
     surface: 'this dashboard translation',
@@ -488,10 +489,29 @@ const translationDataShape = () => ({
       // A widget's headline is `title`; a dashboard's is `label`. Same document,
       // one level apart, opposite spellings — so `label` on a widget is the
       // likeliest mistake on this surface and the least likely to be noticed.
-      aliases: { label: 'title', name: 'title', heading: 'title', subtitle: 'description' },
+      //
+      // `subtitle` points at `subCaption`, not `description`: on a metric
+      // widget the string an author calls the "subtitle" is the sub-caption
+      // under the number (`widget.options.description`), a DIFFERENT authored
+      // field from `widget.description` (the copy under the card header). The
+      // #5428 ruling (2026-08-06, item 4) gives each authored field its own
+      // key — 「两个作者字段两个 key」 — so steering `subtitle` authors at
+      // `description` would steer them at exactly the shared key the ruling
+      // forbids (#7862).
+      aliases: { label: 'title', name: 'title', heading: 'title', subtitle: 'subCaption' },
     }, {
       title: z.string().optional().describe('Translated widget title'),
       description: z.string().optional().describe('Translated widget description'),
+      /**
+       * Overlays the metric widget's sub-caption — the authored
+       * `widget.options.description`, NOT `widget.description`. Two authored
+       * fields, two keys (#5428 item 4, #7862): `description` above translates
+       * `widget.description`; this key translates `options.description`.
+       * Resolved by `translateDashboard` (i18n-resolver.ts); objectui's
+       * client-side renderer half consumes the same
+       * `dashboards.<name>.widgets.<widgetId>.subCaption` path.
+       */
+      subCaption: z.string().optional().describe("Translated metric sub-caption (overlays the widget's `options.description`, a different authored field from `description`)"),
     })).optional().describe('Widget translations keyed by widget id'),
   })).optional().describe('Dashboard translations keyed by dashboard name'),
 

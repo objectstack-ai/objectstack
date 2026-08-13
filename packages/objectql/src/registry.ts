@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveCrudAffordances, resolveInjectedSystemColumns, LEGACY_API_METHODS, AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
+import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveInjectedSystemColumns, checkManagedApiMethodAffordances, LEGACY_API_METHODS, AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
 // [#4513] The audit-family governance table, and [#6562] the injected-column
 // DEFINITION tables it governs — see the re-exports below for why both live in a
 // package `objectql` and `metadata-protocol` both depend on.
@@ -20,7 +20,7 @@ import {
 import { SystemFieldName } from '@objectstack/spec/system';
 import { resolveTenancyPosture, resolveSearchPinyinEnabled } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
-import { provisionSearchCompanion } from './search-companion.js';
+import { provisionSearchCompanion, SEARCH_COMPANION_FIELD } from './search-companion.js';
 import { ObjectStackManifest, ManifestSchema, InstalledPackage, InstalledPackageSchema, checkFieldCompleteness } from '@objectstack/spec/kernel';
 import { AppSchema } from '@objectstack/spec/ui';
 import { applyProtection } from '@objectstack/spec/shared';
@@ -139,6 +139,27 @@ function mergeObjectDefinitions(base: ServiceObject, extension: Partial<ServiceO
   if (extension.description !== undefined) merged.description = extension.description;
 
   return merged;
+}
+
+/**
+ * [#8027] Key-order-insensitive JSON, for comparing two `validations` /
+ * `indexes` entries BY VALUE — see
+ * {@link SchemaRegistry.subtractExtenderContributions}.
+ *
+ * Plain `JSON.stringify` would report the same rule as two different rules
+ * whenever the two copies were built by different code paths (a stored overlay
+ * row that went through `JSON.parse` vs the contributor's in-memory literal),
+ * which is exactly the pair being compared, so key order cannot be assumed.
+ * Arrays keep their order — an index's `fields` list is ordered and two
+ * spellings of it are genuinely two different indexes.
+ */
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([, v]) => v !== undefined)
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${stableStringify(v)}`).join(',')}}`;
 }
 
 /**
@@ -306,6 +327,24 @@ export interface SchemaRegistryOptions {
 export { AUDIT_FIELD_DEFS, TENANT_SCOPE_FIELD_DEF, OWNER_FIELD_DEF, OWNING_BUSINESS_UNIT_FIELD_DEF };
 
 /**
+ * [#7865] Injected-column PROVENANCE — the registry face of the 2026-08-12
+ * maintainer ruling (direction B): the injection below keeps running for
+ * `external` objects, and the machine-readable marker for the anchors it
+ * registers without provisioning storage is this API, re-exported from the
+ * table's home in `@objectstack/metadata-core` exactly like the definition
+ * tables above (#6562's discipline: the producer and every consumer read one
+ * answer from one place). The definitions themselves stay byte-identical —
+ * see `resolveInjectedColumnProvenance`'s doc for why the marker is an
+ * exported derivation and NOT a `provisioned: false` key on the field defs.
+ */
+export {
+  platformProvisionsStorage,
+  resolveInjectedColumnProvenance,
+  unprovisionedInjectedColumns,
+  type InjectedColumnProvenance,
+} from '@objectstack/metadata-core';
+
+/**
  * [#4447] The subset of {@link AUDIT_FIELD_DEFS} that is NOT authorable — the
  * keys that decide who may write an audit column.
  *
@@ -347,6 +386,17 @@ export function applySystemFields(
   // ownership of WHAT each column looks like, the same split #3786 established
   // for the audit family. Do NOT re-derive a condition below: a second copy here
   // is exactly the drift the plan exists to prevent.
+  //
+  // [#7865] This pass runs for `external` (ADR-0015) objects too — DELIBERATELY
+  // (maintainer ruling 2026-08-12, direction B). The platform provisions no
+  // storage for a federated object (`syncObjectSchema` returns early, no DDL),
+  // so the anchors injected below are registered-but-unprovisioned there; the
+  // machine-readable marker for that fact is `resolveInjectedColumnProvenance`
+  // / `unprovisionedInjectedColumns` (re-exported above from
+  // `@objectstack/metadata-core`), NOT a key on the definitions this function
+  // spreads — the definitions must stay byte-identical to the shipped tables,
+  // because the #7859 Layer-0 guard and the #4326 round-trip strip both read
+  // them by exact identity. Do not add keys here; consumers ask the API.
   const plan = resolveInjectedSystemColumns(schema);
 
   // 1. Hard opt-out at object level (e.g. seed/migration tables).
@@ -616,31 +666,6 @@ function declaresTenantIndex(schema: ServiceObject): boolean {
 }
 
 /**
- * Generic-write `apiMethods` verbs mapped to the {@link resolveCrudAffordances}
- * flag each one needs. Read verbs (`get`/`list`/`search`/`history`/…) are
- * always permitted, so they are absent here and never stripped.
- *
- * ⚠️ Two orthogonal axes — do NOT merge this with the API-tightening table.
- * This table (verb → *affordance*) is the UI-intent axis: it strips write verbs
- * a managed bucket does not *offer* from the whitelist. The verb → *primitive*
- * derivation that decides what the automatic API *admits* lives in
- * `@objectstack/spec/data` `API_METHOD_DERIVATION` / `resolveEffectiveApiMethods`
- * (#3391). The identical-shaped `WRITE_OP_AFFORDANCE` in plugin-security
- * `system-write-guard.ts` is the runtime enforcement of this same UI-intent
- * axis. The enum shrink (#3543) DELIBERATELY kept the three tables separate —
- * merging would blur a UX-affordance concern into a security concern (ADR-0103).
- * The `upsert`/`purge` keys survive the shrink: raw (un-parsed) whitelists may
- * still carry legacy verbs, and stripping here must keep covering them.
- */
-const MANAGED_WRITE_VERB_AFFORDANCE: Record<string, 'create' | 'edit' | 'delete'> = {
-  create: 'create',
-  update: 'edit',
-  upsert: 'edit',
-  delete: 'delete',
-  purge: 'delete',
-};
-
-/**
  * Reconcile a managed object's `enable.apiMethods` against the generic-write
  * affordances it actually grants (ADR-0092 / ADR-0103).
  *
@@ -653,8 +678,21 @@ const MANAGED_WRITE_VERB_AFFORDANCE: Record<string, 'create' | 'edit' | 'delete'
  * This is the registration-time backstop that makes the contradiction
  * impossible to *ship*: any write verb whose CRUD affordance the object does
  * not grant — via the `managedBy` bucket default plus `userActions` overrides,
- * exactly as {@link resolveCrudAffordances} computes for the UI — is stripped,
+ * exactly as `resolveCrudAffordances` computes for the UI — is stripped,
  * with a warning. Reads are never touched.
+ *
+ * The judgement itself is NOT here. `checkManagedApiMethodAffordances`
+ * (`@objectstack/spec/data`) owns the verb → affordance table, and
+ * `@objectstack/lint`'s `validateManagedApiMethods` — the authoring-time gate
+ * that reports the same contradiction where the AUTHOR is, rather than in a
+ * boot log nobody reads (#7521) — reads that same predicate. This function is
+ * only the registration-time REACTION to it: strip and warn. If a verdict seems
+ * wrong, fix the predicate, never this reaction — a second table here is the
+ * declared≠enforced drift the predicate exists to detect.
+ *
+ * WARN and strip, never throw — deliberately (the #7521 ruling, 2026-08-11):
+ * failing registration closed would let one metadata typo kill a control-plane
+ * boot, which is too harsh for ops. The author-time gate is where this blocks.
  *
  * Runs for every managed bucket (ADR-0103). Objects that legitimately take
  * user-context writes declare `userActions` opening those verbs, so their
@@ -673,30 +711,22 @@ export function reconcileManagedApiMethods(
   schema: ServiceObject,
   opts?: { warn?: (msg: string) => void },
 ): ServiceObject {
-  if ((schema as any).managedBy == null) return schema;
+  const conflicts = checkManagedApiMethodAffordances(schema);
+  if (conflicts.length === 0) return schema;
 
-  const methods = (schema as any).enable?.apiMethods;
-  if (!Array.isArray(methods) || methods.length === 0) return schema;
-
-  const affordances = resolveCrudAffordances(schema);
-  const stripped: string[] = [];
-  const kept = methods.filter((m: string) => {
-    const need = MANAGED_WRITE_VERB_AFFORDANCE[m];
-    if (need && !affordances[need]) {
-      stripped.push(m);
-      return false;
-    }
-    return true;
-  });
-
-  if (stripped.length === 0) return schema;
+  const methods = (schema as any).enable.apiMethods as unknown[];
+  const strippedIndexes = new Set(conflicts.map((c) => c.index));
+  const kept = methods.filter((_m, i) => !strippedIndexes.has(i));
+  const stripped = conflicts.map((c) => c.verb);
 
   const warn = opts?.warn ?? ((msg: string) => console.warn(msg));
   warn(
     `[Registry] Object "${schema.name}" is managedBy:'${(schema as any).managedBy}' but advertised ` +
       `generic write verb(s) [${stripped.join(', ')}] in enable.apiMethods its resolved affordances ` +
       `do not permit — stripping them (ADR-0092/ADR-0103). Declare userActions to open a verb the ` +
-      `object legitimately takes from a user context. Kept: [${kept.join(', ')}].`,
+      `object legitimately takes from a user context. Kept: [${kept.join(', ')}]. ` +
+      `\`os lint\` reports the same contradiction as \`object/managed-api-method-unaffordable\` ` +
+      `with full authoring context.`,
   );
 
   return {
@@ -1461,13 +1491,216 @@ export class SchemaRegistry {
    * the same way rather than growing a second, drifting copy.
    */
   private foldExtenders(contributors: ObjectContributor[], base: ObjectContributor): ServiceObject {
-    let merged = { ...base.definition };
+    return this.foldExtendersOntoDefinition(contributors, base.definition);
+  }
+
+  /**
+   * The fold itself, over a base DEFINITION rather than a base contributor, so
+   * {@link foldObjectExtendersOnto} can apply it to a body that never came
+   * from this registry without growing a second copy of the merge.
+   */
+  private foldExtendersOntoDefinition(
+    contributors: ObjectContributor[],
+    baseDefinition: ServiceObject,
+  ): ServiceObject {
+    let merged = { ...baseDefinition };
     for (const contrib of contributors) {
       if (contrib.ownership === 'extend') {
         merged = mergeObjectDefinitions(merged, contrib.definition);
       }
     }
     return merged;
+  }
+
+  /**
+   * [#7556] Fold this object's `extend` contributors onto a base body the
+   * CALLER supplies — the same fold {@link resolveObject} (D9.2) and
+   * {@link resolveOwnerLayer} (D9.6) apply, exposed for a base layer that did
+   * not come from this registry.
+   *
+   * Why this is public API rather than the protocol reaching for the
+   * contributor list: `GET /meta/object/:name` reaches an object body through a
+   * source this registry never sees — the copy `MetadataPlugin` registers into
+   * the `metadata` SERVICE when a deployment ingests a compiled artifact, where
+   * `objects` and `objectExtensions` are stored as SEPARATE collections. That
+   * body is ONE LAYER, and serving a layer as the resolved schema is what
+   * dropped every `objectExtensions` field from the by-name read (and from both
+   * layers of `?layers=true`) while `GET /meta/object` — which reads
+   * `resolveObject` — kept them. Two folds would re-open exactly that seam one
+   * level down, so there is one.
+   *
+   * Returns `base` untouched when nothing extends the name, so a caller may
+   * apply it unconditionally.
+   *
+   * [#8027] IDEMPOTENT, by construction — and it has to be, because the
+   * "callers must only pass an unfolded base" precondition this method carried
+   * when #7556 introduced it is not one any caller can honour.
+   *
+   * {@link mergeObjectDefinitions} CONCATENATES `validations` and `indexes`
+   * (`fields` is a key-keyed spread and the scalar props are last-writer-wins,
+   * so those were always safe). A second fold therefore used to duplicate both,
+   * and two shipped call sites already handed it a folded base:
+   *
+   *  1. The MetadataService body on an IN-PROCESS boot. ObjectQL's
+   *     `bridgeObjectsToMetadataService` seeds that service from
+   *     `registry.getAllObjects()` — bodies that are already resolved — so the
+   *     by-name read and the layered `code` layer folded a folded body and
+   *     served every extender-contributed validation and index TWICE. #7556's
+   *     own pin could not see it: it compares FIELD NAMES, and the field spread
+   *     is idempotent.
+   *  2. A `sys_metadata` overlay row (#8027). The write path persists the
+   *     request body verbatim (ADR-0005 §Validation), so the ordinary Studio
+   *     GET → edit → PUT round-trip stores whatever the read served — and since
+   *     #7556 that read is folded. The row is DEFINED by D9.2 as the base
+   *     layer, but nothing enforces it, and legacy/seeded/imported rows are
+   *     unconstrained besides.
+   *
+   * So the precondition is dropped rather than documented harder: an entry the
+   * `extend` contributors are about to add, already sitting in `base`, is
+   * removed from the base first and then re-added by the fold exactly once.
+   * Extenders are still concatenated against EACH OTHER — two contributors
+   * declaring an identical rule still yield two, matching {@link resolveObject}
+   * — so this narrows nothing the fold was doing on an unfolded base, and such
+   * a base is returned byte-identically to before.
+   */
+  foldObjectExtendersOnto<T>(name: string, base: T): T {
+    if (base === null || typeof base !== 'object') return base;
+    const fqn = this.resolveObjectKey(name);
+    if (fqn === undefined) return base;
+    const contributors = this.objectContributors.get(fqn);
+    if (!contributors || !contributors.some((c) => c.ownership === 'extend')) return base;
+    return this.foldExtendersOntoDefinition(
+      contributors,
+      this.subtractExtenderContributions(contributors, base as unknown as ServiceObject),
+    ) as unknown as T;
+  }
+
+  /**
+   * [#8038] Apply THIS registry's `__search` companion-column decision to a
+   * base body the CALLER supplies — the deployment-gated provisioning step
+   * {@link registerObject} runs on every base layer it materializes, exposed
+   * for a body that did not come from this registry.
+   *
+   * Same reason {@link foldObjectExtendersOnto} is public API rather than the
+   * protocol reaching for the contributor list: `GET /meta/object/:name`
+   * reaches an object body through a source this registry never sees — the
+   * copy `MetadataPlugin` registers into the `metadata` SERVICE when a
+   * deployment ingests a compiled artifact. That copy is the author's
+   * DECLARATION, captured before materialization, so it carries no companion
+   * column, while `GET /meta/object` reads `resolveObject` and carries one.
+   * Measured on the showcase (#8038): all 22 companion-bearing package objects
+   * were served WITHOUT `__search` by the by-name read and WITH it by the list
+   * read, while every platform object — registered straight into this registry,
+   * so never routed through the service — agreed on both.
+   *
+   * ⛔ The gate is the registry's own `searchCompanion` field and NOT a fresh
+   * `resolveSearchPinyinEnabled()` call. That field is `options.searchCompanion
+   * ?? resolveSearchPinyinEnabled()`, so a host which passes it explicitly —
+   * every test that pins this behaviour, and any embedder that overrides the
+   * env default — would otherwise get an answer re-derived from the
+   * environment instead of from the registry that actually provisioned (or
+   * declined to provision) the column. That is the #6562 failure mode
+   * restated: an injection pass and an injection table free to disagree.
+   *
+   * Returns `base` by reference when the deployment has companions off, when
+   * the object has no eligible display field, and when the column is already
+   * present — {@link provisionSearchCompanion} is pure and idempotent — so a
+   * registry-sourced body (provisioned at registration) pays a comparison and
+   * no copy, and a caller may apply it unconditionally.
+   */
+  provisionSearchCompanionOnto<T>(base: T): T {
+    if (base === null || typeof base !== 'object') return base;
+    if (!this.searchCompanion) return base;
+    return provisionSearchCompanion(base as never) as unknown as T;
+  }
+
+  /**
+   * [#8038] The WRITE-side counterpart of {@link provisionSearchCompanionOnto}:
+   * take the companion column back off a body on its way IN, so a document the
+   * read served and a client handed straight back still persists byte-identical
+   * (#4326).
+   *
+   * Owed for exactly the reason `stripInjectedSystemColumns` is owed to
+   * `applyInjectedSystemColumns` (#6562): the write path persists the request
+   * body verbatim by design (ADR-0005 §Validation), so anything the READ adds
+   * must come off again or it is baked into `sys_metadata.metadata`, into its
+   * checksum, and into every history diff. Measured before this was added: a
+   * runtime-created object stored `fields: [name]`, and one GET → PUT
+   * round-trip through the converged read turned that into
+   * `fields: [__search, name]` — a column no author wrote, in the row that
+   * records what they customised.
+   *
+   * ⛔ Deliberately NOT gated on `searchCompanion`. The read that added the
+   * column and the write that hands it back are different requests, and a
+   * deployment may have flipped `OS_SEARCH_PINYIN_ENABLED` off in between; a
+   * gated strip would then bake in exactly the body the gate exists to
+   * prevent. What bounds this instead is EXACTNESS, the same discipline
+   * `isInjectedDefinition` applies: the entry is removed only when it is
+   * byte-identical to the definition {@link provisionSearchCompanion} would
+   * stamp — recomputed from that one function rather than transcribed, so the
+   * two cannot drift — and a body carrying anything else under the name keeps
+   * it.
+   *
+   * Returns `base` by reference when there is nothing to remove. Pure and total.
+   */
+  stripProvisionedSearchCompanionFrom<T>(base: T): T {
+    if (base === null || typeof base !== 'object') return base;
+    const fields = (base as { fields?: unknown }).fields;
+    if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return base;
+    const present = (fields as Record<string, unknown>)[SEARCH_COMPANION_FIELD];
+    if (present === undefined) return base;
+
+    // Re-stamp a copy WITHOUT the column and compare: the canonical definition
+    // comes from the provisioning function itself, and an object the seam would
+    // not provision for yields no stamp and therefore no removal.
+    const withoutCompanion = { ...(fields as Record<string, unknown>) };
+    delete withoutCompanion[SEARCH_COMPANION_FIELD];
+    const restamped = provisionSearchCompanion(
+      { ...(base as Record<string, unknown>), fields: withoutCompanion } as never,
+    ) as unknown as { fields?: Record<string, unknown> };
+    const canonical = restamped.fields?.[SEARCH_COMPANION_FIELD];
+    if (canonical === undefined) return base;
+    if (stableStringify(present) !== stableStringify(canonical)) return base;
+
+    return { ...(base as Record<string, unknown>), fields: withoutCompanion } as unknown as T;
+  }
+
+  /**
+   * [#8027] Remove from `base` the `validations` / `indexes` entries the
+   * `extend` contributors are about to contribute — the half of
+   * {@link foldObjectExtendersOnto} that makes the fold idempotent.
+   *
+   * Only the two CONCATENATING keys are considered; `fields` and the scalar
+   * props already re-apply cleanly. Matching is by deep value equality on the
+   * serialised entry, so it fires only on an entry byte-identical to the one
+   * the extender declares — an entry the author merely gave the same `name` is
+   * a different rule and is left where it is.
+   *
+   * Returns `base` BY REFERENCE when nothing matched, which is the ordinary
+   * case (an unfolded base), so the pre-#8027 body is preserved exactly.
+   */
+  private subtractExtenderContributions(
+    contributors: ObjectContributor[],
+    base: ServiceObject,
+  ): ServiceObject {
+    const key = (entry: unknown): string => stableStringify(entry);
+    let out: ServiceObject | undefined;
+    for (const listKey of ['validations', 'indexes'] as const) {
+      const baseList = (base as Record<string, unknown>)[listKey];
+      if (!Array.isArray(baseList) || baseList.length === 0) continue;
+      const contributed = new Set<string>();
+      for (const contrib of contributors) {
+        if (contrib.ownership !== 'extend') continue;
+        const list = (contrib.definition as unknown as Record<string, unknown>)[listKey];
+        if (Array.isArray(list)) for (const entry of list) contributed.add(key(entry));
+      }
+      if (contributed.size === 0) continue;
+      const kept = baseList.filter((entry) => !contributed.has(key(entry)));
+      if (kept.length === baseList.length) continue;
+      out ??= { ...base };
+      (out as unknown as Record<string, unknown>)[listKey] = kept;
+    }
+    return out ?? base;
   }
 
   /**
@@ -1724,28 +1957,53 @@ export class SchemaRegistry {
 
   /**
    * Unregister all objects contributed by a package.
-   * 
+   *
+   * [#7970] **Refuses before it mutates.** If any object this package owns is
+   * extended by another package (ADR-0029), the call throws having removed
+   * nothing — the refusal is decided across every object first. Callers may
+   * therefore treat a throw as a no-op, which is what lets
+   * {@link uninstallPackage} run this verb ahead of its own mutations.
+   *
    * @throws Error if trying to uninstall an owner that has extenders
    */
   unregisterObjectsByPackage(packageId: string, force: boolean = false): void {
+    // [#7970] REFUSAL PASS — the whole decision, taken before a single
+    // contribution is removed. This check used to live inline in the mutation
+    // walk below, one object at a time, so a package owning `account` (free)
+    // and `contact` (extended by another package) lost `account` on the way to
+    // refusing over `contact`: the guard that exists to keep a registry whole
+    // was itself reached through a mutation, and nothing rolled it back. Same
+    // predicate and same iteration order as the inline check it replaces, so
+    // the same object still refuses with the same message — what changed is
+    // only that no removal precedes the throw.
+    if (!force) {
+      for (const [fqn, contributors] of this.objectContributors.entries()) {
+        const ownedHere = contributors.some(
+          c => c.packageId === packageId && c.ownership === 'own'
+        );
+        if (!ownedHere) continue;
+        // Extenders from other packages
+        const otherExtenders = contributors.filter(
+          c => c.packageId !== packageId && c.ownership === 'extend'
+        );
+        if (otherExtenders.length > 0) {
+          throw new Error(
+            `Cannot uninstall package "${packageId}": object "${fqn}" is extended by ` +
+            `${otherExtenders.map(c => c.packageId).join(', ')}. Uninstall extenders first.`
+          );
+        }
+      }
+    }
+
+    // MUTATION PASS — carries no refusal of its own; the pass above already
+    // proved every removal below is allowed. Keep it that way: a second copy of
+    // the predicate here is the two-places-that-must-agree shape this ordering
+    // fix was chosen over.
     for (const [fqn, contributors] of this.objectContributors.entries()) {
       // Find this package's contributions
       const packageContribs = contributors.filter(c => c.packageId === packageId);
-      
-      for (const contrib of packageContribs) {
-        if (contrib.ownership === 'own' && !force) {
-          // Check if there are extenders from other packages
-          const otherExtenders = contributors.filter(
-            c => c.packageId !== packageId && c.ownership === 'extend'
-          );
-          if (otherExtenders.length > 0) {
-            throw new Error(
-              `Cannot uninstall package "${packageId}": object "${fqn}" is extended by ` +
-              `${otherExtenders.map(c => c.packageId).join(', ')}. Uninstall extenders first.`
-            );
-          }
-        }
 
+      for (const contrib of packageContribs) {
         // Remove contribution
         const idx = contributors.indexOf(contrib);
         if (idx !== -1) {
@@ -2065,6 +2323,119 @@ export class SchemaRegistry {
       }
     }
     console.warn(`[Registry] Attempted to unregister non-existent ${type}: ${name}`);
+  }
+
+  /**
+   * [#7221] Unregister every GENERIC metadata item a package shipped — the
+   * counterpart of {@link unregisterObjectsByPackage}, which is addressed by
+   * package too but reaches only `objectContributors`.
+   *
+   * ## Why this exists at all
+   *
+   * A package writes into TWO stores, and until this method only one of them
+   * had a package-addressed removal verb. `unregisterObjectsByPackage` walks
+   * `objectContributors`; every non-object item a package ships — its `page`,
+   * `view`, `flow`, `app`, `api` … — lives in the generic `metadata` map under
+   * the composite key {@link registerItem} builds, and nothing removed those.
+   * Measured on the real registry before this method existed: after
+   * `uninstallPackage('crm')` the package record was gone while
+   * `getItem('page', 'home')` kept serving the uninstalled package's page, and
+   * `metadata.get('flow')` still held `crm:onboard`, for the life of the
+   * process. That is not a stale cache — it is an uninstall that leaves the
+   * package's UI and API metadata installed.
+   *
+   * It is placed HERE, on the registry, rather than privately on
+   * `MetadataFacade`, because the measurement above says both callers have the
+   * gap: {@link uninstallPackage} is registry-direct and shares it exactly. A
+   * private copy in the facade would have been a second expression of the
+   * "which key belongs to which package" rule (#6808's drift), and would have
+   * left every registry-direct uninstall still half-done.
+   *
+   * ## Identity, expressed once
+   *
+   * Membership is the exact inverse of the construction in `registerItem`:
+   * that method stores under `${packageId}:${baseName}` (plus the `@<disc>`
+   * suffix for a discriminated type), so a key belongs to this package iff it
+   * starts with `${packageId}:`. The discriminator rides along at the end and
+   * needs no special handling here — the whole bundle leaves with the package
+   * that shipped it, which is the same "a name addresses the BUNDLE" rule
+   * `unregisterItem` applies. The prefix relation assumes a package id
+   * contains no `:`, the same assumption `getItem`'s composite scan already
+   * makes with `key.endsWith(':' + name)`.
+   *
+   * ## ⛔ What this deliberately does NOT take, and why it says so out loud
+   *
+   * BARE-key entries are left untouched. A bare key is the ADR-0005
+   * runtime/DB overlay slot — a tenant's own customization, rehydrated from
+   * `sys_metadata` — and it carries no package provenance, so an uninstall
+   * that deleted it would take a tenant's authored data along with the package
+   * it merely overlaid. Nobody authorised that delete, and this verb does not
+   * invent the authorisation.
+   *
+   * That leaves a real consequence: an overlay whose base has just been
+   * uninstalled now layers over nothing. This registry's house pattern for
+   * exactly that state is to make it LOUD rather than to silently delete it or
+   * silently keep it — {@link assertSingleOwnerPerObject}'s ADR-0029 D9.5
+   * orphan-overlay violation names the offender and tells the operator to
+   * "re-install the package that owns it, or delete the sys_metadata row", and
+   * {@link unregisterObjectsByPackage} refuses loudly rather than quietly
+   * tearing down an object other packages extend. So this method warns, naming
+   * every orphaned overlay it left behind, and returns them so a caller that
+   * wants to act on them can.
+   *
+   * ⚠️ Deliberately NOT the object-side D9.7 rule ("an overlay layer leaves
+   * with the base it layers over"). That rule is safe precisely because an
+   * object overlay LAYER is a runtime projection of a `sys_metadata` row the
+   * removal does not touch, so a re-install re-hydrates it and nothing durable
+   * is lost. A bare-key generic entry is the other way round: it IS the
+   * runtime face of that row and there is no separate contributor list holding
+   * the durable copy, so dropping it here would lose the tenant's edit.
+   *
+   * @param packageId The package being uninstalled.
+   * @returns `removed` — the storage keys taken, as `type/key`; and
+   *   `orphanedOverlays` — the bare-key overlays deliberately left behind that
+   *   now have no base, as `type/name`.
+   */
+  unregisterItemsByPackage(packageId: string): { removed: string[]; orphanedOverlays: string[] } {
+    const prefix = `${packageId}:`;
+    const removed: string[] = [];
+    const orphanedOverlays: string[] = [];
+
+    for (const [type, collection] of this.metadata.entries()) {
+      // Collect before deleting — mutating a Map while iterating its own keys
+      // is legal but reads as a trap, and the bare-slot probe below wants the
+      // collection in its post-removal state to be truthful.
+      const owned = [...collection.keys()].filter(key => key.startsWith(prefix));
+      for (const key of owned) {
+        collection.delete(key);
+        removed.push(`${type}/${key}`);
+        this.log(`[Registry] Unregistered ${type}: ${key} (package ${packageId} uninstalled)`);
+      }
+      for (const key of owned) {
+        // The bare (overlay) slot for this item is its key without the package
+        // prefix — the same `bareKey` the artifact-vs-DB collision warning in
+        // `registerItem` compares against, discriminator included.
+        const bareSlot = key.slice(prefix.length);
+        const label = `${type}/${bareSlot}`;
+        if (collection.has(bareSlot) && !orphanedOverlays.includes(label)) {
+          orphanedOverlays.push(label);
+        }
+      }
+    }
+
+    if (orphanedOverlays.length > 0) {
+      console.warn(
+        `[Registry] Package "${packageId}" was uninstalled, but ${orphanedOverlays.length} ` +
+        `runtime/DB overlay row(s) layered over its items were KEPT — they are tenant-authored ` +
+        `(ADR-0005) and an uninstall does not delete them: ${orphanedOverlays.join(', ')}. ` +
+        `Each now overlays nothing — re-install the package that owns it, or delete the ` +
+        `sys_metadata row.`,
+      );
+    }
+    if (removed.length > 0) {
+      this.log(`[Registry] Unregistered ${removed.length} item(s) from package: ${packageId}`);
+    }
+    return { removed, orphanedOverlays };
   }
 
   /**
@@ -2477,13 +2848,30 @@ export class SchemaRegistry {
       return false;
     }
 
+    // [#7970] Unregister objects FIRST — this is the one step that can REFUSE
+    // (ADR-0029: the package owns an object another package `extend`s), so
+    // every mutation below is downstream of the refusal point and a refused
+    // uninstall removes nothing at all. The namespace release used to sit
+    // ABOVE this line, which meant reaching the guard that exists to keep a
+    // registry whole cost the namespace on the way in: the package stayed
+    // installed with its objects and its record intact, while its namespace no
+    // longer resolved, for the life of the process. Safe as the first step
+    // because the verb reads `objectContributors` only — it depends on nothing
+    // the steps below establish.
+    this.unregisterObjectsByPackage(id);
+
     // Unregister namespace
     if (pkg.manifest.namespace) {
       this.unregisterNamespace(pkg.manifest.namespace, id);
     }
 
-    // Unregister objects (will throw if extenders exist)
-    this.unregisterObjectsByPackage(id);
+    // [#7221] …and everything else the package shipped. The object verb above
+    // reaches `objectContributors` only, so without this an uninstall dropped
+    // the package record while its `page`/`view`/`flow`/`app`/`api` entries
+    // stayed resolvable through `getItem`/`listItems` for the life of the
+    // process. Runs AFTER the object verb because that one can refuse
+    // (ADR-0029 extenders): a refused uninstall must remove nothing at all.
+    this.unregisterItemsByPackage(id);
 
     // Remove package record
     const collection = this.metadata.get('package');

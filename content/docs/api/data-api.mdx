@@ -19,7 +19,7 @@ Query records with filtering, sorting, selection, and pagination.
 |:----------|:---------|:------------|
 | `object` | path | Object name |
 | `select` | query | Comma-separated field names. Every name must exist — an unknown one is `400 INVALID_FIELD`, never dropped. |
-| `filter` | query | Filter expression (JSON). `filters` also accepted for backward compatibility. Malformed JSON is rejected with `400 INVALID_FILTER` — never ignored. |
+| `filter` | query | Filter expression (JSON). `filters` also accepted for backward compatibility. Malformed JSON is rejected with `400 INVALID_FILTER` — never ignored; so is sending the parameter more than once (`?filter=…&filter=…`), which is refused as a repetition rather than diagnosed as malformed. |
 | `sort` | query | Sort expression (e.g. `name asc` or `-created_at`). Must name a real field on the object itself — an unknown name or a dotted path (`account.company_name`) is `400 INVALID_SORT`. |
 | `top` | query | Max records to return. No default — omitting it returns all matching records. |
 | `skip` | query | Offset |
@@ -76,8 +76,17 @@ successful query:
 | `?filter=5`, `?filter="done"`, `?filter=null` | `400` — parses, but is not a filter |
 | `?filter=` (blank) | treated as absent — no filter, no error |
 | `where` and `filter` sent with **different** values | `400` — aliases for one slot; send exactly one |
+| `?filter={"a":1}&filter={"b":2}` — one spelling sent **twice** | `400` — `Repeated "filter" query parameter — send exactly one` |
 
 The same rule applies to `orderby` on `GET /data/:object/export`.
+
+Sending one spelling **twice** — on `GET /data/:object`, in any of the four
+spellings — is refused as its own named cause rather than reported as a
+malformed filter: a repeat is neither merged nor resolved by precedence,
+because either would apply a filter you did not express. Repetition is counted,
+not compared, so two identical occurrences are still two occurrences, while a
+single occurrence that a server adapter delivers as a one-element array is
+still one.
 
 #### Nor is a sort, a projection, or an expansion
 

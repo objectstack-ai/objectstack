@@ -193,7 +193,10 @@ export const REQUIRED_CONTEXTS = [
     job: 'adr-merge-approval',
     context: 'ADR maintainer approval',
     authorized: '#7022 maintainer settings action, confirmed to the devx PM seat 2026-08-10 ~02:3xZ (screenshot of the `main` ruleset)',
-    carries: 'the #6741 ruling that only the maintainer own-account approval may land a docs/adr/** merge (#6942/#6962 landed unapproved while this context sat outside the required set)',
+    // The context STRING is load-bearing (it is what the ruleset requires) and
+    // must not change; the word "maintainer" in it is now historical — see
+    // #8161. What the check actually enforces is stated below.
+    carries: 'the rule that a docs/adr/** diff may not merge without an APPROVED review on the PR — any approver, per the maintainer ruling of 2026-08-12 (#8161), which superseded the #6741 own-account proxy (#6942/#6962 landed unapproved while this context sat outside the required set)',
   },
 ];
 

@@ -210,6 +210,17 @@ const NOT_A_STAND_IN = {
     'takes the `VerifyStack` that `bootStack` in this same package returned — a concrete handle, ' +
     'not a surface an out-of-tree implementer provides.',
   runRlsProofs: 'same `VerifyStack` handle as runCrudVerification.',
+  provisionRlsProbePersona:
+    'same `VerifyStack` handle as runCrudVerification — it MINTS the RBAC rows for the #7685 ' +
+    'object-granted RLS probe persona through that stack, so there is no second implementer.',
+  provisionRlsPositionPersona:
+    'same `VerifyStack` handle as provisionRlsProbePersona, and the same direction of dependency: ' +
+    'it MINTS the #7978 per-position persona — sign-up through that stack\'s real auth route, then ' +
+    'one `sys_user_position` row written through `stack.kernel`\'s ObjectQL service. Reaching the ' +
+    'kernel is the tell: a minimal structural surface an out-of-tree implementer could satisfy ' +
+    'would not carry a live ObjectKernel. It also CHECKS nothing — it is provisioning, so there is ' +
+    'no conformance whose compile-time half the parameter type could be, and an assertion at a call ' +
+    'site would delete no check.',
   formatReport: 'formats a `VerifyReport` this package produced; presentation, not conformance.',
   formatRlsReport: 'formats an `RlsReport` this package produced; presentation, not conformance.',
   fillRelationalRefs:

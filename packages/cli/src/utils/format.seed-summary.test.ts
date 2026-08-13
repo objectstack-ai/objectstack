@@ -24,7 +24,9 @@ describe('printServerReady seed summary (#3415/#3430)', () => {
 
   beforeEach(() => {
     lines = [];
-    spy = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+    // stderr, not stdout (#7915): the whole banner is a diagnostic, and
+    // `serve` keeps stdout clear for the MCP stdio transport.
+    spy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
       lines.push(args.join(' '));
     });
   });

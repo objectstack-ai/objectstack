@@ -23,10 +23,24 @@ import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
 import { createObjectQLAdapterFactory, withSystemReadContext } from './objectql-adapter.js';
 import { runWithAuthActorScope, setAuthActorResolver } from './auth-actor-attribution.js';
 import {
+  emitAuthSessionAuditEvent,
+  loginEventFor,
+  logoutEventFor,
+  type AuthEventAuditSurface,
+} from './auth-session-audit.js';
+import { SESSION_ERASURE_PATHS } from './session-tombstone.js';
+import {
   invitationRoleCapFailure,
   isPlainMemberInvitation,
   isOrgAdminGrade,
 } from './invitation-role-cap.js';
+import {
+  DEFAULT_CREATOR_ROLE,
+  REMOVE_MEMBER_DENIAL_CODE,
+  REMOVE_MEMBER_DENIAL_MESSAGE,
+  isSoleOwnerGuardTerritory,
+  removalBlockedByOwnerTarget,
+} from './remove-member-permission-guard.js';
 import { isPlaceholderEmail } from './placeholder-email.js';
 import { reconcileMembership, type MembershipPolicy } from './reconcile-membership.js';
 import type { TenancyService } from './tenancy-service.js';
@@ -162,6 +176,26 @@ function installWebContainerRequestStatePolyfill(): void {
       '[AuthManager] WebContainer detected: installed synchronous request-state polyfill ' +
         '(node:async_hooks AsyncLocalStorage does not propagate context across await in WebContainer).',
     );
+  }
+}
+
+/**
+ * [#7724] Carries better-auth's own error `Response` out through the engine
+ * transaction that must roll back because of it.
+ *
+ * better-auth's HTTP entrypoint CATCHES every fault and RETURNS a `Response` —
+ * it does not throw. A `try`/`catch`-shaped unit of work therefore sees a clean
+ * return on the exact path it exists to undo, commits, and the partial writes
+ * land anyway. So the failure signal has to be re-raised from the response
+ * status, and the response itself has to survive the throw that rolls the
+ * transaction back — that is the whole job of this class. It never escapes
+ * `runSubjectErasureAtomically`, which unwraps it back into the response the
+ * client was always going to get.
+ */
+class SubjectErasureRollback extends Error {
+  constructor(readonly response: Response) {
+    super(`subject-erasure unit of work rolled back (HTTP ${response.status})`);
+    this.name = 'SubjectErasureRollback';
   }
 }
 
@@ -551,6 +585,19 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
   getTenancy?: () => TenancyService | undefined;
 
   /**
+   * [#8144] Accessor for the `audit` service — the compliance ledger's ingress
+   * for events that are not CRUD. Consulted by the session lifecycle hooks to
+   * record `login` / `logout` in `sys_audit_log`.
+   *
+   * Lazy for the same reason `getTenancy` is: the service is registered on the
+   * kernel after the AuthManager is constructed, and every call happens at
+   * request time. Omitted, or resolving to `undefined` (the audit plugin is not
+   * installed — it is an OPTIONAL pair in the CLI) → no auth rows are written,
+   * which is exactly today's behaviour.
+   */
+  getAuditSink?: () => AuthEventAuditSurface | undefined;
+
+  /**
    * Optional structured logger (the kernel `ctx.logger`) for best-effort
    * bookkeeping surfaces such as the ADR-0093 membership reconciler. Omitted →
    * those surfaces run silently (they already fail closed to no-op).
@@ -795,6 +842,15 @@ async function smsQuotaExceededApiError(message: string): Promise<Error> {
 export class AuthManager {
   private auth: Auth<any> | null = null;
   private config: AuthManagerOptions;
+  /**
+   * [#8289] The org-role ac map handed to the `organization` plugin as `roles`
+   * (`undefined` → the plugin runs on better-auth's `defaultRoles`). Stashed at
+   * plugin-build time because `assertRemoveMemberPermitted` has to ask the
+   * vendor's own `hasPermission` the same question the route will, and the
+   * global before-hook runs BEFORE the org plugin shims `ctx.context.orgOptions`
+   * into scope — so the map is not reachable from `ctx` at that point.
+   */
+  private orgRolesMap: Record<string, any> | undefined;
   // ADR-0069 — cached "does any org require MFA" flag (per-org tightening).
   // Refreshed lazily with a TTL so isAuthGateActive() stays synchronous + cheap.
   private _orgMfaCache: { value: boolean; at: number } = { value: false, at: 0 };
@@ -901,6 +957,84 @@ export class AuthManager {
         // the objectql `SysUser` object def (provisioned by boot schema-sync)
         // and read by a GUARDED system query in resolveCtx (can only no-op,
         // never break auth). better-auth stays oblivious to the extra column.
+
+        // ── #7735 — self-service email change, ON with verification ────────
+        // better-auth ships `changeEmail` OFF, so `POST /change-email` answered
+        // 400 CHANGE_EMAIL_DISABLED on every deployment while
+        // `auth-route-ledger.ts` booked the route as a live SDK surface. The
+        // ledger was right about the product and wrong about the runtime;
+        // maintainer ruling 2026-08-12 settled it by making the runtime true:
+        // 「`user.changeEmail` 在 plugin-auth 配置开启,带验证流程(变更需确认,
+        // 策略按 better-auth 常规)」.
+        //
+        // THE FLOW, as better-auth 1.7 actually implements it (read off
+        // `better-auth/dist/api/routes/update-user.mjs`, not off the docs):
+        //   1. `POST /change-email {newEmail}` mints a JWT carrying
+        //      `{ email: current, updateTo: newEmail, requestType:
+        //      'change-email-verification' }` and hands it to
+        //      `emailVerification.sendVerificationEmail` — the same callback
+        //      (and `auth.verify_email` template) sign-up verification uses,
+        //      addressed to the NEW address. Nothing is written yet.
+        //   2. `GET /verify-email?token=…` applies it: `updateUserByEmail(old,
+        //      { email: newEmail, emailVerified: true })`, then re-issues the
+        //      session cookie on the new identity.
+        // So the change is confirmed by proving control of the new mailbox —
+        // 「变更需确认」 — and an unclicked request changes nothing.
+        //
+        // TWO OPTIONS DELIBERATELY LEFT AT THEIR DEFAULTS, because each is a
+        // policy this ruling did not decide:
+        //   • `updateEmailWithoutVerification` — would let a user whose CURRENT
+        //     address is unverified swap emails with no confirmation at all.
+        //     That is the one thing the ruling names; leaving it false keeps
+        //     every path confirmed.
+        //   • `sendChangeEmailConfirmation` — better-auth's opt-in EXTRA step
+        //     that asks the OLD address to approve first (old → new, two
+        //     clicks). Stronger against a hijacked session, and it needs a
+        //     decision about which address is authoritative plus its own
+        //     template; 「策略按 better-auth 常规」 is the single-step default,
+        //     so the two-step variant stays a deliberate future design.
+        //
+        // ── #8019 — the OLD address is NOTIFIED, and still not gated ───────
+        // Maintainer ruling 2026-08-12 (later the same day, and deliberately
+        // narrower than the one above): 「notify the OLD address — do not gate
+        // on it」. #7735's ruling keeps governing the CONFIRMATION option; this
+        // one adds only the notice. So `sendChangeEmailConfirmation` stays
+        // absent above — and that is a measured decision, not an omission:
+        //
+        //   `user.changeEmail` in better-auth 1.7.0-rc.2 declares EXACTLY three
+        //   members (`@better-auth/core/src/types/init-options.ts:946-971`):
+        //   `enabled`, `sendChangeEmailConfirmation`, and
+        //   `updateEmailWithoutVerification`. There is NO notify-only hook, and
+        //   `sendChangeEmailConfirmation` is not one: in `update-user.mjs:457`
+        //   it becomes `canSendConfirmation`, and the branch at :495 RETURNS
+        //   right after invoking it — the new address is never mailed until the
+        //   old one clicks. Setting it is therefore structurally the approval
+        //   gate the ruling refuses, not a way to notify.
+        //
+        // The notice is consequently sent by the framework, from the global
+        // `after` hook on `/change-email` (search `__osChangeEmailFrom`), using
+        // the `auth.email_change_notice` template. It is failure-isolated by
+        // construction: it runs after better-auth has already produced the
+        // response, and its own errors are swallowed, so a dead mailbox cannot
+        // turn a notification into a block. That is the "do not gate" half,
+        // enforced mechanically rather than promised in prose.
+        //
+        // No email transport wired ⇒ the `emailVerification` block below is
+        // absent ⇒ better-auth answers 400 "Verification email isn't enabled".
+        // That is the honest answer for a deployment with no mailbox, and a
+        // different sentence from "the platform does not offer this".
+        //
+        // The write itself already worked: `sys_user.email` is schema-`readonly`
+        // and the readonly-strip drops non-system updates, but the adapter runs
+        // better-auth's own writes as system (#3164, `withSystemContext` in
+        // objectql-adapter.ts), so the applied change persists.
+        //
+        // ⛔ `deleteUser` is NOT configured here, by the same ruling — see the
+        // `disabled` row for `POST /api/v1/auth/delete-user` in
+        // `auth-route-ledger.ts` for why, and for what has to be decided first.
+        changeEmail: {
+          enabled: true,
+        },
       },
       account: {
         ...AUTH_ACCOUNT_CONFIG,
@@ -1212,6 +1346,55 @@ export class AuthManager {
             // fall through to the path's own handling below
           }
 
+          // ── #8019: capture the address a change-email would move AWAY from ──
+          // The notice goes out from the after-hook, but the OLD address only
+          // exists BEFORE the endpoint runs — and `ctx.context.session` is not
+          // it: better-auth's own `sensitiveSessionMiddleware` populates that,
+          // and endpoint middleware runs AFTER this global before-hook, so the
+          // field is still empty here. Resolve the session explicitly, the same
+          // hook-order-independent way `/oauth2/authorize` below has to.
+          //
+          // Stashed, never sent from here: at this point the request has not
+          // been accepted yet (it can still fail on `newEmail` equal to the
+          // current address, on rate limiting, or on a missing transport), and
+          // a notice for a request better-auth then refuses would be a false
+          // alarm about an identity move that never happened.
+          if (ctx?.path === '/change-email') {
+            try {
+              const { getSessionFromCtx } = await import('better-auth/api');
+              const s: any = await getSessionFromCtx(ctx as any).catch(() => null);
+              const from = s?.user?.email;
+              if (typeof from === 'string' && from) {
+                ctx.context.__osChangeEmailFrom = {
+                  email: from,
+                  ...(typeof s?.user?.name === 'string' && s.user.name ? { name: s.user.name } : {}),
+                  ...(typeof s?.user?.id === 'string' && s.user.id ? { id: s.user.id } : {}),
+                };
+              }
+            } catch {
+              // Unresolvable session → no stash → no notice. better-auth's own
+              // session middleware still rejects the request with 401, so this
+              // never silently drops a notice for a change that proceeds.
+            }
+          }
+
+          // ── #8289: remove-member answers its PERMISSION denial itself ──
+          // better-auth's `removeMember` orders "only an owner may remove an
+          // owner" AHEAD of its real permission check and reports it with the
+          // sole-owner invariant's code and a 400, so a caller who merely lacks
+          // permission is told they "cannot leave the organization as the only
+          // owner" — every clause false, and a 400 where every sibling denial is
+          // a 403. Answer the permission class here instead; the sole-owner
+          // invariant and every 200 path stay the vendor's, untouched.
+          // `remove-member-permission-guard.ts` carries the full reading,
+          // including why this MUST be a before-hook (an after-hook cannot
+          // change the status) and why the guard's refusal set is exactly the
+          // vendor's.
+          if (ctx?.path === '/organization/remove-member') {
+            await this.assertRemoveMemberPermitted(ctx);
+            // fall through — the vendor still re-decides everything it owns
+          }
+
           // ── ADR-0024: admin-gate self-service SSO provider registration ──
           // `@better-auth/sso`'s POST /sso/register only checks org-admin when
           // `body.organizationId` is present (index.mjs: `if (ctx.body
@@ -1249,47 +1432,32 @@ export class AuthManager {
           // (open editions / self-host) → no gate. Unauthenticated → fall
           // through so the OP redirects to login; the gate runs on the
           // return pass (or immediately for a bearer/cookie session).
+          //
+          // [#8102] The acting subject is resolved through the shared,
+          // hook-order-independent {@link resolveActor} — NOT a second inline
+          // copy of it. This branch used to carry its own token lookup, line
+          // for line the same logic, and the two diverged the moment one was
+          // fixed: #8101 taught `resolveActor` to strip the signature from a
+          // bearer credential (`session.token` stores the UNSIGNED value while
+          // `bearer()` hands clients the SIGNED form in `set-auth-token`), and
+          // the copy here kept looking the signed credential up verbatim. It
+          // resolved nothing — and because the unresolved case is deliberately
+          // fail-open, an AUTHENTICATED caller on the documented API lane was
+          // read as unauthenticated and this env-access check never evaluated
+          // at all. Two resolution sites are what let them diverge, so the fix
+          // is to delete one, not to correct it in place.
           if (ctx?.path === '/oauth2/authorize' && this.config.oidcAuthorizeGate) {
             const clientId = ctx?.query?.client_id;
             if (clientId) {
-              let gateUserId: string | undefined;
-              // (a) standard resolver — handles the cookie session.
-              try {
-                const { getSessionFromCtx } = await import('better-auth/api');
-                const s: any = await getSessionFromCtx(ctx as any);
-                gateUserId = s?.user?.id ?? s?.session?.userId;
-              } catch { /* fall through to explicit resolution */ }
-              // (b) explicit token resolution — hook-order-independent. The
-              // bearer plugin may convert `Authorization: Bearer` to a session
-              // AFTER this global before-hook, so getSessionFromCtx can miss a
-              // bearer (or non-default cookie) request here. Resolve the token
-              // (bearer or the session cookie's token part) and look it up.
-              if (!gateUserId) {
-                try {
-                  const hdr = (k: string): string =>
-                    ((ctx?.headers?.get?.(k) ?? ctx?.request?.headers?.get?.(k)) as string) || '';
-                  let token: string | undefined;
-                  const bm = /^Bearer\s+(.+)$/i.exec(hdr('authorization'));
-                  if (bm?.[1]) token = bm[1].trim();
-                  if (!token) {
-                    const cm = /(?:^|;\s*)(?:__Secure-|__Host-)?better-auth\.session_token=([^;]+)/.exec(hdr('cookie'));
-                    if (cm?.[1]) token = decodeURIComponent(cm[1]).split('.')[0];
-                  }
-                  if (token) {
-                    const sess: any = await (ctx as any).context.adapter.findOne({
-                      model: 'session',
-                      where: [{ field: 'token', value: token }],
-                    });
-                    const exp = sess?.expiresAt ?? sess?.expires_at;
-                    if (sess && (!exp || new Date(exp).getTime() > Date.now())) {
-                      gateUserId = String(sess.userId ?? sess.user_id ?? '') || undefined;
-                    }
-                  }
-                } catch { /* unresolved → fall through, OP handles auth */ }
-              }
-              if (gateUserId) {
+              const actor = await this.resolveActor(ctx);
+              // Unauthenticated → fall through, per the contract above. Only an
+              // AUTHENTICATED subject is gated here. `resolveActor` also returns
+              // `activeOrgId`; this gate deliberately does not consume it — the
+              // D5.1 host contract is `(userId, clientId)` and the control plane
+              // derives org membership / app assignment from the user itself.
+              if (actor?.userId) {
                 const allowed = await this.config.oidcAuthorizeGate({
-                  userId: gateUserId,
+                  userId: actor.userId,
                   clientId: String(clientId),
                 });
                 if (!allowed) {
@@ -1445,6 +1613,47 @@ export class AuthManager {
             }
             delete ctx.context.__osPwChangeUserId;
             delete ctx.context.__osPwHistory;
+            return;
+          }
+
+          // ── #8019: tell the OLD address, without gating on it ──────────────
+          // Maintainer ruling 2026-08-12 — 「notify the OLD address — do not
+          // gate on it」. See the `changeEmail` config site for why this cannot
+          // be `sendChangeEmailConfirmation` (that option IS the gate).
+          //
+          // Why HERE is the whole design:
+          //   • after-hook ⇒ better-auth has already produced its response, so
+          //     nothing this code does can change the endpoint's outcome. The
+          //     "does not gate" property is structural, not a promise;
+          //   • gated on success ⇒ a refused request sends nothing;
+          //   • `sendChangeEmailNotice` swallows its own failures ⇒ a dead
+          //     mailbox, an unseeded template or a missing transport cannot
+          //     turn the notification into a block. That inversion — a security
+          //     notice that takes the flow down with it — is precisely the
+          //     failure mode the ruling exists to avoid.
+          //
+          // Sent at REQUEST time, which is also the strongest moment available:
+          // the owner learns while the attacker still has to prove control of
+          // the new mailbox, so the warning arrives inside the window where it
+          // can still be acted on. It is also the only moment that exists
+          // exactly once per attempt — the apply step (`GET /verify-email`)
+          // does not carry the old address, and better-auth mints a fresh
+          // session there when the link is opened without one, so an
+          // apply-time notice would silently miss that path.
+          if (ctx?.path === '/change-email') {
+            const from = ctx?.context?.__osChangeEmailFrom;
+            delete ctx.context.__osChangeEmailFrom;
+            let succeeded: boolean;
+            try {
+              const { isAPIError } = await import('better-auth/api');
+              succeeded = !isAPIError(ctx?.context?.returned);
+            } catch {
+              succeeded = !(ctx?.context?.returned instanceof Error);
+            }
+            const newEmail = typeof ctx?.body?.newEmail === 'string' ? ctx.body.newEmail : '';
+            if (succeeded && from?.email && newEmail) {
+              await this.sendChangeEmailNotice(from, newEmail);
+            }
             return;
           }
 
@@ -1904,6 +2113,9 @@ export class AuthManager {
       } catch {
         customOrgRoles = undefined;
       }
+      // [#8289] Same map, same request lifetime — see the field's doc for why
+      // the before-hook cannot read it back off `ctx`.
+      this.orgRolesMap = customOrgRoles;
       return organization({
         schema: buildOrganizationPluginSchema(),
         // Enable the team sub-feature so the framework's `sys_team` /
@@ -2453,11 +2665,21 @@ export class AuthManager {
     if (enabled.sso) {
       await this.addOptionalPlugin(plugins, 'sso', async () => {
       const { sso } = await import('@better-auth/sso');
-      // NOTE: unlike `oauthProvider`, @better-auth/sso hardcodes its `ssoProvider`
-      // model and accepts NO `schema` option (verified against 1.6.20 — no
-      // mergeSchema, runtime never reads options.schema). Its table mapping to
-      // `sys_sso_provider` must therefore be resolved by the better-auth adapter
-      // / a global model map, not per-plugin here (see AUTH_SSO_PROVIDER_SCHEMA).
+      // NOTE: the `ssoProvider` model is bridged to `sys_sso_provider` by the
+      // better-auth adapter / a global model map, not per-plugin here (see
+      // AUTH_SSO_PROVIDER_SCHEMA).
+      //
+      // That bridge dates from 1.6.20, where @better-auth/sso hardcoded the
+      // model and read no `schema` option. Re-checked against the pinned
+      // 1.7.0-rc.2 (`node_modules/@better-auth/sso/dist`) on 2026-08-12: that is
+      // no longer true — `SSOOptions.schema.ssoProvider` now exists
+      // (index-D1yk91me.d.mts) and the runtime honours `modelName` plus a
+      // per-field `fieldName` map (index.mjs, the plugin's `schema:` block). The
+      // adapter-level bridge is kept as-is here because it is what the rest of
+      // the auth stack is wired to; whether to move it onto the plugin option is
+      // a separate change, not a silent one. Only the mapping surface below was
+      // re-verified in depth — see register-sso-provider.ts for the
+      // `oidcConfig.mapping` strict-object findings.
       //
       // `organizationProvisioning.defaultRole` (ADR-0024 V1): a first-time
       // federated login is JIT-provisioned into the user's domain-matched org
@@ -2798,6 +3020,66 @@ export class AuthManager {
   }
 
   /**
+   * #8019 — mail the address a change-email request would move the account
+   * AWAY from. Maintainer ruling 2026-08-12: 「notify the OLD address — do not
+   * gate on it」.
+   *
+   * ⛔ **This method must never throw, and must never be awaited for its
+   * effect on the flow.** It is the "do not gate" half of the ruling, and the
+   * enforcement lives right here: every failure — no transport wired, template
+   * not seeded, SMTP down, a `status: 'failed'` delivery — is swallowed. The
+   * sibling auth callbacks above do the opposite ON PURPOSE (a verification
+   * mail that cannot be sent must surface, or the user is stuck on a verify
+   * screen forever); this one is a notification about a change that proceeds
+   * either way, so letting it raise would convert the notice into exactly the
+   * blocking step the ruling refuses.
+   *
+   * ⛔ No undo/rollback link is passed, and the template declares no hole for
+   * one: a one-click revert is a separate flow and a separate decision.
+   *
+   * No `locale` is named, so `EmailService`'s ladder resolves the `en-US` row
+   * (`email-service.ts` — "no locale means the DOCUMENTED default"). The other
+   * three locale rows ship with it and are selected the moment a caller or a
+   * tenant overlay names a locale; the platform has no per-recipient locale to
+   * pass here yet (`sys_user` carries no locale column, and every other auth
+   * template is likewise en-US-only), so naming one would be inventing a
+   * preference rather than honouring one.
+   */
+  private async sendChangeEmailNotice(
+    from: { email: string; name?: string; id?: string },
+    newEmail: string,
+  ): Promise<void> {
+    try {
+      const email = this.getEmailService();
+      if (!email) return;
+      // The endpoint lower-cases `newEmail` before it does anything with it
+      // (`update-user.mjs`: `ctx.body.newEmail.toLowerCase()`), so the raw body
+      // spelling is not what would become the account identity. Report the
+      // address that would actually land.
+      const target = newEmail.trim().toLowerCase();
+      if (!target) return;
+      await email.sendTemplate({
+        template: 'auth.email_change_notice',
+        to: { address: from.email, ...(from.name ? { name: from.name } : {}) },
+        data: {
+          user: { name: from.name || from.email, email: from.email, ...(from.id ? { id: from.id } : {}) },
+          newEmail: target,
+          appName: this.getAppName(),
+        },
+        relatedObject: 'sys_user',
+        ...(from.id ? { relatedId: from.id } : {}),
+      });
+    } catch (err) {
+      // Best-effort by design — see the ⛔ above. Logged so an operator can see
+      // a notice was lost; never rethrown, so the change-email flow cannot be
+      // taken down by its own security notification.
+      this.config.logger?.warn?.('AuthManager: change-email notice to the previous address failed', {
+        error: (err as Error)?.message,
+      });
+    }
+  }
+
+  /**
    * Inject (or replace) the outbound SMS service used by the phone-number
    * OTP callbacks and the SMS invite path (#2780). Mirrors
    * {@link setEmailService}: resolved lazily per send, so it is safe to set
@@ -3069,9 +3351,28 @@ export class AuthManager {
     // costs nothing: the scope starts empty, the before-hook drops a resolver
     // in, and the session is looked up only if some write asks. Attribution
     // only — the authorization subject of those writes is unchanged (system).
-    const response = await runWithAuthActorScope(() =>
-      runWithRequestState(new WeakMap(), () => auth.handler(request)),
-    );
+    // `await`, not a bare return: both scope helpers are generic over their
+    // callback, so the composed call is typed `Promise< Promise< Response > >`.
+    // The previous single call site flattened it with the `await` below.
+    const runHandler = async (): Promise<Response> =>
+      await runWithAuthActorScope(() =>
+        runWithRequestState(new WeakMap(), () => auth.handler(request)),
+      );
+
+    // [#7724] A subject-erasure request is ONE unit of work, and better-auth
+    // does not treat it as one: `internalAdapter.deleteUser` deletes the
+    // sessions, then the accounts, then the user, in three unrelated adapter
+    // calls with no transaction (verified in better-auth 1.7.0-rc.2 —
+    // `dist/db/internal-adapter.mjs` mentions no transaction at all). Anything
+    // that refuses the LAST of those three leaves the first two committed: the
+    // credential rows are gone, the `sys_user` row is not, and the deployment
+    // is left with an identity that still occupies the org roster and can no
+    // longer sign in. Nothing tells the operator, and there is no way back.
+    const endpointPath = this.betterAuthEndpointPath(request);
+    const response =
+      endpointPath !== undefined && SESSION_ERASURE_PATHS.has(endpointPath)
+        ? await this.runSubjectErasureAtomically(runHandler)
+        : await runHandler();
 
     if (response.status >= 500) {
       try {
@@ -3083,6 +3384,84 @@ export class AuthManager {
     }
 
     return response;
+  }
+
+  /**
+   * The better-auth endpoint path (`/admin/remove-user`) this request addresses,
+   * or `undefined` when it is not under the configured `basePath`.
+   *
+   * The same spelling better-auth's own `ctx.path` uses, so the sets keyed by it
+   * — `SESSION_ERASURE_PATHS`, the break-glass guard's path tests — are all
+   * talking about one thing.
+   */
+  private betterAuthEndpointPath(request: Request): string | undefined {
+    let pathname: string;
+    try {
+      pathname = new URL(request.url).pathname;
+    } catch {
+      return undefined;
+    }
+    const configured = this.config.basePath || '/api/v1/auth';
+    const base = (configured.startsWith('/') ? configured : `/${configured}`).replace(/\/+$/, '');
+    if (!pathname.startsWith(base)) return undefined;
+    const endpoint = pathname.slice(base.length).replace(/\/+$/, '');
+    return endpoint.startsWith('/') ? endpoint : undefined;
+  }
+
+  /**
+   * [#7724] Run a subject-erasure request as ONE unit of work: every write it
+   * makes commits together, or none of them do.
+   *
+   * Placed at the REQUEST seam rather than inside better-auth's route, because
+   * re-implementing `/admin/remove-user` here would duplicate its permission
+   * check, its self-removal check and its not-found check — and a duplicated
+   * security check is where the two copies drift apart. This wrapper reads no
+   * bodies and makes no authorization decision; better-auth's handler runs
+   * exactly as before, and the only thing added is the transaction it runs in.
+   *
+   * The engine's `transaction()` (ADR-0034) publishes its handle into the
+   * ambient store, so every adapter write on the way down joins it without the
+   * adapter knowing — which is why this needs no change in `objectql-adapter.ts`.
+   *
+   * Two declared limits, both inherited rather than introduced:
+   * - a datasource whose driver has no `beginTransaction` runs the callback
+   *   with no transaction and no rollback (ADR-0119 D1). The engine warns once
+   *   per driver. Failing CLOSED instead (`{ require: true }`) was considered
+   *   and rejected: it would make user removal impossible on those datasources,
+   *   which is the very defect this card is fixing.
+   * - side effects outside the datasource (a sent email, secondary-storage
+   *   session state) are not transactional and are not undone by a rollback.
+   *   `/admin/remove-user` sends nothing, so no path here relies on it.
+   */
+  private async runSubjectErasureAtomically(
+    run: () => Promise<Response>,
+  ): Promise<Response> {
+    const engine = this.config.dataEngine as
+      | (IDataEngine & {
+          transaction?: <T>(callback: (trxCtx: any, info: any) => Promise<T>) => Promise<T>;
+        })
+      | undefined;
+    // `transaction` is an ObjectQL capability, not an `IDataEngine` member — an
+    // engine without it (a test double, a foreign engine) keeps the previous
+    // behaviour rather than being refused.
+    if (typeof engine?.transaction !== 'function') return run();
+
+    try {
+      return await engine.transaction(async () => {
+        const response = await run();
+        // better-auth RETURNS its faults; see `SubjectErasureRollback`. Any 4xx/5xx
+        // means the erasure did not complete, so whatever part of it already
+        // landed must not survive. 2xx commits; so does the 302 that
+        // `/delete-user/callback` answers with on success.
+        if (response.status >= 400) throw new SubjectErasureRollback(response);
+        return response;
+      });
+    } catch (err) {
+      // The rollback has happened by the time this runs — hand the client the
+      // response better-auth composed, now with no partial writes behind it.
+      if (err instanceof SubjectErasureRollback) return err.response;
+      throw err;
+    }
   }
 
   /**
@@ -3651,11 +4030,19 @@ export class AuthManager {
       const hdr = (k: string): string =>
         ((ctx?.headers?.get?.(k) ?? ctx?.request?.headers?.get?.(k)) as string) || '';
       let token: string | undefined;
+      // `session.token` stores the UNSIGNED value, but a credential reaches us
+      // in either spelling: `bearer()` hands clients the SIGNED `<token>.<sig>`
+      // in `set-auth-token` (and accepts both back), while the cookie always
+      // carries the signed form. Strip the signature on BOTH branches — the
+      // cookie branch always did, and a bearer branch that did not silently
+      // resolved nothing for the exact credential the documented API lane hands
+      // out, which is indistinguishable from "not signed in".
+      const unsigned = (v: string): string => v.split('.')[0];
       const bm = /^Bearer\s+(.+)$/i.exec(hdr('authorization'));
-      if (bm?.[1]) token = bm[1].trim();
+      if (bm?.[1]) token = unsigned(bm[1].trim());
       if (!token) {
         const cm = /(?:^|;\s*)(?:__Secure-|__Host-)?better-auth\.session_token=([^;]+)/.exec(hdr('cookie'));
-        if (cm?.[1]) token = decodeURIComponent(cm[1]).split('.')[0];
+        if (cm?.[1]) token = unsigned(decodeURIComponent(cm[1]));
       }
       if (token) {
         const sess: any = await (ctx as any).context.adapter.findOne({
@@ -3738,6 +4125,129 @@ export class AuthManager {
       return false;
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * [#8289] Answer `/organization/remove-member`'s PERMISSION denial with the
+   * `403 YOU_ARE_NOT_ALLOWED_TO_*` envelope its siblings use, ahead of the
+   * vendor handler that would answer it with the sole-owner invariant's `400`.
+   *
+   * `remove-member-permission-guard.ts` carries the full reading of the vendor
+   * defect and of the two properties that make pre-empting it safe. The shape
+   * here follows from them:
+   *
+   *  - **Silent on the sole-owner path.** A caller removing THEMSELVES while
+   *    carrying the creator role is the one reading under which the vendor's
+   *    message is true, so the guard returns and lets the vendor answer.
+   *  - **FAIL-OPEN on anything unresolvable.** Unlike the `/sso/register` gate,
+   *    this is not a security boundary — better-auth still enforces the whole
+   *    policy after us, and refuses everything it refused before. The guard only
+   *    RESTATES a refusal the vendor is already going to make, so a lookup that
+   *    cannot be completed must fall back to today's behaviour (the vendor's own
+   *    answer), never to an invented refusal. Failing closed here would turn an
+   *    engine hiccup into a 403 on a legitimate owner's removal.
+   *  - **The permission half is the vendor's own `hasPermission`**, called with
+   *    the same roles map we hand the org plugin, so this never becomes a second
+   *    spelling of the authorization question.
+   */
+  private async assertRemoveMemberPermitted(ctx: any): Promise<void> {
+    const engine = this.getDataEngine();
+    if (!engine) return;
+
+    const memberIdOrEmail =
+      typeof ctx?.body?.memberIdOrEmail === 'string' ? ctx.body.memberIdOrEmail : '';
+    if (!memberIdOrEmail) return;
+
+    try {
+      const actor = await this.resolveActor(ctx);
+      // No resolvable session → better-auth's `sessionMiddleware` issues the
+      // 401. Not ours to pre-empt.
+      if (!actor?.userId) return;
+
+      const orgId =
+        (typeof ctx?.body?.organizationId === 'string' && ctx.body.organizationId) ||
+        actor.activeOrgId;
+      // No org in play → the vendor answers NO_ACTIVE_ORGANIZATION.
+      if (!orgId) return;
+
+      const sys = withSystemReadContext(engine);
+
+      const callerRow: any = await sys.findOne('sys_member', {
+        where: { organization_id: orgId, user_id: actor.userId },
+      });
+      if (!callerRow) return; // vendor answers MEMBER_NOT_FOUND
+
+      // Resolve the target exactly the way better-auth's org adapter does:
+      // an `@` means "by email" (lower-cased), anything else is a member id.
+      let targetRow: any = null;
+      if (memberIdOrEmail.includes('@')) {
+        const user: any = await sys.findOne('sys_user', {
+          where: { email: memberIdOrEmail.toLowerCase() },
+        });
+        if (user?.id) {
+          targetRow = await sys.findOne('sys_member', {
+            where: { organization_id: orgId, user_id: user.id },
+          });
+        }
+      } else {
+        targetRow = await sys.findOne('sys_member', { where: { id: memberIdOrEmail } });
+      }
+      if (!targetRow) return; // vendor answers MEMBER_NOT_FOUND
+
+      const creatorRole =
+        (typeof ctx?.context?.orgOptions?.creatorRole === 'string' &&
+          ctx.context.orgOptions.creatorRole) ||
+        DEFAULT_CREATOR_ROLE;
+
+      // (1) The sole-owner invariant's territory — never answer over it.
+      if (
+        isSoleOwnerGuardTerritory(
+          String(actor.userId),
+          String(targetRow.user_id ?? ''),
+          callerRow.role,
+          creatorRole,
+        )
+      ) {
+        return;
+      }
+
+      // (2) The vendor's (3a) predicate: an owner target and a non-owner
+      // caller. A permission refusal — say so, with the right status.
+      if (removalBlockedByOwnerTarget(callerRow.role, targetRow.role, creatorRole)) {
+        const { APIError } = await import('better-auth/api');
+        throw new APIError('FORBIDDEN', {
+          message: REMOVE_MEMBER_DENIAL_MESSAGE,
+          code: REMOVE_MEMBER_DENIAL_CODE,
+        });
+      }
+
+      // (3) The vendor's (4): the real `member: ['delete']` check, decided by
+      // the vendor's own function so there is only ever one answer to it. Only
+      // the envelope differs — better-auth reports this one as 401.
+      const { hasPermission } = await import('better-auth/plugins/organization');
+      const permitted = await hasPermission(
+        {
+          role: callerRow.role,
+          options: (this.orgRolesMap ? { roles: this.orgRolesMap } : {}) as any,
+          permissions: { member: ['delete'] },
+          organizationId: orgId,
+        } as any,
+        ctx,
+      );
+      if (!permitted) {
+        const { APIError } = await import('better-auth/api');
+        throw new APIError('FORBIDDEN', {
+          message: REMOVE_MEMBER_DENIAL_MESSAGE,
+          code: REMOVE_MEMBER_DENIAL_CODE,
+        });
+      }
+    } catch (error) {
+      // Our own refusal must propagate; anything else is a lookup that did not
+      // complete, and per the fail-open contract above that hands the request
+      // back to better-auth unchanged.
+      const { isAPIError } = await import('better-auth/api');
+      if (isAPIError(error)) throw error;
     }
   }
 
@@ -3861,6 +4371,35 @@ export class AuthManager {
           }
         : hostSessionBefore;
 
+    // [#8144] The `login` / `logout` audit writers (#7675 sub-issue A). See
+    // `auth-session-audit.ts` for why these two hooks and no others, and why
+    // logout reads the endpoint path from the hook's own `ctx` argument rather
+    // than from the ambient auth context.
+    //
+    // Host hooks chain FIRST and keep their result, exactly as `sessionBefore`
+    // above does: the audit row is an observation, never a participant in what
+    // better-auth decides. Both emitters are awaited but cannot throw
+    // (`emitAuthSessionAuditEvent` swallows), so neither can turn a valid
+    // sign-in or sign-out into an error.
+    const hostSessionCreateAfter = (host as any)?.session?.create?.after;
+    const sessionCreateAfter = async (session: any, ctx: any) => {
+      const result = hostSessionCreateAfter ? await hostSessionCreateAfter(session, ctx) : undefined;
+      await emitAuthSessionAuditEvent(
+        this.config.getAuditSink?.(),
+        loginEventFor(session, typeof ctx?.path === 'string' ? ctx.path : undefined),
+      );
+      return result;
+    };
+    const hostSessionDeleteAfter = (host as any)?.session?.delete?.after;
+    const sessionDeleteAfter = async (session: any, ctx: any) => {
+      const result = hostSessionDeleteAfter ? await hostSessionDeleteAfter(session, ctx) : undefined;
+      await emitAuthSessionAuditEvent(
+        this.config.getAuditSink?.(),
+        logoutEventFor(session, typeof ctx?.path === 'string' ? ctx.path : undefined),
+      );
+      return result;
+    };
+
     // ADR-0093 D2 — the single owner of the membership invariant. Composed into
     // `user.create.after`, the one seam EVERY creation path flows through
     // (email signup, admin create-user, bulk import, SSO JIT). Host hook (e.g.
@@ -3912,17 +4451,21 @@ export class AuthManager {
           after: userAfter,
         },
       },
-      ...(sessionBefore
-        ? {
-            session: {
-              ...((host as any)?.session ?? {}),
-              create: {
-                ...((host as any)?.session?.create ?? {}),
-                before: sessionBefore,
-              },
-            },
-          }
-        : {}),
+      session: {
+        ...((host as any)?.session ?? {}),
+        create: {
+          ...((host as any)?.session?.create ?? {}),
+          // `sessionBefore` is undefined only when `autoActiveOrganization` is
+          // off AND the host supplied none — spread it in conditionally so the
+          // key is absent rather than explicitly `undefined`.
+          ...(sessionBefore ? { before: sessionBefore } : {}),
+          after: sessionCreateAfter,
+        },
+        delete: {
+          ...((host as any)?.session?.delete ?? {}),
+          after: sessionDeleteAfter,
+        },
+      },
     } as BetterAuthOptions['databaseHooks'];
   }
 
@@ -4277,12 +4820,27 @@ export class AuthManager {
    * `/change-password` the caller is authenticated (session); for
    * `/reset-password` the user is carried by the reset token's verification
    * value (the same lookup better-auth's own handler uses).
+   *
+   * [#8049] `/change-password` goes through {@link resolveActor}, the shared
+   * hook-order-independent resolver — NOT a bare `getSessionFromCtx`. That call
+   * reads the session COOKIE, and better-auth orders `options.hooks.before`
+   * (this hook) ahead of every plugin before-hook, including `bearer()`'s —
+   * which is precisely what converts `Authorization: Bearer` into that cookie.
+   * So on the bearer lane the cookie does not exist yet and the bare call
+   * resolves null, while better-auth's own password write (running after the
+   * conversion) succeeds: a 200 with nothing stamped.
+   *
+   * This is one resolution site on purpose. THREE behaviours hang off the id it
+   * returns — the `password_changed_at` / `must_change_password` stamp, ADR-0069
+   * D1's password-reuse REJECTION, and the history append — so a lane this
+   * cannot see is not merely a lane that stays flagged: it is a lane where a
+   * declared security control silently does not run. Resolving the principal
+   * correctly here fixes all three at once; a second stamp site would fix the
+   * visible one and leave the control transport-dependent.
    */
   private async resolvePasswordChangeUserId(ctx: any): Promise<string | undefined> {
     if (ctx?.path === '/change-password') {
-      const { getSessionFromCtx } = await import('better-auth/api');
-      const sess: any = await getSessionFromCtx(ctx).catch(() => null);
-      return sess?.user?.id ?? sess?.session?.userId ?? undefined;
+      return (await this.resolveActor(ctx))?.userId;
     }
     if (ctx?.path === '/reset-password') {
       const token = typeof ctx?.body?.token === 'string' ? ctx.body.token : '';
@@ -4505,12 +5063,34 @@ export class AuthManager {
    * successful sign-in. Best-effort and always fire-and-forget safe: a login
    * audit write must never turn a valid login into an error, and it runs
    * unconditionally (unlike lockout accounting, which is gated on a threshold).
+   *
+   * [#8144] The write is ATTRIBUTED to the user who just signed in. Before this
+   * it went out as a bare `{ isSystem: true }`, so the audit writer recorded it
+   * with `user_id: null` — and since nothing else wrote a `login` row, that
+   * unattributed `update sys_user` row was the *only* trace a sign-in left
+   * behind (#7675's reproduction). `attributedUserId` is the platform's one
+   * channel for "the human CREDITED for a write the system authorized" (#4586,
+   * `auth-actor-attribution.ts`); it travels as provenance, no security
+   * middleware reads it, and it never becomes the subject the write authorizes
+   * as — `isSystem: true` stays exactly where it is.
+   *
+   * Passed EXPLICITLY rather than through `authSystemWriteContext()`: the
+   * ambient actor scope is filled by better-auth's global before-hook from the
+   * request's session, and on `/sign-in/email` there is no session yet when
+   * that hook runs. The one path that knows who this is, is this one.
+   *
+   * Attributed rather than EXCLUDED (the ruling allowed either). Suppressing it
+   * would mean adding `last_login_at`/`last_login_ip` to the CRUD writer's
+   * repo-wide `NOISE_FIELDS`, which deletes the `last_login_ip` change trail —
+   * a login from a new address is exactly the kind of thing a compliance ledger
+   * is read for — for every object and every deployment. The defect the ruling
+   * named is the missing actor, and this is that actor.
    */
   private async stampLastLogin(userId: string, ip: string | undefined): Promise<void> {
     const engine = this.getDataEngine();
     if (!engine || !userId) return;
     try {
-      const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
+      const SYSTEM_CTX = { isSystem: true, attributedUserId: userId, positions: [], permissions: [] };
       const patch: Record<string, unknown> = { id: userId, last_login_at: new Date() };
       // Cap to the column width (IPv6 textual max 45) — a malformed/oversized
       // forwarded header must not blow up the write.

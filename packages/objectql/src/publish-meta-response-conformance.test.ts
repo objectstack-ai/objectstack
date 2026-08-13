@@ -147,7 +147,7 @@ async function makeProtocol() {
     return new ObjectStackProtocolImplementation(engine);
 }
 
-const viewBody = (label: string) => ({ name: 'cases', type: 'grid', label, columns: ['id'] });
+const viewBody = (label: string) => ({ name: 'cases', type: 'grid', label, columns: ['id'], object: 'case', viewKind: 'list' }); // [#7741] the inline arm requires the object binding pair
 
 /**
  * A `seed` body, which is what makes `seedApplied` appear on the response. It

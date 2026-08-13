@@ -1,16 +1,28 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * mcp-http-tools — object CRUD exposed as MCP tools for the HTTP transport.
+ * mcp-http-tools — object CRUD exposed as MCP tools, for EVERY transport.
  *
- * These are the tools an external agent (Claude Desktop / Cursor) drives over
- * the network. Unlike the stdio bridge — which is a trusted local process —
- * the HTTP surface is reached by arbitrary callers, so every operation MUST
- * run under the caller's resolved principal. We never touch the data engine
- * directly here: all reads/writes go through an injected {@link McpDataBridge}
- * that the runtime wires to the SAME permission/RLS-enforcing path the REST
- * API uses (`callData` with the request's ExecutionContext). This module owns
+ * These are the tools an external agent (Claude Desktop / Cursor) drives, over
+ * the network or down a local pipe. Every operation MUST run under the caller's
+ * resolved principal: we never touch the data engine directly here, all
+ * reads/writes go through an injected {@link McpDataBridge} that the host wires
+ * to the SAME permission/RLS-enforcing path the REST API uses. This module owns
  * the tool *shape*; the bridge owns *execution + security*.
+ *
+ * [#8034] The file name says `http` for historical reasons only, and believing
+ * it cost this package a transport. Until #8034 {@link registerObjectTools} and
+ * {@link registerActionTools} were called from exactly one place —
+ * `MCPServerRuntime.handleHttpRequest()`, on the throwaway per-request server —
+ * so the LONG-LIVED server behind the stdio transport reached `tools/list` with
+ * an empty registry and answered `-32601` while its `initialize` result
+ * advertised `capabilities.tools`. {@link wireBridgeTools} is now the one
+ * composition both transports call, so a tool added here reaches both by
+ * construction and neither can silently serve a different set.
+ *
+ * The bridge, not the transport, is what varies: the HTTP host binds it to the
+ * request's ExecutionContext, the stdio host to the `OS_MCP_STDIO_API_KEY`
+ * identity (re-resolved per call, ADR-0101). Both hand the same interface here.
  *
  * SECURITY (zero-tolerance):
  *  - System objects (`sys_*`) are NOT exposed by default — fail-closed guard on
@@ -22,6 +34,7 @@
 
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { EngineAggregateOptions } from '@objectstack/spec/data';
 import {
   MCP_OAUTH_SCOPE_DATA_READ,
   MCP_OAUTH_SCOPE_DATA_WRITE,
@@ -68,13 +81,21 @@ export interface McpDataBridge {
    * aggregation through the engine simply omits it and the
    * `aggregate_records` tool is not registered (graceful degradation, same
    * contract as {@link McpActionBridge}).
+   *
+   * `groupBy` / `aggregations` are the engine's own declarations
+   * (`EngineAggregateOptions`, #8032) rather than a hand-mirrored copy: the
+   * tool's zod schema below already enforces exactly these shapes at the
+   * ingress, and a private restatement is where the two had drifted — this
+   * interface used to declare `function: string` against the six-name enum
+   * and a `distinct?: boolean` the engine retired (#6815), silently dropping
+   * any caller who believed it.
    */
   aggregate?(
     object: string,
     opts: {
       where?: Record<string, unknown>;
-      groupBy?: Array<string | { field: string; dateGranularity?: string; alias?: string }>;
-      aggregations: Array<{ function: string; field?: string; alias: string; distinct?: boolean }>;
+      groupBy?: NonNullable<EngineAggregateOptions['groupBy']>;
+      aggregations: NonNullable<EngineAggregateOptions['aggregations']>;
       timezone?: string;
     },
   ): Promise<unknown[]>;
@@ -211,15 +232,53 @@ const VALIDATE_SITE_MAP: Record<string, { role: FieldRole; scope: 'record' | 'fl
 };
 
 /**
- * Register the object-CRUD tool set on a fresh per-request {@link McpServer}.
- * All execution is delegated to `bridge`, which is bound to the caller's
- * principal by the runtime.
+ * Wire the FULL tool surface a bridge can serve onto one {@link McpServer} —
+ * the single composition both transports call (#8034).
+ *
+ * Object CRUD always; the business-action pair only when the bridge implements
+ * `listActions` + `runAction` (graceful degradation — a host with no action
+ * mechanism keeps serving object tools unchanged). Whoever owns the server
+ * decides nothing else: the tool set is a function of the BRIDGE, so the same
+ * bridge yields the same tools on stdio and over HTTP, which is the property
+ * `transport-parity` pins.
+ *
+ * @returns the names actually registered, so a host can report its surface
+ *   honestly instead of asserting a count that can drift from the code above.
+ */
+export function wireBridgeTools(
+  server: McpServer,
+  bridge: McpDataBridge & Partial<McpActionBridge>,
+  options: RegisterObjectToolsOptions & RegisterActionToolsOptions = {},
+): string[] {
+  const registered = registerObjectTools(server, bridge, options);
+  if (typeof bridge.listActions === 'function' && typeof bridge.runAction === 'function') {
+    registered.push(...registerActionTools(server, bridge as McpActionBridge, options));
+  }
+  return registered;
+}
+
+/**
+ * Register the object-CRUD tool set on an {@link McpServer} — the throwaway
+ * per-request one on HTTP, the long-lived one behind stdio. All execution is
+ * delegated to `bridge`, which the host binds to the caller's principal.
+ *
+ * @returns the names registered on this call (the set varies with
+ *   `grantedScopes` and with whether the bridge implements `aggregate`).
  */
 export function registerObjectTools(
   server: McpServer,
   bridge: McpDataBridge,
   options: RegisterObjectToolsOptions = {},
-): void {
+): string[] {
+  // Recorded AT the registration site (`note('…')` below) rather than as a
+  // second list here: a literal list would be a parallel spelling of the same
+  // fact, and the first tool added without updating it would make every
+  // caller's report of this surface wrong while every test stayed green.
+  const registered: string[] = [];
+  const note = (name: string): string => {
+    registered.push(name);
+    return name;
+  };
   const allowSystem = options.allowSystemObjects === true;
   const maxLimit = options.maxQueryLimit ?? DEFAULT_MAX_LIMIT;
   // OAuth tool-family gating (#2698). undefined = not scope-limited.
@@ -240,7 +299,7 @@ export function registerObjectTools(
 
   if (canRead) {
     server.registerTool(
-      'list_objects',
+      note('list_objects'),
       {
         description:
           'List the data objects (tables) available in this app. Returns each object\'s name, label and field count.',
@@ -259,7 +318,7 @@ export function registerObjectTools(
     );
 
     server.registerTool(
-      'describe_object',
+      note('describe_object'),
       {
         description:
           'Get the schema of a data object: its fields (name, type, label, required) and enabled features.',
@@ -285,7 +344,7 @@ export function registerObjectTools(
     // self-correct, instead of shipping a formula that silently evaluates to
     // `null` (#1928). Read-only (schema introspection); no data is touched.
     server.registerTool(
-      'validate_expression',
+      note('validate_expression'),
       {
         description:
           'Validate a CEL expression against an object\'s schema before authoring it into metadata. Returns ' +
@@ -343,7 +402,7 @@ export function registerObjectTools(
     );
 
     server.registerTool(
-      'query_records',
+      note('query_records'),
       {
         description:
           'Query records from an object with optional filter, field selection, sorting and pagination. ' +
@@ -385,7 +444,7 @@ export function registerObjectTools(
     if (typeof bridge.aggregate === 'function') {
       const aggregateFn = bridge.aggregate.bind(bridge);
       server.registerTool(
-        'aggregate_records',
+        note('aggregate_records'),
         {
           description:
             'Aggregate records with GROUP BY: count/sum/avg/min/max/count_distinct over an object, ' +
@@ -459,7 +518,7 @@ export function registerObjectTools(
     }
 
     server.registerTool(
-      'get_record',
+      note('get_record'),
       {
         description: 'Fetch a single record by id.',
         inputSchema: {
@@ -484,7 +543,7 @@ export function registerObjectTools(
 
   if (canWrite) {
     server.registerTool(
-      'create_record',
+      note('create_record'),
       {
         description: 'Create a new record. Runs under the caller\'s permissions and validations.',
         inputSchema: {
@@ -505,7 +564,7 @@ export function registerObjectTools(
     );
 
     server.registerTool(
-      'update_record',
+      note('update_record'),
       {
         description: 'Update fields on an existing record by id.',
         inputSchema: {
@@ -527,7 +586,7 @@ export function registerObjectTools(
     );
 
     server.registerTool(
-      'delete_record',
+      note('delete_record'),
       {
         description: 'Delete a record by id. This is destructive.',
         inputSchema: {
@@ -547,11 +606,13 @@ export function registerObjectTools(
       },
     );
   } // end canWrite (data:write)
+
+  return registered;
 }
 
 /**
- * Register the business-action tool set (`list_actions`, `run_action`) on a
- * fresh per-request {@link McpServer}. This is the action analogue of
+ * Register the business-action tool set (`list_actions`, `run_action`) on an
+ * {@link McpServer}. This is the action analogue of
  * {@link registerObjectTools}: it owns the tool *shape* and delegates all
  * resolution + dispatch + security to `bridge`, which the runtime binds to the
  * caller's principal.
@@ -571,16 +632,21 @@ export function registerActionTools(
   server: McpServer,
   bridge: McpActionBridge,
   options: RegisterActionToolsOptions = {},
-): void {
+): string[] {
+  const registered: string[] = [];
+  const note = (name: string): string => {
+    registered.push(name);
+    return name;
+  };
   const allowSystem = options.allowSystemObjects === true;
   // OAuth tool-family gating (#2698): the whole action surface requires
   // `actions:execute`. Not registered = unknown tool = fail-closed.
   if (options.grantedScopes && !options.grantedScopes.includes(MCP_OAUTH_SCOPE_ACTIONS)) {
-    return;
+    return registered;
   }
 
   server.registerTool(
-    'list_actions',
+    note('list_actions'),
     {
       description:
         'List the business actions you can invoke in this app (e.g. "complete task", "convert lead"). ' +
@@ -604,7 +670,7 @@ export function registerActionTools(
   );
 
   server.registerTool(
-    'run_action',
+    note('run_action'),
     {
       description:
         'Invoke a business action by name (see list_actions). Runs the app\'s registered business logic — ' +
@@ -647,6 +713,8 @@ export function registerActionTools(
       }
     },
   );
+
+  return registered;
 }
 
 function messageOf(err: unknown): string {

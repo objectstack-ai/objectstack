@@ -45,6 +45,15 @@
  * warnings included, on the floor. Every case therefore asserts the same lines
  * are present on **stderr**, so a regression toward silencing goes red here
  * too.
+ *
+ * ## The other member of this family
+ *
+ * `os serve` has no `--json` and boots no `bootSchemaStack`, so it is correctly
+ * outside the FAMILY below — but it holds the same invariant for a different
+ * consumer: its stdout is the MCP stdio transport's JSON-RPC channel (#7915).
+ * It reserves the stream through this same module and is pinned by
+ * `serve-stdio-stdout-purity.e2e.test.ts`, which asserts the same two halves —
+ * nothing unparseable on stdout, every diagnostic still on stderr.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';

@@ -23,9 +23,10 @@
  *   - `isActive`   → `active`
  *   - `triggers` / `url` / `method` / `label` / `description` → same-named columns
  *   - `secret`     → `signing_secret` (ENCRYPTED — see below)
+ *   - `headers`    → `headers_secret` (ENCRYPTED — #7986, same channel)
  *   - the rest of the parsed {@link Webhook} → `definition_json` (JSON string)
  *
- * ## The secret does NOT go in `definition_json` (#7799)
+ * ## Neither credential goes in `definition_json` (#7799, #7986)
  * It used to: `definition_json: JSON.stringify(wh)` serialized the whole
  * envelope, key included, into an ordinary textarea on an admin-authorable
  * object — so `GET /api/v1/data/sys_webhook` returned the receiver's only proof
@@ -66,6 +67,12 @@ import {
   isSecretProtectionFailure,
   splitWebhookSecret,
 } from './webhook-secret.js';
+import {
+  WEBHOOK_HEADERS_FIELD,
+  headersPatch,
+  serializeHeaders,
+  splitWebhookHeaders,
+} from './webhook-headers.js';
 
 /** System write context — the boot seeder is not an admin authoring action. */
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
@@ -170,6 +177,12 @@ export async function bootstrapDeclaredWebhooks(
           id: row.id,
           ...mapWebhookToRow(wh),
           ...(await secretPatch(engine, wh, row, subscriptionsObject)),
+          ...(await headersPatch(
+            engine,
+            splitWebhookHeaders(wh as Record<string, unknown>).headers,
+            row,
+            subscriptionsObject,
+          )),
           // Adopt pristine/legacy (pre-provenance) rows so future boots
           // recognize them as package-managed.
           managed_by: 'package',
@@ -181,6 +194,7 @@ export async function bootstrapDeclaredWebhooks(
       }
 
       const { secret } = splitWebhookSecret(wh as Record<string, unknown>);
+      const { headers } = splitWebhookHeaders(wh as Record<string, unknown>);
       const newRow = {
         id: uid('whk'),
         ...mapWebhookToRow(wh),
@@ -189,6 +203,10 @@ export async function bootstrapDeclaredWebhooks(
         // ref behind. Omitted entirely when unauthored, so a webhook with no
         // secret costs no crypto and needs no CryptoProvider.
         ...(secret ? { [WEBHOOK_SECRET_FIELD]: secret } : {}),
+        // [#7986] Same channel, same rule, for the header map — omitted when
+        // unauthored so a header-less webhook still seeds on a host with no
+        // CryptoProvider wired.
+        ...(headers ? { [WEBHOOK_HEADERS_FIELD]: serializeHeaders(headers) } : {}),
         managed_by: 'package',
         customized: false,
         created_at: now,
@@ -269,13 +287,14 @@ async function secretPatch(
 
 /**
  * Translate a validated {@link Webhook} into `sys_webhook` column values.
- * `object → object_name`, `isActive → active`; the envelope MINUS its `secret`
- * is stashed in `definition_json` for the enqueuer's advanced-config read
- * (headers/timeout). The key itself is written separately, into the encrypted
- * `signing_secret` column — see the module header and #7799.
+ * `object → object_name`, `isActive → active`; the envelope MINUS its two
+ * credential passengers — `secret` (#7799) and `headers` (#7986) — is stashed
+ * in `definition_json` for the enqueuer's advanced-config read (`timeoutMs`).
+ * Both credentials are written separately, into their own encrypted columns.
  */
 function mapWebhookToRow(wh: Webhook): Record<string, unknown> {
-  const { envelope } = splitWebhookSecret(wh as Record<string, unknown>);
+  const { envelope: withoutSecret } = splitWebhookSecret(wh as Record<string, unknown>);
+  const { envelope } = splitWebhookHeaders(withoutSecret as Record<string, unknown>);
   return {
     name: wh.name,
     label: wh.label ?? wh.name,

@@ -40,13 +40,62 @@
  *    better-auth object fails as stale, so the exemption list cannot rot into
  *    documentation of nothing.
  *
- * There is a SECOND axis of the same blindness that this file does not close:
- * the `getAuthTables()` call below loads `organization` only, while the auth
- * manager loads many more plugins behind feature flags, so a column an unloaded
- * plugin owns is invisible to the comparison even for a MAPPED object.
- * `sys_user.phone_number` is a live instance — filed as #7820, deliberately not
- * fixed here, because widening the plugin set turns this guard red on an
- * ownership question nobody has decided.
+ * ## The second axis: the plugins the derivation loads (#7820)
+ *
+ * The absence above was about OBJECTS the map skips. The same blindness has a
+ * second axis — COLUMNS the derivation skips because the plugin that owns them
+ * was never loaded. `getAuthTables()` used to be called here with `organization`
+ * alone while the auth manager assembles fourteen plugin factories, so for a
+ * fully MAPPED object like `sys_user` the guard was still comparing against a
+ * fraction of better-auth's real surface and answering green about the rest.
+ *
+ * It is now called with the auth manager's whole set, adopting the reason
+ * `better-auth-schema-parity.test.ts` already records for doing the same:
+ *
+ *   > Plugins that are feature-flagged off in some deployments are still
+ *   > included: the column has to exist before the flag can be turned on.
+ *
+ * A flag is a deployment choice, not a schema fact. `phoneNumber` is opt-in and
+ * owns `sys_user.phone_number` in every deployment that turns it on, so a guard
+ * that only looks at the default set is not answering the ownership question at
+ * all. Widening it produced exactly one live collision — `sys_user.phone_number`,
+ * declared as an ObjectStack extension field while `auth-schema-config.ts` had
+ * shipped the `phoneNumber → phone_number` mapping since #2766. The maintainer
+ * ruled the column better-auth's on 2026-08-12 and it left
+ * `MANAGED_EXTENSION_FIELDS` in the same change.
+ *
+ * Two things keep the widening from silently rotting back, because "green after
+ * the removal" alone would prove only that today's case passes:
+ *
+ *  - the auth-manager DRIFT TRIPWIRE below scans `auth-manager.ts` for the
+ *    plugin factories it imports and fails when one of them is not accounted
+ *    for here, so a plugin added there cannot quietly stay outside the guard;
+ *  - `findCollisions()` is a pure function, exercised against a SYNTHETIC
+ *    registry that declares a column only a widened plugin contributes — so the
+ *    red direction is pinned in-repo, not merely asserted in a PR description.
+ *
+ * ## The third axis: mapping what the widening made derivable (#7994)
+ *
+ * Widening the plugin set had a consequence #7820 did not spend: the models
+ * `twoFactor` / `jwks` / `deviceCode` started being derived, while their three
+ * objects stayed in `UNMAPPED_MANAGED_OBJECTS`. The exemptions outlived their
+ * granted reason — registered because the plugins "are not loaded by this
+ * call", which had become false — and were restated once in place on the
+ * weaker reason that the models were merely unmapped. An exemption whose
+ * justification has to be rewritten to survive is a smell, not a record.
+ *
+ * The 2026-08-12 ruling mapped all three and retired the exemptions, taking
+ * coverage from nine objects to twelve, and explicitly amended the #7820
+ * ruling's 「保持不动」 line to have scoped that card only. `sys_two_factor`
+ * and `sys_jwks` hold credential material (`secret`, `privateKey`), which is
+ * precisely the kind of column D7 exists to stop an extension field from
+ * silently taking ownership of.
+ *
+ * Its acceptance criterion is the one that matters for any coverage change,
+ * and is worth copying: not "the map has twelve entries" — a count derived
+ * from the structure it checks, which cannot fail — but a SYNTHETIC COLLISION
+ * PER TABLE that must turn this suite red, and does not when the mapping is
+ * removed. That is the last describe block but one.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -54,7 +103,20 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getAuthTables } from 'better-auth/db';
-import { organization } from 'better-auth/plugins';
+import { jwt } from 'better-auth/plugins';
+import { admin } from 'better-auth/plugins/admin';
+import { bearer } from 'better-auth/plugins/bearer';
+import { customSession } from 'better-auth/plugins/custom-session';
+import { deviceAuthorization } from 'better-auth/plugins/device-authorization';
+import { genericOAuth } from 'better-auth/plugins/generic-oauth';
+import { haveIBeenPwned } from 'better-auth/plugins/haveibeenpwned';
+import { magicLink } from 'better-auth/plugins/magic-link';
+import { organization } from 'better-auth/plugins/organization';
+import { phoneNumber } from 'better-auth/plugins/phone-number';
+import { twoFactor } from 'better-auth/plugins/two-factor';
+import { oauthProvider } from '@better-auth/oauth-provider';
+import { scim } from '@better-auth/scim';
+import { sso } from '@better-auth/sso';
 
 import {
   MANAGED_EXTENSION_FIELDS,
@@ -74,6 +136,17 @@ const MODEL_TO_OBJECT: Record<string, string> = {
   invitation: 'sys_invitation',
   team: 'sys_team',
   teamMember: 'sys_team_member',
+  // The three opt-in-plugin models #7770 exempted and the 2026-08-12 ruling
+  // mapped (#7994). Each is derivable only because #7820 widened the plugin
+  // set above to everything `auth-manager.ts` can assemble: `twoFactor()`,
+  // `jwt()` and `deviceAuthorization()` are the plugins that contribute them,
+  // so deleting any of those from AUTH_MANAGER_PLUGINS silently withdraws the
+  // object from the collision loop again. Both halves are pinned — the
+  // coverage assertion below, and a per-table synthetic collision at the
+  // bottom of this file.
+  twoFactor: 'sys_two_factor',
+  jwks: 'sys_jwks',
+  deviceCode: 'sys_device_code',
 };
 
 interface UnmappedManagedObject {
@@ -118,41 +191,42 @@ const UNMAPPED_MANAGED_OBJECTS: Record<string, UnmappedManagedObject> = {
     noBetterAuthColumns: true,
   },
 
-  // ── Opt-in core plugins this file's getAuthTables() call does not load ────
-  // It loads `organization` only, which is the surface D7 has covered since
-  // #3624. Column-level parity for these three IS covered — by
-  // `better-auth-schema-parity.test.ts`, which loads their plugins. What is
-  // missing here is only the D7 collision direction, and it costs nothing
-  // while no extension field is declared on them. The moment one is, the
-  // "nothing is silently skipped" assertion below turns red and the mapping
-  // has to be done properly.
-  sys_two_factor: {
-    reason:
-      "Owned by better-auth's opt-in `twoFactor` plugin (model `twoFactor`), which this file's "
-      + 'getAuthTables() call does not load. No extension field is declared on it.',
-  },
-  sys_device_code: {
-    reason:
-      "Owned by better-auth's opt-in `deviceAuthorization` plugin (model `deviceCode`), which this "
-      + "file's getAuthTables() call does not load. No extension field is declared on it.",
-  },
-  sys_jwks: {
-    reason:
-      "Owned by better-auth's opt-in `jwt` plugin (model `jwks`), which this file's getAuthTables() "
-      + 'call does not load. No extension field is declared on it.',
-  },
+  // ── sys_two_factor / sys_jwks / sys_device_code are NO LONGER HERE ────────
+  // #7770 exempted all three because this file's getAuthTables() call did not
+  // load their plugins. #7820 widened the call, which made that reason false,
+  // and the exemptions survived one restatement on a weaker reason: the models
+  // were derived, merely unmapped. The 2026-08-12 ruling (#7994) ended that —
+  // 「map twoFactor / jwks / deviceCode into MODEL_TO_OBJECT, add the three
+  // COVERED_OBJECTS entries, and retire their three #7770 exemptions」 —
+  // explicitly amending the #7820 ruling's 「保持不动」 line to have scoped
+  // that card only. Coverage went 9 → 12 objects.
+  //
+  // ⛔ Do not re-add them here to silence a failure. An exemption is what makes
+  // the collision loop skip a table, and these three hold credential-adjacent
+  // columns (`twoFactor.secret`, `jwks.privateKey`): re-exempting reopens
+  // exactly the invisible-hole shape #7770 was filed for. If the real fix is
+  // to stop deriving one of them, remove its plugin from AUTH_MANAGER_PLUGINS
+  // and say why — the coverage assertion will then demand this list change too.
 
-  // ── Plugins getAuthTables() structurally cannot see (#3653) ───────────────
+  // ── Plugins getAuthTables() cannot ADDRESS as an ObjectStack object (#3653) ─
+  // Both plugins are now in the call (#7820), so their models do appear in the
+  // derived tables — under better-auth's own names (`ssoProvider`,
+  // `scimProvider`, …). What they accept no `schema` option for is the mapping:
+  // there is no way to tell getAuthTables() that `ssoProvider` materializes as
+  // `sys_sso_provider`, so MODEL_TO_OBJECT cannot key off anything the library
+  // reports and the derivation has nothing to compare against the object.
   sys_sso_provider: {
     reason:
-      '@better-auth/sso accepts no `schema` option, so getAuthTables() cannot see its models at all '
-      + '(#3653). Its columns are bridged mechanically by objectql-adapter.ts and gated by the '
-      + 'dedicated sso/scim block in better-auth-schema-parity.test.ts.',
+      '@better-auth/sso accepts no `schema` option, so getAuthTables() reports its models only under '
+      + "better-auth's own names and they cannot be mapped onto this object (#3653). Its columns are "
+      + 'bridged mechanically by objectql-adapter.ts and gated by the dedicated sso/scim block in '
+      + 'better-auth-schema-parity.test.ts.',
   },
   sys_scim_provider: {
     reason:
-      '@better-auth/scim accepts no `schema` option, so getAuthTables() cannot see its models at all '
-      + '(#3653). Same bridge and same dedicated gate as sys_sso_provider.',
+      '@better-auth/scim accepts no `schema` option, so getAuthTables() reports its models only under '
+      + "better-auth's own names and they cannot be mapped onto this object (#3653). Same bridge and "
+      + 'same dedicated gate as sys_sso_provider.',
   },
 
   // ── @better-auth/oauth-provider — separate package, dedicated gate ────────
@@ -172,7 +246,7 @@ const UNMAPPED_MANAGED_OBJECTS: Record<string, UnmappedManagedObject> = {
 const MAPPED_OBJECTS: readonly string[] = Object.values(MODEL_TO_OBJECT);
 
 /**
- * The nine objects this guard has real collision coverage for, written out as
+ * The twelve objects this guard has real collision coverage for, written out as
  * a LITERAL rather than derived from `MODEL_TO_OBJECT`.
  *
  * Deriving it would have made the pin below unable to see the regression it
@@ -181,6 +255,12 @@ const MAPPED_OBJECTS: readonly string[] = Object.values(MODEL_TO_OBJECT);
  * collision loop. Measured — an ablation that removed `teamMember` left a
  * derived version of this pin green and was caught only by the accounting
  * assertion. Two independent lists, so one of them has to be wrong out loud.
+ *
+ * ⚠️ This list is a COUNT, and a count certifies nothing on its own: it says
+ * which objects the loop reaches, not that reaching them judges anything. The
+ * assertion that the three objects added in #7994 are really judged is the
+ * per-table synthetic collision at the bottom of this file, which fails the
+ * moment a mapping is deleted.
  */
 const COVERED_OBJECTS: readonly string[] = [
   'sys_user',
@@ -192,6 +272,10 @@ const COVERED_OBJECTS: readonly string[] = [
   'sys_invitation',
   'sys_team',
   'sys_team_member',
+  // #7994 — the three opt-in-plugin tables, mapped by the 2026-08-12 ruling.
+  'sys_two_factor',
+  'sys_jwks',
+  'sys_device_code',
 ];
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -254,18 +338,98 @@ function toSnakeCase(name: string): string {
 }
 
 /**
+ * Every better-auth plugin factory `auth-manager.ts` can assemble, keyed by the
+ * name it imports, with how this guard accounts for it.
+ *
+ * The plugin SET is derived from this map rather than written beside it, which
+ * is what makes the accounting real: an entry carrying a `construct` IS in the
+ * derived surface, because that thunk is what builds it. There is no way to
+ * declare a plugin covered and not load it — the failure a hand-kept pair of
+ * lists invites. `skip` is the other disposition and costs a written reason;
+ * "it is off by default" is not one, see the file header.
+ *
+ * Feature-flagged-off plugins are all constructed on the reason
+ * `better-auth-schema-parity.test.ts` states for its own derivation: the column
+ * has to exist before the flag can be turned on, so a deployment-time flag
+ * cannot decide who owns a column. Several contribute no model surface at all
+ * today (`bearer`, `haveIBeenPwned`, `magicLink` — which reuses `verification`
+ * — `genericOAuth`, `customSession`); they are constructed anyway so the set is
+ * "what the auth manager loads" rather than "what someone judged relevant", and
+ * so a version bump that gives one of them a user column is seen here the day
+ * it lands.
+ *
+ * ⛔ Do NOT add the `schema:` options from `auth-schema-config.ts` to make this
+ * match the parity gate's call. The two gates want different things from the
+ * same function: parity resolves the exact COLUMN better-auth writes, so it
+ * needs our `fields` mappings; D7 asks whose column it is, and our schema
+ * config carries `additionalFields` — the ADR-0105 D8 `businessUnitId` /
+ * `positions` on `invitation` are ObjectStack's, declared through better-auth's
+ * own extension seam. Feeding those in makes the derived "better-auth surface"
+ * include our extension fields and the guard reports us colliding with
+ * ourselves. Pinned by the `additionalFields` assertion below. The snake_case
+ * half the mappings would provide is already covered: `toSnakeCase` records
+ * both spellings.
+ */
+const AUTH_MANAGER_PLUGINS: Record<string, { construct: () => unknown } | { skip: string }> = {
+  bearer: { construct: () => bearer() },
+  // `teams: { enabled: true }` mirrors the auth-manager default. Without it
+  // better-auth omits the team models entirely, so the sys_team /
+  // sys_team_member entries below would be absent and any extension field added
+  // to those objects would collide silently. (#3624)
+  organization: { construct: () => organization({ teams: { enabled: true } }) },
+  twoFactor: { construct: () => twoFactor() },
+  haveIBeenPwned: { construct: () => haveIBeenPwned() },
+  admin: { construct: () => admin() },
+  // The callbacks below are required by their constructors and never invoked:
+  // this file only reads the schema each plugin declares.
+  phoneNumber: { construct: () => phoneNumber({ sendOTP: async () => undefined }) },
+  magicLink: { construct: () => magicLink({ sendMagicLink: async () => undefined }) },
+  genericOAuth: { construct: () => genericOAuth({ config: [] }) },
+  jwt: { construct: () => jwt() },
+  deviceAuthorization: { construct: () => deviceAuthorization() },
+  customSession: {
+    construct: () =>
+      customSession(async ({ user, session }: { user: unknown; session: unknown }) => ({
+        user,
+        session,
+      })),
+  },
+  sso: { construct: () => sso() },
+  scim: { construct: () => scim() },
+  // `loginPage` / `consentPage` are required by the constructor and are URLs
+  // the auth manager resolves from the console mount point; nothing about the
+  // schema depends on their value.
+  oauthProvider: {
+    construct: () => oauthProvider({ loginPage: '/login', consentPage: '/oauth/consent' }),
+  },
+  // [#8289] NOT a plugin factory — the scanner's regex cannot tell the two
+  // apart, because both are a one-name destructure off `better-auth/plugins/*`.
+  // `hasPermission` is the organization plugin's exported permission PREDICATE
+  // (`(input, ctx) => Promise<boolean>`, `has-permission.mjs`); it declares no
+  // schema, contributes no model and no column, so there is nothing here for
+  // the collision loop to compare. `assertRemoveMemberPermitted` calls it so the
+  // remove-member gate asks the vendor's own authorization question rather than
+  // keeping a second spelling of it. The `stale` assertion below removes this
+  // entry's licence the moment that import goes away.
+  hasPermission: {
+    skip: 'permission predicate exported by the organization plugin — declares no schema',
+  },
+};
+
+/** The plugin set the auth manager actually assembles (`buildPluginList()`). */
+function betterAuthPluginSet(): unknown[] {
+  return Object.values(AUTH_MANAGER_PLUGINS)
+    .filter((entry): entry is { construct: () => unknown } => 'construct' in entry)
+    .map((entry) => entry.construct());
+}
+
+/**
  * Every field better-auth owns, per ObjectStack object name, in BOTH spellings
  * — comparing only one would let `parentOrganizationId` slip past a check on
  * `parent_organization_id`.
  */
 function betterAuthFieldsByObject(): Record<string, Set<string>> {
-  // `teams: { enabled: true }` mirrors the auth-manager default. Without it
-  // better-auth omits the team models entirely, so the sys_team /
-  // sys_team_member entries below would be absent and any extension field
-  // added to those objects would collide silently. (#3624)
-  const tables = getAuthTables({
-    plugins: [organization({ teams: { enabled: true } })],
-  } as never);
+  const tables = getAuthTables({ plugins: betterAuthPluginSet() } as never);
   const out: Record<string, Set<string>> = {};
   for (const [model, table] of Object.entries(tables ?? {})) {
     const object = MODEL_TO_OBJECT[model];
@@ -282,6 +446,59 @@ function betterAuthFieldsByObject(): Record<string, Set<string>> {
   return out;
 }
 
+/**
+ * The collision rule itself, as a pure function of the two surfaces.
+ *
+ * Extracted so the RED direction can be pinned with a synthetic registry
+ * instead of only being observed once by whoever last ablated the file. The
+ * real assertion calls it with `MANAGED_EXTENSION_FIELDS`; the synthetic-overlap
+ * test calls it with a registry declaring a column that only a WIDENED plugin
+ * contributes, which is the future case #7820 exists to make catchable.
+ */
+function findCollisions(
+  registry: Readonly<Record<string, ReadonlySet<string>>>,
+  byObject: Record<string, Set<string>>,
+): string[] {
+  const collisions: string[] = [];
+  for (const [object, fields] of Object.entries(registry)) {
+    const owned = byObject[object];
+    // Accounted for by the "nothing is silently skipped" assertion — the loop
+    // never passes on an object it simply could not derive.
+    if (!owned) continue;
+    for (const field of fields) {
+      if (owned.has(field)) collisions.push(`${object}.${field}`);
+    }
+  }
+  return collisions;
+}
+
+/**
+ * The better-auth plugin factories `auth-manager.ts` imports, scanned from its
+ * source.
+ *
+ * Scanned rather than imported for the same reason `declaredBetterAuthObjects()`
+ * scans: the auth manager builds its list behind feature flags inside an async
+ * method, so there is no value to import that names the SET. Reading the file is
+ * the only way to ask "which plugins can this process load" without booting one
+ * — and this file must not edit `auth-manager.ts` to make it exportable, which
+ * would put the answer under the control of the thing being audited.
+ *
+ * `@better-auth/core/*` is excluded: those are runtime utilities
+ * (`runWithRequestState`, `isPublicRoutableHost`), not plugin factories, and
+ * they declare no schema.
+ */
+function authManagerPluginFactories(): string[] {
+  const source = readFileSync(join(HERE, 'auth-manager.ts'), 'utf8');
+  const found = new Set<string>();
+  const pattern =
+    /const\s*\{\s*([A-Za-z0-9_]+)\s*\}\s*=\s*await import\('((?:better-auth\/plugins|@better-auth\/)[^']*)'\)/g;
+  for (const [, name, specifier] of source.matchAll(pattern)) {
+    if (specifier.startsWith('@better-auth/core')) continue;
+    found.add(name);
+  }
+  return [...found].sort();
+}
+
 describe('managed extension fields (ADR-0105 D7)', () => {
   const byObject = betterAuthFieldsByObject();
   const managedObjects = declaredBetterAuthObjects();
@@ -292,14 +509,14 @@ describe('managed extension fields (ADR-0105 D7)', () => {
     expect(byObject.sys_user?.size ?? 0).toBeGreaterThan(0);
   });
 
-  it('keeps the nine mapped models covered, exactly (coverage cannot shrink)', () => {
+  it('keeps the twelve mapped models covered, exactly (coverage cannot shrink)', () => {
     // Two ways an object can silently withdraw from the collision loop, and
     // this pins both against the same literal: the LIBRARY stops emitting the
     // model, or the MAP stops naming it. Either is the #7770 shape arriving
     // as a regression rather than as a pre-existing absence.
     expect(
       [...MAPPED_OBJECTS].sort(),
-      'MODEL_TO_OBJECT no longer maps exactly the nine covered objects — a deleted mapping '
+      'MODEL_TO_OBJECT no longer maps exactly the twelve covered objects — a deleted mapping '
         + 'withdraws an object from the collision loop as surely as a missing one ever did.',
     ).toEqual([...COVERED_OBJECTS].sort());
     expect(
@@ -331,10 +548,9 @@ describe('managed extension fields (ADR-0105 D7)', () => {
       `these objects declare managedBy: 'better-auth' but are absent from MODEL_TO_OBJECT, so this `
         + `guard skips them entirely and any extension field declared on them gets ZERO collision `
         + `coverage while reading as covered: ${unaccounted.join(', ')}. Pick one deliberately:\n`
-        + `  (a) MAP IT — and it takes both halves, in this order: 1. pass the plugin that owns the `
-        + `model into the getAuthTables() call in betterAuthFieldsByObject(), because a map entry `
-        + `alone derives no table and the object stays silently skipped; 2. add the `
-        + `model: 'object_name' entry to MODEL_TO_OBJECT.\n`
+        + `  (a) MAP IT — and it takes both halves, in this order: 1. make sure the plugin that owns `
+        + `the model is in betterAuthPluginSet(), because a map entry alone derives no table and the `
+        + `object stays silently skipped; 2. add the model: 'object_name' entry to MODEL_TO_OBJECT.\n`
         + `  (b) REGISTER IT in UNMAPPED_MANAGED_OBJECTS with the reason better-auth owns no `
         + `derivable surface for it here.\n`
         + `  Do NOT complete MANAGED_EXTENSION_FIELDS just to make the comparison look meaningful: `
@@ -382,15 +598,7 @@ describe('managed extension fields (ADR-0105 D7)', () => {
   });
 
   it('no declared extension field collides with better-auth\'s own schema', () => {
-    const collisions: string[] = [];
-    for (const [object, fields] of Object.entries(MANAGED_EXTENSION_FIELDS)) {
-      const owned = byObject[object];
-      // Accounted for by the assertion directly above — never a silent pass.
-      if (!owned) continue;
-      for (const field of fields) {
-        if (owned.has(field)) collisions.push(`${object}.${field}`);
-      }
-    }
+    const collisions = findCollisions(MANAGED_EXTENSION_FIELDS, byObject);
     expect(
       collisions,
       `these extension fields collide with better-auth's own schema at the pinned version: ` +
@@ -398,6 +606,101 @@ describe('managed extension fields (ADR-0105 D7)', () => {
         `its field (and migrate) or drop the extension. Silently sharing a column means one side ` +
         `clobbers the other with no error.`,
     ).toEqual([]);
+  });
+
+  it('derives the columns the WIDENED plugin set contributes (#7820)', () => {
+    // The half of the #7820 ruling that "green on today's removal" cannot
+    // prove. Every name here is contributed by a plugin the derivation did NOT
+    // load before this change, and every one is written as a LITERAL — not read
+    // back out of the plugin list — so narrowing the list again cannot shrink
+    // this expectation along with the surface it is meant to police. (That
+    // co-moving shape is exactly how a sibling coverage pin stayed green while
+    // a mapping was deleted underneath it.)
+    const expected: Array<[string, string, string]> = [
+      ['sys_user', 'two_factor_enabled', 'twoFactor'],
+      ['sys_user', 'role', 'admin'],
+      ['sys_user', 'banned', 'admin'],
+      ['sys_user', 'ban_reason', 'admin'],
+      ['sys_user', 'ban_expires', 'admin'],
+      ['sys_user', 'phone_number', 'phoneNumber'],
+      ['sys_user', 'phone_number_verified', 'phoneNumber'],
+      ['sys_session', 'impersonated_by', 'admin'],
+    ];
+    const missing = expected
+      .filter(([object, column]) => !byObject[object]?.has(column))
+      .map(([object, column, plugin]) => `${object}.${column} (${plugin} plugin)`);
+    expect(
+      missing,
+      `the derived better-auth surface no longer contains columns the auth manager's plugin set `
+        + `owns: ${missing.join(', ')}. The plugin list in betterAuthPluginSet() was narrowed, so `
+        + `this guard is back to answering green about columns it is not looking at — which is the `
+        + `#7820 defect, not a passing test. Restore the plugin, or, if better-auth genuinely moved `
+        + `the column, update this list and say where it went.`,
+    ).toEqual([]);
+  });
+
+  it('derives better-auth\'s OWN surface, not our additionalFields (#7820)', () => {
+    // The tempting "improvement" this blocks: passing the `schema:` options
+    // from auth-schema-config.ts into betterAuthPluginSet() to match the parity
+    // gate's call. Those carry ADR-0105 D8's `additionalFields`, which are
+    // OURS, declared through better-auth's extension seam — derived that way,
+    // the guard reports `sys_invitation.business_unit_id` and `.positions` as
+    // better-auth-owned and demands we rename our own columns.
+    for (const field of ['business_unit_id', 'positions']) {
+      expect(
+        byObject.sys_invitation?.has(field),
+        `${field} is an ObjectStack extension field (ADR-0105 D8 placement intent) that appears in `
+          + `getAuthTables() output only when our own schema overrides are passed in. It is in the `
+          + `derived better-auth surface, so the derivation is no longer describing better-auth — `
+          + `drop the schema: options from betterAuthPluginSet().`,
+      ).toBe(false);
+    }
+    // Same claim from the other side: the mapped-through fields better-auth
+    // really does own on that table are still derived.
+    expect(byObject.sys_invitation?.has('inviter_id')).toBe(true);
+  });
+
+  it('every plugin auth-manager.ts can load is accounted for here (#7820)', () => {
+    // The tripwire that keeps the widening wide. Without it the plugin list
+    // above is a snapshot of one afternoon's auth manager, and the next plugin
+    // added there re-opens the exact blind spot #7820 closed — silently,
+    // because a plugin nobody loaded owns columns nobody compared.
+    const imported = authManagerPluginFactories();
+    const declared = Object.keys(AUTH_MANAGER_PLUGINS).sort();
+
+    const unaccounted = imported.filter((name) => AUTH_MANAGER_PLUGINS[name] === undefined);
+    expect(
+      unaccounted,
+      `auth-manager.ts imports better-auth plugin factories this guard does not account for: `
+        + `${unaccounted.join(', ')}. A plugin the auth manager can assemble owns columns on the `
+        + `tables this guard compares, so leaving it out means the derived surface is narrower than `
+        + `the one a booted environment gets. Add it to AUTH_MANAGER_PLUGINS with a construct thunk `
+        + `— or, if it genuinely declares no schema this call can read, with a skip reason. "It is `
+        + `off by default" is NOT a reason: the column has to exist before the flag can be turned on.`,
+    ).toEqual([]);
+
+    const stale = declared.filter((name) => !imported.includes(name));
+    expect(
+      stale,
+      `AUTH_MANAGER_PLUGINS names plugins auth-manager.ts no longer imports: ${stale.join(', ')}. `
+        + `Either the plugin was dropped (remove its entry) or the import shape changed and this scan `
+        + `is now blind — check authManagerPluginFactories() against the real import sites before `
+        + `deleting anything.`,
+    ).toEqual([]);
+
+    // A skip is a decision, so it costs a sentence. `construct` needs no such
+    // check: it cannot claim coverage it does not deliver, because the thunk IS
+    // what builds the derived surface.
+    for (const [name, entry] of Object.entries(AUTH_MANAGER_PLUGINS)) {
+      if ('skip' in entry) {
+        expect(entry.skip.length, `${name} is skipped but carries no reason`).toBeGreaterThan(20);
+      }
+    }
+    // The set really is built from the map — otherwise the reconciliation above
+    // would be auditing a list nothing reads.
+    expect(betterAuthPluginSet().length).toBe(
+      Object.values(AUTH_MANAGER_PLUGINS).filter((entry) => 'construct' in entry).length,
+    );
   });
 
   it('editable extension fields are a SUBSET of declared extension fields', () => {
@@ -429,6 +732,130 @@ describe('managed extension fields (ADR-0105 D7)', () => {
   it('returns empty sets for an object with no extensions', () => {
     expect(managedExtensionFields('sys_session').size).toBe(0);
     expect(managedExtensionEditableFields('sys_session').size).toBe(0);
+  });
+});
+
+describe('the collision rule goes red on a FUTURE overlap (#7820)', () => {
+  // The ruling that widened the derivation states its post-condition in two
+  // directions: green on the `sys_user.phone_number` removal, and genuinely red
+  // on any new overlap. The first is the suite above. This is the second, and
+  // it is a permanent pin rather than a one-off ablation someone ran once —
+  // a widening that only makes today's case pass has implemented half of it.
+  const byObject = betterAuthFieldsByObject();
+
+  it('reports a column contributed by a WIDENED plugin as a collision', () => {
+    // `two_factor_enabled` reaches the surface only through `twoFactor()`,
+    // which the pre-#7820 derivation did not load — so under the old plugin set
+    // this exact registry produced NO collision. That is the regression being
+    // pinned, in the direction that matters.
+    expect(
+      findCollisions({ sys_user: new Set(['two_factor_enabled']) }, byObject),
+    ).toEqual(['sys_user.two_factor_enabled']);
+  });
+
+  it('reports the camelCase spelling of the same column', () => {
+    // better-auth authors `twoFactorEnabled`; a registry that happened to spell
+    // it that way must not slip past a snake_case-only comparison.
+    expect(
+      findCollisions({ sys_user: new Set(['twoFactorEnabled']) }, byObject),
+    ).toEqual(['sys_user.twoFactorEnabled']);
+  });
+
+  it('reports `phone_number` if it is ever re-declared as an extension field', () => {
+    // The specific entry #7820 removed. Re-adding it must not be a quiet edit:
+    // better-auth owns the column via `AUTH_PHONE_NUMBER_USER_FIELDS`, and the
+    // real registry assertion above would go red — this states why.
+    expect(
+      findCollisions({ sys_user: new Set(['phone_number']) }, byObject),
+    ).toEqual(['sys_user.phone_number']);
+  });
+
+  it('stays silent on a genuine extension field, so the pin is not vacuous', () => {
+    // A rule that reported everything would satisfy the three tests above while
+    // making the real assertion useless.
+    expect(findCollisions({ sys_user: new Set(['manager_id']) }, byObject)).toEqual([]);
+  });
+});
+
+describe('the three newly mapped tables are really judged (#7994)', () => {
+  // The 2026-08-12 ruling's acceptance criterion, stated as tests rather than
+  // as a count. "Coverage goes 9 → 12" is satisfied by the COVERED_OBJECTS pin
+  // above — but that pin only proves the collision loop REACHES these tables.
+  // What follows proves it JUDGES them: each case names a column better-auth
+  // really owns on that table at the pinned version and requires the rule to
+  // report it.
+  //
+  // These fail the moment a mapping is deleted, which is what makes them worth
+  // having: with `twoFactor` out of MODEL_TO_OBJECT, `byObject.sys_two_factor`
+  // is undefined, `findCollisions`'s `if (!owned) continue` swallows the
+  // synthetic field, the call returns `[]` and every expectation here goes red.
+  // (Verified by ablation before this landed, in both directions.)
+  //
+  // Deliberately driven through a SYNTHETIC registry rather than by adding
+  // entries to `MANAGED_EXTENSION_FIELDS`: that map is also the ADR-0092 D2
+  // write whitelist, so a column added there widens what a generic write
+  // surface may touch. On `sys_two_factor.secret` or `sys_jwks.private_key`
+  // that is a security change, and D7 coverage must never be bought with one.
+  const byObject = betterAuthFieldsByObject();
+
+  const OWNED: Array<[object_: string, snake: string, camel: string, plugin: string]> = [
+    ['sys_two_factor', 'backup_codes', 'backupCodes', 'twoFactor'],
+    ['sys_jwks', 'private_key', 'privateKey', 'jwt'],
+    ['sys_device_code', 'user_code', 'userCode', 'deviceAuthorization'],
+  ];
+
+  for (const [object_, snake, camel, plugin] of OWNED) {
+    it(`reports a synthetic collision on ${object_} (both spellings)`, () => {
+      const why =
+        `${object_} was mapped into MODEL_TO_OBJECT by the 2026-08-12 ruling so that a platform `
+        + `extension field colliding with better-auth's own column is caught here. A green result `
+        + `means the table is back OUTSIDE the collision loop — most likely its mapping was `
+        + `deleted, or the ${plugin} plugin left AUTH_MANAGER_PLUGINS so no model is derived for `
+        + `it. Either way this guard is answering about a table it is not looking at, which is the `
+        + `#7770 defect. Do NOT "fix" this by re-adding an UNMAPPED_MANAGED_OBJECTS exemption.`;
+      expect(findCollisions({ [object_]: new Set([snake]) }, byObject), why)
+        .toEqual([`${object_}.${snake}`]);
+      // better-auth authors camelCase; `toSnakeCase` records both spellings, so
+      // a registry that happened to use the library's own spelling must not
+      // slip past a snake_case-only comparison.
+      expect(findCollisions({ [object_]: new Set([camel]) }, byObject), why)
+        .toEqual([`${object_}.${camel}`]);
+    });
+  }
+
+  it('stays silent on plausible extension names these tables do NOT own', () => {
+    // Non-vacuity, per table: a rule that reported every field would satisfy
+    // the three cases above while making the real registry assertion useless.
+    // Each name below is one a future ObjectStack extension might genuinely
+    // take, and none is in better-auth's surface at the pinned version.
+    expect(findCollisions({ sys_two_factor: new Set(['mfa_policy_id']) }, byObject)).toEqual([]);
+    expect(findCollisions({ sys_jwks: new Set(['rotation_note']) }, byObject)).toEqual([]);
+    expect(findCollisions({ sys_device_code: new Set(['approved_by_id']) }, byObject)).toEqual([]);
+  });
+
+  it('derives a credential-bearing column set for each of the three', () => {
+    // The ② lens of the card: these tables are why the expansion was worth
+    // doing. If better-auth ever moves `secret` / `privateKey` / `deviceCode`
+    // off these models, the collision cases above would start passing for the
+    // wrong reason (nothing owned, nothing to collide with) — this says so
+    // first, and names the column that moved.
+    expect(byObject.sys_two_factor?.has('secret'), 'twoFactor.secret').toBe(true);
+    expect(byObject.sys_jwks?.has('private_key'), 'jwks.privateKey').toBe(true);
+    expect(byObject.sys_device_code?.has('device_code'), 'deviceCode.deviceCode').toBe(true);
+  });
+
+  it('carries no exemption for the three tables any more', () => {
+    // The ruling's second half, in-repo. The stale-entry assertion above
+    // already fails on a mapped-AND-exempt object; this states the intent
+    // directly, so the next reader sees a removal that was decided rather
+    // than an entry someone lost track of.
+    for (const object_ of ['sys_two_factor', 'sys_jwks', 'sys_device_code']) {
+      expect(
+        UNMAPPED_MANAGED_OBJECTS[object_],
+        `${object_} is exempt again. An exemption is what makes the collision loop skip a table, `
+          + `so re-adding one here silently un-does the 2026-08-12 ruling's coverage expansion.`,
+      ).toBeUndefined();
+    }
   });
 });
 

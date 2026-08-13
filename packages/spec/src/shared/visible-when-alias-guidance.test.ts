@@ -174,10 +174,23 @@ describe('#7832 — the deliberate gaps (an alias here would name a key the shap
     ['SelectOptionSchema', SelectOptionSchema, OPTION],
     ['FormSectionSchema', FormSectionSchema, SECTION],
     ['PageComponentSchema', PageComponentSchema, COMPONENT],
-  ])('%s declares no `disabledWhen` / `disabled` / `readonly`, so `disabled` stays uncurated', (_n, schema, base) => {
-    // Rejected — loudly, with the surface named — just without a pointer,
-    // because there is nothing on this shape to point at. If any of these ever
+  ])('%s declares no `disabledWhen` / `disabled` / `readonly`, so no alias row is filed', (_n, schema, base) => {
+    // Rejected — loudly, with the surface named — and with no RENAME, because
+    // there is nothing on this shape to point a rename at. If any of these ever
     // gains a disabled-ish key, this assertion fails and the row becomes owed.
+    //
+    // #7887 ruled the absence a BOUNDARY rather than a gap and gave the two
+    // view/page shapes a prescription saying so (`EDITABILITY_BOUNDARY_KEYS`,
+    // pinned in `editability-boundary.test.ts`). That is the guidance channel,
+    // not the alias channel: no key was added, no alias row was registered, and
+    // every assertion below is unchanged and green by construction.
+    //
+    // `SelectOptionSchema` was out of that ruling's scope until #8201, which
+    // re-measured the ruling's premise on the object-field pipeline (zero
+    // per-option `disabled` consumers) and gave this shape the boundary too —
+    // with its own prescription, because an option has no fields inside it to
+    // be redirected to. Same channel, same red line: still no key, still no
+    // alias row, so all three rows below stay green by construction.
     for (const target of ['disabledWhen', 'disabled', 'readonly']) {
       expect(
         schema.safeParse({ ...base, [target]: 'x' }).success,

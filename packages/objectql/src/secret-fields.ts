@@ -133,10 +133,16 @@ export function collectMaskedReadFields(schema: ServiceObject | undefined | null
  *    that needs a column readable simply does not flag it. An exemption here
  *    would silently disable the flag on exactly the identity objects it was
  *    minted for.
- *  - **The caller OMITS the key rather than masking it** (see
+ *  - **The read-path caller OMITS the key rather than masking it** (see
  *    {@link SECRET_MASK}). The mask signals "a value is set"; on a `required`
  *    column that is zero bits of information, and shipping it would still put a
  *    value under a field whose declaration promises none.
+ *
+ * [#7922] The read path is not the only consumer. `aggregate()` cannot omit —
+ * a flagged column reached through `groupBy` is already the group KEY, and
+ * masking keys corrupts the result — so the aggregate gate unions this collector
+ * with {@link collectCredentialFields} and REFUSES the query instead. Same
+ * question, two answers, because the two surfaces have different options.
  *
  * Returns an empty array when the schema has no fields or none are flagged, so
  * callers can fast-path on `length === 0`.
@@ -162,6 +168,15 @@ export function collectInternalReadFields(schema: ServiceObject | undefined | nu
  * column is an inference oracle regardless of who owns the table. So the
  * aggregate-rejection gate keys off this stricter, exemption-free collector,
  * keeping the two concerns independent (they must not drift). See ADR-0100 / #3171.
+ *
+ * [#7922] This is the **type-keyed half** of what that gate refuses. Being
+ * type-keyed it cannot see ADR-0100's third channel — a one-way hash in a `text`
+ * column — so the gate unions it with {@link collectInternalReadFields}, the
+ * flag-keyed half. ⛔ Do not collapse the two by widening either one — they
+ * answer different questions ("is this a credential type?" vs "is this field
+ * declared unreturnable?") and their other consumers respond differently: the
+ * read path MASKS a credential type and OMITS a flagged field. Compose at the
+ * call site, which is what the gate does.
  *
  * Returns an empty array when the schema has no fields or no credential fields,
  * so callers can fast-path on `length === 0`.

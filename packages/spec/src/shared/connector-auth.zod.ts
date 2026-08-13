@@ -6,6 +6,20 @@ import { z } from 'zod';
  * SHARED CONNECTOR AUTHENTICATION SCHEMAS
  * These schemas are used by connectors and integrations for external auth.
  * They define "How we authenticate TO other systems", not "How users authenticate TO us".
+ *
+ * ⚠️ Two shapes live here, and which one a door accepts is load-bearing (#7990):
+ *
+ *  - {@link ConnectorAuthConfigSchema} is the RUNTIME shape — every non-`none`
+ *    variant REQUIRES its secret inline (`token` / `key` / `password` /
+ *    `clientSecret`), because it describes what a provider factory receives
+ *    AFTER resolution, or what a plugin hands to `registerConnector`. It must
+ *    never be accepted at an authoring/publish door: a published connector row
+ *    is stored whole in `sys_metadata`, so an inline secret is cleartext at
+ *    rest. `DeclarativeConnectorEntrySchema` enforces that refusal on every
+ *    authored entry (descriptor or instance) since #7990.
+ *  - {@link ConnectorInstanceAuthSchema} is the AUTHORED shape — secret-bearing
+ *    variants carry a `credentialRef` reference resolved through the
+ *    secrets/env layer at materialization (ADR-0097 §3), never the secret.
  */
 
 /**

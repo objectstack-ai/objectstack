@@ -10,8 +10,14 @@ import {
   formatReport,
   runRlsProofs,
   formatRlsReport,
+  provisionRlsProbePersona,
+  provisionRlsPositionPersona,
+  declaredPositionNames,
+  rlsProbeSecurity,
   type VerifyReport,
   type RlsReport,
+  type RlsProbeDescriptor,
+  type RlsPositionPersonaInput,
 } from '@objectstack/verify';
 import { loadConfig } from '../utils/config.js';
 
@@ -106,22 +112,81 @@ export default class Verify extends Command {
     // proving its authorization.
     let rls: RlsReport | undefined;
     if (flags.rls) {
-      const rlsStack = await bootStack(config, { multiTenant });
+      // [#7685] The by-id-write class is only REACHABLE for a persona holding
+      // the object-level grants AND standing outside the record scope. A bare
+      // `signUp()` member holds no grants, so `checkObjectPermission` answers
+      // 403 before record scope is consulted and every probe was masked — 11 of
+      // 13 "consistent" showcase verdicts were that 403, an unfalsifiable green.
+      // `rlsProbeSecurity` registers the capability #7665's acceptance
+      // criterion 2 names (object read+edit, owner-scoped SELECT only) and
+      // carries the app's declared default profile through unchanged.
+      const rlsStack = await bootStack(config, { multiTenant, security: rlsProbeSecurity(config) });
       try {
         const adminToken = await rlsStack.signIn();
-        const memberToken = await rlsStack.signUp('verify-member@objectstack.test');
-        rls = await runRlsProofs(rlsStack, adminToken, memberToken, config);
+        let probeToken: string;
+        let probe: RlsProbeDescriptor;
+        try {
+          const persona = await provisionRlsProbePersona(rlsStack, config);
+          probeToken = persona.token;
+          probe = { label: persona.email, grantedObjects: persona.grantedObjects };
+        } catch (e) {
+          // Prefer failing to falling back (Route & surface ownership §3): a
+          // weaker persona still produces a report, so the degradation is
+          // recorded on the report itself AND counted as a hard failure below.
+          // Silently probing with an ungranted member is the exact false green
+          // this issue exists to remove.
+          probeToken = await rlsStack.signUp('verify-member@objectstack.test');
+          probe = {
+            label: 'verify-member@objectstack.test',
+            degraded: `probe persona provisioning failed: ${(e as Error).message}`,
+          };
+        }
+        // [#7978] The base persona holds no positions by construction, so an
+        // app policy carrying `positions: [...]` is never applicable to it and
+        // the app's OWN narrowing goes unexercised. Mint one persona per
+        // DECLARED position — derived from the config, never a list written
+        // here — so the position-gated half is probed too. Provisioning lives
+        // on this side because it needs the live stack; the runner re-derives
+        // the intended reach from the config, so a position missing from this
+        // loop reports as `positionCoverage.notRun` instead of quietly
+        // shrinking the run.
+        const positionPersonas: RlsPositionPersonaInput[] = [];
+        const positionFailures: Array<{ position: string; error: string }> = [];
+        for (const position of declaredPositionNames(config)) {
+          try {
+            const persona = await provisionRlsPositionPersona(rlsStack, position);
+            positionPersonas.push({ position, token: persona.token, label: persona.email });
+          } catch (e) {
+            positionFailures.push({ position, error: (e as Error).message });
+          }
+        }
+
+        rls = await runRlsProofs(rlsStack, adminToken, probeToken, config, {
+          probe,
+          positionPersonas,
+          positionFailures,
+        });
       } finally {
         await rlsStack.stop();
       }
     }
 
     // Failure contract: a "real" runtime break the app's author must see.
+    // A degraded RLS probe counts: the run reported verdicts it could not have
+    // established, which is worse than no verifier at all.
+    //
+    // [#7978] `totals`, not `summary`: a hole a POSITION persona found is
+    // exactly as real as one the base persona found — reading `summary` here
+    // would run the fan-out and then throw its findings away. A declared
+    // position that could not be provisioned counts for the same reason a
+    // degraded base persona does: the run covered less than its numbers read.
     const hardFailures =
       crud.summary.createFailed +
       crud.summary.readFailed +
       crud.summary.fidelityGaps +
-      (rls?.summary.holes ?? 0);
+      (rls?.totals.holes ?? 0) +
+      (rls?.probe.degraded ? 1 : 0) +
+      (rls?.positionCoverage.notRun.length ?? 0);
 
     if (flags.json) {
       this.log(JSON.stringify({ app: crud.app, config: absolutePath, multiTenant, crud, rls, hardFailures }, null, 2));

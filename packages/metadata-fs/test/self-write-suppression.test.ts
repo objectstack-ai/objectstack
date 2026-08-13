@@ -193,6 +193,124 @@ describe('#7335 self-write suppression is keyed on observed content, not on a cl
   }
 });
 
+/**
+ * #7856 — a spec whose serialised form differs from its in-memory graph is
+ * not an "external edit".
+ *
+ * Same seam, adjacent defect, and the reason it belongs beside #7335: both
+ * decide whether a watcher event is OURS by comparing observed content to
+ * the head index, so both are wrong the moment the index holds a hash the
+ * disk can never reproduce. `put()` hashed the spec it was handed while the
+ * file received `JSON.stringify` of it, so for a `Date`-carrying spec the
+ * index held the hash of `{}` and every re-read of our OWN write looked like
+ * somebody else's edit.
+ *
+ * The three cases below separate consequences the filing bundled together,
+ * because they do not share a trigger:
+ *
+ *   1. `put().version === get().hash` — no watcher, no second write.
+ *   2. a restart, whose `scanHeads()` rebuilds the index FROM DISK — this is
+ *      where the incoherent index becomes observable without any watcher at
+ *      all, as a ConflictError against the version the caller was handed.
+ *   3. a watcher event at lag ≈ 0 — the spurious `{op:'update', actor:'fs'}`.
+ *
+ * Case 2 is the one worth being precise about: with the watcher disabled AND
+ * the process still holding its in-memory index, a second `put()` of the same
+ * spec is recognised as a no-op even on the pre-fix tree, because both sides
+ * of that comparison are the same wrong hash. It takes a restart — or the
+ * watcher — to surface it. Measured both ways; see the PR's per-arm table.
+ */
+describe('#7856 a self-written spec is never republished as an external edit', () => {
+  let root: string;
+  let repo: FileSystemRepository | null = null;
+
+  /** Carries a `Date`: in-memory `{}`, on disk an ISO string. */
+  const dateSpec = () => ({ label: 'ours', createdAt: new Date('2024-01-01T00:00:00.000Z') });
+
+  beforeEach(async () => {
+    root = await fs.mkdtemp(path.join(os.tmpdir(), 'os-7856-'));
+  });
+
+  afterEach(async () => {
+    if (repo) await repo.close();
+    repo = null;
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  it('the version handed back identifies the bytes on disk', async () => {
+    repo = new FileSystemRepository({ root, org: 'system', disableWatch: true });
+    await repo.start();
+    const r = ref('dated');
+
+    const put = await repo.put(r, dateSpec(), { parentVersion: null, actor: 't' });
+    const got = await repo.get(r);
+
+    expect(got).not.toBeNull();
+    expect(got!.hash).toBe(put.version);
+    // The stored body really is the serialised form — this is what makes the
+    // assertion above a claim about BYTES and not about object identity.
+    expect(got!.body).toEqual({ label: 'ours', createdAt: '2024-01-01T00:00:00.000Z' });
+  });
+
+  it('survives a restart: the rebuilt head index still matches the handed-out version', async () => {
+    repo = new FileSystemRepository({ root, org: 'system', disableWatch: true });
+    await repo.start();
+    const r = ref('dated');
+    const put = await repo.put(r, dateSpec(), { parentVersion: null, actor: 't' });
+    await repo.close();
+
+    // A fresh repository over the same root: `scanHeads()` rebuilds the index
+    // by hashing what is ON DISK. No watcher is involved anywhere here.
+    repo = new FileSystemRepository({ root, org: 'system', disableWatch: true });
+    await repo.start();
+
+    // Chaining on the version the first process returned must still be
+    // recognised as the no-op it is, rather than raising ConflictError
+    // against a head the caller was never told about.
+    const second = await repo.put(r, dateSpec(), { parentVersion: put.version, actor: 't' });
+    expect(second.version).toBe(put.version);
+  });
+
+  it('a watcher event for our own write publishes nothing', async () => {
+    repo = new FileSystemRepository({ root, org: 'system', disableWatch: true });
+    await repo.start();
+    const r = ref('dated');
+    const file = path.join(root, 'view', 'dated.json');
+
+    await repo.put(r, dateSpec(), { parentVersion: null, actor: 't' });
+    const before = await readLog(root);
+
+    // Delivered at lag ≈ 0, exactly as the #7335 cases above do it.
+    await deliver(repo, file, 'change');
+
+    // Pre-fix this appended `{op:'update', actor:'fs'}` — the repository
+    // reporting an external actor for a file nothing outside it touched.
+    expect(await readLog(root)).toEqual(before);
+  });
+
+  it('still detects a GENUINE external edit to a Date-carrying item', async () => {
+    repo = new FileSystemRepository({ root, org: 'system', disableWatch: true });
+    await repo.start();
+    const r = ref('dated');
+    const file = path.join(root, 'view', 'dated.json');
+
+    await repo.put(r, dateSpec(), { parentVersion: null, actor: 't' });
+    const externalSpec = { label: 'theirs', createdAt: '2024-01-01T00:00:00.000Z' };
+    await fs.writeFile(file, JSON.stringify(externalSpec, null, 2) + '\n', 'utf8');
+    const before = await readLog(root);
+
+    await deliver(repo, file, 'change');
+
+    // The complementary direction: suppressing the false positive must not be
+    // achieved by blinding the watcher on this class of item.
+    const added = (await readLog(root)).slice(before.length);
+    expect(added).toHaveLength(1);
+    expect(added[0]!.op).toBe('update');
+    expect(added[0]!.actor).toBe('fs');
+    expect(added[0]!.hash).toBe(hashSpec(externalSpec));
+  });
+});
+
 /** The durable change log — the record a swallow erases. */
 async function readLog(root: string): Promise<MetadataEvent[]> {
   const file = path.join(root, '.objectstack', '.log', 'main.jsonl');

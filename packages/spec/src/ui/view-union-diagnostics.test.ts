@@ -91,8 +91,11 @@ describe('[#6391] the union members are contractual, not positional', () => {
     // The route objectui had to reach for `errors[2]` to approximate.
     expect(VIEW_METADATA_MEMBERS.container.safeParse({ object: 'crm_lead', list: LIST_CFG }).success).toBe(true);
     expect(VIEW_METADATA_MEMBERS.container.safeParse({ object: 'crm_lead', listViews: {} }).success).toBe(false);
-    expect(VIEW_METADATA_MEMBERS.listOverlay.safeParse({ type: 'grid', columns: ['name'] }).success).toBe(true);
-    expect(VIEW_METADATA_MEMBERS.formOverlay.safeParse({ type: 'wizard' }).success).toBe(true);
+    // [#7741] The overlay arms require the `object` + `viewKind` binding.
+    expect(VIEW_METADATA_MEMBERS.listOverlay.safeParse({ type: 'grid', columns: ['name'], object: 'crm_lead', viewKind: 'list' }).success).toBe(true);
+    expect(VIEW_METADATA_MEMBERS.listOverlay.safeParse({ type: 'grid', columns: ['name'] }).success).toBe(false);
+    expect(VIEW_METADATA_MEMBERS.formOverlay.safeParse({ type: 'wizard', object: 'crm_lead', viewKind: 'form' }).success).toBe(true);
+    expect(VIEW_METADATA_MEMBERS.formOverlay.safeParse({ type: 'wizard' }).success).toBe(false);
   });
 });
 
@@ -130,7 +133,9 @@ describe('[#6391] diagnoseViewMetadata names the failing branch', () => {
   // `error.issues[0].errors[2]` — member position 2 — while the rendered
   // message came from the CONTAINER branch (fewest issues wins) and told the
   // author to wrap the body in `defineView`, which is not the defect.
-  const BAD_OVERLAY = { type: 'grid', columns: 'not-an-array' };
+  // ([#7741] carries the binding pair so the ONE defect under test stays the
+  // broken `columns`, not a missing binding.)
+  const BAD_OVERLAY = { type: 'grid', columns: 'not-an-array', object: 'crm_lead', viewKind: 'list' };
 
   it('reports the leaf issue under the branch that owns it', () => {
     const d = diagnoseViewMetadata(BAD_OVERLAY);
@@ -229,18 +234,32 @@ describe('[#6391] diagnoseViewMetadata names the failing branch', () => {
 // ⛔ #7025's red line, asserted directly. A discriminated union changes error
 // SHAPE, not membership — so membership is what this block pins, in both
 // directions, on the corpus the before/after diff was measured over.
-describe('[#7025] the acceptance face of ViewMetadataSchema did not move', () => {
+//
+// [#7741] The acceptance face DID move once since #7025, deliberately and by
+// ruling (2026-08-12, direction B): the two flattened overlay arms now require
+// the `object` + `viewKind` binding, so every unbound overlay/PUT entry in the
+// measured corpus flipped from ACCEPTED to REFUSED. The corpus keeps both
+// generations: the bound spelling (what the write path actually delivers after
+// `normalizeViewMetadata` inherits identity, #2555) stays in ACCEPTED with its
+// parse output re-measured, and the unbound original moves to REFUSED so the
+// flip itself is pinned rather than silently absorbed.
+describe('[#7025] the acceptance face of ViewMetadataSchema — as re-ruled by #7741', () => {
   const SECTION = { label: 'Main', collapsible: false, collapsed: false, columns: 1, fields: ['name'] };
+  /** [#7741] The binding pair the write path inherits onto a shadowing overlay. */
+  const BOUND_LIST = { object: 'crm_lead', viewKind: 'list' } as const;
+  const BOUND_FORM = { object: 'crm_lead', viewKind: 'form' } as const;
 
   /**
-   * Every entry is a verdict MEASURED on `origin/main` before the change and
-   * re-measured after — never a verdict predicted from reading the schema. Some
-   * of them are surprising, and they are in the table precisely because a
-   * surprising accept is the one a refactor silently loses:
+   * Every entry is a verdict MEASURED before and after — never a verdict
+   * predicted from reading the schema. Some of them are surprising, and they
+   * are in the table precisely because a surprising accept is the one a
+   * refactor silently loses:
    *
-   * - `overlay.badOperator` / `overlay.console*Id` ACCEPT as `{type:'simple'}` —
-   *   the form overlay does not declare `filter`/`sort`, and `.strip()` drops
-   *   them. Pre-existing, load-bearing for Studio's round-trip, and untouched.
+   * - `overlay.badOperator` / `overlay.console*Id` ACCEPT with the payload
+   *   stripped to the binding + `{type:'simple'}` — the form overlay does not
+   *   declare `filter`/`sort`, and `.strip()` drops them. Pre-existing,
+   *   load-bearing for Studio's round-trip, and untouched by #7741 (openness
+   *   is about unknown keys; the binding is about required ones).
    * - `overlay.list.min` (`{type:'grid'}` alone) REJECTS.
    * - `container.empty` REJECTS with `custom`, not `invalid_union`: when
    *   exactly one branch is non-aborted zod's `handleUnionResults` returns THAT
@@ -259,20 +278,25 @@ describe('[#7025] the acceptance face of ViewMetadataSchema did not move', () =>
     ['container.listViews', { object: 'crm_lead', listViews: { my: LIST_CFG } }, { object: 'crm_lead', listViews: { my: LIST_CFG } }],
     ['container.formViews', { object: 'crm_lead', formViews: { my: FORM_CFG } },
       { object: 'crm_lead', formViews: { my: { type: 'simple', sections: [SECTION] } } }],
-    ['overlay.list.columns', { columns: ['name', 'stage'] }, { type: 'grid', columns: ['name', 'stage'] }],
-    ['overlay.list.aux', { type: 'grid', columns: ['name'], isDefault: true, order: 2, hidden: false },
-      { type: 'grid', columns: ['name'], isDefault: true, order: 2, hidden: false }],
-    ['overlay.form.min', { type: 'simple' }, { type: 'simple' }],
-    ['overlay.form.sections', { sections: [{ label: 'Main', fields: ['name'] }] }, { type: 'simple', sections: [SECTION] }],
+    ['overlay.list.columns', { columns: ['name', 'stage'], ...BOUND_LIST },
+      { type: 'grid', columns: ['name', 'stage'], ...BOUND_LIST }],
+    ['overlay.list.aux', { type: 'grid', columns: ['name'], isDefault: true, order: 2, hidden: false, ...BOUND_LIST },
+      { type: 'grid', columns: ['name'], isDefault: true, order: 2, hidden: false, ...BOUND_LIST }],
+    ['overlay.form.min', { type: 'simple', ...BOUND_FORM }, { type: 'simple', ...BOUND_FORM }],
+    ['overlay.form.sections', { sections: [{ label: 'Main', fields: ['name'] }], ...BOUND_FORM },
+      { type: 'simple', sections: [SECTION], ...BOUND_FORM }],
     ['overlay.form.identity', { name: 'x', object: 'crm_lead', viewKind: 'form', type: 'wizard' },
       { type: 'wizard', name: 'x', object: 'crm_lead', viewKind: 'form' }],
-    ['overlay.badOperator', { filter: [{ field: 'name', operator: 'sorta_equals', value: 'x' }] }, { type: 'simple' }],
-    ['overlay.consoleSortId', { sort: [{ id: 'row-1', field: 'name', order: 'asc' }] }, { type: 'simple' }],
-    ['overlay.consoleFilterId', { filter: [{ id: 'row-1', field: 'name', operator: '=', value: 'x' }] }, { type: 'simple' }],
-    ['put.isPinned', { isPinned: true }, { type: 'simple' }],
-    ['put.sortOrder', { sortOrder: 3 }, { type: 'simple' }],
-    ['put.hidden', { hidden: true }, { type: 'simple', hidden: true }],
-    ['put.pinAndOrder', { isPinned: true, sortOrder: 3 }, { type: 'simple' }],
+    ['overlay.badOperator', { filter: [{ field: 'name', operator: 'sorta_equals', value: 'x' }], ...BOUND_FORM },
+      { type: 'simple', ...BOUND_FORM }],
+    ['overlay.consoleSortId', { sort: [{ id: 'row-1', field: 'name', order: 'asc' }], ...BOUND_FORM },
+      { type: 'simple', ...BOUND_FORM }],
+    ['overlay.consoleFilterId', { filter: [{ id: 'row-1', field: 'name', operator: '=', value: 'x' }], ...BOUND_FORM },
+      { type: 'simple', ...BOUND_FORM }],
+    ['put.isPinned', { isPinned: true, ...BOUND_LIST }, { type: 'simple', ...BOUND_LIST }],
+    ['put.sortOrder', { sortOrder: 3, ...BOUND_LIST }, { type: 'simple', ...BOUND_LIST }],
+    ['put.hidden', { hidden: true, ...BOUND_FORM }, { type: 'simple', hidden: true, ...BOUND_FORM }],
+    ['put.pinAndOrder', { isPinned: true, sortOrder: 3, ...BOUND_LIST }, { type: 'simple', ...BOUND_LIST }],
   ];
 
   const REFUSED: Array<[string, unknown, string[]]> = [
@@ -288,6 +312,21 @@ describe('[#7025] the acceptance face of ViewMetadataSchema did not move', () =>
     ['overlay.badType', { type: 'sideways' }, ['invalid_union']],
     ['overlay.badColumns', { type: 'grid', columns: 'not-an-array' }, ['invalid_union']],
     ['overlay.emptyState.badKey', { type: 'grid', emptyState: { title: 'None', notAnEmptyStateKey: 1 } }, ['invalid_union']],
+    // [#7741] The corpus's former unbound ACCEPTED entries, each re-measured:
+    // an overlay that names no `object`/`viewKind` would be stored as a row no
+    // object-bound read path can serve, so the members now refuse it with the
+    // located binding guidance (ruled 2026-08-12, direction B).
+    ['unbound.overlay.list.columns', { columns: ['name', 'stage'] }, ['invalid_union']],
+    ['unbound.overlay.list.aux', { type: 'grid', columns: ['name'], isDefault: true, order: 2, hidden: false }, ['invalid_union']],
+    ['unbound.overlay.form.min', { type: 'simple' }, ['invalid_union']],
+    ['unbound.overlay.form.sections', { sections: [{ label: 'Main', fields: ['name'] }] }, ['invalid_union']],
+    ['unbound.overlay.badOperator', { filter: [{ field: 'name', operator: 'sorta_equals', value: 'x' }] }, ['invalid_union']],
+    ['unbound.overlay.consoleSortId', { sort: [{ id: 'row-1', field: 'name', order: 'asc' }] }, ['invalid_union']],
+    ['unbound.overlay.consoleFilterId', { filter: [{ id: 'row-1', field: 'name', operator: '=', value: 'x' }] }, ['invalid_union']],
+    ['unbound.put.isPinned', { isPinned: true }, ['invalid_union']],
+    ['unbound.put.sortOrder', { sortOrder: 3 }, ['invalid_union']],
+    ['unbound.put.hidden', { hidden: true }, ['invalid_union']],
+    ['unbound.put.pinAndOrder', { isPinned: true, sortOrder: 3 }, ['invalid_union']],
     ['identity.nope', { nope: 1 }, ['custom']],
     ['identity.empty', {}, ['custom']],
     ['identity.idOnly', { id: 'x' }, ['custom']],

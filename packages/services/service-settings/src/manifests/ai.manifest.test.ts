@@ -3,7 +3,28 @@
 import { describe, it, expect } from 'vitest';
 import { SettingsManifestSchema } from '@objectstack/spec/system';
 import { SettingsService } from '../settings-service.js';
+import type { CryptoAdapter } from '../crypto-adapter.js';
 import { aiSettingsManifest, aiTestActionHandler, aiTestEmbedderActionHandler } from './ai.manifest.js';
+
+/**
+ * #8026 — the write-door cases below save a complete `openai` provider config,
+ * which includes `openai_api_key` (a declared secret). Since the settings write
+ * path fails CLOSED on a secret it cannot protect, the fixture supplies an
+ * adapter that DECLARES confidentiality; without it these cases would be
+ * measuring the crypto gate instead of `temperature`'s declared window.
+ */
+class ConfidentialTestAdapter implements CryptoAdapter {
+  readonly confidential = true;
+  async encrypt(plaintext: string): Promise<string> {
+    return 'kms:' + Buffer.from(plaintext, 'utf8').toString('base64');
+  }
+  async decrypt(ciphertext: string): Promise<string> {
+    return Buffer.from(ciphertext.replace(/^kms:/, ''), 'base64').toString('utf8');
+  }
+  digest(): string {
+    return 'fnv32:deadbeef';
+  }
+}
 
 describe('aiSettingsManifest', () => {
   it('parses against SettingsManifestSchema', () => {
@@ -57,38 +78,59 @@ describe('aiSettingsManifest', () => {
   });
 });
 
+/** Mirror how the service invokes a handler: full input, never a partial. */
+const runTest = (values: Record<string, unknown>) =>
+  aiTestActionHandler({ namespace: 'ai', actionId: 'test', values, ctx: {} });
+const runTestEmbedder = (values: Record<string, unknown>) =>
+  aiTestEmbedderActionHandler({ namespace: 'ai', actionId: 'test_embedder', values, ctx: {} });
+
 describe('aiTestActionHandler', () => {
   it('returns warning for memory provider (no external call to validate)', async () => {
-    const r = await aiTestActionHandler({ values: { provider: 'memory' } } as any);
+    const r = await runTest({ provider: 'memory' });
     expect(r.ok).toBe(true);
     expect(r.severity).toBe('warning');
   });
 
   it('rejects gateway provider without gateway_model', async () => {
-    const r = await aiTestActionHandler({ values: { provider: 'gateway' } } as any);
+    const r = await runTest({ provider: 'gateway' });
     expect(r.ok).toBe(false);
     expect(r.severity).toBe('error');
   });
 
   it('rejects openai provider without api key', async () => {
-    const r = await aiTestActionHandler({ values: { provider: 'openai' } } as any);
+    const r = await runTest({ provider: 'openai' });
     expect(r.ok).toBe(false);
     expect(r.severity).toBe('error');
   });
 
   it('accepts openai provider with api key and reports the model', async () => {
-    const r = await aiTestActionHandler({
-      values: { provider: 'openai', openai_api_key: 'sk-test', openai_model: 'gpt-4o' },
-    } as any);
+    const r = await runTest({
+      provider: 'openai',
+      openai_api_key: 'sk-test',
+      openai_model: 'gpt-4o',
+    });
     expect(r.ok).toBe(true);
     expect(r.message).toContain('gpt-4o');
   });
 
   it('accepts anthropic with api key', async () => {
-    const r = await aiTestActionHandler({
-      values: { provider: 'anthropic', anthropic_api_key: 'sk-ant-test' },
-    } as any);
+    const r = await runTest({ provider: 'anthropic', anthropic_api_key: 'sk-ant-test' });
     expect(r.ok).toBe(true);
+  });
+});
+
+describe('aiTestEmbedderActionHandler', () => {
+  it('warns when the embedder is disabled', async () => {
+    const r = await runTestEmbedder({ embedder_provider: 'none' });
+    expect(r.ok).toBe(false);
+    expect(r.severity).toBe('warning');
+  });
+
+  it('requires an api key for non-ollama providers', async () => {
+    const r = await runTestEmbedder({ embedder_provider: 'openai' });
+    expect(r.ok).toBe(false);
+    expect(r.severity).toBe('error');
+    expect(r.message).toContain('API key');
   });
 });
 
@@ -122,7 +164,7 @@ describe('aiSettingsManifest — temperature declares a window, not a grid (#655
     // default provider is `memory`, so the patch carries a real provider (and
     // its required key) — otherwise the TOUCH/visible contract skips the
     // specifier entirely and this test would be green for the wrong reason.
-    const svc = new SettingsService({ env: {} });
+    const svc = new SettingsService({ env: {}, crypto: new ConfidentialTestAdapter() });
     svc.registerManifest(aiSettingsManifest);
     await expect(
       svc.setMany('ai', { provider: 'openai', openai_api_key: 'sk-test', temperature: 0.15 }),
@@ -136,7 +178,7 @@ describe('aiSettingsManifest — temperature declares a window, not a grid (#655
   });
 
   it('write door: the window still binds — out-of-range values are refused in the min/max vocabulary', async () => {
-    const svc = new SettingsService({ env: {} });
+    const svc = new SettingsService({ env: {}, crypto: new ConfidentialTestAdapter() });
     svc.registerManifest(aiSettingsManifest);
     await expect(
       svc.setMany('ai', { provider: 'openai', openai_api_key: 'sk-test', temperature: 2.5 }),

@@ -6,6 +6,14 @@ import { test, expect } from '@playwright/test';
  * / collapsed chart). Runs against the console the backend serves at /_console
  * (baseURL set in playwright.config.ts). Non-blocking nightly + manual.
  */
+
+// Ambient `process` for the env read below — the showcase tsconfig doesn't pull
+// in `@types/node`, and the package-global shim in types/node-shim.d.ts declares
+// only `cwd()`. Same idiom (and same reason) as the declarations in
+// objectstack.config.ts and src/system/self-url.ts: keeps `pnpm typecheck` green
+// without widening the type surface. Playwright provides the real `process`.
+declare const process: { env: Record<string, string | undefined> };
+
 const APP = process.env.SHOWCASE_APP || 'com.example.showcase';
 const base = (seg: string) => `/_console/apps/${APP}/${seg}`;
 

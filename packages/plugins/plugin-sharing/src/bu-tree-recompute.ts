@@ -30,19 +30,22 @@
  * |-------------------------|---------------------------------------------|---|
  * | `user`                  | the literal id                              | no |
  * | `team`                  | `TeamGraphService` (`sys_team_member`, `sys_member`, `sys_user`) | no |
- * | `business_unit`         | `BusinessUnitGraphService.expandUsers`      | YES |
+ * | `business_unit`         | `BusinessUnitGraphService.expandUnitMembers` | YES |
  * | `position`              | `PositionGraphService` (`sys_user_position`, `sys_member`) | no |
  * | `unit_and_subordinates` | `BusinessUnitGraphService.expandUsers`      | YES |
  * | `queue`                 | returns `[]` (no `sys_queue` yet)           | no |
  *
- * `business_unit` is in that set on the strength of what the code does today:
- * `expandRecipient` routes it through the SAME `expandUsers` call as
- * `unit_and_subordinates`, so it walks `descendants()` and is just as exposed
- * to a re-parent. (The spec declares it as "exactly one business unit's
- * members (no subtree)" — that divergence is a separate defect and is filed
- * separately; covering the kind here is correct under either reading, since a
- * unit-only expansion still reads `sys_business_unit` for its own `active`
- * flag and `sys_business_unit_member` for its members.)
+ * `business_unit` stays in that set after #7807 narrowed it to exactly one
+ * unit's members. The divergence this file originally noted — `expandRecipient`
+ * routing it through the SAME subtree `expandUsers` call as
+ * `unit_and_subordinates`, against a spec declaring it as "exactly one business
+ * unit's members (no subtree)" — was resolved in favour of the declaration, and
+ * membership here was correct under either reading for the reason that fix
+ * confirmed: a unit-only expansion still reads `sys_business_unit` for its own
+ * `active` flag and tenant scope, and `sys_business_unit_member` for its
+ * members. What changed is the blast radius, not the coverage — a re-parent no
+ * longer moves a `business_unit` rule's recipients (its anchor's own membership
+ * is what moves them), while a deactivation or a membership edit still does.
  *
  * Everything else is deliberately NOT recomputed. That exclusion is a
  * requirement, not an optimisation: a fix that recomputed every rule on every

@@ -106,6 +106,7 @@ const VIEW = (name: string) => ({
     name,
     label: 'Probe',
     object: 'task',
+    viewKind: 'list', // [#7741] the inline arm requires the object binding pair
     columns: [{ field: 'name', label: 'Name' }],
 });
 

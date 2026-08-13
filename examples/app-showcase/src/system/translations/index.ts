@@ -58,6 +58,25 @@ export const ShowcaseTranslationBundle = {
           },
           sync_error: { label: 'Sync Error' },
         },
+        // The FIRST `_views` block on the `en` side of this bundle, and
+        // deliberately not a mirror of the zh-CN one below: view LABELS are
+        // already English in `ui/views/task.view.ts`, so restating all fifteen
+        // here would be fifteen fake translations of the kind this bundle's
+        // header warns about. What earns an entry is the `emptyState` fixture
+        // (#7714): the surface-matrix check wants the SAME key resolving to
+        // different copy per locale, and a key present only in zh-CN cannot
+        // show that — an en session would be reading the view's inline source
+        // string through the fallback path, which is a different code path and
+        // proves nothing about the resolver. So this pins the en arm of that
+        // one key group, and nothing else.
+        _views: {
+          urgent: {
+            emptyState: {
+              title: 'No urgent tasks',
+              message: 'Nothing needs immediate attention right now. A task appears here as soon as its priority is raised to Urgent.',
+            },
+          },
+        },
       },
       showcase_account: {
         label: 'Account',
@@ -247,7 +266,19 @@ export const ShowcaseTranslationBundle = {
           // The default list — keyed `default`, see showcase_project above.
           default: { label: '全部任务' },
           in_progress: { label: '进行中' },
-          urgent: { label: '紧急' },
+          urgent: {
+            label: '紧急',
+            // The showcase's only `emptyState` specimen (#7714) — the view is
+            // authored with one in `ui/views/task.view.ts`, so this is the
+            // locale half of that fixture. Two new source labels enter the
+            // extractor's expected set here; both are translated in the same
+            // change, which is what keeps check:i18n-coverage's frozen
+            // untranslated count for this example unmoved in either direction.
+            emptyState: {
+              title: '暂无紧急任务',
+              message: '当前没有需要立即处理的事项。任务优先级调整为「紧急」后会出现在这里。',
+            },
+          },
           done: { label: '已完成' },
           tabular: { label: '任务清单' },
           grid: { label: '表格' },

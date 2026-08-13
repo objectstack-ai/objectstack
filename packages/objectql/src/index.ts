@@ -26,6 +26,19 @@ export {
   DEFAULT_EXTENDER_PRIORITY,
 } from './registry.js';
 export type { ObjectContributor, SchemaRegistryOptions } from './registry.js';
+// [#7865] Injected-column provenance — the machine-readable marker for anchors
+// the registry registers without provisioning storage (external objects,
+// ADR-0015). Canonical home: `@objectstack/metadata-core`, beside the
+// definition tables it derives from; re-exported here because this registry is
+// the producer consumers stand at when they need it. See the doc block over
+// the re-export in `registry.ts`, and `resolveInjectedColumnProvenance`'s own
+// doc for why the marker is an API and not a `provisioned: false` data key.
+export {
+  platformProvisionsStorage,
+  resolveInjectedColumnProvenance,
+  unprovisionedInjectedColumns,
+} from './registry.js';
+export type { InjectedColumnProvenance } from './registry.js';
 
 // Search-normalization companion column (#2486 — pinyin recall). Shared by
 // the registry's compile-time provisioning seam, the engine's `$search`

@@ -1051,6 +1051,215 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
     });
 
     // ─────────────────────────────────────────────────────────────
+    // [#7589] DOTTED PROJECTION at the ENGINE door — #7532's second
+    // half, same shape as #7095's sort refusal one section up. The
+    // ingress pins above cannot cover a caller that reaches
+    // `engine.find` / `engine.findOne` DIRECTLY (flows' `get_record`,
+    // saved reports, hooks, registry-less hosts), which is the exact
+    // caller set the drivers seat measured widening end-to-end.
+    // Controls first, then the rejections, then the KEPT tolerance.
+    // ─────────────────────────────────────────────────────────────
+
+    it('[#7589 CONTROL] a plain projection through `engine.find` narrows to exactly the named columns', async () => {
+        // FIRST, and as a key-SET equality: an over-return defect passes any
+        // assertion written as "does not contain X", so the whole point of
+        // this axis has to be pinned as an equality or it pins nothing.
+        const rows: any[] = await engine.find('showcase_task', { fields: ['title', 'status'] });
+        expect(rows).toHaveLength(5);
+        for (const r of rows) expect(Object.keys(r).sort()).toEqual(['status', 'title']);
+    });
+
+    it('[#7589 CONTROL] the audit-column allowance survives the filter rewrite', async () => {
+        // `id`/`created_at`/`updated_at` are force-allowed even when absent
+        // from schema.fields — the filter now matches WHOLE names, and this
+        // pins that dropping the head-split did not drop the allowance.
+        const rows: any[] = await engine.find('showcase_task', { fields: ['id', 'title', 'created_at'] });
+        expect(Object.keys(rows[0]).sort()).toEqual(['created_at', 'id', 'title']);
+    });
+
+    it('`engine.find` REFUSES a dotted projection instead of widening to every field', async () => {
+        // The measured chain's exact call shape: `crud-nodes.ts` `get_record`
+        // hands flow-authored config to `data.find(objectName, { where,
+        // fields, limit, context })` with NO ingress gate in between. Before
+        // #7589 this answered 200 with EVERY column, byte-identical to no
+        // projection at all (`account.name` cleared the head-only filter on
+        // its head segment; the driver matched no column; the #3821 ladder
+        // retried `select('*')`).
+        await expect(engine.find('showcase_task', {
+            where: { status: 'open' },
+            fields: ['title', 'project_id.name'],
+            limit: 10,
+        })).rejects.toMatchObject({
+            // ADR-0112 envelope — a rejection case asserts code AND status,
+            // never merely that something was thrown.
+            status: 400,
+            code: 'INVALID_FIELD',
+            field: 'project_id.name',
+            object: 'showcase_task',
+        });
+    });
+
+    it('`engine.findOne` refuses it too — `get_record` without `limit > 1` reaches THIS verb', async () => {
+        // `where` is present so this is the projection verdict and not
+        // `requireFindOnePredicate` answering first.
+        await expect(engine.findOne('showcase_task', {
+            where: { status: 'open' },
+            fields: ['title', 'project_id.name'],
+        })).rejects.toMatchObject({
+            status: 400,
+            code: 'INVALID_FIELD',
+            field: 'project_id.name',
+            object: 'showcase_task',
+        });
+    });
+
+    it('a projection that is ONLY a dotted path is refused — the empty-fallback widening shape', async () => {
+        // The worst composition: every entry unresolvable used to EMPTY the
+        // projection, and the empty-projection guard fell back to `*`.
+        await expect(engine.find('showcase_task', { fields: ['project_id.name'] }))
+            .rejects.toMatchObject({ status: 400, code: 'INVALID_FIELD', field: 'project_id.name' });
+    });
+
+    it('a dotted path whose head is a formula field is refused on the same terms', async () => {
+        // `assertOrderByIsMaterializable`'s scope note used to record that a
+        // dotted path "keeps reaching the driver … including one whose head is
+        // a formula field". On the PROJECTION axis that is no longer true, and
+        // this pin is what keeps the two docblocks honest.
+        await expect(engine.find('showcase_task', { fields: ['sort_key.length'] }))
+            .rejects.toMatchObject({ status: 400, code: 'INVALID_FIELD', field: 'sort_key.length' });
+    });
+
+    it('an unknown HEAD is refused as dotted too — the engine door has no unknown-name verdict to defer to', async () => {
+        // DIFFERENT from the ingress door, deliberately: ingress refuses
+        // unknown plain names, so its precedence is `unknown` > `dotted`. The
+        // engine TOLERATES unknown plain names (the kept #3821-family
+        // tolerance below) — so at this door the dotted verdict is the only
+        // refusal there is, and `no_such.name` eats it: a dotted entry with an
+        // unknown head is still a projection nothing resolves, and dropping it
+        // silently is how the only-dotted shape above widened.
+        await expect(engine.find('showcase_task', { fields: ['no_such.name'] }))
+            .rejects.toMatchObject({ status: 400, code: 'INVALID_FIELD', field: 'no_such.name' });
+    });
+
+    it('the engine refusal names the entry point, the relationship, `expand` and the stored-field remedy', async () => {
+        const err: any = await engine
+            .find('showcase_task', { fields: ['title', 'project_id.name'] })
+            .then(() => null, (e: unknown) => e);
+        expect(err).toBeTruthy();
+        expect(err.status).toBe(400);
+        expect(err.code).toBe('INVALID_FIELD');
+        // It must name the entry point, or a caller who never wrote a query
+        // parameter cannot tell which door refused them (#7095's rule).
+        expect(err.message).toMatch(/ObjectQL\.find\('showcase_task'\)/);
+        expect(err.message).toMatch(/follows the relationship 'project_id'/);
+        // The two remedies, in the ingress door's vocabulary: `expand` is the
+        // sanctioned door for related data on this axis, and the denormalise
+        // prescription is the same STORED-field wording every other refusal
+        // on these axes uses (#6924 / #6673).
+        expect(err.message).toMatch(/expand/);
+        expect(err.message).toMatch(/a stored field, written when the source changes/);
+    });
+
+    it('a dotted path under a non-reference head gets the other message', async () => {
+        // `title` holds text — "follows the relationship" would be a lie and
+        // `expand` the wrong prescription.
+        await expect(engine.find('showcase_task', { fields: ['title.length'] }))
+            .rejects.toMatchObject({ status: 400, code: 'INVALID_FIELD', field: 'title.length' });
+        await expect(engine.find('showcase_task', { fields: ['title.length'] }))
+            .rejects.toThrow(/whole columns/);
+    });
+
+    it('the ingress door and the engine door agree word-for-word on the dotted verdict', async () => {
+        // Pins the AGREEMENT itself, same mechanism as the sort axis' remedy
+        // pin above: `metadata-protocol` is assembled FROM an engine, so the
+        // engine cannot import the wording without inverting the layering —
+        // the prose is duplicated, and this is what keeps the duplication
+        // honest. Goes red if either door's core sentence or remedy is
+        // reworded without the other.
+        const core = /No driver resolves it: the path reaches the driver as a column name, matches no column, and the projection falls back to EVERY field/;
+        const remedy = /denormalise the value onto 'showcase_task' \(a stored field, written when the source changes\)/;
+        const ingress: any = await protocol
+            .findData({ object: 'showcase_task', query: { fields: ['project_id.name'] } })
+            .then(() => null, (e: unknown) => e);
+        const direct: any = await engine
+            .find('showcase_task', { fields: ['project_id.name'] })
+            .then(() => null, (e: unknown) => e);
+        expect(ingress.message).toMatch(core);
+        expect(direct.message).toMatch(core);
+        expect(ingress.message).toMatch(remedy);
+        expect(direct.message).toMatch(remedy);
+    });
+
+    // ─────────────────────────────────────────────────────────────
+    // [#7589] THE KEPT TOLERANCE — the ruling's explicit carve-out,
+    // pinned as behaviour so a future tighten cannot ride in on this
+    // card's precedent without meeting its own ruling.
+    // ─────────────────────────────────────────────────────────────
+
+    it('[#7589 GUARD] an unknown PLAIN column is still dropped silently — mixed projection', async () => {
+        // Ruled KEPT 2026-08-12: an unknown plain column is simply absent
+        // from each row; refusing it re-opens the "no records exist" failure
+        // #3821 closed. The row set is unchanged and the known column
+        // narrows.
+        const rows: any[] = await engine.find('showcase_task', { fields: ['title', 'no_such_field'] });
+        expect(rows).toHaveLength(5);
+        for (const r of rows) expect(Object.keys(r).sort()).toEqual(['title']);
+    });
+
+    it('[#7589 GUARD] a projection of ONLY unknown plain columns still falls back to every field', async () => {
+        // The `SELECT *` fallback itself, pinned as KEPT for the plain case:
+        // this is the documented tolerance the ruling preserves, not a defect
+        // this card missed. (The DOTTED route into this same fallback is what
+        // was closed above.)
+        const rows: any[] = await engine.find('showcase_task', { fields: ['no_such_field'] });
+        expect(rows).toHaveLength(5);
+        expect(Object.keys(rows[0])).toEqual(expect.arrayContaining(['id', 'title', 'status']));
+    });
+
+    it('[#7589 GUARD] `engine.findOne` keeps the same plain tolerance', async () => {
+        const row: any = await engine.findOne('showcase_task', {
+            where: { title: 'A' }, fields: ['title', 'no_such_field'],
+        });
+        expect(row).toBeTruthy();
+        expect(Object.keys(row).sort()).toEqual(['title']);
+    });
+
+    it('[#7589 GUARD] a registry-less object gets NO verdict — the door cannot see the field map', async () => {
+        // An object the registry does not know: the engine has no field map,
+        // so it must not invent a dotted verdict about it (same early-return
+        // the ingress gate makes when `resolveQueryFields` cannot answer).
+        // For that host the driver-side #3821 ladder is the documented
+        // backstop — which is exactly why the ruling KEEPS the ladder.
+        await expect(engine.find('unregistered_thing', { fields: ['a.b'] }))
+            .resolves.toEqual([]);
+    });
+
+    it('an `expand` sub-read raises the refusal, which the expand backstop downgrades to a warning', async () => {
+        // MEASURED, same as the sort axis' pin above: a nested `fields` is
+        // forwarded into `expandRelatedRecords`' own `this.find(...)`, where
+        // the [#7589] refusal fires — inside the pre-existing graceful-
+        // degradation `catch` ("if expand fails, keep original IDs"), which
+        // swallows every expand failure, this one included. Outcome improves
+        // from SILENT (a widened sub-read) to OBSERVABLE (a warning carrying
+        // the field name and the fix) — but it is not a refusal, and this pin
+        // says so rather than implying #7589 closed it. Reversing that catch
+        // is the #3821-family decision the sort axis' pin already defers.
+        const rows: any = await engine.find('showcase_task', {
+            expand: { parent_id: { fields: ['project_id.name'] } as any },
+        });
+        expect(rows).toHaveLength(5);
+        expect(rows.filter((r: any) => typeof r.parent_id === 'object' && r.parent_id !== null)).toHaveLength(0);
+        expect(rows.some((r: any) => r.parent_id === 't_A')).toBe(true);
+        // CONTROL — a PLAIN nested projection in the same position still
+        // expands, so the assertion above is about the refusal and not about
+        // expand being broken for every nested `fields`.
+        const ok: any = await engine.find('showcase_task', {
+            expand: { parent_id: { fields: ['title'] } as any },
+        });
+        expect(ok.some((r: any) => typeof r.parent_id === 'object' && r.parent_id !== null)).toBe(true);
+    });
+
+    // ─────────────────────────────────────────────────────────────
     // EXPAND — control group, then rejected
     // ─────────────────────────────────────────────────────────────
 

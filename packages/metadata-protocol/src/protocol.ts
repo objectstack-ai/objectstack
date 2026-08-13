@@ -3,7 +3,7 @@
 import type {
     DataProtocol, MetadataProtocol, PackageProtocol,
 } from '@objectstack/spec/api';
-import { IDataEngine, engineCanRollBack } from '@objectstack/core';
+import { IDataEngine, engineCanRollBack, recordNotFoundError } from '@objectstack/core';
 import { readEnvWithDeprecation, resolveTenancyPosture } from '@objectstack/types';
 // [#6285] ADR-0105 D1's authority on "does this deployment wall organizations?".
 // `resolveMultiOrgEnabled()` is DEMOTED and its own doc comment says answering
@@ -62,7 +62,7 @@ import {
 } from '@objectstack/spec/data';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 import { applyConversionsToStoredItem, type ConversionNotice } from '@objectstack/spec';
-import { type FormView, isAggregatedViewContainer } from '@objectstack/spec/ui';
+import { type FormView, isAggregatedViewContainer, expandViewContainer } from '@objectstack/spec/ui';
 import { METADATA_FORM_REGISTRY, CORE_SERVICE_PROVIDER, serviceUnavailableMessage, inProcessServiceMessage } from '@objectstack/spec/system';
 import { DEFAULT_METADATA_TYPE_REGISTRY, getMetadataTypeSchema, getMetadataTypeActions, getMetadataCreateSeed, PROTOCOL_VERSION } from '@objectstack/spec/kernel';
 import {
@@ -640,43 +640,22 @@ export function zodIssuesToMetadataIssues(issues: unknown): MetadataIssueEntry[]
 }
 
 /**
- * [#4435] The 404 a single-record operation answers when the id names no row.
+ * [#4435/#5138] The 404 a single-record operation answers when the id names no
+ * row — the repo's ONE `RECORD_NOT_FOUND` envelope.
  *
- * Extracted so the READ and the two WRITE paths cannot disagree about it. They
- * did: `getData` answered `404 RECORD_NOT_FOUND` while `updateData` returned
- * `200 { record: null }` and `deleteData` returned `200 { success: true }` for
- * any string in the path — so a typo'd id, an already-deleted row and a real
- * deletion were indistinguishable, and a client PATCHing a concurrently deleted
- * record was told its write had landed.
+ * [#7867] The body moved to `@objectstack/core`
+ * (`utils/record-not-found.ts` — full provenance lives there); this is a
+ * re-export, so every existing importer of
+ * `@objectstack/metadata-protocol`'s `recordNotFoundError` is unchanged and
+ * the three producers still share one function object.
  *
- * That is the same silent-no-op shape the v17 train removed everywhere else
- * this window (#4240/#4303/#4315 refuse missing fields, #4169 refuses unknown
- * params, #4190 stopped dropping filters) — a write that touched zero rows
- * reporting 200 is that shape one level up, on the verb where it costs the
- * most.
- *
- * [#5138] EXPORTED, for the same "cannot disagree about it" reason one layer
- * out. `@objectstack/runtime`'s `callData` is protocol-first with an ObjectQL
- * FALLBACK, and the fallback had reinvented this fact three incompatible ways
- * (`get` → `null`, `update` → a bare `Error` with no status ⇒ 500, `delete` →
- * no check at all ⇒ `200 { deleted: true }` for a row that never existed). It
- * now calls THIS function, so the two paths behind one `callData` answer a
- * missing id identically — which is the only reason a caller may stop caring
- * which of them served it. Re-spelling the envelope there would have been a
- * second not-found envelope; `RECORD_NOT_FOUND` (#5088) is the one this repo
- * has.
+ * ⛔ Do not re-declare it here. It moved because a THIRD producer needed it and
+ * could not reach this package: `ObjectQL.update()`/`delete()`'s by-id gate
+ * lives in `packages/objectql`, whose `/core` entry closure is forbidden by
+ * ADR-0076 D2's boundary ratchet from importing `@objectstack/metadata-protocol`
+ * at all. A local copy here would be the second spelling #5138 ruled out.
  */
-export function recordNotFoundError(object: string, id: string | number): Error {
-    const err = new Error(`Record ${id} not found in ${object}`) as Error & {
-        code?: string;
-        status?: number;
-        object?: string;
-    };
-    err.code = 'RECORD_NOT_FOUND';
-    err.status = 404;
-    err.object = object;
-    return err;
-}
+export { recordNotFoundError };
 
 /**
  * A 400 for a `$filter` ARRAY that looks like a filter AST but is not one.
@@ -1508,6 +1487,115 @@ function carryCatalogedErrorCode(target: Error, source: unknown): void {
 }
 
 /**
+ * [#8136] Whether a caught error **declared itself a client-facing refusal** —
+ * a 4xx `status` in the ADR-0112 envelope — and its sentence may therefore be
+ * quoted back to the caller.
+ *
+ * ## The rule this answers, and why it is a POSITIVE list
+ *
+ * This package used to interpolate whatever it caught into the message it
+ * threw (`Failed to delete customization overlay: ${err.message}`) and into the
+ * `error` strings it collects for a caller. A driver failure on `sys_metadata`
+ * therefore reached a client verbatim — `SQLITE_ERROR: no such table:
+ * sys_metadata` on a 500, and the same text inside `failed[].error` on the
+ * `PACKAGE_DELETE_PARTIAL` 400, where no message-level withhold at any HTTP
+ * boundary can reach it because it is not the message. Three downstream
+ * sanitizers each had a hole because of it.
+ *
+ * The cure is Prime Directive #12's: pay the consumer-side tolerance down at
+ * the producer. So the question asked here is **not** "does this text look like
+ * a driver dump?" — that is `looksLikeInternalErrorLeak`, a heuristic over
+ * phrasing, and a phrasing test can only ever know the dialects someone has
+ * met. It is the inverse and bounded question: **did we author this sentence
+ * for a caller?** A producer that declared 4xx has said the failure is the
+ * caller's to fix and has written the remedy into the message — the
+ * self-correcting refusals `SysMetadataRepository` raises (`[item_locked]`,
+ * `[writable_package_required]`, `[no_draft]`, …) are exactly that, and they
+ * must survive intact. Everything else is withheld by DEFAULT, so a dialect
+ * this repo has never run is handled correctly without anyone having enumerated
+ * it.
+ *
+ * ## ⛔ NOT the complement of `declaresServerFault`
+ *
+ * The obvious-looking `!declaresServerFault(err)` (`@objectstack/types`, #5811)
+ * is the wrong direction and would reinstate the whole defect: a bare `Error`
+ * from a driver declares NOTHING, so it fails that test and would be quoted —
+ * and a bare driver `Error` is precisely the case measured here. The two
+ * predicates answer different halves and neither is the other's negation:
+ * `declaresServerFault` asks a BOUNDARY whether to withhold a declared fault's
+ * detail; this asks a PRODUCER whether it is allowed to quote at all, and an
+ * undeclared error is never allowed.
+ *
+ * ## Why `status` alone, when the sibling code rule also checks the catalog
+ *
+ * {@link carryCatalogedErrorCode} gates on membership in `StandardErrorCode ∪
+ * ERROR_CODE_LEDGER` because it writes `ApiErrorSchema.code`, a closed union a
+ * driver's own dialect must never enter. A message is free text, so the
+ * catalog does not bound it, and the two readings coincide on every refusal
+ * that reaches these exits today (each declares both halves). Where they could
+ * differ, status-alone is the safe direction: requiring a catalogued code too
+ * would blank an authored refusal that happens to carry an uncatalogued one —
+ * deleting a #4277 self-correcting message, which is a usability regression in
+ * exchange for no disclosure gain.
+ *
+ * The withheld text never leaves the server: every call site rides the original
+ * error on `cause`, which `handleRouteError` / `logWithheldServerFault` print
+ * whole — the same posture {@link metadataStoreUnavailableError} already takes.
+ */
+function declaresClientRefusal(err: unknown): boolean {
+    const status = (err as { status?: unknown } | null | undefined)?.status;
+    return typeof status === 'number' && status >= 400 && status < 500;
+}
+
+/**
+ * [#8136] The client-facing sentence for a failed overlay delete: the caller's
+ * own refusal when they declared one, and otherwise a stable line that names
+ * the operation and quotes nothing.
+ *
+ * Both of {@link ObjectStackProtocolImplementation.deleteMetaItem}'s re-wrap
+ * exits share it, for the reason {@link carryCatalogedErrorCode} gives about
+ * `code`: the envelope must not vary by which path served the delete.
+ *
+ * The `Failed to delete customization overlay` prefix is unchanged, byte for
+ * byte — it is the operation description a caller needs and several pins read
+ * it. What changes is what follows the colon.
+ */
+function overlayDeleteFailureMessage(err: unknown, type: string, name: string): string {
+    if (declaresClientRefusal(err)) {
+        const declared = (err as { message?: unknown } | null | undefined)?.message;
+        if (typeof declared === 'string' && declared.length > 0) {
+            return `Failed to delete customization overlay: ${declared}`;
+        }
+    }
+    return `Failed to delete customization overlay for ${type}/${name}. `
+        + 'The metadata store rejected the delete; the reason is in the server log. '
+        + 'Retry once the metadata database is reachable.';
+}
+
+/**
+ * [#8136] The per-item `error` string a collector puts on its response — the
+ * caller's own refusal when they declared one, otherwise a stable fallback.
+ *
+ * The counterpart of {@link overlayDeleteFailureMessage} for the paths that
+ * report failure as DATA rather than by throwing. That distinction is why the
+ * producer is the only place this can be fixed: `deletePackage`'s `failed[]`
+ * and `cleanups[]` ride onto a `PACKAGE_DELETE_PARTIAL` 400 inside `details`,
+ * so no 5xx message withhold at any HTTP boundary ever sees them.
+ *
+ * @param fallback - what to say when nothing may be quoted. Already the
+ *   existing no-message fallback at every call site (`'delete failed'`,
+ *   `'cleanup failed'`), so the withheld case reuses the sentence the caller
+ *   could already receive rather than inventing a second vocabulary.
+ */
+function clientFacingFailureText(err: unknown, fallback: string): string {
+    if (declaresClientRefusal(err)) {
+        const declared = (err as { message?: unknown } | null | undefined)?.message;
+        if (typeof declared === 'string' && declared.length > 0) return declared;
+    }
+    return fallback;
+}
+
+/**
  * A batch row that names no record id for an operation that needs one — a
  * caller error, so it carries VALIDATION_FAILED / 400 rather than falling
  * through {@link toRowApiError}'s unclassified-throw default (#4793).
@@ -1768,8 +1856,13 @@ const WIRE_DOLLAR_ALIASES: readonly (readonly [string, string])[] = [
  *                      and the array from either slot.
  *  - `where`         — a FILTER AST is an array (`['status','=','open']`), so a
  *                      blanket arity refusal here would reject the AST body form
- *                      outright. A repeated `?filter=` is still refused, one
- *                      block down, by `isFilterAST` failing to read it.
+ *                      outright. Arity for this slot is judged one layer up, at
+ *                      the REST querystring ingress (`assertFilterParamSuppliedOnce`,
+ *                      #7390) — the only layer that knows an array on this wire
+ *                      is a repetition and can be nothing else. A repeated
+ *                      `?filter=` never reaches this block on `GET /data/:object`;
+ *                      worse, `?filter=status&filter=%3D&filter=open` spells a
+ *                      valid AST and succeeds with a filter nobody expressed.
  *  - `groupBy`       — `z.array(GroupByNodeSchema)`.
  *  - `aggregations`  — `z.array(AggregationNodeSchema)`.
  *  - `joins` / `windowFunctions` — retired ARRAY keys (#4286). The tombstone,
@@ -2766,7 +2859,7 @@ export type MetadataAuthoringGate = (ctx: MetadataAuthoringGateContext) => void 
  * the CLI's lightweight host-config assembler (`serve.ts`'s auto-register
  * branch, `new ObjectQLPlugin()` with no options) also leaves `environmentId`
  * undefined, and it serves an END-USER `PUT /api/v1/meta/*`. Both topologies
- * read identically, so the whole #4463 gate — all 26 shared `AUTHORING_RULES`
+ * read identically, so the whole #4463 gate — all the shared `AUTHORING_RULES`
  * — was disengaged on a self-hosted app server. #5086 had already moved the
  * code-only refusal off the same proxy for the same reason ("keying
  * authorization off a row-scoping key is what made a type-level declaration
@@ -3154,7 +3247,7 @@ export class ObjectStackProtocolImplementation implements
         // with no options) ALSO leaves `environmentId` undefined, and it
         // serves an end-user `PUT /api/v1/meta/*`. `isHostConfig` →
         // `shouldBootWithLibrary === false` is the flagship showcase's own
-        // boot shape, so a self-hosted app server ran all 26 shared
+        // boot shape, so a self-hosted app server ran all the shared
         // `AUTHORING_RULES` on exactly nothing — and for a Studio tenant or an
         // MCP/AI author this gate is not the weakest of four doors, it is the
         // ONLY one (#4463's filing reason).
@@ -4117,6 +4210,151 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#7556] Resolve an OBJECT body that came from the MetadataService into the
+     * object's resolved schema, by folding the registry's `extend` contributors
+     * onto it.
+     *
+     * The two readers of a single object — this file's by-name read and its
+     * layered view — consult {@link readItemFromMetadataService} BEFORE the
+     * SchemaRegistry, because that service is the HMR-fresh copy. For every
+     * other metadata type that ordering is free. For `object` it is not: an
+     * object's resolved schema is DEFINED (ADR-0029 D9.2 / D9.6) as a base layer
+     * with its `extend` contributors folded on, and the MetadataService copy is
+     * only the base layer. A deployment that ingests a compiled artifact
+     * (`artifactSource`, i.e. every sealed/served runtime) registers `objects`
+     * and `objectExtensions` into that service as SEPARATE collections, so the
+     * body this method receives is the owner's declaration with no extender in
+     * it. Serving it unfolded is what made the showcase's three
+     * `objectExtensions` fields readable through `GET /meta/object`, writable
+     * through the data API, and absent from `GET /meta/object/:name` — the read
+     * the edit and new forms derive from.
+     *
+     * The list read needs no counterpart: it reads `registry.listItems`, whose
+     * object branch resolves through the same fold, so it was never wrong.
+     * This method exists to make the two AGREE at their one point of
+     * divergence, not to give the by-name route a rule of its own.
+     *
+     * Applied ONLY to a MetadataService body. A registry-sourced body has
+     * already been folded, and the fold concatenates `validations`/`indexes`
+     * (see {@link SchemaRegistry.foldObjectExtendersOnto}), so applying it twice
+     * would duplicate both.
+     */
+    private foldObjectExtendersFromRegistry(type: string, name: unknown, body: unknown): unknown {
+        const singular = PLURAL_TO_SINGULAR[type] ?? type;
+        if (singular !== 'object') return body;
+        if (body === null || typeof body !== 'object') return body;
+        // [#8027] The list caller reads the name off the ROW rather than off a
+        // request, and a row with no usable `name` has no contributor list to
+        // look up — `mergePackageAwareOverlay` skips such rows too.
+        if (typeof name !== 'string' || name === '') return body;
+        const registry = (this.engine as any)?.registry;
+        // Partial registry doubles in tests predate this method; a host that
+        // cannot fold answers exactly as it did before.
+        if (!registry || typeof registry.foldObjectExtendersOnto !== 'function') return body;
+        try {
+            return registry.foldObjectExtendersOnto(name, body);
+        } catch {
+            // The fold is a read over in-memory contributors; a failure here
+            // must not turn a served schema into a 5xx.
+            return body;
+        }
+    }
+
+    /**
+     * [#8038] The `__search` half of {@link governServedItem}'s presence
+     * convergence — the third stamp in the same family, and the one the
+     * module-level function cannot carry on its own.
+     *
+     * `applyInjectedSystemColumns` (#6562) converges the columns whose
+     * membership is a pure function of the document
+     * (`resolveInjectedSystemColumns`), so it needs nothing but the body. The
+     * search companion is DEPLOYMENT-gated: `SchemaRegistry` provisions it at
+     * the object-materialization seam only when its own `searchCompanion` flag
+     * is on, and that flag is `options.searchCompanion ??
+     * resolveSearchPinyinEnabled()` — a host may set it explicitly. So the
+     * answer has to come from the registry that made the decision, which is why
+     * this is a method here and a `provisionSearchCompanionOnto` there, exactly
+     * as {@link foldObjectExtendersFromRegistry} is a method here and a
+     * `foldObjectExtendersOnto` there (#7556).
+     *
+     * Applied AFTER `governServedItem` at each exit, because the registry
+     * provisions the companion after `applySystemFields` too: the source field
+     * is resolved by `resolveDisplayField` over the POST-injection field set,
+     * so injecting first is what makes this pass and the registry's own answer
+     * the same answer rather than two independent guesses.
+     *
+     * No-op for every type but `object`, and — via the registry — for a
+     * deployment with companions off, an object with no eligible display field,
+     * and a body that already carries the column (every registry-backed read,
+     * which is the majority path this converges the minority onto).
+     */
+    private provisionSearchCompanionFromRegistry<T>(type: string, body: T): T {
+        if (canonicalMetaType(type) !== 'object') return body;
+        if (body === null || typeof body !== 'object') return body;
+        const registry = (this.engine as any)?.registry;
+        // Partial registry doubles in tests predate this method; a host that
+        // cannot answer the gate answers exactly as it did before.
+        if (!registry || typeof registry.provisionSearchCompanionOnto !== 'function') return body;
+        try {
+            return registry.provisionSearchCompanionOnto(body) as T;
+        } catch {
+            // A read over an in-memory flag and the body's own fields; a failure
+            // here must not turn a served schema into a 5xx.
+            return body;
+        }
+    }
+
+    /**
+     * {@link governServedItem} plus the deployment-gated half it cannot reach
+     * ({@link provisionSearchCompanionFromRegistry}) — the whole of what a
+     * `/meta` READ EXIT owes an object document. Every call site of the free
+     * function that is a read exit goes through this instead; the one call site
+     * that is not — `getMetaItemLayered`'s `code` / `overlay` layers, which are
+     * deliberately raw — never called it in the first place (#6562 ruling
+     * constraint 1, #7556's boundary).
+     */
+    private governServedObject<T>(type: string, item: T): T {
+        return this.provisionSearchCompanionFromRegistry(type, governServedItem(type, item));
+    }
+
+    /**
+     * [#8038] The write-side counterpart of
+     * {@link provisionSearchCompanionFromRegistry}, owed for the reason
+     * {@link stripServedSystemColumns} is owed one field family over: the write
+     * path persists the request body verbatim (ADR-0005 §Validation), so a
+     * document this service's read added the companion to would otherwise be
+     * handed straight back and stored carrying it.
+     *
+     * Measured on the runtime-created object path — the write door type
+     * `object` has open by default, an artifact-backed object refusing the save
+     * outright with `NOT_OVERRIDABLE` — the stored row went from
+     * `fields: [name]` to `fields: [__search, name]` on a single GET → PUT
+     * before this was added.
+     */
+    private stripSearchCompanionFromRegistry<T>(type: string, item: T): T {
+        if (canonicalMetaType(type) !== 'object') return item;
+        if (item === null || typeof item !== 'object') return item;
+        const registry = (this.engine as any)?.registry;
+        if (!registry || typeof registry.stripProvisionedSearchCompanionFrom !== 'function') return item;
+        try {
+            return registry.stripProvisionedSearchCompanionFrom(item) as T;
+        } catch {
+            // A read over the body's own fields; a failure here must not turn a
+            // save into a 5xx.
+            return item;
+        }
+    }
+
+    /**
+     * {@link stripServedSystemColumns} plus the companion half
+     * ({@link stripSearchCompanionFromRegistry}) — the whole of what the write
+     * path owes {@link governServedObject}.
+     */
+    private stripServedObjectColumns<T>(type: string, item: T): T {
+        return this.stripSearchCompanionFromRegistry(type, stripServedSystemColumns(type, item));
+    }
+
+    /**
      * [#5840] Read ONE item from the `metadata` service, keeping the ADR-0110
      * D3 verdict instead of flattening it into `undefined`.
      *
@@ -4333,7 +4571,19 @@ export class ObjectStackProtocolImplementation implements
                         const patch = viewIdentityPatch(data as Record<string, unknown>, prev);
                         if (patch) Object.assign(data as Record<string, unknown>, patch);
                     }
-                    return data;
+                    // [#8027] The list half of the same rule the by-name read
+                    // applies to its own overlay adoption. This merge REPLACES a
+                    // base item with the overlay body wholesale (it is a
+                    // per-slot layer pick, not a field merge), so for `object` —
+                    // whose resolved schema is D9.2's base-plus-extenders — the
+                    // winning row has to be resolved the same way `resolveObject`
+                    // resolves the base it displaced, or the two reads of one
+                    // object disagree the moment a row exists. Both routes were
+                    // wrong here together, which is why #7556's byName===listed
+                    // pin stayed green through this defect.
+                    return this.foldObjectExtendersFromRegistry(
+                        request.type, (data as { name?: unknown } | null)?.name, data,
+                    );
                 });
 
                 // Only hydrate the global registry for unscoped (control-plane)
@@ -4444,50 +4694,66 @@ export class ObjectStackProtocolImplementation implements
                     runtimeItems = runtimeItems.filter((item: any) => item?._packageId === packageId);
                 }
                 if (runtimeItems && runtimeItems.length > 0) {
-                    // Merge, avoiding duplicates. ADR-0048 (#1828) — key by
-                    // (package, name), not bare name, so a runtime item from one
-                    // package does not collapse a same-name item from another.
+                    // Merge, avoiding duplicates. ADR-0048 (#1828) — resolution
+                    // is per `(slot, package)` and never by bare `name`, so a
+                    // runtime item from one package does not collapse a
+                    // same-name item from another.
                     //
-                    // [#7774] …and by `(package, name, locale)` for a type
-                    // whose identity the spec declares as a pair. This loop is
-                    // where the i18n bundle actually died: `items` already
-                    // held both members (the registry keeps them since #7730),
-                    // the second `set` overwrote the first, and
-                    // `GET /meta/email_template` served one locale. It only
-                    // ever ran with a `metadata` service installed AND
-                    // answering non-empty for the type — which is why the
+                    // [#7774] …and the slot carries the bundle discriminator
+                    // for a type whose identity the spec declares as a pair.
+                    // This merge is where the i18n bundle actually died:
+                    // `items` already held both members (the registry keeps
+                    // them since #7730), the second write overwrote the first,
+                    // and `GET /meta/email_template` served one locale. It only
+                    // ever runs with a `metadata` service installed AND
+                    // answering non-empty for the type — which is why that
                     // regression was invisible to every suite that omits one.
-                    const itemMap = new Map<string, any>();
-                    const entryKey = (entry: any): string =>
-                        metaItemKey(
-                            entry._packageId ?? undefined,
-                            entry.name,
-                            itemDiscriminator(request.type, entry),
-                        );
-                    for (const item of items) {
-                        const entry = item as any;
-                        if (entry && typeof entry === 'object' && 'name' in entry) {
-                            itemMap.set(entryKey(entry), entry);
-                        }
-                    }
-                    for (const item of runtimeItems) {
-                        const entry = item as any;
-                        if (entry && typeof entry === 'object' && 'name' in entry) {
-                            // Do not overwrite entries already present in the
-                            // map: those came from sys_metadata (customization
-                            // overlays) or the SchemaRegistry and must win
-                            // over the MetadataService's artifact baseline.
-                            // Without this guard, saved per-org dashboard /
-                            // view overlays disappear from list endpoints on
-                            // refresh (detail endpoint kept showing the
-                            // overlay because it uses a different code path).
-                            const key = entryKey(entry);
-                            if (!itemMap.has(key)) {
-                                itemMap.set(key, entry);
-                            }
-                        }
-                    }
-                    items = Array.from(itemMap.values());
+                    //
+                    // [#7654] THE RESOLUTION IS THE OVERLAY MERGE'S, and it is
+                    // now literally that function instead of a second
+                    // implementation of the same idea. As a hand-rolled `Map`
+                    // keyed on `(package, name)` with STRICT equality, this step
+                    // disagreed with {@link mergePackageAwareOverlay} — which
+                    // runs one layer above it on the very same list — about the
+                    // package-LESS row, and the disagreement reached the wire as
+                    // a duplicate. A package-less row does not merely occupy a
+                    // slot of its own: it STANDS IN for each package's row of
+                    // that name, which is how `getMetaItem(name, packageId=P)`
+                    // resolves and what the overlay merge already implements.
+                    //
+                    // A runtime `PUT /api/v1/meta/<type>/<name>` carries no
+                    // `?package=`, so `sys_metadata` takes a
+                    // `package_id IS NULL` row. For a type the SchemaRegistry
+                    // has nothing for — `skill`, `agent` and `tool` reach the
+                    // MetadataService through its own loaders, so the registry
+                    // listing is empty and this baseline is the only package row
+                    // there is — that overlay leaves the merge above UNSTAMPED
+                    // (it stamps `_packageId` from the base row it displaced,
+                    // and there was none). Its key then missed the
+                    // package-bearing baseline row here, the "already present"
+                    // guard below never fired, and `GET /api/v1/meta/skill`
+                    // listed the override row AND the package row after a 200
+                    // PUT. The mirrored attribution — a package-less runtime
+                    // baseline under a package-bearing higher row — duplicated
+                    // for the same reason and is closed by the same call.
+                    //
+                    // Layer order is the one the guard this replaces stated:
+                    // entries from `sys_metadata` (customization overlays) or
+                    // the SchemaRegistry WIN over the MetadataService's artifact
+                    // baseline — without that, saved per-org dashboard / view
+                    // overlays disappeared from list endpoints on refresh while
+                    // the detail endpoint kept showing them. So `items` is the
+                    // higher layer (`records`) and the runtime listing is the
+                    // base, and "latest contribution wins" reproduces the guard
+                    // rather than reversing it.
+                    items = mergePackageAwareOverlay(
+                        request.type,
+                        runtimeItems as unknown[],
+                        (items as any[]).map((it) => ({
+                            data: it,
+                            packageId: ((it as any)?._packageId ?? undefined) as string | undefined,
+                        })),
+                    );
                 }
             }
         } catch {
@@ -4568,7 +4834,7 @@ export class ObjectStackProtocolImplementation implements
                     // is the other exit a client reads field metadata from, and
                     // an overlay row wins over the (already-governed) registry
                     // entry in the merge above, so it carries the same lie.
-                    return governServedItem(request.type, mergeArtifactProtection(it, a)) as any;
+                    return this.governServedObject(request.type, mergeArtifactProtection(it, a)) as any;
                 }),
             ),
         };
@@ -4632,7 +4898,7 @@ export class ObjectStackProtocolImplementation implements
                     return {
                         type: request.type,
                         name: request.name,
-                        item: decorateMetadataItem(request.type, governServedItem(request.type, draftItem)),
+                        item: decorateMetadataItem(request.type, this.governServedObject(request.type, draftItem)),
                     };
                 }
             } catch (error) {
@@ -4726,8 +4992,32 @@ export class ObjectStackProtocolImplementation implements
             return {
                 type: request.type,
                 name: request.name,
-                item: decorateMetadataItem(request.type, governServedItem(request.type, item)),
+                item: decorateMetadataItem(request.type, this.governServedObject(request.type, item)),
             };
+        }
+
+        // [#8027] An OBJECT's overlay row is a BASE LAYER, not a resolved
+        // schema. ADR-0029 D9.2 defines the resolution as `overlay ?? own` with
+        // the `extend` contributors folded ON — which is what
+        // `SchemaRegistry.resolveObject` does for an overlay it knows about, and
+        // what step 2 below already does (#7556) for the MetadataService copy.
+        // Step 1 was the one adopter that served its layer verbatim, so a single
+        // customisation row — an admin renaming the object's label in Studio —
+        // silently dropped every extension-contributed field from this read, and
+        // therefore from every writable form derived from it, while the data API
+        // kept accepting and persisting those same fields.
+        //
+        // Placed AFTER the draft return on purpose: a draft is a pending edit of
+        // the base layer, and folding it would show an author extension fields
+        // inside the document they are editing and about to PUT back. Drafts were
+        // never folded (before #7556 nothing was), so this leaves that asymmetry
+        // exactly where it already was rather than widening this fix into it.
+        //
+        // No-op for every type but `object`, for an object nothing extends, and
+        // for an item with no overlay row (`item` is still undefined here, and
+        // step 2 / step 3 fold their own sources).
+        if (item !== undefined) {
+            item = this.foldObjectExtendersFromRegistry(request.type, request.name, item);
         }
 
         // 2. MetadataService (runtime-registered items: HMR-updated view/page/
@@ -4754,7 +5044,12 @@ export class ObjectStackProtocolImplementation implements
                     request.packageId,
                 );
                 if (fromService.data !== undefined && fromService.data !== null) {
-                    item = fromService.data;
+                    // [#7556] A layer, not a resolved schema — see
+                    // {@link foldObjectExtendersFromRegistry}. No-op for every
+                    // type but `object`, and for an object nothing extends.
+                    item = this.foldObjectExtendersFromRegistry(
+                        request.type, request.name, fromService.data,
+                    );
                 } else if (fromService.degraded) {
                     serviceDegraded = fromService;
                 }
@@ -4822,7 +5117,7 @@ export class ObjectStackProtocolImplementation implements
         const artifactItem = this.lookupArtifactItem(request.type, request.name, request.packageId);
         let decorated = decorateMetadataItem(
             request.type,
-            governServedItem(request.type, mergeArtifactProtection(item, artifactItem)),
+            this.governServedObject(request.type, mergeArtifactProtection(item, artifactItem)),
         );
         // ADR-0047 — list views additionally get reference-integrity
         // diagnostics (userFilters/tabs fields must exist on the source
@@ -4967,7 +5262,15 @@ export class ObjectStackProtocolImplementation implements
                 request.packageId,
             );
             if (fromService.data !== undefined && fromService.data !== null) {
-                code = fromService.data;
+                // [#7556] The CODE layer of an object is D9.6's "owner's
+                // declaration with its extenders folded on", so the
+                // MetadataService copy is its base, not the layer itself.
+                // `effective` is `overlay ?? code`, so an object with no
+                // overlay row — the ordinary shape — is corrected by this
+                // single fold on both layers the diagnostic reports.
+                code = this.foldObjectExtendersFromRegistry(
+                    request.type, request.name, fromService.data,
+                );
             } else if (fromService.degraded) {
                 // [#5840] Kept, not swallowed — acted on after the registry
                 // fallback below, which may still produce a real code layer.
@@ -5092,7 +5395,21 @@ export class ObjectStackProtocolImplementation implements
         // customised), and a Studio diff showing `code`'s declaration next to
         // `effective`'s governed value is the platform override made visible,
         // not a defect.
-        const effective: unknown | null = governServedItem(request.type, overlay ?? code);
+        // [#8027] …and `effective` is "what `getMetaItem` would return", so when
+        // the overlay wins it is that read's BASE LAYER, resolved the same way:
+        // D9.2's base-plus-extenders. Without this the single `?layers=true`
+        // response contradicted itself — `code` carried the extension fields
+        // (#7556 folds it) and `effective` did not, with the `overlay` layer
+        // showing a customisation that explained none of the difference.
+        //
+        // ⛔ The fold lands on the EFFECTIVE base only. `overlay` stays the row
+        // the tenant actually stored: a code-declared extension is not a tenant
+        // customisation, and #7556 drew that boundary deliberately (the same
+        // reason `governServedItem` is called here and never on `overlay`).
+        const effectiveBase: unknown | null = overlay !== null
+            ? this.foldObjectExtendersFromRegistry(request.type, request.name, overlay)
+            : code;
+        const effective: unknown | null = this.governServedObject(request.type, effectiveBase);
 
         const _diagnostics =
             effective !== null && effective !== undefined
@@ -6094,6 +6411,33 @@ export class ObjectStackProtocolImplementation implements
      * `owner_id.name` — plausible from the select/sort axes — would be
      * silently dropped there, and this gate letting it through would
      * reintroduce the fallback it exists to close.
+     *
+     * ## The PROJECTION axis answers the same name differently — on purpose
+     *
+     * A name this gate refuses can still be spelled in `select` and come back
+     * 200 with the key simply absent: {@link assertProjectionFieldsExist} gates
+     * on whether a field is KNOWN, not on whether it is RETURNABLE, and the
+     * engine's read path then drops what the caller may not see
+     * (`omitInternalFields` for `internal: true` columns,
+     * `stripSearchCompanionFromRead` for the hidden `__search` companion).
+     * Measured on `__search`: `searchFields=__search` is a 400 here, while
+     * `select=__search` is a 200 whose body lacks it.
+     *
+     * That is not a gap someone forgot to close — it was asked as its own
+     * question and ruled intended on 2026-08-12 (#7876, direction C). The two
+     * axes are different KINDS of surface. `searchFields` is AUTHORING input:
+     * it tells the server how to RUN the query, so a value the server will not
+     * honour changes WHICH ROWS come back — the fail-open this gate exists for.
+     * `select` is a READ PROJECTION: it names what the caller would like back,
+     * the row set is untouched either way, and a column the caller may not see
+     * is simply not in the body.
+     *
+     * ⛔ Do not close the asymmetry by teaching the projection gate to refuse
+     * unreturnable columns. That was the alternative on #7876 and it was
+     * declined: it converts requests that answer 200 today into failures, for
+     * symmetry, on spellings with no measured callers. A real caller burned by
+     * a silent drop reopens the question on THAT measurement; the asymmetry
+     * alone does not.
      */
     private assertSearchFieldsAreSearchable(object: string, requested: unknown, param: string): void {
         // Shape first, BEFORE the field-map tiering below — same order as the
@@ -9436,7 +9780,85 @@ export class ObjectStackProtocolImplementation implements
         if (!registry || typeof registry.registerItem !== 'function') return false;
         const artifact = this.lookupArtifactItem(type, (data as any).name, options.packageId ?? undefined);
         registry.registerItem(type, mergeArtifactProtection(data, artifact), 'name' as any);
+        this.hydrateExpandedViewItems(type, data, options, registry);
         return true;
+    }
+
+    /**
+     * [#7736] Expand an aggregated `defineView` container that arrived through
+     * the RUNTIME door into the same independent ViewItems the two SOURCE
+     * registrars produce — at the one hydration choke point all three runtime
+     * callers already share.
+     *
+     * "Object has-many View" (ADR-0017 §2, §3.2) makes container ingestion
+     * DUAL-READ: register the container under the bare `<object>` key for
+     * back-compatible single-item reads, AND register every expanded ViewItem
+     * under `<object>.<viewKey>`, because only the expanded items carry the
+     * `viewKind` + `object` pair that every object-bound read path filters on
+     * (`GET /meta/view?object=` in `rest-server.ts`, `getViewsByObject()` in
+     * `metadata-manager.ts`). Both source registrars do exactly this — the
+     * ObjectQL boot loop (`engine.ts`, `key === 'views'`) and the metadata
+     * artifact/HMR loader (`plugin.ts`, `isAggregatedViewContainer`) — and the
+     * runtime door did not, so a container authored against a writable runtime
+     * package was stored, badged `_diagnostics.valid: true`, and then served by
+     * nothing: `getMetaItems` DROPS containers from enumeration (the
+     * canonical-shape filter below) on the stated assumption that "the
+     * registrar expands it", and for a runtime-written row no registrar ever
+     * had. Measured before the fix: the stored container expands cleanly to two
+     * items that WOULD match the switcher, and both object-bound exits answered
+     * zero.
+     *
+     * Here rather than at either read exit deliberately. There are two
+     * independent object-bound readers — the REST route reads through
+     * `getMetaItems`, while `getViewsByObject()` reads `MetadataManager.list`
+     * — so expanding at one of them fixes the card's literal repro and leaves
+     * its sibling exit answering empty. This function is the ONE place all
+     * three runtime hydration callers (boot `loadMetaFromDb`, read-side
+     * `getMetaItems`, write-through `applyRegistryWriteThrough`) already
+     * funnel through, so one expansion serves every reader, survives a restart,
+     * and keeps read-your-writes — the "single, universally-applied location"
+     * #7163 asked for after the same defect was fixed one seam further in.
+     *
+     * The canonical-shape filter in `getMetaItems` is deliberately left alone:
+     * its invariant ("a container's expanded items are also present") is what
+     * was false here, and this restores it rather than loosening the filter —
+     * which would surface the legacy wrapper shape to every list consumer and
+     * still show the switcher nothing, since a container carries no `viewKind`.
+     *
+     * Object-name derivation mirrors `plugin.ts` (`list.data.object` →
+     * `form.data.object`), falling back to the row's own name — for a container
+     * the metadata door's save name IS the object. No derivable object means no
+     * expansion, exactly as the artifact loader already decides.
+     */
+    private hydrateExpandedViewItems(
+        type: string,
+        data: unknown,
+        options: { packageId?: string | null; organizationId: string | null },
+        registry: any,
+    ): void {
+        if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'view') return;
+        if (!isAggregatedViewContainer(data)) return;
+        const container = data as Record<string, any>;
+        const viewObject =
+            container?.list?.data?.object
+            ?? container?.form?.data?.object
+            ?? (typeof container.name === 'string' ? container.name : undefined);
+        if (!viewObject) return;
+        for (const vi of expandViewContainer(viewObject, container)) {
+            // Carry the container's package provenance onto each expanded item
+            // so the package-disable filter and ADR-0048 artifact scoping judge
+            // them by the same owner the container has.
+            const item: Record<string, unknown> = { ...(vi as any) };
+            if (container._packageId !== undefined && item._packageId === undefined) {
+                item._packageId = container._packageId;
+            }
+            const viArtifact = this.lookupArtifactItem(
+                type,
+                vi.name,
+                (item._packageId as string | undefined) ?? options.packageId ?? undefined,
+            );
+            registry.registerItem(type, mergeArtifactProtection(item, viArtifact), 'name' as any);
+        }
     }
 
     /**
@@ -9906,7 +10328,7 @@ export class ObjectStackProtocolImplementation implements
         // schema gate, the authoring gate and the persisted body all still see
         // one document. See {@link stripServedSystemColumns} for why this is a
         // separate strip from the decoration list and not another entry in it.
-        request.item = stripServedSystemColumns(request.type, request.item);
+        request.item = this.stripServedObjectColumns(request.type, request.item);
         // Per-item lifecycle (ADR-0005 §"Drafts"). Default is `'publish'`
         // (legacy semantics — save goes straight live) to keep callers
         // that predate the draft/publish split working. Studio's
@@ -10012,6 +10434,74 @@ export class ObjectStackProtocolImplementation implements
         if (this.environmentId !== undefined) {
             const artifactBacked = this.isArtifactBacked(request.type, request.name);
             if (artifactBacked && !overlayAllowed) {
+                // [#8184] THE PACKAGE DOOR — the SECOND refusal point for one
+                // condition, and the reason this card exists.
+                //
+                // `SysMetadataRepository.assertAllowed` reads the base the
+                // caller NAMED and answers `ITEM_LOCKED` (`lockSource:
+                // 'package'`) when it is read-only (#7682, then #8146's
+                // hatch ruling). That door is topology-INDEPENDENT — and it
+                // was unreachable here, because this branch throws first on
+                // every kernel with an `environmentId`. So one request
+                // answered `ITEM_LOCKED` on a host-config / CLI-assembled
+                // kernel and the undiscriminated `NOT_OVERRIDABLE` on a
+                // project/cloud per-env one: the refusal VOCABULARY keyed off
+                // a row-scoping key, which is the #5086 / #6710 finding
+                // (see the block comment above) arriving on the error codes.
+                // A client that learns to handle `ITEM_LOCKED` on one
+                // deployment never saw it on the other.
+                //
+                // ⚠️ MIRRORED, NOT RE-INVENTED. Same predicate
+                // ({@link isWritablePackage}, the ADR-0070 rule in one
+                // place), same emitter — `readOnlyBaseOverrideError` is
+                // called, not copied — so the code, the status, the
+                // `lockSource`, the `packageId` and the sentence cannot drift
+                // between the two doors. Two independently-authored refusals
+                // for one condition is how `NOT_OVERRIDABLE`-everywhere
+                // started.
+                //
+                // THE LIMB ORDERING IS THE RULE, and it is the same ordering
+                // the repository states: BELOW every registry limb, ABOVE the
+                // hatch limb.
+                //   • Below the registry limb — this whole branch is guarded
+                //     by `!overlayAllowed`, so an `allowOrgOverride` type
+                //     never reaches the door. That is ADR-0005: an org
+                //     overlay of a code-shipped item ALWAYS names the
+                //     read-only package it customizes, and a door one limb
+                //     higher would close the overlay model outright. Pinned.
+                //   • Above the hatch limb — `isOverlayAllowed` folds
+                //     `OS_METADATA_WRITABLE` in, so an OPEN hatch takes the
+                //     write past this branch entirely, down to the repository
+                //     door, which applies the same rule with `hatchOpen:
+                //     true` and its own remedy. The hatch therefore still
+                //     never unlocks package writability on this topology
+                //     either (#8146 NARROW), and both directions of that
+                //     remedy selection are pinned in
+                //     `sys-metadata-repository.package-writability.test.ts`.
+                //     That is also why `hatchOpen` is passed as a literal
+                //     `false` here rather than recomputed: reaching this line
+                //     PROVES the hatch is closed, and a recomputed value
+                //     would be dead code dressed as a decision.
+                //
+                // ⛔ NARROW, exactly as the repository is: only a write that
+                // NAMES a read-only base is re-coded. A package-less write
+                // keeps `NOT_OVERRIDABLE` verbatim. Refusing a hatch write
+                // that names NO read-only base (BROAD) retires the hatch's
+                // only documented use and needs a maintainer decision plus a
+                // docs/ADR change — never arrived at from here.
+                //
+                // `runtime-only` needs no limb here: this branch is guarded by
+                // `artifactBacked`, so the intent is always
+                // `override-artifact`. The create side of the door is the
+                // ADR-0070 D1 gate further down this method, which is already
+                // topology-independent and already answers
+                // `WRITABLE_PACKAGE_REQUIRED` / 422 on every kernel.
+                const namedBase = typeof request.packageId === 'string' && request.packageId.length > 0;
+                if (namedBase && !this.isWritablePackage(request.packageId)) {
+                    throw SysMetadataRepository.readOnlyBaseOverrideError(
+                        request.type, request.packageId as string, false,
+                    );
+                }
                 const err = new Error(
                     `[not_overridable] Metadata item '${request.type}/${request.name}' is provided by a code package `
                     + `and the type has not opted into per-org overlay writes (allowOrgOverride=false). `
@@ -11776,6 +12266,11 @@ export class ObjectStackProtocolImplementation implements
                 });
                 discarded.push({ type: d.type, name: d.name });
             } catch (e: any) {
+                // [#8136] Same source, same reasoning as `deletePackage`'s
+                // `failed[]` collector below: this `try` wraps only
+                // `deleteMetaItem`, whose exits all now either declare a
+                // refusal or withhold at the source. Clean derivatively; no
+                // filter of its own.
                 failed.push({
                     type: d.type,
                     name: d.name,
@@ -11809,6 +12304,7 @@ export class ObjectStackProtocolImplementation implements
     async deletePackage(request: {
         packageId: string;
         organizationId?: string;
+        allTenants?: boolean;
         actor?: string;
         keepData?: boolean;
     }): Promise<{
@@ -11819,6 +12315,78 @@ export class ObjectStackProtocolImplementation implements
         failed: Array<{ type: string; name: string; error: string; code?: string }>;
         cleanups: UninstallCleanupOutcome[];
     }> {
+        // [#7780] A cross-tenant uninstall must be DECLARED, never inferred from
+        // an absent parameter. Maintainer ruling (2026-08-12):
+        // 跨租户卸载必须显式声明,缺省缺参永远不等于「全部租户」.
+        //
+        // Before this gate, `{ packageId }` with no org matched EVERY
+        // organization's rows — measured during #7705 at 5 of 5 deleted,
+        // including a foreign org's. The two doors disagreed on which semantic
+        // that was: the direct-mount REST registrar
+        // (`packages/rest/src/package-routes.ts`) passes no org and got the
+        // cross-tenant read, while the dispatcher twin
+        // (`packages/runtime/src/domains/packages.ts`) resolves one and got the
+        // org-scoped read. Nobody chose that split; it fell out of a missing
+        // argument.
+        //
+        // Why a flag and not a convention: `resolveActiveOrganizationId`
+        // (#4127) is entirely `catch`-wrapped, so ANY throw on the auth seam
+        // returns `undefined`. An accidental org-less call and a deliberate
+        // env-wide one are byte-identical at the call site, and the widest
+        // possible reading of a destructive operation is the one that must
+        // never be reachable by accident. `allTenants: true` is the carrier
+        // that makes the two distinguishable.
+        //
+        // ⛔ NOT narrowed to `organization_id IS NULL` — #7705 proved that
+        // revives the orphaned-row defect on the other door. The remedy here is
+        // explicitness, not narrowing: with the flag, the no-org branch stays
+        // package-wide exactly as it was.
+        //
+        // Mirrors the `force: true` / `DESTRUCTIVE_CHANGE` opt-in this same
+        // class already uses for `saveMetaItem` — refuse, name the remedy in the
+        // message, and carry a ledger-declared code plus an explicit status.
+        // Two ways to violate ONE contract — "the uninstall's tenant scope must be
+        // readable off the request" — so both answer in the same family, with the
+        // same code and status, and each names the parameters that produced it.
+        //
+        // (a) CONTRADICTORY. `organizationId` says "this tenant", `allTenants`
+        // says "every tenant". Rejecting beats picking a winner, because both
+        // silent resolutions are worse than a refusal: resolving narrow-first
+        // makes `allTenants: true` silently INERT (the caller believes they
+        // asked for a cross-tenant uninstall and quietly gets a scoped one,
+        // discovering it only when the rows they expected gone are still
+        // there); resolving explicit-first silently IGNORES a named
+        // organization and deletes every tenant's rows — the original defect
+        // wearing a flag. Rejecting is also the only reading that stays correct
+        // when a request is COMPOSED from two places (a resolver supplying the
+        // org, config supplying the flag), which is exactly the accidental
+        // composition `resolveActiveOrganizationId` makes real.
+        if (request.organizationId && request.allTenants === true) {
+            const err = new Error(
+                `[tenant_scope_required] Refusing to uninstall '${request.packageId}':`
+                + ` organizationId ('${request.organizationId}') and allTenants: true are mutually exclusive —`
+                + ` one scopes the uninstall to a single tenant, the other clears every tenant's rows.`
+                + ` — pass organizationId alone to scope it, or allTenants: true alone to confirm the cross-tenant uninstall.`
+            );
+            (err as any).code = 'TENANT_SCOPE_REQUIRED';
+            (err as any).status = 400;
+            throw err;
+        }
+        // (b) UNDECLARED. Note `!== true`: an explicit `allTenants: false` lands
+        // here with absent, deliberately. `false` is not a request for
+        // cross-tenant semantics, so it cannot authorise them — only the
+        // affirmative `true` does.
+        if (!request.organizationId && request.allTenants !== true) {
+            const err = new Error(
+                `[tenant_scope_required] Refusing to uninstall '${request.packageId}' with no organization scope:`
+                + ` an uninstall that names neither an organization nor an explicit cross-tenant intent would delete`
+                + ` EVERY organization's rows for this package.`
+                + ` — pass organizationId to scope it, or allTenants: true to confirm the cross-tenant uninstall.`
+            );
+            (err as any).code = 'TENANT_SCOPE_REQUIRED';
+            (err as any).status = 400;
+            throw err;
+        }
         const where: Record<string, unknown> = { package_id: request.packageId };
         // [#7705] Surface BOTH org-scoped rows and env-wide (`organization_id
         // IS NULL`) rows to an org-scoped uninstall. A strict
@@ -11845,14 +12413,52 @@ export class ObjectStackProtocolImplementation implements
         // registrar, `packages/rest/src/package-routes.ts`) passes no
         // `organizationId` at all, and restricting it to env-wide rows would
         // orphan every org-scoped row — the same bug, re-created on the other
-        // door. Absent an org, a full uninstall stays package-wide.
+        // door. Absent an org, a full uninstall stays package-wide — and since
+        // #7780 that branch is reachable only with `allTenants: true`, so the
+        // width is now something a caller ASKED for rather than something a
+        // missing argument selected.
+        //
+        // There is no tie-break for "both supplied" because that combination
+        // never reaches here — it is refused above. A destructive operation
+        // whose scope is stated twice, contradictorily, has no reading that is
+        // safe to guess.
         if (request.organizationId) {
             where.$or = [
                 { organization_id: request.organizationId },
                 { organization_id: null },
             ];
         }
-        const rows = (await this.engine.find('sys_metadata', { where })) as any[];
+        // [#8136] This read is the uninstall's FIRST database touch, and until
+        // now it sat outside every `try` in this method — the per-item `catch`
+        // below wraps only the `deleteMetaItem` loop. So a driver failure here
+        // propagated whole, out of the protocol and onto the wire: measured as
+        // `500 INTERNAL_ERROR / "SQLITE_ERROR: no such table: sys_metadata"`
+        // from `DELETE /api/v1/packages/:id`, a physical table name shipped to
+        // a client.
+        //
+        // Declared rather than swallowed: {@link metadataStoreUnavailableError}
+        // is this file's EXISTING answer for "a `sys_metadata` read failed" —
+        // 503 / `SERVICE_UNAVAILABLE`, a message that quotes nothing, and the
+        // driver error carried on `cause` so the operator still gets it whole.
+        // Reusing it rather than minting a second sentence for one condition is
+        // the point; see its docblock for why the verdict is 503.
+        //
+        // ⛔ Deliberately NOT routed through {@link
+        // rethrowUnlessMetadataStoreUnprovisioned}, which returns normally for
+        // `isMissingTableError` and would license the caller to treat the
+        // overlay as absent. On a READ that is right — there are genuinely no
+        // rows. Here it would turn an unreachable store into `rows = []`, and
+        // this method reports that as a completed uninstall that deleted
+        // nothing. An outage answered as "there was nothing to remove" is the
+        // ADR-0110 D3 confusion in its most damaging direction, on a
+        // destructive verb. Every failure stays a failure; only the disclosure
+        // changes.
+        let rows: any[];
+        try {
+            rows = (await this.engine.find('sys_metadata', { where })) as any[];
+        } catch (e) {
+            throw metadataStoreUnavailableError(e);
+        }
 
         const dropStorage = request.keepData !== true;
         // Delete drafts before active so an object's table is dropped once (on
@@ -11875,6 +12481,27 @@ export class ObjectStackProtocolImplementation implements
                 });
                 deleted.push({ type: row.type, name: row.name, state });
             } catch (e: any) {
+                // [#8136] NO filter here, deliberately, and this comment is why
+                // the absence is a decision rather than an oversight.
+                //
+                // This `try` wraps exactly one call, and every exit
+                // `deleteMetaItem` has is now either a refusal it DECLARED
+                // (its two-tier authorization block and `assertLockAllowsDelete`
+                // — 4xx with a catalogued code) or one of its two re-wraps,
+                // which withhold at the source via {@link
+                // overlayDeleteFailureMessage}. Its one engine touch outside
+                // its own `try`, `getEffectiveLock`, has been fail-closed
+                // through `rethrowUnlessMetadataStoreUnprovisioned` since
+                // #5706, so that arrives as the non-quoting 503 too.
+                //
+                // So `failed[].error` — which rides onto the
+                // `PACKAGE_DELETE_PARTIAL` 400 inside `details`, out of reach
+                // of any boundary's message withhold — is clean BECAUSE the
+                // producer is, which is the whole shape of this fix. Adding a
+                // second filter here would be consumer-side tolerance over a
+                // producer that no longer needs it (Prime Directive #12), and
+                // it would blank the per-item refusals that make a partial
+                // uninstall actionable.
                 failed.push({
                     type: row.type,
                     name: row.name,
@@ -11935,7 +12562,18 @@ export class ObjectStackProtocolImplementation implements
                     ...(r?.error ? { error: r.error } : {}),
                 });
             } catch (e: any) {
-                cleanups.push({ name, success: false, removed: 0, error: e?.message ?? 'cleanup failed' });
+                // [#8136] A cleanup is arbitrary plugin code that goes straight
+                // at the engine (plugin-security deletes `sys_permission_set`
+                // rows and their bindings), so a driver failure lands here
+                // verbatim — and this outcome rides on the RESPONSE by design,
+                // inside `details`, where no boundary's message withhold can
+                // reach it. Quoted only when the cleanup declared a refusal.
+                cleanups.push({
+                    name,
+                    success: false,
+                    removed: 0,
+                    error: clientFacingFailureText(e, 'cleanup failed'),
+                });
                 console.warn(
                     `[protocol.deletePackage] uninstall cleanup '${name}' failed for '${request.packageId}': ${e?.message}`,
                 );
@@ -12037,7 +12675,38 @@ export class ObjectStackProtocolImplementation implements
         if (request.organizationId) {
             const byKey = new Map<string, any>();
             for (const row of scanned) {
-                const key = `${row?.type}\u0000${row?.name}`;
+                // [#7932] …and for a bundled type the slot is
+                // `(type, name, discriminator)`. Same shape #7774 gave
+                // {@link metaItemKey}: the discriminator is appended ONLY
+                // when the type declares one, so every undiscriminated type
+                // keeps a byte-identical two-component key and this
+                // change's blast radius is provable rather than argued.
+                //
+                // Within ONE org the collapse cannot happen —
+                // `sys_metadata`'s overlay uniqueness is
+                // `(type, name, organization_id, package_id)` and the table
+                // has no locale column, so one org cannot hold two rows
+                // differing only by body locale. Across the two tiers it
+                // can, and this scan is the one place they meet: an
+                // env-wide `auth.welcome` customized in `en-US` and THIS
+                // org's `zh-CN` customization are two different members of
+                // one bundle (`EmailTemplateDefinitionSchema` resolves a
+                // template by `(name, locale)`), and keying them together
+                // let the org row displace the env-wide one — the
+                // duplicate then shipped one locale of a two-locale
+                // customization, reporting success. Precedence is unchanged
+                // where it was ever meaningful: an org row still wins over
+                // the env-wide row of the SAME member.
+                //
+                // The discriminator is read off the RAW stored body rather
+                // than the converted one, which is safe because no ADR-0087
+                // conversion entry touches `email_template` — re-checked
+                // against `packages/spec/src/conversions/registry.ts`,
+                // whose surfaces are flow/page/object/view/app/… and never
+                // this type.
+                const disc = storedRowDiscriminator(String(row?.type), row);
+                const base = `${row?.type}\u0000${row?.name}`;
+                const key = disc === undefined ? base : `${base}\u0000${disc}`;
                 const kept = byKey.get(key);
                 const keptIsEnvWide = kept != null && (kept.organization_id ?? null) === null;
                 if (kept == null || (keptIsEnvWide && (row?.organization_id ?? null) !== null)) {
@@ -13447,8 +14116,19 @@ export class ObjectStackProtocolImplementation implements
                     (conflict as any).actualHead = err.actualHead;
                     throw conflict;
                 }
-                const e = new Error(`Failed to delete customization overlay: ${err.message ?? err}`);
+                // [#8136] The message quotes `err` only when `err` DECLARED
+                // itself a caller-facing refusal — see {@link
+                // declaresClientRefusal}. Every engine touch in the `try` above
+                // (`repo.get`, `repo.delete`, `restoreArtifactRegistryView`,
+                // `dropObjectStorage`, `recordMetadataAudit`, the projector)
+                // can land a bare driver `Error` in this catch, and this exit
+                // used to interpolate it whole.
+                const e = new Error(overlayDeleteFailureMessage(err, request.type, request.name));
                 (e as any).status = err?.status ?? 500;
+                // The withheld text is not lost, it is relocated: `cause` is
+                // what `handleRouteError` / `logWithheldServerFault` print, the
+                // same posture {@link metadataStoreUnavailableError} takes.
+                (e as any).cause = err;
                 // [#7426] …and the SAME treatment for `code`, gated on the
                 // declared vocabulary. This is the exit a control-plane
                 // kernel's repository refusal leaves by — `NOT_OVERRIDABLE` /
@@ -13539,8 +14219,15 @@ export class ObjectStackProtocolImplementation implements
                     : `Deleted ${singularTypeForRepo} '${request.name}' — it no longer exists.`,
             };
         } catch (err: any) {
-            const e = new Error(`Failed to delete customization overlay: ${err.message}`);
+            // [#8136] Same rule as the repository path's exit above — one
+            // sentence-selection rule for both, so the envelope does not vary
+            // by which path served the delete. This path is deliberately
+            // ungated (#5264), so in practice everything reaching here is a
+            // fault and nothing is quoted; the shared helper is what keeps that
+            // true if a declared refusal ever does arrive.
+            const e = new Error(overlayDeleteFailureMessage(err, request.type, request.name));
             (e as any).status = 500;
+            (e as any).cause = err;
             // [#7426] The SECOND re-wrap exit, and it gets the same `code` rule
             // — otherwise the verb would answer an envelope that varies by
             // which path served the delete, which is harder to reason about

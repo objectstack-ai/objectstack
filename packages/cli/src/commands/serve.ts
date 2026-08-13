@@ -4,7 +4,7 @@ import { Args, Command, Flags } from '@oclif/core';
 import path from 'path';
 import fs from 'fs';
 import net from 'net';
-import chalk from 'chalk';
+import chalk, { chalkStderr } from 'chalk';
 import { bundleRequire } from 'bundle-require';
 import { loadConfig, BUNDLE_REQUIRE_EXTERNALS } from '../utils/config.js';
 import { mergeBootConfig } from '../utils/merge-boot-config.js';
@@ -67,6 +67,7 @@ import {
   type AutomationReadySummary,
   type SeedSourceSummary,
 } from '../utils/format.js';
+import { redirectStdoutToStderr } from '../utils/json-stdout.js';
 import {
   CONSOLE_PATH,
   resolveConsolePath,
@@ -381,6 +382,72 @@ export default class Serve extends Command {
   }
 
   /**
+   * Identities of the local-install surface (`MarketplaceInstallLocalPlugin`),
+   * matched EXACTLY by {@link Serve.providesCapability}.
+   *
+   * Used by the offline arm of the marketplace wiring (#8343) to leave a host
+   * config that already wires its own install-local strictly alone. Declared
+   * here rather than inline so the same drift test that pins
+   * CAPABILITY_PROVIDERS can pin these against the real plugin.
+   */
+  static readonly INSTALL_LOCAL_IDENTITIES: readonly string[] = [
+    'com.objectstack.runtime.marketplace-install-local',
+    'MarketplaceInstallLocalPlugin',
+  ];
+
+  /**
+   * The `controlPlaneUrl` the offline install-local mount is constructed with.
+   *
+   * A named constant rather than an inline `'off'` so a test can assert the
+   * property the call site depends on — `resolveCloudUrl(this) === ''`. The
+   * tempting value is the empty `marketplaceUrl` the wiring block already
+   * holds, and it is wrong in a way no local reading reveals: `resolveCloudUrl`
+   * treats `''` as "unset" and substitutes the PUBLIC default cloud, so an
+   * air-gapped runtime's catalog branch would dial out instead of answering
+   * 503. Spelled as one of the documented disable sentinels, it resolves to
+   * no cloud at all.
+   */
+  static readonly OFFLINE_CONTROL_PLANE = 'off';
+
+  /**
+   * Which half of the marketplace wiring this boot should mount (#8343).
+   *
+   * Pure + static so the decision is readable and testable on its own, the
+   * same reason {@link Serve.providesCapability} is: the call site sits deep
+   * inside `run()` behind a dynamic import, where the only way to observe a
+   * mounting rule is to boot a kernel.
+   *
+   * The two arms are deliberately asymmetric, because the two surfaces need
+   * different things:
+   *
+   *  - `cloudSurfaces` — proxy + cloud-connection + runtime-config. These
+   *    *are* the control plane's client, so a resolved URL is their precondition.
+   *  - `offlineInstallLocal` — the air-gapped install surface. Its inline
+   *    branch reads no URL at all, so a control plane is precisely what it
+   *    does NOT need; gating it on one is what left a self-hosted EE box with
+   *    no install route at all.
+   *
+   * `isRuntimeHostKernel` is restated here (the call site checks it too, to
+   * skip the dynamic import) so this function is the whole rule in one place:
+   * the cloud distribution wires its own marketplace on the host kernel, so
+   * NEITHER arm mounts there.
+   */
+  static planMarketplaceWiring(input: {
+    isRuntimeHostKernel: boolean;
+    marketplaceUrl: string;
+    plugins: readonly unknown[];
+  }): { cloudSurfaces: boolean; offlineInstallLocal: boolean } {
+    if (input.isRuntimeHostKernel) return { cloudSurfaces: false, offlineInstallLocal: false };
+    if (input.marketplaceUrl) return { cloudSurfaces: true, offlineInstallLocal: false };
+    return {
+      cloudSurfaces: false,
+      // A host config that wires its own install-local keeps it — see the
+      // call site for why replacing it would be a silent downgrade.
+      offlineInstallLocal: !Serve.providesCapability(input.plugins, Serve.INSTALL_LOCAL_IDENTITIES),
+    };
+  }
+
+  /**
    * Registry of `requires` token → built-in service-plugin provider for the
    * standalone serve path. Keys are canonical kebab-case platform capability
    * tokens — a drift test asserts every key is in the spec-owned
@@ -544,6 +611,76 @@ export default class Serve extends Command {
   async run(): Promise<void> {
     const { args, flags } = await this.parse(Serve);
 
+    // ── stdout belongs to the protocol, never to diagnostics (#7915) ──
+    // Everything `serve` and the kernel it boots would write to stdout is
+    // forwarded to stderr, for the whole life of the process. Held, never
+    // released: this is not a window, it is the process's output policy.
+    //
+    // WHY, and why UNCONDITIONALLY. With `OS_MCP_STDIO_ENABLED=true` the MCP
+    // stdio transport owns stdout, and that protocol is newline-delimited JSON:
+    // a conforming client `JSON.parse`s every line it reads, so each banner or
+    // log line reaches it as a transport error. Measured on the #7915 repro
+    // (#7645 had to be fixed first for the channel to carry anything at all):
+    // the `initialize` result arrived on line 517, behind 516 lines of banner
+    // and kernel log — which reads as "the transport is broken".
+    //
+    // The tempting fix is "redirect when the stdio transport is active". It is
+    // the wrong one: a conditional needs a reliable signal at the moment each
+    // line prints — before the config is read, before the plugin is loaded —
+    // and it fails SILENTLY and in the worse direction when that signal is
+    // wrong or late. A frame-corrupting line that appears only in some boots is
+    // far harder to find than one that always does. Banners, boot progress and
+    // kernel logs are diagnostics, not program output; stderr is where a CLI
+    // puts diagnostics, mounted transport or not, and in a terminal it costs
+    // nothing because both streams render.
+    //
+    // Covers writers this file does not own — `ObjectLogger` routes
+    // debug/info/warn to `process.stdout` directly (packages/core), and stray
+    // `console.log`s live in several packages the boot touches (the
+    // `[StandaloneStack] no compiled artifact …` line is one). That is why the
+    // redirection is on the STREAM: `LoggerConfig` has a level but no
+    // destination knob, so there is nothing else to point at stderr. Same route
+    // `--json` takes for the same reason (#6217, `utils/json-stdout.ts`).
+    //
+    // The MCP transport is the one writer that must still reach the real
+    // stdout, and it holds its own channel to it (`packages/mcp`,
+    // protocol-stdout.ts) rather than depending on who booted it.
+    redirectStdoutToStderr();
+
+    // Colour follows the stream the text actually lands on. `chalk`'s default
+    // level is decided from stdout, so with the lines above moved to stderr a
+    // `serve > log` in a terminal would print an uncoloured banner to a TTY,
+    // and a `serve 2> log` would write ANSI escapes into the file. Both are
+    // cosmetic, both are wrong, and one assignment fixes them: every writer in
+    // this process shares the same chalk instance.
+    chalk.level = chalkStderr.level;
+
+    /**
+     * Whether the boot-quiet window (further down) is currently open.
+     *
+     * Declared here rather than beside the window because {@link printDiagnostic}
+     * reads it, and this command's first human line prints long before the
+     * window opens.
+     */
+    let bootQuiet = false;
+
+    /**
+     * One human line from `serve`, written straight to **stderr** (#7915).
+     *
+     * Every `console.log` in this command was one of these: a banner line, a
+     * boot-progress note, an error explanation — diagnostics, all of them. They
+     * are written explicitly rather than left to the redirect above so the
+     * stream choice is visible at the call site; the redirect stays because it
+     * also covers the writers this file does not own.
+     *
+     * Suppressed while the boot-quiet window is open, exactly as `console.log`
+     * was: that window exists to keep the banner readable, and moving the
+     * stream must not turn a quiet boot into a noisy one.
+     */
+    const printDiagnostic = (text = '') => {
+      if (!bootQuiet) process.stderr.write(text + '\n');
+    };
+
     // When --dev is passed, set NODE_ENV early so any runtime modules
     // imported below (and any deps that branch on NODE_ENV at import
     // time) see development mode. We deliberately do NOT inherit
@@ -579,7 +716,7 @@ export default class Serve extends Command {
       // shape — this one is fixed by construction (the e2e that measured the
       // truncation drives the other exit; reaching this one needs a busy port in
       // production mode).
-      console.log(
+      printDiagnostic(
         '\n'
         + chalk.red(`  ✗ Port ${requestedPort} is already in use.\n`)
         + chalk.dim('     ObjectStack does not auto-select a different port in production mode:\n')
@@ -685,7 +822,7 @@ export default class Serve extends Command {
           // lines survived a pipe.) An error whose tail can vanish is the #4012
           // shape all over again; assembling it into a single write keeps it
           // inside one pipe-buffer flush.
-          console.log(
+          printDiagnostic(
             chalk.red('  ✗ Nothing to serve — no config and no compiled artifact.') + '\n'
             + chalk.dim(`     Looked for a config at:    ${absolutePath}\n`)
             + chalk.dim(`     Looked for an artifact at: ${path.resolve(process.cwd(), 'dist/objectstack.json')}\n`)
@@ -703,13 +840,13 @@ export default class Serve extends Command {
     }
 
     // Quiet loading — only show a single spinner line
-    console.log('');
+    printDiagnostic();
     if (useEmptyBoot) {
-      console.log(chalk.dim('  No objectstack.config.ts or artifact found — booting empty kernel...'));
+      printDiagnostic(chalk.dim('  No objectstack.config.ts or artifact found — booting empty kernel...'));
     } else if (useArtifactFallback) {
-      console.log(chalk.dim('  No objectstack.config.ts found — booting from artifact (default host)...'));
+      printDiagnostic(chalk.dim('  No objectstack.config.ts found — booting from artifact (default host)...'));
     } else {
-      console.log(chalk.dim(`  Loading ${relativeConfig}...`));
+      printDiagnostic(chalk.dim(`  Loading ${relativeConfig}...`));
     }
 
     // Track loaded plugins for summary
@@ -747,11 +884,13 @@ export default class Serve extends Command {
     // banner just prints at the end of it (#4012).
     const verboseBoot = isVerboseBootLevel(bootLogLevel);
 
-    // Save original console/stdout methods — we'll suppress noise during boot
+    // Save original console/stdout methods — we'll suppress noise during boot.
+    // `origStdoutWrite` is the redirected write installed at the top of `run()`,
+    // NOT the real stdout: restoring it hands the stream back to the stderr
+    // forwarder, which is where every diagnostic belongs (#7915).
     const originalConsoleLog = console.log;
     const originalConsoleDebug = console.debug;
     const origStdoutWrite = process.stdout.write.bind(process.stdout);
-    let bootQuiet = false;
     // Everything the quiet window intercepts lands here instead of being
     // dropped on the floor, so boot-phase `logger.warn` survives to be
     // replayed under the banner (#4012).
@@ -1172,7 +1311,7 @@ export default class Serve extends Command {
                      Object.defineProperty(telemetry.driver, 'name', { value: 'telemetry' });
                      await kernel.use(new DriverPlugin(telemetry.driver));
                      trackPlugin('TelemetryDatasource');
-                     console.log(chalk.dim(`  telemetry datasource: ${telemetryPath} (lifecycle-classed system data; OS_TELEMETRY_DB=0 to disable)`));
+                     printDiagnostic(chalk.dim(`  telemetry datasource: ${telemetryPath} (lifecycle-classed system data; OS_TELEMETRY_DB=0 to disable)`));
                    }
                  } catch {
                    // Best-effort: a failed telemetry provision must never block
@@ -1622,12 +1761,38 @@ export default class Serve extends Command {
       // marketplace" but, with no config/artifact, has no host to carry the
       // wiring (the only place it can come from is the CLI itself).
       //
-      // Mirrors the objectos-ee single-env host wiring: proxy + install-local
-      // + cloud-connection only when `resolveCloudUrl()` is truthy
-      // (OS_CLOUD_URL=off -> nothing mounts, preserving the vanilla
-      // marketplace-less `objectstack dev`). Each plugin self-registers its
-      // own Setup nav bundle in start(), so no manual bundle registration is
+      // Mirrors the objectos-ee single-env host wiring: the CLOUD-DEPENDENT
+      // surfaces (proxy + cloud-connection + runtime-config) only when
+      // `resolveCloudUrl()` is truthy. Each plugin self-registers its own
+      // Setup nav bundle in start(), so no manual bundle registration is
       // needed here.
+      //
+      // install-local is DELIBERATELY NOT on that gate (#8343). It is the
+      // documented air-gapped path — `os package install ./dist/objectstack.json`
+      // hands the compiled artifact over inline, and `handleInstall`'s inline
+      // branch never reads `this.cloudUrl` at all — so gating it on a control
+      // plane withheld it from the one deployment that cannot have one. A
+      // self-hosted EE box could not install a package by ANY route: measured
+      // on objectos-ee 4.0.5-rc.1, both GET and POST /marketplace/install-local
+      // 404, while its own /runtime/config advertised `installLocal: true`.
+      // Note `off` is not an unusual choice there but the SHIPPED DEFAULT --
+      // that image's compose file reads `OS_CLOUD_URL: ${OS_CLOUD_URL:-off}`,
+      // so every self-hosted stack that does not override it landed here.
+      // The package README states the intended contract in as many words —
+      // "`OS_CLOUD_URL=off` disables every remote call; air-gapped installs
+      // keep working via inline manifests handed to `install-local`" — so the
+      // gate contradicted the contract rather than expressing it.
+      //
+      // What "preserving the vanilla marketplace-less `objectstack dev`" is
+      // worth here, measured rather than assumed: a plain `objectstack dev`
+      // sets NO OS_CLOUD_URL, and `resolveCloudUrl()` then returns
+      // DEFAULT_CLOUD_URL — truthy — so it already mounts install-local (and
+      // its "Installed Apps" nav) today. The only runs this changes are those
+      // that explicitly opted out (`off`/`none`/`local`/`disabled`), and for
+      // them the nav-ownership rule in marketplace-ui.ts ("the entry lives and
+      // dies with the capability -> no dead page") is SATISFIED, not violated:
+      // the entry now appears exactly when a working offline install surface
+      // is behind it. Nothing that makes a remote call mounts under `off`.
       //
       // SKIPPED in runtime/host-kernel mode: the cloud distribution
       // (objectos-stack) wires its own MarketplaceProxyPlugin on the host
@@ -1650,7 +1815,8 @@ export default class Serve extends Command {
             resolveCloudUrl,
           } = await import(/* webpackIgnore: true */ ccPkg);
           const marketplaceUrl = resolveCloudUrl();
-          if (marketplaceUrl) {
+          const wiring = Serve.planMarketplaceWiring({ isRuntimeHostKernel, marketplaceUrl, plugins });
+          if (wiring.cloudSurfaces) {
             await kernel.use(new MarketplaceProxyPlugin({ controlPlaneUrl: marketplaceUrl }));
             await kernel.use(new MarketplaceInstallLocalPlugin({ controlPlaneUrl: marketplaceUrl }));
             // Same-origin /cloud-connection/* surface (status + device-code
@@ -1660,6 +1826,24 @@ export default class Serve extends Command {
             // install-local are live (same-origin; install into THIS kernel).
             await kernel.use(new RuntimeConfigPlugin({ controlPlaneUrl: '', singleEnvironment: true, installLocal: true }));
             trackPlugin('Marketplace');
+          } else if (wiring.offlineInstallLocal) {
+            // Cloud explicitly disabled -> mount the OFFLINE half only.
+            //
+            // OFFLINE_CONTROL_PLANE, never the `''` sitting in `marketplaceUrl`:
+            // the plugin re-resolves whatever it is handed through
+            // `resolveCloudUrl()`, which treats an EMPTY string as "unset" and
+            // falls back to the PUBLIC DEFAULT_CLOUD_URL — pointing an
+            // air-gapped runtime's catalog branch at cloud.objectos.ai, the
+            // opposite of what `off` asked for. See the constant's own note.
+            //
+            // The presence check is load-bearing, not defensive: `kernel.use`
+            // keys plugins by name, so mounting unconditionally would let this
+            // `off`-pinned instance REPLACE a host config's own install-local
+            // that was constructed with an explicit control-plane URL —
+            // silently downgrading that host's catalog capability. A host that
+            // wires its own keeps it.
+            await kernel.use(new MarketplaceInstallLocalPlugin({ controlPlaneUrl: Serve.OFFLINE_CONTROL_PLANE }));
+            trackPlugin('MarketplaceInstallLocal');
           }
         } catch (err: any) {
           console.warn(chalk.yellow(`  \u26a0 Marketplace/cloud-connection wiring failed: ${err?.message ?? err}`));
@@ -2667,7 +2851,7 @@ export default class Serve extends Command {
           trackPlugin('DatasourceAdminRoutes');
 
           if (isDev) {
-            console.log(
+            printDiagnostic(
               chalk.dim('  ↪ datasource admin: runtime UI lifecycle wired (/api/v1/datasources)'),
             );
           }
@@ -2765,7 +2949,7 @@ export default class Serve extends Command {
           }
           dataEngine.setCryptoProvider(sharedCryptoProvider);
           if (isDev) {
-            console.log(
+            printDiagnostic(
               chalk.dim(
                 '  ↪ secret fields: LocalCryptoProvider wired (dev) — set OS_SECRET_KEY and swap for KMS/Vault in production',
               ),
@@ -2803,7 +2987,7 @@ export default class Serve extends Command {
         // degraded-boot warning must not vanish (#4012).
         const migrateDiagnostics = collectBootDiagnostics();
         if (migrateDiagnostics) printBootDiagnostics(migrateDiagnostics);
-        console.log(chalk.green(`✓ Migration complete (${loadedPlugins.length} plugins started against ${resolvedDatabaseUrl ? redactConnectionUrl(resolvedDatabaseUrl) : 'configured DB'})`));
+        printDiagnostic(chalk.green(`✓ Migration complete (${loadedPlugins.length} plugins started against ${resolvedDatabaseUrl ? redactConnectionUrl(resolvedDatabaseUrl) : 'configured DB'})`));
         try {
           await kernel.shutdown();
         } catch (err: any) {
@@ -2941,7 +3125,7 @@ export default class Serve extends Command {
 
     } catch (error: any) {
       restoreOutput();
-      console.log('');
+      printDiagnostic();
       printError(error.message || String(error));
       // A boot that died is when its warnings matter most, and the banner that
       // would normally carry them never printed (#4012).

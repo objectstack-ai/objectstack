@@ -71,16 +71,40 @@ describe('ADR-0097 connector schema evolution', () => {
             expect(() => DeclarativeConnectorEntrySchema.parse(validInstance)).not.toThrow();
         });
 
-        it('accepts a plain descriptor (no provider) with inline authentication + actions', () => {
+        it('accepts a plain descriptor (no provider) with actions and no live credentials', () => {
+            // Until #7990 this pin read "…with inline authentication + actions"
+            // and the bearer token below was ACCEPTED — the ①-d hole of the
+            // #7902 survey: a descriptor published through `sys_metadata`
+            // carried its credential in cleartext. Actions stay authorable on
+            // a descriptor; the credential does not.
             expect(() =>
                 DeclarativeConnectorEntrySchema.parse({
                     name: 'legacy',
                     label: 'Legacy',
                     type: 'api',
-                    authentication: { type: 'bearer', token: 'kept-for-descriptor' },
+                    authentication: { type: 'none' },
                     actions: [{ key: 'do', label: 'Do' }],
                 }),
             ).not.toThrow();
+        });
+
+        it('rejects inline `authentication` secrets on a catalog descriptor (#7990)', () => {
+            const result = DeclarativeConnectorEntrySchema.safeParse({
+                name: 'legacy',
+                label: 'Legacy',
+                type: 'api',
+                authentication: { type: 'bearer', token: 'kept-for-descriptor' },
+                actions: [{ key: 'do', label: 'Do' }],
+            });
+            expect(result.success).toBe(false);
+            const issue = result.error!.issues.find((i) => i.path.join('.') === 'authentication');
+            expect(issue, 'refusal must be re-pathed under `authentication`').toBeDefined();
+            // The message must carry the fix for BOTH shapes an author may want:
+            // descriptor (drop the credential) and instance (credentialRef).
+            expect(issue!.message).toContain('`authentication`');
+            expect(issue!.message).toContain('sys_metadata');
+            expect(issue!.message).toContain('credentialRef');
+            expect(issue!.message).toContain('ADR-0097');
         });
 
         it('rejects inline `authentication` secrets on a provider-bound instance (§3)', () => {

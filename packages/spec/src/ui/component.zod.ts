@@ -8,26 +8,37 @@ import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
 
 // ---------------------------------------------------------------------------
-// NOT CLOSED AGAINST UNKNOWN KEYS -- and until #5068 that was the whole
-// verdict (#4001 batch 17 / 批 17, ADR-0078). Read this before "finishing" the
-// file.
+// CLOSED AGAINST UNKNOWN KEYS as of #4001 batch A -- all 31 object sites.
 //
 // SDUI component prop schemas: the declarative shape of every `page:*`,
 // `record:*`, `element:*`, `nav:*` and `ai:*` node a page can carry.
 //
-// ⚠️ STATUS AS OF #5068: the `no gate` verdict below is SPENT -- a parse now
-// exists -- and this file is `authorable` again. What that does and does not
-// mean is spelled out in the "#5068: the gate is wired" section at the end;
-// read it before scheduling the ratchet, because the gate is on the LINT side
-// and the carrier's own shape is deliberately unchanged.
+// ⚠️ READ THE SCOPE BEFORE ACTING ON THIS. Closing these shapes moved the
+// rejection into ONE door -- the #5068 authoring gate's `safeParse` half. It
+// did NOT close the carrier and it did NOT close storage:
 //
-// The measurement that produced the verdict is kept verbatim below: it is the
-// evidence base for the ratchet, and every sentence of it is still true of the
-// SCHEMA path.
+//   - `PageComponentSchema.properties` is still `z.record(z.string(),
+//     z.unknown())`. Direction B (a discriminated `properties`) stays DECLINED
+//     by the maintainer's 2026-08-05 ruling, because `type` is an open union and
+//     a discriminated carrier would reject the unregistered types real pages
+//     author. An unknown key inside `properties` therefore still survives
+//     `PageSchema.parse()` -- pinned, deliberately, in `component.test.ts`.
+//   - A `saveMetaItem` / REST `/meta` write still stores an unvalidated props
+//     bag (#4463's fourth wall). Recorded, not fixed.
+//   - The gate is still WARNING level. Batch A did not upgrade it; what stands
+//     between it and `error` is the page rewrites named at the end of this
+//     header, not a declaration in this file.
 //
-// These 29 object sites were `no gate` -- carrier live, parse absent -- NOT a
-// pending `.strict()` batch. Do not sweep `strictObject` across this file
-// without reading the #5068 section first.
+// So the honest one-line summary is: an undeclared prop is now rejected BY THE
+// PARSE at authoring time, with the surface named and the rename offered,
+// instead of being reconstructed by a walker reading a strip-mode object. Same
+// rule id, same tier, one fewer moving part -- and a shape that can now carry
+// its own `aliases` / `guidance`, which a walker's reconstruction could not.
+//
+// The 批 17 measurement that produced the earlier `no gate` verdict is kept
+// verbatim below. It is why this file took three batches, and every sentence of
+// it was true when written; the two flips since (#5068 wired the parse, batch A
+// closed the shapes) are recorded at the points where they land.
 //
 // It was scheduled as the #4001 campaign's largest remaining `ui/` block and
 // the measurement came back NEGATIVE: nothing parses these schemas, so
@@ -140,12 +151,23 @@ import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
 //     `type` union. So the three standing assertions in `component.test.ts`
 //     stay GREEN — measured, not assumed — and their prose was updated to say
 //     which dispatch actually landed.
-//  2. **Nothing here became strict.** All 31 entries still STRIP. The gate
-//     reports an undeclared key because the walker reads a strip-mode object;
-//     converting these sites to `strictObject` moves that same report into the
-//     gate's `safeParse` half (`unrecognized_keys`, routed to the same rule id)
-//     — which is what makes the ratchet meaningful rather than cosmetic, and it
-//     is ordinary strictness work again.
+//  2. **Nothing here became strict** — at #5068. All 31 entries still STRIPPED,
+//     and the gate reported an undeclared key because the walker read a
+//     strip-mode object. ✅ **#4001 batch A did the conversion this sentence
+//     predicted**: every site is a `strictObject` now, so the same report
+//     arrives through the gate's `safeParse` half (`unrecognized_keys`, routed
+//     to the same rule id). Two things came with it that the walker could not
+//     produce, and they are the reason the conversion was not cosmetic:
+//     hand-written `aliases`/`guidance` per surface (`key` → `value` on a tab
+//     item, `description` → `subtitle` on a header, the wrong-layer
+//     component-node family), and a rejection that holds on ANY caller of these
+//     schemas rather than only inside the gate that walks them.
+//
+//     Union arms needed one piece of wiring on the lint side to arrive at all:
+//     zod 4 collapses arm failures into a single `invalid_union`, so
+//     `validate-component-props.ts` unpacks a lone arm's `unrecognized_keys`
+//     back onto the unknown-key rule id (`unrecognizedKeysFromUnionArm`), and
+//     deliberately declines to do so when two arms could both have been meant.
 //  3. **The storage path is still open.** The gate is an AUTHORING door. A
 //     `saveMetaItem` / REST `/meta` write still stores an unvalidated props bag
 //     (#4463's fourth wall). That is recorded, not fixed, by #5068.
@@ -169,6 +191,15 @@ import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
 // (`page:card.visible` → the component-level `visibleWhen`, #5776's tab `key`
 // → `value`), not a declaration in this file.
 //
+// ⚠️ One inventory item batch A ADDED rather than closed, because measuring the
+// renderers turned it up: objectui's Studio block designer publishes inputs that
+// no renderer reads — `page:accordion` `title` and its items' `value` (the
+// renderer overwrites `value` with `panel-<index>`), and `page:header.icon`,
+// which #6946 retired here. Those are producer-side defects in the sibling repo
+// (filed as #7973), not keys to declare; the accordion item's
+// `value` carries a `guidance` entry so an author who copies the designer's
+// output is told what happened rather than merely refused.
+//
 // The verdict is pinned in `component.test.ts` and in the `ui/` tables of
 // `docs/audits/2026-07-unknown-key-strictness-ledger.md` — change all three
 // together or none.
@@ -185,7 +216,110 @@ import { retiredKey } from '../shared/retired-key';
 // `ElementDataSourceSchema.sort` (page.zod.ts) — one shape, imported from the
 // shared source rather than re-spelled here (#6276).
 import { SortItemSchema } from '../shared/enums.zod';
-const EmptyProps = z.object({});
+import { strictObject } from '../shared/strict-object';
+import type { KeySetGuidance } from '../shared/suggestions.zod';
+
+/**
+ * What silently happened to an undeclared prop before these shapes were closed
+ * — the one sentence every rejection on this file carries.
+ *
+ * Two layers of silence, not one, which is why the sentence names both: the
+ * schema STRIPPED the key (nothing in `ComponentPropsMap` was strict), and the
+ * carrier never parsed it anyway (`PageComponent.properties` is
+ * `z.record(z.string(), z.unknown())`). #5068 wired the parse; this closes the
+ * shapes behind it, so the rejection is now the parse's own rather than a
+ * walker's reconstruction of it.
+ */
+const PROPS_HISTORY =
+  'Until #4001 batch A an undeclared prop was dropped in silence: the props schema stripped it '
+  + 'and `PageComponent.properties` is an open bag, so the key reached objectui\'s renderer, was '
+  + 'not read there, and the author got a success receipt for configuration that did nothing.';
+
+/**
+ * The keys that belong on the component NODE, written one level down inside
+ * `properties` — the wrong-layer trap this carrier creates by construction.
+ *
+ * objectui's `SchemaRenderer` HOISTS `properties` onto the node before
+ * rendering, which is what makes the confusion durable: for a renderer read
+ * the two spellings are interchangeable, so an author who writes
+ * `properties.visibleWhen` sees the key "work" in some places. It does not
+ * work where it matters — `visibleWhen` is evaluated by the page runtime off
+ * the NODE, and `SchemaRenderer` deliberately skips `type` and `id` when
+ * hoisting (hoisting `type` would shadow which renderer to dispatch to). So
+ * the inner spelling is honoured by nothing that decides anything.
+ *
+ * A pattern rather than a list for the visibility family, on the #6619
+ * precedent: the point is to catch the spellings nobody enumerated
+ * (`visibleIf`, `hiddenWhen`, `visibility`), and ADR-0089 made `visibleWhen`
+ * canonical on the node, so an author borrowing it here is not making a typo.
+ * `page:card.visible` is the live specimen the file header has carried since
+ * #5775 — deliberately never declared, because it is a page to rewrite rather
+ * than a key to add.
+ */
+const COMPONENT_LEVEL_GUIDANCE: readonly KeySetGuidance[] = [
+  {
+    name: 'COMPONENT_NODE_VISIBILITY_KEYS',
+    keys: /^(visible|visibility|visibleOn|visibleIf|visibleWhen|hidden|hiddenWhen|conceal|showWhen)$/,
+    examples: ['visible', 'visibleWhen', 'visibleIf', 'hiddenWhen', 'visibility'],
+    prescription:
+      'Visibility is a COMPONENT-level predicate, not a prop: move it up one level to the '
+      + 'component node\'s own `visibleWhen` (ADR-0089 canonical spelling), beside `type` and '
+      + '`id`. Inside `properties` it is hoisted onto the node by the renderer but evaluated by '
+      + 'nothing — the component renders unconditionally, which is a visibility gate that '
+      + 'silently does not gate.',
+  },
+  {
+    name: 'COMPONENT_NODE_KEYS',
+    /**
+     * Read off `PageComponentSchema`'s own shape (`page.zod.ts`) and then
+     * NARROWED, twice, because a set member the shape declares is a dead entry
+     * the `alias-integrity` audit rejects — and it caught both of these:
+     *
+     * - `type` is out. It really is a prop on `element:metadata_viewer` (the
+     *   metadata view kind — `state_machine` | `flow` | `permission`) and a
+     *   tombstone on `page:tabs` (#6776), so a blanket "this belongs on the
+     *   node" would be a WRONG answer on the two surfaces most likely to see it.
+     * - `label`, `aria` and `properties` are out for the same reason: `label`
+     *   and `aria` are declared props almost everywhere in this file.
+     *
+     * What is left is node-only in both directions: nothing in this file
+     * declares any of them, and the page runtime reads each off the node.
+     */
+    keys: ['id', 'events', 'style', 'className', 'responsiveStyles', 'dataSource', 'responsive'],
+    prescription:
+      'This key belongs on the component NODE, not inside `properties` — write it as a sibling '
+      + 'of `type`. `SchemaRenderer` skips `id` when it hoists `properties`, and `dataSource` / '
+      + '`responsive` / `events` / `style` / `className` / `responsiveStyles` are read off the '
+      + 'node by the page runtime, so the inner spelling is parsed by nothing.',
+  },
+];
+
+/**
+ * A component that declares no props at all — `app:launcher`, `nav:menu`,
+ * `nav:breadcrumb`, `global:search`, `global:notifications`, `user:profile`,
+ * `element:divider`.
+ *
+ * A factory rather than one shared `EmptyProps` const, because the surface name
+ * is the whole value of the rejection here: an empty shape has no candidate
+ * keys, so the edit-distance fallback can say nothing, and "unrecognized key on
+ * this component" would leave the author guessing which of the seven it meant.
+ * One `strictObject(` call site either way — the ledger counts sites from the
+ * AST, and this is one.
+ *
+ * Closing them is not vacuous even with nothing to declare: `element:divider`
+ * carries an authored `{}` on 9 nodes of the example corpus, and the whole
+ * point of the class is that these components take no configuration. Before
+ * this, `<Divider color="red">` parsed clean and drew a divider with no colour.
+ */
+const emptyProps = (type: string) =>
+  strictObject(
+    {
+      surface: `this \`${type}\` component`,
+      history: `\`${type}\` declares no props at all. ${PROPS_HISTORY}`,
+      guidanceSets: COMPONENT_LEVEL_GUIDANCE,
+    },
+    {},
+  );
 
 /**
  * The composition slot every thin container renders: `page:section`,
@@ -210,9 +344,27 @@ const EmptyProps = z.object({});
  * Shared by all three entries rather than copied: they are the same contract,
  * and three identical defs would be three places for it to drift.
  */
-export const PageContainerProps = z.object({
-  children: z.array(z.unknown()).optional().describe('Child components rendered inside this container, in order'),
-});
+export const PageContainerProps = strictObject(
+  {
+    surface: 'this container component (`page:section` / `page:footer` / `page:sidebar`)',
+    history: PROPS_HISTORY,
+    guidanceSets: COMPONENT_LEVEL_GUIDANCE,
+    guidance: {
+      // Not a typo the suggester can reach (`body` → `children` is five edits),
+      // and not a second spelling either: the renderers read `body` as a
+      // back-compat fallback for STORED documents (`renderChildren(schema.children
+      // || schema.body)`), which #5775 settled is objectui's to retire on its own
+      // schedule rather than an authorable key. Closing the shape is what makes
+      // that distinction reach the author.
+      body: '`body` is not an authorable spelling of the composition slot — write `children`. '
+        + 'The renderers still read `body` as a back-compat fallback for documents stored before '
+        + '#5775, but one composition key is the contract (Prime Directive #12).',
+    },
+  },
+  {
+    children: z.array(z.unknown()).optional().describe('Child components rendered inside this container, in order'),
+  },
+);
 export type PageContainerProps = z.input<typeof PageContainerProps>;
 
 /**
@@ -221,7 +373,29 @@ export type PageContainerProps = z.input<typeof PageContainerProps>;
  * ----------------------------------------------------------------------
  */
 
-export const PageHeaderProps = z.object({
+export const PageHeaderProps = strictObject({
+  surface: 'this `page:header`',
+  history: PROPS_HISTORY,
+  guidanceSets: COMPONENT_LEVEL_GUIDANCE,
+  aliases: {
+    /**
+     * The ADR-0087 D2 conversion `page-header-subtitle-alias` (#4827,
+     * objectui#3226) renames this on load and on stored-row rehydration, so the
+     * canonical paths never reach here. What DOES reach here is the source an
+     * author is typing right now — and until this shape closed, that was the
+     * one path with no diagnostic at all: `conversions/walk.ts` records the
+     * hole in as many words, that `description` "is tombstoned nowhere
+     * (`description` is a live declared prop on other components), got no
+     * diagnostic at a nested site from any layer".
+     *
+     * An alias rather than a `retiredKey` tombstone precisely because of that
+     * parenthesis: `description` is a live prop elsewhere in this file
+     * (`element:text_input`), so the answer is a rename on THIS surface, not a
+     * removal notice. Grounded in the conversion registry rather than guessed.
+     */
+    description: 'subtitle',
+  },
+}, {
   /**
    * Page title (#7702, maintainer ruling 2026-08-11 「接受你的建议,开始加速处理」
    * on the lane's A/B recommendation). OPTIONAL, not required: the platform's
@@ -305,11 +479,40 @@ export const PageHeaderProps = z.object({
   showCopyId: z.boolean().default(true).describe(
     'Show the copy-record-id button beside the record title. Part of the record chrome — no effect when `recordChrome` is false.',
   ),
+  /**
+   * How many header actions render as inline buttons before the rest fold into
+   * the overflow menu — desktop and mobile budgets (#4001 batch A).
+   *
+   * Declared on the #5611/#5775/#6276 rule, for the same reason and by the same
+   * evidence: the renderer has always read them and the schema had not caught
+   * up. `containers.tsx:1358` resolves
+   * `schema?.maxVisible ?? schema?.properties?.maxVisible` (and the `mobile*`
+   * twin), the `?? 3` / `?? 1` are its own fallbacks, and its comment says out
+   * loud that both are "overridable on the page:header". Closing this shape
+   * without declaring them would turn an invited affordance into a hard
+   * rejection — the #6276 lesson, which is to enumerate by the RENDERER'S read
+   * pattern rather than by the key list a previous ruling happened to quote.
+   *
+   * Optional with NO schema default, deliberately: 3 and 1 are the renderer's
+   * fallbacks, and declaring them here would materialize a `maxVisible` on
+   * every parsed header — turning an unset key into an authored one, exactly
+   * as the record picker's `limit` docblock records for its own 50.
+   */
+  maxVisible: z.number().int().positive().optional().describe(
+    'How many header actions render as inline buttons before the rest fold into the overflow menu (renderer default 3).',
+  ),
+  mobileMaxVisible: z.number().int().positive().optional().describe(
+    'The `maxVisible` budget on mobile viewports (renderer default 1).',
+  ),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 });
 
-export const PageTabsProps = z.object({
+export const PageTabsProps = strictObject({
+  surface: 'this `page:tabs`',
+  history: PROPS_HISTORY,
+  guidanceSets: COMPONENT_LEVEL_GUIDANCE,
+}, {
   /**
    * Tab-strip visual style. **Renamed from `type` at protocol 17 (#6776,
    * ADR-0087 D2)** — the same concept, the same three values, a spelling an
@@ -348,7 +551,41 @@ export const PageTabsProps = z.object({
     + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
   position: z.enum(['top', 'left']).default('top'),
-  items: z.array(z.object({
+  /**
+   * Keep the tab strip visible when there is only one tab (#4001 batch A).
+   *
+   * The renderer hides a one-tab strip by default — "a single pill labelled
+   * 'Details' is visual clutter rather than an affordance" — and its own
+   * comment invites the override: *"Authors who want the strip even at length 1
+   * can pass `properties.alwaysShowStrip: true`"* (`containers.tsx:637`, read as
+   * `schema?.properties?.alwaysShowStrip === true`). Declared on the same
+   * #5611/#5775/#6276 rule as `page:header`'s action budget: the delivered,
+   * invited shape is the contract, and a closed schema that rejected it would
+   * be the declaration disagreeing with the renderer in the direction that
+   * costs the author.
+   */
+  alwaysShowStrip: z.boolean().optional().describe(
+    'Render the tab strip even when only one tab is visible (renderer default: a one-tab strip is hidden).',
+  ),
+  items: z.array(strictObject({
+    surface: 'this `page:tabs` item',
+    history: PROPS_HISTORY,
+    aliases: {
+      /**
+       * NOT a typo — `key` → `value` is four edits, so the distance fallback
+       * cannot reach it, and this is the alias category the helper's docblock
+       * describes: a different WORD for the same intent, correct on a
+       * neighbouring surface. Measured producers, both live: objectui's Studio
+       * block designer publishes `key` as the tab item's text input
+       * (`previews/block-config.ts`, `page:tabs.items.itemFields`), and #5776
+       * recorded the showcase authoring the same spelling. The renderer reads
+       * neither — `containers.tsx:566` takes `it.value` and falls back to
+       * `tab-${idx}` — so an authored `key` silently yields index-derived tab
+       * tokens that move the moment the item list changes.
+       */
+      key: 'value',
+    },
+  }, {
     label: I18nLabelSchema,
     icon: z.string().optional(),
     /**
@@ -385,7 +622,11 @@ export const PageTabsProps = z.object({
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 });
 
-export const PageCardProps = z.object({
+export const PageCardProps = strictObject({
+  surface: 'this `page:card`',
+  history: PROPS_HISTORY,
+  guidanceSets: COMPONENT_LEVEL_GUIDANCE,
+}, {
   title: I18nLabelSchema.optional(),
   bordered: z.boolean().default(true),
   /**
@@ -449,7 +690,11 @@ export const PageCardProps = z.object({
  * ----------------------------------------------------------------------
  */
 
-export const RecordDetailsProps = z.object({
+export const RecordDetailsProps = strictObject({
+  surface: 'this `record:details`',
+  history: PROPS_HISTORY,
+  guidanceSets: COMPONENT_LEVEL_GUIDANCE,
+}, {
   columns: z.enum(['1', '2', '3', '4']).default('2').describe('Number of columns for field layout (1-4)'),
   /**
    * REMOVED (#6946, maintainer ruling 2026-08-09 「全部接受」 on objectui#3818 —
@@ -494,7 +739,10 @@ export const RecordDetailsProps = z.object({
    * producer and no consumer, so it is gone rather than unioned in: one shape,
    * not two de-facto contracts (Prime Directive #12).
    */
-  sections: z.array(z.object({
+  sections: z.array(strictObject({
+    surface: 'this `record:details` section',
+    history: PROPS_HISTORY,
+  }, {
     /**
      * Stable section identifier, snake_case. This is the i18n anchor: the
      * heading resolves through `objects.<object>._sections.<name>.label`, so a
@@ -530,11 +778,40 @@ export const RecordDetailsProps = z.object({
    * does not silently strip a live platform page's hidden-field list.
    */
   hideFields: z.array(z.string()).optional().describe('Field names to omit from the body — applied to `fields` and to every section\'s `fields` (used to dedupe fields already shown in `record:highlights` or as the page title)'),
+  /**
+   * Inline editing on the detail body, and the body's own heading (#4001
+   * batch A) — the two remaining `record:details` keys the renderer reads and
+   * this schema did not declare.
+   *
+   * `RecordDetailsRenderer` resolves `schema.inlineEdit ?? true` against the
+   * object's own editability and gates the affordance on the result — its
+   * comment states the author's half directly (*"Authors can still force-disable
+   * with `inlineEdit: false`"*) — and passes `schema.showHeader ?? false`
+   * straight through to the body. Both arrive on `schema` because
+   * `SchemaRenderer` hoists `properties` onto the node, so `properties.inlineEdit`
+   * is exactly how a page authors them.
+   *
+   * Optional with no schema default, for the `maxVisible` reason: `true` and
+   * `false` are the RENDERER'S fallbacks, and a schema default would write them
+   * onto every parsed component — turning "the author said nothing" into "the
+   * author asked for the default", which is a different fact and the one a
+   * later liveness audit would read.
+   */
+  inlineEdit: z.boolean().optional().describe(
+    'Allow inline field editing in the detail body (renderer default: on, where the object itself is editable — set `false` to force it off).',
+  ),
+  showHeader: z.boolean().optional().describe(
+    'Render the detail body\'s own heading (renderer default: off).',
+  ),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 });
 
-export const RecordRelatedListProps = z.object({
+export const RecordRelatedListProps = strictObject({
+  surface: 'this `record:related_list`',
+  history: PROPS_HISTORY,
+  guidanceSets: COMPONENT_LEVEL_GUIDANCE,
+}, {
   objectName: z.string().describe('Related object name (e.g., "task", "opportunity")'),
   relationshipField: z.string().describe('Field on related object that points to this record (e.g., "account_id")'),
   /**
@@ -550,7 +827,29 @@ export const RecordRelatedListProps = z.object({
   columns: z.array(z.string()).optional().describe('Fields to display in the related list. Optional: when omitted, columns derive from the related object\'s highlightFields / default list columns (a related list is just another surface that lists that object). Override chain: child highlightFields → field-level relatedListColumns → this inline list.'),
   sort: z.union([
     z.string(),
-    z.array(z.object({
+    z.array(strictObject({
+      surface: 'this `record:related_list` sort entry',
+      history: PROPS_HISTORY,
+      aliases: {
+        /**
+         * Both entries are borrowed-from-a-neighbour spellings, not typos, and
+         * both are grounded in a spelling this repo really carries:
+         *
+         * - `direction` — the same alias `view.zod.ts` already ships for its
+         *   own sort rows (`:1333`), where the pre-conversion tuple was
+         *   `{ field, direction }`. An author moving a sort between the two
+         *   surfaces brings it along.
+         * - `name` — the field spelling `record:highlights` uses for its own
+         *   object form. That divergence is documented from the other side in
+         *   `packages/lint/src/validate-page-field-bindings.ts`'s
+         *   `fieldRefsFrom`, which exists precisely because "`record:highlights`
+         *   keys its object form `name`, while columns/sort/filter key theirs
+         *   `field`".
+         */
+        direction: 'order',
+        name: 'field',
+      },
+    }, {
       field: z.string(),
       order: z.enum(['asc', 'desc'])
     }))
@@ -573,8 +872,22 @@ export const RecordRelatedListProps = z.object({
    * relationshipField=`permission_set_id`, picker.object=`sys_user`,
    * linkField=`user_id`).
    */
-  add: z.object({
-    picker: z.object({
+  add: strictObject({
+    surface: 'this `record:related_list` `add` config',
+    history: PROPS_HISTORY,
+  }, {
+    picker: strictObject({
+      surface: 'this `record:related_list` add picker',
+      history: PROPS_HISTORY,
+      aliases: {
+        // `object` is the spelling here and on every element data source; the
+        // list's own far-side key one level up is `objectName`, so an author
+        // carrying that spelling down into the picker is the near-miss this
+        // entry exists for. Distance cannot reach it (`objectName` → `object`
+        // is four edits, and both are real keys on the same component).
+        objectName: 'object',
+      },
+    }, {
       object: z.string().describe('Object to pick records from (the far side of an m2m, or the child object for a 1:m re-parent).'),
       valueField: z.string().default('id').describe('Field on the picked record used as the link value (default `id`).'),
       labelField: z.string().optional().describe('Field shown in the picker rows (defaults to the object title field).'),
@@ -587,9 +900,33 @@ export const RecordRelatedListProps = z.object({
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 });
 
+/**
+ * ⚠️ The object arm is CLOSED, and closing a union arm is a different act from
+ * closing a plain shape — worth reading before the next arm is touched.
+ *
+ * Zod 4 collapses arm failures: the whole union reports as ONE `invalid_union`
+ * whose message is the bare string `"Invalid input"`, with each arm's real
+ * issues tucked inside `issue.errors`. So the named surface and the rename this
+ * `strictObject` produces reach the author only because
+ * `packages/lint/src/zod-issue-format.ts` unpacks them — the same wiring
+ * #5583 needed when `ChartGroupBySchema`'s object arm was closed, which is the
+ * precedent this follows. Deleting that unpacking leaves `packages/spec`'s own
+ * tests green and turns the author-facing message back into "Invalid input";
+ * `component-props-union-arm.test.ts` pins it from this side.
+ */
 export const RecordHighlightsField = z.union([
   z.string(),
-  z.object({
+  strictObject({
+    surface: 'this `record:highlights` field',
+    history: PROPS_HISTORY,
+    aliases: {
+      // The sibling spelling, in the direction opposite to the sort entry's:
+      // this arm keys its field `name`, while columns/sort/filter key theirs
+      // `field` (documented in `validate-page-field-bindings.ts`'s
+      // `fieldRefsFrom`, which had to handle both).
+      field: 'name',
+    },
+  }, {
     name: z.string().describe('Field name on the record'),
     label: z.string().optional().describe('Display label (overrides schema label)'),
     icon: z.string().optional().describe('Icon name (lucide icon key)'),
@@ -605,14 +942,22 @@ export const RecordHighlightsField = z.union([
 ]).describe('Highlight field: bare name, or {name,label?,icon?,type?,readonly?}');
 export type RecordHighlightsField = z.input<typeof RecordHighlightsField>;
 
-export const RecordHighlightsProps = z.object({
+export const RecordHighlightsProps = strictObject({
+  surface: 'this `record:highlights`',
+  history: PROPS_HISTORY,
+  guidanceSets: COMPONENT_LEVEL_GUIDANCE,
+}, {
   fields: z.array(RecordHighlightsField).min(1).max(7).describe('Key fields to highlight (1-7 fields max, typically displayed as prominent cards). Each item may be a bare field name or {name, label?, icon?, type?, readonly?} for inline overrides.'),
   layout: z.enum(['horizontal', 'vertical']).default('horizontal').describe('Layout orientation for highlight fields'),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 });
 
-export const RecordActivityProps = z.object({
+export const RecordActivityProps = strictObject({
+  surface: 'this `record:activity`',
+  history: PROPS_HISTORY,
+  guidanceSets: COMPONENT_LEVEL_GUIDANCE,
+}, {
   /** Activity types to display (unified enum including comment, field_change, etc.) */
   types: z.array(FeedItemType).optional().describe('Feed item types to show (default: all)'),
   /** Default filter mode (Airtable-style dropdown) */
@@ -639,7 +984,11 @@ export const RecordActivityProps = z.object({
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 });
 
-export const RecordChatterProps = z.object({
+export const RecordChatterProps = strictObject({
+  surface: 'this `record:chatter`',
+  history: PROPS_HISTORY,
+  guidanceSets: COMPONENT_LEVEL_GUIDANCE,
+}, {
   /** Panel position */
   position: z.enum(['sidebar', 'inline', 'drawer']).default('sidebar').describe('Where to render the chatter panel'),
   /** Panel width (for sidebar/drawer) */
@@ -654,9 +1003,24 @@ export const RecordChatterProps = z.object({
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 });
 
-export const RecordPathProps = z.object({
+export const RecordPathProps = strictObject({
+  surface: 'this `record:path`',
+  history: PROPS_HISTORY,
+  guidanceSets: COMPONENT_LEVEL_GUIDANCE,
+}, {
   statusField: z.string().describe('Field name representing the current status/stage'),
-  stages: z.array(z.object({
+  stages: z.array(strictObject({
+    surface: 'this `record:path` stage',
+    history: PROPS_HISTORY,
+    aliases: {
+      // A stage's key is `value` — the status value it stands for. `name` is
+      // the identifier spelling every other authored collection in this file
+      // uses (`record:details` sections, `record:highlights` fields), so it is
+      // the near-miss an author arrives with rather than a typo distance could
+      // reach.
+      name: 'value',
+    },
+  }, {
     value: z.string(),
     label: I18nLabelSchema,
     /**
@@ -675,8 +1039,37 @@ export const RecordPathProps = z.object({
 });
 export type RecordPathProps = z.input<typeof RecordPathProps>;
 
-export const PageAccordionProps = z.object({
-  items: z.array(z.object({
+export const PageAccordionProps = strictObject({
+  surface: 'this `page:accordion`',
+  history: PROPS_HISTORY,
+  guidanceSets: COMPONENT_LEVEL_GUIDANCE,
+}, {
+  items: z.array(strictObject({
+    surface: 'this `page:accordion` item',
+    history: PROPS_HISTORY,
+    guidance: {
+      /**
+       * ⚠️ NOT declared, deliberately, and the measurement is why: objectui's
+       * Studio block designer publishes `value` as an accordion item input
+       * (`previews/block-config.ts`, `page:accordion.items.itemFields`), but
+       * the renderer OVERWRITES it — `containers.tsx:793` maps every item to
+       * `{ ...it, value: \`panel-${idx}\` }` before rendering, so an authored
+       * `value` reaches the Radix item as a discarded key.
+       *
+       * That is the difference between this key and `page:tabs`'s `value`, one
+       * component over, where the renderer really does read what is authored
+       * (`it.value` with a `tab-${idx}` fallback). Declaring it here on the
+       * #5611 rule would be reading the rule backwards: the rule is that the
+       * DELIVERED shape is the contract, and what is delivered here is an
+       * index-derived panel id. The designer input is objectui's to fix
+       * (filed at #7973); until then this prescription is what stops an author
+       * being told a dead key is fine.
+       */
+      value: '`page:accordion` items have no author-settable `value` — the renderer derives '
+        + '`panel-<index>` and discards whatever is written here. Remove the key. (A `page:tabs` '
+        + 'item DOES take a `value`, which is where this spelling usually comes from.)',
+    },
+  }, {
     label: I18nLabelSchema,
     icon: z.string().optional(),
     collapsed: z.boolean().default(false),
@@ -701,7 +1094,11 @@ export const PageAccordionProps = z.object({
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 });
 
-export const AIChatWindowProps = z.object({
+export const AIChatWindowProps = strictObject({
+  surface: 'this `ai:chat_window`',
+  history: PROPS_HISTORY,
+  guidanceSets: COMPONENT_LEVEL_GUIDANCE,
+}, {
   mode: z.enum(['float', 'sidebar', 'inline']).default('float').describe('Display mode for the chat window'),
   agentId: z.string().optional().describe('Specific AI agent to use'),
   context: z.record(z.string(), z.unknown()).optional().describe('Contextual data to pass to the AI'),
@@ -715,7 +1112,11 @@ export const AIChatWindowProps = z.object({
  * ----------------------------------------------------------------------
  */
 
-export const ElementTextPropsSchema = lazySchema(() => z.object({
+export const ElementTextPropsSchema = lazySchema(() => strictObject({
+  surface: 'this `element:text`',
+  history: PROPS_HISTORY,
+  guidanceSets: COMPONENT_LEVEL_GUIDANCE,
+}, {
   /**
    * Text or Markdown body copy.
    *
@@ -737,7 +1138,11 @@ export const ElementTextPropsSchema = lazySchema(() => z.object({
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 }));
 
-export const ElementNumberPropsSchema = lazySchema(() => z.object({
+export const ElementNumberPropsSchema = lazySchema(() => strictObject({
+  surface: 'this `element:number`',
+  history: PROPS_HISTORY,
+  guidanceSets: COMPONENT_LEVEL_GUIDANCE,
+}, {
   object: z.string().describe('Source object'),
   field: z.string().optional().describe('Field to aggregate'),
   aggregate: z.enum(['count', 'sum', 'avg', 'min', 'max'])
@@ -751,7 +1156,11 @@ export const ElementNumberPropsSchema = lazySchema(() => z.object({
 }));
 export type ElementNumberProps = z.input<typeof ElementNumberPropsSchema>;
 
-export const ElementImagePropsSchema = lazySchema(() => z.object({
+export const ElementImagePropsSchema = lazySchema(() => strictObject({
+  surface: 'this `element:image`',
+  history: PROPS_HISTORY,
+  guidanceSets: COMPONENT_LEVEL_GUIDANCE,
+}, {
   src: z.string().describe('Image URL or attachment field'),
   alt: z.string().optional().describe('Alt text for accessibility'),
   fit: z.enum(['cover', 'contain', 'fill'])
@@ -773,7 +1182,11 @@ export const ElementImagePropsSchema = lazySchema(() => z.object({
  * author-controlled altitude projection). `object` embeds are deferred
  * (ADR-0051 §5).
  */
-export const ElementMetadataViewerPropsSchema = lazySchema(() => z.object({
+export const ElementMetadataViewerPropsSchema = lazySchema(() => strictObject({
+  surface: 'this `element:metadata_viewer`',
+  history: PROPS_HISTORY,
+  guidanceSets: COMPONENT_LEVEL_GUIDANCE,
+}, {
   type: z.enum(['state_machine', 'flow', 'permission'])
     .describe('Metadata view kind (ADR-0051): state_machine | flow | permission'),
   name: z.string()
@@ -794,7 +1207,11 @@ export const ElementMetadataViewerPropsSchema = lazySchema(() => z.object({
  * ----------------------------------------------------------------------
  */
 
-export const ElementButtonPropsSchema = lazySchema(() => z.object({
+export const ElementButtonPropsSchema = lazySchema(() => strictObject({
+  surface: 'this `element:button`',
+  history: PROPS_HISTORY,
+  guidanceSets: COMPONENT_LEVEL_GUIDANCE,
+}, {
   label: I18nLabelSchema.describe('Button display label'),
   variant: z.enum(['primary', 'secondary', 'danger', 'ghost', 'link'])
     .optional().default('primary').describe('Button visual variant'),
@@ -821,7 +1238,11 @@ export const ElementButtonPropsSchema = lazySchema(() => z.object({
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 }));
 
-export const ElementFilterPropsSchema = lazySchema(() => z.object({
+export const ElementFilterPropsSchema = lazySchema(() => strictObject({
+  surface: 'this `element:filter`',
+  history: PROPS_HISTORY,
+  guidanceSets: COMPONENT_LEVEL_GUIDANCE,
+}, {
   object: z.string().describe('Object to filter'),
   fields: z.array(z.string()).describe('Filterable field names'),
   targetVariable: z.string().optional().describe('Page variable to store filter state'),
@@ -832,7 +1253,11 @@ export const ElementFilterPropsSchema = lazySchema(() => z.object({
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 }));
 
-export const ElementFormPropsSchema = lazySchema(() => z.object({
+export const ElementFormPropsSchema = lazySchema(() => strictObject({
+  surface: 'this `element:form`',
+  history: PROPS_HISTORY,
+  guidanceSets: COMPONENT_LEVEL_GUIDANCE,
+}, {
   object: z.string().describe('Object for the form'),
   fields: z.array(z.string()).optional().describe('Fields to display (defaults to all editable fields)'),
   mode: z.enum(['create', 'edit']).optional().default('create').describe('Form mode'),
@@ -893,7 +1318,11 @@ export const ElementFormPropsSchema = lazySchema(() => z.object({
  * through a second spelling, so a divergent shape here would be a third
  * dialect rather than a shorthand.
  */
-export const ElementRecordPickerPropsSchema = lazySchema(() => z.object({
+export const ElementRecordPickerPropsSchema = lazySchema(() => strictObject({
+  surface: 'this `element:record_picker`',
+  history: PROPS_HISTORY,
+  guidanceSets: COMPONENT_LEVEL_GUIDANCE,
+}, {
   object: z.string().describe('Object to pick records from'),
   /**
    * Field rendered as each row's text. Defaults to `name`, which is what the
@@ -976,7 +1405,11 @@ export type ElementRecordPickerProps = z.input<typeof ElementRecordPickerPropsSc
  * native modality (text/email/number/…), keeping genuinely-distinct inputs
  * (textarea, select, checkbox) free to arrive as their own elements later.
  */
-export const ElementTextInputPropsSchema = lazySchema(() => z.object({
+export const ElementTextInputPropsSchema = lazySchema(() => strictObject({
+  surface: 'this `element:text_input`',
+  history: PROPS_HISTORY,
+  guidanceSets: COMPONENT_LEVEL_GUIDANCE,
+}, {
   inputType: z.enum(['text', 'email', 'number', 'tel', 'url', 'password'])
     .optional().default('text')
     .describe('Native input type — drives keyboard/validation affordance and how the bound value is coerced (number → numeric).'),
@@ -1020,25 +1453,29 @@ export const ComponentPropsMap = {
   'record:path': RecordPathProps,
 
   // Navigation
-  'app:launcher': EmptyProps,
-  'nav:menu': EmptyProps,
-  'nav:breadcrumb': EmptyProps,
+  'app:launcher': emptyProps('app:launcher'),
+  'nav:menu': emptyProps('nav:menu'),
+  'nav:breadcrumb': emptyProps('nav:breadcrumb'),
 
   // Utility
-  'global:search': EmptyProps,
-  'global:notifications': EmptyProps,
-  'user:profile': EmptyProps,
+  'global:search': emptyProps('global:search'),
+  'global:notifications': emptyProps('global:notifications'),
+  'user:profile': emptyProps('user:profile'),
   
   // AI
   'ai:chat_window': AIChatWindowProps,
-  'ai:suggestion': z.object({ context: z.string().optional() }),
+  'ai:suggestion': strictObject({
+    surface: 'this `ai:suggestion`',
+    history: PROPS_HISTORY,
+    guidanceSets: COMPONENT_LEVEL_GUIDANCE,
+  }, { context: z.string().optional() }),
 
   // Content Elements
   'element:text': ElementTextPropsSchema,
   'element:number': ElementNumberPropsSchema,
   'element:image': ElementImagePropsSchema,
   'element:metadata_viewer': ElementMetadataViewerPropsSchema, // ADR-0051: inline read-only metadata view (embeddableInDoc)
-  'element:divider': EmptyProps,
+  'element:divider': emptyProps('element:divider'),
 
   // Interactive Elements
   'element:button': ElementButtonPropsSchema,

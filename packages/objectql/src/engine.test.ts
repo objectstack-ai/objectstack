@@ -961,10 +961,56 @@ describe('ObjectQL Engine', () => {
             expect(captured).toEqual({ id: 't1', status: 'in_review', assignee: 'sam@example.com' });
         });
 
-        it('does not fetch the prior record when no afterUpdate hook is registered and no rule needs it', async () => {
+        it('[#7867] DOES fetch the prior record even with no hook and no rule — existence is a consumer #5284 never counted', async () => {
+            // ⚠️ This case is the INVERSE of what it asserted until #7867, and
+            // the inversion IS the change, not a casualty of it. #5284 narrowed
+            // the by-id prior read to "does anything CONSUME the prior row?", so
+            // an object with no `beforeUpdate`/`afterUpdate` hook, no
+            // prior-reading validation rule and no roll-up paid no read.
+            //
+            // Existence is a consumer that demand list never enumerated, and it
+            // is the one consumer EVERY by-id write has: a write against an id
+            // that names no row must answer `RECORD_NOT_FOUND`, and no cheaper
+            // question answers that. The two are mutually exclusive, so the
+            // narrowing is retired rather than worked around.
+            //
+            // What that costs, measured rather than assumed: #5929's twin in
+            // `delete()` enumerates the global hook registrants (plugin-sharing,
+            // service-storage, plugin-auth, plugin-audit — all registering with
+            // no `object`, hence matching every object), so on any kernel that
+            // loads them the demand was ALREADY true for every object and the
+            // narrowing skipped nothing there. The read is genuinely new only
+            // for a bare `@objectstack/objectql/core` embedder — which is
+            // buying a 404 it did not have.
+            vi.mocked(mockDriver.findOne).mockResolvedValue({ id: 't1', status: 'todo' });
             vi.mocked(mockDriver.update).mockResolvedValue({ id: 't1' } as any);
             await engine.update('task', { id: 't1', status: 'done' });
-            expect(mockDriver.findOne).not.toHaveBeenCalled();
+            expect(mockDriver.findOne).toHaveBeenCalledTimes(1);
+        });
+
+        it('[#7867] refuses a by-id update whose id names no row — RECORD_NOT_FOUND, before any hook runs', async () => {
+            // The producer half of the defect the `previous` cases above
+            // describe from the other side. With no gate, a ghost id sailed on
+            // into validation, the driver and the hook chain and died on
+            // whichever complained first — a `HookConditionError` on a hooked
+            // object, a required-field failure on an unhooked one. The 400
+            // class varied with the object's declarations; the missing 404 was
+            // the constant.
+            vi.mocked(mockDriver.findOne).mockResolvedValue(null as any);
+            let ran = false;
+            engine.registerHook('beforeUpdate', async () => { ran = true; }, { object: 'task' });
+
+            const err: any = await engine.update('task', { id: 'ghost', status: 'done' })
+                .then(() => null, (e) => e);
+
+            expect(err, 'a ghost id must be refused, not silently resolved').not.toBeNull();
+            expect(err.code).toBe('RECORD_NOT_FOUND');
+            expect(err.status).toBe(404);
+            // Refused BEFORE the before phase: no handler observes a row that is
+            // not there, which removes the symptom at its producer rather than
+            // specializing the message the symptom happened to produce.
+            expect(ran, 'beforeUpdate must not dispatch for a row that is not there').toBe(false);
+            expect(mockDriver.update).not.toHaveBeenCalled();
         });
     });
 
@@ -996,6 +1042,9 @@ describe('ObjectQL Engine', () => {
         });
 
         it('still treats a scalar where.id as a single-row update', async () => {
+            // [#7867] The by-id branch reads the target row before it writes,
+            // so the double has to hold one — see the not-found gate case above.
+            vi.mocked(mockDriver.findOne).mockResolvedValue({ id: 't1', status: 'todo' });
             vi.mocked(mockDriver.update).mockResolvedValue({ id: 't1' } as any);
             await engine.update('task', { status: 'done' }, { where: { id: 't1' } } as any);
             expect(mockDriver.update).toHaveBeenCalledTimes(1);
@@ -1061,6 +1110,8 @@ describe('ObjectQL Engine', () => {
                 if (opCtx.operation === 'update') seenAst = opCtx.ast;
                 await next();
             });
+            // [#7867] The by-id branch reads the target row before it writes.
+            vi.mocked(mockDriver.findOne).mockResolvedValue({ id: 't1', status: 'todo' });
             vi.mocked(mockDriver.update).mockResolvedValue({ id: 't1' } as any);
 
             await engine.update('task', { status: 'done' }, { where: { id: 't1' } } as any);
@@ -1105,6 +1156,11 @@ describe('ObjectQL Engine', () => {
             // from the matched row set), so there is no branch left to
             // re-enter. The lever is refused by name rather than caught one
             // layer down by a security backstop that was never about it.
+            // [#7867] The target row must EXIST for the ladder to reach the
+            // before phase at all — a ghost id is now refused one step earlier,
+            // with RECORD_NOT_FOUND, so this case would otherwise never get to
+            // the lever it is about.
+            vi.mocked(mockDriver.findOne).mockResolvedValue({ id: 't1', status: 'todo' });
             engine.registerHook('beforeUpdate', async (ctx: any) => {
                 ctx.input.id = undefined;
             });
@@ -1358,6 +1414,12 @@ describe('ObjectQL Engine', () => {
             engine.registerDriver(mockDriver, true);
             await engine.init();
             (mockDriver as any).updateMany = vi.fn().mockResolvedValue(1);
+            // [#7867] Every single-id case below writes to record '1'; the by-id
+            // branch now reads that row first and refuses with
+            // RECORD_NOT_FOUND when it is not there, so the double has to hold
+            // it. The cases that care about the prior row's CONTENT (the
+            // `readonlyWhen` ones) still override this with their own shape.
+            vi.mocked(mockDriver.findOne).mockResolvedValue({ id: '1', title: 'stored' } as any);
         });
 
         const docSchema = {

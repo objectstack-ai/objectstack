@@ -6,6 +6,10 @@
 // from the OWD baseline + auto-stamped `owner_id`, no RLS authored. This is the
 // sibling of the `private` proof: same owner-write protection, but rows are
 // VISIBLE across owners (the read-visibility axis of OWD).
+//
+// ADR-0056 D10 — the authz-conformance matrix row this file is the cited proof
+// for; `authz-conformance.test.ts` asserts the pairing is mutual (#7976).
+// authz-row: owd-public-read
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';

@@ -26,6 +26,8 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
         name: 'test_grid',
         type: 'grid',
         label: 'Test Grid',
+        object: 'test_task', // [#7741] the inline arm requires the object binding pair
+        viewKind: 'list',
         columns: ['id', 'title'],
     };
 
@@ -420,6 +422,8 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                 name: 'all_leads',
                 label: 'All Leads',
                 type: 'grid',
+                object: 'lead', // [#7741] the inline arm requires the object binding pair
+                viewKind: 'list',
                 data: { provider: 'object', object: 'lead' },
                 columns: ['first_name', 'last_name'],
             };
@@ -1707,7 +1711,8 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
         it('artifact-backed view (allowOrgOverride:true) still overlays cleanly', async () => {
             // Regression: types that DO allow overlays must keep working
             // even when the item is artifact-backed.
-            const viewBase = { name: 'case_grid', type: 'grid' as const, object: 'case', columns: [{ field: 'name' }] };
+            // [#7741] the inline arm requires the object binding pair.
+            const viewBase = { name: 'case_grid', type: 'grid' as const, object: 'case', viewKind: 'list' as const, columns: [{ field: 'name' }] };
             registry.registerItem('view', viewBase, 'name' as any, 'crm-plugin');
             mockEngine.findOne.mockResolvedValue(null);
 

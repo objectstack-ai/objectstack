@@ -65,6 +65,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Definition",
         help: "Serialised Webhook JSON (see @objectstack/spec/automation/webhook) — full headers/auth/retry/payload config"
       },
+      headers_secret: {
+        label: "Custom Headers",
+        help: "Custom HTTP headers sent with each delivery, as a JSON object ({\"Authorization\": \"Bearer …\"}). Encrypted at rest into sys_secret; reads return a mask, never the headers. Leave the mask untouched to keep the current value."
+      },
       signing_secret: {
         label: "Signing Secret",
         help: "HMAC-SHA256 key used to sign deliveries (X-Objectstack-Signature). Encrypted at rest into sys_secret; reads return a mask, never the key. Leave the mask untouched to keep the current value."

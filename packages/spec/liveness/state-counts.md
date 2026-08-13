@@ -28,7 +28,7 @@ for both corollaries.
 | Type | live | exp | dead | planned | classified |
 |---|---|---|---|---|---|
 | `object` | 49 | 0 | 0 | 1 | 50 |
-| `field` | 67 | 0 | 0 | 0 | 67 |
+| `field` | 67 | 0 | 0 | 1 | 68 |
 | `flow` | 34 | 0 | 6 | 0 | 40 |
 | `action` | 42 | 0 | 2 | 0 | 44 |
 | `hook` | 18 | 0 | 2 | 0 | 20 |
@@ -39,7 +39,7 @@ for both corollaries.
 | `skill` | 16 | 0 | 1 | 0 | 17 |
 | `dataset` | 27 | 0 | 0 | 0 | 27 |
 | `page` | 23 | 0 | 0 | 1 | 24 |
-| `view` | 80 | 0 | 6 | 0 | 86 |
+| `view` | 77 | 0 | 9 | 0 | 86 |
 | `report` | 21 | 0 | 0 | 0 | 21 |
 | `dashboard` | 34 | 0 | 7 | 0 | 41 |
 | `webhook` | 19 | 0 | 0 | 0 | 19 |
@@ -57,4 +57,4 @@ for both corollaries.
 | `api` | 25 | 0 | 0 | 2 | 27 |
 | `capability` | 12 | 0 | 0 | 0 | 12 |
 | `qa` | 4 | 0 | 5 | 0 | 9 |
-| **total** | **777** | **6** | **52** | **7** | **842** |
+| **total** | **774** | **6** | **55** | **8** | **843** |

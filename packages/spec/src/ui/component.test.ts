@@ -10,6 +10,7 @@ import {
   RecordHighlightsProps,
   RecordActivityProps,
   RecordChatterProps,
+  PageAccordionProps,
   ComponentPropsMap,
   ElementTextPropsSchema,
   ElementNumberPropsSchema,
@@ -185,13 +186,28 @@ describe('PageTabsProps', () => {
 
   it('does NOT accept the deprecated `visibility` alias on tab items (new surface, canonical key only)', () => {
     // ADR-0089 D2 aliases exist for keys with legacy metadata; tab items never
-    // had a visibility key, so only canonical `visibleWhen` is declared. The
-    // alias is not folded — it is dropped by parse like any unknown key.
-    const result = PageTabsProps.parse({
-      items: [{ label: 'Contracts', visibility: 'record.status == "customer"', children: [] }],
+    // had a visibility key, so only canonical `visibleWhen` is declared.
+    //
+    // ⚠️ What changed at #4001 batch A is the CHANNEL, not the verdict: the
+    // alias used to be dropped by the parse like any unknown key, and is now
+    // rejected by it. The assertion below is the same claim measured on the
+    // other side of the same fact — `visibility` is not a spelling this surface
+    // accepts — and it is strictly stronger, because a drop is a claim about
+    // the output while a rejection is one the author actually sees.
+    const rejected = PageTabsProps.safeParse({
+      items: [{ label: 'Contracts', visibility: 'record.status == \"customer\"', children: [] }],
     });
-    expect(result.items[0].visibleWhen).toBeUndefined();
-    expect('visibility' in result.items[0]).toBe(false);
+    expect(rejected.success).toBe(false);
+    expect(JSON.stringify(rejected.error!.issues)).toContain('visibility');
+
+    // And the canonical spelling on the same surface still parses — the
+    // positive control that keeps the assertion above from passing for the
+    // wrong reason (a tab item that rejects everything would satisfy it too).
+    expect(
+      PageTabsProps.parse({
+        items: [{ label: 'Contracts', visibleWhen: 'record.status == \"customer\"', children: [] }],
+      }).items[0].visibleWhen,
+    ).toBeDefined();
   });
 });
 
@@ -363,8 +379,18 @@ describe('PageContainerProps — page:section / page:footer / page:sidebar (#577
   // `body` is NOT a second authorable spelling here (Prime Directive #12). The
   // renderers keep reading it as a back-compat fallback for stored documents;
   // that fallback is objectui's to retire on its own schedule.
+  //
+  // #4001 batch A closed this shape, so the same verdict now arrives as a
+  // rejection carrying the rename rather than as a silent drop — which is the
+  // whole difference the campaign is buying, and the reason the prescription is
+  // a hand-written `guidance` entry: `body` → `children` is not a distance the
+  // suggester can cross.
   it('does not declare `body` as a second composition key', () => {
-    expect(PageContainerProps.parse({ body: ['x'] })).not.toHaveProperty('body');
+    const rejected = PageContainerProps.safeParse({ body: ['x'] });
+    expect(rejected.success).toBe(false);
+    const message = rejected.error!.issues.map((i) => i.message).join('\n');
+    expect(message).toContain('`body`');
+    expect(message).toContain('children');
   });
 });
 
@@ -1455,7 +1481,25 @@ describe('批 17 / #5068 — the carrier stays an open bag; the gate is on the l
     expect(PageSchema.safeParse(outside).success).toBe(false);
   });
 
-  it('every ComponentPropsMap entry is still non-strict — #5068 wired the parse, it did not close them', () => {
+  /**
+   * ⚠️ THE FLIP. Until #4001 batch A this asserted the opposite — that every
+   * entry was still open — and its own comment named the conditions for
+   * flipping it: "When a later batch DOES close them, this expectation flips —
+   * update the verdict in component.zod.ts and the ledger in the same PR."
+   * Both were updated in the PR that changed this line.
+   *
+   * The two assertions ABOVE are deliberately untouched and still green: the
+   * carrier is still an open `z.record(z.string(), z.unknown())` and an unknown
+   * key still survives `PageSchema.parse()`. That is not a leftover — it is the
+   * precise scope of this batch. Direction B (a discriminated `properties`)
+   * stays declined, so closing these shapes moves the rejection into the #5068
+   * authoring gate's `safeParse` half, not onto the page protocol. The storage
+   * path (`saveMetaItem` / REST `/meta`) still runs no props parse at all
+   * (#4463's fourth wall), which is why the assertion above must keep passing:
+   * a reader who mistook this batch for a closed storage door would be wrong in
+   * the direction that matters.
+   */
+  it('every ComponentPropsMap entry is now STRICT — batch A closed all 31 sites', () => {
     const stillOpen: string[] = [];
     for (const [type, schema] of Object.entries(ComponentPropsMap)) {
       const def = (schema as any)._zod.def;
@@ -1464,15 +1508,112 @@ describe('批 17 / #5068 — the carrier stays an open bag; the gate is on the l
       if (def.catchall?._zod?.def?.type === 'never') continue;
       stillOpen.push(type);
     }
-    // All 31 registered component types are open. #5068 wired the parse without
-    // touching the posture — deliberately, because the live corpus violates
-    // these declarations in places that are open contract questions (#5728's
-    // inline i18n label maps) and closing them in the same step would turn a
-    // warning inventory into a wall of hard rejections. When a later batch DOES
-    // close them, this expectation flips — update the verdict in
-    // component.zod.ts and the ledger in the same PR. The coverage survives the
-    // flip: the gate's unknown-key half goes quiet on a strict node and its
-    // `safeParse` half reports `unrecognized_keys` under the same rule id.
-    expect(stillOpen.length).toBe(Object.keys(ComponentPropsMap).length);
+    expect(stillOpen).toEqual([]);
+
+    // Positive control in the same run: the strictness is REACHABLE through the
+    // map, on every registered type, with a key no schema declares. Without
+    // this the assertion above is a claim about a `catchall` field rather than
+    // about behaviour — and the campaign has twice shipped a pin that read the
+    // shape and not the parse.
+    const rejects: string[] = [];
+    for (const [type, schema] of Object.entries(ComponentPropsMap)) {
+      if ((schema as any).safeParse({ zzUndeclared: 'x' }).success) rejects.push(type);
+    }
+    expect(rejects).toEqual([]);
+  });
+});
+
+/**
+ * The curated half of #4001 batch A — the `aliases` / `guidance` a closed shape
+ * can carry and the #5068 walker could not.
+ *
+ * `alias-integrity.test.ts` already proves every entry is a TRUE claim about
+ * its schema (the key it is filed under is rejected, the key it prescribes is
+ * accepted). What it cannot ask is whether the entry still EXISTS — a table
+ * emptied by a later edit is a table that passes every integrity check. These
+ * assertions are that half: each one names a producer measured in the wild, so
+ * deleting the entry is a decision about that producer rather than a cleanup.
+ */
+describe('#4001 batch A — the prescriptions, each backed by a measured producer', () => {
+  const refuse = (schema: { safeParse(v: unknown): any }, value: unknown): string => {
+    const r = schema.safeParse(value);
+    expect(r.success).toBe(false);
+    return r.error.issues.map((i: { message: string }) => i.message).join('\n');
+  };
+
+  it('a tab item `key` is answered with `value` — objectui\'s Studio designer publishes `key`', () => {
+    // Producer: `previews/block-config.ts`, `page:tabs.items.itemFields`. The
+    // renderer reads `it.value` and falls back to `tab-<index>` — so an
+    // authored `key` is not a typo, it is a spelling that silently yields
+    // index-derived tab tokens.
+    const message = refuse(PageTabsProps, { items: [{ label: 'A', key: 'a', children: [] }] });
+    expect(message).toContain('`key`');
+    expect(message).toContain('value');
+  });
+
+  it('an accordion item `value` is answered with "the renderer derives it" — NOT a rename', () => {
+    // The same designer publishes `value` here too, but this renderer
+    // OVERWRITES it (`{ ...it, value: `panel-${idx}` }`). The prescription must
+    // therefore say the key is dead, not offer a spelling — the distinction
+    // between this entry and the tab one is the whole point of both (#7973).
+    const message = refuse(PageAccordionProps, {
+      items: [{ label: 'A', value: 'a', children: [] }],
+    });
+    expect(message).toContain('panel-<index>');
+    expect(message).not.toContain('Did you mean');
+  });
+
+  it('a component-NODE key inside `properties` is told to move up a level — by family', () => {
+    // Two families, two prescriptions, and they must NOT be collapsed: the
+    // visibility one is a pattern (it has to catch spellings nobody
+    // enumerated — `visibleIf`, `hiddenWhen`), while the dispatch one is an
+    // enumerated list narrowed to keys no props schema declares.
+    for (const [schema, key] of [
+      [PageCardProps, 'visible'],
+      [PageHeaderProps, 'visibleWhen'],
+      [RecordDetailsProps, 'hiddenWhen'],
+    ] as const) {
+      const message = refuse(schema, { [key]: 'x' });
+      expect(message).toContain('move it up one level');
+      expect(message).toContain('visibleWhen');
+    }
+    for (const [schema, key] of [
+      [RecordDetailsProps, 'dataSource'],
+      [PageCardProps, 'className'],
+    ] as const) {
+      expect(refuse(schema, { [key]: 'x' })).toContain('component NODE');
+    }
+  });
+
+  it('a container `body` is answered with `children`', () => {
+    expect(refuse(PageContainerProps, { body: [] })).toContain('children');
+  });
+
+  it('a no-props component names ITSELF in the rejection, not "this component"', () => {
+    // The reason `emptyProps` is a factory: an empty shape has no candidate
+    // keys, so the distance fallback can say nothing and the surface name is
+    // the entire diagnostic. Seven types share the shape; none may share a name.
+    expect(refuse(ComponentPropsMap['element:divider'], { color: 'red' }))
+      .toContain('`element:divider`');
+    expect(refuse(ComponentPropsMap['nav:menu'], { color: 'red' }))
+      .toContain('`nav:menu`');
+  });
+
+  it('the five renderer-honoured keys batch A declared are ACCEPTED, not prescribed', () => {
+    // The other side of the same judgement: these were measured as read by
+    // objectui through `schema?.X ?? schema?.properties?.X`, so a rejection
+    // here would be the declaration disagreeing with the delivered platform.
+    expect(PageHeaderProps.parse({ maxVisible: 5, mobileMaxVisible: 2 }).maxVisible).toBe(5);
+    expect(PageTabsProps.parse({ items: [], alwaysShowStrip: true }).alwaysShowStrip).toBe(true);
+    const details = RecordDetailsProps.parse({ inlineEdit: false, showHeader: true });
+    expect(details.inlineEdit).toBe(false);
+    expect(details.showHeader).toBe(true);
+
+    // …and none of them acquired a schema DEFAULT, which would turn "the author
+    // said nothing" into "the author asked for the renderer's fallback".
+    const empty = RecordDetailsProps.parse({});
+    expect('inlineEdit' in empty).toBe(false);
+    expect('showHeader' in empty).toBe(false);
+    expect('maxVisible' in PageHeaderProps.parse({})).toBe(false);
   });
 });

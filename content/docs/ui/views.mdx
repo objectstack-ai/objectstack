@@ -112,7 +112,7 @@ A List View controls how a collection of records is presented. It supports multi
 | `bulkActions` | `array` | optional | Bulk selection actions, by action name — see [Actions](/docs/ui/actions) |
 | `bulkActionDefs` | `array` | optional | Rich bulk action definitions — mass edits, and the aggregate single-call mode (below) |
 | `inlineEdit` | `boolean` | optional | Enable inline editing |
-| `exportOptions` | `string[]` | optional | Enabled export formats (`csv`, `xlsx`, `pdf`, `json`) |
+| `exportOptions` | `object` | optional | Export menu configuration: `{ formats?, maxRecords?, includeHeaders?, fileNamePrefix?, streaming? }`. `formats` accepts `csv`, `xlsx`, `json` (default `['csv', 'json']`; PDF export was declined — #1301). A bare format array is the legacy spelling and lifts to `{ formats: [...] }` at parse |
 
 The view's machine name is its **key** in the container (`listViews.urgent` on
 object `task` becomes `task.urgent`); the default `list` claims `task.default`.

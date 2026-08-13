@@ -83,3 +83,49 @@ The regeneration lap. `spec-changes.json` and `docs/protocol-upgrade-guide.md` a
 projections of this registry and still have to be regenerated and committed when an
 entry lands. #6957's ruling kept them in version control on purpose — the review diff
 is worth the laps it costs — so a retirement card is not faster, only harder to lose.
+
+### What the merge queue does with those projections — measured (#8344)
+
+`.gitattributes` routes both through `merge=os-regen`, and that driver is a **local**
+git facility: the GitHub merge queue rebuilds each PR server-side, where no custom
+driver runs. #8344 asked what the queue therefore produces for them when two ADR-0087
+registrations are in flight — stale-but-clean, a conflict, or something correct.
+
+Measured 2026-08-13, on the real in-flight case that raised the question (#8325's
+branch against a `main` already carrying #8324 and #8327) plus four synthetic pairs,
+each merged in a clone with **no `merge.os-regen.driver` configured** — which is
+exactly the queue's situation:
+
+| two registrations in flight, distance in registry sort order | driver-less merge | the un-regenerated result |
+| --- | --- | --- |
+| the real case — #8324 + #8327 against #8325 | clean | **byte-identical** to the regeneration |
+| ids far apart | clean | `check:spec-changes`, `check:upgrade-guide`, `check:migration-registry` all pass |
+| exactly one existing entry between them | clean | all three gates pass |
+| **adjacent — nothing between them** | **conflict** | — (the PR is ejected) |
+| **both the first entry of a new major** | **conflict** | — (the PR is ejected) |
+
+So the answer is **no, never stale-but-clean**. Both files are sorted unions and a
+registration is insertion-only, so the queue's text merge either takes both sides —
+which *is* the regeneration, byte for byte — or refuses. There is no third outcome,
+and the `--check` gates are what prove the clean rows current rather than merely
+conflict-free.
+
+The residue is that conflict, and **sharding those two files would not buy back a
+single ejection**: every conflicting case above also conflicts in `registry.ts`, which
+is generated, committed, unsharded and deliberately outside the driver
+(`NOT_DRIVER_MANAGED` in `scripts/regen-artifacts.mjs`) — and which every registration
+touches by construction. Sharding this directory removed the collision at the
+**source**; it does not reach the generated file the sources are concatenated into.
+
+⚠️ Locally the driver hides two thirds of that signal: the adjacent-id merge reports
+three conflicts server-side and one — `registry.ts` — in a clone with the driver
+registered, because the driver defers the two projections. The one it leaves standing
+is enough to see the collision coming, which is what makes this a narrow hazard rather
+than a silent one.
+
+Reproduce any row with a driver-less clone and git's own server-side merge:
+
+```
+git clone --shared --no-local . /tmp/driverless   # a fresh clone has no merge.os-regen.driver
+git -C /tmp/driverless merge-tree --write-tree --messages BRANCH_A BRANCH_B
+```

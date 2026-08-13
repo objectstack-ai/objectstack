@@ -66,7 +66,7 @@ Turso / libSQL Connection Configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **url** | `string` | ✅ | libSQL endpoint or local file: a remote libsql/https Turso URL, a file path, or :memory: |
-| **authToken** | `string` | optional | JWT auth token for a remote libSQL database (prefer external.credentialsRef) |
+| **authToken** | `never` | optional | Set through the connection form's secret field or `external.credentialsRef` — encrypted into `sys_secret`, never stored in `config` (#7990) |
 | **encryptionKey** | `string` | optional | AES-256 encryption key for the local database file (local/replica modes) |
 | **concurrency** | `integer` | optional | Maximum concurrent requests to the remote database |
 | **syncUrl** | `string` | optional | Remote sync URL for embedded-replica mode: a libsql or https Turso endpoint |

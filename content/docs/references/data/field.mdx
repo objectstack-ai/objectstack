@@ -29,7 +29,7 @@ const result = CurrencyConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **precision** | `integer` | ✅ | Decimal precision (default: 2) |
+| **precision** | `integer` | optional | Decimal precision (default: 2) |
 | **currencyMode** | `Enum<'dynamic' \| 'fixed'>` | ✅ | Currency mode: dynamic (user selectable) or fixed (single currency) |
 | **defaultCurrency** | `string` | ✅ | Default or fixed currency code (ISO 4217, e.g., USD, CNY, EUR) |
 
@@ -71,6 +71,7 @@ const result = CurrencyConfigSchema.parse(data);
 | **scale** | `number` | optional | Decimal places |
 | **min** | `number` | optional | Minimum value |
 | **max** | `number` | optional | Maximum value |
+| **useGrouping** | `boolean` | optional | Digit-grouping presentation hint for `number` fields (#7768) — maps to `Intl.NumberFormat`'s `useGrouping`. Absent = renderer decides (interim heuristic today, locale default eventually); `false` = author opts out of grouping (e.g. a year or other ordinal/identifier integer); `true` = author pins grouping on. |
 | **accept** | `string[]` | optional | Permitted upload types for media fields, as MIME types or extensions (e.g. ["image/*", ".pdf"]). Offered to the file picker AND enforced on write. |
 | **maxSize** | `integer` | optional | Maximum permitted file size in BYTES for media fields. Enforced on write against the stored file size, not just checked in the browser. |
 | **options** | `{ label: string; value: string; color?: string; default?: boolean; … }[]` | optional | Static options for select/multiselect |

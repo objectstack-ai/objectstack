@@ -236,11 +236,44 @@ describe('packages envelope (#3843) — error bodies', () => {
       run: () => drive(mount({}), 'POST', `${PKGS}/publish`, { body: { manifest: {}, metadata: {} } }),
     },
     {
-      name: 'a publish the service refuses',
-      status: 400,
+      // [#8131] Was `a publish the service refuses`, driving
+      // `{ success: false, error: 'version already published' }` against a
+      // 400. That fixture pinned the exact limb #8131 removed — a bare
+      // `error` string, which could not say whether the caller or the write
+      // was at fault, so the door answered one status for both and picked the
+      // client's. Replaced rather than re-spelled: the two outcomes it
+      // conflated are now separate cases, here and below.
+      name: 'a publish whose WRITE broke — a driver fault, so a 5xx',
+      status: 500,
       code: 'PACKAGE_PUBLISH_FAILED',
       run: () => drive(
-        mount({ publish: async () => ({ success: false, error: 'version already published' }) }),
+        mount({
+          publish: async () => ({
+            success: false,
+            driverFault: { message: 'The package registry could not store this package.' },
+          }),
+        }),
+        'POST',
+        `${PKGS}/publish`,
+        { body: { manifest: MANIFEST, metadata: {} } },
+      ),
+    },
+    {
+      // The other half of what the old fixture named: a genuine REFUSAL still
+      // answers 4xx, with the producer's own code — it is thrown, not
+      // returned, and #8016's mapping reads it off the throw.
+      name: 'a publish the service REFUSES keeps its own 4xx and code',
+      status: 409,
+      code: 'RESOURCE_CONFLICT',
+      run: () => drive(
+        mount({
+          publish: async () => {
+            throw Object.assign(new Error('com.acme.crm@1.0.0 is already published.'), {
+              status: 409,
+              code: 'RESOURCE_CONFLICT',
+            });
+          },
+        }),
         'POST',
         `${PKGS}/publish`,
         { body: { manifest: MANIFEST, metadata: {} } },

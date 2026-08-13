@@ -196,7 +196,14 @@ const accountRecordPage = {
           id: 'header',
           properties: {
             fields: ['name', 'type', 'industry', 'owner'],
-            actions: ['edit', 'delete', 'clone'],
+          },
+        },
+        // Record actions are their own component — `record:highlights` renders
+        // field chips and nothing else.
+        {
+          type: 'record:quick_actions',
+          properties: {
+            actionNames: ['edit', 'delete', 'clone'],
           },
         },
       ],

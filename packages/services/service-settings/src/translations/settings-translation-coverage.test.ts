@@ -18,15 +18,18 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import type { SettingsManifest } from '@objectstack/spec/system';
 import * as manifestsModule from '../manifests/index.js';
 import { zhCN, jaJP, esES } from './index.js';
 
-type Specifier = { type?: string; id?: string; key?: string; label?: string; description?: string };
-type Manifest = { namespace: string; description?: string; specifiers: Specifier[] };
-
+// The manifests barrel also exports action handlers and the aggregate array;
+// keep only the manifest objects.
 const manifests = Object.values(manifestsModule).filter(
-  (v): v is Manifest =>
-    !!v && typeof v === 'object' && 'namespace' in v && Array.isArray((v as Manifest).specifiers),
+  (v): v is SettingsManifest =>
+    !!v &&
+    typeof v === 'object' &&
+    'namespace' in v &&
+    Array.isArray((v as SettingsManifest).specifiers),
 );
 
 const LOCALES: Array<[string, { settings?: Record<string, any> }]> = [
@@ -35,7 +38,7 @@ const LOCALES: Array<[string, { settings?: Record<string, any> }]> = [
   ['es-ES', esES],
 ];
 
-function missingFor(data: { settings?: Record<string, any> }, m: Manifest): string[] {
+function missingFor(data: { settings?: Record<string, any> }, m: SettingsManifest): string[] {
   const tr = (data.settings ?? {})[m.namespace];
   const missing: string[] = [];
   if (tr?.title == null) missing.push('title');

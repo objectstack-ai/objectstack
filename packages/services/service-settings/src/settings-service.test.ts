@@ -2,8 +2,14 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { SettingsService } from './settings-service.js';
-import { SettingsLockedError, UnknownKeyError, UnknownNamespaceError, envKeyOf } from './settings-service.types.js';
-import { NoopCryptoAdapter } from './crypto-adapter.js';
+import {
+  SettingsCryptoUnavailableError,
+  SettingsLockedError,
+  UnknownKeyError,
+  UnknownNamespaceError,
+  envKeyOf,
+} from './settings-service.types.js';
+import type { CryptoAdapter } from './crypto-adapter.js';
 import { mailSettingsManifest, mailTestActionHandler } from './manifests/mail.manifest.js';
 import { aiSettingsManifest } from './manifests/ai.manifest.js';
 import { authSettingsManifest } from './manifests/auth.manifest.js';
@@ -89,14 +95,56 @@ describe('SettingsService — resolver precedence', () => {
   });
 });
 
+/**
+ * Stands in for a real, injected `CryptoAdapter` (a KMS-backed one in
+ * production). What matters to the write path is the DECLARATION — an adapter
+ * that says it protects its input is trusted to, exactly as a KMS adapter is —
+ * so the wrapping itself is deliberately trivial and reversible in-test.
+ */
+class ReversibleTestAdapter implements CryptoAdapter {
+  readonly confidential = true;
+  async encrypt(plaintext: string): Promise<string> {
+    return 'kms:' + Buffer.from(plaintext, 'utf8').toString('base64');
+  }
+  async decrypt(ciphertext: string): Promise<string> {
+    return Buffer.from(ciphertext.replace(/^kms:/, ''), 'base64').toString('utf8');
+  }
+  digest(): string {
+    return 'fnv32:deadbeef';
+  }
+}
+
 describe('SettingsService — encryption round-trip', () => {
+  // #8026 — this case used to inject `new NoopCryptoAdapter()`, which the write
+  // path now REFUSES (base64 is encoding, not encryption). Re-pointed rather
+  // than deleted or merely re-spelled: its subject is the injected-adapter seam
+  // (`opts.crypto` still holds and returns an encrypted value), and a fixture
+  // pinned to the refused limb would have kept passing only because nothing was
+  // being stored. The refusal itself is pinned in
+  // `settings-crypto-fail-closed.test.ts`; what stays here is the positive half.
   it('persists encrypted=true values via crypto adapter', async () => {
-    const svc = new SettingsService({ env: {}, crypto: new NoopCryptoAdapter() });
+    const svc = new SettingsService({ env: {}, crypto: new ReversibleTestAdapter() });
     svc.registerManifest(mailSettingsManifest);
     await svc.setMany('mail', { provider: 'resend', api_key: 're-secret-123', from_email: 'a@b.com' });
     const ns = await svc.getNamespace('mail');
     expect(ns.values.api_key.value).toBe('re-secret-123');
     expect(ns.values.api_key.source).toBe('global');
+  });
+
+  it('an adapter that declares no confidentiality is refused, whatever its class', async () => {
+    // Not a NoopCryptoAdapter — the gate reads the DECLARATION, so a bespoke
+    // development adapter opting out is refused on the same terms.
+    const declaredWeak: CryptoAdapter = {
+      confidential: false,
+      encrypt: async (p) => 'weak:' + p,
+      decrypt: async (c) => c.replace(/^weak:/, ''),
+      digest: () => 'fnv32:00000000',
+    };
+    const svc = new SettingsService({ env: {}, crypto: declaredWeak });
+    svc.registerManifest(mailSettingsManifest);
+    await expect(
+      svc.setMany('mail', { provider: 'resend', api_key: 're-secret-123', from_email: 'a@b.com' }),
+    ).rejects.toBeInstanceOf(SettingsCryptoUnavailableError);
   });
 });
 
@@ -140,7 +188,15 @@ describe('SettingsService — audit sink', () => {
     const events: any[] = [];
     const svc = new SettingsService({
       env: {},
-      audit: { record: (e) => events.push(e) },
+      // #8026 — the subject is the audit event's masked digest, which only
+      // exists for a value that was actually persisted; the adapter declares
+      // confidentiality so the write is allowed to happen at all.
+      crypto: new ReversibleTestAdapter(),
+      audit: {
+        record: (e) => {
+          events.push(e);
+        },
+      },
     });
     svc.registerManifest(mailSettingsManifest);
     await svc.setMany('mail', { provider: 'resend', api_key: 'top-secret', from_email: 'a@b.com' });
@@ -320,7 +376,11 @@ describe('SettingsService — resetNamespace / built-in reset action', () => {
 
 describe('SettingsService — save-time validation (required/visible/pattern)', () => {
   function aiService(): SettingsService {
-    const svc = new SettingsService({ env: {} });
+    // #8026 — same reason as `mailService` below: the provider configs these
+    // cases save carry a declared secret (`cloudflare_api_key`), which the
+    // write path will not persist through an adapter that provides no
+    // confidentiality. The subject here is required/visible validation.
+    const svc = new SettingsService({ env: {}, crypto: new ReversibleTestAdapter() });
     svc.registerManifest(aiSettingsManifest);
     return svc;
   }
@@ -435,7 +495,12 @@ describe('SettingsService — save-time validation (required/visible/pattern)', 
  */
 describe('SettingsService — save-time validation (declared options are enforced)', () => {
   const mailService = () => {
-    const svc = new SettingsService({ env: {} });
+    // #8026 — these cases write `api_key` (a declared secret) only as part of a
+    // complete provider config; their subject is the option table. The write
+    // path now refuses a secret when nothing can encrypt it, so the fixture
+    // declares an adapter that can, and the option-table assertions stay about
+    // the option table.
+    const svc = new SettingsService({ env: {}, crypto: new ReversibleTestAdapter() });
     svc.registerManifest(mailSettingsManifest);
     return svc;
   };
@@ -484,7 +549,9 @@ describe('SettingsService — save-time validation (declared options are enforce
     // A workspace that saved `sendgrid` while the option existed still carries
     // it. Simulated exactly as it happened: write under the OLD table, then
     // re-register the narrowed manifest (#5094) over the same namespace.
-    const svc = new SettingsService({ env: {} });
+    // (#8026 — `crypto` for the same reason as `mailService`: the seed write
+    // carries `api_key`.)
+    const svc = new SettingsService({ env: {}, crypto: new ReversibleTestAdapter() });
     svc.registerManifest({
       ...mailSettingsManifest,
       specifiers: mailSettingsManifest.specifiers.map((s: any) =>

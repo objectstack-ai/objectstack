@@ -4,6 +4,9 @@ import {
     IHttpServer, resolveAuthzContext, resolveLocalizationContext, isAuthGateAllowlisted,
     assembleExecutionContext, normalizeAuthGate, type AuthGate,
     shouldDenyAnonymous, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS,
+    // [#7678] ADR-0090 D5/D9 suggested-binding `?status=` vocabulary — the one
+    // owner, shared with the runtime dispatcher's `/security` domain.
+    isAudienceBindingSuggestionStatus, unknownAudienceBindingSuggestionStatusMessage,
 } from '@objectstack/core';
 import {
     isMcpServerEnabled,
@@ -41,7 +44,10 @@ import { RouteManager, type RouteEntry } from './route-manager.js';
 // read points. Each handler below declares WHICH of its parameters are
 // single-valued; genuinely multi-valued ones (`select`, `expand`, `objects`,
 // `fields`, `searchFields`, `approverId`) are deliberately never listed.
-import { refuseRepeatedQueryParams } from './query-multiplicity.js';
+// [#7390] The filter slot is the one arity judgement the shared normalizer
+// structurally cannot make (a filter AST IS an array), so the querystring
+// ingress — the only layer that knows it is one — makes it instead.
+import { refuseRepeatedQueryParams, assertFilterParamSuppliedOnce } from './query-multiplicity.js';
 // [#7527] The other half of the same discipline: a parameter this route does
 // not KNOW is refused rather than dropped. See `query-allowlist.ts` for why an
 // ignored filter is the one wrong answer a caller cannot detect.
@@ -49,7 +55,11 @@ import { refuseUnknownQueryParams } from './query-allowlist.js';
 import type { DirectMountedRoute, MountedRouteSource } from './direct-mount.js';
 import { RestServerConfig, RestApiConfig, CrudEndpointsConfig, MetadataEndpointsConfig, BatchEndpointsConfig, RouteGenerationConfig } from '@objectstack/spec/api';
 import { DataProtocol, MetadataProtocol } from '@objectstack/spec/api';
-import type { FieldErrorCode } from '@objectstack/spec/api';
+// [#8073] The closed ADR-0112 error vocabulary, so the explain family's single
+// refusal emitter types its `code` parameter as the vocabulary rather than as
+// `string` — an invented code is a compile error at the call site instead of a
+// runtime surprise on whichever arm a test happens to drive.
+import type { ErrorCode } from '@objectstack/spec/api';
 // The async-import row ceiling has exactly one definition, in the spec, whose
 // TSDoc is its public statement (#6535). rest is the only enforcer, so it reads
 // that export rather than re-declaring the literal beside a "mirrors spec" comment.
@@ -66,6 +76,16 @@ import {
     effectiveOperationsArray,
     DATA_ACTION_TO_API_OPERATION,
 } from '@objectstack/spec/data';
+// [#8013] The SHARED envelope writer (#3973), aliased: this module already has a
+// module-scope `sendError` of its own — the sanitizing responder that maps a
+// THROWN error onto a status — and the two are not interchangeable. This one
+// emits the declared `{ success: false, error: { code, message } }` for a refusal
+// the handler DECIDED, with `code` typed to the closed ADR-0112 vocabulary rather
+// than `string`. Adding a call site here moves no `check:route-envelope` count:
+// the body literal lives in `@objectstack/types` (the pinned `SHARED_BUILDER`),
+// and this file is audited `dialectOnly` for the two non-conforming dialects it
+// still emits — which this deliberately is not.
+import { sendError as sendEnvelopeError } from '@objectstack/types';
 
 /**
  * The protocol slice the REST layer actually consumes (ADR-0076 D9 / #2462
@@ -149,303 +169,22 @@ async function isTranslatableMetaType(type: string): Promise<boolean> {
  * returns a misleading 404.
  */
 /**
- * A Zod issue → the field-level catalog (ADR-0114 D3).
+ * The ADR-0114 D3 mapper — Zod issue codes → the closed `FieldErrorCode`
+ * catalog, with the #5014 union-branch expansion — lived here module-locally
+ * until #8124 moved it to `@objectstack/spec` (`api/zod-issues-to-fields.ts`),
+ * beside the catalog it is total over. The move exists because
+ * `@objectstack/types`' `fieldsFromZodIssues` (the helper the runtime domain
+ * routes emit through) was still passing `issue.code` through raw, and `types`
+ * cannot import this package to share the compliant copy — the dependency
+ * arrow points rest → types, never back. One implementation of D3's table in
+ * the repo; a second is the drift the ADR exists to prevent.
  *
- * Zod's issue codes are Zod's API, not ours, and this used to pass them straight
- * through. Two things were wrong with that. The wire carried two vocabularies on
- * one position — `too_small` from a route that parses with Zod, `min_length` from
- * the validators — so a client could not read a field code without knowing which
- * route served it. And Zod's own codes are ambiguous alone: `too_small` covers a
- * short string, a small number AND a short array.
- *
- * `origin` and `format` disambiguate every case, so the mapping is total rather
- * than best-effort. The one row that fixes a user-visible bug rather than tidying
- * a name: Zod reports a MISSING required property as `invalid_type` (expected
- * string, received undefined), so passing it through marked a missing input as a
- * type error.
+ * Re-exported unchanged: this module's routes call it exactly as before, and
+ * `zod-field-codes.test.ts` / `zod-union-fields.test.ts` keep pinning the
+ * shared implementation to the wire contract this transport always had.
  */
-function zodIssueToFieldCode(issue: any, path: unknown, input?: unknown, inputProvided = false): FieldErrorCode {
-    const origin = issue?.origin;
-    switch (issue?.code) {
-        case 'too_small':
-            return origin === 'number' || origin === 'bigint' || origin === 'date' ? 'min_value'
-                : origin === 'array' || origin === 'set' ? 'min_items'
-                : 'min_length';
-        case 'too_big':
-            return origin === 'number' || origin === 'bigint' || origin === 'date' ? 'max_value'
-                : origin === 'array' || origin === 'set' ? 'max_items'
-                : 'max_length';
-        case 'invalid_format':
-            return issue?.format === 'email' ? 'invalid_email'
-                : issue?.format === 'url' ? 'invalid_url'
-                : 'invalid_format';
-        case 'invalid_type': {
-            // Zod spells "absent" as a type mismatch against `undefined`, so a
-            // MISSING required property arrives here rather than as its own code.
-            // The issue itself cannot tell the two apart — v4 carries `expected`
-            // and a message but not the offending value — so the only honest
-            // discriminator is the parsed input, walked to `path`. Without it we
-            // keep `invalid_type`: reading "received undefined" out of the message
-            // would make the wire contract depend on Zod's phrasing, which is the
-            // leak this mapping exists to stop.
-            //
-            // `path` is passed in rather than read off the issue because a union
-            // BRANCH issue carries a path relative to the union (#5014): walking
-            // the relative one would read the wrong slot of the input — usually
-            // `undefined` — and report every branch mismatch as `required`.
-            if (!inputProvided) return 'invalid_type';
-            return valueAtPath(input, path) === undefined ? 'required' : 'invalid_type';
-        }
-        case 'invalid_value':
-            // A closed set (`z.enum`, `z.literal`) the value is not a member of.
-            return 'invalid_option';
-        case 'unrecognized_keys':
-            return 'unknown_field';
-        case 'invalid_union':
-        case 'invalid_element':
-        case 'invalid_key':
-            return 'invalid_shape';
-        case 'not_multiple_of':
-        case 'custom':
-        default:
-            // A catalog member, not a leak: an unmapped Zod code still lands on a
-            // code the client can read, and `message` carries the specifics.
-            return 'invalid_value';
-    }
-}
-
-/** Walk a Zod issue `path` into the value that was parsed. */
-function valueAtPath(input: unknown, path: unknown): unknown {
-    if (!Array.isArray(path)) return undefined;
-    let cur: any = input;
-    for (const seg of path) {
-        if (cur === null || cur === undefined) return undefined;
-        cur = cur[seg as any];
-    }
-    return cur;
-}
-
-/**
- * How many levels of nested issues are expanded below a top-level issue, and
- * how many equally-informative union branches are emitted at one level.
- *
- * Both bounds — and the whole selection policy below — are the ones
- * `formatZodError` landed for the CLI/spec side of this defect (#4971,
- * `spec/src/shared/error-map.zod.ts`). They are duplicated rather than imported
- * because spec exports only the STRING renderer (`formatZodIssue`), and the wire
- * needs structured `{field, code, message}` entries; the *verdict* must match all
- * the same, or one mistake gets two different prescriptions depending on whether
- * the author published from the terminal or POSTed to the API (#5014).
- */
-const NESTED_EXPANSION_DEPTH_LIMIT = 3;
-const UNION_BRANCH_EMIT_LIMIT = 3;
-
-/**
- * [#5389] The issue codes that hang their real diagnosis on `issue.issues`
- * rather than on `invalid_union`'s `issue.errors`.
- *
- * `invalid_key` is raised when `z.record(K, V)`'s KEY schema rejects a key (and
- * by `z.map` for a non-`PropertyKey` key); `invalid_element` when `z.map`'s
- * VALUE schema rejects the value under such a key. Both carry a bare wrapper
- * message ("Invalid key in record") with everything the client needs one level
- * down — the same defect as #5014, one property name over. Kept in step with
- * `CONTAINER_ISSUE_CODES` in `spec/src/shared/error-map.zod.ts`.
- */
-const CONTAINER_ISSUE_CODES: ReadonlySet<string> = new Set(['invalid_key', 'invalid_element']);
-
-/** A Zod issue path, normalised to the array Zod always produces. */
-function issuePathOf(issue: any): Array<string | number> {
-    return Array.isArray(issue?.path) ? issue.path : [];
-}
-
-/**
- * True when a branch only complains that the value is the wrong *kind* at the
- * branch root — `expected string, received object` for the string member of
- * `z.union([z.string(), SomeObject])`.
- *
- * Such a branch carries no prescription: the author never intended it, and
- * emitting it is the "N branches, N times the noise" failure. An empty branch
- * (zod's "matched multiple" variant carries `errors: []`) counts as
- * uninformative too — `every` on an empty list is `true`.
- */
-function isKindMismatchOnly(issues: readonly any[]): boolean {
-    return issues.every(
-        (issue) =>
-            issuePathOf(issue).length === 0
-            && (issue?.code === 'invalid_type' || issue?.code === 'invalid_value'),
-    );
-}
-
-/** True when a branch carries the #4001 campaign's unknown-key prescription. */
-function carriesUnknownKey(issues: readonly any[]): boolean {
-    return issues.some((issue) => issue?.code === 'unrecognized_keys');
-}
-
-/**
- * Pick the branch(es) of a failed union whose issues actually explain the
- * failure. Ranking, in order (identical to `selectUnionBranches` in
- * `spec/src/shared/error-map.zod.ts`):
- *
- * 1. **Kind-mismatch-only branches are dropped entirely.** If *every* branch is
- *    one — a plain `z.union([z.string(), z.number()])` handed an object —
- *    nothing is selected and the union reports exactly what it always has.
- * 2. **Fewest issues wins.** The branch the author was closest to hitting
- *    complains least, so "fewest" is what keeps ONE unknown key from arriving as
- *    N `fields[]` entries, one per branch.
- * 3. **A branch carrying `unrecognized_keys` breaks a tie**, because that is
- *    where the curated prose lives.
- * 4. Declaration order breaks what remains, so the wire is deterministic.
- *
- * Branches that tie at the top are all emitted (capped): when two shapes explain
- * the failure equally well, privileging the first by accident of declaration
- * order would be a lie about which shape was expected.
- */
-function selectUnionBranches(branches: readonly (readonly any[])[]): readonly (readonly any[])[] {
-    const informative = branches
-        .map((issues, index) => ({ issues, index }))
-        .filter((branch) => !isKindMismatchOnly(branch.issues));
-    if (informative.length === 0) return [];
-
-    const rank = (branch: { issues: readonly any[] }): [number, number] => [
-        branch.issues.length,
-        carriesUnknownKey(branch.issues) ? 0 : 1,
-    ];
-
-    const sorted = [...informative].sort((a, b) => {
-        const [aCount, aKeys] = rank(a);
-        const [bCount, bKeys] = rank(b);
-        return aCount - bCount || aKeys - bKeys || a.index - b.index;
-    });
-
-    const [bestCount, bestKeys] = rank(sorted[0]!);
-    return sorted
-        .filter((branch) => {
-            const [count, keys] = rank(branch);
-            return count === bestCount && keys === bestKeys;
-        })
-        .slice(0, UNION_BRANCH_EMIT_LIMIT)
-        .map((branch) => branch.issues);
-}
-
-/**
- * One issue → its `fields[]` entries, appended to `out`.
- *
- * An ordinary issue is one entry. An `invalid_union` is its own entry (zod's
- * bare `"Invalid input"`, mapped to `invalid_shape`) FOLLOWED by the entries of
- * the branches that explain it, with `field` resolved against the union's own
- * path — branch paths are relative to it.
- *
- * [#5389] An `invalid_key` / `invalid_element` behaves the same way one property
- * name over: its own entry (zod's `"Invalid key in record"`, also
- * `invalid_shape`) followed by the entries on `issue.issues`, whose paths are
- * likewise relative. The one difference from a union: those issues are not
- * competing candidates, so they are NOT ranked or capped — every one of them is
- * a true statement about the value, and dropping any would be dropping a real
- * diagnosis rather than declining to guess.
- *
- * The union's entry is kept rather than replaced: it is the only entry naming
- * the slot the client sent, existing clients already read it, and when every
- * branch is uninformative it is still the whole answer. So the expansion is
- * strictly ADDITIVE — no entry that shipped before this changed is gone or
- * renumbered, only newly accompanied (ADR-0114: same `{field, code, message}`
- * shape as {@link mapDataError}, which has never bounded the array's length).
- *
- * `seen` de-duplicates entries *within one top-level issue*: two branches that
- * reject the same key with the same words say it once. Union entries themselves
- * are exempt, since two same-path `"Invalid input"` entries can head genuinely
- * different sub-trees.
- *
- * Deliberate divergence from the spec-side renderer: where it prints a trailing
- * "… and N more branches rejected this value", this emits nothing. That line is
- * a rendering affordance; a `fields[]` entry must name a real field and carry a
- * catalog code, and the omission note has neither.
- */
-function collectIssueFields(
-    issue: any,
-    parentPath: Array<string | number>,
-    depth: number,
-    seen: Set<string>,
-    input: unknown,
-    inputProvided: boolean,
-    out: Array<{ field: string; code: FieldErrorCode; message: string }>,
-): void {
-    const ownPathIsArray = Array.isArray(issue?.path);
-    const path = ownPathIsArray ? [...parentPath, ...issue.path] : parentPath;
-    const field = ownPathIsArray
-        ? path.join('.')
-        : [...parentPath, String(issue?.path ?? '')].join('.');
-
-    const branches: readonly (readonly any[])[] = issue?.code === 'invalid_union' && Array.isArray(issue?.errors)
-        ? issue.errors.filter((branch: unknown): branch is any[] => Array.isArray(branch))
-        : [];
-    const contained: readonly any[] = CONTAINER_ISSUE_CODES.has(issue?.code) && Array.isArray(issue?.issues)
-        ? issue.issues
-        : [];
-    const expandable = (branches.length > 0 || contained.length > 0)
-        && depth < NESTED_EXPANSION_DEPTH_LIMIT;
-
-    const entry = {
-        field,
-        // A non-array path keeps the pre-#5014 reading (`valueAtPath` bails and
-        // the mapper stays conservative) instead of being coerced into one.
-        code: zodIssueToFieldCode(issue, ownPathIsArray ? path : issue?.path, input, inputProvided),
-        message: String(issue?.message ?? 'Invalid value'),
-    };
-
-    if (!expandable) {
-        const key = JSON.stringify([entry.field, entry.code, entry.message]);
-        if (seen.has(key)) return;
-        seen.add(key);
-    }
-    out.push(entry);
-    if (!expandable) return;
-
-    if (branches.length > 0) {
-        for (const branch of selectUnionBranches(branches)) {
-            for (const nested of branch) {
-                collectIssueFields(nested, path, depth + 1, seen, input, inputProvided, out);
-            }
-        }
-        return;
-    }
-
-    for (const nested of contained) {
-        collectIssueFields(nested, path, depth + 1, seen, input, inputProvided, out);
-    }
-}
-
-/**
- * Zod issues → the data surface's `fields[]` validation envelope
- * (`{ field, code, message }`, docs/api/wire-format §7).
- *
- * A schema `.parse()` at a route ingress must report failures in the SAME shape
- * a validator-thrown `VALIDATION_FAILED` does through {@link mapDataError}
- * (#3918) — otherwise a client keying on `fields` has to learn a second shape
- * per route, and `code: 'VALIDATION_FAILED'` stops meaning one thing on the
- * wire. Since ADR-0114 that sameness covers the `code` VALUE too, not just the
- * shape: see {@link zodIssueToFieldCode}.
- *
- * A rejection behind a `z.union` is expanded (#5014): zod folds every branch of
- * a failed union into ONE top-level issue whose message is the literal
- * `"Invalid input"`, so mapping only top-level issues put `{field: 'query.search',
- * code: 'invalid_shape', message: 'Invalid input'}` on the wire while the branch
- * that says WHICH key is wrong — required-property and unknown-key prescriptions
- * alike — was produced and dropped. See {@link collectIssueFields}.
- */
-export function zodIssuesToFields(
-    issues: unknown,
-    ...input: [] | [unknown]
-): Array<{ field: string; code: FieldErrorCode; message: string }> {
-    if (!Array.isArray(issues)) return [];
-    const inputProvided = input.length > 0;
-    const out: Array<{ field: string; code: FieldErrorCode; message: string }> = [];
-    for (const issue of issues) {
-        // A fresh `seen` per top-level issue: de-duplication is about one
-        // union's branches agreeing, never about two independent issues.
-        collectIssueFields(issue, [], 0, new Set<string>(), input[0], inputProvided, out);
-    }
-    return out;
-}
+import { zodIssuesToFields } from '@objectstack/spec/api';
+export { zodIssuesToFields };
 
 /**
  * How many characters of a domain error's OWN message reach the client.
@@ -1750,6 +1489,80 @@ export const APPROVAL_REQUEST_LIST_PARAMS: readonly string[] = [
     'submitterId', 'submitter_id',
     'q',
     'limit', 'offset',
+];
+
+/**
+ * [#7606] The closed query-parameter set of `GET {basePath}/data/:object/:id`.
+ *
+ * **Measured**, at `registerCrudEndpoints`' read-record handler, from the ONE
+ * line that reads the query — `const { select, expand } = req.query || {}`.
+ * The handler destructures exactly these two names and forwards nothing else,
+ * so every other parameter on this route is dropped in the fullest sense: it
+ * never reaches `getData` at all.
+ *
+ * ⚠️ The dropped names include the CANONICAL spelling of one slot. The spec's
+ * alias table (`RPC_QUERY_ALIAS_SLOTS`) declares the fields slot as canonical
+ * `fields` with alias `select`, and the expand slot as canonical `expand` with
+ * alias `populate` — but this route folds no aliases, so `?fields=name`
+ * silently returns the FULL record and `?populate=…` silently expands nothing.
+ * Both are outside this set on purpose: adding them here would advertise a
+ * capability the handler does not implement, which is the declared-≠-enforced
+ * trap in the other direction. Refusing them instead makes the gap
+ * self-reporting — the located message names `select` / `expand` as what this
+ * route does accept. Tracked as #8039 (an alias-coverage question for the spec
+ * table and this handler to settle together) rather than widened here.
+ */
+export const DATA_RECORD_READ_PARAMS: readonly string[] = ['select', 'expand'];
+
+/**
+ * [#7606] The closed query-parameter set of `GET {basePath}/data/:object/export`.
+ *
+ * **Measured** from the export handler's own reads of `q = req.query ?? {}`,
+ * every one of them: the output controls (`format`, `header`), the paging pair
+ * (`limit`, and `page` — which on this route is the streaming CHUNK size, not
+ * a page number), the row-selection axes (`filter`, `search`, `searchFields`,
+ * `orderby`) and the column selection (`fields`).
+ *
+ * ⚠️ …and `locale`, **which the handler body never mentions**. It is read one
+ * frame down, by `extractLocale` behind the `translateMetaItem` call that
+ * localises the header row — the "anything middleware reads" clause of the
+ * measuring rule, and the single name on this route that a read of the handler
+ * alone gets wrong. Omitting it would 400 every `?locale=zh-CN` export that
+ * works today, turning localised column headers into an outage: precisely the
+ * silent-widening-traded-for-a-loud-incident failure the policy warns about,
+ * committed by the change meant to prevent it. The measurement is only
+ * finished when the helpers the handler calls have been read too.
+ *
+ * `fields` and `searchFields` are in this set but are deliberately absent from
+ * the route's sibling multiplicity declaration: both read their array arm on
+ * purpose (columns are genuinely a list). Recognition and arity are separate
+ * questions and a name can be answered differently by each.
+ *
+ * ⚠️ Dropping `limit` from this array would convert a silent-widening bug into
+ * a loud export outage — the preservation half of
+ * `rest-server-closed-query-params.test.ts` exists to make that impossible to
+ * land, and pins `locale` by name for the reason above.
+ */
+export const DATA_EXPORT_PARAMS: readonly string[] = [
+    'format', 'header',
+    'limit', 'page',
+    'filter', 'search', 'searchFields', 'orderby',
+    'fields',
+    'locale',
+];
+
+/**
+ * [#7606] The closed query-parameter set of `GET {basePath}/search`.
+ *
+ * **Measured** from the cross-object search handler: the term under both
+ * spellings it honours (`q`, and the `query` fallback the very next line
+ * reads), the object scope (`objects`), and the two result caps (`limit`,
+ * `perObject`). A dropped `?objects=` here is the widening case in its purest
+ * form — the search silently fans out across every object instead of the one
+ * the caller named.
+ */
+export const GLOBAL_SEARCH_PARAMS: readonly string[] = [
+    'q', 'query', 'objects', 'limit', 'perObject',
 ];
 
 /** Platform object backing async import jobs (see sys-import-job.object.ts). */
@@ -3131,7 +2944,59 @@ export class RestServer {
      * is why this used to sniff the shape. There is one shape now.
      */
     private filterAppForUser(item: any, sysPerms: Set<string>, serviceGate?: (name: string) => boolean): any | null {
-        if (!item || typeof item !== 'object') return item;
+        return this.filterAppForUserWithReason(item, sysPerms, serviceGate).app;
+    }
+
+    /**
+     * {@link filterAppForUser}, plus WHICH gate withheld the app.
+     *
+     * The gate above collapses three different refusals into one `null`, and for
+     * the LIST route that is exactly right — every one of them means "not in
+     * your list". The by-name route is where they stop being the same answer
+     * (#8013).
+     *
+     * ## Why the caller needs the reason
+     *
+     * `GET /meta/app/<name>` answered a 404-equivalent for all three, so an
+     * app the session may never use and an app that does not exist were
+     * BYTE-IDENTICAL on the wire. The console has nothing to branch on, so it
+     * renders its only copy for an absent app — "it may still be publishing" —
+     * over a permanent authorization denial. Measured cost (objectui#4252): two
+     * acceptance-test batches spent chasing a "platform defect" that was a
+     * missing permission-set binding.
+     *
+     * ## Only ONE of the three converts, and that is the whole design
+     *
+     * The maintainer ruling (2026-08-12) licenses an explicit denial for
+     * `permission` alone. The other two keep answering absence, for reasons
+     * that are not stylistic:
+     *
+     *  - `unpublished` — ADR-0045 §3 says an unpublished app is *externally
+     *    unobservable*, not merely unlisted. A 403 confirms existence, which is
+     *    precisely what that contract withholds; `meta-app-publish-gate.test.ts`
+     *    has pinned the 404-over-403 choice since #4829 and it stands.
+     *  - `service` — an absent optional kernel service (ADR-0057 D10) is a
+     *    deployment fact about the platform, not a statement about this caller.
+     *    Nothing is denied TO the session, so there is no denial to report.
+     *
+     * That partition is the security boundary of #8013, and it cuts one way
+     * only: a denial for `permission` makes an app the caller may not use
+     * observable BY NAME, which the ruling accepts because a by-name probe
+     * already implies the name. Widening it to a name that resolves to nothing
+     * would make every app name on the platform enumerable — a different and
+     * unruled change. Hence `withheld` is set from the branch that fired, never
+     * inferred from `app == null` at the call site.
+     *
+     * Ordering is load-bearing for the same reason: `unpublished` is judged
+     * FIRST, so an app that is both unpublished and permission-gated reports
+     * `unpublished` and stays absent. ADR-0045 §3 wins over the disclosure.
+     */
+    private filterAppForUserWithReason(
+        item: any,
+        sysPerms: Set<string>,
+        serviceGate?: (name: string) => boolean,
+    ): { app: any | null; withheld?: 'unpublished' | 'permission' | 'service' } {
+        if (!item || typeof item !== 'object') return { app: item };
         // ADR-0045 §3 (as revised 2026-08, #4829) — the publish gate. An
         // UNPUBLISHED app is externally unobservable, not merely unlisted: only
         // builders (studio/setup access) receive it at all, for direct-URL
@@ -3149,20 +3014,20 @@ export class RestServer {
         // system. A hidden app is fully routable and permission-checked here;
         // only `_unpublished` withholds it.
         if (item._unpublished === true && !sysPerms.has('studio.access') && !sysPerms.has('setup.access')) {
-            return null;
+            return { app: null, withheld: 'unpublished' };
         }
         const reqApp = Array.isArray(item.requiredPermissions) ? item.requiredPermissions : [];
         if (reqApp.length > 0 && !reqApp.every((p: string) => sysPerms.has(p))) {
-            return null;
+            return { app: null, withheld: 'permission' };
         }
         // ADR-0057 D10 — capability gate: hide when the named kernel service is
         // absent. Fail-open when the gate can't be probed (serviceGate undefined).
         if (typeof item.requiresService === 'string' && serviceGate && serviceGate(item.requiresService) === false) {
-            return null;
+            return { app: null, withheld: 'service' };
         }
         const nav = Array.isArray(item.navigation) ? item.navigation : null;
         const areas = Array.isArray(item.areas) ? item.areas : null;
-        if (!nav && !areas) return item;
+        if (!nav && !areas) return { app: item };
 
         const filterNav = (entries: any[]): any[] => {
             const out: any[] = [];
@@ -3267,9 +3132,11 @@ export class RestServer {
         };
 
         return {
-            ...item,
-            ...(nav ? { navigation: filterNav(nav) } : {}),
-            ...(areas ? { areas: filterAreas(areas) } : {}),
+            app: {
+                ...item,
+                ...(nav ? { navigation: filterNav(nav) } : {}),
+                ...(areas ? { areas: filterAreas(areas) } : {}),
+            },
         };
     }
 
@@ -5769,8 +5636,42 @@ export class RestServer {
                                     );
                                     const registered = await this.resolveRegisteredServices((ctx as any).__kernel, [visible]);
                                     const serviceGate = registered ? (n: string) => registered.has(n) : undefined;
-                                    visible = this.filterAppForUser(visible, sysPerms, serviceGate);
+                                    const gated = this.filterAppForUserWithReason(visible, sysPerms, serviceGate);
+                                    visible = gated.app;
                                     if (visible == null) {
+                                        // [#8013] A PERMISSION denial is reported as
+                                        // one — everything else keeps answering
+                                        // absence. See
+                                        // {@link filterAppForUserWithReason} for why
+                                        // only this one of the three gates converts,
+                                        // and why the reason comes from the branch
+                                        // that fired rather than from `null`.
+                                        //
+                                        // The condition is generic, so it takes the
+                                        // ADR-0112 STANDARD catalog code rather than
+                                        // a bespoke synonym — 403 `PERMISSION_DENIED`,
+                                        // which is also what
+                                        // `standardErrorCodeForHttpStatus(403)`
+                                        // answers. objectui#4252 branches on exactly
+                                        // this `code`.
+                                        //
+                                        // Written through the shared `sendError`
+                                        // (`@objectstack/types`), aliased because this
+                                        // module has a local function of that name.
+                                        // That builder emits the DECLARED envelope
+                                        // `{ success: false, error: { code, message } }`,
+                                        // so the console reads `body.error.code` — the
+                                        // same accessor as the absence answer below,
+                                        // rather than a second dialect to special-case.
+                                        if (gated.withheld === 'permission') {
+                                            sendEnvelopeError(
+                                                res,
+                                                403,
+                                                'PERMISSION_DENIED',
+                                                `You do not have permission to open the '${req.params.name}' app.`,
+                                            );
+                                            return;
+                                        }
                                         res.status(404).json({
                                             error: { code: 'RESOURCE_NOT_FOUND', message: 'Metadata item not found or access denied.' },
                                         });
@@ -6497,6 +6398,93 @@ export class RestServer {
                         const name = section
                             ? `${section}/${req.params?.name ?? ''}`
                             : String(req.params?.name ?? '');
+                        // [#8278] The AUTHORITATIVE published store is consulted
+                        // first: the `state:'active'` `sys_metadata` overlay row.
+                        // Mirrors the dispatcher fix (#8031 / PR #8254,
+                        // `packages/runtime/src/domains/meta.ts`) onto the
+                        // transport that actually serves the cloud runtime — the
+                        // two doors answered the same question from two stores,
+                        // and only one of them had been corrected.
+                        //
+                        // Two publish lifecycles write to two different places:
+                        //
+                        //   - `MetadataManager.publishPackage` snapshots a body
+                        //     into the row-local `publishedDefinition` key of its
+                        //     own in-memory registry — the ADR-0016-era package
+                        //     publish, which is what `getPublished` below reads.
+                        //   - `publishPackageDrafts` / `promoteDraft` flips the
+                        //     artifact's `sys_metadata` row `state:'draft' →
+                        //     'active'`. ADR-0027 (E)(5) defines sealing a publish
+                        //     as exactly that flip, `SysMetadataRepository` names
+                        //     `'active'` "the published, live overlay", and
+                        //     ADR-0033 §2 routes EVERY runtime authoring write
+                        //     into that same ADR-0027 draft — so promoting it is
+                        //     what "published" means for anything authored at
+                        //     runtime. Those items were absent from the registry
+                        //     `getPublished` consults, so this route answered 404
+                        //     about an item that IS published.
+                        //
+                        // `getMetaItemLayered` is the narrow primitive on purpose.
+                        // Its overlay layer is a strict `state:'active'` lookup
+                        // that never reads a draft, and it reports that layer
+                        // SEPARATELY from the code layer — so a null overlay is
+                        // positively "no runtime-published row" and falls through
+                        // to the untouched `getPublished` path below, which keeps a
+                        // code-published item resolving to byte-identical bytes.
+                        // The broader `getMetaItem` would not do: it folds the code
+                        // layer into its own answer, so this route could no longer
+                        // tell the two stores apart.
+                        //
+                        // NO `organizationId`, and that is the ONE deliberate
+                        // divergence from the dispatcher twin, which resolves one
+                        // and passes it. `packages/rest` carries no
+                        // `resolveActiveOrganizationId` and no org plumbing at all
+                        // — the same seam `package-routes.ts` names at its
+                        // `deletePackage` call ("the dispatcher twin owns that
+                        // seam"). Inventing org plumbing here to close a 404 would
+                        // be a new seam smuggled in under a bug fix. Omitting it
+                        // reads the env-wide (`organization_id: null`) row, which
+                        // is symmetric with what an org-less `publishPackageDrafts`
+                        // (`request.organizationId ?? null`) writes — so this door
+                        // resolves exactly the publishes this door can produce.
+                        // Environment scoping still holds: it comes from WHICH
+                        // protocol `resolveProtocol` hands back, not from the
+                        // request payload (`getMetaItemLayered` declares no
+                        // `environmentId` member).
+                        let publishedProtocol: any;
+                        try {
+                            publishedProtocol = await this.resolveProtocol(environmentId, req);
+                        } catch { /* fall through to the code/package snapshot below */ }
+                        if (typeof publishedProtocol?.getMetaItemLayered === 'function') {
+                            try {
+                                const layered = await publishedProtocol.getMetaItemLayered({ type, name });
+                                if (layered?.overlay !== undefined && layered?.overlay !== null) {
+                                    res.json(layered.overlay);
+                                    return;
+                                }
+                            } catch (overlayError: any) {
+                                // [#5532] The overlay read is NOT blanket-swallowed,
+                                // and this is the second deliberate divergence from
+                                // the dispatcher twin. `getMetaItemLayered` documents
+                                // that it throws `503 SERVICE_UNAVAILABLE` ONLY when a
+                                // read that would decide a layer did not happen; the
+                                // benign "table not provisioned yet" case genuinely
+                                // means "no overlay row" and returns normally with
+                                // `overlay: null`. So a throw here is an availability
+                                // failure, and falling through would let it reach the
+                                // client as `404 Not found` — an availability failure
+                                // reported as an existence fact, which is exactly the
+                                // #5532 defect this package pins in
+                                // `rest-meta-outage-vs-miss.test.ts`. A declared
+                                // status is re-thrown so `handleRouteError` renders
+                                // the producer's own 503; anything undeclared (a
+                                // third-party protocol throwing something shapeless)
+                                // still falls through, so this cannot make the
+                                // code-published path newly fail closed.
+                                if (typeof overlayError?.status === 'number') throw overlayError;
+                            }
+                        }
+
                         const svc = await this.resolveMetadataService(environmentId, req);
                         if (typeof (svc as any)?.getPublished !== 'function') {
                             res.status(501).json({
@@ -6755,14 +6743,39 @@ export class RestServer {
                         const context = await this.resolveExecCtx(environmentId, req);
                         if (this.enforceAuth(req, res, context)) return;
                         if (await this.enforceApiAccess(req, res, p, environmentId, 'list')) return;
-                        // [#6877] Deliberately NOT gated here. This route hands
-                        // the WHOLE query record to `findData`, whose normalizer
+                        // [#6877] Still NOT arity-gated as a whole, for the
+                        // reason it never was: this route hands the WHOLE query
+                        // record to `findData`, whose normalizer
                         // (`metadata-protocol`) owns every parameter's arity — the
                         // `$`-alias table, the implicit field-equality bucket, and
                         // the `$select`/`$expand`/`$searchFields` params that are
                         // legitimately multi-valued. Declaring an arity list here
                         // would be this file guessing at another package's
-                        // contract. Filed separately; see the report on #6877.
+                        // contract.
+                        //
+                        // [#7390] ONE slot is the exception, and structurally so
+                        // rather than by taste. A filter AST *is* an array
+                        // (`['status','=','open']`), so #7386's arity gate cannot
+                        // read `Array.isArray` as evidence of repetition on the
+                        // filter slot: the normalizer serves this querystring and
+                        // `POST /data/:object/query`'s arbitrary-JSON body through
+                        // one door and cannot tell them apart. THIS layer can — on
+                        // a querystring an array is a repeated parameter and can be
+                        // nothing else — so the filter slot's arity is judged here,
+                        // and only here, leaving the normalizer free of a heuristic.
+                        //
+                        // Refused, never resolved (maintainer ruling 2026-08-11 on
+                        // #7390): last-wins and AND-merge are each a silent choice
+                        // between two intents a caller actually expressed. Before
+                        // this line the common shape was answered with the WRONG
+                        // diagnosis — `malformedFilterArrayError`, telling a caller
+                        // whose filters were both well-formed to check their AST
+                        // syntax — and the rarer `?filter=status&filter=%3D&filter=open`
+                        // spelled a valid AST and returned 200 with a filter nobody
+                        // expressed. It throws rather than responding so both keep
+                        // the envelope this route's other filter refusals already
+                        // use; see the helper for why.
+                        assertFilterParamSuppliedOnce(req.query);
                         const result = await p.findData({
                             object: req.params.object,
                             query: req.query,
@@ -6803,10 +6816,23 @@ export class RestServer {
                         // flattening it) would be the regression. The card listed
                         // this line under "array flows downstream"; measurement
                         // says the downstream was built for it.
-                        const { select, expand } = req.query || {};
                         const context = await this.resolveExecCtx(environmentId, req);
                         if (this.enforceAuth(req, res, context)) return;
                         if (await this.enforceApiAccess(req, res, p, environmentId, 'get')) return;
+                        // [#7606] Closed parameter set, AFTER the capability
+                        // gates for the same reason #7527 put it there: which
+                        // parameters a route understands is information, and a
+                        // caller who may not read this object should not learn
+                        // the shape of its ingress before being refused.
+                        //
+                        // This gate RESPONDS rather than throwing, which on this
+                        // route is load-bearing and not a style choice: the catch
+                        // below rewrites every 400 into a 404 (a bad id is a
+                        // miss, not a malformed request). A refusal routed
+                        // through it would reach the caller as "no such record"
+                        // — the silent-drop defect wearing a different status.
+                        if (refuseUnknownQueryParams(req, res, DATA_RECORD_READ_PARAMS)) return;
+                        const { select, expand } = req.query || {};
                         const result = await p.getData({
                             object: req.params.object,
                             id: req.params.id,
@@ -7667,6 +7693,19 @@ export class RestServer {
                     // `fields` and `searchFields` are NOT listed — both already
                     // read the array arm on purpose (`Array.isArray(q.fields)`
                     // a few lines down), and columns are genuinely a list.
+                    // [#7606] Recognition runs BEFORE arity, per the rule stated
+                    // in `query-allowlist.ts`: "I do not know this parameter"
+                    // outranks "this parameter I do know was supplied twice", so
+                    // a request committing both errors is told the more
+                    // fundamental one. Both gates answer the SAME envelope here
+                    // (nested ADR-0112 `VALIDATION_ERROR`), so composing them
+                    // adds no second dialect to this route — the divergence
+                    // recorded in #8001 is between the LIST route's
+                    // `INVALID_FILTER` and this one, and is left exactly as it
+                    // was: `filter` is inside the closed set below, so a
+                    // repeated `?filter=` still reaches the multiplicity gate
+                    // and still answers what it answered before.
+                    if (refuseUnknownQueryParams(req, res, DATA_EXPORT_PARAMS)) return;
                     if (refuseRepeatedQueryParams(req, res,
                         ['format', 'header', 'limit', 'page', 'filter', 'search', 'orderby'])) return;
                     const q = req.query ?? {};
@@ -8040,6 +8079,12 @@ export class RestServer {
                     // term `'a,b'`. `objects` is NOT listed: the next line reads
                     // its array arm deliberately — a cross-object search over a
                     // LIST of objects is the whole point of the parameter.
+                    // [#7606] Recognition before arity, same order and same
+                    // envelope as the export route — see `query-allowlist.ts`.
+                    // A dropped `?objects=` is the widening case at its worst:
+                    // the term fans out across every searchable object while the
+                    // caller believes they scoped it to one.
+                    if (refuseUnknownQueryParams(req, res, GLOBAL_SEARCH_PARAMS)) return;
                     if (refuseRepeatedQueryParams(req, res, ['q', 'query', 'limit', 'perObject'])) return;
                     const q = String(req.query?.q ?? req.query?.query ?? '');
                     const objectsParam = req.query?.objects;
@@ -9033,6 +9078,45 @@ export class RestServer {
             catch { return undefined; }
         };
 
+        /**
+         * [#8073] The ONE refusal emitter for this route family — every arm of
+         * both handlers goes through it, so "explain and my-delegable-scope
+         * answer the same shape" is a property of the code rather than of
+         * eight literals that happen to agree.
+         *
+         * Before this, the family carried BOTH dialects ADR-0112 D5 retires:
+         * the 401/501/400/403 arms were flat `{ code, message }` and the two
+         * 500s were `{ code, error: 'a bare string' }`, so `body.error.code` —
+         * the one position D5 declares — read `undefined` on all six. #7035
+         * (PR #7293) had already removed both from this file's `/meta`
+         * refusals and #7981 (PR #8071) from `registerSecurityEndpoints`, the
+         * immediately ADJACENT registrar: a client calling `explain` and then
+         * `suggested-bindings` met two shapes inside one `security` family.
+         *
+         * Emitted through the SHARED builder (`sendError` from
+         * `@objectstack/types`, imported as `sendEnvelopeError` because this
+         * module has a local `sendError` of its own — the sanitizing responder
+         * for THROWN errors, a different thing). That is what makes this the
+         * reference shape by construction rather than a ninth local literal
+         * agreeing with the eight it replaced, and it types `code` to the
+         * closed vocabulary for free.
+         *
+         * ⛔ Status codes are untouched: only the POSITION of `code` and
+         * `message` moves. `detail` — the 400 arm's Zod-issue dump — moves to
+         * `error.details`, the slot `ApiErrorSchema` actually declares for
+         * structured context; as a top-level sibling it was undeclared.
+         */
+        const respondError = (
+            res: any,
+            status: number,
+            code: ErrorCode,
+            message: string,
+            details?: unknown,
+        ): void => sendEnvelopeError(
+            res, status, code, message,
+            details === undefined ? undefined : { details },
+        );
+
         const handler = async (req: any, res: any) => {
             try {
                 const environmentId = isScoped ? req.params?.environmentId : undefined;
@@ -9041,18 +9125,18 @@ export class RestServer {
                 if (!context?.userId) {
                     // The explain surface stays authenticated-only — it is an
                     // admin diagnosis tool. (Anonymous is already 401ed above.)
-                    return res.status(401).json({
-                        code: 'UNAUTHORIZED',
-                        message: 'The access-explanation endpoint requires an authenticated caller.',
-                    });
+                    return respondError(
+                        res, 401, 'UNAUTHORIZED',
+                        'The access-explanation endpoint requires an authenticated caller.',
+                    );
                 }
 
                 const svc = await resolveService(environmentId, req);
                 if (!svc || typeof svc.explain !== 'function') {
-                    return res.status(501).json({
-                        code: 'NOT_IMPLEMENTED',
-                        message: 'Access explanation is not available on this deployment (no security service with explain).',
-                    });
+                    return respondError(
+                        res, 501, 'NOT_IMPLEMENTED',
+                        'Access explanation is not available on this deployment (no security service with explain).',
+                    );
                 }
 
                 // GET reads the request from the query string, POST from the
@@ -9075,11 +9159,11 @@ export class RestServer {
                     ...(src.recordId != null && src.recordId !== '' ? { recordId: src.recordId } : {}),
                 });
                 if (!parsed.success) {
-                    return res.status(400).json({
-                        code: 'VALIDATION_FAILED',
-                        message: 'Invalid explain request — expected { object: string, operation: read|create|update|delete|transfer|restore|purge, userId?: string, recordId?: string }.',
-                        detail: String(parsed.error?.message ?? '').slice(0, 1000),
-                    });
+                    return respondError(
+                        res, 400, 'VALIDATION_FAILED',
+                        'Invalid explain request — expected { object: string, operation: read|create|update|delete|transfer|restore|purge, userId?: string, recordId?: string }.',
+                        String(parsed.error?.message ?? '').slice(0, 1000),
+                    );
                 }
 
                 const decision = await svc.explain(parsed.data, context);
@@ -9091,10 +9175,13 @@ export class RestServer {
                     error?.name === 'PermissionDeniedError' ||
                     msg.startsWith('[Security] Access denied')
                 ) {
-                    return res.status(403).json({ code: 'PERMISSION_DENIED', message: msg.slice(0, 1000) });
+                    return respondError(res, 403, 'PERMISSION_DENIED', msg.slice(0, 1000));
                 }
                 logError('[REST] Security explain error:', error);
-                res.status(500).json({ code: 'EXPLAIN_FAILED', error: msg.slice(0, 500) });
+                // The 500 arm keeps its 500-char cap: an unexpected fault's
+                // message is not a contract, and truncating it stays a
+                // sanitization step — only the position of the words moves.
+                respondError(res, 500, 'EXPLAIN_FAILED', msg.slice(0, 500));
             }
         };
 
@@ -9134,25 +9221,25 @@ export class RestServer {
                 const context = await this.resolveExecCtx(environmentId, req);
                 if (this.enforceAuth(req, res, context)) return;
                 if (!context?.userId) {
-                    return res.status(401).json({
-                        code: 'UNAUTHORIZED',
-                        message: 'The delegable-scope endpoint requires an authenticated caller.',
-                    });
+                    return respondError(
+                        res, 401, 'UNAUTHORIZED',
+                        'The delegable-scope endpoint requires an authenticated caller.',
+                    );
                 }
 
                 const svc = await resolveService(environmentId, req);
                 if (!svc || typeof svc.describeDelegableScope !== 'function') {
-                    return res.status(501).json({
-                        code: 'NOT_IMPLEMENTED',
-                        message: 'Delegated administration is not available on this deployment (no security service with describeDelegableScope).',
-                    });
+                    return respondError(
+                        res, 501, 'NOT_IMPLEMENTED',
+                        'Delegated administration is not available on this deployment (no security service with describeDelegableScope).',
+                    );
                 }
 
                 res.json(await svc.describeDelegableScope(context));
             } catch (error: any) {
                 const msg = String(error?.message ?? error ?? '');
                 logError('[REST] Delegable scope error:', error);
-                res.status(500).json({ code: 'DELEGABLE_SCOPE_FAILED', error: msg.slice(0, 500) });
+                respondError(res, 500, 'DELEGABLE_SCOPE_FAILED', msg.slice(0, 500));
             }
         };
 
@@ -9177,16 +9264,55 @@ export class RestServer {
             try { return await this.sharingServiceProvider(environmentId); }
             catch { return undefined; }
         };
-        const respond501 = (res: any) => res.status(501).json({
-            code: 'NOT_IMPLEMENTED',
-            message: 'Sharing service is not configured on this deployment',
-        });
+        /**
+         * [#8111] The ONE refusal emitter for the record-sharing family — the
+         * 501, all five mapped verdicts and all three 500s go through it, so
+         * "list, grant and revoke answer the same shape" is a property of the
+         * code rather than of nine literals that happen to agree.
+         *
+         * Before this, the family carried BOTH dialects ADR-0112 D5 retires:
+         * `respond501` was flat `{ code, message }` and every other arm was
+         * `{ code, error: '<bare string>' }`, so `body.error.code` — the one
+         * position D5 declares — read `undefined` on all nine. #7035
+         * (PR #7293) had already removed both from this file's `/meta`
+         * refusals, #7981 (PR #8071) from `registerSecurityEndpoints` and
+         * #8073 (PR #8174) from the `/security/explain` pair.
+         *
+         * Emitted through the SHARED builder (`sendError` from
+         * `@objectstack/types`, imported as `sendEnvelopeError` because this
+         * module has a local `sendError` of its own — the sanitizing responder
+         * for THROWN errors, a different thing). That is what makes this the
+         * reference shape by construction rather than a tenth local literal
+         * agreeing with the nine it replaced, and it types `code` to the
+         * closed ADR-0112 vocabulary for free.
+         *
+         * ⛔ Status codes are untouched and no code VALUE moves: only the
+         * POSITION of `code` and `message` changes.
+         */
+        const respondError = (
+            res: any,
+            status: number,
+            code: ErrorCode,
+            message: string,
+        ): void => sendEnvelopeError(res, status, code, message);
+
+        const respond501 = (res: any) => respondError(
+            res, 501, 'NOT_IMPLEMENTED',
+            'Sharing service is not configured on this deployment',
+        );
         // [ADR-0111] The service enforces authorization (D1/D4/D5/D7) and
         // signals the verdict via message prefixes, the plugin's established
         // error idiom — this maps them onto HTTP. Returns true when handled.
+        //
+        // [#8111] The prefix is a SERVER-INTERNAL service→REST derivation: it
+        // is stripped below and never reaches the wire, so no consumer can
+        // read it (censused at claim — the only in-repo `startsWith(CODE)`
+        // readers are this file's own route mappings plus one
+        // `plugin-approvals` check on an error it threw itself in-process).
+        // It therefore stays exactly as it is; only the response SHAPE moved.
         const respondSharingError = (res: any, error: any): boolean => {
             const msg = String(error?.message ?? error ?? '');
-            const map: Array<[string, number]> = [
+            const map: Array<[ErrorCode, number]> = [
                 ['VALIDATION_FAILED', 400],
                 ['PERMISSION_DENIED', 403],
                 ['NOT_FOUND', 404],
@@ -9195,10 +9321,10 @@ export class RestServer {
             ];
             for (const [code, status] of map) {
                 if (msg.startsWith(code)) {
-                    res.status(status).json({
-                        code,
-                        error: msg.replace(new RegExp(`^${code}:\\s*`), ''),
-                    });
+                    respondError(
+                        res, status, code,
+                        msg.replace(new RegExp(`^${code}:\\s*`), ''),
+                    );
                     return true;
                 }
             }
@@ -9222,7 +9348,10 @@ export class RestServer {
                 } catch (error: any) {
                     if (respondSharingError(res, error)) return;
                     logError('[REST] List shares error:', error);
-                    res.status(500).json({ code: 'SHARES_LIST_FAILED', error: String(error?.message ?? error).slice(0, 500) });
+                    // The 500 arms keep their 500-char cap: an unexpected
+                    // fault's message is not a contract, and truncating it
+                    // stays a sanitization step — only the position moves.
+                    respondError(res, 500, 'SHARES_LIST_FAILED', String(error?.message ?? error).slice(0, 500));
                 }
             },
             metadata: { summary: 'List per-record sharing grants', tags: ['sharing'] },
@@ -9256,7 +9385,7 @@ export class RestServer {
                 } catch (error: any) {
                     if (respondSharingError(res, error)) return;
                     logError('[REST] Grant share error:', error);
-                    res.status(500).json({ code: 'SHARE_GRANT_FAILED', error: String(error?.message ?? error).slice(0, 500) });
+                    respondError(res, 500, 'SHARE_GRANT_FAILED', String(error?.message ?? error).slice(0, 500));
                 }
             },
             metadata: { summary: 'Grant a per-record share to a principal', tags: ['sharing'] },
@@ -9285,7 +9414,7 @@ export class RestServer {
                 } catch (error: any) {
                     if (respondSharingError(res, error)) return;
                     logError('[REST] Revoke share error:', error);
-                    res.status(500).json({ code: 'SHARE_REVOKE_FAILED', error: String(error?.message ?? error).slice(0, 500) });
+                    respondError(res, 500, 'SHARE_REVOKE_FAILED', String(error?.message ?? error).slice(0, 500));
                 }
             },
             metadata: { summary: 'Revoke a per-record share by id', tags: ['sharing'] },
@@ -9335,6 +9464,30 @@ export class RestServer {
             }
             if (msg.startsWith('RULE_NOT_FOUND')) {
                 return res.status(404).json({ code: 'RULE_NOT_FOUND', error: msg.replace(/^RULE_NOT_FOUND:?\s*/, '') });
+            }
+            // [ADR-0111 D7 / #8207] `POST .../evaluate` reconciles through
+            // `SharingService.grant`, whose inertness guard now runs for the
+            // evaluator's system context too. A rule pointed at an object no
+            // sharing gate consults therefore refuses here instead of silently
+            // materialising rows nothing reads — and the admin who asked for
+            // the evaluation needs to be told WHICH object and WHY, not handed
+            // an opaque 500. Same code→status pair the per-record shares routes
+            // already publish (`respondSharingError`), so no new contract.
+            //
+            // ⚠️ Built through the SHARED `sendError` envelope, unlike the three
+            // arms above it. Those are #7035's declared debt — `code` beside
+            // `error` instead of inside it, so `body.error.code` reads
+            // `undefined` — held down by the `check:route-envelope` ratchet,
+            // which only ticks DOWN. A new arm copying its neighbours' shape is
+            // exactly what that ratchet exists to stop, so this one answers the
+            // envelope `BaseResponseSchema` declares. The asymmetry is the
+            // ratchet working; converting the other three is #8111's unfinished
+            // half for this route family, not a rider on this card.
+            if (msg.startsWith('SHARING_NOT_ENABLED')) {
+                return sendEnvelopeError(
+                    res, 422, 'SHARING_NOT_ENABLED',
+                    msg.replace(/^SHARING_NOT_ENABLED:\s*/, ''),
+                );
             }
             logError(`[REST] sharing-rule ${defaultCode}:`, err);
             return res.status(500).json({ code: defaultCode, error: msg.slice(0, 500) });
@@ -9476,6 +9629,20 @@ export class RestServer {
      * Routes return 501 when the `security` service is not registered
      * (deployment without plugin-security). Typed service errors carry their
      * HTTP status (403 permission / 404 not found / 409 state).
+     *
+     * ## One envelope for every refusal these three routes make (#7981)
+     *
+     * Every arm below answers the ADR-0112 D5 body — `{ error: { code,
+     * message } }`, semantic code nested, HTTP status on the transport — and
+     * emits it through the ONE `respondError` helper, so the three cannot
+     * drift apart again. Before this they answered three mutually
+     * incompatible shapes on routes a single client calls in sequence:
+     * `{ error: { code, message } }` from the validation refusals,
+     * `{ code, message }` from the 501, and `{ code, error: '<string>' }`
+     * from the thrown-service-error arm — the bare-string `error` dialect
+     * #7035 (PR #7293) retired from this file's `/meta` 501s. So `error.code`
+     * read `undefined` on exactly the arm carrying the typed 403/404/409
+     * codes a consumer is most likely to branch on.
      */
     private registerSecurityEndpoints(basePath: string): void {
         const dataPath = basePath;
@@ -9488,17 +9655,32 @@ export class RestServer {
                 return svc && typeof svc.listAudienceBindingSuggestions === 'function' ? svc : undefined;
             } catch { return undefined; }
         };
-        const respond501 = (res: any) => res.status(501).json({
-            code: 'NOT_IMPLEMENTED',
-            message: 'Security service is not configured on this deployment',
-        });
+        /**
+         * The ONE refusal emitter for this route family (#7981) — every arm
+         * goes through it, so "the three answer the same shape" is a property
+         * of the code rather than of three literals that happen to agree.
+         * `refuseRepeatedQueryParams` writes the identical body from
+         * `query-multiplicity.ts`; that helper is shared with the whole file
+         * and stays the reference point rather than being re-implemented here.
+         */
+        const respondError = (res: any, status: number, code: string, message: string) =>
+            res.status(status).json({ error: { code, message } });
+        const respond501 = (res: any) => respondError(
+            res, 501, 'NOT_IMPLEMENTED', 'Security service is not configured on this deployment',
+        );
         const handleError = (err: any, res: any, defaultCode: string) => {
             const status = typeof err?.statusCode === 'number' ? err.statusCode : 500;
             if (status !== 500) {
-                return res.status(status).json({ code: err?.code ?? defaultCode, error: String(err?.message ?? err) });
+                // The typed arm: plugin-security's PermissionDeniedError (403),
+                // SuggestionNotFoundError (404) and SuggestionStateError (409)
+                // each carry `code` + `statusCode`. The status mapping is
+                // unchanged — only the position of the code moves.
+                return respondError(res, status, err?.code ?? defaultCode, String(err?.message ?? err));
             }
             logError(`[REST] suggested-bindings ${defaultCode}:`, err);
-            return res.status(500).json({ code: defaultCode, error: String(err?.message ?? err).slice(0, 500) });
+            // The 500 arm keeps its 500-char cap: an unexpected fault's message
+            // is not a contract, and truncating it stays a sanitization step.
+            return respondError(res, 500, defaultCode, String(err?.message ?? err).slice(0, 500));
         };
 
         // LIST (reconciles against installed packages / declared sets first)
@@ -9515,8 +9697,27 @@ export class RestServer {
                     // [#6877] Both are `String(array)` joins — `?status=a&status=b`
                     // filtered on the single status `'a,b'` and returned nothing.
                     if (refuseRepeatedQueryParams(req, res, ['status', 'packageId'])) return;
+                    // [#7678] …and a single well-formed but UNKNOWN `?status=`
+                    // did the same thing one layer on: the service's contract
+                    // declares exactly three values, anything else matched no
+                    // row, and the caller got 200 with an empty list — which
+                    // reads as "there are no suggestions" rather than "your
+                    // filter was not a status". The runtime dispatcher's twin of
+                    // this route had refused it since #4127; this live route
+                    // never did. Same predicate, imported — not a second copy of
+                    // the vocabulary.
+                    const status = req.query?.status ? String(req.query.status) : undefined;
+                    if (status !== undefined && !isAudienceBindingSuggestionStatus(status)) {
+                        // [#7981] Same body as before — emitted through the
+                        // shared helper now, so this arm is the reference
+                        // point by construction instead of by coincidence.
+                        return respondError(
+                            res, 400, 'VALIDATION_ERROR',
+                            unknownAudienceBindingSuggestionStatusMessage(status),
+                        );
+                    }
                     const result = await svc.listAudienceBindingSuggestions(context ?? {}, {
-                        status: req.query?.status ? String(req.query.status) : undefined,
+                        status,
                         packageId: req.query?.packageId ? String(req.query.packageId) : undefined,
                     });
                     res.json({ data: result });

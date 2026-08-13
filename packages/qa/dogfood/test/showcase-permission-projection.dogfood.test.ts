@@ -18,8 +18,11 @@
 //      type; ADR-0086 two-doors applies meanwhile (edit the package,
 //      re-publish).
 //   3. Deleting a runtime-only set retires its record; deleting an
-//      artifact-backed set RESETS it to the declared body (the definition
-//      ships with the app and cannot be removed from the environment).
+//      artifact-backed set never removes it — the definition ships with the
+//      app and cannot be removed from the environment. Since #6483 there is
+//      no overlay left to lift, so that "reset" is a no-op success, not the
+//      revert-to-the-declared-body step ADR-0094's 2026-07-14 direction
+//      described (retired by D5-R).
 //   4. [#6483 inverted this pin too] An environment-door metadata save that
 //      targets a package-owned, artifact-backed set is refused the same way —
 //      record, provenance and effective body all stay exactly as shipped.

@@ -19,6 +19,13 @@
  *    fields. better-auth never reads or writes these, so they can be edited
  *    through the ordinary path under normal FLS / `requiredPermissions`.
  *
+ * A field is an extension field because **better-auth does not write it**, not
+ * because ObjectStack finds it useful. `auth-schema-config.ts` is where that is
+ * decided: a column named in one of its `AUTH_*` mappings is a column
+ * better-auth addresses, so it belongs to the protocol population no matter how
+ * platform-flavoured its name looks (#7820 removed `sys_user.phone_number` on
+ * exactly that evidence).
+ *
  * ADR-0092 made the *guard* registry-driven with a per-object update whitelist;
  * `sys_user → {name, image}` was its first and only entry. This module is the
  * home for the rest, so "which fields on a managed table are ours, and which of
@@ -34,6 +41,11 @@
  * version and fails the build on any overlap, so the upgrade that would cause
  * this is the moment someone finds out.
  *
+ * That derivation loads the plugin set the auth manager actually assembles —
+ * feature-flagged-off plugins included, because the column has to exist before
+ * the flag can be turned on. A narrower set answers green about columns it is
+ * not looking at (#7820).
+ *
  * D7 catches only the OVERLAP — a field on both sides. A better-auth upgrade
  * that adds a field we have nothing named like sails straight through it and
  * fails at runtime instead (`team.memberCount`, #3624). That complementary
@@ -47,7 +59,16 @@ export const MANAGED_EXTENSION_FIELDS: Readonly<Record<string, ReadonlySet<strin
     'manager_id',
     'primary_business_unit_id',
     'ai_access',
-    'phone_number',
+    // `phone_number` was declared here until #7820 and is better-auth's, not
+    // ours: `AUTH_PHONE_NUMBER_USER_FIELDS` in auth-schema-config.ts has
+    // shipped the explicit `phoneNumber → phone_number` mapping since #2766,
+    // so the `phoneNumber` plugin writes that exact column whenever it is
+    // enabled. The entry was invisible to D7 only because the guard derived
+    // its surface from one plugin (see the test's widened derivation).
+    // Nothing generic could write it either way — it was never in
+    // MANAGED_EXTENSION_EDITABLE_FIELDS — and the admin bulk-import path that
+    // does upsert it runs under a system context off its own field list
+    // (`SYS_USER_IMPORT_UPDATE_FIELDS`), not off this map.
     'source',
   ]),
   sys_organization: new Set([

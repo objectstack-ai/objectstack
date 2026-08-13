@@ -240,6 +240,11 @@ async function seedLegacyOrgDraft(
 const OBJECT = {
     name: 'org_widget',
     label: 'Org Widget',
+    // [#8308] Authored OWD. This file pins the NOT_OVERRIDABLE org-scope
+    // refusal, and the authoring gate runs BEFORE it — an OWD-less body would
+    // swap the observed refusal for `security-owd-unset` 422 once #8310
+    // declares `object` in `runtimeTypes`.
+    sharingModel: 'private',
     fields: { title: { type: 'text', label: 'Title' } },
 };
 
@@ -266,6 +271,7 @@ const VIEW = {
     name: 'org_grid',
     label: 'Org grid',
     object: 'task',
+    viewKind: 'list', // [#7741] the inline arm requires the object binding pair
     columns: [{ field: 'title', label: 'Title' }],
 };
 

@@ -6,13 +6,14 @@ import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/
 import type { Logger, IMetadataService, AIToolDefinition } from '@objectstack/spec/contracts';
 import type { Agent } from '@objectstack/spec/ai';
 import type { ToolRegistry, ToolExecutionResult } from './types.js';
-import { registerObjectTools, registerActionTools } from './mcp-http-tools.js';
+import { wireBridgeTools } from './mcp-http-tools.js';
 import type {
   McpDataBridge,
   McpActionBridge,
   RegisterObjectToolsOptions,
   RegisterActionToolsOptions,
 } from './mcp-http-tools.js';
+import { protocolStdout } from './protocol-stdout.js';
 import { renderSkillMarkdown, type RenderSkillOptions } from './skill-md.js';
 import {
   listSkillPrompts,
@@ -614,10 +615,38 @@ export class MCPServerRuntime {
         version: this.config.version,
       },
       {
+        // [#8034] `resources` / `tools` / `prompts` are DELIBERATELY absent
+        // here — they are declared by the SDK when something is actually
+        // registered, never by hand.
+        //
+        // Until #8034 this object hand-declared all three, and the `tools` one
+        // was a lie on the transport that mattered most: `McpServer.registerTool`
+        // is what installs the `tools/list` + `tools/call` handlers (its
+        // `setToolRequestHandlers()` also calls `server.registerCapabilities({
+        // tools: … })`), so a long-lived server that registered NO tool
+        // advertised `capabilities.tools: {}` in its `initialize` result and
+        // then answered `-32601 Method not found` to every `tools/list` and
+        // `tools/call`. That is the dishonest self-report ADR-0076 D12 / #2462
+        // forbid — "advertise what you actually serve" — and this lane closed
+        // the same shape twice on other surfaces (#7939 `handlerReady: true`
+        // for an empty slot, #7602 `capabilities.search` with no route).
+        //
+        // Deriving them is what makes the two halves agree STRUCTURALLY rather
+        // than by two literals that can drift: there is now no way to advertise
+        // a primitive without also installing its handlers, because the SDK
+        // does both in one call. Registration order is unchanged and already
+        // correct — every bridge runs before `start()` connects the transport,
+        // which is also what `Server.registerCapabilities` requires (it throws
+        // once a transport is attached). The per-request HTTP server in
+        // {@link handleHttpRequest} has always built its capabilities this way
+        // (see the `skillBridge ? { prompts: {} }` line there); this brings the
+        // long-lived server to the same contract.
+        //
+        // `logging` STAYS hand-declared: it is honest. The SDK has no
+        // `registerLogging` to derive it from, and the declaration is itself
+        // what wires the `logging/setLevel` request handler and enables
+        // `sendLoggingMessage` — so here, declared IS served.
         capabilities: {
-          resources: {},
-          tools: {},
-          prompts: {},
           logging: {},
         },
         instructions: this.config.instructions ?? 'ObjectStack MCP Server — access data objects, AI tools, and agent prompts.',
@@ -669,6 +698,44 @@ export class MCPServerRuntime {
     }
 
     logger?.info(`[MCP] Bridged ${tools.length} tools from ToolRegistry`);
+  }
+
+  /**
+   * [#8034] Bridge a principal-bound {@link McpDataBridge} onto the LONG-LIVED
+   * server — the object-CRUD tools, plus the business-action pair when the
+   * bridge carries that seam.
+   *
+   * This is the stdio counterpart of what {@link handleHttpRequest} does per
+   * request, and it exists because that per-request call used to be the ONLY
+   * one. `registerObjectTools` / `registerActionTools` were reachable from
+   * nowhere else, so the long-lived server's entire tool surface was whatever
+   * {@link bridgeTools} found in the AI service's function-calling
+   * `ToolRegistry` — a DIFFERENT surface, empty on any app that registers no AI
+   * tools. The stdio transport therefore served zero tools while advertising
+   * the `tools` capability, and every `tools/list` / `tools/call` answered
+   * `-32601 Method not found`. Both transports now register through the one
+   * {@link wireBridgeTools} composition.
+   *
+   * Ordering: call this BEFORE {@link start}. Tool registration is also what
+   * declares the `tools` capability (see the constructor), and the SDK refuses
+   * to register capabilities once a transport is attached. The plugin bridges
+   * everything ahead of `start()` for exactly that reason.
+   *
+   * Not called for a host that has no principal to bind: no bridge means no
+   * tools registered and no `tools` capability advertised, which is the honest
+   * report rather than an empty promise (ADR-0076 D12).
+   *
+   * @returns the tool names registered, for the caller's boot log.
+   */
+  bridgeDataTools(
+    bridge: McpDataBridge & Partial<McpActionBridge>,
+    toolOptions?: RegisterObjectToolsOptions & RegisterActionToolsOptions,
+  ): string[] {
+    const registered = wireBridgeTools(this.mcpServer, bridge, toolOptions);
+    this.config.logger?.info(
+      `[MCP] Bridged ${registered.length} data tools (${registered.join(', ')})`,
+    );
+    return registered;
   }
 
   /**
@@ -1020,7 +1087,14 @@ export class MCPServerRuntime {
     const logger = this.config.logger;
 
     if (this.config.transport === 'stdio') {
-      this.transport = new StdioServerTransport();
+      // [#7915] stdin as usual, stdout through the transport's OWN channel to
+      // the real stream. A host that boots this plugin must keep its banners
+      // and kernel logs off stdout (the framing is newline-delimited JSON), and
+      // the only way to move every writer at once is to intercept
+      // `process.stdout.write` — which would swallow these frames too. See
+      // protocol-stdout.ts for why the transport claims the channel itself
+      // rather than being handed one.
+      this.transport = new StdioServerTransport(process.stdin, protocolStdout());
       await this.mcpServer.connect(this.transport);
       // [#7645] The transport now OWNS this process's stdin — so make sure it
       // is actually flowing. `StdioServerTransport.start()` only attaches a
@@ -1142,7 +1216,20 @@ export class MCPServerRuntime {
     const server = new McpServer(
       { name: this.config.name, version: this.config.version },
       {
-        capabilities: { tools: {}, ...(skillBridge ? { prompts: {} } : {}) },
+        // [#8034] `tools` is DERIVED, exactly as on the long-lived server:
+        // `registerObjectTools` declares it when it registers the first tool,
+        // so a request that supplies no bridge (or a grant that registers
+        // nothing) now advertises no tool capability instead of advertising one
+        // and answering `-32601` — which is what the two "registers nothing"
+        // pins in this package already describe in their titles.
+        //
+        // `prompts` STAYS hand-declared and is not the same case:
+        // `registerSkillPrompts` installs LOW-LEVEL request handlers so the
+        // list can be read at call time, and `Server.setRequestHandler` refuses
+        // a handler whose capability was not declared first. Here the
+        // declaration is what makes the handlers installable, and it is gated
+        // on the seam actually being there — declared IS served.
+        capabilities: { ...(skillBridge ? { prompts: {} } : {}) },
         instructions:
           this.config.instructions ??
           'ObjectStack MCP Server — query and modify your app\'s data objects as tools.',
@@ -1154,17 +1241,10 @@ export class MCPServerRuntime {
     }
 
     if (opts.bridge) {
-      registerObjectTools(server, opts.bridge, opts.toolOptions);
-      // The action surface is wired by capability: only when the runtime's
-      // bridge can resolve + dispatch the framework's actions. A host with no
-      // action mechanism keeps serving object tools unchanged (graceful
-      // degradation, mirroring how record resources need a dataEngine).
-      if (
-        typeof opts.bridge.listActions === 'function' &&
-        typeof opts.bridge.runAction === 'function'
-      ) {
-        registerActionTools(server, opts.bridge as McpActionBridge, opts.toolOptions);
-      }
+      // [#8034] The SAME composition the long-lived server uses in
+      // {@link bridgeDataTools} — including the by-capability action wiring
+      // that used to be open-coded here. Two transports, one call site.
+      wireBridgeTools(server, opts.bridge, opts.toolOptions);
     }
 
     const transport = new WebStandardStreamableHTTPServerTransport({

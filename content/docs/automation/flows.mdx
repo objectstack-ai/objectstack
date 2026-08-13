@@ -684,6 +684,25 @@ GET /api/v1/automation/{flow}/runs/{runId}         # one run
 GET /api/v1/automation/{flow}/runs/{runId}/screen  # re-fetch a paused screen
 ```
 
+<Callout type="warn" title="The two run-state reads require read access to sys_automation_run">
+A run carries the flow's variable snapshot and its `output` — which is to say
+the triggering record's fields. So `GET /runs` and `GET /runs/{runId}` are gated
+on the same grant the `sys_automation_run` object read answers with, not on
+authentication alone; a caller without it gets `403 PERMISSION_DENIED`. Grant it
+to the identities your operator tooling and monitoring run as:
+
+```ts
+permissions: [{
+  name: 'automation_operator',
+  objects: { sys_automation_run: { allowRead: true } },
+}]
+```
+
+The screen re-fetch is deliberately **not** gated this way — it serves the end
+user the flow paused for, and its `resume` counterpart answers on the pause's
+own `resumeAuthority` instead.
+</Callout>
+
 Each run's `steps[]` records every executed node — including loop iterations,
 parallel branch bodies, and try/catch region steps — which the Studio flow
 designer surfaces, nested by iteration / branch / handler, in its **Runs** side
@@ -691,6 +710,14 @@ panel. Recent runs are held in an in-memory ring buffer; terminal runs
 (completed / failed) are also mirrored to `sys_automation_run` as durable
 history with a bounded step log, so `listRuns` / `getRun` still report a run's
 status, steps, and failure reason after a restart or ring-buffer eviction.
+
+Runs still **in flight** survive the same way. A run parked at an `approval`,
+`screen` or `wait` node is persisted as a live suspension row, and both
+`listRuns` (including `?status=paused`) and `getRun` read those rows back — so
+after a restart the Runs view shows what is *waiting*, not only what finished.
+A paused run reports its trigger attribution and its variable snapshot exactly
+as it did before the restart; it carries no `durationMs`, because a suspension
+records when the run started, not when it parked.
 
 ### Run summaries
 
@@ -734,7 +761,7 @@ instead:
 | `http`, `GET`/`HEAD`/`OPTIONS` | `acted: 0` — a read can never write |
 | `http`, mutating method, response OK | `acted: 1` |
 | `http`, mutating method, rejected / timed out | `unmeasured` — a 500 can arrive after the write landed |
-| `http`, `durable: true` | `acted: 1` — the outbox row is a real, durable effect |
+| `http`, `durable: true` | `unmeasured` — the outbox row is a real, durable effect, but a *pending* one: the dispatcher decides the outcome (including `dead`) after the run has settled, so counting it would let the summary claim a callout that `sys_http_delivery` records as dead-lettered |
 | `connector_action` | `unmeasured` |
 | `script`, function declared pure (the default) | nothing — a registered function is **contractually pure**: data I/O stays on the flow graph, so every write it causes is a downstream node that counts itself |
 | `script`, function declared `effect: 'writes'` | `unmeasured` — the function said it writes where the platform cannot see, so the run says the count is incomplete |
@@ -1238,8 +1265,8 @@ curl -b cookies.txt -X POST \
 | Endpoint | Purpose |
 |:---|:---|
 | `POST /api/v1/automation/:name/trigger` | Start a flow (canonical) |
-| `GET /api/v1/automation/:name/runs` | List runs (`?limit`, `?cursor`, `?status` — narrow to one execution status; an undeclared value is refused `400 VALIDATION_FAILED`) |
-| `GET /api/v1/automation/:name/runs/:runId` | One run's detail (404 `Execution not found`) |
+| `GET /api/v1/automation/:name/runs` | List runs (`?limit`, `?cursor`, `?status` — narrow to one execution status; an undeclared value is refused `400 VALIDATION_FAILED`). Requires read on `sys_automation_run` — see [Observing runs](#observing-runs) |
+| `GET /api/v1/automation/:name/runs/:runId` | One run's detail (404 `Execution not found`). Requires read on `sys_automation_run` — see [Observing runs](#observing-runs) |
 | `POST /api/v1/automation/:name/runs/:runId/resume` | Resume a paused run — body `{ inputs, output, branchLabel }` |
 | `GET /api/v1/automation/:name/runs/:runId/screen` | The pending screen of a screen-flow run |
 

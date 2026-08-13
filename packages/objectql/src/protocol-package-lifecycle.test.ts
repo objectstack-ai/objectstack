@@ -77,7 +77,7 @@ describe('protocol.deletePackage', () => {
             { type: 'object', name: 'course', state: 'draft', organization_id: null },
             { type: 'view', name: 'course_list', state: 'active', organization_id: null },
         ]);
-        const res = await protocol.deletePackage({ packageId: 'app.edu' });
+        const res = await protocol.deletePackage({ packageId: 'app.edu', allTenants: true });
         expect(res).toMatchObject({ success: true, deletedCount: 3, failedCount: 0 });
 
         const calls = deleteMetaItem.mock.calls.map((c) => c[0] as any);
@@ -92,13 +92,13 @@ describe('protocol.deletePackage', () => {
         const { protocol, deleteMetaItem } = makeProtocol([
             { type: 'object', name: 'course', state: 'active', organization_id: null },
         ]);
-        await protocol.deletePackage({ packageId: 'app.edu', keepData: true });
+        await protocol.deletePackage({ packageId: 'app.edu', allTenants: true, keepData: true });
         expect((deleteMetaItem.mock.calls[0][0] as any)).not.toHaveProperty('dropStorage');
     });
 
     it('empty package → deletedCount 0, success false', async () => {
         const { protocol, deleteMetaItem } = makeProtocol([]);
-        const res = await protocol.deletePackage({ packageId: 'app.empty' });
+        const res = await protocol.deletePackage({ packageId: 'app.empty', allTenants: true });
         expect(deleteMetaItem).not.toHaveBeenCalled();
         expect(res).toMatchObject({ success: false, deletedCount: 0 });
     });

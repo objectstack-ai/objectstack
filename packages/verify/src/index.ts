@@ -16,13 +16,40 @@ export type { CrudCase, DerivedAssert, AssertKind, RelationalRef } from './deriv
 export { runCrudVerification, formatReport } from './verify.js';
 export type { VerifyReport, ObjectVerifyResult } from './verify.js';
 
-export { runRlsProofs, formatRlsReport } from './rls.js';
-export type { RlsReport, RlsResult } from './rls.js';
+export {
+  runRlsProofs,
+  formatRlsReport,
+  provisionRlsProbePersona,
+  provisionRlsPositionPersona,
+  declaredPositionNames,
+  rlsProbePermissionSet,
+  rlsProbeSecurity,
+  rlsPositionProbeEmail,
+  RLS_PROBE_EMAIL,
+} from './rls.js';
+export type {
+  RlsReport,
+  RlsResult,
+  RlsStatus,
+  RlsSummary,
+  RlsProbeDescriptor,
+  RlsProbePersona,
+  RlsPositionPersona,
+  RlsPositionPersonaInput,
+  RlsPositionRun,
+  RlsPositionCoverage,
+  RlsProofOptions,
+} from './rls.js';
 
 // ADR-0060 — reusable conformance-ledger helper (static complement to the
 // runtime harness): classify every declarable property, fail closed on drift.
 export { checkLedger } from './conformance.js';
-export type { ConformanceRow, ConformanceState, CheckLedgerOptions } from './conformance.js';
+export type {
+  ConformanceRow,
+  ConformanceState,
+  CheckLedgerOptions,
+  ProofAttributionOptions,
+} from './conformance.js';
 
 // Driver read-coercion conformance: a stored value must read back as its
 // declared type on every driver (the case_escalation `1 != true` invariant).

@@ -21,16 +21,16 @@ regenerate.
 | Measure | Value |
 |---|---|
 | Triaged directories | 5 |
-| Object sites in them | 438 |
-| Still-open (strip) sites | 180 |
-| Files carrying at least one | 27 |
+| Object sites in them | 427 |
+| Still-open (strip) sites | 132 |
+| Files carrying at least one | 24 |
 
 Remaining strip sites by class:
 
 | Bucket | Sites |
 |---|---|
-| authorable — the ruling's forced scope | 40 |
-| unresolved — needs a per-schema verdict | 34 |
+| authorable — the ruling's forced scope | 4 |
+| unresolved — needs a per-schema verdict | 22 |
 | wire / open — out of forced scope | 104 |
 | no door — no carrier, ADR-0049 territory | 1 |
 | no gate — carrier live, no parse | 0 |
@@ -44,12 +44,12 @@ The `strict` column is the one the campaign schedules against; it counts both th
 
 | Dir | Sites | strict | passthrough | catchall | strip |
 |---|---|---|---|---|---|
-| `ui/` | 161 | 119 | 5 | 0 | 37 |
-| `data/` | 165 | 57 | 1 | 0 | 107 |
+| `ui/` | 162 | 151 | 5 | 0 | 6 |
+| `data/` | 153 | 62 | 1 | 0 | 90 |
 | `automation/` | 65 | 42 | 0 | 0 | 23 |
 | `security/` | 20 | 7 | 0 | 0 | 13 |
 | `studio/` | 27 | 27 | 0 | 0 | 0 |
-| **total** | **438** | **252** | **6** | **0** | **180** |
+| **total** | **427** | **289** | **6** | **0** | **132** |
 
 ## File-level triage — site counts
 
@@ -75,9 +75,9 @@ classify and is not listed (it becomes reportable the day it grows its first sit
 | `responsive.zod.ts` | 4 |
 | `sharing.zod.ts` | 1 |
 | `theme.zod.ts` | 6 |
-| `view.zod.ts` | 54 |
+| `view.zod.ts` | 55 |
 | `widget.zod.ts` | 1 |
-| **total** | **161** |
+| **total** | **162** |
 
 ### `data/` — sites
 
@@ -97,7 +97,6 @@ classify and is not listed (it becomes reportable the day it grows its first sit
 | `driver/sqlite.zod.ts` | 2 |
 | `driver/turso.zod.ts` | 2 |
 | `external-catalog.zod.ts` | 4 |
-| `external-lookup.zod.ts` | 12 |
 | `field-value.zod.ts` | 3 |
 | `field.zod.ts` | 10 |
 | `filter.zod.ts` | 11 |
@@ -109,7 +108,7 @@ classify and is not listed (it becomes reportable the day it grows its first sit
 | `seed-loader.zod.ts` | 12 |
 | `seed.zod.ts` | 1 |
 | `validation.zod.ts` | 6 |
-| **total** | **165** |
+| **total** | **153** |
 
 ### `automation/` — sites
 
@@ -157,20 +156,19 @@ over it is here.
 
 ### `ui/` — open
 
-**37 strip of 161**, in 5 file(s).
+**6 strip of 162**, in 4 file(s).
 
 | File | Strip | Sites |
 |---|---|---|
 | `action-params.zod.ts` | 1 | 1 |
 | `app.zod.ts` | 1 | 18 |
-| `component.zod.ts` | 31 | 31 |
-| `view.zod.ts` | 3 | 54 |
+| `view.zod.ts` | 3 | 55 |
 | `widget.zod.ts` | 1 | 1 |
-| **total** | **37** | **161** |
+| **total** | **6** | **162** |
 
 | Bucket | Sites |
 |---|---|
-| authorable — the ruling's forced scope | 32 |
+| authorable — the ruling's forced scope | 1 |
 | unresolved — needs a per-schema verdict | 0 |
 | wire / open — out of forced scope | 3 |
 | no door — no carrier, ADR-0049 territory | 1 |
@@ -179,7 +177,7 @@ over it is here.
 
 ### `data/` — open
 
-**107 strip of 165**, in 16 file(s).
+**90 strip of 153**, in 14 file(s).
 
 | File | Strip | Sites |
 |---|---|---|
@@ -189,9 +187,7 @@ over it is here.
 | `driver-nosql.zod.ts` | 10 | 10 |
 | `driver-sql.zod.ts` | 2 | 2 |
 | `driver.zod.ts` | 9 | 9 |
-| `driver/memory.zod.ts` | 5 | 6 |
 | `external-catalog.zod.ts` | 4 | 4 |
-| `external-lookup.zod.ts` | 12 | 12 |
 | `field-value.zod.ts` | 2 | 3 |
 | `field.zod.ts` | 2 | 10 |
 | `filter.zod.ts` | 10 | 11 |
@@ -199,12 +195,12 @@ over it is here.
 | `object.zod.ts` | 1 | 20 |
 | `query.zod.ts` | 4 | 5 |
 | `seed-loader.zod.ts` | 12 | 12 |
-| **total** | **107** | **165** |
+| **total** | **90** | **153** |
 
 | Bucket | Sites |
 |---|---|
-| authorable — the ruling's forced scope | 8 |
-| unresolved — needs a per-schema verdict | 34 |
+| authorable — the ruling's forced scope | 3 |
+| unresolved — needs a per-schema verdict | 22 |
 | wire / open — out of forced scope | 65 |
 | no door — no carrier, ADR-0049 territory | 0 |
 | no gate — carrier live, no parse | 0 |
@@ -271,4 +267,4 @@ directory rather than per file.
 | `kernel/` | 296 |
 | `qa/` | 6 |
 | `shared/` | 20 |
-| `system/` | 365 |
+| `system/` | 360 |

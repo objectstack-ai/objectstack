@@ -3,7 +3,8 @@
 import { z } from 'zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { ExpressionInputSchema } from '../shared/expression.zod';
-import { normalizeVisibleWhen, VISIBILITY_STRICT_OPTIONS } from '../shared/visibility';
+import { normalizeVisibleWhen } from '../shared/visibility';
+import { VISIBILITY_ONLY_STRICT_OPTIONS } from '../shared/editability-boundary';
 import { SortItemSchema } from '../shared/enums.zod';
 import { FilterConditionSchema } from '../data/filter.zod';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
@@ -100,8 +101,36 @@ export const ElementDataSourceSchema = lazySchema(() => strictObject({
  * now under `alias-integrity.test.ts` and with an edit-distance rename for the
  * page-component keys the hand-written map had no channel for (`classNam` →
  * `className`).
+ *
+ * ## A component gates VISIBILITY, not editability (#7887 — boundary, not gap)
+ *
+ * There is no `disabled`, `readonly` or `readonlyWhen` on a page component, and
+ * that is a **deliberate boundary** ruled on 2026-08-12, not a slot nobody got
+ * round to adding: **editability lives on fields.** A component decides whether
+ * it renders at all (`visibleWhen`); whether an input inside it can be edited is
+ * the field's own `readonly` / `readonlyWhen`, enforced by the field renderer
+ * that owns the input. Nothing in the platform reads a component-level read-only
+ * flag, so declaring one would ship the ADR-0049 declared-but-unenforced shape
+ * this repo is retiring elsewhere.
+ *
+ * Writing one anyway stays a loud parse error — unchanged — and since #7887 that
+ * error carries `EDITABILITY_BOUNDARY_KEYS`' prescription naming the field-level
+ * keys, so the author is redirected instead of merely refused. A widget with its
+ * own enabled/disabled notion expresses it inside {@link
+ * PageComponentSchema.properties}, which is that widget's own contract
+ * (`component.zod.ts`) and not this shape's.
  */
-export const PageComponentSchema = lazySchema(() => strictObject(VISIBILITY_STRICT_OPTIONS, {
+export const PageComponentSchema = lazySchema(() => strictObject({
+  ...VISIBILITY_ONLY_STRICT_OPTIONS,
+  // #8202 — the shape names ITSELF rather than inheriting the shared
+  // `'this view/page schema'`. Since #7887 a `disabled` written here gets the
+  // editability-boundary prescription while the same key on a form field gets
+  // a rename pointer toward `readonly`; the two answers contradict each other
+  // by design, so the message has to say which shape refused the key. Filed
+  // per-shape because a table shared by three shapes cannot carry one shape's
+  // name (#8199's placement rule).
+  surface: 'this page component',
+}, {
   /** Definition */
   type: z.union([
     PageComponentType,

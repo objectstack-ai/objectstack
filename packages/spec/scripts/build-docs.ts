@@ -494,16 +494,31 @@ const SECTION_GROUPS: Record<string, Array<{ section: string; pages: string[] }>
   data: [
     { section: 'Objects & Fields', pages: ['object', 'field', 'validation', 'hook', 'hook-body', 'mapping'] },
     { section: 'Query & Analytics', pages: ['query', 'filter', 'data-engine', 'analytics', 'date-macros'] },
-    { section: 'Datasources & Drivers', pages: ['datasource', 'driver', 'driver-sql', 'driver-nosql', 'external-catalog', 'external-lookup'] },
+    // `external-lookup` retired whole at #8075 (ADR-0049) — `external-catalog`
+    // is the surviving federated-external-data surface.
+    { section: 'Datasources & Drivers', pages: ['datasource', 'driver', 'driver-sql', 'driver-nosql', 'external-catalog'] },
     { section: 'Documents & Seed', pages: ['document', 'seed', 'seed-loader', 'feed'] },
   ],
   integration: [
     // `connector-auth` removed at #4696 — `integration/` has no such file; the
     // five `ConnectorInstance*Auth` schemas reach this entry point through
     // `integration/connector.zod.ts`, and are documented there now.
-    { section: 'Connectors', pages: ['connector', 'mapping', 'translation'] },
-    { section: 'Transport & Storage', pages: ['http', 'message-queue', 'object-storage', 'offline'] },
-    { section: 'Tenancy', pages: ['tenant', 'misc'] },
+    //
+    // `mapping`, `translation`, `http`, `message-queue`, `object-storage`,
+    // `offline`, `tenant` and `misc` never had a matching `.zod.ts` here
+    // after #4480 removed the per-provider connector template files
+    // (`connector/saas.zod.ts`, `connector/database.zod.ts`, file-storage,
+    // message-queue, github, vercel) — the losing side of ADR-0023's
+    // rejected per-system modelling; ADR-0097's answer is that provider
+    // shapes come from the provider itself, not from the spec
+    // (`integration/index.ts` records the six removed files). This
+    // integration `message-queue` is that connector-template entry, not the
+    // `system` category's own `message-queue.zod.ts` (#8075). `connector` is
+    // the only module `integration/` has ever emitted a page for.
+    // `buildCategoryPages` filters by what was emitted, so leaving these dead
+    // names here would have been silently harmless — which is why they are
+    // removed deliberately instead (#8166).
+    { section: 'Connectors', pages: ['connector'] },
   ],
   kernel: [
     { section: 'Plugin Lifecycle', pages: ['plugin', 'plugin-lifecycle-events', 'plugin-lifecycle-advanced', 'plugin-runtime', 'plugin-loading', 'plugin-registry', 'plugin-structure', 'plugin-validator'] },
@@ -516,7 +531,9 @@ const SECTION_GROUPS: Record<string, Array<{ section: string; pages: string[] }>
     // `metadata-loader` removed at #4696 — that file lives in `kernel/`, and the
     // two schemas `system/` re-exports from it are documented on
     // `system/metadata-persistence`, the file that re-exports them.
-    { section: 'Services & Infrastructure', pages: ['core-services', 'http-server', 'cache', 'message-queue', 'object-storage', 'search-engine', 'worker', 'job', 'notification', 'translation', 'metadata-persistence'] },
+    // `message-queue` retired whole at #8075 (ADR-0049) — the live MQ surface
+    // is kernel's `EventMessageQueueConfig`, documented with the event bus.
+    { section: 'Services & Infrastructure', pages: ['core-services', 'http-server', 'cache', 'object-storage', 'search-engine', 'worker', 'job', 'notification', 'translation', 'metadata-persistence'] },
     { section: 'Observability', pages: ['logging', 'metrics', 'tracing', 'audit'] },
     { section: 'Security & Compliance', pages: ['encryption', 'security-context', 'incident-response', 'supplier-security', 'disaster-recovery', 'change-management', 'training'] },
     { section: 'Content & Collaboration', pages: ['doc', 'book', 'collaboration'] },

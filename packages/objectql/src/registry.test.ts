@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { SchemaRegistry, applySystemFields, reconcileManagedApiMethods, warnStrippedLegacyApiMethods, warnFunctionalCompleteness, computeFQN, parseFQN } from './registry';
-import { AUDIT_PROVENANCE_FIELDS, type ServiceObject } from '@objectstack/spec/data';
+import { AUDIT_PROVENANCE_FIELDS, checkManagedApiMethodAffordances, type ServiceObject } from '@objectstack/spec/data';
 
 describe('SchemaRegistry', () => {
     let registry: SchemaRegistry;
@@ -357,6 +357,60 @@ describe('SchemaRegistry', () => {
                 registry.unregisterObjectsByPackage('com.owner', true);
             }).not.toThrow();
         });
+
+        it('[#7970] refuses before removing anything — a free sibling object survives', () => {
+            // `free` is walked FIRST (Map insertion order) and used to be spliced
+            // out on the way to refusing over `important`, so the refusal that
+            // exists to keep the registry whole half-tore it down instead.
+            registry.registerObject({ name: 'free', fields: {} }, 'com.owner', 'base', 'own');
+            registry.registerObject({ name: 'important', fields: {} }, 'com.owner', 'base', 'own');
+            registry.registerObject({ name: 'important', fields: {} }, 'com.ext', undefined, 'extend');
+
+            expect(() => {
+                registry.unregisterObjectsByPackage('com.owner');
+            }).toThrow(/object "important" is extended by com\.ext/);
+
+            expect(registry.getObject('free')).toBeDefined();
+            expect(registry.getObject('important')).toBeDefined();
+        });
+
+        /**
+         * [#7970] MESSAGE IDENTITY, the half the reorder must not disturb. The
+         * refusal pass replaces an inline check, so it must name the SAME object
+         * and the SAME extenders as before — with two refusable objects the
+         * first one walked still wins, and an object's extenders are still
+         * listed in registration order. This test is deliberately written to
+         * pass BOTH before and after the fix: run it against the pre-fix
+         * `registry.ts` and it stays green, which is what proves the message did
+         * not move (only the mutations that used to precede it are gone).
+         */
+        it('[#7970] the refusal still names the first refusable object and all its extenders', () => {
+            registry.registerObject({ name: 'alpha', fields: {} }, 'com.owner', 'base', 'own');
+            registry.registerObject({ name: 'beta', fields: {} }, 'com.owner', 'base', 'own');
+            registry.registerObject({ name: 'alpha', fields: {} }, 'com.ext1', undefined, 'extend');
+            registry.registerObject({ name: 'alpha', fields: {} }, 'com.ext2', undefined, 'extend');
+            registry.registerObject({ name: 'beta', fields: {} }, 'com.ext3', undefined, 'extend');
+
+            expect(() => registry.unregisterObjectsByPackage('com.owner')).toThrow(
+                'Cannot uninstall package "com.owner": object "alpha" is extended by ' +
+                'com.ext1, com.ext2. Uninstall extenders first.',
+            );
+        });
+
+        it('[#7970] force still removes the owner even with a free sibling ahead of it', () => {
+            registry.registerObject({ name: 'free', fields: {} }, 'com.owner', 'base', 'own');
+            registry.registerObject({ name: 'important', fields: {} }, 'com.owner', 'base', 'own');
+            registry.registerObject({ name: 'important', fields: {} }, 'com.ext', undefined, 'extend');
+
+            registry.unregisterObjectsByPackage('com.owner', true);
+
+            // The refusal pass is skipped under `force`, and the mutation pass is
+            // unchanged: both of the package's contributions are gone, and the
+            // extender's own contribution is left where it was.
+            expect(registry.getObject('free')).toBeUndefined();
+            expect(registry.getObjectOwner('important')).toBeUndefined();
+            expect(registry.getObjectContributors('important')).toHaveLength(1);
+        });
     });
 
     // ==========================================
@@ -425,6 +479,64 @@ describe('SchemaRegistry', () => {
             registry.uninstallPackage('com.test');
             expect(registry.getPackage('com.test')).toBeUndefined();
             expect(registry.getNamespaceOwner('test')).toBeUndefined();
+        });
+
+        /**
+         * [#7970] The uninstall's ONE refusable step is `unregisterObjectsByPackage`
+         * (ADR-0029: you may not uninstall the owner of an object another package
+         * extends). It now runs before every mutation, so reaching that refusal
+         * costs nothing. The namespace is the limb that measured this: the release
+         * used to run FIRST, so a refused uninstall left the package installed —
+         * record, objects and items all intact — while its namespace no longer
+         * resolved, for the life of the process. No test refused and then inspected
+         * the namespace, which is exactly why the defect was invisible.
+         *
+         * Latent by grade: no in-tree caller reaches the refusal path today.
+         */
+        it('[#7970] a refused uninstall leaves the namespace still resolving', () => {
+            registry.installPackage({ id: 'com.crm', name: 'CRM', namespace: 'crm', version: '1.0.0' } as any);
+            registry.registerObject({ name: 'contact', fields: {} }, 'com.crm', 'crm', 'own');
+            registry.registerObject({ name: 'contact', fields: {} }, 'com.analytics', undefined, 'extend');
+
+            expect(registry.getNamespaceOwner('crm')).toBe('com.crm');
+
+            expect(() => registry.uninstallPackage('com.crm')).toThrow(
+                /Cannot uninstall package "com\.crm".*extended by com\.analytics/,
+            );
+
+            // The assertion the card names: refused ⇒ the namespace still resolves.
+            expect(registry.getNamespaceOwner('crm')).toBe('com.crm');
+            expect(registry.getNamespaceOwners('crm')).toEqual(['com.crm']);
+        });
+
+        it('[#7970] a refused uninstall leaves the whole package intact, not just the namespace', () => {
+            registry.installPackage({ id: 'com.crm', name: 'CRM', namespace: 'crm', version: '1.0.0' } as any);
+            // Registered ahead of the extended object, so the object walk reaches
+            // this one before it can refuse.
+            registry.registerObject({ name: 'account', fields: {} }, 'com.crm', 'crm', 'own');
+            registry.registerObject({ name: 'contact', fields: {} }, 'com.crm', 'crm', 'own');
+            registry.registerObject({ name: 'contact', fields: {} }, 'com.analytics', undefined, 'extend');
+            registry.registerItem('page', { name: 'home' }, 'name', 'com.crm');
+
+            expect(() => registry.uninstallPackage('com.crm')).toThrow(/extended by com\.analytics/);
+
+            // Every limb `uninstallPackage` mutates, in the order it mutates them.
+            expect(registry.getNamespaceOwner('crm')).toBe('com.crm');
+            expect(registry.getObject('account')).toBeDefined();
+            expect(registry.getObject('contact')).toBeDefined();
+            expect(registry.getItem('page', 'home')).toMatchObject({ name: 'home' });
+            expect(registry.getPackage('com.crm')).toBeDefined();
+        });
+
+        it('[#7970] the successful path still releases the namespace after the object verb', () => {
+            registry.installPackage({ id: 'com.crm', name: 'CRM', namespace: 'crm', version: '1.0.0' } as any);
+            registry.registerObject({ name: 'contact', fields: {} }, 'com.crm', 'crm', 'own');
+
+            expect(registry.uninstallPackage('com.crm')).toBe(true);
+
+            expect(registry.getNamespaceOwner('crm')).toBeUndefined();
+            expect(registry.getObject('contact')).toBeUndefined();
+            expect(registry.getPackage('com.crm')).toBeUndefined();
         });
 
         it('updatePackageManifest merges editable fields, preserving lifecycle state', () => {
@@ -994,6 +1106,69 @@ describe('reconcileManagedApiMethods', () => {
         reg.registerObject(managed(), 'sys', 'sys', 'own');
         const stored = (reg as any).objectContributors.get('sys_thing')[0].definition;
         expect(stored.enable.apiMethods).toEqual(['get', 'list']);
+    });
+
+    // ── #7521: the strip is a REACTION to the shared predicate ──────────
+    //
+    // The judgement moved to `checkManagedApiMethodAffordances`
+    // (`@objectstack/spec/data`) so that `@objectstack/lint`'s author-time gate
+    // reaches the identical verdict from the identical table. These pin the
+    // join: if someone reintroduces a local table here, the two can disagree
+    // again — which is the declared≠enforced drift the card is about.
+    describe('shares ONE predicate with the author-time gate (#7521)', () => {
+        const apiMethodsOf = (schema: ServiceObject): string[] =>
+            (schema as { enable: { apiMethods: string[] } }).enable.apiMethods;
+
+        it('strips exactly the verbs the shared predicate names, and only those', () => {
+            const schema = {
+                name: 'sys_environment',
+                managedBy: 'platform',
+                userActions: { create: false, edit: false, delete: false },
+                enable: { apiEnabled: true, apiMethods: ['get', 'list', 'create', 'update'] },
+            } as ServiceObject;
+
+            const conflicts = checkManagedApiMethodAffordances(schema);
+            expect(conflicts.map((c) => c.verb)).toEqual(['create', 'update']);
+
+            const warn = vi.fn<(msg: string) => void>();
+            const kept = apiMethodsOf(reconcileManagedApiMethods(schema, { warn }));
+            expect(kept).toEqual(['get', 'list']);
+            // The declared set minus exactly the predicate's verdict.
+            expect(kept).toEqual(
+                ['get', 'list', 'create', 'update'].filter(
+                    (_v, i) => !conflicts.some((c) => c.index === i),
+                ),
+            );
+        });
+
+        it('a duplicated offender does not take a legitimate verb down with it', () => {
+            const warn = vi.fn<(msg: string) => void>();
+            const out = reconcileManagedApiMethods(
+                {
+                    name: 'sys_thing',
+                    managedBy: 'better-auth',
+                    enable: { apiEnabled: true, apiMethods: ['create', 'get', 'create', 'list'] },
+                } as ServiceObject,
+                { warn },
+            );
+            expect(apiMethodsOf(out)).toEqual(['get', 'list']);
+        });
+
+        it('points the operator at the lint rule id, so a boot log leads to the gate', () => {
+            const warn = vi.fn<(msg: string) => void>();
+            reconcileManagedApiMethods(managed() as ServiceObject, { warn });
+            expect(warn.mock.calls[0]?.[0]).toContain('object/managed-api-method-unaffordable');
+        });
+
+        it('still WARNS rather than throwing — boot must survive a metadata typo', () => {
+            // The #7521 ruling: fail-closed at registration would let one typo
+            // kill a control-plane boot. The gate is where this blocks.
+            const warn = vi.fn<(msg: string) => void>();
+            expect(() =>
+                reconcileManagedApiMethods(managed() as ServiceObject, { warn }),
+            ).not.toThrow();
+            expect(warn).toHaveBeenCalledTimes(1);
+        });
     });
 });
 

@@ -20,9 +20,12 @@ import { z } from 'zod';
 import { lazySchema } from '../../shared/lazy-schema';
 import { strictObject } from '../../shared/strict-object';
 import {
+  credentialFreeUrl,
   driverConfigJsonSchema,
   DriverSslToggleSchema,
+  INLINE_CREDENTIAL_REFUSED,
   READ_ONLY_BELONGS_ON_DATASOURCE,
+  refusedInlineCredentialKey,
   SCHEMA_MODE_BELONGS_ON_DATASOURCE,
   SqlAutoMigrateSchema,
   SSL_DETAIL_BELONGS_ON_DATASOURCE,
@@ -38,8 +41,6 @@ export const MysqlConfigSchema = lazySchema(() => strictObject(
       db: 'database',
       schema: 'database',
       user: 'username',
-      passwd: 'password',
-      pwd: 'password',
       connectionstring: 'url',
       dsn: 'url',
       uri: 'url',
@@ -48,6 +49,10 @@ export const MysqlConfigSchema = lazySchema(() => strictObject(
       usessl: 'ssl',
     },
     guidance: {
+      // #7990 — former aliases of the now-unwritable `password` key; the
+      // refusal is carried directly (see postgres.zod.ts for the reasoning).
+      passwd: INLINE_CREDENTIAL_REFUSED('passwd'),
+      pwd: INLINE_CREDENTIAL_REFUSED('pwd'),
       pool:
         '`pool` is not driver config — connection pooling is configured once for every driver in '
         + "the datasource's own `pool` block. Move it next to `driver`.",
@@ -69,10 +74,17 @@ export const MysqlConfigSchema = lazySchema(() => strictObject(
   },
   {
   /**
-   * Connection URI, passed to `mysql2` as-is when present.
-   * Format: `mysql://[user[:password]@][host][:port]/[dbname][?params]`
+   * Connection URI, passed to `mysql2` as-is when present. Credential-free by
+   * contract since #8082: a `user:password@` userinfo is refused at publish
+   * exactly like an inline `password` (#7990) — bind the secret
+   * (`external.credentialsRef` / the connection form's secret field) and it is
+   * injected at connect time. A bare username (`user@host`) stays writable.
+   * Runtime-environment DSNs (`OS_DATABASE_URL`) never pass through this
+   * schema and are unaffected.
+   * Format: `mysql://[user@][host][:port]/[dbname][?params]`
    */
-  url: z.string().optional().describe('Connection URI (supersedes the discrete fields)')
+  url: credentialFreeUrl(z.string(), 'url').optional()
+    .describe('Connection URI (supersedes the discrete fields; must not embed a password — bind the secret instead)')
     .meta({ title: 'Connection URL' }),
 
   /** Hostname or IP address. */
@@ -88,12 +100,11 @@ export const MysqlConfigSchema = lazySchema(() => strictObject(
   username: z.string().optional().describe('Authentication user').meta({ title: 'User' }),
 
   /**
-   * Authentication password. Prefer `external.credentialsRef`; a datasource
-   * secret always wins over this value.
+   * Authentication password — REFUSED inline since #7990 (see postgres.zod.ts:
+   * declared-unwritable so `tsc`, the parse and the connection form's secret
+   * input all stay wired to the secret binder / `external.credentialsRef`).
    */
-  password: z.string().optional()
-    .describe('Authentication password (prefer external.credentialsRef)')
-    .meta({ title: 'Password', format: 'password' }),
+  password: refusedInlineCredentialKey('password', 'Password'),
 
   /** TLS settings, passed to `mysql2` verbatim. */
   ssl: DriverSslToggleSchema.optional().meta({ title: 'Use SSL/TLS' }),

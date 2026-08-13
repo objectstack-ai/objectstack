@@ -3,7 +3,7 @@
 import {
     ObjectKernel, getEnv, evaluateAuthGate, isAuthGateAllowlisted,
 } from '@objectstack/core';
-import { isMcpServerEnabled, looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
+import { isMcpServerEnabled, looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE, resolveThrownHttpError } from '@objectstack/types';
 import { measureServerTiming, allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
 import { CoreServiceName, serviceUnavailableMessage, inProcessServiceMessage } from '@objectstack/spec/system';
 import type { IDataEngine, IObjectQLEngine } from '@objectstack/spec/contracts';
@@ -47,7 +47,6 @@ import {
     permissionDeniedErrorDetails,
     describeDeniedDiagnostics,
 } from './security/permission-denied-envelope.js';
-import { validationFailureDetails, VALIDATION_FAILED_STATUS } from './validation-failure.js';
 
 // randomUUID moved to ./domains/auth.ts with its only consumer (D11③ PR-7).
 
@@ -174,6 +173,25 @@ export interface HttpDispatcherOptions {
      */
     scopeManager?: EnvironmentScopeManager;
 }
+
+/**
+ * `services.search`'s in-process remedy string (#7939), kept out of the
+ * shared `inProcessServiceMessage('search')` path on purpose: that helper's
+ * wording ("Kernel-internal service — consumed in-process via the service
+ * registry") is written for `cache`/`queue`/`job` — kernel-managed contracts
+ * with no HTTP surface *by construction*. A registered search service is the
+ * opposite kind of occupant: an external engine (Elasticsearch/Meilisearch,
+ * per `core-services.zod.ts`'s `REMEDY_DETAIL['search']`) that simply has no
+ * *dispatcher* route to advertise. Reusing the shared sentence would call an
+ * external engine "kernel-internal", which is false; this says the true thing
+ * instead, and cross-references `capabilities.search` (a different question
+ * about the same slot — see #7602 / PR #7937) rather than leaving readers to
+ * wonder why an occupied slot never got a route.
+ */
+const SEARCH_IN_PROCESS_MESSAGE =
+    "Search engine registered, but the dispatcher has no HTTP route for the 'search' slot — "
+    + 'no dedicated search endpoint is mounted on its behalf. Cross-object search, where a host '
+    + 'serves it, is reported separately by capabilities.search.';
 
 /**
  * The HTTP dispatch engine — translates an inbound (method, path, body, ctx)
@@ -686,13 +704,20 @@ export class HttpDispatcher {
      * expressed its real code as `details.code` gets it promoted into
      * `error.code` by the shared builder, and a site that has none gets one
      * derived from the status. See `./error-envelope.ts`.
+     *
+     * [#8016] `code` is optional and, when given, WINS over anything in
+     * `details` — the precedence `buildApiError` already declares. Only
+     * {@link errorFromThrown} passes it, because the shared resolver it
+     * delegates to has already answered the code question for both package
+     * doors; every other call site still expresses its code the way it did (a
+     * `details.code` to promote, or none at all and let the status derive one).
      */
-    private error(message: string, httpStatus: number = 500, details?: any) {
+    private error(message: string, httpStatus: number = 500, details?: any, code?: string) {
         const safe =
             httpStatus >= 500 && looksLikeInternalErrorLeak(message)
                 ? INTERNAL_ERROR_MESSAGE
                 : message;
-        return apiErrorResponse({ message: safe, httpStatus, details });
+        return apiErrorResponse({ message: safe, httpStatus, details, ...(code ? { code } : {}) });
     }
 
     /**
@@ -718,26 +743,31 @@ export class HttpDispatcher {
      * `@objectstack/rest`'s `mapDataError` has always mapped it: status 400,
      * `fields[]` passed through in `details`. An explicit `.status` /
      * `.statusCode` still wins, so this only supplies the fallback.
+     *
+     * [#8016] The rule itself moved to `resolveThrownHttpError`
+     * (`@objectstack/types`) and this method became its caller. Nothing about
+     * the precedence changed — it is the same table, read from one place now,
+     * because `/api/v1/packages` has a SECOND door (`@objectstack/rest`'s
+     * direct-mount registrar) that answered `500 INTERNAL_ERROR` for the very
+     * throws this method mapped correctly, and that door is the one production
+     * serves. A rule two doors must agree on cannot live inside one of them —
+     * and it could not live in this package regardless, since `rest` cannot
+     * import `runtime`.
+     *
+     * The one thing that stayed here is DISCLOSURE: `this.error` withholds a
+     * leaky 5xx message (#3867), which is a property of this surface's answer
+     * rather than of the throw.
      */
     private errorFromThrown(e: any, fallbackStatus = 500) {
-        const validation = validationFailureDetails(e);
-        const status =
-            typeof e?.status === 'number' ? e.status
-            : typeof e?.statusCode === 'number' ? e.statusCode
-            : validation ? VALIDATION_FAILED_STATUS
-            : fallbackStatus;
-        const issues = Array.isArray(e?.issues) ? e.issues : undefined;
-        const details =
-            issues || e?.code || validation
-                ? {
-                    ...(e?.code ? { code: e.code } : {}),
-                    ...(issues ? { issues } : {}),
-                    // Last so `code` is pinned to VALIDATION_FAILED even when the
-                    // error was matched by `name` alone and carries no `.code`.
-                    ...(validation ?? {}),
-                }
-                : undefined;
-        return this.error(e?.message ?? String(e), status, details);
+        const thrown = resolveThrownHttpError(e, fallbackStatus);
+        // `declaredCode`, NOT the narrowed `code`: this door's `error.code` is
+        // not closed in practice and three suites pin that — `STORAGE_FAILURE`,
+        // `FLOW_FAILED` and `DUPLICATE` are all unregistered and all expected on
+        // the wire verbatim. The REST door takes the narrowed spelling because
+        // its own conformance suite parses its bodies against the ledger. Both
+        // spellings come from the one resolver, so the difference is a stated
+        // one; see its module note.
+        return this.error(thrown.message, thrown.status, thrown.details, thrown.declaredCode);
     }
 
 
@@ -1250,13 +1280,20 @@ export class HttpDispatcher {
         // reduced capability (contrast `realtime` below, whose advertised
         // capability IS the missing surface). Message written once in
         // `@objectstack/spec/system` so both discovery builders agree.
-        const svcInProcess = (name: string, svc: unknown) => {
+        // `fallbackMessage` lets a slot opt out of the shared "Kernel-internal
+        // service" wording (#7939): that sentence is true for cache/queue/job
+        // — kernel-managed, in-process by construction — but false for a slot
+        // whose occupant is an external engine with no dispatcher surface
+        // (`search`: Elasticsearch/Meilisearch, per `core-services.zod.ts`'s
+        // REMEDY_DETAIL). The shared string still applies wherever it reads
+        // true; only the slot that would misdescribe itself with it overrides.
+        const svcInProcess = (name: string, svc: unknown, fallbackMessage?: string) => {
             const self = svc ? readServiceSelfInfo(svc) : undefined;
             return {
                 enabled: true,
                 status: self?.status ?? ('available' as const),
                 handlerReady: false,
-                message: self?.message ?? inProcessServiceMessage(name),
+                message: self?.message ?? fallbackMessage ?? inProcessServiceMessage(name),
             };
         };
 
@@ -1567,7 +1604,22 @@ export class HttpDispatcher {
                 // occupant's behalf — which is the same fact `capabilities
                 // .search` states above, said about the slot instead of about
                 // the host's HTTP surface.
-                search:         searchRegistered ? svcAvailable(undefined, undefined, searchSvc) : svcUnavailable('search'),
+                //
+                // [#7939] But `svcAvailable` was still the wrong builder for a
+                // filled slot: it defaults an unmarked occupant to
+                // `handlerReady: true`, which this map's own contract (above)
+                // reserves for "the dispatcher has a real, bound handler for
+                // this route" — and the dispatcher has none for search (no
+                // `route-ledger.ts` entry, no branch here, `route` is always
+                // `undefined`). That is exactly the contradiction #4318 closed
+                // for `cache`/`queue`/`job` with `svcInProcess`; `search` was
+                // the one slot of that shape #4318 didn't reach, latent only
+                // because no host has ever registered one (`CORE_SERVICE_PROVIDER
+                // ['search'] === null`). Fixed the same way, with its own
+                // remedy string — see `svcInProcess`'s fallbackMessage note.
+                search:         searchRegistered
+                                    ? svcInProcess('search', searchSvc, SEARCH_IN_PROCESS_MESSAGE)
+                                    : svcUnavailable('search'),
             },
             locale,
         };

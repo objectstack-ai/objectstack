@@ -19,6 +19,13 @@
 //    to rows the caller may edit.
 //
 // @proof: owner-anchor-and-bulk-writes
+//
+// ADR-0056 D10 — the authz-conformance matrix rows this file is the cited proof
+// for; `authz-conformance.test.ts` asserts the pairing is mutual (#7976). Two
+// rows, two distinct bodies of evidence in this one file: the #3004 forge /
+// transfer / disown cases, and the #2982 bulk update + bulk delete cases.
+// authz-row: ownership-anchor-guard
+// authz-row: bulk-write-owner-scoping
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack from '@objectstack/example-showcase';

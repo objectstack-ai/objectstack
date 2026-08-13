@@ -194,7 +194,54 @@ function toCount(word) {
  * everywhere, so reformatting one copy into the other's shape does not blind the
  * gate. A blank line closes an entry; wrapped continuation lines belong to it.
  */
-const ENTRY_START = /^(?:\s*[-*]\s+|\*\*Axis\s)/;
+export const ENTRY_START = /^(?:\s*[-*]\s+|\*\*Axis\s)/;
+
+/**
+ * The offset, within `section`, of the first line of each axis entry —
+ * index-aligned with `axisEntries()` because both accept an entry at exactly the
+ * lines `ENTRY_START` matches.
+ *
+ * EXPORTED for the freshness gate's self-test (#5866, #8024). That self-test
+ * manufactures the historical TWO-axis specimen by un-marking one entry in the
+ * real documents, and #8024 recorded what happens when it locates that entry by
+ * a hand-copied spelling instead: the 2026-08-12 principles rewrite reworded the
+ * axis line, the copied spelling matched nothing, and the self-test threw before
+ * the gate ever scanned — a dead gate whose presence in the gate list still read
+ * as coverage. Locating the entry through THIS parser instead means the fixture
+ * depends on the frame's structure, which is the one thing both gates already
+ * agree on, rather than on a second copy of its prose.
+ */
+export function axisEntryStarts(section) {
+  const starts = [];
+  let offset = 0;
+  for (const line of section.split('\n')) {
+    if (ENTRY_START.test(line)) starts.push(offset);
+    offset += line.length + 1;
+  }
+  return starts;
+}
+
+/**
+ * Every mention of the frame's axis COUNT in `text`, as `{ index, text, numeral,
+ * count }` — mentions whose numeral this gate does not read as a count
+ * ("react-chart-axis") are dropped, exactly as the check below wants them.
+ *
+ * Used by the mention check, and EXPORTED for the freshness self-test (#8024),
+ * which must move the mentions with the axes when it demotes the frame or its
+ * specimen would be an incoherent tree that this gate reports on — see the note
+ * on `axisEntryStarts`.
+ */
+export function frameCountMentions(text) {
+  const found = [];
+  for (const pattern of MENTION_PATTERNS) {
+    for (const m of text.matchAll(pattern)) {
+      const count = toCount(m[1]);
+      if (count == null) continue;
+      found.push({ index: m.index, text: m[0], numeral: m[1], count });
+    }
+  }
+  return found;
+}
 
 function axisEntries(section) {
   const entries = [];
@@ -457,19 +504,18 @@ export function runAllChecks(copies, axisMap = AXIS_MAP, scanFiles = null) {
     for (const r of results) {
       if (seen.has(r.copy.file)) continue;
       seen.add(r.copy.file);
-      for (const pattern of MENTION_PATTERNS) {
-        for (const m of r.copy.text.matchAll(pattern)) {
-          const got = toCount(m[1]);
-          if (got == null) continue; // "react-chart-axis", "across-axis header" — not counts
-          mentionCount += 1;
-          if (got !== expected) {
-            problems.push(
-              `${r.copy.file}\n` +
-              `    a mention of the frame states ${got} axes while the frame itself has ` +
-              `${expected}: "${m[0].replace(/\s+/g, ' ')}"\n` +
-              `    Update the mention with the frame, or reword it so it does not state a count.`,
-            );
-          }
+      // One scan, one definition: `frameCountMentions` is what the freshness
+      // self-test moves its specimen's mentions with (#8024), so the two can
+      // never disagree about what counts as a mention.
+      for (const m of frameCountMentions(r.copy.text)) {
+        mentionCount += 1;
+        if (m.count !== expected) {
+          problems.push(
+            `${r.copy.file}\n` +
+            `    a mention of the frame states ${m.count} axes while the frame itself has ` +
+            `${expected}: "${m.text.replace(/\s+/g, ' ')}"\n` +
+            `    Update the mention with the frame, or reword it so it does not state a count.`,
+          );
         }
       }
     }

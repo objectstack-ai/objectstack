@@ -43,6 +43,8 @@
 
 import { describe, it, expect } from 'vitest';
 
+import { getMetadataCreateSeed } from '@objectstack/spec/kernel';
+
 import { AUTHORING_RULES } from './authoring-rules.js';
 import { runRuntimeAuthoringRules, runtimeAuthoringRulesFor, stackKeyForType } from './runtime-gate.js';
 import {
@@ -162,8 +164,9 @@ describe('validateSecurityPosture at the runtime publish surface (#7576)', () =>
   });
 
   it('an OWD-less object write WOULD be refused — the strictness this card escalates', () => {
-    // `METADATA_CREATE_SEEDS.object` is exactly this body: name, label,
-    // pluralLabel, fields — and no `sharingModel`.
+    // The body `METADATA_CREATE_SEEDS.object` carried BEFORE #8308: name,
+    // label, pluralLabel, fields — and no `sharingModel`. Kept literal as the
+    // refusal's positive control.
     const added = wouldGateAdd('objects', { name: 'new_object', label: 'New Object', fields: {} });
     expect(added.map((f) => f.rule)).toEqual([SECURITY_OWD_UNSET]);
     expect(added[0].severity).toBe('error');
@@ -174,6 +177,18 @@ describe('validateSecurityPosture at the runtime publish surface (#7576)', () =>
     expect(
       wouldGateAdd('objects', { name: 'new_object', label: 'New Object', sharingModel: 'private', fields: {} }),
     ).toEqual([]);
+  });
+
+  it('[#8308] the REAL create seed is clean at this gate — blocker A repaired', () => {
+    // The platform's own minimal create body now AUTHORS its OWD
+    // (`sharingModel: 'private'` — the measured runtime default, ADR-0090 D1 /
+    // `effectiveSharingModel` in plugin-sharing), so the gate that #8310 will
+    // register for `object` refuses nothing on the platform's own create path.
+    // Consumed from the seed registry, not re-spelled, so a seed regression
+    // re-opens THIS pin rather than passing silently.
+    const seed = getMetadataCreateSeed('object') as AnyRec;
+    expect(seed.sharingModel).toBe('private');
+    expect(wouldGateAdd('objects', seed)).toEqual([]);
   });
 
   it('a permission-set write INVENTS a finding the whole-stack run does not', () => {

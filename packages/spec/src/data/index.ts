@@ -2,6 +2,15 @@
 
 export * from './query.zod';
 export * from './filter.zod';
+// The comparand-type door (#7872) — the accepted literal comparand set
+// (`string | number | bigint | boolean | null | Date`, the measured superset
+// of #7956's divergence matrix), the walk `parseFilterAST` and the engine's
+// lowering seam enforce it with, and the sentence the SQL family's refusals
+// quote instead of hand-copying. Everything outside the set is refused with
+// the `INVALID_FILTER` / 400 envelope at the compile face, so the frozen
+// drivers (#5499) inherit one answer instead of crashing (memory × BigInt) or
+// letting the BSON encoder edit the query (mongo × undefined → match-all).
+export * from './filter-comparand-type';
 // Canonical conformance cases for the filter logical combinators — the shared
 // standard the five independent FilterCondition backends are each checked
 // against, so they cannot drift apart again (#3774; the fifth — MongoDB's
@@ -22,6 +31,13 @@ export * from './filter-verdict';
 // explicitly out of that table's scope, and this one needs an `expectRejection`
 // discriminant it deliberately never grew (#5701).
 export * from './filter-text-conformance';
+// Canonical conformance cases for the comparand-type door (#7872) — each of
+// the six accepted types compiles on every driver path, and each refused type
+// gets the loud INVALID_FILTER refusal at the door, the two worst measured
+// cells (mongo × undefined silent-edit, memory × BigInt crash) included. A
+// sibling of the text table for the same reason that table is a sibling of the
+// logic table: comparand TYPE is its own axis, out of both of their scopes.
+export * from './filter-comparand-type-conformance';
 export * from './temporal-conformance';
 // Canonical conformance cases for deterministic paged reads — the standard
 // every driver's `find()` is held to whenever `limit`/`offset` slice the result
@@ -53,6 +69,10 @@ export * from './object.zod';
 // API-method derivation — the single source of truth turning an object's
 // `enable.apiMethods` whitelist into its effective operation set (#3391).
 export * from './api-derivation';
+// The managed-object `apiMethods` ⊆ affordances predicate — one table read by
+// objectql's registration-time strip AND @objectstack/lint's authoring gate,
+// so the two can never drift apart (#7521).
+export * from './managed-api-affordance';
 export * from './field.zod';
 // The credential read mask (ADR-0100) — the ONE string a masked read serves, in
 // place of the two byte-identical literals objectql and service-settings each
@@ -101,8 +121,27 @@ export * from './seed-loader.zod';
 // Document Management Protocol
 export * from './document.zod';
 
-// External Lookup Protocol
-export * from './external-lookup.zod';
+// external-lookup.zod (ExternalDataSourceSchema / ExternalFieldMappingSchema /
+// ExternalLookupSchema + every type alias) was REMOVED per ADR-0049
+// enforce-or-remove (#8075). The module declared a real-time external-data
+// lookup protocol — a per-field external data source with an
+// `authentication.config` record whose own docblock example wrote an inline
+// `clientSecret` — and nothing anywhere consumed it: no metadata-type binding,
+// no stack collection, no object/field embedding (`object.external` binds
+// `ObjectExternalBindingSchema`, which carries no credentials), and zero
+// imports outside this package in objectstack. An exported schema with no
+// consumer reads as a capability to whoever finds it (#3950) — here it read as
+// an invitation to put OAuth client secrets in cleartext metadata.
+//
+// The live mechanism external data actually goes through: `object.external`
+// (`ObjectExternalBindingSchema` in object.zod.ts, ADR-0015/0062) names a
+// datasource by reference, and connection credentials live in the datasource
+// config (`datasource.zod.ts` / `driver/`), never inline in object metadata.
+// `external-catalog.zod.ts` below is that federated path's catalog surface and
+// is NOT part of this retirement. Real-time per-field lookup, if ever built,
+// returns via the enforce route of ADR-0049 through a new ADR — the executor
+// first, the vocabulary second. See the D3 record
+// `external-lookup-message-queue-families-retired`.
 export * from './datasource.zod';
 
 // Per-driver `datasource.config` contracts (#4410) — the enforcement half of
@@ -147,9 +186,16 @@ export * from './record-surface';
 
 // injected-system-column derivation (#5378) — the single source for WHICH system
 // columns an object carries without declaring them. Consumed by the registry's
-// `applySystemFields` (which owns the column definitions) and by author-time
-// tooling that must resolve a reference to one but cannot load a runtime.
+// `applySystemFields` and by author-time tooling that must resolve a reference
+// to one but cannot load a runtime.
 export * from './injected-system-columns';
+
+// injected-system-column DEFINITIONS + the #7865 provenance marker (#8116) —
+// WHAT each injected column looks like, and whether storage actually backs it
+// on a given object (`external` objects register anchors the platform never
+// provisions). Moved here from `@objectstack/metadata-core` (which re-exports
+// it) so `@objectstack/lint` — spec-only by contract — can warn at author time.
+export * from './injected-system-column-provenance';
 
 // Feed & Activity Protocol — retains only the UI activity-timeline config enums
 // (FeedItemType / FeedFilterMode); the feed backend contracts were retired (ADR-0052 §5).

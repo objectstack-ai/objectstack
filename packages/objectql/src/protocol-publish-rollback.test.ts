@@ -163,6 +163,7 @@ function makeStubEngine() {
 describe('publishMetaItem / rollbackMetaItem / diffMetaItem', () => {
     const sampleBody = (label: string) => ({
         name: 'case_grid', type: 'grid', label, columns: ['id', 'title'],
+        object: 'case', viewKind: 'list', // [#7741] the inline arm requires the object binding pair
     });
 
     it('saveMetaItem with mode=draft creates a draft row, active read sees published', async () => {
@@ -325,11 +326,11 @@ describe('publishMetaItem / rollbackMetaItem / diffMetaItem', () => {
         const protocol = new ObjectStackProtocolImplementation(engine);
         await protocol.saveMetaItem({
             type: 'view', name: 'case_grid', organizationId: 'org_alpha',
-            item: { name: 'case_grid', type: 'grid', label: 'A', columns: ['id'] },
+            item: { name: 'case_grid', type: 'grid', label: 'A', columns: ['id'], object: 'case', viewKind: 'list' }, // [#7741] the inline arm requires the object binding pair
         });
         await protocol.saveMetaItem({
             type: 'view', name: 'case_grid', organizationId: 'org_alpha',
-            item: { name: 'case_grid', type: 'grid', label: 'B', columns: ['id', 'title'], extra: 1 },
+            item: { name: 'case_grid', type: 'grid', label: 'B', columns: ['id', 'title'], extra: 1, object: 'case', viewKind: 'list' }, // [#7741] the inline arm requires the object binding pair
         });
         const diff = await protocol.diffMetaItem({
             type: 'view', name: 'case_grid', organizationId: 'org_alpha',

@@ -109,8 +109,22 @@ export type Member = z.input<typeof MemberSchema>;
 
 /**
  * Invitation Status Enum
+ *
+ * [#7726] `canceled` is the ISSUER-side terminal state, and it is a shipped
+ * value rather than a speculative one: better-auth's organization plugin
+ * writes it on `POST /organization/cancel-invitation` (reachable from the
+ * `cancel_invitation` action on `sys_invitation`, and from the client SDK's
+ * `organizations.invitations.cancel`), and again when
+ * `cancelPendingInvitationsOnReInvite` supersedes a pending row. It is
+ * distinct from `rejected`, which the INVITEE writes.
+ *
+ * The vocabulary is therefore the union of two upstreams and must stay so:
+ * better-auth contributes `canceled` but has no `expired`, while expiry is
+ * ObjectStack's own (`expiresAt`). `sys_invitation.status` binds its select
+ * options to this enum — see `sys-invitation.status-vocabulary.test.ts`,
+ * which fails loudly if either side grows alone.
  */
-export const InvitationStatus = z.enum(['pending', 'accepted', 'rejected', 'expired']);
+export const InvitationStatus = z.enum(['pending', 'accepted', 'rejected', 'expired', 'canceled']);
 
 export type InvitationStatus = z.input<typeof InvitationStatus>;
 

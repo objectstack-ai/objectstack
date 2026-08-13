@@ -18,11 +18,18 @@
  *  - Credentials never persist in cleartext: the cleartext {@link SecretInput}
  *    transits create/update/test only; create/update write it to the secret
  *    store and persist only the returned `credentialsRef`.
+ *  - The read path never SERVES a credential, whatever a stored row holds
+ *    (#8081): `getDatasource` redacts driver `config` through
+ *    `datasource-config-redaction.ts`. That invariant is about what leaves this
+ *    service, and is separate from the one above — rows written before #8078
+ *    can and do hold inline cleartext, which is why it is stated on its own
+ *    rather than treated as a consequence.
  *  - Removal is refused while objects are still bound to the datasource.
  */
 
 import { validateDriverConfig } from '@objectstack/spec/data';
 import { assertDatasourcePoolSupported } from './datasource-pool-support.js';
+import { redactDatasourceConfig, restoreRedactedConfig } from './datasource-config-redaction.js';
 import type {
   IDatasourceAdminService,
   DatasourceDraft,
@@ -176,31 +183,59 @@ export class DatasourceAdminService implements IDatasourceAdminService {
   }
 
   /**
-   * Read one datasource's full detail for editing, with the credential stripped.
-   * Returns `config` (non-sensitive — credentials live in `sys_secret`, never in
-   * config), `origin`, and a `hasSecret` flag so the UI can show "leave blank to
-   * keep" without ever receiving the `credentialsRef` or any cleartext. Returns
-   * `undefined` when the name is unknown.
+   * Read one datasource's full detail for editing, with every stored credential
+   * redacted out of `config` (#8081).
+   *
+   * Returns `config`, `origin`, a `hasSecret` flag so the UI can show "leave
+   * blank to keep" without ever receiving the `credentialsRef`, and
+   * `redactedConfigKeys` naming what was withheld. Returns `undefined` when the
+   * name is unknown.
+   *
+   * ## The claim this comment used to make
+   *
+   * It said "with the credential stripped", and described `config` as
+   * "non-sensitive — credentials live in `sys_secret`, never in config". Both
+   * halves were false, and load-bearing: nothing here stripped anything, and
+   * `config` was returned verbatim. A datasource row written before #8078
+   * carries `config.password` / `config.authToken` in cleartext (that is the
+   * whole reason #8078 exists), and this method served it — to every caller of
+   * `GET /api/v1/datasources/:name` — under a comment asserting it could not.
+   * A safety claim that no code performs is worse than no claim: it is what
+   * stops the next reader from looking.
+   *
+   * What makes the claim true now is {@link redactDatasourceConfig}, which also
+   * covers the credential the old sentence could not have described — the one
+   * embedded in a `postgresql://user:pass@host` URL, which lives in `config`
+   * and is not `config.password`. Refusing such a URL at the WRITE door remains
+   * unruled (#7990) and is deliberately untouched here; hiding it on the way
+   * out is a separate act and is what this method owes its callers.
+   *
+   * The stored record is not modified. Cleartext already at rest stays at rest
+   * until the migration this card proposes runs — closing the read path is what
+   * stops it being SERVED, not what removes it.
    */
   async getDatasource(name: string): Promise<
     | (Pick<StoredDatasource, 'name' | 'label' | 'driver' | 'schemaMode' | 'config' | 'active' | 'definedIn'> & {
         origin: 'code' | 'runtime';
         hasSecret: boolean;
+        redactedConfigKeys: string[];
       })
     | undefined
   > {
     const rec = await this.config.getDatasourceRecord(name);
     if (!rec) return undefined;
     const hasSecret = Boolean(rec.external?.credentialsRef);
+    const { config, redactedKeys } = redactDatasourceConfig(rec.driver, rec.config);
     return {
       name: rec.name,
       label: rec.label,
       driver: rec.driver,
       schemaMode: rec.schemaMode ?? 'managed',
-      config: rec.config ?? {},
+      config,
       active: rec.active ?? true,
       origin: rec.origin === 'runtime' ? 'runtime' : 'code',
       hasSecret,
+      redactedConfigKeys: redactedKeys,
       ...(rec.definedIn ? { definedIn: rec.definedIn } : {}),
     };
   }
@@ -319,6 +354,33 @@ export class DatasourceAdminService implements IDatasourceAdminService {
       const credentialsRef = await this.config.writeSecret(secret, { name });
       merged.external = { ...(merged.external ?? {}), credentialsRef };
       if (prevRef && prevRef !== credentialsRef) await this.tryRemoveSecret(prevRef);
+    }
+
+    // Carry forward the credential material `getDatasource()` redacts (#8081)
+    // — AFTER the gate above, and only when this patch is round-tripping the
+    // same driver's config back.
+    //
+    // After, because the two judgements have different subjects. The gate
+    // judges what the AUTHOR wrote, and #8078's refusal of an inline credential
+    // is aimed at exactly that. This restore replaces material the author never
+    // saw, was never offered the chance to write, and is not asking to change;
+    // running the gate over it would refuse a legacy row for the contents of
+    // its own stored config and make `active: false` — the way a misconfigured
+    // datasource is taken out of service — unreachable on the rows most likely
+    // to need it. Same shape as the `credentialsRef` preserved a few lines up,
+    // which is likewise carried across a patch without being re-judged.
+    //
+    // Only when the driver is unchanged: a patch that re-points a datasource at
+    // a different driver is rewiring the connection, and one driver's stored
+    // credential is not evidence about another's.
+    //
+    // This preserves cleartext already at rest; it does not create any. Getting
+    // that cleartext OUT of the store is the migration this card proposes
+    // (scope item 3) and is deliberately not attempted here — a write path that
+    // quietly dropped a credential the operator still depends on would be the
+    // destructive sweep that decision is reserved for.
+    if (patch.config !== undefined && merged.driver === existing.driver) {
+      merged.config = restoreRedactedConfig(existing.driver, merged.config, existing.config);
     }
 
     await this.config.putDatasourceRecord(merged);

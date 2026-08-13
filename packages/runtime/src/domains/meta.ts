@@ -234,6 +234,55 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
     if (parts.length >= 3 && parts[parts.length - 1] === 'published' && (!method || method === 'GET')) {
         const type = parts[0];
         const name = parts.slice(1, -1).join('/');
+
+        // [#8031] The AUTHORITATIVE published store is consulted first: the
+        // `state:'active'` `sys_metadata` overlay row.
+        //
+        // Two publish lifecycles write to two different places, and this route
+        // used to know only the older one:
+        //
+        //   - `MetadataManager.publishPackage` snapshots a body into the
+        //     row-local `publishedDefinition` key of its own in-memory
+        //     registry — the ADR-0016-era package publish, which is what
+        //     `getPublished` below reads.
+        //   - `publishPackageDrafts` / `promoteDraft` flips the artifact's
+        //     `sys_metadata` row `state:'draft' → 'active'`. ADR-0027 (E)(5)
+        //     defines sealing a publish as exactly that flip, and
+        //     `SysMetadataRepository` names `'active'` "the published, live
+        //     overlay". ADR-0033 §2 — the ADR this route cites — routes EVERY
+        //     authoring write into that same ADR-0027 draft, so promoting it
+        //     is what "published" means for anything authored at runtime.
+        //
+        // The dispatcher's own `POST /packages/:id/publish-drafts` comment
+        // states that path has "no metadata service dependency", so the two
+        // shared no store at all: an item published at runtime was absent from
+        // the registry `getPublished` consults and this route answered 404 —
+        // a false statement about an item that IS published.
+        //
+        // `getMetaItemLayered` is the narrow primitive on purpose. Its overlay
+        // layer is a strict `state:'active'` lookup (org-scoped first, then
+        // env-wide, ADR-0048 package preference) that never reads a draft, and
+        // it reports that layer SEPARATELY from the code layer. So a null
+        // overlay is positively "no runtime-published row" and falls through to
+        // the untouched `getPublished` path below — which is what keeps a
+        // code-published item resolving to the same bytes it always did. The
+        // broader `getMetaItem` would not do: it folds the code layer into its
+        // own answer, so this route could no longer tell the two stores apart.
+        const protocol = await deps.resolveService(_context, 'protocol');
+        if (protocol && typeof (protocol as any).getMetaItemLayered === 'function') {
+            try {
+                const organizationId = await deps.resolveActiveOrganizationId(_context);
+                const layered = await (protocol as any).getMetaItemLayered({
+                    type,
+                    name,
+                    ...(organizationId ? { organizationId } : {}),
+                });
+                if (layered?.overlay !== undefined && layered?.overlay !== null) {
+                    return { handled: true, response: deps.success(layered.overlay) };
+                }
+            } catch { /* fall through to the code/package snapshot below */ }
+        }
+
         const metadataService = await deps.getService(_context, CoreServiceName.enum.metadata);
         if (metadataService && typeof (metadataService as any).getPublished === 'function') {
             const data = await (metadataService as any).getPublished(type, name);

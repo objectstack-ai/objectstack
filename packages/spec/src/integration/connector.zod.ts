@@ -153,9 +153,10 @@ import { retiredKey } from '../shared/retired-key';
  * base name for the base, matching `ConnectorErrorCategory` and
  * `ConnectorRetryStrategy` in this same file (`ConnectorRateLimitConfig`,
  * #4684, was the fourth until its whole shape was retired in #4911), and
- * `ExternalFieldMappingSchema` in `data/external-lookup.zod.ts` — which extends
- * the same base and, precisely because it carries a domain prefix, never
- * entered the dual-source baseline.
+ * `ExternalFieldMappingSchema` in `data/external-lookup.zod.ts` — which
+ * extended the same base and, precisely because it carried a domain prefix,
+ * never entered the dual-source baseline (the external-lookup family was
+ * itself retired whole in #8075 — ADR-0049, zero consumers).
  */
 import { lazySchema } from '../shared/lazy-schema';
 export const ConnectorFieldMappingSchema = lazySchema(() => BaseFieldMappingSchema.extend({
@@ -716,12 +717,17 @@ export const ConnectorSchema = lazySchema(() => z.object({
   /**
    * Authentication configuration (runtime shape — carries resolved secrets
    * inline, supplied by a plugin at `registerConnector`). Optional and defaults
-   * to `{ type: 'none' }` so a declarative provider-bound instance can reference
-   * credentials through {@link auth}/`credentialRef` instead of inlining them
-   * here (ADR-0097). Hand-written / plugin connectors keep setting it as before.
+   * to `{ type: 'none' }` so a declarative entry can reference credentials
+   * through {@link auth}/`credentialRef` instead of inlining them here
+   * (ADR-0097). Hand-written / plugin connectors keep setting it at
+   * `registerConnector` as before — but the AUTHORING door refuses any
+   * non-`none` value: since #7990 `DeclarativeConnectorEntrySchema` (the shape
+   * behind `defineStack({ connectors })` and `PUT /meta/connector/:name`)
+   * rejects an inline credential on every entry, descriptor or instance,
+   * because a published row lands whole in `sys_metadata`.
    */
   authentication: ConnectorAuthConfigSchema.optional().default({ type: 'none' }).describe(
-    'Authentication configuration (runtime shape with inline secrets). Provider-bound declarative instances use `auth.credentialRef` instead.',
+    'Authentication configuration (runtime shape with inline secrets — plugin-supplied at registerConnector). Authored entries must not inline secrets (#7990): use `auth.credentialRef` on a provider-bound instance.',
   ),
 
   /**
@@ -901,11 +907,17 @@ export function defineConnector(config: z.input<typeof ConnectorSchema>): Connec
  * this; the base {@link ConnectorSchema} stays a plain object so connector
  * *subtypes* (github / database / …) can still `.extend()` it.
  *
- * All rules key off `provider` — instance declaration vs. catalog descriptor:
+ * One rule applies to EVERY authored entry (#7990, maintainer-ruled 2026-08-12):
+ *  - NO entry may inline secrets via `authentication`. A published connector
+ *    row lands whole in `sys_metadata` (`apiMethods: ['get','list']`), so an
+ *    inline `token`/`key`/`password`/`clientSecret` is cleartext at rest,
+ *    readable through the ordinary data API. Until #7990 this rule bound only
+ *    provider-bound instances (ADR-0097 §3) and a catalog DESCRIPTOR could
+ *    still publish an inline credential — the ①-d hole of the #7902 survey.
+ *
+ * The remaining rules key off `provider` — instance vs. catalog descriptor:
  *  - `providerConfig` / `auth` require a `provider`; on a pure descriptor they
  *    are meaningless materialization inputs, so they are rejected.
- *  - A provider-bound instance must NOT inline secrets via `authentication` —
- *    credentials are references (`auth.credentialRef`), never authored literals (§3).
  *  - A provider-bound instance must NOT author `actions` / `triggers` — the
  *    provider derives them from the upstream (OpenAPI document / MCP `tools/list`);
  *    authoring both the instance and its actions reintroduces drift (§5 non-goals).
@@ -913,6 +925,20 @@ export function defineConnector(config: z.input<typeof ConnectorSchema>): Connec
 export const DeclarativeConnectorEntrySchema = lazySchema(() =>
   ConnectorSchema.superRefine((entry, ctx) => {
     const isInstance = typeof entry.provider === 'string' && entry.provider.length > 0;
+    // #7990 — the one rule that binds EVERY authored entry, descriptor and
+    // instance alike: `authentication` is the RUNTIME shape (its secret fields
+    // are required and inline), so any non-`none` value published through this
+    // door puts a cleartext credential into `sys_metadata`. The two messages
+    // differ because the fixes differ; both name the mechanism to use instead.
+    if (entry.authentication && entry.authentication.type !== 'none') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['authentication'],
+        message: isInstance
+          ? `Provider-bound connector instance '${entry.name}' must not inline secrets via \`authentication\`; reference credentials with \`auth: { type, credentialRef }\` instead (ADR-0097 §3).`
+          : `Connector '${entry.name}' must not inline secrets via \`authentication\` — a published connector row is stored whole in \`sys_metadata\`, so the credential would land in cleartext (#7990). A catalog descriptor holds no live credentials: drop \`authentication\` (or set \`{ type: 'none' }\`) and describe the auth scheme in \`description\`. A dispatchable instance declares \`provider\` and references its credential with \`auth: { type, credentialRef }\` (ADR-0097 §3).`,
+      });
+    }
     if (!isInstance) {
       if (entry.providerConfig !== undefined) {
         ctx.addIssue({
@@ -929,14 +955,6 @@ export const DeclarativeConnectorEntrySchema = lazySchema(() =>
         });
       }
       return;
-    }
-    // Provider-bound instance declaration.
-    if (entry.authentication && entry.authentication.type !== 'none') {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['authentication'],
-        message: `Provider-bound connector instance '${entry.name}' must not inline secrets via \`authentication\`; reference credentials with \`auth: { type, credentialRef }\` instead (ADR-0097 §3).`,
-      });
     }
     if (entry.actions && entry.actions.length > 0) {
       ctx.addIssue({

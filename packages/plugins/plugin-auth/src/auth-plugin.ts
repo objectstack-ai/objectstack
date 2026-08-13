@@ -28,6 +28,7 @@ import {
 } from './auth-manager.js';
 import { ensureDefaultOrganization } from './ensure-default-organization.js';
 import { runAttributedToUser } from './auth-actor-attribution.js';
+import type { AuthEventAuditSurface } from './auth-session-audit.js';
 import type { ResolvedSocialProvider } from './backfill-account-issuer.js';
 import { createTenancyService, type TenancyService } from './tenancy-service.js';
 import {
@@ -50,8 +51,10 @@ import { runResendVerificationEmail } from './send-verification-email.js';
 import type { CounterStore } from './rate-limit-storage.js';
 import {
   authIdentityObjects,
+  authObjectExtensions,
   authPluginManifestHeader,
 } from './manifest.js';
+import { scheduleLegacySsoSecretMigration } from './sso-client-secret.js';
 
 
 /**
@@ -346,6 +349,20 @@ export class AuthPlugin implements Plugin {
           return undefined;
         }
       },
+      // [#8144] The compliance ledger's non-CRUD ingress, resolved LAZILY at
+      // session-hook fire time (i.e. per request, long after boot). AuditPlugin
+      // is an optional pair in the CLI, so a miss is the ordinary case, not a
+      // degradation to report: no audit plugin means no `login`/`logout` rows,
+      // which is exactly the behaviour before this card. Deliberately NOT an
+      // `optionalDependencies` entry — nothing in `init()` consumes it, so
+      // there is no boot ordering to constrain.
+      getAuditSink: () => {
+        try {
+          return ctx.getService<AuthEventAuditSurface>('audit');
+        } catch {
+          return undefined;
+        }
+      },
     };
 
     // ADR-0069 D2 — cross-node rate-limit counters, backed by the kernel
@@ -512,6 +529,11 @@ export class AuthPlugin implements Plugin {
       // write-side guardrail that keeps an ungoverned capability grant
       // unrepresentable.
       objects: authIdentityObjects,
+      // [#8009] `sys_sso_provider.oidc_client_secret` — the encrypted home of the
+      // OIDC client secret that used to sit in cleartext inside `oidc_config`.
+      // See `manifest.ts` for why the field is declared here and not on the
+      // object file.
+      objectExtensions: authObjectExtensions,
       // ADR-0048 — Setup/Studio/Account apps (and the Setup nav contributions)
       // moved to their own one-app packages (@objectstack/{setup,studio,account}),
       // each registering under its own package id so /apps/<packageId> resolves
@@ -582,6 +604,22 @@ export class AuthPlugin implements Plugin {
     if (!this.authManager) {
       throw new Error('Auth manager not initialized');
     }
+
+    // [#8009] Move any provider row still holding a CLEARTEXT OIDC client
+    // secret in `oidc_config` into the encrypted column. Registered
+    // unconditionally (not under `registerRoutes`) because the disposition of
+    // an already-stored secret does not depend on whether this process serves
+    // the auth routes. The returned unsubscribe is deliberately dropped: the
+    // engine outlives the plugin and there is no `stop()` to unwind it in.
+    ctx.hook('kernel:ready', async () => {
+      let ql: IDataEngine | undefined;
+      try { ql = ctx.getService<IDataEngine>('objectql'); } catch { ql = undefined; }
+      if (!ql) {
+        try { ql = ctx.getService<IDataEngine>('data'); } catch { ql = undefined; }
+      }
+      if (!ql) return;
+      scheduleLegacySsoSecretMigration(ql, ctx.logger);
+    });
 
     // Setup App translations are now loaded by `PlatformObjectsPlugin`
     // (in @objectstack/platform-objects). Translation bundles belong with

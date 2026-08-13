@@ -17,6 +17,7 @@
     "@objectstack/example-showcase": "workspace:*",
     "@objectstack/mcp": "workspace:*",
     "@objectstack/metadata": "workspace:*",
+    "@objectstack/metadata-core": "workspace:*",
     "@objectstack/objectql": "workspace:*",
     "@objectstack/platform-objects": "workspace:*",
     "@objectstack/plugin-audit": "workspace:*",

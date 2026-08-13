@@ -7,6 +7,7 @@ import { strictObject, strictObjectError } from '../shared/strict-object';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { ExpressionInputSchema } from '../shared/expression.zod';
 import { normalizeVisibleWhen, VISIBILITY_STRICT_OPTIONS } from '../shared/visibility';
+import { VISIBILITY_ONLY_STRICT_OPTIONS } from '../shared/editability-boundary';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 import { ChartTypeSchema } from './chart.zod';
 import { SharingConfigSchema } from './sharing.zod';
@@ -1235,10 +1236,81 @@ export const NavigationConfigSchema = lazySchema(() => strictObject({
   width: z.union([z.string(), z.number()]).optional().describe('[DEPRECATED → size] Pixel/percent width of the drawer/modal (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket.'),
 }));
 
+// `'pdf'` retirement prescription (#8010). Declared with `//` on purpose — the
+// hook-body precedent's placement note applies here too: build-docs takes a
+// file's first JSDoc per exported symbol, and this constant needs no doc page.
+const LIST_VIEW_EXPORT_PDF_RETIRED =
+  "'pdf' was removed from `view.exportOptions` formats in @objectstack/spec 17.0.0 (#8010; "
+  + 'PDF export itself was declined as #1301 NOT_PLANNED) — no renderer has ever produced a PDF '
+  + 'export: ObjectGrid dropped the declared format from the export menu with only a runtime '
+  + "console.warn, so authoring it was a parse-clean no-op. Delete the value; the surviving "
+  + "formats are 'csv', 'xlsx' and 'json'. "
+  + 'Run `os migrate meta --from 16` to rewrite existing sources automatically.';
+
+/**
+ * Export formats the platform actually delivers (#8010): `csv`/`json` on both
+ * export paths, `xlsx` on the server stream only.
+ *
+ * `'pdf'` was REMOVED in 17 (#8010): PDF export was declined platform-side
+ * (#1301 NOT_PLANNED), so the enum member was a declared-but-unrenderable
+ * format whose only failure signal was a browser console line. This is an
+ * enum-VALUE narrowing, so there is no `retiredKey()` tombstone to hang the
+ * prescription on — the enum's own error map carries it
+ * ({@link LIST_VIEW_EXPORT_PDF_RETIRED}), keyed on `issue.input` so that only
+ * the value which used to be legal gets the "was removed" message (the
+ * `HookBodyCapability` / `object.managedBy: 'system'` precedent).
+ */
+const ListViewExportFormatSchema = z.enum(['csv', 'xlsx', 'json'], {
+  error: (issue) => (issue.input === 'pdf' ? LIST_VIEW_EXPORT_PDF_RETIRED : undefined),
+});
+
+/**
+ * Object form of `view.exportOptions` (#8010, maintainer ruling 2026-08-12 —
+ * option A). The declared key set is exactly what the only renderer reads,
+ * measured on objectui `origin/main@878140b` (`ObjectGrid.tsx:1596–1642`):
+ * `formats`, `maxRecords`, `includeHeaders`, `fileNamePrefix`, and the
+ * previously UNDECLARED `streaming` opt-out — declared here so no
+ * undeclared-but-read key survives the fix. Declaring anything more would be
+ * capability surface with no reader; declaring less recreates the defect.
+ */
+const ListViewExportOptionsSchema = strictObject({
+  surface: 'this export options block',
+  history: VIEW_HISTORY,
+}, {
+  formats: z.array(ListViewExportFormatSchema).optional()
+    .describe("Formats offered in the export menu (default: ['csv', 'json']). XLSX is delivered by the server stream only."),
+  maxRecords: z.number().int().nonnegative().optional()
+    .describe('Maximum number of records to export; 0 or absent = unlimited'),
+  includeHeaders: z.boolean().optional()
+    .describe('Include column headers in the exported file (default true)'),
+  fileNamePrefix: z.string().optional()
+    .describe('Download file name prefix — replaces the object label and suppresses the view label in the generated file name'),
+  streaming: z.boolean().optional()
+    .describe('Set false to force the client-side export path (csv/json only) instead of the server stream'),
+});
+
+/**
+ * Loud top-level refusal for a retired `'pdf'` anywhere in `exportOptions`
+ * (#8010). Without this, the prescription raised inside a union BRANCH is
+ * buried in `invalid_union` sub-errors; with it, the union's own message IS
+ * the prescription whenever the authored value — either spelling — declares
+ * `'pdf'`. Every other union failure keeps zod's default message, with the
+ * branch detail nested beneath it.
+ */
+const exportOptionsPdfUnionError = (issue: { input?: unknown }): string | undefined => {
+  const input = issue.input;
+  const declaresPdf = Array.isArray(input)
+    ? input.includes('pdf')
+    : (!!input && typeof input === 'object'
+        && Array.isArray((input as { formats?: unknown }).formats)
+        && ((input as { formats: unknown[] }).formats).includes('pdf'));
+  return declaresPdf ? LIST_VIEW_EXPORT_PDF_RETIRED : undefined;
+};
+
 /**
  * List View Schema (Expanded)
  * Defines how a collection of records is displayed to the user.
- * 
+ *
  * **NAMING CONVENTION:**
  * View names (when provided) are machine identifiers and must be lowercase snake_case.
  * 
@@ -1351,8 +1423,8 @@ export const ListViewSchema = lazySchema(() => strictObject({
 
   /** Grid Features */
   resizable: z.boolean().optional().describe('Enable column resizing'),
-  striped: z.boolean().optional().describe('Striped row styling'),
-  bordered: z.boolean().optional().describe('Show borders'),
+  // `striped` / `bordered` — tombstoned at the bottom of this shape with
+  // `virtualScroll` (#7176, pass-through-only; see the retired block below).
   compactToolbar: z.boolean().optional().describe('Collapse Group/Color/Density/Hide-fields into a single View settings popover'),
 
   /** Selection */
@@ -1409,9 +1481,6 @@ export const ListViewSchema = lazySchema(() => strictObject({
     + '`${ctx.selection.ids}` / `${ctx.selection.count}`.',
   ),
 
-  /** Performance */
-  virtualScroll: z.boolean().optional().describe('Enable virtual scrolling for large datasets'),
-
   /** Conditional Formatting */
   conditionalFormatting: z.array(strictObject({
     surface: 'this conditional formatting rule',
@@ -1435,7 +1504,21 @@ export const ListViewSchema = lazySchema(() => strictObject({
   inlineEdit: z.boolean().optional().describe('Allow inline editing of records directly in the list view'),
 
   /** Export */
-  exportOptions: z.array(z.enum(['csv', 'xlsx', 'pdf', 'json'])).optional().describe('Available export format options'),
+  // Object form adopted at #8010 (maintainer ruling 2026-08-12 — option A):
+  // the spec published a bare format array while the only renderer (objectui
+  // ObjectGrid) read `exportOptions.formats` — no declaration was both
+  // type-legal and functional. The object form is now the contract; the legacy
+  // bare array stays accepted and LIFTS to `{ formats: [...] }` at parse
+  // (z.input keeps both spellings, z.output is the object form only).
+  // `'pdf'` left the format enum in the same change (#1301 NOT_PLANNED) — the
+  // enum error map and the union error above carry the prescription.
+  exportOptions: z.union([
+    z.array(ListViewExportFormatSchema).transform((formats) => ({ formats })), // Legacy: bare format array
+    ListViewExportOptionsSchema,
+  ], { error: exportOptionsPdfUnionError }).optional().describe(
+    'Export configuration for the list toolbar export menu: `{ formats?, maxRecords?, includeHeaders?, fileNamePrefix?, streaming? }`. '
+    + 'A bare format array is the legacy spelling and lifts to `{ formats: [...] }` at parse.',
+  ),
 
   /** User Actions (Airtable Interface parity) */
   userActions: UserActionsConfigSchema.optional().describe('User action toggles for the view toolbar'),
@@ -1489,6 +1572,32 @@ export const ListViewSchema = lazySchema(() => strictObject({
     '`view.performance` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — ' +
     'no renderer or runtime read it; list-view performance tuning was never implemented. ' +
     'Delete the key. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+  ),
+
+  // `striped` / `bordered` / `virtualScroll` REMOVED (#7176, ADR-0049
+  // enforce-or-remove; maintainer ruling 2026-08-10). Every measured reader was
+  // a forwarding copy — react spec-bridge → plugin-list → plugin-view/app-shell
+  // — and the chain ends at ObjectGrid, which never spells any of the three:
+  // copy-without-apply is dead in effect. Per the ruling, if objectui wants one
+  // of these as real behavior, that is an implementation card filed first, and
+  // the key stays retired pending it.
+  striped: retiredKey(
+    '`view.striped` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — ' +
+    'every measured reader only copied it forward and no renderer ever applied it, so authoring ' +
+    'it was a parse-clean no-op. There is no authorable striped-rows switch; delete the key. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+  ),
+  bordered: retiredKey(
+    '`view.bordered` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — ' +
+    'every measured reader only copied it forward and no renderer ever applied it (the grid frame ' +
+    "is the renderer's own constant, not authorable). Delete the key. " +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+  ),
+  virtualScroll: retiredKey(
+    '`view.virtualScroll` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — ' +
+    'every measured reader only copied it forward and no grid ever virtualized off it; authoring ' +
+    'it was a parse-clean no-op. Delete the key; large datasets page via `pagination`. ' +
     'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 }));
@@ -1762,6 +1871,16 @@ const FormFieldBaseSchema = lazySchema(() => {
   return z.object(shape, {
     error: strictObjectError({
       ...VISIBILITY_STRICT_OPTIONS,
+      // #8202 — this shape names ITSELF. The shared table's `'this view/page
+      // schema'` was harmless while all three of its consumers answered a key
+      // the same way; since #7887 they answer `disabled` in two contradictory
+      // ways on purpose (the rename below on a field, the boundary
+      // prescription on a section / page component), and the contradiction is
+      // only coherent if the message says which shape refused the key. A
+      // per-shape string is by definition not something a table shared by
+      // three shapes can carry, so it is filed here — the same placement rule
+      // #8199 drew for the prescription itself.
+      surface: 'this form field',
       extraKeys: ['fields'],
       // The one member of the `visibleWhen` family that can answer `disabled`
       // with a key of its own (#7832). `VISIBILITY_STRICT_OPTIONS` is shared
@@ -1772,6 +1891,16 @@ const FormFieldBaseSchema = lazySchema(() => {
       // match `VISIBILITY_KEY_PATTERN` and are already answered by the shared
       // ADR-0089 prescription, which consumes the key before the rename channel
       // is consulted, so an alias for either would be dead on arrival.
+      //
+      // #7887 filed the OTHER half of that split from the same reasoning and in
+      // the same direction: the two sibling shapes now carry an editability
+      // BOUNDARY prescription (`shared/editability-boundary.ts`), and it is
+      // filed on those two rather than shared, because a `disabled`-matching
+      // guidanceSet on THIS table would consume the key before the rename below
+      // ever runs — killing the one pointer that is correct here, and turning
+      // `alias-integrity.test.ts`'s #7889 reachability check red. The two
+      // decisions are one rule read from both ends: the shared table may only
+      // carry what is true of all three surfaces.
       aliases: { disabled: 'readonly' },
     }, shape),
   });
@@ -1847,8 +1976,34 @@ export const FormFieldSchema: z.ZodType<FormField, FormFieldInput> = lazySchema(
  * set-keyed form and the conversion became the same one call every other closed
  * shape in this package makes. The `.transform()` that folds
  * `visibleOn` → `visibleWhen` is unchanged and still runs after the parse.
+ *
+ * ## A section gates VISIBILITY, not editability (#7887 — boundary, not gap)
+ *
+ * There is no `disabled`, `readonly` or `readonlyWhen` on a section, and that is
+ * a **deliberate boundary** ruled on 2026-08-12, not a slot nobody got round to
+ * adding: **editability lives on fields.** A section decides whether its fields
+ * are *shown* (`visibleWhen`, plus `collapsible` / `collapsed` for how); whether
+ * a shown field can be *edited* is the field's own `readonly` /
+ * {@link FormFieldSchema.readonlyWhen}, enforced by the field renderer that owns
+ * the input. Nothing in the platform reads a section-level read-only flag, so
+ * declaring one would ship the ADR-0049 declared-but-unenforced shape this repo
+ * is retiring elsewhere.
+ *
+ * Writing one anyway stays a loud parse error — unchanged — and since #7887 that
+ * error carries `EDITABILITY_BOUNDARY_KEYS`' prescription naming the field-level
+ * keys, so the author is redirected instead of merely refused. To make a whole
+ * section non-editable, mark its fields `readonly`; to make it conditionally
+ * non-editable, give each field a `readonlyWhen` predicate.
  */
-export const FormSectionSchema = lazySchema(() => strictObject(VISIBILITY_STRICT_OPTIONS, {
+export const FormSectionSchema = lazySchema(() => strictObject({
+  ...VISIBILITY_ONLY_STRICT_OPTIONS,
+  // #8202 — see the note at `FormFieldBaseSchema`'s options: the boundary
+  // prescription this table carries tells the author to move an editability
+  // key to "the form field(s) inside", and the field's own message tells them
+  // to rename it in place. The reader can only tell which answer is theirs if
+  // the rejection names the shape, so each of the three shapes names itself.
+  surface: 'this form section',
+}, {
   /**
    * Stable identifier for translation lookup. snake_case convention.
    * When provided, translation bundles can target this section's `label`
@@ -2479,13 +2634,26 @@ export const ObjectListViewSchema = lazySchema(() =>
   ListViewSchema.omit({ userFilters: true }).extend({ userFilters: ObjectUserFiltersSchema.optional() }));
 
 /**
+ * [#4001/#7741] The wrap remedy, ONE prose source for two doors: the container's
+ * unknown-key guidance (the build/authoring door below) and the inline overlay
+ * arms' missing-binding refusals (the runtime write door —
+ * {@link flattenedViewOverlayFields}). The ruling on #7741 (2026-08-12) requires
+ * the write door to reuse the build path's existing guidance — 「写门的拒绝复用
+ * build 路径已有的 guidance」 — so the sentence is shared rather than forked into
+ * a second copy that would drift on the first rewording.
+ */
+const VIEW_WRAP_REMEDY =
+  'Wrap it: `defineView({ list: { type, data, columns, … } })`, or name it — '
+  + '`defineView({ listViews: { my_view: { … } } })`.';
+
+/**
  * Master View Schema
  * Can define multiple named views.
  */
 /**
  * View Container Schema
  * Aggregates all view definitions for a specific object or context.
- * 
+ *
  * @example
  * {
  *   list: { type: "grid", columns: ["name"] },
@@ -2527,7 +2695,7 @@ export const ViewSchema = lazySchema(() => strictObject({
   // entry is a claim about the schema, and claims need verifying like code.
   guidance: Object.fromEntries(
     ['type', 'columns', 'data', 'viewKind', 'filters', 'sort']
-      .map((k) => [k, `\`${k}\` belongs to a single VIEW, not to the container. Wrap it: \`defineView({ list: { type, data, columns, … } })\`, or name it — \`defineView({ listViews: { my_view: { … } } })\`. The container's own keys are \`list\`, \`form\`, \`listViews\`, \`formViews\`.`]),
+      .map((k) => [k, `\`${k}\` belongs to a single VIEW, not to the container. ${VIEW_WRAP_REMEDY} The container's own keys are \`list\`, \`form\`, \`listViews\`, \`formViews\`.`]),
   ),
 }, {
     // Item identity. The container is a registered metadata item, so the door
@@ -2925,20 +3093,93 @@ export function defineViewItem(config: z.input<typeof ViewItemSchema>): ViewItem
 // above the object schemas #4001 closed: at union-MEMBER SELECTION, not at
 // any single member. The fix is a precondition, NOT a strictness flip on the
 // members — see {@link assertViewIdentity} and {@link viewMetadataVocabulary}.
+//
+// [#7741] The residue that precondition deliberately let through — a body that
+// DOES speak view vocabulary (`{ type: 'grid', columns: […] }`) but names no
+// object to attach to — was the same defect one layer further in: accepted,
+// persisted, badged valid, served by nothing. Closed at the members this time
+// (ruled direction B, 2026-08-12): the two flattened overlay arms now REQUIRE
+// `object` + `viewKind` — the exact pair the object-bound read paths filter on
+// — with located refusals that reuse the container door's wrap guidance. The
+// precondition's bar (speaks the vocabulary at all) and the members' bar
+// (bound enough to be servable) are different questions and stay in their own
+// stages; a baseline-shadowing personalization PUT arrives here already bound
+// because `normalizeViewMetadata` inherits identity before validation (#2555).
 
 /**
- * Optional identity + structural-guard fields layered onto the two "flattened
- * runtime overlay" members. The `config`/`list`/`form`/`listViews`/`formViews`
- * guards pin those keys to `undefined`: a body carrying any of them is a record
- * or a container, not a flattened overlay, so it must be validated by the
- * dedicated member instead of slipping through here with its real payload
- * stripped away.
+ * [#7741] The located refusals the two inline overlay arms give a body that
+ * arrives at the runtime write door without its object binding.
+ *
+ * Why these are REQUIRED rather than optional (maintainer ruling, 2026-08-12,
+ * direction B): every object-bound read path matches a stored view row on
+ * `object` AND `viewKind` — `GET /meta/view?object=` (rest-server.ts) and
+ * `getViewsByObject()` (metadata-manager.ts) both filter
+ * `v.viewKind && v.object === obj` — so an inline config missing either is
+ * stored, badged `valid: true`, and then served by nothing: `expandViewContainer`
+ * never sees it (it is not a container) and the switcher never lists it. The
+ * ruling: 「一个无法展开、无法被任何读路径服务的行,不允许被存储并盖上
+ * `valid:true`」. Both fields, not `object` alone, because the pair is what the
+ * measured serving filter requires — a row bound by `object` but missing
+ * `viewKind` is exactly as invisible to the switcher as the card's repro.
+ *
+ * The platform's own personalization writes are unaffected: `saveMetaItem`
+ * normalizes before it validates, and `viewIdentityPatch`
+ * (`@objectstack/metadata-protocol`, #2555) inherits `viewKind`/`object`/`label`
+ * from the registry entry the overlay shadows — an expanded ViewItem always
+ * carries both — so a console pin/sort/hide PUT on a REAL view reaches this
+ * schema already bound. The body that arrives unbound is the one with no entry
+ * to inherit from: a new name authored inline, i.e. the dead row this closes.
+ *
+ * Draft and active alike, by the same ruling — the schema is mode-agnostic on
+ * purpose: 「draft 与 active 同样适用 …… 现在没有这个证据,不预留」.
+ */
+const INLINE_VIEW_OBJECT_REQUIRED =
+  'This inline view config names no `object`, so the saved row could never be served: '
+  + '`GET /meta/view?object=…` and the view switcher match stored views on `object` + `viewKind`, '
+  + 'and a row missing them is registered yet renders nowhere. '
+  + 'Bind it — add `object: "<object_name>"` and `viewKind: "list" | "form"` — or save a ViewItem '
+  + 'record (`{ name, object, viewKind, config: { … } }`), or make it a container. '
+  + VIEW_WRAP_REMEDY;
+
+const INLINE_VIEW_KIND_REQUIRED =
+  'This inline view config names no `viewKind`, so the saved row could never be served: '
+  + '`GET /meta/view?object=…` and the view switcher match stored views on `object` + `viewKind`, '
+  + 'and a row missing them is registered yet renders nowhere. '
+  + 'Bind it — add `viewKind: "list" | "form"` alongside `object` — or save a ViewItem record '
+  + '(`{ name, object, viewKind, config: { … } }`), or make it a container. '
+  + VIEW_WRAP_REMEDY;
+
+/**
+ * Identity + structural-guard fields layered onto the two "flattened runtime
+ * overlay" members. The `config`/`list`/`form`/`listViews`/`formViews` guards
+ * pin those keys to `undefined`: a body carrying any of them is a record or a
+ * container, not a flattened overlay, so it must be validated by the dedicated
+ * member instead of slipping through here with its real payload stripped away.
+ *
+ * [#7741] `object` and `viewKind` are REQUIRED on these two members — see the
+ * refusal constants above for the measured reason and the ruling. The rest of
+ * the identity fields stay optional: they are display/round-trip state, not
+ * what any read path filters on.
  */
 function flattenedViewOverlayFields() {
   return {
     name: z.string().optional().describe('Save name / qualified view id (stamped by the write path).'),
-    object: z.string().optional().describe('Bound object name (inherited from the shadowed entry — #2555).'),
-    viewKind: ViewKindSchema.optional().describe('View family (inherited from the shadowed entry — #2555).'),
+    object: z
+      .string({ error: (issue) => (issue.input === undefined ? INLINE_VIEW_OBJECT_REQUIRED : undefined) })
+      .describe(
+        'Bound object name — REQUIRED on an inline view config (#7741): the object-bound read paths '
+        + '(`GET /meta/view?object=`, the view switcher) match on `object` + `viewKind`, so an unbound '
+        + 'row can never be served. Inherited from the shadowed entry on personalization PUTs (#2555).',
+      ),
+    viewKind: z
+      .enum(ViewKindSchema.options, {
+        error: (issue) => (issue.input === undefined ? INLINE_VIEW_KIND_REQUIRED : undefined),
+      })
+      .describe(
+        'View family — REQUIRED on an inline view config (#7741): half of the `object` + `viewKind` '
+        + 'pair the object-bound read paths match on. Inherited from the shadowed entry on '
+        + 'personalization PUTs (#2555).',
+      ),
     label: I18nLabelSchema.optional().describe('Display label (inherited from the shadowed entry — #2555).'),
     isDefault: z.boolean().optional(),
     order: z.number().int().optional(),
@@ -3066,7 +3307,11 @@ function speaksViewVocabulary(body: unknown): boolean {
  * whether the view is *complete* — which is what keeps it compatible with every
  * lean shape the platform round-trips. A pin PUT (`{ isPinned: true }`), a hide
  * PUT (`{ hidden: true }`), a reorder (`{ sortOrder: 3 }`) and a column-sort PUT
- * all carry declared non-identity keys and are unaffected.
+ * all carry declared non-identity keys and are unaffected *by this precondition*
+ * ([#7741] the UNION may still refuse the baseline-less ones — an overlay with
+ * no shadowed entry to inherit `object`/`viewKind` from now fails the members'
+ * binding requirement, which is the ruled behaviour, and the refusal is the
+ * members' located guidance rather than this precondition's).
  *
  * "Complete" is deliberately NOT the bar, and the distinction is the whole
  * reason this is safe: `{ isPinned: true }` is not a renderable view either, but
@@ -3203,6 +3448,10 @@ const ViewContainerWireSchema = lazySchema(() =>
  * ledger names this as the trap to watch while batching: a response-side
  * extension of an authoring schema must strip back, or an upstream field
  * addition becomes a crash.
+ *
+ * [#7741] `object` + `viewKind` are required on this arm (and its form
+ * sibling) — see {@link flattenedViewOverlayFields} for the ruling and the
+ * measured serving filter that decides exactly this pair.
  */
 const ListViewOverlayWireSchema = lazySchema(() =>
   ListViewSchema.extend(flattenedViewOverlayFields()).strip(),

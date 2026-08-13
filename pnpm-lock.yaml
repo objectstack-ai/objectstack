@@ -1323,6 +1323,9 @@ importers:
       '@objectstack/formula':
         specifier: workspace:*
         version: link:../formula
+      '@objectstack/lint':
+        specifier: workspace:*
+        version: link:../lint
       '@types/node':
         specifier: ^26.1.2
         version: 26.1.2
@@ -1749,6 +1752,9 @@ importers:
       '@objectstack/formula':
         specifier: workspace:*
         version: link:../../formula
+      '@objectstack/metadata-core':
+        specifier: workspace:*
+        version: link:../../metadata-core
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../objectql
@@ -1762,9 +1768,15 @@ importers:
         specifier: workspace:*
         version: link:../../types
     devDependencies:
+      '@objectstack/driver-sql':
+        specifier: workspace:*
+        version: link:../../drivers/driver-sql
       '@types/node':
         specifier: ^26.1.2
         version: 26.1.2
+      better-sqlite3:
+        specifier: ^13.0.2
+        version: 13.0.2
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -1823,6 +1835,9 @@ importers:
       '@objectstack/metadata':
         specifier: workspace:*
         version: link:../../metadata
+      '@objectstack/metadata-core':
+        specifier: workspace:*
+        version: link:../../metadata-core
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../objectql
@@ -1971,12 +1986,18 @@ importers:
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../objectql
+      '@objectstack/plugin-hono-server':
+        specifier: workspace:*
+        version: link:../plugins/plugin-hono-server
       '@objectstack/plugin-security':
         specifier: workspace:*
         version: link:../plugins/plugin-security
       '@objectstack/service-analytics':
         specifier: workspace:*
         version: link:../services/service-analytics
+      '@objectstack/service-datasource':
+        specifier: workspace:*
+        version: link:../services/service-datasource
       '@types/node':
         specifier: ^26.1.2
         version: 26.1.2
@@ -2464,6 +2485,9 @@ importers:
         specifier: workspace:*
         version: link:../../types
     devDependencies:
+      '@objectstack/objectql':
+        specifier: workspace:*
+        version: link:../../objectql
       '@types/node':
         specifier: ^26.1.2
         version: 26.1.2
