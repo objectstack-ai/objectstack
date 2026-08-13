@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { FieldMappingSchema } from './mapping.zod';
 import { ConnectorFieldMappingSchema } from '../integration/connector.zod';
-import { ExternalFieldMappingSchema } from '../data/external-lookup.zod';
 
 describe('FieldMappingSchema', () => {
   it('should accept minimal valid mapping', () => {
@@ -95,14 +94,16 @@ describe('[#5552] FieldMapping.transform is retired, and says so', () => {
     expect(result.error!.issues[0]!.message).toMatch(/os migrate meta --from 16/s);
   });
 
-  it('both extenders inherit the tombstone — one retirement, three authorable spellings', () => {
-    // `ConnectorFieldMappingSchema` and `ExternalFieldMappingSchema` are
-    // `.extend()`s of the base, so the retired property is copied into their
-    // shapes. This is why `RETIRED_KEYS_BY_MAJOR` registers three keys for one
-    // tombstone; if `.extend()` ever stopped copying it, this goes red.
+  it('the surviving extender inherits the tombstone — one retirement, two authorable spellings', () => {
+    // `ConnectorFieldMappingSchema` is an `.extend()` of the base, so the
+    // retired property is copied into its shape. This is why
+    // `RETIRED_KEYS_BY_MAJOR` registers a key per walked shape — nothing
+    // radiates from the base; if `.extend()` ever stopped copying it, this
+    // goes red. (`ExternalFieldMappingSchema` was the third spelling until the
+    // whole external-lookup family left in #8075; its retired-keys entry was
+    // subsumed by the def retirement, the WidgetManifest.performance way.)
     for (const [name, schema] of [
       ['ConnectorFieldMapping', ConnectorFieldMappingSchema],
-      ['ExternalFieldMapping', ExternalFieldMappingSchema],
     ] as const) {
       const result = schema.safeParse(RETIRED);
       expect(result.success, `${name} must reject the retired key`).toBe(false);

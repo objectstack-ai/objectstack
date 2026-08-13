@@ -71,8 +71,20 @@ behind the same `ICryptoProvider` seam via `cryptoProvider` plugin option.
 > `InMemoryCryptoProvider` is a deprecated alias for `LocalCryptoProvider`
 > (the old name wrongly implied an ephemeral key).
 
-The legacy `CryptoAdapter` / `NoopCryptoAdapter` (a base64 wrapper) remains
-only as a pre-Phase-3 backward-compat path when no `cryptoProvider` is wired.
+The legacy `CryptoAdapter` seam remains as a pre-Phase-3 backward-compat path
+when no `cryptoProvider` is wired — but only for an adapter that actually
+encrypts. `NoopCryptoAdapter` (a base64 wrapper) no longer takes part in a
+**write**: since #8026 the write path **fails closed** and refuses to persist a
+declared-encrypted value (`encrypted: true` / `type: 'password'`) when the only
+thing available is an adapter that provides no confidentiality, matching the
+engine's `Field.secret()` posture. Base64 is encoding, not encryption, and a
+populated `value_enc` reads as protected to the next author and the next audit.
+
+The class stays exported and its `decrypt()` is unchanged, so existing `b64:`
+rows remain readable and migratable. An adapter declares itself fit to hold a
+secret with `confidential: true` (absent means "yes" — only the base64 default
+declares `false`), and `providesConfidentiality(adapter)` is the exported
+predicate the write path uses.
 
 ## Audit
 

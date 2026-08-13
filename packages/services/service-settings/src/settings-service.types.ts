@@ -311,6 +311,47 @@ export class UnknownKeyError extends Error {
 }
 
 /**
+ * Thrown when a write would persist a declared-encrypted value (`encrypted:
+ * true` or `type: 'password'`) and nothing able to encrypt it is wired (#8026).
+ *
+ * ## Why this is a refusal and not a fallback
+ *
+ * The path this replaces persisted `'b64:' + base64(plaintext)` through
+ * `NoopCryptoAdapter` — encoding, not encryption, and worse than plaintext in
+ * one specific way: `sys_setting.value_enc` comes back populated, so both the
+ * next author and the next audit read the row as protected. The engine's
+ * `Field.secret()` path has always thrown here instead, which is what makes a
+ * provider-less deployment safe to REPORT on rather than silently wrong. This
+ * error is the settings side taking the same posture.
+ *
+ * ## Wire spelling
+ *
+ * Not mapped to a dedicated HTTP status/code by `settings-routes.ts`: it
+ * surfaces on the `500 INTERNAL_ERROR` arm every unmapped service error takes,
+ * carrying this message. That is deliberate for now — a dedicated
+ * `SETTINGS_CRYPTO_UNAVAILABLE` on the wire has to be registered in
+ * `ERROR_CODE_LEDGER` (`packages/spec`) first, or it is the "silent fourth
+ * state" ADR-0112 forbids, and that registration is out of this card's scope.
+ * `code` is therefore an IN-PROCESS discriminator today: a plugin calling
+ * `settings.setMany` branches on it exactly as it does on `SETTINGS_LOCKED`.
+ */
+export class SettingsCryptoUnavailableError extends Error {
+  readonly code = 'SETTINGS_CRYPTO_UNAVAILABLE' as const;
+  constructor(
+    readonly namespace: string,
+    readonly key: string,
+  ) {
+    super(
+      `Cannot persist encrypted setting '${namespace}.${key}': no CryptoProvider is wired ` +
+        'and the configured CryptoAdapter declares no confidentiality (base64 is encoding, ' +
+        'not encryption). Wire SettingsServicePluginOptions.cryptoProvider ' +
+        '(LocalCryptoProvider in dev, a KMS/Vault provider in production), or inject a real ' +
+        '`crypto` adapter. Refusing to store a reversible value (fail-closed).',
+    );
+  }
+}
+
+/**
  * [Finding-1] Thrown when an ENFORCED (HTTP-boundary) caller lacks the
  * capability a manifest declares for the operation — `readPermission` for
  * reads, `writePermission` for writes/actions. Maps to HTTP 403. Trusted

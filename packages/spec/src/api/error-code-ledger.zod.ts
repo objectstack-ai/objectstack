@@ -76,7 +76,15 @@
  * "no silent fourth state" read backwards, and it is not hypothetical:
  * `OVERLAY_PERSISTENCE_FAILED` outlived its only producer by one PR (#5264
  * deleted `saveMetaItem`'s legacy raw-engine branch; #5783 unregistered the
- * code). Before deleting a row, check that no producer remains repo-wide AND
+ * code). Nor does a row need to LOSE its producer to be in this class — a
+ * throw site whose error can never reach a response envelope was unemittable
+ * from birth: `MONGODB_MULTI_TENANT_UNSUPPORTED` (registered by #3724,
+ * unregistered by #8035) is a BOOT refusal — the CLI rethrows it pre-HTTP and
+ * aborts, and the one request-reachable trigger sits inside a documented
+ * best-effort catch that logs and continues. Its throw site and constant
+ * (`MULTI_TENANT_UNSUPPORTED_CODE`, `@objectstack/driver-mongodb`) live on:
+ * host boot matching is not wire vocabulary.
+ * Before deleting a row, check that no producer remains repo-wide AND
  * that no consumer — including `objectui` and `cloud` — reads the literal;
  * tests that merely CONSTRUCT the code are not producers, and a test pinned to
  * a producerless code is pinning nothing (#4984's phantom-check family).
@@ -102,6 +110,16 @@ export const ERROR_CODE_LEDGER = {
     'BATCH_UNRESOLVED_REF',
     'BLANK_MATCH_KEY',
     'CONCURRENT_UPDATE',
+    // [#8111] `respondSharingError`'s 409 arm — `revoke` on a rule-materialised
+    // share (`source != 'manual'`), thrown by plugin-sharing's `sharing-service`
+    // and documented at `content/docs/kernel/runtime-services/sharing-service.mdx`.
+    // REGISTERED, not renamed: this is the value the arm has always put on the
+    // wire, and #8111 converged its POSITION only. Consolidating it onto the
+    // standard catalog's `RESOURCE_CONFLICT` would change what clients read, so
+    // it is a deliberate wire change for the maintainer, filed separately —
+    // exactly the shape this block's existing generic synonyms (`NOT_FOUND`,
+    // `FORBIDDEN`, `INTERNAL`) already carry.
+    'CONFLICT',
     'CONFLICTING_MAPPING',
     'DATASET_INVALID',
     'DELEGABLE_SCOPE_FAILED',
@@ -397,9 +415,6 @@ export const ERROR_CODE_LEDGER = {
     'EXTERNAL_SCHEMA_MISMATCH',
     'EXTERNAL_SCHEMA_MODE_VIOLATION',
     'EXTERNAL_WRITE_FORBIDDEN',
-  ],
-  '@objectstack/driver-mongodb': [
-    'MONGODB_MULTI_TENANT_UNSUPPORTED',
   ],
 } as const satisfies Record<string, readonly string[]>;
 

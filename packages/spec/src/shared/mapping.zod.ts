@@ -6,14 +6,16 @@ import { retiredKey } from './retired-key';
 /**
  * Base Field Mapping Protocol
  *
- * Shared by: Connector, External Lookup
+ * Shared by: Connector
  *
  * This module provides the canonical field mapping schema used across
  * ObjectStack for data synchronization.
  *
  * **Use Cases:**
  * - Integration connectors (integration/connector.zod.ts)
- * - External lookups (data/external-lookup.zod.ts)
+ * - (`data/external-lookup.zod.ts`'s `ExternalFieldMappingSchema` extended
+ *   this base too, until the whole external-lookup family was retired in
+ *   #8075 — ADR-0049, zero consumers.)
  *
  * @example Basic field mapping
  * ```typescript

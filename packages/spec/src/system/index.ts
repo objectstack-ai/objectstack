@@ -13,7 +13,22 @@
 // Infrastructure Services
 export * from './cache.zod';
 export * from './disaster-recovery.zod';
-export * from './message-queue.zod';
+// message-queue.zod (MessageQueueProviderSchema / TopicConfigSchema /
+// ConsumerConfigSchema / DeadLetterQueueSchema / MessageQueueConfigSchema
+// + every type alias) was REMOVED per ADR-0049 enforce-or-remove (#8075). The
+// module declared broker-administration config for six providers — partitions,
+// consumer groups, DLQs — including a required inline `sasl.password`
+// credential, and no runtime ever parsed or read any of it: zero consumers
+// outside this package repo-wide, no `message_queue` metadata type, and the
+// connector 'message_queue' ConnectorType value never referenced these shapes.
+// The consumed near-namesake is `kernel/events/integrations.zod.ts`'s
+// `EventMessageQueueConfigSchema` (`EventBusConfigSchema.messageQueue`), which
+// deliberately carries NO credential field — broker connection/credentials are
+// deployment configuration for the runtime, not authorable metadata. Queue
+// administration as authorable protocol metadata returns via the enforce route
+// of ADR-0049 through a new ADR — the broker admin service first, the
+// vocabulary second. See the D3 record
+// `external-lookup-message-queue-families-retired`.
 export * from './object-storage.zod';
 export * from './search-engine.zod';
 export * from './http-server.zod';

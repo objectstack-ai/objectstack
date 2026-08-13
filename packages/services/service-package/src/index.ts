@@ -26,11 +26,105 @@ export interface PackageRecord {
   updated_at: string;
 }
 
+/**
+ * [#8131] The caller-facing sentence a driver-fault publish answers with.
+ *
+ * Deliberately a CONSTANT with no interpolation at all. The whole defect this
+ * closes was `(error as Error).message` being handed back as caller-visible
+ * data, so the remedy is not "interpolate something safer" — it is that this
+ * producer interpolates *nothing* into the message a caller reads. Exported so
+ * the door and its pins can assert the POSITIVE shape rather than the absence
+ * of a driver line (an absence assertion passes for any rewrite, including a
+ * worse one).
+ *
+ * It says the three things a caller can act on: the write did not land, the
+ * detail exists but on the server, and this is not theirs to fix.
+ */
+export const PACKAGE_PUBLISH_DRIVER_FAULT_MESSAGE =
+  'The package registry could not store this package. The failure was logged on the server; '
+  + 'no package data was written.';
+
+/**
+ * [#8131] A publish that failed because the WRITE broke — a server fault.
+ *
+ * Its `message` is always safe to hand a caller: the driver's own text went to
+ * the log and travels no further.
+ */
+export interface PackagePublishDriverFault {
+  /** A stable sentence. NEVER interpolates driver text. */
+  message: string;
+}
+
+/**
+ * [#8131] The outcome of {@link PackageService.publish}.
+ *
+ * The discriminant is the CHANNEL, not a field to parse:
+ *
+ *  - **Returned** `{ success: false, driverFault }` — the write itself broke.
+ *    The caller did nothing wrong, so this is a **5xx**, and the driver's text
+ *    is not theirs to read.
+ *  - **Thrown**, carrying an ADR-0112 envelope — a *refusal*. `publish` does
+ *    not swallow those; they leave by the door's `sendThrownError`, where
+ *    #8016's mapping answers them with the producer's own status and code
+ *    (a `409 DESTRUCTIVE_CHANGE` stays a 409) and #8086's withhold judges
+ *    their prose.
+ *
+ * Replaces `error?: string`, which was that leak's carrier: a bare string
+ * cannot say which side is at fault, so the door had no way to answer anything
+ * but one status for both, and it picked the wrong one.
+ */
+export interface PackagePublishResult {
+  success: boolean;
+  /** Present only when the write broke. Absent on success. */
+  driverFault?: PackagePublishDriverFault;
+}
+
 export interface PackageService {
-  publish(data: { manifest: ObjectStackManifest; metadata: PackageMetadata }): Promise<{ success: boolean; error?: string }>;
+  publish(data: { manifest: ObjectStackManifest; metadata: PackageMetadata }): Promise<PackagePublishResult>;
   get(packageId: string, version?: string): Promise<PackageRecord | null>;
   list(): Promise<PackageRecord[]>;
   delete(packageId: string, version?: string): Promise<{ success: boolean }>;
+}
+
+/**
+ * [#8131] Does this throw DECLARE an HTTP answer of its own (ADR-0112)?
+ *
+ * The channel is the **status**, in both spellings `resolveThrownHttpError`
+ * (`@objectstack/types`, the ONE rule both package doors call since #8016)
+ * reads, and for the reason that function documents: both are produced in this
+ * repo (`metadata-protocol` throws `status`, `plugin-approvals` throws
+ * `statusCode`), and reading only one is how a deliberate refusal became a
+ * 500.
+ *
+ * ⛔ **`.code` is deliberately NOT a declaration here, and that is a measured
+ * decision, not an omission.** Every SQL driver populates a string `code` on
+ * its errors — `node:sqlite` throws `ERR_SQLITE_ERROR`, better-sqlite3
+ * `SQLITE_ERROR`, Postgres the SQLSTATE `42P01`, MySQL `ER_NO_SUCH_TABLE`.
+ * An earlier draft of this predicate accepted any non-empty string `code`, and
+ * the real-driver cases in `publish-driver-fault.test.ts` went red at once:
+ * every genuine driver fault was re-thrown as if it were a refusal, resolved
+ * to `500 INTERNAL_ERROR` with the driver's own message, and — because
+ * `looksLikeInternalErrorLeak` is false for `no such table: sys_packages` —
+ * that message reached the wire. The exact leak this card closes, re-opened by
+ * the classifier. A producer that wants a specific answer declares a
+ * **status**; a bare string `code` is a channel it shares with every driver we
+ * ship, so it cannot carry intent at this seam.
+ *
+ * The predicate is asked HERE rather than imported because
+ * `@objectstack/types` resolves through `exports` to `dist/`, so
+ * value-importing it would make this package's unit pins a verdict about a
+ * build artifact (`check:test-source-alias`). Its agreement with the shared
+ * rule is pinned at the door, where `@objectstack/types` is already a value
+ * dependency — see `package-publish-status-classification.test.ts` §5.
+ *
+ * Note this is a test of DECLARATION, not of the status's band. A declared
+ * 5xx is re-thrown too: the producer said what it was, so the door's shared
+ * mapping — not this catch — is what should answer for it.
+ */
+function declaresHttpAnswer(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const { status, statusCode } = error as { status?: unknown; statusCode?: unknown };
+  return typeof status === 'number' || typeof statusCode === 'number';
 }
 
 /**
@@ -111,10 +205,40 @@ export class PackageServicePlugin implements Plugin {
           logger.info(`Published package: ${data.manifest.id}@${data.manifest.version}`);
           return { success: true };
         } catch (error) {
+          // [#8131] ① The raw driver text goes to the LOG — the one place it
+          // belongs, and where it already went. Nothing about the operator's
+          // diagnostics changes here; what changes is that this is now the
+          // ONLY place it goes.
           logger.error('Failed to publish package', error as Error);
+
+          // ② A throw that DECLARES its own envelope is a REFUSAL, and a
+          // refusal is not this method's to swallow. Re-thrown so it leaves by
+          // the door's catch-all, where #8016's shared mapping answers it with
+          // the producer's own status and code. Swallowing these is what
+          // flattened every coded refusal reachable from this call path into
+          // one `400 PACKAGE_PUBLISH_FAILED` — the mirror of the defect #8016
+          // fixed for the throw path, and the reason a caller error and a
+          // server fault were indistinguishable on this route.
+          if (declaresHttpAnswer(error)) throw error;
+
+          // ③ Everything else is a DRIVER FAULT: the `INSERT INTO
+          // sys_packages` broke, the caller's request was never the problem,
+          // and the driver's line — a constraint dump naming physical columns,
+          // a `SQLITE_ERROR`, an `SQLSTATE` — is not theirs to read. A stable
+          // sentence goes back instead.
+          //
+          // ⚠️ This is the half that actually closes the disclosure, and it
+          // has to be: the 5xx withhold (#8086) lives in the door's
+          // `sendThrownError`, which a RETURNED failure never reaches at any
+          // status. `sendError` consults no predicate, so correct
+          // classification alone leaves the text on the wire — measured
+          // against the POST-#8132 predicate, which recognises
+          // `no such table: sys_packages` perfectly and is never asked.
+          // A smarter heuristic does not make this redundant; nothing on this
+          // path calls one.
           return {
             success: false,
-            error: (error as Error).message,
+            driverFault: { message: PACKAGE_PUBLISH_DRIVER_FAULT_MESSAGE },
           };
         }
       },

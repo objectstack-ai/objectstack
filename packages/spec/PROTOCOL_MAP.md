@@ -34,7 +34,6 @@ This document serves as the **Grand Map** of the ObjectStack specification. It l
 | [`seed-loader.zod.ts`](src/data/seed-loader.zod.ts) | | **Seed Loader**. How seed rows are resolved and applied. |
 | [`analytics.zod.ts`](src/data/analytics.zod.ts) | | **Data Analytics**. Aggregation and multidimensional analysis types. |
 | [`document.zod.ts`](src/data/document.zod.ts) | | **Document**. Unstructured document storage protocol. |
-| [`external-lookup.zod.ts`](src/data/external-lookup.zod.ts) | | **External Lookup**. Virtual lookups to external API data. |
 | [`filter.zod.ts`](src/data/filter.zod.ts) | | **Filter**. Low-level filter syntax definitions. |
 | [`hook.zod.ts`](src/data/hook.zod.ts) | | **Triggers/Hooks**. Database trigger definitions (before/after insert/update). |
 | [`mapping.zod.ts`](src/data/mapping.zod.ts) | | **Data Mapping**. Rules for transforming data between schemas. |
@@ -131,7 +130,6 @@ This document serves as the **Grand Map** of the ObjectStack specification. It l
 | [`metrics.zod.ts`](src/system/metrics.zod.ts) | | **Observability**. Prometheus/OpenTelemetry metrics. |
 | [`tracing.zod.ts`](src/system/tracing.zod.ts) | | **Tracing**. Distributed tracing configuration. |
 | [`object-storage.zod.ts`](src/system/object-storage.zod.ts) | | **File Storage**. S3 bucket and upload configurations. |
-| [`message-queue.zod.ts`](src/system/message-queue.zod.ts) | | **Message Queue**. Internal event bus settings. |
 | [`search-engine.zod.ts`](src/system/search-engine.zod.ts) | | **Search**. Elasticsearch/Meilisearch configuration. |
 | [`notification.zod.ts`](src/system/notification.zod.ts) | | **Notifications**. System-wide notification preferences. |
 | [`translation.zod.ts`](src/system/translation.zod.ts) | | **i18n**. Internationalization and localization. |

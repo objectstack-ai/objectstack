@@ -67,4 +67,22 @@ describe('ErrorCode (standard ∪ registered)', () => {
     expect(() => ErrorCode.parse(400)).toThrow();                // pre-#3842 dispatcher shape
     expect(() => ErrorCode.parse('')).toThrow();
   });
+
+  it('rejects retired registered-but-unemittable codes (the ledger header "Retiring a code" class)', () => {
+    // MONGODB_MULTI_TENANT_UNSUPPORTED (#3724 → retired #8035): a BOOT
+    // refusal — the CLI rethrows it pre-HTTP and aborts; the one
+    // request-reachable trigger is swallowed by a documented best-effort
+    // catch. No response envelope can carry it, so keeping the row promised
+    // clients a code no response delivers (precedent:
+    // OVERLAY_PERSISTENCE_FAILED / #5783). The throw site and its constant
+    // (`MULTI_TENANT_UNSUPPORTED_CODE` in `@objectstack/driver-mongodb`)
+    // deliberately live on — host boot matching is not wire vocabulary —
+    // which is exactly why the WIRE vocabulary must refuse the string.
+    expect(() => ErrorCode.parse('MONGODB_MULTI_TENANT_UNSUPPORTED')).toThrow();
+    expect(REGISTERED_ERROR_CODES).not.toContain('MONGODB_MULTI_TENANT_UNSUPPORTED');
+    // The row was the package's only registration, so the owner key came out
+    // with it — a future driver-mongodb WIRE code re-adds the entry
+    // deliberately, with an emit path, not by reverting #8035.
+    expect(Object.keys(ERROR_CODE_LEDGER)).not.toContain('@objectstack/driver-mongodb');
+  });
 });

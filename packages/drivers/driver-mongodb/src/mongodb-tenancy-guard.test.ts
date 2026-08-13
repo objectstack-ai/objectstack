@@ -34,6 +34,18 @@ function makeDriver() {
 }
 
 describe('multi-tenancy boot guard (#3724)', () => {
+  it('pins the code literal — the CLI boot handler matches it duck-typed', () => {
+    // `packages/cli/src/commands/serve.ts` rethrows a driver-construction
+    // failure on `e?.code === 'MONGODB_MULTI_TENANT_UNSUPPORTED'` (matched by
+    // LITERAL so the CLI keeps no dependency on this package). #8035 removed
+    // the code from the spec error-code ledger — it is host boot vocabulary,
+    // not wire vocabulary — so this pin is now the only cross-package guard
+    // on the literal: silently changing the value would un-arm the CLI's
+    // loud-fail path, and the boot would swallow the refusal and come up
+    // with NO driver at all (the exact failure #3724 removed).
+    expect(MULTI_TENANT_UNSUPPORTED_CODE).toBe('MONGODB_MULTI_TENANT_UNSUPPORTED');
+  });
+
   beforeEach(() => {
     delete process.env.OS_MULTI_ORG_ENABLED;
     delete process.env.OS_TENANCY_POSTURE;

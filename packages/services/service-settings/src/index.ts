@@ -9,6 +9,11 @@ export { SettingsService } from './settings-service.js';
 export {
   type CryptoAdapter,
   NoopCryptoAdapter,
+  // #8026 — the predicate the write path asks before it agrees to hold a
+  // declared-secret value. Published with the interface it reads: an adapter
+  // author needs to be able to check their own `confidential` declaration the
+  // same way the service does, rather than re-deriving the two-arm rule.
+  providesConfidentiality,
 } from './crypto-adapter.js';
 // Default, KMS-free ICryptoProvider. AES-256-GCM keyed off `OS_SECRET_KEY`
 // (production) or a persisted dev key; fails loud in production rather than
@@ -32,6 +37,10 @@ export {
   type SettingsRow,
   type SettingsServiceOptions,
   envKeyOf,
+  // #8026 — thrown when a declared-encrypted write has nothing able to encrypt
+  // it. Exported so an in-process caller can branch on the refusal (there is no
+  // dedicated wire code for it yet; see the class doc).
+  SettingsCryptoUnavailableError,
   SettingsLockedError,
   SettingsValidationError,
   UnknownKeyError,
@@ -66,6 +75,25 @@ export {
   redactSecretValues,
   dropEchoedSecretMasks,
 } from './settings-secret-redaction.js';
+// #8103 — REPORT-ONLY classification of `sys_secret` rows against the settings
+// subsystem's references. Published because the operator-facing vehicle for it
+// (admin command / opt-in script) is still an open maintainer decision and will
+// live outside this package; the classifier is the part that is safe to settle
+// now. ⛔ Contains no deletion and must not grow one — and note the verdict
+// vocabulary's third value: `sys_secret` has three producers, so "unreferenced
+// by `sys_setting`" is NOT "unreferenced". See the module header.
+export {
+  classifySysSecretRows,
+  collectEncryptedSpecifierRefs,
+  isSecretHandle,
+  SECRET_HANDLE_PREFIX,
+  type ClassifiedSecretRow,
+  type EncryptedSpecifierRef,
+  type SecretRowSnapshot,
+  type SecretRowVerdict,
+  type SettingRowSnapshot,
+  type SysSecretOrphanReport,
+} from './sys-secret-orphan-report.js';
 export {
   settingsObjects,
   settingsPluginManifestHeader,

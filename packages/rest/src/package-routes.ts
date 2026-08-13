@@ -417,7 +417,39 @@ export function registerPackageRoutes(
         return;
       }
 
-      sendError(res, 400, 'PACKAGE_PUBLISH_FAILED', result.error ?? `Failed to publish ${manifest.id}.`);
+      // [#8131] A REPORTED publish failure is a DRIVER FAULT, and a driver
+      // fault is a **5xx**. This answered `400` for as long as it existed —
+      // telling a caller to fix a request that was never the problem, and
+      // hiding a real server fault from every dashboard that buckets by
+      // status. It is the mirror of what #8016 fixed on the throw path there
+      // (`a caller who was refused was told the platform had broken`); here
+      // the platform broke and the caller was told they had made a mistake.
+      //
+      // The CALLER's own errors on this route are unaffected and still 4xx:
+      // the missing-field and invalid-manifest refusals above are checked
+      // before `publish` is called at all, and a coded refusal thrown from
+      // below `publish` is re-thrown by the producer and answered by
+      // {@link sendThrownError} with its own status (#8016) — so a `409
+      // DESTRUCTIVE_CHANGE` is still a 409, not swept in here.
+      //
+      // The code stays `PACKAGE_PUBLISH_FAILED` rather than becoming
+      // `INTERNAL_ERROR`: it is registered, it is more informative than the
+      // generic fallback, and it discloses nothing (the *message* was the
+      // disclosure, and the producer no longer emits one). `envelopeViolations`
+      // imposes no code↔status agreement, so a registered code on a 5xx is
+      // conformant — `SERVICE_UNAVAILABLE` at 503 is the same shape.
+      //
+      // `result.driverFault.message` is a CONSTANT the producer owns and never
+      // interpolates into; the `??` arm is not a leniency alias but the answer
+      // for a `PackageService` implementation that reports failure without
+      // saying why, which is the one thing the old `error?: string` could not
+      // distinguish from a driver dump.
+      sendError(
+        res,
+        500,
+        'PACKAGE_PUBLISH_FAILED',
+        result.driverFault?.message ?? `Failed to publish ${manifest.id}.`,
+      );
     } catch (error) {
       sendThrownError(res, error);
     }

@@ -603,6 +603,32 @@ jobs:
       - name: Test-source alias gate
         run: pnpm check:test-source-alias
 
+      # The TYPE axis of the same invariant (#8180). The gate above reads
+      # `vitest.config.*` and nothing else, so the identical exposure on the
+      # type axis was unguarded repo-wide — and its symptom is likewise a GREEN
+      # `typecheck`. Measured on `packages/qa/downstream-contract` (#8021):
+      # identical checkout, identical stale `dist`, a narrowing injected into
+      # `packages/spec/src` in SOURCE only — without a `paths` block
+      # `tsc --noEmit` exited 0 and clean; with one it reported the `TS2322` the
+      # frozen fixture should always have produced. The comment beside the
+      # type-check-debt step below documents the same mechanism as expected
+      # state ("tsc resolves workspace imports through each dependency's built
+      # `dist/*.d.ts`"), and turbo's `typecheck` dependsOn `^build` does not
+      # reach it for the same reason it does not reach the runtime axis.
+      # NOT a port of the gate above: tsc's `paths` algorithm is exact-key-wins
+      # then longest-prefix (Vite's is first-match-wins), type-only imports
+      # COUNT here, and `tsconfig.json` is JSONC that inherits through
+      # `extends`. The trap is also different and worse — `@objectstack/spec*`,
+      # star not after a separator, folds every namespace onto one target and
+      # type-checks GREEN against the wrong module instead of crashing.
+      # The registry is measured (51 of 76 packages on the day it landed),
+      # shrink-only and audited in BOTH directions. It finds no new offender
+      # today: it is a ratchet, so the remediation list is finite and cannot
+      # grow behind anyone's back. Static scan of sources and tsconfigs; no
+      # build needed (~1.2s), so it belongs in this job.
+      - name: Type-source resolution gate
+        run: pnpm check:type-source-resolution
+
       # #4248 packaging-hygiene guard. Without a `files` whitelist npm packs the
       # whole package directory, and 20 of the 49 publishable packages declared
       # none — so consumers installed TypeScript sources, unit tests and build
