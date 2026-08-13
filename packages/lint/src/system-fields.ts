@@ -100,3 +100,90 @@ export function injectedColumnsFor(objectDef: unknown): ReadonlySet<string> {
 export function unprovisionedInjectedColumnsFor(objectDef: unknown): ReadonlySet<string> {
   return new Set(unprovisionedInjectedColumns(objectDef));
 }
+
+/** Coerce an array-or-name-keyed-map collection to an array (name injected). */
+function objectDefsOf(stack: unknown): Record<string, unknown>[] {
+  if (!stack || typeof stack !== 'object') return [];
+  const objects = (stack as { objects?: unknown }).objects;
+  if (Array.isArray(objects)) return objects.filter((o): o is Record<string, unknown> => !!o && typeof o === 'object');
+  if (objects && typeof objects === 'object') {
+    return Object.entries(objects as Record<string, unknown>)
+      .filter(([, def]) => !!def && typeof def === 'object')
+      .map(([name, def]) => ({ name, ...(def as Record<string, unknown>) }));
+  }
+  return [];
+}
+
+/**
+ * `objectName -> its unprovisioned injected anchors`, over a whole stack
+ * (#8340) — the shape a rule that resolves references PER STACK consumes.
+ *
+ * Only non-empty entries are stored, so `get(name)` is `undefined` for every
+ * ordinary (platform-provisioned) object and the lookup doubles as the
+ * "nothing to say here" fast path — the same shape `validate-expressions.ts`
+ * built inline for #8116.
+ *
+ * ⛔ Not a replacement for {@link SYSTEM_FIELDS} at the call sites that consume
+ * it. The blanket union answers "could this name be a system column anywhere",
+ * which is the right question for a rule deciding whether to FLAG a name; this
+ * index answers "does this object's registered anchor have storage", which is a
+ * question about a name the first one already decided NOT to flag. The four
+ * filter/binding rules ask both: membership still governs the existence
+ * error, and this governs an additional warning on the path where the existence
+ * check stays silent.
+ */
+export function indexUnprovisionedAnchors(stack: unknown): ReadonlyMap<string, ReadonlySet<string>> {
+  const index = new Map<string, ReadonlySet<string>>();
+  for (const obj of objectDefsOf(stack)) {
+    const name = typeof obj.name === 'string' && obj.name.length > 0 ? obj.name : undefined;
+    if (!name) continue;
+    const anchors = unprovisionedInjectedColumnsFor(obj);
+    if (anchors.size > 0) index.set(name, anchors);
+  }
+  return index;
+}
+
+/**
+ * The CAUSE clause every unprovisioned-anchor diagnostic in this package
+ * states — one sentence, one wording, across the four filter/binding rules
+ * #8340 wired (`validate-widget-bindings`, `validate-react-page-props`,
+ * `validate-page-field-bindings`, `validate-flow-template-paths`).
+ *
+ * Shared rather than re-typed because the sentence is the finding's whole
+ * evidentiary content: it names the column, the object, WHY the platform
+ * registered an anchor it did not provision (ADR-0015 federation), and it is
+ * the part an author checks against their remote schema. A rule that re-words
+ * it drifts from the others and, worse, from the runtime guards
+ * (#7833 / #7859 / #7858) whose verdict it reports. Each call site supplies its
+ * own POSITION prefix and its own CONSEQUENCE clause — those genuinely differ
+ * per surface (a filter degrades to constant-false, a display binding renders
+ * blank, an interpolated flow token drops the condition outright).
+ *
+ * #8116's two originals (`warnUnprovisionedAnchors` in `validate-expressions.ts`
+ * and `unprovisionedPointer` in `validate-semantic-roles.ts`) still carry their
+ * own copies of this sentence; they are the convergence target when either is
+ * next touched, and were left alone here because #8340's file surface stops at
+ * the filter/binding rules.
+ */
+export function unprovisionedAnchorCause(objectName: string, field: string): string {
+  return (
+    `'${field}' is an injected system column with NO storage behind it: '${objectName}' is an ` +
+    `external object (ADR-0015), so the remote database owns its schema and the platform ` +
+    `registers this anchor without provisioning a column`
+  );
+}
+
+/**
+ * The FIX clause paired with {@link unprovisionedAnchorCause} — the two ways
+ * out, in the order an author should consider them: vouch for the remote column
+ * by declaring it, or stop referencing an anchor this object does not have.
+ */
+export function unprovisionedAnchorHint(objectName: string, field: string): string {
+  return (
+    `If the remote table really carries '${field}', declare it in ${objectName}'s own fields ` +
+    `(mapped through the external binding's columnMap) so the reference resolves to a column ` +
+    `you vouch for; otherwise drop the reference, or opt the object out of the injection ` +
+    `(\`ownership: 'none'\` for the ownership anchors, \`systemFields: { audit: false }\` for ` +
+    `the audit family).`
+  );
+}
