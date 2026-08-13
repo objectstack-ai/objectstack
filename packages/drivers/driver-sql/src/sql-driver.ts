@@ -4262,6 +4262,66 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
+   * Run a SPECULATIVE statement — one whose failure is an expected outcome the
+   * caller recovers from — so that its error cannot poison the surrounding
+   * transaction.
+   *
+   * # Why this exists (#8269)
+   *
+   * On Postgres, ANY statement error aborts the whole transaction: every
+   * subsequent statement returns `25P02 current transaction is aborted` until
+   * rollback. So the `try { … } catch { …recover… }` idiom, where the recovery
+   * itself issues SQL on the same transaction, can never run there — the
+   * recovery statement is the one that raises the error you observe. SQLite and
+   * MySQL do not abort the transaction on a statement error, which is why the
+   * idiom looked correct and why the SQLite-backed autonumber suite never
+   * caught it.
+   *
+   * Measured on `postgres:16`, two tenants inserting into the same cold
+   * autonumber object concurrently: `select … from "_objectstack_sequences"
+   * where "key_hash" = $1 limit $2 for update - current transaction is aborted,
+   * commands ignored until end of transaction block`. The whole batch failed
+   * while the counters advanced, so the reserved numbers were lost — a
+   * permanent gap at the start of both tenants' sequences.
+   *
+   * A knex nested transaction is a `SAVEPOINT`, released on success and rolled
+   * back to on failure, so the outer transaction stays usable on every dialect
+   * (verified: PG 16, and better-sqlite3 at pool `max: 1`, where the savepoint
+   * rides the parent's connection and never asks the pool for a second one —
+   * the deadlock #4250 exists to prevent).
+   *
+   * Chosen over `INSERT … ON CONFLICT DO NOTHING` on two pieces of evidence:
+   *
+   *  1. It is the only form that covers BOTH speculative sites here — the other
+   *     one is a `SELECT … FOR UPDATE`, and there is no `ON CONFLICT` for a
+   *     read.
+   *  2. `ON CONFLICT (object, tenant_id, field)` — the columns the legacy key
+   *     shape uses when `sequencesHasKeyHash` is false — raises `42P10 there is
+   *     no unique or exclusion constraint matching the ON CONFLICT
+   *     specification` against an INTERIM table whose primary key is the FOUR
+   *     columns `(object, tenant_id, field, scope)`. That pairing is reachable:
+   *     it is exactly what a failed {@link ensureSequencesKeyHashShape}
+   *     migration leaves behind. It would have replaced this bug with a harder
+   *     one on the deployments least able to absorb it.
+   *
+   * Returns a discriminated result rather than rethrowing, so the caller keeps
+   * the ORIGINAL error to inspect or rethrow — an `ON CONFLICT DO NOTHING` that
+   * silently affects zero rows cannot tell "another writer raced me" apart from
+   * "the row was rejected for some other reason".
+   */
+  protected async attemptWithoutPoisoning<T>(
+    trx: Knex.Transaction,
+    attempt: (scoped: Knex.Transaction) => Promise<T> | Knex.QueryBuilder<any, T>,
+  ): Promise<{ ok: true; value: T } | { ok: false; error: unknown }> {
+    try {
+      const value = await trx.transaction(async (scoped) => attempt(scoped));
+      return { ok: true, value: value as T };
+    } catch (error) {
+      return { ok: false, error };
+    }
+  }
+
+  /**
    * Atomically reserve and return the next sequence value for
    * `(object, tenantId, field)`. Bootstraps from the data-table MAX on
    * first call so existing seeded records continue monotonically.
@@ -4349,13 +4409,21 @@ export class SqlDriver implements IDataDriver {
 
     return runner.transaction(async (trx) => {
       // Lock the row (no-op on SQLite, real lock on Postgres/MySQL).
+      //
+      // Speculative, so it runs under a savepoint: `.forUpdate()` on a MISSING
+      // row does NOT throw on Postgres (measured: returns zero rows), so the
+      // fallback below is unreachable for the reason the old comment gave. It
+      // IS reachable for lock-level failures — deadlock (40P01), lock/statement
+      // timeout (55P03/57014) — and without the savepoint each of those turned
+      // into a `25P02` from the fallback SELECT, masking the real error.
       let existing: any;
-      try {
-        existing = await trx(SEQUENCES_TABLE).where(key).forUpdate().first();
-      } catch {
-        // Some dialects/versions reject .forUpdate() on a missing row in
-        // weird ways; fall back to plain SELECT then rely on transaction
-        // isolation. Postgres/MySQL behave normally here.
+      const locked = await this.attemptWithoutPoisoning(trx, (scoped) =>
+        scoped(SEQUENCES_TABLE).where(key).forUpdate().first(),
+      );
+      if (locked.ok) {
+        existing = locked.value;
+      } else {
+        // Fall back to a plain SELECT then rely on transaction isolation.
         existing = await trx(SEQUENCES_TABLE).where(key).first();
       }
 
@@ -4370,15 +4438,15 @@ export class SqlDriver implements IDataDriver {
           suffix,
         );
         const initial = seedMax + 1;
-        try {
-          await trx(SEQUENCES_TABLE).insert({ ...insertRow, last_value: initial });
-          return initial;
-        } catch (err) {
-          // Another writer raced us to the first INSERT. Fall through to
-          // the UPDATE path with the now-present row.
-          existing = await trx(SEQUENCES_TABLE).where(key).forUpdate().first();
-          if (!existing) throw err;
-        }
+        const inserted = await this.attemptWithoutPoisoning(trx, (scoped) =>
+          scoped(SEQUENCES_TABLE).insert({ ...insertRow, last_value: initial }),
+        );
+        if (inserted.ok) return initial;
+        // Another writer raced us to the first INSERT. Fall through to
+        // the UPDATE path with the now-present row. This `SELECT … FOR UPDATE`
+        // blocks until the winner commits, so it sees the committed counter.
+        existing = await trx(SEQUENCES_TABLE).where(key).forUpdate().first();
+        if (!existing) throw inserted.error;
       }
 
       const next = Number(existing.last_value) + 1;
