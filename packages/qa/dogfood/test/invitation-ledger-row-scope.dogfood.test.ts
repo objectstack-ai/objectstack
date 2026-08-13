@@ -385,6 +385,42 @@ describe('#8095/#8240: the sys_invitation ledger, read by four personas', () => 
     expect(raw).not.toContain(DELEGATE_EMAIL);
   }, 60_000);
 
+  it('[#8240] the ADR-0105 D8 checklist step reads correctly — and stops being vacuous', async () => {
+    // The D8 item (`docs/qa/platform-checklist/areas/identity-auth.json`,
+    // `identity-auth.invitation-scope-gates`) has two steps phrased as the
+    // delegate reading the data API: "capture the created sys_invitation row via
+    // the data API", and "immediately read sys_invitation via the API and verify
+    // NO row was left behind" by the REFUSED admin-role attempt. The ruling
+    // predicted both become correct as written under this card, and asked for it
+    // to be verified rather than assumed. This is that verification.
+    //
+    // The second step is the interesting one. Before this card the delegate read
+    // `total: 0` no matter what, so "verify no row was left behind" passed
+    // whether or not a row had been left behind — a check that could not fail.
+    // It is only a real check once the delegate can see its OWN issuances, which
+    // is exactly what a leaked row from a refused attempt would be.
+    const refused = await stack.apiAs(delegateToken, 'POST', '/auth/organization/invite-member', {
+      email: 'refused.8240@acme-test.example',
+      role: 'admin',
+      organizationId: orgId,
+    });
+    expect(refused.status, 'the #3697 role cap still refuses a delegate minting an admin').toBe(403);
+
+    // Step 2, run exactly as the checklist words it — as the delegate, over the
+    // data API. One row, the legitimate one; the refused attempt left nothing.
+    const { status, rows } = await readLedger(stack, delegateToken);
+    expect(status).toBe(200);
+    expect(rows.map((r) => r.email)).toEqual([DELEGATE_INVITEE_EMAIL]);
+    expect(rows.map((r) => r.email)).not.toContain('refused.8240@acme-test.example');
+
+    // And the step is now load-bearing: had the refusal leaked a row, it would
+    // carry the delegate's own `inviter_id` and therefore land INSIDE the scope
+    // this card just granted — so the read above would have returned two rows
+    // rather than silently returning zero like it used to.
+    const leaked = await findRows(ql, 'sys_invitation', { email: 'refused.8240@acme-test.example' }, 5);
+    expect(leaked).toHaveLength(0);
+  }, 60_000);
+
   it("[#8240] the delegate's own scope does NOT open a by-id fetch of a row it did not issue", async () => {
     // Same argument as the member's by-id probe: a row filter that engages only
     // on the list path is not a row filter, and invitation ids travel in emails.
