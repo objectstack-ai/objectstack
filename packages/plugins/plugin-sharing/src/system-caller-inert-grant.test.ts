@@ -56,7 +56,11 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { OWNER_FIELD_DEF, assertEngineDeleteDispatch } from '@objectstack/metadata-core';
+import {
+  OWNER_FIELD_DEF,
+  assertEngineDeleteDispatch,
+  assertEngineUpdateDispatch,
+} from '@objectstack/metadata-core';
 import { ERROR_CODE_LEDGER } from '@objectstack/spec/api';
 import { SharingService } from './sharing-service.js';
 import { SharingRuleService } from './sharing-rule-service.js';
@@ -93,12 +97,30 @@ function makeEngine(schemas: Record<string, any>) {
       return ensure(o).filter(r => matches(r, f)).slice(0, opts?.limit ?? 10000);
     },
     async insert(o: string, data: any) { const row = { ...data }; ensure(o).push(row); return row; },
-    async update(o: string, idOrData: any, dataOrOpts?: any) {
-      const data = typeof idOrData === 'object' ? idOrData : dataOrOpts;
-      const id = typeof idOrData === 'object' ? idOrData.id : idOrData;
-      const t = ensure(o); const i = t.findIndex(r => r.id === id);
-      if (i >= 0) t[i] = { ...t[i], ...data };
-      return t[i];
+    async update(o: string, data: any, options?: any) {
+      // [#4550/#5480] Pinned to `ObjectQL.update`'s OWN dispatch predicate, for
+      // the same reason `delete` is below: a fake looser than the contract it
+      // stands in for is how a green suite ships a dead route (#4434).
+      //
+      // The shape this replaced also mirrored the DRIVER arity
+      // (`update(object, id, data)`) alongside the engine one, which
+      // `IDataEngine` does not have at all — so the double accepted a call no
+      // real engine would dispatch, on top of accepting the predicate updates
+      // the producer rejects.
+      const dispatch = assertEngineUpdateDispatch(data, options);
+      const t = ensure(o);
+      if (dispatch.kind === 'by-id') {
+        const i = t.findIndex(r => r.id === dispatch.id);
+        if (i >= 0) t[i] = { ...t[i], ...data };
+        return t[i];
+      }
+      // `multi`: the producer rewrites every matching row's fields.
+      let updated = 0;
+      const where = options?.where ?? {};
+      for (let i = 0; i < t.length; i++) {
+        if (matches(t[i], where)) { t[i] = { ...t[i], ...data }; updated += 1; }
+      }
+      return { ok: true, updated };
     },
     async delete(o: string, opts?: any) {
       // [#4550] Pinned to `ObjectQL.delete`'s OWN dispatch predicate — a fake
