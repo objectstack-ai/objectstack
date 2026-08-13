@@ -309,3 +309,53 @@ describe('check:react-declaration-parity — the gate CAN go red (#4690)', () =>
     expect(output).toMatch(/declares no components/);
   });
 });
+
+/**
+ * The SDUI `object-*` blocks ride this gate as of #7751 (maintainer ruling
+ * 2026-08-12, direction A: the parity burden goes through THIS machinery, no
+ * new gate). Same comparison, same ratchet, baseline-keyed by the TYPE itself
+ * (`object-grid`) rather than a PascalCase tag. These tests prove the new
+ * iteration source with the same fixture harness — including that it can go
+ * red — because the real manifest only exists at pin-bump time and cannot be
+ * produced here (#4690's constraint, unchanged).
+ */
+describe('check:react-declaration-parity — SDUI object-* blocks (#7751)', () => {
+  it('compares an object-* ComponentPropsMap entry against the manifest (both directions)', { timeout: SPAWN_TIMEOUT_MS }, () => {
+    // `filter` IS declared by ObjectGridPropsSchema; the fabricated name is not.
+    const out = run(manifestFor('object-grid', ['objectName', 'filter', 'zzzNotInTheGridSchema']));
+    expect(out).toMatch(/# Spec ↔ registry declaration parity \(SDUI object-\* blocks, #7751\)/);
+    expect(out).toMatch(/object-grid: 2 declared by both/);
+    expect(out).toMatch(/registry declares, spec does not: .*zzzNotInTheGridSchema/);
+    // The declared-set surplus (renderer-read keys the palette does not offer)
+    // is the SOFT signal, present and named:
+    expect(out).toMatch(/⚠ object-grid: .*spec-only/);
+  });
+
+  it('reports an object-* block absent from the manifest as missing', { timeout: SPAWN_TIMEOUT_MS }, () => {
+    const out = run(manifestFor('something-else', []));
+    expect(out).toMatch(/✗ object-grid: NO component in the manifest/);
+    expect(out).toMatch(/✗ object-metric: NO component in the manifest/);
+  });
+
+  it('ratchets a fabricated registry-only input on an object-* block — non-zero, named', { timeout: SPAWN_TIMEOUT_MS }, () => {
+    const { status, output } = runExit({
+      manifest: manifestFor('object-kanban', ['groupBy', 'zzzFabricatedKanbanInput']),
+      baseline: { blocks: { 'object-kanban': { registryOnly: [], missing: false } } },
+      args: ['--strict'],
+    });
+    expect(output).toContain('new registry-only input(s) not in baseline: zzzFabricatedKanbanInput');
+    expect(status, output).toBe(1);
+  });
+
+  it('a block not yet in the baseline is additive, not a regression (pin-bump onboarding path)', { timeout: SPAWN_TIMEOUT_MS }, () => {
+    // The committed baseline predates #7751's blocks; the first pin-bump run
+    // must not go red because coverage GREW. (`--update` then records them.)
+    const { status, output } = runExit({
+      manifest: manifestFor('object-grid', ['objectName', 'columns', 'filter']),
+      baseline: { blocks: { ObjectForm: { registryOnly: [], missing: true } } },
+      args: ['--strict'],
+    });
+    expect(output).toMatch(/no new DECLARATION divergence/);
+    expect(status, output).toBe(0);
+  });
+});

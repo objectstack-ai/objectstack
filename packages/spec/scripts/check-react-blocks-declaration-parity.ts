@@ -98,6 +98,26 @@ process.env.OS_EAGER_SCHEMAS = '1';
 import fs from 'fs';
 import { z } from 'zod';
 import { REACT_BLOCKS } from '../src/ui/react-blocks';
+import { ComponentPropsMap } from '../src/ui/component.zod';
+
+/**
+ * The SDUI `object-*` page blocks whose props schemas entered
+ * `ComponentPropsMap` at #7751 (maintainer ruling 2026-08-12, direction A).
+ * The ruling's third point assigned their spec↔objectui parity burden to THIS
+ * existing gate rather than a new one, so they ride the same comparison and
+ * the same baseline ratchet as the react blocks: spec side from the zod
+ * schema, registry side from the manifest, `registry-only` ratcheted,
+ * `spec-only` soft (their declared sets are renderer-read supersets of the
+ * registry `inputs`, so surplus is expected — ADR-0082 §2).
+ *
+ * Derived from the map rather than restated, so an `object-*` entry added to
+ * the spec is covered by this gate the day it lands. Baseline keys use the
+ * TYPE itself (`object-grid`), which cannot collide with the react blocks'
+ * PascalCase tags.
+ */
+const SDUI_OBJECT_BLOCK_TYPES = Object.keys(ComponentPropsMap)
+  .filter((t) => t.startsWith('object-'))
+  .sort();
 
 const MANIFEST = process.env.MANIFEST;
 const FAIL_ON_DIVERGENCE = process.argv.includes('--strict');
@@ -244,6 +264,32 @@ for (const b of REACT_BLOCKS) {
   if (specOnly.length) console.log(`    spec declares, registry does not: ${specOnly.join(', ')}`);
   if (registryOnly.length) console.log(`    registry declares, spec does not: ${registryOnly.join(', ')}`);
 }
+// ── SDUI object-* blocks (#7751) — same comparison, same ratchet ─────────────
+console.log('\n# Spec ↔ registry declaration parity (SDUI object-* blocks, #7751)\n');
+for (const type of SDUI_OBJECT_BLOCK_TYPES) {
+  const schema = (ComponentPropsMap as Record<string, unknown>)[type];
+  const spec = new Set(specProps(schema));
+  const inputs = manifestInputs(manifest, type);
+  if (inputs === null) {
+    console.log(`✗ ${type}: NO component in the manifest — not registered or not public.`);
+    totalMissingComp++;
+    current[type] = { registryOnly: [], missing: true };
+    continue;
+  }
+  const inputSet = new Set(inputs);
+  const specOnly = [...spec].filter((p) => !inputSet.has(p));
+  const registryOnly = [...inputSet].filter((p) => !spec.has(p));
+  const declaredByBoth = [...spec].filter((p) => inputSet.has(p));
+  totalSpecOnly += specOnly.length;
+  current[type] = { registryOnly: registryOnly.slice().sort(), missing: false };
+  const status = specOnly.length === 0 ? '✓' : '⚠';
+  console.log(
+    `${status} ${type}: ${declaredByBoth.length} declared by both, ${specOnly.length} spec-only, ${registryOnly.length} registry-only`,
+  );
+  if (specOnly.length) console.log(`    spec declares, registry does not: ${specOnly.join(', ')}`);
+  if (registryOnly.length) console.log(`    registry declares, spec does not: ${registryOnly.join(', ')}`);
+}
+
 console.log(
   `\nSummary: ${totalSpecOnly} spec-only divergences, ${totalMissingComp} blocks missing from the registry.`,
 );
