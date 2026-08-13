@@ -70,8 +70,6 @@ export const jaJP: TranslationData = {
           },
         },
         recurrence_interval: { label: '繰り返し間隔' },
-        is_completed: { label: '完了済み' },
-        is_overdue: { label: '期限超過' },
         progress_percent: { label: '進捗率 (%)' },
         estimated_hours: { label: '見積時間' },
         actual_hours: { label: '実績時間' },

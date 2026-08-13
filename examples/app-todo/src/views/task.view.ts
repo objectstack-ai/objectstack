@@ -46,9 +46,13 @@ export const TaskViews = defineView({
         { field: 'owner' },
         { field: 'category' },
       ],
+      // [#7226] "Overdue" asked the removed `is_overdue`/`is_completed` flags,
+      // which nothing maintained — so this view was permanently EMPTY. It now
+      // asks the stored, indexed columns that carry the same fact: past due, and
+      // not finished. `{today}` is the platform date macro, resolved per request.
       filter: [
-        { field: 'is_overdue', operator: 'equals', value: true },
-        { field: 'is_completed', operator: 'equals', value: false },
+        { field: 'due_date', operator: 'less_than', value: '{today}' },
+        { field: 'status', operator: 'not_equals', value: 'completed' },
       ],
       sort: [{ field: 'due_date', order: 'asc' }],
     },
@@ -65,9 +69,11 @@ export const TaskViews = defineView({
         { field: 'owner' },
         { field: 'category' },
       ],
+      // [#7226] `is_completed == false` was vacuously true for every row; it now
+      // asks `status` directly so a completed task really does drop out.
       filter: [
         { field: 'due_date', operator: 'equals', value: '{today}' },
-        { field: 'is_completed', operator: 'equals', value: false },
+        { field: 'status', operator: 'not_equals', value: 'completed' },
       ],
       sort: [{ field: 'priority', order: 'desc' }],
     },

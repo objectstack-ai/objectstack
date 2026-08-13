@@ -23,7 +23,7 @@ export const TaskReminderFlow: Flow = {
       // `limit > 1` is the declared way to make this a LIST read (`find`, not
       // `findOne`) — the undeclared `getAll` that sat here was never read, so
       // this sweep silently fetched a single task (#4277 rejects the key now).
-      config: { objectName: 'todo_task', filter: { due_date: '{tomorrow}', is_completed: false }, outputVariable: 'tasksToRemind', limit: 200 },
+      config: { objectName: 'todo_task', filter: { due_date: '{tomorrow}', status: { $ne: 'completed' } }, outputVariable: 'tasksToRemind', limit: 200 },
     },
     {
       id: 'loop_tasks', type: 'loop', label: 'Loop Through Tasks',
@@ -75,7 +75,7 @@ export const OverdueEscalationFlow: Flow = {
       // `limit > 1` = LIST read; the undeclared `getAll` was never read (#4277).
       config: {
         objectName: 'todo_task',
-        filter: { due_date: { $lt: '{3_days_ago}' }, is_completed: false, is_overdue: true },
+        filter: { due_date: { $lt: '{3_days_ago}' }, status: { $ne: 'completed' } },
         outputVariable: 'overdueTasks', limit: 200,
       },
     },
@@ -245,7 +245,7 @@ export const TaskCompletionFlow: Flow = {
           // A whole-string token, so `interpolate()` hands the create the RAW
           // value the script node returned instead of a stringified copy.
           due_date: '{nextDueDate}',
-          status: 'not_started', is_completed: false,
+          status: 'not_started',
         },
         outputVariable: 'newTaskId',
       },
