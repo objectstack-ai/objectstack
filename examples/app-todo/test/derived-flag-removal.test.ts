@@ -172,7 +172,7 @@ describe('#7226 — the replacement filters really select, on BOTH sides of the 
     expect(await done()).toEqual([]);
 
     // Drive the real completion transition through the real hook.
-    await ql.update('todo_task', id, { status: 'completed' });
+    await ql.update('todo_task', { status: 'completed' }, { where: { id } });
 
     // AFTER: the sets have swapped. THIS is the half the old `is_completed`
     // flag failed — it stayed `false`, so "Completed Today" and both completed
@@ -185,7 +185,7 @@ describe('#7226 — the replacement filters really select, on BOTH sides of the 
     expect(completed[0].completed_date, 'completion date and completion state agree').toBeTruthy();
 
     // Reopening puts it back — the filter tracks the column in both directions.
-    await ql.update('todo_task', id, { status: 'in_progress' });
+    await ql.update('todo_task', { status: 'in_progress' }, { where: { id } });
     expect((await open()).map((r: any) => r.id ?? r._id)).toEqual([id]);
     expect(await done()).toEqual([]);
   });
@@ -198,7 +198,13 @@ describe('#7226 — the replacement filters really select, on BOTH sides of the 
     const late = await mk('late', 'in_progress', PAST);
     const soon = await mk('not yet due', 'in_progress', FUTURE);
     const noDue = await mk('no due date', 'not_started');
-    const lateDone = await mk('late but finished', 'completed', PAST);
+    // Completed via the real transition, not seeded as `completed`: the app's
+    // `completed_date_required` rule is satisfied by the hook's stamp on the
+    // UPDATE path, so inserting a completed task directly is refused (#7036).
+    const lateDone = await mk('late but finished', 'in_progress', PAST);
+    await ql.update(
+      'todo_task', { status: 'completed' }, { where: { id: lateDone.id ?? lateDone._id } },
+    );
 
     // The shape the `overdue` view and the "Overdue Tasks" tile now declare.
     const overdue = await ql.find('todo_task', {
