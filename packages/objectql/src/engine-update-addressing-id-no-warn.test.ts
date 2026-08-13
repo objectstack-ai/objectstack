@@ -206,7 +206,7 @@ describe('#8141 — the addressed row\'s primary key is not logged as a forged c
       { value: 'v1', locked_note: 'forged', id: 'rec_1' },
       { where: { id: 'rec_1' } },
     );
-    expect(warns).toEqual([readonlyStripWarning('locked_note', 'pref')]);
+    expect(warns).toEqual([readonlyStripWarning('locked_note', 'pref', { preserveAuditApplies: true })]);
     expect(lines.filter((l: any) => l.level !== 'debug' && l.level !== 'info').map((l: any) => l.level))
       .toEqual(['warn']);
     // The line still carries the consequence and both remedies (#4903), and
@@ -233,7 +233,7 @@ describe('#8141 — the addressed row\'s primary key is not logged as a forged c
     );
     expect(warns).toHaveLength(2);
     expect(warns.some((w: string) => w.includes("dropped 'id' from the write payload"))).toBe(true);
-    expect(warns).toContain(readonlyStripWarning('locked_note', 'pref'));
+    expect(warns).toContain(readonlyStripWarning('locked_note', 'pref', { preserveAuditApplies: true }));
     expect(events).toEqual([
       { object: 'pref', fields: ['id'], reason: 'primary_key' },
       { object: 'pref', fields: ['locked_note'], reason: 'readonly' },
@@ -249,7 +249,7 @@ describe('#8141 — the addressed row\'s primary key is not logged as a forged c
       { locked_note: 'forged', value: 'v1' },
       { multi: true, where: { title: 't0' } },
     );
-    expect(warns).toEqual([readonlyStripWarning('locked_note', 'pref')]);
+    expect(warns).toEqual([readonlyStripWarning('locked_note', 'pref', { preserveAuditApplies: true })]);
     expect(writes.map((w) => w.fn)).toEqual(['updateMany']);
     expect(writes[0].data).toEqual({ value: 'v1' });
   });

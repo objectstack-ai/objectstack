@@ -890,7 +890,13 @@ describe('stripReadonlyFields — implicit readonly on autonumber (#5503)', () =
       { warn: (m: string) => warns.push(m) } as any,
     );
     expect(warns).toHaveLength(2);
-    expect(warns.some((m) => m === runtimeOwnedStripWarning('account_number', 'autonumber', 'an_account'))).toBe(true);
+    // [#8214] `preserveAuditApplies` is now stated by the pin rather than
+    // assumed: `account_number` is an `autonumber` with no `system: true`, so
+    // {@link isPreservableUnderAudit} keeps it and the remedy really is on
+    // offer. The clause the old text printed unconditionally is unchanged FOR
+    // THIS FIELD — what moved is that the strip now proves it applies before
+    // saying so.
+    expect(warns.some((m) => m === runtimeOwnedStripWarning('account_number', 'autonumber', 'an_account', { preserveAuditApplies: true }))).toBe(true);
     // The message must say WHY (runtime-issued) and name BOTH exempt writer
     // paths — an author who never wrote `readonly: true` gets no help from a
     // bare "this field is read-only".
@@ -927,7 +933,7 @@ function stripWithWarns(
   schema: unknown,
   data: Record<string, unknown>,
   supplied: Record<string, unknown>,
-  options?: { preserveAudit?: boolean; addressKey?: string },
+  options?: { preserveAudit?: boolean; addressKey?: string; strictReadonlyWrites?: boolean },
 ) {
   const warns: string[] = [];
   const levels: string[] = [];
@@ -959,7 +965,7 @@ describe('stripReadonlyFields — addressKey silences the LOG, never the strip (
     const supplied = { id: 'rec_1', value: 'v1' };
     const { out, warns, levels } = stripWithWarns(addressedFields, { ...supplied }, supplied);
     expect(out).toEqual({ value: 'v1' });
-    expect(warns).toEqual([readonlyStripWarning('id', 'pref')]);
+    expect(warns).toEqual([readonlyStripWarning('id', 'pref', { preserveAuditApplies: true })]);
     expect(levels).toEqual(['warn']);
   });
 
@@ -972,7 +978,7 @@ describe('stripReadonlyFields — addressKey silences the LOG, never the strip (
       addressedFields, { ...supplied }, supplied, { addressKey: 'id' },
     );
     expect(out).toEqual({ value: 'v1' });
-    expect(warns).toEqual([readonlyStripWarning('locked_note', 'pref')]);
+    expect(warns).toEqual([readonlyStripWarning('locked_note', 'pref', { preserveAuditApplies: true })]);
     expect(levels).toEqual(['warn']);
     expect(warns[0]).toContain('COMMITTED WITHOUT IT');
     expect(warns[0]).toContain('{ context: { isSystem: true } }');
@@ -994,7 +1000,7 @@ describe('stripReadonlyFields — addressKey silences the LOG, never the strip (
       addressedFields, { ...supplied }, supplied, { addressKey: 'value' },
     );
     expect(out).toEqual({ value: 'v1' });
-    expect(warns).toEqual([readonlyStripWarning('locked_note', 'pref')]);
+    expect(warns).toEqual([readonlyStripWarning('locked_note', 'pref', { preserveAuditApplies: true })]);
   });
 
   it('composes with preserveAudit rather than overriding it', () => {
@@ -1014,7 +1020,13 @@ describe('stripReadonlyFields — addressKey silences the LOG, never the strip (
     // reinstated by the same whitelist; `organization_id` is a non-audit system
     // column, so it is still stripped and still loud.
     expect(out).toEqual({ id: 'rec_1', created_at: '2020-01-01T00:00:00Z' });
+    // [#8214] NO `preserveAuditApplies` here, and that is the load-bearing
+    // half: `organization_id` is `system` and outside the audit family, so
+    // `preserveAudit` does NOT rescue it — this very call had the flag ON and
+    // stripped it anyway. A blanket "use preserveAudit" sentence would be a
+    // lie exactly here, which is why the remedy is derived per field.
     expect(warns).toEqual([readonlyStripWarning('organization_id', 'pref')]);
+    expect(warns[0]).not.toContain('preserveAudit');
   });
 
   it('silences the RUNTIME-OWNED message for the same key, on the same ground', () => {
@@ -1033,7 +1045,137 @@ describe('stripReadonlyFields — addressKey silences the LOG, never the strip (
     const supplied = { id: 'ACC-1', account_number: 'ACC-888888', value: 'v1' };
     const { out, warns } = stripWithWarns(numberedId, { ...supplied }, supplied, { addressKey: 'id' });
     expect(out).toEqual({ value: 'v1' });
-    expect(warns).toEqual([runtimeOwnedStripWarning('account_number', 'autonumber', 'pref')]);
+    expect(warns).toEqual([runtimeOwnedStripWarning('account_number', 'autonumber', 'pref', { preserveAuditApplies: true })]);
+  });
+});
+
+// #8214 — the two claims the strip messages were making that were not true of
+// the call in front of them. The engine-level measurement lives in
+// `engine-strict-readonly-warning-truthful.test.ts`; this block pins the
+// composer and the strip's derivation of what it may say.
+describe('#8214 — strictReadonlyWrites: the line reports a REFUSAL, not a commit', () => {
+  it('the strip threads the flag into the message it emits', () => {
+    const supplied = { id: 'rec_1', value: 'v1', locked_note: 'forged' };
+    const { warns, levels } = stripWithWarns(
+      addressedFields, { ...supplied }, supplied,
+      { addressKey: 'id', strictReadonlyWrites: true },
+    );
+    expect(warns).toEqual([
+      readonlyStripWarning('locked_note', 'pref', { strict: true, preserveAuditApplies: true }),
+    ]);
+    // ⛔ Not silenced, and not demoted: the forgery signal is the whole reason
+    // this line exists at `warn`, and a refused forged write is the case that
+    // most deserves it.
+    expect(levels).toEqual(['warn']);
+    expect(warns[0]).toContain("Field 'locked_note'");
+  });
+
+  it('and the ADDRESS is still silent under strict — #8141 is not re-opened', () => {
+    const supplied = { id: 'rec_1', value: 'v1' };
+    const { out, warns } = stripWithWarns(
+      addressedFields, { ...supplied }, supplied,
+      { addressKey: 'id', strictReadonlyWrites: true },
+    );
+    expect(warns).toEqual([]);
+    expect(out).toEqual({ value: 'v1' }); // …and still STRIPPED, as ever
+  });
+
+  it('omitting the flag is identical to passing it false — the default is the old text', () => {
+    expect(readonlyStripWarning('f', 'o')).toBe(readonlyStripWarning('f', 'o', { strict: false }));
+    expect(runtimeOwnedStripWarning('f', 'autonumber', 'o'))
+      .toBe(runtimeOwnedStripWarning('f', 'autonumber', 'o', { strict: false }));
+  });
+
+  it('the strict text swaps the CONSEQUENCE and the observe-instead remedy, nothing else', () => {
+    const plain = readonlyStripWarning('f', 'o');
+    const strict = readonlyStripWarning('f', 'o', { strict: true });
+    expect(plain).toContain('COMMITTED WITHOUT IT');
+    expect(strict).not.toContain('COMMITTED WITHOUT IT');
+    expect(strict).toContain('REFUSED ENTIRELY');
+    expect(strict).toContain('ERR_READONLY_FIELD_REJECTED');
+    // Under strict, "pass onFieldsDropped" alone is not the remedy — dropping
+    // strict is. Same direction the refusal error's own message points.
+    expect(strict).toContain('drop options.strictReadonlyWrites');
+    // Everything the #4903 contract requires is still in both.
+    for (const m of [plain, strict]) {
+      expect(m).toContain("Field 'f' on 'o' is read-only");
+      expect(m).toContain('{ context: { isSystem: true } }');
+      expect(m).toContain('onFieldsDropped');
+    }
+  });
+
+  it('the runtime-owned twin does the same, keeping its own WHY', () => {
+    const strict = runtimeOwnedStripWarning('code', 'autonumber', 'o', { strict: true });
+    expect(strict).not.toContain('COMMITTED WITHOUT IT');
+    expect(strict).toContain('REFUSED ENTIRELY');
+    // The clause that makes it distinct from the readonly message must survive:
+    // the author never wrote `readonly: true` here, so the line has to say who
+    // owns the value.
+    expect(strict).toContain('the runtime issues this value from its sequence');
+  });
+});
+
+// #8214 (2) — the remedy set. `stripReadonlyFields` honours `preserveAudit`
+// (#3493), a WHITELIST narrower than `isSystem` by construction, while the
+// message offered only the blanket exemption — steering an import that forgot
+// the flag to the strictly worse posture, the identical failure #8141 fixed one
+// remedy over. It is now offered per field, DERIVED from the same predicate the
+// strip consults, so it can never advertise an exemption that would not have
+// worked — and cannot drift when #8215 narrows that predicate.
+describe('#8214 — the preserveAudit remedy is derived per field, not described', () => {
+  it('offers it for a field the whitelist would have kept', () => {
+    const supplied = { closed_at: '2021-03-01T00:00:00Z' };
+    const { warns } = stripWithWarns(historicalFields, { ...supplied }, supplied);
+    expect(warns).toEqual([
+      readonlyStripWarning('closed_at', undefined, { preserveAuditApplies: true }),
+    ]);
+    expect(warns[0]).toContain('{ context: { preserveAudit: true } }');
+  });
+
+  it('WITHHOLDS it for a non-audit system column the whitelist strips anyway', () => {
+    const supplied = { organization_id: 'org_forged' };
+    const { warns } = stripWithWarns(historicalFields, { ...supplied }, supplied);
+    expect(warns).toEqual([readonlyStripWarning('organization_id')]);
+    expect(warns[0]).not.toContain('preserveAudit');
+    expect(warns[0]).toContain('{ context: { isSystem: true } }');
+  });
+
+  it('the audit family itself is offered it — that is the case #3493 exists for', () => {
+    const supplied = { created_at: '2020-01-01T00:00:00Z' };
+    const { warns } = stripWithWarns(historicalFields, { ...supplied }, supplied);
+    expect(warns[0]).toContain('{ context: { preserveAudit: true } }');
+  });
+
+  it('a line that PRINTS with preserveAudit already on never offers it', () => {
+    // The derivation's safety property, stated as a test rather than trusted:
+    // a field kept by `preserveAudit` never reaches the log at all, so any
+    // field that DOES reach it while the flag is on is one the whitelist
+    // refused — and the remedy is correctly withheld.
+    const supplied = { organization_id: 'org_forged', closed_at: '2021-03-01T00:00:00Z' };
+    const { out, warns } = stripWithWarns(
+      historicalFields, { ...supplied }, supplied, { preserveAudit: true },
+    );
+    expect(out).toEqual({ closed_at: '2021-03-01T00:00:00Z' });
+    expect(warns).toEqual([readonlyStripWarning('organization_id')]);
+    expect(warns[0]).not.toContain('preserveAudit');
+  });
+
+  it('the two sibling messages now agree — one predicate, two texts', () => {
+    // The disagreement the card was filed about: the runtime-owned twin named
+    // both exemptions unconditionally while the readonly one named neither.
+    // Both are now gated on the same fact, so a field that is preservable gets
+    // the sentence from either message and a field that is not gets it from
+    // neither.
+    for (const applies of [true, false]) {
+      const ro = readonlyStripWarning('f', 'o', { preserveAuditApplies: applies });
+      const rt = runtimeOwnedStripWarning('f', 'autonumber', 'o', { preserveAuditApplies: applies });
+      expect(ro.includes('preserveAudit')).toBe(applies);
+      expect(rt.includes('preserveAudit')).toBe(applies);
+      // `isSystem` is unconditional in both — it exempts the whole strip, so it
+      // is true for every field either message can name.
+      expect(ro).toContain('isSystem');
+      expect(rt).toContain('isSystem');
+    }
   });
 });
 
