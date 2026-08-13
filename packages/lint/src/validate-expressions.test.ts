@@ -11,6 +11,7 @@ import { FieldSchema, ObjectSchema, SelectOptionSchema } from '@objectstack/spec
 import { SharingRuleSchema } from '@objectstack/spec/security';
 
 import { validateStackExpressions } from './validate-expressions.js';
+import type { ExprIssue } from './validate-expressions.js';
 
 describe('validateStackExpressions (ADR-0032 build-time)', () => {
   const objects = [
@@ -2817,7 +2818,7 @@ describe('validateStackExpressions — unprovisioned injected anchors (#8116)', 
       objects: [{ ...object, validations: [{ name: 'r1', type: 'script', condition }] }],
     });
 
-  const warningsOf = (issues: Array<{ severity?: string }>) =>
+  const warningsOf = (issues: readonly ExprIssue[]): ExprIssue[] =>
     issues.filter((i) => i.severity === 'warning');
 
   it('warns on record.<anchor> in a validation rule on an external object', () => {
