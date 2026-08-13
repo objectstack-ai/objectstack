@@ -402,6 +402,18 @@ const AUTH_MANAGER_PLUGINS: Record<string, { construct: () => unknown } | { skip
   oauthProvider: {
     construct: () => oauthProvider({ loginPage: '/login', consentPage: '/oauth/consent' }),
   },
+  // [#8289] NOT a plugin factory — the scanner's regex cannot tell the two
+  // apart, because both are a one-name destructure off `better-auth/plugins/*`.
+  // `hasPermission` is the organization plugin's exported permission PREDICATE
+  // (`(input, ctx) => Promise<boolean>`, `has-permission.mjs`); it declares no
+  // schema, contributes no model and no column, so there is nothing here for
+  // the collision loop to compare. `assertRemoveMemberPermitted` calls it so the
+  // remove-member gate asks the vendor's own authorization question rather than
+  // keeping a second spelling of it. The `stale` assertion below removes this
+  // entry's licence the moment that import goes away.
+  hasPermission: {
+    skip: 'permission predicate exported by the organization plugin — declares no schema',
+  },
 };
 
 /** The plugin set the auth manager actually assembles (`buildPluginList()`). */
