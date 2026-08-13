@@ -34,6 +34,8 @@
  *    branch. An ADR-0005 overlay names the read-only package it customizes by
  *    construction, so a package door that refused would close the overlay
  *    model, and that case is pinned below.
+ *  - **delete is untouched** — #6960 moved the delete side deliberately and
+ *    warns against symmetrising; `DeleteOptions` carries no `packageId`.
  *
  * ## ⛔ `OS_METADATA_WRITABLE` is deliberately UNCOVERED here (#8146)
  *
@@ -53,8 +55,6 @@
  * deliverable as "the refusal plus a rejection pin asserting `code` and
  * `status`". That pin belongs to #8146, written against the fixed behaviour;
  * nothing is lost by this suite staying silent until then.
- *  - **delete is untouched** — #6960 moved the delete side deliberately and
- *    warns against symmetrising; `DeleteOptions` carries no `packageId`.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
