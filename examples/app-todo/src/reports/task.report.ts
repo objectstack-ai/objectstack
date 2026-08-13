@@ -28,7 +28,7 @@ export const TasksByPriorityReport = defineReport({
   dataset: 'task_metrics',
   rows: ['priority'],
   values: ['task_count'],
-  runtimeFilter: { is_completed: false },
+  runtimeFilter: { status: { $ne: 'completed' } },
 });
 
 /** Tasks by Owner Report */
@@ -40,7 +40,7 @@ export const TasksByOwnerReport = defineReport({
   dataset: 'task_metrics',
   rows: ['owner'],
   values: ['est_hours', 'actual_hours'],
-  runtimeFilter: { is_completed: false },
+  runtimeFilter: { status: { $ne: 'completed' } },
 });
 
 // ADR-0021 Phase 2: the former `OverdueTasksReport` (a flat record list, no
@@ -57,7 +57,7 @@ export const CompletedTasksReport = defineReport({
   dataset: 'task_metrics',
   rows: ['category'],
   values: ['est_hours', 'actual_hours'],
-  runtimeFilter: { is_completed: true },
+  runtimeFilter: { status: 'completed' },
 });
 
 /** Time Tracking Report */
@@ -72,5 +72,5 @@ export const TimeTrackingReport = defineReport({
   dataset: 'task_metrics',
   rows: ['owner', 'category'],
   values: ['est_hours', 'actual_hours'],
-  runtimeFilter: { is_completed: true },
+  runtimeFilter: { status: 'completed' },
 });

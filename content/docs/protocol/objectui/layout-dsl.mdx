@@ -940,46 +940,29 @@ steps:
         showAllFields: true
 ```
 
-## Performance Considerations
+## Performance
 
-### Lazy Loading
+The Layout DSL has **no** performance surface. A section declares no
+`virtualScroll`, `itemHeight`, `lazy` or `source` key, and there is no
+`layout.renderStrategy`. `FormSectionSchema`
+(`packages/spec/src/ui/view.zod.ts`) is `.strict()`, so authoring any of them is
+a **parse failure** — a loud rejection, not a silent no-op.
 
-Load sections/tabs only when visible:
+Nor is there an authorable virtual-scrolling switch anywhere else: since 17.0.0
+(#7176) the view-level boolean `virtualScroll` is retired too, under ADR-0049
+enforce-or-remove — every measured reader only copied the key forward and the
+grid renderer never applied it. Large datasets page via the view's `pagination`
+block. See
+[Widget Contract → Performance](/docs/protocol/objectui/widget-contract#performance).
 
-```yaml
-sections:
-  - label: Details
-    lazy: false  # Load immediately
-  
-  - label: History (10,000 records)
-    lazy: true   # Load when section expanded
-    source: /api/customers/123/history
-```
-
-### Virtual Scrolling
-
-For long lists of fields:
-
-```yaml
-section:
-  label: Product Catalog (1,000 items)
-  virtualScroll: true
-  itemHeight: 60  # px
-  fields: [...]  # Large array
-```
-
-### Progressive Rendering
-
-Render above-the-fold content first:
-
-```yaml
-layout:
-  renderStrategy: progressive
-  priority:
-    - sections[0]  # Render first section immediately
-    - sections[1]  # Render second section after 100ms
-    - sections[2]  # Render third section after 200ms
-```
+<Callout type="info">
+  Earlier revisions of this page documented section-level `virtualScroll` /
+  `itemHeight` / `lazy` / `source` and a `layout.renderStrategy: progressive`
+  block. None of them existed on any schema, so they are **removed rather than
+  implemented** — real virtualization is an implementation card first. For the
+  keys a section really accepts, see the
+  [View Reference](/docs/references/ui/view).
+</Callout>
 
 ## What's Next?
 
