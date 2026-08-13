@@ -109,7 +109,11 @@ export const SysPosition = ObjectSchema.create({
       refreshAfter: true,
       params: [
         { name: 'label', label: 'New Display Name', type: 'text', required: true },
-        { name: 'name', label: 'New API Name', type: 'text', required: true, helpText: 'Unique snake_case machine name' },
+        // [#8468] The clone dialog is where an admin types a NEW position name,
+        // so it is the one place the scope has to be right at the moment of
+        // authoring: the name must be free within THIS organization, not across
+        // the installation.
+        { name: 'name', label: 'New API Name', type: 'text', required: true, helpText: 'snake_case machine name, unique per organization' },
         { field: 'description', defaultFromRow: true },
         { field: 'permissions', defaultFromRow: true },
       ],
@@ -173,7 +177,12 @@ export const SysPosition = ObjectSchema.create({
       required: true,
       searchable: true,
       maxLength: 100,
-      description: 'Unique machine name for the position (e.g. sales_manager, hr_specialist)',
+      // [#8468] "unique per organization", not "unique". The bare wording
+      // asserted the installation-wide reading the declared index accidentally
+      // materialized, so the accident reached admins as contract.
+      description:
+        'Machine name for the position, unique per organization ' +
+        '(e.g. sales_manager, hr_specialist)',
       group: 'Identity',
     }),
 
@@ -267,7 +276,42 @@ export const SysPosition = ObjectSchema.create({
   },
 
   indexes: [
-    { fields: ['name'], unique: true },
+    // [ADR-0120 D1, #8468] `'organization'`, NOT bare `true`.
+    //
+    // Positions are admin-authored (`managed_by: 'admin'` by default, created
+    // in Setup and by the `clone_position` action above), and the object takes
+    // no `tenancy` opt-out, so `organization_id` is injected. A position name
+    // is therefore one holder per ORGANIZATION, not one across the whole
+    // installation.
+    //
+    // Bare `true` on a DECLARED index is the positional spelling of `'global'`
+    // — the listed columns VERBATIM (see `normalizeDeclaredIndex`, which
+    // prepends the organization key part only for the explicit spelling). It is
+    // NOT the field-level `true`, which has meant per-organization since #3696;
+    // that divergence is "the #4986 trap" named in
+    // `packages/lint/src/data-model-rules.ts`, and this declaration was the
+    // third instance of it in the platform's own objects.
+    //
+    // Measured on a real engine before the fix (two organizations, same name):
+    //   org_jia POST name=probe_pos_xtenant   → 201
+    //   org_yi  POST the SAME name            → 409 UNIQUE_VIOLATION
+    //   org_yi  POST an unused name           → 201
+    //   org_yi  GET  that name                → total 0
+    // A per-value refusal on a row the caller cannot read is a cross-tenant
+    // existence oracle, plus a dead end: the second organization could never
+    // name a position `sales_manager` if any other organization already had.
+    //
+    // The maintainer ruling of 2026-08-13 settles the family: an admin-authored
+    // name on a tenant-scoped object is scoped per organization. The hierarchy
+    // counter-argument does not apply here in any case — positions are
+    // deliberately FLAT (ADR-0090 D3, finalizing ADR-0057 D5); there is no
+    // `parent_id` on this object and no position tree to share a namespace.
+    //
+    // Platform-seeded rows (`bootstrapBuiltinRoles`, `managed_by: 'platform'`)
+    // carry no organization, and the organization key part is NULL-safe
+    // (`COALESCE(organization_id, '__global__')`, ADR-0120 D3), so they remain
+    // unique among THEMSELVES and the bootstrap upsert-by-name is unaffected.
+    { fields: ['name'], unique: 'organization' },
     { fields: ['active'] },
   ],
 

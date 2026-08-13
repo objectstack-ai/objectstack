@@ -69,7 +69,15 @@ export const PositionSchema = lazySchema(() => strictObject(
   },
   {
   /** Identity */
-  name: SnakeCaseIdentifierSchema.describe('Unique position name (lowercase snake_case)'),
+  // [#8468] "unique per organization", not bare "unique". This `describe()` is
+  // the source of the generated reference page's `name` row
+  // (`content/docs/references/identity/position.mdx`), so the bare wording
+  // published the installation-wide reading that `sys_position`'s declared
+  // index accidentally materialized — as if it had been intended. The ruling of
+  // 2026-08-13 scopes the name per organization; the text now says so.
+  name: SnakeCaseIdentifierSchema.describe(
+    'Position name, unique per organization (lowercase snake_case)',
+  ),
   label: z.string().describe('Display label (e.g. VP of Sales)'),
 
   /** Description */

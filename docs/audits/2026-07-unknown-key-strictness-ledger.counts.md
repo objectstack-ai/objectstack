@@ -29,10 +29,10 @@ Remaining strip sites by class:
 
 | Bucket | Sites |
 |---|---|
-| authorable — the ruling's forced scope | 4 |
+| authorable — the ruling's forced scope | 2 |
 | unresolved — needs a per-schema verdict | 22 |
 | wire / open — out of forced scope | 104 |
-| no door — no carrier, ADR-0049 territory | 1 |
+| no door — no carrier, ADR-0049 territory | 3 |
 | no gate — carrier live, no parse | 0 |
 | covered — no carrier, no parse, guarded at every consumer | 1 |
 
@@ -199,10 +199,10 @@ over it is here.
 
 | Bucket | Sites |
 |---|---|
-| authorable — the ruling's forced scope | 3 |
+| authorable — the ruling's forced scope | 1 |
 | unresolved — needs a per-schema verdict | 22 |
 | wire / open — out of forced scope | 65 |
-| no door — no carrier, ADR-0049 territory | 0 |
+| no door — no carrier, ADR-0049 territory | 2 |
 | no gate — carrier live, no parse | 0 |
 | covered — no carrier, no parse, guarded at every consumer | 0 |
 
