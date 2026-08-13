@@ -10434,6 +10434,74 @@ export class ObjectStackProtocolImplementation implements
         if (this.environmentId !== undefined) {
             const artifactBacked = this.isArtifactBacked(request.type, request.name);
             if (artifactBacked && !overlayAllowed) {
+                // [#8184] THE PACKAGE DOOR — the SECOND refusal point for one
+                // condition, and the reason this card exists.
+                //
+                // `SysMetadataRepository.assertAllowed` reads the base the
+                // caller NAMED and answers `ITEM_LOCKED` (`lockSource:
+                // 'package'`) when it is read-only (#7682, then #8146's
+                // hatch ruling). That door is topology-INDEPENDENT — and it
+                // was unreachable here, because this branch throws first on
+                // every kernel with an `environmentId`. So one request
+                // answered `ITEM_LOCKED` on a host-config / CLI-assembled
+                // kernel and the undiscriminated `NOT_OVERRIDABLE` on a
+                // project/cloud per-env one: the refusal VOCABULARY keyed off
+                // a row-scoping key, which is the #5086 / #6710 finding
+                // (see the block comment above) arriving on the error codes.
+                // A client that learns to handle `ITEM_LOCKED` on one
+                // deployment never saw it on the other.
+                //
+                // ⚠️ MIRRORED, NOT RE-INVENTED. Same predicate
+                // ({@link isWritablePackage}, the ADR-0070 rule in one
+                // place), same emitter — `readOnlyBaseOverrideError` is
+                // called, not copied — so the code, the status, the
+                // `lockSource`, the `packageId` and the sentence cannot drift
+                // between the two doors. Two independently-authored refusals
+                // for one condition is how `NOT_OVERRIDABLE`-everywhere
+                // started.
+                //
+                // THE LIMB ORDERING IS THE RULE, and it is the same ordering
+                // the repository states: BELOW every registry limb, ABOVE the
+                // hatch limb.
+                //   • Below the registry limb — this whole branch is guarded
+                //     by `!overlayAllowed`, so an `allowOrgOverride` type
+                //     never reaches the door. That is ADR-0005: an org
+                //     overlay of a code-shipped item ALWAYS names the
+                //     read-only package it customizes, and a door one limb
+                //     higher would close the overlay model outright. Pinned.
+                //   • Above the hatch limb — `isOverlayAllowed` folds
+                //     `OS_METADATA_WRITABLE` in, so an OPEN hatch takes the
+                //     write past this branch entirely, down to the repository
+                //     door, which applies the same rule with `hatchOpen:
+                //     true` and its own remedy. The hatch therefore still
+                //     never unlocks package writability on this topology
+                //     either (#8146 NARROW), and both directions of that
+                //     remedy selection are pinned in
+                //     `sys-metadata-repository.package-writability.test.ts`.
+                //     That is also why `hatchOpen` is passed as a literal
+                //     `false` here rather than recomputed: reaching this line
+                //     PROVES the hatch is closed, and a recomputed value
+                //     would be dead code dressed as a decision.
+                //
+                // ⛔ NARROW, exactly as the repository is: only a write that
+                // NAMES a read-only base is re-coded. A package-less write
+                // keeps `NOT_OVERRIDABLE` verbatim. Refusing a hatch write
+                // that names NO read-only base (BROAD) retires the hatch's
+                // only documented use and needs a maintainer decision plus a
+                // docs/ADR change — never arrived at from here.
+                //
+                // `runtime-only` needs no limb here: this branch is guarded by
+                // `artifactBacked`, so the intent is always
+                // `override-artifact`. The create side of the door is the
+                // ADR-0070 D1 gate further down this method, which is already
+                // topology-independent and already answers
+                // `WRITABLE_PACKAGE_REQUIRED` / 422 on every kernel.
+                const namedBase = typeof request.packageId === 'string' && request.packageId.length > 0;
+                if (namedBase && !this.isWritablePackage(request.packageId)) {
+                    throw SysMetadataRepository.readOnlyBaseOverrideError(
+                        request.type, request.packageId as string, false,
+                    );
+                }
                 const err = new Error(
                     `[not_overridable] Metadata item '${request.type}/${request.name}' is provided by a code package `
                     + `and the type has not opted into per-org overlay writes (allowOrgOverride=false). `
