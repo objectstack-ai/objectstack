@@ -1830,7 +1830,30 @@ ${body}
   // Conjunct 1, the scalar test: a `$in` predicate is a multi-row write, and a
   // predicate write matching zero rows is legitimately "0 rows affected" — the
   // line ObjectQL itself draws ("Scope: the BY-ID branch only").
-  expect('a multi-row $in predicate is not a by-id write',
+  //
+  // Asserted on `scalarWhereIdOf` DIRECTLY rather than through `scanSeams`,
+  // and the difference is not stylistic. Through `scanSeams` this claim passes
+  // for the wrong reason: `rootIdentifier` answers null for an object literal
+  // too, so the seam is dropped by the caller-supplied conjunct and the
+  // scalar test is never what decided. Measured by neutering the scalar test
+  // and watching the end-to-end assertion stay GREEN — a phantom check, which
+  // is the one thing a gate must not ship. The rule keeps its named home here
+  // (`scalarWhereIdOf` is where "scalar" means something) and this pins it
+  // where a mutation can reach it.
+  const whereIdOf = (src) => {
+    const f = ts.createSourceFile('t.ts', src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    let lit = null;
+    const v = (n) => { if (!lit && ts.isObjectLiteralExpression(n) && propertyNamed(n, 'where')) lit = n; ts.forEachChild(n, v); };
+    v(f);
+    return lit ? scalarWhereIdOf(lit) : undefined;
+  };
+  expect('a multi-row $in predicate is not a scalar by-id write',
+    whereIdOf('const o = { where: { id: { $in: xs } } };') === null);
+  expect('an array of ids is not a scalar by-id write',
+    whereIdOf('const o = { where: { id: [1, 2] } };') === null);
+  expect('…and a plain scalar id IS one — the control for both',
+    whereIdOf('const o = { where: { id: request.id } };') !== null);
+  expect('a $in predicate never reaches the seam report end to end',
     scanSeams('m.ts', seamSrc(`
     await this.engine.update(request.object, request.data, { where: { id: { $in: request.ids } } });
     return { object: request.object, success: true };`)).length === 0);
