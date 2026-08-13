@@ -24,6 +24,14 @@ for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud
   gh label create needs-user-decision -R "$R" -c d93f0b -d "Blocked on a maintainer decision — do not dispatch" 2>/dev/null || true
   gh label create pm:on-hold          -R "$R" -c e4e669 -d "Decision made, deliberately deferred — do not dispatch, do not nag; restart condition in the hold comment" 2>/dev/null || true
   gh label create pm:blocked          -R "$R" -c b60205 -d "Blocked by another issue/PR — body carries Blocked-by: #N" 2>/dev/null || true
+  # pm:blocking is a derived CACHE, never hand state (maintainer opinion
+  # 2026-08-13, superseding the earlier derived-only-no-stored-label ruling):
+  # the triage sweep writes/removes it from the Blocked-by: reverse index, and
+  # it comes off when every dependent closes. Named consumers: the lane queue
+  # pull order (p0 > blocking > target board > Bug > age; SKILL.md 选择优先级)
+  # and list-page scans. A hand-set instance is mislabeling — the sweep
+  # corrects it against the index.
+  gh label create pm:blocking         -R "$R" -c 8250df -d "Derived cache from the Blocked-by reverse index: open card with open dependents — never hand-set" 2>/dev/null || true
   gh label create finding             -R "$R" -c c2e0c6 -d "Recorded observation — held, not dispatchable until the findings triage round grades it" 2>/dev/null || true
   gh label create pm:epic             -R "$R" -c 5319e7 -d "Parent delegated to a dedicated epic PM (session + territory in the parent's own body) — other PMs never dispatch into its subtree" 2>/dev/null || true
 done
