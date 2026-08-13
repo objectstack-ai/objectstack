@@ -1772,10 +1772,12 @@ export default class Serve extends Command {
       // hands the compiled artifact over inline, and `handleInstall`'s inline
       // branch never reads `this.cloudUrl` at all — so gating it on a control
       // plane withheld it from the one deployment that cannot have one. A
-      // self-hosted EE box (whose compose file documents `OS_CLOUD_URL=off`
-      // for 完全自托管) could not install a package by ANY route: measured on
-      // objectos-ee 4.0.5-rc.1, both GET and POST /marketplace/install-local
+      // self-hosted EE box could not install a package by ANY route: measured
+      // on objectos-ee 4.0.5-rc.1, both GET and POST /marketplace/install-local
       // 404, while its own /runtime/config advertised `installLocal: true`.
+      // Note `off` is not an unusual choice there but the SHIPPED DEFAULT --
+      // that image's compose file reads `OS_CLOUD_URL: ${OS_CLOUD_URL:-off}`,
+      // so every self-hosted stack that does not override it landed here.
       // The package README states the intended contract in as many words —
       // "`OS_CLOUD_URL=off` disables every remote call; air-gapped installs
       // keep working via inline manifests handed to `install-local`" — so the
