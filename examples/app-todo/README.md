@@ -56,7 +56,7 @@ examples/app-todo/
 - ✅ **Select** (`status`, `priority`, `category`) — Single-select with colors
 - ✅ **Multi-Select** (`tags`) — Multiple tag selection
 - ✅ **Date / DateTime** (`due_date`, `reminder_date`, `completed_date`)
-- ✅ **Boolean** (`is_completed`, `is_overdue`, `is_recurring`)
+- ✅ **Boolean** (`is_recurring`)
 - ✅ **Number** (`estimated_hours`, `actual_hours`, `recurrence_interval`)
 - ✅ **Percent** (`progress_percent`) — Progress tracking
 - ✅ **Lookup** (`owner`) — User assignment
@@ -90,8 +90,9 @@ examples/app-todo/
 ### Validations & Automation
 - Completed date required when status is "completed" (validation rule)
 - Recurrence type required for recurring tasks (validation rule)
-- Auto-set `is_completed`, `completed_date`, `progress_percent` on status
-  change (data hook)
+- Auto-set `completed_date` on the completion transition, cleared on reopen
+  (data hook). Completion and overdue state are read from `status` / `due_date`
+  directly — the app declares no derived boolean flags (#7226)
 - Auto-detect overdue tasks and send urgent notifications (flow)
 
 ## 💡 How to Run

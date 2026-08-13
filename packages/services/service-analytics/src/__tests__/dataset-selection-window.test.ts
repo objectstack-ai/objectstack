@@ -41,14 +41,26 @@ const accounts = DatasetSchema.parse({
 
 type AggCall = { object: string; options: Record<string, unknown> };
 
-/** ObjectQL-aggregate service; captures every `executeAggregate` call. */
-function aggService(rows: Record<string, unknown>[], calls: AggCall[] = []) {
+/**
+ * ObjectQL-aggregate service; captures every `executeAggregate` call.
+ *
+ * [#8286] `debugSql` is the response-level SQL echo, off by default outside
+ * development. Only the tests that read `result.sql` — the block asserting the
+ * echo tells the truth — need it on; the rest of this file measures the CALL
+ * the executor made, which the gate does not touch.
+ */
+function aggService(
+  rows: Record<string, unknown>[],
+  calls: AggCall[] = [],
+  options: { debugSql?: boolean } = {},
+) {
   const svc = new AnalyticsService({
     queryCapabilities: () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false }),
-    executeAggregate: async (object, options) => {
-      calls.push({ object, options: options as Record<string, unknown> });
+    executeAggregate: async (object, opts) => {
+      calls.push({ object, options: opts as Record<string, unknown> });
       return rows;
     },
+    debugSql: options.debugSql,
   });
   return { svc, calls };
 }
@@ -327,9 +339,16 @@ describe('#3588 — ordering never corrupts a multi-query selection', () => {
   });
 });
 
+/**
+ * [#8286] Every service in this block enables the echo explicitly. The claim —
+ * that the echoed statement is an honest account of the query that ran — is
+ * unchanged and still worth pinning; what changed is that the echo now has a
+ * precondition, and a block whose whole subject is the echo's CONTENT must
+ * state it rather than inherit whatever `NODE_ENV` the runner happens to have.
+ */
 describe('#3588 — the echoed SQL tells the truth on the ObjectQL path', () => {
   it('renders date_trunc for a bucketed dimension instead of the bare column', async () => {
-    const { svc } = aggService([{ created_at: '2026-06', account_count: 4 }]);
+    const { svc } = aggService([{ created_at: '2026-06', account_count: 4 }], [], { debugSql: true });
     const result = await svc.queryDataset(
       accounts,
       { dimensions: ['created_at'], measures: ['account_count'], dateGranularity: 'month' },
@@ -341,7 +360,7 @@ describe('#3588 — the echoed SQL tells the truth on the ObjectQL path', () => 
   });
 
   it('renders the ordering and window that the response rows actually reflect', async () => {
-    const { svc } = aggService([{ industry: 'Tech', annual_revenue_sum: 1 }]);
+    const { svc } = aggService([{ industry: 'Tech', annual_revenue_sum: 1 }], [], { debugSql: true });
     const result = await svc.queryDataset(
       accounts,
       { dimensions: ['industry'], measures: ['annual_revenue_sum'], order: { annual_revenue_sum: 'desc' }, limit: 10 },
@@ -352,7 +371,7 @@ describe('#3588 — the echoed SQL tells the truth on the ObjectQL path', () => 
   });
 
   it('parameterizes filter values rather than inlining them into the echoed statement', async () => {
-    const { svc } = aggService([{ industry: 'Tech', account_count: 1 }]);
+    const { svc } = aggService([{ industry: 'Tech', account_count: 1 }], [], { debugSql: true });
     const result = await svc.queryDataset(
       accounts,
       { dimensions: ['industry'], measures: ['account_count'], runtimeFilter: { industry: 'Tech' } },

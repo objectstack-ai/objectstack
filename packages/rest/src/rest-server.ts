@@ -9747,6 +9747,30 @@ export class RestServer {
             if (msg.startsWith('RULE_NOT_FOUND')) {
                 return res.status(404).json({ code: 'RULE_NOT_FOUND', error: msg.replace(/^RULE_NOT_FOUND:?\s*/, '') });
             }
+            // [ADR-0111 D7 / #8207] `POST .../evaluate` reconciles through
+            // `SharingService.grant`, whose inertness guard now runs for the
+            // evaluator's system context too. A rule pointed at an object no
+            // sharing gate consults therefore refuses here instead of silently
+            // materialising rows nothing reads — and the admin who asked for
+            // the evaluation needs to be told WHICH object and WHY, not handed
+            // an opaque 500. Same code→status pair the per-record shares routes
+            // already publish (`respondSharingError`), so no new contract.
+            //
+            // ⚠️ Built through the SHARED `sendError` envelope, unlike the three
+            // arms above it. Those are #7035's declared debt — `code` beside
+            // `error` instead of inside it, so `body.error.code` reads
+            // `undefined` — held down by the `check:route-envelope` ratchet,
+            // which only ticks DOWN. A new arm copying its neighbours' shape is
+            // exactly what that ratchet exists to stop, so this one answers the
+            // envelope `BaseResponseSchema` declares. The asymmetry is the
+            // ratchet working; converting the other three is #8111's unfinished
+            // half for this route family, not a rider on this card.
+            if (msg.startsWith('SHARING_NOT_ENABLED')) {
+                return sendEnvelopeError(
+                    res, 422, 'SHARING_NOT_ENABLED',
+                    msg.replace(/^SHARING_NOT_ENABLED:\s*/, ''),
+                );
+            }
             logError(`[REST] sharing-rule ${defaultCode}:`, err);
             return res.status(500).json({ code: defaultCode, error: msg.slice(0, 500) });
         };
