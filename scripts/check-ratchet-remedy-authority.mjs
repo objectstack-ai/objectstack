@@ -780,16 +780,23 @@ function selfTest() {
     + 'from three literals keeps the testimony written beside it',
     authorFacingMessages(`const m = '${ADD} an entry to ' + 'the ledger. It is ' + 'shrink-only.';`).length === 1);
 
-  // (4) Offer grammar, word order A: "add … to … REGISTRY".
-  const orderA = { message: 'Fix it properly. Or add a MEASURED entry to scripts/x.baseline.json saying why not.' };
-  // (5) Offer grammar, word order B: "add a REGISTRY entry" — #8540 miss ①.
-  const orderB = { message: 'Fix it properly. Or add a TEST_DEBT entry in the ledger saying why not.' };
   const offersIn = (src) => findOffers(src);
-  expect('offer grammar — word order "add … to … REGISTRY" is an offer',
-    offersIn(`const m = ${JSON.stringify(orderA.message)};`).length > 0);
-  expect('offer grammar — word order "add a REGISTRY entry" is an offer too (#8540 miss ①: the '
-    + 'prototype demanded to/in and missed check-type-check-coverage.mjs entirely)',
-    offersIn(`const m = ${JSON.stringify(orderB.message)};`).length > 0);
+
+  // (4) Offer grammar, word order A: the registry FOLLOWS a preposition.
+  expect('offer grammar — word order "… to … REGISTRY" is an offer',
+    offersIn(`const m = 'Fix it properly. Or ${ADD} a MEASURED entry to scripts/x.baseline.json saying why not.';`).length > 0);
+
+  // (5) Offer grammar, word order B — #8540 miss ①. The fixture carries NO
+  // preposition at all before the registry, mirroring the real text in
+  // check-type-check-coverage.mjs, where the location that follows "in" is an
+  // interpolated path and the registry itself sits ahead of the noun. An earlier
+  // draft of this fixture read "… entry in the ledger", which the prototype's
+  // defect would have matched happily — the assertion would have passed while
+  // pinning nothing. Fixtures for a word-order bug have to be word-ordered.
+  expect('offer grammar — a registry named BEFORE the noun, with no preposition leading to it, is '
+    + 'an offer (#8540 miss ①: the prototype demanded "add … to/in … REGISTRY" and so missed '
+    + 'check-type-check-coverage.mjs entirely)',
+    offersIn(`const TEST_DEBT = {};\nconst m = 'Fix it properly. Or ${ADD} a TEST_DEBT entry saying why not.';`).length > 0);
 
   // (6) The dot. A registry named by PATH must match — the measured `[^.;]` bug.
   const byPath = offersIn("const m = 'add it to scripts/role-word-baseline.json to admit the case.';");
