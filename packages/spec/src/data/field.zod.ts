@@ -3,6 +3,11 @@
 import { z } from 'zod';
 import { retiredKey } from '../shared/retired-key';
 import { strictObject } from '../shared/strict-object';
+// Package-internal, like `strict-object` itself — the `shared/index.ts` barrel
+// deliberately does not re-export it, so nothing about the public API surface
+// moves. No cycle back into this file: that module's only runtime import is
+// `shared/visibility.ts`, which imports nothing at runtime.
+import { SELECT_OPTION_EDITABILITY_GUIDANCE } from '../shared/editability-boundary';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { SystemIdentifierSchema } from '../shared/identifiers.zod';
 import { ExpressionInputSchema } from '../shared/expression.zod';
@@ -147,10 +152,41 @@ const FIELD_HISTORY =
   'Until #4001 closed this shape these were dropped silently — the field was still created, '
   + 'minus whatever the key was meant to constrain, protect or compute.';
 
+/**
+ * ## An option is offered or withheld — it is never "shown but unselectable"
+ * (#8201 — boundary, not gap)
+ *
+ * There is no `disabled`, `readonly` or `readonlyWhen` on a select option, and
+ * that is a **deliberate boundary** rather than a slot nobody added. It is the
+ * 2026-08-12 #7887 ruling reaching its third shape, on that ruling's own
+ * premise re-measured for this one: nothing in the object-field pipeline these
+ * options feed reads a per-option enabled/disabled flag — objectui's select and
+ * radio widgets treat the FIELD-level state as the single authority — so
+ * declaring one here would ship the ADR-0049 declared-but-unenforced shape.
+ * (A shown-but-unselectable option does exist in objectui's SDUI component
+ * family, but on that package's own option vocabulary, not this shape.)
+ *
+ * Writing one anyway stays a loud parse error — unchanged — and since #8201
+ * that error carries {@link SELECT_OPTION_EDITABILITY_GUIDANCE}, which points
+ * at the two things that are real: {@link SelectOptionSchema.visibleWhen} to
+ * withdraw THIS option (per record or, uniquely on this surface, per
+ * `current_user` — ADR-0068), and `readonly` / `readonlyWhen` on the FIELD to
+ * freeze the whole picker.
+ *
+ * If a non-selectable field option ever earns a real reader, that is a spec
+ * decision that widens the accepted set — this boundary records what the
+ * platform honours today, not a claim that the answer can never change.
+ */
 export const SelectOptionSchema = lazySchema(() => strictObject({
   surface: 'this select option',
   history: FIELD_HISTORY,
   aliases: { text: 'label', name: 'label', title: 'label', key: 'value', id: 'value', isDefault: 'default', selected: 'default', colour: 'color', visible: 'visibleWhen', showWhen: 'visibleWhen' },
+  // #8201. No alias row for the editability family, per the same red line the
+  // mother ruling drew: an alias names a key the shape must then accept, and
+  // this shape accepts none of them. The set consumes those spellings before
+  // the rename channel runs, and none of the alias keys above is a member, so
+  // no existing pointer is shadowed (`alias-integrity.test.ts`, #7889).
+  guidanceSets: [SELECT_OPTION_EDITABILITY_GUIDANCE],
 }, {
   label: z.string().describe('Display label (human-readable, any case allowed)'),
   value: SystemIdentifierSchema.describe('Stored value (lowercase machine identifier)'),

@@ -3138,8 +3138,13 @@ describe('visibility unknown-key message order — fix before history (#6416 / #
 
   it('names the wrong key first, then the alias pointer, then the history', () => {
     const m = messageFor({ visibleWhenn: 'record.a == 1' });
-    // 1. which key is wrong — and nothing before it
-    expect(m.startsWith('Unrecognized key(s) on this view/page schema: `visibleWhenn`.')).toBe(true);
+    // 1. which key is wrong — and nothing before it.
+    //    The surface NAME moved with #8202 and the ORDER pin did not: this probe
+    //    is `FormFieldSchema`, which since #8202 names itself instead of
+    //    sharing `'this view/page schema'` with the section and the page
+    //    component. What is asserted here is unchanged — the key statement
+    //    comes first and nothing precedes it.
+    expect(m.startsWith('Unrecognized key(s) on this form field: `visibleWhenn`.')).toBe(true);
     // 2. the fix, immediately after it — this is the whole point of the reorder.
     //    Since #6619 the prescription arrives as the shared template's `  • `
     //    bullet (it rides the set-keyed guidance channel); the position is
@@ -3163,10 +3168,16 @@ describe('visibility unknown-key message order — fix before history (#6416 / #
     // No prescription branch — the sentence follows the key statement directly,
     // exactly as it always did. Full-message pin, so a stray separator or a
     // duplicated clause fails here.
+    //
+    // The surface reads `this form section` since #8202: this probe is a
+    // SECTION, and the three shapes that shared one string now each name
+    // themselves. Note that the pin above, on a form FIELD, reads a different
+    // string — the two literals disagreeing is #8202's whole content, and if a
+    // future edit makes them agree again, one of these two is now wrong.
     const res = FormSectionSchema.safeParse({ label: 'S', fields: [], bogusKey: true });
     expect(res.success).toBe(false);
     const m = res.error!.issues.find((i) => i.code === 'unrecognized_keys')!.message;
-    expect(m).toBe(`Unrecognized key(s) on this view/page schema: \`bogusKey\`. ${HISTORY}`);
+    expect(m).toBe(`Unrecognized key(s) on this form section: \`bogusKey\`. ${HISTORY}`);
   });
 
   it('emits the history exactly once, whatever the key count', () => {
