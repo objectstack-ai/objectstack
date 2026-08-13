@@ -98,9 +98,10 @@ function viaNestedPlugin() {
   return { id: PKG, name: 'sales', plugins: [{ name: 'sales-nested', views: [accountContainer()] }] };
 }
 
+// [#8378] The `content ?? item` unwrap this mirrored is retired — a no-op on a
+// real engine, whose `registerMetadataCollections` registers items as-is.
 function viewItems(engine: ObjectQL): any[] {
   return (engine.registry.listItems<any>('view') ?? [])
-    .map((i: any) => i?.content ?? i)
     .filter(Boolean);
 }
 

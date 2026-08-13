@@ -56,9 +56,9 @@ export const ProjectDetailPage = definePage({
                 type: 'record:details',
                 properties: {
                   sections: [
-                    { label: 'Overview', columns: 2, fields: ['name', 'account', 'owner', 'status'] },
-                    { label: 'Financials', columns: 2, fields: ['budget', 'spent'] },
-                    { label: 'Timeline', columns: 2, fields: ['start_date', 'end_date'] },
+                    { name: 'overview', label: 'Overview', columns: 2, fields: ['name', 'account', 'owner', 'status'] },
+                    { name: 'financials', label: 'Financials', columns: 2, fields: ['budget', 'spent'] },
+                    { name: 'timeline', label: 'Timeline', columns: 2, fields: ['start_date', 'end_date'] },
                   ],
                 },
               },

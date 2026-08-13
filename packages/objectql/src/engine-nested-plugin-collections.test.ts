@@ -81,15 +81,17 @@ function manifestDirect(collections: readonly string[]) {
   return manifest;
 }
 
+// [#8378] Both helpers mirrored the plugin readers' `content ?? item` unwrap,
+// which has been retired: `registerMetadataCollections` registers each
+// collection element as-is, so the unwrap was a no-op on this real engine.
 function registeredNames(engine: ObjectQL, type: string): string[] {
   return (engine.registry.listItems<any>(type) ?? [])
-    .map((i: any) => i?.content ?? i)
     .filter(Boolean)
     .map((i: any) => i.name);
 }
 
 function registeredItem(engine: ObjectQL, type: string): any {
-  return (engine.registry.listItems<any>(type) ?? []).map((i: any) => i?.content ?? i).filter(Boolean)[0];
+  return (engine.registry.listItems<any>(type) ?? []).filter(Boolean)[0];
 }
 
 describe('registerPlugin — the four collections a nested plugin used to drop (#7049)', () => {

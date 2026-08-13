@@ -60,6 +60,7 @@ export const LeadViews = defineView({
       data: { provider: 'object', object: 'crm_lead' },
       sections: [
         {
+          name: 'contact_us',
           label: 'Contact us',
           columns: 1,
           fields: [
@@ -81,6 +82,7 @@ export const LeadViews = defineView({
       type: 'simple',
       sections: [
         {
+          name: 'lead_information',
           label: 'Lead Information',
           columns: 2,
           fields: [
@@ -93,6 +95,7 @@ export const LeadViews = defineView({
           ],
         },
         {
+          name: 'qualification',
           label: 'Qualification',
           columns: 2,
           fields: [
@@ -103,6 +106,7 @@ export const LeadViews = defineView({
           ],
         },
         {
+          name: 'conversion',
           label: 'Conversion',
           columns: 2,
           fields: [
@@ -111,6 +115,7 @@ export const LeadViews = defineView({
           ],
         },
         {
+          name: 'notes',
           label: 'Notes',
           columns: 1,
           fields: [{ field: 'notes' }],

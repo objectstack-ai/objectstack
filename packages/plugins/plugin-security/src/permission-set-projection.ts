@@ -303,8 +303,10 @@ const isProjectionEcho = (v: any): boolean =>
 function readDeclaredBody(ql: any, name: string): any {
   try {
     const items = ql?.registry?.listItems?.('permission') ?? [];
-    for (const i of items) {
-      const body = i?.content ?? i;
+    for (const body of items) {
+      // [#8378] The registered item IS the body — no `{ name, content }`
+      // envelope to unwrap (`PermissionSetSchema` rejects `content` as an
+      // unrecognized key, and nothing in the tree produces the envelope).
       // Skip projection echoes too: deleteMetaItem's registry heal
       // (restoreArtifactRegistryView) can re-register the metadata manager's
       // view — which may be OUR marked copy — into the engine registry as a

@@ -193,6 +193,23 @@ jobs:
       - name: PM dispatch-gates self-test
         run: pnpm check:pm-dispatch-gates
 
+      # Part-of/closing-keyword guard self-test (#8476). The guard itself is a
+      # PR-scoped blocking check in its own workflow — it needs a pull request
+      # body to judge, which this job does not have — so what runs HERE is its
+      # self-test, which is the half with a verdict independent of any PR.
+      # Unconditional for the same reason as the two steps above: a self-test
+      # that runs only when someone remembers is a check whose coverage is a
+      # function of who remembered, and the failure it hides is quiet — a break
+      # in the verdict layer lands green and surfaces later as a card silently
+      # closed by the sentence written to keep it open.
+      #
+      # The self-test also pins the WIRING (the guard workflow still invokes
+      # the script, still subscribes to `edited`, still passes the body through
+      # `env:`), so unwiring the gate reddens here rather than going quiet.
+      # Imports one sibling module, reads two files; ~0.1s.
+      - name: Part-of closing-keyword guard self-test
+        run: pnpm check:partof-closing-keyword
+
       # Docs/skills authoring guard (#2035 / ADR-0059): TS code blocks in
       # Markdown/MDX are not type-checked or ESLinted, so skills/ and
       # content/docs/ can drift back to teaching the bare `: Page = {}` literal

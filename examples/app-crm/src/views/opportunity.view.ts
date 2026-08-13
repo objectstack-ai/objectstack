@@ -52,6 +52,7 @@ export const OpportunityViews = defineView({
       data: { provider: 'object', object: 'crm_opportunity' },
       sections: [
         {
+          name: 'opportunity',
           label: 'Opportunity',
           columns: 2,
           fields: [

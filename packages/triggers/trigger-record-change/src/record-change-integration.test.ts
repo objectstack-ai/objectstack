@@ -28,7 +28,30 @@ import { ObjectKernel } from '@objectstack/core';
 import { ObjectQLPlugin } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { AutomationServicePlugin, type AutomationEngine } from '@objectstack/service-automation';
+import type { IDataEngine, IObjectQLEngine } from '@objectstack/spec/contracts';
 import { RecordChangeTriggerPlugin } from './plugin.js';
+
+/**
+ * `check:slot-lookup` (#4251) — a NEW `kernel.getService(...)` site must carry
+ * the slot's real contract type, never an `as any` erasure (this file's other
+ * lookups predate the ratchet and are grandfathered by count, not by file —
+ * see `scripts/slot-lookup-baseline.json`).
+ *
+ * `IObjectQLEngine` covers everything the `objectql` slot's PUBLISHED contract
+ * promises. Two things the test below also calls are real, public methods on
+ * the concrete `ObjectQL` engine but are deliberately NOT part of that
+ * contract — `syncSchemas()` (a boot-time operation, not a slot consumer's
+ * concern) and `registry.registerObject` (the registry's TEST-time seam;
+ * `bulk-write-per-row-context.test.ts` in this same package casts the same
+ * gap separately as `TestObjectRegistry`). Naming both here, once, keeps the
+ * lookup itself fully typed rather than reaching back for `any`.
+ */
+type TestObjectQLEngine = IObjectQLEngine & {
+  syncSchemas(): Promise<void>;
+  registry: IObjectQLEngine['registry'] & {
+    registerObject(schema: unknown, packageId?: string, namespace?: string): void;
+  };
+};
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -158,6 +181,30 @@ const objectDef = (name: string) => ({
     mirror: { name: 'mirror', label: 'M', type: 'text' },
     priority: { name: 'priority', label: 'P', type: 'text' },
     alerted: { name: 'alerted', label: 'A', type: 'text' },
+  },
+});
+
+/**
+ * #4953 (services half) — a `record-before-*` flow's `record` used to be
+ * JUST the incoming patch (`inputData`, see `record-change-trigger.ts`
+ * `buildContext`), never merged with the prior row and never materialized
+ * over the object's declared fields. `tag` here is untouched by the update
+ * below (only `note` is written), so BEFORE the fix `record.tag != null`
+ * read a record with no `tag` key at all and FAULTED — the flow's own
+ * error-isolation try/catch (`RecordChangeTrigger.start`'s handler) swallows
+ * that fault, so the only observable symptom was "the flow silently never
+ * fires", never a visible error.
+ */
+const beforeHookObjectDef = (name: string) => ({
+  name,
+  label: name,
+  fields: {
+    tag: { name: 'tag', label: 'Tag', type: 'text' },
+    note: { name: 'note', label: 'Note', type: 'text' },
+    // Declared, but never given a value anywhere below — the "genuinely no
+    // value" case `materializeDeclaredFields` fills with an explicit `null`
+    // rather than leaving it an absent (fault-on-access) key.
+    nickname: { name: 'nickname', label: 'Nickname', type: 'text' },
   },
 });
 
@@ -397,5 +444,86 @@ describe('record-change trigger — end-to-end (#1491)', () => {
     await data.update('wid5', { id: lowId, priority: 'urgent' }, { context: { userId: 'u_trigger' } });
     await sleep(200);
     expect((await data.findOne('wid5', { where: { id: lowId } }))?.alerted).toBe('yes');
+  }, 15000);
+
+  /**
+   * #4953 (services half) — a REAL-engine (SqlDriver) measurement of the
+   * `record-before-*` seam. `record-before-write` dispatches on `beforeUpdate`
+   * BEFORE the driver has anything to echo back (`ctx.result` is unset), so
+   * `hydrateComputedFields` never runs either — this leg is entirely on
+   * `buildContext`'s own prior-row fold + `materializeDeclaredFields` to be
+   * total, with no assist from the after-row merge #1872 fixed.
+   */
+  it('a record-before-write start condition sees an UNTOUCHED declared field\'s real value, and a NEVER-SET one as null — not a fault (#4953)', async () => {
+    // `{ logger: { level: 'silent' } }`, not this file's OTHER `{ logLevel:
+    // 'silent' }` — `ObjectKernelConfig` declares only `logger`
+    // (`packages/core/src/kernel.ts`); the sibling spelling is an untyped
+    // excess property `tsc` never catches on this test-hiding package (a
+    // pre-existing `check:type-check-debt` TEST_DEBT site, not this PR's to
+    // sweep) and, measurably, does NOTHING — `createLogger(config.logger)`
+    // never reads it, so every sibling `it` below actually logs at its
+    // default level despite the option.
+    const kernel = new ObjectKernel({ logger: { level: 'silent' } });
+    await kernel.use(new ObjectQLPlugin());
+    await kernel.use(new AutomationServicePlugin());
+    await kernel.use(new RecordChangeTriggerPlugin());
+    await kernel.bootstrap();
+
+    // Typed via the slot's contract (`check:slot-lookup` ratchet, #4251) —
+    // see the `TestObjectQLEngine` doc comment at the top of this file for
+    // why it is `IObjectQLEngine` PLUS the two concrete-engine members the
+    // published contract omits, rather than `as any`.
+    const objectql = kernel.getService<TestObjectQLEngine>('objectql');
+    const data = kernel.getService<IDataEngine>('data');
+    const automation = kernel.getService<AutomationEngine>('automation');
+
+    await attachSqlite(objectql);
+    objectql.registry.registerObject(beforeHookObjectDef('bfw'), 'test', 'test');
+    objectql.registry.registerObject(
+      { name: 'bfw_audit', label: 'bfw audit', fields: { seen_tag: { name: 'seen_tag', label: 'T', type: 'text' } } },
+      'test', 'test',
+    );
+    await objectql.syncSchemas();
+
+    automation.registerFlow('before_write_probe', {
+      name: 'before_write_probe', label: 'Before-update probe', type: 'record_change',
+      nodes: [
+        {
+          id: 'start', type: 'start', label: 'Start',
+          // `record-before-update` ONLY (not `-write`, which would also bind
+          // `beforeInsert` — the insert leg would trivially satisfy this same
+          // condition too and double the audit count, muddying the measurement).
+          config: {
+            objectName: 'bfw', triggerType: 'record-before-update',
+            // `tag` is NOT in THIS write's payload (only `note` is written) —
+            // BEFORE the fix this read a record with no `tag` key and
+            // FAULTED. `nickname` is declared but never given a value
+            // ANYWHERE (not on insert, not on this update): a materialized
+            // `null`, not a fabrication.
+            condition: "record.tag != null && record.nickname == null",
+          },
+        },
+        {
+          id: 'log', type: 'create_record', label: 'Log',
+          config: { objectName: 'bfw_audit', fields: { seen_tag: '{record.tag}' } },
+        },
+        { id: 'end', type: 'end', label: 'End' },
+      ],
+      edges: [{ id: 'e1', source: 'start', target: 'log' }, { id: 'e2', source: 'log', target: 'end' }],
+    } as any);
+
+    const created = await data.insert('bfw', { tag: 'keep', note: 'x' }, { context: { userId: 'u_trigger' } });
+    const id = Array.isArray(created) ? created[0]?.id : created?.id ?? created;
+    await sleep(200);
+
+    // Update touches ONLY `note` — `tag` never appears in this write's payload.
+    await data.update('bfw', { id, note: 'y' }, { context: { userId: 'u_trigger' } });
+    await sleep(200);
+
+    const audit: any[] = await data.find('bfw_audit', {});
+    expect(audit).toHaveLength(1);
+    // The condition read `record.tag`'s REAL persisted value ('keep', folded
+    // from the prior row) — not a fabricated null, and not a fault.
+    expect(audit[0]?.seen_tag).toBe('keep');
   }, 15000);
 });

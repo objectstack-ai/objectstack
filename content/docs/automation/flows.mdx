@@ -1249,6 +1249,21 @@ true`. Compare against the stored shape (`record.done == 1`) or normalize the
 value before the condition.
 </Callout>
 
+<Callout type="info">
+**`record` / `previous` are *total* over the object's declared fields** — the
+same guarantee [validation predicates](/docs/data-modeling/validation)
+carry (see the `has(x)` is not a null guard callout under "Basic Structure"). A field this write didn't touch (and, for `record`, a field the driver
+didn't echo back) still reads as an explicit `null` rather than dropping out
+of scope, so `record.discount != null` and `previous.stage != previous_stage`
+evaluate cleanly instead of aborting with `No such key`. `has(record.x)` is
+therefore uniformly `true` for a *declared* field the moment it's present at
+all — including when its value is `null` — so it answers "is `x` declared on
+this object", never "does `x` have a value". Guard emptiness with
+`record.x != null` / `isBlank(record.x)`, same as everywhere else CEL runs
+(see the [`has()` gotcha](/docs/data-modeling/formulas#cel-primer) above).
+`has()` still earns its keep against a genuinely *undeclared* key.
+</Callout>
+
 ## Run a flow via API
 
 Flows of any type can be launched over HTTP — this is what an external system,

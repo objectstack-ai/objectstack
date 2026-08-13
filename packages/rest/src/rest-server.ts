@@ -3394,6 +3394,41 @@ export class RestServer {
     }
 
     /**
+     * [#8284] The packaged (code-layer) base declaration of an OBJECT, for the
+     * localization boundary — `translateObject`'s
+     * `TranslateDocumentOptions.packagedBase`.
+     *
+     * The i18n catalog is keyed by object name and is the packaged translation
+     * of the packaged declaration, so it must yield to any scalar that has
+     * been authored on top of that declaration: a code-shipped
+     * `objectExtensions` label, and the tenant's own Studio rename — which
+     * answered `200` and then appeared on neither of the two reads a writable
+     * form derives from (maintainer ruling 2026-08-13; the comparison itself
+     * lives in `@objectstack/spec/system`, which is where the rule belongs —
+     * this method only hands it the value it cannot see).
+     *
+     * `undefined` on every uncertainty, and that is contractual rather than
+     * defensive: the spec-side rule reads absence as "no baseline known" and
+     * falls back to the pre-#8284 `catalog ?? document`, so a host whose
+     * protocol predates this method (or a partial protocol double) keeps
+     * exactly the behaviour it has today instead of losing its translations.
+     *
+     * Feature-detected because `RestProtocol` is the ADR-0076 D9 wire slice
+     * and server-only extensions are detected via runtime casts rather than
+     * widening it — the same shape `getMetaItemLayered` is consumed with.
+     */
+    private packagedObjectBase(p: any, type: string, name: unknown): unknown {
+        if (type !== 'object') return undefined;
+        if (typeof name !== 'string' || name === '') return undefined;
+        if (!p || typeof p.getPackagedObjectBase !== 'function') return undefined;
+        try {
+            return p.getPackagedObjectBase(name);
+        } catch {
+            return undefined;
+        }
+    }
+
+    /**
      * Parse the highest-priority locale from an `Accept-Language` header.
      * Falls back to a `?locale=` query parameter, then to the i18n service's
      * default locale. Returns `undefined` when no preference is expressed
@@ -3493,7 +3528,17 @@ export class RestServer {
         const locale = this.extractLocale(req, i18n);
         if (!locale) return item;
         const { translateMetadataDocument } = await import('@objectstack/spec/system');
-        return translateMetadataDocument(metaType, item, bundle, { locale });
+        // [#8284] The packaged baseline the catalog is a translation OF — see
+        // `packagedObjectBase`. Resolved through the request's own protocol so
+        // a multi-tenant read asks the kernel that actually serves it.
+        const packagedBase = metaType === 'object'
+            ? this.packagedObjectBase(
+                await this.resolveProtocol(environmentId, req).catch(() => undefined),
+                metaType,
+                (item as any)?.name,
+            )
+            : undefined;
+        return translateMetadataDocument(metaType, item, bundle, { locale, packagedBase });
     }
 
     /**
@@ -3686,10 +3731,18 @@ export class RestServer {
         const locale = this.extractLocale(req, i18n);
         if (!locale) return items;
         const { translateMetadataDocument } = await import('@objectstack/spec/system');
+        // [#8284] One protocol resolution for the whole page; the lookup
+        // itself is a synchronous in-memory registry read per element.
+        const p = metaType === 'object'
+            ? await this.resolveProtocol(environmentId, req).catch(() => undefined)
+            : undefined;
         // `getMetaItems` elements are metadata documents (the list envelope is
         // the OUTER `{ type, items }`), so every element translates directly —
         // #5563 removed the per-element shape sniff that stood here.
-        const translated = arr.map((item) => translateMetadataDocument(metaType, item, bundle, { locale }));
+        const translated = arr.map((item) => translateMetadataDocument(metaType, item, bundle, {
+            locale,
+            packagedBase: this.packagedObjectBase(p, metaType, item?.name),
+        }));
         return Array.isArray(items) ? translated : { ...items, items: translated };
     }
 
@@ -8582,7 +8635,16 @@ export class RestServer {
                                     const locale = this.extractLocale(req, i18n);
                                     if (bundle && locale) {
                                         const { translateMetadataDocument } = await import('@objectstack/spec/system');
-                                        objectSchema = translateMetadataDocument('object', objectSchema, bundle, { locale });
+                                        // [#8284] Same rule as the two `/meta/object`
+                                        // reads: the catalog yields to a scalar the
+                                        // package's own extension or the tenant
+                                        // authored. The public form must not be the
+                                        // one surface still serving the packaged
+                                        // string back at a tenant who renamed it.
+                                        objectSchema = translateMetadataDocument('object', objectSchema, bundle, {
+                                            locale,
+                                            packagedBase: this.packagedObjectBase(p, 'object', objectSchema?.name),
+                                        });
                                     }
                                 } catch (e: any) {
                                     logError('[REST] Public form schema translation failed:', e);

@@ -56,6 +56,7 @@ export const InquiryViews = defineView({
       data,
       sections: [
         {
+          name: 'tell_us_about_yourself',
           label: 'Tell us about yourself',
           columns: 1,
           fields: [

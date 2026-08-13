@@ -44,13 +44,25 @@ export interface RecordChangeDataEngine {
     ): void;
     unregisterHooksByPackage?(packageId: string): number;
     /**
-     * Optional object-existence probe (the ObjectQL engine's `getObject`).
-     * When present, {@link RecordChangeTrigger.start} uses it to call out a
-     * flow whose `objectName` matches no registered object — a hook filtered
-     * to a name nobody writes never fires, with zero output at any layer
-     * (2026-07-17 third-party eval).
+     * Optional object-schema accessor (the ObjectQL engine's `getObject`,
+     * `IObjectQLEngine.getObject` — confirmed WIRED on the concrete engine,
+     * unlike {@link getObjectConfig} below). Two independent consumers:
+     *
+     *  1. {@link RecordChangeTrigger.start} probes existence to call out a
+     *     flow whose `objectName` matches no registered object — a hook
+     *     filtered to a name nobody writes never fires, with zero output at
+     *     any layer (2026-07-17 third-party eval).
+     *  2. {@link RecordChangeTrigger.buildContext} reads `.fields` off the
+     *     result to make the seeded `record` / `previous` CEL roots TOTAL
+     *     over the object's DECLARED fields (#4953 services half) — see
+     *     {@link materializeDeclaredFields}.
+     *
+     * Typed loosely (not `ServiceObject`) so this plugin keeps its zero
+     * build-time dependency on objectql; a fixture that returns only what a
+     * probe needs (e.g. `{ name }`) is still a valid implementation for
+     * consumer (1) and simply contributes no fields to consumer (2).
      */
-    getObject?(name: string): unknown;
+    getObject?(name: string): { fields?: Record<string, { type?: unknown } | undefined> } | undefined;
     /**
      * Optional record re-read (the ObjectQL engine's `findOne`). When present,
      * {@link RecordChangeTrigger} uses it to hydrate the seeded `record` with
@@ -66,14 +78,26 @@ export interface RecordChangeDataEngine {
         options: { where?: Record<string, unknown>; fields?: string[]; context?: unknown },
     ): Promise<Record<string, unknown> | null | undefined>;
     /**
-     * Optional object-config accessor (the ObjectQL engine's `getObjectConfig`).
-     * When present, {@link RecordChangeTrigger} uses it to SKIP the hydration
-     * re-read for objects that declare no `formula` field — the only thing the
-     * re-read adds (`summary` fields are stored on write, not read-time
-     * computed). Returns the object's field map; typed loosely so this plugin
-     * keeps its zero build-time dependency on objectql. Absent (or unsure) ⇒ the
+     * Optional object-config accessor (`getObjectConfig`). When present,
+     * {@link RecordChangeTrigger} uses it to SKIP the hydration re-read for
+     * objects that declare no `formula` field — the only thing the re-read
+     * adds (`summary` fields are stored on write, not read-time computed).
+     * Returns the object's field map; typed loosely so this plugin keeps its
+     * zero build-time dependency on objectql. Absent (or unsure) ⇒ the
      * trigger re-reads unconditionally (prior behavior — correctness over the
      * optimization).
+     *
+     * ⚠️ Measured while wiring #4953 (services half): the concrete ObjectQL
+     * engine does NOT implement a method named `getObjectConfig` — only
+     * `getObject` (above) exists there. So on the real engine this optional
+     * hook is always absent and {@link objectHasFormulaField} always takes
+     * its `true` fallback; the schema-gate skip it describes is unreachable
+     * in production (harmless — "correctness over the optimization" is
+     * exactly the documented fallback — but it is dead code, not a working
+     * gate). Out of scope here (a hydration-perf question, not a
+     * materialization one); filed separately rather than folded into this
+     * fix. Left as-is, and deliberately NOT reused for #4953's field lookup —
+     * {@link getObject} is the one actually wired.
      */
     getObjectConfig?(object: string): { fields?: Record<string, { type?: unknown } | undefined> } | undefined;
 }
@@ -89,6 +113,45 @@ export interface TriggerLogger {
      * stdout (debug/info/warn) but stderr (error/fatal) always lands.
      */
     error?(msg: string, ...args: unknown[]): void;
+}
+
+/**
+ * Make a record TOTAL over an object's DECLARED fields — a structural mirror
+ * of `@objectstack/objectql`'s `materializeDeclaredFields`
+ * (`packages/objectql/src/declared-fields.ts`), duplicated here for the same
+ * reason {@link FlowTriggerBinding} / {@link FlowTrigger} above are: this
+ * package stays free of a build-time dependency on objectql (`@objectstack/
+ * objectql` is a devDependency only — tests wire the real engine, production
+ * gets it structurally via {@link RecordChangeDataEngine}). SAME algorithm,
+ * SAME contract as the canonical copy — this is not a second materialisation
+ * pattern, it is the one #4953 (readonlyWhen, PR #6454) established, applied
+ * at the one seam objectql itself cannot reach (a server package one hop
+ * further out). See the canonical doc comment for the full rationale
+ * (why `undefined` counts as absent, why scope is declared-fields-only, why
+ * `has()` becomes uniformly true afterwards).
+ *
+ * Mutates `record` in place (matching the canonical copy's contract) and
+ * returns it. Callers that must not mutate a shared object — this file's own
+ * `ctx.previous`, observed by every OTHER binding sharing the same
+ * HookContext — pass a shallow copy in.
+ *
+ * Exported (module-scope only — NOT re-exported from `index.ts`, so this
+ * stays off the package's published API) so
+ * `materialize-declared-fields-parity.test.ts` can run it head-to-head
+ * against the canonical copy in `@objectstack/objectql`'s
+ * `declared-fields.ts` and fail the moment the two disagree — a duplicated
+ * algorithm with nothing checking it stays duplicated is exactly the
+ * declared-vs-enforced gap this platform treats as a bug.
+ */
+export function materializeDeclaredFields(
+    record: Record<string, unknown>,
+    fields: Record<string, unknown> | undefined | null,
+): Record<string, unknown> {
+    if (!fields || typeof fields !== 'object') return record;
+    for (const name of Object.keys(fields)) {
+        if (record[name] === undefined) record[name] = null;
+    }
+    return record;
 }
 
 const TRIGGER_PREFIX = 'com.objectstack.trigger.record-change';
@@ -277,11 +340,13 @@ export class RecordChangeTrigger implements FlowTrigger {
     /**
      * Build the flow execution context from an ObjectQL hook context. The new
      * record comes from `ctx.result` (after-hooks) or falls back to the
-     * mutation input payload / previous row; the old record from `ctx.previous`,
-     * which the engine binds ahead of every dispatch.
+     * mutation input payload, layered over the prior row; the old record from
+     * `ctx.previous`, which the engine binds ahead of every dispatch.
      *
      * Async because the seeded `record` is hydrated with read-time computed
-     * fields (see {@link hydrateComputedFields}) via a data-engine re-read.
+     * fields (see {@link hydrateComputedFields}) via a data-engine re-read,
+     * AND — since #4953 (services half) — made total over the object's
+     * declared fields (see the `materializeDeclaredFields` call below).
      */
     private async buildContext(binding: FlowTriggerBinding, ctx: HookContext): Promise<AutomationContext> {
         // objectql lifecycle hooks carry the written row under `input.data` (insert /
@@ -311,8 +376,21 @@ export class RecordChangeTrigger implements FlowTrigger {
         // producer of `__previous` is therefore ignored by design; the way to hand
         // this consumer a pre-image is to bind the declared `ctx.previous`.
         const previous = ctx.previous as Record<string, unknown> | undefined;
+        const priorBase = previous && typeof previous === 'object' ? previous : undefined;
+
+        const object = binding.object ?? ctx.object;
 
         const inputData = input.data && typeof input.data === 'object' ? input.data : undefined;
+        // #4953 (services half) — the prior row is now the BASE layer, not just
+        // the before-hook fallback: a field this write's payload/after-row
+        // doesn't mention still needs its REAL persisted value (from `previous`)
+        // rather than going missing, or #1871/#4649's `materializeDeclaredFields`
+        // below would default it to `null` and FABRICATE a value that
+        // contradicts the stored row (`declared-fields.ts`'s own warning) —
+        // wrong for a field that simply was not touched by this write. `after`
+        // (this write's own post-write echo) is trusted last / most, `previous`
+        // least, matching `readonlyWhenBindings`' `{ ...previous, ...data }`
+        // shape in `rule-validator.ts` (#6454).
         const record: Record<string, unknown> =
             after && typeof after === 'object'
                 ? // #1872 — overlay the after-row on the input payload so fields the
@@ -320,21 +398,58 @@ export class RecordChangeTrigger implements FlowTrigger {
                   // stored as an array column) stay visible to the flow's start
                   // condition and `{record.<field>}` interpolation. The after-row
                   // wins for every field it DOES return (id, DB-computed values).
-                  { ...(inputData ?? {}), ...after }
-                : inputData ?? (previous && typeof previous === 'object' ? previous : {});
+                  { ...(priorBase ?? {}), ...(inputData ?? {}), ...after }
+                : { ...(priorBase ?? {}), ...(inputData ?? {}) };
 
         const session = (ctx.session ?? {}) as { userId?: string; organizationId?: string };
-
-        const object = binding.object ?? ctx.object;
 
         // Hydrate read-time computed fields (formula virtuals) onto the seeded
         // record so the flow's start condition and every `{record.<field>}`
         // template resolve them — the raw hook row never carries them (#3426).
+        // Runs BEFORE materialization below: hydration only fills keys `record`
+        // LACKS (`{...full, ...record}`, record wins), so a field materialized
+        // to `null` first would shadow the real value hydration's re-read could
+        // have supplied.
         const hydrated = await this.hydrateComputedFields(object, ctx.event, record, ctx);
+
+        // #4953 (services half) — make BOTH CEL roots (`record` AND `previous`)
+        // TOTAL over the object's DECLARED fields, exactly as the server's other
+        // materialised seams already are (`materializeDeclaredFields`,
+        // `packages/objectql/src/declared-fields.ts`; `rule-validator.ts`
+        // `readonlyWhenBindings`, PR #6454). Without this, `record.x != null` /
+        // `previous.x != null` in a flow's start condition, edge condition, or a
+        // `{record.x}` template fault with `No such key: x` whenever the driver
+        // didn't echo `x` back — while `has(record.x)` silently answers `false`
+        // for the exact same reason, which reads as "the field genuinely has no
+        // value" when the truth is "this evaluation point never got told".
+        //
+        // Only once the record's persisted state is actually IN HAND — same
+        // `groundTruth` gate `evaluateValidationRules` uses. On insert there is
+        // nothing to know yet (absence genuinely means "no value"): every
+        // insert-type event materializes unconditionally. On update/delete it is
+        // knowable only once the prior row was fetched (`ctx.previous`, `#7867`
+        // makes that unconditional for by-id writes) — defaulting a
+        // still-missing field to `null` without that would not materialise an
+        // absent value, it would FABRICATE one that contradicts the stored row,
+        // so a write whose prior row genuinely could not be read is left as-is
+        // and the rare unevaluable predicate fails closed (a fault), same policy
+        // as the validation seam.
+        const isInsertEvent = ctx.event === 'beforeInsert' || ctx.event === 'afterInsert';
+        const groundTruth = isInsertEvent || priorBase !== undefined;
+        const fields = groundTruth ? this.engine.getObject?.(object)?.fields : undefined;
+        if (fields) materializeDeclaredFields(hydrated, fields);
+        // COPIED before materialising, never mutated in place: `previous` here
+        // is the engine's shared `ctx.previous` — the SAME HookContext reference
+        // is handed to every OTHER flow binding on this write (see the class doc
+        // on `hydrationCache`), so writing into it would leak materialised
+        // `null`s into bindings that haven't run yet. Same rule
+        // `readonlyWhenBindings` follows for the identical reason.
+        const materializedPrevious =
+            priorBase && fields ? materializeDeclaredFields({ ...priorBase }, fields) : previous;
 
         return {
             record: hydrated,
-            previous,
+            previous: materializedPrevious,
             object,
             event: binding.event,
             userId: session.userId,

@@ -139,6 +139,7 @@ import type * as M61 from './data/driver/common.zod.js';
 import type * as M62 from './data/driver/memory.zod.js';
 import type * as M63 from './data/driver/sqlite.zod.js';
 import type * as M181 from './data/driver/turso.zod.js';
+import type * as M182 from './api/error-code-ledger.zod.js';
 import type * as M65 from './data/feed.zod.js';
 import type * as M66 from './data/field.zod.js';
 import type * as M67 from './data/filter.zod.js';
@@ -263,7 +264,7 @@ import type * as M167 from './ui/view.zod.js';
 import type * as M170 from './ui/component.zod.js';
 
 // ---------------------------------------------------------------------------
-// 830 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 831 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -398,6 +399,9 @@ export type Iso80 = Assert<Eq< z.input< typeof M19.CodeGenerationTemplateSchema 
 export type Iso81 = Assert<Eq< z.input< typeof M20.ErrorCategory >, z.infer< typeof M20.ErrorCategory > >>;
 export type Iso82 = Assert<Eq< z.input< typeof M20.StandardErrorCode >, z.infer< typeof M20.StandardErrorCode > >>;
 export type Iso83 = Assert<Eq< z.input< typeof M20.RetryStrategy >, z.infer< typeof M20.RetryStrategy > >>;
+
+// api/error-code-ledger.zod.ts
+export type Iso838 = Assert<Eq< z.input< typeof M182.StandardSynonymWaiverSchema >, z.infer< typeof M182.StandardSynonymWaiverSchema > >>;
 export type Iso84 = Assert<Eq< z.input< typeof M20.FieldErrorCode >, z.infer< typeof M20.FieldErrorCode > >>;
 export type Iso85 = Assert<Eq< z.input< typeof M20.FieldErrorSchema >, z.infer< typeof M20.FieldErrorSchema > >>;
 
@@ -1539,12 +1543,12 @@ export type Iso821 = Assert<Eq< z.input< typeof M170.RecordPathProps >, z.infer<
 // "the author asked for the renderer's fallback"), so input === infer holds.
 // A default added to any of these six goes red here, and the fix is the ADR's:
 // declare the XParsed alias and delete the pin line.
-export type Iso838 = Assert<Eq< z.input< typeof M170.ObjectGridPropsSchema >, z.infer< typeof M170.ObjectGridPropsSchema > >>;
-export type Iso839 = Assert<Eq< z.input< typeof M170.ObjectMetricPropsSchema >, z.infer< typeof M170.ObjectMetricPropsSchema > >>;
-export type Iso840 = Assert<Eq< z.input< typeof M170.ObjectKanbanPropsSchema >, z.infer< typeof M170.ObjectKanbanPropsSchema > >>;
-export type Iso841 = Assert<Eq< z.input< typeof M170.ObjectCalendarPropsSchema >, z.infer< typeof M170.ObjectCalendarPropsSchema > >>;
-export type Iso842 = Assert<Eq< z.input< typeof M170.ObjectFormPropsSchema >, z.infer< typeof M170.ObjectFormPropsSchema > >>;
-export type Iso843 = Assert<Eq< z.input< typeof M170.ObjectMasterDetailFormPropsSchema >, z.infer< typeof M170.ObjectMasterDetailFormPropsSchema > >>;
+export type Iso839 = Assert<Eq< z.input< typeof M170.ObjectGridPropsSchema >, z.infer< typeof M170.ObjectGridPropsSchema > >>;
+export type Iso840 = Assert<Eq< z.input< typeof M170.ObjectMetricPropsSchema >, z.infer< typeof M170.ObjectMetricPropsSchema > >>;
+export type Iso841 = Assert<Eq< z.input< typeof M170.ObjectKanbanPropsSchema >, z.infer< typeof M170.ObjectKanbanPropsSchema > >>;
+export type Iso842 = Assert<Eq< z.input< typeof M170.ObjectCalendarPropsSchema >, z.infer< typeof M170.ObjectCalendarPropsSchema > >>;
+export type Iso843 = Assert<Eq< z.input< typeof M170.ObjectFormPropsSchema >, z.infer< typeof M170.ObjectFormPropsSchema > >>;
+export type Iso844 = Assert<Eq< z.input< typeof M170.ObjectMasterDetailFormPropsSchema >, z.infer< typeof M170.ObjectMasterDetailFormPropsSchema > >>;
 
 // ui/page.zod.ts
 export type Iso822 = Assert<Eq< z.input< typeof M163.PageComponentType >, z.infer< typeof M163.PageComponentType > >>;
@@ -1632,7 +1636,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 830 isomorphic pins', () => {
+  it('still declares all 831 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -1828,14 +1832,28 @@ describe('ADR-0122 type-alias convention', () => {
     // are retired with their subjects and are NOT free for reuse: the ids are
     // claims about pins, not positions.
     //
-    // 824 -> 830 is #7751 — the object-* block family's six props schemas
+    // 824 -> 825 is #8211's `StandardSynonymWaiverSchema` — the recorded
+    // waiver that keeps a semantic synonym of a standard-catalog member
+    // registered in `ERROR_CODE_LEDGER`. Isomorphism MEASURED, not assumed:
+    // two `z.string()`s (one regex-, one min-constrained — constraints refine,
+    // they do not reshape) and the `StandardErrorCode` enum, with no
+    // `.default()`, `.transform()`, `.catch()`, `.optional()` or `.pipe()`
+    // anywhere, so the two shapes coincide and ADR-0122 gives it a pin rather
+    // than an `XParsed`. Its id is `Iso838`, the next free one — the ids are
+    // claims about pins, not positions.
+    //
+    // 825 -> 831 is #7751 — the object-* block family's six props schemas
     // (`ObjectGridPropsSchema` … `ObjectMasterDetailFormPropsSchema`),
     // deliberately default-free at the warning tier ("the author said
     // nothing" must stay distinguishable from "the author asked for the
-    // renderer's fallback"), so all six pin isomorphic (Iso838-Iso843).
+    // renderer's fallback"), so all six pin isomorphic. Their ids are
+    // `Iso839`-`Iso844`, the next free ones AFTER #8211's `Iso838` — the
+    // branch numbered them `Iso838`-`Iso843` while unmerged and renumbered on
+    // merge, which is legal precisely because the ids are claims about pins,
+    // not positions: an unmerged claim has been asserted to nobody yet.
     const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     const pins = self.match(/^export type Iso\d+ = Assert</gm) ?? [];
-    expect(pins).toHaveLength(830);
+    expect(pins).toHaveLength(831);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either

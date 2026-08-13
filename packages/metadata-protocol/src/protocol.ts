@@ -1651,6 +1651,74 @@ function clientFacingFailureText(err: unknown, fallback: string): string {
 }
 
 /**
+ * [#8441] The client-facing `code` for a failed row on a batch verb's
+ * `failed[]` — the caught error's own code when the CATALOG declares it, and
+ * otherwise a catalogued stand-in.
+ *
+ * ## The measurement
+ *
+ * The sibling of {@link clientFacingFailureText}, one field over, and it needs
+ * a DIFFERENT rule. #8333 closed the `error` limb at these same two collectors
+ * and left this one explicitly alone. Measured afterwards — on the fixed branch,
+ * with the message withhold already in place — `publishPackageDrafts` still
+ * answered `{ error: 'publish failed', code: 'SQLITE_ERROR' }`: the sentence
+ * withheld and the driver's own dialect still shipping beside it, on response
+ * DATA that no HTTP boundary's withhold can reach. `revertCommit` measured the
+ * same, `{ error: 'revert failed', code: 'SQLITE_ERROR' }`.
+ *
+ * ## ⛔ NOT {@link declaresClientRefusal}'s question
+ *
+ * That predicate asks whether a producer AUTHORED this sentence for a caller,
+ * because a message is free text and no catalog bounds it. This field is
+ * `ApiErrorSchema.code`: a CLOSED union (ADR-0112 D4) whose membership test
+ * this file already has — {@link carryCatalogedErrorCode}'s, itself verbatim
+ * {@link toRowApiError}'s. So the question here is **"is this code in the
+ * catalog?"**, and asking the 4xx question instead would be the wrong test on
+ * the wrong field twice over: it would admit `SQLITE_ERROR` from any producer
+ * that happened to declare a 4xx, and it would reject
+ * `ERR_DATASOURCE_UNAVAILABLE` — a code the ledger registered.
+ *
+ * ## Why it SUBSTITUTES rather than drops the limb
+ *
+ * `code` is the half a client BRANCHES on. `BATCH_ABORTED` rides the same
+ * array, and the Studio publish form highlights the offending field from
+ * `INVALID_METADATA` plus the structured `issues` beside it. Deleting the limb
+ * would trade a real authoring surface for a disclosure narrower than the one
+ * #8333 already closed — a worse deal than doing nothing. So a catalogued code
+ * passes through untouched, and only an uncatalogued one is replaced: by the
+ * status-derived standard code when the error declared a status, otherwise
+ * `INTERNAL_ERROR`. That derivation is {@link toRowApiError}'s, reused rather
+ * than restated, so there is one rule and one place to change it. ⛔ No code is
+ * minted here — ADR-0114's catalog already names every value this returns.
+ *
+ * ## What it deliberately does not touch
+ *
+ * An error carrying **no** code still produces **no** limb: `...(code ? …)` is
+ * the shape both call sites had, and it is preserved. Minting a code where the
+ * wire never carried one is an ADDITION to the response — a separate contract
+ * decision, and the same posture {@link carryCatalogedErrorCode} takes toward
+ * `status`. `issues` is unchanged for the same reason it was out of #8333's
+ * scope: it is structured authoring feedback, and no driver error carries it.
+ *
+ * The other two `failed[]` collectors that build this limb —
+ * `discardPackageDrafts` and `deletePackage` — need no filter and got none.
+ * Measured under the same failing driver: their rows carry no `code` at all.
+ * Both wrap exactly one call, {@link
+ * ObjectStackProtocolImplementation.deleteMetaItem}, whose two re-wrap exits
+ * ALREADY run {@link carryCatalogedErrorCode}, so an uncatalogued driver code
+ * never survives to them. Adding a second filter there would be consumer-side
+ * tolerance over a producer that does not need it (Prime Directive #12) —
+ * the same call #8136 recorded at those sites for the message.
+ */
+function clientFacingFailureCode(err: unknown): string | undefined {
+    const code = (err as { code?: unknown } | null | undefined)?.code;
+    if (!code) return undefined;
+    if (typeof code === 'string' && ErrorCode.safeParse(code).success) return code;
+    const status = (err as { status?: unknown } | null | undefined)?.status;
+    return typeof status === 'number' ? standardErrorCodeForHttpStatus(status) : 'INTERNAL_ERROR';
+}
+
+/**
  * [#8333] The seed-request schema rejection, DECLARED — a 422 refusal with the
  * same envelope `saveMetaItem` raises for a failed overlay parse.
  *
@@ -4374,6 +4442,50 @@ export class ObjectStackProtocolImplementation implements
             // The fold is a read over in-memory contributors; a failure here
             // must not turn a served schema into a 5xx.
             return body;
+        }
+    }
+
+    /**
+     * [#8284] The PACKAGED (code-layer) OWNER declaration of an object —
+     * the base layer, BEFORE `objectExtensions` are folded onto it
+     * (ADR-0029 D9.2) and before any tenant `sys_metadata` overlay.
+     *
+     * Read-only, synchronous, and the ONE fact the localization boundary
+     * cannot derive for itself. `translateObject`
+     * (`@objectstack/spec/system`) resolves an object's `label` /
+     * `pluralLabel` / `description` against the i18n catalog, which is keyed
+     * by object name and is the packaged translation of exactly this
+     * declaration. Consulting it unconditionally overwrote every scalar that
+     * had been authored ON TOP of the declaration — a code-shipped extension
+     * scalar, and the tenant's own Studio rename, which answered `200` and
+     * then appeared on neither `/meta/object` read (#8284, maintainer ruling
+     * 2026-08-13: the catalog loses to an explicit override, decided by
+     * comparison against this value).
+     *
+     * ⛔ NOT {@link lookupArtifactItem}, whose object branch answers
+     * `resolveOwnerLayer` — owner **plus its extenders** (see
+     * `SchemaRegistry.getArtifactItem`). That body already carries the
+     * extension's scalar, so comparing against it would call the extension's
+     * label "unchanged" and hand the catalog back the very case #8037 filed.
+     * The discriminator is `getPackagedObjectOwner`, which is the same
+     * "does a code package ship this?" test (`isCodeArtifactBody`) applied to
+     * the OWNER contributor alone.
+     *
+     * Returns `undefined` — meaning "no packaged baseline, do not infer
+     * anything" — for a runtime/tenant-authored object (no code owner), an
+     * unknown name, and a partial registry double. The caller's contract is
+     * that absence restores the pre-#8284 behaviour rather than guessing.
+     */
+    getPackagedObjectBase(name: string): unknown {
+        if (typeof name !== 'string' || name === '') return undefined;
+        const registry = (this.engine as any)?.registry;
+        if (!registry || typeof registry.getPackagedObjectOwner !== 'function') return undefined;
+        try {
+            return registry.getPackagedObjectOwner(name)?.definition;
+        } catch {
+            // Same rule as the fold above: a read over in-memory contributors
+            // must never turn a served schema into a 5xx.
+            return undefined;
         }
     }
 
@@ -12622,19 +12734,27 @@ export class ObjectStackProtocolImplementation implements
             // 403, `METADATA_CONFLICT` 409, the repository's 403/404/409/422).
             // So the rule withholds the driver text and nothing else.
             //
-            // `code` and `issues` are deliberately left as they were: they are
-            // a different field with a different rule (a closed union — see
-            // {@link carryCatalogedErrorCode}), and are not this card's scope.
+            // [#8441] `code` was left as it was by #8333 — a different field
+            // with a different rule (a closed union) — and measured afterwards
+            // it still carried the driver's own dialect: `SQLITE_ERROR` beside
+            // the withheld sentence. It is now filtered by CATALOG MEMBERSHIP,
+            // not by the 4xx question, so `INVALID_METADATA` / `NOT_OVERRIDABLE`
+            // and every other declared code reach the caller untouched. See
+            // {@link clientFacingFailureCode}. `issues` stays as it was: it is
+            // structured authoring feedback, which no driver error carries.
             console.warn(
                 `[protocol.publishPackageDrafts] batch publish of '${request.packageId}' rolled back at `
                 + `${causal ? `${causal.type}/${causal.name}` : 'an unidentified item'}: ${e?.message ?? e}`,
             );
+            // One error drives the whole map — the batch is all-or-nothing — so
+            // the filter runs once rather than per row.
+            const causalCode = clientFacingFailureCode(e);
             const failedOut = ordered.map((d) =>
                 causal && d.type === causal.type && d.name === causal.name
                     ? {
                         type: d.type, name: d.name,
                         error: clientFacingFailureText(e, 'publish failed'),
-                        ...(e?.code ? { code: e.code } : {}),
+                        ...(causalCode ? { code: causalCode } : {}),
                         // Carry structured spec-validation issues so the publish
                         // surface can point at the offending field.
                         ...(Array.isArray(e?.issues) ? { issues: e.issues } : {}),
@@ -14057,11 +14177,21 @@ export class ObjectStackProtocolImplementation implements
                 // `[version_not_restorable]` 409, `[item_locked]` 403,
                 // `[writable_package_required]` 422 — so the self-correcting
                 // sentences survive and only the driver line is withheld.
+                // [#8441] …and the `code` limb beside it, which #8333 left
+                // alone as a different field with a different rule. Measured
+                // after that fix landed, this row still answered
+                // `{ error: 'revert failed', code: 'SQLITE_ERROR' }`. The rule
+                // here is CATALOG MEMBERSHIP, so the repository's declared
+                // refusals — `VERSION_NOT_FOUND`, `ITEM_LOCKED`, `NO_DRAFT`,
+                // `VERSION_NOT_RESTORABLE` — pass through untouched and only a
+                // driver's dialect is replaced. See {@link
+                // clientFacingFailureCode}.
+                const failureCode = clientFacingFailureCode(e);
                 failed.push({
                     type: it.type,
                     name: it.name,
                     error: clientFacingFailureText(e, 'revert failed'),
-                    ...(e?.code ? { code: e.code } : {}),
+                    ...(failureCode ? { code: failureCode } : {}),
                 });
                 console.warn(
                     `[protocol.revertCommit] revert of ${it.type}/${it.name} failed for commit `

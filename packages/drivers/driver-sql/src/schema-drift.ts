@@ -75,9 +75,31 @@ export function isUniqueScopeDeclared(unique: unknown): boolean {
 }
 
 /**
- * The organization-scoped spellings: field-level `true` (unchanged since
- * #3696) and the explicit `'organization'` synonym (ADR-0120 D1) — on either
- * spelling (field-level `unique` or a declared index's `unique`).
+ * The organization-scoped spellings of a FIELD-level `unique`: bare `true`
+ * (the positional synonym, unchanged since #3696) and the explicit
+ * `'organization'` word (ADR-0120 D1). Pass a field's `unique`; do NOT pass a
+ * declared index's.
+ *
+ * This is NOT the scope judgment for a declared index, and it must not be
+ * reached for there. {@link normalizeDeclaredIndex} decides with a strict
+ * `idx?.unique === 'organization'` instead, so a declared index's bare `true`
+ * is taken VERBATIM as global — the `'global'` arm. That the two paths judge
+ * the same token differently is the answer to #4986, not an oversight: the
+ * spellings were authored under different contracts, and both halves are
+ * pinned (`sql-driver-declared-index-organization-respelling.test.ts`).
+ *
+ * Routing the declared-index branch through this predicate so code and comment
+ * agree is REJECTED — maintainer ruling 2026-08-13, option 1 of #8323. It
+ * would silently reinterpret every existing declared `unique: true` on
+ * deployed databases as organization-scoped: an unannounced index migration,
+ * landing a release BEFORE #5082 refuses the bare spelling — the
+ * two-migrations-with-contradictory-meanings sequence that ruling exists to
+ * avoid. Whether a declared index's bare `true` should be refused at all is
+ * PARKED on #5082 (v18 D2: bare `true` → `'global'` plus a loud refusal).
+ * Until that lands the divergence stays, surfaced to authors rather than
+ * silently repaired: lint `unique/unscoped-declared-index` warns on it
+ * (`packages/lint/src/data-model-rules.ts`) and `IndexSchema.unique`'s
+ * `describe()` states it (`packages/spec/src/data/object.zod.ts`).
  */
 export function isOrganizationScopedUnique(unique: unknown): boolean {
   return unique === true || unique === 'organization';

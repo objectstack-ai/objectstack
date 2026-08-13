@@ -1,6 +1,6 @@
 ---
 title: Protocol Reference
-description: Every schema published by @objectstack/spec — 1576 schemas across 14 protocol modules
+description: Every schema published by @objectstack/spec — 1571 schemas across 14 protocol modules
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -20,7 +20,7 @@ counts are sums of the rows they head. Regenerate with
 | Module | Pages | Schemas | Description |
 | :--- | ---: | ---: | :--- |
 | [AI Protocol](/docs/references/ai) | 11 | 66 | Agents, tools, skills, RAG and knowledge sources, model registry, conversations. |
-| [API Protocol](/docs/references/api) | 28 | 412 | REST/GraphQL contracts, endpoints, routing, realtime, batch, discovery. |
+| [API Protocol](/docs/references/api) | 28 | 413 | REST/GraphQL contracts, endpoints, routing, realtime, batch, discovery. |
 | [Automation Protocol](/docs/references/automation) | 13 | 68 | Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records. |
 | [Cloud Protocol](/docs/references/cloud) | 11 | 94 | Environments, packages and versions, marketplace, developer portal, tenancy. |
 | [Data Protocol](/docs/references/data) | 29 | 163 | Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer. |
@@ -32,8 +32,8 @@ counts are sums of the rows they head. Regenerate with
 | [Shared Protocol](/docs/references/shared) | 8 | 31 | Primitives used across every protocol — identifiers, HTTP, expressions, error maps, enums. |
 | [Studio Protocol](/docs/references/studio) | 3 | 35 | Studio designer metadata — the authoring surfaces for the protocols above. |
 | [System Protocol](/docs/references/system) | 36 | 287 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
-| [UI Protocol](/docs/references/ui) | 16 | 154 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
-| **Total** | **198** | **1576** | 14 protocol modules |
+| [UI Protocol](/docs/references/ui) | 16 | 148 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
+| **Total** | **198** | **1571** | 14 protocol modules |
 
 ---
 
@@ -61,7 +61,7 @@ Agents, tools, skills, RAG and knowledge sources, model registry, conversations.
 
 ## API Protocol
 
-**Source:** `packages/spec/src/api/` · **Import:** `@objectstack/spec/api` · **28 pages, 412 schemas**
+**Source:** `packages/spec/src/api/` · **Import:** `@objectstack/spec/api` · **28 pages, 413 schemas**
 
 REST/GraphQL contracts, endpoints, routing, realtime, batch, discovery.
 
@@ -77,7 +77,7 @@ REST/GraphQL contracts, endpoints, routing, realtime, batch, discovery.
 | [`dispatcher.zod.ts`](/docs/references/api/dispatcher) | `DispatcherConfig`, `DispatcherErrorCode`, `DispatcherErrorResponse`, `DispatcherRoute` |
 | [`documentation.zod.ts`](/docs/references/api/documentation) | `ApiChangelogEntry`, `ApiDocumentationConfig`, `ApiTestCollection`, `ApiTestRequest`, `ApiTestingUiConfig`, `ApiTestingUiType`, `CodeGenerationTemplate`, `GeneratedApiDocumentation`, `OpenApiSecurityScheme`, `OpenApiServer`, `OpenApiSpec` |
 | [`endpoint.zod.ts`](/docs/references/api/endpoint) | `ApiEndpoint`, `ApiMapping` |
-| [`error-code-ledger.zod.ts`](/docs/references/api/error-code-ledger) | `ErrorCode` |
+| [`error-code-ledger.zod.ts`](/docs/references/api/error-code-ledger) | `ErrorCode`, `StandardSynonymWaiver` |
 | [`errors.zod.ts`](/docs/references/api/errors) | `EnhancedApiError`, `ErrorCategory`, `ErrorResponse`, `FieldError`, `FieldErrorCode`, `RetryStrategy`, `StandardErrorCode` |
 | [`events.zod.ts`](/docs/references/api/events) | `BulkDataEvent`, `BulkDataEventType`, `DataEvent`, `DataEventType`, `MetadataEvent`, `MetadataEventType` |
 | [`export.zod.ts`](/docs/references/api/export) | `CreateExportJobRequest`, `CreateExportJobResponse`, `CreateImportJobRequest`, `CreateImportJobResponse`, `DeduplicationStrategy`, `ExportFormat`, `ExportImportTemplate`, `ExportJobProgress`, `ExportJobStatus`, `ExportJobSummary`, `FieldMappingEntry`, `GetExportJobDownloadRequest`, `GetExportJobDownloadResponse`, `ImportJobProgress`, `ImportJobResults`, `ImportJobStatus`, `ImportJobSummary`, `ImportMapping`, `ImportRequest`, `ImportResponse`, `ImportRowResult`, `ImportValidationConfig`, `ImportValidationMode`, `ImportValidationResult`, `ImportWriteMode`, `ListExportJobsRequest`, `ListExportJobsResponse`, `ListImportJobsRequest`, `ListImportJobsResponse`, `ScheduleExportRequest`, `ScheduleExportResponse`, `ScheduledExport`, `UndoImportJobResponse` |
@@ -364,7 +364,7 @@ The runtime environment — logging, jobs, cache, metrics, notifications, i18n a
 
 ## UI Protocol
 
-**Source:** `packages/spec/src/ui/` · **Import:** `@objectstack/spec/ui` · **16 pages, 154 schemas**
+**Source:** `packages/spec/src/ui/` · **Import:** `@objectstack/spec/ui` · **16 pages, 148 schemas**
 
 Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer.
 
@@ -375,7 +375,7 @@ Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI lay
 | [`app.zod.ts`](/docs/references/ui/app) | `ActionNavItem`, `App`, `AppBranding`, `AppContextSelector`, `ComponentNavItem`, `DashboardNavItem`, `GroupNavItem`, `NavigationArea`, `NavigationContribution`, `NavigationItem`, `ObjectNavItem`, `PageNavItem`, `ReportNavItem`, `UrlNavItem` |
 | [`bulk-action.zod.ts`](/docs/references/ui/bulk-action) | `BulkActionDef`, `BulkActionExecution`, `BulkActionOperation`, `BulkActionParam` |
 | [`chart.zod.ts`](/docs/references/ui/chart) | `ChartAggregate`, `ChartAggregateFunction`, `ChartAnnotation`, `ChartAxis`, `ChartConfig`, `ChartDrillDown`, `ChartGroupBy`, `ChartInteraction`, `ChartSeries`, `ChartType` |
-| [`component.zod.ts`](/docs/references/ui/component) | `AIChatWindowProps`, `ElementButtonProps`, `ElementFilterProps`, `ElementFormProps`, `ElementImageProps`, `ElementMetadataViewerProps`, `ElementNumberProps`, `ElementRecordPickerProps`, `ElementTextInputProps`, `ElementTextProps`, `ObjectCalendarProps`, `ObjectFormProps`, `ObjectGridProps`, `ObjectKanbanProps`, `ObjectMasterDetailFormProps`, `ObjectMetricProps`, `PageAccordionProps`, `PageCardProps`, `PageContainerProps`, `PageHeaderProps`, `PageTabsProps`, `RecordActivityProps`, `RecordChatterProps`, `RecordDetailsProps`, `RecordHighlightsField`, `RecordHighlightsProps`, `RecordPathProps`, `RecordRelatedListProps` |
+| [`component.zod.ts`](/docs/references/ui/component) | `AIChatWindowProps`, `ElementButtonProps`, `ElementFilterProps`, `ElementFormProps`, `ElementImageProps`, `ElementMetadataViewerProps`, `ElementNumberProps`, `ElementRecordPickerProps`, `ElementTextInputProps`, `ElementTextProps`, `PageAccordionProps`, `PageCardProps`, `PageContainerProps`, `PageHeaderProps`, `PageTabsProps`, `RecordActivityProps`, `RecordChatterProps`, `RecordDetailsProps`, `RecordHighlightsField`, `RecordHighlightsProps`, `RecordPathProps`, `RecordRelatedListProps` |
 | [`dashboard.zod.ts`](/docs/references/ui/dashboard) | `Dashboard`, `DashboardHeader`, `DashboardHeaderAction`, `DashboardWidget`, `DashboardWidgetOptions`, `GlobalFilter`, `GlobalFilterOptionsFrom`, `WidgetActionType`, `WidgetColorVariant` |
 | [`dataset.zod.ts`](/docs/references/ui/dataset) | `Dataset`, `DatasetDimension`, `DatasetMeasure`, `DerivedMeasureOp` |
 | [`i18n.zod.ts`](/docs/references/ui/i18n) | `AriaProps`, `I18nLabel`, `InlineLocaleMap` |

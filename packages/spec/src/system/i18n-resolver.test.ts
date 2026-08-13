@@ -1806,3 +1806,186 @@ describe('normalizeSupportedLocales (#7679)', () => {
     ]);
   });
 });
+
+// ────────────────────────────────────────────────────────────────────────────
+// translateObject — the catalog loses to an explicit override (#8284)
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * #8284 — `label` / `pluralLabel` / `description` used to resolve as a flat
+ * `catalog ?? document`, so the packaged catalog entry overwrote whatever had
+ * been authored on top of the packaged declaration: a code-shipped
+ * `objectExtensions` scalar, and — the severe half — the tenant's own Studio
+ * rename, which answered `200` and then reached neither `GET /meta/object` nor
+ * `GET /meta/object/:name`.
+ *
+ * Maintainer ruling, 2026-08-13: the catalog loses to an explicit override,
+ * decided by COMPARISON against the packaged base — no provenance flag is
+ * carried through the fold. These cases are the rule's whole truth table; the
+ * end-to-end shape is pinned in
+ * `packages/qa/dogfood/test/showcase-object-extension-scalar-divergence.dogfood.test.ts`.
+ */
+describe('translateObject — catalog vs explicit override (#8284)', () => {
+  /** The packaged declaration, as the owner contributor holds it. */
+  const PACKAGED = {
+    name: 'showcase_account',
+    label: 'Account',
+    pluralLabel: 'Accounts',
+    description: 'A company the org delivers projects for.',
+  };
+
+  /**
+   * A catalog carrying all three scalars in BOTH locales. `en` repeats the
+   * packaged strings (what `i18n:extract` writes); `zh-CN` is the translation.
+   * Both are needed: a rule that only looked at the requested locale would
+   * pass every zh case here and still be wrong for an `en` session.
+   */
+  const BUNDLE: TranslationBundle = {
+    en: {
+      objects: {
+        showcase_account: {
+          label: 'Account',
+          pluralLabel: 'Accounts',
+          description: 'A company the org delivers projects for.',
+        },
+      },
+    } as any,
+    'zh-CN': {
+      objects: {
+        showcase_account: {
+          label: '客户',
+          pluralLabel: '客户',
+          description: '本组织为其交付项目的公司。',
+        },
+      },
+    } as any,
+  };
+
+  const zh = (doc: any, packagedBase?: unknown) =>
+    translateObject(doc, BUNDLE, { locale: 'zh-CN', packagedBase });
+
+  it('an untouched document still gets the catalog — all three scalars', () => {
+    // The majority path, and the one a comparison-based rule must not break:
+    // the document carries exactly what the package shipped, so the catalog IS
+    // its translation.
+    const out = zh({ ...PACKAGED }, PACKAGED);
+    expect(out.label).toBe('客户');
+    expect(out.pluralLabel).toBe('客户');
+    expect(out.description).toBe('本组织为其交付项目的公司。');
+  });
+
+  it("a code-shipped extension's scalars beat the catalog — all three", () => {
+    // The #8037 half: `objectExtensions` declares scalars that the fold
+    // applies (ADR-0029 D9.2) and the catalog used to discard.
+    const folded = {
+      ...PACKAGED,
+      label: 'Account (Success Overlay)',
+      pluralLabel: 'Accounts (Success Overlay)',
+      description: 'A company, with the success overlay applied.',
+    };
+    const out = zh(folded, PACKAGED);
+    expect(out.label).toBe('Account (Success Overlay)');
+    expect(out.pluralLabel).toBe('Accounts (Success Overlay)');
+    expect(out.description).toBe('A company, with the success overlay applied.');
+  });
+
+  it("a tenant's own rename beats the catalog — the severe half", () => {
+    // The `PUT /meta/object/:name` → 200 case. Nothing distinguishes it from
+    // the extension case at this seam, deliberately: one mechanism, both.
+    expect(zh({ ...PACKAGED, label: 'Customer' }, PACKAGED).label).toBe('Customer');
+  });
+
+  it('judges each scalar SEPARATELY', () => {
+    // A renamed `label` must not drag `pluralLabel`/`description` out of the
+    // catalog with it — three scalars, three comparisons.
+    const out = zh({ ...PACKAGED, label: 'Customer' }, PACKAGED);
+    expect(out.label).toBe('Customer');
+    expect(out.pluralLabel).toBe('客户');
+    expect(out.description).toBe('本组织为其交付项目的公司。');
+  });
+
+  it('withholds the catalog in the SOURCE locale too, not just in translation', () => {
+    // An `en` session read the packaged English string back over the tenant's
+    // rename — the same defect, and the one an all-Chinese fixture cannot see.
+    const out = translateObject({ ...PACKAGED, label: 'Customer' }, BUNDLE, {
+      locale: 'en',
+      packagedBase: PACKAGED,
+    });
+    expect(out.label).toBe('Customer');
+  });
+
+  it('NO packaged base supplied → pre-#8284 behaviour, catalog applies', () => {
+    // "Unknown" is not "authored". A host whose protocol cannot answer (or a
+    // runtime-authored object with no code owner) keeps every translation it
+    // has today rather than losing them to an inference nobody can support.
+    expect(zh({ ...PACKAGED, label: 'Customer' }).label).toBe('客户');
+    expect(zh({ ...PACKAGED, label: 'Customer' }, undefined).label).toBe('客户');
+    expect(zh({ ...PACKAGED, label: 'Customer' }, null).label).toBe('客户');
+  });
+
+  it('the ruled edge — renaming to exactly the base value degrades to a no-op', () => {
+    // Ruled harmless on 2026-08-13: the tenant typed the packaged word, so the
+    // catalog still translates it. Pinned because it is a DECISION, not an
+    // oversight — a later reader must not "fix" it.
+    expect(zh({ ...PACKAGED, label: 'Account' }, PACKAGED).label).toBe('客户');
+  });
+
+  it('a base that declares no such scalar still counts as a divergence', () => {
+    // The package shipped no `description`; the served document has one, so it
+    // came from an extension or an overlay — authored either way.
+    const base = { name: 'showcase_account', label: 'Account' };
+    const out = zh({ ...base, description: 'Authored after the fact.' }, base);
+    expect(out.description).toBe('Authored after the fact.');
+    // …and the scalar that DID come from the package is still translated.
+    expect(out.label).toBe('客户');
+  });
+
+  it('an absent or empty document scalar is not an override', () => {
+    // Nothing to protect: the catalog is the only value on offer, so it is
+    // still served (this is the `?? doc.label` half of the old expression).
+    expect(zh({ name: 'showcase_account' }, PACKAGED).label).toBe('客户');
+    expect(zh({ name: 'showcase_account', label: '' }, PACKAGED).label).toBe('客户');
+  });
+
+  it('leaves FIELD labels alone — the rule is scoped to the three scalars', () => {
+    // Field labels have their own per-field catalog keys and no measured
+    // divergence; widening the rule to them would be a second change riding
+    // this one.
+    const withFields = {
+      ...PACKAGED,
+      label: 'Customer',
+      fields: { industry: { name: 'industry', type: 'select', label: 'Vertical' } },
+    };
+    const bundle: TranslationBundle = {
+      'zh-CN': {
+        objects: {
+          showcase_account: { label: '客户', fields: { industry: { label: '行业' } } },
+        },
+      } as any,
+    };
+    const out = translateObject(withFields, bundle, { locale: 'zh-CN', packagedBase: PACKAGED });
+    expect(out.label).toBe('Customer');
+    expect((out.fields as any).industry.label).toBe('行业');
+  });
+
+  it('does not mutate either input document', () => {
+    const doc = { ...PACKAGED, label: 'Customer' };
+    zh(doc, PACKAGED);
+    expect(doc.label).toBe('Customer');
+    expect(PACKAGED.label).toBe('Account');
+  });
+
+  it('reaches the generic dispatcher — translateMetadataDocument carries the base', () => {
+    // `@objectstack/rest` never calls `translateObject` directly; it goes
+    // through the type dispatch, so a base that stopped at the dispatcher
+    // would leave the defect exactly where it was.
+    const out = translateMetadataDocument(
+      'object',
+      { ...PACKAGED, label: 'Customer' },
+      BUNDLE,
+      { locale: 'zh-CN', packagedBase: PACKAGED },
+    );
+    expect(out.label).toBe('Customer');
+    expect(out.pluralLabel).toBe('客户');
+  });
+});

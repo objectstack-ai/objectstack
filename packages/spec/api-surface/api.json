@@ -834,6 +834,7 @@
     "RuntimeAuthoringIssue (type)",
     "RuntimeAuthoringIssueSchema (const)",
     "SERVICE_SELF_INFO_KEY (const)",
+    "STANDARD_SYNONYM_WAIVERS (const)",
     "SaveMetaItemRequest (type)",
     "SaveMetaItemRequestSchema (const)",
     "SaveMetaItemResponse (type)",
@@ -873,6 +874,9 @@
     "SingleRecordResponseSchema (const)",
     "StandardApiContracts (const)",
     "StandardErrorCode (type)",
+    "StandardSynonymViolation (interface)",
+    "StandardSynonymWaiver (type)",
+    "StandardSynonymWaiverSchema (const)",
     "StorageApiContracts (const)",
     "SubscribeMessage (type)",
     "SubscribeMessageSchema (const)",
@@ -998,6 +1002,8 @@
     "readServiceSelfInfo (function)",
     "resolveDiscoveryEnvironment (function)",
     "standardErrorCodeForHttpStatus (function)",
+    "standardSynonymOf (function)",
+    "standardSynonymViolations (function)",
     "validateApiEndpointDeclarations (function)",
     "zodIssuesToFields (function)"
   ]

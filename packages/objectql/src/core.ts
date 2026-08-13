@@ -69,6 +69,12 @@ export { ValidationError, validateRecord } from './validation/record-validator.j
 export type { FieldValidationError } from './validation/record-validator.js';
 export { evaluateValidationRules, needsPriorRecord, legalNextStates } from './validation/rule-validator.js';
 export type { EvaluateRulesOptions } from './validation/rule-validator.js';
+// #4953 — published so a package that duplicates this algorithm for its own
+// zero-build-dependency reasons (`@objectstack/trigger-record-change`'s
+// structural mirror, `record-change-trigger.ts`) has a TEST-TIME way to
+// verify its copy still agrees, instead of the two silently drifting behind
+// one doc comment's word.
+export { materializeDeclaredFields } from './declared-fields.js';
 export {
   InMemoryHookMetricsRecorder,
   noopHookMetricsRecorder,

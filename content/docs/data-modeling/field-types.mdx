@@ -483,6 +483,21 @@ Auto-incrementing number with format template.
 { name: 'ticket_number', label: 'Ticket #', type: 'autonumber', autonumberFormat: 'TKT-{0000}' }
 ```
 
+<Callout type="warn">
+**An autonumber is unique and monotonic per scope — it is not gapless.** Any
+write that gets rejected after the number was reserved — a unique violation on
+another field, a failed validation rule, a `beforeInsert` hook that throws —
+still consumes that number, and it is never reissued. `TKT-0001` succeeding and
+`TKT-0002` failing means the next row is `TKT-0003`; `TKT-0002` will not exist.
+
+This is a decided property of the counter, not a bug to work around. If you are
+building an invoice, contract, or receipt sequence on an `autonumber` field,
+design for gaps: an autonumber guarantees a unique, ever-increasing business
+identifier, but it is **not** a legally gapless document number. Treat that
+guarantee as a separate requirement to satisfy explicitly, not something
+`autonumber` already gives you.
+</Callout>
+
 ---
 
 ## Embedded Structured Types
