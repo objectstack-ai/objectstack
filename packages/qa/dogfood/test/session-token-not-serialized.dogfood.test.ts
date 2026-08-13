@@ -264,6 +264,73 @@ describe('#7823: sys_session.token (a live bearer) never serializes on the gener
     expect(await stillAuthenticates(victim)).toBe(false);
   });
 
+  it('revoke-other-sessions ACTUALLY revokes — the other session stops authenticating (#7823 Q2)', async () => {
+    // The measured composition defect: with the read strip in place and no
+    // readback seam, better-auth's revoke-other-sessions filtered
+    // `listSessions(userId)` rows by a `token` every row had lost — so it
+    // answered `200 {"status":true}` while the user's OTHER session kept
+    // authenticating. A security control reporting success while doing
+    // nothing. The fix routes the adapter's session reads through
+    // `Engine.resolveInternalField` (#8118); this arm holds it there.
+    //
+    // Asserted on the OTHER SESSION'S LIVENESS, not the status code — the
+    // status code is exactly what lied.
+    const email = 'session-token-revoke-others@verify.test';
+    const olderSession = await stack.signUp(email);
+    const currentSession = await stack.signIn(email, 'Member-Pass-123');
+    expect(olderSession).not.toBe(currentSession);
+    expect(await stillAuthenticates(olderSession)).toBe(true);
+    expect(await stillAuthenticates(currentSession)).toBe(true);
+
+    const res = await stack.apiAs(currentSession, 'POST', '/auth/revoke-other-sessions', {});
+    expect(res.status).toBe(200);
+    const body: any = await res.json();
+    expect(body?.status).toBe(true);
+
+    // The half that was silently false before: the other session is GONE…
+    expect(await stillAuthenticates(olderSession)).toBe(false);
+    // …and the caller kept their own — revoke-OTHER, not revoke-all.
+    expect(await stillAuthenticates(currentSession)).toBe(true);
+  });
+
+  it('expired-session cleanup still lands — the expired row is removed, not just refused (#7823 Q2)', async () => {
+    // Same seam, second consumer: when bearer validation meets an EXPIRED
+    // row, better-auth deletes it by `session.token` read back off the row it
+    // just fetched through the adapter. Token-less rows turn that into a
+    // refusal that leaves the credential row in storage forever. Observe the
+    // ROW, not the response — the refusal looks identical either way.
+    const ql = await stack.kernel.getServiceAsync<any>('objectql');
+    const bearer = await stack.signUp('session-token-expired-cleanup@verify.test');
+    expect(await stillAuthenticates(bearer)).toBe(true);
+
+    const rowsFor = async (): Promise<any[]> =>
+      (await ql.find('sys_session', {
+        where: { token: bearer },
+        context: { isSystem: true },
+      })) as any[];
+    expect((await rowsFor()).length).toBe(1);
+
+    // Expire the row in place (system write — the identity write guard admits
+    // the platform's own maintenance writes, and this is storage state, not a
+    // route behaviour).
+    const [row] = await rowsFor();
+    await ql.update(
+      'sys_session',
+      { id: row.id, expires_at: new Date(Date.now() - 60_000).toISOString() },
+      { where: { id: row.id }, context: { isSystem: true } },
+    );
+
+    // Bearer validation on the expired session must refuse…
+    expect(await stillAuthenticates(bearer)).toBe(false);
+    // …and the cleanup must have LANDED: the row is deleted (or tombstoned),
+    // which is precisely the write that no-ops when `token` is missing. A row
+    // still sitting there un-revoked is the silent-no-op state — the refusal
+    // above looks identical whether or not the delete happened, so the ROW is
+    // the only honest witness.
+    const lingering = (await rowsFor()).filter((r: any) => r.revoked_at == null);
+    expect(lingering.length, 'expired-session cleanup must remove/tombstone the row, not silently no-op').toBe(0);
+  });
+
   it('the by-token session lookup still resolves server-side — the value is still in STORAGE', async () => {
     // The load-bearing negative assertion. `internal` is a SERIALIZATION
     // contract, not a storage one: the strip runs on rows the driver has

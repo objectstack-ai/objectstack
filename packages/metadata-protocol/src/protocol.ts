@@ -11,6 +11,7 @@ import { readEnvWithDeprecation, resolveTenancyPosture } from '@objectstack/type
 // the posture, is what the runtime authoring gate is told.
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import type { MetadataHostEngine } from './host-engine.js';
+import { omitInternalFieldsFromWriteResponse } from './write-response-internal-fields.js';
 import { evaluateRuntimeAuthoringGate } from './runtime-authoring-gate.js';
 // [#7560] ADR-0070's read-only-package rule, shared with the `/packages`
 // lifecycle gate in `@objectstack/runtime` — see `./package-writability.js`.
@@ -7578,6 +7579,14 @@ export class ObjectStackProtocolImplementation implements
         const opts: any = { onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); } };
         if (request.context !== undefined) opts.context = request.context;
         const result = await this.engine.insert(request.object, data, opts);
+        // [#7823] The 201 body is a GENERIC-DATA-PATH surface: strip
+        // `internal: true` fields here, at the ingress, per the A-prime ruling
+        // (2026-08-13). The engine deliberately no longer strips its own write
+        // results — better-auth reads a minted `sys_session.token` back off
+        // them — so this line is what keeps a flagged credential out of the
+        // external create response. Tripwire-enforced; see
+        // `write-response-internal-fields.ts`.
+        omitInternalFieldsFromWriteResponse(this.engine.registry?.getObject(request.object), result);
         return {
             object: request.object,
             id: result.id,
@@ -7652,6 +7661,12 @@ export class ObjectStackProtocolImplementation implements
         const insertData = stripReadonlyForInsert(schema, data, ctx);
 
         const result = await this.engine.insert(request.object, insertData, ctxOpt as any);
+        // [#7823] Same ingress strip as `createData` — a clone's 201 body is
+        // the same generic-data-path surface. (The SOURCE row was read through
+        // the engine's find path, which already omits internal fields, so the
+        // copy never carried one in; this guards the INSERT RESULT, which the
+        // engine returns whole by design.)
+        omitInternalFieldsFromWriteResponse(schema, result);
         return {
             object: request.object,
             id: result.id,
@@ -7750,6 +7765,16 @@ export class ObjectStackProtocolImplementation implements
             ? { ...(request.data as Record<string, unknown>), id: request.id }
             : request.data;
         const result = await this.engine.update(request.object, writeData, opts);
+        // [#7823] The PATCH 200 body is the surface #7728's fourth measurement
+        // caught: a client revoking a `sys_api_key` (apiMethods keeps `update`
+        // open, #7727) got the stored hash back in this response. That closure
+        // used to live in the engine's by-id update path and RELOCATED here
+        // under the A-prime ruling (2026-08-13) — the engine's write results
+        // stay whole for privileged server-side writers, and THIS line is the
+        // sole closure of that surface. Pinned by
+        // `api-key-hash-not-serialized.dogfood.test.ts` and the ingress
+        // tripwire.
+        omitInternalFieldsFromWriteResponse(this.engine.registry?.getObject(request.object), result);
         return {
             object: request.object,
             id: request.id,
@@ -7783,6 +7808,22 @@ export class ObjectStackProtocolImplementation implements
             id: request.id,
             success: true
         };
+    }
+
+    /**
+     * [#7823] The write-response `internal: true` strip, exposed for generic
+     * write ingresses that live OUTSIDE this class. The one consumer today is
+     * the REST cross-object transactional batch (`POST /batch` in
+     * `@objectstack/rest`), whose UPDATE arm calls `ql.update` directly — a
+     * deliberate #3835-era choice made when the engine still stripped its own
+     * write results — and pushes the returned row into the response body.
+     * `@objectstack/rest` does not depend on this package, so it reaches the
+     * helper through the protocol instance it already holds (duck-typed, the
+     * way it probes `createManyData`). In-place, idempotent, non-objects
+     * skipped — see `write-response-internal-fields.ts`.
+     */
+    omitInternalWriteFields(object: string, records: unknown): void {
+        omitInternalFieldsFromWriteResponse(this.engine.registry?.getObject(object), records);
     }
 
     /**
@@ -8385,6 +8426,7 @@ export class ObjectStackProtocolImplementation implements
                         const stripped = stripReadonlyForInsert(batchSchema, record.data || record, context);
                         const ev = diffDroppedFields(object, record.data || record, stripped, 'readonly');
                         const created = await this.engine.insert(object, stripped, insertCtx as any);
+                        omitInternalFieldsFromWriteResponse(batchSchema, created); // [#7823]
                         results.push({ id: created.id, success: true, data: created, index, ...(ev ? { droppedFields: [ev] } : {}) });
                         succeeded++;
                         break;
@@ -8400,6 +8442,7 @@ export class ObjectStackProtocolImplementation implements
                         // [#3455] Collect the engine's LEGAL write strips per row.
                         const dropped: DroppedFieldsEvent[] = [];
                         const updated = await this.engine.update(object, record.data || {}, { where: { id: record.id }, onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); }, ...ctxOpt } as any);
+                        omitInternalFieldsFromWriteResponse(batchSchema, updated); // [#7823]
                         results.push({ id: record.id, success: true, data: updated, index, ...(dropped.length > 0 ? { droppedFields: dropped } : {}) });
                         succeeded++;
                         break;
@@ -8431,13 +8474,16 @@ export class ObjectStackProtocolImplementation implements
                             if (existing) {
                                 const dropped: DroppedFieldsEvent[] = [];
                                 const updated = await this.engine.update(object, record.data || {}, { where: { id: record.id }, onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); }, ...ctxOpt } as any);
+                                omitInternalFieldsFromWriteResponse(batchSchema, updated); // [#7823]
                                 results.push({ id: record.id, success: true, data: updated, index, ...(dropped.length > 0 ? { droppedFields: dropped } : {}) });
                             } else {
                                 const created = await this.engine.insert(object, { id: record.id, ...(record.data || {}) }, insertCtx as any);
+                                omitInternalFieldsFromWriteResponse(batchSchema, created); // [#7823]
                                 results.push({ id: created.id, success: true, data: created, index });
                             }
                         } else {
                             const created = await this.engine.insert(object, record.data || record, insertCtx as any);
+                            omitInternalFieldsFromWriteResponse(batchSchema, created); // [#7823]
                             results.push({ id: created.id, success: true, data: created, index });
                         }
                         succeeded++;
@@ -8661,6 +8707,12 @@ export class ObjectStackProtocolImplementation implements
         const opts: any = { onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); } };
         if (request.context !== undefined) opts.context = request.context;
         const records = await this.engine.insert(request.object, rows, opts);
+        // [#7823] Bulk create is the same generic-data-path surface as the
+        // single-record 201 — one strip over the returned rows, at the
+        // ingress. (Today's `internal`-flagged objects grant no `bulk`
+        // apiMethod, so this face cannot reach one over REST yet; the strip is
+        // here so the flag's guarantee does not depend on that staying true.)
+        omitInternalFieldsFromWriteResponse(this.engine.registry?.getObject(request.object), records);
         const merged = mergeDroppedFieldEvents(dropped);
         return {
             object: request.object,
@@ -8717,6 +8769,15 @@ export class ObjectStackProtocolImplementation implements
             rows,
             opts,
         );
+        // [#7823] Per-outcome ingress strip — the partial-success face hands
+        // each written row back as `outcomes[i].record`, so each is the same
+        // generic-data-path surface as a single-record 201 body.
+        if (Array.isArray(outcomes)) {
+            const outcomeSchema = this.engine.registry?.getObject(request.object);
+            for (const o of outcomes) {
+                if (o?.record) omitInternalFieldsFromWriteResponse(outcomeSchema, o.record);
+            }
+        }
         if (Array.isArray(outcomes)) {
             for (let i = 0; i < outcomes.length; i++) {
                 if (!outcomes[i]) continue;
@@ -8777,6 +8838,10 @@ export class ObjectStackProtocolImplementation implements
         const results: BatchDataRowResult[] = [];
         let succeeded = 0;
         let failed = 0;
+        // [#7823] Ingress strip over each row's `data` payload — the bulk
+        // update face is the same generic-data-path surface as the by-id
+        // PATCH body, one row at a time. Resolved once; the loop reuses it.
+        const updateManySchema = this.engine.registry?.getObject(object);
 
         for (const [index, record] of records.entries()) {
             try {
@@ -8810,6 +8875,7 @@ export class ObjectStackProtocolImplementation implements
                 const opts: any = { where: { id: record.id }, onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); } };
                 if (context !== undefined) opts.context = context;
                 const updated = await this.engine.update(object, record.data || {}, opts);
+                omitInternalFieldsFromWriteResponse(updateManySchema, updated); // [#7823]
                 results.push({ id: record.id, success: true, data: updated, index, ...(dropped.length > 0 ? { droppedFields: dropped } : {}) });
                 succeeded++;
             } catch (err: any) {

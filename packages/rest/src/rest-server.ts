@@ -10601,13 +10601,27 @@ export class RestServer {
                                 }
                                 out.push(created?.record);
                             } else if (op.action === 'update') {
-                                // Update needs no ingress detour: the engine enforces
-                                // both static `readonly` (#2948) and `readonlyWhen`
-                                // (#3042) on its own update path, and reports them
-                                // through this listener.
+                                // Update needs no ingress detour for the WRITE half:
+                                // the engine enforces both static `readonly` (#2948)
+                                // and `readonlyWhen` (#3042) on its own update path,
+                                // and reports them through this listener.
                                 const onFieldsDropped = (e: DroppedFieldsEvent) => { dropped.push({ ...e, index }); };
                                 const id = op.id ?? data?.id;
-                                out.push(await ql.update(op.object, { ...data, id }, { context: trxCtx, onFieldsDropped }));
+                                const updated = await ql.update(op.object, { ...data, id }, { context: trxCtx, onFieldsDropped });
+                                // [#7823] …but the RESPONSE half moved to the ingress
+                                // (A-prime ruling, 2026-08-13): the engine no longer
+                                // strips `internal: true` fields from its write
+                                // results, so this direct-`ql.update` mouth must
+                                // apply the shared strip itself before the row rides
+                                // `results` out to the caller. Reached through the
+                                // protocol instance because this package does not
+                                // depend on `@objectstack/metadata-protocol` (same
+                                // duck-typing as the `createManyData` probes).
+                                // Dormant today — no `internal`-flagged object grants
+                                // `bulk` — wired so the flag's guarantee does not
+                                // depend on that staying true.
+                                (p as any).omitInternalWriteFields?.(op.object, updated);
+                                out.push(updated);
                             } else { // 'delete'
                                 out.push(await ql.delete(op.object, { where: { id: op.id }, context: trxCtx }));
                             }
