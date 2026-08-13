@@ -29,6 +29,7 @@ export default defineConfig({
       // nonsensical `spec/src/index.ts/shared` — ENOTDIR at import time for every
       // test file that transitively loads `@objectstack/core`.
       '@objectstack/spec/shared': path.resolve(__dirname, '../../spec/src/shared/index.ts'),
+      '@objectstack/spec/qa': path.resolve(__dirname, '../../spec/src/qa/index.ts'),
       '@objectstack/spec': path.resolve(__dirname, '../../spec/src/index.ts'),
     },
   },
