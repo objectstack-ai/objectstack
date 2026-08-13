@@ -717,7 +717,6 @@
     "TrainingPlanSchema": "src/system/training.zod.ts#TrainingPlanSchema (const)",
     "TrainingRecord": "src/system/training.zod.ts#TrainingRecord (type)",
     "TrainingRecordSchema": "src/system/training.zod.ts#TrainingRecordSchema (const)",
-    "TranslateDocumentOptions": "src/system/i18n-resolver.ts#TranslateDocumentOptions (interface)",
     "TranslationBundle": "src/system/translation.zod.ts#TranslationBundle (type)",
     "TranslationBundleSchema": "src/system/translation.zod.ts#TranslationBundleSchema (const)",
     "TranslationConfig": "src/system/translation.zod.ts#TranslationConfig (type)",
