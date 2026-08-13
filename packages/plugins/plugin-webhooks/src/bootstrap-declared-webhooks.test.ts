@@ -42,9 +42,14 @@ class FakeEngine {
   }
 
   // Declared-metadata registry (where manifest decomposition parks stack.webhooks).
+  //
+  // [#8378] Items are registered EXACTLY as the real engine registers them —
+  // the document itself. Boxing each as `{ content: <item> }` made this fake
+  // the only producer of that envelope in the tree, which is what kept the
+  // production `i?.content ?? i` looking load-bearing.
   get _registry() {
     return {
-      listItems: (type: string) => (this.declared[type] ?? []).map((content) => ({ content })),
+      listItems: (type: string) => [...(this.declared[type] ?? [])],
     };
   }
 
