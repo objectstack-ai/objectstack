@@ -10,6 +10,7 @@ import type { ICryptoProvider } from '@objectstack/spec/contracts';
 import type { SettingsAuditWriter, SettingsEngine, SettingsSecretStore } from './settings-service.types.js';
 import type { CryptoAdapter } from './crypto-adapter.js';
 import { LocalCryptoProvider } from './local-crypto-provider.js';
+import { buildConfigChangeAuditSink } from './config-change-audit.js';
 import { registerSettingsRoutes } from './settings-routes.js';
 import {
   settingsObjects,
@@ -69,7 +70,10 @@ export interface SettingsServicePluginOptions {
  *     and ship `sys_setting` to the manifest service so the engine
  *     auto-provisions the table.
  *  2. `start` → `kernel:ready`: bind the data engine (when present),
- *     wire the audit sink (when present), mount REST routes.
+ *     wire BOTH audit ledgers — `sys_audit_log` `config_change` rows
+ *     ({@link buildConfigChangeAuditSink}) and the settings-specific
+ *     `sys_setting_audit` trail ({@link SettingsServicePlugin.buildAuditWriter})
+ *     — and mount REST routes.
  */
 export class SettingsServicePlugin implements Plugin {
   name = SETTINGS_PLUGIN_ID;
@@ -197,7 +201,16 @@ export class SettingsServicePlugin implements Plugin {
         // its narrow, bundled signature.
         this.service!.bindEngine(
           wrapEngineAsSettingsEngine(engine),
-          undefined,
+          // [#8145] The generic-ledger sink — `sys_audit_log` rows with
+          // `action: 'config_change'`. This argument was `undefined` from the
+          // day the slot was declared, which is the whole of #7675's
+          // `config_change` half: the settings service audited into
+          // `sys_setting_audit` and nothing else, so the shipped
+          // `config_changes` list view and every `action: 'config_change'`
+          // filter were permanently empty. Both ledgers are written now — see
+          // `config-change-audit.ts` for why the settings-specific one keeps
+          // its rows rather than being rerouted.
+          buildConfigChangeAuditSink(engine, ctx.logger),
           {
             secretStore: this.buildSecretStore(engine),
             auditWriter: this.buildAuditWriter(ctx, engine),
@@ -323,35 +336,60 @@ export class SettingsServicePlugin implements Plugin {
   }
 
   /**
-   * Phase 3: append-only writer for `sys_setting_audit`. Failures here
-   * MUST NOT abort the settings write, so all calls are wrapped in a
-   * try/catch and reported through the plugin logger.
+   * Phase 3: append-only writer for `sys_setting_audit`.
+   * See {@link buildSettingAuditWriter} — this is the plugin-context-bound
+   * spelling of it.
    */
   private buildAuditWriter(ctx: PluginContext, engine: IDataEngine): SettingsAuditWriter {
-    const eng: any = engine;
-    return {
-      write: async (entry) => {
-        try {
-          await eng.insert('sys_setting_audit', {
-            namespace: entry.namespace,
-            key: entry.key,
-            scope: entry.scope,
-            action: entry.action,
-            source: entry.source ?? 'api',
-            actor_id: entry.actorId ?? null,
-            old_hash: entry.oldHash ?? null,
-            new_hash: entry.newHash ?? null,
-            encrypted: !!entry.encrypted,
-            request_id: entry.requestId ?? null,
-            reason: entry.reason ?? null,
-            created_at: new Date().toISOString(),
-          }, { bypassTenantAudit: true });
-        } catch (err: any) {
-          ctx.logger?.warn?.('SettingsServicePlugin: setting-audit write failed: ' + (err?.message ?? err));
-        }
-      },
-    };
+    return buildSettingAuditWriter(engine, ctx.logger as any);
   }
+}
+
+/**
+ * Phase 3: append-only writer for `sys_setting_audit`. Failures here
+ * MUST NOT abort the settings write, so all calls are wrapped in a
+ * try/catch and reported through the plugin logger.
+ *
+ * [#8145] The settings-SHAPED half of the dual write. Its sibling —
+ * {@link buildConfigChangeAuditSink} — records the same event on the
+ * platform-wide `sys_audit_log` as a `config_change` row. Neither replaces the
+ * other: `namespace`/`key`/`scope`/`old_hash`/`new_hash`/`source`/`reason` below
+ * have no columns on the generic ledger, and `object_name`/`record_id`/`actor`
+ * have none here.
+ *
+ * Lifted out of the class body (and exported) by the same card, for the same
+ * reason `wrapEngineAsSettingsEngine` is: a pin over the DUAL write has to
+ * exercise both writers as the plugin builds them. Reconstructing this row shape
+ * inside a test would make the test assert against its own copy — the one place
+ * a "the existing ledger is unchanged" claim must not be measured.
+ */
+export function buildSettingAuditWriter(
+  engine: IDataEngine,
+  logger?: { warn?: (message: string) => void },
+): SettingsAuditWriter {
+  const eng: any = engine;
+  return {
+    write: async (entry) => {
+      try {
+        await eng.insert('sys_setting_audit', {
+          namespace: entry.namespace,
+          key: entry.key,
+          scope: entry.scope,
+          action: entry.action,
+          source: entry.source ?? 'api',
+          actor_id: entry.actorId ?? null,
+          old_hash: entry.oldHash ?? null,
+          new_hash: entry.newHash ?? null,
+          encrypted: !!entry.encrypted,
+          request_id: entry.requestId ?? null,
+          reason: entry.reason ?? null,
+          created_at: new Date().toISOString(),
+        }, { bypassTenantAudit: true });
+      } catch (err: any) {
+        logger?.warn?.('SettingsServicePlugin: setting-audit write failed: ' + (err?.message ?? err));
+      }
+    },
+  };
 }
 
 /**
