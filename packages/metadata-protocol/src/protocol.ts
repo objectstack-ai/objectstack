@@ -13711,8 +13711,39 @@ export class ObjectStackProtocolImplementation implements
         }
 
         // Record the revert as its own commit (append-only history).
+        //
+        // [#7860] The scope of the commit being REVERTED, not the request's —
+        // the same rule #7559 gave this function's items ({@link
+        // resolveMetaItemOrgScope}) and #7819 tier 2 gave {@link
+        // duplicatePackage}'s copies, now applied to the commit RECORD that
+        // documents them. `packageId` on this very call is already read off
+        // `row`; the org was the one field still taken from whoever asked.
+        //
+        // Reachable only since #7819 tier 1: before it, the lookup above
+        // answered COMMIT_NOT_FOUND for an env-wide row, so an org caller
+        // could not reach this line with a mismatched scope at all.
+        //
+        // The invariant it restores: a revert commit is visible to exactly
+        // the readers who can see the commit it reverts. Measured on a real
+        // driver, both directions were incoherent without it —
+        //
+        //   env-wide commit reverted by an org caller: the revert row was
+        //   stamped with that org, so a DIFFERENT org's `listCommits` showed
+        //   the env-wide `apply` with no compensation anywhere after it —
+        //   while the artifact really was removed env-wide (the items revert
+        //   in the ROW's scope), i.e. the effect was global and the record
+        //   private. That is the reporting defect this card was opened to
+        //   measure, and it is not cosmetic: {@link rollbackToPackageCommit}
+        //   plans from `listCommits`.
+        //
+        //   org-scoped commit reverted by the no-org REST door: the revert
+        //   row was stamped env-wide, so every OTHER org read a dangling
+        //   `Revert: …` entry whose `parentCommitId` names a commit that
+        //   door cannot see.
+        //
+        // Both collapse to one line because both are the same mismatch.
         const revertCommit = await this.recordPackageCommit({
-            orgId,
+            orgId: (row.organization_id ?? null) as string | null,
             packageId: row.package_id,
             operation: 'revert',
             message: `Revert: ${row.message ?? request.commitId}`,
