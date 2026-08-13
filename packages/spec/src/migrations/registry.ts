@@ -1349,7 +1349,22 @@ const step17: MigrationStep = {
     + 'the three — so an author who wrote `striped: true` got a parse-clean no-op, the exact '
     + 'silent-no-op shape enforce-or-remove exists to end. Copy-without-apply is dead in '
     + 'effect; per the ruling, if objectui wants one of these as real behavior, that is an '
-    + 'implementation card filed first, and the key stays retired pending it.',
+    + 'implementation card filed first, and the key stays retired pending it.\n\n'
+    + "Finally it removes the 'pdf' member of `view.exportOptions` formats (#8010, maintainer "
+    + 'ruling 2026-08-12). PDF export was declined platform-side (#1301 NOT_PLANNED), so the '
+    + "member was declared-but-unrenderable: ObjectGrid dropped the format from the export menu "
+    + "with only a runtime console.warn, so `exportOptions: ['xlsx', 'pdf']` type-checked, "
+    + 'validated, and silently rendered a menu without PDF. The same ruling adopted the OBJECT '
+    + 'form for `exportOptions` — `{ formats?, maxRecords?, includeHeaders?, fileNamePrefix?, '
+    + 'streaming? }`, exactly the key set the renderer reads, ending the state where no '
+    + 'declaration was both type-legal and functional — with the legacy bare array still '
+    + 'accepted and lifted to `{ formats: [...] }` at parse, which is why the conversion strips '
+    + "only 'pdf' and does not rewrite the array spelling. This is an enum VALUE, not a key, so "
+    + '— as with `crypto.hash` above — there is no `retiredKey()` tombstone: the format enum\'s '
+    + 'error map carries the prescription, keyed on the received value so only the spelling '
+    + 'that used to be legal is told it "was removed", plus a union-level dispatch so the '
+    + 'refusal is the top-level message in either authored form. The strip keeps an emptied '
+    + '`formats` array rather than deleting the declaration.',
   conversionIds: [
     'action-execute-to-target',
     'field-conditionalRequired-to-requiredWhen',
@@ -1371,6 +1386,7 @@ const step17: MigrationStep = {
     'flow-inert-keys-removed',
     'view-inert-keys-removed',
     'view-list-passthrough-keys-removed',
+    'view-export-options-pdf-removed',
     'dashboard-inert-keys-removed',
     'agent-knowledge-removed',
     'skill-trigger-phrases-removed',
