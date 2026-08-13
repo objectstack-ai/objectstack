@@ -44,6 +44,8 @@ import { RowCrudActionOverrideSchema } from '../data/object.zod';
 import { FieldSchema, SelectOptionSchema } from '../data/field.zod';
 import { FormFieldSchema, FormSectionSchema } from '../ui/view.zod';
 import { PageComponentSchema } from '../ui/page.zod';
+import { PageTabsProps } from '../ui/component.zod';
+import { ScreenFieldConfigSchema } from '../automation/builtin-node-config.zod';
 
 /**
  * The `unrecognized_keys` message for `value`, or a loud failure.
@@ -237,5 +239,106 @@ describe('#7832 — no acceptance change', () => {
       expect(FieldSchema.safeParse({ ...FIELD, [key]: true }).success).toBe(false);
     }
     expect(FormFieldSchema.safeParse({ ...FORM_FIELD, disabled: true }).success).toBe(false);
+  });
+});
+
+// ===========================================================================
+// 5. #8382 — the two `visibleWhen` shapes #7832's inventory never enumerated
+// ===========================================================================
+//
+// `page:tabs` items (`component.zod.ts`) and `ScreenFieldConfigSchema`
+// (`builtin-node-config.zod.ts`) both declare `visibleWhen` and were outside
+// the six shapes #7832 curated: `visible` / `showWhen` were rejected without
+// naming the key to write instead. Both have exactly ONE landing key for the
+// visibility intent and no boolean sibling, so per the header's rule this is
+// the simple alias case on both: `visible → visibleWhen`, `showWhen →
+// visibleWhen`. Neither shape spreads `VISIBILITY_STRICT_OPTIONS` — both are
+// hand-rolled `strictObject` calls with their own options (the tab item
+// already carried one alias row, `key → value`; the screen field carried
+// `guidance` only, keyed to the `visibleIf` typo) — so no guidance set
+// consumes these keys before the alias channel does; the assertions below
+// confirm the rename fires (a shadowed row would emit the guidance-set
+// prescription instead, per section 2's `.not.toContain('Did you mean')`
+// pattern), which is exactly what keeps `alias-integrity.test.ts` green.
+
+/** Minimal bodies that reach each new surface's unknown-key path. */
+const TAB_ITEM = { label: 'Tab', children: [] } as const;
+const SCREEN_FIELD = { name: 'f' } as const;
+
+describe('#8382 — the two shapes #7832 never enumerated', () => {
+  describe('`page:tabs` item (`PageTabsProps.items`) — `visibleWhen` declared, no alias for the action-side spellings', () => {
+    it('`visible` renames onto `visibleWhen`', () => {
+      const m = unknownKeyMessage(PageTabsProps, { items: [{ ...TAB_ITEM, visible: true }] });
+      expect(m).toContain('Did you mean `visible` → `visibleWhen`?');
+    });
+
+    it('`showWhen` renames onto `visibleWhen`', () => {
+      const m = unknownKeyMessage(PageTabsProps, { items: [{ ...TAB_ITEM, showWhen: 'record.x' }] });
+      expect(m).toContain('Did you mean `showWhen` → `visibleWhen`?');
+    });
+
+    it('the canonical `visibleWhen` still parses, unchanged', () => {
+      // `ExpressionInputSchema` normalizes a bare string into `{ dialect: 'cel',
+      // source }` — that normalization is pre-existing and untouched by this
+      // card; what this pins is that the alias rows did not disturb it.
+      const r = PageTabsProps.safeParse({ items: [{ ...TAB_ITEM, visibleWhen: 'record.x' }] });
+      expect(r.success).toBe(true);
+      if (r.success) expect(r.data.items[0]?.visibleWhen).toEqual({ dialect: 'cel', source: 'record.x' });
+    });
+
+    it('`visible` and `showWhen` stay REJECTED — a pointer is not an acceptance', () => {
+      expect(PageTabsProps.safeParse({ items: [{ ...TAB_ITEM, visible: true }] }).success).toBe(false);
+      expect(PageTabsProps.safeParse({ items: [{ ...TAB_ITEM, showWhen: 'record.x' }] }).success).toBe(false);
+    });
+
+    // The judgment call: `visibility` / `visibleOn` are the ADR-0089 spellings
+    // this surface's own docblock says are deliberately NOT folded in (the
+    // key is new; there is no legacy convention to carry forward here, unlike
+    // the view/page shapes that fold them via `normalizeVisibleWhen`). That
+    // sentence is about ACCEPTANCE and an alias row does not disturb it — both
+    // stay rejected below. But an author who used the ADR-0089 spelling
+    // correctly on a page component or view form and reaches for the same
+    // word on a tab item is signalling the identical intent, so #8382 points
+    // the rejection at `visibleWhen` for these two as well, on the same
+    // one-landing-key rule as `visible` / `showWhen`. Pinned here so a future
+    // edit cannot silently drop the pointer OR silently start accepting them.
+    it('`visibility` / `visibleOn` are POINTED at `visibleWhen` but stay rejected (the #8382 judgment call)', () => {
+      const mVisibility = unknownKeyMessage(PageTabsProps, { items: [{ ...TAB_ITEM, visibility: true }] });
+      expect(mVisibility).toContain('Did you mean `visibility` → `visibleWhen`?');
+      expect(PageTabsProps.safeParse({ items: [{ ...TAB_ITEM, visibility: true }] }).success).toBe(false);
+
+      const mVisibleOn = unknownKeyMessage(PageTabsProps, { items: [{ ...TAB_ITEM, visibleOn: 'record.x' }] });
+      expect(mVisibleOn).toContain('Did you mean `visibleOn` → `visibleWhen`?');
+      expect(PageTabsProps.safeParse({ items: [{ ...TAB_ITEM, visibleOn: 'record.x' }] }).success).toBe(false);
+    });
+  });
+
+  describe('`ScreenFieldConfigSchema` — `visibleWhen` declared, no alias for the action-side spellings', () => {
+    it('`visible` renames onto `visibleWhen`', () => {
+      const m = unknownKeyMessage(ScreenFieldConfigSchema, { ...SCREEN_FIELD, visible: true });
+      expect(m).toContain('Did you mean `visible` → `visibleWhen`?');
+    });
+
+    it('`showWhen` renames onto `visibleWhen`', () => {
+      const m = unknownKeyMessage(ScreenFieldConfigSchema, { ...SCREEN_FIELD, showWhen: 'record.x' });
+      expect(m).toContain('Did you mean `showWhen` → `visibleWhen`?');
+    });
+
+    it('the canonical `visibleWhen` still parses, unchanged', () => {
+      const r = ScreenFieldConfigSchema.safeParse({ ...SCREEN_FIELD, visibleWhen: 'record.x' });
+      expect(r.success).toBe(true);
+      if (r.success) expect(r.data.visibleWhen).toBe('record.x');
+    });
+
+    it('`visible` and `showWhen` stay REJECTED — a pointer is not an acceptance', () => {
+      expect(ScreenFieldConfigSchema.safeParse({ ...SCREEN_FIELD, visible: true }).success).toBe(false);
+      expect(ScreenFieldConfigSchema.safeParse({ ...SCREEN_FIELD, showWhen: 'record.x' }).success).toBe(false);
+    });
+
+    it('the pre-existing `visibleIf` guidance is untouched by the new aliases (`guidance` wins over `aliases`)', () => {
+      const m = unknownKeyMessage(ScreenFieldConfigSchema, { ...SCREEN_FIELD, visibleIf: 'record.x' });
+      expect(m).toContain('The visibility predicate is `visibleWhen`');
+      expect(m).not.toContain('Did you mean');
+    });
   });
 });
