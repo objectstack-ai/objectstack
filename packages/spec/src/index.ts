@@ -68,6 +68,16 @@ export * from './stack.zod';
 
 // DX Helper Functions (re-exported for convenience)
 export { defineView, defineForm, defineViewItem, isAggregatedViewContainer, expandViewContainer, expandViewContainerWithDiagnostics } from './ui/view.zod';
+// [#5320] The assembled-manifest view channel: the `viewItems:` vocabulary, its
+// producer-side partition, and the shared container classifier the registration
+// loop's `views:` tighten judges by.
+export {
+  ASSEMBLED_VIEW_ITEMS_KEY,
+  AssembledViewArtifactSchema,
+  isViewContainerShaped,
+  partitionAssembledViewArtifacts,
+} from './ui/assembled-views.zod';
+export type { AssembledViewArtifact, AssembledViewArtifactParsed, AssembledViewPartition } from './ui/assembled-views.zod';
 export type { ExpandedViewItem, ViewKeyCollision, ExpandViewResult } from './ui/view.zod';
 export { defineApp } from './ui/app.zod';
 export { defineFlow } from './automation/flow.zod';

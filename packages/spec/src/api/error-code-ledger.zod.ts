@@ -344,6 +344,12 @@ export const ERROR_CODE_LEDGER = {
     'ERR_BULK_RESULT_MISMATCH',
     'ERR_DATASOURCE_UNAVAILABLE',
     'ERR_DRIVER_CONNECT',
+    // [#5320] Third EMITTER of the code (metadata-protocol and plugin-security
+    // already register it) — the registration loop's `views:` tighten refuses a
+    // non-container entry, and the `viewItems:` channel refuses an entry the
+    // assembled vocabulary rejects, both 422/INVALID_METADATA. Provenance, not
+    // identity, per this file's header.
+    'INVALID_METADATA',
     'ERR_READONLY_FIELD_REJECTED', // strictReadonlyWrites: the write would strip caller-supplied fields, so it was refused (#5126; since #6437 that covers the primary_key strip too — one code, `drops` carries the per-reason breakdown)
     'ERR_SUMMARY_RECOMPUTE',
     'VALIDATION_FAILED',

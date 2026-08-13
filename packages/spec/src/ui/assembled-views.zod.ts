@@ -160,12 +160,21 @@ function comparable(item: Record<string, unknown>): Record<string, unknown> {
  * empty container; classification for travel needs the shape question instead:
  * anything that is not a ViewItem record (`viewKind`/`config`) and carries no
  * inline view-config fingerprint is a container document.
+ *
+ * EXPORTED because the producers and the consumer must run ONE classifier: the
+ * partition below routes by it on assembly, and the ObjectQL registration
+ * loop's `views:` tighten (#5320 step 3) refuses by it on ingestion. Two
+ * classifiers would let an assembler emit an entry the importer refuses —
+ * re-opening, one level down, the exact producer/consumer disagreement this
+ * module exists to close.
  */
-function isContainerShaped(item: Record<string, unknown>): boolean {
-  if (isAggregatedViewContainer(item)) return true;
-  if (item.viewKind != null || item.config != null) return false;
+export function isViewContainerShaped(item: unknown): boolean {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
+  const rec = item as Record<string, unknown>;
+  if (isAggregatedViewContainer(rec)) return true;
+  if (rec.viewKind != null || rec.config != null) return false;
   // Flattened overlays put single-view config keys at the top level.
-  return !['type', 'columns', 'sections', 'data', 'filter', 'sort'].some((k) => k in item);
+  return !['type', 'columns', 'sections', 'data', 'filter', 'sort'].some((k) => k in rec);
 }
 
 /**
@@ -191,7 +200,7 @@ export function partitionAssembledViewArtifacts(
   const views: Record<string, unknown>[] = [];
   const rest: Record<string, unknown>[] = [];
   for (const item of items) {
-    if (item && typeof item === 'object' && isContainerShaped(item)) views.push(item);
+    if (isViewContainerShaped(item)) views.push(item);
     else rest.push(item);
   }
 
