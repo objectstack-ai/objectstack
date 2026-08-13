@@ -81,9 +81,23 @@ describe('sys_position — declared uniqueness is organization-scoped (#8468)', 
 
   it('matches the fixture the driver suite copies, entry for entry', () => {
     // The driver suite hand-copies this declaration to keep the package
-    // boundary; without this assertion the two could drift apart silently and
-    // the driver suite would go on proving something about a fixture nobody
-    // ships. Keep both sides in step.
+    // boundary (the shape #8461 used). This assertion catches ONE direction of
+    // drift, and it is worth being exact about which:
+    //
+    //   caught   — the shipped declaration changes and the driver fixture does
+    //              not. This test goes red. Measured: reverting the declaration
+    //              to bare `true` leaves the entire driver suite green at 17/17,
+    //              because that suite never imports `SysPosition`. This is the
+    //              only thing standing between that edit and a silent pass.
+    //   NOT caught — the DRIVER fixture is edited and this declaration is not.
+    //              Nothing compares the literal below to `FIXED_APP`; the two
+    //              copies are only ever checked against this third spelling.
+    //              A driver-side edit drifts silently and this test cannot see
+    //              it. Closing that direction means importing across the
+    //              package boundary, which #8461 deliberately declined.
+    //
+    // So: keep both sides in step by hand, and treat the driver fixture as the
+    // copy that has no guard rather than assuming this pin covers it.
     //
     // Asserted on the BUILT value, which is what a driver is handed:
     // `ObjectSchema.create` normalizes the authored `{ fields: ['active'] }`

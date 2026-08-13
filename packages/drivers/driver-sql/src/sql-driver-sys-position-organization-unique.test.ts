@@ -95,10 +95,16 @@ const POSITION_FIELDS = {
 
 /**
  * The shipped declaration, reduced to the entry that carries the constraint.
- * `sys-position.organization-unique.test.ts` in `plugin-security` asserts the
- * real `SysPosition.indexes` is byte-identical to `FIXED_APP`'s, so this
- * fixture and the real metadata cannot drift apart silently. (Copying rather
- * than importing keeps the package boundary — the same shape #8461 used.)
+ * Copying rather than importing keeps the package boundary — the shape #8461
+ * used.
+ *
+ * ⚠️ The copy is guarded in ONE direction only. `sys-position.organization-unique.test.ts`
+ * in `plugin-security` pins the real `SysPosition.indexes` against its own inline
+ * literal, so a change to the SHIPPED DECLARATION that is not mirrored here goes
+ * red over there. The reverse is unguarded: if `FIXED_APP` below is edited and the
+ * declaration is not, nothing compares them and this suite will go on proving
+ * something about a fixture nobody ships. Treat this block as hand-maintained,
+ * and change it only together with the declaration.
  *
  * The `unique: false` on the second entry is not decoration: `ObjectSchema.create`
  * normalizes the authored `{ fields: ['active'] }` into that shape, so this is
