@@ -398,6 +398,21 @@ export function evaluateRuntimeAuthoringGate(args: {
     body: unknown;
     /** Live object declarations, the resolution universe for the rules. */
     objects?: readonly unknown[];
+    /**
+     * [#8309] Live permission-set declarations — the sibling collection the
+     * three cross-collection security rules compare against. Without it a
+     * per-write snapshot holds exactly one permission set (the written item),
+     * which was measured inventing 38 phantom
+     * `security-master-detail-ungranted` findings per-write against the
+     * whole-stack run's 4 (PR #7886).
+     */
+    permissions?: readonly unknown[];
+    /**
+     * [#8309] Live documentation-book declarations, so a `book` write is
+     * judged with its siblings present and book-derived findings cancel in
+     * the gate's differential for every other write type.
+     */
+    books?: readonly unknown[];
     /** ADR-0080 SDUI manifest when the host has one. */
     sduiManifest?: unknown;
     /**
@@ -427,7 +442,11 @@ export function evaluateRuntimeAuthoringGate(args: {
     const result = runRuntimeAuthoringRules({
         type: args.type,
         item: args.body,
-        context: { objects: args.objects ?? [] },
+        context: {
+            objects: args.objects ?? [],
+            permissions: args.permissions ?? [],
+            books: args.books ?? [],
+        },
         ...(args.sduiManifest !== undefined ? { sduiManifest: args.sduiManifest } : {}),
     });
 

@@ -122,7 +122,17 @@ describe('protocol.publishPackageDrafts (ADR-0033 / ADR-0067 D2)', () => {
       { type: 'view', name: 'course_list' },
     ]);
     promote.mockImplementation(async (req: any) => {
-      if (req.name === 'student') throw Object.assign(new Error('ITEM_LOCKED'), { code: 'ITEM_LOCKED' });
+      // [#8333] `status: 403` added, and the fixture is more faithful for it.
+      // `failed[].error` now quotes a caught sentence only when the error
+      // DECLARED itself a client-facing refusal (a 4xx `status`, ADR-0112);
+      // anything undeclared is withheld because it is indistinguishable from
+      // raw driver text. This double used to throw a `code` with no `status`,
+      // which the REAL producer never does — `SysMetadataRepository`'s
+      // `[item_locked]` carries `status: 403` — so the missing half was the
+      // fixture's, not the rule's. The assertion below is unchanged.
+      if (req.name === 'student') {
+        throw Object.assign(new Error('ITEM_LOCKED'), { code: 'ITEM_LOCKED', status: 403 });
+      }
       return promoteOk(req);
     });
 

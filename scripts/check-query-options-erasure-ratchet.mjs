@@ -20,6 +20,43 @@
 //     number instead, so the surface is measured and cannot grow unnoticed
 //     without a per-file ratchet going red on a legitimate rejection test.
 //
+//     ⚠️ #8210: driving this number down does NOT make `tsc` catch a malformed
+//     options bag for every file it counts, and no other type-aware checker
+//     fills the gap either — measured directly (see below), not assumed. At
+//     the time of writing, 6 of the 9 packages holding test-surface sites
+//     (`objectql`, `runtime`, `spec`, `drivers/driver-mongodb`,
+//     `plugins/plugin-approvals`, `plugins/plugin-auth`) exclude `**/*.test.ts`
+//     from their `tsconfig.json` — ~143 of the 240 counted sites sit in files
+//     `pnpm --filter <pkg> typecheck` never reads at all (`drivers/driver-memory`,
+//     `drivers/driver-sql` and `drivers/driver-sqlite-wasm` hold the other ~97
+//     and ARE type-checked). Re-derive the split any time with
+//     `git log`-free measurement: run the two `measure()` calls below against
+//     `QUERY_OPTIONS_TEST_GLOBS`, bucket the resulting files by whether their
+//     package's `tsconfig.json` excludes `**/*.test.ts`.
+//
+//     ESLint does not fill the gap either — measured, not assumed: this
+//     repo's ONE `eslint.config.mjs` never sets `parserOptions.project` (or
+//     any other type-aware option) and never registers a
+//     `@typescript-eslint/eslint-plugin` typed rule, so no ESLint pass here is
+//     type-aware, over test files or non-test files alike. Positive control:
+//     a `const opts: EngineAggregateOptions = { aggregations: [{ func: … }] }`
+//     (wrong key — the declared one is `function`) planted in an excluded
+//     `objectql` test file left BOTH `pnpm --filter @objectstack/objectql
+//     typecheck` (exit 0) and `pnpm exec eslint --no-inline-config` on that
+//     file (0 problems) silent. A second, independently measured instance:
+//     PR #8406's patch round found `pnpm --filter @objectstack/lint typecheck`
+//     structurally blind to 12 new TS2339s in `packages/lint` test files,
+//     caught only by the TEST_DEBT hidden-layer measurement — same shape,
+//     different package, same day.
+//
+//     What driving this number down DOES buy, honestly: it removes an `any`
+//     that would otherwise blind whatever type-aware tool eventually DOES run
+//     over the file (an editor's language service today; `tsc` itself on the
+//     day a package's exclusion lifts), and it is the precondition for that
+//     day rather than a substitute for it. Where a package's `tsconfig.json`
+//     excludes `**/*.test.ts`, typing the options bag is real, low-cost
+//     hygiene — it is just not, today, a compiler guard against a wrong key.
+//
 // It fails when:
 //   • a non-test file NOT in the baseline reports a site (that already fails
 //     `pnpm lint` — reported here too so one command explains the picture), or
@@ -154,7 +191,11 @@ export function diffRatchet({ baseline, current, testCeiling, testSites, addedBa
       `input is DELIBERATELY off-contract (a test asserting the engine rejects an ` +
       `unknown option) — write \`as unknown as EngineQueryOptions\`, which names the ` +
       `contract being bypassed, keeps the rest of the call checked, and is not counted ` +
-      `here. Raising this number is a reviewed edit, not a remedy.`,
+      `here. Raising this number is a reviewed edit, not a remedy. Note (#8210): in a ` +
+      `package whose tsconfig excludes \`**/*.test.ts\`, typing the options here does ` +
+      `NOT make \`tsc\` (or ESLint — neither is type-aware over this repo's test files) ` +
+      `catch a wrong key; it removes an \`any\` and is a precondition for the day that ` +
+      `exclusion lifts, not a compiler guard today.`,
     );
   } else if (testSites < testCeiling) {
     errors.push(

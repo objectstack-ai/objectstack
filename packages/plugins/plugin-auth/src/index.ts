@@ -28,6 +28,13 @@ export * from './identity-write-guard.js';
 // has to be able to register the invariant itself rather than ship an
 // environment that can ban or delete its last administrator.
 export * from './last-admin-guard.js';
+// [#8317] `sys_member.role` canonicalisation — the write-path hooks and the
+// one-off convergent pass. Exported for the same reason the two guards above
+// are, plus one of its own: a host that upgrades outside this plugin's boot
+// path still has to converge its stored rows, because every non-canonical one
+// is an authorization inversion (an owner to ObjectStack, a plain member to
+// better-auth's raw `split(',')`).
+export * from './member-role-canonical.js';
 export * from './sys-user-writable-fields.js';
 export * from './otp-send-guard.js';
 // ADR-0069 D2 / #4772 — the cross-node rate-limit counter store (kernel cache,

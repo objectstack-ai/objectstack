@@ -1,7 +1,9 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { scheduledJobs } from 'croner';
 import { DbJobAdapter } from './db-job-adapter.js';
+import { CronJobAdapter } from './cron-job-adapter.js';
 
 function makeFakeEngine() {
   const tables = new Map<string, any[]>();
@@ -140,5 +142,78 @@ describe('DbJobAdapter', () => {
     // One synthetic replay run + one wrapped success run from inner trigger
     const triggers = runs.map((r) => r.trigger).sort();
     expect(triggers).toEqual(['replay', 'schedule']);
+  });
+});
+
+// ─── #8362 — the destroy chain, and what an evicted kernel leaves behind ─────
+//
+// Kernel eviction is ROUTINE in the cloud runtime: a freshness probe runs every
+// few seconds and every auto-publish bumps freshness, so the eviction chain
+// `KernelManager.evict() -> kernel.shutdown() -> plugin.destroy() ->
+// JobServicePlugin.destroy() -> dbAdapter.destroy()` runs constantly. It used
+// to stop one level short — `destroy()` destroyed `inner` and never `cron` — so
+// every evicted kernel left its croner timers running and holding their
+// PROCESS-GLOBAL names, and the rebuilt kernel could never re-bind that flow
+// again. The only signal was one WARN.
+//
+// Why the ordering of the two fixes matters, pinned by the second case below:
+// the leaked job is not merely holding a name, it is still ALIVE with a closure
+// over the shut-down kernel's engine. Namespacing the names WITHOUT closing the
+// destroy chain would therefore convert a silent death into a zombie
+// double-write — two live jobs, one driving a dead kernel. Hence the assertion
+// is `oldJob.isStopped()`, not "a new job exists somewhere".
+describe('DbJobAdapter — kernel rebuild (#8362)', () => {
+  /** Croner's process-global registry, narrowed to one PUBLIC job name. */
+  const registeredFor = (jobName: string) =>
+    scheduledJobs.filter((j) => (j.name ?? '').endsWith(jobName));
+
+  const DAILY = { type: 'cron', expression: '0 8 * * *' } as const;
+
+  /** One kernel's job-service wiring: the pair JobServicePlugin builds. */
+  function kernel() {
+    const cron = new CronJobAdapter();
+    return { cron, db: new DbJobAdapter({ engine: makeFakeEngine(), cron }) };
+  }
+
+  it('destroy() destroys the CRON adapter too, freeing the process-global name', async () => {
+    const NAME = 'flow-time-relative:xqao_contract_expiry_reminder_flow';
+    const k = kernel();
+    await k.db.schedule(NAME, DAILY, async () => {});
+
+    const [job] = registeredFor(NAME);
+    expect(job, 'the first bind must register a REAL croner named job').toBeDefined();
+    expect(job.isStopped()).toBe(false);
+
+    // Exactly what the eviction chain reaches, one call short of which was the
+    // whole defect.
+    await k.db.destroy();
+
+    expect(job.isStopped()).toBe(true);
+    expect(registeredFor(NAME)).toHaveLength(0);
+  });
+
+  it('a rebuilt kernel re-binds the same flow: scheduled exactly once, and it fires', async () => {
+    const NAME = 'flow-time-relative:xqao_contract_expiry_reminder_flow';
+    const fired: string[] = [];
+
+    const old = kernel();
+    await old.db.schedule(NAME, DAILY, async () => { fired.push('old-kernel'); });
+    // Assert the FIRST bind landed before asserting anything about the second.
+    expect(registeredFor(NAME)).toHaveLength(1);
+    const oldJob = registeredFor(NAME)[0];
+
+    await old.db.destroy(); // kernel evicted by the freshness probe
+
+    const rebuilt = kernel();
+    await rebuilt.db.schedule(NAME, DAILY, async () => { fired.push('new-kernel'); });
+
+    const held = registeredFor(NAME);
+    expect(held).toHaveLength(1); // exactly once — not one live + one zombie
+    expect(oldJob.isStopped()).toBe(true); // the old job is STOPPED, not merely renamed around
+
+    await held[0].trigger();
+    expect(fired).toEqual(['new-kernel']); // the dead kernel's closure never runs
+
+    await rebuilt.db.destroy();
   });
 });

@@ -107,7 +107,8 @@ ADR-0095 D2 posture rung — PLATFORM_ADMIN crosses the tenant wall where object
 | **principal** | `{ userId: string \| null; positions: string[]; permissionSets: string[]; principalKind?: Enum<'human' \| 'agent' \| 'service' \| 'guest' \| 'system'>; … }` | ✅ |  |
 | **layers** | `{ layer: Enum<'tenant_isolation' \| 'principal' \| 'required_permissions' \| 'object_crud' \| … +6 more>; kernelTier?: Enum<'layer_0_tenant' \| 'layer_1_business'>; verdict: Enum<'grants' \| 'denies' \| 'narrows' \| 'widens' \| 'neutral' \| 'not_applicable'>; detail: string; … }[]` | ✅ |  |
 | **readFilter** | `any` | optional |  |
-| **record** | `{ recordId: string; visible: boolean; decidedBy?: Enum<'tenant_isolation' \| 'principal' \| 'required_permissions' \| 'object_crud' \| … +6 more> }` | optional | Row-level verdict for the specific record; set only for record-grained requests. |
+| **record** | `{ recordId: string; visible: boolean; decidedBy?: Enum<'tenant_isolation' \| 'principal' \| 'required_permissions' \| 'object_crud' \| … +6 more> }` | optional | Row-level verdict for the specific record; set only for singular record-grained requests. |
+| **records** | `{ recordId: string; visible: boolean; decidedBy?: Enum<'tenant_isolation' \| 'principal' \| 'required_permissions' \| 'object_crud' \| … +6 more> }[]` | optional | Per-record verdicts for a batch request — records[i] answers recordIds[i]; set only when the request carried recordIds. |
 
 
 ---
@@ -183,7 +184,8 @@ ADR-0095 D2 posture rung — PLATFORM_ADMIN crosses the tenant wall where object
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ |  |
 | **operation** | `Enum<'read' \| 'create' \| 'update' \| 'delete' \| 'transfer' \| 'restore' \| 'purge' \| 'export'>` | ✅ |  |
-| **recordId** | `string` | optional | Optional id of one concrete record to explain at row granularity; omitted = object-level (pre-C2) request. |
+| **recordId** | `string` | optional | Optional id of one concrete record to explain at row granularity; omitted = object-level (pre-C2) request. Mutually exclusive with recordIds. |
+| **recordIds** | `string[]` | optional | Batch of record ids (1–200) to answer at row granularity in one round trip; records[i] answers recordIds[i]. Mutually exclusive with recordId. |
 | **userId** | `string` | optional |  |
 
 

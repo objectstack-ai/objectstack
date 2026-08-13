@@ -385,6 +385,27 @@ export class TursoDriver extends SqlDriver {
       // cannot lose them by changing its connection string.
       this.remoteTransport.setDiagnosticSink((message) => this.logger.warn(message));
 
+      // [#8413] A declared UNIQUE index the remote face could not create is a
+      // DURABILITY degradation, not a functional one: writes keep succeeding,
+      // reads keep returning rows, and the only thing that changed is that a
+      // constraint the metadata declares is not enforced — the "looks normal
+      // from the outside" shape AGENTS.md grades at `error`. It is a SEPARATE
+      // sink from the `warn` one above precisely so this class does not have to
+      // share a level with the diagnostics that are merely informative.
+      this.remoteTransport.setDurabilitySink((message) =>
+        (this.logger.error ?? this.logger.warn).call(this.logger, message),
+      );
+
+      // [#8413] The tenancy rule behind a field-level `unique`, handed down
+      // rather than re-derived. `computeTenantField` is `SqlDriver`'s single
+      // source of truth (ADR-0120 D1/D3) and is a pure function of the schema,
+      // which is what the transport needs: remote DDL runs BEFORE
+      // `registerRemoteFieldMetadata` fills `tenantFieldByTable`, so a lookup
+      // by table name would read empty at exactly the moment the index is built
+      // and would silently emit a platform-wide unique where the local face
+      // builds a per-organization one.
+      this.remoteTransport.setTenantFieldResolver((schema) => this.computeTenantField(schema));
+
       // Register a lazy-connect factory so the transport can self-heal when
       // connect() was never called, failed on first attempt, or the client
       // was lost (e.g. serverless cold-start, transient network error).

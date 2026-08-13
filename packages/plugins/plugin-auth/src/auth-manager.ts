@@ -30,6 +30,12 @@ import {
 } from './auth-session-audit.js';
 import { SESSION_ERASURE_PATHS } from './session-tombstone.js';
 import {
+  ADMIN_SESSION_COOKIE_KEY,
+  STOP_IMPERSONATING_PATH,
+  rotateCallerBearerOnImpersonation,
+  withBearerAdminSessionRecovery,
+} from './impersonation-bearer-rotation.js';
+import {
   invitationRoleCapFailure,
   isPlainMemberInvitation,
   isOrgAdminGrade,
@@ -42,7 +48,11 @@ import {
   removalBlockedByOwnerTarget,
 } from './remove-member-permission-guard.js';
 import { isPlaceholderEmail } from './placeholder-email.js';
-import { reconcileMembership, type MembershipPolicy } from './reconcile-membership.js';
+import {
+  reconcileMembership,
+  type MembershipPolicy,
+  type ReconcileOutcome,
+} from './reconcile-membership.js';
 import type { TenancyService } from './tenancy-service.js';
 import { OtpSendGuard, assertOtpCooldownSeconds } from './otp-send-guard.js';
 import type { CounterStore } from './rate-limit-storage.js';
@@ -1557,6 +1567,18 @@ export class AuthManager {
           }
         }),
         after: createAuthMiddleware(async (ctx: any) => {
+          // ── #8243: impersonation must actually take effect for a bearer ──
+          // FIRST among the after-hooks that touch the response, because the
+          // bearer plugin's own after-hook runs behind this one and must see
+          // what we stage: it re-reads `Access-Control-Expose-Headers` to add
+          // `set-auth-token`, so the recovery header we expose here survives
+          // only by being merged before it. See
+          // `impersonation-bearer-rotation.ts` for the mechanism — the short
+          // version is that `bearer()` converts the caller's token back into
+          // the ADMIN's session cookie on every later request, so without
+          // rotating that token, `/admin/impersonate-user` is a 200 no-op.
+          await rotateCallerBearerOnImpersonation(ctx);
+
           // ── ADR-0069 D2: account lockout (counter) ──────────────────
           // better-auth catches an INVALID_EMAIL_OR_PASSWORD APIError and runs
           // the after-hook with it on `ctx.context.returned`; a success leaves
@@ -3002,6 +3024,58 @@ export class AuthManager {
   }
 
   /**
+   * [ADR-0093 D2] Run the membership reconciler for one user — the ONE place
+   * this manager assembles its inputs.
+   *
+   * Two seams call it, and the whole point is that they cannot disagree:
+   *
+   *  - `user.create.after`, the creation seam every path flows through (email
+   *    signup, admin create-user, bulk import, SSO JIT);
+   *  - `session.create.before`, which settles the membership before resolving
+   *    the session's active organization so a user's FIRST session is not
+   *    minted tenant-less (#8247 rule 2 / #8245).
+   *
+   * Assembling the deps at each call site instead would let the two drift on
+   * the axis that matters most: the POLICY. `getMembershipPolicy()` reads a
+   * live platform setting (#5152) — a captured constructor option would keep
+   * one seam auto-binding after an admin switched the deployment to
+   * `invite-only`, which is the exact defect that made the accessor exist. The
+   * target-org resolution is shared for the same reason: "which organization"
+   * must never be answered two ways.
+   *
+   * Never throws — `reconcileMembership` already guarantees that, and the guard
+   * stands anyway because both callers are hooks where a bookkeeping failure
+   * must not fail user creation or sign-in. The OUTCOME is returned (rather
+   * than swallowed) so the session seam can tell "a membership now exists" from
+   * "policy says there will never be one" and skip a pointless re-read;
+   * `undefined` means the reconciler could not be consulted at all.
+   */
+  private async settleMembership(userId: unknown): Promise<ReconcileOutcome | undefined> {
+    try {
+      const result = await reconcileMembership(
+        this.config.dataEngine,
+        typeof userId === 'string' && userId ? userId : undefined,
+        {
+          // #5152 — read through the accessor, not `this.config` directly: it is
+          // the single source the backfill path reads too.
+          policy: this.getMembershipPolicy(),
+          resolveTargetOrg: async () => {
+            const tenancy = this.config.getTenancy?.();
+            // Single-org → default org; multi-org → none (invite/JIT own it).
+            return tenancy ? await tenancy.defaultOrgId() : null;
+          },
+          logger: this.config.logger,
+        },
+      );
+      return result.outcome;
+    } catch {
+      // reconcileMembership never throws, but guard regardless — membership
+      // bookkeeping must never break user creation or session creation.
+      return undefined;
+    }
+  }
+
+  /**
    * Inject (or replace) the outbound email service used by better-auth
    * callbacks. Safe to call after construction but BEFORE the first
    * request hits the auth handler — callbacks read this via
@@ -3335,6 +3409,35 @@ export class AuthManager {
     }
 
     const auth = await this.getOrCreateAuth();
+
+    // [#8243] Let a bearer client carry the `admin_session` recovery credential
+    // back out of impersonation. better-auth's `/admin/stop-impersonating`
+    // resolves the admin through the `admin_session` COOKIE alone, so in a
+    // cookie-blocked deployment — the exact context `bearer()` exists for — the
+    // exit path is dead. We accept the credential on a header and write it into
+    // the request's own `Cookie` before better-auth sees it; the vendor route
+    // then runs completely unmodified, checking everything it always checked.
+    //
+    // The REQUEST seam, not a before-hook: `bearer()`'s before-hook rebuilds
+    // the header set from `c.request.headers`, so a `Cookie` injected by any
+    // hook is clobbered by whichever hook sorts after it. Written into the
+    // request itself, `bearer()`'s parse-mutate-serialize keeps it.
+    if (this.betterAuthEndpointPath(request) === STOP_IMPERSONATING_PATH) {
+      try {
+        const authContext: any = await (auth as any).$context;
+        const adminCookieName: string | undefined =
+          authContext?.createAuthCookie?.(ADMIN_SESSION_COOKIE_KEY)?.name;
+        if (adminCookieName) {
+          request = await withBearerAdminSessionRecovery(request, adminCookieName);
+        }
+      } catch {
+        // Cookie name unresolvable (e.g. a dynamic-baseURL context we cannot
+        // reach here) → leave the request alone. The vendor route then answers
+        // exactly as it does today for a missing cookie: a loud failure, never
+        // a silent wrong identity.
+      }
+    }
+
     // better-auth's HTTP entrypoint (`createBetterAuth.handler`) wraps execution
     // in `runWithAdapter` but NOT `runWithRequestState`. Endpoints that read
     // request-state via `defineRequestState()` (e.g. `should-session-refresh`,
@@ -4323,6 +4426,30 @@ export class AuthManager {
     // never fails on this bookkeeping. Opt out via `autoActiveOrganization:
     // false`.
     const hostSessionBefore = (host as any)?.session?.create?.before;
+
+    /**
+     * The membership → active-org selection, in ONE place: owner-preferred,
+     * else the oldest row. It is called twice below and both calls must select
+     * identically — a second, "simpler" lookup after the settle would silently
+     * make a freshly-bound user's active org depend on which path found it.
+     */
+    const selectActiveOrg = async (reader: any, userId: string): Promise<string | undefined> => {
+      let row: any;
+      try {
+        row = await reader.findOne('sys_member', { where: { user_id: userId, role: 'owner' } });
+      } catch {
+        row = undefined;
+      }
+      if (!row?.organization_id) {
+        try {
+          row = await reader.findOne('sys_member', { where: { user_id: userId } });
+        } catch {
+          row = undefined;
+        }
+      }
+      return row?.organization_id;
+    };
+
     const defaultActiveOrg = async (session: any) => {
       try {
         if (!session || session.activeOrganizationId) return;
@@ -4333,22 +4460,51 @@ export class AuthManager {
         // sys_member is org/user-scoped in host stacks — read with the system
         // context so the pre-session lookup (no org on the caller yet) works.
         const reader = withSystemReadContext(engine);
-        let row: any;
-        try {
-          row = await reader.findOne('sys_member', {
-            where: { user_id: userId, role: 'owner' },
-          });
-        } catch {
-          row = undefined;
-        }
-        if (!row?.organization_id) {
-          try {
-            row = await reader.findOne('sys_member', { where: { user_id: userId } });
-          } catch {
-            row = undefined;
+        let orgId = await selectActiveOrg(reader, userId);
+
+        // [#8247 rule 2 / #8245] SETTLE THE MEMBERSHIP, THEN LOOK AGAIN.
+        //
+        // The ADR-0093 D2 reconciler is composed into `user.create.after`, and
+        // better-auth DEFERS that past the sign-up transaction. This hook runs
+        // inside it. So a user's very FIRST session is minted BEFORE the
+        // reconciler has bound them to anything, the lookup above finds no
+        // `sys_member` row, and the session carries no active organization —
+        // for every new user, on every deployment, structurally.
+        //
+        // That first session is not a harmless intermediate. Everything it
+        // writes is tenant-less: its `login` audit row is derived from
+        // `session.activeOrganizationId` (`auth-session-audit.ts`), so it lands
+        // with a NULL tenant and the SecurityPlugin's RLS predicate hides it
+        // from every reader FOREVER — nothing back-fills a written ledger row,
+        // and the rows lost this way are exactly the ones describing account
+        // creation (#8245).
+        //
+        // So the settle is hoisted HERE, to the seam that actually needs it,
+        // rather than the ordering being left to better-auth's hook scheduling.
+        //
+        // ⛔ THIS DOES NOT WIDEN WHO GETS BOUND, and that is the property to
+        // preserve if this is ever touched: it calls the SAME reconciler with
+        // the SAME policy and the SAME target-org resolution that
+        // `user.create.after` uses (one owner — `settleMembership`), so the
+        // outcome is byte-for-byte what would have happened a moment later.
+        // `invite-only` still binds nobody; multi-org still resolves no
+        // unambiguous target and binds nobody. Those users keep minting
+        // sessions with no active organization, which is the LEGAL state the
+        // #8247 ruling declares — this removes a race, never a policy.
+        //
+        // Cost is paid only where there is something to fix: a caller who
+        // already holds a membership never reaches this branch, and a
+        // deployment that binds nobody stops at the reconciler's own policy /
+        // target-org check without touching the store. The re-read is gated on
+        // an outcome that means a membership now EXISTS, so the common
+        // no-bind login costs no extra query at all.
+        if (!orgId) {
+          const outcome = await this.settleMembership(userId);
+          if (outcome === 'bound' || outcome === 'yielded') {
+            orgId = await selectActiveOrg(reader, userId);
           }
         }
-        const orgId = row?.organization_id;
+
         if (!orgId) return;
         return { data: { ...session, activeOrganizationId: orgId } };
       } catch {
@@ -4408,22 +4564,7 @@ export class AuthManager {
     // double bind. Best-effort — never fails user creation.
     const hostUserAfter = (host as any)?.user?.create?.after;
     const membershipReconciler = async (user: any) => {
-      try {
-        await reconcileMembership(this.config.dataEngine, user?.id, {
-          // #5152 — read through the accessor, not `this.config` directly: it is
-          // the single source the backfill path reads too.
-          policy: this.getMembershipPolicy(),
-          resolveTargetOrg: async () => {
-            const tenancy = this.config.getTenancy?.();
-            // Single-org → default org; multi-org → none (invite/JIT own it).
-            return tenancy ? await tenancy.defaultOrgId() : null;
-          },
-          logger: this.config.logger,
-        });
-      } catch {
-        // reconcileMembership never throws, but guard the hook regardless —
-        // membership bookkeeping must never break user creation.
-      }
+      await this.settleMembership(user?.id);
     };
     const userAfter = hostUserAfter
       ? async (user: any, ctx: any) => {

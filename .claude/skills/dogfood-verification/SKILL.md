@@ -61,6 +61,18 @@ unsaved drafts that block navigation, and dirty the working tree. Isolate up fro
       own `objectstack.config.ts` / `src`, not workspace packages.
 - [ ] So: make **all** source edits first → `pnpm --filter <pkg...> build` →
       `preview_stop` + `preview_start`. Don't edit→build→restart per fix.
+- [ ] ⚠️ **An ablation (predict-then-mutate) inherits this the dangerous way — rebuild
+      between mutate and run, and say in your report that you did.** Not rebuilding a
+      *fix* is a false red: it costs a lap and gets noticed. Not rebuilding an **ablation**
+      runs the pre-mutation build, so the suite stays **green** and that green gets written
+      down as "the test was proved discriminating" — certifying an assertion that may never
+      be able to fail, which no later CI run can expose (CI builds correctly, so it is
+      green there forever). Every leg is mutate → `pnpm --filter <pkg> build` → **prove the
+      mutation reached `dist/`** → run:
+      `node scripts/ablation-dist-preflight.mjs <pkg> '<marker>'` exits non-zero unless the
+      consumed `dist/` really carries the mutation (`--absent` when the ablation deleted a
+      guard, and for the restore leg — a marker left behind in `dist/` keeps mutated code
+      live for every later run in that tree).
 - [ ] `dist/` is gitignored — safe; never commit build output.
 - [ ] **The `/_console` UI is a *vendored objectui build*, separate from framework `dist`.**
       It's pinned by `.objectui-sha` and served as a pre-built bundle. A merged objectui

@@ -199,6 +199,7 @@ describe('index introspection failure is not "no indexes" (#7332)', () => {
       legacy: [
         {
           column: 'code',
+          legacyColumns: ['code'],
           legacyNames: ['product_code_unique'],
           replacement: { name: 'uniq_product_organization_id_code', columns: ['organization_id', 'code'], unique: true as const },
         },

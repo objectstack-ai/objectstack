@@ -619,14 +619,82 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   //
   // `object` and `field`: packaged items are LOCKED (`allowOrgOverride: false`).
   // Runtime API rejects overlay writes against artifact-backed objects/fields
-  // with `403 not_overridable`. Tenants CAN create brand-new objects/fields
-  // (`allowRuntimeCreate: true`). Rationale: object schema = physical table
+  // with `403 not_overridable`. Tenants CAN create brand-new OBJECTS
+  // (`allowRuntimeCreate: true`); `field` is the exception and the entry below
+  // records why. Rationale: object schema = physical table
   // DDL; per-org overlay of packaged objects creates upgrade conflicts and
   // multi-tenant schema drift. New tenant-owned objects live in their own
   // namespace and are free to evolve. (Mirrors Salesforce: standard objects
   // are not modifiable per-org beyond layout/label; custom objects are full).
   { type: 'object', label: 'Object', filePatterns: ['**/*.object.ts', '**/*.object.yml', '**/*.object.json'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 10, domain: 'data' },
-  { type: 'field', label: 'Field', filePatterns: ['**/*.field.ts', '**/*.field.yml'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 20, domain: 'data' },
+  // [#7893] `field` — the STANDALONE runtime-create door is RETIRED
+  // (`allowRuntimeCreate: false`), maintainer ruling 2026-08-12.
+  //
+  // WHY THIS FLAG IS `false` (the decision this entry records):
+  //
+  // `field` is the one declared type with NO STANDALONE EXISTENCE. Fields are
+  // authored INSIDE the object (`ObjectSchema.fields`, a `z.record(name,
+  // FieldSchema)`), so a `field` write mints a SEPARATE `sys_metadata` row
+  // keyed `('field', '<object>.<name>')` — and nothing composes fragment rows
+  // into their parent. Measured end-to-end through the real `HttpDispatcher` →
+  // `ObjectStackProtocolImplementation` → `SysMetadataRepository` (#7893):
+  //
+  //   PUT /api/v1/meta/field/showcase_task.zz_probe  -> 200, state=active,
+  //       "Saved field 'showcase_task.zz_probe' (env-wide, state=active)"
+  //   GET /api/v1/meta/object/showcase_task          -> fields = [title, status]
+  //                                                     `zz_probe` ABSENT, forever
+  //   GET /api/v1/meta/field/showcase_task.zz_probe  -> 200, _diagnostics.valid=true
+  //
+  // So the row is self-readable and well-formed, and reaches no object's
+  // `fields` — therefore no ObjectQL query, no physical column, no consumer
+  // that matters. Self-readable and universally inert. `allowRuntimeCreate:
+  // true` declared a capability the platform never built: there is no
+  // composition step, `applyRegistryWriteThrough` routes only
+  // `type === 'object'`, and `filePatterns` (`**\/*.field.ts`) match nothing in
+  // any app. ADR-0049 calls a declared-but-unhonoured capability false
+  // compliance and requires enforce-or-remove; this is the remove side.
+  //
+  // ⚠️ THE READ SKIP IS NOT CAUSED BY `supportsOverlay: false`, and a fix that
+  // "corrects" that flag is a REGRESSION. `supportsOverlay` gates no read path
+  // at all — only `assertDeleteAllowed` consults it, so flipping it to `true`
+  // changes nothing on the read and silently WIDENS the delete authorization
+  // gate. The control that settles it is one line up: `object` carries the
+  // IDENTICAL pair (`supportsOverlay: false, allowRuntimeCreate: true`) and a
+  // runtime-created object is fully readable (measured: `GET
+  // /meta/object/runtime_thing` -> `fields: ['note']`). Same flags, opposite
+  // outcome, so the flag is not the cause — the missing composition step is.
+  //
+  // WHAT DOES NOT CHANGE, and why this is not a lost capability: adding a
+  // field at runtime is a core Studio/CRM operation and it REMAINS possible —
+  // through the object, which is where a field actually lives. `object` keeps
+  // `allowRuntimeCreate: true`, so `PUT /api/v1/meta/object/<name>` with the
+  // new field in `fields` both persists AND composes. What is withdrawn is a
+  // second, broken SPELLING of that operation, not the operation. The refusal
+  // says so: `codeOnlySourceHint` gives `field` the object-route prescription
+  // rather than reading its `filePatterns` back (see the metadata-protocol
+  // call site — the glob would name a file no loader has ever ingested).
+  //
+  // ⚠️ NOT borrowed from #5488 (`api`), whose mechanism this reuses but whose
+  // JUSTIFICATION does not transfer: that ruling rested on "zero business pull
+  // for Studio-authored runtime endpoints today", and "add a field" is the
+  // opposite of zero-pull. The justification here is this card's own ruling and
+  // the object route staying open, not an absence of demand.
+  //
+  // Options rejected, on the record: (1) BUILD the read path — a feature
+  // spanning >= 3 packages (a composition step that does not exist, ~20
+  // `gate.fields` call sites, physical schema/migrations, and cold boot via
+  // `loadMetaFromDb`); a separate card if ever wanted, implementation first,
+  // declaration second. (3) DOCUMENT it as inert — precisely the shape ADR-0049
+  // forbids.
+  //
+  // ⚠️ `allowOrgOverride: false` is UNCHANGED and #7743's overlay refusal
+  // STAYS: an artifact-backed field is still refused `403 NOT_OVERRIDABLE` via
+  // `isNestedArtifactField`. Making field OVERRIDES legal is a separate
+  // decision from making field CREATES work; this entry touches only the
+  // create tier. `OS_METADATA_WRITABLE=field` remains the one operator escape
+  // hatch, and `deleteMetaItem` is deliberately NOT gated by this refusal, so
+  // repair of rows written through the retired channel stays possible.
+  { type: 'field', label: 'Field', filePatterns: ['**/*.field.ts', '**/*.field.yml'], supportsOverlay: false, allowOrgOverride: false, allowRuntimeCreate: false, supportsVersioning: false, executionPinned: false, loadOrder: 20, domain: 'data' },
   // ADR-0088 (#4509) — the `validation` kind is RETIRED. It failed the
   // admission test on its first clause: no independent lifecycle. A rule only
   // means anything against an object, and the only shape the engine evaluates

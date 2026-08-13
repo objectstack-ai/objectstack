@@ -47,9 +47,12 @@
 // For every workspace package that has test files:
 //
 //   1. Walk the imports REACHABLE FROM ITS TESTS — the test files plus every
-//      intra-package file they pull in transitively — and collect the workspace
-//      packages they import **as values**. `import type` is erased before the
-//      module ever resolves, so it is not a hazard and is not counted.
+//      file they pull in transitively — and collect the workspace packages they
+//      import **as values**. `import type` is erased before the module ever
+//      resolves, so it is not a hazard and is not counted. The walk follows
+//      relative imports inside the package, and ALSO crosses into a dependency
+//      the config aliases to source; "Where the walk goes" below says why, and
+//      exactly what the crossing does and does not feed.
 //   2. Keep only the deps that can actually go stale: the dep's own entry point
 //      resolves under `dist/`. A dep whose `exports` already point at source
 //      (the example apps' `objectstack.config.ts`) is not an artifact and needs
@@ -76,6 +79,62 @@
 // resulting path and fails on any specifier whose resolution passes THROUGH a
 // file extension. Either anchor the pattern (`/^@objectstack\/core$/`, the
 // array form) or list the subpath entry ahead of the bare one.
+//
+// ── Where the walk goes, and why it leaves the package (#8351) ──────────────
+//
+// **Aliasing a workspace dep to source imports that dep's ENTIRE import surface
+// into the consumer's resolution domain.** The consumer's own files are then no
+// longer the full list of specifiers its config has to resolve correctly — the
+// aliased dep's source is loaded by the consumer's Vite, through the consumer's
+// alias list, at the consumer's test time.
+//
+// A walk that stopped at the package boundary stopped one hop short of the
+// domain it certifies, and that gap shipped: #7378 added a single runtime
+// `import { pluralToSingular } from '@objectstack/spec/shared'` inside
+// `packages/core/src/metadata-service-contract.ts`. This gate was GREEN on that
+// diff. CI then went red in `@objectstack/plugin-hono-server` (16 test files
+// dead at load) and `@objectstack/driver-memory` (23 dead) with rule 5's own
+// signature — `ENOTDIR: not a directory, open '…/packages/spec/src/index.ts/
+// shared'` — because both configs alias bare `@objectstack/spec` to a FILE and
+// had no `/shared` entry above it. The specifier appears in no file of either
+// failing package. It reached them purely because they alias `@objectstack/core`
+// to source. Three more configs (`knowledge-ragflow`, `plugin-dev`,
+// `knowledge-memory`) were latently identical and stayed green by luck of
+// coverage, not by resolution.
+//
+// So the walk crosses the boundary into any dependency whose specifier THIS
+// config resolves to a real source file, and keeps following — the domain
+// extends exactly as far as the alias chain does, which is what run time does.
+//
+// ⚖️ The crossing feeds **rule 5 only** — the ENOTDIR check — never the
+// unaliased-artifact ledger in `KNOWN_UNALIASED_TEST_IMPORTS`. That line is not
+// squeamishness, it is what the two checks ARE:
+//
+//   - Rule 5 is a correctness verdict on the alias list the config already
+//     wrote: an entry it declared mangles a specifier that will really be
+//     resolved. Crossing finds more instances of the config's OWN defect, and
+//     touches no registry.
+//   - The ledger is a coverage measurement of which deps a package has not yet
+//     aliased. Feeding it transitive surface would silently re-scope it from
+//     "what this package's code imports" to "what it imports plus everything
+//     every aliased dep's source imports" — re-measuring all 60+ entries of a
+//     set-equality-audited, SHRINK-ONLY registry as a side effect of a walk
+//     change. That is a different card, and it must not arrive disguised as
+//     this one.
+//
+// Consequences of that line, stated so they are not rediscovered as bugs: a
+// specifier collected across the boundary that resolves to `dist/`, or that no
+// alias matches at all, is NOT reported here. The staleness half of the
+// cross-boundary domain remains unmeasured.
+//
+// Crossing is deliberately gated on the alias landing on a file that EXISTS.
+// An alias into `dist/` is not crossed (there is no source graph there, and the
+// artifact need not exist in a bare checkout); neither is one whose replacement
+// this file's static reader cannot turn into a real path. Both are silent, and
+// both are the fail-open direction — accepted because the alternative is a gate
+// that cannot run on a checkout it does not fully understand, and because the
+// same configs are already read fail-closed by step 3 for every specifier the
+// consumer writes itself.
 //
 // ── The registry, and why it is shaped like this ────────────────────────────
 //
@@ -285,7 +344,10 @@ const KNOWN_UNALIASED_TEST_IMPORTS = {
     '@objectstack/objectql', '@objectstack/plugin-security', '@objectstack/service-job',
     '@objectstack/service-messaging', '@objectstack/spec',
   ],
-  '@objectstack/service-cache': ['@objectstack/core', '@objectstack/observability'],
+  // `@objectstack/core` came off when the import reader started stripping
+  // comments (#8351): this package's only non-`import type` mention of it is a
+  // JSDoc usage example in `cache-service-plugin.ts`. Prose, not resolution.
+  '@objectstack/service-cache': ['@objectstack/observability'],
   '@objectstack/service-cluster': ['@objectstack/spec'],
   '@objectstack/service-cluster-redis': ['@objectstack/service-cluster'],
   '@objectstack/service-datasource': [
@@ -410,12 +472,43 @@ const IMPORT_PATTERNS =
  * Every module specifier the file loads AT RUNTIME, with type-only imports
  * dropped: `import type { X } from 'y'` and `import { type X } from 'y'` are
  * erased before anything resolves, so they cannot read a stale artifact.
+ *
+ * Comments are stripped first, for the reason `stripComments` was written for
+ * configs one level down — and this half was measured, not assumed. Source here
+ * carries long rationale comments that NAME specifiers, and `packages/spec/
+ * src/index.ts` opens with a JSDoc code fence demonstrating the subpath import
+ * styles:
+ *
+ *     * import * as UI from '@objectstack/spec/ui';
+ *
+ * Read as code, that is an import of `@objectstack/spec/ui` by every consumer
+ * that aliases `@objectstack/spec` to source — and once the walk crosses the
+ * package boundary (#8351) it is an ENOTDIR failure reported against nine
+ * configs, for a specifier no file anywhere actually imports. Documentation is
+ * not a resolution hazard.
+ *
+ * ⚠️ What this still OVER-counts, measured: a namespace or named import with no
+ * `type` keyword whose bindings are all used in TYPE positions is elided by
+ * esbuild exactly as `import type` is, and so never resolves either. It is
+ * counted here anyway — telling them apart needs a type-aware parser, and this
+ * gate is deliberately a dependency-free text reader (see `asPath`).
+ * `packages/core/src/qa/adapter.ts` writes `import * as QA from
+ * '@objectstack/spec/qa'` and uses `QA.` only in annotations; a live probe
+ * through vitest confirmed `import('@objectstack/core')` loads clean under a
+ * config with no `/qa` alias, while `import('@objectstack/spec/qa')` under that
+ * same config raises `ENOTDIR … spec/src/index.ts/qa`. So such a finding is
+ * LATENT rather than currently-red: the alias really is missing and the config
+ * really would mangle the specifier — it is one value-use away from breaking,
+ * and it is being held green by type erasure, not by resolution. Reporting it
+ * is the fail-closed direction and the remediation (one alias entry) is correct
+ * either way, but it is not evidence that a suite is failing today.
  */
 function extractRuntimeImports(text) {
   const specs = [];
+  const code = stripComments(text);
   IMPORT_PATTERNS.lastIndex = 0;
   let match;
-  while ((match = IMPORT_PATTERNS.exec(text))) {
+  while ((match = IMPORT_PATTERNS.exec(code))) {
     const clause = match[1];
     const spec = match[2] ?? match[3] ?? match[4] ?? match[5];
     if (!spec) continue;
@@ -437,10 +530,46 @@ function isTypeOnlyClause(clause) {
   return names.length > 0 && names.every((n) => /^type\s/.test(n));
 }
 
+/**
+ * `path -> specifiers`, for the whole process. Crossing the package boundary
+ * means the SAME dependency source is walked once per consuming config — nine
+ * of them alias `@objectstack/core` — and both the read and the comment strip
+ * are pure functions of the file.
+ *
+ * Measured on this repo, full scan, three runs each: ~1.6s before this change;
+ * ~8.5s with the crossing and no cache; ~5.1s with it. What remains is not the
+ * crossing (~0.5s) but comment stripping every source file (~3.0s), which is
+ * correctness, not overhead — see `extractRuntimeImports`.
+ */
+const importCache = new Map();
+
+function fileRuntimeImports(file) {
+  const cached = importCache.get(file);
+  if (cached) return cached;
+  let specs;
+  try {
+    specs = extractRuntimeImports(readFileSync(file, 'utf8'));
+  } catch {
+    specs = [];
+  }
+  importCache.set(file, specs);
+  return specs;
+}
+
 const RELATIVE_CANDIDATE_SUFFIXES = ['', '.ts', '.tsx', '.mts', '.cts', '.js', '.mjs', '.cjs', '.jsx'];
 
 function resolveRelative(fromFile, spec) {
-  const base = resolve(dirname(fromFile), spec);
+  return resolveModulePath(dirname(fromFile), spec);
+}
+
+/**
+ * The file a path fragment lands on, resolved against `baseDir` with the
+ * extension and `index.*` candidates a bundler would try. Used both for the
+ * relative imports inside a package and for turning an alias replacement into
+ * the file a cross-boundary walk continues into.
+ */
+function resolveModulePath(baseDir, spec) {
+  const base = resolve(baseDir, spec);
   const candidates = [];
   for (const suffix of RELATIVE_CANDIDATE_SUFFIXES) candidates.push(base + suffix);
   // NodeNext writes `./x.js` for `./x.ts`.
@@ -459,46 +588,63 @@ function resolveRelative(fromFile, spec) {
 
 /**
  * Workspace specifiers reachable from this package's tests, following relative
- * imports inside the package. Starting at the tests rather than at every file
- * in the package matters: a specifier only decides a verdict if a test can
- * actually reach it.
+ * imports inside the package and crossing into any dependency `crossInto`
+ * reports as aliased to a real source file. Starting at the tests rather than at
+ * every file in the package matters: a specifier only decides a verdict if a
+ * test can actually reach it.
+ *
+ * The two returned maps are kept apart on purpose — see "Where the walk goes"
+ * in the header. `imports` is what THIS package's own files write, and is the
+ * only input to the unaliased-artifact ledger. `crossPackage` is what an aliased
+ * dependency's source writes, reaching this config's resolution domain through
+ * the alias; it feeds rule 5 and nothing else.
+ *
+ * @param crossInto (spec) => absolute file path to continue into, or null.
  */
-function testReachableWorkspaceImports(pkg, workspaceNames) {
+function testReachableWorkspaceImports(pkg, workspaceNames, crossInto) {
   const files = walkFiles(pkg.dir);
   const tests = files.filter((f) => TEST_FILE.test(f));
   if (tests.length === 0) return null;
 
   const seen = new Set();
-  const queue = [...tests];
+  /** `via` is null inside this package, else the specifier that crossed out of it. */
+  const queue = tests.map((file) => ({ file, via: null }));
   /** bare package name -> the specifiers actually written (bare and subpath) */
   const imports = new Map();
+  /** specifier -> the alias of THIS config that pulled its writer into the graph */
+  const crossPackage = new Map();
 
   while (queue.length > 0) {
-    const file = queue.pop();
+    const { file, via } = queue.pop();
     if (seen.has(file)) continue;
     seen.add(file);
     if (!SOURCE_FILE.test(file)) continue;
-    let text;
-    try {
-      text = readFileSync(file, 'utf8');
-    } catch {
-      continue;
-    }
-    for (const spec of extractRuntimeImports(text)) {
+    for (const spec of fileRuntimeImports(file)) {
       if (spec.startsWith('.')) {
         const resolved = resolveRelative(file, spec);
-        if (resolved && !seen.has(resolved)) queue.push(resolved);
+        if (resolved && !seen.has(resolved)) queue.push({ file: resolved, via });
         continue;
       }
       const scoped = spec.match(/^(@[^/]+\/[^/]+)(?:\/.*)?$/);
       const bare = scoped ? scoped[1] : spec.split('/')[0];
-      if (bare === pkg.name || !workspaceNames.has(bare)) continue;
-      if (!imports.has(bare)) imports.set(bare, new Set());
-      imports.get(bare).add(spec);
+      if (!workspaceNames.has(bare)) continue;
+      if (via == null) {
+        if (bare === pkg.name) continue;
+        if (!imports.has(bare)) imports.set(bare, new Set());
+        imports.get(bare).add(spec);
+      } else if (!crossPackage.has(spec)) {
+        crossPackage.set(spec, via);
+      }
+      // Aliasing a dep to source puts ITS import surface in this config's
+      // resolution domain, so the walk follows the alias exactly as far as run
+      // time does. `via` keeps the first hop: that is the alias the consumer
+      // actually chose, and the one its diagnostic has to name.
+      const target = crossInto ? crossInto(spec) : null;
+      if (target && !seen.has(target)) queue.push({ file: target, via: via ?? spec });
     }
   }
 
-  return { testCount: tests.length, imports };
+  return { testCount: tests.length, imports, crossPackage };
 }
 
 // ── vitest config alias reading ─────────────────────────────────────────────
@@ -923,21 +1069,86 @@ function pointsAtSource(path) {
   return /(^|[\\/])src([\\/]|$)/.test(path) && !/(^|[\\/])dist([\\/]|$)/.test(path);
 }
 
+/**
+ * The source file this config's aliases really put behind `spec`, or null when
+ * the walk must not cross there. Null covers four distinct cases, all of them
+ * deliberate: the specifier is not aliased at all; the alias resolves THROUGH a
+ * file (rule 5 is already failing it, and there is nothing to read); the alias
+ * lands on `dist/` (an artifact, not a source graph, and possibly absent in a
+ * bare checkout); or the replacement does not name a file that exists.
+ *
+ * `asPath` returns a FRAGMENT, not an absolute path — by design, since its other
+ * two callers only ask it for `src`/extension segments. The real configs spell
+ * their replacements `path.resolve(__dirname, '…')`, so the fragment is relative
+ * to the config's own directory; the repo root is tried as a second base for the
+ * `path.resolve(REPO_ROOT, '…')` spelling. A fragment that answers to neither is
+ * simply not crossed.
+ */
+function aliasedSourceFile(spec, entries, configDir, root) {
+  const resolved = resolveThroughAliases(spec, entries);
+  if (!resolved) return null;
+  if (THROUGH_A_FILE.test(resolved.result)) return null;
+  if (!pointsAtSource(resolved.result)) return null;
+  for (const base of [configDir, root]) {
+    const file = resolveModulePath(base, resolved.result);
+    if (file) return file;
+  }
+  return null;
+}
+
+/**
+ * The source file that would serve `spec`, spelled relative to `consumerDir` —
+ * i.e. ready to drop into `path.resolve(__dirname, …)` in that package's vitest
+ * config. Null when nothing under the dependency's `src/` answers to it.
+ *
+ * This is the half of the remediation hint that CANNOT be a template (#8256).
+ * The right-hand side of a subpath alias is not derivable from the specifier:
+ * measured in #8104, `@objectstack/spec` maps every namespace to a DIRECTORY
+ * (`src/api/index.ts`) while `@objectstack/platform-objects` maps `./plugin` to
+ * a FILE (`src/plugin.ts`). A single capture rule — the tempting "fix" — is
+ * therefore right for one and wrong for the other, and it fails on whoever NEXT
+ * writes that import rather than on the author of the rule. So the target is
+ * measured per specifier against the tree instead of being guessed from its
+ * shape: `resolveModulePath` tries the same file-then-`index.*` candidate list
+ * a bundler does, and returns only a path that really exists.
+ *
+ * Fail-soft on purpose: a dependency whose source is not laid out under `src/`
+ * mirroring its subpaths yields null, and the caller prints a placeholder plus
+ * the instruction to resolve it by hand. A hint that cannot be measured must
+ * say so, never invent a path — inventing one is the defect this card exists
+ * to remove, one layer down.
+ */
+function sourceTargetFor(spec, packageDirs, consumerDir) {
+  const scoped = spec.match(/^(@[^/]+\/[^/]+)(?:\/.*)?$/);
+  const bare = scoped ? scoped[1] : spec.split('/')[0];
+  const dir = packageDirs.get(bare);
+  if (!dir) return null;
+  const subpath = spec.slice(bare.length + 1);
+  const file = resolveModulePath(join(dir, 'src'), subpath === '' ? 'index' : subpath);
+  if (!file) return null;
+  return relative(consumerDir, file).replace(/\\/g, '/');
+}
+
 // ── the scan ────────────────────────────────────────────────────────────────
 
 /**
  * @returns {{ packages: Array, artifactPackages: Set<string>, totalPackages: number }}
  */
 function scan(root) {
+  // Per-scan, not per-process: `--self-test` rewrites fixture files BETWEEN
+  // `check()` calls to exercise registry drift, and a cache that outlived a
+  // scan would answer those later passes from the pre-rewrite content.
+  importCache.clear();
   const workspace = listWorkspacePackages(root);
   const names = new Set(workspace.map((p) => p.name));
   const artifactPackages = new Set(workspace.filter((p) => resolvesToArtifact(p.json)).map((p) => p.name));
+  const packageDirs = new Map(workspace.map((p) => [p.name, p.dir]));
 
   const packages = [];
   for (const pkg of workspace) {
-    const reachable = testReachableWorkspaceImports(pkg, names);
-    if (!reachable) continue;
-
+    // The config is read BEFORE the walk now: the alias list is what decides
+    // where the walk is allowed to leave the package, so it cannot be read
+    // after the graph has already been collected.
     const configPath = findVitestConfig(pkg.dir);
     let entries = [];
     let unreadable = null;
@@ -950,24 +1161,52 @@ function scan(root) {
       }
     }
 
+    const crossInto =
+      entries.length > 0 ? (spec) => aliasedSourceFile(spec, entries, dirname(configPath), root) : null;
+    const reachable = testReachableWorkspaceImports(pkg, names, crossInto);
+    if (!reachable) continue;
+
     const unaliased = [];
+    /**
+     * dep -> the specifiers that made it unaliased, each with where it lands
+     * today and the source file that would serve it. The verdict is still the
+     * emptiness of this list, exactly as the `anyUnaliased` flag it replaces —
+     * see `remediationHint` for why the specifiers now have to survive the scan
+     * instead of being reduced to the dep's bare name here (#8256).
+     */
+    const unaliasedSpecs = new Map();
     const throughAFile = [];
     for (const [dep, specs] of [...reachable.imports].sort(([a], [b]) => a.localeCompare(b))) {
       if (!artifactPackages.has(dep)) continue; // resolves to source already; not an artifact
-      let anyUnaliased = false;
+      const offending = [];
       for (const spec of [...specs].sort()) {
         const resolved = resolveThroughAliases(spec, entries);
         if (!resolved) {
-          anyUnaliased = true;
+          offending.push({ spec, landsOn: null, suggest: sourceTargetFor(spec, packageDirs, pkg.dir) });
           continue;
         }
         if (THROUGH_A_FILE.test(resolved.result)) {
-          throughAFile.push({ spec, result: resolved.result });
+          throughAFile.push({ spec, result: resolved.result, via: null });
           continue;
         }
-        if (!pointsAtSource(resolved.result)) anyUnaliased = true;
+        if (!pointsAtSource(resolved.result))
+          offending.push({ spec, landsOn: resolved.result, suggest: sourceTargetFor(spec, packageDirs, pkg.dir) });
       }
-      if (anyUnaliased) unaliased.push(dep);
+      if (offending.length > 0) {
+        unaliased.push(dep);
+        unaliasedSpecs.set(dep, offending);
+      }
+    }
+
+    // Rule 5 over the specifiers that reached this config's resolution domain
+    // through its own alias to a dependency's source. Ledger-neutral by
+    // construction: nothing here can touch `unaliased`.
+    const alreadyReported = new Set(throughAFile.map((t) => t.spec));
+    for (const [spec, via] of [...reachable.crossPackage].sort(([a], [b]) => a.localeCompare(b))) {
+      if (alreadyReported.has(spec)) continue;
+      const resolved = resolveThroughAliases(spec, entries);
+      if (!resolved || !THROUGH_A_FILE.test(resolved.result)) continue;
+      throughAFile.push({ spec, result: resolved.result, via });
     }
 
     packages.push({
@@ -977,6 +1216,7 @@ function scan(root) {
       configPath: configPath ? relative(root, configPath) : null,
       unreadable,
       unaliased,
+      unaliasedSpecs,
       throughAFile,
     });
   }
@@ -989,6 +1229,90 @@ function scan(root) {
 /** Spell a specifier the way it must appear inside a `/…/` regex literal. */
 function escapeForRegexLiteral(spec) {
   return spec.replace(/[/\\^$*+?.()|[\]{}]/g, (c) => '\\' + c);
+}
+
+/** The bare package name a specifier belongs to. */
+function barePackageOf(spec) {
+  const scoped = spec.match(/^(@[^/]+\/[^/]+)(?:\/.*)?$/);
+  return scoped ? scoped[1] : spec.split('/')[0];
+}
+
+/** Does this specifier reach a subpath export rather than the package entry? */
+function isSubpathSpecifier(spec) {
+  return spec.length > barePackageOf(spec).length;
+}
+
+/** Printed where a replacement could not be measured — never a fabricated path. */
+const UNMEASURED_TARGET = '<relative>/src/…';
+
+/**
+ * The remediation block for a set of unaliased dependencies: the specifiers the
+ * gate ACTUALLY measured, and one anchored entry per specifier.
+ *
+ * ⛔ Deliberately not a template (#8256). What stood here printed the dep's
+ * bare NAME and one anchored-bare entry for `deps[0]` — correct only for a
+ * package imported bare. For an importer whose reachable specifiers are all
+ * subpaths (`@objectstack/spec/api`, `/data`, `/system`), `/^@objectstack\/spec$/`
+ * matches NONE of the specifiers the same message had just named: the reader
+ * applies the printed fix, the gate stays red, and the message repeats itself
+ * with no further guidance. Worse, the obvious next guess is the object form,
+ * which makes this gate pass while matching by PREFIX and dying with ENOTDIR at
+ * run time (#7778) — a wrong turn this block now warns against by name, because
+ * the case where it is tempting is exactly the case detected here.
+ *
+ * The one thing this must NOT do is answer with a different template: a single
+ * capture rule is safe for a package with a uniform export map and wrong for
+ * one that maps a subpath to a file, and it would fail on the next author
+ * rather than on its own. Everything printed here is measured — the specifiers
+ * from the walk, the targets from the tree — or explicitly marked unmeasured.
+ */
+function remediationHint(pkg, deps) {
+  const rows = deps.flatMap((dep) => pkg.unaliasedSpecs.get(dep) ?? []);
+  if (rows.length === 0) return '';
+  const width = Math.max(...rows.map((r) => r.spec.length));
+  const subpath = rows.find((r) => isSubpathSpecifier(r.spec));
+
+  const lines = [
+    '    Measured — the specifiers these tests really import, and where each one lands today:',
+    ...rows.map(
+      (r) =>
+        `      ${r.spec.padEnd(width)}  ` +
+        (r.landsOn ? `aliased, but lands on \`${r.landsOn}\` — an artifact` : 'no alias entry matches it'),
+    ),
+    "    Add ONE ANCHORED entry per specifier above to this package's vitest.config.* (array form).",
+    '    Anchoring is what makes the entries order-independent and stops a bare key from swallowing',
+    '    the subpaths:',
+    '      alias: [',
+    ...rows.map(
+      (r) =>
+        `        { find: /^${escapeForRegexLiteral(r.spec)}$/, ` +
+        `replacement: path.resolve(__dirname, '${r.suggest ?? UNMEASURED_TARGET}') },`,
+    ),
+    '      ]',
+  ];
+
+  if (rows.some((r) => r.suggest))
+    lines.push(
+      '    Each replacement above names a file that EXISTS in this checkout' +
+        (subpath
+          ? "; confirm it is what that\n    package's `exports` entry for the subpath is built from — this gate measures the tree, it\n    does not read the export map."
+          : '.'),
+    );
+  if (rows.some((r) => !r.suggest))
+    lines.push(
+      `    \`${UNMEASURED_TARGET}\` marks a specifier with no counterpart under that dependency's \`src/\`:`,
+      '    resolve that one against the package\'s own `exports` map by hand. This gate prints no path',
+      '    that it could not measure.',
+    );
+  if (subpath)
+    lines.push(
+      `    ⛔ Do NOT collapse the subpath entries into the object form \`{ '${barePackageOf(subpath.spec)}': … }\`.`,
+      `    It matches by PREFIX, so \`${subpath.spec}\` resolves to \`…/src/index.ts/${subpath.spec.slice(barePackageOf(subpath.spec).length + 1)}\` —`,
+      '    ENOTDIR at run time, in a config that reads as correct. This gate fails that as the',
+      '    alias-through-a-file rule, and it is the trap this hint exists to keep you out of.',
+    );
+
+  return lines.join('\n');
 }
 
 function check(root, registry) {
@@ -1015,6 +1339,11 @@ function check(root, registry) {
     for (const trap of pkg.throughAFile) {
       failures.push(
         `${pkg.rel}: alias resolves \`${trap.spec}\` to \`${trap.result}\` — a path THROUGH a file (ENOTDIR at run time).\n` +
+          (trap.via
+            ? `    No file of this package writes that specifier. It is reached through this config's own alias\n` +
+              `    for \`${trap.via}\`, which points at source: aliasing a workspace dep to src imports THAT dep's\n` +
+              '    import surface into this config\'s resolution domain, and this entry mangles one of them.\n'
+            : '') +
           '    The object alias form matches by PREFIX. Anchor the pattern with the array form\n' +
           `    (\`{ find: /^${escapeForRegexLiteral(trap.spec)}$/, replacement: … }\`) or list the subpath entry BEFORE the bare one.`,
       );
@@ -1030,8 +1359,8 @@ function check(root, registry) {
           `    ${deps.join(', ')}\n` +
           '    Every verdict in this package is currently a function of build state, not of the source in the\n' +
           '    checkout — and the dangerous case is SILENT (a dist merely behind the source runs GREEN against\n' +
-          '    old behaviour). Add the aliases to its vitest.config.ts, anchored-regex/array form:\n' +
-          `      alias: [{ find: /^${escapeForRegexLiteral(deps[0])}$/, replacement: path.resolve(__dirname, '<relative>/src/index.ts') }]`,
+          '    old behaviour).\n' +
+          remediationHint(pkg, deps),
       );
       continue;
     }
@@ -1040,7 +1369,13 @@ function check(root, registry) {
     if (added.length > 0)
       failures.push(
         `${name}: NEW unaliased artifact import(s) since this entry was measured: ${added.join(', ')}.\n` +
-          '    Alias them in the package\'s vitest.config.* — widening the registry entry is not the fix.',
+          "    Alias them in the package's vitest.config.* — widening the registry entry is not the fix.\n" +
+          // Same defect, same fix: this branch also named bare packages and left
+          // the reader to guess the specifier shape (#8256).
+          remediationHint(
+            packages.find((p) => p.name === name),
+            added,
+          ),
       );
     if (gone.length > 0)
       failures.push(
@@ -1099,10 +1434,15 @@ function buildFixtureTree() {
   mkdirSync(join(root, 'packages'), { recursive: true });
 
   // The stale-able dependency every fixture imports.
+  // `logger` is a subpath served by a FILE and `nested` one served by a
+  // DIRECTORY — the non-uniformity that decides whether a remediation hint can
+  // be a template at all (#8256; measured on the real `@objectstack/spec` vs
+  // `@objectstack/platform-objects` in #8104).
   fixture(root, 'packages/core', {
     'package.json': ARTIFACT_MANIFEST('@fx/core'),
     'src/index.ts': 'export const alive = 1;\n',
     'src/logger.ts': 'export const log = 1;\n',
+    'src/nested/index.ts': 'export const nested = 1;\n',
   });
 
   // (1) violating: tests import the artifact, no config at all.
@@ -1110,6 +1450,23 @@ function buildFixtureTree() {
     'package.json': ARTIFACT_MANIFEST('@fx/violator'),
     'src/thing.ts': "import { alive } from '@fx/core';\nexport const thing = alive;\n",
     'src/thing.test.ts': "import { thing } from './thing';\nexport default thing;\n",
+  });
+
+  // (1b) THE SUBPATH-ONLY IMPORTER (#8256) — the shape the old hint could not
+  // serve. Not one of its specifiers is the bare package name, so the anchored
+  // BARE entry the diagnostic used to print (`/^@fx\/core$/`) matches NONE of
+  // them: the reader applied the printed fix and the gate stayed red, with the
+  // same message and no further guidance. All three subpaths are here because
+  // their remediations differ and no single rule covers them: `logger` is a
+  // file, `nested` is a directory, and `ghost` has no counterpart under `src/`
+  // at all — which must print as unmeasured rather than as an invented path.
+  fixture(root, 'packages/subpath-only', {
+    'package.json': ARTIFACT_MANIFEST('@fx/subpath-only'),
+    'src/thing.test.ts':
+      "import { log } from '@fx/core/logger';\n" +
+      "import { nested } from '@fx/core/nested';\n" +
+      "import { ghost } from '@fx/core/ghost';\n" +
+      'export default log + nested + ghost;\n',
   });
 
   // (2) compliant: anchored array-form alias to source.
@@ -1225,6 +1582,105 @@ function buildFixtureTree() {
       '] } };\n',
   });
 
+  // ── (11-14) THE CROSS-BOUNDARY SHAPE (#8351) ──────────────────────────────
+  //
+  // A reproduction of the #8349 miss: the specifier that dies at run time is
+  // written in NO file of the failing package. `@fx/relay` is aliased to source
+  // by the consumer, so relay's own imports are resolved by the CONSUMER's
+  // alias list — and the consumer's bare `@fx/core` key, whose replacement is a
+  // FILE, swallows the `@fx/core/logger` that relay's source reaches.
+  fixture(root, 'packages/relay', {
+    'package.json': ARTIFACT_MANIFEST('@fx/relay'),
+    // The hop through a relative file matters: the real incident reached the
+    // subpath from `core/src/index.ts` via `metadata-service-contract.ts`, not
+    // from the entry point itself.
+    'src/index.ts': "export * from './inner.js';\n",
+    'src/inner.ts': "import { log } from '@fx/core/logger';\nexport const relayed = log;\n",
+  });
+
+  // (11) violating: the consumer aliases relay to src, and mangles relay's own
+  // subpath import. Nothing in this package mentions `@fx/core/logger`.
+  fixture(root, 'packages/cross-package-trap', {
+    'package.json': ARTIFACT_MANIFEST('@fx/cross-package-trap'),
+    'src/thing.test.ts': "import { relayed } from '@fx/relay';\nexport default relayed;\n",
+    'vitest.config.ts':
+      "import path from 'path';\nexport default { resolve: { alias: {\n" +
+      "  '@fx/relay': path.resolve(__dirname, '../relay/src/index.ts'),\n" +
+      "  '@fx/core': path.resolve(__dirname, '../core/src/index.ts'),\n" +
+      '} } };\n',
+  });
+
+  // (12) the negative control that keeps (11) honest: the SAME cross-boundary
+  // reach, with the subpath entry listed ahead of the bare one. Crossing the
+  // package boundary must not mean reporting everyone who does it.
+  fixture(root, 'packages/cross-package-compliant', {
+    'package.json': ARTIFACT_MANIFEST('@fx/cross-package-compliant'),
+    'src/thing.test.ts': "import { relayed } from '@fx/relay';\nexport default relayed;\n",
+    'vitest.config.ts':
+      "import path from 'path';\nexport default { resolve: { alias: {\n" +
+      "  '@fx/relay': path.resolve(__dirname, '../relay/src/index.ts'),\n" +
+      "  '@fx/core/logger': path.resolve(__dirname, '../core/src/logger.ts'),\n" +
+      "  '@fx/core': path.resolve(__dirname, '../core/src/index.ts'),\n" +
+      '} } };\n',
+  });
+
+  // (13) the domain extends as far as the alias chain does: consumer → relay →
+  // mid → the mangled subpath. A walk that crossed exactly one boundary and
+  // stopped would miss this the way the package-scoped walk missed #8349.
+  fixture(root, 'packages/mid', {
+    'package.json': ARTIFACT_MANIFEST('@fx/mid'),
+    'src/index.ts': "import { log } from '@fx/core/logger';\nexport const mid = log;\n",
+  });
+  fixture(root, 'packages/relay-deep', {
+    'package.json': ARTIFACT_MANIFEST('@fx/relay-deep'),
+    'src/index.ts': "import { mid } from '@fx/mid';\nexport const deep = mid;\n",
+  });
+  fixture(root, 'packages/cross-package-depth2', {
+    'package.json': ARTIFACT_MANIFEST('@fx/cross-package-depth2'),
+    'src/thing.test.ts': "import { deep } from '@fx/relay-deep';\nexport default deep;\n",
+    'vitest.config.ts':
+      "import path from 'path';\nexport default { resolve: { alias: {\n" +
+      "  '@fx/relay-deep': path.resolve(__dirname, '../relay-deep/src/index.ts'),\n" +
+      "  '@fx/mid': path.resolve(__dirname, '../mid/src/index.ts'),\n" +
+      "  '@fx/core': path.resolve(__dirname, '../core/src/index.ts'),\n" +
+      '} } };\n',
+  });
+
+  // (14) crossing is GATED on the alias landing on source. This consumer reaches
+  // relay too, but does not alias it — at run time relay loads from its own
+  // `dist/`, resolving its imports itself, so the consumer's `@fx/core` key
+  // never sees `@fx/core/logger`. Reporting it here would be inventing a
+  // failure. (The unaliased `@fx/relay` is a LEDGER matter, and registered.)
+  fixture(root, 'packages/no-cross-unaliased', {
+    'package.json': ARTIFACT_MANIFEST('@fx/no-cross-unaliased'),
+    'src/thing.test.ts': "import { relayed } from '@fx/relay';\nexport default relayed;\n",
+    'vitest.config.ts':
+      "import path from 'path';\nexport default { resolve: { alias: {\n" +
+      "  '@fx/core': path.resolve(__dirname, '../core/src/index.ts'),\n" +
+      '} } };\n',
+  });
+
+  // (15) comments are not imports. The real `packages/spec/src/index.ts` opens
+  // with a JSDoc fence demonstrating subpath imports; read as code it invented
+  // ENOTDIR findings against nine configs for a specifier nobody imports.
+  fixture(root, 'packages/documented', {
+    'package.json': ARTIFACT_MANIFEST('@fx/documented'),
+    'src/index.ts':
+      '/**\n * Usage:\n * ```ts\n' +
+      " * import * as Docs from '@fx/core/docs-only';\n" +
+      ' * ```\n */\n' +
+      "export const documented = 1;\n",
+  });
+  fixture(root, 'packages/reads-documented', {
+    'package.json': ARTIFACT_MANIFEST('@fx/reads-documented'),
+    'src/thing.test.ts': "import { documented } from '@fx/documented';\nexport default documented;\n",
+    'vitest.config.ts':
+      "import path from 'path';\nexport default { resolve: { alias: {\n" +
+      "  '@fx/documented': path.resolve(__dirname, '../documented/src/index.ts'),\n" +
+      "  '@fx/core': path.resolve(__dirname, '../core/src/index.ts'),\n" +
+      '} } };\n',
+  });
+
   return root;
 }
 
@@ -1245,6 +1701,65 @@ function selfTest() {
     expect(!has(bare.failures, 'packages/unreachable'), 'an import no test can reach was treated as a hazard');
     expect(has(bare.failures, 'ENOTDIR'), 'the prefix/ENOTDIR alias trap was not detected');
     expect(has(bare.failures, 'cannot be read statically'), 'a config with spread aliases was read as aliasing nothing');
+
+    // ── the remediation hint is MEASURED, not a template (#8256) ──────────
+    //
+    // The old text named the bare dependency and printed one anchored-BARE
+    // entry for it. Following that verbatim fixes nothing for an importer that
+    // only ever writes subpaths, and the message then repeats unchanged. Each
+    // assertion below pins one fact the hint must carry from the measurement
+    // rather than from a shape guess.
+    const subpathOnly = bare.failures.find((f) => f.startsWith('packages/subpath-only')) ?? '';
+    expect(
+      subpathOnly.includes('@fx/core/logger') &&
+        subpathOnly.includes('@fx/core/nested') &&
+        subpathOnly.includes('@fx/core/ghost'),
+      'the hint did not print the specifiers the gate measured — it named the bare dependency only',
+    );
+    expect(
+      subpathOnly.includes('find: /^@fx\\/core\\/nested$/'),
+      'the hint emitted no anchored entry for a measured subpath specifier (the old `deps[0]`-only template)',
+    );
+    // The counterexample that rules a one-size capture rule out: same package,
+    // same shape of specifier, two different targets. A rule deriving the path
+    // from the specifier gets exactly one of these two right.
+    expect(
+      subpathOnly.includes("'../core/src/logger.ts'"),
+      'a subpath served by a FILE was not measured to that file — a capture rule would say `logger/index.ts`',
+    );
+    expect(
+      subpathOnly.includes("'../core/src/nested/index.ts'"),
+      'a subpath served by a DIRECTORY was not measured through its index — the same rule cannot do both',
+    );
+    // Fail-soft: unmeasurable must print as unmeasurable.
+    expect(
+      subpathOnly.includes(UNMEASURED_TARGET) && !subpathOnly.includes('src/ghost'),
+      'a subpath with no counterpart under `src/` was given an invented replacement path',
+    );
+    // The wrong turn this card exists to stop (#7778): the object form passes
+    // this gate by prefix-matching and dies with ENOTDIR at run time.
+    expect(
+      subpathOnly.includes('matches by PREFIX') && subpathOnly.includes('ENOTDIR'),
+      'a subpath-only importer was not warned off the object form, the next guess that survives review',
+    );
+    // …and the warning is scoped to the case where it applies. A package
+    // imported only bare cannot hit prefix-matching, and telling it about the
+    // trap anyway is how a diagnostic becomes noise nobody reads.
+    const bareOnly = bare.failures.find((f) => f.startsWith('packages/violator')) ?? '';
+    expect(
+      bareOnly.includes("find: /^@fx\\/core$/") && bareOnly.includes("'../core/src/index.ts'"),
+      'the bare importer lost the anchored-bare entry, which was right for it all along',
+    );
+    expect(
+      !bareOnly.includes('matches by PREFIX'),
+      'the object-form warning was printed for an importer with no subpath specifier',
+    );
+    // The two reasons a specifier lands in the ledger are different repairs:
+    // no entry matched it at all, versus an entry matched and points at `dist/`.
+    expect(
+      (bare.failures.find((f) => f.startsWith('packages/template-to-dist')) ?? '').includes('lands on'),
+      'a specifier whose alias lands on `dist/` was reported as having no alias entry at all',
+    );
 
     // ── the canary (#8020) ────────────────────────────────────────────────
     // Escaped-slash regex `find` AND template-literal `replacement`, together,
@@ -1325,6 +1840,50 @@ function selfTest() {
     });
     const sourceDep = check(root, { '@fx/violator': ['@fx/core', '@fx/other'] });
     expect(!has(sourceDep.failures, '@fx/consumes-source'), 'a dep that already resolves to source was reported as a hazard');
+
+    // ── the cross-boundary walk (#8351) ───────────────────────────────────
+    // Aliasing a dep to source imports ITS import surface into this config's
+    // resolution domain. Each of these pins one half of that; the registry
+    // fixture keeps the ledger-only entries quiet so the rule-5 half is read
+    // against a clean list.
+    const cross = check(root, {
+      '@fx/violator': ['@fx/core', '@fx/other'],
+      '@fx/no-cross-unaliased': ['@fx/relay'],
+      '@fx/reads-documented': ['@fx/core'],
+    });
+    expect(
+      cross.failures.some((f) => f.includes('packages/cross-package-trap') && f.includes('@fx/core/logger')),
+      'a subpath import reached ONLY through an aliased-to-source dependency was not judged by rule 5 — the #8349 miss',
+    );
+    expect(
+      cross.failures.some((f) => f.includes('packages/cross-package-trap') && f.includes('reached through this config')),
+      'the cross-boundary diagnostic did not say the specifier comes from an aliased dependency rather than this package',
+    );
+    expect(
+      !has(cross.failures, 'packages/cross-package-compliant'),
+      'a config that correctly orders the subpath entry ahead of the bare one was reported anyway',
+    );
+    expect(
+      cross.failures.some((f) => f.includes('packages/cross-package-depth2') && f.includes('@fx/core/logger')),
+      'the walk stopped after one boundary — a mangled subpath two aliased hops out went unseen',
+    );
+    expect(
+      !cross.failures.some((f) => f.includes('packages/no-cross-unaliased') && f.includes('ENOTDIR')),
+      'a dependency this config does NOT alias to source was walked into anyway, inventing a failure',
+    );
+    // The ledger must be untouched by the crossing: rule 5 gets the cross-
+    // boundary specifiers, `KNOWN_UNALIASED_TEST_IMPORTS` never does.
+    expect(
+      !cross.failures.some(
+        (f) => f.includes('cross-package-trap') && f.includes('with no source alias'),
+      ),
+      'a cross-boundary specifier leaked into the unaliased-artifact ledger, which is registry-audited',
+    );
+    // Comments are prose, not resolution.
+    expect(
+      !has(cross.failures, 'docs-only'),
+      'a specifier appearing only inside a JSDoc example was read as a real import',
+    );
 
     // Census guard: an empty tree is a broken scanner, never a clean repo.
     const empty = join(tmpdir(), `os-test-source-alias-empty-${process.pid}`);

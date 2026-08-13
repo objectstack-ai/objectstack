@@ -61,6 +61,7 @@ import { validatePageFieldBindings } from './validate-page-field-bindings.js';
 import { validateChartBindings } from './validate-chart-bindings.js';
 import { validateNavAccess } from './validate-nav-access.js';
 import { validateNavTargetRefs } from './validate-nav-target-refs.js';
+import { validateNavObjectServability } from './validate-nav-object-servability.js';
 import { validateTranslationReferences } from './validate-translation-references.js';
 import { validateTranslatableSections } from './validate-translatable-sections.js';
 import { validateFlowTemplatePaths } from './validate-flow-template-paths.js';
@@ -120,6 +121,15 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // `action` is deliberately absent (validateActionNameRefs owns it) and so is
   // `component` (an unregistered ref renders a named diagnostic, not silence).
   { name: 'validateNavTargetRefs', run: validateNavTargetRefs },
+  // [#7912] The THIRD question about a nav entry, after "does the target
+  // resolve?" (above) and "is it granted?" (`validateNavAccess`): can the
+  // destination serve at all? An object's own `enable` block can make its list
+  // answer 404/405 for every persona, and no gate authorable on the entry
+  // expresses that — which is how #7544's dead row survived review for a year.
+  // The server now prunes such an entry from the `/meta` payload; the
+  // maintainer ruling of 2026-08-12 makes THIS the mandatory companion, so the
+  // prune is never silent to the author who wrote the row.
+  { name: 'validateNavObjectServability', run: validateNavObjectServability },
   { name: 'validateTranslationReferences', run: validateTranslationReferences },
   // The same family from the other end (#5417). Its sibling above asks "does
   // this bundle key resolve?"; this one asks "is there a key at all?" — a form

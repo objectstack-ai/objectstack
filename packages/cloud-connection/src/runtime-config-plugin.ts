@@ -56,6 +56,34 @@
  * the original defect into the EE image, where both the host config and this
  * package's README kept a hand-maintained flag out of step with their own
  * mounting.
+ *
+ * ## `features.installLocal` is DERIVED too, with the option kept as a CEILING (#8388)
+ *
+ * #8356 derived `marketplace` and stopped there, leaving two keys in one
+ * object answered by different rules — one observed, one declared. The
+ * declared one was the constructor's `installLocal`, and it is the key #8343
+ * actually measured wrong on a real customer deployment: `installLocal: true`
+ * in the served payload with
+ * `GET/POST /api/v1/marketplace/install-local -> 404 {"error":"Not found"}`
+ * behind it. The #8343 ruling's reasoning — a hand-maintained boolean makes
+ * every host responsible for keeping the flag in step with its own mounting,
+ * and hosts measurably do not — transfers to this key unchanged; it is simply
+ * the one the ruling was not asked about.
+ *
+ * The `installLocal` constructor option is **kept** (hosts pass it today), but
+ * it is now a **ceiling, not a source**:
+ *
+ *   omitted / `true`  -> the derived observation governs
+ *   `false`           -> `false`, even where the plugin IS mounted (opt-out)
+ *
+ * A ceiling rather than a plain override because the plain override would have
+ * left the measured defect standing: the CLI's own `RUNTIME_CONFIG_OPTIONS`
+ * passes `installLocal: true` unconditionally, so honouring `true` upward
+ * would keep "declared `true`, route 404s" reachable on the exact product path
+ * #8343 reported — the derivation would be inert precisely where it is needed.
+ * Nothing is lost: a host on an adapter whose routes cannot be observed still
+ * states the capability through `resolveFeatures`, which merges over this base
+ * exactly as it does for `marketplace`.
  */
 
 import type { Plugin, PluginContext } from '@objectstack/core';
@@ -77,13 +105,20 @@ interface EnvRegistrySurface {
  * a browse surface.
  *
  * These literals are deliberately NOT imported from `marketplace-proxy-plugin`
- * — the derivation must also see a browse surface this package never mounted
- * (see {@link hasMarketplaceBrowseMount}), so keying it on the proxy module
- * would narrow it back to one provider. The coupling to the proxy's own
- * spelling is instead pinned by test: the positive direction mounts the REAL
- * `MarketplaceProxyPlugin` onto the same app rather than hand-spelling its
- * route, so a change to its prefix fails here rather than silently flipping
- * this flag to `false`.
+ * / `marketplace-install-local-plugin` — the derivations must also see a
+ * surface this package never mounted (see {@link hasMarketplaceBrowseMount}),
+ * so keying them on a provider module would narrow them back to one provider.
+ * The coupling to each plugin's own spelling is instead pinned by test: both
+ * positive directions mount the REAL plugin onto the same app rather than
+ * hand-spelling its route, so a change to either prefix fails there rather
+ * than silently flipping a flag to `false`.
+ *
+ * `MARKETPLACE_INSTALL_LOCAL_PREFIX` is the **one** definition of "what
+ * install-local is", read in opposite directions by the two predicates below:
+ * negatively by browse (#8356 excludes it) and positively by install-local
+ * (#8388 requires it). That single constant is the part that genuinely has to
+ * be shared — it is what makes it impossible for the two flags to both claim,
+ * or both disown, the same route if the prefix ever moves.
  */
 const MARKETPLACE_API_PREFIX = '/api/v1/marketplace';
 const MARKETPLACE_INSTALL_LOCAL_PREFIX = `${MARKETPLACE_API_PREFIX}/install-local`;
@@ -150,11 +185,70 @@ function isMarketplaceBrowsePattern(pattern: string): boolean {
  * through the `resolveFeatures` seam, which still merges over this base.
  */
 function hasMarketplaceBrowseMount(rawApp: unknown): boolean {
+    return someRoutePattern(rawApp, isMarketplaceBrowsePattern);
+}
+
+/**
+ * Does this registered route pattern mount the offline INSTALL-LOCAL surface?
+ * (#8388)
+ *
+ * Sibling of {@link isMarketplaceBrowsePattern}, not a reuse of it: browse
+ * subtracts these paths by design, so no single predicate can answer both
+ * questions. What the two share is the prefix constant, so "what counts as
+ * install-local" has one definition rather than two that can drift apart.
+ *
+ * `MarketplaceInstallLocalPlugin` mounts the bare prefix plus `/:manifestId`
+ * sub-paths, so a segment boundary — not a bare `startsWith` — decides
+ * membership: `…/install-local` and `…/install-local/anything` count,
+ * `…/install-locality` does not. That is deliberately one notch stricter than
+ * browse's exclusion, which subtracts every `startsWith` match. The asymmetry
+ * is in the safe direction for both keys: a near-miss spelling is claimed by
+ * neither flag, which is under-reporting, and under-reporting is the failure
+ * mode this whole family of fixes chose over the alternative. Tightening
+ * browse's exclusion to match would be a behaviour change to #8356's key and
+ * is not this card's to make.
+ */
+function isMarketplaceInstallLocalPattern(pattern: string): boolean {
+    if (!pattern.startsWith(MARKETPLACE_INSTALL_LOCAL_PREFIX)) return false;
+    const rest = pattern.slice(MARKETPLACE_INSTALL_LOCAL_PREFIX.length);
+    return rest === '' || rest.startsWith('/');
+}
+
+/**
+ * Is an install-local surface actually mounted on the app serving this
+ * response? (#8388)
+ *
+ * Every word of {@link hasMarketplaceBrowseMount}'s reasoning about *why the
+ * raw app's route table* applies here too, and one of them applies harder:
+ * `MarketplaceInstallLocalPlugin` also registers no service to look up — it
+ * announces itself only by mounting its routes on the raw app — so the route
+ * ledger is again the only place the question has an answer. Read per request
+ * for the same reason: `kernel:ready` hook order is not guaranteed, and by
+ * request time every hook has run.
+ *
+ * Unobservable adapter ⇒ `false`, same as browse: do not claim a capability
+ * you could not verify. That is not a regression against the old constructor
+ * flag — claiming it unverified IS #8343's measured defect. A host that knows
+ * better says so through `resolveFeatures`.
+ */
+function hasMarketplaceInstallLocalMount(rawApp: unknown): boolean {
+    return someRoutePattern(rawApp, isMarketplaceInstallLocalPattern);
+}
+
+/**
+ * The route-ledger read both derivations share.
+ *
+ * This — not the predicates — is the genuinely common mechanism: locate the
+ * raw app's `routes` ledger, refuse to answer when there is none, and test
+ * every registered pattern. The predicates stay separate because they answer
+ * different questions about the same ledger.
+ */
+function someRoutePattern(rawApp: unknown, matches: (pattern: string) => boolean): boolean {
     const routes = (rawApp as { routes?: unknown } | null | undefined)?.routes;
     if (!Array.isArray(routes)) return false;
     return routes.some((route) => {
         const pattern = (route as { path?: unknown } | null | undefined)?.path;
-        return typeof pattern === 'string' && isMarketplaceBrowsePattern(pattern);
+        return typeof pattern === 'string' && matches(pattern);
     });
 }
 
@@ -188,7 +282,27 @@ export interface RuntimeConfigPluginConfig {
      * for marketplace + install).
      */
     controlPlaneUrl?: string;
-    /** Override the `features.installLocal` flag. Default: false. */
+    /**
+     * CEILING for the `features.installLocal` flag — no longer its source
+     * (#8388).
+     *
+     * The flag is derived from whether an install-local surface is really
+     * mounted on the app serving the response. This option can only lower that
+     * answer:
+     *
+     *   - omitted or `true` — report what is mounted (the default, and what
+     *     every host passing `installLocal: true` today already meant);
+     *   - `false` — report `false` even where the plugin IS mounted, for a
+     *     host that wants the affordance hidden.
+     *
+     * It deliberately cannot raise the answer: `true` on a runtime with no
+     * install-local route is #8343's measured defect (a capability whose route
+     * 404s), and re-admitting it here would make the derivation inert on the
+     * CLI's own path, which passes `installLocal: true` unconditionally. A host
+     * whose adapter exposes no route table, but which knows install-local is
+     * live, declares it through {@link resolveFeatures} — that hook still
+     * merges over this base, exactly as it does for `marketplace`.
+     */
     installLocal?: boolean;
     /**
      * Override the `features.aiStudio` flag — whether the SPA should surface
@@ -245,7 +359,12 @@ export class RuntimeConfigPlugin implements Plugin {
     readonly version = '1.0.0';
 
     private readonly cloudUrl: string;
-    private readonly installLocal: boolean;
+    /**
+     * `false` only when the host explicitly opted out — see the config option.
+     * Named for what it now is (a bound on the derived answer) rather than for
+     * the answer itself, so a future edit cannot mistake it for the source.
+     */
+    private readonly installLocalCeiling: boolean;
     private readonly aiStudio: boolean;
     private readonly singleEnvironment: boolean;
     private readonly productName: string;
@@ -263,7 +382,9 @@ export class RuntimeConfigPlugin implements Plugin {
         this.cloudUrl = config.controlPlaneUrl === ''
             ? ''
             : (resolveCloudUrl(config.controlPlaneUrl) ?? '');
-        this.installLocal = !!config.installLocal;
+        // `!== false`, not `!!` — an omitted option must not read as an opt-out
+        // now that the flag is derived; only an explicit `false` lowers it.
+        this.installLocalCeiling = config.installLocal !== false;
         this.aiStudio = config.aiStudio !== false; // default true (override-to-hide)
         this.singleEnvironment = !!config.singleEnvironment;
         // Prefer the plan-agnostic seam; fall back to the deprecated alias.
@@ -308,15 +429,15 @@ export class RuntimeConfigPlugin implements Plugin {
             const rawApp = httpServer.getRawApp();
 
             // Diagnosable once at mount time rather than per request: an
-            // adapter with no observable route ledger makes
-            // `features.marketplace` report false for the whole process, and
-            // a silently downgraded capability flag is hard to trace from the
-            // SPA end. See hasMarketplaceBrowseMount().
+            // adapter with no observable route ledger makes BOTH derived flags
+            // report false for the whole process, and a silently downgraded
+            // capability flag is hard to trace from the SPA end. See
+            // hasMarketplaceBrowseMount() / hasMarketplaceInstallLocalMount().
             if (!Array.isArray((rawApp as { routes?: unknown } | null | undefined)?.routes)) {
                 ctx.logger?.warn?.(
-                    '[RuntimeConfigPlugin] raw app exposes no route table — features.marketplace will report false '
-                    + '(a mounted browse surface cannot be observed here). Declare it via resolveFeatures if this '
-                    + 'runtime does serve marketplace browse.',
+                    '[RuntimeConfigPlugin] raw app exposes no route table — features.marketplace and '
+                    + 'features.installLocal will report false (a mounted browse or install-local surface cannot '
+                    + 'be observed here). Declare them via resolveFeatures if this runtime does serve them.',
                 );
             }
 
@@ -403,7 +524,12 @@ export class RuntimeConfigPlugin implements Plugin {
                     defaultOrgId,
                     defaultEnvironmentId,
                     features: {
-                        installLocal: this.installLocal,
+                        // Observed, not declared (#8388) — the constructor
+                        // option survives only as a ceiling, so a host cannot
+                        // announce an install route it never mounted (#8343's
+                        // measured symptom) but can still opt out of one it
+                        // did.
+                        installLocal: this.installLocalCeiling && hasMarketplaceInstallLocalMount(rawApp),
                         // Observed, not declared (#8356) — re-read per request
                         // because it is a property of the app, not of this
                         // plugin's config. A host's resolveFeatures still

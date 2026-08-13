@@ -217,6 +217,15 @@ export type ExplainLayer = z.input<typeof ExplainLayerSchema>;
 /** Post-parse shape of {@link ExplainLayer} — defaults applied, transforms run (ADR-0122). */
 export type ExplainLayerParsed = z.infer<typeof ExplainLayerSchema>;
 
+/**
+ * [#8326] Hard cap on `recordIds` per batch explain request. The batch form is
+ * a transport amortization of the singular evaluation (a 50-row list page was
+ * measured at 2 probes per row = 100 POSTs without it), not a bulk-scan API —
+ * the cap keeps one request's evaluation cost bounded, and a consumer with
+ * more records paginates under it.
+ */
+export const EXPLAIN_BATCH_MAX_RECORD_IDS = 200;
+
 /** Request shape for the explain API. */
 export const ExplainRequestSchema = lazySchema(() => z.object({
   /** Object (entity) name the access question is about. */
@@ -228,9 +237,36 @@ export const ExplainRequestSchema = lazySchema(() => z.object({
    * sharing / rls / owd / tenant_isolation layers add per-record `record`
    * attribution and the decision carries a top-level `record` verdict. Omitted =
    * an object-level question (the pre-C2 contract), answered identically.
+   * Mutually exclusive with `recordIds`.
    */
   recordId: z.string().optional()
-    .describe('Optional id of one concrete record to explain at row granularity; omitted = object-level (pre-C2) request.'),
+    .describe('Optional id of one concrete record to explain at row granularity; omitted = object-level (pre-C2) request. Mutually exclusive with recordIds.'),
+  /**
+   * [#8326] Batch form of the record-grained question: the SAME evaluation as
+   * `recordId`, amortized over one round trip for one `(object, operation)`
+   * pair. Each id is evaluated through the singular pipeline (same layering
+   * semantics — the batch answer for a record is defined as identical to the
+   * singular answer for that record), and the decision carries a top-level
+   * `records` array of per-record verdicts.
+   *
+   * Contract details:
+   * - **Ordering**: `decision.records[i]` answers `recordIds[i]` — same order,
+   *   same length, duplicates answered per position.
+   * - **Cap**: at most {@link EXPLAIN_BATCH_MAX_RECORD_IDS} (200) ids; more is
+   *   refused at validation (HTTP 400), never silently truncated. Empty arrays
+   *   are refused too — send at least one id or omit the field.
+   * - **Missing records**: an id that does not resolve to a readable row under
+   *   a system read (filtered, deleted, or never existed) gets
+   *   `{ recordId, visible: false }` with `decidedBy` omitted — the same
+   *   fail-closed answer the singular form gives for that id.
+   * - **Mutually exclusive** with `recordId`: a request carrying both is
+   *   refused loudly rather than silently preferring either spelling.
+   * - Batch responses carry the per-layer trace at OBJECT level only (no
+   *   per-layer `record` attribution); ask the singular form for one record's
+   *   full row-level story.
+   */
+  recordIds: z.array(z.string()).min(1).max(EXPLAIN_BATCH_MAX_RECORD_IDS).optional()
+    .describe('Batch of record ids (1–200) to answer at row granularity in one round trip; records[i] answers recordIds[i]. Mutually exclusive with recordId.'),
   /**
    * User to explain FOR. Omitted = the calling principal. Explaining another
    * user requires the `manage_users` capability (or system context) — the
@@ -239,8 +275,51 @@ export const ExplainRequestSchema = lazySchema(() => z.object({
    * as the runtime resolver (everyone anchor, additive baseline).
    */
   userId: z.string().optional(),
+}).superRefine((req, ctx) => {
+  // [#8326] recordId and recordIds are one question in two spellings — a
+  // request carrying both is ambiguous, and an ambiguous authorization
+  // question must fail loudly, never resolve by silent precedence.
+  if (req.recordId !== undefined && req.recordIds !== undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['recordIds'],
+      message: 'recordId and recordIds are mutually exclusive — send one record as recordId, or the batch as recordIds, never both.',
+    });
+  }
 }));
 export type ExplainRequest = z.input<typeof ExplainRequestSchema>;
+
+/**
+ * [C2 / #8326] The record-grained bottom line for ONE record — the shape of
+ * the singular `decision.record` verdict AND of each `decision.records[]`
+ * entry (the batch form reuses the schema so the two can never drift).
+ * Deliberately NOT exported: consumers hold it as
+ * `NonNullable<ExplainDecision['record']>`; the per-layer trace behind it
+ * lives in {@link ExplainRecordAttributionSchema}.
+ */
+const ExplainRecordVerdictSchema = lazySchema(() => z.object({
+  /** The record this verdict is about (echoes the request `recordId` / `recordIds[i]`). */
+  recordId: z.string().describe('The concrete record id this verdict is about (echoes the request recordId or recordIds[i]).'),
+  /** Whether the operation is permitted on THIS specific record. */
+  visible: z.boolean().describe('Whether the operation is permitted on this specific record after all layers.'),
+  /**
+   * The pipeline layer that decided the outcome (excluded the record, or last
+   * admitted it). Omitted when no layer answered — notably for a missing
+   * record, whose fail-closed verdict is `visible: false` with no decider.
+   */
+  decidedBy: z.enum([
+    'tenant_isolation',
+    'principal',
+    'required_permissions',
+    'object_crud',
+    'fls',
+    'owd_baseline',
+    'depth',
+    'sharing',
+    'vama_bypass',
+    'rls',
+  ]).optional().describe('The pipeline layer that decided the record-level outcome (excluded it, or last admitted it); omitted for a missing record.'),
+}));
 
 /** The full decision report. */
 export const ExplainDecisionSchema = lazySchema(() => z.object({
@@ -282,25 +361,19 @@ export const ExplainDecisionSchema = lazySchema(() => z.object({
    * The per-layer `record` attributions above carry the full trace; this is the
    * summary a UI pins next to the record.
    */
-  record: lazySchema(() => z.object({
-    /** The record this verdict is about (echoes the request `recordId`). */
-    recordId: z.string().describe('The concrete record id this verdict is about (echoes the request recordId).'),
-    /** Whether the operation is permitted on THIS specific record. */
-    visible: z.boolean().describe('Whether the operation is permitted on this specific record after all layers.'),
-    /** The pipeline layer that decided the outcome (excluded the record, or last admitted it). */
-    decidedBy: z.enum([
-      'tenant_isolation',
-      'principal',
-      'required_permissions',
-      'object_crud',
-      'fls',
-      'owd_baseline',
-      'depth',
-      'sharing',
-      'vama_bypass',
-      'rls',
-    ]).optional().describe('The pipeline layer that decided the record-level outcome (excluded it, or last admitted it).'),
-  })).optional().describe('Row-level verdict for the specific record; set only for record-grained requests.'),
+  record: ExplainRecordVerdictSchema.optional()
+    .describe('Row-level verdict for the specific record; set only for singular record-grained requests.'),
+  /**
+   * [#8326] Batch record-grained verdicts — present only when the request
+   * carried `recordIds`. `records[i]` answers `recordIds[i]` (same order, same
+   * length, duplicates answered per position); each entry is the SAME verdict
+   * the singular form returns for that id (a missing record fail-closes to
+   * `visible: false` with `decidedBy` omitted). The `layers` of a batch
+   * response are the object-level trace; per-layer `record` attribution is the
+   * singular form's job.
+   */
+  records: z.array(ExplainRecordVerdictSchema).optional()
+    .describe('Per-record verdicts for a batch request — records[i] answers recordIds[i]; set only when the request carried recordIds.'),
 }));
 export type ExplainDecision = z.input<typeof ExplainDecisionSchema>;
 /** Post-parse shape of {@link ExplainDecision} — defaults applied, transforms run (ADR-0122). */

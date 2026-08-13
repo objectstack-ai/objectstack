@@ -7,7 +7,7 @@ import {
     TIME_RELATIVE_DEFAULT_MAX_RECORDS,
 } from '@objectstack/spec/automation';
 import type { TimeRelativeTrigger as TimeRelativeDescriptor } from '@objectstack/spec/automation';
-import { normalizeSchedule } from './schedule-trigger.js';
+import { normalizeSchedule, reportBindFailure } from './schedule-trigger.js';
 import type { FlowTrigger, FlowTriggerBinding, JobServiceSurface, TriggerLogger } from './schedule-trigger.js';
 
 /**
@@ -242,9 +242,7 @@ export class TimeRelativeTrigger implements FlowTrigger {
             })
             .catch((err) => {
                 this.bound.delete(binding.flowName);
-                this.logger.warn(
-                    `[time-relative] failed to schedule flow '${binding.flowName}': ${errMessage(err)}`,
-                );
+                reportBindFailure(this.logger, 'time-relative', binding.flowName, err);
             });
     }
 

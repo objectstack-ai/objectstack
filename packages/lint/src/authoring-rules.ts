@@ -324,12 +324,20 @@ const CLI_AND_RUNTIME: readonly AuthoringSurface[] = ['cli', 'runtime-publish'];
 
 /**
  * The rule reads a stack-wide COLLECTION the per-write snapshot does not carry
- * (pages, dashboards, navigation, translations, seeds, permission sets). The
- * runtime universe can answer these — it is strictly more complete than the
- * CLI's single-package view — but building that snapshot is #4463 P2, and
- * shipping the rule against a partial snapshot would invent findings for
- * metadata the tenant simply did not include in THIS write. A false 422 on the
- * only door a Studio tenant has is worse than the gap it would close.
+ * (pages, dashboards, navigation, translations). The runtime universe can
+ * answer these — it is strictly more complete than the CLI's single-package
+ * view — but shipping a rule against a partial snapshot would invent findings
+ * for metadata the tenant simply did not include in THIS write. A false 422 on
+ * the only door a Studio tenant has is worse than the gap it would close.
+ *
+ * [#8309] The snapshot is widened by measurement, never wholesale: it now
+ * carries `permissions` and `books` (`RuntimeStackContext` in
+ * `runtime-gate.ts`) because the three cross-collection security rules were
+ * measured inventing findings without them (38 phantom
+ * `security-master-detail-ungranted` per-write vs 4 whole-stack, PR #7886) —
+ * so for a rule whose only missing collection was one of those two, this
+ * reason no longer holds and widening it is a `runtimeTypes` edit plus its
+ * own rollout decision. For every other collection the sentence above stands.
  */
 const RUNTIME_NEEDS_FULL_SNAPSHOT =
   'P2 (#4463): reads a stack-wide collection the per-write snapshot does not carry, so running it ' +
@@ -1131,17 +1139,21 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   //    — carries no `sharingModel` either. That is a strictness rollout
   //    (#4001 pattern), not a registry-honesty fix, and its repair sites are in
   //    packages this card may not edit.
-  //  - `permission` and `book` fail for a different, structural reason. The gate
-  //    carries `objects` as resolution context and nothing else
-  //    (`RuntimeStackContext`), so the three cross-collection rules judge a
-  //    snapshot missing the collection they compare against. Measured: one
-  //    simulated runtime write per shipped permission set produces 38
-  //    `security-master-detail-ungranted` warnings where the same rule over the
-  //    whole stack produces 4 — with one set in the snapshot, every detail
-  //    object the tenant's OTHER sets grant reads as ungranted.
-  //    `security-private-no-readscope` and `security-book-audience-unknown-set`
-  //    fail identically. That is RUNTIME_NEEDS_FULL_SNAPSHOT (#4463 P2), and it
-  //    is a snapshot change in the protocol package, not a `runtimeTypes` edit.
+  //  - `permission` and `book` failed for a different, structural reason —
+  //    REPAIRED under #8309. The gate used to carry `objects` as resolution
+  //    context and nothing else (`RuntimeStackContext`), so the three
+  //    cross-collection rules judged a snapshot missing the collection they
+  //    compare against. Measured: one simulated runtime write per shipped
+  //    permission set produced 38 `security-master-detail-ungranted` warnings
+  //    where the same rule over the whole stack produces 4 — with one set in
+  //    the snapshot, every detail object the tenant's OTHER sets grant read as
+  //    ungranted. `security-private-no-readscope` and
+  //    `security-book-audience-unknown-set` failed identically. The snapshot
+  //    now carries `permissions` and `books` in both differential passes and
+  //    `TYPE_TO_STACK_KEY` maps both types, so the per-write verdict agrees
+  //    with the whole-stack one (pinned in
+  //    `validate-security-posture.runtime-surface.test.ts`); what remains for
+  //    these two types is ONLY the `runtimeTypes` declaration itself — #8310.
   //
   // The residue that WAS ready, and now crosses (#8307): the two ADR-0091 seed
   // rules (`security-grant-expired-at-authoring`, `security-delegation-missing-
@@ -1154,14 +1166,14 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // `sales_role` is not, which is the #7220 failure this table already refuses
   // to build.
   //
-  // `object` / `permission` / `book` remain UNDECLARED here (that is #8310,
-  // still blocked): (a) declaring `object` makes `security-owd-unset` refuse
-  // every OWD-less runtime object publish — 26 refusals across 8 files of
-  // `@objectstack/metadata-protocol`'s own suite, and `METADATA_CREATE_SEEDS.object`
-  // carries no `sharingModel` — so it is a strictness rollout (#4001), not a
-  // wiring fix; (b) `permission` / `book` need a second collection the per-write
-  // snapshot does not carry, and were measured inventing findings without it (38
-  // vs 4 over the shipped corpus) — RUNTIME_NEEDS_FULL_SNAPSHOT, #4463 P2. This
+  // `object` / `permission` / `book` remain UNDECLARED here (that is #8310):
+  // (a) declaring `object` makes `security-owd-unset` refuse every OWD-less
+  // runtime object publish — a strictness rollout (#4001), not a wiring fix;
+  // (b) `permission` / `book` needed a second collection the per-write
+  // snapshot did not carry, and were measured inventing findings without it
+  // (38 vs 4 over the shipped corpus). #8309 closed (b) — the snapshot now
+  // carries `permissions`/`books` and both types map to stack keys — so
+  // declaring them here is #8310's remaining one-line flip. This
   // entry is the WHOLE `validateSecurityPosture` function (all 13 rule ids), not
   // a per-rule split: `runtimeTypes: ['seed']` is safe to declare on the whole
   // entry ONLY because of `runtime-gate.ts`'s baseline/candidate differential —
@@ -1239,11 +1251,10 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     source: 'packages/lint/src/validate-rls-predicate-enforceability.ts',
     surfaces: CLI_ONLY,
     surfaceReason:
-      'P2 (#4463): the rule reads `stack.permissions[]`, a stack-wide collection the per-write snapshot '
-      + 'does not carry, and P1 gates `flow` alone. It is otherwise snapshot-ready — it needs no other '
-      + 'collection — so widening it is a `runtimeTypes: [\'permission_set\']` edit once the gate builds '
-      + 'that snapshot, not new wiring. Recorded as pending rather than done, because a rule that has '
-      + 'never run at a door should not claim it.',
+      'The rule reads `stack.permissions[]`, which the per-write snapshot DOES carry since #8309 — '
+      + 'the remaining gap is only the declaration: no `runtimeTypes` names `permission` here, and that '
+      + 'flip is a rollout decision on #8310\'s axis, not a wiring fix. Recorded as pending rather than '
+      + 'done, because a rule that has never run at a door should not claim it.',
     run: (stack) => validateRlsPredicateEnforceability(stack),
   },
   // #4762 — the same "declared but enforces nothing" question, for the two
