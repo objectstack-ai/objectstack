@@ -103,6 +103,24 @@ function seedFailureCause(err: unknown): string {
 }
 
 /**
+ * [#8442] How a log line labels the cause it is about to print: marked when the
+ * payload half withheld that sentence, plain when the caller received it too.
+ *
+ * The marker is the half of the operator story that is not about the text. An
+ * operator reading `Cause: …` and an operator reading
+ * `Cause (withheld from the seed response): …` are looking at the same
+ * sentence and a DIFFERENT support situation — in the second the reporter never
+ * saw it, so "what did the response say?" has a different answer than the log
+ * suggests. Both passes share this one vocabulary so the two halves of the file
+ * cannot drift into answering that question differently.
+ */
+function seedCauseLabel(err: unknown): string {
+  return quotableSeedFailureDetail(err) === undefined
+    ? 'Cause (withheld from the seed response)'
+    : 'Cause';
+}
+
+/**
  * [#8442] The operator half. The log line always carries the caught sentence,
  * even when the payload may not quote it — without this, withholding the text
  * would be indistinguishable from DELETING the diagnostic, which is what makes
@@ -112,7 +130,7 @@ function seedFailureLogLine(payloadMessage: string, err: unknown): string {
   const cause = seedFailureCause(err);
   return payloadMessage.includes(cause)
     ? `[SeedLoader] ${payloadMessage}`
-    : `[SeedLoader] ${payloadMessage} Cause (withheld from the seed response): ${cause}`;
+    : `[SeedLoader] ${payloadMessage} ${seedCauseLabel(err)}: ${cause}`;
 }
 
 /** The environments a seed dataset can be scoped to — mirrors `SeedSchema.env`. */
@@ -1255,7 +1273,10 @@ export class SeedLoaderService implements ISeedLoaderService {
                 `${deferred.targetField} = '${this.formatAttempted(deferred.attemptedValue)}'. Nothing retries this — ` +
                 `fix the write error below (a transient failure that outlasted the retry budget, or a validation rule ` +
                 `vetoing the update) and re-run the seed to complete the link. ` +
-                `Cause: ${err?.message ?? String(err)}`,
+                // [#8442] Same cause vocabulary as the pass-1 write sites: the
+                // raw sentence always, MARKED when the payload half withheld it
+                // so an operator can see the reporter did not receive this line.
+                `${seedCauseLabel(err)}: ${seedFailureCause(err)}`,
               err instanceof Error ? err : undefined,
               {
                 object: deferred.objectName,
@@ -1267,9 +1288,13 @@ export class SeedLoaderService implements ISeedLoaderService {
             // [#8442] The pass-2 counterpart of `buildWriteError`'s tail, and
             // the same rule: the located structure (which object, which field,
             // which target, which record) is authored here and untouched; only
-            // the caught sentence is gated. The `logger.error` above already
-            // carries the raw cause for the operator, so nothing is lost from
-            // the server's side of this failure.
+            // the caught sentence is gated. The `logger.error` above is this
+            // site's operator half — it runs on THIS path, in this same catch,
+            // and carries the raw cause under {@link seedCauseLabel}, the same
+            // marked vocabulary the pass-1 sites use. Both halves are pinned:
+            // an assertion on the pass-2 logger lives beside the payload one in
+            // `seed-loader-driver-text.test.ts`, so a later edit that withholds
+            // here too cannot stay green.
             this.recordDeferredError(deferred, allResults, allErrors,
               `Failed to write deferred reference: ${deferred.objectName}.${deferred.field} = '${this.formatAttempted(deferred.attemptedValue)}' → ${deferred.targetObject}.${deferred.targetField}: ${quotableSeedFailureDetail(err) ?? WITHHELD_WRITE_REASON}`);
           }

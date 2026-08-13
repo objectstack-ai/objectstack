@@ -230,7 +230,8 @@ describe('[#8442] raw driver text is withheld from the seed `errors[].message`',
             aggregate: vi.fn(async () => []),
         } as unknown as IDataEngine;
 
-        const result = await new SeedLoaderService(engine, metadata, createLogger() as never).load({
+        const logger = createLogger();
+        const result = await new SeedLoaderService(engine, metadata, logger as never).load({
             seeds: [
                 { object: 'dept', externalId: 'name', mode: 'insert', env: ['prod', 'dev', 'test'], records: [{ name: 'Engineering', head_id: 'Alice' }] },
                 { object: 'worker', externalId: 'name', mode: 'insert', env: ['prod', 'dev', 'test'], records: [{ name: 'Alice', dept_id: 'Engineering' }] },
@@ -245,6 +246,19 @@ describe('[#8442] raw driver text is withheld from the seed `errors[].message`',
         expect(backfill!.message).toContain('worker.name');
         expect(backfill!.message).toContain(WITHHELD);
         expectNothingLeaked(result);
+
+        // THE OPERATOR HALF OF *THIS* PASS — pinned here rather than left to
+        // section 5, which drives pass 1 only. Without this assertion a later
+        // edit could withhold the pass-2 log line too and every pin in the file
+        // would stay green while the deferred diagnostic disappeared: a payload
+        // pinned for both passes and an operator half pinned for one is exactly
+        // the "green pin narrower than its name" shape this family has already
+        // recorded once.
+        const logged = logger.error.mock.calls.map((c) => String(c[0])).join('\n');
+        expect(logged).toContain(DRIVER_TEXT);
+        // …under the SAME marked vocabulary pass 1 uses, so an operator reading
+        // a pass-2 line learns the reporter never received this sentence.
+        expect(logged).toContain('Cause (withheld from the seed response)');
     });
 });
 
