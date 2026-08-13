@@ -25,35 +25,28 @@
  * subject is the one that would notice a `register` that threw, silently
  * skipped, or mutated the document on the way to `loader.save`.
  *
- * ## All three rows are now RULED (#7378) — and the table lags the ruling
+ * ## All three cells are RULED (#7378, 2026-08-12) — and the table carries them
  *
  * This file's `// DIVERGENCE` era is over. The maintainer's three-cell ruling
- * of 2026-08-12 (#7378, 裁定人:维护者 huangyiirene), quoted verbatim and
- * untranslated:
- *
- * > 1. **Row 1(key 归属)= (c) 响亮拒绝。** `register(type, name, data)` 中
- * >    `name` 参数与 `data.name` 不一致时,所有实现统一拒绝并报错定位。
- * > 2. **Row 2(objects/object 别名)= 所有实现一个答案,与
- * >    `check:meta-type-normalized` 收敛。**
- * > 3. **Row 3(非对象 data 静默丢弃)= 响亮拒绝(throw)。**
- * >
- * > 三格的 `// DIVERGENCE` pin 在裁定 PR 内同步更新(该测试文件设计意图即如此)。
- *
- * Every shipped implementation now enforces it through ONE shared guard —
+ * of 2026-08-12 (#7378, 裁定人:维护者 huangyiirene): mismatch between the
+ * `name` argument and `data.name` refused loudly (row 1); one answer for the
+ * objects/object spellings, converged with `check:meta-type-normalized` (row
+ * 2); non-object `data` refused, never accepted-and-dropped (row 3). Every
+ * shipped implementation enforces it through ONE shared guard —
  * `assertMetadataRegisterContract` / `canonicalMetadataServiceType`
  * (`@objectstack/core/metadata-service-contract`), whose header carries the
- * full ruling text and the row-2 convergence rationale (the direction is
- * `check:meta-type-normalized`'s: normalize once at the entry, decide on the
- * normalized value — the gate's header carries #3984/#5881/#6241).
+ * full verbatim ruling text and the row-2 convergence rationale (the
+ * direction is `check:meta-type-normalized`'s: normalize once at the entry,
+ * decide on the normalized value — the gate's header carries
+ * #3984/#5881/#6241).
  *
- * **{@link RULED_CONTRACT_ANSWERS} below overrides the table's `expected` for
- * the five ruled case rows.** The table's own reference answers still describe
- * the PRE-ruling reference semantics, because the table — and the contract's
- * reference double beside it — live under `packages/spec/src/**`, whose half
- * of this ruling is the `domain:spec` seat's, tracked on #7378. When that half
- * lands (table rows re-ruled, reference double refusing/folding), the
- * `table lags the ruling` wiring test below goes red on purpose: delete the
- * override for each row it names and hold every subject to the table again.
+ * The shared table states the same ruling as `expected` answers — `refused`
+ * rows carry the ADR-0112 envelope contract, the plural row is `readable`
+ * through the canonical fold — so this driver holds every subject to the
+ * table directly. (Between the ruling's implementation half and its spec-side
+ * half, a `RULED_CONTRACT_ANSWERS` override map here carried the ruled
+ * answers over a still-pre-ruling table; the handoff wiring test went red
+ * when the table landed, and both were deleted, as designed.)
  *
  * ## Two assertion strengths, declared per subject
  *
@@ -172,37 +165,6 @@ class WritableFixtureLoader implements MetadataLoader {
     }
 }
 
-/**
- * The RULED contract answer for a case, where the 2026-08-12 ruling and the
- * table's (spec-side, still pre-ruling) `expected` disagree — see the header
- * for why the two can disagree at all and for when each entry here dies.
- *
- * - `refused` — `register` must reject the case's write with the ADR-0112
- *   envelope (`code` AND `status`), a locating message, and NOTHING stored.
- * - `readable` — the case's final write is readable back, even though the
- *   table still says `absent`.
- */
-type RuledAnswer =
-    | { readonly kind: 'refused'; readonly note: string }
-    | { readonly kind: 'readable'; readonly note: string };
-
-const RULED_1 =
-    'Row 1 (#7378, 2026-08-12): a data.name disagreeing with the name argument is REFUSED loudly by every implementation — silent resolution in either direction can misplace the item. Replaces the option-(a) argument-wins ruling of 2026-08-11 that the table still describes.';
-
-const RULED_2 =
-    "Row 2 (#7378, 2026-08-12): all implementations give ONE answer, converged with check:meta-type-normalized's enforced direction — plural folds to singular before any decision, so 'objects' and 'object' address one store. The table's `absent` still describes the pre-ruling reference semantics (raw-string type keys).";
-
-const RULED_3 =
-    'Row 3 (#7378, 2026-08-12): a non-object data is REFUSED (throw) by every implementation — accept-then-drop was indefensible, and coercing into storability (the interim { name, content } box) is equally forbidden. The table still expects the value readable back.';
-
-const RULED_CONTRACT_ANSWERS: Readonly<Record<string, RuledAnswer>> = {
-    'key-is-the-name-argument-object': { kind: 'refused', note: RULED_1 },
-    'key-is-the-name-argument-nonobject': { kind: 'refused', note: RULED_1 },
-    'primitive-data-roundtrips': { kind: 'refused', note: RULED_3 },
-    'array-data-roundtrips': { kind: 'refused', note: RULED_3 },
-    'plural-objects-type-is-its-own-store': { kind: 'readable', note: RULED_2 },
-};
-
 const IMPLEMENTATIONS: readonly ShippedImplementation[] = [
     {
         label: 'MetadataManager (registry only)',
@@ -303,9 +265,8 @@ describe.each(IMPLEMENTATIONS)(
             '%s',
             async (_id, testCase) => {
                 const service = implementation.create();
-                const ruled = RULED_CONTRACT_ANSWERS[testCase.id];
 
-                if (ruled?.kind === 'refused') {
+                if (testCase.expected.kind === 'refused') {
                     await assertRefused(service, testCase);
                     return;
                 }
@@ -320,10 +281,7 @@ describe.each(IMPLEMENTATIONS)(
                 const got = await service.get(testCase.read.type, testCase.read.name);
                 const exists = await service.exists(testCase.read.type, testCase.read.name);
                 const names = await service.listNames(testCase.read.type);
-                const expected =
-                    ruled?.kind === 'readable'
-                        ? { kind: 'readable' as const, document: lastWrittenDocument(testCase) }
-                        : testCase.expected;
+                const expected = testCase.expected;
 
                 if (expected.kind === 'readable') {
                     // Anti-vacuity: `toMatchObject` against an absent document
@@ -359,9 +317,8 @@ describe.each(IMPLEMENTATIONS)(
 );
 
 /**
- * [#7378 rows 1/2] Driver-local pins the table does not carry (the table is the
- * spec seat's half — see the header). These keep the ruled behaviour from
- * passing for a wrong, narrower reason.
+ * [#7378 rows 1/2] Driver-local pins the table deliberately does not carry.
+ * These keep the ruled behaviour from passing for a wrong, narrower reason.
  */
 describe.each(IMPLEMENTATIONS)('#7378 ruled behaviour, beyond the table [$label]', (implementation) => {
     it('row 1 is a MISMATCH rule: a document with NO name of its own registers under the argument', async () => {
@@ -421,35 +378,5 @@ describe.each(IMPLEMENTATIONS)('#7378 ruled behaviour, beyond the table [$label]
         expect(viaPlural).toMatchObject({ name: 'pin_both_ways' });
         expect(await service.exists('objects', 'pin_both_ways')).toBe(true);
         expect(await service.listNames('objects')).toContain('pin_both_ways');
-    });
-});
-
-describe('round-trip conformance table wiring', () => {
-    const ids = new Set(METADATA_ROUNDTRIP_CASES.map((testCase) => testCase.id));
-
-    it('declares no ruled override for a case id the table does not contain', () => {
-        // A renamed case would otherwise turn its override into a dead entry,
-        // and every subject would quietly be held to the pre-ruling reference
-        // answer it is known to fail.
-        for (const id of Object.keys(RULED_CONTRACT_ANSWERS)) {
-            expect(ids, id).toContain(id);
-        }
-    });
-
-    it('the table still lags the 2026-08-12 ruling — this red is the handoff signal', () => {
-        // The overrides above exist ONLY because the table and the reference
-        // double live under `packages/spec/src/**`, the `domain:spec` seat's
-        // half of #7378. When that half lands, each assertion here goes red:
-        // delete the corresponding RULED_CONTRACT_ANSWERS entry and let every
-        // subject be held to the table's (then-ruled) answer directly.
-        for (const [id, ruled] of Object.entries(RULED_CONTRACT_ANSWERS)) {
-            const testCase = METADATA_ROUNDTRIP_CASES.find((candidate) => candidate.id === id);
-            if (!testCase) continue; // the wiring test above owns this failure
-            if (ruled.kind === 'refused') {
-                expect(testCase.expected.kind, `${id}: table updated? delete its override`).toBe('readable');
-            } else {
-                expect(testCase.expected.kind, `${id}: table updated? delete its override`).toBe('absent');
-            }
-        }
     });
 });

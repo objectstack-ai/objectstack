@@ -1700,17 +1700,21 @@ function formatCsvCell(value: any): string {
  * the header row uses field labels and cell values are formatted to readable
  * display values (lookup names, select labels, 是/否, formatted dates). With an
  * empty map the output is byte-identical to the raw, un-formatted behaviour.
+ *
+ * `timezone` (#8373) is the caller's business timezone, used to render
+ * `datetime` cells in the same clock the UI shows; absent, they render in UTC.
  */
 function rowsToCsv(
     fields: string[],
     rows: Array<Record<string, any>>,
     includeHeader: boolean,
     metaMap: Map<string, ExportFieldMeta>,
+    timezone?: string,
 ): string {
     const lines: string[] = [];
     if (includeHeader) lines.push(fields.map(f => formatCsvCell(headerLabel(f, metaMap))).join(','));
     for (const row of rows) {
-        lines.push(formatRowCells(row, fields, metaMap).map(formatCsvCell).join(','));
+        lines.push(formatRowCells(row, fields, metaMap, timezone).map(formatCsvCell).join(','));
     }
     return lines.join('\r\n') + (lines.length > 0 ? '\r\n' : '');
 }
@@ -7819,6 +7823,11 @@ export class RestServer {
         // their option label, booleans to 是/否, dates to YYYY-MM-DD. When the
         // schema is unavailable the raw stored values stream through unchanged.
         //
+        // [#8373] `datetime` cells render in the caller's BUSINESS timezone
+        // (`ExecutionContext.timezone`), so the file agrees with the screen;
+        // with no timezone resolved they render in UTC, as they always did.
+        // `date` stays a timezone-naive calendar day (ADR-0053).
+        //
         // A zero-row result still emits the header row when the column set is
         // authoritative (the security service's readable projection, or an explicit
         // `fields=`), so an empty export doubles as an import template. Without a
@@ -8010,6 +8019,18 @@ export class RestServer {
                     // (and thus a name). Batched $in inside findData — no N+1.
                     const expandFields = referenceFieldNames(metaMap);
 
+                    // [#8373] The clock every `datetime` cell below renders in.
+                    // The business timezone is ALREADY on the context resolved
+                    // at the top of this handler (`resolveLocalizationContext`'s
+                    // platform-default → global → tenant cascade, assembled onto
+                    // `ExecutionContext.timezone`) — the export formatter simply
+                    // never asked for it, so every date/datetime column streamed
+                    // UTC while the UI rendered the business zone. `undefined`
+                    // keeps the historical UTC rendering, byte for byte.
+                    const timezone = typeof (context as any)?.timezone === 'string' && (context as any).timezone
+                        ? String((context as any).timezone)
+                        : undefined;
+
                     // [#3547] Column projection ≡ list's field-level security — the
                     // LONG-TERM correct path. Ask the security service which fields the
                     // caller may READ under this context (the SAME field mask the read
@@ -8119,7 +8140,7 @@ export class RestServer {
                         }
 
                         if (format === 'csv') {
-                            const text = rowsToCsv(fields ?? [], rows, firstChunk && includeHeader, metaMap);
+                            const text = rowsToCsv(fields ?? [], rows, firstChunk && includeHeader, metaMap, timezone);
                             res.write(text);
                         } else if (format === 'xlsx') {
                             if (firstChunk && includeHeader) {
@@ -8127,7 +8148,7 @@ export class RestServer {
                             }
                             const cols = fields ?? [];
                             for (const row of rows) {
-                                const r = xlsx!.ws.addRow(formatRowCells(row, cols, metaMap));
+                                const r = xlsx!.ws.addRow(formatRowCells(row, cols, metaMap, timezone));
                                 if (styled) {
                                     cols.forEach((f, i) => {
                                         const argb = cellFontColor(row?.[f], metaMap.get(f));
@@ -8139,7 +8160,7 @@ export class RestServer {
                         } else {
                             for (let i = 0; i < rows.length; i++) {
                                 const prefix = (firstChunk && i === 0) ? '' : ',';
-                                res.write(prefix + JSON.stringify(formatRowForJson(rows[i], metaMap)));
+                                res.write(prefix + JSON.stringify(formatRowForJson(rows[i], metaMap, timezone)));
                             }
                         }
                         firstChunk = false;
@@ -10813,13 +10834,27 @@ export class RestServer {
                                 }
                                 out.push(created?.record);
                             } else if (op.action === 'update') {
-                                // Update needs no ingress detour: the engine enforces
-                                // both static `readonly` (#2948) and `readonlyWhen`
-                                // (#3042) on its own update path, and reports them
-                                // through this listener.
+                                // Update needs no ingress detour for the WRITE half:
+                                // the engine enforces both static `readonly` (#2948)
+                                // and `readonlyWhen` (#3042) on its own update path,
+                                // and reports them through this listener.
                                 const onFieldsDropped = (e: DroppedFieldsEvent) => { dropped.push({ ...e, index }); };
                                 const id = op.id ?? data?.id;
-                                out.push(await ql.update(op.object, { ...data, id }, { context: trxCtx, onFieldsDropped }));
+                                const updated = await ql.update(op.object, { ...data, id }, { context: trxCtx, onFieldsDropped });
+                                // [#7823] …but the RESPONSE half moved to the ingress
+                                // (A-prime ruling, 2026-08-13): the engine no longer
+                                // strips `internal: true` fields from its write
+                                // results, so this direct-`ql.update` mouth must
+                                // apply the shared strip itself before the row rides
+                                // `results` out to the caller. Reached through the
+                                // protocol instance because this package does not
+                                // depend on `@objectstack/metadata-protocol` (same
+                                // duck-typing as the `createManyData` probes).
+                                // Dormant today — no `internal`-flagged object grants
+                                // `bulk` — wired so the flag's guarantee does not
+                                // depend on that staying true.
+                                (p as any).omitInternalWriteFields?.(op.object, updated);
+                                out.push(updated);
                             } else { // 'delete'
                                 out.push(await ql.delete(op.object, { where: { id: op.id }, context: trxCtx }));
                             }

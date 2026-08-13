@@ -24,6 +24,7 @@ import {
   driverConfigJsonSchema,
   DriverSslToggleSchema,
   INLINE_CREDENTIAL_REFUSED,
+  placeholderFree,
   READ_ONLY_BELONGS_ON_DATASOURCE,
   refusedInlineCredentialKey,
   SCHEMA_MODE_BELONGS_ON_DATASOURCE,
@@ -79,25 +80,30 @@ export const MysqlConfigSchema = lazySchema(() => strictObject(
    * exactly like an inline `password` (#7990) — bind the secret
    * (`external.credentialsRef` / the connection form's secret field) and it is
    * injected at connect time. A bare username (`user@host`) stays writable.
+   * Placeholder-free since #8336: a `${…}` span anywhere in the value is
+   * refused — placeholders in authored metadata are resolved by nothing.
    * Runtime-environment DSNs (`OS_DATABASE_URL`) never pass through this
    * schema and are unaffected.
    * Format: `mysql://[user@][host][:port]/[dbname][?params]`
    */
-  url: credentialFreeUrl(z.string(), 'url').optional()
+  url: placeholderFree(credentialFreeUrl(z.string(), 'url'), 'url').optional()
     .describe('Connection URI (supersedes the discrete fields; must not embed a password — bind the secret instead)')
     .meta({ title: 'Connection URL' }),
 
-  /** Hostname or IP address. */
-  host: z.string().default('localhost').describe('Host address').meta({ title: 'Host' }),
+  /** Hostname or IP address. Placeholder-free since #8336. */
+  host: placeholderFree(z.string(), 'host').default('localhost')
+    .describe('Host address').meta({ title: 'Host' }),
 
   /** Port number. */
   port: z.number().int().default(3306).describe('Port number').meta({ title: 'Port' }),
 
-  /** Database (schema) name. Required unless `url` carries it. */
-  database: z.string().optional().describe('Database name').meta({ title: 'Database' }),
+  /** Database (schema) name. Required unless `url` carries it. Placeholder-free since #8336. */
+  database: placeholderFree(z.string(), 'database').optional()
+    .describe('Database name').meta({ title: 'Database' }),
 
-  /** Authentication user. Passed to `mysql2` as `user`. */
-  username: z.string().optional().describe('Authentication user').meta({ title: 'User' }),
+  /** Authentication user. Passed to `mysql2` as `user`. Placeholder-free since #8336. */
+  username: placeholderFree(z.string(), 'username').optional()
+    .describe('Authentication user').meta({ title: 'User' }),
 
   /**
    * Authentication password — REFUSED inline since #7990 (see postgres.zod.ts:

@@ -169,6 +169,30 @@ jobs:
       - name: PM skill issue-ID lint
         run: pnpm check:pm-skill-id-lint
 
+      # PM dispatch-gates self-test (#8162). `scripts/pm/dispatch-gates.mjs`
+      # derives the "local gates for this card" line of every dispatch prompt,
+      # and carried a 61-case --self-test that NO job ran: it executed only when
+      # a human or an agent typed it. A break in the extraction functions landed
+      # green and surfaced later as a prompt naming the wrong gate families —
+      # output that reads as correct, produced by the one tool whose purpose is
+      # to stop gate lists being memory-shaped. Same family as the
+      # `Changeset-family gate self-tests` step above, and like that one this
+      # step is deliberately UNCONDITIONAL: no `if:`, no label read, no paths
+      # filter. An exemption is what a self-test must not have, or the gap moves.
+      #
+      # The gate runs the SELF-TEST only. The live derivation
+      # (`node scripts/pm/dispatch-gates.mjs <path>`) answers a question about a
+      # card's file surface, is print-only, and exits 0 on any completed run —
+      # there is no verdict in it for CI to hold, only a slow read of the whole
+      # workflow tree. Why the gate is its own file rather than pointing
+      # `check:pm-dispatch-gates` straight at the tool is measured and argued in
+      # `scripts/pm/check-dispatch-gates.mjs`'s header (the tool's self-test
+      # fixtures are path strings, and they become watch hints that fabricate
+      # MATCHED leads across most of the tree). Reads two files and walks
+      # packages/; ~0.3s.
+      - name: PM dispatch-gates self-test
+        run: pnpm check:pm-dispatch-gates
+
       # Docs/skills authoring guard (#2035 / ADR-0059): TS code blocks in
       # Markdown/MDX are not type-checked or ESLinted, so skills/ and
       # content/docs/ can drift back to teaching the bare `: Page = {}` literal

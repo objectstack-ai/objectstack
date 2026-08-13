@@ -164,20 +164,25 @@ describe('PostgresConfigSchema', () => {
     expect(result.error!.issues[0]!.message).toContain('`user` → `username`');
   });
 
-  it('should accept config with environment variable patterns', () => {
-    // NOTE (#7990 census): nothing in the runtime resolves `${…}` placeholders
-    // in datasource config — these strings reach the client verbatim. The test
-    // pins only that placeholder-shaped strings parse for NON-credential keys;
-    // `password` is refused whatever its value (including a placeholder),
-    // because the key itself is the cleartext sink.
-    const config = PostgresConfigSchema.parse({
+  it('refuses config with environment variable patterns — placeholders are not resolved here (#8336)', () => {
+    // INVERTED acceptance pin. This test used to pin (#7990 census) that
+    // placeholder-shaped strings PARSE for non-credential keys — recording the
+    // measured fact that nothing resolves them and they reach the client
+    // verbatim. The #8336 ruling (direction 2, 2026-08-13) closed that door:
+    // same input, opposite verdict. The family pins live in
+    // driver-placeholder-refusal.test.ts; this inversion keeps the historical
+    // fixture judged rather than deleted.
+    const result = PostgresConfigSchema.safeParse({
       database: '${DB_NAME}',
       host: '${DB_HOST}',
       username: '${DB_USER}',
     });
 
-    expect(config.database).toBe('${DB_NAME}');
-    expect(config.host).toBe('${DB_HOST}');
+    expect(result.success).toBe(false);
+    const paths = result.error!.issues
+      .filter((i) => i.message.includes('placeholders are not resolved here'))
+      .map((i) => i.path.join('.'));
+    expect(paths.sort()).toEqual(['database', 'host', 'username']);
   });
 
   it('accepts the dev-only autoMigrate passthrough', () => {
