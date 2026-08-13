@@ -38,7 +38,7 @@ import {
 // `packages/spec/src/data/bulk-write-hook-conformance.ts` so BOTH phases and
 // both verbs enforce one definition; the engine raises, the contract decides.
 import { MAX_BULK_PER_ROW_HOOK_ROWS, resolveBulkPerRowHookBudget } from '@objectstack/spec/data';
-import { assertListComparandShapes } from './filter-comparand-shape.js';
+import { assertListComparandShapes, assertFilterIsMaterializable } from './filter-comparand-shape.js';
 // Seek pagination for the walks that must read EVERY row — the autonumber seed
 // scan is one (#6249). Shared with `summary-backfill` rather than re-rolled:
 // the cursor merge is the part that is easy to get subtly wrong.
@@ -620,6 +620,7 @@ function lowerWhereFilterArray<T extends object | undefined>(
   object: string,
   operation: string,
   bag: T,
+  schema?: unknown,
 ): T {
   if (!bag) return bag;
   const where = (bag as Record<string, unknown>).where;
@@ -631,6 +632,12 @@ function lowerWhereFilterArray<T extends object | undefined>(
     // one either way — it reads the lowered condition, which is what both doors
     // produce.
     assertListComparandShapes(object, operation, where);
+    // [#8296] The unmaterializable-FIELD door, on the same object form. It sits
+    // beside the shape gate because the two answer different questions about
+    // the same predicate — "can this comparand run" vs "is there a column to
+    // run it against" — and because this seam is the one place EVERY
+    // caller-supplied `where` passes through, whichever verb it arrived by.
+    assertFilterIsMaterializable(object, operation, schema, where);
     // [#7872] The comparand-type door, on the OBJECT form. `parseFilterAST`
     // runs the same walk on everything it lowers or passes through, but
     // NEITHER door routes an object-form filter through it — Door 1 gates on
@@ -687,6 +694,10 @@ function lowerWhereFilterArray<T extends object | undefined>(
   // comparand — `['status', 'not_in', 'done']` lowers to `{status: {$nin:
   // 'done'}}` and a scalar `$nin` is what reached the driver as a 500.
   assertListComparandShapes(object, operation, condition);
+  // [#8296] Same door as the object branch above, on the LOWERED condition —
+  // the array sugar (`[['is_open','=',true]]`) names fields too, and a gate on
+  // one branch would answer one mistake two ways depending on the spelling.
+  assertFilterIsMaterializable(object, operation, schema, condition);
   lowered.where = condition;
   return lowered as T;
 }
@@ -7213,7 +7224,7 @@ export class ObjectQL implements IObjectQLEngine {
     // (#4371, three shipped instances in #4370).
     query = foldEngineOptionAliases(object, 'find', query, ENGINE_QUERY_SLOTS, ENGINE_WIRE_ONLY_SLOTS);
     rejectUnknownEngineOptions(object, 'find', query, ENGINE_FIND_OPTION_KEYS);
-    query = lowerWhereFilterArray(object, 'find', query);
+    query = lowerWhereFilterArray(object, 'find', query, this._registry.getObject(object));
     this.logger.debug('Find operation starting', { object, query });
     const driver = this.getDriver(object);
     // `object` LAST: the resolved name must win. Spread-first used to let a
@@ -7388,7 +7399,7 @@ export class ObjectQL implements IObjectQLEngine {
     // matters here too: findOne({ sort }) means "first row of THIS order".
     query = foldEngineOptionAliases(objectName, 'findOne', query, ENGINE_QUERY_SLOTS, ENGINE_WIRE_ONLY_SLOTS);
     rejectUnknownEngineOptions(objectName, 'findOne', query, ENGINE_FIND_OPTION_KEYS);
-    query = lowerWhereFilterArray(objectName, 'findOne', query);
+    query = lowerWhereFilterArray(objectName, 'findOne', query, this._registry.getObject(objectName));
     this.logger.debug('FindOne operation', { objectName });
     const driver = this.getDriver(objectName);
     // `object` after the spread for the same reason as find(); `limit: 1`
@@ -8167,7 +8178,7 @@ export class ObjectQL implements IObjectQLEngine {
      // [#5158] Lower before the by-id extraction below reads `where.id`: on an
      // array that read is `undefined` whatever the caller wrote, so an
      // `update({ where: [['id','=',x]] })` used to route to the multi-row path.
-     options = lowerWhereFilterArray(object, 'update', options);
+     options = lowerWhereFilterArray(object, 'update', options, this._registry.getObject(object));
 
      // Expand `{filter-placeholder}` values BEFORE the id is extracted (#3810).
      // The read path resolves them; without the same call here the SAME filter
@@ -9479,7 +9490,7 @@ export class ObjectQL implements IObjectQLEngine {
     rejectUnknownEngineOptions(object, 'delete', options, ENGINE_DELETE_OPTION_KEYS);
     // [#5158] Same ordering reason as update(): the dispatch decision below
     // reads `where.id`, which an unlowered array never carries.
-    options = lowerWhereFilterArray(object, 'delete', options);
+    options = lowerWhereFilterArray(object, 'delete', options, this._registry.getObject(object));
 
     // Expand `{filter-placeholder}` values before the id is extracted — same
     // reasoning as update() above (#3810).
@@ -9937,7 +9948,7 @@ export class ObjectQL implements IObjectQLEngine {
      // `query.where` only, so an unfolded `{ filter }` counted the whole table.
      query = foldEngineOptionAliases(object, 'count', query, ENGINE_WHERE_SLOTS);
      rejectUnknownEngineOptions(object, 'count', query, ENGINE_COUNT_OPTION_KEYS);
-     query = lowerWhereFilterArray(object, 'count', query);
+     query = lowerWhereFilterArray(object, 'count', query, this._registry.getObject(object));
      const driver = this.getDriver(object);
 
      // The AST must ride on the opCtx so the security/sharing middlewares can
@@ -10041,7 +10052,7 @@ export class ObjectQL implements IObjectQLEngine {
       // `query.where` only, so an unfolded `{ filter }` aggregated every row.
       query = foldEngineOptionAliases(object, 'aggregate', query, ENGINE_WHERE_SLOTS);
       rejectUnknownEngineOptions(object, 'aggregate', query, ENGINE_AGGREGATE_OPTION_KEYS);
-      query = lowerWhereFilterArray(object, 'aggregate', query);
+      query = lowerWhereFilterArray(object, 'aggregate', query, this._registry.getObject(object));
       this.rejectCredentialAggregation(object, query);
       const driver = this.getDriver(object);
       this.logger.debug(`Aggregate on ${object} using ${driver.name}`, query);

@@ -5866,9 +5866,29 @@ export class ObjectStackProtocolImplementation implements
      *
      * Value shapes are NOT judged here: a wrong-typed or unrunnable filter is
      * `INVALID_FILTER`'s job (#4121 / #4181), already answered upstream in this
-     * same block. This gate answers exactly one question — does this field
-     * exist — with exactly the envelope the write path and the bare-key door
-     * already give it.
+     * same block. This gate answers questions about the NAME, with exactly the
+     * envelope the write path and the bare-key door already give it.
+     *
+     * [#8296] It answers TWO of them now — "does this field exist" and, second,
+     * "does this field's TYPE materialise a column to filter on". A `formula`
+     * field is known, undotted and unfilterable: it cleared this gate precisely
+     * BECAUSE the object declares it, reached a driver that has no column for
+     * it, and answered 200 with zero rows in BOTH directions. That was the last
+     * axis in this family still fail-open — SORT refuses the same field
+     * (#6994/#7095) and SEARCH refuses it (#6674) — and it is the shape the
+     * standing ruling of 2026-08-12 names: a declaration the platform cannot
+     * honour is refused at the latest checkpoint that can see the whole
+     * picture, naming the offending key path, never answered 200.
+     *
+     * SCOPE: this is an INGRESS gate, so it covers what reaches {@link
+     * findData}. The half it cannot reach — a caller handing a `where` straight
+     * to `engine.find` / `findOne` / `count` / `aggregate` / `update` /
+     * `delete`, which is how a saved report's `query.filter` travels
+     * (`plugin-reports` forwards it verbatim) — is closed at the engine's own
+     * filter seam by `assertFilterIsMaterializable` (`@objectstack/objectql`,
+     * `filter-comparand-shape.ts`), with the same `400 INVALID_FIELD` and the
+     * same remedy sentence. Same two-door shape, and same reason, as the sort
+     * axis' #7095.
      */
     private assertFilterFieldsExist(object: string, where: unknown, param: string): void {
         if (!where || typeof where !== 'object') return;
@@ -5878,20 +5898,92 @@ export class ObjectStackProtocolImplementation implements
         if (!gate) return;
         // Head segment only, exactly as the bare-key door judges `owner_id.name`.
         const unknown = names.filter((f) => !gate.known.has(f.split('.')[0]));
-        if (unknown.length === 0) return;
-        const first = unknown[0];
+        if (unknown.length > 0) {
+            const first = unknown[0];
+            const err: any = new Error(
+                `Query parameter '${param}' filters on '${first}', which is not a field on object `
+                + `'${object}'`
+                + (unknown.length > 1 ? ` (also: ${unknown.slice(1).join(', ')})` : '')
+                + '. A filter on a field that does not exist can only match zero records, so the '
+                + 'query was refused instead of answered with an empty list.'
+                + suggestFieldName(first, gate.declared),
+            );
+            err.code = 'INVALID_FIELD';
+            err.status = 400;
+            err.field = first;
+            err.fields = unknown;
+            err.object = object;
+            err.param = param;
+            throw err;
+        }
+
+        // [#8296] The SECOND verdict on this axis: a name that is a REAL field
+        // of this object and still cannot be filtered on, because its TYPE
+        // materialises no column. It is the FILTER axis finally growing the
+        // verdict its two neighbours already have — {@link
+        // assertSortFieldsExist} splits `unknown` from unmaterializable
+        // (#6994) and {@link assertSearchFieldsAreSearchable} splits `unknown`
+        // from `virtual` (#6674) — and it was the last axis on which a
+        // declaration the platform cannot honour still answered 200.
+        //
+        // Measured on a real `ObjectQL` + this protocol, base cb43296ef
+        // (`is_open` a `formula` over the stored `status` column):
+        //
+        // ```
+        // where { is_open: true }          -> 0 rows, NO ERROR
+        // where { is_open: false }         -> 0 rows, NO ERROR
+        // CONTROL where { status: 'open' } -> 4 rows
+        // CONTROL where { subtask_total: 5 } -> 1 row   (`summary` HAS a column)
+        // ```
+        //
+        // BOTH directions are wrong and the `false` one is the dangerous one:
+        // the same predicate against a STORED boolean returns every row, so a
+        // filter meaning "not yet done" silently becomes "no records at all".
+        // The response is indistinguishable from an empty table, and the
+        // formula READS correctly in that very same response (`applyFormulaPlan`
+        // hydrates it), so the field is visibly populated and simultaneously
+        // unfilterable.
+        //
+        // Judged by the same `@objectstack/spec/data` predicate the SEARCH axis
+        // uses ({@link isVirtualSearchField} / `SEARCH_VIRTUAL_TYPES`) rather
+        // than a list minted here, so this gate and the drivers cannot disagree
+        // about which types have a column. `summary` and `autonumber` are NOT
+        // in it and must not be: both get real stored columns and filter
+        // correctly — a gate widened to the spec's `COMPUTED_VALUE_TYPES` (the
+        // WRITE contract) would refuse two working types.
+        //
+        // PRECEDENCE — `unknown` first, then this, mirroring the sort axis'
+        // `unknown` > `dotted` > unmaterializable: identity errors before type
+        // errors. DOTTED names are deliberately NOT judged here: a dotted
+        // filter path has no verdict on this axis at all (its head being a real
+        // field is what carries it through the check above), and inventing one
+        // for the formula-headed case alone would answer two spellings of one
+        // unjudged shape differently.
+        const virtual = names.filter((f) => !f.includes('.') && isVirtualSearchField(gate.fields[f]));
+        if (virtual.length === 0) return;
+        const virtualFirst = virtual[0];
+        const virtualType = String(gate.fields[virtualFirst]?.type ?? 'formula');
         const err: any = new Error(
-            `Query parameter '${param}' filters on '${first}', which is not a field on object `
-            + `'${object}'`
-            + (unknown.length > 1 ? ` (also: ${unknown.slice(1).join(', ')})` : '')
-            + '. A filter on a field that does not exist can only match zero records, so the '
-            + 'query was refused instead of answered with an empty list.'
-            + suggestFieldName(first, gate.declared),
+            `Query parameter '${param}' filters on '${virtualFirst}', a virtual '${virtualType}' `
+            + `field on object '${object}'`
+            + (virtual.length > 1 ? ` (also: ${virtual.slice(1).join(', ')})` : '')
+            + '. Its value is computed on read and never stored, so no driver materializes a '
+            + 'column to filter on: the predicate reaches the driver, matches nothing, and the '
+            + 'query answers an empty list under a 200 — in BOTH directions, so a false test '
+            + 'returns no records where the same test against a stored boolean returns every '
+            + 'record.'
+            // Deliberately the same remedy, in the same words, as the SORT
+            // axis' formula refusal (#6994) and #6673's SEARCH-axis
+            // correction, with only the verb changed to name this axis. One
+            // vocabulary across the doors: an author refused on two axes must
+            // not be sent two different ways.
+            + ` Denormalise the value onto '${object}' (a stored field, written when the source`
+            + ' changes) and filter that.',
         );
         err.code = 'INVALID_FIELD';
         err.status = 400;
-        err.field = first;
-        err.fields = unknown;
+        err.field = virtualFirst;
+        err.fields = virtual;
         err.object = object;
         err.param = param;
         throw err;
