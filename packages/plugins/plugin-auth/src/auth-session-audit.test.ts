@@ -19,7 +19,12 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { AuthManager } from './auth-manager';
-import { loginEventFor, logoutEventFor, SIGN_OUT_PATH } from './auth-session-audit';
+import {
+  loginEventFor,
+  logoutEventFor,
+  SIGN_OUT_PATH,
+  type AuthSessionAuditEventInput,
+} from './auth-session-audit';
 
 const SECRET = 'test-secret-at-least-32-chars-long';
 
@@ -32,8 +37,43 @@ const SESSION = {
   userAgent: 'Mozilla/5.0 (probe)',
 };
 
+/**
+ * The structural minimum this file needs from the sink spy: a call log whose
+ * entries are the one-argument tuple `recordAuthEvent` is declared with.
+ *
+ * Declared rather than inferred from `vi.fn()`'s return type, for two reasons.
+ * A `vi.fn(async () => …)` whose implementation takes NO parameter types its
+ * `mock.calls` as `[][]` — a zero-length tuple — so every `calls[0][0]` in this
+ * file was reaching past the end of a tuple the type system believed was empty
+ * (TS2493), and reading the argument back is the entire point of these cases.
+ * And pinning the element type to `AuthSessionAuditEventInput` is what makes
+ * the assertions below type-check against the REAL event shape rather than
+ * against `any`: a field renamed on the event surface fails here at compile
+ * time instead of quietly comparing `undefined` to `undefined`.
+ */
+type RecordAuthEventSpy = { mock: { calls: Array<[AuthSessionAuditEventInput]> } };
+
+/** Every event the sink was handed, in call order. */
+function recordedEvents(spy: RecordAuthEventSpy): AuthSessionAuditEventInput[] {
+  return spy.mock.calls.map(([event]) => event);
+}
+
+/**
+ * The first event the sink was handed.
+ *
+ * The "never called" case is named here rather than left to blow up on a
+ * property access: a writer that was never wired is precisely the failure these
+ * cases exist to catch, and it should read as that sentence, not as a
+ * `TypeError` about `undefined`.
+ */
+function firstEvent(spy: RecordAuthEventSpy): AuthSessionAuditEventInput {
+  const [event] = recordedEvents(spy);
+  if (!event) throw new Error('the audit sink was never handed an event');
+  return event;
+}
+
 function hooksWithSink(config: Record<string, unknown> = {}) {
-  const recordAuthEvent = vi.fn(async () => undefined);
+  const recordAuthEvent = vi.fn(async (_event: AuthSessionAuditEventInput) => undefined);
   const manager = new AuthManager({
     secret: SECRET,
     baseUrl: 'http://localhost:3000',
@@ -51,7 +91,7 @@ describe('[#8144] session.create.after records a login', () => {
     await hooks.session.create.after(SESSION, { path: '/sign-in/email' });
 
     expect(recordAuthEvent).toHaveBeenCalledTimes(1);
-    expect(recordAuthEvent.mock.calls[0][0]).toEqual({
+    expect(firstEvent(recordAuthEvent)).toEqual({
       action: 'login',
       userId: 'usr_1',
       sessionId: 'ses_1',
@@ -74,7 +114,7 @@ describe('[#8144] session.create.after records a login', () => {
     }
 
     expect(recordAuthEvent).toHaveBeenCalledTimes(4);
-    expect(recordAuthEvent.mock.calls.map((c: any[]) => c[0].action)).toEqual([
+    expect(recordedEvents(recordAuthEvent).map((event) => event.action)).toEqual([
       'login',
       'login',
       'login',
@@ -90,7 +130,7 @@ describe('[#8144] session.create.after records a login', () => {
       { path: '/admin/impersonate-user' },
     );
 
-    const event = recordAuthEvent.mock.calls[0][0];
+    const event = firstEvent(recordAuthEvent);
     expect(event.userId).toBe('usr_1');
     expect(event.actor).toBe('usr_admin');
     expect(event.context).toEqual({
@@ -160,7 +200,7 @@ describe('[#8144] session.delete.after records a logout — and ONLY for /sign-o
     await hooks.session.delete.after(SESSION, { path: SIGN_OUT_PATH });
 
     expect(recordAuthEvent).toHaveBeenCalledTimes(1);
-    expect(recordAuthEvent.mock.calls[0][0]).toEqual({
+    expect(firstEvent(recordAuthEvent)).toEqual({
       action: 'logout',
       userId: 'usr_1',
       sessionId: 'ses_1',
