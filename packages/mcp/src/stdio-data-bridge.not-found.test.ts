@@ -64,16 +64,32 @@ function makeBridge() {
   return { bridge, engine, metadataService };
 }
 
+/** A rejection's payload, narrowed once so callers never juggle `unknown`. */
+type NotFoundEnvelope = Error & { code?: string; status?: number };
+
+/**
+ * The rejection `run` throws, typed — or `null` if it resolved. One explicit
+ * cast, shared, rather than `.catch((e) => e)` at each call site: that idiom
+ * infers the settled value as `unknown` here (TResult from an `any`-typed
+ * catch parameter widens to `unknown`), which is a second, unrelated way to
+ * fail `tsc` — this repo's TEST_DEBT ledger already carries 53 raw errors for
+ * `packages/mcp` from the *other* half of that idiom (`await res.json()`),
+ * and a fix for this card must not add a fourth without narrowing it.
+ */
+async function catchError(run: () => Promise<unknown>): Promise<NotFoundEnvelope | null> {
+  return (await run().then(
+    () => null,
+    (e: unknown) => e,
+  )) as NotFoundEnvelope | null;
+}
+
 /**
  * Assert a not-found refusal by its ENVELOPE, not by the fact that something
  * threw — a bare `Error` also satisfies `.toThrow()`, which is exactly the
  * defect this card removes.
  */
 async function expectRecordNotFound(run: () => Promise<unknown>): Promise<void> {
-  const err = (await run().then(
-    () => null,
-    (e: unknown) => e,
-  )) as (Error & { code?: string; status?: number }) | null;
+  const err = await catchError(run);
   expect(err, 'the call resolved — no not-found refusal was raised').toBeTruthy();
   expect(err!.code).toBe('RECORD_NOT_FOUND');
   expect(err!.status).toBe(404);
@@ -99,11 +115,11 @@ describe('#8422 stdio bridge by-id writes throw the shared not-found envelope', 
   it('both seams throw the SAME envelope shape — one declaration, not two', async () => {
     const { bridge } = makeBridge();
 
-    const updateErr = await bridge.update('task', 'ghost', { title: 'x' }).catch((e) => e);
-    const removeErr = await bridge.remove('task', 'ghost').catch((e) => e);
+    const updateErr = await catchError(() => bridge.update('task', 'ghost', { title: 'x' }));
+    const removeErr = await catchError(() => bridge.remove('task', 'ghost'));
 
-    expect(updateErr.code).toBe(removeErr.code);
-    expect(updateErr.status).toBe(removeErr.status);
-    expect(updateErr.code).toBe('RECORD_NOT_FOUND');
+    expect(updateErr?.code).toBe(removeErr?.code);
+    expect(updateErr?.status).toBe(removeErr?.status);
+    expect(updateErr?.code).toBe('RECORD_NOT_FOUND');
   });
 });
