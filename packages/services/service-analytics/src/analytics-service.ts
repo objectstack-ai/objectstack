@@ -16,7 +16,7 @@ import type { Dataset } from '@objectstack/spec/ui';
 // differently from objectui's `pickLocalized` with neither end erroring.
 import { resolveI18nLabel } from '@objectstack/spec/ui';
 import type { Logger } from '@objectstack/spec/contracts';
-import { createLogger, bucketKeyToCalendarRange, zonedDateStartToUtcMs } from '@objectstack/core';
+import { createLogger, getEnv, bucketKeyToCalendarRange, zonedDateStartToUtcMs } from '@objectstack/core';
 // [#6615] The Postgres `"x" of relation "y"` phrase, owned once. This is the
 // only reason this package depends on `@objectstack/types` — see the module's
 // docblock for why the edge is acyclic and why it was worth adding.
@@ -575,6 +575,43 @@ export interface AnalyticsServiceConfig {
     objectName: string,
     context?: ExecutionContext,
   ) => Promise<Record<string, unknown>[] | null>;
+
+  /**
+   * [#8286] Echo the executed statement back to the CALLER in
+   * `AnalyticsResult.sql`. **Off unless this host opts in.**
+   *
+   * The contract has always declared the echo debug-only —
+   * `AnalyticsResultResponseSchema.data.sql` (`spec/api/analytics.zod.ts`) is
+   * `optional()` and describes itself as "Executed SQL (if debug enabled)" —
+   * but no implementation ever read a debug switch, so every `/analytics/query`
+   * response carried the statement, on production deployments included. This
+   * field is that switch: declared = enforced, restored at the one seam the
+   * response leaves through ({@link AnalyticsService.query}).
+   *
+   * **Default** — `NODE_ENV === 'development'`, and nothing else. In
+   * particular an UNSET `NODE_ENV` counts as production and the echo stays
+   * off: that is the maintainer's 2026-08-06 ruling for machine-readable
+   * environment answers (see `resolveDiscoveryEnvironment` and the note at
+   * `runtime/src/http-dispatcher.ts`), and of the two ways to be wrong,
+   * disclosing on a production deployment whose operator forgot the variable
+   * is the dangerous one. `os start` forces `NODE_ENV='production'` when
+   * unset, `os serve` resolves `NODE_ENV || 'production'`, `os doctor` derives
+   * the same expression — this switch now reads the absence the same way.
+   *
+   * **Why not a request field.** There is none, deliberately: a caller-set
+   * debug flag would let any tenant re-open the disclosure on demand, which is
+   * the shape of the defect rather than a fix for it. The echo is a HOST
+   * decision, and the caller-facing surface for "show me the SQL" already
+   * exists as the dedicated dry-run route `/api/v1/analytics/sql`
+   * (`generateSql`), which this switch does not touch.
+   *
+   * **Why not the plugin's `debug` (log) option.** Server-side log verbosity
+   * and what travels to a caller are different decisions with different blast
+   * radii; folding them together means a support engineer raising log level on
+   * a live deployment silently reopens the disclosure. Two switches, named for
+   * what they open.
+   */
+  debugSql?: boolean;
 }
 
 /**
@@ -632,6 +669,11 @@ export class AnalyticsService implements IAnalyticsService {
   private readonly isExternalObject?: AnalyticsServiceConfig['isExternalObject'];
   /** [#3867] One-shot flag for the {@link assertInferableCube} stand-down warning. */
   private warnedNoObjectRegistry = false;
+  /**
+   * [#8286] Does the executed statement travel back to the caller?
+   * See {@link AnalyticsServiceConfig.debugSql} for the switch and its default.
+   */
+  private readonly debugSql: boolean;
   readonly cubeRegistry: CubeRegistry;
   private readonly logger: Logger;
 
@@ -653,6 +695,10 @@ export class AnalyticsService implements IAnalyticsService {
     this.getObjectFieldNames = config.getObjectFieldNames;
     this.getObjectDatasource = config.getObjectDatasource;
     this.isExternalObject = config.isExternalObject;
+    // [#8286] Resolved ONCE, at construction, from the host's explicit choice
+    // or from `NODE_ENV`. An unset `NODE_ENV` is not development — see the
+    // field's doc for the ruling this inherits.
+    this.debugSql = config.debugSql ?? (getEnv('NODE_ENV') === 'development');
 
     // Compile + register pre-defined datasets (ADR-0021).
     if (config.datasets) {
@@ -810,7 +856,14 @@ export class AnalyticsService implements IAnalyticsService {
       const strategy = this.resolveStrategy(query, ctx, skip);
       this.logger.debug(`[Analytics] Query on cube "${query.cube}" → ${strategy.name}`);
       try {
-        return await strategy.execute(query, ctx);
+        // [#8286] ONE gate, every strategy. This is the single seam a strategy
+        // result leaves the service through — `NativeSQLStrategy` returns the
+        // statement it ran, `ObjectQLStrategy` renders a representative one,
+        // and `FallbackDelegateStrategy` passes through whatever the delegated
+        // service minted (e.g. `MemoryAnalyticsService`, which always echoes).
+        // Gating any one of those would leave the others serving, which is the
+        // shape the defect already had.
+        return this.applySqlEchoPolicy(await strategy.execute(query, ctx));
       } catch (e) {
         if ((e as { code?: string })?.code === 'RAW_SQL_UNSUPPORTED') {
           this.logger.warn(
@@ -822,6 +875,35 @@ export class AnalyticsService implements IAnalyticsService {
         throw e;
       }
     }
+  }
+
+  /**
+   * [#8286] Withhold the executed statement unless this host enabled the echo.
+   *
+   * Applied at {@link query}, which is the response-assembly seam for BOTH
+   * faces that serve callers: `/api/v1/analytics/query` calls it directly, and
+   * `queryDataset` reaches it through `DatasetExecutor`, so a dataset response
+   * inherits the same verdict without a second gate to keep in step.
+   * `generateSql` — the dedicated `/api/v1/analytics/sql` dry-run route — is
+   * deliberately NOT gated: asking for the statement is that route's entire
+   * purpose, and it is the surface a debugging author is meant to use.
+   *
+   * What the echo disclosed, and why "it is only a table name" understates it:
+   * the statement carries the compiled read scope, i.e. the SHAPE of the
+   * isolation predicate (`"sys_user"."id" IN ($2, $3, …)` rather than an
+   * `organization_id` comparison) plus its bound-parameter arity, which counts
+   * the caller's own org membership. No wall was breached by it — the echo is
+   * information disclosure, and this is the disclosure closing.
+   */
+  private applySqlEchoPolicy(result: AnalyticsResult): AnalyticsResult {
+    if (this.debugSql || result?.sql === undefined) return result;
+    // Copy-and-delete rather than mutate: the strategy (or a delegated
+    // fallback service) owns the object it returned, and a cached result on
+    // the other side of that boundary must not lose a field because this
+    // service handed it to a caller once.
+    const withheld: AnalyticsResult = { ...result };
+    delete withheld.sql;
+    return withheld;
   }
 
   /**

@@ -21,6 +21,8 @@
  *                   an omitted field never 400s — legacy null rows rest.
  *  - `maxLength` / `minLength`            (text/textarea/email/url/phone/password)
  *  - `min` / `max`                        (number/currency/percent/rating/slider)
+ *  - `scale`        more decimal places than declared → `max_scale` (#7501;
+ *                   rejection, NEVER rounding — maintainer ruling 2026-08-11)
  *  - format         email / url / phone   (lightweight RFC-aware regex)
  *  - select / multiselect: value must appear in `options`
  *  - boolean / toggle: must coerce to boolean
@@ -161,11 +163,40 @@ interface FieldDef {
   minLength?: number;
   min?: number;
   max?: number;
+  /** Max decimal places for number types — enforced by rejection (#7501). */
+  scale?: number;
   options?: Array<{ value: string | number; label?: string } | string | number>;
 }
 
 function isMissing(v: unknown): boolean {
   return v === undefined || v === null || (typeof v === 'string' && v.trim() === '');
+}
+
+/**
+ * How many decimal places a finite number carries (#7501).
+ *
+ * Measured from the number's own canonical string form — `String(n)` — rather
+ * than by multiply-and-round arithmetic, for two reasons:
+ *
+ *  - `n * 10 ** scale` overflows to `Infinity` for large magnitudes
+ *    (`1e308` at `scale: 10`), turning an integral value into a false
+ *    rejection; the string form never overflows.
+ *  - the canonical string is exactly what JSON serialization produces, so the
+ *    count judged here is the count the client's own payload showed. A float
+ *    artifact like `0.1 + 0.2` really IS `0.30000000000000004` on the wire,
+ *    and judging the canonical form reports it as the 17 decimal places the
+ *    stored value would carry — the honest verdict under a rejection contract.
+ *
+ * Exponent forms are normalized: `1e-7` → 7 places, `1.5e-7` → 8,
+ * `1.23e+21` → 0. Callers guard `Number.isFinite` first; a non-numeric string
+ * (which `String` would render as `NaN`) falls out of the regex and counts 0.
+ */
+function decimalPlacesOf(n: number): number {
+  const m = /^-?\d+(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/.exec(String(n));
+  if (!m) return 0;
+  const fractionDigits = m[1] ? m[1].length : 0;
+  const exponent = m[2] ? Number(m[2]) : 0;
+  return Math.max(0, fractionDigits - exponent);
 }
 
 /**
@@ -531,6 +562,24 @@ function validateOne(
     }
     if (def.max !== undefined && n > def.max) {
       return fail('max_value', { max: def.max });
+    }
+    // ── `scale` — enforced by REJECTION, never rounding (#7501) ──
+    // Maintainer ruling 2026-08-11: an over-scale value is refused the way an
+    // out-of-range one is; silent rounding is silently altering data. Applies
+    // to NEW writes only — already-stored values are read back untouched.
+    // Only a well-formed declaration (integer ≥ 0) is enforced: `scale: 2.5`
+    // has no defined meaning, and inventing one here (floor? round?) would be
+    // the consumer-side guessing PD #12 forbids — a malformed declaration
+    // stays unenforced exactly as every declaration was before this branch.
+    if (
+      def.scale !== undefined &&
+      Number.isInteger(def.scale) &&
+      def.scale >= 0
+    ) {
+      const actual = decimalPlacesOf(n);
+      if (actual > def.scale) {
+        return fail('max_scale', { scale: def.scale, actual });
+      }
     }
     return null;
   }

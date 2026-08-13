@@ -1323,6 +1323,9 @@ importers:
       '@objectstack/formula':
         specifier: workspace:*
         version: link:../formula
+      '@objectstack/lint':
+        specifier: workspace:*
+        version: link:../lint
       '@types/node':
         specifier: ^26.1.2
         version: 26.1.2

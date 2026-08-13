@@ -74,8 +74,6 @@ export const zhCN: TranslationData = {
           },
         },
         recurrence_interval: { label: '重复间隔' },
-        is_completed: { label: '是否完成' },
-        is_overdue: { label: '是否逾期' },
         progress_percent: { label: '进度 (%)' },
         estimated_hours: { label: '预估工时' },
         actual_hours: { label: '实际工时' },

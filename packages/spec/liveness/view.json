@@ -185,7 +185,8 @@
         },
         "exportOptions": {
           "status": "live",
-          "note": "objectui: ObjectGrid.tsx (audit L15)."
+          "verifiedAt": "2026-08-13",
+          "note": "objectui: ObjectGrid.tsx reads five object keys — formats/streaming (:1596-:1611), maxRecords/includeHeaders/fileNamePrefix (:1620-:1631) — re-measured objectui origin/main@878140b. Object form adopted at #8010 (option A ruling 2026-08-12): the spec used to publish a bare format array the renderer never read (.formats on an array is undefined), so no declaration was both type-legal and functional; the bare array stays accepted and lifts to { formats } at parse. Sub-value 'pdf' removed same change (#1301 NOT_PLANNED) — enum error map carries the prescription; conversion view-export-options-pdf-removed strips stored sources."
         },
         "userActions": {
           "status": "live",
