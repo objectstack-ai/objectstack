@@ -6,6 +6,7 @@ import {
   ORGANIZATION_ADMIN_NO_BYPASS,
   BUILTIN_IDENTITY_ORG_ADMIN,
   BUILTIN_IDENTITY_ORG_OWNER,
+  MEMBERSHIP_ROLE_DELEGATED_ADMIN,
 } from '@objectstack/spec';
 import {
   MCP_AGENT_PERMISSION_SET_READ,
@@ -719,6 +720,68 @@ const baseDefaultPermissionSets: PermissionSet[] = [
         object: 'sys_invitation',
         operation: 'select',
         using: 'email == current_user.email',
+      },
+      // [#8240] The ISSUER half of the same object: a `delegated_admin` reads
+      // the invitations THEY THEMSELVES issued. Sibling of the addressee policy
+      // directly above — same set, same mechanism, same `select` — differing
+      // only in which end of the invitation it keys on.
+      //
+      // What #8095 left behind, measured: `delegated_admin` exists precisely as
+      // the invitation-issuing principal that is NOT an org admin (ADR-0105 D8 /
+      // #3697 — better-auth grants `invitation: ["create"]` to owner/admin only,
+      // and under a wall-enforcing posture those two are auto-elevated to tenant
+      // admins, so the delegated grade is the only caller the scope-bounded
+      // issuance path has). The narrowing's admin admission is domained to
+      // `org_owner`/`org_admin`, and this role normalizes to NEITHER
+      // (`mapMembershipRole` maps only owner/admin/member and passes unknown
+      // values through verbatim); it does not receive `organization_admin` from
+      // the auto-grant either, whose test is `roles.includes('owner') ||
+      // roles.includes('admin')` over the comma-split list. So the only policy
+      // that reached it was the addressee scope above, and it read its own
+      // incoming invitations only — never the ones it had just issued. It could
+      // create invitations it then could not list, with no second path back
+      // (better-auth's own `list-invitations` route is owner/admin-gated too).
+      //
+      // Maintainer ruling (2026-08-13): option C. The issuing principal may
+      // confirm and review ITS OWN work; the ledger's audience is NOT widened
+      // beyond what #8095 ruled. Letting `delegated_admin` read the whole ledger
+      // (adding it to `sys_invitation_org_admin`'s domain) was considered and
+      // REJECTED for exactly that widening — do not "simplify" this policy into
+      // that one. Leaving it unable to see its own issuance was also rejected:
+      // an issuer that cannot confirm its own issuance is a broken shape.
+      //
+      // WARNING: the predicate IS the ruling. `inviter_id == current_user.id` is
+      // what makes this scope-bounded rather than an admin admission in
+      // disguise, and the two are indistinguishable to any pin that only asks
+      // whether the delegate can see A row — under `using: 'id != null'` it sees
+      // one too. The coverage therefore requires a ledger with MORE THAN ONE
+      // inviter and asserts the negative case (someone else's invitation stays
+      // invisible); a single-inviter fixture cannot tell the ruled option from
+      // the rejected one. See `invitation-ledger-row-scope.dogfood.test.ts`.
+      //
+      // Why a `positions` DOMAIN, when the predicate looks self-domaining: only
+      // owner/admin/delegated_admin can ever BE an `inviter_id`, and the first
+      // two already read the whole ledger — so today the domain changes no
+      // persona's result. It is here for the case that outlives today: a
+      // principal DEMOTED out of an administrative grade would otherwise keep a
+      // permanent window onto the invitations it issued while it held one, which
+      // is a wider grant than "a `delegated_admin` sees the invitations they
+      // themselves issued". The domain only ever WIDENS (same argument as
+      // `sys_invitation_org_admin`): a principal it does not match keeps the
+      // addressee scope above and fails closed, so it can never be the reason
+      // someone reads MORE.
+      //
+      // No twin in `viewer_readonly`, deliberately: this set carries the
+      // `everyone` anchor and resolves for every authenticated principal, so a
+      // delegate holding `viewer_readonly` gets this policy from here anyway —
+      // and a read-only viewer that issued an invitation is not a shape the
+      // system can produce.
+      {
+        name: 'sys_invitation_issuer',
+        object: 'sys_invitation',
+        operation: 'select',
+        using: 'inviter_id == current_user.id',
+        positions: [MEMBERSHIP_ROLE_DELEGATED_ADMIN],
       },
     ],
   }),
