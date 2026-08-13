@@ -374,3 +374,75 @@ export function isApiOperationAllowed(
 export function effectiveOperationsArray(eff: EffectiveApiMethods): ApiOperation[] {
   return API_OPERATION_ORDER.filter((m) => eff.operations.has(m));
 }
+
+/**
+ * Why an object's `enable` block refuses `operation` on the EXTERNAL REST
+ * surface — or `null` when it does not refuse.
+ *
+ * - `api-disabled` — `enable.apiEnabled === false`. The object is not exposed
+ *   at all; the REST surface answers 404 so its existence is not revealed.
+ * - `method-not-allowed` — exposed, but `enable.apiMethods` resolves to an
+ *   effective set that does not contain `operation` (405).
+ */
+export type ApiExposureDenialReason = 'api-disabled' | 'method-not-allowed';
+
+/**
+ * The ORDER in which an object's `enable` block refuses an operation — declared
+ * once, here, beside the two primitives it composes (#3391).
+ *
+ * ## Why this exists as its own export
+ *
+ * The order is two steps and both matter: `apiEnabled === false` is judged
+ * FIRST and independently of any whitelist, so an object that is API-disabled
+ * refuses every operation whatever `apiMethods` says. Spelling those two steps
+ * out at each call site is how they drift — and by #7912 there were already
+ * three spellings of it (the REST data gate, the `platform-objects` nav
+ * invariant, and the nav prune this export was extracted for), each free to
+ * disagree about a case the others had not met.
+ *
+ * Everything about the decision is a pure function of `enable`: it takes no
+ * user, no permissions and no request context, so the answer is identical for
+ * every persona — platform admin included. That property is what lets a
+ * SERVING-side filter (which nav entries can work at all) and an AUTHORING-side
+ * lint (which nav entries could never work) read the same function and reach
+ * the same verdict, instead of approximating each other.
+ *
+ * Callers that need to SEND the refusal turn the reason into their own envelope
+ * (`apiAccessDenialFromEnable` in `@objectstack/rest` builds the 404/405 bodies
+ * from it); callers that only need the verdict use {@link canServeApiOperation}.
+ *
+ * @param enable    The object's `enable` capability block (or `undefined`).
+ * @param operation A canonical {@link ApiOperation} name — normalize runtime
+ *                  action names through {@link DATA_ACTION_TO_API_OPERATION} first.
+ * @param opts      `writeMode` (import precision) / `bulkChild` (bulk∧child).
+ */
+export function apiExposureDenialReason(
+  enable: EnableLike | null | undefined,
+  operation: string,
+  opts?: OperationCheckOptions,
+): ApiExposureDenialReason | null {
+  // No `enable` block at all → nothing declared, nothing to refuse. Kept
+  // ahead of the `apiEnabled` test so the default-open case is one branch and
+  // cannot be reached by a falsy-`enable` slip.
+  if (!enable) return null;
+  if (enable.apiEnabled === false) return 'api-disabled';
+  const eff = resolveEffectiveApiMethods(enable);
+  if (eff.mode === 'unrestricted') return null;
+  return isApiOperationAllowed(eff, operation, opts) ? null : 'method-not-allowed';
+}
+
+/**
+ * The boolean face of {@link apiExposureDenialReason}: can this object serve
+ * `operation` on the external REST surface at all?
+ *
+ * `canServeApiOperation(enable, 'list')` is the question a navigation entry
+ * asks — "if a user clicks this, can the destination answer?" — and it is the
+ * one every nav-servability consumer shares.
+ */
+export function canServeApiOperation(
+  enable: EnableLike | null | undefined,
+  operation: string,
+  opts?: OperationCheckOptions,
+): boolean {
+  return apiExposureDenialReason(enable, operation, opts) === null;
+}

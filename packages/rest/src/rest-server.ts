@@ -72,8 +72,8 @@ import { preferredLocaleFromHeader } from '@objectstack/spec/system';
 import type { ISecurityService } from '@objectstack/spec/contracts';
 import {
     resolveEffectiveApiMethods,
-    isApiOperationAllowed,
     effectiveOperationsArray,
+    apiExposureDenialReason,
     DATA_ACTION_TO_API_OPERATION,
 } from '@objectstack/spec/data';
 // [#8013] The SHARED envelope writer (#3973), aliased: this module already has a
@@ -1422,6 +1422,22 @@ interface ApiAccessOpts {
 }
 
 /**
+ * [#7912] The nav-servability gate handed to `filterAppForUser`: given the
+ * `objectName` a `type: 'object'` entry targets (and the entry itself, for the
+ * diagnostic), answer whether the destination can serve a `list`.
+ *
+ * `true` = serve the entry. That includes every case this layer cannot judge —
+ * an object absent from metadata, or metadata that could not be read at all —
+ * because the gate is a SURFACE-AREA control, not an authorization boundary,
+ * and the same fail-open reasoning `loadObjectItems` records applies here.
+ *
+ * `appName` is passed in rather than captured because ONE gate serves the whole
+ * app list: the list route resolves object metadata once and gates every app
+ * with the same closure, so the app being filtered is a per-call fact.
+ */
+type NavServabilityGate = (objectName: string, entry: any, appName: string) => boolean;
+
+/**
  * Pure per-object API-exposure check: given an object's `enable` block, decide
  * whether `operation` is denied on the *external* REST surface (ADR-0049 /
  * #1889 / #3391). Returns the `{ status, body }` to send, or `null` when
@@ -1435,6 +1451,14 @@ interface ApiAccessOpts {
  * identically everywhere. The 405 body's `allowed` array is the EFFECTIVE
  * operation set (enum-ordered), the single "effective" channel the frontend
  * consumes — never the raw whitelist.
+ *
+ * [#7912] The two-step ORDER those primitives compose into — `apiEnabled`
+ * first and independently, the whitelist second — is now the spec's
+ * `apiExposureDenialReason`, and this function is its ENVELOPE half: it turns
+ * the reason into the 404/405 body this surface sends. The extraction is what
+ * lets the nav-servability prune below (and the authoring-time lint that warns
+ * about the same entry) reach the identical verdict without a second spelling
+ * of the order to drift from this one.
  */
 export function apiAccessDenialFromEnable(
     enable: any,
@@ -1442,8 +1466,13 @@ export function apiAccessDenialFromEnable(
     operation: string,
     opts?: ApiAccessOpts,
 ): { status: number; body: Record<string, unknown> } | null {
-    if (!enable) return null;
-    if (enable.apiEnabled === false) {
+    // Canonicalization stays HERE: `operation` arrives as a runtime action name
+    // on this surface, while the spec helper's contract is a canonical
+    // `ApiOperation`.
+    const canonical = DATA_ACTION_TO_API_OPERATION[operation] ?? operation;
+    const reason = apiExposureDenialReason(enable, canonical, opts);
+    if (!reason) return null;
+    if (reason === 'api-disabled') {
         return {
             status: 404,
             body: {
@@ -1453,18 +1482,13 @@ export function apiAccessDenialFromEnable(
             },
         };
     }
-    const eff = resolveEffectiveApiMethods(enable);
-    // Unrestricted (no whitelist) → default-allow, exactly as before.
-    if (eff.mode === 'unrestricted') return null;
-    const canonical = DATA_ACTION_TO_API_OPERATION[operation] ?? operation;
-    if (isApiOperationAllowed(eff, canonical, opts)) return null;
     return {
         status: 405,
         body: {
             error: `API operation '${operation}' is not allowed on object '${objectName}'`,
             code: 'OBJECT_API_METHOD_NOT_ALLOWED',
             object: objectName,
-            allowed: effectiveOperationsArray(eff),
+            allowed: effectiveOperationsArray(resolveEffectiveApiMethods(enable)),
         },
     };
 }
@@ -1936,6 +1960,15 @@ export class RestServer {
      * in-flight Promise so concurrent callers share one resolution.
      */
     private readonly execCtxMemo = new WeakMap<object, Map<string, Promise<any | undefined>>>();
+    /**
+     * [#7912] De-duplication keys for the nav-servability prune log — one line
+     * per `app|entry|object|reason` per process. See
+     * {@link resolveNavServability}: a console session re-fetches `/meta/app`
+     * on every navigation, so an unthrottled warning would bury its own first
+     * occurrence. Process-lifetime by design (the set is bounded by the number
+     * of dead nav entries authored, not by traffic).
+     */
+    private readonly navPruneLogged = new Set<string>();
     private defaultEnvironmentIdProvider?: () => string | undefined;
     private authServiceProvider?: (environmentId?: string) => Promise<any | undefined>;
     private objectQLProvider?: (environmentId?: string) => Promise<any | undefined>;
@@ -2925,11 +2958,25 @@ export class RestServer {
      *   enforced by the shell alone: the entry (with its `objectName` /
      *   `pageName` / `componentRef` target) still shipped in the `/meta` body,
      *   so reading the JSON defeated it.
+     * - [#7912] SERVABILITY: drops a `type: 'object'` entry whose destination
+     *   object could not answer a `list` for anyone — see `servabilityGate`.
      *
      * NOT gated here: `visible` (CEL) at any level, and `requiresObject` — both
      * are still evaluated client-side only. That asymmetry is deliberate and
      * pinned in `rest.test.ts`: server-side CEL needs a bound `user` context
      * that this layer does not have, and is its own change.
+     *
+     * ⚠️ [#7912] `requiresObject` STAYS on that list, and the servability gate
+     * is not it wearing a new hat. `requiresObject` asks whether the named
+     * object is REGISTERED — a question about deployment composition, whose
+     * answer this filter deliberately leaves to the client (the maintainer
+     * ruling of 2026-08-12 rejected re-meaning the key server-side precisely
+     * because the docblock calls that asymmetry deliberate). The servability
+     * gate asks a different question of an object that IS registered: does its
+     * own `enable` block let the destination answer at all? An entry whose
+     * object this layer cannot find is therefore SERVED, not pruned — the
+     * `requiresObject` pin and #3770's "no declared policy ⇒ nothing to
+     * enforce" both survive unchanged.
      *
      * Returns `null` when the app should be withheld from the user entirely.
      * Returns a shallow copy with filtered `navigation` / `areas` otherwise —
@@ -2943,8 +2990,13 @@ export class RestServer {
      * `requiredPermissions` and the ADR-0057 D10 `requiresService` gate — which
      * is why this used to sniff the shape. There is one shape now.
      */
-    private filterAppForUser(item: any, sysPerms: Set<string>, serviceGate?: (name: string) => boolean): any | null {
-        return this.filterAppForUserWithReason(item, sysPerms, serviceGate).app;
+    private filterAppForUser(
+        item: any,
+        sysPerms: Set<string>,
+        serviceGate?: (name: string) => boolean,
+        servabilityGate?: NavServabilityGate,
+    ): any | null {
+        return this.filterAppForUserWithReason(item, sysPerms, serviceGate, servabilityGate).app;
     }
 
     /**
@@ -2995,6 +3047,7 @@ export class RestServer {
         item: any,
         sysPerms: Set<string>,
         serviceGate?: (name: string) => boolean,
+        servabilityGate?: NavServabilityGate,
     ): { app: any | null; withheld?: 'unpublished' | 'permission' | 'service' } {
         if (!item || typeof item !== 'object') return { app: item };
         // ADR-0045 §3 (as revised 2026-08, #4829) — the publish gate. An
@@ -3036,6 +3089,26 @@ export class RestServer {
                 const req = Array.isArray(e.requiredPermissions) ? e.requiredPermissions : [];
                 if (req.length > 0 && !req.every((p: string) => sysPerms.has(p))) continue;
                 if (typeof e.requiresService === 'string' && serviceGate && serviceGate(e.requiresService) === false) continue;
+                // [#7912] SERVABILITY — the gate this filter had no vocabulary
+                // for. A `type: 'object'` entry names its destination in
+                // `objectName`; the object's own `enable` block decides whether
+                // a `list` can be answered there, and that decision takes no
+                // user, no permissions and no context. So an entry whose
+                // destination is API-disabled (404 `OBJECT_API_DISABLED`) or
+                // whose whitelist omits `list` (405
+                // `OBJECT_API_METHOD_NOT_ALLOWED`) is dead for EVERY persona,
+                // platform admin included — which is why no combination of
+                // `requiredPermissions` on the entry could ever prune it
+                // (#7544 shipped exactly that combination for a year).
+                //
+                // The verdict comes from the same derivation the data route
+                // enforces (`apiExposureDenialReason`, #3391), reached through
+                // the gate the caller built — never a second reading of
+                // `enable` here.
+                if (servabilityGate && e.type === 'object' && typeof e.objectName === 'string') {
+                    const appName = typeof item.name === 'string' ? item.name : '(unnamed)';
+                    if (servabilityGate(e.objectName, e, appName) === false) continue;
+                }
                 // [#7380] A `group` is judged on what SURVIVES, never on how it
                 // got there. Both childless shapes render the same dead sidebar
                 // label, so both are dropped:
@@ -3209,6 +3282,92 @@ export class RestServer {
         const registered = new Set<string>();
         for (const name of wanted) { if (await probe(name)) registered.add(name); }
         return registered;
+    }
+
+    /**
+     * [#7912] Build the nav-servability gate for one request: which objects can
+     * actually answer a `list` on the external REST surface.
+     *
+     * ## Shape, and why it mirrors `resolveRegisteredServices`
+     *
+     * Same contract as the ADR-0057 D10 service gate one method up: resolve the
+     * facts ONCE per request, hand `filterAppForUser` a closure, and return
+     * `null` when the facts cannot be established so the caller skips the gate
+     * entirely. Nav filtering already runs over a whole app list; re-reading
+     * object metadata per entry would turn one read into dozens.
+     *
+     * ## Fail-open, in three distinct cases — each deliberate
+     *
+     *  1. **Metadata unreadable** — `loadObjectItems` answers `[]` and logs.
+     *     This method then answers `null` (no gate), so nothing is pruned. The
+     *     alternative fails CLOSED during every cold start, emptying the
+     *     sidebar of a healthy deployment; #3545 already settled that trade for
+     *     the data-route twin and the same reasoning binds harder here, where
+     *     the consequence is a user staring at an app with no navigation.
+     *  2. **Object not in metadata** — served. There is no declared exposure
+     *     policy to enforce (#3770), and "is this object registered at all?" is
+     *     `requiresObject`'s question, which this layer deliberately does not
+     *     answer (see {@link filterAppForUser}).
+     *  3. **No `enable` block** — served, by `apiExposureDenialReason`'s own
+     *     default-open contract. An object that declares nothing restricts
+     *     nothing.
+     *
+     * Only case (3)'s opposite — a declared `enable` that refuses `list` — ever
+     * prunes.
+     *
+     * ## The prune is LOGGED, never silent
+     *
+     * The maintainer ruling of 2026-08-12 makes the author-visible diagnostic a
+     * mandatory companion, not an optional one: "a prune the author cannot see
+     * is the same failure one layer over — no silent dead rows, and no silent
+     * repairs." The authoring-time half of that is
+     * `validate-nav-object-servability` in `@objectstack/lint`, which refuses
+     * the stack at `os validate` / `os build` / `os lint` before it can ever be
+     * served. This log is the serving-side half, for an entry that reached a
+     * running deployment anyway (a `sys_metadata` overlay row, or a stack built
+     * before the lint existed): it names the app, the entry id, the object AND
+     * the condition, so the pruned row is discoverable from the server log
+     * rather than being an unexplained gap in a menu.
+     *
+     * One line per `app|entry|object|reason` per process — a console session
+     * re-fetches `/meta/app` on every navigation, and an unthrottled log would
+     * bury the first occurrence under thousands of repeats.
+     */
+    private async resolveNavServability(
+        p: RestProtocol,
+        environmentId: string | undefined,
+    ): Promise<NavServabilityGate | null> {
+        const items = await this.loadObjectItems(p, environmentId);
+        // Case (1): nothing to judge with. `loadObjectItems` has already logged
+        // a THROWN read; a legitimately empty registry is silent and equally
+        // ungated, which is correct — an empty registry declares no policy.
+        if (items.length === 0) return null;
+        const enableByName = new Map<string, any>();
+        for (const o of items) {
+            if (o && typeof o.name === 'string') enableByName.set(o.name, o.enable);
+        }
+        return (objectName: string, entry: any, appName: string): boolean => {
+            // Case (2): unknown object → no declared policy to enforce here.
+            if (!enableByName.has(objectName)) return true;
+            const reason = apiExposureDenialReason(enableByName.get(objectName), 'list');
+            if (!reason) return true;
+            const entryId = (entry && (entry.id ?? entry.label)) ?? '(unnamed)';
+            const key = `${appName}|${entryId}|${objectName}|${reason}`;
+            if (!this.navPruneLogged.has(key)) {
+                this.navPruneLogged.add(key);
+                logWarn(
+                    `[REST] [#7912] nav entry '${entryId}' pruned from app '${appName}': its destination ` +
+                        `object '${objectName}' cannot serve a list — ` +
+                        (reason === 'api-disabled'
+                            ? `\`enable.apiEnabled: false\` (the list answers 404 OBJECT_API_DISABLED for every user).`
+                            : `\`enable.apiMethods\` does not grant \`list\` (the list answers 405 ` +
+                              `OBJECT_API_METHOD_NOT_ALLOWED for every user).`) +
+                        ` Remove the entry, or expose the object — \`os validate\` refuses this stack ` +
+                        `(nav-object-unservable).`,
+                );
+            }
+            return false;
+        };
     }
 
     /**
@@ -4797,8 +4956,12 @@ export class RestServer {
                                     );
                                     const registered = await this.resolveRegisteredServices((ctx as any).__kernel, list);
                                     const serviceGate = registered ? (n: string) => registered.has(n) : undefined;
+                                    // [#7912] Resolved ONCE for the whole list —
+                                    // object metadata is a per-request fact, not
+                                    // a per-app one.
+                                    const servabilityGate = await this.resolveNavServability(p, environmentId) ?? undefined;
                                     const filtered = list
-                                        .map((it: any) => this.filterAppForUser(it, sysPerms, serviceGate))
+                                        .map((it: any) => this.filterAppForUser(it, sysPerms, serviceGate, servabilityGate))
                                         .filter((it: any) => it != null);
                                     visible = Array.isArray(raw)
                                         ? filtered
@@ -5636,7 +5799,13 @@ export class RestServer {
                                     );
                                     const registered = await this.resolveRegisteredServices((ctx as any).__kernel, [visible]);
                                     const serviceGate = registered ? (n: string) => registered.has(n) : undefined;
-                                    const gated = this.filterAppForUserWithReason(visible, sysPerms, serviceGate);
+                                    // [#7912] Same gate as the list route — the
+                                    // by-name route must not serve a nav entry
+                                    // the list route prunes, or reading the
+                                    // single-app JSON defeats the filter (the
+                                    // #4722 lesson, one gate over).
+                                    const servabilityGate = await this.resolveNavServability(p, environmentId) ?? undefined;
+                                    const gated = this.filterAppForUserWithReason(visible, sysPerms, serviceGate, servabilityGate);
                                     visible = gated.app;
                                     if (visible == null) {
                                         // [#8013] A PERMISSION denial is reported as

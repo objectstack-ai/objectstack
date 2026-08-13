@@ -137,9 +137,26 @@ regions:
   - name: right
     width: full
     components:
-      - type: record:details
+      - type: page:tabs
         properties:
-          tabs: [details, related, activity]
+          items:
+            - label: Details
+              value: details
+              children:
+                - type: record:details
+                  properties:
+                    fields: [subject, priority, status]
+            - label: Related
+              value: related
+              children:
+                - type: record:related_list
+                  properties:
+                    objectName: task
+                    relationshipField: case_id
+            - label: Activity
+              value: activity
+              children:
+                - type: record:activity
 ```
 
 **Visual Layout:**

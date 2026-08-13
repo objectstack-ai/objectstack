@@ -4,6 +4,9 @@ import { Plugin, PluginContext, POSTURE_LADDER } from '@objectstack/core';
 import type { PermissionSet, RowLevelSecurityPolicy } from '@objectstack/spec/security';
 import { describeHighPrivilegeBits, describeAnchorForbiddenBits, PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
 import { MCP_AGENT_PERMISSION_SET_RESTRICTED } from '@objectstack/spec/ai';
+// [#8220] The read-scope provenance mark: this middleware is one of the two
+// merge boundaries that stamp it (see the RLS injection below).
+import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 // [#7414] The SHARED operation-message catalog #7307 built for the data path's
 // operation-level refusals. Second consumer, same mechanism — a second remedy
 // for one defect class is what that module exists to prevent.
@@ -2232,6 +2235,36 @@ export class SecurityPlugin implements Plugin {
           if (delRls) extra.push(delRls);
           const delCbp = await this.computeControlledByParentFilter(delegatorSets, opCtx.object, delegatorContext);
           if (delCbp) extra.push(delCbp);
+        }
+        // [#8220, A of #7929] This is one of the two read-scope MERGE
+        // BOUNDARIES, and the only frame that knows which subtree the caller
+        // did not write — so the provenance mark is stamped here, before the
+        // shapes blur into one `$and`.
+        //
+        //  - Every injected scope is marked `'policy'`: a cross-field refusal
+        //    raised from inside it keeps the #7929 redaction.
+        //  - The caller's own predicate is marked `'author'` — but ONLY when
+        //    this middleware can positively vouch for it: `opCtx.ast.where`
+        //    still IS `opCtx.options.where`, the caller's verbatim predicate
+        //    (the same identity step 2.9 above leans on). If a sibling
+        //    middleware (plugin-sharing) already composed its own filter in,
+        //    or the engine rewrote the tree (context tokens), identity fails
+        //    and NOTHING is vouched — the whole tree stays unmarked, which
+        //    withholds. Fail closed: the mark is permission to reveal, never
+        //    a guess; a wholesale mark on a tree that might contain another
+        //    plugin's policy would disclose it.
+        //
+        // Marking is on the OBJECTS, so it survives the `$and` wrapper below
+        // and any sibling's later wrapping by reference. `markFilterSubtreeProvenance`
+        // never overwrites an existing mark and no-ops on frozen input.
+        for (const scope of extra) markFilterSubtreeProvenance(scope, 'policy');
+        const callerWhere = opCtx.ast.where;
+        if (
+          callerWhere &&
+          typeof callerWhere === 'object' &&
+          callerWhere === (opCtx.options as { where?: unknown } | undefined)?.where
+        ) {
+          markFilterSubtreeProvenance(callerWhere, 'author');
         }
         if (extra.length) {
           opCtx.ast.where = opCtx.ast.where
