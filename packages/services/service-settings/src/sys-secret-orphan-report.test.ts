@@ -35,7 +35,14 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { ObjectQL } from '@objectstack/objectql';
+// `assertEngineUpdateDispatch` comes from `@objectstack/objectql` (which
+// re-exports the predicate that lives in `@objectstack/metadata-core` since
+// #5619) rather than from metadata-core directly: the cycle rule prefers
+// metadata-core only when objectql DEPENDS ON the package being pinned, and
+// objectql does not depend on `service-settings`. objectql is already a
+// devDependency here and `vitest.config.ts` already aliases it to SOURCE, so
+// this adds no dependency and no new alias.
+import { assertEngineUpdateDispatch, ObjectQL } from '@objectstack/objectql';
 import { SysSecret, SysSetting } from '@objectstack/platform-objects/system';
 import type { SettingsManifest } from '@objectstack/spec/system';
 import type { CryptoHandle, ICryptoProvider } from '@objectstack/spec/contracts';
@@ -191,6 +198,23 @@ function wrapEngineDroppingContext(engine: any): SettingsEngine {
     find: real.find.bind(real),
     insert: real.insert.bind(real),
     async update(objectName, opts) {
+      // This double is loose in exactly ONE dimension — `context` — and must
+      // stay conformant in every other, or the orphan counts it produces stop
+      // being evidence about the real engine. `assertEngineUpdateDispatch`
+      // pins the dimension that is easiest to drift silently: by-id vs multi.
+      //
+      // `multi: true` is passed unconditionally rather than re-deciding the
+      // branch here, because that IS the settings adapter's contract — a
+      // scalar `where.id` outranks `multi` in the shared predicate, so this one
+      // call reproduces both of `wrapEngineAsSettingsEngine`'s branches
+      // (by-id when `where.id` is scalar, multi otherwise) without mirroring
+      // the guard. The predicate reads only `where` / `multi` / `data.id` and
+      // never looks at `context`, so it is orthogonal to the defect being
+      // reproduced.
+      assertEngineUpdateDispatch((opts as any)?.data ?? {}, {
+        where: (opts as any)?.where,
+        multi: true,
+      });
       const { context: _dropped, ...withoutContext } = opts as any;
       return real.update(objectName, withoutContext);
     },
