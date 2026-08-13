@@ -2673,9 +2673,15 @@ function selfTest() {
       expect: ['ledgered'],
     },
     {
-      label: 'a package that declares no type entry point is never stale',
+      // Described as BUILT on purpose, which the fs read cannot currently
+      // produce (`built` is "some declared entry exists", so no entries means
+      // not built). Written the other way the case passes on the `built` guard
+      // alone and pins nothing about type entries -- measured: deleting the
+      // type-entry guard left the whole table green until this node said
+      // `built: true`.
+      label: 'a package that declares no type entry point is never stale, however it is described',
       roots: ['ledgered'],
-      graph: new Map([['ledgered', fresh(['console'])], ['console', { deps: [], typeEntries: [], built: false, stale: true }]]),
+      graph: new Map([['ledgered', fresh(['console'])], ['console', { deps: [], typeEntries: [], built: true, stale: true }]]),
       expect: [],
     },
     {
