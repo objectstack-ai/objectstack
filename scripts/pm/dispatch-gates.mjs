@@ -65,13 +65,91 @@ const ROOT = new URL('../..', import.meta.url).pathname;
 // ---------------------------------------------------------------------------
 
 /**
- * Pull every `check:*` invocation out of a workflow file's `run:` lines,
+ * A `run:` value that is a YAML block-scalar HEADER (`|`, `>`, with any
+ * chomping/indentation indicator) carries no command of its own: the commands
+ * are the lines indented beneath the key.
+ */
+const BLOCK_SCALAR_HEADER = /^[|>][+-]?\d*$/;
+
+/**
+ * The command text of every `run:` step in a workflow, one string per step,
+ * with whole-line `#` comments removed.
+ *
+ * ## Why the body of a block scalar has to be read
+ *
+ * The obvious spelling — one regex for `run:` and take the rest of the line —
+ * reads only the steps whose command fits on the `run:` line itself. A step
+ * written as a block scalar puts `|` there and its commands on the FOLLOWING
+ * lines, so that spelling collected the string "|" and never saw the commands.
+ * Measured on this tree at the time of writing: six gate families were invoked
+ * exclusively from block-scalar bodies (`check-adr-0087-registration`,
+ * `check-empty-changeset`, `check-shard-attestation`, `check-osv-exemptions`,
+ * `check-test-completeness`, `check-cross-package-test-inputs`) and were
+ * therefore absent from the derivation ENTIRELY — not matched, and not in the
+ * "undetermined" bucket either, because a family that is never discovered has
+ * no entry to fall into it. That is the one output shape this script's contract
+ * forbids (a gate the derivation cannot mention at all), and it cost PR #8399 a
+ * CI round: its declared-breaking changeset derived `check-changeset-no-major`
+ * (a one-line `run:`, so visible) but not `check-adr-0087-registration` (a
+ * block-scalar body, so invisible), which is the gate that actually reddened.
+ *
+ * Nothing downstream needed changing: `check-adr-0087-registration.mjs` names
+ * `.changeset` in its own source, so the ordinary watch-hint match fires as
+ * soon as the family is discovered at all. The bug was never in the matching.
+ *
+ * ## Why comments are stripped, and why only whole-line ones
+ *
+ * Reading a block body means reading the shell comments inside it, and this
+ * tree's workflow bodies discuss gates by name at length (ci.yml's shard job
+ * spells `check-shard-attestation.mjs` in a comment explaining that gate's own
+ * classifier). "Mentions a gate" is not "runs a gate", and a family discovered
+ * from prose would be a fabricated lead — the same failure the "22 leads is the
+ * same as none" note below rejects for a wider heuristic. Only whole-line
+ * comments are dropped: a trailing `# note` after a real command sits on a line
+ * whose command still has to be read, and stripping from the first `#` anywhere
+ * would corrupt commands that legitimately contain one inside a quoted string.
+ *
+ * Measured both ways on this tree: stripping changes no family's discovery
+ * today (every gate named in a body comment is also really invoked somewhere).
+ * It is here so that stops being luck.
+ */
+export function runCommandTexts(workflowText) {
+  const lines = workflowText.split('\n');
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^([ \t]*)run:[ \t]*(.*)$/.exec(lines[i]);
+    if (!m) continue;
+    const [, indent, inline] = m;
+    if (!BLOCK_SCALAR_HEADER.test(inline.trim())) {
+      out.push(inline.trim());
+      continue;
+    }
+    // Block scalar: the body is every following line indented deeper than the
+    // key (blank lines belong to it too). Advancing `i` past the body is what
+    // keeps a `run:` MENTIONED inside a body from being parsed as a new key.
+    const body = [];
+    let j = i + 1;
+    for (; j < lines.length; j++) {
+      if (lines[j].trim() === '') {
+        body.push('');
+        continue;
+      }
+      if (/^[ \t]*/.exec(lines[j])[0].length <= indent.length) break;
+      body.push(lines[j]);
+    }
+    out.push(body.filter((l) => !/^[ \t]*#/.test(l)).join('\n'));
+    i = j - 1;
+  }
+  return out;
+}
+
+/**
+ * Pull every `check:*` invocation out of a workflow file's `run:` steps,
  * with the pnpm --filter package (if any) and the workflow's file name.
  */
 export function extractCheckInvocations(workflowText, workflowFile) {
   const out = [];
-  const runRe = /^\s*run:\s*(.+)$/gm;
-  for (const [, cmd] of workflowText.matchAll(runRe)) {
+  for (const cmd of runCommandTexts(workflowText)) {
     for (const m of cmd.matchAll(/pnpm\s+(?:--filter\s+(\S+)\s+)?(?:run\s+)?(check:[\w:-]+)/g)) {
       out.push({ check: m[2], filter: m[1] ?? null, workflow: workflowFile });
     }
@@ -475,6 +553,52 @@ function selfTest() {
   t('extracts direct node scripts/check-*.mjs', invs.some((i) => i.check === 'scripts/check-nul-bytes.mjs' && i.direct));
   t('ignores non-check runs', !invs.some((i) => String(i.check).includes('build')));
 
+  // Block-scalar bodies (#8410). A step written `run: |` keeps its commands on
+  // the following lines; reading only the `run:` line collected "|" and missed
+  // every gate invoked this way. Both scalar styles and both invocation shapes
+  // are pinned, plus the two directions in which the body must END.
+  const blockWf = [
+    'jobs:',
+    '  changeset-check:',
+    '    steps:',
+    '      - name: Literal block, two commands',
+    '        env:',
+    '          MERGE_BASE: abc',
+    '        run: |',
+    '          node scripts/check-adr-0087-registration.mjs --self-test',
+    '          node scripts/check-adr-0087-registration.mjs --base "$MERGE_BASE"',
+    '',
+    '      # A YAML comment BETWEEN steps naming `pnpm check:invented-by-prose`.',
+    '      - name: Folded block with a pnpm check',
+    '        run: >-',
+    '          pnpm --filter @objectstack/spec check:folded-surface',
+    '      - name: Body carrying a shell comment',
+    '        run: |',
+    '          # first run node scripts/check-mentioned-only.mjs, they said',
+    '          pnpm check:really-invoked',
+    '      - name: Back to a one-liner',
+    '        run: node scripts/check-nul-bytes.mjs',
+  ].join('\n');
+  const blockInvs = extractCheckInvocations(blockWf, 'pr-automation.yml');
+  const blockNames = blockInvs.map((i) => i.check);
+  t('extracts a direct script from a literal block body', blockNames.includes('scripts/check-adr-0087-registration.mjs'));
+  t('extracts a pnpm check from a folded block body, with its filter', blockInvs.some((i) => i.check === 'check:folded-surface' && i.filter === '@objectstack/spec'));
+  t('a dedented step ends the block body (the one-liner after it still parses)', blockNames.includes('scripts/check-nul-bytes.mjs'));
+  t('a blank line does NOT end the block body', blockNames.includes('check:folded-surface'));
+  // The over-match guard: discovery must report what a step RUNS, never what a
+  // comment mentions. Measured on this tree — four families (check:adr-links,
+  // check:empty-changeset, check:platform-checklist, check:skill-frame-freshness)
+  // appear in workflow prose only, and a naive any-token scan invents all four.
+  t('a gate named only in a YAML comment between steps is not discovered', !blockNames.includes('check:invented-by-prose'));
+  t('a gate named only in a shell comment inside a body is not discovered', !blockNames.includes('scripts/check-mentioned-only.mjs'));
+  t('a real command in the same body as a comment is still discovered', blockNames.includes('check:really-invoked'));
+
+  // `runCommandTexts` on its own: one entry per step, in file order.
+  const texts = runCommandTexts(blockWf);
+  t('one command text per run step', texts.length === 4);
+  t('a block body keeps its lines joined', texts[0].split('\n').filter((l) => l.trim()).length === 2);
+  t('a one-line run yields its command verbatim', texts[3] === 'node scripts/check-nul-bytes.mjs');
+
   // #7440: the printed line must be runnable as-is. The three shapes come from
   // the same three fixtures above, so the sample workflow and the print site
   // cannot drift apart.
@@ -557,6 +681,27 @@ function selfTest() {
   t('an owning-package path emits the i18n convention section', i18nHit.length === 2 && i18nHit[0].includes('owns an i18n-extract.config.ts'));
   t('the i18n section names check:i18n exactly, runnably', i18nHit.some((l) => l.includes('- pnpm check:i18n   —')));
   t('a path outside every owning package emits no i18n section', !changeKindLines(['packages/objectql/src/engine.ts'], resolved).some((l) => l.includes('check:i18n')));
+
+  // The measured incident (#8410 / PR #8399), pinned against the REAL workflow
+  // rather than a fixture: a fixture proves the parser, only the live file
+  // proves that THIS repo's changeset gate is reachable. `Check Changeset`
+  // invokes check-adr-0087-registration.mjs from a block-scalar body, and that
+  // is the gate PR #8399's declared-breaking changeset went red on after a
+  // fully green local loop. If the step is ever rewritten as a one-liner this
+  // case still passes (it asserts discovery, not the YAML style); if the gate
+  // moves out of pr-automation.yml, re-point the case at its new home rather
+  // than deleting it.
+  const liveWf = readFileSync(join(ROOT, '.github/workflows/pr-automation.yml'), 'utf8');
+  const liveInvs = extractCheckInvocations(liveWf, 'pr-automation.yml').map((i) => i.check);
+  t('the live Check Changeset job discovers its ADR-0087 gate', liveInvs.includes('scripts/check-adr-0087-registration.mjs'));
+  t('the live Check Changeset job discovers its empty-changeset gate', liveInvs.includes('scripts/check-empty-changeset.mjs'));
+  t('the live one-line gate in that file still discovers', liveInvs.includes('scripts/check-changeset-no-major.mjs'));
+  // The end-to-end direction: a `.changeset/` path must now REACH the ADR-0087
+  // gate through the ordinary watch-hint match. That gate names `.changeset` in
+  // its own source, so this asserts the whole chain (discover -> resolve ->
+  // hint -> cover) rather than the parser alone.
+  const adrHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-adr-0087-registration.mjs'), 'utf8'));
+  t('a .changeset path is covered by the ADR-0087 gate own hints', adrHints.some((h) => hintCovers(h, '.changeset/some-breaking-change.md')));
 
   // The table's own rot detector: a name no live run discovers must say so,
   // never disappear quietly.

@@ -80,9 +80,16 @@ quote.
 
 ## Resource discipline — parallel agents share ONE container
 
-1. **Serialize the heavy phase.** Wrap every build/test run in the shared verification lock:
-   `flock -w 7200 /tmp/os-heavy-verify.lock -c '<command>'` (waiting on it is normal, not a
-   hang).
+1. **Serialize the heavy phase — the shared verification lock is a named convention.** One
+   lock per container, `/tmp/os-heavy-verify.lock`, wrapping every build/test run:
+   `flock -E 99 -w 540 /tmp/os-heavy-verify.lock -c '<command>'`. Discipline: **`flock` owns
+   the release** — the lock lives on an open fd and drops when the command's whole process
+   tree exits, so never hand-roll a lockfile someone has to remember to delete; wrap **the
+   command only**, never your reading, editing or deciding; and keep **`-E 99`**, without
+   which a queue timeout and a genuinely failing test both exit 1. Bound `-w` to fit inside
+   ONE foreground call (this harness caps a call at 10 minutes) and re-acquire in a loop: a
+   `-w 7200` blind block cannot outlive the call it runs in, and backgrounding it to escape
+   that cap is the stall rule 7 exists to stop. Queueing is normal, not a hang.
 2. **Cap the heap**: prefix heavy commands with `NODE_OPTIONS=--max-old-space-size=4096`
    (raise only with a reason).
 3. **Scope, don't sweep**: build/test the affected packages (`pnpm --filter <pkg> …`),
@@ -99,7 +106,19 @@ quote.
    them blocking, read the real output, continue. ⛔ Never park verification on a background
    watcher and stop — a completion notification is itself the statement that no live subtask
    remains, so that wake-up never arrives and the task sits stalled until the PM pulls it
-   back. The one legitimate long wait is `flock` queueing in rule 1.
+   back. The one legitimate long wait is `flock` queueing in rule 1 — and that wait is
+   active and in-turn (rule 7), never a reason to stop.
+7. **Queued is not stalled — wait ACTIVELY, inside the turn.** Whatever holds the lock is a
+   process you do not own, so nothing about its completion can wake you: ⛔ never end a turn
+   to "wait for the lock". Measured, three agents in one batch ended on "the queued run will
+   notify on completion" — none was ever notified; each cost the PM a probe round and its
+   card 45–120 minutes. The loop instead: bounded acquire ⇒ on exit 99, spend the interval on
+   lock-free work (test authoring, changeset, PR body, package-local `typecheck`) ⇒
+   re-acquire. **Queued past ~20 minutes with no progress ⇒ stop and report `blocked` with
+   the holder named**: `fuser -v /tmp/os-heavy-verify.lock` (or `lsof`) prints its PID and
+   command, and an abandoned run's orphaned child keeps the lock until that child itself
+   exits, so an unmoving holder is a real finding. Report it; silence is the one wrong
+   answer.
 
 ## Toolchain traps (each cost at least one agent a false-red lap)
 
@@ -302,6 +321,13 @@ your return message dies with your process; the comment is what survives you.
    a reprimand. On a probe, re-read state and deliver the report from your transcript: every
    such death so far was fully recoverable with zero work lost. The cost is latency, not
    correctness — ⛔ never "recover" by redoing the work.
+4. **The self-check before every turn you are about to end**: *does my last message describe
+   a wake-up I expect from a process I do not own?* If yes — a queued lock, another agent's
+   build, a watcher that already detached — that wake-up is not coming and you are about to
+   stall; keep the turn alive and collect the exit code yourself. The report is never a
+   violation of this check: it ends the turn on a **result**, `in_progress` gate status
+   included, not on a promise that something else will resume you. The only wait you may end
+   a turn on is one your report calls `blocked` and names.
 
 ## When to stop instead of code
 

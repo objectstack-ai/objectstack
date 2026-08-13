@@ -8,7 +8,7 @@ import type { IAIService, IDataEngine, IMetadataService } from '@objectstack/spe
 import { MCPServerRuntime } from './mcp-server-runtime.js';
 import type { MCPServerRuntimeConfig } from './mcp-server-runtime.js';
 import type { ToolRegistry } from './types.js';
-import { createStdioDataBridge } from './stdio-data-bridge.js';
+import { createStdioDataBridge, enforceApiExposure, GATED_ACTIONS } from './stdio-data-bridge.js';
 import type { McpDataBridge } from './mcp-http-tools.js';
 import { CONNECT_AGENT_UI_BUNDLE } from './connect-ui.js';
 
@@ -236,8 +236,32 @@ export class MCPServerPlugin implements Plugin {
             + 'Fix: register the metadata service (the metadata plugin) in this assembly.',
         );
       }
+      // [#8266] The metadata service the exposure gate reads the declaration
+      // from, captured once rather than re-read off the outer `let` inside the
+      // closure — the reader must not be able to see a different service from
+      // the one `bridgeResources` was registered with.
+      const gateMetadata = metadataService;
       getRecord = async (objectName, recordId) => {
         const ec = await resolvePrincipal();
+        // [#8266] The ADR-0049 exposure gate, applied BEFORE the read: the same
+        // decision, from the same helper, that `bridge.get` applies for the
+        // `get_record` tool (#8083). Without it, one `enable.apiEnabled: false`
+        // declaration was refused by the TOOL and still served by this
+        // RESOURCE — same transport, same key, two answers.
+        //
+        // This is a SURFACE-AREA control, not the authorization boundary (see
+        // `api-exposure.ts`'s own ADR note): the `find` below runs under the
+        // key's `ExecutionContext` and passes CRUD/FLS/RLS either way. What was
+        // leaking is the author's exposure DECLARATION.
+        //
+        // No metadata service ⇒ no declaration to read ⇒ open, exactly as
+        // `enforceApiExposure` itself falls open when `getObject` throws or
+        // resolves nothing. Unreachable in practice: `bridgeResources` — the
+        // only consumer of this reader — is called under `if (metadataService)`
+        // below, so the resource is never registered without one.
+        if (gateMetadata) {
+          await enforceApiExposure(gateMetadata, objectName, GATED_ACTIONS.get, ec);
+        }
         const res = (await scopedQl.find(objectName, {
           where: { id: recordId },
           limit: 1,

@@ -334,6 +334,16 @@ export type { ObjectRefFinding, ObjectRefSeverity } from './validate-object-refe
 export { validateNavTargetRefs, NAV_TARGET_UNRESOLVED } from './validate-nav-target-refs.js';
 export type { NavTargetRefFinding, NavTargetRefSeverity } from './validate-nav-target-refs.js';
 
+// [#7912] The servability question about an `object` nav target: not "does the
+// name resolve?" but "can the destination answer a list at all?". Gates, and
+// gates alone among the nav rules — `enable` is declared on the object in this
+// same stack, so a finding is a certainty rather than a suspicion.
+export {
+  validateNavObjectServability,
+  NAV_OBJECT_UNSERVABLE,
+} from './validate-nav-object-servability.js';
+export type { NavObjectServabilityFinding } from './validate-nav-object-servability.js';
+
 export {
   validateSearchableFields,
   SEARCHABLE_FIELD_UNKNOWN,

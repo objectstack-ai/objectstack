@@ -270,8 +270,19 @@ describe('publishMetaItem response conforms to PublishMetaItemResponseSchema (#7
         const parsed = PublishMetaItemResponseSchema.parse(raw);
         // Surfaced, never thrown — the publish itself still reports success.
         expect(parsed.success).toBe(true);
+        // [#8333] The SHAPE is what this file is about, and the shape is
+        // unchanged: `success: false` plus counters plus an `error` string,
+        // conforming to the response schema. What changed is the string. A
+        // materializer is arbitrary plugin code going straight at the engine,
+        // so an undeclared throw from it is indistinguishable from raw driver
+        // text (`SQLITE_ERROR: no such table: sys_metadata` was the measured
+        // case) — and `materializeApplied` rides on a 200 response, where no
+        // HTTP boundary's message withhold can reach it. A bare `Error`
+        // declares no 4xx `status`, so it is withheld here and logged instead.
+        // A materializer that DOES declare a refusal keeps its sentence; that
+        // is pinned in metadata-protocol's `protocol.batch-verb-driver-text.test.ts`.
         expect(parsed.materializeApplied)
-            .toEqual({ success: false, inserted: 0, updated: 0, error: 'boom-from-materializer' });
+            .toEqual({ success: false, inserted: 0, updated: 0, error: 'materialize failed' });
     });
 
     it('publishing a `seed`: seedApplied is carried through with its counters', async () => {
