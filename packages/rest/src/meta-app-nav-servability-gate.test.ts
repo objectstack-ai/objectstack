@@ -19,7 +19,11 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { RestServer } from './rest-server';
+// Explicit `.js` extension: this package's tsconfig resolves NodeNext, so the
+// extensionless spelling its older test files use is a TS2835 — 67 of them are
+// frozen in the TEST_DEBT ledger, which only ever shrinks. A new file must not
+// add the 68th.
+import { RestServer } from './rest-server.js';
 
 const ANON_API = { api: { requireAuth: false } };
 
