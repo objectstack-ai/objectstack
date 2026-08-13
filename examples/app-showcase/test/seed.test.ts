@@ -189,6 +189,131 @@ describe('showcase stack', () => {
 });
 
 /**
+ * #8231 — generalizes the "keys the contact form sections..." test above to
+ * EVERY view container's `form`/`formViews`, and to every `record:details`
+ * section on every page. A section can silence
+ * `translation-section-name-missing` completely just by getting a `name`,
+ * with ZERO translation delivered: the bundle simply never gains a matching
+ * `_sections.<name>` entry, and the heading keeps rendering in the source
+ * locale in every locale. This asserts BOTH halves for every section this
+ * sweep can see: it has a `name`, AND the zh-CN bundle carries a REAL
+ * (non-empty, non-English) label for it — an echoed English string would
+ * satisfy the key set while faking coverage.
+ *
+ * Read on the COMPOSED stack, the same reachability principle the test above
+ * documents: what the platform's i18n resolver and lint gates see is
+ * `stack.views` / `stack.pages` / `stack.translations`, not the imported
+ * modules.
+ */
+describe('showcase form + page section i18n coverage (#8231)', () => {
+  const zh = (stack.translations?.[0] as any)?.['zh-CN']?.objects as
+    | Record<string, { _sections?: Record<string, { label?: string }> }>
+    | undefined;
+
+  interface Found {
+    object: string;
+    where: string;
+    label: string;
+    name: unknown;
+  }
+
+  /**
+   * KNOWN EXCLUSIONS — deliberately left unnamed by #8231's own scope.
+   *
+   * Naming any of these three would flip a currently-green, currently-PINNED
+   * finding in `packages/lint/src/validate-translatable-sections.test.ts`
+   * ("reports both nameless headings the shipped task container declares",
+   * "reports the sparse create override and nothing from the named default
+   * form") and `validate-translation-references.test.ts` ("still reports a
+   * section name nothing declares") — all three import `TaskViews` /
+   * `ContactViews` directly from this app and pin their CURRENT nameless
+   * state as the regression fixture. Fixing them requires a coordinated
+   * `packages/lint` test update, which is `packages/**` — out of #8231's
+   * declared file surface. Tracked as a follow-up rather than silently
+   * widening scope; see this test's introducing PR for the issue link.
+   */
+  const KNOWN_UNNAMED = new Set<string>([
+    'showcase_task::formViews.edit::Task',
+    'showcase_task::formViews.quick::Quick Edit',
+    'showcase_contact::formViews.create::Who is this?',
+  ]);
+
+  function collectFormSections(): Found[] {
+    const out: Found[] = [];
+    for (const container of (stack.views ?? []) as any[]) {
+      const containerObject: string | undefined =
+        container.list?.data?.object ?? container.form?.data?.object;
+      const forms: Record<string, any> = { ...(container.formViews ?? {}) };
+      if (container.form) forms.form = container.form;
+      for (const [viewKey, fv] of Object.entries(forms)) {
+        const sections = Array.isArray(fv?.sections) ? fv.sections : [];
+        const objectName: string | undefined = fv?.data?.object ?? containerObject;
+        if (!objectName) continue;
+        const where = viewKey === 'form' ? 'form' : `formViews.${viewKey}`;
+        sections.forEach((s: any) => {
+          out.push({ object: objectName, where, label: String(s?.label ?? '(untitled)'), name: s?.name });
+        });
+      }
+    }
+    return out;
+  }
+
+  function collectPageDetailSections(): Found[] {
+    const out: Found[] = [];
+    const visit = (node: unknown, pageName: string, pageObject: string) => {
+      if (Array.isArray(node)) {
+        for (const item of node) visit(item, pageName, pageObject);
+        return;
+      }
+      if (node && typeof node === 'object') {
+        const rec = node as Record<string, unknown>;
+        if (rec.type === 'record:details' && rec.properties && typeof rec.properties === 'object') {
+          const sections = (rec.properties as any).sections;
+          if (Array.isArray(sections)) {
+            sections.forEach((s: any) => {
+              out.push({
+                object: pageObject,
+                where: `page "${pageName}" · record:details`,
+                label: String(s?.label ?? '(untitled)'),
+                name: s?.name,
+              });
+            });
+          }
+        }
+        for (const v of Object.values(rec)) visit(v, pageName, pageObject);
+      }
+    };
+    for (const page of (stack.pages ?? []) as any[]) {
+      if (typeof page.object !== 'string') continue;
+      visit(page.regions, page.name, page.object);
+      visit(page.slots, page.name, page.object);
+    }
+    return out;
+  }
+
+  const found = [...collectFormSections(), ...collectPageDetailSections()].filter(
+    (f) => !KNOWN_UNNAMED.has(`${f.object}::${f.where}::${f.label}`),
+  );
+
+  it('found more than a token number of sections (guards against a vacuous sweep)', () => {
+    expect(found.length).toBeGreaterThanOrEqual(12);
+  });
+
+  for (const f of found) {
+    it(`${f.object} · ${f.where} · section "${f.label}" declares a name and resolves in zh-CN`, () => {
+      expect(
+        typeof f.name === 'string' && f.name.length > 0,
+        `${f.object} · ${f.where} · "${f.label}" has no \`name\` — untranslatable by construction.`,
+      ).toBe(true);
+      const name = f.name as string;
+      const label = zh?.[f.object]?._sections?.[name]?.label;
+      expect(label, `objects.${f.object}._sections.${name}.label is missing from the zh-CN bundle`).toBeTruthy();
+      expect(label, `zh-CN _sections.${name}.label reads as untranslated ASCII`).not.toMatch(/^[\x20-\x7e]+$/);
+    });
+  }
+});
+
+/**
  * Static shadow of the seed contract after #3433: a seed write is a curated
  * end-state fact, so the platform EXEMPTS it from the object's `state_machine`
  * rule — a project is seeded directly `active` / `on_hold` / `completed`

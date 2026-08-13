@@ -71,9 +71,14 @@ export const TaskDetailPage = definePage({
           type: 'record:details',
           properties: {
             sections: [
-              { label: 'Overview', columns: 2, fields: ['title', 'project', 'assignee', 'status', 'priority'] },
-              { label: 'Schedule', columns: 2, fields: ['start_date', 'end_date', 'due_date', 'estimate_hours'] },
-              { label: 'Details', columns: 1, fields: ['labels', 'location', 'notes'] },
+              // Reuses `objects.showcase_task._sections.{overview,schedule,details}` —
+              // the same three names `ui/views/task.view.ts`'s `tabbed` form
+              // already declares and `system/translations/index.ts` already
+              // translates, so this page's headings resolve in zh-CN with no
+              // new bundle entries (#8231).
+              { name: 'overview', label: 'Overview', columns: 2, fields: ['title', 'project', 'assignee', 'status', 'priority'] },
+              { name: 'schedule', label: 'Schedule', columns: 2, fields: ['start_date', 'end_date', 'due_date', 'estimate_hours'] },
+              { name: 'details', label: 'Details', columns: 1, fields: ['labels', 'location', 'notes'] },
             ],
           },
         },
