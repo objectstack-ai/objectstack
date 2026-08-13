@@ -1,7 +1,14 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { validatePageFieldBindings, PAGE_FIELD_UNKNOWN } from './validate-page-field-bindings.js';
+import {
+  validatePageFieldBindings,
+  checkFieldRefs,
+  indexObjectFields,
+  PAGE_FIELD_UNKNOWN,
+  PAGE_FIELD_UNPROVISIONED,
+} from './validate-page-field-bindings.js';
+import { indexUnprovisionedAnchors } from './system-fields.js';
 
 const baseStack = () => ({
   objects: [
@@ -343,5 +350,112 @@ describe('validatePageFieldBindings — legacy bare-string sort (#4340)', () => 
     expect(bad).toHaveLength(1);
     expect(bad[0].message).toContain('"ghost_col"');
     expect(bad[0].message).not.toContain('ghost_col desc');
+  });
+});
+
+describe('validatePageFieldBindings — unprovisioned injected anchors (#8340)', () => {
+  /**
+   * The #8340 repro: a page binding over an ADR-0015 `external` object naming
+   * `owner_id` — a registry-injected system column, so `page-field-unknown`
+   * rightly stays silent, but nothing is stored behind it on a federated
+   * object. `objectExtra` breaks each half of the derivation independently.
+   */
+  const externalStack = (objectExtra: Record<string, unknown> = {}) => ({
+    objects: [
+      {
+        name: 'ext_customer',
+        external: { remoteName: 'customers' },
+        fields: { email: { type: 'text' }, tier: { type: 'select' } },
+        ...objectExtra,
+      },
+    ],
+  });
+  const extPage = (components: unknown[]) => ({
+    name: 'customer_detail',
+    object: 'ext_customer',
+    regions: [{ name: 'main', components }],
+  });
+  const only = (findings: ReturnType<typeof validatePageFieldBindings>) =>
+    findings.filter((f) => f.rule === PAGE_FIELD_UNPROVISIONED);
+
+  it('warns on a highlights binding over an unprovisioned anchor, and the existence rule stays silent', () => {
+    const findings = validatePageFieldBindings({
+      ...externalStack(),
+      pages: [extPage([
+        { type: 'record:highlights', properties: { fields: ['tier', 'owner_id'] } },
+      ])],
+    });
+    expect(findings.filter((f) => f.rule === PAGE_FIELD_UNKNOWN)).toHaveLength(0);
+    const warned = only(findings);
+    expect(warned).toHaveLength(1);
+    expect(warned[0].severity).toBe('warning');
+    expect(warned[0].path).toBe('pages[0].regions[0].components[0].properties.fields[1]');
+    expect(warned[0].message).toContain('owner_id');
+    expect(warned[0].message).toContain('external object (ADR-0015)');
+    expect(warned[0].message).toContain('renders it, blank, on every record');
+    expect(warned[0].hint).toContain('columnMap');
+  });
+
+  it('is silent on the local twin — platform storage is real (mutation: drop `external`)', () => {
+    const findings = validatePageFieldBindings({
+      ...externalStack({ external: undefined }),
+      pages: [extPage([
+        { type: 'record:highlights', properties: { fields: ['owner_id'] } },
+      ])],
+    });
+    expect(findings).toEqual([]);
+  });
+
+  it('is silent when the author DECLARES the column (#7859 — it maps a remote column they vouch for)', () => {
+    const findings = validatePageFieldBindings({
+      ...externalStack({ fields: { email: { type: 'text' }, owner_id: { type: 'text' } } }),
+      pages: [extPage([
+        { type: 'record:highlights', properties: { fields: ['owner_id'] } },
+      ])],
+    });
+    expect(only(findings)).toHaveLength(0);
+  });
+
+  it('is silent on a declared field of the same external object', () => {
+    const findings = validatePageFieldBindings({
+      ...externalStack(),
+      pages: [extPage([
+        { type: 'record:highlights', properties: { fields: ['tier'] } },
+      ])],
+    });
+    expect(findings).toEqual([]);
+  });
+
+  it('names the QUERY consequence when the ref reached a predicate, not a renderer', () => {
+    // The `queried` consequence is reachable only through the shared core (the
+    // react surface's own call); assert it there rather than inventing a page
+    // shape that does not exist.
+    const stack = externalStack();
+    const findings = checkFieldRefs(
+      [{ name: 'owner_id', path: 'p' }],
+      'ext_customer',
+      indexObjectFields(stack),
+      'where',
+      'queried',
+      indexUnprovisionedAnchors(stack),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(PAGE_FIELD_UNPROVISIONED);
+    // WARNING even in the gating position: unlike a missing column, the remote
+    // schema is not visible to this pass (#8116's severity reasoning).
+    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].message).toContain('constant-false');
+  });
+
+  it('asks nothing when the caller passes no anchor index — the pre-#8340 behaviour', () => {
+    const stack = externalStack();
+    const findings = checkFieldRefs(
+      [{ name: 'owner_id', path: 'p' }],
+      'ext_customer',
+      indexObjectFields(stack),
+      'where',
+      'queried',
+    );
+    expect(findings).toEqual([]);
   });
 });

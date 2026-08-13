@@ -215,6 +215,18 @@ silence is the expected shape, never permission:
   (canonical-first `??` chains: invalid spellings stop being judged by the over-reaching
   rule and fall to the schema's named rejection — rule green, schema red). Report the
   direction you actually observed; never force the template's presumption.
+- **A dogfood ablation runs on `dist/`, so rebuild the ablated package — and say in the
+  report that you did.** `packages/qa/dogfood` resolves the code under test from each
+  package's **built `dist/`** deliberately (that is what covers packaging and export
+  surface), and the two directions are not symmetric: an unbuilt **fix** is a false red
+  that costs a lap and gets noticed, an unbuilt **ablation** runs the pre-mutation build
+  and stays **green** — certifying an assertion that may never be able to fail, invisible
+  to every later CI run because CI builds correctly and the test is green there forever.
+  Every leg is mutate → `pnpm --filter <pkg> build` → **prove the mutation reached the
+  artifact** → run: `node scripts/ablation-dist-preflight.mjs <pkg> '<marker>'`, or
+  `--absent` when the ablation deleted a guard (its literal must be gone) — which is the
+  restore leg too, since a marker left in `dist/` keeps mutated code live for every later
+  run in that worktree.
 
 ## Definition of done, in order
 
@@ -331,7 +343,7 @@ after retrying enough to be sure it is not your change.
   "pr": "<url or null>",
   "premise_still_valid": true,
   "summary": "what was implemented, 2-4 sentences",
-  "tests": "commands run + pass/fail evidence (real output excerpts)",
+  "tests": "commands run + pass/fail evidence (real output excerpts); an ablation states its rebuild",
   "open_questions": [
     { "question": "…", "options": ["A …", "B …"], "recommendation": "A, because …" }
   ],

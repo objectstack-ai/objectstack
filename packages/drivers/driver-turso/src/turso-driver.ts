@@ -189,6 +189,19 @@ export interface TursoDriverConfig {
  * break a path that works today and would take the two faces further apart, not
  * closer (#6203).
  */
+/**
+ * `SqlDriver.fillAutoNumberFields`'s own generate predicate: a slot holding
+ * `undefined` / `null` / `''` is one the driver would have had to fill.
+ *
+ * Stated once, read twice — by the pre-write refusal below and by the
+ * post-write report on the one leg that refusal provably cannot classify
+ * (#7099). Two spellings of "empty" would be two answers to one question, and
+ * the second one would drift.
+ */
+function isEmptyAutoNumberSlot(held: unknown): boolean {
+  return held === undefined || held === null || held === '';
+}
+
 function refuseRemoteAutonumber(object: string, fields: string[], path: string): never {
   const err = new Error(
     `Object "${object}" declares auto_number field(s) [${fields.join(', ')}] left empty for this ` +
@@ -653,14 +666,83 @@ export class TursoDriver extends SqlDriver {
     for (const row of rows) {
       if (!row || typeof row !== 'object') continue;
       for (const cfg of cfgs) {
-        // `fillAutoNumberFields`'s own generate predicate, verbatim: a slot
-        // holding undefined / null / '' is one the driver would have had to
-        // fill.
-        const held = row[cfg.name];
-        if (held === undefined || held === null || held === '') empty.add(cfg.name);
+        if (isEmptyAutoNumberSlot(row[cfg.name])) empty.add(cfg.name);
       }
     }
     if (empty.size > 0) refuseRemoteAutonumber(object, [...empty], path);
+  }
+
+  /**
+   * [#7099] Say out loud that a remote write landed a row whose declared
+   * `auto_number` column holds no record number.
+   *
+   * # Why this exists beside the refusal, rather than inside it
+   *
+   * {@link refuseUngeneratableRemoteAutonumber} runs BEFORE the statement is
+   * built, which is what makes a refused write cost zero round trips — and is
+   * also the reason it cannot cover every leg. An upsert carrying an `id` or
+   * explicit `conflictKeys` may merge (safe: the row keeps the number already
+   * in its column) or may insert (the slot lands NULL), and which one it did is
+   * not knowable before it runs. #6944 left that leg as declared residue.
+   *
+   * What has since been measured is that the round trip the residue was
+   * attributed to is **already paid**: `RemoteTransport.upsert` follows its
+   * `INSERT … ON CONFLICT` with `SELECT * FROM "<object>" WHERE "id" = ?` and
+   * returns the mapped row, unconditionally. So the NULL is in hand at no extra
+   * cost, on the layer that knows which column is an `auto_number` — and the
+   * leg can be made loud without buying anything. Note the check is not "did it
+   * insert or merge": it is one field read on a row this method already holds.
+   *
+   * # Report, not refuse — deliberately
+   *
+   * The write has already happened when this runs. Refusing here would be a
+   * different act from the pre-write gate (it would have to undo a landed row),
+   * and that trade-off is untouched by this change: nothing about what the
+   * remote face accepts or rejects moves. Generating the number on remote stays
+   * behind the same appetite door (#6944 disposition A) it always has.
+   *
+   * # `warn`, not `error`
+   *
+   * By AGENTS.md §Degradation log levels this is a FUNCTIONAL degradation, not
+   * a durability one: everything the caller submitted persisted, nothing it
+   * claims to have stored is missing, and the returned row carries the `null`
+   * in plain sight rather than reporting a success that did not happen. What is
+   * absent is a DERIVED value this face declares it does not issue — the same
+   * capability gap the sibling legs answer with `NOT_IMPLEMENTED`/501. Grading
+   * it `error` would file a known capability gap beside real data loss, which
+   * is the over-application that rule warns about by name.
+   *
+   * # Not throttled, unlike the tenant-audit warning
+   *
+   * `SqlDriver.tenantAuditWarned` collapses its warning per `{object}:{op}`
+   * because that one reports a CONFIGURATION mistake — the second occurrence
+   * carries no information the first did not. Here the row `id` IS the payload:
+   * each occurrence names a different row that landed without a record number,
+   * and that list is what an operator repairs. One line per unnumbered row is
+   * proportional, not noisy.
+   */
+  private reportUnnumberedRemoteRow(
+    object: string,
+    row: Record<string, any> | null | undefined,
+    path: string,
+  ): void {
+    const cfgs = this.autoNumberFields[object];
+    if (!cfgs || cfgs.length === 0) return;
+    if (!row || typeof row !== 'object') return;
+    const unfilled = cfgs
+      .filter((cfg) => isEmptyAutoNumberSlot(row[cfg.name]))
+      .map((cfg) => cfg.name);
+    if (unfilled.length === 0) return;
+    this.logger.warn(
+      `[driver-turso] ${path} on "${object}" returned row id ${JSON.stringify(row.id)} with ` +
+      `auto_number field(s) [${unfilled.join(', ')}] left empty. The Turso REMOTE transport does ` +
+      `not generate record numbers, so an upsert that matches no existing row inserts one without ` +
+      `it — the row is persisted, its record number is not, and nothing else reports this. Supply ` +
+      `the value explicitly on this path (a seed replay or import keeps its own numbers and is ` +
+      `written unchanged), or use the local / embedded-replica transport, which do issue them ` +
+      `(#7099).`,
+      { object, fields: unfilled, id: row.id, path },
+    );
   }
 
   override async create(object: string, data: Record<string, any>, options?: DriverOptions): Promise<any> {
@@ -691,15 +773,25 @@ export class TursoDriver extends SqlDriver {
       // insert — measured, two such upserts produced two rows with different
       // ids. That is also the shape the engine sends for a new record.
       //
-      // ⚠️ Residue, stated rather than papered over: an upsert that DOES carry
-      // an id or conflict keys but matches nothing still inserts, and on that
-      // leg the slot is still written NULL. Classifying it needs the round trip
-      // this refusal exists to avoid, so it is left as a known gap of the same
-      // deferred half (A) rather than answered with a probe query.
+      // ⚠️ The leg the pre-write gate cannot classify: an upsert that DOES
+      // carry an id or conflict keys but matches nothing still inserts, and on
+      // that leg the slot is still written NULL. That outcome is UNCHANGED by
+      // #7099 — what changed is that it is no longer silent. The row comes back
+      // through this method, so the NULL can be read AFTER the write and
+      // reported, without the probe query the pre-write gate exists to avoid
+      // and without turning an accepted write into a refused one. Generating
+      // the number here stays behind the deferred half (A).
       const mayMerge = data?.id !== undefined || data?._id !== undefined
         || (Array.isArray(conflictKeys) && conflictKeys.length > 0);
       if (!mayMerge) this.refuseUngeneratableRemoteAutonumber(object, [data], 'upsert');
-      return this.formatRemoteRow(object, await this.remoteTransport!.upsert(object, this.toRemoteWriteForms(object, data), conflictKeys));
+      const row = this.formatRemoteRow(object, await this.remoteTransport!.upsert(object, this.toRemoteWriteForms(object, data), conflictKeys));
+      // Judged on the row the CALLER receives, after read-coercion — reporting
+      // a different value than the one handed out would be its own defect. The
+      // `!mayMerge` leg reaches this too and is a no-op there by construction:
+      // an empty slot was already refused above, and a caller-supplied number
+      // comes back filled.
+      this.reportUnnumberedRemoteRow(object, row, 'upsert');
+      return row;
     }
     return super.upsert(object, data, conflictKeys, options);
   }

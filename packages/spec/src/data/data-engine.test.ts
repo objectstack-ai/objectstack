@@ -193,12 +193,21 @@ describe('DataEngineUpdateOptionsSchema', () => {
     expect(options).toBeDefined();
   });
 
-  it('should accept upsert mode', () => {
-    const options = DataEngineUpdateOptionsSchema.parse({
-      upsert: true,
-    });
+  it('REJECTS the retired `upsert` flag, with the fix in the message (#8057)', () => {
+    // Tombstoned, not deleted: the schema is not `.strict()`, so a plain
+    // deletion would silently strip the key — the exact accepted-and-dropped
+    // silence #8057 removes. `retiredKey()` makes the removal audible.
+    expect(() =>
+      DataEngineUpdateOptionsSchema.parse({
+        upsert: true,
+      }),
+    ).toThrow(/`update\.options\.upsert` was removed .*#8057, ADR-0049.*Delete the key/s);
+  });
 
-    expect(options.upsert).toBe(true);
+  it('parses cleanly without the retired flag, and never produces the key', () => {
+    const options = DataEngineUpdateOptionsSchema.parse({ multi: true });
+    expect(options.multi).toBe(true);
+    expect(options).not.toHaveProperty('upsert');
   });
 
   it('should accept multi-update', () => {
@@ -448,6 +457,20 @@ describe('EngineUpdateOptionsSchema', () => {
     });
     expect(options.where).toBeDefined();
     expect(options.multi).toBe(true);
+  });
+
+  it('REJECTS the retired `upsert` flag with the same #8057 tombstone as the legacy schema', () => {
+    expect(() =>
+      EngineUpdateOptionsSchema.parse({
+        where: { status: 'inactive' },
+        upsert: true,
+      }),
+    ).toThrow(/`update\.options\.upsert` was removed .*#8057, ADR-0049.*Delete the key/s);
+  });
+
+  it('never produces the retired key on a clean parse', () => {
+    const options = EngineUpdateOptionsSchema.parse({ where: { status: 'inactive' } });
+    expect(options).not.toHaveProperty('upsert');
   });
 });
 
@@ -1029,7 +1052,7 @@ describe('Integration Tests', () => {
   it('should accept options without context (backward compatible)', () => {
     const queryOpts = DataEngineQueryOptionsSchema.parse({ filter: { x: 1 } });
     const insertOpts = DataEngineInsertOptionsSchema.parse({ returning: true });
-    const updateOpts = DataEngineUpdateOptionsSchema.parse({ upsert: true });
+    const updateOpts = DataEngineUpdateOptionsSchema.parse({ multi: true });
     const deleteOpts = DataEngineDeleteOptionsSchema.parse({ multi: true });
     const countOpts = DataEngineCountOptionsSchema.parse({});
     const aggOpts = DataEngineAggregateOptionsSchema.parse({ groupBy: ['a'] });

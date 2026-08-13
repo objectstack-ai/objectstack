@@ -202,6 +202,7 @@
     "DriverVocabularyEntry (interface)",
     "DroppedFieldsEvent (type)",
     "DroppedFieldsEventSchema (const)",
+    "ENGINE_UPDATE_UPSERT_REMOVED (const)",
     "ESignatureConfig (type)",
     "ESignatureConfigParsed (type)",
     "ESignatureConfigSchema (const)",
