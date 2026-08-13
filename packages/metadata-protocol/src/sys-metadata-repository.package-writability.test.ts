@@ -33,11 +33,26 @@
  *  - **no allow decision moves** — this is a code SELECTION inside the refusal
  *    branch. An ADR-0005 overlay names the read-only package it customizes by
  *    construction, so a package door that refused would close the overlay
- *    model. `OS_METADATA_WRITABLE` is untouched for the same structural reason
- *    (its limb returns before the door), and its case here is a CHARACTERIZATION
- *    pin, not an endorsement: the 2026-08-12 ruling on #8146 says today's
- *    answer is a bug, and that case is named and documented so the fix must
- *    invert it rather than quietly pass it. See the case for the re-measurement.
+ *    model, and that case is pinned below.
+ *
+ * ## ⛔ `OS_METADATA_WRITABLE` is deliberately UNCOVERED here (#8146)
+ *
+ * The absence is a decision, not an oversight, so do not "complete" this suite
+ * by adding a case for it. A hatch write into a read-only package currently
+ * SUCCEEDS — re-measured on `main` while #7682 was in flight: `success: true`,
+ * with the row landing at `package_id = com.example.showcase`, i.e. bound INTO
+ * the read-only package rather than as the per-org override the variable's own
+ * documentation describes (`content/docs/deployment/environment-variables.mdx`
+ * — "treats them as `allowOrgOverride: true`", a TYPE-level unlock). The
+ * maintainer ruling of 2026-08-12 on #8146 holds that this should refuse, so
+ * any test of it here would be green *because the bug is present*, and that is
+ * a shape this repo does not merge (PM ruling, PR #8185 patch round).
+ *
+ * #7682 does not touch that path — the hatch limb returns before the new
+ * package door, exactly as it did before — and #8146 already names its own
+ * deliverable as "the refusal plus a rejection pin asserting `code` and
+ * `status`". That pin belongs to #8146, written against the fixed behaviour;
+ * nothing is lost by this suite staying silent until then.
  *  - **delete is untouched** — #6960 moved the delete side deliberately and
  *    warns against symmetrising; `DeleteOptions` carries no `packageId`.
  */
@@ -239,6 +254,17 @@ describe('#7682 — the refusal discriminates on package writability', () => {
       expect(readOnly).toMatchObject({ code: 'WRITABLE_PACKAGE_REQUIRED', status: 422, packageId: READ_ONLY_PKG });
       expect(writable).toMatchObject({ code: 'NOT_CREATABLE', status: 403 });
     });
+
+    it('a permission set belonging to a read-only package is refused by the package door', async () => {
+      // The card's own hatch case, minus the hatch — see the suite docblock for
+      // why the hatch half is deliberately uncovered here. With no hatch set,
+      // the read-only base is what the refusal names, which is #7682's whole
+      // point, and `permission` is the type the QA run used.
+      const err = await putWith(repo, {
+        type: 'permission', name: 'showcase_contributor', intent: 'override-artifact', packageId: READ_ONLY_PKG,
+      });
+      expect(err).toMatchObject({ code: 'ITEM_LOCKED', status: 403 });
+    });
   });
 
   // ── nothing that was allowed becomes refused ──────────────────────────
@@ -255,57 +281,6 @@ describe('#7682 — the refusal discriminates on package writability', () => {
       expect(err).toBeNull();
       expect(Array.from(engine.rows.values())).toHaveLength(1);
       expect(Array.from(engine.rows.values())[0]).toMatchObject({ package_id: READ_ONLY_PKG });
-    });
-
-    it('[CONTESTED — #8146 ruled this a BUG] OS_METADATA_WRITABLE currently unlocks a write into a READ-ONLY package', async () => {
-      // ⛔ NOT an assertion that this behaviour is correct. Read the name.
-      //
-      // This is a CHARACTERIZATION pin of what `main` does today, and the
-      // maintainer ruling of 2026-08-12 on #8146 (option B: "the server should
-      // refuse — the badge is telling the truth") says today's answer is a bug:
-      // the hatch is TYPE-level by its own shipped documentation
-      // (`content/docs/deployment/environment-variables.mdx`, `OS_METADATA_WRITABLE`
-      // — "treats them as `allowOrgOverride: true`"), so it has nothing to say
-      // about the package dimension.
-      //
-      // It is kept, rather than deleted, because it is the tripwire: whoever
-      // implements #8146 must INVERT this case, and a suite that simply went
-      // quiet about the hatch would let that land without anyone re-reading
-      // what the hatch is for. Re-measured on current `main` at the request of
-      // that ruling (the original measurement was against two-week-old
-      // builds): it still reproduces, end to end through `saveMetaItem` on the
-      // host-config topology — `success: true`, and the row lands with
-      // `package_id = com.example.showcase`, i.e. bound INTO the read-only
-      // package rather than as the per-org override the documentation
-      // describes.
-      //
-      // #7682's own fix does not touch this path: the hatch limb returns
-      // before the package door, exactly as it did before. Which is the point
-      // — the change under test neither preserves nor moves this deliberately;
-      // it is orthogonal to it.
-      process.env.OS_METADATA_WRITABLE = 'permission';
-      resetEnvWritableMetadataTypes();
-
-      const err = await putWith(repo, {
-        type: 'permission', name: 'showcase_contributor', intent: 'override-artifact', packageId: READ_ONLY_PKG,
-      });
-
-      expect(err).toBeNull();
-      expect(Array.from(engine.rows.values())).toHaveLength(1);
-      expect(Array.from(engine.rows.values())[0]).toMatchObject({
-        type: 'permission', name: 'showcase_contributor', package_id: READ_ONLY_PKG,
-      });
-    });
-
-    it('without the hatch, that same permission write is refused by the package door', async () => {
-      // The other side of the case above: the hatch is doing the work, not an
-      // accident of `permission` being overlay-capable. This one IS an
-      // assertion of correctness — with no hatch, the read-only base is what
-      // the refusal names, which is #7682's whole point.
-      const err = await putWith(repo, {
-        type: 'permission', name: 'showcase_contributor', intent: 'override-artifact', packageId: READ_ONLY_PKG,
-      });
-      expect(err).toMatchObject({ code: 'ITEM_LOCKED', status: 403 });
     });
 
     it('a write that names NO base keeps the type-door codes verbatim', async () => {

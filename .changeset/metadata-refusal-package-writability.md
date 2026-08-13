@@ -41,14 +41,19 @@ is unchanged (#6960 moved that side on purpose; `DeleteOptions` names no
 package).
 
 The `OS_METADATA_WRITABLE` hatch is likewise untouched — structurally, because
-its limb returns before the new door. That is **not** an endorsement: the
-maintainer ruling of 2026-08-12 on #8146 holds that a hatch write into a
-read-only package should REFUSE, and the test covering it is labelled a
-characterization pin of today's behaviour so the #8146 fix must invert it rather
-than pass it silently. Re-measured on current `main` at that ruling's request:
-it still reproduces, and the row lands bound INTO the read-only package
-(`package_id = com.example.showcase`) rather than as the per-org override the
-variable's own documentation describes.
+its limb returns before the new door — and is deliberately left **uncovered** by
+this change's tests, which the suite docblock records so the gap reads as a
+decision. The maintainer ruling of 2026-08-12 on #8146 holds that a hatch write
+into a read-only package should REFUSE, so a test of today's answer would be
+green *because the bug is present*; #8146 ships the refusal and its own
+rejection pin (`code` + `status`) together.
+
+Re-measured on current `main` while this was in flight, and carried here because
+it is new evidence for that decision: the hatch write still succeeds, and the row
+lands bound **into** the read-only package (`package_id = com.example.showcase`,
+`organization_id = null`) rather than as the per-org override the variable's own
+documentation describes ("treats them as `allowOrgOverride: true`" — a
+*type*-level unlock, which says nothing about the package dimension).
 
 Reachability, stated so it is not mistaken for more than it is: this refusal is
 what answers on the host-config topology (`environmentId` undefined — the CLI's
