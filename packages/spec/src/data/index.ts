@@ -186,9 +186,16 @@ export * from './record-surface';
 
 // injected-system-column derivation (#5378) — the single source for WHICH system
 // columns an object carries without declaring them. Consumed by the registry's
-// `applySystemFields` (which owns the column definitions) and by author-time
-// tooling that must resolve a reference to one but cannot load a runtime.
+// `applySystemFields` and by author-time tooling that must resolve a reference
+// to one but cannot load a runtime.
 export * from './injected-system-columns';
+
+// injected-system-column DEFINITIONS + the #7865 provenance marker (#8116) —
+// WHAT each injected column looks like, and whether storage actually backs it
+// on a given object (`external` objects register anchors the platform never
+// provisions). Moved here from `@objectstack/metadata-core` (which re-exports
+// it) so `@objectstack/lint` — spec-only by contract — can warn at author time.
+export * from './injected-system-column-provenance';
 
 // Feed & Activity Protocol — retains only the UI activity-timeline config enums
 // (FeedItemType / FeedFilterMode); the feed backend contracts were retired (ADR-0052 §5).

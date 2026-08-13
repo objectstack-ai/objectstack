@@ -30,9 +30,12 @@
  * This module is that answer, in the one place both a runtime and an
  * author-time tool can read. It is the same split #3786 established for the
  * audit family and the `AUDIT_FIELD_DEFS` table records: **the spec declares
- * WHICH columns exist; the registry owns WHAT each one looks like.** Here the
- * spec declares which ones exist *on a given object*; `applySystemFields`
- * consumes this plan and keeps sole ownership of the column shapes.
+ * WHICH columns exist; the registry owns the injection.** Here the spec
+ * declares which ones exist *on a given object*; `applySystemFields` consumes
+ * this plan when it injects. (The column DEFINITIONS — WHAT each one looks
+ * like — and the #7865 provenance marker over them moved into the sibling
+ * `injected-system-column-provenance.ts` by #8116, the WHAT-half move #3786
+ * anticipated, so author-time tools can ask the storage question too.)
  *
  * ## Why it is a pure derivation, and total
  *

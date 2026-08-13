@@ -2786,3 +2786,122 @@ describe('validateStackExpressions — injected system columns (#5378)', () => {
     expect(withCondition(optedOut, 'has(record.id)')).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// [#8116] Unprovisioned injected anchors on external objects WARN.
+//
+// The gap this pins: #5378 made injected anchors resolve (existence), so a
+// predicate over `record.owner_id` on an ADR-0015 `external` object linted
+// clean — while the platform registers that anchor WITHOUT provisioning
+// storage (#7865), and the query silently degrades at runtime (on SQLite:
+// constant-false, HTTP 200, zero rows, no error). The provenance derivation
+// moved into `@objectstack/spec/data` precisely so this package could ask it
+// (maintainer ruling on #8116, option 1); these tests pin the author-time
+// warning built on it.
+// ---------------------------------------------------------------------------
+describe('validateStackExpressions — unprovisioned injected anchors (#8116)', () => {
+  const externalObject = (extra: Record<string, unknown> = {}) => ({
+    name: 'ext_customer',
+    external: { remoteName: 'customers' },
+    fields: { email: { type: 'email' }, region: { type: 'text' } },
+    ...extra,
+  });
+
+  const withValidation = (object: Record<string, unknown>, condition: string) =>
+    validateStackExpressions({
+      objects: [{ ...object, validations: [{ name: 'r1', type: 'script', condition }] }],
+    });
+
+  const warningsOf = (issues: Array<{ severity?: string }>) =>
+    issues.filter((i) => i.severity === 'warning');
+
+  it('warns on record.<anchor> in a validation rule on an external object', () => {
+    const issues = withValidation(externalObject(), 'record.owner_id != null');
+    const warnings = warningsOf(issues);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].message).toContain('record.owner_id');
+    expect(warnings[0].message).toContain('NO storage');
+    expect(warnings[0].message).toContain('external');
+    expect(warnings[0].message).toContain('constant-false');
+    // Advisory, never build-breaking: the runtime degradation is non-fatal and
+    // the security-critical member of the class is fenced at runtime
+    // (#7859/#7858) — see the helper's doc for the #7219 criterion.
+    expect(issues.filter((i) => i.severity === 'error')).toHaveLength(0);
+  });
+
+  it('catches the has() guard form too — record.<anchor> inside a call argument', () => {
+    const warnings = warningsOf(withValidation(externalObject(), 'has(record.organization_id)'));
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].message).toContain('organization_id');
+  });
+
+  it('warns in a flow condition (flattened scope) — the root is explicit, so no bare-identifier guessing', () => {
+    const issues = validateStackExpressions({
+      objects: [externalObject()],
+      flows: [{
+        name: 'ext_flow',
+        nodes: [
+          { id: 'start', type: 'start', config: { objectName: 'ext_customer', condition: 'record.owner_id != null' } },
+        ],
+        edges: [],
+      }],
+    });
+    expect(warningsOf(issues)).toHaveLength(1);
+  });
+
+  it('never judges a bare identifier — a flow variable named like an anchor stays silent', () => {
+    const issues = validateStackExpressions({
+      objects: [externalObject()],
+      flows: [{
+        name: 'ext_flow',
+        nodes: [
+          { id: 'start', type: 'start', config: { objectName: 'ext_customer', condition: 'owner_id != null' } },
+        ],
+        edges: [],
+      }],
+    });
+    expect(warningsOf(issues)).toHaveLength(0);
+  });
+
+  it('is silent on the local twin — provenance, not existence, carries the verdict', () => {
+    const local = { name: 'ext_customer', fields: { email: { type: 'email' } } };
+    expect(warningsOf(withValidation(local, 'record.owner_id != null'))).toHaveLength(0);
+  });
+
+  it("is silent on an author-DECLARED column of the same name (#7859's security direction)", () => {
+    const declaredReal = externalObject({
+      fields: {
+        email: { type: 'email' },
+        organization_id: { type: 'text', label: 'Remote Org Key' },
+      },
+    });
+    expect(warningsOf(withValidation(declaredReal, 'record.organization_id != null'))).toHaveLength(0);
+  });
+
+  it('is silent for an anchor the injection plan withholds — the existence pass owns that (as an error)', () => {
+    // `ownership: 'none'` ⇒ no owner_id anywhere ⇒ the reference is an unknown
+    // field (error), not an unprovisioned anchor (warning). One defect, one
+    // finding, the right one.
+    const issues = withValidation(externalObject({ ownership: 'none' }), 'record.owner_id != null');
+    expect(warningsOf(issues)).toHaveLength(0);
+    expect(issues.filter((i) => i.severity === 'error')).toHaveLength(1);
+  });
+
+  it('rides the field-level slots and formulas too', () => {
+    const issues = validateStackExpressions({
+      objects: [externalObject({
+        fields: {
+          email: { type: 'email' },
+          vip: { type: 'boolean', readonlyWhen: 'record.owner_id == null' },
+          owner_label: { type: 'text', expression: "record.owner_id + ''" },
+        },
+      })],
+    });
+    const warnings = warningsOf(issues).filter(
+      (i) => i.message.includes('owner_id') && i.message.includes('NO storage'),
+    );
+    expect(warnings).toHaveLength(2);
+    expect(warnings.some((i) => i.where.includes('readonlyWhen'))).toBe(true);
+    expect(warnings.some((i) => i.where.includes('expression'))).toBe(true);
+  });
+});
