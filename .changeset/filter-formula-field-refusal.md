@@ -65,5 +65,19 @@ invent the stored column, and it must not filter post-hoc after the formulas are
 evaluated, because the driver has already applied `limit` / `offset`, so a
 post-hoc predicate would filter an arbitrary PAGE. Grep your saved reports,
 flows, dashboards and view filters for a filtered field whose object declares it
-as a `formula`. Every shipped example app in this repo was swept: none filters on
-one, so nothing in-tree needed changing.
+as a `formula`.
+
+**In-tree sweep — source AND tests.** No shipped example app's *metadata* filters
+a formula field: the ones the examples declare (`crm_contact.full_name`,
+`crm_opportunity.expected_revenue` / `days_to_close`, `crm_lead.is_closed`,
+`showcase_project.budget_remaining`, `showcase_field_zoo.f_formula`) appear only
+as view columns, form fields, permission entries and record-level CEL
+predicates — never in a `where` / `filter`. One in-tree TEST did filter one and
+is updated in this change: `examples/app-todo/test/derived-flag-removal.test.ts`
+registers a test-local formula-shaped object to record *why* two inert flags were
+removed rather than derived, and pinned the behaviour this refusal abolishes —
+filtering a formula answering 0 rows with no error. It now asserts the
+`400 INVALID_FIELD` envelope instead; its conclusion is unchanged, because a
+formula still cannot be filtered. The first sweep read app source only, which is
+the wrong half: current behaviour is pinned in tests, so a behaviour change lands
+there first.
