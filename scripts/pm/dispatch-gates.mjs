@@ -899,11 +899,17 @@ function selfTest() {
   // expensive one — a false lead is pasted into every dispatch prompt whose
   // surface brushes it — but a narrowing that also drops the real inputs would
   // just move the dishonesty.
+  // Every path a comment case names is QUOTED inside that comment, because the
+  // scan only ever reads quoted spans: an unquoted path in prose is invisible
+  // to it with or without masking, so a fixture spelling one bare would assert
+  // nothing and pass forever. Measured — the first draft of the two cases below
+  // did exactly that, and only the reverse-verification run that removed the
+  // comment mask showed them staying green through it.
   const commented = [
     '/**',
-    ' * Reads `packages/spec/src` and .changeset/x.md — prose, not inputs.',
+    ' * Reads `packages/spec/src` and `.changeset/x.md` — prose, not inputs.',
     ' */',
-    "const REAL = 'packages/rest/src';   // twin of packages/core/src, says the comment",
+    "const REAL = 'packages/rest/src';   // twin of 'packages/core/src', says the comment",
     "const U = 'https://example.com/a/b'; const AFTER_URL = 'packages/metadata/src';",
     "const RE = /['\"`]/;",
     "const AFTER_REGEX = 'packages/client/src';",
