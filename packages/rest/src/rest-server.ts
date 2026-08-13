@@ -6680,6 +6680,93 @@ export class RestServer {
                         const name = section
                             ? `${section}/${req.params?.name ?? ''}`
                             : String(req.params?.name ?? '');
+                        // [#8278] The AUTHORITATIVE published store is consulted
+                        // first: the `state:'active'` `sys_metadata` overlay row.
+                        // Mirrors the dispatcher fix (#8031 / PR #8254,
+                        // `packages/runtime/src/domains/meta.ts`) onto the
+                        // transport that actually serves the cloud runtime — the
+                        // two doors answered the same question from two stores,
+                        // and only one of them had been corrected.
+                        //
+                        // Two publish lifecycles write to two different places:
+                        //
+                        //   - `MetadataManager.publishPackage` snapshots a body
+                        //     into the row-local `publishedDefinition` key of its
+                        //     own in-memory registry — the ADR-0016-era package
+                        //     publish, which is what `getPublished` below reads.
+                        //   - `publishPackageDrafts` / `promoteDraft` flips the
+                        //     artifact's `sys_metadata` row `state:'draft' →
+                        //     'active'`. ADR-0027 (E)(5) defines sealing a publish
+                        //     as exactly that flip, `SysMetadataRepository` names
+                        //     `'active'` "the published, live overlay", and
+                        //     ADR-0033 §2 routes EVERY runtime authoring write
+                        //     into that same ADR-0027 draft — so promoting it is
+                        //     what "published" means for anything authored at
+                        //     runtime. Those items were absent from the registry
+                        //     `getPublished` consults, so this route answered 404
+                        //     about an item that IS published.
+                        //
+                        // `getMetaItemLayered` is the narrow primitive on purpose.
+                        // Its overlay layer is a strict `state:'active'` lookup
+                        // that never reads a draft, and it reports that layer
+                        // SEPARATELY from the code layer — so a null overlay is
+                        // positively "no runtime-published row" and falls through
+                        // to the untouched `getPublished` path below, which keeps a
+                        // code-published item resolving to byte-identical bytes.
+                        // The broader `getMetaItem` would not do: it folds the code
+                        // layer into its own answer, so this route could no longer
+                        // tell the two stores apart.
+                        //
+                        // NO `organizationId`, and that is the ONE deliberate
+                        // divergence from the dispatcher twin, which resolves one
+                        // and passes it. `packages/rest` carries no
+                        // `resolveActiveOrganizationId` and no org plumbing at all
+                        // — the same seam `package-routes.ts` names at its
+                        // `deletePackage` call ("the dispatcher twin owns that
+                        // seam"). Inventing org plumbing here to close a 404 would
+                        // be a new seam smuggled in under a bug fix. Omitting it
+                        // reads the env-wide (`organization_id: null`) row, which
+                        // is symmetric with what an org-less `publishPackageDrafts`
+                        // (`request.organizationId ?? null`) writes — so this door
+                        // resolves exactly the publishes this door can produce.
+                        // Environment scoping still holds: it comes from WHICH
+                        // protocol `resolveProtocol` hands back, not from the
+                        // request payload (`getMetaItemLayered` declares no
+                        // `environmentId` member).
+                        let publishedProtocol: any;
+                        try {
+                            publishedProtocol = await this.resolveProtocol(environmentId, req);
+                        } catch { /* fall through to the code/package snapshot below */ }
+                        if (typeof publishedProtocol?.getMetaItemLayered === 'function') {
+                            try {
+                                const layered = await publishedProtocol.getMetaItemLayered({ type, name });
+                                if (layered?.overlay !== undefined && layered?.overlay !== null) {
+                                    res.json(layered.overlay);
+                                    return;
+                                }
+                            } catch (overlayError: any) {
+                                // [#5532] The overlay read is NOT blanket-swallowed,
+                                // and this is the second deliberate divergence from
+                                // the dispatcher twin. `getMetaItemLayered` documents
+                                // that it throws `503 SERVICE_UNAVAILABLE` ONLY when a
+                                // read that would decide a layer did not happen; the
+                                // benign "table not provisioned yet" case genuinely
+                                // means "no overlay row" and returns normally with
+                                // `overlay: null`. So a throw here is an availability
+                                // failure, and falling through would let it reach the
+                                // client as `404 Not found` — an availability failure
+                                // reported as an existence fact, which is exactly the
+                                // #5532 defect this package pins in
+                                // `rest-meta-outage-vs-miss.test.ts`. A declared
+                                // status is re-thrown so `handleRouteError` renders
+                                // the producer's own 503; anything undeclared (a
+                                // third-party protocol throwing something shapeless)
+                                // still falls through, so this cannot make the
+                                // code-published path newly fail closed.
+                                if (typeof overlayError?.status === 'number') throw overlayError;
+                            }
+                        }
+
                         const svc = await this.resolveMetadataService(environmentId, req);
                         if (typeof (svc as any)?.getPublished !== 'function') {
                             res.status(501).json({
