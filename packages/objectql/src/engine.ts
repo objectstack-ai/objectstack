@@ -785,13 +785,16 @@ function planFormulaProjection(
  * PAGE. It would pass every small-result-set test and be wrong the moment
  * pagination is involved.
  *
- * SCOPE — deliberately the third verdict only. `unknown` and `dotted` names are
- * NOT judged here: the ingress gate's precedence is `unknown` > `dotted` >
- * unmaterializable (#4226 / #4256 / #6994), and the engine has always tolerated
- * an unknown projection name by design (the `SELECT *` tolerance a few lines
- * below). Widening this door to those two is a separate posture change on two
- * more axes, not a free extension of this one — so a dotted path keeps reaching
- * the driver exactly as before, including one whose head is a formula field.
+ * SCOPE — deliberately the third verdict only, on the SORT axis. `unknown` and
+ * `dotted` SORT names are NOT judged here: the ingress gate's precedence is
+ * `unknown` > `dotted` > unmaterializable (#4226 / #4256 / #6994), and widening
+ * this door to those two is a separate posture change on two more axes, not a
+ * free extension of this one — so a dotted SORT path keeps reaching the driver
+ * exactly as before, including one whose head is a formula field. On the
+ * PROJECTION axis the engine still tolerates an unknown PLAIN name by design
+ * (the `SELECT *` tolerance a few lines below, kept by the #7589 ruling), but
+ * a dotted PROJECTION entry is refused since #7589 —
+ * {@link assertProjectionHasNoDottedPaths}, directly below.
  *
  * A registry-less host (`schema` undefined) returns early, exactly as the
  * ingress gate returns early when `resolveQueryFields` cannot answer: a door
@@ -840,6 +843,107 @@ function assertOrderByIsMaterializable(
   err.code = 'INVALID_SORT';
   err.field = first;
   err.fields = unmaterialized;
+  err.object = object;
+  throw err;
+}
+
+/**
+ * [#7589] A DOTTED projection entry — refused on the engine's own public
+ * boundary, the second half of #7532's ingress refusal.
+ *
+ * #7532 (PR #7588) closed this at `assertProjectionFieldsExist`
+ * (`400 INVALID_FIELD`), which covers everything reaching `findData`: the REST
+ * list route, `POST /data/:object/query`, the export route and the RPC
+ * dispatcher. It could not cover a caller that reaches {@link ObjectQL.find} /
+ * {@link ObjectQL.findOne} DIRECTLY — and that half was measured, not assumed
+ * (#7589): a flow-authored `get_record` node's `fields: ['name','account.name']`
+ * parses (`GetRecordConfigSchema` restricts nothing), travels verbatim into
+ * `data.find(...)`, cleared the head-only filter below on its head segment
+ * (`account` IS a field), and reached the driver as a projection column — where
+ * SQL renders `"account"."name"` against a table that was never joined, the DB
+ * answers `no such column`, and the #3821 recovery ladder retries `select('*')`.
+ * The caller asked to narrow and silently received EVERY field, byte-identical
+ * to no projection at all. A saved report's `query.fields` reaches this the
+ * same way (`plugin-reports` forwards it verbatim), as does every hook and
+ * internal caller.
+ *
+ * WHY A REFUSAL: ruled 2026-08-12 on #7589 (adopting the drivers seat's
+ * Option B) — a dotted entry the engine cannot resolve is refused loudly at
+ * this one site, covering every caller that reaches the engine. The head-only
+ * check this replaces was justified by a comment claiming the engine resolves
+ * relationship paths "via populate"; #7601 measured that NO populate step
+ * exists — the comment was the last place in the repo asserting dotted-path
+ * resolution does (after PR #7617) — so what is removed here is not a working
+ * feature but a path to widening, kept alive by a false premise. Both the typo
+ * (`titel.name`) and the genuine traversal intent (`account.name`) eat this
+ * refusal: nothing resolves either, they are not separable at this door, and
+ * the alternative is the over-return above (#5918's precedent, same as the
+ * ingress ruling).
+ *
+ * SCOPE — the dotted leg ONLY. The unknown-PLAIN-column tolerance a few lines
+ * below each call site is explicitly KEPT (same #7589 ruling): an unknown
+ * plain column is simply absent from each row, the "no records exist" failure
+ * that tolerance prevents is real, and it backstops registry-less hosts. A
+ * dotted path differs in kind — it is a projection no driver can structurally
+ * apply, and answering it with every column points away from both FLS and data
+ * minimisation. The two facts get two verdicts.
+ *
+ * A registry-less host (`schema.fields` undefined) returns early, exactly as
+ * the ingress gate returns early when `resolveQueryFields` cannot answer: a
+ * door that cannot see the field map must not invent a verdict about it. For
+ * that host the driver-side #3821 ladder remains the documented backstop
+ * (deliberately untouched — a driver-side carve-out is ruled measured-need
+ * only).
+ *
+ * The wording deliberately shares its core sentence and remedies with the
+ * ingress door's dotted refusal — one vocabulary across the doors, so a caller
+ * refused at the REST boundary and a caller refused here are not sent two
+ * different ways. Duplicated rather than imported because `metadata-protocol`
+ * is assembled FROM an engine, so the engine cannot import from it without
+ * inverting the layering; the agreement pin in
+ * `query-expression-conformance.test.ts` is what keeps the duplication honest
+ * (same mechanism as the sort axis' three-door remedy pin).
+ */
+function assertProjectionHasNoDottedPaths(
+  object: string,
+  operation: 'find' | 'findOne',
+  schema: any,
+  fields: unknown,
+): void {
+  if (!Array.isArray(fields) || fields.length === 0) return;
+  if (!schema?.fields) return;
+  const dotted = fields.filter(
+    (f): f is string => typeof f === 'string' && f.includes('.'));
+  if (dotted.length === 0) return;
+  const first = dotted[0];
+  const head = first.split('.')[0];
+  const headDef: any = (schema.fields as any)[head];
+  const crossesRelation = headDef != null && REFERENCE_VALUE_TYPES.has(headDef.type);
+  const err: any = new Error(
+    (crossesRelation
+      ? `ObjectQL.${operation}('${object}') projects '${first}', which follows the relationship `
+        + `'${head}' into another object — 'fields' reaches only columns of '${object}' itself`
+      : `ObjectQL.${operation}('${object}') projects '${first}', a dotted path — 'fields' reaches `
+        + `only whole columns of '${object}', not values inside them`)
+    + (dotted.length > 1 ? ` (also: ${dotted.slice(1).join(', ')})` : '')
+    + '. No driver resolves it: the path reaches the driver as a column name, matches no '
+    + 'column, and the projection falls back to EVERY field — a narrower request answered '
+    + 'with a wider response.'
+    + (crossesRelation
+      ? ` Read the related record with 'expand' (\`{ expand: { ${head}: { object: '<target>', `
+        + `fields: ['<column>'] } } }\` to choose its columns), or denormalise the value onto `
+        + `'${object}' (a stored field, written when the source changes) and name that.`
+      : ` Name the whole column ('${head}') and read into its value in the caller.`),
+  );
+  // `INVALID_FIELD`, not a new code, and 400 rather than 500 — the same
+  // reasoning `assertOrderByIsMaterializable` records for `INVALID_SORT`: one
+  // condition ("this projection was not applied as written") keeps ONE wire
+  // code however the caller reached it, so a host surfacing engine errors over
+  // HTTP answers the same envelope on both doors.
+  err.status = 400;
+  err.code = 'INVALID_FIELD';
+  err.field = first;
+  err.fields = dotted;
   err.object = object;
   throw err;
 }
@@ -7140,16 +7244,29 @@ export class ObjectQL implements IObjectQLEngine {
     // dropped. `fillQueryAstDefaults` has already normalised `orderBy` into
     // `SortNode[]`, so the names read here are the ones the driver would get.
     assertOrderByIsMaterializable(object, 'find', _findSchema, ast.orderBy);
+    // [#7589] The projection's DOTTED leg, judged on the caller's own
+    // spellings BEFORE the formula planner rewrites the projection: a dotted
+    // entry is structurally unresolvable (no populate step exists — #7601)
+    // and is refused loudly instead of riding its head segment into the
+    // driver, where the #3821 ladder answered it with EVERY field.
+    assertProjectionHasNoDottedPaths(object, 'find', _findSchema, ast.fields);
     const _findFormula = planFormulaProjection(_findSchema, ast.fields);
     if (_findFormula.projected) ast.fields = _findFormula.projected;
 
-    // Drop any requested field that doesn't exist on the schema. Without
-    // this, drivers (notably SqlDriver) emit `SELECT unknown_col FROM ...`
-    // which the DB rejects ("no such column") — and SqlDriver swallows
-    // that error and returns `[]`, making a frontend bug (e.g. a generic
-    // view requesting `name`/`due_date` on every object) look like "no
-    // records exist". Silently filtering matches the existing OData
+    // Drop any requested PLAIN field that doesn't exist on the schema.
+    // Without this, drivers (notably SqlDriver) emit `SELECT unknown_col
+    // FROM ...` which the DB rejects ("no such column") — and SqlDriver
+    // swallows that error and returns `[]`, making a frontend bug (e.g. a
+    // generic view requesting `name`/`due_date` on every object) look like
+    // "no records exist". Silently filtering matches the existing OData
     // tolerance and Salesforce/Postgres behavior of `SELECT *` semantics.
+    //
+    // [#7589] This tolerance is for unknown PLAIN columns ONLY, and it is
+    // KEPT deliberately (ruled 2026-08-12): the "no records exist" failure it
+    // prevents is real, and the driver-side half of the same tolerance
+    // backstops registry-less hosts. A structurally unresolvable (dotted)
+    // projection is a different fact and no longer reaches this filter via
+    // the engine — `assertProjectionHasNoDottedPaths` above refused it.
     if (_findSchema?.fields && Array.isArray(ast.fields) && ast.fields.length > 0) {
       const known = new Set(Object.keys(_findSchema.fields));
       // Always allow the primary key + audit columns even if not present in
@@ -7158,12 +7275,9 @@ export class ObjectQL implements IObjectQLEngine {
       known.add('id');
       known.add('created_at');
       known.add('updated_at');
-      const filtered = ast.fields.filter(f => {
-        // Keep relationship paths like `owner.name` — the engine will
-        // resolve those via populate; only validate top-level segment.
-        const head = f.split('.')[0];
-        return known.has(head);
-      });
+      // Whole names, no head-splitting: only plain entries reach here (the
+      // dotted refusal above fired on anything carrying a '.').
+      const filtered = ast.fields.filter(f => known.has(f));
       // Guard against an empty projection — fall back to `*` so the
       // request still returns rows. An empty SELECT list would either
       // 400 in Postgres or silently project nothing.
@@ -7297,12 +7411,19 @@ export class ObjectQL implements IObjectQLEngine {
     // dropped sort does not merely reorder the answer, it returns a DIFFERENT
     // record, and the one it returns looks exactly as legitimate.
     assertOrderByIsMaterializable(objectName, 'findOne', _findOneSchema, ast.orderBy);
+    // [#7589] Same dotted-projection refusal as `find`, same position: on the
+    // caller's own spellings, before the formula planner rewrites them. The
+    // measured flow chain (`get_record` → `data.findOne`) reaches THIS verb
+    // whenever `limit` is absent or 1, so a hole here would be the same hole.
+    assertProjectionHasNoDottedPaths(objectName, 'findOne', _findOneSchema, ast.fields);
     // [#7642] Caller's own projection, before planning rewrites it — see `find`.
     const _findOneRequestedFields = Array.isArray(ast.fields) ? [...ast.fields] : undefined;
     const _findOneFormula = planFormulaProjection(_findOneSchema, ast.fields);
     if (_findOneFormula.projected) ast.fields = _findOneFormula.projected;
 
-    // Drop unknown fields — see equivalent block in `find()` for rationale.
+    // Drop unknown PLAIN fields — see the equivalent block in `find()` for
+    // the rationale, and for why this tolerance is plain-columns-only ([#7589]
+    // refused any dotted entry above, so none reaches this filter).
     if (_findOneSchema?.fields && Array.isArray(ast.fields) && ast.fields.length > 0) {
       const known = new Set(Object.keys(_findOneSchema.fields));
       // Always allow the primary key + audit columns even if not present
@@ -7310,7 +7431,7 @@ export class ObjectQL implements IObjectQLEngine {
       known.add('id');
       known.add('created_at');
       known.add('updated_at');
-      const filtered = ast.fields.filter(f => known.has(f.split('.')[0]));
+      const filtered = ast.fields.filter(f => known.has(f));
       ast.fields = filtered.length > 0 ? filtered : undefined;
     }
 

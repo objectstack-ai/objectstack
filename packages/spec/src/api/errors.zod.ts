@@ -251,6 +251,10 @@ export const FieldErrorCode = z.enum([
   'max_length',
   'min_value',
   'max_value',
+  // more decimal places than the field's declared `scale` allows (#7501) —
+  // `scale` is an upper bound on the fractional-digit COUNT, so it joins the
+  // max_* family the way `max_length` bounds the character count.
+  'max_scale',
   'min_items',
   'max_items',
   // closed sets and references
