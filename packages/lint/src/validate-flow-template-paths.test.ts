@@ -5,6 +5,7 @@ import {
   validateFlowTemplatePaths,
   FLOW_TEMPLATE_UNKNOWN_FIELD,
   FLOW_TEMPLATE_LOOKUP_TRAVERSAL,
+  FLOW_TEMPLATE_FIELD_UNPROVISIONED,
 } from './validate-flow-template-paths.js';
 
 type AnyRec = Record<string, unknown>;
@@ -417,5 +418,90 @@ describe('validateFlowTemplatePaths', () => {
       expect(findings[0].severity).toBe('warning');
       expect(findings[0].path).toBe('flows[0].nodes[1]');
     });
+  });
+});
+
+describe('validateFlowTemplatePaths — unprovisioned injected anchors (#8340)', () => {
+  /** The #8116 fixture shape: an ADR-0015 `external` trigger object. */
+  const EXT_OBJECT = (extra: AnyRec = {}): AnyRec => ({
+    name: 'ext_customer',
+    external: { remoteName: 'customers' },
+    fields: { email: { name: 'email', type: 'text' } },
+    ...extra,
+  });
+
+  /** A record-change flow on the external object, with one node of `type`. */
+  function extFlow(type: string, block: AnyRec, object: AnyRec = EXT_OBJECT()): AnyRec {
+    return {
+      objects: [object],
+      flows: [
+        {
+          name: 'ext_flow',
+          type: 'record_change',
+          nodes: [
+            { id: 'start', type: 'start', config: { objectName: 'ext_customer', triggerType: 'record-after-create' } },
+            { id: 'n1', type, config: block },
+          ],
+        },
+      ],
+    };
+  }
+  const only = (findings: { rule: string }[]) =>
+    findings.filter((f) => f.rule === FLOW_TEMPLATE_FIELD_UNPROVISIONED);
+
+  it('warns on a filter token over an unprovisioned anchor — the existence rule stays silent', () => {
+    const findings = validateFlowTemplatePaths(
+      extFlow('get_record', { objectName: 'ext_customer', filter: { email: '{record.owner_id}' } }),
+    );
+    expect(findings.filter((f) => f.rule === FLOW_TEMPLATE_UNKNOWN_FIELD)).toHaveLength(0);
+    const warned = only(findings);
+    expect(warned).toHaveLength(1);
+    // WARNING even in the filter position, where a typo would be an ERROR:
+    // the provenance question has no closed oracle here (#8116).
+    expect(warned[0].severity).toBe('warning');
+    expect(warned[0].message).toContain('owner_id');
+    expect(warned[0].message).toContain('external object (ADR-0015)');
+    expect(warned[0].message).toContain('refuses to run');
+    expect(warned[0].hint).toContain('columnMap');
+  });
+
+  it('warns outside a filter too, naming the blank-string consequence', () => {
+    const findings = validateFlowTemplatePaths(
+      extFlow('notify', { title: 'Owned by {record.owner_id}' }),
+    );
+    const warned = only(findings);
+    expect(warned).toHaveLength(1);
+    expect(warned[0].message).toContain('empty string on every run');
+  });
+
+  it('is silent on the local twin — platform storage is real (mutation: drop `external`)', () => {
+    const findings = validateFlowTemplatePaths(
+      extFlow('notify', { title: '{record.owner_id}' }, EXT_OBJECT({ external: undefined })),
+    );
+    expect(findings).toEqual([]);
+  });
+
+  it('is silent when the author DECLARES the column (#7859)', () => {
+    const findings = validateFlowTemplatePaths(
+      extFlow('notify', { title: '{record.owner_id}' }, EXT_OBJECT({
+        fields: { email: { name: 'email', type: 'text' }, owner_id: { name: 'owner_id', type: 'text' } },
+      })),
+    );
+    expect(only(findings)).toHaveLength(0);
+  });
+
+  it('is silent on a declared field of the same external object', () => {
+    expect(validateFlowTemplatePaths(extFlow('notify', { title: '{record.email}' }))).toEqual([]);
+  });
+
+  it('reports one finding per node for a token repeated in two positions', () => {
+    const findings = validateFlowTemplatePaths(
+      extFlow('update_record', {
+        objectName: 'ext_customer',
+        filter: { email: '{record.owner_id}' },
+        fields: { email: 'echo {record.owner_id}' },
+      }),
+    );
+    expect(only(findings)).toHaveLength(1);
   });
 });
