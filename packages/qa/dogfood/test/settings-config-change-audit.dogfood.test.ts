@@ -136,7 +136,12 @@ describe('#8145: a settings write reaches sys_audit_log as config_change', () =>
     });
     // A digest, never the value — the ledger describes the change, not the data.
     expect(JSON.parse(String(row.new_value)).digest).toBeTruthy();
-  });
+    // Generous timeout so a REGRESSION reports `waitForRows`'s own message
+    // ("expected at least one config_change row…") rather than vitest's 5s
+    // default cutting the poll short and reporting a timeout instead. Measured
+    // on `origin/main`, where this case is red: with the default it failed as a
+    // bare timeout, which names neither the object nor the filter.
+  }, 30_000);
 
   it('the shipped `config_changes` list view — its OWN declared filter — now matches', async () => {
     // The view's filter is read off the registered object rather than retyped,
@@ -181,7 +186,7 @@ describe('#8145: a settings write reaches sys_audit_log as config_change', () =>
     expect(ledger.length).toBeGreaterThanOrEqual(1);
     expect(row.object_name).toBeUndefined();
     expect(ledger[0].new_hash).toBeUndefined();
-  });
+  }, 30_000);
 
   it('the setting itself is readable back — the audit is a complement, not the write', async () => {
     // The settings routes are mounted at `/api/settings`, outside `/api/v1`.
