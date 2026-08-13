@@ -4468,7 +4468,14 @@ const connectorRateLimitConfigRemoved: MetadataConversion = {
  * source that can carry the key. `ExternalLookupSchema` is not referenced by
  * any stack collection or metadata type, so there is no external-lookup
  * document for the walker to visit; its authorable key is retired by the same
- * tombstone and needs no transform.
+ * tombstone and needs no transform. (That zero-consumer finding then became
+ * the whole family's verdict: #8075 retired `data/external-lookup.zod.ts`
+ * outright — route 3, D3 `external-lookup-message-queue-families-retired` —
+ * and the `data/ExternalFieldMapping:transform` retired-keys entry was
+ * subsumed by the def retirement, the WidgetManifest.performance way. The
+ * `externalLookup.…` clause in this entry's `surface` stays: it correctly
+ * documents what the v16→17 change list removed, and it composes with the def
+ * retirement into "delete the whole value".)
  *
  * `retiredFromLoadPath`: the key claims a transformation that never ran, the
  * `connector-rate-limit-config-removed` shape exactly. Absorbing it silently at

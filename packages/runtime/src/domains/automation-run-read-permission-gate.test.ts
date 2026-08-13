@@ -31,7 +31,10 @@
  *     the ruling names and not some second permission invented here.
  *  4. **THE AUDIT** — the routes that stay authenticated-only stay
  *     authenticated-only, and ask the security service nothing. A future change
- *     to any of those verdicts has to come through this file.
+ *     to any of those verdicts has to come through this file. (#7968 is that
+ *     change, for one row: the paused-run `screen` read left this table when
+ *     the maintainer gated it on the run's trigger identity instead — see the
+ *     note in the table.)
  *
  * The three non-denials (system context, no security service, partial service)
  * are pinned too: each is a decision recorded on `refuseUngrantedRunRead`, and
@@ -323,7 +326,16 @@ describe('#7900 — /automation run-state reads require the sys_automation_run r
             { path: 'approval_flow', why: 'getFlow — a flow definition, metadata-plane data' },
             { path: 'actions', why: 'getActionDescriptors — the deployment action catalog' },
             { path: '_status', why: 'getFlowRuntimeStates — per-flow enabled/bound state' },
-            { path: 'approval_flow/runs/run_7/screen', why: 'the interactive runner\'s re-fetch' },
+            // [#7968] `approval_flow/runs/run_7/screen` USED to be this table's
+            // fifth row. The audit's reason for leaving it here was right — the
+            // grant alone would refuse the end user the flow paused for — but
+            // "no grant" was not the same as "no gate": the route disclosed
+            // record-derived screen defaults to any authenticated caller with a
+            // run id. The 2026-08-12 ruling gates it on the run's own trigger
+            // identity, with this grant as an operator override, so it is no
+            // longer authenticated-only and no longer answers `explainCalls ===
+            // 0` for a caller who is not the trigger identity. Its own file
+            // owns it now: `automation-screen-read-gate.test.ts`.
         ];
 
         it.each(AUTHENTICATED_ONLY)('$path stays authenticated-only ($why)', async ({ path }) => {

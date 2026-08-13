@@ -62,7 +62,10 @@ export const SysAuditLog = ObjectSchema.create({
       label: 'Auth',
       data: { provider: 'object', object: 'sys_audit_log' },
       columns: ['created_at', 'action', 'user_id'],
-      filter: [{ field: 'action', operator: 'in', value: ['login', 'logout', 'permission_change'] }],
+      // `permission_change` removed (#8147): the value is retired from the enum,
+      // so the filter would have matched nothing for the rest of time. Permission
+      // object writes are already on the ledger as ordinary create/update rows.
+      filter: [{ field: 'action', operator: 'in', value: ['login', 'logout'] }],
       sort: [{ field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 50 },
     },
@@ -72,7 +75,13 @@ export const SysAuditLog = ObjectSchema.create({
       label: 'Config',
       data: { provider: 'object', object: 'sys_audit_log' },
       columns: ['created_at', 'action', 'object_name', 'user_id'],
-      filter: [{ field: 'action', operator: 'in', value: ['config_change', 'export', 'import'] }],
+      // `export` removed (#8147) — retired from the enum, nothing ever wrote it.
+      // `import` KEPT deliberately: `plugin-auth`'s admin user-import writes a
+      // real run-level row (`admin-import-users.ts`, `action: 'import'` with
+      // `record_id: null`), pinned by the W4 case in
+      // `packages/qa/dogfood/test/admin-identity-audit-trail.dogfood.test.ts`.
+      // This view is the only shipped surface that lists those rows.
+      filter: [{ field: 'action', operator: 'in', value: ['config_change', 'import'] }],
       sort: [{ field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 50 },
     },
@@ -97,8 +106,23 @@ export const SysAuditLog = ObjectSchema.create({
       group: 'Event',
     }),
 
+    // ADR-0087 retirement (#8147, ruling 2026-08-12): `export` and
+    // `permission_change` left this enum. Neither had a writer anywhere in the
+    // repo — the only two `sys_audit_log` writers are `audit-writers.ts` (whose
+    // `actionFor` emits create/update/delete and nothing else) and
+    // `plugin-auth`'s admin user-import. A declared action nothing ever writes
+    // is an empty widget and a filter that can never match: 审计面宁窄勿谎.
+    // Permission-object writes are already on the ledger as create/update rows.
+    //
+    // ⚠ `import` was named in the same ruling but is NOT retired: it has a live,
+    // deliberate writer (`plugin-auth/src/admin-import-users.ts`, run-level row
+    // with `record_id: null`) pinned by dogfood case W4. Retiring it would make
+    // this enum deny a value the platform writes on every admin import run —
+    // and silently, because every field here is `readonly: true` and
+    // `validateRecord` skips readonly fields, so nothing would ever go red.
+    // See #8147 for the escalation.
     action: Field.select(
-      ['create', 'update', 'delete', 'restore', 'login', 'logout', 'permission_change', 'config_change', 'export', 'import'],
+      ['create', 'update', 'delete', 'restore', 'login', 'logout', 'config_change', 'import'],
       {
         label: 'Action',
         required: true,

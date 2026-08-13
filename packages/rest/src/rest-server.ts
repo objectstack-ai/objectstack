@@ -9459,16 +9459,55 @@ export class RestServer {
             try { return await this.sharingServiceProvider(environmentId); }
             catch { return undefined; }
         };
-        const respond501 = (res: any) => res.status(501).json({
-            code: 'NOT_IMPLEMENTED',
-            message: 'Sharing service is not configured on this deployment',
-        });
+        /**
+         * [#8111] The ONE refusal emitter for the record-sharing family — the
+         * 501, all five mapped verdicts and all three 500s go through it, so
+         * "list, grant and revoke answer the same shape" is a property of the
+         * code rather than of nine literals that happen to agree.
+         *
+         * Before this, the family carried BOTH dialects ADR-0112 D5 retires:
+         * `respond501` was flat `{ code, message }` and every other arm was
+         * `{ code, error: '<bare string>' }`, so `body.error.code` — the one
+         * position D5 declares — read `undefined` on all nine. #7035
+         * (PR #7293) had already removed both from this file's `/meta`
+         * refusals, #7981 (PR #8071) from `registerSecurityEndpoints` and
+         * #8073 (PR #8174) from the `/security/explain` pair.
+         *
+         * Emitted through the SHARED builder (`sendError` from
+         * `@objectstack/types`, imported as `sendEnvelopeError` because this
+         * module has a local `sendError` of its own — the sanitizing responder
+         * for THROWN errors, a different thing). That is what makes this the
+         * reference shape by construction rather than a tenth local literal
+         * agreeing with the nine it replaced, and it types `code` to the
+         * closed ADR-0112 vocabulary for free.
+         *
+         * ⛔ Status codes are untouched and no code VALUE moves: only the
+         * POSITION of `code` and `message` changes.
+         */
+        const respondError = (
+            res: any,
+            status: number,
+            code: ErrorCode,
+            message: string,
+        ): void => sendEnvelopeError(res, status, code, message);
+
+        const respond501 = (res: any) => respondError(
+            res, 501, 'NOT_IMPLEMENTED',
+            'Sharing service is not configured on this deployment',
+        );
         // [ADR-0111] The service enforces authorization (D1/D4/D5/D7) and
         // signals the verdict via message prefixes, the plugin's established
         // error idiom — this maps them onto HTTP. Returns true when handled.
+        //
+        // [#8111] The prefix is a SERVER-INTERNAL service→REST derivation: it
+        // is stripped below and never reaches the wire, so no consumer can
+        // read it (censused at claim — the only in-repo `startsWith(CODE)`
+        // readers are this file's own route mappings plus one
+        // `plugin-approvals` check on an error it threw itself in-process).
+        // It therefore stays exactly as it is; only the response SHAPE moved.
         const respondSharingError = (res: any, error: any): boolean => {
             const msg = String(error?.message ?? error ?? '');
-            const map: Array<[string, number]> = [
+            const map: Array<[ErrorCode, number]> = [
                 ['VALIDATION_FAILED', 400],
                 ['PERMISSION_DENIED', 403],
                 ['NOT_FOUND', 404],
@@ -9477,10 +9516,10 @@ export class RestServer {
             ];
             for (const [code, status] of map) {
                 if (msg.startsWith(code)) {
-                    res.status(status).json({
-                        code,
-                        error: msg.replace(new RegExp(`^${code}:\\s*`), ''),
-                    });
+                    respondError(
+                        res, status, code,
+                        msg.replace(new RegExp(`^${code}:\\s*`), ''),
+                    );
                     return true;
                 }
             }
@@ -9504,7 +9543,10 @@ export class RestServer {
                 } catch (error: any) {
                     if (respondSharingError(res, error)) return;
                     logError('[REST] List shares error:', error);
-                    res.status(500).json({ code: 'SHARES_LIST_FAILED', error: String(error?.message ?? error).slice(0, 500) });
+                    // The 500 arms keep their 500-char cap: an unexpected
+                    // fault's message is not a contract, and truncating it
+                    // stays a sanitization step — only the position moves.
+                    respondError(res, 500, 'SHARES_LIST_FAILED', String(error?.message ?? error).slice(0, 500));
                 }
             },
             metadata: { summary: 'List per-record sharing grants', tags: ['sharing'] },
@@ -9538,7 +9580,7 @@ export class RestServer {
                 } catch (error: any) {
                     if (respondSharingError(res, error)) return;
                     logError('[REST] Grant share error:', error);
-                    res.status(500).json({ code: 'SHARE_GRANT_FAILED', error: String(error?.message ?? error).slice(0, 500) });
+                    respondError(res, 500, 'SHARE_GRANT_FAILED', String(error?.message ?? error).slice(0, 500));
                 }
             },
             metadata: { summary: 'Grant a per-record share to a principal', tags: ['sharing'] },
@@ -9567,7 +9609,7 @@ export class RestServer {
                 } catch (error: any) {
                     if (respondSharingError(res, error)) return;
                     logError('[REST] Revoke share error:', error);
-                    res.status(500).json({ code: 'SHARE_REVOKE_FAILED', error: String(error?.message ?? error).slice(0, 500) });
+                    respondError(res, 500, 'SHARE_REVOKE_FAILED', String(error?.message ?? error).slice(0, 500));
                 }
             },
             metadata: { summary: 'Revoke a per-record share by id', tags: ['sharing'] },

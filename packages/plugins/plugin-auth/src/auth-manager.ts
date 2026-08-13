@@ -2610,11 +2610,21 @@ export class AuthManager {
     if (enabled.sso) {
       await this.addOptionalPlugin(plugins, 'sso', async () => {
       const { sso } = await import('@better-auth/sso');
-      // NOTE: unlike `oauthProvider`, @better-auth/sso hardcodes its `ssoProvider`
-      // model and accepts NO `schema` option (verified against 1.6.20 — no
-      // mergeSchema, runtime never reads options.schema). Its table mapping to
-      // `sys_sso_provider` must therefore be resolved by the better-auth adapter
-      // / a global model map, not per-plugin here (see AUTH_SSO_PROVIDER_SCHEMA).
+      // NOTE: the `ssoProvider` model is bridged to `sys_sso_provider` by the
+      // better-auth adapter / a global model map, not per-plugin here (see
+      // AUTH_SSO_PROVIDER_SCHEMA).
+      //
+      // That bridge dates from 1.6.20, where @better-auth/sso hardcoded the
+      // model and read no `schema` option. Re-checked against the pinned
+      // 1.7.0-rc.2 (`node_modules/@better-auth/sso/dist`) on 2026-08-12: that is
+      // no longer true — `SSOOptions.schema.ssoProvider` now exists
+      // (index-D1yk91me.d.mts) and the runtime honours `modelName` plus a
+      // per-field `fieldName` map (index.mjs, the plugin's `schema:` block). The
+      // adapter-level bridge is kept as-is here because it is what the rest of
+      // the auth stack is wired to; whether to move it onto the plugin option is
+      // a separate change, not a silent one. Only the mapping surface below was
+      // re-verified in depth — see register-sso-provider.ts for the
+      // `oidcConfig.mapping` strict-object findings.
       //
       // `organizationProvisioning.defaultRole` (ADR-0024 V1): a first-time
       // federated login is JIT-provisioned into the user's domain-matched org

@@ -892,6 +892,45 @@ export class SharingService implements ISharingService {
         + `(public sharing model or no '${OWNER_FIELD}' field); a share row on it would never be consulted`,
       );
     }
+    // [#8119] …and an `owner_id` the REGISTRY injected into a FEDERATED object is
+    // not an owner column either — it is the one case `hasOwnerField` answers YES
+    // about a column that is not there. The platform provisions no storage for a
+    // federated object (`Engine.syncObjectSchema` returns early for
+    // `external != null`), so the ownership fast-path behind `checkEdit` /
+    // `checkDelete` selects `owner_id` off a remote table that has no such column.
+    //
+    // MEASURED on a booted showcase stack (SQLite external datasource, an
+    // unstamped federated object bound to remote table `customers`): that lookup
+    // does NOT raise. The driver DISCARDS the whole projection when it names a
+    // column the remote table lacks and returns the full row, which simply has no
+    // `owner_id` key — so `matchesOwnerScope` reads `owner == null`, returns
+    // false, and both gates answer `deny` for every principal at every write
+    // DEPTH (`org` included: the null-owner short-circuit runs before the scope is
+    // consulted). Only the `modifyAllRecords` bypass can still reach `allow`, and
+    // it does so without reading a share row.
+    //
+    // A grant here is therefore inert BY CONSTRUCTION — the ADR-0078
+    // silently-inert trap this whole guard (ADR-0111 D7) exists to close: "share"
+    // succeeds and nothing is shared. Measured pre-fix, an admin's grant on such
+    // an object minted a real `sys_record_share` row that no verdict can ever
+    // consult. Refusing is the fail-closed direction and costs no live access:
+    // the row it declines to write could never have granted any.
+    //
+    // ⛔ Deliberately NOT paired with a change to `checkEdit` / `checkDelete`.
+    // Those REFUSE today, which is safe; widening them to `abstain` would hand
+    // the row to another authority and can turn a refusal into an allow. That is
+    // a decision, recorded on #8119, not a rider on this guard.
+    //
+    // A federated object whose author DECLARED a real remote `owner_id` keeps its
+    // shares — see `federated-phantom-anchors.ts` for why this is a provenance
+    // test and not an `external` test.
+    if (hasPhantomOwnerAnchor(schema)) {
+      throw new Error(
+        `SHARING_NOT_ENABLED: '${object}' is federated (ADR-0015) and its '${OWNER_FIELD}' is the `
+        + `platform's injected anchor, not a remote column — the record-level gates read it off a `
+        + `table that does not have it, so a share row on it would never be consulted`,
+      );
+    }
   }
 
   /**

@@ -19,7 +19,6 @@
     "core-services",
     "http-server",
     "job",
-    "message-queue",
     "metadata-persistence",
     "notification",
     "object-storage",

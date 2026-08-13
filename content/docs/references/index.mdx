@@ -1,6 +1,6 @@
 ---
 title: Protocol Reference
-description: Every schema published by @objectstack/spec — 1578 schemas across 14 protocol modules
+description: Every schema published by @objectstack/spec — 1570 schemas across 14 protocol modules
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -23,7 +23,7 @@ counts are sums of the rows they head. Regenerate with
 | [API Protocol](/docs/references/api) | 28 | 412 | REST/GraphQL contracts, endpoints, routing, realtime, batch, discovery. |
 | [Automation Protocol](/docs/references/automation) | 13 | 68 | Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records. |
 | [Cloud Protocol](/docs/references/cloud) | 11 | 94 | Environments, packages and versions, marketplace, developer portal, tenancy. |
-| [Data Protocol](/docs/references/data) | 30 | 166 | Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer. |
+| [Data Protocol](/docs/references/data) | 29 | 163 | Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer. |
 | [Identity Protocol](/docs/references/identity) | 5 | 28 | Users and accounts, organizations, positions, API keys, SCIM provisioning. |
 | [Integration Protocol](/docs/references/integration) | 1 | 27 | The single connector protocol (ADR-0097) — catalog descriptors and provider-bound instances. |
 | [Kernel Protocol](/docs/references/kernel) | 31 | 176 | Plugin lifecycle and manifests, capabilities and security, metadata loading, service registry. |
@@ -31,9 +31,9 @@ counts are sums of the rows they head. Regenerate with
 | [Security Protocol](/docs/references/security) | 5 | 27 | Permission sets, row-level security, sharing rules, tenancy posture. |
 | [Shared Protocol](/docs/references/shared) | 8 | 31 | Primitives used across every protocol — identifiers, HTTP, expressions, error maps, enums. |
 | [Studio Protocol](/docs/references/studio) | 3 | 35 | Studio designer metadata — the authoring surfaces for the protocols above. |
-| [System Protocol](/docs/references/system) | 37 | 292 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
+| [System Protocol](/docs/references/system) | 36 | 287 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
 | [UI Protocol](/docs/references/ui) | 16 | 148 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
-| **Total** | **200** | **1578** | 14 protocol modules |
+| **Total** | **198** | **1570** | 14 protocol modules |
 
 ---
 
@@ -146,7 +146,7 @@ Environments, packages and versions, marketplace, developer portal, tenancy.
 
 ## Data Protocol
 
-**Source:** `packages/spec/src/data/` · **Import:** `@objectstack/spec/data` · **30 pages, 166 schemas**
+**Source:** `packages/spec/src/data/` · **Import:** `@objectstack/spec/data` · **29 pages, 163 schemas**
 
 Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer.
 
@@ -169,7 +169,6 @@ Objects, fields, queries, filters, datasources and drivers — the ObjectQL laye
 | [`driver/sqlite.zod.ts`](/docs/references/data/driver-sqlite) | `SqliteConfig`, `SqliteWasmConfig`, `SqliteWasmPersistMode` |
 | [`driver/turso.zod.ts`](/docs/references/data/driver-turso) | `TursoConfig`, `TursoTransportMode` |
 | [`external-catalog.zod.ts`](/docs/references/data/external-catalog) | `ExternalCatalog`, `ExternalColumn`, `ExternalTable` |
-| [`external-lookup.zod.ts`](/docs/references/data/external-lookup) | `ExternalDataSource`, `ExternalFieldMapping`, `ExternalLookup` |
 | [`feed.zod.ts`](/docs/references/data/feed) | `FeedFilterMode`, `FeedItemType` |
 | [`field.zod.ts`](/docs/references/data/field) | `CurrencyConfig`, `CurrencyValue`, `Field`, `FieldType`, `LocationCoordinates`, `SelectOption`, `UniqueScope` |
 | [`field-value.zod.ts`](/docs/references/data/field-value) | `Address`, `AddressValue`, `CalendarDateValue`, `ClockTimeValue`, `FileLikeValue`, `FileReferenceIdValue`, `FileValue`, `InstantValue`, `LocationValue`, `ReferenceIdValue` |
@@ -318,7 +317,7 @@ Studio designer metadata — the authoring surfaces for the protocols above.
 
 ## System Protocol
 
-**Source:** `packages/spec/src/system/` · **Import:** `@objectstack/spec/system` · **37 pages, 292 schemas**
+**Source:** `packages/spec/src/system/` · **Import:** `@objectstack/spec/system` · **36 pages, 287 schemas**
 
 The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance.
 
@@ -343,7 +342,6 @@ The runtime environment — logging, jobs, cache, metrics, notifications, i18n a
 | [`job.zod.ts`](/docs/references/system/job) | `CronSchedule`, `IntervalSchedule`, `Job`, `JobExecution`, `JobExecutionStatus`, `OnceSchedule`, `RetryPolicy`, `Schedule` |
 | [`license.zod.ts`](/docs/references/system/license) | `Feature`, `License`, `LicenseMetricType`, `Plan` |
 | [`logging.zod.ts`](/docs/references/system/logging) | `ConsoleDestinationConfig`, `ExtendedLogLevel`, `ExternalServiceDestinationConfig`, `FileDestinationConfig`, `HttpDestinationConfig`, `LogDestination`, `LogDestinationType`, `LogEnrichmentConfig`, `LogEntry`, `LogFormat`, `LogLevel`, `LoggerConfig`, `LoggingConfig`, `StructuredLogEntry` |
-| [`message-queue.zod.ts`](/docs/references/system/message-queue) | `ConsumerConfig`, `DeadLetterQueue`, `MessageQueueConfig`, `MessageQueueProvider`, `TopicConfig` |
 | [`metadata-persistence.zod.ts`](/docs/references/system/metadata-persistence) | `MetadataCollectionInfo`, `MetadataDiffResult`, `MetadataFallbackStrategy`, `MetadataFormat`, `MetadataHistoryQueryOptions`, `MetadataHistoryQueryResult`, `MetadataHistoryRecord`, `MetadataHistoryRetentionPolicy`, `MetadataLoadOptions`, `MetadataLoadResult`, `MetadataLoaderContract`, `MetadataManagerConfig`, `MetadataRecord`, `MetadataSaveOptions`, `MetadataSaveResult`, `MetadataScope`, `MetadataSource`, `MetadataState`, `MetadataStats`, `MetadataWatchEvent`, `PackagePublishResult` |
 | [`metrics.zod.ts`](/docs/references/system/metrics) | `HistogramBucketConfig`, `MetricAggregationConfig`, `MetricAggregationType`, `MetricDataPoint`, `MetricDefinition`, `MetricExportConfig`, `MetricLabels`, `MetricType`, `MetricUnit`, `MetricsConfig`, `ServiceLevelIndicator`, `ServiceLevelObjective`, `TimeSeries`, `TimeSeriesDataPoint` |
 | [`migration.zod.ts`](/docs/references/system/migration) | `AddFieldOperation`, `ChangeSet`, `CreateObjectOperation`, `DataMigrationFlag`, `DeleteObjectOperation`, `ExecuteSqlOperation`, `MigrationDependency`, `MigrationJournalEvent`, `MigrationOperation`, `ModifyFieldOperation`, `RemoveFieldOperation`, `RenameObjectOperation` |

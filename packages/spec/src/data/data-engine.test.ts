@@ -476,6 +476,53 @@ describe('EngineAggregateOptionsSchema', () => {
     expect(options.groupBy).toHaveLength(1);
     expect(options.aggregations).toHaveLength(2);
   });
+
+  // #8032 — `groupBy` is the standard GroupByNodeSchema union, the same
+  // vocabulary as `QuerySchema.groupBy`. The engine has always read the
+  // structured `{ field, dateGranularity }` bucket form (date bucketing,
+  // and the credential-aggregation guard walks it); the declaration used to
+  // say `string[]`, so every correct caller had to cast. These pin the
+  // declaration to the enforced contract, in both directions.
+  it('accepts structured { field, dateGranularity, alias } groupBy buckets (#8032)', () => {
+    const result = EngineAggregateOptionsSchema.safeParse({
+      groupBy: ['region', { field: 'closed_at', dateGranularity: 'quarter' }, { field: 'owner_id', alias: 'owner' }],
+      aggregations: [{ function: 'sum', field: 'amount', alias: 'total' }],
+      timezone: 'Asia/Shanghai',
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.groupBy).toEqual([
+        'region',
+        { field: 'closed_at', dateGranularity: 'quarter' },
+        { field: 'owner_id', alias: 'owner' },
+      ]);
+    }
+  });
+
+  it('keeps the plain-string groupBy form validating byte-identically', () => {
+    const result = EngineAggregateOptionsSchema.safeParse({
+      groupBy: ['status', 'category'],
+      aggregations: [{ function: 'count', alias: 'n' }],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.groupBy).toEqual(['status', 'category']);
+  });
+
+  it('rejects a groupBy bucket whose dateGranularity is not in the vocabulary', () => {
+    const result = EngineAggregateOptionsSchema.safeParse({
+      groupBy: [{ field: 'closed_at', dateGranularity: 'decade' }],
+      aggregations: [{ function: 'count', alias: 'n' }],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a groupBy bucket that names no field', () => {
+    const result = EngineAggregateOptionsSchema.safeParse({
+      groupBy: [{ dateGranularity: 'day' }],
+      aggregations: [{ function: 'count', alias: 'n' }],
+    });
+    expect(result.success).toBe(false);
+  });
 });
 
 describe('EngineCountOptionsSchema', () => {

@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+import { normalizeFilterComparandTypes } from './filter-comparand-type';
 
 /**
  * Unified Query DSL Specification
@@ -1709,6 +1710,19 @@ function convertComparison(node: [string, string, unknown]): FilterCondition {
  * If the input is already a FilterCondition object (not an array), it is returned as-is.
  * If the input is `null` or `undefined`, it is returned as-is.
  *
+ * ## This is the comparand-type door (#7872)
+ *
+ * Whatever this function returns — the lowered AST form or the object
+ * passthrough — has passed {@link normalizeFilterComparandTypes} first: every
+ * LITERAL comparand is one of the accepted six types
+ * (`string | number | bigint | boolean | null | Date`), an exact-range
+ * `bigint` has been narrowed to its number (copy-on-write, so the object
+ * passthrough returns the same reference unless a bigint was narrowed), and
+ * everything else has been refused with the `INVALID_FILTER` / 400 envelope.
+ * The object form used to pass through this function UNEXAMINED, which is how
+ * five drivers came to answer an unsupported comparand type five ways
+ * (#7956's divergence matrix); the door module's header carries the ruling.
+ *
  * @example
  * // Simple condition
  * parseFilterAST(["status", "=", "active"])
@@ -1725,6 +1739,16 @@ function convertComparison(node: [string, string, unknown]): FilterCondition {
  * // → { status: "active" }
  */
 export function parseFilterAST(filter: unknown): FilterCondition | undefined {
+  const lowered = lowerFilterAST(filter);
+  return lowered === undefined ? undefined : normalizeFilterComparandTypes(lowered);
+}
+
+/**
+ * The lowering half of {@link parseFilterAST} — exactly its historical body,
+ * recursion included, split out so the comparand-type door (#7872) runs ONCE
+ * over the finished condition rather than once per recursion level.
+ */
+function lowerFilterAST(filter: unknown): FilterCondition | undefined {
   if (filter == null) return undefined;
   if (!Array.isArray(filter)) return filter as FilterCondition;
   if (filter.length === 0) return undefined;
@@ -1734,7 +1758,7 @@ export function parseFilterAST(filter: unknown): FilterCondition | undefined {
   // Logical node: ["and", cond1, cond2, ...] or ["or", cond1, cond2, ...]
   if (typeof first === 'string' && (first.toLowerCase() === 'and' || first.toLowerCase() === 'or')) {
     const logicOp = `$${first.toLowerCase()}` as '$and' | '$or';
-    const children = filter.slice(1).map((child: unknown) => parseFilterAST(child)).filter(Boolean) as FilterCondition[];
+    const children = filter.slice(1).map((child: unknown) => lowerFilterAST(child)).filter(Boolean) as FilterCondition[];
     if (children.length === 0) return undefined;
     if (children.length === 1) return children[0];
     return { [logicOp]: children } as FilterCondition;
@@ -1748,7 +1772,7 @@ export function parseFilterAST(filter: unknown): FilterCondition | undefined {
   // Legacy flat array: [[field, op, val], [field, op, val], ...]
   // All elements are sub-arrays → treat as implicit AND
   if (filter.every((item: unknown) => Array.isArray(item))) {
-    const children = filter.map((child: unknown) => parseFilterAST(child)).filter(Boolean) as FilterCondition[];
+    const children = filter.map((child: unknown) => lowerFilterAST(child)).filter(Boolean) as FilterCondition[];
     if (children.length === 0) return undefined;
     if (children.length === 1) return children[0];
     return { $and: children } as FilterCondition;

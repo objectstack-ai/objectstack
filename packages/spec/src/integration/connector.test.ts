@@ -907,13 +907,14 @@ describe('[#4911] `./integration` no longer publishes an outbound rate-limit sha
 //                    CONCEPT: the column mapping of a CSV/table import.
 //
 // The first two are base-and-superset, so "converge them" is a tempting read.
-// It is wrong in both directions: widening the base to 7 keys pushes connector
-// sync semantics onto `data/external-lookup.zod.ts` which also extends it
-// (`automation/sync.zod.ts` embedded the base too until its retirement in
-// #4738), and narrowing the connector side to 4 is a retirement of
+// It is wrong in both directions: widening the base to 7 keys pushed connector
+// sync semantics onto every other extender of the base
+// (`data/external-lookup.zod.ts` extended it until its #8075 retirement;
+// `automation/sync.zod.ts` embedded it too until its retirement in #4738), and
+// narrowing the connector side to 4 is a retirement of
 // three live keys, not a naming fix. ADR-0112 D9a's prefix remedy applies, and
-// the file next door already demonstrates it: `data/ExternalFieldMappingSchema`
-// extends the same base and, purely because it carries a prefix, never entered
+// the file next door already demonstrated it: `data/ExternalFieldMappingSchema`
+// extended the same base and, purely because it carried a prefix, never entered
 // the dual-source baseline at all.
 //
 // The `./data` side is not a spelling variant of anything. The tests below pin
