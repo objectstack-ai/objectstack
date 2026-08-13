@@ -530,6 +530,32 @@ function isTypeOnlyClause(clause) {
   return names.length > 0 && names.every((n) => /^type\s/.test(n));
 }
 
+/**
+ * `path -> specifiers`, for the whole process. Crossing the package boundary
+ * means the SAME dependency source is walked once per consuming config — nine
+ * of them alias `@objectstack/core` — and both the read and the comment strip
+ * are pure functions of the file.
+ *
+ * Measured on this repo, full scan, three runs each: ~1.6s before this change;
+ * ~8.5s with the crossing and no cache; ~5.1s with it. What remains is not the
+ * crossing (~0.5s) but comment stripping every source file (~3.0s), which is
+ * correctness, not overhead — see `extractRuntimeImports`.
+ */
+const importCache = new Map();
+
+function fileRuntimeImports(file) {
+  const cached = importCache.get(file);
+  if (cached) return cached;
+  let specs;
+  try {
+    specs = extractRuntimeImports(readFileSync(file, 'utf8'));
+  } catch {
+    specs = [];
+  }
+  importCache.set(file, specs);
+  return specs;
+}
+
 const RELATIVE_CANDIDATE_SUFFIXES = ['', '.ts', '.tsx', '.mts', '.cts', '.js', '.mjs', '.cjs', '.jsx'];
 
 function resolveRelative(fromFile, spec) {
@@ -593,13 +619,7 @@ function testReachableWorkspaceImports(pkg, workspaceNames, crossInto) {
     if (seen.has(file)) continue;
     seen.add(file);
     if (!SOURCE_FILE.test(file)) continue;
-    let text;
-    try {
-      text = readFileSync(file, 'utf8');
-    } catch {
-      continue;
-    }
-    for (const spec of extractRuntimeImports(text)) {
+    for (const spec of fileRuntimeImports(file)) {
       if (spec.startsWith('.')) {
         const resolved = resolveRelative(file, spec);
         if (resolved && !seen.has(resolved)) queue.push({ file: resolved, via });
@@ -1082,6 +1102,10 @@ function aliasedSourceFile(spec, entries, configDir, root) {
  * @returns {{ packages: Array, artifactPackages: Set<string>, totalPackages: number }}
  */
 function scan(root) {
+  // Per-scan, not per-process: `--self-test` rewrites fixture files BETWEEN
+  // `check()` calls to exercise registry drift, and a cache that outlived a
+  // scan would answer those later passes from the pre-rewrite content.
+  importCache.clear();
   const workspace = listWorkspacePackages(root);
   const names = new Set(workspace.map((p) => p.name));
   const artifactPackages = new Set(workspace.filter((p) => resolvesToArtifact(p.json)).map((p) => p.name));
