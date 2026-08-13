@@ -11,6 +11,11 @@ import {
   hideRevokedSessionRow,
   reconcileSessionDelete,
 } from './session-tombstone.js';
+import {
+  injectClientSecretOnRead,
+  liftClientSecretForWrite,
+  type SecretResolvingEngine,
+} from './sso-client-secret.js';
 
 /**
  * Mapping from better-auth model names to ObjectStack protocol object names.
@@ -689,6 +694,12 @@ export const withSystemReadContext = withSystemContext;
  */
 export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
   const dataEngine = withSystemContext(rawDataEngine);
+  // [#8009] The OIDC `clientSecret` seam needs the engine's PRIVILEGED secret
+  // dereference, which `withSystemContext` deliberately does not carry (it
+  // exposes the CRUD verbs only). `resolveSecretField` is a separately-named
+  // privileged verb for exactly that reason (#7823), so it comes off the raw
+  // engine. See `sso-client-secret.ts` for why the seam sits here at all.
+  const secretEngine = rawDataEngine as unknown as SecretResolvingEngine;
   // Field-name bridging for better-auth plugins that expose NO `schema` option
   // (e.g. @better-auth/sso): when a model is remapped via AUTH_MODEL_TO_PROTOCOL,
   // its camelCase model fields are also converted to snake_case columns on the
@@ -724,6 +735,10 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
         const bridged = objectName !== model;
         const payload = normaliseIdentifierWrite(model, data);
         const row = bridged ? remapKeys(payload, camelToSnake) : payload;
+        // [#8009] Registration write door #1. Lift the OIDC `clientSecret` out
+        // of the cleartext JSON blob into the `secret`-typed column so the
+        // ENGINE encrypts it; `oidc_config` keeps everything else.
+        liftClientSecretForWrite(objectName, row);
         // [#7725] `sys_member` declares `{organization_id, user_id}` unique, and
         // the platform auto-binds every user at sign-up (ADR-0093 D1/D2), so
         // better-auth's accept-invitation `createMember` collides on a pair that
@@ -760,6 +775,10 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
         // [#7732] A revoked session is not a session — see `session-tombstone.ts`.
         if (await hideRevokedSessionRow(objectName, result)) return null;
         if (revokedAtIsBorrowed) delete (result as Record<string, unknown>).revoked_at;
+        // [#8009] Read half — MANDATORY. `/sso/callback` reads the provider back
+        // and authenticates to the IdP with the plaintext; encrypt-on-write
+        // without this breaks every federated login.
+        await injectClientSecretOnRead(secretEngine, objectName, result);
         const norm = normaliseLegacyDates(model, result);
         return (bridged ? remapKeys(norm, snakeToCamel) : norm) as T;
       },
@@ -786,6 +805,9 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
         });
         // [#7732] A revoked session is not a session — see `session-tombstone.ts`.
         const results = await filterRevokedSessionRows(objectName, found);
+        // [#8009] Same read half, per row — better-auth reaches the provider
+        // through findMany as well as findOne.
+        for (const r of results) await injectClientSecretOnRead(secretEngine, objectName, r);
 
         return results.map((r) => {
           const norm = normaliseLegacyDates(model, r as Record<string, any>);
@@ -815,6 +837,10 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
 
         const normalised = normaliseIdentifierWrite(model, update as any);
         const patch = bridged ? remapKeys(normalised, camelToSnake) : normalised;
+        // [#8009] Write door #2 — `/sso/update-provider`. A create-only seam
+        // would encrypt at registration and then write cleartext back on the
+        // first config edit, leaving a column that only LOOKS protected.
+        liftClientSecretForWrite(objectName, patch);
         const result = await dataEngine.update(objectName, { ...patch, id: record.id });
         if (!result) return null;
         const norm = normaliseLegacyDates(model, result);
@@ -832,6 +858,9 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
         const records = await dataEngine.find(objectName, { where: filter });
         const normalised = normaliseIdentifierWrite(model, update);
         const patch = bridged ? remapKeys(normalised, camelToSnake) : normalised;
+        // [#8009] Write door #3. Same column, same rule — a bulk edit must not
+        // be the one path that writes the secret back in cleartext.
+        liftClientSecretForWrite(objectName, patch);
         for (const record of records) {
           await dataEngine.update(objectName, { ...patch, id: record.id });
         }

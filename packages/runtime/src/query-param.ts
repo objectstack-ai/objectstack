@@ -39,12 +39,23 @@
  * spelling either: ADR-0112's registered `VALIDATION_FAILED` and ADR-0114's
  * closed field-level catalog (`FieldErrorCode`) already say all of this.
  *
- * What these parsers deliberately do NOT do is police RANGE. A value that is
+ * What these parsers do NOT do, by default, is police RANGE. A value that is
  * out of range but in domain (`?limit=1000`) is the service's declared business
  * — the notifications inbox clamps it, the automation engine slices by it — and
  * a boundary that started refusing those would be changing an answer that was
- * already defensible. These gates add a refusal for values that were never of
- * the declared type at all.
+ * already defensible. So range enforcement is opt-in, per call site
+ * ({@link parseIntegerParam}'s `bounds`), read off the call site's own
+ * declared schema rather than re-listed — never switched on module-wide.
+ *
+ * #8054 is that opt-in's origin case, and the same shape as #7359 one field
+ * over: `ListRunsRequestSchema` had always declared `limit`'s range
+ * (`.min(1).max(100)`), and the boundary was not reading it —
+ *
+ *   ?limit=0    →  200, zero rows   →  "this flow has never run", confidently
+ *   ?limit=101  →  200, cap ignored →  a result-set size nothing had asked for
+ *
+ * — so that one call site now threads its own bounds through; every other
+ * caller of `parseIntegerParam` is unaffected, because it passes none.
  */
 
 import type { FieldErrorCode } from '@objectstack/spec/api';
@@ -95,8 +106,25 @@ export function parseBooleanParam(param: string, raw: unknown): boolean | undefi
 }
 
 /**
+ * Inclusive numeric bounds a call site may pass to {@link parseIntegerParam}
+ * so it can police RANGE on top of type — read off the caller's own declared
+ * schema (`ExistingSchema.shape.limit.unwrap().minValue` / `.maxValue`),
+ * never re-listed as literals. That is the #7359 discipline
+ * ({@link parseEnumParam} reading `ExecutionStatus.options`) applied to a
+ * bounded number instead of a closed set: the wire's declared range and the
+ * boundary's enforced range cannot drift, because they are the same read.
+ */
+export interface IntegerParamBounds {
+    /** Inclusive lower bound — a value below it is refused as `min_value`. */
+    readonly min?: number;
+    /** Inclusive upper bound — a value above it is refused as `max_value`. */
+    readonly max?: number;
+}
+
+/**
  * A whole-number parameter — the window sizes both `?limit=` defects were filed
- * against (#6928, #7300).
+ * against (#6928, #7300), and, once `bounds` is supplied, the RANGE defect
+ * #8054 filed against the same parameter.
  *
  * `Number(query.limit)` answers `NaN` for `?limit=abc`, and NaN then survives
  * the guards downstream, because the two idioms services use to default a
@@ -108,21 +136,40 @@ export function parseBooleanParam(param: string, raw: unknown): boolean | undefi
  * REFUSED: values that are not a whole number at all — `abc`, `10abc`, `1.5`,
  * `Infinity`, a repeated `?limit=1&limit=2`, a structured value.
  *
- * NOT refused, deliberately: an out-of-RANGE number. Range is the consuming
- * service's declared contract (clamp, slice, or reject with its own message),
- * and this gate must not start answering 400 for a value that already had a
- * defensible answer.
+ * RANGE (`bounds`) is opt-in, per call site, and OFF unless a bounds object is
+ * passed — a caller that omits the third argument is byte-for-byte the
+ * pre-#8054 gate: an out-of-range number (`?limit=1000`) reaches the service
+ * unrefused, exactly as before, because range used to be nobody's job at this
+ * boundary. #8054 found the one call site (`ListRunsRequestSchema`'s `limit`)
+ * that HAD declared a range and was not enforcing it — `?limit=0` answered
+ * "no runs" with a 200, and `?limit=101` was served uncapped — so that call
+ * site now threads its own `.min()`/`.max()` through as `bounds`, and a value
+ * outside them is refused with the ADR-0114 field code the property name
+ * already mirrors (`min_value` / `max_value`), the same shape
+ * {@link parseEnumParam}'s `invalid_option` refusal takes for `status`.
  *
  * The falsy gate is the one both call sites already had
  * (`query.limit ? Number(query.limit) : undefined`): absent, `null`, `''` and
- * `0` have always meant "no limit here", and they keep meaning that instead of
- * becoming a new 400.
+ * an in-process (non-string) `0` have always meant "no limit here", and they
+ * keep meaning that — checked BEFORE `bounds`, so they never become a new 400
+ * even when a `min` above 0 is supplied. Only a numeric STRING (`?limit=0`,
+ * truthy as a string) reaches the bounds check.
  */
-export function parseIntegerParam(param: string, raw: unknown): number | undefined {
+export function parseIntegerParam(
+    param: string,
+    raw: unknown,
+    bounds?: IntegerParamBounds,
+): number | undefined {
     if (!raw) return undefined;
     const parsed = Number(raw);
     if (!Number.isInteger(parsed)) {
         throw invalidQueryParam(param, 'invalid_number', 'a whole number', raw);
+    }
+    if (bounds?.min !== undefined && parsed < bounds.min) {
+        throw invalidQueryParam(param, 'min_value', `a whole number >= ${bounds.min}`, raw);
+    }
+    if (bounds?.max !== undefined && parsed > bounds.max) {
+        throw invalidQueryParam(param, 'max_value', `a whole number <= ${bounds.max}`, raw);
     }
     return parsed;
 }

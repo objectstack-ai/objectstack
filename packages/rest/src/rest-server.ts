@@ -56,6 +56,11 @@ import type { DirectMountedRoute, MountedRouteSource } from './direct-mount.js';
 import { RestServerConfig, RestApiConfig, CrudEndpointsConfig, MetadataEndpointsConfig, BatchEndpointsConfig, RouteGenerationConfig } from '@objectstack/spec/api';
 import { DataProtocol, MetadataProtocol } from '@objectstack/spec/api';
 import type { FieldErrorCode } from '@objectstack/spec/api';
+// [#8073] The closed ADR-0112 error vocabulary, so the explain family's single
+// refusal emitter types its `code` parameter as the vocabulary rather than as
+// `string` — an invented code is a compile error at the call site instead of a
+// runtime surprise on whichever arm a test happens to drive.
+import type { ErrorCode } from '@objectstack/spec/api';
 // The async-import row ceiling has exactly one definition, in the spec, whose
 // TSDoc is its public statement (#6535). rest is the only enforcer, so it reads
 // that export rather than re-declaring the literal beside a "mirrors spec" comment.
@@ -72,6 +77,16 @@ import {
     effectiveOperationsArray,
     DATA_ACTION_TO_API_OPERATION,
 } from '@objectstack/spec/data';
+// [#8013] The SHARED envelope writer (#3973), aliased: this module already has a
+// module-scope `sendError` of its own — the sanitizing responder that maps a
+// THROWN error onto a status — and the two are not interchangeable. This one
+// emits the declared `{ success: false, error: { code, message } }` for a refusal
+// the handler DECIDED, with `code` typed to the closed ADR-0112 vocabulary rather
+// than `string`. Adding a call site here moves no `check:route-envelope` count:
+// the body literal lives in `@objectstack/types` (the pinned `SHARED_BUILDER`),
+// and this file is audited `dialectOnly` for the two non-conforming dialects it
+// still emits — which this deliberately is not.
+import { sendError as sendEnvelopeError } from '@objectstack/types';
 
 /**
  * The protocol slice the REST layer actually consumes (ADR-0076 D9 / #2462
@@ -3211,7 +3226,59 @@ export class RestServer {
      * is why this used to sniff the shape. There is one shape now.
      */
     private filterAppForUser(item: any, sysPerms: Set<string>, serviceGate?: (name: string) => boolean): any | null {
-        if (!item || typeof item !== 'object') return item;
+        return this.filterAppForUserWithReason(item, sysPerms, serviceGate).app;
+    }
+
+    /**
+     * {@link filterAppForUser}, plus WHICH gate withheld the app.
+     *
+     * The gate above collapses three different refusals into one `null`, and for
+     * the LIST route that is exactly right — every one of them means "not in
+     * your list". The by-name route is where they stop being the same answer
+     * (#8013).
+     *
+     * ## Why the caller needs the reason
+     *
+     * `GET /meta/app/<name>` answered a 404-equivalent for all three, so an
+     * app the session may never use and an app that does not exist were
+     * BYTE-IDENTICAL on the wire. The console has nothing to branch on, so it
+     * renders its only copy for an absent app — "it may still be publishing" —
+     * over a permanent authorization denial. Measured cost (objectui#4252): two
+     * acceptance-test batches spent chasing a "platform defect" that was a
+     * missing permission-set binding.
+     *
+     * ## Only ONE of the three converts, and that is the whole design
+     *
+     * The maintainer ruling (2026-08-12) licenses an explicit denial for
+     * `permission` alone. The other two keep answering absence, for reasons
+     * that are not stylistic:
+     *
+     *  - `unpublished` — ADR-0045 §3 says an unpublished app is *externally
+     *    unobservable*, not merely unlisted. A 403 confirms existence, which is
+     *    precisely what that contract withholds; `meta-app-publish-gate.test.ts`
+     *    has pinned the 404-over-403 choice since #4829 and it stands.
+     *  - `service` — an absent optional kernel service (ADR-0057 D10) is a
+     *    deployment fact about the platform, not a statement about this caller.
+     *    Nothing is denied TO the session, so there is no denial to report.
+     *
+     * That partition is the security boundary of #8013, and it cuts one way
+     * only: a denial for `permission` makes an app the caller may not use
+     * observable BY NAME, which the ruling accepts because a by-name probe
+     * already implies the name. Widening it to a name that resolves to nothing
+     * would make every app name on the platform enumerable — a different and
+     * unruled change. Hence `withheld` is set from the branch that fired, never
+     * inferred from `app == null` at the call site.
+     *
+     * Ordering is load-bearing for the same reason: `unpublished` is judged
+     * FIRST, so an app that is both unpublished and permission-gated reports
+     * `unpublished` and stays absent. ADR-0045 §3 wins over the disclosure.
+     */
+    private filterAppForUserWithReason(
+        item: any,
+        sysPerms: Set<string>,
+        serviceGate?: (name: string) => boolean,
+    ): { app: any | null; withheld?: 'unpublished' | 'permission' | 'service' } {
+        if (!item || typeof item !== 'object') return { app: item };
         // ADR-0045 §3 (as revised 2026-08, #4829) — the publish gate. An
         // UNPUBLISHED app is externally unobservable, not merely unlisted: only
         // builders (studio/setup access) receive it at all, for direct-URL
@@ -3229,20 +3296,20 @@ export class RestServer {
         // system. A hidden app is fully routable and permission-checked here;
         // only `_unpublished` withholds it.
         if (item._unpublished === true && !sysPerms.has('studio.access') && !sysPerms.has('setup.access')) {
-            return null;
+            return { app: null, withheld: 'unpublished' };
         }
         const reqApp = Array.isArray(item.requiredPermissions) ? item.requiredPermissions : [];
         if (reqApp.length > 0 && !reqApp.every((p: string) => sysPerms.has(p))) {
-            return null;
+            return { app: null, withheld: 'permission' };
         }
         // ADR-0057 D10 — capability gate: hide when the named kernel service is
         // absent. Fail-open when the gate can't be probed (serviceGate undefined).
         if (typeof item.requiresService === 'string' && serviceGate && serviceGate(item.requiresService) === false) {
-            return null;
+            return { app: null, withheld: 'service' };
         }
         const nav = Array.isArray(item.navigation) ? item.navigation : null;
         const areas = Array.isArray(item.areas) ? item.areas : null;
-        if (!nav && !areas) return item;
+        if (!nav && !areas) return { app: item };
 
         const filterNav = (entries: any[]): any[] => {
             const out: any[] = [];
@@ -3347,9 +3414,11 @@ export class RestServer {
         };
 
         return {
-            ...item,
-            ...(nav ? { navigation: filterNav(nav) } : {}),
-            ...(areas ? { areas: filterAreas(areas) } : {}),
+            app: {
+                ...item,
+                ...(nav ? { navigation: filterNav(nav) } : {}),
+                ...(areas ? { areas: filterAreas(areas) } : {}),
+            },
         };
     }
 
@@ -5849,8 +5918,42 @@ export class RestServer {
                                     );
                                     const registered = await this.resolveRegisteredServices((ctx as any).__kernel, [visible]);
                                     const serviceGate = registered ? (n: string) => registered.has(n) : undefined;
-                                    visible = this.filterAppForUser(visible, sysPerms, serviceGate);
+                                    const gated = this.filterAppForUserWithReason(visible, sysPerms, serviceGate);
+                                    visible = gated.app;
                                     if (visible == null) {
+                                        // [#8013] A PERMISSION denial is reported as
+                                        // one — everything else keeps answering
+                                        // absence. See
+                                        // {@link filterAppForUserWithReason} for why
+                                        // only this one of the three gates converts,
+                                        // and why the reason comes from the branch
+                                        // that fired rather than from `null`.
+                                        //
+                                        // The condition is generic, so it takes the
+                                        // ADR-0112 STANDARD catalog code rather than
+                                        // a bespoke synonym — 403 `PERMISSION_DENIED`,
+                                        // which is also what
+                                        // `standardErrorCodeForHttpStatus(403)`
+                                        // answers. objectui#4252 branches on exactly
+                                        // this `code`.
+                                        //
+                                        // Written through the shared `sendError`
+                                        // (`@objectstack/types`), aliased because this
+                                        // module has a local function of that name.
+                                        // That builder emits the DECLARED envelope
+                                        // `{ success: false, error: { code, message } }`,
+                                        // so the console reads `body.error.code` — the
+                                        // same accessor as the absence answer below,
+                                        // rather than a second dialect to special-case.
+                                        if (gated.withheld === 'permission') {
+                                            sendEnvelopeError(
+                                                res,
+                                                403,
+                                                'PERMISSION_DENIED',
+                                                `You do not have permission to open the '${req.params.name}' app.`,
+                                            );
+                                            return;
+                                        }
                                         res.status(404).json({
                                             error: { code: 'RESOURCE_NOT_FOUND', message: 'Metadata item not found or access denied.' },
                                         });
@@ -6577,6 +6680,93 @@ export class RestServer {
                         const name = section
                             ? `${section}/${req.params?.name ?? ''}`
                             : String(req.params?.name ?? '');
+                        // [#8278] The AUTHORITATIVE published store is consulted
+                        // first: the `state:'active'` `sys_metadata` overlay row.
+                        // Mirrors the dispatcher fix (#8031 / PR #8254,
+                        // `packages/runtime/src/domains/meta.ts`) onto the
+                        // transport that actually serves the cloud runtime — the
+                        // two doors answered the same question from two stores,
+                        // and only one of them had been corrected.
+                        //
+                        // Two publish lifecycles write to two different places:
+                        //
+                        //   - `MetadataManager.publishPackage` snapshots a body
+                        //     into the row-local `publishedDefinition` key of its
+                        //     own in-memory registry — the ADR-0016-era package
+                        //     publish, which is what `getPublished` below reads.
+                        //   - `publishPackageDrafts` / `promoteDraft` flips the
+                        //     artifact's `sys_metadata` row `state:'draft' →
+                        //     'active'`. ADR-0027 (E)(5) defines sealing a publish
+                        //     as exactly that flip, `SysMetadataRepository` names
+                        //     `'active'` "the published, live overlay", and
+                        //     ADR-0033 §2 routes EVERY runtime authoring write
+                        //     into that same ADR-0027 draft — so promoting it is
+                        //     what "published" means for anything authored at
+                        //     runtime. Those items were absent from the registry
+                        //     `getPublished` consults, so this route answered 404
+                        //     about an item that IS published.
+                        //
+                        // `getMetaItemLayered` is the narrow primitive on purpose.
+                        // Its overlay layer is a strict `state:'active'` lookup
+                        // that never reads a draft, and it reports that layer
+                        // SEPARATELY from the code layer — so a null overlay is
+                        // positively "no runtime-published row" and falls through
+                        // to the untouched `getPublished` path below, which keeps a
+                        // code-published item resolving to byte-identical bytes.
+                        // The broader `getMetaItem` would not do: it folds the code
+                        // layer into its own answer, so this route could no longer
+                        // tell the two stores apart.
+                        //
+                        // NO `organizationId`, and that is the ONE deliberate
+                        // divergence from the dispatcher twin, which resolves one
+                        // and passes it. `packages/rest` carries no
+                        // `resolveActiveOrganizationId` and no org plumbing at all
+                        // — the same seam `package-routes.ts` names at its
+                        // `deletePackage` call ("the dispatcher twin owns that
+                        // seam"). Inventing org plumbing here to close a 404 would
+                        // be a new seam smuggled in under a bug fix. Omitting it
+                        // reads the env-wide (`organization_id: null`) row, which
+                        // is symmetric with what an org-less `publishPackageDrafts`
+                        // (`request.organizationId ?? null`) writes — so this door
+                        // resolves exactly the publishes this door can produce.
+                        // Environment scoping still holds: it comes from WHICH
+                        // protocol `resolveProtocol` hands back, not from the
+                        // request payload (`getMetaItemLayered` declares no
+                        // `environmentId` member).
+                        let publishedProtocol: any;
+                        try {
+                            publishedProtocol = await this.resolveProtocol(environmentId, req);
+                        } catch { /* fall through to the code/package snapshot below */ }
+                        if (typeof publishedProtocol?.getMetaItemLayered === 'function') {
+                            try {
+                                const layered = await publishedProtocol.getMetaItemLayered({ type, name });
+                                if (layered?.overlay !== undefined && layered?.overlay !== null) {
+                                    res.json(layered.overlay);
+                                    return;
+                                }
+                            } catch (overlayError: any) {
+                                // [#5532] The overlay read is NOT blanket-swallowed,
+                                // and this is the second deliberate divergence from
+                                // the dispatcher twin. `getMetaItemLayered` documents
+                                // that it throws `503 SERVICE_UNAVAILABLE` ONLY when a
+                                // read that would decide a layer did not happen; the
+                                // benign "table not provisioned yet" case genuinely
+                                // means "no overlay row" and returns normally with
+                                // `overlay: null`. So a throw here is an availability
+                                // failure, and falling through would let it reach the
+                                // client as `404 Not found` — an availability failure
+                                // reported as an existence fact, which is exactly the
+                                // #5532 defect this package pins in
+                                // `rest-meta-outage-vs-miss.test.ts`. A declared
+                                // status is re-thrown so `handleRouteError` renders
+                                // the producer's own 503; anything undeclared (a
+                                // third-party protocol throwing something shapeless)
+                                // still falls through, so this cannot make the
+                                // code-published path newly fail closed.
+                                if (typeof overlayError?.status === 'number') throw overlayError;
+                            }
+                        }
+
                         const svc = await this.resolveMetadataService(environmentId, req);
                         if (typeof (svc as any)?.getPublished !== 'function') {
                             res.status(501).json({
@@ -9170,6 +9360,45 @@ export class RestServer {
             catch { return undefined; }
         };
 
+        /**
+         * [#8073] The ONE refusal emitter for this route family — every arm of
+         * both handlers goes through it, so "explain and my-delegable-scope
+         * answer the same shape" is a property of the code rather than of
+         * eight literals that happen to agree.
+         *
+         * Before this, the family carried BOTH dialects ADR-0112 D5 retires:
+         * the 401/501/400/403 arms were flat `{ code, message }` and the two
+         * 500s were `{ code, error: 'a bare string' }`, so `body.error.code` —
+         * the one position D5 declares — read `undefined` on all six. #7035
+         * (PR #7293) had already removed both from this file's `/meta`
+         * refusals and #7981 (PR #8071) from `registerSecurityEndpoints`, the
+         * immediately ADJACENT registrar: a client calling `explain` and then
+         * `suggested-bindings` met two shapes inside one `security` family.
+         *
+         * Emitted through the SHARED builder (`sendError` from
+         * `@objectstack/types`, imported as `sendEnvelopeError` because this
+         * module has a local `sendError` of its own — the sanitizing responder
+         * for THROWN errors, a different thing). That is what makes this the
+         * reference shape by construction rather than a ninth local literal
+         * agreeing with the eight it replaced, and it types `code` to the
+         * closed vocabulary for free.
+         *
+         * ⛔ Status codes are untouched: only the POSITION of `code` and
+         * `message` moves. `detail` — the 400 arm's Zod-issue dump — moves to
+         * `error.details`, the slot `ApiErrorSchema` actually declares for
+         * structured context; as a top-level sibling it was undeclared.
+         */
+        const respondError = (
+            res: any,
+            status: number,
+            code: ErrorCode,
+            message: string,
+            details?: unknown,
+        ): void => sendEnvelopeError(
+            res, status, code, message,
+            details === undefined ? undefined : { details },
+        );
+
         const handler = async (req: any, res: any) => {
             try {
                 const environmentId = isScoped ? req.params?.environmentId : undefined;
@@ -9178,18 +9407,18 @@ export class RestServer {
                 if (!context?.userId) {
                     // The explain surface stays authenticated-only — it is an
                     // admin diagnosis tool. (Anonymous is already 401ed above.)
-                    return res.status(401).json({
-                        code: 'UNAUTHORIZED',
-                        message: 'The access-explanation endpoint requires an authenticated caller.',
-                    });
+                    return respondError(
+                        res, 401, 'UNAUTHORIZED',
+                        'The access-explanation endpoint requires an authenticated caller.',
+                    );
                 }
 
                 const svc = await resolveService(environmentId, req);
                 if (!svc || typeof svc.explain !== 'function') {
-                    return res.status(501).json({
-                        code: 'NOT_IMPLEMENTED',
-                        message: 'Access explanation is not available on this deployment (no security service with explain).',
-                    });
+                    return respondError(
+                        res, 501, 'NOT_IMPLEMENTED',
+                        'Access explanation is not available on this deployment (no security service with explain).',
+                    );
                 }
 
                 // GET reads the request from the query string, POST from the
@@ -9212,11 +9441,11 @@ export class RestServer {
                     ...(src.recordId != null && src.recordId !== '' ? { recordId: src.recordId } : {}),
                 });
                 if (!parsed.success) {
-                    return res.status(400).json({
-                        code: 'VALIDATION_FAILED',
-                        message: 'Invalid explain request — expected { object: string, operation: read|create|update|delete|transfer|restore|purge, userId?: string, recordId?: string }.',
-                        detail: String(parsed.error?.message ?? '').slice(0, 1000),
-                    });
+                    return respondError(
+                        res, 400, 'VALIDATION_FAILED',
+                        'Invalid explain request — expected { object: string, operation: read|create|update|delete|transfer|restore|purge, userId?: string, recordId?: string }.',
+                        String(parsed.error?.message ?? '').slice(0, 1000),
+                    );
                 }
 
                 const decision = await svc.explain(parsed.data, context);
@@ -9228,10 +9457,13 @@ export class RestServer {
                     error?.name === 'PermissionDeniedError' ||
                     msg.startsWith('[Security] Access denied')
                 ) {
-                    return res.status(403).json({ code: 'PERMISSION_DENIED', message: msg.slice(0, 1000) });
+                    return respondError(res, 403, 'PERMISSION_DENIED', msg.slice(0, 1000));
                 }
                 logError('[REST] Security explain error:', error);
-                res.status(500).json({ code: 'EXPLAIN_FAILED', error: msg.slice(0, 500) });
+                // The 500 arm keeps its 500-char cap: an unexpected fault's
+                // message is not a contract, and truncating it stays a
+                // sanitization step — only the position of the words moves.
+                respondError(res, 500, 'EXPLAIN_FAILED', msg.slice(0, 500));
             }
         };
 
@@ -9271,25 +9503,25 @@ export class RestServer {
                 const context = await this.resolveExecCtx(environmentId, req);
                 if (this.enforceAuth(req, res, context)) return;
                 if (!context?.userId) {
-                    return res.status(401).json({
-                        code: 'UNAUTHORIZED',
-                        message: 'The delegable-scope endpoint requires an authenticated caller.',
-                    });
+                    return respondError(
+                        res, 401, 'UNAUTHORIZED',
+                        'The delegable-scope endpoint requires an authenticated caller.',
+                    );
                 }
 
                 const svc = await resolveService(environmentId, req);
                 if (!svc || typeof svc.describeDelegableScope !== 'function') {
-                    return res.status(501).json({
-                        code: 'NOT_IMPLEMENTED',
-                        message: 'Delegated administration is not available on this deployment (no security service with describeDelegableScope).',
-                    });
+                    return respondError(
+                        res, 501, 'NOT_IMPLEMENTED',
+                        'Delegated administration is not available on this deployment (no security service with describeDelegableScope).',
+                    );
                 }
 
                 res.json(await svc.describeDelegableScope(context));
             } catch (error: any) {
                 const msg = String(error?.message ?? error ?? '');
                 logError('[REST] Delegable scope error:', error);
-                res.status(500).json({ code: 'DELEGABLE_SCOPE_FAILED', error: msg.slice(0, 500) });
+                respondError(res, 500, 'DELEGABLE_SCOPE_FAILED', msg.slice(0, 500));
             }
         };
 
@@ -9314,16 +9546,55 @@ export class RestServer {
             try { return await this.sharingServiceProvider(environmentId); }
             catch { return undefined; }
         };
-        const respond501 = (res: any) => res.status(501).json({
-            code: 'NOT_IMPLEMENTED',
-            message: 'Sharing service is not configured on this deployment',
-        });
+        /**
+         * [#8111] The ONE refusal emitter for the record-sharing family — the
+         * 501, all five mapped verdicts and all three 500s go through it, so
+         * "list, grant and revoke answer the same shape" is a property of the
+         * code rather than of nine literals that happen to agree.
+         *
+         * Before this, the family carried BOTH dialects ADR-0112 D5 retires:
+         * `respond501` was flat `{ code, message }` and every other arm was
+         * `{ code, error: '<bare string>' }`, so `body.error.code` — the one
+         * position D5 declares — read `undefined` on all nine. #7035
+         * (PR #7293) had already removed both from this file's `/meta`
+         * refusals, #7981 (PR #8071) from `registerSecurityEndpoints` and
+         * #8073 (PR #8174) from the `/security/explain` pair.
+         *
+         * Emitted through the SHARED builder (`sendError` from
+         * `@objectstack/types`, imported as `sendEnvelopeError` because this
+         * module has a local `sendError` of its own — the sanitizing responder
+         * for THROWN errors, a different thing). That is what makes this the
+         * reference shape by construction rather than a tenth local literal
+         * agreeing with the nine it replaced, and it types `code` to the
+         * closed ADR-0112 vocabulary for free.
+         *
+         * ⛔ Status codes are untouched and no code VALUE moves: only the
+         * POSITION of `code` and `message` changes.
+         */
+        const respondError = (
+            res: any,
+            status: number,
+            code: ErrorCode,
+            message: string,
+        ): void => sendEnvelopeError(res, status, code, message);
+
+        const respond501 = (res: any) => respondError(
+            res, 501, 'NOT_IMPLEMENTED',
+            'Sharing service is not configured on this deployment',
+        );
         // [ADR-0111] The service enforces authorization (D1/D4/D5/D7) and
         // signals the verdict via message prefixes, the plugin's established
         // error idiom — this maps them onto HTTP. Returns true when handled.
+        //
+        // [#8111] The prefix is a SERVER-INTERNAL service→REST derivation: it
+        // is stripped below and never reaches the wire, so no consumer can
+        // read it (censused at claim — the only in-repo `startsWith(CODE)`
+        // readers are this file's own route mappings plus one
+        // `plugin-approvals` check on an error it threw itself in-process).
+        // It therefore stays exactly as it is; only the response SHAPE moved.
         const respondSharingError = (res: any, error: any): boolean => {
             const msg = String(error?.message ?? error ?? '');
-            const map: Array<[string, number]> = [
+            const map: Array<[ErrorCode, number]> = [
                 ['VALIDATION_FAILED', 400],
                 ['PERMISSION_DENIED', 403],
                 ['NOT_FOUND', 404],
@@ -9332,10 +9603,10 @@ export class RestServer {
             ];
             for (const [code, status] of map) {
                 if (msg.startsWith(code)) {
-                    res.status(status).json({
-                        code,
-                        error: msg.replace(new RegExp(`^${code}:\\s*`), ''),
-                    });
+                    respondError(
+                        res, status, code,
+                        msg.replace(new RegExp(`^${code}:\\s*`), ''),
+                    );
                     return true;
                 }
             }
@@ -9359,7 +9630,10 @@ export class RestServer {
                 } catch (error: any) {
                     if (respondSharingError(res, error)) return;
                     logError('[REST] List shares error:', error);
-                    res.status(500).json({ code: 'SHARES_LIST_FAILED', error: String(error?.message ?? error).slice(0, 500) });
+                    // The 500 arms keep their 500-char cap: an unexpected
+                    // fault's message is not a contract, and truncating it
+                    // stays a sanitization step — only the position moves.
+                    respondError(res, 500, 'SHARES_LIST_FAILED', String(error?.message ?? error).slice(0, 500));
                 }
             },
             metadata: { summary: 'List per-record sharing grants', tags: ['sharing'] },
@@ -9393,7 +9667,7 @@ export class RestServer {
                 } catch (error: any) {
                     if (respondSharingError(res, error)) return;
                     logError('[REST] Grant share error:', error);
-                    res.status(500).json({ code: 'SHARE_GRANT_FAILED', error: String(error?.message ?? error).slice(0, 500) });
+                    respondError(res, 500, 'SHARE_GRANT_FAILED', String(error?.message ?? error).slice(0, 500));
                 }
             },
             metadata: { summary: 'Grant a per-record share to a principal', tags: ['sharing'] },
@@ -9422,7 +9696,7 @@ export class RestServer {
                 } catch (error: any) {
                     if (respondSharingError(res, error)) return;
                     logError('[REST] Revoke share error:', error);
-                    res.status(500).json({ code: 'SHARE_REVOKE_FAILED', error: String(error?.message ?? error).slice(0, 500) });
+                    respondError(res, 500, 'SHARE_REVOKE_FAILED', String(error?.message ?? error).slice(0, 500));
                 }
             },
             metadata: { summary: 'Revoke a per-record share by id', tags: ['sharing'] },
@@ -9472,6 +9746,30 @@ export class RestServer {
             }
             if (msg.startsWith('RULE_NOT_FOUND')) {
                 return res.status(404).json({ code: 'RULE_NOT_FOUND', error: msg.replace(/^RULE_NOT_FOUND:?\s*/, '') });
+            }
+            // [ADR-0111 D7 / #8207] `POST .../evaluate` reconciles through
+            // `SharingService.grant`, whose inertness guard now runs for the
+            // evaluator's system context too. A rule pointed at an object no
+            // sharing gate consults therefore refuses here instead of silently
+            // materialising rows nothing reads — and the admin who asked for
+            // the evaluation needs to be told WHICH object and WHY, not handed
+            // an opaque 500. Same code→status pair the per-record shares routes
+            // already publish (`respondSharingError`), so no new contract.
+            //
+            // ⚠️ Built through the SHARED `sendError` envelope, unlike the three
+            // arms above it. Those are #7035's declared debt — `code` beside
+            // `error` instead of inside it, so `body.error.code` reads
+            // `undefined` — held down by the `check:route-envelope` ratchet,
+            // which only ticks DOWN. A new arm copying its neighbours' shape is
+            // exactly what that ratchet exists to stop, so this one answers the
+            // envelope `BaseResponseSchema` declares. The asymmetry is the
+            // ratchet working; converting the other three is #8111's unfinished
+            // half for this route family, not a rider on this card.
+            if (msg.startsWith('SHARING_NOT_ENABLED')) {
+                return sendEnvelopeError(
+                    res, 422, 'SHARING_NOT_ENABLED',
+                    msg.replace(/^SHARING_NOT_ENABLED:\s*/, ''),
+                );
             }
             logError(`[REST] sharing-rule ${defaultCode}:`, err);
             return res.status(500).json({ code: defaultCode, error: msg.slice(0, 500) });

@@ -333,6 +333,22 @@ jobs:
       - name: Normalized metadata-type guard
         run: pnpm check:meta-type-normalized
 
+      # Filter-slot wire-alias parity guard (#8002). The ONE filter slot is
+      # spelled four ways, declared in TWO packages: `where`/`filter` come from
+      # the spec table, while the wire-only `filters`/`$filter` are declared in
+      # `metadata-protocol` (no schema declares them) and named LITERALLY in
+      # `packages/rest`, which gates the slot's arity at the querystring ingress
+      # (#7390). A runtime import cannot join them — the normalizer's table is a
+      # module-private const, and metadata-protocol is only a devDependency of
+      # rest — so a fifth wire-only spelling would fold correctly and be
+      # silently ungated, putting repetition on it back on the misdiagnosis
+      # #7390 removed. The REST side alone is pinned by that card's §5 test;
+      # this covers the half it cannot reach. AST-based, and an unreadable
+      # declaration is RED rather than an empty corpus reported as a pass
+      # (#4690). Runs its own --self-test first.
+      - name: Filter-slot wire-alias parity guard
+        run: pnpm check:filter-alias-parity
+
       # Init-service declaration guard (#4471, ADR-0116). The kernel's ordering
       # contract (dependencies / optionalDependencies / requiresServices /
       # providesServices) was complete but VOLUNTARY: a plugin that resolves
@@ -586,6 +602,32 @@ jobs:
       # and vitest configs; no build needed, so it belongs in this job.
       - name: Test-source alias gate
         run: pnpm check:test-source-alias
+
+      # The TYPE axis of the same invariant (#8180). The gate above reads
+      # `vitest.config.*` and nothing else, so the identical exposure on the
+      # type axis was unguarded repo-wide — and its symptom is likewise a GREEN
+      # `typecheck`. Measured on `packages/qa/downstream-contract` (#8021):
+      # identical checkout, identical stale `dist`, a narrowing injected into
+      # `packages/spec/src` in SOURCE only — without a `paths` block
+      # `tsc --noEmit` exited 0 and clean; with one it reported the `TS2322` the
+      # frozen fixture should always have produced. The comment beside the
+      # type-check-debt step below documents the same mechanism as expected
+      # state ("tsc resolves workspace imports through each dependency's built
+      # `dist/*.d.ts`"), and turbo's `typecheck` dependsOn `^build` does not
+      # reach it for the same reason it does not reach the runtime axis.
+      # NOT a port of the gate above: tsc's `paths` algorithm is exact-key-wins
+      # then longest-prefix (Vite's is first-match-wins), type-only imports
+      # COUNT here, and `tsconfig.json` is JSONC that inherits through
+      # `extends`. The trap is also different and worse — `@objectstack/spec*`,
+      # star not after a separator, folds every namespace onto one target and
+      # type-checks GREEN against the wrong module instead of crashing.
+      # The registry is measured (51 of 76 packages on the day it landed),
+      # shrink-only and audited in BOTH directions. It finds no new offender
+      # today: it is a ratchet, so the remediation list is finite and cannot
+      # grow behind anyone's back. Static scan of sources and tsconfigs; no
+      # build needed (~1.2s), so it belongs in this job.
+      - name: Type-source resolution gate
+        run: pnpm check:type-source-resolution
 
       # #4248 packaging-hygiene guard. Without a `files` whitelist npm packs the
       # whole package directory, and 20 of the 49 publishable packages declared
@@ -915,6 +957,50 @@ jobs:
       - name: Stall-guard self-test
         run: pnpm check:stall-guard
 
+      # The dev-preflight gate's self-test — and deliberately only HALF of that
+      # gate (#8170, the second and only other member of #8110's split-gate
+      # family). Same neighbour as the step above for the same reason: both are
+      # self-tests of a guard whose real path CI does not exercise.
+      #
+      # The npm script of the same name is `--self-test && the scan`, and the
+      # SCAN half is genuinely CI-hostile. Its question is "is THIS WORKING TREE
+      # built, and is the one staleness-lying artifact current" — a precondition
+      # for `pnpm dev` on a human's long-lived tree. Re-measured on a fresh
+      # worktree before any install or build: exit 1, "The workspace is not built
+      # — 67 of 67 workspace packages declare an entry point under dist/ that is
+      # not on disk". In a job that has not built, that is a hard false red about
+      # a precondition CI does not have; in a job that just built, it is a
+      # tautological green. It correctly stays out, and it was taking the half
+      # that CAN run with it — the gate sat in the gate list reading as coverage
+      # while its scan ran on every human's `pnpm dev` and nothing kept that scan
+      # honest.
+      #
+      # The `--self-test` half is a different animal. Its fixtures are SYNTHETIC:
+      # it materializes throwaway workspaces in a temp dir and drives the gate's
+      # own `inspect`/`report`/`stamp` to all 16 verdicts. No network, no git, no
+      # node_modules, no workspace state at all — measured green in ~0.11s in a
+      # `--depth 1` clone carrying no remote-tracking ref for main.
+      #
+      # WHAT REDDENS IT, and where this differs from its sibling. #8110's step
+      # cannot go red alone (its specimen is derived from the frame documents, so
+      # a structural change reddens the sync gate above it first). This one CAN,
+      # and that is fine: its only input is this one script's own code, so the
+      # only PR that reaches it red is a PR that edits that script. Measured
+      # adversarially — rewording the stale-dist red message from "LIES" reds this
+      # step alone with `stale/says-it-lies: expected true, got false`, naming the
+      # assertion in the very file the PR is editing, so no sibling gate needs to
+      # diagnose it. The other direction was measured too: a legitimate change
+      # elsewhere cannot redden it — dropping `--stamp` from packages/spec's build
+      # script (which DOES red the scan half) leaves this step green, because the
+      # fixtures are synthetic. That is also this step's honest boundary: it
+      # vouches for the gate's verdict paths, never for this workspace.
+      #
+      # Invoked as `node`, NOT through the npm script, precisely because that
+      # script would drag the scan half in with it — the same shape as the `dev`
+      # chain calling this file directly (see the script's header).
+      - name: Self-test the dev-prereqs gate (self-test half only, never the scan)
+        run: node scripts/check-dev-prereqs.mjs --self-test
+
       - name: Type check (@objectstack/spec)
         run: pnpm --filter @objectstack/spec exec tsc --noEmit
 
@@ -1080,6 +1166,42 @@ jobs:
       # script header on layering.
       - name: Check the decision frame is in sync across its four copies
         run: pnpm check:skill-frame-sync
+
+      # The SECOND skill-frame gate — and deliberately only HALF of it (#8110).
+      #
+      # `pnpm check:skill-frame-freshness` is `--self-test && the scan`, and only the
+      # SCAN half is CI-hostile: it asks "is THIS WORKING TREE's frame current with
+      # origin/main?", which on a fresh merge ref is a tautological green, and on any
+      # PR that legitimately edits the frame would be a false red — "differs from main"
+      # is that PR's whole purpose. That script's own header ("WHERE IT RUNS") argues
+      # it, and the scan stays out of CI for exactly that reason. It is NOT wired here.
+      #
+      # The `--self-test` half is a different animal. It DERIVES a coherent two-axis
+      # specimen from this tree's own frame documents, commits it and the real
+      # documents into throwaway git repos whose `origin` points at a path that does
+      # not exist, and asserts 12 verdicts against the gate's own code. No network, no
+      # origin/main, no history: measured green in a `--depth 1` clone carrying no
+      # remote-tracking ref at all, in ~1.3s. So the half that CANNOT run in CI was
+      # keeping the half that CAN out of it, and the price was measured on #8024 —
+      # the fixture had stranded TWICE, neither time noticed, while the gate sat in
+      # the gate list reading as coverage and protecting nothing.
+      #
+      # This step cannot redden a PR that edits the frame on purpose: the specimen is
+      # re-derived from whatever the frame currently is, so a reword, a reflow or a
+      # principles-only rewrite carries the fixture with it (verified adversarially
+      # before wiring this — rewording axis prose across all three frame files keeps
+      # both gates green). What DOES redden it is a STRUCTURAL change — an axis added,
+      # removed, or its declaring sentence reworded past the shared anchors — and that
+      # reddens `check:skill-frame-sync` directly above with the same diagnosis, which
+      # the self-test's own failure message names as the thing to fix first. No PR can
+      # reach this step red with the step above green.
+      #
+      # Invoked as `node`, NOT `pnpm check:skill-frame-freshness`, precisely because
+      # that npm script would drag the scan half in with it — the same shape as the
+      # `dev` chain calling check-dev-prereqs.mjs directly rather than through its
+      # pnpm script (see that script's header).
+      - name: Self-test the skill-frame freshness gate (self-test half only, never the scan)
+        run: node scripts/check-skill-frame-freshness.mjs --self-test
 
       # The third gate over SKILL.md, covering the one line the other two cannot see
       # (#5331). check:skill-docs / check:skill-refs compare generated artifacts and

@@ -36,11 +36,14 @@
 // something, so the casts belong in the diff too.
 //
 //   node scripts/check-type-check-coverage.mjs                # structural, sub-second
-//   node scripts/check-type-check-coverage.mjs --re-measure   # + runs tsc per ledger entry
+//   node scripts/check-type-check-coverage.mjs --re-measure   # + refreshes the
+//                                    #   ledgered packages' dependency closure,
+//                                    #   then runs tsc per ledger entry
 //   node scripts/check-type-check-coverage.mjs --re-measure --lower
 //                                    # + writes each measured number back into
-//                                    #   the ledger below (#6376). Needs the
-//                                    #   workspace built -- see BUILT CLOSURE.
+//                                    #   the ledger below (#6376). Refuses on a
+//                                    #   closure it cannot make current itself
+//                                    #   -- see BUILT CLOSURE.
 //   node scripts/check-type-check-coverage.mjs --self-test
 //
 // Invariants, per workspace package (the root workspace package included --
@@ -276,7 +279,8 @@
 // the exclusion from tsconfig.json and delete the entry here in the same PR.
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, posix, resolve } from 'node:path';
 
 // Anchored to the script, not to cwd: the verdict must not depend on where the
@@ -290,6 +294,9 @@ const TRACKING_ISSUE = 'https://github.com/objectstack-ai/objectstack/issues/431
 // "does this config steer tsc away from the test layer", not "which exact glob".
 const TEST_GLOB = /\*\.(test|spec)\.tsx?$/;
 const TEST_FILE = /\.(test|spec)\.tsx?$/;
+// A TypeScript source file, i.e. one whose content can reach a generated
+// `.d.ts`. Used only by the built-closure freshness read (#8271).
+const SOURCE_FILE = /\.([cm]?ts|tsx)$/;
 // A `@ts-expect-error` in DIRECTIVE position -- first thing on its own comment
 // line, where the compiler reads it. Prose that merely mentions the directive
 // (several files in this repo explain why they do NOT use one) must not count,
@@ -344,7 +351,7 @@ const DEBT = {
     note: 'code-tier 3 (TS2353) + 1 config-tier (TS2550 lib).',
   },
   '@objectstack/metadata': {
-    errors: 92,
+    errors: 89,
     note: 'code-tier 34 (TS2345 x30, TS2322 x4); config-tier 24 (TS2835); noise 34 (TS7006 x33, TS6133). '
       + 'Re-measured 92 at 5ab08428, up from 87. Composition moved as well as the count: the note used to '
       + 'name TS2353, which is gone, and TS2322 has taken its place. Two thirds of the pile sits in '
@@ -374,7 +381,7 @@ const DEBT = {
       + 'unremarked (#5278).',
   },
   '@objectstack/service-automation': {
-    errors: 5,
+    errors: 3,
     note: 'code-tier 5. Two are the TS2741 this note used to describe as the whole debt: '
       + 'engine.test.ts:2547/2577 build a descriptor literal missing a required field, the #4198 discovery '
       + 'that opened #4311 (the missing field TS names moved from resumeAuthority to handlerContract in '
@@ -396,7 +403,7 @@ const DEBT = {
       + 'in __tests__/knowledge-service.test.ts.',
   },
   '@objectstack/service-storage': {
-    errors: 52,
+    errors: 51,
     note: 'code-tier 8 (TS2339 x4, TS2347 x4); config-tier 21 (TS2835); noise 13 (TS7006 x11, TS6196, '
       + 'TS6133). This entry is the fourth bootstrap margin, and it earned the label the hard way inside '
       + 'one flight: 42 -> 41 at e8db1a230 (the spec half of the `IStorageService.list(prefix)` '
@@ -504,10 +511,23 @@ const EXEMPT = {
 // graduation -- it is a programme rather than a sitting, and its entry stands.
 const TEST_DEBT = {
   '@objectstack/plugin-approvals': {
-    errors: 547,
-    note: 'TS2339 x296, TS2345 x213, TS2550 x20, TS18048 x10. Re-measured 547 at 5ab08428, up from 467. '
-      + 'Still larger than driver-sql ever was, and still entirely test-only (src is clean), so nothing '
-      + 'but this ledger has ever seen it. 443 of the 547 are in one file, src/approval-service.test.ts.',
+    errors: 348,
+    note: 'TS2339 x296, TS2550 x20, TS2345 x16, TS18048 x10, plus 6 singletons (TS2554 x2, TS1470, '
+      + 'TS2352, TS2353, TS6133). Was 547 (re-measured at 5ab08428, up from 467; TS2345 x213 then). '
+      + 'Lowered 547 -> 348 at b5e09b21 (#7888), and the -199 is ONE CLASS COLLAPSING rather than a '
+      + 'measured surface shrinking -- the distinction the surplus finding asked to be settled before a '
+      + 'gap this size was written in as a floor. Three readings say collapse: (a) TS2339 x296, TS2550 '
+      + 'x20 and TS18048 x10 are unchanged TO THE UNIT against the 547 composition and only TS2345 moved, '
+      + '213 -> 16 -- a program that had DEGRADED instead (an unresolved import turning a type into any) '
+      + 'would have wiped the 296 property errors first, since property access on any is legal; (b) all '
+      + '21 test files are on disk and all 21 are in the program (tsc --listFiles), none deleted, and the '
+      + 'package\'s other test files gained 406 lines and lost 204 over the window -- the set grew; (c) '
+      + 'src/approval-service.test.ts, which holds 273 of the 348 as it held 443 of the 547, is '
+      + 'BYTE-IDENTICAL between 5ab08428 and b5e09b21 (blob 3fc272f, 3335 lines both ends). Same bytes, '
+      + '170 fewer errors, so the repair landed in a producer\'s types and no assertion was deleted to '
+      + 'get it. The 16 TS2345 that survive are still reported against a fully-resolved approver-config '
+      + 'union, so that parameter type is still strict -- the 197 that went were repaired, not loosened '
+      + 'away. Still entirely test-only (src is clean), so nothing but this ledger has ever seen it.',
   },
   '@objectstack/objectql': {
     errors: 355,
@@ -589,9 +609,13 @@ const TEST_DEBT = {
       + '(#5278 option A).',
   },
   '@objectstack/plugin-auth': {
-    errors: 131,
+    errors: 111,
     note: 'TS2493 x42 (tuple index out of range), TS18048 x24, TS2740 x19, TS2322 x11, TS2532 x9, '
-      + 'TS2339 x8, TS2741 x8. '
+      + 'TS2339 x8, TS2741 x8. Lowered 131 -> 111 at b16dcb45 (#7888); the intermediate 108 in this PR\'s '
+      + 'first commit was measured at b5e09b21 and was already stale when the merge queue built it -- the '
+      + 'package took +3 inside the hour, which is the same "a ledger number is a number about a moment" '
+      + 'race that kicked #5278 three times, and 111 is the merge-queue run\'s own re-measure on the ref '
+      + 'this PR actually lands on. Composition below predates both and is NOT re-tallied at 111. '
       + 'Measured 124 -> 129 (5ab08428, composition unchanged in shape) -> 131 (e8db1a230). Half of the '
       + 'latest +2 is a TS2554 in src/last-admin-guard.test.ts, a file added by #5941 / PR #5993 '
       + '(the break-glass delete guard); the other 1 landed in a file that already existed and is not '
@@ -599,7 +623,7 @@ const TEST_DEBT = {
       + 'src/admin-import-users.test.ts and 18 in src/admin-user-endpoints.test.ts.',
   },
   '@objectstack/mcp': {
-    errors: 63,
+    errors: 53,
     note: 'TS18046 x51 -- `json` is of type unknown, one `await res.json()` idiom repeated across four '
       + 'files (23 in mcp-server-runtime.http.test.ts, 14 in mcp-action-tools.test.ts, 8 in '
       + 'mcp-http-tools.scopes.test.ts, 6 in mcp-validate-expression.test.ts); TS6133 x1; TS2352 x1. '
@@ -635,7 +659,7 @@ const TEST_DEBT = {
       + "so none of the -33 is this PR's doing.",
   },
   '@objectstack/lint': {
-    errors: 42,
+    errors: 20,
     note: 'TS7006 x22, TS2835 x6, TS6059 x4. Measured 26 -> 30 (5ab08428, the +4 being TS6059, a file '
       + 'outside rootDir, a class the pre-#5278 note did not list) -> 32 (e8db1a230). The latest +2 are '
       + 'both TS7006 and both in files that already existed; three lint test files changed in this window '
@@ -645,14 +669,14 @@ const TEST_DEBT = {
       + 'measured at e8db1a230 and re-confirmed at 32 an hour later at 77c7c884b) -- tighten via the ℹ '
       + 'hint immediately after landing (#5278 option A).',
   },
-  '@objectstack/plugin-security': { errors: 21, note: 'TS2739 x8, TS2740 x5, TS2345/TS2322/TS2741 x2 each -- incomplete literals. Re-measured 21 at 5ab08428, up from 20, and still 21 at e8db1a230 after the package gained a test file -- the file count moved, the error count did not (which is why the file count is derived here rather than written down, #5826).' },
+  '@objectstack/plugin-security': { errors: 11, note: 'TS2739 x8, TS2740 x5, TS2345/TS2322/TS2741 x2 each -- incomplete literals. Re-measured 21 at 5ab08428, up from 20, and still 21 at e8db1a230 after the package gained a test file -- the file count moved, the error count did not (which is why the file count is derived here rather than written down, #5826).' },
   '@objectstack/formula': { errors: 17, note: 'TS2591 x6 (`process`), TS2345 x3, TS2352 x3, TS1470 x2, TS2339 x2. Re-measured 17 at 5ab08428, up from 12; the TS2591 half doubled, which is the missing `types:["node"]` again rather than five new defects.' },
   '@objectstack/trigger-record-change': { errors: 9, note: 'TS2353 x9 -- still the one unknown-property shape repeated, now in four files. Re-measured 9 at 5ab08428, up from 8.' },
   '@objectstack/verify': { errors: 8, note: 'TS2835 x4, TS7006 x4. Re-measured 8 at 5ab08428, up from 6; both classes are the NodeNext pair from the top-of-ledger note.' },
   '@objectstack/connector-mcp': { errors: 5, note: 'TS2339 x5. Re-measured 5 at 5ab08428, exact.' },
   '@objectstack/connector-openapi': { errors: 5, note: 'TS2339 x5. Re-measured 5 at 5ab08428, exact.' },
   '@objectstack/http-conformance': {
-    errors: 4,
+    errors: 3,
     note: 'TS2307 x2, TS2304 x1, TS2740 x1. Re-measured 4 at 5ab08428, up from 1. Worth knowing before '
       + 'anyone tries to graduate it: 2 of the 4 are reported inside node_modules `.d.ts` files '
       + '(@better-auth/core, @better-fetch/fetch), so this entry moves with the lockfile and not only with '
@@ -1200,10 +1224,26 @@ const TSC_ERROR_LINE = /^(?!\s)(?:.*\s)?error TS\d+: /;
  * A missing/unreadable project or an empty file list would otherwise be counted
  * as one tidy little error and silently *lower* a package's number -- a gate
  * that measures nothing and reports an improvement is worse than no gate.
+ *
+ * TS2688 ("Cannot find type definition file for 'node'") is here for the same
+ * reason and was measured, not reasoned about (#8218). A generated project whose
+ * `typeRoots` do not resolve loses every global the package compiles against, so
+ * tsc stops at the type-library entry point and prints ONE diagnostic:
+ * packages/cli measured 188 with `typeRoots` resolving and **1** without, same
+ * tree, same sources. Counted as debt that is a 187-error improvement handed to
+ * the ledger by a broken measurement -- and `--lower` would then write it down.
+ * No ledger `note` in this file records a TS2688, and none can while this line
+ * stands: a package that really cannot resolve its own type libraries has a
+ * broken tsconfig, which is a defect to fix rather than a number to freeze.
  */
-const TSC_SETUP_ERROR = /\berror TS(5058|5083|6053|18003|5012)\b/;
+const TSC_SETUP_ERROR = /\berror TS(5058|5083|6053|18003|5012|2688)\b/;
 
-/** Temp project used to lift a tsconfig's own test exclusion. Never committed. */
+/**
+ * Temp project used to lift a tsconfig's own test exclusion. Written into a
+ * fresh `os.tmpdir()` directory -- never anywhere inside the repository. See
+ * `remeasureProject` for why that costs a page of path rewriting, and what the
+ * in-tree version cost instead.
+ */
 const REMEASURE_CONFIG = 'tsconfig.debt-remeasure.json';
 const REMEASURE_ISSUE = 'https://github.com/objectstack-ai/objectstack/issues/5278';
 const SURPLUS_ISSUE = 'https://github.com/objectstack-ai/objectstack/issues/6376';
@@ -1245,6 +1285,39 @@ const SURPLUS_ISSUE = 'https://github.com/objectstack-ai/objectstack/issues/6376
 // debt -- the workspace root's note names TS2307 x17 -- and a gate that cannot
 // tell a recorded defect from a broken measurement would refuse the very
 // entries it exists to measure.
+//
+// PRESENT is not CURRENT (#8271). The precondition above asks whether a
+// `dist/*.d.ts` EXISTS, which is silent about whether it describes today's
+// source -- and the stale case is worse than the missing one, because nothing
+// fires. Measured: #8235 was filed in good faith as a `priority:p0` main-red
+// stanch off four errors (TS2614/TS2339/TS7006) this gate reported locally
+// against a `dist/` predating #8198, while CI's own re-measure was green on two
+// consecutive runs; the errors were not in the source and never had been. The
+// mirror direction is quieter and worse: a stale artifact can HIDE real drift
+// until CI finds it, which is the entire reason to run this locally.
+//
+// So the closure is now REFRESHED, not merely asserted -- `refreshBuiltClosure`
+// runs the same turbo command with the same filters lint.yml runs immediately
+// before this gate, which is why CI has never seen this failure and a local run
+// always could. Three measurements decided that shape over "detect staleness and
+// refuse", which was the other direction on the card:
+//
+//   9.5s    a closure build with everything already current (70/70 turbo cache
+//           hits), against a ~257s re-measure -- under 4% to remove the variable
+//   3m2s    ONE ledgered package's 7-task closure built COLD, which is why the
+//           refusal above still owns the nothing-is-built case rather than
+//           silently disappearing for minutes on a gate people run before pushing
+//   3 of 3  packages that an mtime read flagged as stale in the first worktree
+//           it was pointed at were false alarms (2 dated by a `*.test.ts` that
+//           no `dist/` is generated from, 1 by a `git checkout` that rewrote a
+//           file to byte-identical content) -- an error rate that is fine for a
+//           backstop and disqualifying for a refusal, because refusing costs a
+//           4-minute lap and the rebuild it would demand costs 9.5 seconds
+//
+// turbo decides what is genuinely out of date by hashing inputs, and its cache
+// replay rewrites the outputs it restores, so a refreshed closure reads as
+// current afterwards. The mtime read survives only as the backstop over what
+// those filters do not reach.
 // ---------------------------------------------------------------------------
 
 /**
@@ -1275,44 +1348,139 @@ function declaredTypeEntries(manifest) {
 }
 
 /**
- * Which workspace packages in the ledgered packages' dependency closure have no
- * built type entry point. Pure over a described graph -- `built` is decided by
- * the caller's fs read -- so the traversal (transitive, cycle-safe, and blind to
- * a package that declares no type entry at all) is pinned without a filesystem.
+ * Every workspace package reachable from the ledgered packages' dependencies.
+ * Pure over a described graph, so the traversal (transitive, cycle-safe) is
+ * pinned without a filesystem.
  *
- * The ROOTS themselves are never reported: measuring a package reads its own
+ * The ROOTS themselves are never members: measuring a package reads its own
  * SOURCES, so its own `dist` is irrelevant to its own number. A root appears
  * only when some other ledgered package depends on it, which is the case where
  * its `dist` really is the input.
  *
  * @param {string[]} roots ledgered package names
- * @param {Map<string, {deps: string[], typeEntries: string[], built: boolean}>} graph
+ * @param {Map<string, {deps: string[]}>} graph
  * @returns {string[]} sorted names
  */
-function unbuiltClosure(roots, graph) {
-  const unbuilt = new Set();
+function closureMembers(roots, graph) {
   const seen = new Set();
   const visit = (name) => {
     if (seen.has(name)) return;
     seen.add(name);
     const node = graph.get(name);
     if (!node) return; // not a workspace member -- node_modules, not our build
-    if (node.typeEntries.length > 0 && !node.built) unbuilt.add(name);
     for (const dep of node.deps) visit(dep);
   };
   for (const root of roots) {
     for (const dep of graph.get(root)?.deps ?? []) visit(dep);
   }
-  return [...unbuilt].sort();
+  return [...seen].filter((name) => graph.has(name)).sort();
+}
+
+/**
+ * Which packages in that closure have no built type entry point at all. Pure --
+ * `built` is decided by the caller's fs read -- and blind to a package that
+ * declares no type entry point in the first place.
+ *
+ * @param {string[]} roots ledgered package names
+ * @param {Map<string, {deps: string[], typeEntries: string[], built: boolean}>} graph
+ * @returns {string[]} sorted names
+ */
+function unbuiltClosure(roots, graph) {
+  return closureMembers(roots, graph).filter((name) => {
+    const node = graph.get(name);
+    return node.typeEntries.length > 0 && !node.built;
+  });
+}
+
+/**
+ * Which packages in that closure have a type entry point that is OLDER than the
+ * sources it is generated from -- present, so `unbuiltClosure` waves it through,
+ * and describing a package that no longer exists (#8271).
+ *
+ * Same shape and the same purity as its sibling: `stale` is the caller's fs
+ * read, this function only walks. A package with no type entry point on disk is
+ * `unbuiltClosure`'s finding, never this one's -- reporting it twice would name
+ * one package in two different remedies.
+ *
+ * @param {string[]} roots ledgered package names
+ * @param {Map<string, {deps: string[], typeEntries: string[], built: boolean, stale?: boolean}>} graph
+ * @returns {string[]} sorted names
+ */
+function staleClosure(roots, graph) {
+  return closureMembers(roots, graph).filter((name) => {
+    const node = graph.get(name);
+    return node.typeEntries.length > 0 && node.built && node.stale === true;
+  });
+}
+
+/**
+ * Whether a file name is one a package's `dist/*.d.ts` can be generated from.
+ * Named, rather than inlined into the walk below, so the self-test asserts the
+ * predicate the walk actually applies instead of a copy of it.
+ *
+ * @param {string} name basename
+ */
+function isBuildSource(name) {
+  return SOURCE_FILE.test(name) && !TEST_FILE.test(name);
+}
+
+/**
+ * The newest mtime among the TypeScript sources a package's `dist/*.d.ts` is
+ * generated from, or 0 when it has none.
+ *
+ * Deliberately narrow on both axes, because every file it reads that cannot
+ * reach a declaration file is a false "your build is stale":
+ *   - `src/` when there is one, since that is this workspace's build root, and
+ *     a package-wide walk would let a README or a fixture date the build;
+ *   - `.ts`/`.tsx`/`.mts`/`.cts` only, and never a `*.test.ts` / `*.spec.ts` --
+ *     no test file is reachable from a package's entry point, so none of them
+ *     can change the emitted types. Measured before this exclusion existed:
+ *     3 packages read as stale in a worktree where 2 of the 3 were flagged by
+ *     nothing but a test file (driver-sqlite-wasm by
+ *     sqlite-wasm-cross-field-conformance.test.ts, service-analytics by
+ *     __tests__/cross-field-engine-fallback.test.ts).
+ *
+ * @param {string} dir package directory, repo-relative
+ * @returns {number} epoch ms
+ */
+function newestSourceMtime(dir) {
+  const from = existsSync(join(ROOT, dir, 'src')) ? join(ROOT, dir, 'src') : join(ROOT, dir);
+  let newest = 0;
+  const walk = (abs) => {
+    let entries;
+    try {
+      entries = readdirSync(abs, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.name.startsWith('.') || entry.name === 'node_modules' || entry.name === 'dist') continue;
+      const child = join(abs, entry.name);
+      if (entry.isDirectory()) {
+        walk(child);
+        continue;
+      }
+      if (!isBuildSource(entry.name)) continue;
+      const { mtimeMs } = statSync(child);
+      if (mtimeMs > newest) newest = mtimeMs;
+    }
+  };
+  walk(from);
+  return newest;
 }
 
 /**
  * The observed build graph: every workspace member, its `workspace:` deps
- * (runtime, dev and peer -- a hidden test layer imports all three) and whether
- * any type entry point it declares exists on disk.
+ * (runtime, dev and peer -- a hidden test layer imports all three), whether any
+ * type entry point it declares exists on disk, and whether the ones that do
+ * predate the sources they are generated from.
+ *
+ * `stale` compares against the OLDEST existing entry, not the newest: a package
+ * that declares `dist/index.d.ts` and `dist/index.d.mts` has both written by one
+ * build, so the older of the two is when that build actually ran.
  *
  * @param {Array<{name: string, dir: string}>} packages
- * @returns {Map<string, {deps: string[], typeEntries: string[], built: boolean}>}
+ * @returns {Map<string, {deps: string[], typeEntries: string[], built: boolean, stale: boolean}>}
  */
 function workspaceBuildGraph(packages) {
   const graph = new Map();
@@ -1330,13 +1498,47 @@ function workspaceBuildGraph(packages) {
       }
     }
     const typeEntries = declaredTypeEntries(manifest);
+    const onDisk = typeEntries.filter((entry) => existsSync(join(ROOT, pkg.dir, entry)));
+    const builtAt = onDisk.length > 0
+      ? Math.min(...onDisk.map((entry) => statSync(join(ROOT, pkg.dir, entry)).mtimeMs))
+      : 0;
     graph.set(pkg.name, {
       deps: [...new Set(deps)].sort(),
       typeEntries,
-      built: typeEntries.some((entry) => existsSync(join(ROOT, pkg.dir, entry))),
+      built: onDisk.length > 0,
+      stale: onDisk.length > 0 && newestSourceMtime(pkg.dir) > builtAt,
     });
   }
   return graph;
+}
+
+/**
+ * Rebuild the ledgered packages' dependency closure, with the same command and
+ * the same filters `lint.yml` runs immediately before this gate. Parity is the
+ * whole point: two different build commands are two different worlds, and the
+ * ledger's discipline is that a number is reproducible.
+ *
+ * turbo decides what is actually out of date by hashing inputs, which is
+ * strictly better than the mtime read below and is why this runs FIRST and the
+ * freshness check is only a backstop over what it leaves behind.
+ */
+function refreshBuiltClosure() {
+  const bin = join(ROOT, 'node_modules', '.bin', 'turbo');
+  if (!existsSync(bin)) {
+    throw new Error(`--re-measure needs the workspace's own turbo at ${bin}; run \`pnpm install\` first.`);
+  }
+  const args = ['run', 'build', '--filter=./packages/*', '--filter=./packages/*/*'];
+  const run = spawnSync(bin, args, { cwd: ROOT, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+  if (run.error) throw new Error(`the closure build could not be run: ${run.error.message}`);
+  if (run.status !== 0) {
+    const output = `${run.stdout ?? ''}${run.stderr ?? ''}`.trim();
+    throw new Error(
+      `--re-measure cannot run: the ledgered packages' dependency closure does not build, so there is no `
+        + `world to measure against. Fix the build first -- every number in DEBT and TEST_DEBT is measured `
+        + `with tsc resolving workspace imports through each dependency's built \`dist/*.d.ts\`.\n`
+        + `  ${bin} ${args.join(' ')}\n${output.slice(-4000)}`,
+    );
+  }
 }
 
 /** @param {string} output */
@@ -1351,7 +1553,9 @@ function countTscErrors(output) {
  * `--pretty false` so the count does not depend on whether a TTY is attached;
  * cwd is ROOT so reported paths are repo-relative however the gate was invoked.
  *
- * @param {string} project repo-relative path to a tsconfig
+ * @param {string} project path to a tsconfig -- repo-relative for the ledgered
+ *   packages' own configs, absolute for the generated re-measure project, which
+ *   lives outside the repo entirely
  * @returns {number}
  */
 function tscErrorCount(project) {
@@ -1394,13 +1598,104 @@ function measureDebt(dir) {
 }
 
 /**
- * The TEST_DEBT number: what the package reports once its tsconfig stops
- * steering tsc away from its own tests -- AND once it starts steering tsc toward
- * the ones it had merely never reached. Written as a sibling project that
- * `extends` the real one and re-declares `exclude` without the test globs --
- * a sibling, in the package's own directory, because tsconfig resolves
- * `include`/`outDir`/`rootDir` relative to the file that DECLARES them, so a
- * config generated anywhere else would silently repoint every one of them.
+ * What the extends chain above one package's `tsconfig.json` already decides for
+ * itself. Two facts, and both of them are only interesting because the generated
+ * project below lives OUTSIDE the repository:
+ *
+ *   `include`   whether anything in the chain selects files at all. If nothing
+ *               does, tsc falls back to `**\/*` resolved against the directory of
+ *               the config it was handed -- which used to be the package and is
+ *               now a temp dir holding one file.
+ *   `typeRoots` whether the chain names them explicitly. If it does, they are
+ *               already absolute-by-origin and the generated project must not
+ *               override them.
+ *
+ * `files` counts as selecting: a chain that declares `files` and no `include`
+ * compiles exactly those, and adding an `include` would widen the program.
+ *
+ * Relative `extends` only -- which is every one in this workspace. A bare
+ * specifier (`@tsconfig/node22/tsconfig.json`) stops the walk and reads as
+ * "declares neither", the conservative answer for shared bases that carry
+ * `compilerOptions` and nothing else.
+ *
+ * @returns {{selectsFiles: boolean, declaresTypeRoots: boolean}}
+ */
+function tsconfigChainFacts(dir) {
+  let configAbs = join(ROOT, dir, 'tsconfig.json');
+  const facts = { selectsFiles: false, declaresTypeRoots: false };
+  for (let depth = 0; depth < 8; depth++) {
+    let parsed;
+    try {
+      parsed = JSON.parse(readFileSync(configAbs, 'utf8').replace(/^\s*\/\/.*$/gm, ''));
+    } catch {
+      return facts;
+    }
+    if (Array.isArray(parsed.include) && parsed.include.length > 0) facts.selectsFiles = true;
+    if (Array.isArray(parsed.files)) facts.selectsFiles = true;
+    if (parsed.compilerOptions?.typeRoots !== undefined) facts.declaresTypeRoots = true;
+    const next = parsed.extends;
+    if (typeof next !== 'string' || !next.startsWith('.')) return facts;
+    configAbs = resolve(configAbs, '..', next.endsWith('.json') ? next : `${next}.json`);
+  }
+  return facts;
+}
+
+/**
+ * The default `typeRoots` tsc would have computed for a config sitting IN the
+ * package: every `node_modules/@types` from the package directory up. Stopped at
+ * the repo root on purpose -- tsc would keep walking to `/`, and a measurement
+ * that changes with whatever is installed above the checkout is not a
+ * measurement. Nothing above ROOT resolves in CI either way.
+ *
+ * @param {string} pkgAbs absolute, posix-separated package directory
+ * @param {string} rootAbs absolute, posix-separated repo root
+ * @returns {string[]} outermost-last, the order tsc searches
+ */
+function defaultTypeRoots(pkgAbs, rootAbs) {
+  const roots = [];
+  let cursor = pkgAbs;
+  for (let depth = 0; depth < 12; depth++) {
+    roots.push(`${cursor}/node_modules/@types`);
+    if (cursor === rootAbs) break;
+    const parent = cursor.slice(0, cursor.lastIndexOf('/'));
+    if (!parent || parent === cursor) break;
+    cursor = parent;
+  }
+  return roots;
+}
+
+/**
+ * The generated re-measure project, pure over one package's own tsconfig so the
+ * self-test can pin the property the whole design rests on: EVERY path it emits
+ * is absolute and rooted at the package.
+ *
+ * It has to be, because the file is written into `os.tmpdir()` rather than
+ * beside the config it extends (#8218). The old sibling-in-the-package-directory
+ * placement made the relative paths free, and charged for them somewhere else:
+ * the scratch file sat in a TRACKED directory, matched by no `.gitignore` rule,
+ * for as long as that package's tsc ran -- around 250s across the ledger. Any
+ * `git add -A` in the same worktree during that window staged it, which is how a
+ * 71-line generated tsconfig reached a real commit, and no crash was required.
+ * The `finally` that removes it was never the gap; the ADDRESS was.
+ *
+ * What the move costs, item by item -- each one is a path tsc would otherwise
+ * resolve against the temp dir:
+ *
+ *   `extends`     absolute, so the chain still starts at the real config. Paths
+ *                 declared UP that chain keep resolving against the file that
+ *                 declared them, which is why the package's own `include`,
+ *                 `outDir` and `rootDir` need no help here.
+ *   `exclude`     absolutised: these patterns are re-declared HERE, so they
+ *                 originate in this file and would otherwise mean `/tmp/x/dist`.
+ *   `include`     same, and additionally never left implicit -- see
+ *                 `tsconfigChainFacts`.
+ *   `rootDir`     absolute for the same reason as `exclude`.
+ *   `typeRoots`   not a re-declared path at all, and the one that bites. tsc
+ *                 derives the default from the directory of the ROOT config
+ *                 file, so from a temp dir `types: ["node"]` resolves to
+ *                 nothing: packages/cli measures 188 with them and 1 without.
+ *                 Reconstructed here, and TS2688 joined TSC_SETUP_ERROR above so
+ *                 the next way this breaks is loud instead of a free 187.
  *
  * Dropping exclusions is only half of un-hiding, because only half of hiding is
  * an exclusion (#7353). A package whose `include` never named its `test/` tree
@@ -1418,38 +1713,81 @@ function measureDebt(dir) {
  * protect, so a TS6059 here is a diagnostic about this generated config rather
  * than about the package, and counting it would be measuring the tape measure.
  *
- * Removed in a `finally`: a stray `tsconfig.*.json` left behind would be picked
- * up by this very script's own tsconfig scan on the next run.
- *
- * @param {string[]} hiddenTests package-relative paths of the unread test files
+ * @param {object} input
+ * @param {string} input.pkgAbs absolute, posix-separated package directory
+ * @param {string} input.rootAbs absolute, posix-separated repo root
+ * @param {object} input.parsed the package's own parsed `tsconfig.json`
+ * @param {string[]} input.unreachable package-relative test files its `include` cannot reach
+ * @param {{selectsFiles: boolean, declaresTypeRoots: boolean}} input.chain
+ * @returns {object} the project to serialise
  */
-function measureTestDebt(dir, hiddenTests = []) {
-  const configPath = join(ROOT, dir, REMEASURE_CONFIG);
-  const raw = readFileSync(join(ROOT, dir, 'tsconfig.json'), 'utf8').replace(/^\s*\/\/.*$/gm, '');
-  const parsed = JSON.parse(raw);
+function remeasureProject({ pkgAbs, rootAbs, parsed, unreachable, chain }) {
+  const absolutise = (p) => (p.startsWith('/') ? p : posix.join(pkgAbs, p));
   const kept = (parsed.exclude ?? []).filter((pattern) => !TEST_GLOB.test(pattern));
-  const project = { extends: './tsconfig.json', exclude: kept };
+  const project = {
+    extends: `${pkgAbs}/tsconfig.json`,
+    exclude: kept.map(absolutise),
+  };
+  const compilerOptions = {};
 
   // Only the files this config's OWN `include` cannot reach need adding; the
   // ones it already selects are back in the program the moment `exclude` stops
   // subtracting them, and re-listing those would say nothing.
   const include = Array.isArray(parsed.include) && parsed.include.length > 0 ? parsed.include : null;
   if (include) {
-    const { roots } = readTsconfig(dir, 'tsconfig.json');
-    const unreachable = hiddenTests.filter(
-      (rel) => !roots.some((root) => root === '' || rel === root || rel.startsWith(`${root}/`)),
-    );
-    if (unreachable.length > 0) {
-      project.include = [...include, ...unreachable];
-      project.compilerOptions = { rootDir: '.' };
-    }
+    project.include = (unreachable.length > 0 ? [...include, ...unreachable] : include).map(absolutise);
+    if (unreachable.length > 0) compilerOptions.rootDir = pkgAbs;
+  } else if (!chain.selectsFiles) {
+    project.include = [`${pkgAbs}/**/*`];
   }
 
+  if (!chain.declaresTypeRoots) compilerOptions.typeRoots = defaultTypeRoots(pkgAbs, rootAbs);
+  if (Object.keys(compilerOptions).length > 0) project.compilerOptions = compilerOptions;
+  return project;
+}
+
+/**
+ * The TEST_DEBT number: what the package reports once its tsconfig stops
+ * steering tsc away from its own tests -- AND once it starts steering tsc toward
+ * the ones it had merely never reached.
+ *
+ * The project is `remeasureProject`'s, and it is written into a fresh temp
+ * directory that this function owns and removes. Nothing is created inside the
+ * repository at any point, so there is no window in which `git status`, `git add
+ * -A`, a `git clean`, an editor's file watcher or a parallel agent can see a
+ * generated artifact in a tracked directory -- and no `tsconfig.*.json` for this
+ * script's own next-run scan to trip over either. The cleanup below is now
+ * housekeeping rather than the only thing standing between a scratch file and a
+ * commit: a `finally` covers a throw and a non-zero exit, and covers neither a
+ * SIGKILL nor a cancelled CI step, which is what an in-tree address needed it to.
+ *
+ * @param {string[]} hiddenTests package-relative paths of the unread test files
+ */
+function measureTestDebt(dir, hiddenTests = []) {
+  const rootAbs = ROOT.replaceAll('\\', '/').replace(/\/$/, '');
+  const pkgAbs = join(ROOT, dir).replaceAll('\\', '/').replace(/\/$/, '');
+  const parsed = JSON.parse(
+    readFileSync(join(ROOT, dir, 'tsconfig.json'), 'utf8').replace(/^\s*\/\/.*$/gm, ''),
+  );
+  const { roots } = readTsconfig(dir, 'tsconfig.json');
+  const unreachable = hiddenTests.filter(
+    (rel) => !roots.some((root) => root === '' || rel === root || rel.startsWith(`${root}/`)),
+  );
+  const project = remeasureProject({
+    pkgAbs,
+    rootAbs,
+    parsed,
+    unreachable,
+    chain: tsconfigChainFacts(dir),
+  });
+
+  const holder = mkdtempSync(join(tmpdir(), 'objectstack-debt-remeasure-'));
+  const configPath = join(holder, REMEASURE_CONFIG);
   writeFileSync(configPath, `${JSON.stringify(project, null, 2)}\n`);
   try {
-    return tscErrorCount(posix.join(dir, REMEASURE_CONFIG));
+    return tscErrorCount(configPath);
   } finally {
-    rmSync(configPath, { force: true });
+    rmSync(holder, { force: true, recursive: true });
   }
 }
 
@@ -1487,6 +1825,37 @@ function measureLedgers(packages, rootName, state) {
         + `ledger (${SURPLUS_ISSUE}).\n`
         + `Build the closure first, exactly as lint.yml does before this step:\n`
         + `  pnpm exec turbo run build --filter='./packages/*' --filter='./packages/*/*'`,
+    );
+  }
+
+  // PRESENT is not CURRENT (#8271). Every dependency having SOME `dist/*.d.ts`
+  // says nothing about whether it describes today's source, and the stale case
+  // is the silent one: the refusal above never fires, tsc resolves through an
+  // artifact of a package that no longer exists, and the drift it reports is
+  // not in the source at all. So the closure is refreshed rather than merely
+  // asserted -- the same command, with the same filters, that lint.yml runs
+  // immediately before this gate, which is why CI has never seen this failure.
+  refreshBuiltClosure();
+  // BACKSTOP, deliberately after the build and never before it. An mtime read
+  // is a guess (a `git checkout` that rewrites a file to identical content ages
+  // a `dist/` that is perfectly current, and 3 of 3 packages flagged in the
+  // first worktree measured this way were exactly that kind of false alarm), so
+  // it is not fit to decide whether to spend a build. After one, it is a
+  // different question with a different error rate: turbo has just rebuilt
+  // everything its filters reach, so anything still older than its own sources
+  // is a package the build did not cover, and naming it is the only remedy the
+  // caller can act on.
+  const stale = staleClosure(ledgered, workspaceBuildGraph(packages));
+  if (stale.length > 0) {
+    throw new Error(
+      `--re-measure cannot run: ${stale.length} workspace dependenc(ies) of the ledgered packages still have `
+        + `a type entry point OLDER than their own sources after a full closure build -- ${stale.join(', ')}.\n`
+        + `The build covers \`./packages/*\` and \`./packages/*/*\`, so a package that survives it is one those `
+        + `filters do not reach, or one whose build does not write the entry point its own manifest declares. `
+        + `Measuring now would resolve imports through a \`dist/*.d.ts\` describing a package that no longer `
+        + `exists, and a number recorded from there is not this package's debt (${SURPLUS_ISSUE}).\n`
+        + `Build the named package(s) directly, then re-run:\n`
+        + `  pnpm --filter ${stale[0]} build`,
     );
   }
 
@@ -2266,6 +2635,217 @@ function selfTest() {
     }
   }
 
+  // STALE CLOSURE (#8271) -- present but older than the source it describes,
+  // which is the case `built` alone cannot see and the one that reported four
+  // errors that were not in any source. Paired the same way its sibling is: the
+  // SAME graph asserted quiet and then with one `stale` flag flipped, because
+  // "nothing is reported" is a sentence an empty traversal also says.
+  //
+  // The first case is load-bearing beyond the pairing: `unbuiltClosure`'s own
+  // table describes nodes with no `stale` key at all, so it also pins that a
+  // graph read by the older function cannot be read as stale by this one.
+  const fresh = (deps, isStale = false) => ({ deps, typeEntries: ['dist/index.d.ts'], built: true, stale: isStale });
+  const staleGraph = (specStale) => new Map([
+    ['ledgered', fresh(['spec', 'formula'])],
+    ['spec', fresh([], specStale)],
+    ['formula', fresh(['spec'])],
+    ['untouched', fresh([], true)], // stale, but nothing in the closure needs it
+  ]);
+  const staleCases = [
+    { label: 'a current closure reports nothing, over a graph of 4 packages', roots: ['ledgered'], graph: staleGraph(false), expect: [] },
+    { label: 'flipping one dependency to stale reports exactly that one', roots: ['ledgered'], graph: staleGraph(true), expect: ['spec'] },
+    {
+      label: 'a transitive dependency counts — the closure is walked, not just the direct deps',
+      roots: ['ledgered'],
+      graph: new Map([['ledgered', fresh(['formula'])], ['formula', fresh(['spec'])], ['spec', fresh([], true)]]),
+      expect: ['spec'],
+    },
+    {
+      label: 'a ledgered package\'s OWN dist is irrelevant to its OWN number',
+      roots: ['ledgered'],
+      graph: new Map([['ledgered', fresh([], true)]]),
+      expect: [],
+    },
+    {
+      label: 'but it IS reported when another ledgered package depends on it',
+      roots: ['a', 'ledgered'],
+      graph: new Map([['a', fresh(['ledgered'])], ['ledgered', fresh([], true)]]),
+      expect: ['ledgered'],
+    },
+    {
+      // Described as BUILT on purpose, which the fs read cannot currently
+      // produce (`built` is "some declared entry exists", so no entries means
+      // not built). Written the other way the case passes on the `built` guard
+      // alone and pins nothing about type entries -- measured: deleting the
+      // type-entry guard left the whole table green until this node said
+      // `built: true`.
+      label: 'a package that declares no type entry point is never stale, however it is described',
+      roots: ['ledgered'],
+      graph: new Map([['ledgered', fresh(['console'])], ['console', { deps: [], typeEntries: [], built: true, stale: true }]]),
+      expect: [],
+    },
+    {
+      // The two findings are different remedies -- build it once, versus build
+      // it again -- so a package with nothing on disk must reach the caller as
+      // exactly one of them, and it is unbuiltClosure's.
+      label: 'an UNBUILT dependency is not also reported as stale',
+      roots: ['ledgered'],
+      graph: new Map([['ledgered', fresh(['spec'])], ['spec', { deps: [], typeEntries: ['dist/index.d.ts'], built: false, stale: true }]]),
+      expect: [],
+    },
+    {
+      label: 'a dependency cycle terminates instead of hanging the gate',
+      roots: ['ledgered'],
+      graph: new Map([['ledgered', fresh(['a'])], ['a', fresh(['b'])], ['b', fresh(['a'], true)]]),
+      expect: ['b'],
+    },
+    {
+      label: 'a dependency outside the workspace is npm\'s problem, not the build\'s',
+      roots: ['ledgered'],
+      graph: new Map([['ledgered', fresh(['zod'])]]),
+      expect: [],
+    },
+  ];
+  for (const c of staleCases) {
+    const got = staleClosure(c.roots, c.graph);
+    if (JSON.stringify(got) !== JSON.stringify(c.expect)) {
+      failures.push(`staleClosure — ${c.label}: expected ${JSON.stringify(c.expect)}, got ${JSON.stringify(got)}`);
+    }
+  }
+
+  // The freshness READ, as opposed to the traversal over its result. Two files
+  // decide it and they are not interchangeable: a source file dates the build,
+  // a test file must not, because no `dist/*.d.ts` is generated from one. This
+  // is the exclusion that took the first worktree's flag count from 3 to 1.
+  const sourceFileCases = [
+    { label: 'a plain source file is read', name: 'index.ts', expect: true },
+    { label: 'a .tsx source file is read', name: 'view.tsx', expect: true },
+    { label: 'an .mts source file is read', name: 'entry.mts', expect: true },
+    { label: 'a .test.ts file is not', name: 'engine.test.ts', expect: false },
+    { label: 'a .spec.tsx file is not', name: 'form.spec.tsx', expect: false },
+    { label: 'a non-TypeScript file is not', name: 'README.md', expect: false },
+    { label: 'a .json fixture is not', name: 'fixture.json', expect: false },
+  ];
+  for (const c of sourceFileCases) {
+    const got = isBuildSource(c.name);
+    if (got !== c.expect) {
+      failures.push(`source-file read — ${c.label}: expected ${c.expect}, got ${got}`);
+    }
+  }
+
+  // THE GENERATED RE-MEASURE PROJECT (#8218). The invariant is one sentence --
+  // no path in this object may be relative -- and it is worth a case table
+  // because the file is written into `os.tmpdir()`, where a relative path does
+  // not fail, it QUIETLY MEANS SOMETHING ELSE. The two shapes that bit hardest
+  // are the ones nobody writes down: an omitted `include` (tsc substitutes
+  // `**\/*` against the temp dir) and an omitted `typeRoots` (tsc derives them
+  // from the temp dir, and packages/cli drops from 188 errors to 1).
+  const PKG = '/repo/packages/a';
+  const REPO = '/repo';
+  const chain = (extra = {}) => ({ selectsFiles: false, declaresTypeRoots: false, ...extra });
+  const projectCases = [
+    {
+      label: 'the usual shape: own include, no exclude, nothing unreachable',
+      input: { parsed: { include: ['src/**/*'] }, unreachable: [], chain: chain({ selectsFiles: true }) },
+      expect: {
+        extends: '/repo/packages/a/tsconfig.json',
+        exclude: [],
+        include: ['/repo/packages/a/src/**/*'],
+        compilerOptions: { typeRoots: ['/repo/packages/a/node_modules/@types', '/repo/packages/node_modules/@types', '/repo/node_modules/@types'] },
+      },
+    },
+    {
+      label: 'the test globs are dropped from exclude and the survivors are absolutised',
+      input: {
+        parsed: { include: ['src/**/*'], exclude: ['dist', 'node_modules', '**/*.test.ts', '**/*.spec.tsx'] },
+        unreachable: [],
+        chain: chain({ selectsFiles: true }),
+      },
+      expectPart: { exclude: ['/repo/packages/a/dist', '/repo/packages/a/node_modules'] },
+    },
+    {
+      label: 'unreachable test files are appended one at a time and rootDir is neutralised to the package',
+      input: {
+        parsed: { include: ['src'], exclude: [] },
+        unreachable: ['test/x.test.ts', 'e2e/y.spec.ts'],
+        chain: chain({ selectsFiles: true }),
+      },
+      expectPart: {
+        include: ['/repo/packages/a/src', '/repo/packages/a/test/x.test.ts', '/repo/packages/a/e2e/y.spec.ts'],
+      },
+      expectOption: { rootDir: '/repo/packages/a' },
+    },
+    {
+      label: 'a config that selects nothing gets an EXPLICIT include — the default would name the temp dir',
+      input: { parsed: {}, unreachable: [], chain: chain() },
+      expectPart: { include: ['/repo/packages/a/**/*'] },
+    },
+    {
+      label: 'a chain that selects files keeps selecting them: no include is invented over its head',
+      input: { parsed: {}, unreachable: [], chain: chain({ selectsFiles: true }) },
+      expectAbsent: ['include'],
+    },
+    {
+      label: 'a chain that names its own typeRoots is not overridden — those already resolve from their own file',
+      input: { parsed: { include: ['src'] }, unreachable: [], chain: chain({ selectsFiles: true, declaresTypeRoots: true }) },
+      expectAbsentOption: ['typeRoots'],
+    },
+  ];
+  for (const c of projectCases) {
+    const got = remeasureProject({ pkgAbs: PKG, rootAbs: REPO, ...c.input });
+    const problems = [];
+    if (c.expect && JSON.stringify(got) !== JSON.stringify(c.expect)) {
+      problems.push(`expected ${JSON.stringify(c.expect)}, got ${JSON.stringify(got)}`);
+    }
+    for (const [key, want] of Object.entries(c.expectPart ?? {})) {
+      if (JSON.stringify(got[key]) !== JSON.stringify(want)) {
+        problems.push(`${key}: expected ${JSON.stringify(want)}, got ${JSON.stringify(got[key])}`);
+      }
+    }
+    for (const [key, want] of Object.entries(c.expectOption ?? {})) {
+      if (JSON.stringify(got.compilerOptions?.[key]) !== JSON.stringify(want)) {
+        problems.push(`compilerOptions.${key}: expected ${JSON.stringify(want)}, got ${JSON.stringify(got.compilerOptions?.[key])}`);
+      }
+    }
+    for (const key of c.expectAbsent ?? []) {
+      if (got[key] !== undefined) problems.push(`${key} should be absent, got ${JSON.stringify(got[key])}`);
+    }
+    for (const key of c.expectAbsentOption ?? []) {
+      if (got.compilerOptions?.[key] !== undefined) {
+        problems.push(`compilerOptions.${key} should be absent, got ${JSON.stringify(got.compilerOptions[key])}`);
+      }
+    }
+    // The blanket property, checked on EVERY case rather than spelled per
+    // expectation: one relative path anywhere in this object is a silently
+    // different measurement, so no case is allowed to introduce one.
+    for (const [where, value] of [
+      ['extends', [got.extends]],
+      ['include', got.include ?? []],
+      ['exclude', got.exclude ?? []],
+      ['compilerOptions.rootDir', got.compilerOptions?.rootDir ? [got.compilerOptions.rootDir] : []],
+      ['compilerOptions.typeRoots', got.compilerOptions?.typeRoots ?? []],
+    ]) {
+      for (const p of value) {
+        if (!String(p).startsWith('/')) problems.push(`${where} emits a relative path: ${JSON.stringify(p)}`);
+      }
+    }
+    if (problems.length > 0) failures.push(`remeasureProject — ${c.label}: ${problems.join('; ')}`);
+  }
+
+  // The measurement is only as good as its refusal to record a broken one. A
+  // generated project whose type libraries do not resolve prints ONE diagnostic
+  // and nothing else, which is why TS2688 must never reach the counter (#8218).
+  const setupErrorCases = [
+    { label: 'an unresolvable type library is a broken measurement, not one error', output: "error TS2688: Cannot find type definition file for 'node'.", expect: true },
+    { label: 'an unreadable project is a broken measurement', output: "error TS5058: The specified path does not exist: 'x.json'.", expect: true },
+    { label: 'an ordinary type error is debt', output: "packages/a/src/x.ts(1,2): error TS2322: Type 'A' is not assignable to type 'B'.", expect: false },
+    { label: 'a code that merely starts with the same digits is not a setup error', output: 'packages/a/src/x.ts(1,2): error TS26881: invented.', expect: false },
+  ];
+  for (const c of setupErrorCases) {
+    const got = TSC_SETUP_ERROR.test(c.output);
+    if (got !== c.expect) failures.push(`TSC_SETUP_ERROR — ${c.label}: expected ${c.expect}, got ${got}`);
+  }
+
   // AUTO-LOWERING (#6376). What it refuses matters more than what it writes.
   const planCases = [
     {
@@ -2366,8 +2946,9 @@ function selfTest() {
     `✓ check:type-check-coverage --self-test — ${cases.length} semantic case(s) + ` +
       `${namedCases.length + coverCases.length + unreadCases.length + accountedCases.length
         + derivedCases.length} observation case(s) + ` +
-      `${driftCases.length + countCases.length} re-measure case(s) + ` +
-      `${typeEntryCases.length + closureCases.length} built-closure case(s) + ` +
+      `${driftCases.length + countCases.length + projectCases.length + setupErrorCases.length} re-measure case(s) + ` +
+      `${typeEntryCases.length + closureCases.length + staleCases.length + sourceFileCases.length} ` +
+      `built-closure case(s) + ` +
       `${planCases.length + rewriteCases.length} auto-lowering case(s) hold.`,
   );
 }

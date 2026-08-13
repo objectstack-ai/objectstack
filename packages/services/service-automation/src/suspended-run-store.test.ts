@@ -311,11 +311,16 @@ describe('hasSuspendedRun', () => {
         const paused = await pausableEngine(new ObjectStoreSuspendedRunStore(table, createTestLogger()))
             .execute('approval_flow');
 
-        // The case `getRun` cannot answer: no execution-log entry exists in
-        // this process, yet the run is alive and resumable.
+        // No execution-log entry exists in this process, yet the run is alive
+        // and resumable — and both reads now say so. `getRun` used to answer
+        // `null` here, and this line asserted that as the CONTRAST between the
+        // two methods; #8050 measured the same `null` as the defect (it is what
+        // made run-detail 404 for a healthy parked run) and gave `getRun` the
+        // durable paused fallback `hasSuspendedRun` always had. The assertion is
+        // inverted rather than deleted, so the pair stays pinned together.
         const cold = pausableEngine(new ObjectStoreSuspendedRunStore(table, createTestLogger()));
         expect(await cold.hasSuspendedRun(paused.runId!)).toBe(true);
-        expect(await cold.getRun(paused.runId!)).toBeNull();
+        expect((await cold.getRun(paused.runId!))?.status).toBe('paused');
     });
 
     it('throws rather than answering false when the store is unreadable', async () => {
@@ -326,6 +331,14 @@ describe('hasSuspendedRun', () => {
         // "Unknown" must not collapse into "gone" — a caller that treats an
         // outage as a dead run rejects every decision in the tenant.
         await expect(e.hasSuspendedRun('run_x')).rejects.toThrow(/connection refused/);
+
+        // The distinction between the two reads that #8050 did NOT erase, and
+        // the one that carries the safety property: this method backs a WRITE
+        // decision, so an outage must read as "unknown"; `getRun` is an
+        // observability read and still degrades to null with a warning. Now
+        // that they agree on a healthy store, the place they must keep
+        // disagreeing is worth its own assertion.
+        await expect(e.getRun('run_x')).resolves.toBeNull();
     });
 
     it('answers false with no store and nothing in memory', async () => {

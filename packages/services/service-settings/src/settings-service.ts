@@ -15,6 +15,7 @@ import type {
 import {
   type CryptoAdapter,
   NoopCryptoAdapter,
+  providesConfidentiality,
 } from './crypto-adapter.js';
 import {
   type SettingsActionHandler,
@@ -24,6 +25,7 @@ import {
   type SettingsRow,
   type SettingsServiceOptions,
   envKeyOf,
+  SettingsCryptoUnavailableError,
   SettingsForbiddenError,
   SettingsLockedError,
   SettingsValidationError,
@@ -538,6 +540,13 @@ export class SettingsService {
    * the value is part of the key and not just the var name.
    */
   private readonly reportedEnvOverrides = new Set<string>();
+  /**
+   * `<namespace>.<key>` pairs whose fail-closed encryption refusal (#8026) has
+   * already been reported to the logger. Deduped for the same reason
+   * {@link reportedEnvOverrides} is: a settings form that retries a save would
+   * otherwise repeat one operator-actionable line per attempt.
+   */
+  private readonly reportedCryptoRefusals = new Set<string>();
   /** In-memory fallback when no engine is wired. */
   private readonly memory: SettingsRow[] = [];
   /** Change subscribers, optionally scoped to a namespace. */
@@ -1245,6 +1254,49 @@ export class SettingsService {
   // Mutations
   // ---------------------------------------------------------------------
 
+  /**
+   * Fail-closed gate for `encryptedKeys` writes (#8026).
+   *
+   * Refuses when BOTH credential paths are unavailable: no
+   * `cryptoProvider` + `secretStore` pair (the Phase 3 `sys_secret` path), and
+   * an inline {@link CryptoAdapter} that declares no confidentiality — i.e.
+   * the `NoopCryptoAdapter` default, whose `encrypt()` is base64. Anything
+   * that CAN protect the value is left alone: an injected KMS-backed adapter
+   * keeps working exactly as before, and so does the `sys_secret` path the
+   * shipped plugin wires.
+   *
+   * ## Boot vs write
+   *
+   * The card asked for this to be loud at boot. It cannot be *refused* at
+   * boot: `SettingsServicePlugin` constructs the service in `init()` and binds
+   * the real provider later, at `kernel:ready`, so a construction-time throw
+   * would refuse every shipped deployment — and a namespace with no encrypted
+   * specifier needs no provider at all. The refusal therefore lands at the
+   * write, where the fact is finally knowable, and the LOUDNESS lands here:
+   * one operator-actionable line through the deployment's own logger the first
+   * time a given key is refused. A caller that swallows the thrown error still
+   * leaves that line behind.
+   *
+   * Reads are deliberately NOT gated: `NoopCryptoAdapter.decrypt` still
+   * decodes existing `b64:` rows, so a deployment that already wrote some can
+   * still read them, report them, and migrate them. Refusing those reads too
+   * would strand exactly the data this refusal exists to stop producing.
+   */
+  private assertEncryptionAvailable(namespace: string, key: string): void {
+    if (this.cryptoProvider && this.secretStore) return;
+    if (providesConfidentiality(this.crypto)) return;
+
+    const err = new SettingsCryptoUnavailableError(namespace, key);
+    const dedupeAt = `${namespace}.${key}`;
+    if (!this.reportedCryptoRefusals.has(dedupeAt)) {
+      this.reportedCryptoRefusals.add(dedupeAt);
+      const message = `[SettingsService] ${err.message}`;
+      if (this.logger?.error) this.logger.error(message);
+      else console.error(message);
+    }
+    throw err;
+  }
+
   /** Persist a single key. Throws SettingsLockedError when env-locked. */
   async set(
     namespace: string,
@@ -1305,6 +1357,26 @@ export class SettingsService {
     // validatePatch for the exact semantics.
     await this.validatePatch(namespace, patch, ctx);
 
+    // #8026 — a declared-encrypted key with nothing able to encrypt it fails
+    // the WHOLE batch, here, rather than part-way down the write loop below.
+    // The persist site enforces the same rule (that is the load-bearing half);
+    // this pass is what keeps a refused batch from leaving the namespace
+    // half-written.
+    //
+    // Ordered AFTER `validatePatch` deliberately. Both refuse the whole batch,
+    // but they address different people: a validation error names something the
+    // CALLER can fix in the form they are looking at, while this one names a
+    // deployment the caller cannot reconfigure. Checked first, it would mask
+    // every field-level diagnostic on a namespace that happens to carry a
+    // secret. Clearing a key (null/undefined) is exempt throughout: there is no
+    // plaintext to protect, and an operator must always be able to REMOVE a
+    // value on a deployment that cannot store one.
+    for (const [key, submitted] of Object.entries(patch)) {
+      if (submitted === null || typeof submitted === 'undefined') continue;
+      if (!reg.encryptedKeys.has(key)) continue;
+      this.assertEncryptionAvailable(namespace, key);
+    }
+
     for (const [key, rawValue] of Object.entries(patch)) {
       const scope = reg.scopes.get(key)!;
       // global rows are platform-wide (tenant_id=null, user_id=null);
@@ -1343,6 +1415,13 @@ export class SettingsService {
             storedEnc = handle.id;
             digest = this.cryptoProvider.digest(plain);
           } else {
+            // #8026 — the legacy inline-adapter path persists only through an
+            // adapter that declares real confidentiality. The base64 default
+            // is refused here rather than silently writing a reversible
+            // `value_enc` that reads as protected. Kept AT the write (not only
+            // in the pre-flight above) so no future caller can reach this
+            // branch and fall open.
+            this.assertEncryptionAvailable(namespace, key);
             storedEnc = await this.crypto.encrypt(plain, { namespace, key });
             digest = this.crypto.digest(plain);
           }
@@ -1372,16 +1451,29 @@ export class SettingsService {
       await this.reapRotatedSecret(previousEnc, storedEnc);
 
       if (this.audit) {
-        await this.audit.record({
-          namespace,
-          key,
-          scope,
-          userId: ctx.userId,
-          action: isNull ? 'reset' : 'set',
-          valueDigest: isEncrypted ? '<encrypted:' + digest + '>' : digest,
-          encrypted: isEncrypted,
-          requestId: ctx.requestId,
-        });
+        try {
+          await this.audit.record({
+            namespace,
+            key,
+            scope,
+            userId: ctx.userId,
+            // [#8145] The ledger row's tenant context. Its absence is what makes
+            // an audit row invisible to RLS readers — see `SettingsAuditSink`.
+            tenantId: ctx.tenantId,
+            action: isNull ? 'reset' : 'set',
+            valueDigest: isEncrypted ? '<encrypted:' + digest + '>' : digest,
+            encrypted: isEncrypted,
+            requestId: ctx.requestId,
+          });
+        } catch {
+          // [#8145] Never fail a write because a ledger is unhappy — the same
+          // rule `auditWriter` below has always had, now applied to both sinks.
+          // Load-bearing rather than defensive: this sink writes `sys_audit_log`,
+          // owned by the OPTIONAL plugin-audit, so on a deployment without that
+          // plugin the insert throws on every single settings write. The sink
+          // the plugin supplies swallows and reports on its own; this guard is
+          // what protects a HOST-supplied sink from taking down the write path.
+        }
       }
 
       if (this.auditWriter) {

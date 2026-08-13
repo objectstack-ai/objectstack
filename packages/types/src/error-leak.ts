@@ -36,17 +36,70 @@
 export const INTERNAL_ERROR_MESSAGE = 'Internal server error';
 
 /**
+ * [#8132] The phrasings of the dialects this repo actually RUNS, each anchored
+ * on the driver's own errmsg template rather than on its tail.
+ *
+ * The gap that forced these: the keyword set below caught SQLite's
+ * `SQLITE_ERROR: no such table: sys_metadata` through the `sqlite_` limb, while
+ * the Postgres phrasing of *the same condition* —
+ * `relation "sys_metadata" does not exist` — matched nothing and shipped a
+ * physical table name to the client from every boundary that applies the
+ * predicate.
+ *
+ * **Why anchored, and never on the bare tail.** `does not exist` is ordinary
+ * business English: "user does not exist", "record does not exist". Matching
+ * that substring would replace legitimate answers with `Internal server error`,
+ * so each pattern requires what the DRIVER always emits and prose usually does
+ * not — a quoted identifier, or the trailing colon of SQLite's template. The
+ * negative cases in `error-leak.test.ts` pin that distinction.
+ *
+ * **Why the list stops here.** The module note above argues against growing a
+ * driver taxonomy, and it is right that the list is unbounded *across dialects*
+ * — MySQL/MSSQL/Oracle each phrase all of this differently and nobody here runs
+ * them. These are not a census: they are the two engines `driver-sql`,
+ * `driver-turso` and `driver-sqlite-wasm` actually reach. A dialect this repo
+ * does not run gets no entry, and {@link declaresServerFault} remains the
+ * answer that does not depend on phrasing at all.
+ *
+ * ⚠️ Related but NOT reusable: `relation-sub-object.ts` owns the same Postgres
+ * sentence for two other questions (which column? / is this a sub-object?), and
+ * its note warns that its two widths must never be collapsed. Neither answers
+ * "is this a leak", and its central problem does not arise here: a message like
+ * `column "label" of relation "sys_team" does not exist` contains a complete
+ * missing-TABLE phrase as a substring, which is a hazard when you are deciding
+ * WHICH object is missing and a non-issue when the verdict is "leak" either way.
+ * That is why this asks its own question with its own patterns.
+ */
+const DIALECT_LEAK_PHRASINGS: readonly RegExp[] = [
+  // Postgres 42P01 / 42703 (and, as a superstring, the `… of relation "…"`
+  // sub-object family: 42704 and friends). The quotes are required because
+  // Postgres always emits them here.
+  /\b(?:relation|column)\s+["'`][^"'`]+["'`]\s+does not exist/i,
+  // Postgres 42501. Restricted to physical object kinds: `schema`, `view`,
+  // `function` and `column` are all ObjectStack AUTHORING vocabulary, so a
+  // product message could legitimately use them and a miss is the cheap
+  // direction (the outcome is already a 5xx).
+  /\bpermission denied for (?:table|relation|sequence|database)\b/i,
+  // SQLite/libsql, message-only form. The `sqlite_` limb below catches these
+  // only when the driver prefixed its code; `better-sqlite3` and libsql both
+  // raise them bare, which is the shape measured across this repo.
+  /\bno such (?:table|column):/i,
+];
+
+/**
  * Whether `message` looks like a raw SQL statement or driver/engine dump that
  * must not be returned to an API client.
  *
  * Matches: dialect error codes (`SQLSTATE`, `sqlite_*`), bare statements
  * (a message that *starts* as `SELECT`/`INSERT INTO`/`UPDATE`/`DELETE FROM` —
- * drivers prefix the offending SQL to their message), and constraint-violation
- * dumps, which name physical tables and columns.
+ * drivers prefix the offending SQL to their message), constraint-violation
+ * dumps, which name physical tables and columns, and the
+ * {@link DIALECT_LEAK_PHRASINGS} of the engines this repo ships.
  *
  * Does NOT match ordinary business or validation messages, which is why the
- * statement forms are anchored with `startsWith`: a legitimate message may
- * *mention* "update" without being one.
+ * statement forms are anchored with `startsWith` and the dialect phrasings on
+ * the driver's template: a legitimate message may *mention* "update", or say
+ * "does not exist" about a business record, without being either.
  */
 export function looksLikeInternalErrorLeak(message: string | undefined | null): boolean {
   if (!message) return false;
@@ -60,7 +113,8 @@ export function looksLikeInternalErrorLeak(message: string | undefined | null): 
     lower.startsWith('delete from ') ||
     lower.includes('constraint failed') ||
     lower.includes('unique constraint') ||
-    lower.includes('foreign key')
+    lower.includes('foreign key') ||
+    DIALECT_LEAK_PHRASINGS.some((pattern) => pattern.test(lower))
   );
 }
 

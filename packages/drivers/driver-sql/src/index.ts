@@ -7,6 +7,13 @@ export { SqlDriver };
 // service layer's native→wasm step-down resolves the same answer for its
 // fallback rung — one judgement, two call sites, no second `existsSync`.
 export { resolveSqliteAbsentFileTarget } from './sql-driver.js';
+// [#7929] The read half of the cross-field refusal's withhold: the full,
+// operand-naming diagnostic a redacted `INVALID_FILTER` carries under a symbol
+// key, for a host that maps driver errors itself and wants the same text in its
+// own log. `SqlDriver` writes it to `this.logger` already — this export is what
+// stops an embedder from re-deriving the seam (or, worse, putting the text back
+// on the wire by spreading the error, which the symbol key exists to prevent).
+export { withheldFilterDiagnosticOf } from './sql-driver.js';
 export type {
   SqlDriverConfig,
   SqliteJournalMode,
@@ -40,6 +47,7 @@ export {
   CROSS_FIELD_AUTHORED_CASES,
   CROSS_FIELD_CASES,
   CROSS_FIELD_OBJECT_FIELDS,
+  CROSS_FIELD_OPERAND_NAMES,
   CROSS_FIELD_REFUSALS,
   CROSS_FIELD_ROWS,
 } from './cross-field-conformance-cases.js';

@@ -562,7 +562,8 @@ export interface ITeamGraphService {
  *
  * Walks `parent_business_unit_id` to expand a department into the union of
  * its members and all descendant members. Drives:
- *   - `recipient_type='business_unit'` sharing rules
+ *   - `recipient_type='unit_and_subordinates'` sharing rules (this subtree
+ *     walk); `business_unit` expands only the one named unit's members
  *   - `bu:` approver prefix in the approval engine
  *   - report rollups, manager chains, and similar org-aware logic
  */

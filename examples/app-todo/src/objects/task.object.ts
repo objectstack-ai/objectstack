@@ -125,19 +125,37 @@ export const Task = ObjectSchema.create({
       min: 1,
     }),
     
-    // Flags
-    is_completed: Field.boolean({
-      label: 'Is Completed',
-      defaultValue: false,
-      readonly: true,
-    }),
-    
-    is_overdue: Field.boolean({
-      label: 'Is Overdue',
-      defaultValue: false,
-      readonly: true,
-    }),
-    
+    // [#7226] `is_completed` / `is_overdue` USED TO LIVE HERE, and were removed.
+    //
+    // Both were `readonly: true` booleans defaulting to `false` that nothing in
+    // the app ever wrote — no hook leg, no flow node, no action handler, and the
+    // seed data set neither. They were therefore `false` on every row for the
+    // life of the app, while twelve view / dashboard / report / flow filters
+    // read them as if they were maintained. `is_completed: true` tiles ("Completed
+    // Today", "Weekly Task Completion", the two completed-task reports) were
+    // permanently empty, and the divergence became visible once #7036 started
+    // stamping `completed_date` on the completion transition: a task could carry
+    // a completion date and `is_completed: false` at the same time.
+    //
+    // They are GONE rather than derived, and the reason is measured, not
+    // stylistic. `Field.formula(...)` computes correctly for both — including the
+    // temporal one (`date(record.due_date) < today()` evaluates per read, with a
+    // per-call `now` snapshot) — but a formula field is VIRTUAL: no driver
+    // materialises a column for it, so a FILTER naming one matches nothing.
+    // Measured on this app's own sqlite-wasm driver: `where { is_completed: false }`
+    // against a formula field returns 0 rows with no error, where the stored
+    // boolean returned every row. Deriving them would have silently emptied the
+    // "Due Today" view, the reminder flow and both open-task reports — trading a
+    // wrong answer for an invisible one.
+    //
+    // `status` and `due_date` are stored, indexed columns that already carry the
+    // information, so every consumer now asks them directly:
+    //   is_completed == true   ->  status equals 'completed'
+    //   is_completed == false  ->  status not_equals 'completed'
+    //   is_overdue   == true   ->  due_date less_than '{today}' AND status not_equals 'completed'
+    // Consistent by construction, with no second writer that can drift — which is
+    // the pattern a reference app should be teaching.
+
     // Progress
     progress_percent: Field.percent({
       label: 'Progress (%)',

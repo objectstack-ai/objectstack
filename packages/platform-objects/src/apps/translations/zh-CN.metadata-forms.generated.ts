@@ -641,12 +641,6 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       resizable: {
         label: "可调整大小"
       },
-      striped: {
-        label: "斑马纹"
-      },
-      bordered: {
-        label: "边框"
-      },
       compactToolbar: {
         label: "紧凑工具栏"
       },

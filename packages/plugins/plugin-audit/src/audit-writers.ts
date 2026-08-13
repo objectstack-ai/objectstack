@@ -193,6 +193,54 @@ const NOISE_FIELDS = new Set<string>([
   'created_by',
 ]);
 
+/**
+ * "Does this object's REGISTERED schema declare this field?", memoized per
+ * object.
+ *
+ * Extracted to module scope (#8144) so the CRUD writer below and the auth-event
+ * writer (`auth-event-audit.ts`) ask the question ONE way. Both stamp the same
+ * two conditional columns on the same table, and a second hand-rolled probe
+ * would answer differently on the day one of them is fixed.
+ *
+ * Why the probe exists at all: the SchemaRegistry auto-injects
+ * `organization_id` only in multi-tenant mode (`applySystemFields({
+ * multiTenant })`), so on single-tenant stacks the `sys_audit_log` /
+ * `sys_activity` tables have no such column. Unconditionally stamping it there
+ * made every audit INSERT fail with "table sys_audit_log has no column named
+ * organization_id" — and the error was swallowed, so audit logging was silently
+ * non-functional. Resolve the field set lazily from the engine schema and cache
+ * it; object schemas are static after registration.
+ *
+ * Best-effort in both directions: an engine with no `getSchema` (an in-memory
+ * test double) reports every field absent, which skips the stamp rather than
+ * failing the write.
+ */
+export function createFieldPresenceProbe(
+  engine: unknown,
+): (objectName: string, field: string) => boolean {
+  const fieldSetCache = new Map<string, Set<string> | null>();
+  return (objectName: string, field: string): boolean => {
+    let set = fieldSetCache.get(objectName);
+    if (set === undefined) {
+      set = null;
+      try {
+        const schema: any =
+          typeof (engine as any)?.getSchema === 'function' ? (engine as any).getSchema(objectName) : null;
+        const fields = schema?.fields;
+        if (fields && typeof fields === 'object' && !Array.isArray(fields)) {
+          set = new Set<string>(Object.keys(fields));
+        } else if (Array.isArray(fields)) {
+          set = new Set<string>(fields.map((f: any) => f?.name).filter(Boolean));
+        }
+      } catch {
+        /* ignore — best-effort; absence just means we skip the stamp */
+      }
+      fieldSetCache.set(objectName, set);
+    }
+    return set != null && set.has(field);
+  };
+}
+
 /** Action name produced from a HookContext.event string. */
 function actionFor(event: string): 'create' | 'update' | 'delete' | null {
   if (event === 'afterInsert') return 'create';
@@ -777,36 +825,10 @@ export function installAuditWriters(
     engine.unregisterHooksByPackage(packageId);
   }
 
-  // Whether a given object's *registered* schema declares a field. The
-  // SchemaRegistry auto-injects `organization_id` only in multi-tenant mode
-  // (`applySystemFields({ multiTenant })`), so on single-tenant stacks the
-  // `sys_audit_log` / `sys_activity` tables have no `organization_id` column.
-  // Unconditionally stamping it there made every audit INSERT fail with
-  // "table sys_audit_log has no column named organization_id" (the error was
-  // swallowed, so audit logging was silently non-functional). Resolve the
-  // field set lazily from the engine schema and cache it — object schemas are
-  // static after registration.
-  const fieldSetCache = new Map<string, Set<string> | null>();
-  const objectHasField = (objectName: string, field: string): boolean => {
-    let set = fieldSetCache.get(objectName);
-    if (set === undefined) {
-      set = null;
-      try {
-        const schema: any =
-          typeof (engine as any).getSchema === 'function' ? (engine as any).getSchema(objectName) : null;
-        const fields = schema?.fields;
-        if (fields && typeof fields === 'object' && !Array.isArray(fields)) {
-          set = new Set<string>(Object.keys(fields));
-        } else if (Array.isArray(fields)) {
-          set = new Set<string>(fields.map((f: any) => f?.name).filter(Boolean));
-        }
-      } catch {
-        /* ignore — best-effort; absence just means we skip the stamp */
-      }
-      fieldSetCache.set(objectName, set);
-    }
-    return set != null && set.has(field);
-  };
+  // Whether a given object's *registered* schema declares a field — see
+  // `createFieldPresenceProbe` for why the conditional stamp exists. Shared
+  // with the auth-event writer so both stamp on the same answer.
+  const objectHasField = createFieldPresenceProbe(engine);
 
   // Cached full field-definition map per object (for ADR-0052 §5b trackHistory
   // rendering — needs labels/options, not just field names).

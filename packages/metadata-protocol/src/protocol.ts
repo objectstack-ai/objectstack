@@ -62,7 +62,7 @@ import {
 } from '@objectstack/spec/data';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 import { applyConversionsToStoredItem, type ConversionNotice } from '@objectstack/spec';
-import { type FormView, isAggregatedViewContainer } from '@objectstack/spec/ui';
+import { type FormView, isAggregatedViewContainer, expandViewContainer } from '@objectstack/spec/ui';
 import { METADATA_FORM_REGISTRY, CORE_SERVICE_PROVIDER, serviceUnavailableMessage, inProcessServiceMessage } from '@objectstack/spec/system';
 import { DEFAULT_METADATA_TYPE_REGISTRY, getMetadataTypeSchema, getMetadataTypeActions, getMetadataCreateSeed, PROTOCOL_VERSION } from '@objectstack/spec/kernel';
 import {
@@ -1747,8 +1747,13 @@ const WIRE_DOLLAR_ALIASES: readonly (readonly [string, string])[] = [
  *                      and the array from either slot.
  *  - `where`         — a FILTER AST is an array (`['status','=','open']`), so a
  *                      blanket arity refusal here would reject the AST body form
- *                      outright. A repeated `?filter=` is still refused, one
- *                      block down, by `isFilterAST` failing to read it.
+ *                      outright. Arity for this slot is judged one layer up, at
+ *                      the REST querystring ingress (`assertFilterParamSuppliedOnce`,
+ *                      #7390) — the only layer that knows an array on this wire
+ *                      is a repetition and can be nothing else. A repeated
+ *                      `?filter=` never reaches this block on `GET /data/:object`;
+ *                      worse, `?filter=status&filter=%3D&filter=open` spells a
+ *                      valid AST and succeeds with a filter nobody expressed.
  *  - `groupBy`       — `z.array(GroupByNodeSchema)`.
  *  - `aggregations`  — `z.array(AggregationNodeSchema)`.
  *  - `joins` / `windowFunctions` — retired ARRAY keys (#4286). The tombstone,
@@ -4147,6 +4152,100 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#8038] The `__search` half of {@link governServedItem}'s presence
+     * convergence — the third stamp in the same family, and the one the
+     * module-level function cannot carry on its own.
+     *
+     * `applyInjectedSystemColumns` (#6562) converges the columns whose
+     * membership is a pure function of the document
+     * (`resolveInjectedSystemColumns`), so it needs nothing but the body. The
+     * search companion is DEPLOYMENT-gated: `SchemaRegistry` provisions it at
+     * the object-materialization seam only when its own `searchCompanion` flag
+     * is on, and that flag is `options.searchCompanion ??
+     * resolveSearchPinyinEnabled()` — a host may set it explicitly. So the
+     * answer has to come from the registry that made the decision, which is why
+     * this is a method here and a `provisionSearchCompanionOnto` there, exactly
+     * as {@link foldObjectExtendersFromRegistry} is a method here and a
+     * `foldObjectExtendersOnto` there (#7556).
+     *
+     * Applied AFTER `governServedItem` at each exit, because the registry
+     * provisions the companion after `applySystemFields` too: the source field
+     * is resolved by `resolveDisplayField` over the POST-injection field set,
+     * so injecting first is what makes this pass and the registry's own answer
+     * the same answer rather than two independent guesses.
+     *
+     * No-op for every type but `object`, and — via the registry — for a
+     * deployment with companions off, an object with no eligible display field,
+     * and a body that already carries the column (every registry-backed read,
+     * which is the majority path this converges the minority onto).
+     */
+    private provisionSearchCompanionFromRegistry<T>(type: string, body: T): T {
+        if (canonicalMetaType(type) !== 'object') return body;
+        if (body === null || typeof body !== 'object') return body;
+        const registry = (this.engine as any)?.registry;
+        // Partial registry doubles in tests predate this method; a host that
+        // cannot answer the gate answers exactly as it did before.
+        if (!registry || typeof registry.provisionSearchCompanionOnto !== 'function') return body;
+        try {
+            return registry.provisionSearchCompanionOnto(body) as T;
+        } catch {
+            // A read over an in-memory flag and the body's own fields; a failure
+            // here must not turn a served schema into a 5xx.
+            return body;
+        }
+    }
+
+    /**
+     * {@link governServedItem} plus the deployment-gated half it cannot reach
+     * ({@link provisionSearchCompanionFromRegistry}) — the whole of what a
+     * `/meta` READ EXIT owes an object document. Every call site of the free
+     * function that is a read exit goes through this instead; the one call site
+     * that is not — `getMetaItemLayered`'s `code` / `overlay` layers, which are
+     * deliberately raw — never called it in the first place (#6562 ruling
+     * constraint 1, #7556's boundary).
+     */
+    private governServedObject<T>(type: string, item: T): T {
+        return this.provisionSearchCompanionFromRegistry(type, governServedItem(type, item));
+    }
+
+    /**
+     * [#8038] The write-side counterpart of
+     * {@link provisionSearchCompanionFromRegistry}, owed for the reason
+     * {@link stripServedSystemColumns} is owed one field family over: the write
+     * path persists the request body verbatim (ADR-0005 §Validation), so a
+     * document this service's read added the companion to would otherwise be
+     * handed straight back and stored carrying it.
+     *
+     * Measured on the runtime-created object path — the write door type
+     * `object` has open by default, an artifact-backed object refusing the save
+     * outright with `NOT_OVERRIDABLE` — the stored row went from
+     * `fields: [name]` to `fields: [__search, name]` on a single GET → PUT
+     * before this was added.
+     */
+    private stripSearchCompanionFromRegistry<T>(type: string, item: T): T {
+        if (canonicalMetaType(type) !== 'object') return item;
+        if (item === null || typeof item !== 'object') return item;
+        const registry = (this.engine as any)?.registry;
+        if (!registry || typeof registry.stripProvisionedSearchCompanionFrom !== 'function') return item;
+        try {
+            return registry.stripProvisionedSearchCompanionFrom(item) as T;
+        } catch {
+            // A read over the body's own fields; a failure here must not turn a
+            // save into a 5xx.
+            return item;
+        }
+    }
+
+    /**
+     * {@link stripServedSystemColumns} plus the companion half
+     * ({@link stripSearchCompanionFromRegistry}) — the whole of what the write
+     * path owes {@link governServedObject}.
+     */
+    private stripServedObjectColumns<T>(type: string, item: T): T {
+        return this.stripSearchCompanionFromRegistry(type, stripServedSystemColumns(type, item));
+    }
+
+    /**
      * [#5840] Read ONE item from the `metadata` service, keeping the ADR-0110
      * D3 verdict instead of flattening it into `undefined`.
      *
@@ -4610,7 +4709,7 @@ export class ObjectStackProtocolImplementation implements
                     // is the other exit a client reads field metadata from, and
                     // an overlay row wins over the (already-governed) registry
                     // entry in the merge above, so it carries the same lie.
-                    return governServedItem(request.type, mergeArtifactProtection(it, a)) as any;
+                    return this.governServedObject(request.type, mergeArtifactProtection(it, a)) as any;
                 }),
             ),
         };
@@ -4674,7 +4773,7 @@ export class ObjectStackProtocolImplementation implements
                     return {
                         type: request.type,
                         name: request.name,
-                        item: decorateMetadataItem(request.type, governServedItem(request.type, draftItem)),
+                        item: decorateMetadataItem(request.type, this.governServedObject(request.type, draftItem)),
                     };
                 }
             } catch (error) {
@@ -4768,7 +4867,7 @@ export class ObjectStackProtocolImplementation implements
             return {
                 type: request.type,
                 name: request.name,
-                item: decorateMetadataItem(request.type, governServedItem(request.type, item)),
+                item: decorateMetadataItem(request.type, this.governServedObject(request.type, item)),
             };
         }
 
@@ -4893,7 +4992,7 @@ export class ObjectStackProtocolImplementation implements
         const artifactItem = this.lookupArtifactItem(request.type, request.name, request.packageId);
         let decorated = decorateMetadataItem(
             request.type,
-            governServedItem(request.type, mergeArtifactProtection(item, artifactItem)),
+            this.governServedObject(request.type, mergeArtifactProtection(item, artifactItem)),
         );
         // ADR-0047 — list views additionally get reference-integrity
         // diagnostics (userFilters/tabs fields must exist on the source
@@ -5185,7 +5284,7 @@ export class ObjectStackProtocolImplementation implements
         const effectiveBase: unknown | null = overlay !== null
             ? this.foldObjectExtendersFromRegistry(request.type, request.name, overlay)
             : code;
-        const effective: unknown | null = governServedItem(request.type, effectiveBase);
+        const effective: unknown | null = this.governServedObject(request.type, effectiveBase);
 
         const _diagnostics =
             effective !== null && effective !== undefined
@@ -9556,7 +9655,85 @@ export class ObjectStackProtocolImplementation implements
         if (!registry || typeof registry.registerItem !== 'function') return false;
         const artifact = this.lookupArtifactItem(type, (data as any).name, options.packageId ?? undefined);
         registry.registerItem(type, mergeArtifactProtection(data, artifact), 'name' as any);
+        this.hydrateExpandedViewItems(type, data, options, registry);
         return true;
+    }
+
+    /**
+     * [#7736] Expand an aggregated `defineView` container that arrived through
+     * the RUNTIME door into the same independent ViewItems the two SOURCE
+     * registrars produce — at the one hydration choke point all three runtime
+     * callers already share.
+     *
+     * "Object has-many View" (ADR-0017 §2, §3.2) makes container ingestion
+     * DUAL-READ: register the container under the bare `<object>` key for
+     * back-compatible single-item reads, AND register every expanded ViewItem
+     * under `<object>.<viewKey>`, because only the expanded items carry the
+     * `viewKind` + `object` pair that every object-bound read path filters on
+     * (`GET /meta/view?object=` in `rest-server.ts`, `getViewsByObject()` in
+     * `metadata-manager.ts`). Both source registrars do exactly this — the
+     * ObjectQL boot loop (`engine.ts`, `key === 'views'`) and the metadata
+     * artifact/HMR loader (`plugin.ts`, `isAggregatedViewContainer`) — and the
+     * runtime door did not, so a container authored against a writable runtime
+     * package was stored, badged `_diagnostics.valid: true`, and then served by
+     * nothing: `getMetaItems` DROPS containers from enumeration (the
+     * canonical-shape filter below) on the stated assumption that "the
+     * registrar expands it", and for a runtime-written row no registrar ever
+     * had. Measured before the fix: the stored container expands cleanly to two
+     * items that WOULD match the switcher, and both object-bound exits answered
+     * zero.
+     *
+     * Here rather than at either read exit deliberately. There are two
+     * independent object-bound readers — the REST route reads through
+     * `getMetaItems`, while `getViewsByObject()` reads `MetadataManager.list`
+     * — so expanding at one of them fixes the card's literal repro and leaves
+     * its sibling exit answering empty. This function is the ONE place all
+     * three runtime hydration callers (boot `loadMetaFromDb`, read-side
+     * `getMetaItems`, write-through `applyRegistryWriteThrough`) already
+     * funnel through, so one expansion serves every reader, survives a restart,
+     * and keeps read-your-writes — the "single, universally-applied location"
+     * #7163 asked for after the same defect was fixed one seam further in.
+     *
+     * The canonical-shape filter in `getMetaItems` is deliberately left alone:
+     * its invariant ("a container's expanded items are also present") is what
+     * was false here, and this restores it rather than loosening the filter —
+     * which would surface the legacy wrapper shape to every list consumer and
+     * still show the switcher nothing, since a container carries no `viewKind`.
+     *
+     * Object-name derivation mirrors `plugin.ts` (`list.data.object` →
+     * `form.data.object`), falling back to the row's own name — for a container
+     * the metadata door's save name IS the object. No derivable object means no
+     * expansion, exactly as the artifact loader already decides.
+     */
+    private hydrateExpandedViewItems(
+        type: string,
+        data: unknown,
+        options: { packageId?: string | null; organizationId: string | null },
+        registry: any,
+    ): void {
+        if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'view') return;
+        if (!isAggregatedViewContainer(data)) return;
+        const container = data as Record<string, any>;
+        const viewObject =
+            container?.list?.data?.object
+            ?? container?.form?.data?.object
+            ?? (typeof container.name === 'string' ? container.name : undefined);
+        if (!viewObject) return;
+        for (const vi of expandViewContainer(viewObject, container)) {
+            // Carry the container's package provenance onto each expanded item
+            // so the package-disable filter and ADR-0048 artifact scoping judge
+            // them by the same owner the container has.
+            const item: Record<string, unknown> = { ...(vi as any) };
+            if (container._packageId !== undefined && item._packageId === undefined) {
+                item._packageId = container._packageId;
+            }
+            const viArtifact = this.lookupArtifactItem(
+                type,
+                vi.name,
+                (item._packageId as string | undefined) ?? options.packageId ?? undefined,
+            );
+            registry.registerItem(type, mergeArtifactProtection(item, viArtifact), 'name' as any);
+        }
     }
 
     /**
@@ -10026,7 +10203,7 @@ export class ObjectStackProtocolImplementation implements
         // schema gate, the authoring gate and the persisted body all still see
         // one document. See {@link stripServedSystemColumns} for why this is a
         // separate strip from the decoration list and not another entry in it.
-        request.item = stripServedSystemColumns(request.type, request.item);
+        request.item = this.stripServedObjectColumns(request.type, request.item);
         // Per-item lifecycle (ADR-0005 §"Drafts"). Default is `'publish'`
         // (legacy semantics — save goes straight live) to keep callers
         // that predate the draft/publish split working. Studio's

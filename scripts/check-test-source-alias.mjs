@@ -172,7 +172,6 @@ const KNOWN_UNALIASED_TEST_IMPORTS = {
     '@objectstack/service-analytics', '@objectstack/service-messaging', '@objectstack/service-storage',
     '@objectstack/spec', '@objectstack/types', '@objectstack/verify',
   ],
-  '@objectstack/downstream-contract': ['@objectstack/spec'],
   '@objectstack/driver-mongodb': [
     '@objectstack/core', '@objectstack/objectql', '@objectstack/spec', '@objectstack/types',
   ],
@@ -303,9 +302,6 @@ const KNOWN_UNALIASED_TEST_IMPORTS = {
   '@objectstack/service-package': ['@objectstack/metadata-core'],
   '@objectstack/service-queue': ['@objectstack/objectql', '@objectstack/platform-objects'],
   '@objectstack/service-realtime': ['@objectstack/spec'],
-  '@objectstack/service-settings': [
-    '@objectstack/platform-objects', '@objectstack/spec', '@objectstack/types',
-  ],
   '@objectstack/service-sms': ['@objectstack/plugin-auth', '@objectstack/service-settings'],
   '@objectstack/service-storage': [
     '@objectstack/objectql', '@objectstack/observability', '@objectstack/platform-objects',

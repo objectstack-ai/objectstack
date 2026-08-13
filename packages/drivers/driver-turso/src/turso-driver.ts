@@ -362,6 +362,16 @@ export class TursoDriver extends SqlDriver {
         this.temporalFilterColumnSql(object, field, columnSql),
       );
 
+      // [#7929] The server-side half of a REDACTED filter refusal. The remote
+      // compiler withholds the operands of a cross-field comparison for the
+      // same reason the inherited local one does — an RLS rule's columns are
+      // not the caller's to read — and this line is what stops the withheld
+      // text from being withheld from the OPERATOR too. `this.logger` is
+      // `SqlDriver`'s own sink, so a host that injected a logger for local mode
+      // gets remote mode's diagnostics in the same place, and a deployment
+      // cannot lose them by changing its connection string.
+      this.remoteTransport.setDiagnosticSink((message) => this.logger.warn(message));
+
       // Register a lazy-connect factory so the transport can self-heal when
       // connect() was never called, failed on first attempt, or the client
       // was lost (e.g. serverless cold-start, transient network error).

@@ -605,11 +605,18 @@ account_id:
 
 **Storage:** Stores `id` of referenced record
 
-**Query behavior:**
+**Query behavior:** `expand` is the door for related data. A dotted `fields`
+entry (`'account_id.company_name'`) is **refused** (`400 INVALID_FIELD`) — no
+driver resolves one, at the REST ingress since #7532 and on direct
+`engine.find` / `engine.findOne` calls since #7589. Keep the reference column
+itself in the projection: the relation is carried by `account_id`, and
+projecting it away leaves the expansion nothing to resolve.
+
 ```typescript
-// Expand the account lookup
+// Read a column of the related account
 const opportunities = await engine.find('opportunity', {
-  fields: ['name', 'account.company_name']  // Expands account
+  fields: ['name', 'account_id'],
+  expand: { account_id: { object: 'account', fields: ['company_name'] } },
 });
 ```
 

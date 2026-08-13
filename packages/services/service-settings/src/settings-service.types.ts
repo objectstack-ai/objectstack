@@ -13,8 +13,23 @@
  *    precedence and tag every value with provenance.
  *  - Encrypt-at-rest for `encrypted: true` specifiers using a pluggable
  *    {@link CryptoAdapter}.
- *  - Emit `sys_audit_log` rows for every successful write (encrypted
- *    values are masked).
+ *  - Record every successful write on BOTH audit ledgers, best-effort, with
+ *    encrypted values masked to a digest (#8145 — 以实现定契约, so this line
+ *    states what is built rather than what was once intended):
+ *      · `sys_audit_log` with `action: 'config_change'` — the platform-wide
+ *        compliance ledger, via {@link SettingsAuditSink}. This is what the
+ *        shipped `config_changes` list view and any
+ *        `$filter={"action":"config_change"}` read.
+ *      · `sys_setting_audit` with `action: 'set' | 'reset'` — the
+ *        settings-specific append-only trail, via {@link SettingsAuditWriter},
+ *        carrying `namespace`/`key`/`scope`/`old_hash`/`new_hash`/`source`
+ *        which the generic ledger has no columns for.
+ *    A REFUSED write is not a successful one and emits NEITHER row: the
+ *    fail-closed crypto refusal (#8026) is raised before anything is
+ *    persisted, so no ledger records a write that did not happen.
+ *    Both sinks are optional and both are best-effort — a failing audit write
+ *    is reported, never raised, because it must not undo a settings write that
+ *    already landed.
  *  - Dispatch `runAction` for `action_button` specifiers — used by
  *    "Test connection" / "Send test email" etc.
  *
@@ -115,13 +130,38 @@ export interface SettingsEngine {
   delete?(objectName: string, opts: { where: Record<string, unknown> }): Promise<any>;
 }
 
-/** Optional audit hook — service-settings won't crash if absent. */
+/**
+ * Optional audit hook — service-settings won't crash if absent.
+ *
+ * [#8145] This is the GENERIC-ledger sink: the plugin wires it to
+ * `sys_audit_log` with `action: 'config_change'`
+ * ({@link buildConfigChangeAuditSink} in `config-change-audit.ts`), which is
+ * what makes the shipped `config_changes` list view and the
+ * `$filter={"action":"config_change"}` reproduction in #7675 return rows. The
+ * slot pre-dates that card and was documented as writing there all along; what
+ * was missing was a plugin supplying it, so every settings write landed only on
+ * {@link SettingsAuditWriter}'s `sys_setting_audit`.
+ *
+ * ⚠️ A sink's `record` MUST NOT be relied on to succeed and must not be used to
+ * veto a write: the settings service calls it AFTER the row is persisted and
+ * swallows anything it throws (see the call site). `sys_audit_log` is owned by
+ * the optional `plugin-audit`, so on a deployment without that plugin the write
+ * genuinely cannot land, and a settings write must not fail for it.
+ */
 export interface SettingsAuditSink {
   record(entry: {
     namespace: string;
     key: string;
     scope: SpecifierScope;
     userId?: string;
+    /**
+     * [#8145] Tenant context of the caller, when known. Recorded on the ledger
+     * row's `tenant_id` (and, where the deployment declares the column,
+     * `organization_id`) — without it the SecurityPlugin's RLS predicate hides
+     * every `config_change` row from non-platform-admin readers, leaving the
+     * `config_changes` view as empty as the defect this fixes.
+     */
+    tenantId?: string;
     actor?: string;
     action: 'set' | 'reset';
     valueDigest: string;
@@ -184,9 +224,15 @@ export interface SettingsSecretStore {
 
 /**
  * Append-only writer for the `sys_setting_audit` object — Phase 3
- * audit trail. Distinct from `SettingsAuditSink` (which still writes
- * to the generic `sys_audit_log`) so audit consumers can subscribe
+ * audit trail. Distinct from {@link SettingsAuditSink} (which writes the
+ * generic `sys_audit_log` `config_change` row) so audit consumers can subscribe
  * to settings activity without scanning the firehose.
+ *
+ * [#8145] Both are wired in production and both fire on the same write — the
+ * dual-write half of the 2026-08-12 ruling. The rows are not duplicates: the
+ * fields below (`namespace`, `key`, `scope`, `oldHash`/`newHash`, `source`,
+ * `reason`) have no columns on `sys_audit_log`, and this table is what the
+ * platform QA checklist reads for per-key settings history.
  */
 export interface SettingsAuditWriter {
   write(entry: {
@@ -307,6 +353,47 @@ export class UnknownKeyError extends Error {
   readonly code = 'SETTINGS_UNKNOWN_KEY' as const;
   constructor(readonly namespace: string, readonly key: string) {
     super(`Key '${key}' is not declared in manifest '${namespace}'.`);
+  }
+}
+
+/**
+ * Thrown when a write would persist a declared-encrypted value (`encrypted:
+ * true` or `type: 'password'`) and nothing able to encrypt it is wired (#8026).
+ *
+ * ## Why this is a refusal and not a fallback
+ *
+ * The path this replaces persisted `'b64:' + base64(plaintext)` through
+ * `NoopCryptoAdapter` — encoding, not encryption, and worse than plaintext in
+ * one specific way: `sys_setting.value_enc` comes back populated, so both the
+ * next author and the next audit read the row as protected. The engine's
+ * `Field.secret()` path has always thrown here instead, which is what makes a
+ * provider-less deployment safe to REPORT on rather than silently wrong. This
+ * error is the settings side taking the same posture.
+ *
+ * ## Wire spelling
+ *
+ * Not mapped to a dedicated HTTP status/code by `settings-routes.ts`: it
+ * surfaces on the `500 INTERNAL_ERROR` arm every unmapped service error takes,
+ * carrying this message. That is deliberate for now — a dedicated
+ * `SETTINGS_CRYPTO_UNAVAILABLE` on the wire has to be registered in
+ * `ERROR_CODE_LEDGER` (`packages/spec`) first, or it is the "silent fourth
+ * state" ADR-0112 forbids, and that registration is out of this card's scope.
+ * `code` is therefore an IN-PROCESS discriminator today: a plugin calling
+ * `settings.setMany` branches on it exactly as it does on `SETTINGS_LOCKED`.
+ */
+export class SettingsCryptoUnavailableError extends Error {
+  readonly code = 'SETTINGS_CRYPTO_UNAVAILABLE' as const;
+  constructor(
+    readonly namespace: string,
+    readonly key: string,
+  ) {
+    super(
+      `Cannot persist encrypted setting '${namespace}.${key}': no CryptoProvider is wired ` +
+        'and the configured CryptoAdapter declares no confidentiality (base64 is encoding, ' +
+        'not encryption). Wire SettingsServicePluginOptions.cryptoProvider ' +
+        '(LocalCryptoProvider in dev, a KMS/Vault provider in production), or inject a real ' +
+        '`crypto` adapter. Refusing to store a reversible value (fail-closed).',
+    );
   }
 }
 

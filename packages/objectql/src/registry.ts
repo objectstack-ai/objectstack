@@ -20,7 +20,7 @@ import {
 import { SystemFieldName } from '@objectstack/spec/system';
 import { resolveTenancyPosture, resolveSearchPinyinEnabled } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
-import { provisionSearchCompanion } from './search-companion.js';
+import { provisionSearchCompanion, SEARCH_COMPANION_FIELD } from './search-companion.js';
 import { ObjectStackManifest, ManifestSchema, InstalledPackage, InstalledPackageSchema, checkFieldCompleteness } from '@objectstack/spec/kernel';
 import { AppSchema } from '@objectstack/spec/ui';
 import { applyProtection } from '@objectstack/spec/shared';
@@ -1573,6 +1573,96 @@ export class SchemaRegistry {
       contributors,
       this.subtractExtenderContributions(contributors, base as unknown as ServiceObject),
     ) as unknown as T;
+  }
+
+  /**
+   * [#8038] Apply THIS registry's `__search` companion-column decision to a
+   * base body the CALLER supplies — the deployment-gated provisioning step
+   * {@link registerObject} runs on every base layer it materializes, exposed
+   * for a body that did not come from this registry.
+   *
+   * Same reason {@link foldObjectExtendersOnto} is public API rather than the
+   * protocol reaching for the contributor list: `GET /meta/object/:name`
+   * reaches an object body through a source this registry never sees — the
+   * copy `MetadataPlugin` registers into the `metadata` SERVICE when a
+   * deployment ingests a compiled artifact. That copy is the author's
+   * DECLARATION, captured before materialization, so it carries no companion
+   * column, while `GET /meta/object` reads `resolveObject` and carries one.
+   * Measured on the showcase (#8038): all 22 companion-bearing package objects
+   * were served WITHOUT `__search` by the by-name read and WITH it by the list
+   * read, while every platform object — registered straight into this registry,
+   * so never routed through the service — agreed on both.
+   *
+   * ⛔ The gate is the registry's own `searchCompanion` field and NOT a fresh
+   * `resolveSearchPinyinEnabled()` call. That field is `options.searchCompanion
+   * ?? resolveSearchPinyinEnabled()`, so a host which passes it explicitly —
+   * every test that pins this behaviour, and any embedder that overrides the
+   * env default — would otherwise get an answer re-derived from the
+   * environment instead of from the registry that actually provisioned (or
+   * declined to provision) the column. That is the #6562 failure mode
+   * restated: an injection pass and an injection table free to disagree.
+   *
+   * Returns `base` by reference when the deployment has companions off, when
+   * the object has no eligible display field, and when the column is already
+   * present — {@link provisionSearchCompanion} is pure and idempotent — so a
+   * registry-sourced body (provisioned at registration) pays a comparison and
+   * no copy, and a caller may apply it unconditionally.
+   */
+  provisionSearchCompanionOnto<T>(base: T): T {
+    if (base === null || typeof base !== 'object') return base;
+    if (!this.searchCompanion) return base;
+    return provisionSearchCompanion(base as never) as unknown as T;
+  }
+
+  /**
+   * [#8038] The WRITE-side counterpart of {@link provisionSearchCompanionOnto}:
+   * take the companion column back off a body on its way IN, so a document the
+   * read served and a client handed straight back still persists byte-identical
+   * (#4326).
+   *
+   * Owed for exactly the reason `stripInjectedSystemColumns` is owed to
+   * `applyInjectedSystemColumns` (#6562): the write path persists the request
+   * body verbatim by design (ADR-0005 §Validation), so anything the READ adds
+   * must come off again or it is baked into `sys_metadata.metadata`, into its
+   * checksum, and into every history diff. Measured before this was added: a
+   * runtime-created object stored `fields: [name]`, and one GET → PUT
+   * round-trip through the converged read turned that into
+   * `fields: [__search, name]` — a column no author wrote, in the row that
+   * records what they customised.
+   *
+   * ⛔ Deliberately NOT gated on `searchCompanion`. The read that added the
+   * column and the write that hands it back are different requests, and a
+   * deployment may have flipped `OS_SEARCH_PINYIN_ENABLED` off in between; a
+   * gated strip would then bake in exactly the body the gate exists to
+   * prevent. What bounds this instead is EXACTNESS, the same discipline
+   * `isInjectedDefinition` applies: the entry is removed only when it is
+   * byte-identical to the definition {@link provisionSearchCompanion} would
+   * stamp — recomputed from that one function rather than transcribed, so the
+   * two cannot drift — and a body carrying anything else under the name keeps
+   * it.
+   *
+   * Returns `base` by reference when there is nothing to remove. Pure and total.
+   */
+  stripProvisionedSearchCompanionFrom<T>(base: T): T {
+    if (base === null || typeof base !== 'object') return base;
+    const fields = (base as { fields?: unknown }).fields;
+    if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return base;
+    const present = (fields as Record<string, unknown>)[SEARCH_COMPANION_FIELD];
+    if (present === undefined) return base;
+
+    // Re-stamp a copy WITHOUT the column and compare: the canonical definition
+    // comes from the provisioning function itself, and an object the seam would
+    // not provision for yields no stamp and therefore no removal.
+    const withoutCompanion = { ...(fields as Record<string, unknown>) };
+    delete withoutCompanion[SEARCH_COMPANION_FIELD];
+    const restamped = provisionSearchCompanion(
+      { ...(base as Record<string, unknown>), fields: withoutCompanion } as never,
+    ) as unknown as { fields?: Record<string, unknown> };
+    const canonical = restamped.fields?.[SEARCH_COMPANION_FIELD];
+    if (canonical === undefined) return base;
+    if (stableStringify(present) !== stableStringify(canonical)) return base;
+
+    return { ...(base as Record<string, unknown>), fields: withoutCompanion } as unknown as T;
   }
 
   /**

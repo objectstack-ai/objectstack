@@ -78,6 +78,8 @@ async function resolveActiveOrganizationId(
  *                cookie / bearer + Origin; its body carries the flat form
  *                fields ({ providerId, issuer, domain, clientId, clientSecret,
  *                discoveryEndpoint?, scopes?, mapId?, mapEmail?, mapName? }).
+ *                `mapId` is accepted only as the (empty or `sub`) no-op it now
+ *                is — see the mapping block below.
  */
 export async function runRegisterSsoProviderFromForm(
   handle: AuthRequestHandler,
@@ -119,8 +121,40 @@ export async function runRegisterSsoProviderFromForm(
   const oidcConfig: Record<string, unknown> = { clientId, clientSecret };
   if (discoveryEndpoint) oidcConfig.discoveryEndpoint = discoveryEndpoint;
   oidcConfig.scopes = scopesRaw ? scopesRaw.split(/[\s,]+/).filter(Boolean) : ['openid', 'email', 'profile'];
+
+  // `oidcConfig.mapping` is a `z.strictObject` in `@better-auth/sso@1.7.0-rc.2`
+  // (dist/index.mjs, `oidcMappingSchema`): members { email, emailVerified?,
+  // name, image?, extraFields? }, with `email` and `name` REQUIRED and NO `id`
+  // member. Emitting `id` is therefore a hard 400 on EVERY registration:
+  //   [body.oidcConfig.mapping] Unrecognized key: "id"
+  //
+  // `id` is not a key that moved — it was RETIRED upstream, so there is nowhere
+  // to re-home it. 1.6.20 declared the mapping as a plain (non-strict)
+  // `z.object` that DID carry `id`, and honoured it at login
+  // (`id: rawUserInfo[mapping.id || "sub"]`). 1.7.0-rc.2 deletes the member and
+  // hard-wires the federated subject to the OIDC `sub` claim
+  // (`id: readStringClaim(rawUserInfo, "sub")` / `id: idToken.sub`), then
+  // cross-checks it (`id_token_subject_missing`,
+  // `id_token_userinfo_subject_mismatch`). `extraFields` is NOT a substitute:
+  // it parses, but it is spread BEFORE `id` in the profile literal, so an
+  // `extraFields.id` is silently overwritten by `sub` — a no-op that reads as
+  // configured. The subject claim is simply not configurable any more, so a
+  // caller that asks for a different one is told so instead of being ignored.
+  const mapId = str(body?.mapId);
+  if (mapId && mapId !== 'sub') {
+    return {
+      status: 400,
+      body: {
+        success: false,
+        error: {
+          code: 'INVALID_REQUEST',
+          message:
+            'The user ID claim is not configurable: the federated subject is always read from the OIDC "sub" claim. Leave the user-ID claim mapping empty (or set it to "sub").',
+        },
+      },
+    };
+  }
   oidcConfig.mapping = {
-    id: str(body?.mapId) || 'sub',
     email: str(body?.mapEmail) || 'email',
     name: str(body?.mapName) || 'name',
   };
