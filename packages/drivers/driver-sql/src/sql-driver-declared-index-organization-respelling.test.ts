@@ -352,7 +352,8 @@ describe('#8323 — declared unique indexes on the platform’s tenant-scoped ob
       ).toBe(201);
 
       // Both rows exist, each stamped to its own organization.
-      expect(await d.count('sys_capability', { name: 'probe_cap_xtenant' })).toBe(2);
+      const held = (await d.find('sys_capability', {})).filter((r: any) => r.name === 'probe_cap_xtenant');
+      expect(held.map((r: any) => r.organization_id).sort()).toEqual(['org_jia', 'org_yi']);
     });
 
     it('AFTER (anti-vacuity): a SAME-organization duplicate is still refused', async () => {
@@ -440,8 +441,13 @@ describe('#8323 — declared unique indexes on the platform’s tenant-scoped ob
       expect([jia.status, yi.status]).toEqual([201, 201]);
 
       // Two independent rows, one per organization — the console feature works.
-      const rows = await d.find('sys_user_preference', { filters: [['key', '=', 'ui.recent']] } as any);
-      expect(rows.map((r: any) => r.organization_id).sort()).toEqual(['org_jia', 'org_yi']);
+      const rows = await d.find('sys_user_preference', {});
+      expect(
+        rows
+          .filter((r: any) => r.key === 'ui.recent')
+          .map((r: any) => r.organization_id)
+          .sort(),
+      ).toEqual(['org_jia', 'org_yi']);
     });
 
     it('AFTER (anti-vacuity): the same key twice in ONE organization is still refused', async () => {
