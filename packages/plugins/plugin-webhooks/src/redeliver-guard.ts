@@ -36,18 +36,26 @@
  *
  * ## The narrow fail-open this closes deliberately
  * Case 2 is checked as *"a value is stored but nothing came back"*, not as
- * *"the resolver threw"*. `resolveWebhookSecret` returns `undefined` — the same
- * value it uses for "authored unsigned" — when the column holds something that
- * is not a resolvable ref, so a `try/catch` alone would treat an unrecoverable
- * key as a legitimately unsigned webhook and allow the replay. Presence is
- * decidable from the masked read even though the value is not, so the guard
- * asks the question it can actually answer.
+ * *"the resolver threw"*. Presence is decidable from the masked read even
+ * though the value is not, so the guard asks the question it can actually
+ * answer.
+ *
+ * [#8542] That reasoning has since moved DOWN into `resolveWebhookSecret`,
+ * which now raises `WebhookSecretUnresolvableError` instead of returning the
+ * same `undefined` it uses for "authored unsigned". The reason it had to move:
+ * the ENQUEUE path had the identical ambiguity and no way to see it — and there
+ * it failed open, arming the subscription and delivering unsigned. One seam,
+ * one rule, so a consumer cannot forget to re-derive it. This guard keeps its
+ * own presence check because the refusal REASON it returns is written from the
+ * subscription row, and keeps its behaviour byte for byte: an unresolvable key
+ * is refused with the text below, and anything else still propagates.
  */
 
 import type { IDataEngine } from '@objectstack/spec/contracts';
 import {
     WEBHOOK_OBJECT,
     WEBHOOK_SECRET_FIELD,
+    isWebhookSecretUnresolvable,
     resolveWebhookSecret,
 } from './webhook-secret.js';
 
@@ -91,7 +99,21 @@ export function createWebhookRedeliverGuard(
             && subscription[WEBHOOK_SECRET_FIELD] !== '';
         if (!storesSecret) return undefined;
 
-        const plaintext = await resolveWebhookSecret(engine, subscription as { id: string }, subscriptionsObject);
+        // [#8542] The seam now RAISES for the case this guard used to detect on
+        // its own — the enqueue path needed the same distinction and could only
+        // get it from a throw (its `catch` is what parks the subscription), so
+        // the rule moved down one level instead of being written twice. This
+        // guard's contract is unchanged in both directions, which is the point:
+        // a stored-but-unresolvable key still returns the refusal REASON below
+        // (case 2), and any OTHER failure still propagates, because "we could
+        // not check" must never read as "allowed" (case 3, handled by
+        // `assertRedeliverAllowed`).
+        let plaintext: string | undefined;
+        try {
+            plaintext = await resolveWebhookSecret(engine, subscription as { id: string }, subscriptionsObject);
+        } catch (err) {
+            if (!isWebhookSecretUnresolvable(err)) throw err;
+        }
         if (plaintext) return undefined;
 
         return (

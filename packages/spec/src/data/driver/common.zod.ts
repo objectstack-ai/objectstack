@@ -168,8 +168,10 @@ export const URL_EMBEDDED_CREDENTIAL_REFUSED = (key: string): string =>
  * mangles (postgres/mongo multi-host `user:pass@h1:5432,h2:5432/db`, bare
  * `:memory:`, `file:` paths), and a detector that throws on the exact inputs it
  * must judge would fail open. The boundaries below are RFC 3986's, and match
- * the read-path redactor (`service-datasource`'s `redactUrlPassword`) so the
- * write door refuses precisely the material the read door redacts:
+ * the read-path redactor (`redactUrlPassword` in this package's
+ * `data/datasource-credential-redaction.ts`, moved from `service-datasource`
+ * by #8300) so the write door refuses precisely the material the read door
+ * redacts:
  *
  *  - the authority is what follows `//` (scheme-relative included), up to the
  *    first `/`, `?` or `#` — a `:` or `@` in a path or query is never userinfo;

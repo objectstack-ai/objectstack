@@ -498,6 +498,15 @@ export class AutoEnqueuer {
      * origin (#7722, #7799): a webhook that stops arriving is visible and gets
      * investigated, while one that keeps arriving unsigned is invisible and
      * teaches the receiver to accept unauthenticated traffic.
+     *
+     * [#8542] Case 3 means what it says only because the seam was fixed to say
+     * it. `resolveWebhookSecret` used to answer `undefined` for BOTH "no key is
+     * stored" and "a key is stored and did not come back", so this method read
+     * the second as the third and armed the subscription — the invariant above
+     * failing OPEN, silently, on the producer path. Nothing here changed: the
+     * seam now raises for that case, so it lands in the `catch` below exactly
+     * the way a throwing resolver already did, and the drop, the say-once
+     * `error` and the #8069 park all apply to it unchanged.
      */
     private async attachSecret(sub: CachedSubscription, row: any): Promise<boolean> {
         try {
