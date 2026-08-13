@@ -528,10 +528,11 @@ describe('#6190 — org-scoped writes of non-org-overridable types are refused',
         // instead, the enforcement cases above go red rather than this one —
         // which is why they, not this, are the acceptance criterion. Recorded
         // as a measurement so the blast radius of the ruling is auditable:
-        // 18 of 27 registry entries change behaviour here. (It was 19 when the
+        // 17 of 27 registry entries change behaviour here. (It was 19 when the
         // ruling was made; #5488 has since withdrawn `api`'s runtime-create
-        // door entirely, so `api` now sits in the CODE-ONLY tier — refused
-        // env-wide and org-scoped alike, before this gate is consulted.)
+        // door entirely and #7893 withdrew `field`'s, so both now sit in the
+        // CODE-ONLY tier — refused env-wide and org-scoped alike, before this
+        // gate is consulted.)
         const affected = DEFAULT_METADATA_TYPE_REGISTRY
             .filter((e) => !e.allowOrgOverride && e.allowRuntimeCreate)
             .map((e) => e.type);
@@ -541,14 +542,21 @@ describe('#6190 — org-scoped writes of non-org-overridable types are refused',
 
         expect(orgOverridable).toEqual(['view', 'dashboard', 'report', 'translation', 'email_template']);
         // The types the maintainer ruling names explicitly, all present.
-        for (const t of ['object', 'field', 'hook', 'seed', 'mapping', 'flow']) {
+        for (const t of ['object', 'hook', 'seed', 'mapping', 'flow']) {
             expect(affected, `${t} must be refused org-scoped`).toContain(t);
         }
-        // `api` was also named by the ruling; it left this set for the
-        // stronger tier, not for a per-org channel — pin the direction.
-        expect(
-            DEFAULT_METADATA_TYPE_REGISTRY.find((e) => e.type === 'api'),
-        ).toMatchObject({ allowOrgOverride: false, allowRuntimeCreate: false });
-        expect(affected).toHaveLength(18);
+        // `api` and `field` were also named by the ruling; each left this set
+        // for the STRONGER tier, not for a per-org channel — pin the direction,
+        // because "no longer in the org-scoped refusal set" reads identically
+        // to "now permitted org-scoped" unless the destination is asserted.
+        // (`field`: #7893, maintainer-ruled 2026-08-12 — the standalone create
+        // door minted a row no read path composed into its parent object.)
+        for (const t of ['api', 'field']) {
+            expect(affected, `${t} must have left this set for the code-only tier`).not.toContain(t);
+            expect(
+                DEFAULT_METADATA_TYPE_REGISTRY.find((e) => e.type === t),
+            ).toMatchObject({ allowOrgOverride: false, allowRuntimeCreate: false });
+        }
+        expect(affected).toHaveLength(17);
     });
 });

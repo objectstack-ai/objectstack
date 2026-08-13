@@ -230,7 +230,7 @@ describe('overlay whitelist enforcement (shared-DB invariant)', () => {
             // it. The reintroduction guard below is what holds the line now.
             { type: 'hook', item: { name: 'before_save', object: 'case', events: ['beforeInsert'] } },
             { type: 'hooks', item: { name: 'before_save', object: 'case', events: ['beforeInsert'] } }, // plural
-            // object/field reverted to allowOrgOverride:false on 2026-05-29 —
+            // object reverted to allowOrgOverride:false on 2026-05-29 —
             // packaged items locked, brand-new tenant-authored items succeed.
             {
                 type: 'object',
@@ -240,10 +240,21 @@ describe('overlay whitelist enforcement (shared-DB invariant)', () => {
                     fields: { title: { name: 'title', type: 'text', label: 'Title' } },
                 },
             },
-            {
-                type: 'field',
-                item: { name: 'tenant_widget_color', type: 'text', label: 'Color' },
-            },
+            // `field` left this list on 2026-08-12 (#7893, maintainer-ruled),
+            // the same way `validation` left it with its kind: "runtime-
+            // creatable" stopped describing it. Unlike `validation` the KIND
+            // survives — reads, `/meta/types` and #7743's overlay refusal all
+            // still need it — but its CREATE door is closed
+            // (`allowRuntimeCreate: false`), because a standalone `field` write
+            // minted a row keyed ('field','<object>.<name>') that nothing ever
+            // composed into the parent object: measured 200 `state=active` at
+            // the write, and the field absent from `GET /meta/object/...`
+            // forever. A field is added by writing its OBJECT — the `object`
+            // specimen directly above carries `fields`, which is that route.
+            // The line is now held by `protocol.code-only-types.test.ts` (which
+            // derives the code-only set from the registry, so `field`
+            // auto-enrolled) and by the declaration pin in
+            // `packages/spec/src/kernel/metadata-type-field-registration.test.ts`.
             // datasource/datasources became runtime-creatable with the
             // ADR-0015 Addendum (UI "Add Datasource"). Brand-new runtime
             // datasources succeed; code-defined collisions are refused via

@@ -126,6 +126,33 @@ const PROBES: Record<string, { name: string; item: Record<string, unknown> }> = 
             objectParams: { object: 'example_object', operation: 'find' },
         },
     },
+    // [#7893] The fifth flagged type, maintainer-ruled 2026-08-12. `field`
+    // declared `allowRuntimeCreate: true` and the platform never built the read
+    // path: a `field` write mints a SEPARATE `sys_metadata` row keyed
+    // `('field', '<object>.<name>')`, and nothing composes fragment rows into
+    // their parent — measured end-to-end, `PUT /meta/field/showcase_task.zz_probe`
+    // answered 200 `state=active` while `GET /meta/object/showcase_task` never
+    // listed the field. ADR-0049 enforce-or-remove, ruled REMOVE.
+    //
+    // ⚠️ The name is DOTTED because that is the only shape this type is ever
+    // addressed by (`<object>.<field>`); a bare name would probe a spelling no
+    // caller uses. The parent is deliberately an object NO artifact ships, so
+    // the write is classified `runtime-only` (a CREATE) and earns
+    // `NOT_CREATABLE` — an artifact-backed parent would take #7743's
+    // `isNestedArtifactField` path and answer `NOT_OVERRIDABLE` instead, which
+    // is a different gate and stays untouched by this card.
+    //
+    // Schema-valid on purpose, like the four above: `field` resolves
+    // `FieldSchema`, so a malformed body would 422 before the registry consult
+    // and the probe would prove nothing about the code-only gate.
+    field: {
+        name: 'rc3_field_probe.zz_probe',
+        item: {
+            name: 'zz_probe',
+            label: 'Probe',
+            type: 'text',
+        },
+    },
 };
 
 function makeStubEngine(artifacts: Array<{ type: string; name: string }> = []) {
@@ -228,17 +255,20 @@ describe('code-only metadata types are refused on every kernel (#5086)', () => {
 
     it('covers every code-only type the registry declares', () => {
         // Today: job (#4509), agent (ADR-0063 §2), capability (#5961,
-        // ADR-0066 D1) and api (#5488, ADR-0049 remove side — the maintainer
+        // ADR-0066 D1), api (#5488, ADR-0049 remove side — the maintainer
         // ruling of 2026-08-07 withdrew a runtime create door the endpoint
-        // matcher could never read). When a fifth type is flagged, this fails
-        // until it has a schema-valid probe above — which is the whole cost of
-        // covering it, and is exactly what happened when `capability` joined
-        // and again when `api` did: this assertion and the generated cases
-        // went red on the spec-side registry edit alone, before a line of this
-        // file was touched. That auto-enrolment is the point of deriving the
-        // set instead of listing it (Prime Directive #8).
+        // matcher could never read) and field (#7893, the same remove side —
+        // ruled 2026-08-12; a `field` write minted a standalone row nothing
+        // ever composed into its parent object). When a sixth type is flagged,
+        // this fails until it has a schema-valid probe above — which is the
+        // whole cost of covering it, and is exactly what happened when
+        // `capability` joined, again when `api` did, and again for `field`:
+        // this assertion and the generated cases went red on the spec-side
+        // registry edit alone, before a line of this file was touched. That
+        // auto-enrolment is the point of deriving the set instead of listing it
+        // (Prime Directive #8).
         expect(CODE_ONLY_TYPES.length).toBeGreaterThan(0);
-        expect([...CODE_ONLY_TYPES].sort()).toEqual(['agent', 'api', 'capability', 'job']);
+        expect([...CODE_ONLY_TYPES].sort()).toEqual(['agent', 'api', 'capability', 'field', 'job']);
         for (const type of CODE_ONLY_TYPES) {
             expect(PROBES[type], `no probe payload for code-only type '${type}'`).toBeDefined();
         }

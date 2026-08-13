@@ -9181,13 +9181,44 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#7893] The prescription for a type whose artifacts are NOT standalone.
+     *
+     * `filePatterns` is the right source for every OTHER type, because for
+     * every other type it names a file a loader really ingests. `field` is the
+     * one declared type where it does not: `**\/*.field.ts` matches nothing in
+     * any app (see {@link isNestedArtifactField} for the measurement), because
+     * fields are authored INSIDE the object. Reading the glob back would answer
+     * a refusal with a route that has never worked — moving the confusion one
+     * layer down instead of ending it, which is exactly what #5086's refusal
+     * shape exists to avoid.
+     *
+     * The remedy named here is the one the maintainer ruled on 2026-08-12 and
+     * is a route that genuinely composes: `object` keeps `allowRuntimeCreate:
+     * true`, so writing the whole object with the new field in `fields` both
+     * persists and reaches every consumer. Adding a field at runtime is still
+     * possible; only this spelling of it is withdrawn.
+     *
+     * Keyed by type rather than branched inline so a second fragment type, if
+     * one is ever declared, states its own remedy instead of inheriting an
+     * unrelated one.
+     */
+    private static readonly NESTED_TYPE_REMEDY: Readonly<Record<string, string>> = {
+        field: ' Fields are not standalone artifacts: author it inside its object and write the whole '
+            + 'object instead (PUT /api/v1/meta/object/:object with the new field in `fields`), or declare '
+            + 'it in the object source (**/*.object.ts) and redeploy.',
+    };
+
+    /**
      * The prescription half of a code-only refusal (#5086): where the author
      * is supposed to declare this item instead. Read from the type's own
      * registry entry (`filePatterns`), so a newly-flagged type carries an
-     * accurate hint the day it is flagged — nothing here to keep in sync.
+     * accurate hint the day it is flagged — nothing here to keep in sync,
+     * except the fragment types {@link NESTED_TYPE_REMEDY} names explicitly.
      */
     private static codeOnlySourceHint(type: string): string {
         const singular = PLURAL_TO_SINGULAR[type] ?? type;
+        const nested = ObjectStackProtocolImplementation.NESTED_TYPE_REMEDY[singular];
+        if (nested) return nested;
         const entry = DEFAULT_METADATA_TYPE_REGISTRY.find((e) => e.type === singular);
         const pattern = entry?.filePatterns?.[0];
         return pattern ? ` Declare it in source (${pattern}) and redeploy.` : '';
