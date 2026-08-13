@@ -123,8 +123,16 @@ export const SysMetadataAuditObject = ObjectSchema.create({
      *  - on `allowed`: `'ok'`
      *  - on `denied`: `'not_overridable'` | `'not_creatable'` |
      *    `'item_locked'` | `'invalid_metadata'` | `'destructive_change'` |
-     *    `'metadata_conflict'`
+     *    `'metadata_conflict'` | `'batch_aborted'`
      *  - on `forced`: `'lock_override'` (Phase 3)
+     *
+     * `batch_aborted` (#8400) is the batch publish's own refusal value:
+     * `publishPackageDrafts` promotes a whole package inside ONE transaction,
+     * so its refusal is "the batch rolled back and nothing landed" rather than
+     * any one item's verdict, and the causal code rides in `note`. It is ONE
+     * fixed value on purpose — lower-casing whatever `error.code` happened to
+     * abort the batch would turn this closed set into an open one that grows
+     * silently with the error catalog.
      *
      * Deliberately lowercase, and deliberately NOT the `error.code` vocabulary
      * (ADR-0112) even though the denial values are spelled the same as the
