@@ -247,8 +247,15 @@ describe('sys_capability — ADR-0066 D1 capability registry', () => {
     expect(mbOpts).toEqual(['admin', 'package', 'platform']);
   });
 
-  it('enforces a unique index on name', () => {
+  it('enforces a unique index on name, scoped per organization', () => {
     const nameIdx = (SysCapability.indexes ?? []).find((i: any) => Array.isArray(i.fields) && i.fields.includes('name'));
-    expect(nameIdx?.unique).toBe(true);
+    // [#8323] Was `toBe(true)`. On a DECLARED index bare `true` is the
+    // positional spelling of `'global'` — the listed columns verbatim — which
+    // made `name` an installation-wide key on a tenant-scoped object and turned
+    // its 409 into a cross-tenant existence oracle. The assertion is respelled
+    // rather than relaxed: a truthiness check here would accept the very
+    // spelling that was the defect. Full contract in
+    // `sys-capability.organization-unique.test.ts`.
+    expect(nameIdx?.unique).toBe('organization');
   });
 });

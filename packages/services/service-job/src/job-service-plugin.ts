@@ -16,6 +16,18 @@ function getClusterSafe(ctx: any): any {
   try { return ctx.getService('cluster'); } catch { return undefined; }
 }
 
+/**
+ * Best-effort environment label for the cron adapter's entry in croner's
+ * process-global name registry — it makes `scheduledJobs` readable when several
+ * environments share one container. Cosmetic only: per-instance uniqueness is
+ * the adapter's own guarantee and does not depend on this resolving to
+ * anything (#8362).
+ */
+function environmentLabel(): string | undefined {
+  const raw = process.env.OS_ENVIRONMENT_ID?.trim();
+  return raw ? raw : undefined;
+}
+
 export interface JobServicePluginOptions {
   /**
    * Job adapter type.
@@ -62,6 +74,9 @@ export class JobServicePlugin implements Plugin {
   private readonly options: JobServicePluginOptions;
   private dbAdapter?: DbJobAdapter;
   private intervalAdapter?: IntervalJobAdapter;
+  /** Only set on the `adapter: 'cron'` path — otherwise the cron adapter is
+   *  owned (and destroyed) by {@link DbJobAdapter}. */
+  private cronAdapter?: CronJobAdapter;
 
   constructor(options: JobServicePluginOptions = {}) {
     this.options = {
@@ -98,8 +113,16 @@ export class JobServicePlugin implements Plugin {
     }
 
     if (choice === 'cron') {
-      const cron = new CronJobAdapter({ timezone: 'UTC', cluster: getClusterSafe(ctx) });
-      ctx.registerService('job', cron);
+      // Held on the instance so `destroy()` can reach it: this adapter owns
+      // process-global croner names, and a kernel evicted without releasing
+      // them blocks every later rebind of those jobs (#8362).
+      this.cronAdapter = new CronJobAdapter({
+        timezone: 'UTC',
+        cluster: getClusterSafe(ctx),
+        namespace: environmentLabel(),
+        logger: ctx.logger,
+      });
+      ctx.registerService('job', this.cronAdapter);
       ctx.logger.info('JobServicePlugin: registered CronJobAdapter');
       return;
     }
@@ -139,7 +162,12 @@ export class JobServicePlugin implements Plugin {
       let cron: CronJobAdapter | undefined;
       if (this.options.enableCron !== false) {
         try {
-          cron = new CronJobAdapter({ timezone: 'UTC', cluster: getClusterSafe(ctx) });
+          cron = new CronJobAdapter({
+            timezone: 'UTC',
+            cluster: getClusterSafe(ctx),
+            namespace: environmentLabel(),
+            logger: ctx.logger,
+          });
         } catch (err) {
           ctx.logger.warn('JobServicePlugin: cron adapter init failed; cron jobs will not auto-run', err as any);
         }
@@ -192,8 +220,17 @@ export class JobServicePlugin implements Plugin {
     });
   }
 
+  /**
+   * Kernel eviction lands here. Every adapter this plugin built must be
+   * released, cron included: croner's named registry is process-global, so a
+   * timer that outlives its kernel keeps its name for the life of the process
+   * and blocks the rebuilt kernel from ever re-binding that job (#8362).
+   * `dbAdapter.destroy()` covers the cron adapter it owns; `cronAdapter` is
+   * the `adapter: 'cron'` path, where nothing else would.
+   */
   async destroy(): Promise<void> {
     await this.dbAdapter?.destroy();
     await this.intervalAdapter?.destroy();
+    await this.cronAdapter?.destroy();
   }
 }

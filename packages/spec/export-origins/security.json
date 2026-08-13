@@ -18,6 +18,7 @@
     "CriteriaSharingRule": "src/security/sharing.zod.ts#CriteriaSharingRule (type)",
     "CriteriaSharingRuleParsed": "src/security/sharing.zod.ts#CriteriaSharingRuleParsed (type)",
     "CriteriaSharingRuleSchema": "src/security/sharing.zod.ts#CriteriaSharingRuleSchema (const)",
+    "EXPLAIN_BATCH_MAX_RECORD_IDS": "src/security/explain.zod.ts#EXPLAIN_BATCH_MAX_RECORD_IDS (const)",
     "EffectiveObjectPermission": "src/security/permission.zod.ts#EffectiveObjectPermission (type)",
     "EffectiveObjectPermissionSchema": "src/security/permission.zod.ts#EffectiveObjectPermissionSchema (const)",
     "ExplainDecision": "src/security/explain.zod.ts#ExplainDecision (type)",

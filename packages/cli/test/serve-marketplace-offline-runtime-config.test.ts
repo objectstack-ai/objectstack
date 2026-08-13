@@ -311,12 +311,34 @@ describe('#8389: the wiring plan mounts runtime-config on the offline arm', () =
     // One shared gate would have been the smaller change and would have
     // excluded exactly this box: it serves install-local (its own), serves no
     // runtime-config, and therefore has the #8389 defect in full.
+    //
+    // [#8388] "the host wires its OWN install-local" now has to mean the host
+    // MOUNTS one. `INSTALL_LOCAL` below is only an identity handed to the
+    // resolver, and since `features.installLocal` became an observation of the
+    // route table rather than the constructor flag, an identity with no route
+    // behind it models a box announcing a capability it cannot serve — #8343's
+    // measured defect, which is not this case's subject. So the host's own
+    // plugin is really started on the same app, ahead of the arm, exactly as
+    // the positive control mounts the real proxy. The assertions below are
+    // unchanged; what changed is that the fixture now earns them.
     const dir = tempStorageDir();
     try {
-      const { wiring, app } = await bootOfflineArm({ plugins: [INSTALL_LOCAL], storageDir: dir });
+      const { MarketplaceInstallLocalPlugin } = await import('@objectstack/cloud-connection');
+      const { wiring, app } = await bootOfflineArm({
+        plugins: [INSTALL_LOCAL],
+        storageDir: dir,
+        preMounted: [new MarketplaceInstallLocalPlugin({
+          controlPlaneUrl: Serve.OFFLINE_CONTROL_PLANE,
+          storageDir: dir,
+        })],
+      });
 
       expect(wiring.offlineInstallLocal, "the host's own install-local is left alone").toBe(false);
       expect(wiring.offlineRuntimeConfig).toBe(true);
+
+      // ...and the host's own mount is the ONLY install-local surface here —
+      // the arm added none, which is what `offlineInstallLocal: false` means.
+      expect(app.routes.some((r) => r.path.startsWith('/api/v1/marketplace/install-local'))).toBe(true);
 
       const body = await readConfig(app);
       expect(body.features.installLocal).toBe(true);

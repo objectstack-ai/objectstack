@@ -40,9 +40,14 @@ const plugins = [
   // DEFAULT_CLOUD_URL. 'off' is one of the documented disable sentinels and
   // is the value that actually resolves to no cloud.
   new MarketplaceInstallLocalPlugin({ controlPlaneUrl: cloudUrl || 'off' }),
-  // NOT cloud-gated: features.marketplace is derived from what is actually
-  // mounted, not from this constructor call, so a cloud-less runtime reports
-  // marketplace: false on its own — there is nothing here to keep in sync.
+  // NOT cloud-gated: BOTH features.marketplace and features.installLocal are
+  // derived from what is actually mounted, not from this constructor call, so
+  // a cloud-less runtime reports marketplace: false and installLocal: true on
+  // its own — there is nothing here to keep in sync.
+  // `installLocal: true` is therefore a CEILING, not a declaration: it is the
+  // default, and it cannot make the flag report a route this runtime never
+  // mounted. Pass `false` to hide the affordance on a box that could serve it;
+  // omitting it entirely behaves the same as `true`.
   // `''` here, unlike its neighbor above, is correct as-is: this plugin does
   // NOT re-resolve controlPlaneUrl through resolveCloudUrl(), so '' means
   // "stay on this origin" rather than "unset" — do not "fix" it to 'off'.

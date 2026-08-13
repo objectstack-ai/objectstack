@@ -642,7 +642,16 @@ function selfTest() {
   const resolved = (name) => `pnpm ${name}`;
   const kindHit = changeKindLines(['packages/objectql/src/engine.test.ts'], resolved);
   t('a test path emits the convention section', kindHit.length === 3 && kindHit[0].includes('adds or edits a test file'));
-  t('the section names both convention gates, runnably', kindHit.some((l) => l.includes('pnpm check:query-options-erasure')) && kindHit.some((l) => l.includes('pnpm check:type-check-coverage')));
+  // Both halves anchor on the rendered DELIMITERS (`- pnpm x   —`), for the
+  // reason the i18n entry's pins below state at length: a bare `includes` is
+  // satisfied by every name that merely STARTS WITH the expected one, so a
+  // prefix-preserving rename is invisible to it — the single rot class the STALE
+  // branch exists to report. Measured on this entry rather than inherited from
+  // that one: renaming these gates to `check:query-options-erasure-v2` and
+  // `check:type-check-coverage-v2` in CHANGE_KIND_GATES left the substring form
+  // green at 61/61 while the live run printed both as STALE; anchored, the same
+  // rename fails this case. The two conventions in this file now agree.
+  t('the section names both convention gates, runnably', kindHit.some((l) => l.includes('- pnpm check:query-options-erasure   —')) && kindHit.some((l) => l.includes('- pnpm check:type-check-coverage   —')));
   t('a non-test path emits nothing', changeKindLines(['scripts/pm/dispatch-gates.mjs'], resolved).length === 0);
 
   // i18n change-kind derivation — the pure judgments first, each mirroring one

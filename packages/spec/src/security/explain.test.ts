@@ -26,6 +26,7 @@ import {
   AuthzPostureSchema,
   ExplainMatchedRuleSchema,
   ExplainRecordAttributionSchema,
+  EXPLAIN_BATCH_MAX_RECORD_IDS,
 } from './explain.zod';
 
 describe('ExplainOperationSchema — the operation vocabulary is fixed', () => {
@@ -181,6 +182,39 @@ describe('ExplainRequestSchema — the request contract', () => {
     const recordLevel = ExplainRequestSchema.parse({ object: 'leave_request', operation: 'update', recordId: 'lr_42' });
     expect(recordLevel.recordId).toBe('lr_42');
   });
+
+  it('[#8326] recordIds round-trips a batch; singular and object-level requests are untouched by its presence in the schema', () => {
+    const batch = ExplainRequestSchema.parse({ object: 'leave_request', operation: 'update', recordIds: ['lr_1', 'lr_2'] });
+    expect(batch.recordIds).toEqual(['lr_1', 'lr_2']);
+    expect(batch.recordId).toBeUndefined();
+    // The singular spelling parses to an identical shape with recordIds absent.
+    const singular = ExplainRequestSchema.parse({ object: 'leave_request', operation: 'update', recordId: 'lr_1' });
+    expect(singular.recordIds).toBeUndefined();
+  });
+
+  it('[#8326] the cap is 200: exactly 200 ids parse, 201 are refused (never truncated)', () => {
+    const ids = (n: number) => Array.from({ length: n }, (_, i) => `r_${i}`);
+    expect(ExplainRequestSchema.parse({ object: 'x', operation: 'read', recordIds: ids(200) }).recordIds).toHaveLength(200);
+    expect(EXPLAIN_BATCH_MAX_RECORD_IDS).toBe(200);
+    const over = ExplainRequestSchema.safeParse({ object: 'x', operation: 'read', recordIds: ids(201) });
+    expect(over.success).toBe(false);
+  });
+
+  it('[#8326] an empty recordIds array is refused — send at least one id or omit the field', () => {
+    expect(ExplainRequestSchema.safeParse({ object: 'x', operation: 'read', recordIds: [] }).success).toBe(false);
+  });
+
+  it('[#8326] recordId + recordIds together is a loud refusal, never a silent precedence', () => {
+    const both = ExplainRequestSchema.safeParse({
+      object: 'x', operation: 'read', recordId: 'r_1', recordIds: ['r_1', 'r_2'],
+    });
+    expect(both.success).toBe(false);
+    expect(JSON.stringify(both.success ? [] : both.error.issues)).toContain('mutually exclusive');
+  });
+
+  it('[#8326] non-string members are refused by the element schema', () => {
+    expect(ExplainRequestSchema.safeParse({ object: 'x', operation: 'read', recordIds: [42] }).success).toBe(false);
+  });
 });
 
 describe('ExplainDecisionSchema — the full decision report L3 consumes', () => {
@@ -255,6 +289,29 @@ describe('ExplainDecisionSchema — the full decision report L3 consumes', () =>
     expect(parsed.layers[1].record?.outcome).toBe('excluded');
   });
 
+  it('[#8326] round-trips a batch decision — records[] carries the same verdict shape as record', () => {
+    const parsed = ExplainDecisionSchema.parse({
+      allowed: true, object: 'leave_request', operation: 'update',
+      principal: { userId: 'u2' },
+      layers: [{ layer: 'object_crud', verdict: 'grants', detail: 'x', contributors: [] }],
+      records: [
+        { recordId: 'lr_1', visible: true, decidedBy: 'sharing' },
+        { recordId: 'lr_2', visible: false, decidedBy: 'rls' },
+        // Missing record: fail-closed verdict with decidedBy omitted.
+        { recordId: 'lr_gone', visible: false },
+      ],
+    });
+    expect(parsed.records).toHaveLength(3);
+    expect(parsed.records?.[0]).toEqual({ recordId: 'lr_1', visible: true, decidedBy: 'sharing' });
+    expect(parsed.records?.[2]).toEqual({ recordId: 'lr_gone', visible: false });
+    // An unknown decidedBy is refused in records[] exactly as in record.
+    expect(() => ExplainDecisionSchema.parse({
+      allowed: true, object: 'x', operation: 'read',
+      principal: { userId: 'u' }, layers: [],
+      records: [{ recordId: 'r1', visible: true, decidedBy: 'quantum' }],
+    })).toThrow();
+  });
+
   it('[C2] object-level decisions omit record + posture (backward-compatible)', () => {
     const parsed = ExplainDecisionSchema.parse({
       allowed: true, object: 'x', operation: 'read',
@@ -263,6 +320,9 @@ describe('ExplainDecisionSchema — the full decision report L3 consumes', () =>
       readFilter: { owner: 'u2' },
     });
     expect(parsed.record).toBeUndefined();
+    // [#8326] The batch array is absent too — singular and object-level
+    // responses are byte-identical to the pre-batch contract.
+    expect(parsed.records).toBeUndefined();
     expect(parsed.principal.posture).toBeUndefined();
   });
 

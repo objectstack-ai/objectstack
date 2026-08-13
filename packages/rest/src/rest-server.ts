@@ -1700,17 +1700,21 @@ function formatCsvCell(value: any): string {
  * the header row uses field labels and cell values are formatted to readable
  * display values (lookup names, select labels, 是/否, formatted dates). With an
  * empty map the output is byte-identical to the raw, un-formatted behaviour.
+ *
+ * `timezone` (#8373) is the caller's business timezone, used to render
+ * `datetime` cells in the same clock the UI shows; absent, they render in UTC.
  */
 function rowsToCsv(
     fields: string[],
     rows: Array<Record<string, any>>,
     includeHeader: boolean,
     metaMap: Map<string, ExportFieldMeta>,
+    timezone?: string,
 ): string {
     const lines: string[] = [];
     if (includeHeader) lines.push(fields.map(f => formatCsvCell(headerLabel(f, metaMap))).join(','));
     for (const row of rows) {
-        lines.push(formatRowCells(row, fields, metaMap).map(formatCsvCell).join(','));
+        lines.push(formatRowCells(row, fields, metaMap, timezone).map(formatCsvCell).join(','));
     }
     return lines.join('\r\n') + (lines.length > 0 ? '\r\n' : '');
 }
@@ -7819,6 +7823,11 @@ export class RestServer {
         // their option label, booleans to 是/否, dates to YYYY-MM-DD. When the
         // schema is unavailable the raw stored values stream through unchanged.
         //
+        // [#8373] `datetime` cells render in the caller's BUSINESS timezone
+        // (`ExecutionContext.timezone`), so the file agrees with the screen;
+        // with no timezone resolved they render in UTC, as they always did.
+        // `date` stays a timezone-naive calendar day (ADR-0053).
+        //
         // A zero-row result still emits the header row when the column set is
         // authoritative (the security service's readable projection, or an explicit
         // `fields=`), so an empty export doubles as an import template. Without a
@@ -8010,6 +8019,18 @@ export class RestServer {
                     // (and thus a name). Batched $in inside findData — no N+1.
                     const expandFields = referenceFieldNames(metaMap);
 
+                    // [#8373] The clock every `datetime` cell below renders in.
+                    // The business timezone is ALREADY on the context resolved
+                    // at the top of this handler (`resolveLocalizationContext`'s
+                    // platform-default → global → tenant cascade, assembled onto
+                    // `ExecutionContext.timezone`) — the export formatter simply
+                    // never asked for it, so every date/datetime column streamed
+                    // UTC while the UI rendered the business zone. `undefined`
+                    // keeps the historical UTC rendering, byte for byte.
+                    const timezone = typeof (context as any)?.timezone === 'string' && (context as any).timezone
+                        ? String((context as any).timezone)
+                        : undefined;
+
                     // [#3547] Column projection ≡ list's field-level security — the
                     // LONG-TERM correct path. Ask the security service which fields the
                     // caller may READ under this context (the SAME field mask the read
@@ -8119,7 +8140,7 @@ export class RestServer {
                         }
 
                         if (format === 'csv') {
-                            const text = rowsToCsv(fields ?? [], rows, firstChunk && includeHeader, metaMap);
+                            const text = rowsToCsv(fields ?? [], rows, firstChunk && includeHeader, metaMap, timezone);
                             res.write(text);
                         } else if (format === 'xlsx') {
                             if (firstChunk && includeHeader) {
@@ -8127,7 +8148,7 @@ export class RestServer {
                             }
                             const cols = fields ?? [];
                             for (const row of rows) {
-                                const r = xlsx!.ws.addRow(formatRowCells(row, cols, metaMap));
+                                const r = xlsx!.ws.addRow(formatRowCells(row, cols, metaMap, timezone));
                                 if (styled) {
                                     cols.forEach((f, i) => {
                                         const argb = cellFontColor(row?.[f], metaMap.get(f));
@@ -8139,7 +8160,7 @@ export class RestServer {
                         } else {
                             for (let i = 0; i < rows.length; i++) {
                                 const prefix = (firstChunk && i === 0) ? '' : ',';
-                                res.write(prefix + JSON.stringify(formatRowForJson(rows[i], metaMap)));
+                                res.write(prefix + JSON.stringify(formatRowForJson(rows[i], metaMap, timezone)));
                             }
                         }
                         firstChunk = false;
@@ -9214,7 +9235,14 @@ export class RestServer {
      * explain engine (framework#2696).
      *
      *   GET  {basePath}/security/explain?object=…&operation=…&userId=…
-     *   POST {basePath}/security/explain   body: { object, operation, userId? }
+     *   POST {basePath}/security/explain   body: { object, operation, userId?,
+     *                                              recordId? | recordIds? }
+     *
+     * [#8326] `recordIds` (max 200, exclusive with `recordId`) is the batch
+     * form of the record-grained question: one `(object, operation)` pair
+     * answered per record in one round trip — `records[i]` answers
+     * `recordIds[i]`; each entry is the verdict the singular form returns for
+     * that id (see `ExplainRequestSchema`'s TSDoc for the full contract).
      *
      * Delegates to the security service's `explain(request, callerContext)`
      * (`SecurityPlugin.explainAccessForCaller`) — the same code paths the
@@ -9319,6 +9347,14 @@ export class RestServer {
                 // refusal gate is imitating, so there is nothing to add here.
                 const src = req.method === 'GET' ? (req.query ?? {}) : (req.body ?? {});
                 const { ExplainRequestSchema } = await import('@objectstack/spec/security');
+                // [#8326] GET-transport normalization ONLY: a query string
+                // cannot spell a one-element array (`?recordIds=a` parses to
+                // the bare string), so a lone string is wrapped on GET. On
+                // POST the body is JSON and can say what it means — a string
+                // where the contract says array stays a 400, not a wrap.
+                const rawRecordIds = req.method === 'GET' && typeof src.recordIds === 'string' && src.recordIds !== ''
+                    ? [src.recordIds]
+                    : src.recordIds;
                 const parsed = (ExplainRequestSchema as any).safeParse({
                     object: src.object,
                     operation: src.operation ?? 'read',
@@ -9326,17 +9362,45 @@ export class RestServer {
                     // [C2 / ADR-0095] Optional record id — explains ONE concrete
                     // row at record granularity; omitted stays object-level.
                     ...(src.recordId != null && src.recordId !== '' ? { recordId: src.recordId } : {}),
+                    // [#8326] Optional batch of record ids — the schema owns the
+                    // cap (200), the min (1), and recordId/recordIds mutual
+                    // exclusion, so every refusal is the one 400 below.
+                    ...(rawRecordIds != null ? { recordIds: rawRecordIds } : {}),
                 });
                 if (!parsed.success) {
                     return respondError(
                         res, 400, 'VALIDATION_FAILED',
-                        'Invalid explain request — expected { object: string, operation: read|create|update|delete|transfer|restore|purge, userId?: string, recordId?: string }.',
+                        'Invalid explain request — expected { object: string, operation: read|create|update|delete|transfer|restore|purge, userId?: string, recordId?: string, recordIds?: string[] (max 200, exclusive with recordId) }.',
                         String(parsed.error?.message ?? '').slice(0, 1000),
                     );
                 }
 
-                const decision = await svc.explain(parsed.data, context);
-                res.json(decision);
+                const { recordIds, ...singularRequest } = parsed.data as { recordIds?: string[] } & Record<string, unknown>;
+                if (!recordIds) {
+                    // Singular / object-level — the pre-#8326 path, byte-identical.
+                    const decision = await svc.explain(parsed.data, context);
+                    return res.json(decision);
+                }
+
+                // [#8326] Batch form — transport amortization of the SINGULAR
+                // evaluation, not a new semantic: the object-level trace is one
+                // object-level explain, and each per-record verdict is the
+                // singular record-grained explain for that id, relayed
+                // verbatim. "Batch answer ≡ N singular answers" is therefore a
+                // property of the construction, and the agreement test pins it
+                // from staying that way by accident.
+                const decision = await svc.explain(singularRequest, context);
+                const verdictById = new Map<string, unknown>();
+                for (const id of new Set(recordIds)) {
+                    const single = await svc.explain({ ...singularRequest, recordId: id }, context);
+                    // A service without record-grained support answers no
+                    // record verdict; fail CLOSED (a hidden button beats a
+                    // shown-then-403), with no decidedBy fabricated.
+                    verdictById.set(id, single?.record ?? { recordId: id, visible: false });
+                }
+                // Ordering contract: records[i] answers recordIds[i] — same
+                // order, same length, duplicates answered per position.
+                res.json({ ...decision, records: recordIds.map((id) => verdictById.get(id)) });
             } catch (error: any) {
                 const msg = String(error?.message ?? error ?? '');
                 if (
