@@ -595,6 +595,7 @@
     "TursoDriverSpec": "src/data/driver/turso.zod.ts#TursoDriverSpec (const)",
     "TursoTransportMode": "src/data/driver/turso.zod.ts#TursoTransportMode (type)",
     "TursoTransportModeSchema": "src/data/driver/turso.zod.ts#TursoTransportModeSchema (const)",
+    "URL_EMBEDDED_CREDENTIAL_REFUSED": "src/data/driver/common.zod.ts#URL_EMBEDDED_CREDENTIAL_REFUSED (const)",
     "UniqueScope": "src/data/field.zod.ts#UniqueScope (type)",
     "UniqueScopeSchema": "src/data/field.zod.ts#UniqueScopeSchema (const)",
     "UnknownAuthoringKeyFinding": "src/data/authoring-key-lint.ts#UnknownAuthoringKeyFinding (interface)",
@@ -613,6 +614,7 @@
     "checkManagedApiMethodAffordances": "src/data/managed-api-affordance.ts#checkManagedApiMethodAffordances (function)",
     "classifyFilterToken": "src/data/context-tokens.zod.ts#classifyFilterToken (function)",
     "countAuthorableFields": "src/data/record-surface.ts#countAuthorableFields (function)",
+    "credentialFreeUrl": "src/data/driver/common.zod.ts#credentialFreeUrl (function)",
     "defaultAggregateFor": "src/data/aggregation-policy.ts#defaultAggregateFor (function)",
     "defaultValueTokenIssue": "src/data/default-value-shape.ts#defaultValueTokenIssue (function)",
     "defineCube": "src/data/analytics.zod.ts#defineCube (function)",
@@ -711,6 +713,7 @@
     "suggestDefaultValueToken": "src/data/default-value-shape.ts#suggestDefaultValueToken (function)",
     "suggestFieldTypeForSqlType": "src/data/type-compat.ts#suggestFieldTypeForSqlType (function)",
     "unprovisionedInjectedColumns": "src/data/injected-system-column-provenance.ts#unprovisionedInjectedColumns (function)",
+    "urlUserinfoPassword": "src/data/driver/common.zod.ts#urlUserinfoPassword (function)",
     "utcInstantMs": "src/data/calendar-day.ts#utcInstantMs (function)",
     "validateDriverConfig": "src/data/driver/config-registry.zod.ts#validateDriverConfig (function)",
     "valueSchemaFor": "src/data/field-value.zod.ts#valueSchemaFor (function)"
