@@ -78,8 +78,25 @@
  * `packages/objectql/src/metadata-service-roundtrip-conformance.test.ts`.
  */
 
-import { StandardErrorCode } from '@objectstack/spec/api';
+// The `/api` import is TYPE-ONLY on purpose — erased at compile time, so this
+// module makes no runtime demand on that subpath. This module is loaded by
+// every consumer of `@objectstack/core`, and several packages' vitest configs
+// alias the bare `@objectstack/spec` specifier to `spec/src/index.ts` (a FILE)
+// with per-subpath entries spelled out above it; an alias list matches by
+// PREFIX, so any subpath NOT spelled out resolves under the file and dies with
+// ENOTDIR at import time (measured: `@objectstack/plugin-hono-server` and
+// `@objectstack/driver-memory`, 39 test files dead at load between them). The
+// typed literal below keeps the closed-set compile check without the runtime
+// import — the `packages/spec/src/contracts/storage-service.ts` pattern.
+// `/shared` cannot get the same treatment: `pluralToSingular` is a runtime
+// value and its map has ONE owner (#7378 row 2 — copying it here would be the
+// per-implementation folk normalization the ruling forbids), so the consumer
+// configs carry a `/shared` alias entry instead.
+import type { StandardErrorCode } from '@objectstack/spec/api';
 import { pluralToSingular } from '@objectstack/spec/shared';
+
+/** The standard catalog's generic argument-validation code, type-checked against the closed set. */
+const REGISTER_REFUSAL_CODE: StandardErrorCode = 'VALIDATION_ERROR';
 
 /**
  * The canonical spelling an `IMetadataService` type store is keyed on
@@ -102,7 +119,7 @@ export function canonicalMetadataServiceType(type: string): string {
  */
 function registerRefusal(message: string): Error & { code: string; status: number } {
     const err = new Error(message) as Error & { code: string; status: number };
-    err.code = StandardErrorCode.enum.VALIDATION_ERROR;
+    err.code = REGISTER_REFUSAL_CODE;
     err.status = 400;
     return err;
 }
