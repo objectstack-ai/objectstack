@@ -18,12 +18,13 @@
  * staring at an unchanged page.
  */
 
-import { injectedColumnsFor } from './system-fields.js';
+import { injectedColumnsFor, unprovisionedInjectedColumnsFor } from './system-fields.js';
 
 export const FIELD_GROUP_UNDECLARED = 'field-group-undeclared';
 export const FIELD_GROUP_EMPTY = 'field-group-empty';
 export const FIELD_GROUP_SHADOWED = 'field-group-shadowed';
 export const SEMANTIC_ROLE_FIELD_UNKNOWN = 'semantic-role-field-unknown';
+export const SEMANTIC_ROLE_FIELD_UNPROVISIONED = 'semantic-role-field-unprovisioned';
 
 export type SemanticRoleSeverity = 'error' | 'warning';
 
@@ -88,6 +89,30 @@ export function validateSemanticRoles(stack: AnyRec): SemanticRoleFinding[] {
     // (`FIELD_GROUP_SYSTEM_FIELDS`), and must not count as a group member or a
     // title candidate.
     const fieldNames = new Set([...Object.keys(fields), ...injectedColumnsFor(obj)]);
+    // [#8116] The provenance half of the same #5378 widening: on an ADR-0015
+    // `external` object the injected anchors resolve — so rule (c) rightly
+    // stays silent — but the platform provisions no storage behind them, so a
+    // pointer at one drives its consumers (default columns, cards, previews,
+    // the highlight strip, stage detection) off a column that is blank on
+    // every record. Existence and provenance are different questions; the set
+    // is empty everywhere except external objects, and an author-DECLARED
+    // column of the same name is the author's and never in it.
+    const unprovisioned = unprovisionedInjectedColumnsFor(obj);
+    const unprovisionedPointer = (slot: string, entry: string): SemanticRoleFinding => ({
+      severity: 'warning',
+      rule: SEMANTIC_ROLE_FIELD_UNPROVISIONED,
+      where,
+      path: `${path}.${slot}`,
+      message:
+        `${objName}: ${slot} points at "${entry}", an injected system column with no storage ` +
+        `behind it — this object is external (ADR-0015), so the platform registers the anchor ` +
+        `but the remote schema owns the table and no column backs it. Every consumer renders ` +
+        `it empty on every record.`,
+      hint:
+        `If the remote table really carries "${entry}", declare it in the object's own fields ` +
+        `(mapped through the external binding's columnMap); otherwise point ${slot} at a real ` +
+        `remote column.`,
+    });
 
     // ── (a) Field.group → declared fieldGroups[].key ──
     const declaredGroups = new Set(
@@ -150,6 +175,8 @@ export function validateSemanticRoles(stack: AnyRec): SemanticRoleFinding[] {
           `Point stageField at an existing select/status field, or set ` +
           `stageField: false to declare the object has no linear lifecycle.`,
       });
+    } else if (typeof stage === 'string' && unprovisioned.has(stage)) {
+      findings.push(unprovisionedPointer('stageField', stage));
     }
 
     const highlights = Array.isArray(obj.highlightFields)
@@ -158,7 +185,11 @@ export function validateSemanticRoles(stack: AnyRec): SemanticRoleFinding[] {
         ? obj.compactLayout
         : [];
     for (const entry of highlights) {
-      if (typeof entry !== 'string' || entry.length === 0 || fieldNames.has(entry)) continue;
+      if (typeof entry !== 'string' || entry.length === 0) continue;
+      if (fieldNames.has(entry)) {
+        if (unprovisioned.has(entry)) findings.push(unprovisionedPointer('highlightFields', entry));
+        continue;
+      }
       findings.push({
         severity: 'warning',
         rule: SEMANTIC_ROLE_FIELD_UNKNOWN,

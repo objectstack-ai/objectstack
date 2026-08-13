@@ -37,6 +37,25 @@
  * `aiStudio` / `autoPublishAiBuilds` are the framework's own non-commercial
  * mechanism defaults (ADR-0005: AI authoring is an all-plan capability gated
  * by cost, not a paid tier), so they keep first-class config knobs here.
+ *
+ * ## `features.marketplace` is DERIVED, not declared (#8356)
+ *
+ * It used to be the literal `true`, so every runtime mounting this plugin told
+ * the Console the catalog was browsable — including one where
+ * `MarketplaceProxyPlugin` was never mounted because no control plane
+ * resolved. The affordance rendered; the runtime could not serve it. That is
+ * the same declared-is-not-enforced shape as #8343, one key over, and it is
+ * why #8343 mounts install-local ALONE on a cloud-less runtime rather than
+ * also mounting this plugin: reporting install-local truthfully would have
+ * cost a false browse claim.
+ *
+ * The flag is now read off what is really mounted — see
+ * {@link hasMarketplaceBrowseMount} for the seam and why it is that one. A
+ * config knob was rejected on the record (#8343 ACCEPT, 2026-08-13): it
+ * repeats one layer up the every-host-must-remember failure that propagated
+ * the original defect into the EE image, where both the host config and this
+ * package's README kept a hand-maintained flag out of step with their own
+ * mounting.
  */
 
 import type { Plugin, PluginContext } from '@objectstack/core';
@@ -51,6 +70,92 @@ import type { IHttpServer } from '@objectstack/spec/contracts';
 interface EnvRegistrySurface {
     resolveByHostname?(hostname: string): Promise<any>;
     resolveHostname?(hostname: string): Promise<any>;
+}
+
+/**
+ * The marketplace HTTP namespace, and the one sub-path inside it that is NOT
+ * a browse surface.
+ *
+ * These literals are deliberately NOT imported from `marketplace-proxy-plugin`
+ * — the derivation must also see a browse surface this package never mounted
+ * (see {@link hasMarketplaceBrowseMount}), so keying it on the proxy module
+ * would narrow it back to one provider. The coupling to the proxy's own
+ * spelling is instead pinned by test: the positive direction mounts the REAL
+ * `MarketplaceProxyPlugin` onto the same app rather than hand-spelling its
+ * route, so a change to its prefix fails here rather than silently flipping
+ * this flag to `false`.
+ */
+const MARKETPLACE_API_PREFIX = '/api/v1/marketplace';
+const MARKETPLACE_INSTALL_LOCAL_PREFIX = `${MARKETPLACE_API_PREFIX}/install-local`;
+
+/**
+ * Does this registered route pattern mount a marketplace BROWSE surface?
+ *
+ * `/api/v1/marketplace/install-local` is excluded on purpose. It is the
+ * offline install half, mounted precisely on the runtimes that have no
+ * catalog, and counting it as browse would recreate this bug's mirror image:
+ * #8343's cloud-less deployment reporting a capability whose route 404s.
+ * Patterns outside the namespace (`/api/v1/*` middleware, an SPA `/*`
+ * catch-all) are not evidence of anything and never match.
+ */
+function isMarketplaceBrowsePattern(pattern: string): boolean {
+    if (pattern.startsWith(MARKETPLACE_INSTALL_LOCAL_PREFIX)) return false;
+    if (!pattern.startsWith(MARKETPLACE_API_PREFIX)) return false;
+    // `/api/v1/marketplaceish/...` is somebody else's namespace.
+    const rest = pattern.slice(MARKETPLACE_API_PREFIX.length);
+    return rest === '' || rest.startsWith('/');
+}
+
+/**
+ * Is a marketplace browse surface actually mounted on the app serving this
+ * response? (#8356)
+ *
+ * ## Why the raw app's route table, and not any of the alternatives
+ *
+ * Measured on `main`, not assumed — the card proposed reading a kernel
+ * registration and there is none:
+ *
+ *  - **`MarketplaceProxyPlugin` registers no service.** Its `init` says so in
+ *    as many words ("No services registered — pure HTTP wiring during
+ *    `start()`"); it announces itself only by mounting
+ *    `${MARKETPLACE_API_PREFIX}/*` on the raw app. So there is nothing on the
+ *    kernel to look up, and adding a registration purely to read it back
+ *    would be a mechanism invented for its own observation rather than a fix.
+ *  - **`IHttpServer.getMountedRoutes()` / `resolveMountedRoute()` cannot see
+ *    it.** Both are scoped to routes registered through the adapter's own
+ *    verb methods — "routes an adapter mounts on its framework-native handle
+ *    behind `getRawApp` are outside this table by construction" (the contract's
+ *    own words, `packages/spec/src/contracts/http-server.ts`), and
+ *    `resolveMountedRoute` filters the live router's verdict back through that
+ *    same ledger. The proxy mounts through `getRawApp()`, so the adapter
+ *    ledger reports nothing for it.
+ *  - **A proxy-specific signal would under-report.** The ObjectStack Cloud
+ *    control plane serves `/api/v1/marketplace/packages*` NATIVELY (its own
+ *    route module), with no proxy anywhere; the flag's documented meaning in
+ *    that distribution is already "`/api/v1/marketplace/*` is reachable
+ *    (proxy or native)". Reading the route table is what makes one derivation
+ *    true for both.
+ *
+ * The raw app's route ledger is the union of everything registered on it —
+ * adapter verb methods and framework-native `getRawApp()` mounts alike — so it
+ * answers exactly the question the flag claims to answer. Read per request:
+ * plugin `start()` order across `kernel:ready` hooks is not guaranteed, and by
+ * request time every hook has run.
+ *
+ * ## When it cannot be observed
+ *
+ * An adapter whose raw app exposes no route ledger returns `false` — do not
+ * claim a capability you could not verify; claiming it unverified is the
+ * defect. A host on such an adapter that KNOWS browse is live states it
+ * through the `resolveFeatures` seam, which still merges over this base.
+ */
+function hasMarketplaceBrowseMount(rawApp: unknown): boolean {
+    const routes = (rawApp as { routes?: unknown } | null | undefined)?.routes;
+    if (!Array.isArray(routes)) return false;
+    return routes.some((route) => {
+        const pattern = (route as { path?: unknown } | null | undefined)?.path;
+        return typeof pattern === 'string' && isMarketplaceBrowsePattern(pattern);
+    });
 }
 
 
@@ -202,6 +307,19 @@ export class RuntimeConfigPlugin implements Plugin {
             }
             const rawApp = httpServer.getRawApp();
 
+            // Diagnosable once at mount time rather than per request: an
+            // adapter with no observable route ledger makes
+            // `features.marketplace` report false for the whole process, and
+            // a silently downgraded capability flag is hard to trace from the
+            // SPA end. See hasMarketplaceBrowseMount().
+            if (!Array.isArray((rawApp as { routes?: unknown } | null | undefined)?.routes)) {
+                ctx.logger?.warn?.(
+                    '[RuntimeConfigPlugin] raw app exposes no route table — features.marketplace will report false '
+                    + '(a mounted browse surface cannot be observed here). Declare it via resolveFeatures if this '
+                    + 'runtime does serve marketplace browse.',
+                );
+            }
+
             // A multi-tenant runtime serves many subdomains, each mapped to
             // one environment. Telling the SPA *which* environment it is
             // attached to (per-request) lets the App Marketplace skip the
@@ -286,7 +404,11 @@ export class RuntimeConfigPlugin implements Plugin {
                     defaultEnvironmentId,
                     features: {
                         installLocal: this.installLocal,
-                        marketplace: true,
+                        // Observed, not declared (#8356) — re-read per request
+                        // because it is a property of the app, not of this
+                        // plugin's config. A host's resolveFeatures still
+                        // merges over it, same as every other base flag.
+                        marketplace: hasMarketplaceBrowseMount(rawApp),
                         // aiStudio + autoPublishAiBuilds + any distribution keys.
                         ...features,
                     },

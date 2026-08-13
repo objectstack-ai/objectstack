@@ -51,9 +51,15 @@
  *      it (#5617's audit lists `Console Pin Freshness` as exactly this shape:
  *      a file whose own comment invites required-ization it cannot survive);
  *   7. its workflow's `pull_request:` trigger exists and carries no `paths:` /
- *      `paths-ignore:`. A path-filtered trigger produces NO check run on a PR
- *      that misses the glob — not a skip, an absence — which is permanent
- *      pending (the audit's `Spec property liveness` exclusion).
+ *      `paths-ignore:`, and, if it names `types:` at all, that list is a
+ *      superset of GitHub's default `[opened, synchronize, reopened]`. A
+ *      path-filtered trigger produces NO check run on a PR that misses the
+ *      glob, and naming `types:` REPLACES (never extends) the default set,
+ *      so dropping one of the three from a hand-written list produces NO
+ *      check run on that activity — neither is a skip, both are an absence,
+ *      which is permanent pending (the audit's `Spec property liveness`
+ *      exclusion for the `paths:` half; #8304 for the `types:` half, live
+ *      since `adr-merge-approval.yml` started naming `types:` in #8302).
  *
  * Plus two whole-registry properties:
  *
@@ -206,6 +212,16 @@ function scriptRepoRoot() {
 }
 
 /**
+ * GitHub's default `pull_request:` activity types. Naming any `types:` at
+ * all REPLACES this set rather than extending it, so a workflow that names
+ * `types:` must restate every one of these (or more) or it silently stops
+ * publishing a check run for the dropped activity — the same permanent-
+ * pending wedge assertion 7's `paths:` guard exists to catch, through a
+ * different key on the same trigger (#8304).
+ */
+const DEFAULT_PULL_REQUEST_TYPES = ['opened', 'synchronize', 'reopened'];
+
+/**
  * A workflow's trigger block.
  *
  * Read under both spellings on purpose. `on` is a YAML 1.1 boolean and a YAML
@@ -307,6 +323,23 @@ export function judge({ registry, workflows }) {
             `.github/workflows/${file}'s \`pull_request:\` trigger carries \`${key}:\`. A path-filtered trigger publishes NO check run ` +
               `on a PR that misses the glob — not a skip, an absence — so every required context in this file sits permanently pending ` +
               `on those PRs (#5617 audit; the \`Spec property liveness\` shape).`,
+          );
+        }
+      }
+      // (7b) a `types:` list that drops one of GitHub's defaults. Naming any
+      // `types:` REPLACES the default `[opened, synchronize, reopened]`
+      // rather than adding to it, so a hand-restated list that misses one is
+      // the identical permanent-pending wedge as a `paths:` filter, through a
+      // different key on the same trigger (#8304).
+      if (pr && typeof pr === 'object' && Object.prototype.hasOwnProperty.call(pr, 'types')) {
+        const types = Array.isArray(pr.types) ? pr.types : [];
+        const missing = DEFAULT_PULL_REQUEST_TYPES.filter((t) => !types.includes(t));
+        if (missing.length > 0) {
+          problems.push(
+            `.github/workflows/${file}'s \`pull_request:\` trigger names \`types:\` but omits GitHub's default activity type(s) ` +
+              `${missing.map((t) => `'${t}'`).join(', ')}. Naming any \`types:\` REPLACES that default set instead of extending it, so a PR reaching ` +
+              `that activity produces NO check run — not a skip, an absence — and every required context in this file sits permanently pending ` +
+              `on those PRs (#8304; the \`types:\` counterpart to assertion 7's \`paths:\` guard above).`,
           );
         }
       }
@@ -557,6 +590,49 @@ async function selfTest() {
   );
   const noPr = fixture('drop pull_request from ci.yml', 'ci.yml', (s) => s.replace('  pull_request:\n    branches:\n      - main\n', ''));
   assert(noPr.problems.some((p) => p.includes('no `pull_request:` trigger')), 'a required-context workflow with no pull_request trigger ⇒ red');
+
+  // ── (7b) a `types:` list that drops a GitHub default ──────────────────────
+  // adr-merge-approval.yml is (as of #8302) the only required-context
+  // workflow that names `types:` at all — its list hand-restates the three
+  // defaults alongside the two auto-merge activities #8012 needs, which is
+  // exactly the load-bearing-but-unverified shape #8304 is about.
+  const droppedReopened = fixture('drop reopened from adr-merge-approval.yml types', 'adr-merge-approval.yml', (s) =>
+    s.replace(
+      'types: [opened, synchronize, reopened, auto_merge_enabled, auto_merge_disabled]',
+      'types: [opened, synchronize, auto_merge_enabled, auto_merge_disabled]',
+    ),
+  );
+  assert(
+    droppedReopened.problems.some((p) => p.includes('adr-merge-approval.yml') && p.includes("omits GitHub's default activity type(s) 'reopened'")),
+    "pruning 'reopened' from a hand-restated types: list ⇒ red, naming the dropped default (#8304)",
+  );
+  const droppedTwo = fixture('drop opened and synchronize from adr-merge-approval.yml types', 'adr-merge-approval.yml', (s) =>
+    s.replace(
+      'types: [opened, synchronize, reopened, auto_merge_enabled, auto_merge_disabled]',
+      'types: [reopened, auto_merge_enabled, auto_merge_disabled]',
+    ),
+  );
+  assert(
+    droppedTwo.problems.some((p) => p.includes("'opened', 'synchronize'")),
+    'dropping two defaults at once ⇒ red naming both, in default order',
+  );
+  const noTypesAtAll = fixture('remove the types: key entirely from adr-merge-approval.yml', 'adr-merge-approval.yml', (s) =>
+    s.replace('    types: [opened, synchronize, reopened, auto_merge_enabled, auto_merge_disabled]\n', ''),
+  );
+  assert(
+    noTypesAtAll.problems.length === 0,
+    `a pull_request trigger with no \`types:\` key at all ⇒ green — GitHub's own defaults apply, nothing was replaced (got ${JSON.stringify(noTypesAtAll.problems)})`,
+  );
+  const supersetTypes = fixture('extend adr-merge-approval.yml types with an extra activity', 'adr-merge-approval.yml', (s) =>
+    s.replace(
+      'types: [opened, synchronize, reopened, auto_merge_enabled, auto_merge_disabled]',
+      'types: [opened, synchronize, reopened, auto_merge_enabled, auto_merge_disabled, ready_for_review]',
+    ),
+  );
+  assert(
+    supersetTypes.problems.length === 0,
+    `a types: list that is a strict superset of the three defaults ⇒ green (got ${JSON.stringify(supersetTypes.problems)})`,
+  );
 
   // ── (9) the shadowing collision, on the live specimen ────────────────────
   // ci.yml's sharded `test` job is named `Test Core (${{ matrix.shard }}/3)`

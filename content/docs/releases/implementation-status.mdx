@@ -111,7 +111,7 @@ This matrix is generated from actual codebase analysis and represents the curren
 | **Dataset** | ✅ | ❌ | ✅ | ✅ `@objectstack/service-analytics` |
 | **Mapping** | ✅ | ❌ | ❌ | ❌ Not Impl |
 | **Document** | ✅ | ❌ | ❌ | ❌ Not Impl |
-| **External Lookup** | ✅ | ❌ | ❌ | ❌ Not Impl |
+| **External Lookup** | ❌ | ❌ | ❌ | ❌ Retired — `data/external-lookup.zod.ts` was retired outright under ADR-0049 (route 3, D3 `external-lookup-message-queue-families-retired`, #8075) |
 
 **Field Type Support:**
 
@@ -459,7 +459,7 @@ There is no MSW package in this repo — browser API mocking is a devDependency 
 
 | Category | Total Protocols | Status |
 |:---------|:---------------:|:-------|
-| **Data** | 16 | Core modeling, hooks, and query engine fully implemented; document/mapping/external-lookup still pending |
+| **Data** | 16 | Core modeling, hooks, and query engine fully implemented; document/mapping still pending; external-lookup retired outright under ADR-0049 (route 3, #8075) |
 | **UI** | 10 | Studio/ObjectUI render most authored surfaces (🟡); full cross-surface renderer parity in progress |
 | **API** | 14 | REST/HTTP/discovery/batch fully implemented; OData and the WebSocket transport pending; GraphQL removed from the plan |
 | **System** | 39 | Logging, audit, job, translation, metrics, cache, notification implemented; encryption partial (local crypto provider); several governance services pending |
@@ -471,7 +471,7 @@ There is no MSW package in this repo — browser API mocking is a devDependency 
 
 ### Implementation Coverage
 
-Implementation spans every layer of the platform. Core infrastructure, data modeling, the REST API, client SDKs, security (Phase-1), automation, AI, and integration all have shipping implementations. Remaining gaps are concentrated in specific protocols (OData, cross-surface UI renderer parity, ETL/Sync, the mapping/document/external-lookup data protocols, and a handful of governance and AI-cost services) rather than entire layers. Refer to the per-layer tables above for protocol-level status.
+Implementation spans every layer of the platform. Core infrastructure, data modeling, the REST API, client SDKs, security (Phase-1), automation, AI, and integration all have shipping implementations. Remaining gaps are concentrated in specific protocols (OData, cross-surface UI renderer parity, ETL/Sync, the mapping/document data protocols, and a handful of governance and AI-cost services) rather than entire layers; the external-lookup data protocol was retired outright rather than left pending (ADR-0049 route 3, #8075). Refer to the per-layer tables above for protocol-level status.
 
 ### Core Functionality Status
 

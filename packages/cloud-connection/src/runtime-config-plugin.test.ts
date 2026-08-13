@@ -18,7 +18,16 @@ async function getConfig(opts: {
     host?: string;
 }): Promise<any> {
     let handler: ((c: any) => Promise<any>) | undefined;
-    const rawApp = { get(path: string, h: (c: any) => Promise<any>) { if (path === '/api/v1/runtime/config') handler = h; } };
+    // Hono-shaped: a real `routes` ledger, empty because this suite mounts no
+    // marketplace surface — so `features.marketplace` derives to false here.
+    // The derivation itself is pinned in runtime-config-marketplace-derivation.test.ts.
+    const rawApp = {
+        routes: [] as Array<{ method: string; path: string }>,
+        get(path: string, h: (c: any) => Promise<any>) {
+            this.routes.push({ method: 'GET', path });
+            if (path === '/api/v1/runtime/config') handler = h;
+        },
+    };
     const services: Record<string, any> = { 'http-server': { getRawApp: () => rawApp } };
     if (opts.resolveByHostname) services['env-registry'] = { resolveByHostname: opts.resolveByHostname };
     const ctx: any = {
@@ -38,7 +47,9 @@ describe('RuntimeConfigPlugin feature seam', () => {
     it('always ships the base mechanism flags', async () => {
         const body = await getConfig({});
         expect(body.features.installLocal).toBe(false);
-        expect(body.features.marketplace).toBe(true);
+        // Derived, not declared (#8356): no browse surface is mounted on this
+        // app, so the mechanism must not claim one.
+        expect(body.features.marketplace).toBe(false);
         expect(body.features.aiStudio).toBe(true);
         expect(body.features.autoPublishAiBuilds).toBe(false);
     });
@@ -58,8 +69,9 @@ describe('RuntimeConfigPlugin feature seam', () => {
         expect(body.features.customDomain).toBe(true);
         expect(body.features.sso).toBe(false);
         expect(body.features.aiStudio).toBe(true);
-        // base flags survive the merge
-        expect(body.features.marketplace).toBe(true);
+        // base flags survive the merge — including the derived one, which this
+        // host's hook does not name (nothing browse-shaped is mounted here).
+        expect(body.features.marketplace).toBe(false);
     });
 
     it('honours the deprecated resolvePlanFeatures alias', async () => {
