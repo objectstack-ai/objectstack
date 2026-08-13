@@ -101,6 +101,22 @@ const taskObject = {
             name: 'subtask_total', label: 'Subtask total', type: 'summary' as const,
             summaryOperations: { object: 'showcase_task', field: 'estimate', function: 'sum' as const },
         },
+        // [#8296] A BOOLEAN formula, beside the text one above, because the
+        // FILTER axis fails in a direction the sort axis does not have: the
+        // dangerous case is `{ is_open: false }`, which against a stored
+        // boolean returns every row and against a virtual one returns none.
+        // Its expression reads a stored column (`status`), so every assertion
+        // about it has a stored CONTROL with a known, different answer.
+        is_open: {
+            name: 'is_open', label: 'Open?', type: 'formula' as const,
+            expression: 'record.status == "open"', returnType: 'boolean' as const,
+        },
+        // [#8296] The THIRD "calculated" type, and the second control the
+        // filter gate must not catch: `autonumber` is server-assigned but
+        // STORED, so it filters exactly like any other column. It sits beside
+        // `subtask_total` so both non-members of the virtual family are pinned
+        // on the same axis at once.
+        ticket_no: { name: 'ticket_no', label: 'Ticket #', type: 'autonumber' as const },
     },
 };
 
@@ -281,6 +297,11 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
                 // A control that agreed with either would pass against a driver
                 // that ignored `orderBy` entirely.
                 subtask_total: [2, 5, 1, 4, 3][i],
+                // [#8296] Seeded, as a real driver's stored autonumber column
+                // is: `C A E B D` get 1..5, so `ticket_no: 3` is `E` — a value
+                // that matches neither insertion nor title order, so the
+                // control cannot hold vacuously.
+                ticket_no: i + 1,
             });
         });
         stores.set('showcase_task', tasks);
@@ -290,6 +311,7 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
         const r: any = await protocol.findData({ object: 'showcase_task' });
         expect(titles(r)).toEqual(INSERTION_ORDER);
     });
+
 
     // ─────────────────────────────────────────────────────────────
     // SORT — control group
@@ -835,6 +857,208 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
         // would be a much larger change wearing this one's clothes.
         const rows = await engine.find('showcase_task', { fields: ['id', 'title', 'sort_key'] });
         expect(rows.map((r: any) => r.sort_key).sort()).toEqual(['A', 'B', 'C', 'D', 'E']);
+    });
+
+    // ─────────────────────────────────────────────────────────────
+    // FILTER — [#8296] the third axis' unmaterializable verdict, on both
+    // doors. `formula` is the one field type no driver materialises a column
+    // for; SORT refuses it (#6994/#7095) and SEARCH refuses it (#6674), while
+    // FILTER accepted it and answered 200 with ZERO ROWS. Measured on this
+    // file's base (cb43296ef), real `ObjectQL` + real protocol:
+    //
+    //   INGRESS where {is_open:true}    -> 0 rows, NO ERROR
+    //   INGRESS where {is_open:false}   -> 0 rows, NO ERROR
+    //   ENGINE  find/findOne/count      -> 0 rows / null / 0, NO ERROR
+    //   CONTROL where {status:'open'}   -> 4 rows
+    //   CONTROL where {subtask_total:5} -> 1 row     (`summary` HAS a column)
+    //
+    // Worse than the sort axis one axis over: a filter changes the row SET,
+    // and BOTH directions answer nothing — so `{is_open:false}`, which against
+    // a stored boolean returns every row, silently became "no records at all".
+    // ─────────────────────────────────────────────────────────────
+
+    it('CONTROL — stored columns still filter, in both directions', async () => {
+        // FIRST, because every refusal pin below is vacuous against a harness
+        // whose filtering is simply broken: the `false` direction of a REAL
+        // predicate must return the rows the virtual one cannot.
+        const open: any = await protocol.findData({ object: 'showcase_task', query: { where: { status: 'open' } } });
+        expect(titles(open)).toEqual(['A', 'E', 'B', 'D']);
+        const done: any = await protocol.findData({ object: 'showcase_task', query: { where: { status: 'done' } } });
+        expect(titles(done)).toEqual(['C']);
+    });
+
+    it('CONTROL — a `summary` field still filters: the family is `formula`, not "computed"', async () => {
+        // The regression this gate must never cause. `summary` and
+        // `autonumber` get REAL stored columns and filter correctly, and both
+        // are excluded by the shared `SEARCH_VIRTUAL_TYPES` predicate. This is
+        // what fails if the gate is ever widened to the spec's
+        // `COMPUTED_VALUE_TYPES` (`formula`/`summary`/`autonumber`) — the WRITE
+        // contract, which would refuse two working types on a read axis.
+        const bySummary: any = await protocol.findData({ object: 'showcase_task', query: { where: { subtask_total: 5 } } });
+        expect(titles(bySummary)).toEqual(['A']);
+        const byAutonumber: any = await protocol.findData({ object: 'showcase_task', query: { where: { ticket_no: 3 } } });
+        expect(titles(byAutonumber)).toEqual(['E']);
+        // Through the engine door too — same two types, same answer.
+        expect((await engine.find('showcase_task', { where: { subtask_total: 5 } })).map((r: any) => r.title)).toEqual(['A']);
+        expect((await engine.find('showcase_task', { where: { ticket_no: 3 } })).map((r: any) => r.title)).toEqual(['E']);
+    });
+
+    it.each([
+        ['true — the direction that merely looks empty', { where: { is_open: true } }],
+        ['FALSE — the dangerous one: a stored boolean answers every row', { where: { is_open: false } }],
+        ['a text formula', { where: { sort_key: 'A' } }],
+        ['an operator bag', { where: { sort_key: { $in: ['A', 'B'] } } }],
+        ['second of two predicates', { where: { status: 'open', is_open: true } }],
+        ['under $and', { where: { $and: [{ status: 'open' }, { is_open: true }] } }],
+        ['under $or', { where: { $or: [{ is_open: true }, { is_open: false } ] } }],
+        ['the `filter` spelling', { filter: { is_open: true } }],
+        ['the `filters` spelling', { filters: { is_open: true } }],
+        ['the OData `$filter` spelling', { $filter: ['is_open', '=', true] }],
+        ['the filter-ARRAY sugar', { where: [['is_open', '=', true]] }],
+    ])('filtering on a formula field is a 400, not a silent empty list — %s', async (_label, query) => {
+        // `is_open` / `sort_key` are REAL fields of this object, so they are in
+        // `gate.known` and cleared the #7534 unknown check; they carry no dot.
+        // They then reached a driver with no column for them.
+        await expect(protocol.findData({ object: 'showcase_task', query }))
+            .rejects.toMatchObject({
+                status: 400,
+                code: 'INVALID_FIELD',
+                object: 'showcase_task',
+            });
+    });
+
+    it('the ingress refusal names the offending key path, the type and the fix', async () => {
+        const err: any = await protocol
+            .findData({ object: 'showcase_task', query: { where: { is_open: false } } })
+            .then(() => null, (e: unknown) => e);
+        expect(err).toBeTruthy();
+        // ADR-0112 envelope — a rejection case asserts code AND status, never
+        // merely that something was thrown.
+        expect(err.status).toBe(400);
+        expect(err.code).toBe('INVALID_FIELD');
+        // The standing ruling's third clause: NAME the offending key path.
+        expect(err.field).toBe('is_open');
+        expect(err.param).toBe('where');
+        // It must say WHICH type, or the author cannot tell this apart from a
+        // typo — the whole reason it needs its own verdict.
+        expect(err.message).toMatch(/a virtual 'formula' field on object 'showcase_task'/);
+        expect(err.message).toMatch(/computed on read/);
+        // ...and it must state the consequence a caller cannot infer from a
+        // status code: the answer would have been an empty list, both ways.
+        expect(err.message).toMatch(/BOTH directions/);
+    });
+
+    it('the refusal names the caller’s OWN wire spelling, not `where`', async () => {
+        // #4226's discipline: telling someone who sent `?$filter=…` that
+        // "'where' is invalid" names a parameter absent from their request.
+        const err: any = await protocol
+            .findData({ object: 'showcase_task', query: { $filter: ['is_open', '=', true] } })
+            .then(() => null, (e: unknown) => e);
+        expect(err.status).toBe(400);
+        expect(err.code).toBe('INVALID_FIELD');
+        expect(err.param).toBe('$filter');
+    });
+
+    it('precedence is unknown > unmaterializable — identity errors first', async () => {
+        // The same order the sort axis (`unknown` > `dotted` > type) and the
+        // expand axis (`unknown` > `not-a-reference`) use. Pinned so it stays a
+        // decision rather than an accident: the older verdict keeps answering
+        // exactly what it answered before this gate grew a second one.
+        await expect(protocol.findData({
+            object: 'showcase_task', query: { where: { no_such_field: 1, is_open: true } },
+        })).rejects.toMatchObject({ status: 400, code: 'INVALID_FIELD', field: 'no_such_field' });
+    });
+
+    it.each([
+        ['find', (e: ObjectQL) => e.find('showcase_task', { where: { is_open: true } })],
+        ['findOne', (e: ObjectQL) => e.findOne('showcase_task', { where: { is_open: true } })],
+        ['count', (e: ObjectQL) => e.count('showcase_task', { where: { is_open: true } })],
+        ['aggregate', (e: ObjectQL) => e.aggregate('showcase_task', {
+            where: { is_open: true }, aggregations: [{ function: 'count', field: 'id', alias: 'n' }],
+        })],
+        ['update', (e: ObjectQL) => e.update('showcase_task', { status: 'done' }, { where: { is_open: true }, multi: true })],
+        ['delete', (e: ObjectQL) => e.delete('showcase_task', { where: { is_open: true }, multi: true })],
+    ])('`engine.%s` REFUSES it too — the door the REST ingress cannot reach', async (_verb, call) => {
+        // The half an ingress-only fix leaves open, and it is AUTHOR-reachable
+        // rather than merely internal: `plugin-reports`' `executeReport`
+        // forwards a saved report's `query.filter` verbatim into
+        // `engine.find(object, { where: q.filter, … })`, exactly as #7095
+        // measured for `query.orderBy`. Flows and dashboards travel the same
+        // path. Every verb that accepts a caller `where` passes through the one
+        // lowering seam this gate lives in, which is why all six answer alike.
+        await expect(call(engine)).rejects.toMatchObject({
+            status: 400,
+            code: 'INVALID_FIELD',
+            field: 'is_open',
+            object: 'showcase_task',
+        });
+    });
+
+    it('the engine refusal names the entry point, the field and the fix', async () => {
+        const err: any = await engine
+            .find('showcase_task', { where: { is_open: false } })
+            .then(() => null, (e: unknown) => e);
+        expect(err).toBeTruthy();
+        expect(err.status).toBe(400);
+        expect(err.code).toBe('INVALID_FIELD');
+        // A caller who never wrote a query parameter must be told which door
+        // refused them — the same reason the sort engine door names itself.
+        expect(err.message).toMatch(/ObjectQL\.find\('showcase_task'\)/);
+        expect(err.message).toMatch(/a virtual formula field on 'showcase_task'/);
+        expect(err.fields).toEqual(['is_open']);
+    });
+
+    it('the FILTER refusals agree word-for-word with the SORT refusals on the remedy', async () => {
+        // Pins the AGREEMENT itself rather than each wording separately — the
+        // one-vocabulary-across-doors discipline. Four doors share one
+        // sentence, differing only in the verb that names the axis: an author
+        // refused on two axes must not be sent two different ways, which is
+        // exactly how #4256 and #6673 drifted apart in the first place.
+        const stem = /Denormalise the value onto 'showcase_task' \(a stored field, written when the source changes\) and /;
+        const filterIngress: any = await protocol
+            .findData({ object: 'showcase_task', query: { where: { is_open: true } } })
+            .then(() => null, (e: unknown) => e);
+        const filterEngine: any = await engine
+            .find('showcase_task', { where: { is_open: true } })
+            .then(() => null, (e: unknown) => e);
+        const sortIngress: any = await protocol
+            .findData({ object: 'showcase_task', query: { sort: 'sort_key' } })
+            .then(() => null, (e: unknown) => e);
+        const sortEngine: any = await engine
+            .find('showcase_task', { orderBy: [{ field: 'sort_key', order: 'asc' }] })
+            .then(() => null, (e: unknown) => e);
+        for (const err of [filterIngress, filterEngine, sortIngress, sortEngine]) {
+            expect(err.message).toMatch(stem);
+        }
+        expect(filterIngress.message).toMatch(new RegExp(stem.source + 'filter that\\.'));
+        expect(filterEngine.message).toMatch(new RegExp(stem.source + 'filter that\\.'));
+        expect(sortIngress.message).toMatch(new RegExp(stem.source + 'sort by that\\.'));
+        expect(sortEngine.message).toMatch(new RegExp(stem.source + 'sort by that\\.'));
+    });
+
+    it('BLAST RADIUS — a formula field is still readable, projectable and computed', async () => {
+        // This card narrows ONE axis. A refusal that also stopped formulas
+        // being RETURNED would be a much larger change wearing this one's
+        // clothes — and the hydration is precisely what makes the defect so
+        // hard to see: the value is visibly present in the response that
+        // cannot filter on it.
+        const rows = await engine.find('showcase_task', { fields: ['id', 'title', 'is_open'] });
+        expect(rows).toHaveLength(5);
+        expect(rows.map((r: any) => r.is_open)).toEqual([false, true, true, true, true]);
+        const viaIngress: any = await protocol.findData({ object: 'showcase_task', query: { select: 'id,title,sort_key' } });
+        expect(viaIngress.records.map((r: any) => r.sort_key).sort()).toEqual(['A', 'B', 'C', 'D', 'E']);
+        // And an unfiltered read is untouched.
+        expect(titles(await protocol.findData({ object: 'showcase_task' }))).toEqual(INSERTION_ORDER);
+    });
+
+    it('a registry-less host keeps its old answer — a door that cannot see the field map invents no verdict', async () => {
+        // Same early return both gates already make: `resolveQueryFields`
+        // returns null and `schema.fields` is undefined for an object nobody
+        // registered, so the engine door must not refuse there.
+        const bare = new ObjectQL();
+        bare.registerDriver(makeStubDriver().driver, true);
+        await bare.init();
+        await expect(bare.find('unregistered_object', { where: { anything: true } })).resolves.toEqual([]);
     });
 
     // ─────────────────────────────────────────────────────────────

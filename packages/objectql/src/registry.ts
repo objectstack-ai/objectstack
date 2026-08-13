@@ -1307,19 +1307,7 @@ export class SchemaRegistry {
     // Extensions still never redesignate: they merge into a base that has
     // already been provisioned.
     if (ownership === 'own' || ownership === 'overlay') {
-      schema = provisionPrimary(schema, { synthesize: false });
-
-      // [#2486] Search-normalization companion column (`__search`). Runs
-      // AFTER `provisionPrimary` so the just-designated `nameField` is
-      // visible, and ONLY when the deployment enables pinyin search — the
-      // column is a real additive migration (ADR-0045) that the driver's
-      // `syncSchema` materializes, populated by plugin-pinyin-search's
-      // before-save hooks and OR-ed into `$search` by the engine's
-      // `expandSearchToFilter`. BASE layers only: extensions merge into
-      // the base's already-provisioned shape.
-      if (this.searchCompanion) {
-        schema = provisionSearchCompanion(schema);
-      }
+      schema = this.materializeBaseLayer(schema);
     }
 
     const shortName = schema.name;
@@ -1576,6 +1564,122 @@ export class SchemaRegistry {
   }
 
   /**
+   * [#8268] The ADR-0079 object-materialization block itself, as ONE function.
+   *
+   * Every stamp this registry puts on a base layer at registration time lives
+   * HERE, and {@link registerObject} calls it rather than spelling the sequence
+   * out — so {@link materializeServedObjectOnto}, which replays it onto a body
+   * that never came through `registerObject`, is the SAME code and not a second
+   * copy free to drift from it.
+   *
+   * That property is the whole point, and it is the lesson three cards taught
+   * one at a time. Each of #6562 (injected system columns), #8038 (`__search`)
+   * and #8268 (`nameField`) is the same shape: a stamp the registry applies at
+   * this seam, absent from the copy a `/meta` read serves, found and filed
+   * SEPARATELY because nothing tied the stamps together. A fourth stamp added
+   * to this method is converged at the read exits the day it is added, with no
+   * fourth card and no fourth patch — which is what "fix the class" means here.
+   *
+   * ⛔ Order is contractual, not incidental: `provisionPrimary` runs BEFORE
+   * `provisionSearchCompanion` because the companion's source is resolved over
+   * the post-designation document. Keep additions in the order the seam applies
+   * them.
+   *
+   * @param opts.designatePrimary - `false` withholds ONLY the ADR-0079
+   *   designation step. See {@link materializeServedObjectOnto} for the one
+   *   caller that passes it and why the choice is not this method's to make.
+   */
+  private materializeBaseLayer(
+    schema: ServiceObject,
+    opts?: { designatePrimary?: boolean },
+  ): ServiceObject {
+    let out = schema;
+
+    // [ADR-0079] DESIGNATE-ONLY primary-title provisioning — `synthesize:
+    // false` never adds a column, so this is safe against title-less
+    // system/junction tables (see the call in `registerObject` for the full
+    // reasoning on why synthesis is refused at this seam).
+    if (opts?.designatePrimary !== false) {
+      out = provisionPrimary(out, { synthesize: false });
+    }
+
+    // [#2486] Search-normalization companion column (`__search`). Runs AFTER
+    // `provisionPrimary` so the just-designated `nameField` is visible, and
+    // ONLY when the deployment enables pinyin search — the column is a real
+    // additive migration (ADR-0045) that the driver's `syncSchema`
+    // materializes, populated by plugin-pinyin-search's before-save hooks and
+    // OR-ed into `$search` by the engine's `expandSearchToFilter`.
+    if (this.searchCompanion) {
+      out = provisionSearchCompanion(out);
+    }
+
+    return out;
+  }
+
+  /**
+   * [#8268] Replay THIS registry's whole object-materialization seam
+   * ({@link materializeBaseLayer}) onto a base body the CALLER supplies — the
+   * generalisation of {@link provisionSearchCompanionOnto}, which exposed one
+   * stamp of that seam for one card.
+   *
+   * The read exits call this INSTEAD of reaching for individual stamps. Both
+   * halves of that matter:
+   *
+   *  - a stamp added to the seam converges on the served document without a new
+   *    method here, a new method in the protocol, or a new card — the failure
+   *    mode #6562 → #8038 → #8268 demonstrated three times; and
+   *  - the served document is materialized in the seam's own ORDER, so the two
+   *    answers cannot differ by sequencing either.
+   *
+   * ⛔ `designatePrimary` is withheld when this registry HAS resolved the named
+   * object and its own answer carries no `nameField`. Without that check the
+   * convergence would over-reach in exactly one measured case: `registerObject`
+   * designates over the BASE layer and `resolveObject` folds `extend`
+   * contributors on afterwards WITHOUT re-designating, so a title-less base
+   * that an extension gives a text field to resolves with NO `nameField` — while
+   * a transform run at the read exit sees the folded document and would
+   * designate the extension's field. Withholding is the safe half of that
+   * disagreement: this seam may only converge the served copy ONTO the
+   * registry's answer, never invent a designation the registry declined. The
+   * mirror-image case — the registry designates and the served body cannot —
+   * needs no check, because `provisionPrimary` is a pure function of the body it
+   * is handed and can only ever point at a field that body really declares.
+   *
+   * ⚠️ The same base-vs-folded asymmetry applies to the `__search` stamp and is
+   * NOT closed here: `provisionSearchCompanionOnto` has served the folded
+   * document since #8038 and this method preserves that behaviour exactly
+   * rather than re-spelling it. Measured, and filed separately — see the PR's
+   * stamp inventory.
+   *
+   * Returns `base` by reference when nothing was owed, so a registry-sourced
+   * body (materialized at registration) pays comparisons and no copy, and a
+   * caller may apply it unconditionally.
+   */
+  materializeServedObjectOnto<T>(base: T): T {
+    if (base === null || typeof base !== 'object') return base;
+    return this.materializeBaseLayer(base as never, {
+      designatePrimary: !this.declinedPrimaryDesignation(base),
+    }) as unknown as T;
+  }
+
+  /**
+   * Did this registry resolve the object `base` names, and decline to designate
+   * a primary title for it? See {@link materializeServedObjectOnto}.
+   *
+   * `false` — "no opinion" — for a body with no usable name and for a name this
+   * registry does not know, which is the honest answer in both cases: an object
+   * that never reached `registerObject` has no registry designation to converge
+   * onto, and the pure transform is then the only answer available.
+   */
+  private declinedPrimaryDesignation(base: unknown): boolean {
+    const name = (base as { name?: unknown }).name;
+    if (typeof name !== 'string' || name === '') return false;
+    const resolved = this.getObject(name);
+    if (!resolved) return false;
+    return (resolved as { nameField?: unknown }).nameField === undefined;
+  }
+
+  /**
    * [#8038] Apply THIS registry's `__search` companion-column decision to a
    * base body the CALLER supplies — the deployment-gated provisioning step
    * {@link registerObject} runs on every base layer it materializes, exposed
@@ -1607,6 +1711,14 @@ export class SchemaRegistry {
    * present — {@link provisionSearchCompanion} is pure and idempotent — so a
    * registry-sourced body (provisioned at registration) pays a comparison and
    * no copy, and a caller may apply it unconditionally.
+   *
+   * ⚠️ [#8268] This is ONE STAMP of the materialization seam, and the `/meta`
+   * read exits no longer call it — they call
+   * {@link materializeServedObjectOnto}, which replays the whole seam. Reaching
+   * for a single stamp from a read exit is what made `nameField` a third card
+   * after this one was a second. Kept public because it is the exact operation
+   * the write-side {@link stripProvisionedSearchCompanionFrom} is the inverse
+   * of, and hosts pin the pair.
    */
   provisionSearchCompanionOnto<T>(base: T): T {
     if (base === null || typeof base !== 'object') return base;
@@ -1663,6 +1775,83 @@ export class SchemaRegistry {
     if (stableStringify(present) !== stableStringify(canonical)) return base;
 
     return { ...(base as Record<string, unknown>), fields: withoutCompanion } as unknown as T;
+  }
+
+  /**
+   * [#8268] The WRITE-side inverse of {@link materializeServedObjectOnto}: take
+   * this registry's whole materialization seam back OFF a body on its way IN.
+   *
+   * Owed for the reason each individual strip beside it is owed (#4326): the
+   * write path persists the request body verbatim by design (ADR-0005
+   * §Validation), so whatever the READ added must come off again or it is baked
+   * into `sys_metadata.metadata`, into its checksum, and into every history
+   * diff — the standard Studio GET → edit → PUT turning a platform-computed
+   * stamp into a phantom customisation the author never wrote.
+   *
+   * It exists as ONE method for the same reason its read-side twin does. A
+   * stamp added to {@link materializeBaseLayer} acquires BOTH halves here, and
+   * the pair cannot be half-implemented: the read half alone is a #4326
+   * regression that a landed round-trip pin catches, and this card measured
+   * exactly that before adding this method.
+   *
+   * ⛔ Strips in the REVERSE of the seam's order — companion first, then the
+   * title designation — because the companion's canonical definition is
+   * recomputed over a body that still carries the pointer, which is the state
+   * it was stamped in. Stripping the pointer first would ask
+   * `provisionSearchCompanion` a different question than the one it was
+   * answered with.
+   *
+   * Returns `base` by reference when nothing was owed.
+   */
+  stripMaterializedStampsFrom<T>(base: T): T {
+    if (base === null || typeof base !== 'object') return base;
+    return this.stripProvisionedPrimaryFrom(this.stripProvisionedSearchCompanionFrom(base));
+  }
+
+  /**
+   * [#8268] Remove an ADR-0079 title designation that is REDUNDANT WITH THE
+   * DERIVATION — the pointer {@link materializeServedObjectOnto} adds, and only
+   * that one.
+   *
+   * Same EXACTNESS discipline as {@link stripProvisionedSearchCompanionFrom},
+   * and recomputed from `provisionPrimary` itself rather than transcribed, so
+   * the strip and the stamp cannot drift: the pointer comes off only when it is
+   * identical to what the seam would designate for a body carrying no pointer
+   * at all. A pointer naming any OTHER field is the author's own deliberate
+   * choice — it overrides the derivation, which is the entire reason to write
+   * one — and is kept untouched.
+   *
+   * ⚠️ The narrow case this trades away, stated plainly because it is real and
+   * it is NOT the same trade `stripProvisionedSearchCompanionFrom` makes. That
+   * one removes a value byte-identical to a platform-canonical FIELD
+   * DEFINITION, where coincidence with an author's own writing is implausible.
+   * This one compares a single string, so an author who explicitly declared the
+   * field the derivation would have picked anyway loses that declaration on a
+   * round trip. What bounds the harm is that the two are indistinguishable by
+   * construction — the read serves one body, and "the author wrote
+   * `nameField: 'name'`" and "the read derived `nameField: 'name'`" are the
+   * same bytes — and that the stripped pointer is REDERIVED on every load:
+   * `registerObject` runs `provisionPrimary` over every base layer, so the
+   * resolved answer is identical with or without the stored key, now and at
+   * each future boot. The designation is only ever lost if a later edit changes
+   * which field the derivation picks, and that edit re-serves and re-stores the
+   * new designation through this same pair.
+   */
+  private stripProvisionedPrimaryFrom<T>(base: T): T {
+    if (base === null || typeof base !== 'object') return base;
+    const present = (base as { nameField?: unknown }).nameField;
+    if (typeof present !== 'string' || present === '') return base;
+
+    // Re-stamp a copy WITHOUT the pointer and compare: the canonical answer
+    // comes from the provisioning function itself, and an object the seam would
+    // designate nothing for yields no stamp and therefore no removal.
+    const withoutPointer = { ...(base as Record<string, unknown>) };
+    delete withoutPointer.nameField;
+    const restamped = provisionPrimary(withoutPointer as never, { synthesize: false }) as unknown as
+      { nameField?: unknown };
+    if (restamped.nameField !== present) return base;
+
+    return withoutPointer as unknown as T;
   }
 
   /**
