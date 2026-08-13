@@ -153,12 +153,19 @@ function selfTest() {
 
   // (3)'s fixture is SYNTHETIC rather than the real message with the marker
   // stripped: derived, it also fires on a rewording and misdescribes the cause.
+  // if/else, not two flat asserts: a fixture that stopped being an offer would
+  // ALSO fail the discrimination check, and the second failure would misdescribe
+  // the cause ("the predicate is not discriminating" when the fixture is what
+  // broke). Exactly one of these two can fire.
   const unmarkedOffer = `example.mdx: NEW use. add it to ${BASELINE_PATH} with --update.`;
-  expect('#8435 — the synthetic unmarked-offer fixture is still recognised as an offer',
-    RATCHET_EXPANSION_OFFER.test(unmarkedOffer));
-  expect('#8435 — ratchetRemedyCarriesAuthority() REJECTS an offer carrying no marker (proves the '
-    + 'predicate discriminates rather than approving everything)',
-    !ratchetRemedyCarriesAuthority(unmarkedOffer));
+  if (!RATCHET_EXPANSION_OFFER.test(unmarkedOffer)) {
+    expect('#8435 — the synthetic unmarked-offer fixture is no longer recognised as an offer, so '
+      + 'it cannot test discrimination at all. Re-spell it to match RATCHET_EXPANSION_OFFER', false);
+  } else {
+    expect('#8435 — ratchetRemedyCarriesAuthority() REJECTS an offer carrying no marker (proves '
+      + 'the predicate discriminates rather than approving everything)',
+      !ratchetRemedyCarriesAuthority(unmarkedOffer));
+  }
 
   const ratchetDown = `content/docs/example.mdx: role-word count improved 4 → 2 — ratchet DOWN: `
     + 'run `node scripts/check-role-word.mjs --update` and commit the baseline.';

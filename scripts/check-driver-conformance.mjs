@@ -1060,11 +1060,18 @@ function selfTest() {
     const unmarkedOffer =
       `CONSUMED: driver-example does not run PAGINATION_CASES. Add a suite that drives the shared `
       + `cases, or add a measured DEBT/EXEMPT entry to the ledger in ${LEDGER_REL} saying why not.`;
-    expect('#8435 — the synthetic unmarked-offer fixture is still recognised as an offer',
-      RATCHET_EXPANSION_OFFER.test(unmarkedOffer));
-    expect('#8435 — ratchetRemedyCarriesAuthority() REJECTS an offer carrying no marker (proves '
-      + 'the predicate discriminates rather than approving everything)',
-      !ratchetRemedyCarriesAuthority(unmarkedOffer));
+    // if/else, not two flat asserts: a fixture that stopped being an offer would
+    // ALSO fail the discrimination check, and that second failure would
+    // misdescribe the cause. Exactly one of these two can fire.
+    if (!RATCHET_EXPANSION_OFFER.test(unmarkedOffer)) {
+      expect('#8435 — the synthetic unmarked-offer fixture is no longer recognised as an offer, so '
+        + 'it cannot test discrimination at all. Re-spell it to match RATCHET_EXPANSION_OFFER',
+        false);
+    } else {
+      expect('#8435 — ratchetRemedyCarriesAuthority() REJECTS an offer carrying no marker (proves '
+        + 'the predicate discriminates rather than approving everything)',
+        !ratchetRemedyCarriesAuthority(unmarkedOffer));
+    }
   }
 
   if (failures.length) {
