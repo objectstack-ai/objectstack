@@ -45,27 +45,28 @@
  *
  * ## What `expected` means, precisely
  *
- * **The reference semantics: a store keyed by `type` × the `name` ARGUMENT.**
- * That is what the contract's own double implements, what its parameter names
- * say (`@param name - Item name/identifier (snake_case)` on both members) —
- * and, since the maintainer ruling of 2026-08-11 on #7378 (option (a)), what
- * {@link ../contracts/metadata-service | IMetadataService.register} RULES in
- * so many words: the argument is the effective key and `data.name` never
- * overrides it.
+ * **The reference semantics, ruled by the maintainer on 2026-08-12 (#7378,
+ * three cells): a store keyed by the CANONICAL type × the `name` ARGUMENT,
+ * refusing loudly what it cannot key.**
  *
- * That ruling settled two of the three rows `MetadataFacade` used to answer
- * differently — the effective key (`key-is-the-name-argument-*`) and the
- * dropped non-object `data` (`primitive-data-roundtrips` and its array
- * sibling) — and `MetadataFacade` was aligned to the contract on both. What
- * they pin in the objectql driver is now RULED BEHAVIOUR, not a measured
- * divergence.
+ * - a `data.name` disagreeing with the `name` argument is refused
+ *   (the `refused` rows) — a disagreement is almost always an authoring bug,
+ *   and silent resolution in either direction can misplace the item;
+ * - a non-object (or array) `data` is refused — never accepted-and-dropped,
+ *   never coerced into storability;
+ * - the type folds plural→singular (`PLURAL_TO_SINGULAR`, `../shared`)
+ *   before any store decision, so the two spellings of the object type
+ *   address ONE store.
  *
- * ONE row is still measured-and-unresolved: `plural-objects-type-is-its-own-store`.
- * The alias it measures is `SchemaRegistry`'s, not the facade's, and removing
- * it collides with the platform's own plural→singular normalization direction —
- * the objectql driver's surviving `// DIVERGENCE` note carries the evidence and
- * the escalation. Pinning ≠ blessing: read that note and the card it links
- * before treating either answer as the intended one.
+ * This supersedes the 2026-08-11 option-(a) reference semantics (a
+ * disagreeing `data.name` silently outranked by the argument; non-object
+ * `data` accepted; raw-string type keys) that this table's `expected` column
+ * stated until the ruling's spec-side half landed. Every shipped
+ * implementation enforces the same three cells through ONE shared guard —
+ * `assertMetadataRegisterContract` / `canonicalMetadataServiceType`
+ * (`@objectstack/core`, whose header carries the verbatim ruling); the
+ * reference double beside this table restates the semantics locally, because
+ * `packages/spec` is the dependency root and cannot import core.
  *
  * ## Deliberate scope
  *
@@ -107,13 +108,23 @@ export interface MetadataRoundTripRemoval {
  * (`organization_id`, `created_at`, …) that the author never wrote. A driver
  * whose subject is known to answer verbatim SHOULD additionally assert exact
  * equality; the objectql driver does this via `documentFidelity`.
+ *
+ * `refused` (#7378, 2026-08-12) means the case's SINGLE write must be
+ * rejected with the ADR-0112 envelope — the standard catalog's
+ * `VALIDATION_ERROR` as the error's `code` AND `status` 400; a bare
+ * `toThrow()` is not a conformance assertion — with a locating message that
+ * names the type, the `name` argument and, on mismatch rows, BOTH disagreeing
+ * spellings; and with NOTHING stored: the case's read key answers absent, and
+ * so does the document's own `name` when it disagrees (the misplacement the
+ * ruling exists to make impossible).
  */
 export type MetadataRoundTripExpectation =
     | { readonly kind: 'readable'; readonly document: unknown }
-    | { readonly kind: 'absent' };
+    | { readonly kind: 'absent' }
+    | { readonly kind: 'refused' };
 
 export interface MetadataRoundTripCase {
-    /** Stable id — what a divergence override in a driver keys off. */
+    /** Stable id — unique per row; what a driver names when it reports a row. */
     readonly id: string;
     /** Sentence stating the proposition, used as the test title. */
     readonly title: string;
@@ -121,7 +132,10 @@ export interface MetadataRoundTripCase {
     readonly writes: readonly MetadataRoundTripWrite[];
     /** Applied after every write, through `unregister(type, name)`. */
     readonly removes?: readonly MetadataRoundTripRemoval[];
-    /** The ONE read the case makes, through `get` / `exists` / `listNames`. */
+    /**
+     * The ONE read the case makes, through `get` / `exists` / `listNames`.
+     * On a `refused` row it is the key the refusal must have left absent.
+     */
     readonly read: { readonly type: string; readonly name: string };
     readonly expected: MetadataRoundTripExpectation;
     /** Why the case is in the table — what breaks if it is dropped. */
@@ -258,44 +272,44 @@ export const METADATA_ROUNDTRIP_CASES: readonly MetadataRoundTripCase[] = [
         why: 'No shipped implementation normalizes name case today. Pinning that keeps a future one from folding case silently — which would make two authored items collide into one.',
     },
     {
-        id: 'key-is-the-name-argument-object',
-        title: "get('object', n) finds a write made under n even when data.name differs",
+        id: 'data-name-mismatch-refused-object',
+        title: "register('object', n, d) REFUSES a d whose own name disagrees with n",
         writes: [{ type: 'object', name: 'pin_key', data: PIN_KEYED_OBJECT }],
         read: { type: 'object', name: 'pin_key' },
-        expected: { kind: 'readable', document: PIN_KEYED_OBJECT },
-        why: 'Whether `name` or `data.name` is the key is the whole round-trip. **Ruled** (#7378, maintainer 2026-08-11, option (a)): the argument is the effective key and `data.name` never overrides it. Every shipped implementation now answers this way; `MetadataFacade` was aligned to it in the same PR.',
+        expected: { kind: 'refused' },
+        why: 'Whether `name` or `data.name` is the key is the whole round-trip. **Ruled** (#7378, maintainer 2026-08-12, row 1, superseding the 2026-08-11 option (a) this row used to state): a disagreement is refused loudly — it is almost always an authoring bug, and silent resolution in EITHER direction can file the item under a key the author never wrote. A document with no `name` of its own still registers under the argument; the objectql driver pins that boundary.',
     },
     {
-        id: 'key-is-the-name-argument-nonobject',
-        title: "get('view', n) finds a write made under n even when data.name differs",
+        id: 'data-name-mismatch-refused-nonobject',
+        title: "register('view', n, d) REFUSES a d whose own name disagrees with n",
         writes: [{ type: 'view', name: 'pin_key_view', data: PIN_KEYED_VIEW }],
         read: { type: 'view', name: 'pin_key_view' },
-        expected: { kind: 'readable', document: PIN_KEYED_VIEW },
-        why: 'The same question on the generic store, so a divergence cannot be mistaken for object-specific special-casing.',
+        expected: { kind: 'refused' },
+        why: 'The same refusal on the generic store, so a conforming answer cannot be mistaken for object-specific special-casing.',
     },
     {
-        id: 'plural-objects-type-is-its-own-store',
-        title: "get('object', n) does not see a register('objects', n, …)",
+        id: 'plural-type-folds-to-canonical-store',
+        title: "get('object', n) sees a register('objects', n, …) — the plural spelling folds to the canonical type",
         writes: [{ type: 'objects', name: 'pin_plural', data: PIN_PLURAL }],
         read: { type: 'object', name: 'pin_plural' },
-        expected: { kind: 'absent' },
-        why: 'The two spellings of the object type. The reference store keys on the string it is given; some implementations alias the plural to the singular. **Shipped implementations still disagree here, and this row is the one #7378 did NOT settle** — the alias is `SchemaRegistry`\'s own, on the READ side, and the objectql driver\'s surviving DIVERGENCE note carries the measurement and the escalation.',
+        expected: { kind: 'readable', document: PIN_PLURAL },
+        why: "The two spellings of the object type address ONE store. **Ruled** (#7378, maintainer 2026-08-12, row 2): every implementation gives one answer, converged with `check:meta-type-normalized`'s enforced direction — the type folds plural→singular (`PLURAL_TO_SINGULAR`, `../shared`) before any store decision. This row was `plural-objects-type-is-its-own-store` (expected `absent`) while the answer was still a measured divergence; the reverse read direction is pinned driver-locally in objectql.",
     },
     {
-        id: 'primitive-data-roundtrips',
-        title: 'a non-object `data` value is readable back unchanged',
+        id: 'primitive-data-refused',
+        title: 'a non-object `data` value is REFUSED, never accepted-and-dropped',
         writes: [{ type: 'setting', name: 'pin_flag', data: 'enabled' }],
         read: { type: 'setting', name: 'pin_flag' },
-        expected: { kind: 'readable', document: 'enabled' },
-        why: '`data` is declared `unknown`, not `object`. An implementation that derives its key from `data.name` has nothing to derive it from here — which is why the #7378 ruling (the ARGUMENT is the key) is what makes this row answerable at all. Accepting the write and dropping the value is the one answer the ruling forbids.',
+        expected: { kind: 'refused' },
+        why: '`data` is declared `unknown`, not `object`, so this is a runtime refusal (#7378, maintainer 2026-08-12, row 3): a value the service cannot key was measured as accept-then-drop — written, then readable back through NO member — which is indefensible; and coercing it into storability is equally forbidden. The ruling fixes 「接受再丢」, it does not demand 「必须存下」.',
     },
     {
-        id: 'array-data-roundtrips',
-        title: 'an array `data` value is readable back as an array',
+        id: 'array-data-refused',
+        title: 'an array `data` value is REFUSED with the primitives',
         writes: [{ type: 'setting', name: 'pin_list', data: PIN_ARRAY }],
         read: { type: 'setting', name: 'pin_list' },
-        expected: { kind: 'readable', document: PIN_ARRAY },
-        why: 'The sibling shape of the row above, and the one a `typeof data === "object"` guard gets WRONG rather than drops: an array passes that test, so an implementation that keys by spreading the document turns [a, b] into { 0: a, 1: b } — silent corruption where the primitive row measured silent loss. Neither survives the #7378 ruling.',
+        expected: { kind: 'refused' },
+        why: 'The sibling shape of the row above, and the one a `typeof data === "object"` guard admits WRONGLY: an array passes that test, carries no document identity, and an implementation that keys by spreading the document turns [a, b] into { 0: a, 1: b } — silent corruption where the primitive row measured silent loss. The ruling\'s ban on coercion-into-storability decides this row with the primitive one.',
     },
     {
         id: 'absent-after-unregister',
