@@ -1894,6 +1894,68 @@ function measureLedgers(packages, rootName, state) {
   return measurements;
 }
 
+// ── The ratchet-remedy authority convention (#8435) ──────────────────────────
+//
+// A gate that offers two remedies teaches whichever one the author can act on.
+// This gate's second remedy -- raise the TEST_DEBT entry -- edits a SHRINK-ONLY
+// ledger, so taking it is not a fix at all: it is a ratchet weakening, and
+// #8225 had already paid to press plugin-auth's entry from 131 to 111 hours
+// before a +1 drift arrived on that same entry the same shift. Raising it would
+// have handed part of that cost back with every gate green and nothing anywhere
+// recording the reversion.
+//
+// The ledger's shrink-only semantics were ALREADY written into the message
+// below ("frozen debt, not a permission slip"). What was missing is the half a
+// reader needs in order to act: WHOSE call it is. An author reading this output
+// sees two paths that both turn CI green, and no marker saying one of them is
+// not theirs to take. So the fix is not more explanation -- it is an authority
+// label on the privileged path.
+//
+// Measured as a FARM-LEVEL shape, not a one-gate nit: the same structure --
+// second remedy edits a shrink-only ratchet, presented co-equally -- also lives
+// in check-engine-double-contract.mjs (which this PR fixes), and in
+// check-durability-degradation-log-level.mjs, check-role-word.mjs and
+// check-driver-conformance.mjs (which it does not; see the report/finding).
+// `check-driver-memory-census.mjs` is the precedent worth copying: its output
+// already refuses the weakening remedy outright ("Do NOT add an entry to make
+// ...").
+//
+// ⛔ This convention STRENGTHENS ratchet governance. Nothing here relaxes a
+// threshold, adds a baseline entry, or raises a ledger number -- the verdicts
+// this gate reaches are byte-for-byte the ones it reached before.
+
+/**
+ * The marker token every gate in the farm uses for the same purpose, kept short
+ * and identical across gates so it is greppable and reads as one convention
+ * rather than one author's phrasing.
+ */
+const RATCHET_AUTHORITY_MARKER = '⛔ MAINTAINER-ONLY';
+
+/**
+ * How this gate OFFERS the privileged path, as a detector rather than a string
+ * compare. Built from `SELF` so a rename of this file moves both halves
+ * together; the phrase in front of it is what the self-test pins, because a
+ * reworded offer that no longer matches would make the convention check below
+ * pass vacuously on every message.
+ */
+const RATCHET_EXPANSION_OFFER = new RegExp(
+  `raise the entry in\\s+${SELF.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`,
+);
+
+/**
+ * The convention itself, as a predicate: a message that hands the author the
+ * ratchet-raising path must say, in the same breath, that the path is not
+ * theirs. A message that offers no such path is unaffected -- this is an
+ * authority label, not a vocabulary ban.
+ *
+ * @param {string} message
+ * @returns {boolean}
+ */
+function ratchetRemedyCarriesAuthority(message) {
+  if (!RATCHET_EXPANSION_OFFER.test(message)) return true;
+  return message.includes(RATCHET_AUTHORITY_MARKER);
+}
+
 /**
  * MEASURED's verdict, pure over already-taken measurements so the self-test
  * pins the semantics without running a compiler.
@@ -1922,11 +1984,15 @@ function evaluateMeasurements(measurements) {
       problems.push(
         `${m.name}: ${m.ledger} records ${m.recorded} raw tsc error(s), \`tsc --noEmit\` now reports ` +
           `${m.actual} (+${m.actual - m.recorded}). ${m.ledger} is frozen debt, not a permission slip -- ` +
-          `the ledger is a ratchet and may only shrink (${REMEASURE_ISSUE}). Fix the new errors, or, if they ` +
-          `are genuinely irreducible today, raise the entry in ${SELF} AND rewrite its \`note\` to match what ` +
+          `the ledger is a ratchet and may only shrink (${REMEASURE_ISSUE}). Fix the new errors -- that is ` +
+          `the author's remedy, and the only one of the two below that you can take on your own. ` +
+          `${RATCHET_AUTHORITY_MARKER}, NOT a co-equal option: if they are genuinely irreducible today, ` +
+          `raise the entry in ${SELF} AND rewrite its \`note\` to match what ` +
           `the pile is now made of: the composition drifts too, and a note still naming only the old errors ` +
           `reads as "nearly graduated" to the next author while something else entirely has moved in. ` +
-          `If the delta cannot be attributed, say that in the note rather than inventing composition.`,
+          `If the delta cannot be attributed, say that in the note rather than inventing composition. ` +
+          `Raising the entry weakens a shrink-only ratchet and hands back what an earlier PR paid to press ` +
+          `it down, so it needs a maintainer's agreement first -- do not take this path to get CI green.`,
       );
     } else if (m.actual === 0 && m.recorded > 0) {
       notes.push(
@@ -2531,6 +2597,52 @@ function selfTest() {
       failures.push(
         `evaluateMeasurements — ${c.label}: expected ${c.problems.length} problem(s) / ${c.notes.length} note(s) ` +
           `matching${c.surplus === undefined ? '' : ` / surplus ${c.surplus}`}, got ${JSON.stringify(got)}`,
+      );
+    }
+  }
+
+  // ── The ratchet-remedy authority convention (#8435) ────────────────────────
+  //
+  // Three assertions, deliberately non-overlapping, so each way this can rot is
+  // caught by exactly one NAMED failure:
+  //
+  //   (1) the detector still reaches its subject -- the only one that fails if
+  //       the offer is reworded out from under `RATCHET_EXPANSION_OFFER`,
+  //       which would make (3) pass vacuously forever after;
+  //   (2) the real emitted message carries the marker -- the only one that
+  //       fails if the label is dropped from the drift text;
+  //   (3) an offer WITHOUT the marker is REJECTED -- the only one that fails if
+  //       the predicate stops discriminating (e.g. is reduced to `return true`).
+  //
+  // (3) is what makes (2) worth having: without it, a predicate that approves
+  // everything would keep this block green while the convention is gone.
+  const driftMessage = evaluateMeasurements([
+    { ledger: 'TEST_DEBT', name: 'plugin-auth', recorded: 111, actual: 112 },
+  ]).problems[0];
+
+  if (!RATCHET_EXPANSION_OFFER.test(driftMessage)) {
+    failures.push(
+      '#8435 convention — the ratchet-offer DETECTOR no longer matches the drift message it is ' +
+        'written against. Either the offer was reworded (re-point RATCHET_EXPANSION_OFFER at the new ' +
+        'wording) or the ratchet path was removed (delete the convention block). Until then the ' +
+        'convention check passes vacuously on every message.',
+    );
+  }
+  if (!ratchetRemedyCarriesAuthority(driftMessage)) {
+    failures.push(
+      '#8435 convention — the drift message offers the ratchet-raising path in ' +
+        `${SELF} without the ${RATCHET_AUTHORITY_MARKER} marker. The ledger is shrink-only, so that ` +
+        'path is a maintainer action; presenting it unmarked next to the real fix is what let a +1 ' +
+        'drift read as "two ways to go green".',
+    );
+  }
+  {
+    const unmarked = driftMessage.split(RATCHET_AUTHORITY_MARKER).join('(unmarked)');
+    if (ratchetRemedyCarriesAuthority(unmarked)) {
+      failures.push(
+        '#8435 convention — ratchetRemedyCarriesAuthority() ACCEPTED a message that offers the ' +
+          'ratchet-raising path with the marker stripped out. The predicate is not discriminating, so ' +
+          'the assertion above proves nothing.',
       );
     }
   }
