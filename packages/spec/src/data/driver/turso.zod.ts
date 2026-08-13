@@ -6,6 +6,7 @@ import { lazySchema } from '../../shared/lazy-schema';
 import { strictObject } from '../../shared/strict-object';
 import type { DriverDefinition } from '../datasource.zod';
 import {
+  credentialFreeUrl,
   driverConfigJsonSchema,
   INLINE_CREDENTIAL_REFUSED,
   READ_ONLY_BELONGS_ON_DATASOURCE,
@@ -124,6 +125,12 @@ export const TursoConfigSchema = lazySchema(() => strictObject(
      * is the single fact that makes `hasLocalDefault: false` true for turso,
      * and the reason both boot hosts refuse a driver selection with no URL
      * rather than guessing one (#6345 fork 2).
+     *
+     * Credential-free by contract since #8082: a `user:password@` userinfo is
+     * refused at publish exactly like an inline `authToken` (#7990) — bind the
+     * secret and it reaches the driver at connect time. Runtime-environment
+     * DSNs (`OS_DATABASE_URL` + `OS_DATABASE_AUTH_TOKEN`) never pass through
+     * this schema and are unaffected.
      */
     // The description names the SHAPES in words rather than pasting URL
     // prefixes, matching how the postgres/mysql/mongo `url` keys describe
@@ -133,7 +140,7 @@ export const TursoConfigSchema = lazySchema(() => strictObject(
     // docs link checker resolves as an internationalised domain name, and
     // fails on (caught by CI on this very key). Concrete example URLs belong
     // in the TSDoc above the key, which the reference tables do not inline.
-    url: z.string().min(1)
+    url: credentialFreeUrl(z.string().min(1), 'url')
       .describe('libSQL endpoint or local file: a remote libsql/https Turso URL, a file path, or :memory:')
       .meta({ title: 'Database URL' }),
 
@@ -158,8 +165,13 @@ export const TursoConfigSchema = lazySchema(() => strictObject(
       .describe('Maximum concurrent requests to the remote database')
       .meta({ title: 'Concurrency' }),
 
-    /** Remote sync endpoint that turns a local file into an embedded replica. */
-    syncUrl: z.string().optional()
+    /**
+     * Remote sync endpoint that turns a local file into an embedded replica.
+     * Judged by the same #8082 value-level parse as `url`: it is an authored
+     * URL persisted into the identical `sys_metadata` sink, so a
+     * `user:password@` userinfo is refused the same way.
+     */
+    syncUrl: credentialFreeUrl(z.string(), 'syncUrl').optional()
       .describe('Remote sync URL for embedded-replica mode: a libsql or https Turso endpoint')
       .meta({ title: 'Sync URL' }),
 

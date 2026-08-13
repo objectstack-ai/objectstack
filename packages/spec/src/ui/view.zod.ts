@@ -1871,6 +1871,16 @@ const FormFieldBaseSchema = lazySchema(() => {
   return z.object(shape, {
     error: strictObjectError({
       ...VISIBILITY_STRICT_OPTIONS,
+      // #8202 — this shape names ITSELF. The shared table's `'this view/page
+      // schema'` was harmless while all three of its consumers answered a key
+      // the same way; since #7887 they answer `disabled` in two contradictory
+      // ways on purpose (the rename below on a field, the boundary
+      // prescription on a section / page component), and the contradiction is
+      // only coherent if the message says which shape refused the key. A
+      // per-shape string is by definition not something a table shared by
+      // three shapes can carry, so it is filed here — the same placement rule
+      // #8199 drew for the prescription itself.
+      surface: 'this form field',
       extraKeys: ['fields'],
       // The one member of the `visibleWhen` family that can answer `disabled`
       // with a key of its own (#7832). `VISIBILITY_STRICT_OPTIONS` is shared
@@ -1985,7 +1995,15 @@ export const FormFieldSchema: z.ZodType<FormField, FormFieldInput> = lazySchema(
  * section non-editable, mark its fields `readonly`; to make it conditionally
  * non-editable, give each field a `readonlyWhen` predicate.
  */
-export const FormSectionSchema = lazySchema(() => strictObject(VISIBILITY_ONLY_STRICT_OPTIONS, {
+export const FormSectionSchema = lazySchema(() => strictObject({
+  ...VISIBILITY_ONLY_STRICT_OPTIONS,
+  // #8202 — see the note at `FormFieldBaseSchema`'s options: the boundary
+  // prescription this table carries tells the author to move an editability
+  // key to "the form field(s) inside", and the field's own message tells them
+  // to rename it in place. The reader can only tell which answer is theirs if
+  // the rejection names the shape, so each of the three shapes names itself.
+  surface: 'this form section',
+}, {
   /**
    * Stable identifier for translation lookup. snake_case convention.
    * When provided, translation bundles can target this section's `label`

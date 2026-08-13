@@ -327,7 +327,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "Method"
       },
       headers_json: {
-        label: "Headers JSON"
+        label: "Headers JSON",
+        help: "Authored request headers for this delivery — the ordinary place a credential goes, so never returned on the generic data path (#8118). The dispatcher recovers it through the engine's privileged accessor on the claim path."
       },
       signature: {
         label: "HMAC Signature",

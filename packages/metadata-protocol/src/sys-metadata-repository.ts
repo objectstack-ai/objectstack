@@ -1257,8 +1257,18 @@ export class SysMetadataRepository implements MetadataRepository {
    * item-level `_lock` refusal (`assertLockAllowsWrite`) that carries a `lock`
    * value read off the item. This one claims no `_lock`, because the item
    * declares none.
+   *
+   * @internal [#8184] Reachable from `protocol.ts` — deliberately, and it is
+   * the whole point of that card. `saveMetaItem` carries a SECOND refusal for
+   * this condition behind `environmentId !== undefined`, which shadowed this
+   * door on every scoped kernel and answered the undiscriminated
+   * `NOT_OVERRIDABLE` there. The two sites now share this ONE emitter rather
+   * than each spelling the sentence: two independently-authored refusals for
+   * one condition is how the `NOT_OVERRIDABLE`-everywhere problem started, and
+   * a copy in `protocol.ts` would drift from this one the first time either
+   * moves. ⛔ Do not re-privatise without deleting that call site.
    */
-  private static readOnlyBaseOverrideError(type: string, packageId: string, hatchOpen = false): Error {
+  static readOnlyBaseOverrideError(type: string, packageId: string, hatchOpen = false): Error {
     const singular = PLURAL_TO_SINGULAR[type] ?? type;
     const err: any = new Error(
       `[item_locked] Cannot overlay '${type}' in package '${packageId}': that package is read-only `

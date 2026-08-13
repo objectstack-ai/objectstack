@@ -106,7 +106,9 @@ effective body** and:
 - upserts the record (creates it if missing, `managed_by:'user'` — Studio-created
   sets now appear in Setup); a PACKAGE-OWNED record's facets follow the effective
   body too, with its `managed_by:'package'` + `package_id` provenance preserved
-  (see D5 — an env overlay is the standard customization of a packaged set);
+  (see D5-R — **D5's "an env overlay is the standard customization of a packaged
+  set" direction is RETIRED as of 2026-08-09**, so for an artifact-backed set there
+  is normally no overlay layer left to contribute to that effective body);
 - syncs the **metadata manager's in-memory `permission` entry**
   (`registerInMemory`) so the evaluator's registry-first `list('permission')`
   resolution sees the same effective body it projects — closing the

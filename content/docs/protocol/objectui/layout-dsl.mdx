@@ -429,34 +429,32 @@ Address
 
 ## Tabs: Multi-Page Layouts
 
-Organize large forms into tabbed sections.
+Organize large forms into tabs. A tabbed form has **no separate tab list** — set
+`type: tabbed` and **every section renders as its own tab**, in declaration
+order. `defaultTab` names the section that opens first; `tabPosition` places the
+strip.
 
 ### Basic Tabs
 
 ```yaml
-layout:
-  mode: tabbed
-  tabs:
-    - name: details
-      label: Details
-      icon: file-text
-      sections:
-        - label: Basic Info
-          fields: [name, email, phone]
-    
-    - name: address
-      label: Address
-      icon: map-pin
-      sections:
-        - label: Primary Address
-          fields: [street, city, state, zip]
-    
-    - name: preferences
-      label: Preferences
-      icon: settings
-      sections:
-        - label: Notifications
-          fields: [email_notifications, sms_notifications]
+type: tabbed
+tabPosition: top       # top | bottom | left | right
+defaultTab: details    # a section `name`
+
+sections:
+  - name: details
+    label: Details
+    columns: 2
+    fields: [name, email, phone]
+
+  - name: address
+    label: Address
+    columns: 2
+    fields: [street, city, state, zip]
+
+  - name: preferences
+    label: Preferences
+    fields: [email_notifications, sms_notifications]
 ```
 
 **Rendered:**
@@ -465,7 +463,6 @@ layout:
 │ [Details] [Address] [Preferences]                │
 ├──────────────────────────────────────────────────┤
 │                                                  │
-│  Basic Info                                      │
 │  Name:  __________________________________________│
 │  Email: __________________________________________│
 │  Phone: __________________________________________│
@@ -473,38 +470,37 @@ layout:
 └──────────────────────────────────────────────────┘
 ```
 
-### Lazy-Loaded Tabs
+### A tab carries no options of its own
 
-Load tab content only when clicked (performance optimization):
+The tab *is* the section, so a section's keys are the whole surface: `name`,
+`label`, `description`, `fields`, `columns`, `collapsible`, `collapsed`,
+`visibleWhen` — plus `pane`, which split forms alone accept. There is **no**
+per-tab `lazy`, `source`, `badge` or `badgeVariant` key, and no
+`layout: { mode: tabbed, ... }` wrapper: `FormViewSchema.layout` is a string
+enum (`vertical` / `horizontal` / `inline` / `grid`) and the form schema
+declares no `tabs` key at all. `FormViewSchema` and `FormSectionSchema`
+(`packages/spec/src/ui/view.zod.ts`) are `.strict()`, so authoring any of them
+is a **parse failure** — a loud rejection, not a silent no-op.
 
-```yaml
-tabs:
-  - name: details
-    label: Details
-    lazy: false  # Load immediately
-  
-  - name: history
-    label: History (1,234 records)
-    lazy: true   # Load when tab clicked
-    source: /api/customers/123/history
-```
+<Callout type="info">
+  Earlier revisions of this page documented tab-level `lazy` / `source` and tab
+  `badge` / `badgeVariant` (both the scalar `badge: 5` + `badgeVariant: danger`
+  form and the object `badge: { count, variant }` form), nested under a
+  `layout: { mode: tabbed, tabs: [...] }` wrapper. None of them existed on any
+  schema — `lazy` is authorable **nowhere** in the spec — so they are **removed
+  rather than implemented**; deferred tab loading is an implementation card
+  first. Counter-badges are real, but on app **navigation** items (`badge` /
+  `badgeVariant` on `ui/ObjectNavItem` and its siblings), never on a form tab.
+  For the keys a section really accepts, see the
+  [View Reference](/docs/references/ui/view).
+</Callout>
 
-### Tab Badges and Counters
-
-```yaml
-tabs:
-  - name: details
-    label: Details
-  
-  - name: tasks
-    label: Tasks
-    badge: 5  # Show "5" badge
-    badgeVariant: danger  # Red badge
-  
-  - name: notes
-    label: Notes
-    badge: { count: 12, variant: info }
-```
+Looking for tabs that carry their own `name`, `icon`, `filter`, `order`,
+`pinned` and `isDefault`? That surface exists, but it belongs to **list** views,
+not forms: `ui/ViewTab` declares exactly nine keys (`filter`, `icon`,
+`isDefault`, `label`, `name`, `order`, `pinned`, `view`, `visible`), and each
+tab points at a named list view. See
+[View Reference → ViewTab](/docs/references/ui/view#viewtab).
 
 ## Responsive Layout Modifiers
 

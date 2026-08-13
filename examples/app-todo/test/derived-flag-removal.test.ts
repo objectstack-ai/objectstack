@@ -21,12 +21,24 @@
  * A formula computes both correctly — including the temporal one — so the
  * obvious repair looks available. It is not, and the reason is a STORAGE fact
  * rather than a taste judgment: a `formula` field is virtual, no driver
- * materialises a column for it, and so a FILTER naming one matches nothing.
- * That is measured here, not asserted — {@link REVERSE} registers the
- * formula-shaped object and shows `where { is_completed: false }` answering
- * **0 rows with no error** where the stored column answers every row. Deriving
- * would have silently emptied the "Due Today" view, the daily reminder flow and
- * both open-task reports: a wrong answer traded for an invisible one.
+ * materialises a column for it, and so a FILTER naming one cannot be applied
+ * as written. That is measured here, not asserted — {@link REVERSE} registers
+ * the formula-shaped object and shows `where { is_completed: false }` failing
+ * where the stored column answers every row. Deriving would have emptied the
+ * "Due Today" view, the daily reminder flow and both open-task reports.
+ *
+ * Since **#8296** that failure is VISIBLE. The engine's filter seam refuses a
+ * `where` naming a virtual `formula` field with `400 INVALID_FIELD` instead of
+ * handing the predicate to a driver with no column behind it and answering
+ * **0 rows with no error** — which is what this test measured when #7226 was
+ * decided, and the invisible zero was the danger: a wrong answer traded for an
+ * unobservable one.
+ *
+ * The storage fact that decided #7226 is unchanged, so the decision stands and
+ * its reasoning is stronger, not weaker: a formula field still carries no
+ * column, a filter naming one still could not have worked, and the eight app
+ * filters that read these flags still had to move to stored columns. Only the
+ * failure mode changed — a silent zero became a named 400.
  *
  * `status` and `due_date` are stored, indexed columns that already carry the
  * information, and both are declared dimensions on the `task_metrics` dataset,
@@ -229,10 +241,23 @@ describe('#7226 — the replacement filters really select, on BOTH sides of the 
  * REVERSE VERIFICATION — the measurement that chose removal over derivation.
  *
  * Predicted direction, recorded BEFORE running it: the formula field READS
- * correctly (so "just derive it" looks right) but is UNFILTERABLE, and the
- * failure is silent — 0 rows, no error — rather than an exception. That
- * asymmetry is the whole argument: an exception would have been safe, because
- * someone would have seen it.
+ * correctly (so "just derive it" looks right) but is UNFILTERABLE. When #7226
+ * ran it the failure was silent — 0 rows, no error — rather than an exception,
+ * and this docblock named that asymmetry as the whole argument: **an exception
+ * would have been safe, because someone would have seen it.**
+ *
+ * **#8296 supplied that exception**, and the second `it` below therefore
+ * asserts a rejection envelope (`400 INVALID_FIELD`, naming the field and the
+ * object) where it used to assert an empty array. That is this file's own
+ * argument being adopted platform-wide — the safe design it asked for is now
+ * the shipped one — not a correction of it.
+ *
+ * The verdict on the derive route is UNCHANGED. A formula field still
+ * materialises no column and still cannot carry a predicate, so the eight app
+ * filters that named these flags still could not have worked; removal in
+ * favour of the stored `status` / `due_date` columns remains the only repair.
+ * What #8296 changed is that choosing the derive route now fails where someone
+ * can see it, instead of quietly answering an empty set.
  */
 describe('REVERSE — why the derive route was rejected, measured', () => {
   /** `todo_task` as it would look on the derive route. */
@@ -276,26 +301,39 @@ describe('REVERSE — why the derive route was rejected, measured', () => {
     expect(byId.d.is_overdue).toBe(false);   // no due date at all
   });
 
-  it('...and is UNFILTERABLE: 0 rows, no error — which is why deriving was refused', async () => {
+  it('...and is UNFILTERABLE: a `where` naming one is REFUSED, 400 INVALID_FIELD (#8296)', async () => {
     const ql = await bootEngine(DERIVED);
     await ql.insert('derived_task', { id: 'a', subject: 'done', status: 'completed', due_date: '2020-01-01' });
     await ql.insert('derived_task', { id: 'b', subject: 'late', status: 'in_progress', due_date: '2020-01-01' });
 
     // A formula field materialises no column on any driver, so the predicate
-    // matches nothing — and returns cleanly rather than throwing.
-    expect(await ql.find('derived_task', { where: { is_completed: true } })).toEqual([]);
-    expect(await ql.find('derived_task', { where: { is_overdue: true } })).toEqual([]);
+    // cannot be applied as written. When #7226 measured this the engine handed
+    // it to the driver anyway and answered 0 rows with no error; since #8296
+    // the engine's filter seam refuses it by name. The full envelope is pinned,
+    // not merely "it throws": a driver that happened to throw a bare `Error`
+    // would satisfy a bare `.rejects` while proving nothing about the verdict.
+    await expect(ql.find('derived_task', { where: { is_completed: true } })).rejects.toMatchObject({
+      status: 400, code: 'INVALID_FIELD', field: 'is_completed', object: 'derived_task',
+    });
+    await expect(ql.find('derived_task', { where: { is_overdue: true } })).rejects.toMatchObject({
+      status: 400, code: 'INVALID_FIELD', field: 'is_overdue', object: 'derived_task',
+    });
 
     // THE decisive one. On the old stored boolean this returned EVERY row; as a
-    // formula it returns NONE. Eight filters in this app relied on exactly this
-    // predicate ("Due Today", the reminder flow, both open-task reports, three
-    // distribution charts), so the derive route would have silently emptied
-    // every one of them.
-    expect(await ql.find('derived_task', { where: { is_completed: false } })).toEqual([]);
+    // formula it is not answerable at all. Eight filters in this app relied on
+    // exactly this predicate ("Due Today", the reminder flow, both open-task
+    // reports, three distribution charts), so the derive route would have
+    // broken every one of them — before #8296 by silently emptying them, after
+    // #8296 by failing loudly on the first query. Neither is a working app,
+    // which is why these flags were removed rather than derived.
+    await expect(ql.find('derived_task', { where: { is_completed: false } })).rejects.toMatchObject({
+      status: 400, code: 'INVALID_FIELD', field: 'is_completed', object: 'derived_task',
+    });
 
     // CONTROL — the stored column answers correctly on the same rows and the
-    // same engine, so the emptiness above is about the field being virtual, not
-    // about the fixture or the driver.
+    // same engine, so the refusal above is about the field being virtual, not
+    // about the fixture or the driver. (Assertions unchanged from #7226: the
+    // anti-vacuity arm never depended on the formula's failure mode.)
     expect((await ql.find('derived_task', { where: { status: 'completed' } })).map((r: any) => r.id)).toEqual(['a']);
     expect((await ql.find('derived_task', { where: { status: { $ne: 'completed' } } })).map((r: any) => r.id)).toEqual(['b']);
   });

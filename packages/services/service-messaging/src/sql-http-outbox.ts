@@ -26,6 +26,22 @@ export interface SqlHttpOutboxOptions {
     objectName?: string;
 }
 
+/**
+ * [#8118] Engines that expose the privileged internal-field dereference
+ * (ObjectQL — the sibling of the `resolveSecretField` probe in
+ * `plugin-webhooks/webhook-headers.ts`). Structural on purpose: this package
+ * depends only on the `IDataEngine` contract, and a minimal fake engine that
+ * implements neither method is an engine whose `find` does not redact either.
+ */
+type InternalFieldResolvingEngine = IDataEngine & {
+    resolveInternalField?(
+        object: string,
+        recordIds: readonly string[],
+        field: string,
+    ): Promise<Map<string, unknown>>;
+    getSchema?(objectName: string): unknown;
+};
+
 interface DeliveryRow {
     id: string;
     source: string;
@@ -177,7 +193,63 @@ export class SqlHttpOutbox implements IHttpOutbox {
             where: { id: { $in: ids }, claimed_by: opts.nodeId, claimed_at: now, status: 'in_flight' },
         })) as DeliveryRow[];
 
-        return claimed.map((r) => this.toDelivery(r));
+        // 5. [#8118] Recover the redacted header column for the rows this
+        // claim now owns — the one read that must see the authored map.
+        const headerColumns = await this.readClaimedHeaderColumns(claimed.map((r) => r.id));
+
+        return claimed.map((r) => this.toDelivery(r, headerColumns));
+    }
+
+    /**
+     * [#8118] Recover `headers_json` for a batch of just-claimed rows.
+     *
+     * `sys_http_delivery.headers_json` is declared `internal: true`, so the
+     * generic read path — including the step-4 read-back above — hands rows
+     * back WITHOUT it, for every caller, with no system carve-out (#7728's
+     * explicit design). The dispatcher is the one reader that must see the
+     * authored map verbatim: a delivery that goes out MISSING a header is not
+     * self-announcing — against an endpoint that does not require it (a
+     * routing `X-Tenant-Id`, an `X-Environment: staging`) the delivery
+     * SUCCEEDS while silently deviating from the authored configuration, and
+     * nothing records that it went out incomplete. So the claim path reads the
+     * column back through the engine's purpose-built privileged accessor
+     * (`resolveInternalField` — the remedy #7728 itself names), one driver
+     * read per claim batch, never per row.
+     *
+     * Returns `undefined` — "use the row's own value" — when nothing redacts:
+     *  - an object whose `headers_json` is not flagged `internal` has nothing
+     *    withheld (a custom `objectName` override without the marking), and
+     *  - an engine that exposes no schema at all is a minimal fake whose
+     *    `find` does not omit the column either.
+     *
+     * The one combination this must NOT survive silently is "the column is
+     * flagged, rows were claimed, and the engine cannot dereference": headers
+     * are stored but unrecoverable, and delivering without them is the exact
+     * fail-closed violation above. That combination THROWS — the same
+     * discipline as `resolveWebhookHeaders` in plugin-webhooks (drop the
+     * delivery attempt loudly, never deliver incomplete) — and the claimed
+     * rows revert to `pending` via the claim TTL instead of going out bare.
+     */
+    private async readClaimedHeaderColumns(ids: string[]): Promise<Map<string, unknown> | undefined> {
+        if (ids.length === 0) return undefined;
+        const engine = this.engine as InternalFieldResolvingEngine;
+        const schema = typeof engine.getSchema === 'function'
+            ? (engine.getSchema(this.objectName) as
+                | { fields?: Record<string, { internal?: unknown }> }
+                | undefined)
+            : undefined;
+        // Strict `=== true`, matching the engine's own collector — a truthy-
+        // but-not-true value does not enrol a field in the redaction either.
+        if (schema?.fields?.headers_json?.internal !== true) return undefined;
+        if (typeof engine.resolveInternalField !== 'function') {
+            throw new Error(
+                `SqlHttpOutbox.claim: ${this.objectName}.headers_json is declared \`internal: true\`, `
+                    + 'but this data engine does not implement resolveInternalField() — stored headers '
+                    + 'cannot be recovered, and a delivery must not go out missing the headers it was '
+                    + 'authored with (#8118). The claimed rows revert to pending via the claim TTL.',
+            );
+        }
+        return engine.resolveInternalField(this.objectName, ids, 'headers_json');
     }
 
     async ack(id: string, result: HttpAckResult): Promise<void> {
@@ -264,7 +336,18 @@ export class SqlHttpOutbox implements IHttpOutbox {
         return this.toDelivery(after);
     }
 
-    private toDelivery(r: DeliveryRow): HttpDelivery {
+    private toDelivery(r: DeliveryRow, headerColumns?: Map<string, unknown>): HttpDelivery {
+        // [#8118] On the claim path the read-back row no longer carries
+        // `headers_json` (`internal: true`) — the value arrives through the
+        // privileged per-batch read instead. Parse semantics are IDENTICAL for
+        // both sources on purpose: this is one column with two doors, not two
+        // formats. Rows materialised WITHOUT the map (`list()`, `redeliver()`)
+        // yield `headers: undefined` under a redacting engine — the redacted
+        // view, which is the surface narrowing #8118 rules; the dispatcher
+        // never sends from those.
+        const headersJson = headerColumns
+            ? (headerColumns.get(r.id) as string | null | undefined)
+            : r.headers_json;
         return {
             id: r.id,
             source: r.source,
@@ -273,7 +356,7 @@ export class SqlHttpOutbox implements IHttpOutbox {
             label: r.label ?? undefined,
             url: r.url,
             method: r.method ?? undefined,
-            headers: r.headers_json ? JSON.parse(r.headers_json) : undefined,
+            headers: headersJson ? JSON.parse(headersJson) : undefined,
             signature: r.signature ?? undefined,
             timeoutMs: r.timeout_ms ?? undefined,
             payload: JSON.parse(r.payload_json),

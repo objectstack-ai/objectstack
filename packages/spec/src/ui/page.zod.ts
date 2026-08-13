@@ -120,7 +120,17 @@ export const ElementDataSourceSchema = lazySchema(() => strictObject({
  * PageComponentSchema.properties}, which is that widget's own contract
  * (`component.zod.ts`) and not this shape's.
  */
-export const PageComponentSchema = lazySchema(() => strictObject(VISIBILITY_ONLY_STRICT_OPTIONS, {
+export const PageComponentSchema = lazySchema(() => strictObject({
+  ...VISIBILITY_ONLY_STRICT_OPTIONS,
+  // #8202 — the shape names ITSELF rather than inheriting the shared
+  // `'this view/page schema'`. Since #7887 a `disabled` written here gets the
+  // editability-boundary prescription while the same key on a form field gets
+  // a rename pointer toward `readonly`; the two answers contradict each other
+  // by design, so the message has to say which shape refused the key. Filed
+  // per-shape because a table shared by three shapes cannot carry one shape's
+  // name (#8199's placement rule).
+  surface: 'this page component',
+}, {
   /** Definition */
   type: z.union([
     PageComponentType,

@@ -7,7 +7,11 @@ import type { MetadataLoader } from './loaders/loader-interface.js';
 import type { MetadataLoaderContract, MetadataLoadResult, MetadataSaveResult, MetadataStats } from '@objectstack/spec/system';
 import type { IPubSub, PubSubMessage } from '@objectstack/spec/contracts';
 
-vi.mock('@objectstack/core', () => ({
+vi.mock('@objectstack/core', async (orig) => ({
+  // [#7378] Spread the REAL module: MetadataManager now also imports the
+  // shared register-contract guard from @objectstack/core, and a mock that
+  // names only createLogger breaks on every export the class gains.
+  ...((await orig()) as object),
     createLogger: () => ({
         info: vi.fn(),
         warn: vi.fn(),

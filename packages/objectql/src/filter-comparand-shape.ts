@@ -72,6 +72,7 @@
  */
 
 import { StandardErrorCode } from '@objectstack/spec/api';
+import { isVirtualSearchField } from '@objectstack/spec/data';
 
 /**
  * The operators whose comparand `FieldOperatorsSchema` declares as a list, with
@@ -295,4 +296,168 @@ function assertFieldListComparands(
       throw nonListComparandError(object, operation, op, field, comparand, `${path}.${op}`);
     }
   }
+}
+
+/**
+ * [#8296] FILTER on a field whose value is computed on read — refused HERE, on
+ * the engine's own filter seam, and no longer only at the REST ingress.
+ *
+ * `formula` is the one field type no driver materialises a column for. Three
+ * query axes can name a field, and until this landed only two of them said so:
+ * SORT answers `400 INVALID_SORT` (#6994 at ingress, #7095 at this engine
+ * boundary) and SEARCH answers `400 INVALID_FIELD` (#6674) — while FILTER
+ * accepted the same field, handed the predicate to a driver with no column for
+ * it, and answered 200 with zero rows. Measured on a real `ObjectQL`, base
+ * cb43296ef, `is_open` a `formula` over the stored `status` column:
+ *
+ * ```
+ * engine.find(o,    { where: { is_open: true  } }) -> []  200, no error
+ * engine.find(o,    { where: { is_open: false } }) -> []  200, no error
+ * engine.findOne(o, { where: { is_open: true  } }) -> null
+ * engine.count(o,   { where: { is_open: true  } }) -> 0
+ * CONTROL find(o,   { where: { status: 'open' } }) -> 4 rows
+ * ```
+ *
+ * BOTH directions returning nothing is what makes this worse than the sort
+ * axis' dropped ORDER BY: a filter changes the row SET, and the `false`
+ * direction is the dangerous one — the same predicate against a STORED boolean
+ * returns every row, so a filter meaning "not yet done" silently becomes "no
+ * records at all". The rows are not merely misordered; they are absent, and the
+ * response is indistinguishable from an empty table. The formula READS
+ * correctly in that same response (`applyFormulaPlan` hydrates it after the
+ * driver returns), so the field is visibly populated and simultaneously
+ * unfilterable.
+ *
+ * WHY A REFUSAL AND NOT A SILENT ZERO: the standing maintainer ruling of
+ * 2026-08-12 — if the platform cannot honour a declaration, refuse it at the
+ * latest checkpoint that can see the whole picture, name the offending key
+ * path, and never answer 200. Same direction as ADR-0032 (no silent failure)
+ * and as the sort axis' #7095 ruling one axis over.
+ *
+ * WHY AT THIS SEAM AND NOT ONLY AT INGRESS: #7095 had to add
+ * `assertOrderByIsMaterializable` inside this package because a saved report's
+ * `query.orderBy` is forwarded verbatim into `engine.find` and never passes the
+ * REST door. Filters travel the SAME path — `plugin-reports`' `executeReport`
+ * calls `this.engine.find(report.object_name, { where: q.filter, … })` — so an
+ * ingress-only fix would have left the author-reachable half open. This gate
+ * runs inside `lowerWhereFilterArray`, the one seam EVERY caller-supplied
+ * `where` passes through (`find` / `findOne` / `count` / `aggregate` / `update`
+ * / `delete`), which is what makes a new verb unable to miss it by omission.
+ *
+ * ORDERING: it judges the CALLER's own `where`, before the middleware chain
+ * composes RLS / sharing / tenant predicates onto `opCtx.ast.where`. That is
+ * deliberate — an injected read filter is the platform's own, not a
+ * declaration the caller can fix, and refusing one would turn a policy into a
+ * 400 nobody can act on.
+ *
+ * SCOPE — the unmaterializable verdict ONLY. An UNKNOWN filter field is not
+ * judged here: that is the ingress gate's first verdict
+ * (`assertFilterFieldsExist`, #7534), the engine deliberately keeps its
+ * registry-less tolerance, and widening this door to it is a separate posture
+ * change on a second verdict, exactly as #7095 declined to inherit sort's
+ * `unknown` and `dotted` legs. DOTTED filter paths are likewise untouched —
+ * they have no verdict on this axis at either door.
+ *
+ * A registry-less host (`schema.fields` undefined) returns early, exactly as
+ * the ingress gate returns early when `resolveQueryFields` cannot answer: a
+ * door that cannot see the field map must not invent a verdict about it.
+ *
+ * The wording deliberately shares its remedy sentence with the ingress door,
+ * duplicated rather than imported because `metadata-protocol` is assembled FROM
+ * an engine, so the engine cannot import from it without inverting the
+ * layering (the same argument `assertOrderByIsMaterializable` records). The
+ * agreement pin in `query-expression-conformance.test.ts` is what keeps the
+ * duplication honest.
+ */
+export function assertFilterIsMaterializable(
+  object: string,
+  operation: string,
+  schema: unknown,
+  where: unknown,
+): void {
+  const fields = (schema as { fields?: Record<string, unknown> } | undefined)?.fields;
+  if (!fields || typeof fields !== 'object') return;
+  const named = collectFilterFieldNames(where);
+  if (named.length === 0) return;
+  // Judged by the same `@objectstack/spec/data` predicate the SEARCH axis and
+  // the ingress door use, never a list minted here, so gate and drivers cannot
+  // disagree about which types have a column. `summary` and `autonumber` are
+  // deliberately NOT in it: both get real stored columns and filter correctly.
+  const virtual = named.filter((f) => isVirtualSearchField(fields[f] as never));
+  if (virtual.length === 0) return;
+  const first = virtual[0];
+  const type = String((fields[first] as { type?: unknown } | undefined)?.type ?? 'formula');
+  const err = new Error(
+    `ObjectQL.${operation}('${object}') filters on '${first}', a virtual ${type} field on `
+    + `'${object}' — a ${type} value is computed on read, so no driver materialises a column `
+    + 'to filter on'
+    + (virtual.length > 1 ? ` (also: ${virtual.slice(1).join(', ')})` : '')
+    + '. The predicate was not applied as written: it reaches the driver, matches nothing, and '
+    + 'returns an empty result in BOTH directions — a false test answers no records where the '
+    + 'same test against a stored boolean answers every record.'
+    // Deliberately the SAME remedy, in the same words, as the ingress door's
+    // formula refusal, with only the verb naming this axis. One vocabulary
+    // across the doors: a caller refused at the REST boundary and a caller
+    // refused here must not be sent two different ways.
+    + ` Denormalise the value onto '${object}' (a stored field, written when the source`
+    + ' changes) and filter that.',
+  ) as Error & { code?: string; status?: number; field?: string; fields?: string[]; object?: string };
+  // `INVALID_FIELD`, not `INVALID_FILTER`, and not a new code: this verdict is
+  // about the NAME's type, which is the question the ingress door answers with
+  // `INVALID_FIELD` on its neighbouring `unknown` verdict and the SEARCH axis
+  // answers with `INVALID_FIELD` for this very field class. `INVALID_FILTER` is
+  // this package's VALUE-shape envelope (#5869 / #7047) — a different fact.
+  // 400 rather than 500 for the reason `assertOrderByIsMaterializable` records:
+  // one condition keeps ONE wire code however the caller reached it, so a host
+  // surfacing engine errors over HTTP answers the same envelope on both doors.
+  err.status = 400;
+  err.code = StandardErrorCode.enum.INVALID_FIELD;
+  err.field = first;
+  err.fields = virtual;
+  err.object = object;
+  throw err;
+}
+
+/**
+ * Every key of a `FilterCondition` that NAMES A FIELD of THIS object, structure
+ * discarded — whether a predicate sits under an `$or` changes nothing about
+ * whether its column exists.
+ *
+ * The same three conservative rules the ingress collector applies
+ * (`collectFilterFieldKeys`, `metadata-protocol`), for the same reasons:
+ *
+ * - **A `$`-prefixed key is never a field.** `$and` / `$or` / `$not` are
+ *   recursed into; any OTHER `$` key is skipped WITHOUT descending, so an
+ *   unrecognised combinator leaves the fields beneath it ungated — a hole, not
+ *   a false 400, which is the right failure direction for a gate that exists to
+ *   stop wrong answers rather than invent new ones.
+ * - **A field key's VALUE is not descended into.** It is an operator bag
+ *   (`{$gte: 18}`) or a nested-relation condition (`{owner: {region: 'NA'}}`),
+ *   and the latter's keys belong to a DIFFERENT object whose field map this
+ *   gate has not resolved.
+ * - **A DOTTED key is dropped here**, not judged on its head: this door has one
+ *   verdict and a dotted filter path has none on this axis (see the scope note
+ *   above).
+ *
+ * `depth` is a cheap backstop against a self-referential `where` — in-process
+ * callers hand over live objects, and a gate that can hang the read path is
+ * worse than the defect it closes.
+ */
+function collectFilterFieldNames(where: unknown, out: string[] = [], depth = 0): string[] {
+  if (depth > 32) return out;
+  if (!isFilterNode(where)) return out;
+  for (const [key, value] of Object.entries(where)) {
+    if (key.startsWith('$')) {
+      if (key !== '$and' && key !== '$or' && key !== '$not') continue;
+      if (Array.isArray(value)) {
+        for (const arm of value) collectFilterFieldNames(arm, out, depth + 1);
+      } else {
+        collectFilterFieldNames(value, out, depth + 1);
+      }
+      continue;
+    }
+    if (key.includes('.')) continue;
+    out.push(key);
+  }
+  return out;
 }

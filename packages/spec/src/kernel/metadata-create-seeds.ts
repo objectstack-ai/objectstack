@@ -102,6 +102,15 @@ const BUILTIN_METADATA_CREATE_SEEDS: Partial<Record<MetadataType, unknown>> = {
     label: 'New Object',
     pluralLabel: 'New Objects',
     fields: {},
+    // [#8308 / ADR-0090 D1] The OWD baseline is an AUTHORED decision, never an
+    // accident. The runtime already resolves an absent `sharingModel` on a
+    // custom object to 'private' (fail-closed — `effectiveSharingModel`,
+    // packages/plugins/plugin-sharing/src/sharing-service.ts), so seeding
+    // 'private' changes no tenant's effective sharing; it makes the operative
+    // default explicit in the platform's own minimal create body, which is
+    // what lets `security-owd-unset` enforce at the runtime publish door
+    // (#7891 programme) without refusing the platform's own seed.
+    sharingModel: 'private',
   },
   agent: {
     name: 'new_agent',

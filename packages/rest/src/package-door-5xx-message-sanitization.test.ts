@@ -193,17 +193,60 @@ async function bootRealProtocol(dbError: string): Promise<any> {
   return new ObjectStackProtocolImplementation(engine as any);
 }
 
-describe('[#8086] a real sys_metadata failure, walked in process through this door', () => {
-  it('the premise guard: the protocol really does throw the driver line', async () => {
-    // Anti-vacuity for the whole section. If `deletePackage` ever stops letting
-    // the driver text out — option C, the real cure — this goes RED and the
-    // cases below stop proving anything, instead of silently passing over a
-    // path nothing can traverse.
+/**
+ * [#8136] **OPTION C LANDED, AND THIS SECTION IS ITS SIGNAL — INVERTED, NOT
+ * REPAIRED.**
+ *
+ * What used to open this block was an anti-vacuity guard asserting that
+ * `protocol.deletePackage` really does let the driver line out:
+ *
+ * ```ts
+ * await expect(protocol.deletePackage({ … })).rejects.toThrow(SQLITE_NO_TABLE);
+ * ```
+ *
+ * It was written to go RED the day the producer stopped disclosing — "option C,
+ * the real cure" — so that a reader came back and re-read this section instead
+ * of consuming a green suite as proof the door was covered. #8136 is that day.
+ * Per the card's own instruction the pin is inverted rather than mended: making
+ * it green again would mean re-teaching the protocol to leak.
+ *
+ * So the subject of this section has moved by one layer, deliberately:
+ *
+ *   before — "the producer emits a driver line and this DOOR withholds it"
+ *   now    — "the producer emits no driver line at all, and the envelope it
+ *             does emit is DECLARED rather than guessed from a bare `Error`"
+ *
+ * The end-to-end walk is kept exactly as it was, because it is still the only
+ * thing here that proves the whole path: a real `ObjectQL`, a real
+ * `ObjectStackProtocolImplementation`, a driver that fails every `sys_metadata`
+ * access, driven through the route a client calls. What changed is what it
+ * observes at the far end.
+ *
+ * ⚠️ This does NOT retire the door's withhold, and section 2 onward still pins
+ * it in full. `sendThrownError` guards every producer that reaches this
+ * registrar, not just `metadata-protocol`, and #8131's `service-package`
+ * producer is a separate card still in flight. The belt stays; what changed is
+ * that this particular producer no longer needs it.
+ */
+describe('[#8136] a real sys_metadata failure, walked in process through this door', () => {
+  it('the producer no longer discloses: the driver line never leaves `deletePackage`', async () => {
+    // The inverted guard. This is the same call the old premise guard made,
+    // asserting the opposite fact — and it is still the anti-vacuity anchor for
+    // the section: if the protocol ever starts interpolating driver text again,
+    // this goes red at the source rather than the door silently covering for it.
     const protocol = await bootRealProtocol(SQLITE_NO_TABLE);
+
+    // The POSITIVE shape first, so this guard cannot pass vacuously — a bare
+    // `rejects.not.toThrow(...)` is green for a rejection with ANY other
+    // message, including a different leak, and green-by-accident is the exact
+    // failure mode this section exists to prevent.
+    await expect(
+      protocol.deletePackage({ packageId: 'com.acme.crm', allTenants: true }),
+    ).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
 
     await expect(
       protocol.deletePackage({ packageId: 'com.acme.crm', allTenants: true }),
-    ).rejects.toThrow(SQLITE_NO_TABLE);
+    ).rejects.not.toThrow(SQLITE_NO_TABLE);
   }, 60_000);
 
   it('the driver line does not appear anywhere in the client body', async () => {
@@ -217,13 +260,17 @@ describe('[#8086] a real sys_metadata failure, walked in process through this do
     );
 
     const error = expectDeclaredEnvelope(captured);
-    // The POSITIVE shape, not "it changed": this is the same replacement
-    // constant the dispatcher twin and `rest-server.ts` use.
-    expect(error.message).toBe(INTERNAL_ERROR_MESSAGE);
-    // The full ADR-0112 envelope. Still a server fault on the wire — the
-    // withhold touches the prose and nothing else.
-    expect(captured.status).toBe(500);
-    expect(error.code).toBe('INTERNAL_ERROR');
+    // [#8136] The envelope is now the producer's own DECLARATION, not this
+    // door's guess. `metadata-protocol` answers an unreadable metadata store
+    // with 503 / `SERVICE_UNAVAILABLE` — the contract it already used for that
+    // exact condition — so the door forwards a declared refusal instead of
+    // falling to the undeclared-500 default and withholding its prose.
+    expect(captured.status).toBe(503);
+    expect(error.code).toBe('SERVICE_UNAVAILABLE');
+    // Still the POSITIVE shape, not "it changed": the authored sentence, which
+    // is safe to ship precisely because it quotes nothing.
+    expect(error.message).toContain('The metadata store could not be read');
+    expect(error.message).not.toBe(INTERNAL_ERROR_MESSAGE);
 
     const wire = JSON.stringify(captured.body);
     expect(wire).not.toContain('SQLITE_ERROR');
@@ -232,30 +279,26 @@ describe('[#8086] a real sys_metadata failure, walked in process through this do
   }, 60_000);
 
   /**
-   * [#8132] Was the residual; now the second green.
+   * [#8132 → #8136] Twice-inverted, and the trail is the point.
    *
-   * This case was added by #8086 as a deliberately-red-in-future pin: the
-   * shared predicate was a heuristic over the message and knew no Postgres
-   * `relation … does not exist` phrasing, so that dialect's line still
-   * travelled through this door while SQLite's was withheld — the same
-   * condition, disclosed or not depending on which engine was underneath. It
-   * asserted that gap positively so the day it closed would be visible.
+   * #8086 added this as a deliberately-red-in-future pin: the shared predicate
+   * knew no Postgres `relation … does not exist`, so that dialect's line
+   * travelled through this door while SQLite's was withheld. #8132 / #8263
+   * closed that IN THE PREDICATE and the case flipped to "withheld too, by the
+   * shared predicate". #8136 now removes the disclosure at the producer, so
+   * there is nothing left for the predicate to decide about this path.
    *
-   * #8132 closed it in the predicate, where it belonged — so the assertion is
-   * INVERTED here rather than deleted, and the pair above/below now proves the
-   * property that actually matters: this door answers the same withheld
-   * envelope for BOTH dialects of one failure.
-   *
-   * ⚠️ Still not the structural cure, and this comment is the reason the
-   * pointer survives the flip. The predicate now recognises the two engines
-   * this repo runs; it is a phrasing test, and a phrasing test can only ever
-   * know the dialects someone has met. **Option C** — `metadata-protocol` not
-   * interpolating driver text into client-facing messages at all — is the fix
-   * whose correctness does not depend on that, and is tracked as #8136. The
-   * anti-vacuity guard at the top of this describe block goes red when C
-   * lands, which is the intended signal to revisit this whole section.
+   * ⚠️ The predicate assertion is KEPT, and deliberately still asserts `true` —
+   * it records that the interim belt is real and still standing for every other
+   * producer. What it no longer does is carry the weight of this path, and that
+   * is the structural difference option C bought: the body below is clean for a
+   * dialect the predicate has never met just as surely as for one it has.
+   * `packages/metadata-protocol/src/protocol.driver-text-disclosure.test.ts`
+   * measures that directly, across five dialects, three of which the predicate
+   * cannot see.
    */
-  it('the Postgres phrasing of the same failure is withheld too, by the shared predicate', async () => {
+  it('the Postgres phrasing of the same failure is withheld at the producer now', async () => {
+    // The interim belt still exists and still recognises this phrasing.
     expect(looksLikeInternalErrorLeak(PG_NO_RELATION)).toBe(true);
 
     const protocol = await bootRealProtocol(PG_NO_RELATION);
@@ -267,11 +310,11 @@ describe('[#8086] a real sys_metadata failure, walked in process through this do
     );
 
     const error = expectDeclaredEnvelope(captured);
-    expect(captured.status).toBe(500);
-    expect(error.code).toBe('INTERNAL_ERROR');
-    // The same positive shape the SQLite case asserts, which is the point of
-    // the flip: one door, one envelope, regardless of the engine underneath.
-    expect(error.message).toBe(INTERNAL_ERROR_MESSAGE);
+    // One door, one envelope, regardless of the engine underneath — the
+    // property the flip was always about, now held one layer earlier.
+    expect(captured.status).toBe(503);
+    expect(error.code).toBe('SERVICE_UNAVAILABLE');
+    expect(error.message).toContain('The metadata store could not be read');
 
     const wire = JSON.stringify(captured.body);
     expect(wire).not.toContain('does not exist');

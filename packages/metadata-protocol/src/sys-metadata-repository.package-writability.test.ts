@@ -157,7 +157,10 @@ function makeFakeEngine() {
   };
 }
 
-const objectBody = { name: 'showcase_task', label: 'Task', fields: { name: { type: 'text', label: 'Name' } } };
+// [#8308] `sharingModel` authored: the publish gate refuses an OWD-less custom
+// object (`security-owd-unset`) once #8310 declares `object` in `runtimeTypes`,
+// and this file pins the package-writability refusals, not that one.
+const objectBody = { name: 'showcase_task', label: 'Task', sharingModel: 'private', fields: { name: { type: 'text', label: 'Name' } } };
 
 /**
  * [#8146] A spec-VALID permission set — the QA run's `showcase_contributor`.
@@ -169,6 +172,22 @@ const objectBody = { name: 'showcase_task', label: 'Task', fields: { name: { typ
  * `permissions: {}` and every case came back 422 from the schema.)
  */
 const permissionBody = { name: 'showcase_contributor', label: 'Contributor', objects: {} };
+
+/**
+ * [#8184] A spec-valid `view` CONTAINER — the ADR-0005 overlay preservation
+ * case, which needs a body the Zod gate accepts for the same reason
+ * {@link permissionBody} does: an invalid body answers 422 before the
+ * authorization door and the pin goes green without ever reaching it.
+ *
+ * `ViewSchema` is the container (`list` / `form` / `listViews` / `formViews`),
+ * NOT a flat list view — a flat one parses to an empty container.
+ */
+const viewBody = {
+  name: 'case_grid',
+  label: 'Case Grid',
+  object: 'showcase_task',
+  list: { columns: ['name'] },
+};
 
 /**
  * `put` with everything but the base fixed, so each case differs in ONE way.
@@ -517,13 +536,15 @@ describe('#7682 — the refusal discriminates on package writability', () => {
  * backed refusal is behind `environmentId !== undefined`, so the write reaches
  * `SysMetadataRepository.put` and the package door is what answers.
  *
- * ⚠️ On a SCOPED kernel (`environmentId` set) the protocol refuses first, with
- * `NOT_OVERRIDABLE`, and this fix is not reachable — that second refusal point
- * lives in `protocol.ts`, which neither #7682 nor #8146 is authorised to edit.
- * It is filed as **#8184**, and it is deliberately NOT covered here: this file
- * pins ONE kernel. ⛔ Do not read a green run of this suite as evidence that
- * the scoped kernel refuses too — it does not, and #8146's hatch refusal below
- * inherits exactly the same boundary.
+ * ⚠️ [#8184] THAT BOUNDARY IS GONE — do not restore this docblock's earlier
+ * warning. It read: on a SCOPED kernel the protocol refuses first with
+ * `NOT_OVERRIDABLE`, this fix is not reachable there, and a green run of this
+ * block is NOT evidence about that kernel. True when #7682 and #8146 wrote it
+ * (neither was authorised to edit `protocol.ts`), and closed by #8184: the
+ * scoped branch now consults the same predicate and throws this file's own
+ * emitter. Both kernels are covered, and the block at the very bottom pins
+ * them against EACH OTHER rather than against a literal — so the divergence
+ * cannot come back as a green suite.
  */
 describe('#7682 / #8146 — through saveMetaItem on the host-config topology', () => {
   function boot() {
@@ -625,5 +646,236 @@ describe('#7682 / #8146 — through saveMetaItem on the host-config topology', (
       .filter((r) => r.__table === 'sys_metadata');
     expect(metaRows).toHaveLength(1);
     expect(metaRows[0]).toMatchObject({ package_id: null, organization_id: null });
+  }, 30_000);
+});
+
+/**
+ * [#8184] The SECOND refusal point — the same request on a SCOPED kernel.
+ *
+ * `saveMetaItem` carries its own artifact-backed refusal behind
+ * `if (this.environmentId !== undefined)`, and it ran BEFORE the repository
+ * ever saw the write. So the block above pinned one kernel and one kernel only:
+ * a project/cloud per-env kernel answered the undiscriminated
+ * `NOT_OVERRIDABLE` for the very request a host-config kernel answered
+ * `ITEM_LOCKED` for. One condition, two machine-readable vocabularies, selected
+ * by a ROW-SCOPING key — the #5086 / #6710 finding, now on the refusal
+ * vocabulary itself.
+ *
+ * ⚠️ Not a regression from #8185 or #8320: this branch answered
+ * `NOT_OVERRIDABLE` before both. Those cards made the divergence visible.
+ *
+ * ## What this block pins, and why it is a MIRROR rather than a second rule
+ *
+ * The protocol branch now consults the same {@link isWritablePackage}
+ * predicate and throws the repository's OWN emitter
+ * (`SysMetadataRepository.readOnlyBaseOverrideError`) — not a re-spelling of
+ * it. Two independently-authored refusals for one condition is how the
+ * `NOT_OVERRIDABLE`-everywhere problem started, so the pin below compares the
+ * two kernels' answers to EACH OTHER (`the two kernels agree`) rather than
+ * asserting a literal twice.
+ *
+ * **The limb ordering is the rule, here too.** `isOverlayAllowed` folds the
+ * registry flag AND the `OS_METADATA_WRITABLE` hatch into one predicate, so
+ * this branch is reached only with BOTH closed — the door is therefore below
+ * every registry limb (an ADR-0005 overlay never reaches it, pinned) and the
+ * hatch-open direction is delivered by the repository door downstream, which
+ * this block measures rather than assumes.
+ */
+describe('#8184 — the scoped kernel answers the same code as the host-config kernel', () => {
+  /**
+   * @param environmentId `undefined` = the CLI host-config assembler;
+   *   a string = a project/cloud per-environment kernel. The ONLY difference
+   *   between the two boots, which is what makes the comparison a measurement
+   *   of the topology key and nothing else.
+   */
+  function boot(environmentId?: string) {
+    const engine = makeFakeEngine() as unknown as Record<string, unknown>;
+    (engine as { registry: Record<string, unknown> }).registry = {
+      ...(engine.registry as Record<string, unknown>),
+      registerItem: () => {},
+      registerObject: () => {},
+      listItems: () => [],
+      getItem: () => undefined,
+      getArtifactItem: (type: string, name: string) =>
+        (type === 'object' && name === 'showcase_task')
+        || (type === 'permission' && name === 'showcase_contributor')
+        // [#8184] `view` is `allowOrgOverride: true`, so it returns at the
+        // REGISTRY limb — above the door. Artifact-backed on purpose: that is
+        // the ADR-0005 overlay the door must never refuse.
+        || (type === 'view' && name === 'case_grid')
+          ? { name, _packageId: READ_ONLY_PKG }
+          : undefined,
+    };
+    const protocol = new ObjectStackProtocolImplementation(
+      engine as never,
+      () => new Map(),
+      environmentId,
+    ) as unknown as {
+      saveMetaItem(req: Record<string, unknown>): Promise<unknown>;
+    };
+    return { engine, protocol };
+  }
+
+  const metaRowsOf = (engine: Record<string, unknown>) =>
+    Array.from((engine as unknown as { rows: Map<string, Row> }).rows.values())
+      .filter((r) => r.__table === 'sys_metadata');
+
+  const save = (
+    protocol: { saveMetaItem(req: Record<string, unknown>): Promise<unknown> },
+    req: Record<string, unknown>,
+  ) => protocol.saveMetaItem(req).then(() => null, (e: unknown) => e);
+
+  const openHatch = (types: string) => {
+    process.env.OS_METADATA_WRITABLE = types;
+    resetEnvWritableMetadataTypes();
+    ObjectStackProtocolImplementation.resetEnvWritableCache();
+  };
+
+  beforeEach(() => {
+    delete process.env.OS_METADATA_WRITABLE;
+    resetEnvWritableMetadataTypes();
+    ObjectStackProtocolImplementation.resetEnvWritableCache();
+  });
+  afterEach(() => {
+    delete process.env.OS_METADATA_WRITABLE;
+    resetEnvWritableMetadataTypes();
+    ObjectStackProtocolImplementation.resetEnvWritableCache();
+  });
+
+  // ── the defect: one request, two kernels, two vocabularies ─────────────
+
+  it('the two kernels agree on the code, the status and the lock source', async () => {
+    // THE CARD. Compared to each other, not to a literal: the property is
+    // "one condition keeps one vocabulary", so a future change that moved
+    // BOTH would still be one vocabulary — while a change that moves one is
+    // exactly the defect coming back.
+    const hostConfig = await save(boot().protocol, {
+      type: 'object', name: 'showcase_task', item: objectBody, packageId: READ_ONLY_PKG,
+    }) as Record<string, unknown>;
+    const scoped = await save(boot('env_alpha').protocol, {
+      type: 'object', name: 'showcase_task', item: objectBody, packageId: READ_ONLY_PKG,
+    }) as Record<string, unknown>;
+
+    expect(scoped).toMatchObject({
+      code: hostConfig.code, status: hostConfig.status, lockSource: hostConfig.lockSource,
+    });
+    expect(scoped).toMatchObject({
+      code: 'ITEM_LOCKED', status: 403, lockSource: 'package', packageId: READ_ONLY_PKG,
+    });
+    // The SENTENCE too, and it is byte-identical because the two doors call
+    // ONE emitter. `saveMetaItem` folds plural→singular at its top
+    // (`canonicalizeMetaRequestType`) and the repository folds again, so
+    // neither door can spell the type differently either. A copy in
+    // `protocol.ts` would pass every assertion above this one and fail here.
+    expect((scoped as { message?: string }).message)
+      .toBe((hostConfig as { message?: string }).message);
+  }, 30_000);
+
+  it('a WRITABLE base still answers the type door — the door discriminates, it does not blanket-refuse', async () => {
+    // The other half of "one PUT, two bases, two outcomes", on this kernel.
+    // A suite that only pinned the new code would stay green if the scoped
+    // branch started answering ITEM_LOCKED for every base.
+    const err = await save(boot('env_alpha').protocol, {
+      type: 'object', name: 'showcase_task', item: objectBody, packageId: WRITABLE_PKG,
+    });
+    expect(err).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+  }, 30_000);
+
+  it('a write that names NO base keeps the type-door code verbatim', async () => {
+    const err = await save(boot('env_alpha').protocol, {
+      type: 'object', name: 'showcase_task', item: objectBody,
+    });
+    expect(err).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+  }, 30_000);
+
+  it('nothing persists on the refusal', async () => {
+    const { engine, protocol } = boot('env_alpha');
+    await save(protocol, {
+      type: 'object', name: 'showcase_task', item: objectBody, packageId: READ_ONLY_PKG,
+    });
+    expect(metaRowsOf(engine)).toEqual([]);
+  }, 30_000);
+
+  // ── the hatchOpen remedy selection, BOTH directions, on this kernel ────
+
+  it('with the hatch CLOSED the refusal offers it — the prescription is chosen, not deleted', async () => {
+    const err = await save(boot('env_alpha').protocol, {
+      type: 'object', name: 'showcase_task', item: objectBody, packageId: READ_ONLY_PKG,
+    }) as { message?: string };
+    expect(String(err.message)).toContain('set OS_METADATA_WRITABLE=object');
+  }, 30_000);
+
+  it('with the hatch OPEN the refusal does NOT prescribe the step already taken', async () => {
+    // The false-prescription trap, on the topology this card is about. The
+    // hatch-open write does not reach the protocol branch at all — an open
+    // hatch makes `isOverlayAllowed` true — so this measures that the write
+    // falls through to the repository door and is answered there with the
+    // SAME code and the hatch-aware remedy. That is why the protocol site
+    // passes `hatchOpen: false` rather than recomputing it.
+    openHatch('permission');
+    const err = await save(boot('env_alpha').protocol, {
+      type: 'permission', name: 'showcase_contributor', item: permissionBody, packageId: READ_ONLY_PKG,
+    }) as { code?: string; status?: number; message?: string };
+
+    expect(err).toMatchObject({ code: 'ITEM_LOCKED', status: 403 });
+    expect(String(err.message)).not.toContain('set OS_METADATA_WRITABLE=permission');
+    expect(String(err.message)).toContain('does not apply here');
+  }, 30_000);
+
+  // ── PRESERVATION: the load-bearing pins ───────────────────────────────
+
+  it('an ADR-0005 overlay of a code-shipped item still lands — the door is BELOW every registry limb', async () => {
+    // If the door had been placed one limb higher this goes red and the whole
+    // overlay model closes. `view` is allowOrgOverride, artifact-backed, and
+    // names the read-only package it customizes — by construction.
+    const { engine, protocol } = boot('env_alpha');
+    const err = await save(protocol, {
+      type: 'view', name: 'case_grid', item: viewBody, packageId: READ_ONLY_PKG,
+    });
+
+    expect(err).toBeNull();
+    expect(metaRowsOf(engine)[0]).toMatchObject({ package_id: READ_ONLY_PKG });
+  }, 30_000);
+
+  it('a package-less hatch write still lands the env-wide overlay, bound to NO package', async () => {
+    // THE PREMISE of NARROW, on this kernel. Red here means NARROW preserves
+    // nothing and the NARROW/BROAD fork goes back to the maintainer — not a
+    // test to "repair" by relaxing it.
+    openHatch('permission');
+    const { engine, protocol } = boot('env_alpha');
+    const err = await save(protocol, {
+      type: 'permission', name: 'showcase_contributor', item: permissionBody,
+    });
+
+    expect(err).toBeNull();
+    const rows = metaRowsOf(engine);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ package_id: null, organization_id: null });
+  }, 30_000);
+
+  it('a package-less hatch write under an ORG kernel lands the per-org override the docs promise', async () => {
+    openHatch('permission');
+    const { engine, protocol } = boot('env_alpha');
+    const err = await save(protocol, {
+      type: 'permission', name: 'showcase_contributor',
+      item: permissionBody, organizationId: 'org_acme',
+    });
+
+    expect(err).toBeNull();
+    const rows = metaRowsOf(engine);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ package_id: null, organization_id: 'org_acme' });
+  }, 30_000);
+
+  it('a hatch write naming a WRITABLE base still lands — the door reads writability, not the hatch', async () => {
+    openHatch('permission');
+    const { engine, protocol } = boot('env_alpha');
+    const err = await save(protocol, {
+      type: 'permission', name: 'showcase_contributor',
+      item: permissionBody, packageId: WRITABLE_PKG,
+    });
+
+    expect(err).toBeNull();
+    expect(metaRowsOf(engine)[0]).toMatchObject({ package_id: WRITABLE_PKG });
   }, 30_000);
 });
