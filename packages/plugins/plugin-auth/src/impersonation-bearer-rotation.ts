@@ -37,8 +37,8 @@
  * authenticated with a bearer, the token it is holding is INVALIDATED as part
  * of impersonation:
  *
- *   1. mint a rotated admin session (carrying the old one's fields forward, so
- *      the admin does not lose e.g. their active organization on the way back);
+ *   1. mint a rotated admin session, carrying the admin's selected organization
+ *      across so they do not land somewhere else on the way back;
  *   2. hand the caller the rotated session as an `admin_session` RECOVERY
  *      credential, both as the signed cookie the vendor already sets and — for
  *      the cookie-blocked lane — as a `set-admin-session-token` response
@@ -236,16 +236,21 @@ export async function rotateCallerBearerOnImpersonation(ctx: any): Promise<void>
   );
 
   // ── 1. mint the rotated admin session ───────────────────────────────────
-  // The old session's fields ride along: `createSession` spreads the override
-  // BEFORE its own generated `token`/`expiresAt`/`createdAt`, so identity-
-  // shaped state (the active organization, for one) is carried forward while
-  // the token is genuinely new. The old session is still live at this point —
-  // a failure here leaves the admin exactly as they were.
-  const { id: _id, ...carriedForward } = (adminSession ?? {}) as Record<string, unknown>;
+  // Exactly ONE field rides across, deliberately: the active organization the
+  // admin had selected, which is the only piece of session state they would
+  // notice losing on the way back. Everything else is re-derived for a session
+  // minted now — `ipAddress`/`userAgent` from this request, and
+  // `activeOrganizationId` itself by ADR-0081 D1's `session.create.before`
+  // stamp when the admin had not switched away from their default.
+  //
+  // Spreading the whole old row here instead would be handing the producer a
+  // set of keys nobody reasoned about — a shape an in-memory test double
+  // accepts happily and a real ObjectQL insert can refuse. Narrow on purpose.
+  const activeOrganizationId = (adminSession as any)?.activeOrganizationId;
   const rotated = await ctx.context.internalAdapter.createSession(
     adminUserId,
     !!dontRememberMe,
-    carriedForward,
+    activeOrganizationId ? { activeOrganizationId } : undefined,
     false,
   );
   const rotatedToken: unknown = rotated?.token;

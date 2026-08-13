@@ -25,7 +25,7 @@
 // calls.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { assertEngineDeleteDispatch } from '@objectstack/objectql';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { AuthManager } from './auth-manager';
 import {
   ADMIN_SESSION_RECOVERY_REQUEST_HEADER,
@@ -95,11 +95,22 @@ const createMemoryEngine = () => {
     async count(name: string, q: any = {}) {
       return rows(name).filter((r) => matches(r, q.where)).length;
     },
-    async update(name: string, patch: any) {
-      const row = rows(name).find((r) => r.id === patch.id);
-      if (!row) return null;
-      Object.assign(row, patch);
-      return { ...row };
+    // Both write verbs open with the PRODUCER's own dispatch predicate, never a
+    // hand-mirrored id/multi check — a fake looser than the real engine is how
+    // a suite goes green over a route that never worked.
+    async update(name: string, data: any, options?: any) {
+      const dispatch = assertEngineUpdateDispatch(data, options);
+      const table = rows(name);
+      const targets =
+        dispatch.kind === 'by-id'
+          ? table.filter((r) => r.id === dispatch.id)
+          : table.filter((r) => matches(r, options?.where));
+      for (const row of targets) Object.assign(row, data);
+      return dispatch.kind === 'by-id'
+        ? targets[0]
+          ? { ...targets[0] }
+          : null
+        : targets.length;
     },
     async delete(name: string, q: any = {}) {
       assertEngineDeleteDispatch(q);
@@ -289,6 +300,32 @@ describe('#8243 pin 1 — a bearer client that impersonates STOPS resolving as t
     expect((await impersonate(manager, adminBearer, targetId)).status).toBe(200);
 
     expect(sessionRows(engine).some((r) => r.token === adminSessionToken)).toBe(false);
+  });
+
+  it('the rotated admin session is a well-formed session row, not a smuggled copy', async () => {
+    // The in-memory engine below accepts any payload, so "rotation worked" in a
+    // test is not by itself evidence that the real ObjectQL insert would take
+    // it. This converts that permissiveness into a signal: the rotated row is
+    // compared, column for column, against a row a plain sign-in produced. A
+    // key the producer would refuse shows up here as an extra column.
+    const { engine, manager, adminId, targetId, adminBearer } = await arrangeAdminAndTarget();
+
+    const signInShape = new Set(
+      Object.keys(sessionRows(engine).find((r) => r.user_id === adminId) ?? {}),
+    );
+    expect(signInShape.size).toBeGreaterThan(0);
+
+    expect((await impersonate(manager, adminBearer, targetId)).status).toBe(200);
+
+    const rotated = sessionRows(engine).find(
+      (r) => r.user_id === adminId && r.token !== adminBearer.split('.')[0],
+    );
+    expect(rotated).toBeTruthy();
+    expect(Object.keys(rotated!).filter((key) => !signInShape.has(key))).toEqual([]);
+
+    // …and the one field carried across on purpose really is carried across.
+    const adminRow = sessionRows(engine).find((r) => r.user_id === adminId);
+    expect(rotated!.active_organization_id).toBe(adminRow!.active_organization_id);
   });
 
   it('hands back a recovery credential, and exposes it to cross-origin readers', async () => {
