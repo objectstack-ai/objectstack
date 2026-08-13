@@ -2197,6 +2197,11 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       'issues', 'idx', 'out', 'kept', 'seen', 'seenActions', 'nullable', 'nullableFields', 'nullableIndex',
       'fieldIndex', 'fieldTypeIndex', 'fields', 'nodes', 'options', 'targets', 'retired', 'ref', 'roots',
       'res', 'graph', 'found', 'e', 'w', 'p', 'n', 'issue', 'guards', 'config',
+      // [#8116] The unprovisioned-anchor pass: CEL AST walk locals (`celNode` /
+      // `celRecv` / `pending` — named to stay clear of the `node` metadata
+      // receiver above) and the provenance index (`unprovisionedIndex` /
+      // `anchors`), whose keys are Map/Set methods, never metadata keys.
+      'pending', 'celNode', 'celRecv', 'anchors', 'unprovisionedIndex',
     ]);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
   });
