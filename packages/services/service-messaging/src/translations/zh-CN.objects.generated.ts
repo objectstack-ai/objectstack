@@ -327,7 +327,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "请求方法"
       },
       headers_json: {
-        label: "请求头 JSON"
+        label: "请求头 JSON",
+        help: "Authored request headers for this delivery — the ordinary place a credential goes, so never returned on the generic data path (#8118). The dispatcher recovers it through the engine's privileged accessor on the claim path."
       },
       signature: {
         label: "HMAC 签名",
