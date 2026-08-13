@@ -188,6 +188,20 @@ function exposureError(
  * (#8083). Throws {@link McpExposureError} when the object's own declaration
  * does not expose `action`; returns normally when it does.
  *
+ * EXPORTED for the ADR-0101 record resource (#8266), which is the one read path
+ * on this transport that does NOT go through this bridge: its reader is built
+ * inline in `plugin.ts` and handed to `bridgeResources`, so it called `ql.find`
+ * with no gate at all and served rows for objects the tool surface refused.
+ * That reader now calls this function with {@link GATED_ACTIONS}`.get` — the
+ * same action word `bridge.get` gates under — so one declaration yields one
+ * verdict on both read paths. Exported within the package only; `index.ts`
+ * publishes neither this nor `createStdioDataBridge`.
+ *
+ * Any FUTURE read path added to this transport belongs here too. The decision
+ * is deliberately one function rather than a per-seam re-derivation, because
+ * the two defects this file has now paid for (#8083, #8266) were both a seam
+ * that skipped the decision, never a seam that got the decision wrong.
+ *
  * The DECISION is not re-implemented here — it comes from the spec's single
  * source of truth (`resolveEffectiveApiMethods` / `isApiOperationAllowed`),
  * the same functions `checkApiExposure` (runtime, the HTTP/MCP path) and
@@ -211,7 +225,7 @@ function exposureError(
  *    definition be gated on HTTP and ungated on stdio — the very divergence
  *    this function closes, re-opened one shape down.
  */
-async function enforceApiExposure(
+export async function enforceApiExposure(
   metadataService: IMetadataService,
   object: string,
   action: string,
