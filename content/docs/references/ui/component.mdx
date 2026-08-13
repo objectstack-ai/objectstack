@@ -14,8 +14,8 @@ Empty Properties Schema
 ## TypeScript Usage
 
 ```typescript
-import { AIChatWindowProps, ElementButtonPropsSchema, ElementFilterPropsSchema, ElementFormPropsSchema, ElementImagePropsSchema, ElementMetadataViewerPropsSchema, ElementNumberPropsSchema, ElementRecordPickerPropsSchema, ElementTextInputPropsSchema, ElementTextPropsSchema, PageAccordionProps, PageCardProps, PageContainerProps, PageHeaderProps, PageTabsProps, RecordActivityProps, RecordChatterProps, RecordDetailsProps, RecordHighlightsField, RecordHighlightsProps, RecordPathProps, RecordRelatedListProps } from '@objectstack/spec/ui';
-import type { ElementNumberProps, ElementRecordPickerProps, PageContainerProps, RecordHighlightsField, RecordPathProps } from '@objectstack/spec/ui';
+import { AIChatWindowProps, ElementButtonPropsSchema, ElementFilterPropsSchema, ElementFormPropsSchema, ElementImagePropsSchema, ElementMetadataViewerPropsSchema, ElementNumberPropsSchema, ElementRecordPickerPropsSchema, ElementTextInputPropsSchema, ElementTextPropsSchema, ObjectCalendarPropsSchema, ObjectFormPropsSchema, ObjectGridPropsSchema, ObjectKanbanPropsSchema, ObjectMasterDetailFormPropsSchema, ObjectMetricPropsSchema, PageAccordionProps, PageCardProps, PageContainerProps, PageHeaderProps, PageTabsProps, RecordActivityProps, RecordChatterProps, RecordDetailsProps, RecordHighlightsField, RecordHighlightsProps, RecordPathProps, RecordRelatedListProps } from '@objectstack/spec/ui';
+import type { ElementNumberProps, ElementRecordPickerProps, ObjectCalendarProps, ObjectFormProps, ObjectGridProps, ObjectKanbanProps, ObjectMasterDetailFormProps, ObjectMetricProps, PageContainerProps, RecordHighlightsField, RecordPathProps } from '@objectstack/spec/ui';
 
 // Validate data
 const result = AIChatWindowProps.parse(data);
@@ -189,6 +189,196 @@ const result = AIChatWindowProps.parse(data);
 | **variant** | `Enum<'heading' \| 'subheading' \| 'body' \| 'caption'>` | ✅ | Text style variant |
 | **align** | `Enum<'left' \| 'center' \| 'right'>` | ✅ | Text alignment |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
+
+
+---
+
+## ObjectCalendarProps
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **objectName** | `string` | optional | Object this calendar binds to. Optional because the component-level `dataSource` binding can supply the object instead (#6953) |
+| **calendar** | `any` | optional | Calendar field config: `{ startDateField, endDateField?, titleField?, colorField?, allDayField? }` |
+| **defaultView** | `Enum<'month' \| 'week' \| 'day'>` | optional | Initial view mode |
+| **filter** | `any` | optional | Base query filter |
+| **sort** | `any` | optional | Sort for the fetched events |
+| **data** | `any[]` | optional | Pre-fetched records — skips the internal fetch |
+| **staticData** | `any[]` | optional | Static inline records |
+| **locale** | `string` | optional | Locale override for the calendar chrome |
+| **loading** | `boolean` | optional | External loading state (honoured only alongside `data`) |
+
+
+---
+
+## ObjectFormProps
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **objectName** | `string` | optional | Object this form creates/edits. Optional because the component-level `dataSource` binding can supply the object instead (#6953) |
+| **recordId** | `string \| number` | optional | Record to load (edit/view modes) |
+| **mode** | `Enum<'create' \| 'edit' \| 'view'>` | optional | Form mode |
+| **formType** | `Enum<'simple' \| 'tabbed' \| 'wizard' \| 'split' \| 'drawer' \| 'modal'>` | optional | Form presentation |
+| **layout** | `Enum<'vertical' \| 'horizontal' \| 'inline' \| 'grid'>` | optional | Field layout |
+| **columns** | `number` | optional | Field columns in grid layout |
+| **fields** | `any[]` | optional | Limit/order the fields shown |
+| **customFields** | `any` | optional | Custom field definitions merged into the generated set |
+| **sections** | `any[]` | optional | Form sections (`{ label, description?, fields }` — wizard steps / tab panes) |
+| **title** | `string \| Record<string, string>` | optional | Form title |
+| **description** | `string \| Record<string, string>` | optional | Form description (rendered by the drawer/modal presentations) |
+| **defaultTab** | `string` | optional | Initially active tab (tabbed) |
+| **tabPosition** | `Enum<'top' \| 'bottom' \| 'left' \| 'right'>` | optional | Tab strip position (tabbed) |
+| **allowSkip** | `boolean` | optional | Allow skipping steps (wizard) |
+| **showStepIndicator** | `boolean` | optional | Show the step indicator (wizard) |
+| **splitDirection** | `Enum<'horizontal' \| 'vertical'>` | optional | Split direction (split) |
+| **splitSize** | `number` | optional | Split panel size in percent (split) |
+| **splitResizable** | `boolean` | optional | Allow resizing the split (split) |
+| **drawerSide** | `Enum<'top' \| 'bottom' \| 'left' \| 'right'>` | optional | Drawer side (drawer) |
+| **drawerWidth** | `string \| number` | optional | Drawer width (drawer) |
+| **modalSize** | `Enum<'sm' \| 'default' \| 'lg' \| 'xl' \| 'full'>` | optional | Modal size (modal) |
+| **modalCloseButton** | `boolean` | optional | Show the modal close button (modal) |
+| **contentLayout** | `any` | optional | Modal content layout config (modal) |
+| **confirmOnDiscard** | `boolean` | optional | Confirm before discarding edits (drawer/modal) |
+| **submitText** | `string \| Record<string, string>` | optional | Submit button label |
+| **cancelText** | `string \| Record<string, string>` | optional | Cancel button label |
+| **nextText** | `string \| Record<string, string>` | optional | Next-step button label (wizard) |
+| **prevText** | `string \| Record<string, string>` | optional | Previous-step button label (wizard) |
+| **showSubmit** | `boolean` | optional | Show the submit button |
+| **showCancel** | `boolean` | optional | Show the cancel button |
+| **showReset** | `boolean` | optional | Show the reset button |
+| **submitBehavior** | `any` | optional | What happens after a successful submit (`{ kind: 'thank-you' \| …, title?, message? }`) |
+| **successMessage** | `string \| Record<string, string>` | optional | Toast message on successful submit |
+| **resetOnSuccess** | `boolean` | optional | Reset the form after a successful submit |
+| **navigateOnSuccess** | `any` | optional | Navigate after a successful submit |
+| **readOnly** | `boolean` | optional | Render every field read-only |
+| **initialValues** | `Record<string, any>` | optional | Prefill values (create mode) |
+| **initialData** | `Record<string, any>` | optional | Alternate spelling of `initialValues` the renderer also reads |
+| **mobile** | `any` | optional | Mobile presentation overrides |
+
+
+---
+
+## ObjectGridProps
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **objectName** | `string` | optional | Object this grid binds to. Optional because the component-level `dataSource` binding can supply the object instead (#6953) |
+| **label** | `string \| Record<string, string>` | optional | Grid label — used as the table caption and export file title |
+| **title** | `string \| Record<string, string>` | optional | Fallback for `label` (the renderer reads `label \|\| title`) |
+| **columns** | `any[]` | optional | Columns: field names or column definition objects |
+| **fields** | `any[]` | optional | Field list fallback used when `columns` is absent |
+| **filter** | `any` | optional | Base query filter (ObjectQL filter array/AST) — lowered to the wire `$filter`. THE key #7750 misspelled as plural |
+| **defaultFilters** | `any` | optional | Legacy base-filter fallback, read only when `filter` is absent. Prefer `filter` |
+| **sort** | `any` | optional | Initial sort (array of `{ field, order }`) |
+| **defaultSort** | `any` | optional | Legacy single-sort fallback (`{ field, order }`), read only when `sort` is absent. Prefer `sort` |
+| **pagination** | `any` | optional | Pagination config (`{ pageSize, pageSizeOptions, … }`); its presence enables paging |
+| **pageSize** | `number` | optional | Flat page-size shorthand; `pagination.pageSize` wins when both are set |
+| **showPagination** | `boolean` | optional | Show the pager (read only when `pagination` is absent) |
+| **searchableFields** | `string[]` | optional | Fields the toolbar search queries; a non-empty list enables search |
+| **showSearch** | `boolean` | optional | Show the search box (read only when `searchableFields` is absent) |
+| **rowHeight** | `any` | optional | Row density mode (e.g. compact / comfortable) |
+| **grouping** | `any` | optional | Row grouping config |
+| **aggregations** | `any` | optional | Group aggregation config (sum/avg/… per column) |
+| **conditionalFormatting** | `any` | optional | Conditional row/cell formatting rules |
+| **rowColor** | `any` | optional | Row color rules |
+| **selection** | `any` | optional | Selection config (`{ type: none \| single \| multiple }`) |
+| **selectable** | `any` | optional | Legacy selection shorthand, read only when `selection` is absent. Prefer `selection` |
+| **rowActions** | `any[]` | optional | Per-row action names |
+| **bulkActions** | `any[]` | optional | Bulk action names shown on selection |
+| **batchActions** | `any[]` | optional | Alternate spelling the renderer reads FIRST (`batchActions ?? bulkActions`) |
+| **bulkActionDefs** | `any[]` | optional | Inline bulk-action definitions (full defs, not names) |
+| **navigation** | `any` | optional | Row-click navigation config (`{ mode: page \| drawer \| modal \| split \| none }`) |
+| **editable** | `boolean` | optional | Enable inline cell editing |
+| **singleClickEdit** | `boolean` | optional | Enter cell edit on single click (default true when editable) |
+| **resizable** | `boolean` | optional | Allow column resize (read before `resizableColumns`) |
+| **resizableColumns** | `boolean` | optional | Alternate spelling of `resizable` (the renderer reads `resizable ?? resizableColumns`) |
+| **reorderableColumns** | `boolean` | optional | Allow column drag-reorder |
+| **frozenColumns** | `number` | optional | How many leading columns stay frozen (default 1) |
+| **showColumnTypeIcons** | `boolean` | optional | Show field-type icons in column headers |
+| **exportOptions** | `any` | optional | Export config (`{ formats, streaming }`) |
+| **operations** | `any` | optional | Operation toggles (`{ export: false, … }`) |
+| **data** | `any[]` | optional | Static inline rows — bypasses the object query |
+| **staticData** | `any[]` | optional | Alternate spelling of `data` the renderer also reads |
+
+
+---
+
+## ObjectKanbanProps
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **objectName** | `string` | optional | Object this board binds to. Optional because the component-level `dataSource` binding can supply the object instead (#6953) |
+| **groupBy** | `string` | optional | Field whose values become the board columns |
+| **columns** | `any[]` | optional | Swimlane definitions (`{ id, title }` per `groupBy` value, or bare value strings) — NOT a field projection |
+| **filter** | `any` | optional | Base query filter, handed to the wire `$filter` |
+| **data** | `any[]` | optional | Static inline cards — bypasses the object query |
+| **cardTitle** | `string` | optional | Field rendered as each card title |
+| **titleField** | `string` | optional | Legacy fallback for `cardTitle` (the board reads `cardTitle \|\| titleField`). Prefer `cardTitle` |
+| **cardFields** | `string[]` | optional | Fields rendered on each card |
+| **swimlaneField** | `string` | optional | Field for horizontal swimlanes (in addition to columns) |
+| **grouping** | `any` | optional | View grouping config; its first field is the swimlane fallback |
+| **quickAdd** | `boolean` | optional | Show the per-column quick-add affordance |
+| **coverImageField** | `string` | optional | Image field rendered as the card cover |
+| **conditionalFormatting** | `any` | optional | Card conditional formatting rules |
+
+
+---
+
+## ObjectMasterDetailFormProps
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **objectName** | `string` | optional | PARENT object. Optional because the component-level `dataSource` binding can supply the object instead (#7121) |
+| **recordId** | `string \| number` | optional | Parent record to load (edit mode) |
+| **mode** | `Enum<'create' \| 'edit'>` | optional | Form mode |
+| **formType** | `string` | optional | Parent form presentation |
+| **sections** | `any[]` | optional | Parent form sections |
+| **fields** | `any[]` | optional | Parent fields shown |
+| **details** | `any[]` | optional | Detail collections (`{ title, childObject, addLabel?, columns?, relationshipField? }` — FK and columns auto-derive from child metadata) |
+| **title** | `string \| Record<string, string>` | optional | Form title |
+| **submitText** | `string \| Record<string, string>` | optional | Submit button label |
+| **cancelText** | `string \| Record<string, string>` | optional | Cancel button label |
+| **showSubmit** | `boolean` | optional | Show the submit button |
+| **initialValues** | `Record<string, any>` | optional | Prefill values for the parent (create mode) |
+| **initialData** | `Record<string, any>` | optional | Alternate spelling of `initialValues` the renderer also reads |
+| **taxRateField** | `string` | optional | Child field holding the per-line tax rate (line-items totals) |
+
+
+---
+
+## ObjectMetricProps
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **objectName** | `string` | optional | Object this metric aggregates. Optional because the component-level `dataSource` binding can supply the object instead (#6953) |
+| **label** | `string \| Record<string, string>` | optional | Metric label |
+| **description** | `string \| Record<string, string>` | optional | Helper text under the value |
+| **title** | `string \| Record<string, string>` | optional | Drill-down panel title; defaults to the metric label |
+| **icon** | `string` | optional | Icon name (Lucide) |
+| **colorVariant** | `Enum<'default' \| 'blue' \| 'teal' \| 'orange' \| 'purple' \| 'success' \| 'warning' \| 'danger'>` | optional | Icon container color variant |
+| **aggregate** | `any` | optional | Aggregation config (`{ field, function, groupBy? }`) run against the object |
+| **filter** | `any` | optional | Filter the aggregation is scoped by |
+| **format** | `string` | optional | Number format pattern (e.g. '0,0', '$0,0', '0%') |
+| **currency** | `string` | optional | ISO currency code (e.g. 'USD') — enables currency formatting |
+| **prefix** | `string` | optional | Static prefix before the formatted value |
+| **suffix** | `string` | optional | Static suffix after the formatted value |
+| **invert** | `boolean` | optional | Display `1 - value` for opposite-signal gauges (compliance/uptime) |
+| **variant** | `Enum<'card' \| 'bare'>` | optional | Layout variant |
+| **fallbackValue** | `string \| number` | optional | Static value shown when no data source is available |
+| **trend** | `any` | optional | Static trend info (`{ value, label, direction }`) |
+| **drillDown** | `any` | optional | Click-through drill config — opens the underlying records |
+| **compareTo** | `any` | optional | Period-over-period comparison (`{ kind: 'previousPeriod' \| 'previousYear' }`) |
 
 
 ---
