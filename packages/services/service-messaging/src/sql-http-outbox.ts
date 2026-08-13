@@ -7,12 +7,16 @@ import { toEpochMs } from './audit-timestamp.js';
 import { deliveryBody, signBody } from './http-sender.js';
 import {
     HttpRedeliverError,
+    assertEnqueueDeliverable,
+    assertRedeliverAllowed,
     type EnqueueHttpInput,
     type HttpAckResult,
     type HttpClaimOptions,
     type HttpDelivery,
     type HttpDeliveryStatus,
     type IHttpOutbox,
+    type RedeliverGuard,
+    type UndeliverableHttpInput,
 } from './http-outbox.js';
 import { SYS_HTTP_DELIVERY } from './objects/http-delivery.object.js';
 
@@ -104,6 +108,42 @@ export class SqlHttpOutbox implements IHttpOutbox {
     }
 
     async enqueue(input: EnqueueHttpInput): Promise<string> {
+        assertEnqueueDeliverable(input);
+        return this.insert(input, {
+            // Sign here, store only the signature (#7722). The body is decided
+            // at enqueue and replayed byte-for-byte by every retry, so one HMAC
+            // covers every attempt and the secret has no reason to be persisted.
+            signature: input.signingSecret
+                ? signBody(deliveryBody(input.payload), input.signingSecret)
+                : undefined,
+            status: 'pending',
+            error: undefined,
+        });
+    }
+
+    /**
+     * [#8069] Park a delivery that can never be sent.
+     *
+     * Written terminal on arrival — `status: 'dead'`, `attempts: 0`, the cause
+     * in the existing `error` column, and **no signature**, because the secret
+     * that would have produced one is precisely what could not be resolved.
+     * The dispatcher's claim query filters `status = 'pending'`, so a parked row
+     * is never picked up; `redeliver()` refuses it (see
+     * `assertHttpRedeliverable`), so no operator can conjure a first delivery
+     * out of it either.
+     *
+     * Reuses the same INSERT + `(source, dedup_key)` dedup convergence as
+     * `enqueue()`: one discarded event yields at most one record, and a webhook
+     * that re-arms cannot double-write a record for an event it already parked.
+     */
+    async recordUndeliverable(input: UndeliverableHttpInput): Promise<string> {
+        return this.insert(input, { signature: undefined, status: 'dead', error: input.reason });
+    }
+
+    private async insert(
+        input: Omit<EnqueueHttpInput, 'signingSecret' | 'undeliverableReason'>,
+        terminal: { signature: string | undefined; status: HttpDeliveryStatus; error?: string },
+    ): Promise<string> {
         const existing = await this.engine.findOne(this.objectName, {
             where: { source: input.source, dedup_key: input.dedupKey },
             fields: ['id'],
@@ -123,17 +163,13 @@ export class SqlHttpOutbox implements IHttpOutbox {
             url: input.url,
             method: input.method ?? 'POST',
             headers_json: input.headers ? JSON.stringify(input.headers) : undefined,
-            // Sign here, store only the signature (#7722). The body is decided
-            // at enqueue and replayed byte-for-byte by every retry, so one HMAC
-            // covers every attempt and the secret has no reason to be persisted.
-            signature: input.signingSecret
-                ? signBody(deliveryBody(input.payload), input.signingSecret)
-                : undefined,
+            signature: terminal.signature,
             timeout_ms: input.timeoutMs,
             payload_json: JSON.stringify(input.payload ?? null),
             partition_key: hashPartition(input.refId, this.partitionCount),
-            status: 'pending',
+            status: terminal.status,
             attempts: 0,
+            error: terminal.error,
             created_at: now,
             updated_at: now,
         };
@@ -303,17 +339,14 @@ export class SqlHttpOutbox implements IHttpOutbox {
         return rows.map((r) => this.toDelivery(r));
     }
 
-    async redeliver(id: string): Promise<HttpDelivery> {
+    async redeliver(id: string, guard?: RedeliverGuard): Promise<HttpDelivery> {
         const current = (await this.engine.findOne(this.objectName, { where: { id } })) as DeliveryRow | null;
         if (!current) {
             throw new HttpRedeliverError(`Delivery row '${id}' not found`, 'RESOURCE_NOT_FOUND');
         }
-        if (current.status !== 'success' && current.status !== 'failed' && current.status !== 'dead') {
-            throw new HttpRedeliverError(
-                `Delivery row '${id}' is '${current.status}', expected one of: success, failed, dead`,
-                'DELIVERY_NOT_ELIGIBLE',
-            );
-        }
+        // [#8069] Every refusal runs BEFORE the reset UPDATE — a refused
+        // redelivery leaves the row exactly as it was, `dead` reason included.
+        await assertRedeliverAllowed(this.toDelivery(current), guard);
         await this.engine.update(
             this.objectName,
             {

@@ -176,6 +176,14 @@ export const HttpDelivery = ObjectSchema.create({
             description: 'hash(ref_id) mod partitionCount — precomputed for cheap WHERE',
         }),
 
+        // [#8069] The vocabulary is UNCHANGED by the drop-record work, and that
+        // is a decision rather than an omission. The maintainer's ruling
+        // (2026-08-12) admits a new never-sendable state only if the reason
+        // column cannot carry the drop cause — and `error` below carries it
+        // fine, which is why no migration-shaped state landed here. A dropped
+        // subscription's discarded event is written `dead` with its cause in
+        // `error`, so it appears in the existing "Failures" view with no new
+        // vocabulary for an operator (or a driver, or a saved filter) to learn.
         status: Field.text({
             label: 'Status',
             required: true,
@@ -184,11 +192,25 @@ export const HttpDelivery = ObjectSchema.create({
             description: 'pending | in_flight | success | failed | dead',
         }),
 
+        // [#8069] Part of the redelivery CONTRACT, not just a diagnostic count.
+        // `ack()` — the only writer of a terminal status — always increments
+        // it, so `status in (success, failed, dead) AND attempts = 0` is
+        // reachable only through `SqlHttpOutbox.recordUndeliverable()`: a
+        // PARKED row, recording an event that was discarded because its
+        // webhook's signing secret could not be resolved. `redeliver()` refuses
+        // exactly that pair. It must, because a parked row carries no
+        // `signature` (the secret that would have produced one is what went
+        // missing) and `POST /api/v1/webhooks/redeliver` is reachable by any
+        // authenticated user — so without the refusal, recording the drop would
+        // hand that user a button that delivers the payload UNSIGNED, reopening
+        // #7799 through a door nobody would think to audit.
         attempts: Field.number({
             label: 'Attempts',
             required: true,
             defaultValue: 0,
-            description: 'Number of attempts made so far',
+            description:
+                'Number of attempts made so far. 0 on a terminal row means the delivery was PARKED — '
+                + 'never sent, and not redeliverable (#8069); see `error` for the cause.',
         }),
 
         claimed_by: Field.text({ label: 'Claimed By', required: false, maxLength: 128 }),
@@ -197,7 +219,22 @@ export const HttpDelivery = ObjectSchema.create({
         last_attempted_at: Field.number({ label: 'Last Attempted At (ms)', required: false }),
         response_code: Field.number({ label: 'HTTP Status', required: false }),
         response_body: Field.textarea({ label: 'Response Body (capped)', required: false }),
-        error: Field.textarea({ label: 'Error', required: false }),
+        // [#8069] Two authors, one column — and it holds both without a new
+        // field. The dispatcher writes the last transport/timeout error here;
+        // `recordUndeliverable()` writes why a delivery was never attempted at
+        // all (an unresolvable signing secret, an unrecoverable header map).
+        // Both are "why this row is not a delivered webhook", both are read by
+        // the same operator in the same "Failures" view, and the column is an
+        // unbounded textarea, so it carries the remedy text an AGENTS.md
+        // `error` owes. That is the measured answer to the ruling's step 3: the
+        // reason column CAN carry the drop cause, so no new lifecycle state.
+        error: Field.textarea({
+            label: 'Error',
+            required: false,
+            description:
+                'Why this row is not a delivered callout: the last transport error, or — on a row with '
+                + '0 attempts — why the delivery could never be prepared (#8069).',
+        }),
 
         // Builtin audit columns are native TIMESTAMP columns (Postgres/MySQL),
         // so declare them `datetime` and write `Date`s (not epoch-ms numbers,

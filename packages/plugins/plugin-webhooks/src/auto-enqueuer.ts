@@ -98,6 +98,20 @@ interface CachedSubscription {
     headers?: Record<string, string>;
     secret?: string;
     timeoutMs?: number;
+    /**
+     * [#8069] Set when a credential this subscription needs could not be
+     * recovered. The subscription stays CACHED — that is the change — but every
+     * event it matches is written to `sys_http_delivery` as a parked `dead` row
+     * carrying this text, instead of being discarded with nothing to find.
+     *
+     * Before this, `attachCredentials` returning false removed the row from the
+     * cache entirely, so matching events found no subscription and vanished:
+     * fail-closed and correct, but leaving an operator with a log line (#8043)
+     * and no durable trace. A parked subscription is still fail-closed —
+     * {@link secret} and {@link headers} stay unset, so nothing can be sent —
+     * it is merely no longer silent.
+     */
+    parkedReason?: string;
 }
 
 export interface AutoEnqueuerOptions {
@@ -315,9 +329,11 @@ export class AutoEnqueuer {
             // them here, on the 60s refresh, rather than per event: the cache
             // already holds the plaintext in memory (it always did), so this
             // changes where the values come FROM, not how long they are held. A
-            // row whose credentials cannot be recovered is DROPPED — see
+            // row whose credentials cannot be recovered is PARKED — cached with
+            // `parkedReason` set and no credentials, so its events are recorded
+            // as undeliverable instead of silently discarded (#8069). See
             // `attachCredentials`.
-            if (!(await this.attachCredentials(sub, row))) continue;
+            await this.attachCredentials(sub, row);
             // Empty objectName == "any object" → indexed under '*'.
             const key = sub.objectName ?? '*';
             const arr = next.get(key) ?? [];
@@ -380,6 +396,34 @@ export class AutoEnqueuer {
     }
 
     /**
+     * [#8069] Mark a subscription parked and strip anything sendable off it.
+     *
+     * Called from the two `attachX` failure paths, which each already reported
+     * the drop at `error` (say-once, #8022). The credentials are cleared rather
+     * than merely "not set": `attachSecret` can succeed and `attachHeaders`
+     * fail, and a parked row must not carry the header map — that map is the
+     * ordinary place an `Authorization: Bearer …` goes (#7986), and copying it
+     * onto a row that will sit in `sys_http_delivery` for the full 30d
+     * retention window without ever being sent is a credential copy bought for
+     * nothing.
+     */
+    private park(sub: CachedSubscription, err: unknown, credential: DropReason): void {
+        sub.secret = undefined;
+        sub.headers = undefined;
+        sub.parkedReason =
+            `[${WEBHOOK_SECRET_REFUSAL_CODE}/${WEBHOOK_SECRET_REFUSAL_STATUS}] webhook '${sub.name}' `
+            + `holds ${credential.article} that could not be decrypted, so this event was NOT `
+            + `delivered — recording it here rather than ${credential.ratherThan} (${credential.issue}, `
+            + `#8069). This row was never sent and cannot be redelivered: it carries no HMAC signature, `
+            + `because the ${credential.noun} that would have produced one is exactly what is missing. `
+            + `Fix: register a CryptoProvider (engine.setCryptoProvider — LocalCryptoProvider in dev, `
+            + `KMS/Vault in production) with the same key the ${credential.noun} was written under, and `
+            + `make sure the sys_secret row is reachable; the subscription re-arms on registration `
+            + `(#8022) and at the next periodic refresh, and later events are delivered normally. `
+            + `Cause: ${(err as Error)?.message ?? String(err)}`;
+    }
+
+    /**
      * [#7799] Resolve `sub.secret`. Returns `false` when the subscription must
      * be dropped.
      *
@@ -409,6 +453,7 @@ export class AutoEnqueuer {
             }
         } catch (err) {
             this.reportDrop(sub, err, SIGNING_SECRET_CREDENTIAL);
+            this.park(sub, err, SIGNING_SECRET_CREDENTIAL);
             return false;
         }
 
@@ -451,6 +496,7 @@ export class AutoEnqueuer {
             }
         } catch (err) {
             this.reportDrop(sub, err, CUSTOM_HEADERS_CREDENTIAL);
+            this.park(sub, err, CUSTOM_HEADERS_CREDENTIAL);
             return false;
         }
 
@@ -706,6 +752,12 @@ export class AutoEnqueuer {
                 method: sub.method,
                 headers: sub.headers,
                 signingSecret: sub.secret,
+                // [#8069] Set only for a PARKED subscription, and then this is
+                // not an enqueue at all: the messaging seam routes it to
+                // `recordUndeliverable()`, which writes a terminal `dead` row
+                // with this reason and no signature. Undefined for every healthy
+                // subscription, so the delivery path is byte-identical to before.
+                undeliverableReason: sub.parkedReason,
                 timeoutMs: sub.timeoutMs,
                 // [#3946] Envelope keys are written LAST so the event payload
                 // cannot rewrite them. Behaviour-neutral for the engine's own
@@ -802,6 +854,9 @@ export class AutoEnqueuer {
                 method: sub.method,
                 headers: sub.headers,
                 signingSecret: sub.secret,
+                // [#8069] See the per-record path — parked subscriptions record
+                // an undeliverable row instead of enqueuing a delivery.
+                undeliverableReason: sub.parkedReason,
                 timeoutMs: sub.timeoutMs,
                 // [#3946] Envelope keys last so the payload cannot rewrite them.
                 payload: {
