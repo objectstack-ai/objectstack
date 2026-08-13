@@ -46,7 +46,7 @@ import {
     __objectqlSecretWireForms,
     resolveWebhookSecret,
 } from './webhook-secret.js';
-import { WEBHOOK_HEADERS_FIELD } from './webhook-headers.js';
+import { WEBHOOK_HEADERS_FIELD, resolveWebhookHeaders } from './webhook-headers.js';
 
 /**
  * [#8069] The PRODUCTION enqueue wiring, as one helper.
@@ -1123,6 +1123,280 @@ describe('a stored signing secret that resolves to nothing (#8542)', () => {
         // `success`, not `pending`: the dispatcher ran, so this control asserts
         // a delivery that COMPLETED — the working feature a blanket refusal
         // would have turned into a parked `dead` row.
+        expect(rows[0].status).toBe('success');
+        expect(errors).toHaveLength(0);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// #8558 — the same collapse on the SIBLING credential, measured rather than
+// assumed symmetric.
+//
+// The card that filed this traced the call path and said so honestly: the three
+// `null`-producing states were measured for `signing_secret` on #8542 and
+// carried over here "by construction, since `resolveSecretField` is
+// field-agnostic". They do all reach this path — but the measurement that
+// produced these pins found the header path is **WIDER**, not equal, and the
+// difference is the reason this block is not a copy of the one above.
+//
+//  - `signing_secret` holds an opaque scalar: ANY non-empty string that comes
+//    back is a usable key, so only the empty string collapses.
+//  - `headers_secret` holds a SERIALIZED MAP, and `parseStoredHeaders` — quite
+//    correctly, for its own job — answers `undefined` for every string that is
+//    not a flat `Record<string, string>`. `''`, `'{}'`, `'[]'`, `'null'`,
+//    `'{"X-Count":5}'`, `'{"a":{"b":"c"}}'` and any typo all land there.
+//
+// And that field is DIRECTLY AUTHORABLE: `sys_webhook.headers_secret` is a
+// `Field.secret` whose own description instructs the admin to type "a JSON
+// object ({"Authorization": "Bearer …"})" into it. So the widest road here is
+// not a hand-edited column or a restored dump — it is an admin mistyping JSON
+// into the field the product told them to type JSON into, through the ordinary
+// data API, on a row that then reads back masked and `active: true`.
+//
+// What reached the wire before this fix, measured end to end: a delivery that
+// SUCCEEDED (`sys_http_delivery.status = 'success'`), carrying a byte-correct
+// `X-Objectstack-Signature`, with the entire authored header map — the
+// `Authorization` included — silently absent, and no `error` logged anywhere.
+// The valid signature is what makes this worse than it looks: it tells the
+// receiver the delivery is genuinely ours, so a receiver that authenticates by
+// signature has every reason to accept a request that no longer matches the
+// configuration its operator wrote.
+//
+// ⚠️ Every pin below first asserts that a header map is genuinely STORED — the
+// row reads back as the mask, the column is a ref at rest, `active: true`.
+// Without that precondition a fixture that had quietly lost its headers would
+// exercise only the legitimate no-headers arm and pass against a completely
+// unfixed tree. Both controls at the end are that arm, deliberately separate.
+// ---------------------------------------------------------------------------
+
+describe('a stored header map that resolves to nothing (#8558)', () => {
+    /** Drive one create event through the PRODUCTION wiring; report all three surfaces. */
+    async function driveOnce(engine: any) {
+        const realtime = new FakeRealtime();
+        const outbox = new MemoryHttpOutbox();
+        const errors: Array<{ msg: string; meta: any }> = [];
+        const enqueuer = new AutoEnqueuer(engine, realtime, enqueueVia(outbox), {
+            // The 60s escape hatch held shut, as in the #8022 pins.
+            refreshIntervalMs: 0,
+            logger: {
+                error: (msg: string, _e?: unknown, meta?: unknown) => { errors.push({ msg, meta: meta as any }); },
+                debug: () => {}, warn: () => {},
+            },
+        });
+        await enqueuer.start();
+        await realtime.publish(recordEvent('contact', { id: 'c1', name: 'Ada' }));
+        await new Promise((r) => setTimeout(r, 0));
+        await new Promise((r) => setTimeout(r, 0));
+        const { impl, calls } = makeFetch();
+        await new HttpDispatcher({ nodeId: 'n1', outbox, fetchImpl: impl, partitionCount: 1 }).tick();
+        await enqueuer.stop();
+        return { calls, rows: await outbox.list(), errors };
+    }
+
+    /**
+     * The anti-vacuity precondition: a header map IS stored, everything an
+     * operator can read says so, and the webhook is armed. A test that reached
+     * the assertions below WITHOUT this state would be exercising the
+     * legitimate no-headers arm and would pass on an unfixed tree.
+     */
+    async function expectHeadersGenuinelyStored(engine: any, stores: any) {
+        const [viaApi] = await engine.find('sys_webhook', { where: { name: 'crm_hook' } });
+        expect(viaApi[WEBHOOK_HEADERS_FIELD]).toBe(SECRET_MASK);
+        expect(viaApi.active).toBe(true);
+        const atRest = Array.from(stores.get('sys_webhook')!.values())[0] as any;
+        expect(atRest[WEBHOOK_HEADERS_FIELD]).toBeTruthy();
+        return viaApi;
+    }
+
+    /** What a fail-closed outcome has to look like on all three surfaces. */
+    function expectParkedNotDelivered(result: Awaited<ReturnType<typeof driveOnce>>) {
+        // ── The invariant, on the wire. Asserting only that `Authorization` is
+        // absent would PASS on the broken tree — the broken tree's whole
+        // signature is a delivery that arrives looking normal — so the pin is
+        // that nothing arrives at all.
+        expect(result.calls).toHaveLength(0);
+        // ── #8069: the discarded event still leaves a durable trace, and the
+        // parked row carries neither the credential-bearing map nor a signature.
+        expect(result.rows).toHaveLength(1);
+        expect(result.rows[0]).toMatchObject({ status: 'dead', attempts: 0 });
+        expect(result.rows[0].headers).toBeUndefined();
+        expect(result.rows[0].signature).toBeUndefined();
+        // ── #8022/#8043: one say-once `error` carrying the ADR-0112 pair, and
+        // naming `headers_secret` — the signing secret resolves perfectly well
+        // in every pin here, so a report that named the wrong credential would
+        // send an operator to rotate a key that was never the problem.
+        expect(result.errors).toHaveLength(1);
+        expect(result.errors[0].meta).toMatchObject({
+            code: 'INTERNAL_ERROR',
+            status: 500,
+            field: WEBHOOK_HEADERS_FIELD,
+        });
+    }
+
+    it('refuses to arm when the stored map was emptied through the ordinary data API', async () => {
+        const { engine, stores } = await buildEngine();
+        await bootstrapDeclaredWebhooks(engine, metadataWith([headerBearingWebhook()]));
+        const [row] = await engine.find('sys_webhook', { where: { name: 'crm_hook' } });
+
+        // Needs no privileged access at all: the engine accepts an empty string
+        // for a `secret` field, encrypts it like any other value, mints a real
+        // `sys_secret` row and leaves the column holding a VALID ref. Every read
+        // path then reports headers are configured, and the dereference answers ''.
+        await engine.update('sys_webhook', { [WEBHOOK_HEADERS_FIELD]: '' }, { where: { id: row.id } });
+
+        await expectHeadersGenuinelyStored(engine, stores);
+        const result = await driveOnce(engine);
+        expectParkedNotDelivered(result);
+        expect(result.rows[0].error).toMatch(/could not be decrypted/);
+        expect(result.errors[0].msg).toMatch(/NO delivery/);
+    });
+
+    // The road that has no counterpart on the signing-secret side. For a key,
+    // any non-empty answer is usable; for a map, the CONTENT decides — and this
+    // is the field an admin is told to type JSON into. Each spelling below is a
+    // realistic thing to find in that box, and every one of them delivered
+    // header-less before this fix.
+    const unusableStoredValues: Array<[label: string, stored: string]> = [
+        ['an empty JSON object — "no headers", spelled as a value rather than as null', '{}'],
+        ['a JSON array instead of an object', '[]'],
+        ['a header whose value is a number, not a string', '{"X-Count":5}'],
+        ['a nested object where a flat string map is required', '{"X-Team":{"name":"crm"}}'],
+        ['not JSON at all — a typo in the authoring box', '{X-Team: crm}'],
+    ];
+
+    it.each(unusableStoredValues)(
+        'refuses to arm when the stored value decrypts fine but is unusable: %s',
+        async (_label, badValue) => {
+            const { engine, stores } = await buildEngine();
+            await bootstrapDeclaredWebhooks(engine, metadataWith([headerBearingWebhook()]));
+            const [row] = await engine.find('sys_webhook', { where: { name: 'crm_hook' } });
+
+            // Written through the ORDINARY data API — no driver access, no SQL.
+            await engine.update(
+                'sys_webhook',
+                { [WEBHOOK_HEADERS_FIELD]: badValue },
+                { where: { id: row.id } },
+            );
+
+            // …and the row is indistinguishable from the healthy one it was a
+            // moment ago: masked on read, a real ref at rest, still `active`.
+            await expectHeadersGenuinelyStored(engine, stores);
+            const atRest = Array.from(stores.get('sys_webhook')!.values())[0] as any;
+            expect(String(atRest[WEBHOOK_HEADERS_FIELD])).toMatch(/^secret:/);
+
+            expectParkedNotDelivered(await driveOnce(engine));
+        },
+    );
+
+    it('refuses to arm when the column no longer holds a resolvable ref', async () => {
+        const { engine, stores, driver } = await buildEngine();
+        await bootstrapDeclaredWebhooks(engine, metadataWith([headerBearingWebhook()]));
+        const [row] = await engine.find('sys_webhook', { where: { name: 'crm_hook' } });
+
+        // Written BELOW the engine deliberately: that is the only route measured
+        // to reach this state, since the engine's own write path drops an echoed
+        // mask and re-encrypts cleartext. A dump restored without its sys_secret
+        // rows, a column edited in SQL, a seed script writing at driver level.
+        //
+        // The value planted here is a PERFECTLY VALID serialized header map, and
+        // that is the point: `resolveSecretField` answers `null` for anything
+        // that is not a `secret:` ref, so the map is unreadable through the
+        // supported channel no matter how well-formed it looks at rest.
+        await driver.update('sys_webhook', row.id, {
+            [WEBHOOK_HEADERS_FIELD]: JSON.stringify({ 'X-Team': 'crm' }),
+        });
+
+        await expectHeadersGenuinelyStored(engine, stores);
+        expectParkedNotDelivered(await driveOnce(engine));
+    });
+
+    it('refuses when the row is deleted between the cache read and the dereference', async () => {
+        const { engine } = await buildEngine();
+        await bootstrapDeclaredWebhooks(engine, metadataWith([headerBearingWebhook()]));
+
+        // The snapshot the enqueuer's refresh loop holds while it dereferences
+        // each row's credentials, one at a time.
+        const [snapshot] = await engine.find('sys_webhook', { where: { name: 'crm_hook' } });
+        expect(snapshot[WEBHOOK_HEADERS_FIELD]).toBe(SECRET_MASK);
+
+        await engine.delete('sys_webhook', { where: { id: snapshot.id } });
+
+        // Pinned at the seam rather than through the enqueuer because the race
+        // is a property of the seam: `resolveSecretField` opens `if (!row)
+        // return null`, and the caller holding the snapshot cannot tell that
+        // `null` apart from "this webhook was authored without headers".
+        await expect(
+            resolveWebhookHeaders(engine, snapshot as any, 'sys_webhook'),
+        ).rejects.toThrow(/resolved to nothing/);
+    });
+
+    it('refuses on an engine with no encrypted channel whose column holds an unusable value', async () => {
+        // The third arm of the same seam, and the one with no analogue on the
+        // signing side at all: with no `resolveSecretField` the column IS the
+        // serialized map, so reading it verbatim is correct — but the parse can
+        // still fail, and that answered `undefined` too.
+        const engineWithoutChannel = {
+            async find() { return []; },
+        } as any;
+
+        await expect(
+            resolveWebhookHeaders(
+                engineWithoutChannel,
+                { id: 'whk_1', name: 'crm_hook', [WEBHOOK_HEADERS_FIELD]: '{oops' },
+                'sys_webhook',
+            ),
+        ).rejects.toThrow(/not a flat JSON object/);
+
+        // …and the same engine still returns a well-formed verbatim map, so
+        // this refusal did not break the no-crypto deployment shape.
+        await expect(
+            resolveWebhookHeaders(
+                engineWithoutChannel,
+                { id: 'whk_1', name: 'crm_hook', [WEBHOOK_HEADERS_FIELD]: '{"X-Team":"crm"}' },
+                'sys_webhook',
+            ),
+        ).resolves.toEqual({ 'X-Team': 'crm' });
+    });
+
+    it('a webhook authored with NO headers still arms and delivers — the refusal is not a blanket', async () => {
+        const { engine } = await buildEngine();
+        await bootstrapDeclaredWebhooks(
+            engine,
+            metadataWith([declaredWebhook({ headers: undefined })]),
+        );
+
+        // The control's precondition is the exact mirror of the anti-vacuity one
+        // above: NOTHING is stored, so `undefined` is the legitimate authored
+        // fact and not a swallowed failure. Its signing secret is left declared
+        // on purpose — the header refusal must not spill onto the sibling
+        // credential that resolves perfectly well.
+        const [viaApi] = await engine.find('sys_webhook', { where: { name: 'crm_hook' } });
+        expect(viaApi[WEBHOOK_HEADERS_FIELD] ?? null).toBeNull();
+
+        const { calls, rows, errors } = await driveOnce(engine);
+        expect(calls).toHaveLength(1);
+        // `success`, not `pending`: the dispatcher ran, so this control asserts
+        // a delivery that COMPLETED — the working feature a blanket refusal
+        // would have turned into a parked `dead` row.
+        expect(rows[0].status).toBe('success');
+        expect(errors).toHaveLength(0);
+        // …and it is still signed: the header rule did not touch the key path.
+        const expected = createHmac('sha256', SECRET).update(calls[0].body).digest('hex');
+        expect(calls[0].headers['X-Objectstack-Signature']).toBe(`sha256=${expected}`);
+    });
+
+    it('a webhook whose stored map resolves normally still delivers every header', async () => {
+        // The other half of the control, and the one that would catch a fix
+        // written as "refuse whenever headers are stored": the healthy path has
+        // to keep working end to end, credential entry included.
+        const { engine, stores } = await buildEngine();
+        await bootstrapDeclaredWebhooks(engine, metadataWith([headerBearingWebhook()]));
+
+        await expectHeadersGenuinelyStored(engine, stores);
+        const { calls, rows, errors } = await driveOnce(engine);
+        expect(calls).toHaveLength(1);
+        expect(calls[0].headers.Authorization).toBe(BEARER);
+        expect(calls[0].headers['X-Team']).toBe('crm');
         expect(rows[0].status).toBe('success');
         expect(errors).toHaveLength(0);
     });

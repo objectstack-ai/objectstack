@@ -66,10 +66,21 @@
  * - It does not deliver partially. A row whose stored headers cannot be
  *   resolved DROPS the subscription rather than delivering it with the headers
  *   missing — see {@link resolveWebhookHeaders}.
+ *
+ * [#8558] That last line was a statement of intent this file did not keep. Only
+ * a THROWING resolver reached the caller's `catch`; a resolver that answered
+ * `null` — or handed back a value that was not a flat string map — folded onto
+ * the `undefined` this seam uses for "no headers stored", and the subscription
+ * armed and delivered without them. {@link WebhookHeadersUnresolvableError} is
+ * what makes the sentence true.
  */
 
 import type { IDataEngine } from '@objectstack/spec/contracts';
-import { isOpaqueSecretForm } from './webhook-secret.js';
+import {
+  WEBHOOK_SECRET_REFUSAL_CODE,
+  WEBHOOK_SECRET_REFUSAL_STATUS,
+  isOpaqueSecretForm,
+} from './webhook-secret.js';
 
 /** Column on `sys_webhook` holding the encrypted custom-header map. */
 export const WEBHOOK_HEADERS_FIELD = 'headers_secret';
@@ -151,13 +162,131 @@ export function readLegacyHeaders(definitionJson: unknown): WebhookHeaders | und
 }
 
 /**
- * Recover a row's custom headers. Returns `undefined` when the row stores none
- * — which is not an error: `headers` is optional on the authoring envelope.
+ * [#8558] A header map IS stored on the row and did not come back as one.
  *
- * Throws when headers ARE stored but cannot be dereferenced. Callers must treat
- * that as "drop this subscription", never as "deliver without them" — see
- * `AutoEnqueuer.attachCredentials` for why partial delivery is the invisible
- * failure and a stopped subscription is the visible one.
+ * ## Why this is an error and not an `undefined`
+ * `resolveWebhookHeaders` used to return `undefined` for two different facts —
+ * *"the author configured this webhook with no custom headers"* and *"a map is
+ * stored and did not come back"* — and its caller acts on the first reading,
+ * which is the legitimate one. So the second silently became the first: the
+ * subscription ARMED and every delivery went out missing the entire authored
+ * header map, while `sys_webhook` kept reading `active: true` with
+ * `headers_secret` masked, i.e. still reporting "custom headers are
+ * configured". Measured end to end, what reached the receiver was a delivery
+ * that SUCCEEDED, carrying a byte-correct `X-Objectstack-Signature`, with the
+ * `Authorization` the author declared simply absent — and nothing logged.
+ *
+ * That the signature is VALID is what makes the direction so bad. It tells the
+ * receiver the request is genuinely ours, so a receiver that authenticates by
+ * signature has every reason to accept a request that no longer matches the
+ * configuration its operator wrote. Against an endpoint that does not require
+ * the header at all — a routing `X-Tenant-Id`, an `X-Environment: staging` —
+ * the delivery is simply wrong and nobody finds out.
+ *
+ * Presence is decidable even when the value is not, and this is the one place
+ * worth stating plainly because the field LOOKS like it should behave
+ * differently: `headers_secret` is a map only in the plaintext. At the storage
+ * layer it is an ordinary scalar `secret` column holding the serialized map, so
+ * the generic read path returns the engine's mask for a set map and `null` for
+ * an unset one — the same decidable signal `signing_secret` gives, for the same
+ * reason. The "it is a map, not a scalar" worry does not survive measurement.
+ *
+ * Carries the ADR-0112 pair as fields so a consumer branches on `code`/`status`
+ * rather than on message text — the same pair `attachHeaders`' drop report and
+ * the signing seam's refusal already carry for the same class of cause.
+ *
+ * ## Why ONE error class for two conditions
+ * A stored map reaches this seam and fails in two distinguishable ways: it
+ * could not be RECOVERED (nothing came back), or it was recovered fine and is
+ * not a usable header map. They deserve different remedies and get different
+ * messages. They do not deserve different types: every consumer of this seam
+ * branches on the ADR-0112 pair and the disposition, both identical — park the
+ * subscription, record the discarded event, say it once. A second class with no
+ * consumer would be a distinction the tree cannot act on.
+ */
+export class WebhookHeadersUnresolvableError extends Error {
+  readonly code = WEBHOOK_SECRET_REFUSAL_CODE;
+  readonly status = WEBHOOK_SECRET_REFUSAL_STATUS;
+  constructor(message: string) {
+    super(message);
+    this.name = 'WebhookHeadersUnresolvableError';
+  }
+}
+
+/** The remedy clause both refusals end with — one wording, stated once. */
+const HEADERS_REMEDY =
+  'Fix: re-save the webhook headers as a flat JSON object of string values so the column holds a '
+  + 'fresh ref, or CLEAR the field to null if this webhook is meant to send no custom headers — an '
+  + 'empty or unparseable header map is not the same thing as no header map, and only the second '
+  + 'one means "send nothing extra".';
+
+/**
+ * Parse a recovered value into the map, or refuse.
+ *
+ * {@link parseStoredHeaders} answers `undefined` for every string that is not a
+ * flat `Record` of strings, which is right for its own job and wrong as an
+ * answer to *"what are this webhook's headers?"* once a value is known to be
+ * stored. This is the narrow wrapper that turns the second reading into a
+ * refusal, so the rule lives at the seam and no caller re-derives it.
+ */
+function requireHeaderMap(
+  recovered: unknown,
+  row: { id: string; [k: string]: unknown },
+  where: string,
+): WebhookHeaders {
+  const parsed = parseStoredHeaders(recovered);
+  if (parsed) return parsed;
+
+  throw new WebhookHeadersUnresolvableError(
+    `Webhook "${String(row.name ?? row.id)}" stores custom headers in ${where} that came back but are `
+      + 'not a flat JSON object of string values, so there is no header map to send. A value IS stored '
+      + '— the read path returns the engine mask for it — so this is NOT a webhook authored without '
+      + 'headers, and delivering it without them would silently drop whatever the author put in that '
+      + 'map, including an Authorization credential, on a delivery that is otherwise correctly signed '
+      + 'and therefore looks genuine to the receiver (#7986, #8558). Causes, in the order worth '
+      + 'checking: the value was typed into the Custom Headers field and is not valid JSON; it parses '
+      + 'but is an array, an empty object, or has a non-string value ({"X-Count": 5}); or it is a '
+      + `nested object where the wire format allows only strings. ${HEADERS_REMEDY}`,
+  );
+}
+
+/**
+ * Recover a row's custom headers. Returns `undefined` for EXACTLY one fact —
+ * the row stores no headers — which is not an error: `headers` is optional on
+ * the authoring envelope, and a webhook with no custom headers is a legitimate
+ * authored configuration.
+ *
+ * Throws {@link WebhookHeadersUnresolvableError} when a map IS stored and does
+ * not come back as one. Callers must treat that as "drop this subscription",
+ * never as "deliver without them" — see `AutoEnqueuer.attachCredentials` for
+ * why partial delivery is the invisible failure and a stopped subscription is
+ * the visible one.
+ *
+ * ## [#8558] Why "did not come back" is not spelled `undefined`
+ * This is the sibling of #8542 on `webhook-secret.ts`, and the measurement that
+ * produced it found the header path is WIDER than the signing path rather than
+ * symmetric to it. A signing secret is an opaque scalar: any non-empty answer
+ * is a usable key, so only the empty string collapses. A header map's CONTENT
+ * decides, so every one of these reaches this function as a stored-but-unusable
+ * value, all confirmed against a real engine:
+ *
+ *  1. the `sys_webhook` row is deleted between the enqueuer's cache read and
+ *     this dereference (`resolveSecretField` opens `if (!row) return null`);
+ *  2. the column holds something that is not a `secret:` ref — reachable only
+ *     through a write that BYPASSES the engine (a hand-edited column, a dump
+ *     restored without its `sys_secret` rows, a seed script writing at driver
+ *     level). The engine's own write path defends both obvious routes: an
+ *     echoed mask is dropped and cleartext is re-encrypted;
+ *  3. the ciphertext decrypts to the empty string;
+ *  4. ⭐ the ciphertext decrypts to a perfectly readable string that is not a
+ *     flat string map — `{}`, `[]`, `{"X-Count": 5}`, a nested object, or any
+ *     typo. Reachable through the ORDINARY data API with no privileged access,
+ *     and it is the WIDEST road here rather than an exotic one:
+ *     `sys_webhook.headers_secret` is an admin-authorable field whose own
+ *     description instructs the author to type a JSON object into it.
+ *
+ * In all four the row still advertises stored headers on every read path, so
+ * returning `undefined` told the caller the opposite of what the row says.
  */
 export async function resolveWebhookHeaders(
   engine: IDataEngine,
@@ -167,24 +296,42 @@ export async function resolveWebhookHeaders(
   const stored = row[WEBHOOK_HEADERS_FIELD];
   // Unset / cleared. On the generic read path a set secret comes back as the
   // engine's mask (a non-empty string) and an unset one as `null`, so presence
-  // is decidable here WITHOUT the value ever being readable.
+  // is decidable here WITHOUT the value ever being readable. Everything below
+  // this line therefore runs with "headers ARE stored" already established —
+  // which is the knowledge the old `undefined` return threw away.
   if (stored == null || stored === '') return undefined;
 
   const resolver = engine as SecretResolvingEngine;
   if (typeof resolver.resolveSecretField !== 'function') {
     // An engine with no encrypted-field channel stored verbatim what the seeder
     // handed it, so the column IS the serialized map — reading it is correct,
-    // not a fallback. The refusal below is for the narrow case where the value
-    // is one of objectql's opaque forms and there is no way to invert it.
-    if (!isOpaqueSecretForm(stored)) return parseStoredHeaders(stored);
-    throw new Error(
+    // not a fallback. It can still fail to parse, and that arm used to answer
+    // `undefined` too; it is refused here for the same reason as everything
+    // else on this seam.
+    if (!isOpaqueSecretForm(stored)) {
+      return requireHeaderMap(stored, row, `${object}.${WEBHOOK_HEADERS_FIELD}`);
+    }
+    throw new WebhookHeadersUnresolvableError(
       `Webhook "${String(row.name ?? row.id)}" stores encrypted custom headers, but this data engine `
         + 'does not implement resolveSecretField() — they cannot be recovered, so the subscription is '
         + 'dropped rather than delivered without the headers it was authored with (#7986).',
     );
   }
   const plain = await resolver.resolveSecretField(object, String(row.id), WEBHOOK_HEADERS_FIELD);
-  return parseStoredHeaders(plain);
+  if (plain == null || plain === '') {
+    throw new WebhookHeadersUnresolvableError(
+      `Webhook "${String(row.name ?? row.id)}" stores custom headers in `
+        + `${object}.${WEBHOOK_HEADERS_FIELD} that resolved to nothing. A value IS stored — the read `
+        + 'path returns the engine mask for it — so this is NOT a webhook authored without headers, '
+        + 'and delivering it without them would silently drop whatever the author put in that map, '
+        + 'including an Authorization credential, on a delivery that is otherwise correctly signed and '
+        + 'therefore looks genuine to the receiver (#7986, #8558). Causes, in the order worth checking: '
+        + 'the row was deleted while this refresh was reading it; the column holds something that is '
+        + 'not a secret: ref (a hand-edited column, or a dump restored without its sys_secret rows); '
+        + `or the stored value decrypts to an empty string. ${HEADERS_REMEDY}`,
+    );
+  }
+  return requireHeaderMap(plain, row, `${object}.${WEBHOOK_HEADERS_FIELD}`);
 }
 
 /**

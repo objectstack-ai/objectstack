@@ -550,6 +550,18 @@ export class AutoEnqueuer {
      * from the configuration the author wrote, and nothing anywhere records
      * that it went out incomplete. A subscription that stops is visible; a
      * delivery that arrives subtly wrong is not.
+     *
+     * [#8558] And that is what this method used to do, for the same reason its
+     * signing sibling did (#8542): `resolveWebhookHeaders` answered `undefined`
+     * for BOTH "no headers are stored" and "a map is stored and did not come
+     * back as one", so this method read the second as the first and armed the
+     * subscription — the paragraph above failing OPEN. Measured, the delivery
+     * then went out SUCCESSFULLY and correctly SIGNED with the whole authored
+     * map missing, which is the worst available combination: the signature
+     * tells the receiver the request is genuinely ours. Nothing here changed:
+     * the seam now raises, so it lands in the `catch` below exactly the way a
+     * throwing resolver already did, and the drop, the say-once `error` and the
+     * #8069 park all apply to it unchanged.
      */
     private async attachHeaders(sub: CachedSubscription, row: any): Promise<boolean> {
         try {
