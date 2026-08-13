@@ -240,9 +240,12 @@ export type SchemaMode = z.input<typeof SchemaModeSchema>;
 /**
  * External Datasource Settings (ADR-0015)
  *
- * Present only when `schemaMode !== 'managed'`. Carries the federation
- * policy for a mature external database: write gating, schema whitelist,
- * boot/drift validation behaviour, credentials reference, and query caps.
+ * The federation policy for a mature external database: write gating, schema
+ * whitelist, boot/drift validation behaviour, credentials reference, and
+ * query caps. The federation keys apply only when `schemaMode !== 'managed'`;
+ * `credentialsRef` alone is also valid on a managed datasource (#8153) —
+ * the Studio wizard's `createDatasource` stores the secret in the secrets
+ * store and keeps the reference here, whatever the schema mode.
  */
 export const ExternalDatasourceSettingsSchema = strictObject(
   {
@@ -309,11 +312,13 @@ export const ExternalDatasourceSettingsSchema = strictObject(
   })
     .default({ onMismatch: 'fail', checkOnBoot: true }).describe('Boot/drift validation policy'),
   credentialsRef: z.string().optional()
-    .describe('Reference into the secrets store; never inline credentials.'),
+    .describe('Reference into the secrets store; never inline credentials. '
+      + 'Valid in every schemaMode — the one `external` key a managed datasource may carry (#8153).'),
   queryTimeoutMs: z.number().default(30_000)
     .describe('Hard cap on per-query execution time.'),
 })
-  .describe('External datasource federation settings (schemaMode != "managed")');
+  .describe('External datasource settings: federation policy (schemaMode != "managed") '
+    + 'plus the secrets-store credentials reference (valid in every schemaMode)');
 
 export type ExternalDatasourceSettings = z.input<typeof ExternalDatasourceSettingsSchema>;
 /** Post-parse shape of {@link ExternalDatasourceSettings} — defaults applied, transforms run (ADR-0122). */
@@ -503,7 +508,10 @@ export const DatasourceSchema = lazySchema(() => strictObject(
 
   /**
    * External Federation Settings (ADR-0015)
-   * Required when `schemaMode !== 'managed'`; forbidden otherwise.
+   * Required when `schemaMode !== 'managed'`. On a managed datasource the
+   * block may carry `credentialsRef` — and only it — because the wizard's
+   * `createDatasource` writes the secrets-store reference there whatever the
+   * schema mode; every federation key is still refused on managed (#8153).
    */
   external: ExternalDatasourceSettingsSchema.optional(),
 
@@ -548,13 +556,68 @@ export const DatasourceSchema = lazySchema(() => strictObject(
     });
   }
   if (ds.schemaMode === 'managed' && ds.external) {
-    ctx.addIssue({
-      code: 'custom',
-      path: ['external'],
-      message: `'external' settings only apply when schemaMode != 'managed'.`,
-    });
+    const federationKeys = managedFederationContentKeys(ds.external);
+    if (federationKeys.length > 0) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['external'],
+        message: `'external' settings only apply when schemaMode != 'managed'. `
+          + `A managed datasource may carry 'external.credentialsRef' (and only it) — `
+          + `remove: ${federationKeys.join(', ')}.`,
+      });
+    }
   }
 }));
+
+/**
+ * Parsed shape of an empty `external` block — every key a default. Lazily
+ * computed so the module does not pay a parse at load time.
+ */
+let parsedEmptyExternal: ExternalDatasourceSettingsParsed | undefined;
+
+/**
+ * The federation keys a managed datasource's `external` block effectively
+ * carries (#8153) — empty means the block is `credentialsRef` plus inert
+ * defaults, which is the exact shape the Studio wizard's `createDatasource`
+ * persists on managed rows (the secret goes to the secrets store; the row
+ * keeps the reference).
+ *
+ * The comparison is against the parsed-empty baseline — VALUES, not key
+ * presence — deliberately: this refinement runs post-parse, where defaults
+ * are already applied, so a re-parsed stored row (or a `PUT /meta` round-trip
+ * of served output) legitimately carries every default key. Refusing on key
+ * presence would 422 the exact round-trip this allowance exists to keep
+ * valid. An explicitly-written default is byte-equal to an applied one and
+ * semantically inert either way; any non-default federation value — write
+ * gating, schema whitelist, drift validation, query caps — still refuses.
+ */
+function managedFederationContentKeys(external: ExternalDatasourceSettingsParsed): string[] {
+  const baseline = (parsedEmptyExternal ??= ExternalDatasourceSettingsSchema.parse({}));
+  return Object.keys(external)
+    .filter((key) => key !== 'credentialsRef')
+    .filter((key) => !sameParsedValue(
+      (external as Record<string, unknown>)[key],
+      (baseline as Record<string, unknown>)[key],
+    ))
+    .sort();
+}
+
+/** Structural equality over parsed plain data (objects/arrays/primitives). */
+function sameParsedValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return Array.isArray(a) && Array.isArray(b) && a.length === b.length
+      && a.every((value, i) => sameParsedValue(value, b[i]));
+  }
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  return aKeys.length === bKeys.length
+    && aKeys.every((key) => sameParsedValue(
+      (a as Record<string, unknown>)[key],
+      (b as Record<string, unknown>)[key],
+    ));
+}
 
 export type Datasource = z.input<typeof DatasourceSchema>;
 /** Post-parse shape of {@link Datasource} — defaults applied, transforms run (ADR-0122). */
