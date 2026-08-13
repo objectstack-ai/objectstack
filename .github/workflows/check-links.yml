@@ -36,6 +36,67 @@ jobs:
     permissions:
       contents: read
 
+    # The lychee argv lives here, not inline on the step, because the step is
+    # invoked TWICE (attempt + retry, see #8238 below) and two copies of a
+    # 9-line argv is a drift hazard: an edit to one copy silently changes what
+    # the retry checks relative to the first attempt. One definition, two
+    # readers. `github.workspace` is available in a job-level `env`.
+    env:
+      # `--offline` is the internal-only mechanism, and it lives HERE rather
+      # than in lychee.toml on purpose: the equivalent `offline = true`
+      # config key is silently ignored by older lychee (measured: ignored on
+      # 0.19.1, honoured on the 0.24.2 pinned below). A determinism guarantee
+      # must not depend on which lychee the action happens to install, so it is
+      # asserted at the invocation site.
+      #
+      # Offline means only `file://` targets are resolved -- every http(s)
+      # link is reported EXCLUDED, never requested. That is what makes this
+      # gate deterministic and free of external-network flake.
+      #
+      # --root-dir is what makes ROOT-RELATIVE links checkable. Most internal
+      # links in content/** are site routes (`/docs/permissions`), and lychee
+      # hard-errors on those unless it is told which directory `/` means.
+      # The Fumadocs content root is `content/`, so `/docs/x` resolves to
+      # content/docs/x -- and --fallback-extensions supplies the .mdx/.md
+      # suffix that a site route omits. Without this pair the gate cannot go
+      # green at all: 1286 root-relative links fail as "Cannot resolve
+      # root-relative link ... provide a root dir".
+      #
+      # ⛔ Do NOT add `docs/adr/**/*.md` here. It looks like the one-line fix
+      # for #6592 and it is not: measured on the pinned lychee 0.24.2, that
+      # glob reports 8 broken links today, every one a pre-existing ADR →
+      # source-tree link whose target moved out of this repo. This job would
+      # be red on every PR from the moment it merged, which is how an
+      # advisory lane becomes a lane nobody reads (#6028 landed it
+      # advisory-first specifically to earn a green streak). `docs/adr/` is
+      # checked by the `Check ADR cross-links` step below instead, which can
+      # freeze those 8 on a shrink-only baseline and fail on a NEW one --
+      # something neither `exclude` nor `.lycheeignore` can express, because
+      # neither ever tells you an entry stopped being needed.
+      # `ARCHITECTURE.md` joined this glob in #6867: unlike `docs/adr/**`, it
+      # carried no pre-existing rot once its 10 dead links + 2 stale path
+      # references were fixed in the same PR, so -- unlike the ADR directory
+      # above -- it needs no KNOWN_DEAD_TARGETS-style baseline to land clean.
+      LYCHEE_ARGS: >-
+        --offline
+        --root-dir ${{ github.workspace }}/content
+        --fallback-extensions mdx,md
+        --config lychee.toml
+        'content/**/*.md'
+        'content/**/*.mdx'
+        'README.md'
+        'ARCHITECTURE.md'
+
+      # ⛔ Pin the lychee binary explicitly rather than inheriting the action's
+      # default (#8238). Three comments in this file already reason about "the
+      # pinned lychee 0.24.2" -- the `--offline` argument above turns on which
+      # version runs -- but nothing here pinned it: the version came from
+      # `lycheeverse/lychee-action@v2`'s own `lycheeVersion` default, which
+      # moves whenever the `v2` tag moves. The determinism claim was true only
+      # by coincidence. Asserting it at the invocation site is the same rule
+      # `--offline` is held to, applied to the thing `--offline` depends on.
+      LYCHEE_VERSION: v0.24.2
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -53,52 +114,98 @@ jobs:
       - name: Check ADR cross-links
         run: node scripts/check-adr-links.mjs --self-test && node scripts/check-adr-links.mjs
 
+      # ── #8238: the action's binary download is a single-shot curl ───────────
+      #
+      # `lychee-action@v2`'s `lychee-setup` step fetches the release tarball
+      # with a bare `curl -sfLO` -- no `--retry`, no cache, and a `rm -rf` of
+      # its download dir on every run, so `actions/cache` cannot reach it (the
+      # action re-downloads unconditionally whatever is already on disk; a
+      # cache step here would read as coverage while doing nothing).
+      #
+      # When that one curl loses, `curl` exits 22 ("HTTP page not retrieved"),
+      # the action's `Install lychee` and `Run Lychee` steps both report
+      # `skipped`, and this job goes red having examined ZERO links. Measured
+      # on three unrelated PRs in one afternoon (2026-08-12), all three job
+      # logs read directly and byte-identical in shape:
+      #
+      #   #8128  17:23:49Z  run 31622391000 job 94200196323  exit 22, 497ms
+      #   #8205  20:08:47Z  run 31636151516 job 94246838620  exit 22, 177ms
+      #   #8225  21:21:28Z  run 31642129140 job 94266966755  exit 22
+      #
+      # Transient, not systemic: every one cleared on the next attempt, and
+      # PR #8227 went green at 21:27:53Z, six minutes after #8225's failure.
+      #
+      # ⛔ This is NOT gate weakening and must not become it. `fail: true`
+      # stays on both attempts and neither is allowed to fail open: a retry
+      # that exhausts still fails the job -- it just now says WHY.
       - name: Check links with lychee
+        id: lychee
+        # Attempt 1 only. `continue-on-error` here hands the verdict to the
+        # retry below; it does NOT let a failure through, because the retry
+        # step carries no such escape and its failure fails the job.
+        continue-on-error: true
         uses: lycheeverse/lychee-action@v2
         with:
-          # `--offline` is the internal-only mechanism, and it lives HERE rather
-          # than in lychee.toml on purpose: the equivalent `offline = true`
-          # config key is silently ignored by older lychee (measured: ignored on
-          # 0.19.1, honoured on the 0.24.2 this action pins). A determinism
-          # guarantee must not depend on which lychee the action happens to
-          # install, so it is asserted at the invocation site.
-          #
-          # Offline means only `file://` targets are resolved -- every http(s)
-          # link is reported EXCLUDED, never requested. That is what makes this
-          # gate deterministic and free of external-network flake.
-          #
-          # --root-dir is what makes ROOT-RELATIVE links checkable. Most internal
-          # links in content/** are site routes (`/docs/permissions`), and lychee
-          # hard-errors on those unless it is told which directory `/` means.
-          # The Fumadocs content root is `content/`, so `/docs/x` resolves to
-          # content/docs/x -- and --fallback-extensions supplies the .mdx/.md
-          # suffix that a site route omits. Without this pair the gate cannot go
-          # green at all: 1286 root-relative links fail as "Cannot resolve
-          # root-relative link ... provide a root dir".
-          #
-          # ⛔ Do NOT add `docs/adr/**/*.md` here. It looks like the one-line fix
-          # for #6592 and it is not: measured on the pinned lychee 0.24.2, that
-          # glob reports 8 broken links today, every one a pre-existing ADR →
-          # source-tree link whose target moved out of this repo. This job would
-          # be red on every PR from the moment it merged, which is how an
-          # advisory lane becomes a lane nobody reads (#6028 landed it
-          # advisory-first specifically to earn a green streak). `docs/adr/` is
-          # checked by the `Check ADR cross-links` step above instead, which can
-          # freeze those 8 on a shrink-only baseline and fail on a NEW one --
-          # something neither `exclude` nor `.lycheeignore` can express, because
-          # neither ever tells you an entry stopped being needed.
-          # `ARCHITECTURE.md` joined this glob in #6867: unlike `docs/adr/**`, it
-          # carried no pre-existing rot once its 10 dead links + 2 stale path
-          # references were fixed in the same PR, so -- unlike the ADR directory
-          # above -- it needs no KNOWN_DEAD_TARGETS-style baseline to land clean.
-          args: >-
-            --offline
-            --root-dir ${{ github.workspace }}/content
-            --fallback-extensions mdx,md
-            --config lychee.toml
-            'content/**/*.md'
-            'content/**/*.mdx'
-            'README.md'
-            'ARCHITECTURE.md'
+          lycheeVersion: ${{ env.LYCHEE_VERSION }}
+          args: ${{ env.LYCHEE_ARGS }}
           # Fail the job if broken links are found
           fail: true
+
+      # A back-to-back retry is not obviously enough. Every observed recovery
+      # was tens of seconds to tens of minutes later, so retrying within the
+      # same second would be retrying inside the same blip. 15s is a judgement,
+      # not a measurement -- the retry is the part the evidence supports. Costs
+      # nothing on a green run: this step is `skipped` when attempt 1 passes.
+      - name: Wait before retrying the lychee setup
+        if: steps.lychee.outcome == 'failure'
+        run: sleep 15
+
+      - name: Check links with lychee (retry)
+        id: lychee-retry
+        if: steps.lychee.outcome == 'failure'
+        uses: lycheeverse/lychee-action@v2
+        with:
+          lycheeVersion: ${{ env.LYCHEE_VERSION }}
+          args: ${{ env.LYCHEE_ARGS }}
+          fail: true
+
+      # ── #8238, the legibility half: distinguish "links are broken" from ────
+      #     "the link check never ran"
+      #
+      # Both outcomes were the same red before this step, and telling them
+      # apart cost every reader a job-log read. `exit_code` is the
+      # discriminator, and it is exact rather than heuristic: the action's
+      # `entrypoint.sh` writes `exit_code=$LYCHEE_EXIT_CODE` to `$GITHUB_OUTPUT`
+      # BEFORE it exits, so a genuine broken-link failure carries a value (2)
+      # while a setup failure skips `Run Lychee` entirely and leaves the output
+      # unset. Empty ⇒ lychee never executed ⇒ nothing about the links was
+      # examined, whatever the check's name suggests.
+      #
+      # `$GITHUB_STEP_SUMMARY` is safe to append to here: the only writer of
+      # that file in this job is `entrypoint.sh`, which never ran in the one
+      # case this step fires.
+      - name: Report a setup failure as "the link check did not run"
+        if: always() && steps.lychee-retry.outcome == 'failure' && steps.lychee-retry.outputs.exit_code == ''
+        run: |
+          {
+            echo "## ⚠️ The link check did not run"
+            echo
+            echo "\`lychee\` was never executed, so **no link in this repository was"
+            echo "examined** — this red says nothing about the documentation links,"
+            echo "and nothing about the files this PR touches."
+            echo
+            echo "Both attempts failed while \`lycheeverse/lychee-action@v2\` was"
+            echo "downloading the \`${LYCHEE_VERSION}\` binary from the GitHub releases"
+            echo "CDN (\`curl\` exit 22). This is a known transient failure (#8238);"
+            echo "re-running the job is the expected remedy."
+            echo
+            echo "The gate remains fail-closed on purpose: a link check that could"
+            echo "not run must not report success."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::error title=Link check did not run::lychee setup failed twice (binary download, curl exit 22). No links were checked — see #8238. Re-run the job."
+          # Fail-closed, asserted here rather than inherited. The retry step has
+          # already failed the job, so this `exit 1` is redundant today -- and
+          # deliberately so: if anyone ever adds `continue-on-error` to the
+          # retry, the "did not run" case must still be red, not a vacuous
+          # green (#4690).
+          exit 1
