@@ -325,6 +325,12 @@ describe('runtime authoring gate on saveMetaItem (#4463)', () => {
         // `object` writes are deliberately outside P1 — see the registry's
         // RUNTIME_OBJECT_WRITES_P2 reason. A type nobody declared must pass
         // through untouched rather than be silently half-checked.
+        //
+        // [#8308] The body carries an authored `sharingModel` so this write is
+        // ALSO clean on the gated side: it succeeds today because nothing runs,
+        // and keeps succeeding when #8310 declares `object` in `runtimeTypes`
+        // (at which point this case's "no rule declares" premise ends — #8310
+        // owns re-pinning what this test asserts).
         const { protocol } = makeProtocol();
         const result = await protocol.saveMetaItem({
             type: 'object',
@@ -332,6 +338,7 @@ describe('runtime authoring gate on saveMetaItem (#4463)', () => {
             item: {
                 name: 'leave_request',
                 label: 'Leave Request',
+                sharingModel: 'private',
                 fields: { owner: { type: 'text', label: 'Owner' } },
             },
         });

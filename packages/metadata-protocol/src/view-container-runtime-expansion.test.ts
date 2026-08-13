@@ -227,7 +227,10 @@ describe('#7736 a runtime-authored view container is served', () => {
             const { engine, rows } = makeStubEngine();
             const protocol = new ObjectStackProtocolImplementation(engine);
 
-            const authored = { name: 'crm_invoice', label: 'Invoice', fields: { amount: { type: 'currency', label: 'Amount' } } };
+            // [#8308] `sharingModel` authored: the publish gate refuses an
+            // OWD-less custom object once #8310 declares `object` in
+            // `runtimeTypes`; this case pins byte-identical storage, not that.
+            const authored = { name: 'crm_invoice', label: 'Invoice', sharingModel: 'private', fields: { amount: { type: 'currency', label: 'Amount' } } };
             await protocol.saveMetaItem({ type: 'object', name: 'crm_invoice', item: authored });
 
             const stored = Array.from(rows.values()).find((r) => r.name === 'crm_invoice')!;
