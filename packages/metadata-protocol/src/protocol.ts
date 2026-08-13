@@ -4585,50 +4585,66 @@ export class ObjectStackProtocolImplementation implements
                     runtimeItems = runtimeItems.filter((item: any) => item?._packageId === packageId);
                 }
                 if (runtimeItems && runtimeItems.length > 0) {
-                    // Merge, avoiding duplicates. ADR-0048 (#1828) — key by
-                    // (package, name), not bare name, so a runtime item from one
-                    // package does not collapse a same-name item from another.
+                    // Merge, avoiding duplicates. ADR-0048 (#1828) — resolution
+                    // is per `(slot, package)` and never by bare `name`, so a
+                    // runtime item from one package does not collapse a
+                    // same-name item from another.
                     //
-                    // [#7774] …and by `(package, name, locale)` for a type
-                    // whose identity the spec declares as a pair. This loop is
-                    // where the i18n bundle actually died: `items` already
-                    // held both members (the registry keeps them since #7730),
-                    // the second `set` overwrote the first, and
-                    // `GET /meta/email_template` served one locale. It only
-                    // ever ran with a `metadata` service installed AND
-                    // answering non-empty for the type — which is why the
+                    // [#7774] …and the slot carries the bundle discriminator
+                    // for a type whose identity the spec declares as a pair.
+                    // This merge is where the i18n bundle actually died:
+                    // `items` already held both members (the registry keeps
+                    // them since #7730), the second write overwrote the first,
+                    // and `GET /meta/email_template` served one locale. It only
+                    // ever runs with a `metadata` service installed AND
+                    // answering non-empty for the type — which is why that
                     // regression was invisible to every suite that omits one.
-                    const itemMap = new Map<string, any>();
-                    const entryKey = (entry: any): string =>
-                        metaItemKey(
-                            entry._packageId ?? undefined,
-                            entry.name,
-                            itemDiscriminator(request.type, entry),
-                        );
-                    for (const item of items) {
-                        const entry = item as any;
-                        if (entry && typeof entry === 'object' && 'name' in entry) {
-                            itemMap.set(entryKey(entry), entry);
-                        }
-                    }
-                    for (const item of runtimeItems) {
-                        const entry = item as any;
-                        if (entry && typeof entry === 'object' && 'name' in entry) {
-                            // Do not overwrite entries already present in the
-                            // map: those came from sys_metadata (customization
-                            // overlays) or the SchemaRegistry and must win
-                            // over the MetadataService's artifact baseline.
-                            // Without this guard, saved per-org dashboard /
-                            // view overlays disappear from list endpoints on
-                            // refresh (detail endpoint kept showing the
-                            // overlay because it uses a different code path).
-                            const key = entryKey(entry);
-                            if (!itemMap.has(key)) {
-                                itemMap.set(key, entry);
-                            }
-                        }
-                    }
-                    items = Array.from(itemMap.values());
+                    //
+                    // [#7654] THE RESOLUTION IS THE OVERLAY MERGE'S, and it is
+                    // now literally that function instead of a second
+                    // implementation of the same idea. As a hand-rolled `Map`
+                    // keyed on `(package, name)` with STRICT equality, this step
+                    // disagreed with {@link mergePackageAwareOverlay} — which
+                    // runs one layer above it on the very same list — about the
+                    // package-LESS row, and the disagreement reached the wire as
+                    // a duplicate. A package-less row does not merely occupy a
+                    // slot of its own: it STANDS IN for each package's row of
+                    // that name, which is how `getMetaItem(name, packageId=P)`
+                    // resolves and what the overlay merge already implements.
+                    //
+                    // A runtime `PUT /api/v1/meta/<type>/<name>` carries no
+                    // `?package=`, so `sys_metadata` takes a
+                    // `package_id IS NULL` row. For a type the SchemaRegistry
+                    // has nothing for — `skill`, `agent` and `tool` reach the
+                    // MetadataService through its own loaders, so the registry
+                    // listing is empty and this baseline is the only package row
+                    // there is — that overlay leaves the merge above UNSTAMPED
+                    // (it stamps `_packageId` from the base row it displaced,
+                    // and there was none). Its key then missed the
+                    // package-bearing baseline row here, the "already present"
+                    // guard below never fired, and `GET /api/v1/meta/skill`
+                    // listed the override row AND the package row after a 200
+                    // PUT. The mirrored attribution — a package-less runtime
+                    // baseline under a package-bearing higher row — duplicated
+                    // for the same reason and is closed by the same call.
+                    //
+                    // Layer order is the one the guard this replaces stated:
+                    // entries from `sys_metadata` (customization overlays) or
+                    // the SchemaRegistry WIN over the MetadataService's artifact
+                    // baseline — without that, saved per-org dashboard / view
+                    // overlays disappeared from list endpoints on refresh while
+                    // the detail endpoint kept showing them. So `items` is the
+                    // higher layer (`records`) and the runtime listing is the
+                    // base, and "latest contribution wins" reproduces the guard
+                    // rather than reversing it.
+                    items = mergePackageAwareOverlay(
+                        request.type,
+                        runtimeItems as unknown[],
+                        (items as any[]).map((it) => ({
+                            data: it,
+                            packageId: ((it as any)?._packageId ?? undefined) as string | undefined,
+                        })),
+                    );
                 }
             }
         } catch {
