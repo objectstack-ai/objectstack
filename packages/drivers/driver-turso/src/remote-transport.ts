@@ -15,6 +15,14 @@
 import type { Client, InStatement, ResultSet } from '@libsql/client';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import { FILTER_OPERATORS, LOGICAL_OPERATORS, RETIRED_FILTER_OPERATORS } from '@objectstack/spec/data';
+// [#7872] The shared comparand-type door. `serializeComparand`'s allow-list and
+// `driver-sql`'s reached the identical six types twice independently — the
+// measured fact the door was ruled from — so the SET and the sentence the
+// refusal quotes are sourced there rather than kept as this transport's copy.
+import {
+  isAcceptedFilterComparand,
+  ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE,
+} from '@objectstack/spec/data';
 // [#7536] `$like`/`$ilike`'s pattern language, from the spec's one definition —
 // the dangling-escape gate and the LIKE→GLOB translation. Shared with
 // `SqlDriver`'s local emitter so this transport and its local twin cannot fork
@@ -2951,14 +2959,11 @@ export class RemoteTransport {
     // falls to the allow-list below and is named rather than laundered.
     if (value === null) return null;
     if (isBindableObjectComparand(value)) return value.toISOString();
-    if (
-      typeof value === 'string' ||
-      typeof value === 'number' ||
-      typeof value === 'bigint' ||
-      typeof value === 'boolean'
-    ) {
-      return value;
-    }
+    // [#7872] The remaining scalar membership (string / number / bigint /
+    // boolean — null and Date answered above) is the shared door's set, asked
+    // of the one predicate every face now shares instead of this transport's
+    // own copy of it.
+    if (isAcceptedFilterComparand(value)) return value;
     throw this.uncompilableComparand(object, field, op, value);
   }
 
@@ -3002,9 +3007,10 @@ export class RemoteTransport {
     }
     return invalidFilterError(
       `[RemoteTransport] Filter comparand ${target} ${shown} is ${describeValue(value)}, which this ` +
-        `transport cannot bind. A comparison value must be a string, number, bigint, boolean, null or ` +
-        `Date. Refusing rather than binding its JSON text — that compiles to valid SQL matching zero ` +
-        `rows, which is indistinguishable from "no rows matched" (#1004, #1058).`,
+        `transport cannot bind. A comparison value must be ` +
+        `${ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE}. Refusing rather than binding its JSON text ` +
+        `— that compiles to valid SQL matching zero rows, which is indistinguishable from ` +
+        `"no rows matched" (#1004, #1058).`,
     );
   }
 

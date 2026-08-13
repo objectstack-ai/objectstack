@@ -3,7 +3,28 @@
 import { describe, it, expect } from 'vitest';
 import { SettingsManifestSchema } from '@objectstack/spec/system';
 import { SettingsService } from '../settings-service.js';
+import type { CryptoAdapter } from '../crypto-adapter.js';
 import { aiSettingsManifest, aiTestActionHandler, aiTestEmbedderActionHandler } from './ai.manifest.js';
+
+/**
+ * #8026 — the write-door cases below save a complete `openai` provider config,
+ * which includes `openai_api_key` (a declared secret). Since the settings write
+ * path fails CLOSED on a secret it cannot protect, the fixture supplies an
+ * adapter that DECLARES confidentiality; without it these cases would be
+ * measuring the crypto gate instead of `temperature`'s declared window.
+ */
+class ConfidentialTestAdapter implements CryptoAdapter {
+  readonly confidential = true;
+  async encrypt(plaintext: string): Promise<string> {
+    return 'kms:' + Buffer.from(plaintext, 'utf8').toString('base64');
+  }
+  async decrypt(ciphertext: string): Promise<string> {
+    return Buffer.from(ciphertext.replace(/^kms:/, ''), 'base64').toString('utf8');
+  }
+  digest(): string {
+    return 'fnv32:deadbeef';
+  }
+}
 
 describe('aiSettingsManifest', () => {
   it('parses against SettingsManifestSchema', () => {
@@ -143,7 +164,7 @@ describe('aiSettingsManifest — temperature declares a window, not a grid (#655
     // default provider is `memory`, so the patch carries a real provider (and
     // its required key) — otherwise the TOUCH/visible contract skips the
     // specifier entirely and this test would be green for the wrong reason.
-    const svc = new SettingsService({ env: {} });
+    const svc = new SettingsService({ env: {}, crypto: new ConfidentialTestAdapter() });
     svc.registerManifest(aiSettingsManifest);
     await expect(
       svc.setMany('ai', { provider: 'openai', openai_api_key: 'sk-test', temperature: 0.15 }),
@@ -157,7 +178,7 @@ describe('aiSettingsManifest — temperature declares a window, not a grid (#655
   });
 
   it('write door: the window still binds — out-of-range values are refused in the min/max vocabulary', async () => {
-    const svc = new SettingsService({ env: {} });
+    const svc = new SettingsService({ env: {}, crypto: new ConfidentialTestAdapter() });
     svc.registerManifest(aiSettingsManifest);
     await expect(
       svc.setMany('ai', { provider: 'openai', openai_api_key: 'sk-test', temperature: 2.5 }),

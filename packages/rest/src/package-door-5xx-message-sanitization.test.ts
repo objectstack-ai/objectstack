@@ -232,29 +232,31 @@ describe('[#8086] a real sys_metadata failure, walked in process through this do
   }, 60_000);
 
   /**
-   * ⚠️ The CEILING of option B, measured and pinned rather than papered over.
+   * [#8132] Was the residual; now the second green.
    *
-   * The ruled fix applies the SHARED predicate, which is a heuristic over the
-   * message and recognises no Postgres "relation … does not exist" phrasing —
-   * measured false, asserted below. So that dialect's line still travels
-   * through this door after this change, exactly as it travels through the
-   * dispatcher twin, which runs the same predicate (#3867). The two doors
-   * therefore still AGREE, which is what this card was about; what remains is a
-   * property of the heuristic, shared by every boundary that applies it.
+   * This case was added by #8086 as a deliberately-red-in-future pin: the
+   * shared predicate was a heuristic over the message and knew no Postgres
+   * `relation … does not exist` phrasing, so that dialect's line still
+   * travelled through this door while SQLite's was withheld — the same
+   * condition, disclosed or not depending on which engine was underneath. It
+   * asserted that gap positively so the day it closed would be visible.
    *
-   * This is not an argument for widening the predicate here — that would be a
-   * new rule at one door, re-creating the divergence this closes. It is the
-   * argument for **option C**: `metadata-protocol` should not interpolate
-   * driver text into client-facing messages at all, which is the only fix that
-   * does not depend on recognising a dialect's phrasing. Filed separately.
+   * #8132 closed it in the predicate, where it belonged — so the assertion is
+   * INVERTED here rather than deleted, and the pair above/below now proves the
+   * property that actually matters: this door answers the same withheld
+   * envelope for BOTH dialects of one failure.
    *
-   * This case goes RED the day the shared predicate learns this phrasing or C
-   * lands — which is precisely when a reader should come back and re-read the
-   * paragraph above, instead of consuming a green suite as proof that the door
-   * is covered.
+   * ⚠️ Still not the structural cure, and this comment is the reason the
+   * pointer survives the flip. The predicate now recognises the two engines
+   * this repo runs; it is a phrasing test, and a phrasing test can only ever
+   * know the dialects someone has met. **Option C** — `metadata-protocol` not
+   * interpolating driver text into client-facing messages at all — is the fix
+   * whose correctness does not depend on that, and is tracked as #8136. The
+   * anti-vacuity guard at the top of this describe block goes red when C
+   * lands, which is the intended signal to revisit this whole section.
    */
-  it('the residual: Postgres phrasing trips no keyword, so it still travels (option C is the cure)', async () => {
-    expect(looksLikeInternalErrorLeak(PG_NO_RELATION)).toBe(false);
+  it('the Postgres phrasing of the same failure is withheld too, by the shared predicate', async () => {
+    expect(looksLikeInternalErrorLeak(PG_NO_RELATION)).toBe(true);
 
     const protocol = await bootRealProtocol(PG_NO_RELATION);
     const captured = await drive(
@@ -267,10 +269,13 @@ describe('[#8086] a real sys_metadata failure, walked in process through this do
     const error = expectDeclaredEnvelope(captured);
     expect(captured.status).toBe(500);
     expect(error.code).toBe('INTERNAL_ERROR');
-    // Stated as the fact it is: withheld would be better, and the predicate
-    // cannot tell. Asserted positively so the day it changes is visible.
-    expect(error.message).toContain('does not exist');
-    expect(error.message).not.toBe(INTERNAL_ERROR_MESSAGE);
+    // The same positive shape the SQLite case asserts, which is the point of
+    // the flip: one door, one envelope, regardless of the engine underneath.
+    expect(error.message).toBe(INTERNAL_ERROR_MESSAGE);
+
+    const wire = JSON.stringify(captured.body);
+    expect(wire).not.toContain('does not exist');
+    expect(wire).not.toContain('sys_metadata');
   }, 60_000);
 });
 

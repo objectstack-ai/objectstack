@@ -958,6 +958,14 @@ export function isRuntimeOwnedField(def: { type?: string } | undefined | null): 
  * level. Changing this means giving `ExecutionContext` a real origin marker
  * first — not guessing from the absence of a principal.
  *
+ * [#8214] The level did not move; two of the message's CLAIMS did. Under
+ * `options.strictReadonlyWrites` the write is refused outright, so the line no
+ * longer says the update was committed without the field, and the
+ * `preserveAudit` remedy is now offered per-field, derived from
+ * {@link isPreservableUnderAudit} rather than described in prose. Both are
+ * argued on {@link StripWarningOptions}; both keep the line naming the field,
+ * the consequence, and a remedy that is TRUE for the case that printed.
+ *
  * ### ...and the one key it does NOT log: the write's ADDRESS (#8141)
  *
  * `options.addressKey` names the key that carries the ADDRESS of the row this
@@ -1006,12 +1014,13 @@ export function stripReadonlyFields(
   data: Record<string, unknown> | undefined | null,
   supplied: Readonly<Record<string, unknown>>,
   logger?: EvaluateRulesOptions['logger'],
-  options?: { preserveAudit?: boolean; addressKey?: string },
+  options?: { preserveAudit?: boolean; addressKey?: string; strictReadonlyWrites?: boolean },
 ): Record<string, unknown> | undefined | null {
   const fields = objectSchema?.fields;
   if (!fields || !data) return data;
   const preserveAudit = options?.preserveAudit === true;
   const addressKey = options?.addressKey;
+  const strict = options?.strictReadonlyWrites === true;
   let result = data;
   for (const [name, def] of Object.entries(fields)) {
     // [#5503] `readonly: true` is the AUTHOR-declared lock; a runtime-owned
@@ -1043,10 +1052,19 @@ export function stripReadonlyFields(
     // rejection on stores with immutable primary keys, #6435), and only the
     // caller can know a key is an address — this helper never guesses one.
     if (addressKey !== undefined && name === addressKey) continue;
+    // [#8214] Both facts the message is allowed to state, computed HERE from
+    // what this pass actually knows. `preserveAuditApplies` is the same
+    // predicate the `continue` above consults — and reaching this line proves
+    // the flag was OFF (a preservable field under `preserveAudit` never gets
+    // here), so offering it is a remedy that would really have worked.
+    const warnOptions: StripWarningOptions = {
+      strict,
+      preserveAuditApplies: isPreservableUnderAudit(name, def),
+    };
     logger?.warn?.(
       def?.readonly
-        ? readonlyStripWarning(name, objectSchema?.name)
-        : runtimeOwnedStripWarning(name, String(def?.type), objectSchema?.name),
+        ? readonlyStripWarning(name, objectSchema?.name, warnOptions)
+        : runtimeOwnedStripWarning(name, String(def?.type), objectSchema?.name, warnOptions),
     );
   }
   return result;
@@ -1118,11 +1136,12 @@ export function stripRuntimeOwnedFields(
   data: Record<string, unknown> | undefined | null,
   supplied: Readonly<Record<string, unknown>>,
   logger?: EvaluateRulesOptions['logger'],
-  options?: { preserveAudit?: boolean },
+  options?: { preserveAudit?: boolean; strictReadonlyWrites?: boolean },
 ): Record<string, unknown> | undefined | null {
   const fields = objectSchema?.fields;
   if (!fields || !data) return data;
   const preserveAudit = options?.preserveAudit === true;
+  const strict = options?.strictReadonlyWrites === true;
   let result = data;
   for (const [name, def] of Object.entries(fields)) {
     if (!isRuntimeOwnedField(def)) continue;
@@ -1142,9 +1161,109 @@ export function stripRuntimeOwnedFields(
     if (preserveAudit && isPreservableUnderAudit(name, def)) continue; // historical import reinstates it
     if (result === data) result = { ...data };
     delete (result as Record<string, unknown>)[name];
-    logger?.warn?.(runtimeOwnedStripWarning(name, String(def?.type), objectSchema?.name));
+    // [#8214] The insert side carried the same false "COMMITTED WITHOUT IT"
+    // claim under `strictReadonlyWrites`, and the card marked that UNVERIFIED.
+    // Measured on `origin/main`, real `ObjectQL` + a recording driver, one
+    // `autonumber` seeded by the caller: `refusedCode
+    // ERR_READONLY_FIELD_REJECTED`, `driverCreates 0`, `warnLines 1`,
+    // `claimsCommitted true`. It reproduces — `engine.insert` throws after this
+    // pass and before any driver dispatch, exactly as `update` does.
+    logger?.warn?.(
+      runtimeOwnedStripWarning(name, String(def?.type), objectSchema?.name, {
+        strict,
+        preserveAuditApplies: isPreservableUnderAudit(name, def),
+      }),
+    );
   }
   return result;
+}
+
+/**
+ * What the strip knows about the write at the moment it composes a line (#8214).
+ *
+ * Both members exist for the same reason and follow the same rule: **a strip
+ * message may state only what is true of the call in front of it.** Neither is
+ * a wording preference — each replaces a sentence that was measurably false for
+ * a real caller.
+ *
+ * Both default to `false`, and the default is the CONSERVATIVE reading, not the
+ * common one: an unset flag never claims a commit that may not happen and never
+ * advertises a remedy that may not work. A caller that knows better says so.
+ * #8141 is the standing reason — its defect was a line offering `isSystem` to a
+ * caller for whom that exemption was the strictly worse posture, and a message
+ * that guesses optimistically reproduces it.
+ */
+export interface StripWarningOptions {
+  /**
+   * The write passed `options.strictReadonlyWrites` (#5126), so the drop this
+   * line reports will REFUSE the whole write instead of shrinking it.
+   *
+   * Measured on `origin/main` before this option existed (real `ObjectQL` + a
+   * recording driver, by-id update of an object with a `readonly` field,
+   * `{ strictReadonlyWrites: true }`): `refusedCode ERR_READONLY_FIELD_REJECTED`,
+   * `driverWrites 0`, `warnLines 1`, and the one line said the update was
+   * "COMMITTED WITHOUT IT". Nothing was written and the log promised a partial
+   * commit — the #4632 shape inverted, sending a reader to hunt for a row that
+   * was never touched. The INSERT side reproduced identically
+   * (`runtimeOwnedStripWarning`, `driverCreates 0`), which is why this option
+   * is shared by both messages rather than being an update-path patch.
+   *
+   * ⚠️ The strip is NOT the seam that decides the refusal, so this flag is the
+   * caller's assertion, not a derivation: `assertNoStrictDrops()` in `engine.ts`
+   * throws afterwards. It is safe to state as fact here because the two are
+   * driven off the SAME drop — a field this function is called for is a field
+   * `reportDroppedFields` records and `assertNoStrictDrops` then refuses on,
+   * including the `addressKey` case, which is excluded from both channels by
+   * one predicate (#8141). Adding a drop path that skips one channel and not
+   * the other would falsify this line; keep the two fed from one fact.
+   */
+  readonly strict?: boolean;
+  /**
+   * `{ context: { preserveAudit: true } }` (#3493) would have KEPT this exact
+   * field — so naming it is a remedy the reader can act on.
+   *
+   * DERIVED from {@link isPreservableUnderAudit} at the call site, never from a
+   * hand-written description of the whitelist. That is the whole point: the
+   * whitelist is `AUDIT_TIMELINE_FIELDS` plus any non-`system` field, and its
+   * second limb is under active revision (#8215 — it currently sweeps in a
+   * platform object's own primary key). A sentence DESCRIBING the whitelist
+   * becomes false the day that lands; a sentence gated on the predicate narrows
+   * with it, automatically and with no second declaration to forget.
+   *
+   * It is also why the remedy is targeted rather than blanket. `preserveAudit`
+   * does not help every stripped `readonly` field: a non-audit `system` column
+   * (`organization_id` — tenancy) is stripped under `preserveAudit` too, and
+   * measured, today's blanket-free wording is right about that one by accident.
+   * Offering the flag there would repeat #8141's defect one exemption over.
+   */
+  readonly preserveAuditApplies?: boolean;
+}
+
+/**
+ * The `preserveAudit` remedy sentence, emitted only when the flag would really
+ * have kept the field this line names. See {@link StripWarningOptions}.
+ */
+function preserveAuditRemedySentence(options?: StripWarningOptions): string {
+  if (options?.preserveAuditApplies !== true) return '';
+  return (
+    ` A historical import restoring this record's own earlier values does NOT need that blanket ` +
+    `exemption: pass the narrower historical-import context { context: { preserveAudit: true } } ` +
+    `(#3493), which reinstates THIS field while the rest of the strip stays in force.`
+  );
+}
+
+/**
+ * The "observe instead of reading this log" sentence. Under strict the write is
+ * refused, so "detect drops programmatically" is not the remedy on offer —
+ * dropping strict is. Same sentence the refusal error itself ends on, so the
+ * log line and `ReadonlyFieldRejectedError` point the same way.
+ */
+function observeInsteadSentence(options?: StripWarningOptions): string {
+  return options?.strict === true
+    ? ` To let the strip happen and merely observe it instead of refusing the write, drop ` +
+        `options.strictReadonlyWrites and pass options.onFieldsDropped (#3407).`
+    : ` To detect drops programmatically instead of reading ` +
+        `this log, pass options.onFieldsDropped (#3407).`;
 }
 
 /**
@@ -1158,19 +1277,47 @@ export function stripRuntimeOwnedFields(
  * writer paths still may set it. Same `warn` level, for the same reason spelled
  * out on {@link readonlyStripWarning}: this seam cannot tell a hostile forged
  * body from a trusted server-side writer that simply forgot to declare itself.
+ *
+ * [#8214] Its `preserveAudit` clause is now gated on
+ * {@link StripWarningOptions.preserveAuditApplies} rather than printed
+ * unconditionally. The clause was RIGHT for every field measured — a declared
+ * `autonumber` is not `system`, so the whitelist keeps it — and it stays
+ * printed for those. What changed is that the two sibling messages now derive
+ * their remedy set from ONE predicate instead of each carrying its own opinion,
+ * which is the disagreement #8214 was filed about.
  */
-export function runtimeOwnedStripWarning(field: string, type: string, object?: string): string {
+export function runtimeOwnedStripWarning(
+  field: string,
+  type: string,
+  object?: string,
+  options?: StripWarningOptions,
+): string {
   const on = object ? ` on '${object}'` : '';
+  const audit = options?.preserveAuditApplies === true;
+  const consequence =
+    options?.strict === true
+      ? `DROPPED and the write is being REFUSED ENTIRELY — the runtime issues this value from its ` +
+        `sequence, and this write passed options.strictReadonlyWrites, so NOTHING is written: not ` +
+        `this column, and not the fields that would have survived the strip. The call throws ` +
+        `ERR_READONLY_FIELD_REJECTED rather than returning success (#5126).`
+      : `DROPPED and the write is being COMMITTED WITHOUT IT — the runtime issues this value from its ` +
+        `sequence, so the call returns success while the column holds the generated number, not the one ` +
+        `sent (#5503).`;
   return (
     `Field '${field}'${on} is a runtime-owned '${type}' field: the caller-supplied value was ` +
-    `DROPPED and the write is being COMMITTED WITHOUT IT — the runtime issues this value from its ` +
-    `sequence, so the call returns success while the column holds the generated number, not the one ` +
-    `sent (#5503). Server-side code that legitimately sets it (seed replay, a migration) must ` +
-    `declare itself trusted by passing { context: { isSystem: true } }; a data import reinstating ` +
-    `legacy record numbers uses the historical-import context ({ context: { preserveAudit: true } }, ` +
-    `#3493). A beforeInsert/beforeUpdate hook does NOT need either — hook-written keys are not ` +
-    `caller-supplied. To detect drops programmatically instead of reading this log, pass ` +
-    `options.onFieldsDropped (#3407). Forged record numbers from untrusted client input are ` +
+    consequence +
+    ` Server-side code that legitimately sets it (seed replay, a migration) must ` +
+    `declare itself trusted by passing { context: { isSystem: true } }` +
+    (audit
+      ? `; a data import reinstating ` +
+        `legacy record numbers uses the historical-import context ({ context: { preserveAudit: true } }, ` +
+        `#3493), which reinstates THIS field while the rest of the strip stays in force. ` +
+        `A beforeInsert/beforeUpdate hook does NOT need either — hook-written keys are not ` +
+        `caller-supplied.`
+      : `. A beforeInsert/beforeUpdate hook does NOT need it — hook-written keys are not ` +
+        `caller-supplied.`) +
+    observeInsteadSentence(options) +
+    ` Forged record numbers from untrusted client input are ` +
     `expected here and need no action.`
   );
 }
@@ -1179,17 +1326,55 @@ export function runtimeOwnedStripWarning(field: string, type: string, object?: s
  * The message {@link stripReadonlyFields} logs per dropped field (#4903).
  * Exported so the pin test asserts the CONTRACT of this text — consequence,
  * `isSystem` remedy, `onFieldsDropped` remedy — rather than its wording.
+ *
+ * ### [#8214] Two claims that were false, and are now conditioned on the fact
+ *
+ * 1. **The commit.** "COMMITTED WITHOUT IT" is the DEFAULT strip's consequence
+ *    and stays byte-identical there. Under `strictReadonlyWrites` it was a lie:
+ *    nothing is written at all. See {@link StripWarningOptions.strict} for the
+ *    measurement. The line is NOT dropped in strict mode — the level argument
+ *    below is that `warn` exists so real forgery attempts stay visible, and a
+ *    forged write that got REFUSED is the case that most deserves a line. Only
+ *    the claim of a commit goes.
+ * 2. **The remedy.** The message named `{ context: { isSystem: true } }`, the
+ *    BLANKET exemption from the whole strip, and never `preserveAudit` (#3493),
+ *    the narrower whitelist this strip actually honours three lines up. An
+ *    import that forgot the flag read this line and was steered to the strictly
+ *    worse posture — the identical failure #8141 fixed one remedy over. It is
+ *    offered per-field rather than always, and derived rather than described;
+ *    {@link StripWarningOptions.preserveAuditApplies} argues both.
+ *
+ * What did NOT change, deliberately: the level (`warn`), and the requirement
+ * that every surviving line name the FIELD, the CONSEQUENCE and a REMEDY THAT
+ * IS TRUE FOR THAT CASE. And the write's own address still logs nothing at all
+ * (#8141) — in strict mode as well, since `addressKey` is consulted before this
+ * message is composed in either mode.
  */
-export function readonlyStripWarning(field: string, object?: string): string {
+export function readonlyStripWarning(
+  field: string,
+  object?: string,
+  options?: StripWarningOptions,
+): string {
   const on = object ? ` on '${object}'` : '';
+  const consequence =
+    options?.strict === true
+      ? `the caller-supplied value was DROPPED and the update is being REFUSED ENTIRELY — this ` +
+        `write passed options.strictReadonlyWrites, so NOTHING is written: not this column, and ` +
+        `not the fields that would have survived the strip. The call throws ` +
+        `ERR_READONLY_FIELD_REJECTED rather than returning success (#5126).`
+      : `the caller-supplied value was DROPPED and the update ` +
+        `is being COMMITTED WITHOUT IT — the call returns success while this column keeps its stored ` +
+        `value (#2948).`;
   return (
-    `Field '${field}'${on} is read-only: the caller-supplied value was DROPPED and the update ` +
-    `is being COMMITTED WITHOUT IT — the call returns success while this column keeps its stored ` +
-    `value (#2948). Server-side code that legitimately writes read-only columns (a plugin, a cron / ` +
+    `Field '${field}'${on} is read-only: ` +
+    consequence +
+    ` Server-side code that legitimately writes read-only columns (a plugin, a cron / ` +
     `background job persisting a system-computed value) must declare itself trusted by passing ` +
     `{ context: { isSystem: true } } on the write; a beforeUpdate hook does NOT need this because ` +
-    `hook-written keys are not caller-supplied. To detect drops programmatically instead of reading ` +
-    `this log, pass options.onFieldsDropped (#3407). Forged read-only keys from untrusted client ` +
+    `hook-written keys are not caller-supplied.` +
+    preserveAuditRemedySentence(options) +
+    observeInsteadSentence(options) +
+    ` Forged read-only keys from untrusted client ` +
     `input are expected here and need no action.`
   );
 }

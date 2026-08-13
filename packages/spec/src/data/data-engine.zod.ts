@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 import { FilterConditionSchema } from './filter.zod';
-import { SortNodeSchema, QuerySchema, FullTextSearchSchema, FieldNodeSchema, AggregationNodeSchema, QUERY_CURSOR_REMOVED, QUERY_DISTINCT_REMOVED } from './query.zod';
+import { SortNodeSchema, QuerySchema, FullTextSearchSchema, FieldNodeSchema, AggregationNodeSchema, GroupByNodeSchema, QUERY_CURSOR_REMOVED, QUERY_DISTINCT_REMOVED } from './query.zod';
 import { retiredKey } from '../shared/retired-key';
 import { ExecutionContextSchema } from '../kernel/execution-context.zod';
 
@@ -326,8 +326,15 @@ export const DataEngineDeleteOptionsSchema = lazySchema(() => BaseEngineOptionsS
 export const EngineAggregateOptionsSchema = lazySchema(() => BaseEngineOptionsSchema.extend({
   /** Filter conditions (WHERE) — standard QueryAST `where` */
   where: z.union([z.record(z.string(), z.unknown()), FilterConditionSchema]).optional(),
-  /** Group By fields */
-  groupBy: z.array(z.string()).optional(),
+  /**
+   * GROUP BY targets — standard {@link GroupByNodeSchema}, same as
+   * `QuerySchema.groupBy`: a bare field name, or a
+   * `{ field, dateGranularity?, alias? }` bucket object for date bucketing.
+   * The engine has always read both spellings (#8032 caught the declaration
+   * up to the enforced contract); the string form stays the canonical
+   * short-hand and validates unchanged.
+   */
+  groupBy: z.array(GroupByNodeSchema).optional().describe('GROUP BY targets (strings or `{field, dateGranularity?}` objects for date bucketing)'),
   /**
    * Aggregation definitions — uses standard AggregationNodeSchema (`function` key).
    * e.g. [{ function: 'sum', field: 'amount', alias: 'total' }]

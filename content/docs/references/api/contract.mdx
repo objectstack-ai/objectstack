@@ -27,7 +27,7 @@ const result = ApiErrorSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| … +261 more>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| … +260 more>` | ✅ | Error code (e.g. VALIDATION_ERROR; StandardErrorCode ∪ the ledger the serving side registers — ERROR_CODE_LEDGER for framework packages) |
 | **message** | `string` | ✅ | Readable error message |
 | **category** | `string` | optional | Error category (e.g. validation, authorization) |
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
@@ -198,7 +198,6 @@ const result = ApiErrorSchema.parse(data);
 * `METADATA_CONFLICT`
 * `METADATA_NOT_FOUND`
 * `METADATA_SCHEMA_INVALID`
-* `MONGODB_MULTI_TENANT_UNSUPPORTED`
 * `NAMESPACE_PREFIX`
 * `NEEDS_PASSWORD`
 * `NODE_FAILURE`
@@ -315,7 +314,7 @@ const result = ApiErrorSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| … +265 more>; message: string; category?: string; httpStatus?: integer; … }` | optional | Error details if success is false |
+| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| … +264 more>; message: string; category?: string; httpStatus?: integer; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 
 
@@ -354,7 +353,7 @@ const result = ApiErrorSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| … +265 more>; message: string; category?: string; httpStatus?: integer; … }` | optional | Error details if success is false |
+| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| … +264 more>; message: string; category?: string; httpStatus?: integer; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `{ id?: string; success: boolean; errors?: object[]; index?: number; … }[]` | ✅ | Results for each item in the batch |
 
@@ -396,7 +395,7 @@ const result = ApiErrorSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| … +265 more>; message: string; category?: string; httpStatus?: integer; … }` | optional | Error details if success is false |
+| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| … +264 more>; message: string; category?: string; httpStatus?: integer; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **id** | `string` | ✅ | ID of the deleted record |
 
@@ -448,7 +447,7 @@ const result = ApiErrorSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| … +265 more>; message: string; category?: string; httpStatus?: integer; … }` | optional | Error details if success is false |
+| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| … +264 more>; message: string; category?: string; httpStatus?: integer; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `Record<string, any>[]` | ✅ | Array of matching records |
 | **pagination** | `{ total?: number; limit?: number; offset?: number; cursor?: string; … }` | ✅ | Pagination info |
@@ -464,7 +463,7 @@ const result = ApiErrorSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | optional | Record ID if processed |
 | **success** | `boolean` | ✅ |  |
-| **errors** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| … +265 more>; message: string; category?: string; httpStatus?: integer; … }[]` | optional |  |
+| **errors** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| … +264 more>; message: string; category?: string; httpStatus?: integer; … }[]` | optional |  |
 | **index** | `number` | optional | Index in original request |
 | **data** | `any` | optional | Result data (e.g. created record) |
 
@@ -503,7 +502,7 @@ Key-value map of record data
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **success** | `boolean` | ✅ | Operation success status |
-| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| … +265 more>; message: string; category?: string; httpStatus?: integer; … }` | optional | Error details if success is false |
+| **error** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| … +264 more>; message: string; category?: string; httpStatus?: integer; … }` | optional | Error details if success is false |
 | **meta** | `{ timestamp: string; duration?: number; requestId?: string; traceId?: string }` | optional | Response metadata |
 | **data** | `Record<string, any>` | ✅ | The requested or modified record |
 

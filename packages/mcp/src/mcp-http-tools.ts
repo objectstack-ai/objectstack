@@ -34,6 +34,7 @@
 
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { EngineAggregateOptions } from '@objectstack/spec/data';
 import {
   MCP_OAUTH_SCOPE_DATA_READ,
   MCP_OAUTH_SCOPE_DATA_WRITE,
@@ -80,13 +81,21 @@ export interface McpDataBridge {
    * aggregation through the engine simply omits it and the
    * `aggregate_records` tool is not registered (graceful degradation, same
    * contract as {@link McpActionBridge}).
+   *
+   * `groupBy` / `aggregations` are the engine's own declarations
+   * (`EngineAggregateOptions`, #8032) rather than a hand-mirrored copy: the
+   * tool's zod schema below already enforces exactly these shapes at the
+   * ingress, and a private restatement is where the two had drifted — this
+   * interface used to declare `function: string` against the six-name enum
+   * and a `distinct?: boolean` the engine retired (#6815), silently dropping
+   * any caller who believed it.
    */
   aggregate?(
     object: string,
     opts: {
       where?: Record<string, unknown>;
-      groupBy?: Array<string | { field: string; dateGranularity?: string; alias?: string }>;
-      aggregations: Array<{ function: string; field?: string; alias: string; distinct?: boolean }>;
+      groupBy?: NonNullable<EngineAggregateOptions['groupBy']>;
+      aggregations: NonNullable<EngineAggregateOptions['aggregations']>;
       timezone?: string;
     },
   ): Promise<unknown[]>;

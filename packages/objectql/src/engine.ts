@@ -28,7 +28,12 @@ import type { ValidateDataIssue, ValidateDataResponse } from '@objectstack/spec/
 import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken, isNowDefaultToken } from '@objectstack/spec/data';
 // [#5158] Door 2's lowering sink — the SAME pair the protocol face (Door 1)
 // runs, so `FilterArray` has exactly one lowering in the product.
-import { isFilterAST, parseFilterAST, VALID_AST_OPERATORS } from '@objectstack/spec/data';
+import {
+  isFilterAST,
+  parseFilterAST,
+  normalizeFilterComparandTypes,
+  VALID_AST_OPERATORS,
+} from '@objectstack/spec/data';
 // [#5574] D6, executable. The ceiling and the refusal message live in
 // `packages/spec/src/data/bulk-write-hook-conformance.ts` so BOTH phases and
 // both verbs enforce one definition; the engine raises, the contract decides.
@@ -626,6 +631,19 @@ function lowerWhereFilterArray<T extends object | undefined>(
     // one either way — it reads the lowered condition, which is what both doors
     // produce.
     assertListComparandShapes(object, operation, where);
+    // [#7872] The comparand-type door, on the OBJECT form. `parseFilterAST`
+    // runs the same walk on everything it lowers or passes through, but
+    // NEITHER door routes an object-form filter through it — Door 1 gates on
+    // `isFilterAST` first and Door 2 is this very branch — so without this
+    // call the dominant form would bypass the door entirely (the #7956
+    // divergence matrix arrived through it). Shape gate first (#5869 keeps
+    // its pinned wording for the list-operator shapes), type door second;
+    // the walk is copy-on-write, so the common path allocates nothing and a
+    // narrowed bigint replaces the bag rather than editing the caller's.
+    const normalized = normalizeFilterComparandTypes(where, `${operation}('${object}')`);
+    if (normalized !== where) {
+      return { ...(bag as Record<string, unknown>), where: normalized } as T;
+    }
     return bag;
   }
 
@@ -7723,8 +7741,15 @@ export class ObjectQL implements IObjectQLEngine {
           const preserveAudit = opCtx.context?.preserveAudit === true;
           for (let i = 0; i < rows.length; i++) {
             if (rowErrors[i] !== undefined) continue;
+            // [#8214] The insert side carries the same claim and the same
+            // sequencing — this pass logs, the `ReadonlyFieldRejectedError`
+            // below throws before any driver dispatch. Measured on
+            // `origin/main`: `driverCreates 0` while the line said the write
+            // was "COMMITTED WITHOUT IT". The card marked this half UNVERIFIED;
+            // it reproduces, so the flag is threaded here too.
             const stripped = stripRuntimeOwnedFields(
-              schemaForValidation as any, rows[i], suppliedPerRow[i] ?? {}, this.logger, { preserveAudit },
+              schemaForValidation as any, rows[i], suppliedPerRow[i] ?? {}, this.logger,
+              { preserveAudit, strictReadonlyWrites: options?.strictReadonlyWrites === true },
             ) as Record<string, unknown>;
             if (stripped === rows[i]) continue;
             for (const k of Object.keys(rows[i])) {
@@ -8709,7 +8734,15 @@ export class ObjectQL implements IObjectQLEngine {
                // insert-side sibling), which is what keeps those byte-identical.
                if (!opCtx.context?.isSystem) {
                    const preRo = hookContext.input.data as Record<string, unknown>;
-                   hookContext.input.data = stripReadonlyFields(updateSchema as any, preRo, suppliedValues, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true, addressKey: idAddressesThisRow ? 'id' : undefined }) as any;
+                   // [#8214] `strictReadonlyWrites` is threaded INTO the strip
+                   // rather than consulted only at `assertNoStrictDrops()`
+                   // below: the strip logs from inside, the refusal happens
+                   // afterwards, and until the strip knew the flag its line
+                   // told a refused caller the update had been "COMMITTED
+                   // WITHOUT IT" while `driverWrites` was 0. The seam that
+                   // composes the sentence has to know the mode the sentence
+                   // describes; nothing else here can tell it.
+                   hookContext.input.data = stripReadonlyFields(updateSchema as any, preRo, suppliedValues, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true, addressKey: idAddressesThisRow ? 'id' : undefined, strictReadonlyWrites }) as any;
                    reportDroppedFields(preRo, hookContext.input.data as Record<string, unknown>, 'readonly');
                }
                // [#5126] Both strip passes are done; refuse now if the caller
@@ -8856,7 +8889,11 @@ export class ObjectQL implements IObjectQLEngine {
                // rejected upstream by the tenant write wall, #2946).
                if (!opCtx.context?.isSystem) {
                    const preRoMulti = hookContext.input.data as Record<string, unknown>;
-                   hookContext.input.data = stripReadonlyFields(updateSchema as any, preRoMulti, suppliedValues, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true }) as any;
+                   // [#8214] Same threading as the by-id branch; the multi
+                   // branch still passes no `addressKey` (nothing addresses a
+                   // row by key here), which is what keeps it byte-identical
+                   // to #8141 in every other respect.
+                   hookContext.input.data = stripReadonlyFields(updateSchema as any, preRoMulti, suppliedValues, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true, strictReadonlyWrites }) as any;
                    reportDroppedFields(preRoMulti, hookContext.input.data as Record<string, unknown>, 'readonly');
                }
                // [#5126] Same refusal on the predicate path. A bulk strip is
@@ -9860,8 +9897,8 @@ export class ObjectQL implements IObjectQLEngine {
       const field = (agg as { field?: string })?.field;
       if (field && field !== '*') referenced.add(field);
     }
-    for (const g of (query?.groupBy as unknown[]) ?? []) {
-      const field = typeof g === 'string' ? g : (g as { field?: string })?.field;
+    for (const g of query?.groupBy ?? []) {
+      const field = typeof g === 'string' ? g : g?.field;
       if (field) referenced.add(field);
     }
 
@@ -9897,7 +9934,7 @@ export class ObjectQL implements IObjectQLEngine {
         ast: {
             object,
             where: query.where,
-            groupBy: query.groupBy as any,
+            groupBy: query.groupBy,
             aggregations: query.aggregations,
             // ENFORCED since #4286 (step 3). On the ast so the FLS predicate
             // guard walks its references (predicate-guard.ts) and a future
@@ -9924,11 +9961,11 @@ export class ObjectQL implements IObjectQLEngine {
         // supported we can push the aggregate down to the driver; otherwise
         // we fall back to driver.find() + in-memory bucketing so the result
         // remains correct on partial-support dialects (e.g. SQLite + week).
-        const groupByItems = Array.isArray(query.groupBy) ? (query.groupBy as any[]) : [];
+        const groupByItems = Array.isArray(query.groupBy) ? query.groupBy : [];
         const granularityCaps: Record<string, boolean> | undefined =
             drv?.supports?.queryDateGranularity;
         const structuredItems = groupByItems.filter((g) => typeof g !== 'string');
-        const allStructuredSupported = structuredItems.every((g: any) => {
+        const allStructuredSupported = structuredItems.every((g) => {
             if (!g?.dateGranularity) return true; // plain {field} object is fine
             return granularityCaps?.[g.dateGranularity] === true;
         });
@@ -9940,7 +9977,7 @@ export class ObjectQL implements IObjectQLEngine {
         // matching rows are fetched), but bucketing runs uniformly in JS so a
         // row near a tz day-boundary lands identically on every driver.
         const tz = query.timezone;
-        const hasDateBucket = structuredItems.some((g: any) => !!g?.dateGranularity);
+        const hasDateBucket = structuredItems.some((g) => !!g?.dateGranularity);
         const tzRequiresInMemory = !!tz && tz !== 'UTC' && hasDateBucket;
         if (typeof drv.aggregate === 'function' && allStructuredSupported && !tzRequiresInMemory) {
             // HAVING is engine-owned (#4286): applied AFTER aggregation, over
