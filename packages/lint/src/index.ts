@@ -627,6 +627,7 @@ export type {
 // `@objectstack/lint/runtime` subpath — the entry the kernel boot path imports,
 // so a consumer there never names the graph that reaches the source parsers.
 export {
+  buildRuntimeWriteSnapshots,
   runRuntimeAuthoringRules,
   runtimeAuthoringRulesFor,
   runtimeGatedTypes,

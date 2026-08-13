@@ -3290,15 +3290,28 @@ export class ObjectStackProtocolImplementation implements
         // Resolution context. Best-effort: a host without a registry (a
         // metadata-only test double) still writes, it just gets the rules that
         // need no object universe. Never let context-gathering fail a write.
-        let objects: unknown[] = [];
-        try {
-            if (typeof this.engine.registry?.listItems === 'function') {
-                objects = [...this.engine.registry.listItems('object')];
-                if (objects.length === 0) objects = [...this.engine.registry.listItems('objects')];
+        //
+        // [#8309] `permissions`/`books` join `objects` — the sibling
+        // collections the three cross-collection security rules compare
+        // against (RuntimeStackContext's own docblock carries the 38-vs-4
+        // measurement). Gathered PER WRITE like `objects` always was, never
+        // cached: the read is a registry map walk plus one array copy of item
+        // references, it runs only on an `active`-state publish (D1), and a
+        // cache would need invalidation across every org's overlay writes.
+        // Each collection is guarded independently so a registry that can
+        // answer one question still answers the others.
+        const listCollection = (singularType: string, pluralType: string): unknown[] => {
+            try {
+                if (typeof this.engine.registry?.listItems !== 'function') return [];
+                const items = [...this.engine.registry.listItems(singularType)];
+                return items.length > 0 ? items : [...this.engine.registry.listItems(pluralType)];
+            } catch {
+                return [];
             }
-        } catch {
-            objects = [];
-        }
+        };
+        const objects = listCollection('object', 'objects');
+        const permissions = listCollection('permission', 'permissions');
+        const books = listCollection('book', 'books');
 
         const verdict = evaluateRuntimeAuthoringGate({
             type: singular,
@@ -3306,6 +3319,8 @@ export class ObjectStackProtocolImplementation implements
             state: evt.state,
             body: evt.body,
             objects,
+            permissions,
+            books,
             ...(evt.organizationId !== undefined ? { organizationId: evt.organizationId } : {}),
             orgWallEnforced: this.orgWallEnforced(),
         });
