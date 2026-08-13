@@ -22,7 +22,16 @@ function makeQl(declared: any[] = []) {
     async find(object: string, q: any) {
       if (object !== 'sys_capability') return [];
       const where = q?.where ?? {};
-      return rows.filter((r) => Object.entries(where).every(([k, v]) => r[k] === v));
+      // [#8470] A `null` comparand is IS NULL, not `=== null`: `driver-sql`
+      // compiles `{ field: null }` to `IS NULL`, `driver-memory`'s matcher uses
+      // `value == condition`, and MongoDB matches null-or-missing — none of them
+      // is strict equality against an ABSENT key. `bootstrapSystemCapabilities`
+      // (called by several cases below) scopes its curated lookup with
+      // `organization_id: null`, which strict `===` would make unsatisfiable
+      // here while it works in production.
+      return rows.filter((r) =>
+        Object.entries(where).every(([k, v]) => (v === null ? r[k] == null : r[k] === v)),
+      );
     },
     async insert(object: string, data: any) {
       if (object !== 'sys_capability') return null;

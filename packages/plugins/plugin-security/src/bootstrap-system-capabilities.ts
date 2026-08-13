@@ -30,6 +30,51 @@
  * The seed loop used to refresh both alike while the comment in front of it
  * claimed admin edits were preserved — what #2909 T3 actually made seed-once is
  * `scope`, and only `scope`.
+ *
+ * [#8470] The CURATED half looks up THE ROW THE PLATFORM OWNS, not the first row
+ * that happens to share the name.
+ *
+ * `tryFind` runs under `SYSTEM_CTX`, which carries no `tenantId`: the security
+ * middleware short-circuits on `isSystem` before Layer 0 is composed, and the
+ * engine's `buildDriverOptions` sets a driver tenant scope only when
+ * `execCtx.tenantId !== undefined`. The lookup therefore reads ACROSS
+ * organizations by construction — which is correct for a seeder, and is exactly
+ * why the predicate has to say which row it means.
+ *
+ * Since #8461 made `sys_capability.name` unique per ORGANIZATION rather than per
+ * installation (ADR-0120 D1, the cross-tenant existence oracle #8323 reports), an
+ * admin may author `manage_users` inside their organization while the platform
+ * holds its own row in the NULL-organization bucket. A lookup on `{ name }` alone
+ * then has two candidates and picks between them on grounds unrelated to
+ * ownership, with two harms: an organization's authored copy is overwritten with
+ * the platform's at every boot, and — when the org row is the one selected before
+ * the platform's row exists — the curated row is NEVER INSERTED, in any bucket,
+ * installation-wide.
+ *
+ * Note what the remedy is NOT. "Give the lookup an ORDER BY" was already true and
+ * did not help: #4363's pagination tie-breaker appends `ORDER BY id ASC` to any
+ * paged read of a driver-managed table, and `limit: 1` counts as paged on both
+ * `SqlDriver` and `MongoDBDriver` (only `findOne` opts out via
+ * `singleRowLookup`). So this lookup was already DETERMINISTIC on the shipped
+ * drivers — deterministic on `id`, a key with no relationship whatsoever to who
+ * owns the row, and stable per installation, so a boot that reconciles the wrong
+ * row keeps reconciling it forever rather than self-healing. Determinism was
+ * never the missing property; OWNERSHIP was.
+ *
+ * The predicate is therefore `managed_by: 'platform'` AND `organization_id: null`
+ * — the two facts that jointly define "the platform's own row". They also make
+ * the result set provably a singleton, which is what retires the ordering
+ * question rather than answering it: the post-#8461 unique key is
+ * `(COALESCE(organization_id, …), name)`, so the NULL-organization bucket admits
+ * at most ONE row per name, and `limit: 1` over a set of size ≤ 1 cannot be
+ * arbitrary. `managed_by` alone would not carry that guarantee (a platform-marked
+ * row sitting inside an organization — from seed data or a legacy import — would
+ * restore the two-candidate state), and `organization_id` alone would not
+ * distinguish the platform's row from an admin's in a single-organization
+ * deployment, where both live in the same bucket.
+ *
+ * The DERIVED half's lookup is deliberately UNCHANGED (its own guard, #5876,
+ * already refuses to touch a row it does not own).
  */
 
 import { PLATFORM_CAPABILITIES, type PlatformCapability } from '@objectstack/spec/security';
@@ -104,6 +149,21 @@ export interface CapabilitySeedResult {
    * boot summary rather than warned about (#4632).
    */
   skippedAuthored: number;
+  /**
+   * [#8470] Curated definitions whose platform row is ABSENT and could not be
+   * written, because a row this pass does not own already holds the name in the
+   * NULL-organization bucket (a Setup-authored row on a single-organization
+   * deployment, or a package row that claimed a curated name).
+   *
+   * This counter exists because the alternative is silence in both directions.
+   * Before the ownership-scoped lookup the seeder resolved that collision by
+   * OVERWRITING the other author's row; now it correctly declines to — but
+   * `tryInsert` swallows the engine's unique-constraint refusal, so declining
+   * would otherwise look exactly like a clean boot while a curated capability is
+   * missing from the registry installation-wide. Counted and warned, never
+   * silent.
+   */
+  blockedCurated: number;
   /** Definitions considered this pass (curated + derived). */
   total: number;
 }
@@ -114,7 +174,7 @@ export async function bootstrapSystemCapabilities(
   options: SeedOptions = {},
 ): Promise<CapabilitySeedResult> {
   if (!ql || typeof ql.find !== 'function' || typeof ql.insert !== 'function') {
-    return { seeded: 0, updated: 0, skippedAuthored: 0, total: 0 };
+    return { seeded: 0, updated: 0, skippedAuthored: 0, blockedCurated: 0, total: 0 };
   }
 
   const materialized = new Set<string>(options.materializedCapabilityNames ?? []);
@@ -141,8 +201,17 @@ export async function bootstrapSystemCapabilities(
   let seeded = 0;
   let updated = 0;
   let skippedAuthored = 0;
+  let blockedCurated = 0;
   for (const def of byName.values()) {
-    const existing = await tryFind(ql, 'sys_capability', { name: def.name }, 1);
+    const isDerived = derivedNames.has(def.name);
+    // [#8470] CURATED: address the platform's OWN row. DERIVED: unchanged — its
+    // own `managed_by` guard below is what keeps it off rows it does not own
+    // (#5876), and narrowing its lookup here would change a half this card
+    // deliberately leaves alone.
+    const lookup = isDerived
+      ? { name: def.name }
+      : { name: def.name, managed_by: 'platform', organization_id: null };
+    const existing = await tryFind(ql, 'sys_capability', lookup, 1);
     const row = existing[0];
     if (row?.id) {
       // [#5876] Reconcile display fields only where THIS pass owns the copy.
@@ -166,7 +235,7 @@ export async function bootstrapSystemCapabilities(
       // the caller says which names another pass already materialized, and
       // this guard holds even when nothing said so — an admin row for a name
       // no package ever declared is invisible to that list.
-      if (derivedNames.has(def.name) && row.managed_by !== 'platform') {
+      if (isDerived && row.managed_by !== 'platform') {
         skippedAuthored += 1;
         continue;
       }
@@ -189,10 +258,27 @@ export async function bootstrapSystemCapabilities(
         active: true,
       });
       if (created) seeded += 1;
+      else if (!isDerived) {
+        // [#8470] The curated row is absent AND could not be written. On the
+        // reachable path that is the NULL-organization bucket already holding
+        // the name under another author — the collision the scoped lookup
+        // declines to resolve by overwriting. Report it: a curated capability
+        // missing from the registry is the harm this card is about, and an
+        // unreported one is indistinguishable from a clean boot.
+        blockedCurated += 1;
+        options.logger?.warn?.(
+          `[security] curated capability "${def.name}" has no platform row and could not be seeded — ` +
+            'a row this pass does not own already holds the name in the platform (NULL-organization) ' +
+            'bucket. The platform definition is missing from sys_capability installation-wide; the ' +
+            'other row was left as its author wrote it (ADR-0066 D1 asset ownership). Grants and ' +
+            'requiredPermissions referencing the name are unaffected — they resolve by name, not by row.',
+          { name: def.name },
+        );
+      }
     }
   }
   options.logger?.info?.('[security] system capabilities seeded into sys_capability (ADR-0066 D1)', {
-    seeded, updated, skippedAuthored, total: byName.size,
+    seeded, updated, skippedAuthored, blockedCurated, total: byName.size,
   });
-  return { seeded, updated, skippedAuthored, total: byName.size };
+  return { seeded, updated, skippedAuthored, blockedCurated, total: byName.size };
 }
