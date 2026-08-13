@@ -948,16 +948,19 @@ The Layout DSL has **no** performance surface. A section declares no
 (`packages/spec/src/ui/view.zod.ts`) is `.strict()`, so authoring any of them is
 a **parse failure** — a loud rejection, not a silent no-op.
 
-Virtualization for large datasets is configured on the **view**, not on a section
-or a layout: set the boolean `virtualScroll` on a list-shaped view
-(`ListViewSchema`). That is the only virtual-scrolling switch objectui reads —
-see [Widget Contract → Performance](/docs/protocol/objectui/widget-contract#performance).
+Nor is there an authorable virtual-scrolling switch anywhere else: since 17.0.0
+(#7176) the view-level boolean `virtualScroll` is retired too, under ADR-0049
+enforce-or-remove — every measured reader only copied the key forward and the
+grid renderer never applied it. Large datasets page via the view's `pagination`
+block. See
+[Widget Contract → Performance](/docs/protocol/objectui/widget-contract#performance).
 
 <Callout type="info">
   Earlier revisions of this page documented section-level `virtualScroll` /
   `itemHeight` / `lazy` / `source` and a `layout.renderStrategy: progressive`
   block. None of them existed on any schema, so they are **removed rather than
-  implemented**. For the keys a section really accepts, see the
+  implemented** — real virtualization is an implementation card first. For the
+  keys a section really accepts, see the
   [View Reference](/docs/references/ui/view).
 </Callout>
 
