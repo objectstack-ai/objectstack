@@ -42,11 +42,19 @@ is seeded regardless of what any organization has authored.
 breaking for anyone constructing `CapabilitySeedResult` by hand, hence `minor`
 per the launch-window convention). It counts, and warns about, the one collision
 the seeder now declines to resolve by overwriting: a curated name already held
-in the platform bucket by a row this pass does not own — a Setup-authored row on
-a single-organization deployment. Previously that case was "resolved" by
-clobbering the other author; now it is refused, and refusing silently would be
-its own defect, since `tryInsert` swallows the engine's unique-constraint
-refusal.
+in the platform bucket by a row the scoped lookup did not match. Previously that
+case was "resolved" by clobbering the other author; now it is refused, and
+refusing silently would be its own defect, since `tryInsert` swallows the
+engine's unique-constraint refusal. The warning states the provenance it
+actually **read** off the blocking row rather than asserting who authored it —
+the seeder observes "no platform-owned row matched, and the insert was refused",
+which is not the same fact as "this row belongs to someone else".
+
+Reachable and ordinary, not hypothetical: `organization_id` auto-stamping lives
+in the enterprise `@objectstack/organizations` runtime, which is also what
+activates every walled posture — so on a deployment without it (`single`
+posture, no stamper) every Setup-authored capability row lands in the
+NULL-organization bucket.
 
 No authorization behaviour changes. Grants (`systemPermissions`) and
 requirements (`requiredPermissions`) resolve capabilities **by name**, and no
