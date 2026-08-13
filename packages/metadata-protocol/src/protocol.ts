@@ -1596,6 +1596,53 @@ function clientFacingFailureText(err: unknown, fallback: string): string {
 }
 
 /**
+ * [#8333] The seed-request schema rejection, DECLARED — a 422 refusal with the
+ * same envelope `saveMetaItem` raises for a failed overlay parse.
+ *
+ * ## Why this exists rather than a wider rule at the collector
+ *
+ * {@link ObjectStackProtocolImplementation.applySeedBodies} reports failure as
+ * DATA (`seedApplied.error`), and #8136's rule quotes a caught sentence only
+ * when the error DECLARED itself a client-facing refusal. Measured on
+ * `origin/main`, that catch receives two populations:
+ *
+ *  1. **driver text** — a `sys_metadata` read failing underneath the loader's
+ *     dependency-graph walk arrives verbatim, and `seedApplied` rides on a
+ *     `200` publish response, so no HTTP boundary can withhold it;
+ *  2. **the seed bodies' own schema rejection** — `SeedLoaderRequestSchema`
+ *     used to `parse()`, so a malformed seed reached the same catch as a raw
+ *     `ZodError`. That is AUTHORING feedback and it must survive — but it
+ *     declared nothing, so the #8136 rule would have blanked it.
+ *
+ * ⛔ The wrong cure is loosening the rule at the collector: that turns a
+ * positive list into a guess and re-admits population 1. The right one is the
+ * direction #8136 set — **declare the refusal at its own producer**. So the
+ * parse becomes a `safeParse` and its rejection is minted here as a real
+ * ADR-0112 envelope (422 / `INVALID_METADATA` / structured `issues`), which
+ * then satisfies {@link declaresClientRefusal} on its own merits and is quoted
+ * back to the author unchanged by a collector that needed no special case.
+ *
+ * The author is also strictly better off: the old path stringified a whole
+ * `ZodError`, so `seedApplied.error` was a multi-line JSON dump of raw zod
+ * internals. This is the curated summary {@link zodIssuesToMetadataIssues}
+ * already produces for every other authoring surface.
+ */
+function seedRequestValidationError(zodIssues: unknown): Error {
+    const issues = zodIssuesToMetadataIssues(zodIssues);
+    const summary = issues.slice(0, 3)
+        .map((i: { path: string; message: string }) => `${i.path || '<root>'}: ${i.message}`)
+        .join('; ');
+    const err = new Error(
+        `[invalid_metadata] the published seed bodies failed spec validation: ${summary}`
+        + (issues.length > 3 ? ` (+${issues.length - 3} more)` : ''),
+    );
+    (err as any).code = 'INVALID_METADATA';
+    (err as any).status = 422;
+    (err as any).issues = issues;
+    return err;
+}
+
+/**
  * A batch row that names no record id for an operation that needs one — a
  * caller error, so it carries VALIDATION_FAILED / 400 rather than falling
  * through {@link toRowApiError}'s unclassified-throw default (#4793).
@@ -11502,12 +11549,36 @@ export class ObjectStackProtocolImplementation implements
                 });
                 record({ ...base, notices: flattened, outcome: 'rewritten' });
             } catch (e: any) {
+                // [#8333 · P13] `rows[].reason` is REPORT DATA — it rides on the
+                // migration report, not on a thrown message — so no HTTP
+                // boundary's 5xx withhold can reach it. Measured on
+                // `origin/main`: a `sys_metadata` write failing under
+                // `saveMetaItem` put `SQLITE_ERROR: no such table: sys_metadata`
+                // straight onto this field.
+                //
+                // The authoring half is unaffected and that was checked before
+                // this line changed, not assumed: every refusal this `try` can
+                // receive declares 4xx — `saveMetaItem`'s spec rejection
+                // (422 `INVALID_METADATA`), `SysMetadataRepository`'s
+                // `[item_locked]` / `[writable_package_required]` (403 / 422) —
+                // so each is still quoted verbatim and still names the fix.
+                //
+                // ⚠️ The old fallback was `String(e)`, which is itself a
+                // disclosure (`String(err)` renders as `Error: SQLITE_ERROR:
+                // …`). A stable sentence replaces it; the text goes to the log
+                // below, whole.
                 record({
                     ...base,
                     notices: flattened,
                     outcome: 'failed',
-                    reason: e?.message ?? String(e),
+                    reason: clientFacingFailureText(
+                        e,
+                        'the metadata store rejected the rewrite; the reason is in the server log',
+                    ),
                 });
+                console.warn(
+                    `[protocol.migrateStoredMetadata] rewrite failed for ${base.type}/${base.name}: ${e?.message ?? e}`,
+                );
             }
         }
 
@@ -11824,10 +11895,29 @@ export class ObjectStackProtocolImplementation implements
                     actor: args.actor ?? 'system',
                 });
             } catch (e: any) {
+                // [#8333 · P8] A materializer is arbitrary PLUGIN code going
+                // straight at the engine (plugin-security upserts
+                // `sys_permission_set`), so a driver failure lands here
+                // verbatim — and this string is copied onto
+                // `materializeApplied.failures[].error` of a **200** publish
+                // response, where no boundary withhold can reach it.
+                //
+                // ⚠️ Checked before converting, and it is the reason this site
+                // is safe: the real materializer reports its AUTHORED refusals
+                // by RETURNING `{ success: false, error }` ("permission set
+                // name is owned by another package"), which never enters this
+                // catch at all — it is forwarded by the collector below. So the
+                // rule here judges only what THREW, and blanks no authoring
+                // feedback. A third-party materializer that throws a declared
+                // 4xx still keeps its sentence.
                 out.materializeApplied = {
                     success: false, inserted: 0, updated: 0,
-                    error: e?.message ?? 'materialize failed',
+                    error: clientFacingFailureText(e, 'materialize failed'),
                 };
+                console.warn(
+                    `[protocol.runPublishSideEffects] materializer failed for `
+                    + `${args.singularType}/${args.name}: ${e?.message ?? e}`,
+                );
             }
         }
         // [ADR-0094] Awaited projection: runs AFTER the package-door
@@ -11889,7 +11979,13 @@ export class ObjectStackProtocolImplementation implements
                 metadataAdapter as any,
                 console as any,
             );
-            const request = SeedLoaderRequestSchema.parse({
+            // [#8333 · P9] `safeParse`, not `parse` — see {@link
+            // seedRequestValidationError}. A malformed seed body used to reach
+            // the catch below as a raw `ZodError`, which declares no `status`
+            // and would therefore have been withheld along with the driver text
+            // this card is about. Declaring the refusal at its own producer is
+            // what keeps the author's feedback AND the positive list intact.
+            const parsedRequest = SeedLoaderRequestSchema.safeParse({
                 seeds,
                 config: {
                     defaultMode: 'upsert',
@@ -11897,7 +11993,8 @@ export class ObjectStackProtocolImplementation implements
                     ...(organizationId ? { organizationId } : {}),
                 },
             });
-            const r = await loader.load(request);
+            if (!parsedRequest.success) throw seedRequestValidationError(parsedRequest.error.issues);
+            const r = await loader.load(parsedRequest.data);
             return {
                 success: r.success,
                 inserted: r.summary.totalInserted,
@@ -11905,7 +12002,23 @@ export class ObjectStackProtocolImplementation implements
                 ...(r.errors?.length ? { errors: r.errors } : {}),
             };
         } catch (e: any) {
-            return { success: false, inserted: 0, updated: 0, error: e?.message ?? 'seed apply failed' };
+            // [#8333 · P9] `seedApplied.error` rides on a **200** publish
+            // response, so this is a data-path disclosure no HTTP boundary can
+            // reach. Measured on `origin/main`: a driver failure under the
+            // loader's dependency-graph read (`getMetaItem` → `sys_metadata`)
+            // escaped the loader and arrived here, putting `SQLITE_ERROR: no
+            // such table: sys_metadata` on the field.
+            //
+            // The other population this catch receives — the seed bodies' own
+            // schema rejection — now DECLARES itself 422 at the parse above, so
+            // it is quoted in full and the author still learns which seed and
+            // which key. That declaration is the whole reason this site could
+            // be converted rather than escalated.
+            console.warn(`[protocol.applySeedBodies] seed apply failed: ${e?.message ?? e}`);
+            return {
+                success: false, inserted: 0, updated: 0,
+                error: clientFacingFailureText(e, 'seed apply failed'),
+            };
         }
     }
 
@@ -12231,11 +12344,36 @@ export class ObjectStackProtocolImplementation implements
             // BATCH_ABORTED so the caller sees the all-or-nothing semantics
             // instead of inferring them from publishedCount 0.
             const causal = e?.__batchItem as { type: string; name: string } | undefined;
+            // [#8333 · P6] `failed[].error` is RESPONSE DATA, not a message, so
+            // no HTTP boundary's withhold reaches it. Measured on `origin/main`
+            // by failing the `sys_metadata` write under the promote: the batch
+            // answered `failed[0].error = "SQLITE_ERROR: no such table:
+            // sys_metadata"`.
+            //
+            // ⚠️ This is the site the card warned about, and the measurement is
+            // why it could be converted rather than escalated. Its authored
+            // population — the one #4277 exists for — is `assertRuntimeAuthoringRules`'
+            // author-time rejection, and it DECLARES `422 INVALID_METADATA`
+            // with structured `issues`. Reproduced end to end with a real
+            // broken-CEL approval flow: after this change the caller still
+            // receives `flows[0].nodes[1].config.approvers[0].value:
+            // [approval-expression-invalid] …`, plus `code` and `issues`. Every
+            // other refusal reaching here declares 4xx too (`NOT_OVERRIDABLE`
+            // 403, `METADATA_CONFLICT` 409, the repository's 403/404/409/422).
+            // So the rule withholds the driver text and nothing else.
+            //
+            // `code` and `issues` are deliberately left as they were: they are
+            // a different field with a different rule (a closed union — see
+            // {@link carryCatalogedErrorCode}), and are not this card's scope.
+            console.warn(
+                `[protocol.publishPackageDrafts] batch publish of '${request.packageId}' rolled back at `
+                + `${causal ? `${causal.type}/${causal.name}` : 'an unidentified item'}: ${e?.message ?? e}`,
+            );
             const failedOut = ordered.map((d) =>
                 causal && d.type === causal.type && d.name === causal.name
                     ? {
                         type: d.type, name: d.name,
-                        error: e?.message ?? 'publish failed',
+                        error: clientFacingFailureText(e, 'publish failed'),
                         ...(e?.code ? { code: e.code } : {}),
                         // Carry structured spec-validation issues so the publish
                         // surface can point at the offending field.
@@ -12292,9 +12430,25 @@ export class ObjectStackProtocolImplementation implements
                     `[Protocol] publish side effects failed for ${p.d.type}/${p.d.name}: ${e?.message ?? e}`,
                 );
                 materialize.any = true;
+                // [#8333 · P7] The PREFIX is unchanged byte for byte — it is
+                // the operational fact a caller needs (the metadata IS live;
+                // boot reconciliation heals the drift), and pins read it. Only
+                // the interpolation changes: measured on `origin/main`, a
+                // driver failure inside the side effects put `SQLITE_ERROR: no
+                // such table: sys_metadata` on the tail of this sentence, on a
+                // 200 response.
+                //
+                // Everything this `try` wraps is infrastructure — registry
+                // write-through, table DDL, the projector, the event — so no
+                // authored refusal was measured arriving here at all; the
+                // materializer's authored refusal takes P8's RETURN path
+                // instead. The rule is applied uniformly anyway rather than
+                // special-cased: a declared 4xx from any of them is still
+                // quoted.
                 materialize.failures.push({
                     type: p.d.type, name: p.d.name,
-                    error: `side effects failed (metadata is live; boot reconciliation heals): ${e?.message ?? 'unknown'}`,
+                    error: 'side effects failed (metadata is live; boot reconciliation heals): '
+                        + clientFacingFailureText(e, 'the reason is in the server log'),
                 });
             }
         }
@@ -13031,7 +13185,32 @@ export class ObjectStackProtocolImplementation implements
                 });
                 copied.push({ type: row.type, name: newName });
             } catch (e: any) {
-                failed.push({ type: row.type, name: row.name, error: e?.message ?? 'copy failed' });
+                // [#8333 · P10] `failed[].error` is copy-response DATA.
+                // Measured on `origin/main` by failing the `sys_metadata`
+                // insert under `saveMetaItem`: the field carried `SQLITE_ERROR:
+                // no such table: sys_metadata` verbatim.
+                //
+                // This `try` wraps exactly one call, and `saveMetaItem`'s
+                // authored refusals all declare 4xx — the spec rejection is
+                // `422 INVALID_METADATA` (measured: the whole "Unrecognized
+                // key(s) on this view container … Wrap it: `defineView({ … })`"
+                // prescription comes through unchanged), the author-time gate
+                // likewise 422, the org/overridability refusals 403. Nothing an
+                // author needs is blanked.
+                //
+                // ⛔ The two sibling `failed[]` pushes ABOVE this one (`the flow
+                // does not canonicalize` / `the source item does not convert`)
+                // are deliberately untouched: they interpolate authored
+                // schema-validation text, not driver text, and #8333 records
+                // them as examined-and-left.
+                failed.push({
+                    type: row.type, name: row.name,
+                    error: clientFacingFailureText(e, 'copy failed'),
+                });
+                console.warn(
+                    `[protocol.duplicatePackage] copy failed for ${row.type}/${row.name} → `
+                    + `'${request.targetPackageId}': ${e?.message ?? e}`,
+                );
             }
         }
         return {
@@ -13607,12 +13786,27 @@ export class ObjectStackProtocolImplementation implements
                     reverted.push({ type: it.type, name: it.name, action: 'restored' });
                 }
             } catch (e: any) {
+                // [#8333 · P11] `failed[].error` is revert-response DATA.
+                // Measured on `origin/main` by failing the
+                // `sys_metadata_history` read under `repo.restoreVersion`: the
+                // field carried `SQLITE_ERROR: no such table: sys_metadata`.
+                //
+                // Every authored refusal this `try` can receive declares 4xx —
+                // `SysMetadataRepository`'s `[version_not_found]` 404 (measured
+                // end to end and still quoted whole), `[no_draft]` 404,
+                // `[version_not_restorable]` 409, `[item_locked]` 403,
+                // `[writable_package_required]` 422 — so the self-correcting
+                // sentences survive and only the driver line is withheld.
                 failed.push({
                     type: it.type,
                     name: it.name,
-                    error: e?.message ?? 'revert failed',
+                    error: clientFacingFailureText(e, 'revert failed'),
                     ...(e?.code ? { code: e.code } : {}),
                 });
+                console.warn(
+                    `[protocol.revertCommit] revert of ${it.type}/${it.name} failed for commit `
+                    + `'${request.commitId}': ${e?.message ?? e}`,
+                );
             }
         }
 
@@ -13700,7 +13894,24 @@ export class ObjectStackProtocolImplementation implements
                 });
                 revertedCommits.push(c.id);
             } catch (e: any) {
-                failed.push({ commitId: c.id, error: e?.message ?? 'revert failed' });
+                // [#8333 · P12] The derivative of P11 — `failed[].error` on the
+                // rollback response. Measured on `origin/main` by failing the
+                // `sys_metadata_commit` lookup inside the inner
+                // {@link revertCommit}: `SQLITE_ERROR: no such table:
+                // sys_metadata` reached the field.
+                //
+                // This `try` wraps exactly one call, and `revertCommit` throws
+                // only refusals it declared — `[commit_not_found]` 404
+                // (measured, still quoted whole) and the lock/authorization
+                // 4xx above it; its PER-ITEM failures never throw at all, they
+                // are collected into its own `failed[]` (P11).
+                failed.push({
+                    commitId: c.id,
+                    error: clientFacingFailureText(e, 'revert failed'),
+                });
+                console.warn(
+                    `[protocol.rollbackToPackageCommit] revert of commit '${c.id}' failed: ${e?.message ?? e}`,
+                );
             }
         }
         return { success: failed.length === 0, revertedCommits, failed };
