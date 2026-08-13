@@ -23,7 +23,7 @@
 import { describe, it, expect } from 'vitest';
 import { filterSubtreeProvenanceOf } from '@objectstack/spec/data';
 
-import { ObjectQLStrategy } from '../strategies/objectql-strategy';
+import { ObjectQLStrategy } from '../strategies/objectql-strategy.js';
 
 /** Reach the private merge exactly as `execute()` calls it. */
 const withReadScope = (
