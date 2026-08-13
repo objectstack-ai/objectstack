@@ -52,7 +52,10 @@ function assertAnalyticsQueryBody(body: unknown): void {
         if ('filters' in b && !('where' in b)) {
             throw validationFailure(
                 '`filters` is not an AnalyticsQuery field — use `where` (canonical Query DSL FilterCondition, the same shape find() takes).',
-                [{ field: 'filters', code: 'unrecognized_keys', message: 'use `where` instead of `filters`' }],
+                // `unknown_field` — the ADR-0114 catalog member for "a key the
+                // target does not declare"; this entry used to hand-spell Zod's
+                // `unrecognized_keys`, a code outside the closed catalog (#8124).
+                [{ field: 'filters', code: 'unknown_field', message: 'use `where` instead of `filters`' }],
             );
         }
     }

@@ -40,6 +40,10 @@ export * from './odata.zod';
 export * from './batch.zod';
 export * from './http-cache.zod';
 export * from './errors.zod';
+// The ADR-0114 D3 boundary mapper — the ONE implementation of Zod issue code →
+// `FieldErrorCode` in the repo (#8124); `@objectstack/rest` and
+// `@objectstack/types` both consume it.
+export { zodIssuesToFields } from './zod-issues-to-fields';
 export * from './error-code-ledger.zod';
 export * from './protocol.zod';
 export * from './rest-server.zod';

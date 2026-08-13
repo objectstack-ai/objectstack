@@ -998,6 +998,7 @@
     "readServiceSelfInfo": "src/api/discovery.zod.ts#readServiceSelfInfo (function)",
     "resolveDiscoveryEnvironment": "src/api/discovery.zod.ts#resolveDiscoveryEnvironment (function)",
     "standardErrorCodeForHttpStatus": "src/api/errors.zod.ts#standardErrorCodeForHttpStatus (function)",
-    "validateApiEndpointDeclarations": "src/api/endpoint-publish-gate.ts#validateApiEndpointDeclarations (function)"
+    "validateApiEndpointDeclarations": "src/api/endpoint-publish-gate.ts#validateApiEndpointDeclarations (function)",
+    "zodIssuesToFields": "src/api/zod-issues-to-fields.ts#zodIssuesToFields (function)"
   }
 }
