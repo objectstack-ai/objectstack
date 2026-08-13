@@ -78,6 +78,57 @@
  * One detail not predicted and worth keeping: the reverted suite does not merely
  * go red, it REPRINTS the defect — every failure message carries the resolved
  * row with `"case_number":null` (or `""` for the empty-string case) inside it.
+ *
+ * # [#7099] The leg the gate cannot classify is now LOUD — still not refused
+ *
+ * The residue pin below was recorded under a premise that has since been
+ * measured false. It said classifying this leg "needs the round trip this
+ * refusal exists to avoid"; in fact `RemoteTransport.upsert` already runs
+ * `SELECT * FROM "<object>" WHERE "id" = ?` after every `INSERT … ON CONFLICT`
+ * and returns the mapped row — the pin's own `expect(inserted.case_number)`
+ * was reading that very round trip's result. So the NULL was in hand all along,
+ * one field read away, on the layer that knows which column is an
+ * `auto_number`. No probe query was added, and none is needed.
+ *
+ * What did NOT change: the row still lands, and it still lands with a NULL
+ * record number. Refusing after the write is a different act from the pre-write
+ * gate, and generating the number on remote is still the deferred half (A). The
+ * pin therefore asserts BOTH halves — the unchanged NULL and the new warning —
+ * so a future change that quietly converts this leg into a refusal goes red on
+ * the first half rather than sliding through on the second.
+ *
+ * ## Where the detection lives, and why not on `RemoteTransport`
+ *
+ * The card's promoted scope suggested handing the autonumber rule DOWN to
+ * `RemoteTransport` (the `setFilterColumnSql` / `setDiagnosticSink` plumbing
+ * precedent). Measured, the driver is the better layer and needs no plumbing at
+ * all: `TursoDriver.upsert` already receives the transport's returned row and
+ * already holds `autoNumberFields[object]`, and its `logger.warn` is the very
+ * sink `setDiagnosticSink` forwards to — so routing through the transport would
+ * be a longer path to the same log line. It would also contradict the layering
+ * decision the block below pins: "RemoteTransport cannot see a field type, so it
+ * cannot be the one to refuse" asserts no member of `RemoteTransport.prototype`
+ * matches `/autonumber|sequence/i`. Teaching the transport this rule would have
+ * gone red on that pin — correctly.
+ *
+ * ## Reverse verification — both directions predicted BEFORE they were run
+ *
+ * ① Fix reverted (driver source restored to `origin/main`, all new tests kept).
+ *    Predicted: exactly one red — the residue pin, failing on the WARNING half
+ *    (`expect(lines).toHaveLength(1)`), never on the NULL half asserted above
+ *    it. Measured `1 failed | 19 passed`, `expected [] to have a length of 1`.
+ *    The 19 green include the three silence controls, which an unfixed driver
+ *    satisfies trivially — stated plainly because it is what ② is for.
+ *
+ * ② Fix broken the OTHER way (empty-slot predicate dropped, so the report fires
+ *    on every declared `auto_number` column). Predicted: exactly two red — the
+ *    MERGE-leg control and the caller-supplied-number control — with the
+ *    residue pin itself STAYING GREEN, since an over-firing rule still emits
+ *    its one line, and with the no-`auto_number`-field control also staying
+ *    green, since the registry lookup returns before the predicate is reached.
+ *    Measured `2 failed | 18 passed`, both `expected [ Array(1) ] to deeply
+ *    equal []`. That is the half ① cannot prove: the pin alone cannot tell a
+ *    correct warning from a wolf-crying one, and the controls are what do.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
