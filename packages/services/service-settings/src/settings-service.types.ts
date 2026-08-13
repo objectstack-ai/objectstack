@@ -372,14 +372,14 @@ export class UnknownKeyError extends Error {
  *
  * ## Wire spelling
  *
- * Not mapped to a dedicated HTTP status/code by `settings-routes.ts`: it
- * surfaces on the `500 INTERNAL_ERROR` arm every unmapped service error takes,
- * carrying this message. That is deliberate for now — a dedicated
- * `SETTINGS_CRYPTO_UNAVAILABLE` on the wire has to be registered in
- * `ERROR_CODE_LEDGER` (`packages/spec`) first, or it is the "silent fourth
- * state" ADR-0112 forbids, and that registration is out of this card's scope.
- * `code` is therefore an IN-PROCESS discriminator today: a plugin calling
- * `settings.setMany` branches on it exactly as it does on `SETTINGS_LOCKED`.
+ * Mapped by `settings-routes.ts`'s PUT handler to `500
+ * SETTINGS_CRYPTO_UNAVAILABLE` (#8273; the code is registered in
+ * `ERROR_CODE_LEDGER`, `packages/spec/src/api/error-code-ledger.zod.ts`, per
+ * ADR-0112). The status stays 500 — a server-side misconfiguration, and
+ * deliberately not 503: no retry succeeds until an operator wires a
+ * cryptoProvider. `code` doubles as the in-process discriminator: a plugin
+ * calling `settings.setMany` branches on it exactly as it does on
+ * `SETTINGS_LOCKED`.
  */
 export class SettingsCryptoUnavailableError extends Error {
   readonly code = 'SETTINGS_CRYPTO_UNAVAILABLE' as const;

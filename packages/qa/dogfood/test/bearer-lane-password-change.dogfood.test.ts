@@ -79,6 +79,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack from '@objectstack/example-showcase';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { assertArmed, authSettingArmed } from './armed.js';
 
 const SYS = { context: { isSystem: true } };
 
@@ -143,6 +144,24 @@ describe('#8049: /auth/change-password clears the force-change flag and enforces
     // reuse assertion in this file would pass without testing anything.
     const auth = await stack.kernel.getServiceAsync<any>('auth');
     auth.applyConfigPatch({ passwordHistoryCount: HISTORY_COUNT });
+
+    // [#8074] …and READ IT BACK. Patching and trusting the patch is the same
+    // bet the org-less fixture of #8023 lost: if this key is ever renamed,
+    // clamped or dropped, `applyConfigPatch` still returns quietly and every
+    // reuse assertion below silently returns to the vacuous state the header
+    // warns about. From `beforeAll`, so a disarm leaves no green cells.
+    await assertArmed([
+      authSettingArmed({
+        stack,
+        setting: 'passwordHistoryCount',
+        armed: (v) => Number(v) >= 1,
+        control: "ADR-0069 D1's password-reuse rejection (and its history append)",
+        disarmedBy:
+          '`passwordHistoryCount` defaults to 0 (off): nothing is recorded, so "a reused ' +
+          'password is refused" has nothing to reject against and certifies a control that ' +
+          'was never exercised. Arm it through `applyConfigPatch`.',
+      }),
+    ]);
 
     adminToken = await stack.signIn();
   }, 180_000);

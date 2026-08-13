@@ -32,7 +32,11 @@
  * genuinely does not have.
  */
 
-import { FIELD_GROUP_SYSTEM_FIELDS, resolveInjectedSystemColumns } from '@objectstack/spec/data';
+import {
+  FIELD_GROUP_SYSTEM_FIELDS,
+  resolveInjectedSystemColumns,
+  unprovisionedInjectedColumns,
+} from '@objectstack/spec/data';
 import { SystemFieldName } from '@objectstack/spec/system';
 
 /**
@@ -68,4 +72,31 @@ export const SYSTEM_FIELDS: ReadonlySet<string> = new Set<string>([
  */
 export function injectedColumnsFor(objectDef: unknown): ReadonlySet<string> {
   return resolveInjectedSystemColumns(objectDef).names;
+}
+
+/**
+ * The injected columns THIS object registers with NO storage behind them
+ * (#8116) — the #7865 provenance marker, in the per-object set shape lint
+ * rules consume.
+ *
+ * Non-empty only for an ADR-0015 `external` object: the remote database owns
+ * its schema, so the platform's injected anchors (`owner_id`,
+ * `organization_id`, the audit family, …) exist in the registered schema and
+ * nowhere else. A reference to one is still ADDRESSABLE — it resolves, so
+ * {@link injectedColumnsFor} rightly includes it and the existence rules stay
+ * silent — but a predicate or pointer over it can never produce a real value:
+ * on SQLite the query silently degrades to constant-false (HTTP 200, zero
+ * rows, no error). Existence and provenance are different questions; rules
+ * that RESOLVE a reference ask the first, and should ALSO ask this one to warn.
+ *
+ * Delegates to the spec's `unprovisionedInjectedColumns` — the same derivation
+ * the runtime guards converge on (#7833 / #7859 / #7858) — so the author-time
+ * warning and the runtime's storage verdict cannot disagree. ⛔ Never hand-copy
+ * the `external` predicate or the anchor identity check here; the drift is the
+ * exact shape #8116 moved the derivation into the spec to prevent. An
+ * author-DECLARED column of the same name is the author's (it maps a remote
+ * column they vouch for — #7859's security direction) and is never in the set.
+ */
+export function unprovisionedInjectedColumnsFor(objectDef: unknown): ReadonlySet<string> {
+  return new Set(unprovisionedInjectedColumns(objectDef));
 }
