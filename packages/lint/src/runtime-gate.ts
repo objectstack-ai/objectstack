@@ -85,9 +85,11 @@ const TYPE_TO_STACK_KEY: Readonly<Record<string, string>> = {
   // have stayed green while the gate built `{ objects, seeds: [item] }` for
   // every seed write and every rule reading `stack.data` saw nothing — wired,
   // and running on nothing, with `rulesRun` reporting the rules as having run.
-  // Nothing declares `seed` in `runtimeTypes` today, so correcting it changes no
-  // behaviour now; it is corrected here, with the measurement that found it
-  // (#7576), rather than left for the rollout card to trip over.
+  // Nothing declared `seed` in `runtimeTypes` at the time, so correcting it
+  // changed no behaviour then; it was corrected here, with the measurement
+  // that found it (#7576), rather than left for the rollout card to trip
+  // over. The ADR-0091 seed pair now DOES declare `seed` (#8307), so this
+  // mapping is load-bearing today, not merely inert-and-correct.
   seed: 'data',
 };
 
