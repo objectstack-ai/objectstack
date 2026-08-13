@@ -16,6 +16,11 @@ import type {
 import { SeedLoaderConfigSchema, isMultiValueField } from '@objectstack/spec/data';
 import { resolveSeedRecord } from '@objectstack/formula';
 import { bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult } from '@objectstack/core';
+// [#8442] The repo's ONE recogniser for "this throw is a record-validation
+// failure" — duck-typed on `code`/`name`, the same predicate `mapDataError` and
+// both dispatcher error exits use. Imported rather than re-spelled so the seed
+// channel and the HTTP boundaries cannot drift about what counts as one.
+import { validationFailureDetails } from '@objectstack/types';
 
 interface Logger {
   info(message: string, meta?: Record<string, any>): void;
@@ -26,6 +31,89 @@ interface Logger {
 
 /** Default field used for externalId matching on target objects */
 const DEFAULT_EXTERNAL_ID_FIELD = 'name';
+
+/**
+ * [#8442] What a seed `errors[].message` says when the caught sentence may NOT
+ * be quoted. Names the operation and points at the log; quotes nothing.
+ */
+const WITHHELD_WRITE_REASON =
+  'the data engine rejected the write; the reason is in the server log';
+
+/**
+ * [#8442] Whether a caught error DECLARED itself a client-facing refusal, and
+ * may therefore have its sentence quoted back into `errors[].message`.
+ *
+ * ## Which question this sink asks
+ *
+ * `errors[].message` is free text — no catalog bounds it — so this is #8333's
+ * question ("did the producer AUTHOR this sentence for a caller?"), NOT #8441's
+ * membership question, which belongs to `code` because that field writes a
+ * closed union (ADR-0112 D4). Same question, one file over.
+ *
+ * ## …and why the ANSWER needs a second declaration shape
+ *
+ * `protocol.ts`'s {@link declaresClientRefusal} answers it with a numeric 4xx
+ * `status` alone, because every refusal reaching ITS collectors declares one
+ * (the repository's `ITEM_LOCKED` 403, `VERSION_NOT_FOUND` 404, …). This sink
+ * receives a population those collectors never see: the **data engine's
+ * validation layer**. Measured on `main`, an `@objectstack/objectql`
+ * `ValidationError` carries own properties `[stack, message, code, name,
+ * fields]` — `code = 'VALIDATION_FAILED'` and deliberately **no `status`**,
+ * because (per `@objectstack/types`' `validation-failure.ts`) "deciding it
+ * means 400 is the job of whichever boundary serves it". For the seed channel,
+ * THIS is that boundary.
+ *
+ * So the 4xx test alone would withhold exactly the sentence a seed author
+ * needs. That is not a hypothetical loss of nuance: on this producer the
+ * structured keys do NOT carry the offending field. `buildWriteError` reports
+ * `field: '(write)'` and `targetField`/`attemptedValue` = the record's
+ * EXTERNAL key ("which row"), so "which key was rejected and why" — `plan`,
+ * `max_length` — survives only inside the validation sentence. Blanking it
+ * would trade the authoring surface for the disclosure, the trade #8441
+ * explicitly refused and this card's own warning names.
+ *
+ * `VALIDATION_FAILED_STATUS = 400` is the repo already stating that a
+ * validation failure IS a 4xx client refusal that merely omits the property, so
+ * admitting it here widens no boundary — it reads the declaration the error
+ * actually makes. A driver fault (`SQLITE_ERROR`, `errno`) matches neither
+ * shape and is withheld.
+ */
+function declaresSeedClientRefusal(err: unknown): boolean {
+  const status = (err as { status?: unknown } | null | undefined)?.status;
+  if (typeof status === 'number' && status >= 400 && status < 500) return true;
+  // A record-validation failure declares itself by SHAPE rather than status.
+  return validationFailureDetails(err) !== undefined;
+}
+
+/**
+ * [#8442] The client-facing tail of a seed failure message — the caught
+ * sentence when {@link declaresSeedClientRefusal} admits it, otherwise
+ * `undefined` so the caller gets {@link WITHHELD_WRITE_REASON} instead.
+ */
+function quotableSeedFailureDetail(err: unknown): string | undefined {
+  if (!declaresSeedClientRefusal(err)) return undefined;
+  const declared = (err as { message?: unknown } | null | undefined)?.message;
+  return typeof declared === 'string' && declared.length > 0 ? declared : undefined;
+}
+
+/** The caught sentence, whole — for the LOG, which never withholds. */
+function seedFailureCause(err: unknown): string {
+  const message = (err as { message?: unknown } | null | undefined)?.message;
+  return typeof message === 'string' && message.length > 0 ? message : String(err);
+}
+
+/**
+ * [#8442] The operator half. The log line always carries the caught sentence,
+ * even when the payload may not quote it — without this, withholding the text
+ * would be indistinguishable from DELETING the diagnostic, which is what makes
+ * a disclosure fix a net loss for whoever has to fix the database.
+ */
+function seedFailureLogLine(payloadMessage: string, err: unknown): string {
+  const cause = seedFailureCause(err);
+  return payloadMessage.includes(cause)
+    ? `[SeedLoader] ${payloadMessage}`
+    : `[SeedLoader] ${payloadMessage} Cause (withheld from the seed response): ${cause}`;
+}
 
 /** The environments a seed dataset can be scoped to — mirrors `SeedSchema.env`. */
 type SeedEnv = 'prod' | 'dev' | 'test';
@@ -521,9 +609,10 @@ export class SeedLoaderService implements ISeedLoaderService {
           // `error`, not `warn` (#4729 / #4632): this row is counted in
           // `allErrors` — the load already reports `success: false` — and the
           // consequence is that the record did NOT land. Count and log level
-          // must agree; the message names the row and the cause.
+          // must agree; the message names the row and the cause — [#8442] the
+          // cause EXPLICITLY, since the payload half may now withhold it.
           this.logger.error(
-            `[SeedLoader] ${error.message}`,
+            seedFailureLogLine(error.message, res.error),
             res.error instanceof Error ? res.error : undefined,
             { recordIndex },
           );
@@ -887,8 +976,9 @@ export class SeedLoaderService implements ISeedLoaderService {
             // `error`, not `warn` (#4729 / #4632): counted in `allErrors`, and
             // the record did not land. `writeRecord` is in the durability
             // gate's vocabulary, so this catch cannot regress to `warn`.
+            // [#8442] carries the caught cause even when the payload withholds.
             this.logger.error(
-              `[SeedLoader] ${error.message}`,
+              seedFailureLogLine(error.message, err),
               err instanceof Error ? err : undefined,
               { recordIndex: i },
             );
@@ -925,8 +1015,9 @@ export class SeedLoaderService implements ISeedLoaderService {
               // and the row's declared values did not land — an upsert that
               // fails here leaves the PREVIOUS row contents in place, which
               // looks like a seeded record and is not one.
+              // [#8442] carries the caught cause even when the payload withholds.
               this.logger.error(
-                `[SeedLoader] ${error.message}`,
+                seedFailureLogLine(error.message, err),
                 err instanceof Error ? err : undefined,
                 { recordIndex: i },
               );
@@ -1173,8 +1264,14 @@ export class SeedLoaderService implements ISeedLoaderService {
                 recordIndex: deferred.recordIndex,
               },
             );
+            // [#8442] The pass-2 counterpart of `buildWriteError`'s tail, and
+            // the same rule: the located structure (which object, which field,
+            // which target, which record) is authored here and untouched; only
+            // the caught sentence is gated. The `logger.error` above already
+            // carries the raw cause for the operator, so nothing is lost from
+            // the server's side of this failure.
             this.recordDeferredError(deferred, allResults, allErrors,
-              `Failed to write deferred reference: ${deferred.objectName}.${deferred.field} = '${this.formatAttempted(deferred.attemptedValue)}' → ${deferred.targetObject}.${deferred.targetField}: ${err?.message ?? String(err)}`);
+              `Failed to write deferred reference: ${deferred.objectName}.${deferred.field} = '${this.formatAttempted(deferred.attemptedValue)}' → ${deferred.targetObject}.${deferred.targetField}: ${quotableSeedFailureDetail(err) ?? WITHHELD_WRITE_REASON}`);
           }
         } else {
           // THE TARGET RESOLVED BUT THE SOURCE ROW HAS NO ID (#5127).
@@ -1649,7 +1746,21 @@ export class SeedLoaderService implements ISeedLoaderService {
     return String(a) === String(b);
   }
 
-  /** Builds the same `ReferenceResolutionError` shape a failed write has always reported. */
+  /**
+   * Builds the same `ReferenceResolutionError` shape a failed write has always
+   * reported.
+   *
+   * [#8442] Every STRUCTURED key is unchanged — `sourceObject`, `field`,
+   * `targetObject`, `targetField`, `attemptedValue`, `recordIndex` are built
+   * from the seed declaration and the record, never from the caught error, so
+   * "which record, which key" is untouched by the withhold. The authored prefix
+   * is unchanged byte for byte too (two runtime pins read it). What changes is
+   * only what follows the colon: a DECLARED refusal — a 4xx, or the data
+   * engine's `VALIDATION_FAILED` shape, which is where "which field and why"
+   * lives — is quoted whole; a driver fault is replaced by
+   * {@link WITHHELD_WRITE_REASON} and goes to the log instead. See
+   * {@link declaresSeedClientRefusal}.
+   */
   private buildWriteError(
     objectName: string,
     record: Record<string, unknown>,
@@ -1657,7 +1768,7 @@ export class SeedLoaderService implements ISeedLoaderService {
     recordIndex: number,
     err: unknown,
   ): ReferenceResolutionError {
-    const message = (err as { message?: unknown } | null)?.message ?? String(err);
+    const detail = quotableSeedFailureDetail(err) ?? WITHHELD_WRITE_REASON;
     const label = this.externalIdLabel(externalId);
     const keyValue = this.externalIdKey(record, externalId);
     return {
@@ -1667,7 +1778,7 @@ export class SeedLoaderService implements ISeedLoaderService {
       targetField: label,
       attemptedValue: keyValue || null,
       recordIndex,
-      message: `Failed to write ${objectName} record #${recordIndex} (${label}=${keyValue}): ${message}`,
+      message: `Failed to write ${objectName} record #${recordIndex} (${label}=${keyValue}): ${detail}`,
     };
   }
 
