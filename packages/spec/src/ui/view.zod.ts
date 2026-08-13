@@ -1352,8 +1352,8 @@ export const ListViewSchema = lazySchema(() => strictObject({
 
   /** Grid Features */
   resizable: z.boolean().optional().describe('Enable column resizing'),
-  striped: z.boolean().optional().describe('Striped row styling'),
-  bordered: z.boolean().optional().describe('Show borders'),
+  // `striped` / `bordered` — tombstoned at the bottom of this shape with
+  // `virtualScroll` (#7176, pass-through-only; see the retired block below).
   compactToolbar: z.boolean().optional().describe('Collapse Group/Color/Density/Hide-fields into a single View settings popover'),
 
   /** Selection */
@@ -1409,9 +1409,6 @@ export const ListViewSchema = lazySchema(() => strictObject({
     + '(#4457). Toolbar url/api actions can also interpolate the current selection via '
     + '`${ctx.selection.ids}` / `${ctx.selection.count}`.',
   ),
-
-  /** Performance */
-  virtualScroll: z.boolean().optional().describe('Enable virtual scrolling for large datasets'),
 
   /** Conditional Formatting */
   conditionalFormatting: z.array(strictObject({
@@ -1490,6 +1487,32 @@ export const ListViewSchema = lazySchema(() => strictObject({
     '`view.performance` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — ' +
     'no renderer or runtime read it; list-view performance tuning was never implemented. ' +
     'Delete the key. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+  ),
+
+  // `striped` / `bordered` / `virtualScroll` REMOVED (#7176, ADR-0049
+  // enforce-or-remove; maintainer ruling 2026-08-10). Every measured reader was
+  // a forwarding copy — react spec-bridge → plugin-list → plugin-view/app-shell
+  // — and the chain ends at ObjectGrid, which never spells any of the three:
+  // copy-without-apply is dead in effect. Per the ruling, if objectui wants one
+  // of these as real behavior, that is an implementation card filed first, and
+  // the key stays retired pending it.
+  striped: retiredKey(
+    '`view.striped` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — ' +
+    'every measured reader only copied it forward and no renderer ever applied it, so authoring ' +
+    'it was a parse-clean no-op. There is no authorable striped-rows switch; delete the key. ' +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+  ),
+  bordered: retiredKey(
+    '`view.bordered` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — ' +
+    'every measured reader only copied it forward and no renderer ever applied it (the grid frame ' +
+    "is the renderer's own constant, not authorable). Delete the key. " +
+    'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
+  ),
+  virtualScroll: retiredKey(
+    '`view.virtualScroll` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — ' +
+    'every measured reader only copied it forward and no grid ever virtualized off it; authoring ' +
+    'it was a parse-clean no-op. Delete the key; large datasets page via `pagination`. ' +
     'Run `os migrate meta --from 16` to rewrite existing sources automatically.',
   ),
 }));

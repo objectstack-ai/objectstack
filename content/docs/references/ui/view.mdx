@@ -475,8 +475,6 @@ List chart view configuration
 | **filterableFields** | `string[]` | optional | Legacy shorthand for userFilters.fields — bare field names enabled for end-user filtering. Prefer userFilters |
 | **userFilters** | `{ element?: Enum<'dropdown' \| 'tabs' \| 'toggle'>; fields?: object[]; tabs?: object[]; showAllRecords?: boolean; … }` | optional | End-user quick-filter bar: dropdown/toggle fields or tab presets. Omit to let the renderer derive filters from select/boolean fields |
 | **resizable** | `boolean` | optional | Enable column resizing |
-| **striped** | `boolean` | optional | Striped row styling |
-| **bordered** | `boolean` | optional | Show borders |
 | **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
 | **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; view?: string; preventNavigation?: boolean; openNewTab?: boolean; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
@@ -498,7 +496,6 @@ List chart view configuration
 | **rowActions** | `string[]` | optional | Actions available for individual row items |
 | **bulkActions** | `string[]` | optional | Actions available when multiple rows are selected |
 | **bulkActionDefs** | `{ name: string; label?: string; icon?: string; variant?: Enum<'primary' \| 'secondary' \| 'danger' \| 'ghost' \| 'outline'>; … }[]` | optional | Rich bulk action definitions (schema-driven, executed via BulkActionDialog). Use a def for a mass data-plane mutation ('update' with a `patch` / 'delete') that no action expresses, or for an `operation: 'custom'` + `execution: 'aggregate'` entry (objectui#3139) that dispatches the action it NAMES once for the whole selection — the renderer injects `params._selectedIds: string[]` (read that on the server, not `recordId`) so a single call can produce one aggregate artifact (zip of QR codes, merged PDF, batch print). Aggregate results are all-or-nothing: a handler that cannot cover the whole selection must reject, and per-row retry is replaced by re-running the action. `batchSize` does not apply (the call is never chunked); set `maxRecords` on defs whose server work is expensive. For the PER-RECORD dispatch use `bulkActions: ['<name>']` instead — the bare-string form, promoted with the action's own label, params and `visible`; a 'custom' def without `execution: 'aggregate'` has no dispatcher and is refused at parse time (#4457). Toolbar url/api actions can also interpolate the current selection via `${ctx.selection.ids}` / `${ctx.selection.count}`. |
-| **virtualScroll** | `boolean` | optional | Enable virtual scrolling for large datasets |
 | **conditionalFormatting** | `{ condition: string \| object; style: Record<string, string> }[]` | optional | Conditional formatting rules for list rows |
 | **inlineEdit** | `boolean` | optional | Allow inline editing of records directly in the list view |
 | **exportOptions** | `Enum<'csv' \| 'xlsx' \| 'pdf' \| 'json'>[]` | optional | Available export format options |
@@ -512,6 +509,9 @@ List chart view configuration
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes for the list view |
 | **responsive** | `never` | optional | [REMOVED] `view.responsive` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer ever read it; the grid is responsive by its own layout rules. Delete the key. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **performance** | `never` | optional | [REMOVED] `view.performance` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer or runtime read it; list-view performance tuning was never implemented. Delete the key. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
+| **striped** | `never` | optional | [REMOVED] `view.striped` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no renderer ever applied it, so authoring it was a parse-clean no-op. There is no authorable striped-rows switch; delete the key. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
+| **bordered** | `never` | optional | [REMOVED] `view.bordered` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no renderer ever applied it (the grid frame is the renderer's own constant, not authorable). Delete the key. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
+| **virtualScroll** | `never` | optional | [REMOVED] `view.virtualScroll` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no grid ever virtualized off it; authoring it was a parse-clean no-op. Delete the key; large datasets page via `pagination`. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 
 
 ---
@@ -563,8 +563,6 @@ List chart view configuration
 | **searchableFields** | `string[]` | optional | Fields enabled for search |
 | **filterableFields** | `string[]` | optional | Legacy shorthand for userFilters.fields — bare field names enabled for end-user filtering. Prefer userFilters |
 | **resizable** | `boolean` | optional | Enable column resizing |
-| **striped** | `boolean` | optional | Striped row styling |
-| **bordered** | `boolean` | optional | Show borders |
 | **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
 | **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; view?: string; preventNavigation?: boolean; openNewTab?: boolean; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
@@ -586,7 +584,6 @@ List chart view configuration
 | **rowActions** | `string[]` | optional | Actions available for individual row items |
 | **bulkActions** | `string[]` | optional | Actions available when multiple rows are selected |
 | **bulkActionDefs** | `{ name: string; label?: string; icon?: string; variant?: Enum<'primary' \| 'secondary' \| 'danger' \| 'ghost' \| 'outline'>; … }[]` | optional | Rich bulk action definitions (schema-driven, executed via BulkActionDialog). Use a def for a mass data-plane mutation ('update' with a `patch` / 'delete') that no action expresses, or for an `operation: 'custom'` + `execution: 'aggregate'` entry (objectui#3139) that dispatches the action it NAMES once for the whole selection — the renderer injects `params._selectedIds: string[]` (read that on the server, not `recordId`) so a single call can produce one aggregate artifact (zip of QR codes, merged PDF, batch print). Aggregate results are all-or-nothing: a handler that cannot cover the whole selection must reject, and per-row retry is replaced by re-running the action. `batchSize` does not apply (the call is never chunked); set `maxRecords` on defs whose server work is expensive. For the PER-RECORD dispatch use `bulkActions: ['<name>']` instead — the bare-string form, promoted with the action's own label, params and `visible`; a 'custom' def without `execution: 'aggregate'` has no dispatcher and is refused at parse time (#4457). Toolbar url/api actions can also interpolate the current selection via `${ctx.selection.ids}` / `${ctx.selection.count}`. |
-| **virtualScroll** | `boolean` | optional | Enable virtual scrolling for large datasets |
 | **conditionalFormatting** | `{ condition: string \| object; style: Record<string, string> }[]` | optional | Conditional formatting rules for list rows |
 | **inlineEdit** | `boolean` | optional | Allow inline editing of records directly in the list view |
 | **exportOptions** | `Enum<'csv' \| 'xlsx' \| 'pdf' \| 'json'>[]` | optional | Available export format options |
@@ -600,6 +597,9 @@ List chart view configuration
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes for the list view |
 | **responsive** | `never` | optional | [REMOVED] `view.responsive` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer ever read it; the grid is responsive by its own layout rules. Delete the key. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **performance** | `never` | optional | [REMOVED] `view.performance` was removed in @objectstack/spec 17.0.0 (#3896 audit close-out) — no renderer or runtime read it; list-view performance tuning was never implemented. Delete the key. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
+| **striped** | `never` | optional | [REMOVED] `view.striped` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no renderer ever applied it, so authoring it was a parse-clean no-op. There is no authorable striped-rows switch; delete the key. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
+| **bordered** | `never` | optional | [REMOVED] `view.bordered` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no renderer ever applied it (the grid frame is the renderer's own constant, not authorable). Delete the key. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
+| **virtualScroll** | `never` | optional | [REMOVED] `view.virtualScroll` was removed in @objectstack/spec 17.0.0 (#7176, ADR-0049 enforce-or-remove) — every measured reader only copied it forward and no grid ever virtualized off it; authoring it was a parse-clean no-op. Delete the key; large datasets page via `pagination`. Run `os migrate meta --from 16` to rewrite existing sources automatically. |
 | **userFilters** | `{ element?: Enum<'dropdown' \| 'toggle'>; fields?: object[] }` | optional |  |
 
 

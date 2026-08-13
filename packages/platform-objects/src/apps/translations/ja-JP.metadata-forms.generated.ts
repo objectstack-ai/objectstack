@@ -641,12 +641,6 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       resizable: {
         label: "サイズ変更可"
       },
-      striped: {
-        label: "縞表示"
-      },
-      bordered: {
-        label: "枠線"
-      },
       compactToolbar: {
         label: "コンパクトツールバー"
       },
