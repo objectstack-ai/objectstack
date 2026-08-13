@@ -45,6 +45,7 @@
 // enumeration is shown to pick it up, and the scan is shown to catch its leak.
 
 import { describe, it, expect } from 'vitest';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import {
   collectInternalWriteResponseFields,
@@ -93,10 +94,18 @@ function makeSentinelEngine() {
         : writtenRow(data?.id ?? `new-${nextId++}`, data),
     insertMany: async (_object: string, rows: any[]) =>
       rows.map((r: any) => ({ ok: true, record: writtenRow(r?.id ?? `new-${nextId++}`, r) })),
-    update: async (_object: string, data: any, options?: any) =>
-      writtenRow(options?.where?.id ?? data?.id ?? 'row-1', data),
+    update: async (_object: string, data: any, options?: any) => {
+      // [#5480] The producer's own update-verb dispatch contract, so this fake
+      // cannot accept a call `ObjectQL.update` refuses (check:engine-double-contract).
+      assertEngineUpdateDispatch(data, options);
+      return writtenRow(options?.where?.id ?? data?.id ?? 'row-1', data);
+    },
     // Contract per #4435: `false` is the positive not-found value.
-    delete: async (_object: string, _options?: any) => ({ deleted: 1 }),
+    delete: async (_object: string, options?: any) => {
+      // [#4550] Likewise for delete.
+      assertEngineDeleteDispatch(options);
+      return { deleted: 1 };
+    },
     findOne: async (_object: string, options?: any) => storedRow(options?.where?.id ?? 'row-1'),
     find: async (_object: string, _options?: any) => [storedRow('row-1')],
     count: async () => 1,
