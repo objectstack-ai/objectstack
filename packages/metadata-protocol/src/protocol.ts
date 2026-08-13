@@ -4341,40 +4341,58 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * [#8038] The write-side counterpart of
-     * {@link materializeFromRegistry}'s companion stamp, owed for the reason
+     * [#8268, generalising #8038] The write-side counterpart of
+     * {@link materializeFromRegistry}, owed for the reason
      * {@link stripServedSystemColumns} is owed one field family over: the write
      * path persists the request body verbatim (ADR-0005 §Validation), so a
-     * document this service's read added the companion to would otherwise be
-     * handed straight back and stored carrying it.
+     * document this service's read added a stamp to would otherwise be handed
+     * straight back and stored carrying it.
      *
      * Measured on the runtime-created object path — the write door type
      * `object` has open by default, an artifact-backed object refusing the save
      * outright with `NOT_OVERRIDABLE` — the stored row went from
      * `fields: [name]` to `fields: [__search, name]` on a single GET → PUT
-     * before this was added.
+     * before #8038 added the companion half, and gained a `nameField` the
+     * author never wrote on the same round trip before #8268 added the title
+     * half. The landed `#4326` round-trip pin catches either omission, which is
+     * why the read half and this half must move together.
+     *
+     * ⛔ Asks the registry for the WHOLE seam's inverse rather than for one
+     * named stamp — the same reason {@link materializeFromRegistry} does.
      */
-    private stripSearchCompanionFromRegistry<T>(type: string, item: T): T {
+    private stripMaterializedFromRegistry<T>(type: string, item: T): T {
         if (canonicalMetaType(type) !== 'object') return item;
         if (item === null || typeof item !== 'object') return item;
         const registry = (this.engine as any)?.registry;
-        if (!registry || typeof registry.stripProvisionedSearchCompanionFrom !== 'function') return item;
-        try {
-            return registry.stripProvisionedSearchCompanionFrom(item) as T;
-        } catch {
-            // A read over the body's own fields; a failure here must not turn a
-            // save into a 5xx.
-            return item;
+        // Partial registry doubles in tests predate this method; the narrower
+        // #8038 spelling keeps such a host stripping what it stripped before
+        // rather than silently losing the companion strip to a rename.
+        if (registry && typeof registry.stripMaterializedStampsFrom === 'function') {
+            try {
+                return registry.stripMaterializedStampsFrom(item) as T;
+            } catch {
+                // A read over the body's own fields; a failure here must not
+                // turn a save into a 5xx.
+                return item;
+            }
         }
+        if (registry && typeof registry.stripProvisionedSearchCompanionFrom === 'function') {
+            try {
+                return registry.stripProvisionedSearchCompanionFrom(item) as T;
+            } catch {
+                return item;
+            }
+        }
+        return item;
     }
 
     /**
-     * {@link stripServedSystemColumns} plus the companion half
-     * ({@link stripSearchCompanionFromRegistry}) — the whole of what the write
+     * {@link stripServedSystemColumns} plus the registry-seam half
+     * ({@link stripMaterializedFromRegistry}) — the whole of what the write
      * path owes {@link governServedObject}.
      */
     private stripServedObjectColumns<T>(type: string, item: T): T {
-        return this.stripSearchCompanionFromRegistry(type, stripServedSystemColumns(type, item));
+        return this.stripMaterializedFromRegistry(type, stripServedSystemColumns(type, item));
     }
 
     /**

@@ -1778,6 +1778,83 @@ export class SchemaRegistry {
   }
 
   /**
+   * [#8268] The WRITE-side inverse of {@link materializeServedObjectOnto}: take
+   * this registry's whole materialization seam back OFF a body on its way IN.
+   *
+   * Owed for the reason each individual strip beside it is owed (#4326): the
+   * write path persists the request body verbatim by design (ADR-0005
+   * §Validation), so whatever the READ added must come off again or it is baked
+   * into `sys_metadata.metadata`, into its checksum, and into every history
+   * diff — the standard Studio GET → edit → PUT turning a platform-computed
+   * stamp into a phantom customisation the author never wrote.
+   *
+   * It exists as ONE method for the same reason its read-side twin does. A
+   * stamp added to {@link materializeBaseLayer} acquires BOTH halves here, and
+   * the pair cannot be half-implemented: the read half alone is a #4326
+   * regression that a landed round-trip pin catches, and this card measured
+   * exactly that before adding this method.
+   *
+   * ⛔ Strips in the REVERSE of the seam's order — companion first, then the
+   * title designation — because the companion's canonical definition is
+   * recomputed over a body that still carries the pointer, which is the state
+   * it was stamped in. Stripping the pointer first would ask
+   * `provisionSearchCompanion` a different question than the one it was
+   * answered with.
+   *
+   * Returns `base` by reference when nothing was owed.
+   */
+  stripMaterializedStampsFrom<T>(base: T): T {
+    if (base === null || typeof base !== 'object') return base;
+    return this.stripProvisionedPrimaryFrom(this.stripProvisionedSearchCompanionFrom(base));
+  }
+
+  /**
+   * [#8268] Remove an ADR-0079 title designation that is REDUNDANT WITH THE
+   * DERIVATION — the pointer {@link materializeServedObjectOnto} adds, and only
+   * that one.
+   *
+   * Same EXACTNESS discipline as {@link stripProvisionedSearchCompanionFrom},
+   * and recomputed from `provisionPrimary` itself rather than transcribed, so
+   * the strip and the stamp cannot drift: the pointer comes off only when it is
+   * identical to what the seam would designate for a body carrying no pointer
+   * at all. A pointer naming any OTHER field is the author's own deliberate
+   * choice — it overrides the derivation, which is the entire reason to write
+   * one — and is kept untouched.
+   *
+   * ⚠️ The narrow case this trades away, stated plainly because it is real and
+   * it is NOT the same trade `stripProvisionedSearchCompanionFrom` makes. That
+   * one removes a value byte-identical to a platform-canonical FIELD
+   * DEFINITION, where coincidence with an author's own writing is implausible.
+   * This one compares a single string, so an author who explicitly declared the
+   * field the derivation would have picked anyway loses that declaration on a
+   * round trip. What bounds the harm is that the two are indistinguishable by
+   * construction — the read serves one body, and "the author wrote
+   * `nameField: 'name'`" and "the read derived `nameField: 'name'`" are the
+   * same bytes — and that the stripped pointer is REDERIVED on every load:
+   * `registerObject` runs `provisionPrimary` over every base layer, so the
+   * resolved answer is identical with or without the stored key, now and at
+   * each future boot. The designation is only ever lost if a later edit changes
+   * which field the derivation picks, and that edit re-serves and re-stores the
+   * new designation through this same pair.
+   */
+  private stripProvisionedPrimaryFrom<T>(base: T): T {
+    if (base === null || typeof base !== 'object') return base;
+    const present = (base as { nameField?: unknown }).nameField;
+    if (typeof present !== 'string' || present === '') return base;
+
+    // Re-stamp a copy WITHOUT the pointer and compare: the canonical answer
+    // comes from the provisioning function itself, and an object the seam would
+    // designate nothing for yields no stamp and therefore no removal.
+    const withoutPointer = { ...(base as Record<string, unknown>) };
+    delete withoutPointer.nameField;
+    const restamped = provisionPrimary(withoutPointer as never, { synthesize: false }) as unknown as
+      { nameField?: unknown };
+    if (restamped.nameField !== present) return base;
+
+    return withoutPointer as unknown as T;
+  }
+
+  /**
    * [#8027] Remove from `base` the `validations` / `indexes` entries the
    * `extend` contributors are about to contribute — the half of
    * {@link foldObjectExtendersOnto} that makes the fold idempotent.
