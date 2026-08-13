@@ -140,7 +140,7 @@ describe('[#8502] a REAL validation refusal keeps its sentence on a batch row', 
         expect(res.results[0].errors[0].message).toContain('Reason');
         expect(res.results[0].errors[0].message).not.toContain('The reason is in the server log');
         // The stored row is untouched: the refusal happened before the write.
-        expect((await engine.findOne('bf_leave_request', { where: { id: 'lr1' } } as any)).reason).toBe('ok');
+        expect((await engine.findOne('bf_leave_request', { where: { id: 'lr1' } })).reason).toBe('ok');
     });
 
     it('the refusal carries no `status`, so a status-only rule WOULD have blanked it', async () => {

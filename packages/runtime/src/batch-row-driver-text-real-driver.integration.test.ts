@@ -137,7 +137,7 @@ describe('[#8502] a REAL driver fault is withheld from every batch row', () => {
 
         // Non-vacuity on the other side: the row is still there, so the
         // failure was real rather than a swallowed success.
-        expect(await engine!.findOne('bd_parent', { where: { id: 'p1' } } as any)).toBeTruthy();
+        expect(await engine!.findOne('bd_parent', { where: { id: 'p1' } })).toBeTruthy();
         // The response's own accounting agrees the row failed.
         expect(res).toMatchObject({ success: false, total: 1, succeeded: 0, failed: 1 });
         void real;

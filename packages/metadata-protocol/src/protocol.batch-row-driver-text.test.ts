@@ -202,8 +202,6 @@ function makeEngine(throwOn: (verb: string, id: unknown) => unknown | undefined)
     return { engine, protocol: new ObjectStackProtocolImplementation(engine) as any, rows };
 }
 
-const messagesOf = (res: any): string[] => res.results.map((r: any) => r.errors?.[0]?.message);
-
 /** Silence — and capture — the operator-half warn the withhold writes. */
 function captureWarn() {
     return vi.spyOn(console, 'warn').mockImplementation(() => {});
