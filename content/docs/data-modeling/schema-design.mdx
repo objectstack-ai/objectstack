@@ -218,6 +218,13 @@ Field.autonumber({
 // no separate reset config. A fixed prefix like 'INV-{000}' keeps one global counter.
 ```
 
+The counter is unique and monotonic per scope, **not gapless** — a rejected
+write (a unique violation on another field, a failed validation rule, a
+throwing `beforeInsert`) still consumes the number it reserved. Before wiring
+an `autonumber` field to an invoice, contract, or receipt sequence, see the
+[full contract](/docs/data-modeling/field-types#autonumber) in the Field Type
+Gallery.
+
 ### User Fields
 
 Pick a person — the equivalent of Airtable's *Collaborator* or Salesforce's
