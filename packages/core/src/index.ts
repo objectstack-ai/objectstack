@@ -53,6 +53,11 @@ export * from './utils/record-not-found.js';
 // Export in-memory fallbacks for core-criticality services
 export * from './fallbacks/index.js';
 
+// [#7378] The IMetadataService register/read argument contract (three-cell
+// maintainer ruling, 2026-08-12) — shared by every shipped implementation so
+// the refusals and the canonical type fold have one home instead of three.
+export * from './metadata-service-contract.js';
+
 // Export Phase 2 components - Advanced lifecycle management
 export * from './health-monitor.js';
 export * from './hot-reload.js';

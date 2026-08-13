@@ -56,7 +56,12 @@ import {
   validateApiEndpointDeclarations,
   type ApiEndpoint,
 } from '@objectstack/spec/api';
-import { createLogger, type Logger } from '@objectstack/core';
+import {
+  assertMetadataRegisterContract,
+  canonicalMetadataServiceType,
+  createLogger,
+  type Logger,
+} from '@objectstack/core';
 import { JSONSerializer } from './serializers/json-serializer.js';
 import { YAMLSerializer } from './serializers/yaml-serializer.js';
 import { TypeScriptSerializer } from './serializers/typescript-serializer.js';
@@ -753,6 +758,16 @@ export class MetadataManager implements IMetadataService {
     data: unknown,
     options?: MetadataWriteOptions,
   ): Promise<void> {
+    // [#7378] The ruled register contract, before anything is touched: refuse
+    // a data.name that disagrees with the name argument and refuse a
+    // non-document data (rows 1/3 — the guard's header carries the ruling),
+    // and key every downstream store, loader write, cache entry and watcher
+    // announcement on the CANONICAL type (row 2). A refusal here writes to no
+    // store and persists to no loader; it fires even on a read-only manager,
+    // because it judges the arguments, not the persistence posture.
+    assertMetadataRegisterContract(type, name, data);
+    type = canonicalMetadataServiceType(type);
+
     // Persistence write gate: when `persistence.writable` is explicitly false
     // we treat register() as read-only. Default `true` (or omitted) preserves
     // historical behavior.
@@ -835,6 +850,11 @@ export class MetadataManager implements IMetadataService {
    * consumers will read the pre-write definition until restart.
    */
   registerInMemory(type: string, name: string, data: unknown): void {
+    // [#7378 row 2] The canonical fold is a store fact and applies here; the
+    // rows-1/3 refusals deliberately do NOT — the ruling names `register`,
+    // and this is the boot-time seeding primitive (see
+    // assertMetadataRegisterContract's header for the boundary).
+    type = canonicalMetadataServiceType(type);
     if (!this.registry.has(type)) {
       this.registry.set(type, new Map());
     }
@@ -878,6 +898,8 @@ export class MetadataManager implements IMetadataService {
    * `metadata-manager-get-diagnosed.test.ts`.
    */
   async get(type: string, name: string): Promise<unknown | undefined> {
+    // [#7378 row 2] Read the store `register` wrote: the canonical type.
+    type = canonicalMetadataServiceType(type);
     // Check in-memory registry first
     const typeStore = this.registry.get(type);
     if (typeStore?.has(name)) {
@@ -916,6 +938,8 @@ export class MetadataManager implements IMetadataService {
     type: string,
     name: string
   ): Promise<{ data: unknown | undefined; degraded: boolean; errors: string[] }> {
+    // [#7378 row 2] Same fold as `get` — the two are pinned to agree.
+    type = canonicalMetadataServiceType(type);
     // Check in-memory registry first — a hit here consulted no loader, so
     // there is nothing to be degraded about.
     const typeStore = this.registry.get(type);
@@ -942,7 +966,9 @@ export class MetadataManager implements IMetadataService {
    * `listCache`.
    */
   async list(type: string): Promise<unknown[]> {
-    return (await this.readList(type)).items;
+    // [#7378 row 2] Fold before the cache/single-flight machinery, so the
+    // two spellings join one read and one cache entry.
+    return (await this.readList(canonicalMetadataServiceType(type))).items;
   }
 
   /**
@@ -974,7 +1000,8 @@ export class MetadataManager implements IMetadataService {
    * partial even when the others answered plenty — which is the whole fact.
    */
   async listDiagnosed(type: string): Promise<ListReadResult> {
-    const { items, degraded, errors } = await this.readList(type);
+    // [#7378 row 2] Same fold as `list` — same read, narrowed differently.
+    const { items, degraded, errors } = await this.readList(canonicalMetadataServiceType(type));
     return { items, degraded, errors };
   }
 
@@ -1330,6 +1357,8 @@ export class MetadataManager implements IMetadataService {
    * before the await would buy nothing and would re-open step 1's window.
    */
   async unregister(type: string, name: string, options?: MetadataWriteOptions): Promise<void> {
+    // [#7378 row 2] Remove from the store `register` wrote: the canonical type.
+    type = canonicalMetadataServiceType(type);
     // ── 1. Storage first ────────────────────────────────────────────────
     // Delete only from database-backed loaders that declare write capability.
     for (const loader of this.loaders.values()) {
@@ -1466,6 +1495,8 @@ export class MetadataManager implements IMetadataService {
    * Check if a metadata item exists
    */
   async exists(type: string, name: string): Promise<boolean> {
+    // [#7378 row 2] Same store `get` reads: the canonical type.
+    type = canonicalMetadataServiceType(type);
     // Check in-memory registry
     if (this.registry.get(type)?.has(name)) {
       return true;
@@ -1484,6 +1515,8 @@ export class MetadataManager implements IMetadataService {
    * List all names of metadata items of a given type
    */
   async listNames(type: string): Promise<string[]> {
+    // [#7378 row 2] Same store `get` reads: the canonical type.
+    type = canonicalMetadataServiceType(type);
     const names = new Set<string>();
 
     // From in-memory registry
@@ -2253,6 +2286,10 @@ export class MetadataManager implements IMetadataService {
    * @returns An unsubscribe function.
    */
   subscribe(type: string, callback: WatchCallback): () => void {
+    // [#7378 row 2] Announcements are made under the canonical type (register/
+    // unregister fold before notifyWatchers), so a subscription under the
+    // plural spelling must land on the same key or it would never fire.
+    type = canonicalMetadataServiceType(type);
     this.addWatchCallback(type, callback);
     return () => this.removeWatchCallback(type, callback);
   }
