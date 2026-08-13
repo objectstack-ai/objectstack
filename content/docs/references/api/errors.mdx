@@ -48,7 +48,7 @@ const result = EnhancedApiErrorSchema.parse(data);
 | **retryStrategy** | `Enum<'no_retry' \| 'retry_immediate' \| 'retry_backoff' \| 'retry_after'>` | optional | Recommended retry strategy |
 | **retryAfter** | `number` | optional | Seconds to wait before retrying |
 | **details** | `any` | optional | Additional error context |
-| **fields** | `{ field: string; code: Enum<'required' \| 'invalid_type' \| 'invalid_shape' \| 'unknown_field' \| … +23 more>; message: string; label?: string; … }[]` | optional | One entry per offending value |
+| **fields** | `{ field: string; code: Enum<'required' \| 'invalid_type' \| 'invalid_shape' \| 'unknown_field' \| … +24 more>; message: string; label?: string; … }[]` | optional | One entry per offending value |
 | **fieldErrors** | `never` | optional | [REMOVED] `EnhancedApiError.fieldErrors` was renamed to `fields` in @objectstack/spec 17 (ADR-0114 D4, #3977) — the array is unchanged, only the property name. Every producer already emitted `fields`; `fieldErrors` was declared and never emitted, so a reader keying on it was reading a field no server sent. |
 | **timestamp** | `string` | optional | When the error occurred |
 | **requestId** | `string` | optional | Request ID for tracking |
@@ -152,7 +152,7 @@ const result = EnhancedApiErrorSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **field** | `string` | ✅ | Field path (supports dot notation) |
-| **code** | `Enum<'required' \| 'invalid_type' \| 'invalid_shape' \| 'unknown_field' \| 'invalid_boolean' \| 'invalid_number' \| 'invalid_date' \| 'invalid_time' \| 'invalid_email' \| … +18 more>` | ✅ | Which constraint the value violated (field-level catalog, ADR-0114) |
+| **code** | `Enum<'required' \| 'invalid_type' \| 'invalid_shape' \| 'unknown_field' \| 'invalid_boolean' \| 'invalid_number' \| 'invalid_date' \| 'invalid_time' \| 'invalid_email' \| … +19 more>` | ✅ | Which constraint the value violated (field-level catalog, ADR-0114) |
 | **message** | `string` | ✅ | Human-readable error message, rendered in the caller’s locale |
 | **label** | `string` | optional | Field display label in the caller’s locale |
 | **value** | `any` | optional | The invalid value that was provided |
@@ -177,6 +177,7 @@ const result = EnhancedApiErrorSchema.parse(data);
 * `max_length`
 * `min_value`
 * `max_value`
+* `max_scale`
 * `min_items`
 * `max_items`
 * `invalid_option`
@@ -212,6 +213,7 @@ const result = EnhancedApiErrorSchema.parse(data);
 * `max_length`
 * `min_value`
 * `max_value`
+* `max_scale`
 * `min_items`
 * `max_items`
 * `invalid_option`

@@ -55,6 +55,7 @@ describe('validation message catalog — completeness', () => {
     const required: Record<string, string[]> = {
       min_value: ['{{min}}'],
       max_value: ['{{max}}'],
+      max_scale: ['{{scale}}', '{{actual}}'],
       min_length: ['{{minLength}}', '{{actual}}'],
       max_length: ['{{maxLength}}', '{{actual}}'],
       invalid_option: ['{{allowed}}'],
