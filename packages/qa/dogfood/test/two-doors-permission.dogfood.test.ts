@@ -9,11 +9,18 @@
 //        `package_id` (publish-time, not just at boot). A draft alone
 //        materializes nothing — only publish makes it live.
 //
-//  块2 — the ADMIN door (evolved by ADR-0094, direction 2026-07-14): a
-//        data-plane edit of a package-managed row is TRANSLATED into an
-//        env-scope metadata OVERLAY (the standard ADR-0005 customization) —
-//        the record projects the effective body while the package keeps
-//        owning the row, and "delete" resets to the shipped declaration.
+//  块2 — the ADMIN door (evolved by ADR-0094; its 2026-07-14 "translate the
+//        edit into an env-scope ADR-0005 overlay" direction was RETIRED on
+//        2026-08-09 — see ADR-0094 D5-R): a data-plane edit of a
+//        package-managed, ARTIFACT-BACKED row is REFUSED with 403
+//        `not_overridable` and no overlay is minted — #6483 rolled
+//        `permission` back to `allowOrgOverride: false`, and ADR-0086 names
+//        the supported channel instead: edit the package and re-publish.
+//        A "delete" through this door still degrades to a RESET — a packaged
+//        definition can never be removed from the environment — though with
+//        no overlay left to lift there is nothing for it to revert. A set
+//        authored through the data door rides the still-open
+//        `allowRuntimeCreate` tier and stays editable.
 //        Forging package provenance through the admin door stays refused.
 
 import { describe, it, expect, beforeAll } from 'vitest';

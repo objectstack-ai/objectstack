@@ -96,18 +96,19 @@
 //     the `.vN` version rule above and unlike an allowlist — an author who cites
 //     a sibling repo has a spelling that is both correct to a reader and clean
 //     to the gate. Bare `ADR-0001`, meaning ours, still fails.
-//   - **A record that was withdrawn or deleted, cited as history.** ADR-0001's
-//     record was deleted in the 2026-02-11 permission-protocol rewrite and is
-//     cited as history by ADR-0002. Those numbers sit on
-//     `UNRESOLVED_ADR_CITATIONS` below — an explicit, shrink-only allowlist,
-//     audited in both directions like the collision list.
+//   - **A record that was withdrawn or deleted, cited as history.** Such numbers
+//     may sit on `UNRESOLVED_ADR_CITATIONS` below — an explicit, shrink-only
+//     allowlist, audited in both directions like the collision list.
 //
 //     It is the WEAKER of the two remedies, and the list says so: preferred is
-//     to give the number a record, even when the record is a tombstone. ADR-0107
-//     left this list that way (#6676) — withdrawn nine hours after it landed
-//     (#3735), it now has `docs/adr/0107-withdrawn-*.md` saying so, which both
-//     resolves the historical citations and makes re-use collide loudly under
-//     the number-uniqueness audit instead of merely going stale here.
+//     to give the number a record, even when the record is a tombstone. Both
+//     numbers that list ever held have now left it that way, and it is empty:
+//     ADR-0107 (#6676), withdrawn nine hours after it landed (#3735), and
+//     ADR-0001 (#7866), whose record was swept away with the rest of the
+//     `docs/adr/` registry on 2026-02-11. Each now has a
+//     `docs/adr/NNNN-withdrawn-*.md` saying so, which both resolves the
+//     historical citations and makes re-use collide loudly under the
+//     number-uniqueness audit instead of merely going stale here.
 //
 // ## The fourth thing it checks: a tombstone is NOT anchorable (#7329)
 //
@@ -268,34 +269,44 @@ const CROSS_REPO_QUALIFIERS = new Set(['objectui', 'object-ui', 'cloud']);
  * directions: an entry whose number gains a record, or that nothing cites any
  * more, fails as stale — so a number cannot be quietly re-used under cover of
  * its own grandfather clause, which is the squatting half of #6634.
+ *
+ * **The list is EMPTY today (#7866), and that is the finished state, not an
+ * oversight.** Both entries it ever held left the same way — the number gained a
+ * tombstone, which is remedy (a) of the dangling-citation message and strictly
+ * stronger than this list. Keep it empty: an empty allowlist is the only
+ * configuration in which every cited ADR number resolves to something a reader
+ * can open.
+ *
+ * One consequence to know before reading the `--self-test` output: while the list
+ * is empty, its ablation assertions ("drop the allowlist, each entry's number must
+ * surface as dangling") are VACUOUSLY green — zero entries, zero expected
+ * findings. They are still correct, and they regain their teeth the moment an
+ * entry is added, which is the only time they have anything to say. The live
+ * assertions that do carry weight while the list is empty are the tombstone pins
+ * further down, which check the two numbers by name.
  */
 const UNRESOLVED_ADR_CITATIONS = [
-  {
-    number: '0001',
-    // Deleted 2026-02-11 (9da8e3e72) together with 0002-database-driven-metadata-
-    // storage.md and docs/adr/README.md, in the permission-protocol rewrite.
-    // Cited as history by `docs/adr/0002-...md` ("already discarded in v3.4's
-    // ADR-0001"), which is what keeps this entry earning its place.
-    // ARCHITECTURE.md used to carry a markdown LINK to the deleted path — a
-    // genuinely broken pointer rather than history, filed separately from #6634
-    // and fixed in #6733: that section now names the deleted path as plain text
-    // and states the current single-provider architecture (MetadataPlugin is the
-    // sole `metadata` provider; ObjectQL consumes it) instead of pointing at a
-    // 404. This entry never blessed that link and does not bless any future one.
-    why: 'record deleted 2026-02-11 (9da8e3e72); cited as history by ADR-0002',
-  },
-  // 0107 was the second entry until #6676. It is gone from this list because the
-  // number gained a record — `docs/adr/0107-withdrawn-hook-body-write-set-static-
-  // gap.md`, a tombstone. That is the (a) remedy the dangling-citation message
-  // recommends over this list, and it is strictly stronger here: an allowlist
-  // entry survives only as long as something still cites the number (the
-  // direction-B staleness rule below), and 0107's citations are a changeset
+  // 0107 was the first entry to leave (#6676), and 0001 the second and last
+  // (#7866) — both to `docs/adr/NNNN-withdrawn-*.md` tombstones.
+  //
+  // Why a tombstone beats an entry here, in the words of the 0107 case: an
+  // allowlist entry survives only as long as something still cites the number
+  // (the direction-B staleness rule below), and 0107's citations are a changeset
   // awaiting release plus an audit, so the grandfather clause would have expired
   // on its own and quietly re-freed the number. A record does not expire, and a
   // re-use now collides in `auditAdrDirectory` — loud, and about the right fact.
-  // The one thing the tombstone bought that this list never could — resolving the
+  // The one thing a tombstone bought that this list never could — resolving the
   // citations — is also the one thing it must NOT buy for anchors, which is why
   // `nonDecisions` exists (#7329).
+  //
+  // The 0001 entry additionally carried a claim that turned out to be wrong, and
+  // it is corrected rather than deleted because it is the reason the entry looked
+  // load-bearing: it said the number was "cited as history by ADR-0002". ADR-0002
+  // does cite `ADR-0001` — but for "one global DB + tenant column … already
+  // discarded in v3.4's ADR-0001", which is not what the record under this number
+  // decided (it decided how the `metadata` SERVICE is registered) and not a
+  // document that ever existed here. The tombstone dissects that; this comment
+  // exists so nobody re-derives the discrepancy from the removed entry's text.
 ];
 
 /**
@@ -1095,37 +1106,76 @@ function selfTest() {
         );
       }
 
-      // ── Tombstones on the real tree (#7329) ───────────────────────────────
+      // ── Tombstones on the real tree (#7329, #7866) ────────────────────────
       //
-      // The live half of the synthetic assertions above: ADR-0107 is the corpus's
-      // only tombstone today, and the shipped registry must be clean under the
-      // new rule — a green build here is what says the rule costs nothing to keep.
+      // The live half of the synthetic assertions above, over the corpus's actual
+      // tombstones — and the shipped registry must be clean under the rule, since
+      // a green build here is what says the rule costs nothing to keep.
+      //
+      // The two numbers are pinned BY NAME because each one is a migration this
+      // gate is meant never to lose: 0107 (#6676) and 0001 (#7866) both left
+      // `UNRESOLVED_ADR_CITATIONS` for a tombstone, and a regression that
+      // un-flagged either would re-open the number silently. The structural sweep
+      // that follows then covers every tombstone, including ones written later —
+      // so a future `NNNN-withdrawn-*.md` inherits the rule without editing this
+      // file, which is the property the filename marker was chosen for.
       {
         const { records: liveRecs, nonDecisions: liveTombs } = audit(liveFiles, KNOWN_NUMBER_COLLISIONS);
-        assert(
-          'live-tombstone-is-flagged',
-          liveTombs.has('0107'),
-          `docs/adr/0107-withdrawn-*.md is the corpus's tombstone; got {${[...liveTombs].join(',')}}`,
+
+        // The both-directions pin, per known tombstone: in `records` so the
+        // citations it was written to resolve keep resolving, and in
+        // `nonDecisions` so no anchor may name it. The two sets deliberately
+        // disagree about the same file; asserting only one of them is how this
+        // gate read GREEN on the #7329 gap.
+        for (const n of ['0001', '0107']) {
+          assert(
+            `live-tombstone-${n}-is-flagged`,
+            liveTombs.has(n),
+            `docs/adr/${n}-withdrawn-*.md is a tombstone; got {${[...liveTombs].join(',')}}`,
+          );
+          assert(
+            `live-tombstone-${n}-still-resolves-citations`,
+            liveRecs.has(n),
+            'flagging the tombstone must not un-resolve the citations it was written to resolve',
+          );
+          // Ablation, predicted RED: an anchor to the tombstone must be refused.
+          // This is the exact probe run on `main` @ `69fde55` for 0107, where it
+          // came back GREEN.
+          assert(
+            `ablation-anchoring-the-live-tombstone-${n}-is-red`,
+            anchorIdProblem('ADR-' + n, liveRecs, liveTombs) !== null,
+            'the #7329 gap is open again — a shard citing the tombstone would pass',
+          );
+        }
+
+        // Structural sweep: whatever the tombstone set turns out to be, every
+        // member holds both halves. Catches a tombstone added later without a
+        // named pin above.
+        const halfFlagged = [...liveTombs].filter(
+          (n) => !liveRecs.has(n) || anchorIdProblem('ADR-' + n, liveRecs, liveTombs) === null,
         );
         assert(
-          'live-tombstone-still-resolves-citations',
-          liveRecs.has('0107'),
-          'flagging the tombstone must not un-resolve the citations it was written to resolve',
+          'every-live-tombstone-resolves-and-refuses-anchors',
+          halfFlagged.length === 0,
+          `a tombstone must both resolve citations and refuse anchors; these do not: {${halfFlagged.join(',')}}`,
         );
+
+        // The set is non-empty, so the sweep above is not vacuously green. It is
+        // the standing guard on this whole block: if `nonDecisions` ever comes
+        // back empty — a broken marker, a renamed file — every assertion that
+        // iterates it would pass by reading nothing.
+        assert(
+          'live-tombstone-set-is-not-empty',
+          liveTombs.size >= 2,
+          `expected at least the two known tombstones {0001,0107}, got {${[...liveTombs].join(',')}}`,
+        );
+
         const anchored = (anchors ?? []).flatMap((entry) => (entry?.adrs ?? []).map((adr) => `${entry.file} → ${adr}`));
         const disarmed = anchored.filter((hit) => anchorIdProblem(hit.split(' → ')[1], liveRecs, liveTombs) !== null);
         assert(
           'live-registry-anchors-only-decisions',
           disarmed.length === 0,
           `no shipped anchor may name a tombstone, got:\n        ${disarmed.join('\n        ')}`,
-        );
-
-        // Ablation, predicted RED: an anchor to the tombstone must be refused. This
-        // is the exact probe run on `main` @ `69fde55`, where it came back GREEN.
-        assert(
-          'ablation-anchoring-the-live-tombstone-is-red',
-          anchorIdProblem('ADR-' + '0107', liveRecs, liveTombs) !== null,
-          'the #7329 gap is open again — a shard citing the tombstone would pass',
         );
       }
 

@@ -53,8 +53,7 @@ export const viewForm = defineForm({
       columns: 2,
       fields: [
         { field: 'resizable', colSpan: 1 },
-        { field: 'striped', colSpan: 1 },
-        { field: 'bordered', colSpan: 1 },
+        // `striped` / `bordered` inputs removed with the keys (#7176 — pass-through-only, retired).
         { field: 'compactToolbar', colSpan: 1 },
         { field: 'rowHeight', colSpan: 1 },
         { field: 'selection', type: 'composite', colSpan: 2 },

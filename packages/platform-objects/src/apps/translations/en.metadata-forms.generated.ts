@@ -641,12 +641,6 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       resizable: {
         label: "Resizable"
       },
-      striped: {
-        label: "Striped"
-      },
-      bordered: {
-        label: "Bordered"
-      },
       compactToolbar: {
         label: "Compact Toolbar"
       },
