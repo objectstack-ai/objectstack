@@ -46,6 +46,7 @@ import {
     resolveArtifactFetchTimeoutMs,
     resolveArtifactReference,
     sha256Hex,
+    stagedArtifactPath,
 } from './artifact-reference.js';
 
 // ── Fixtures ─────────────────────────────────────────────────────────
@@ -100,7 +101,7 @@ afterEach(() => {
 /** A `fetch` stand-in that answers once with `body`, then records the calls. */
 function fetchServing(body: string, init: { status?: number } = {}) {
     const calls: string[] = [];
-    const impl = vi.fn(async (input: any) => {
+    const impl = vi.fn(async (input: any, _init?: any) => {
         calls.push(String(input));
         const status = init.status ?? 200;
         return {
@@ -121,6 +122,23 @@ function fetchFailingWithUrlInMessage(url: string) {
     return vi.fn(async () => {
         throw new Error(`request to ${url} failed, reason: ECONNREFUSED`);
     }) as unknown as typeof globalThis.fetch;
+}
+
+/**
+ * Await a call that MUST be refused, and hand back the refusal.
+ *
+ * Not merely a type convenience: `promise.catch((e) => e as Err)` types as
+ * `Err | Resolved`, so a call that wrongly SUCCEEDS arrives at the assertions
+ * as a resolved value and fails on a missing `.code` — red, but pointing at the
+ * wrong thing. This turns "it resolved" into its own accurate failure.
+ */
+async function refusalOf(promise: Promise<unknown>): Promise<ArtifactReferenceError> {
+    try {
+        await promise;
+    } catch (err) {
+        return err as ArtifactReferenceError;
+    }
+    throw new Error('expected the reference to be refused, but it resolved');
 }
 
 /** Write a file and return its path. */
@@ -241,11 +259,11 @@ describe('secrets discipline (acceptance #6)', () => {
     });
 
     it('the fetch-failure refusal carries no credential — on the real code path', async () => {
-        const err = await resolveArtifactReference(PRESIGNED, {
+        const err = await refusalOf(resolveArtifactReference(PRESIGNED, {
             homeDir: home,
             fetchImpl: fetchFailingWithUrlInMessage(PRESIGNED),
             warn: () => {},
-        }).catch((e) => e as ArtifactReferenceError);
+        }));
 
         expect(err).toBeInstanceOf(ArtifactReferenceError);
         expect(err.code).toBe('OS_ARTIFACT_UNREACHABLE');
@@ -261,11 +279,11 @@ describe('secrets discipline (acceptance #6)', () => {
         const warnings: string[] = [];
 
         // (a) mismatch on the fetch path
-        const mismatch = await resolveArtifactReference(`${PRESIGNED}#sha256=${wrongPin}`, {
+        const mismatch = await refusalOf(resolveArtifactReference(`${PRESIGNED}#sha256=${wrongPin}`, {
             homeDir: home,
             fetchImpl: fetchServing(body).impl,
             warn: (m) => warnings.push(m),
-        }).catch((e) => e as ArtifactReferenceError);
+        }));
         expect(mismatch.code).toBe('OS_ARTIFACT_INTEGRITY_MISMATCH');
         expectNamesTheArtifact(mismatch.message);
         expectNoSecrets(mismatch.message);
@@ -391,37 +409,46 @@ describe('unpinned references (acceptance #2)', () => {
     });
 
     it('fails the boot loudly on a fetch failure EVEN THOUGH a usable cached copy exists', async () => {
-        // The sharp version of "no cache-fallback logic": an implementation
-        // that grew one would pass a test that merely cuts the network with an
-        // empty cache. So the cache is planted with byte-identical content
-        // first, and the refusal has to happen anyway.
+        // The sharp version of "no cache-fallback logic". Cutting the network
+        // with an empty cache proves nothing — an implementation that HAD a
+        // fallback would refuse there too, for want of anything to fall back
+        // to. So both places a plausible implementation would look are planted
+        // with byte-identical content first:
+        //
+        //   • the content-addressed pinned cache, and
+        //   • the URL-keyed staging path, which is where a naive
+        //     "just remember the last good copy of this URL" fallback would go.
+        //
+        // The refusal has to happen with both sitting on disk, because that is
+        // the situation the criterion is actually about.
+        const url = 'https://cdn.example.com/app.json';
         const body = artifactJson();
         mkdirSync(artifactCacheDir(home), { recursive: true });
         writeFileSync(pinnedCachePath(home, digestOf(body)), body);
-        writeFileSync(join(artifactCacheDir(home), 'staged-anything.json'), body);
+        writeFileSync(stagedArtifactPath(home, redactArtifactUrl(url)), body);
 
-        const err = await resolveArtifactReference('https://cdn.example.com/app.json', {
+        const err = await refusalOf(resolveArtifactReference(url, {
             homeDir: home,
-            fetchImpl: fetchFailingWithUrlInMessage('https://cdn.example.com/app.json'),
-        }).catch((e) => e as ArtifactReferenceError);
+            fetchImpl: fetchFailingWithUrlInMessage(url),
+        }));
 
         expect(err).toBeInstanceOf(ArtifactReferenceError);
         expect(err.code).toBe('OS_ARTIFACT_UNREACHABLE');
     });
 
     it('fails loudly on an HTTP error status, naming the status', async () => {
-        const err = await resolveArtifactReference('https://cdn.example.com/app.json', {
+        const err = await refusalOf(resolveArtifactReference('https://cdn.example.com/app.json', {
             homeDir: home,
             fetchImpl: fetchServing('nope', { status: 404 }).impl,
-        }).catch((e) => e as ArtifactReferenceError);
+        }));
         expect(err.code).toBe('OS_ARTIFACT_UNREACHABLE');
         expect(err.message).toContain('HTTP 404');
     });
 
     it('fails loudly when a file:// reference does not exist', async () => {
-        const err = await resolveArtifactReference('file:///definitely/not/here/objectstack.json', {
+        const err = await refusalOf(resolveArtifactReference('file:///definitely/not/here/objectstack.json', {
             homeDir: home,
-        }).catch((e) => e as ArtifactReferenceError);
+        }));
         expect(err.code).toBe('OS_ARTIFACT_UNREACHABLE');
         expect(err.message).toContain('must not invent an empty one');
     });
@@ -443,10 +470,10 @@ describe('pinned references (acceptance #3)', () => {
     it('refuses a mismatch naming BOTH the expected and the actual digest', async () => {
         const body = artifactJson();
         const expected = 'c'.repeat(64);
-        const err = await resolveArtifactReference(
+        const err = await refusalOf(resolveArtifactReference(
             `https://cdn.example.com/app.json#sha256=${expected}`,
             { homeDir: home, fetchImpl: fetchServing(body).impl },
-        ).catch((e) => e as ArtifactReferenceError);
+        ));
 
         expect(err.code).toBe('OS_ARTIFACT_INTEGRITY_MISMATCH');
         // Both, not "it threw": an operator who is told only that it failed
@@ -472,10 +499,10 @@ describe('pinned references (acceptance #3)', () => {
         const body = artifactJson();
         const file = writeFixture('objectstack.json', body);
         const expected = 'd'.repeat(64);
-        const err = await resolveArtifactReference(
+        const err = await refusalOf(resolveArtifactReference(
             `${pathToFileURL(file).href}#sha256=${expected}`,
             { homeDir: home },
-        ).catch((e) => e as ArtifactReferenceError);
+        ));
         expect(err.code).toBe('OS_ARTIFACT_INTEGRITY_MISMATCH');
         expect(err.message).toContain(expected);
         expect(err.message).toContain(digestOf(body));
@@ -508,27 +535,27 @@ describe('pinned references (acceptance #3)', () => {
         // name. The NAME is not the authority — the bytes are re-hashed.
         writeFileSync(pinnedCachePath(home, pin), artifactJson({ manifest: { id: 'com.evil' } }));
 
-        const err = await resolveArtifactReference(
+        const err = await refusalOf(resolveArtifactReference(
             `https://cdn.example.com/app.json#sha256=${pin}`,
             {
                 homeDir: home,
                 fetchImpl: fetchFailingWithUrlInMessage('https://cdn.example.com/app.json'),
                 warn: () => {},
             },
-        ).catch((e) => e as ArtifactReferenceError);
+        ));
         expect(err.code).toBe('OS_ARTIFACT_INTEGRITY_MISMATCH');
         expect(err.detail.source).toMatch(/^cache /);
     });
 
     it('refuses when the fetch fails and no cached copy exists', async () => {
-        const err = await resolveArtifactReference(
+        const err = await refusalOf(resolveArtifactReference(
             `https://cdn.example.com/app.json#sha256=${'e'.repeat(64)}`,
             {
                 homeDir: home,
                 fetchImpl: fetchFailingWithUrlInMessage('https://cdn.example.com/app.json'),
                 warn: () => {},
             },
-        ).catch((e) => e as ArtifactReferenceError);
+        ));
         expect(err.code).toBe('OS_ARTIFACT_UNREACHABLE');
     });
 
@@ -551,10 +578,10 @@ describe('engines.protocol validation (acceptance #4)', () => {
 
     it('refuses an artifact whose declared range excludes this runtime', async () => {
         const body = withProtocol(`^${PROTOCOL_MAJOR - 1}`);
-        const err = await resolveArtifactReference('https://cdn.example.com/app.json', {
+        const err = await refusalOf(resolveArtifactReference('https://cdn.example.com/app.json', {
             homeDir: home,
             fetchImpl: fetchServing(body).impl,
-        }).catch((e) => e as ArtifactReferenceError);
+        }));
 
         expect(err).toBeInstanceOf(ArtifactReferenceError);
         expect(err.code).toBe('OS_PROTOCOL_INCOMPATIBLE');
@@ -592,10 +619,10 @@ describe('engines.protocol validation (acceptance #4)', () => {
     });
 
     it('refuses malformed JSON rather than booting an empty platform', async () => {
-        const err = await resolveArtifactReference('https://cdn.example.com/app.json', {
+        const err = await refusalOf(resolveArtifactReference('https://cdn.example.com/app.json', {
             homeDir: home,
             fetchImpl: fetchServing('{ not json').impl,
-        }).catch((e) => e as ArtifactReferenceError);
+        }));
         expect(err.code).toBe('OS_ARTIFACT_MALFORMED');
     });
 });

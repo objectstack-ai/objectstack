@@ -55,10 +55,13 @@ function fakeDriver(drift: ManagedDriftEntry[], opts: { skip?: ManagedDriftEntry
     const applyCalls: Array<{ entries: ManagedDriftEntry[]; allowDestructive?: boolean }> = [];
     const driver: SqlDriverLike = {
         detectManagedDrift: vi.fn(async () => drift),
-        applyMigrationEntries: vi.fn(async (entries, o) => {
+        applyMigrationEntries: vi.fn(async (
+            entries: ManagedDriftEntry[],
+            o: { allowDestructive?: boolean },
+        ) => {
             applyCalls.push({ entries, allowDestructive: o.allowDestructive });
             const skipped = opts.skip ?? [];
-            const skippedSet = new Set(skipped);
+            const skippedSet = new Set<ManagedDriftEntry>(skipped);
             return { applied: entries.filter((e) => !skippedSet.has(e)), skipped };
         }),
     };
