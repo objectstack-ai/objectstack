@@ -47,6 +47,7 @@
     "check:pm-skill-ratchet": "node scripts/pm/check-skill-line-ratchet.mjs --self-test && node scripts/pm/check-skill-line-ratchet.mjs",
     "check:pm-skill-id-lint": "node scripts/pm/check-skill-id-lint.mjs --self-test && node scripts/pm/check-skill-id-lint.mjs",
     "check:pm-dispatch-gates": "node scripts/pm/check-dispatch-gates.mjs",
+    "check:partof-closing-keyword": "node scripts/check-partof-closing-keyword.mjs --self-test",
     "check:adr-anchors": "node scripts/check-adr-anchors.mjs --self-test && node scripts/check-adr-anchors.mjs",
     "check:adr-links": "node scripts/check-adr-links.mjs --self-test && node scripts/check-adr-links.mjs",
     "check:adr-merge-approval": "node scripts/check-adr-merge-approval.mjs --self-test && node scripts/check-adr-merge-approval.mjs",

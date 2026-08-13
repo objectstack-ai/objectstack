@@ -1,0 +1,74 @@
+# A PR that declares itself only `Part of #N` must not also tell GitHub to
+# close `#N`. GitHub's closing-keyword parser matches the keyword plus the
+# number and ignores the surrounding prose entirely — negations and modals
+# included — so the sentence an author writes to PREVENT an auto-close is
+# exactly what performs it on merge. That happened: a half-delivered card was
+# closed `completed` two seconds after its PR merged, by its own warning
+# sentence, and a closed card reads as finished, so it was found only by a
+# post-merge inventory re-pull. The author wrote the warning correctly and
+# still lost the card, which is why this is mechanical and not advice.
+#
+# The rule, the wording of the failure, and the code-stripping this depends on
+# all live in `scripts/check-partof-closing-keyword.mjs` and the predicate it
+# reuses; that header is authoritative, this file is the invocation.
+#
+# Sibling shape, deliberately copied rather than reinvented: the Duplicate Fix
+# Guard is this repo's other PR-body-scoped blocking check, and it takes the
+# same trigger set for the same measured reason.
+name: Part-of Closing-Keyword Guard
+
+# `edited` is load-bearing, not decoration. The body is this check's whole
+# input, and GitHub does not re-deliver a `pull_request` event when a body
+# changes under any other activity type — while `rerun_failed_jobs` replays the
+# frozen payload, so a re-run of a fixed body stays red forever. With `edited`
+# subscribed, rewording the sentence fires a fresh event carrying the fresh
+# body and the check goes green with no push and no re-run.
+#
+# No `merge_group:` trigger, and that is not an oversight: a merge-queue event
+# carries no pull request and therefore no body, so this check has nothing to
+# judge there. That also keeps it out of the required-context registry, whose
+# entries must report on queue builds; see the script header on where branch
+# protection fits.
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: partof-closing-keyword-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  partof-closing-keyword:
+    name: Part-of PR must not also close its card
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+
+      # The body reaches the script through `env:`, never through `${{ }}`
+      # inside the `run:` script. An expression interpolated into a shell line
+      # is substituted before bash ever sees it, so a PR body is arbitrary
+      # attacker-controlled text landing in a command; through `env:` it is
+      # inert data. The script's self-test pins this spelling.
+      #
+      # `PR_NUMBER` is not only for the message: GitHub renders a null body as
+      # an EMPTY value, so it is the witness that separates "this PR has an
+      # empty body" (a real, clean verdict) from "this step was handed nothing"
+      # (a wiring failure, which exits 2 and says so).
+      #
+      # No install step: the script imports one sibling module and reads no
+      # workspace package, so `node` on the pinned runtime is the whole
+      # toolchain it needs.
+      - name: A Part-of PR body may not carry a closing keyword for the same card
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: node scripts/check-partof-closing-keyword.mjs
