@@ -66,6 +66,25 @@ export {
   redactSecretValues,
   dropEchoedSecretMasks,
 } from './settings-secret-redaction.js';
+// #8103 — REPORT-ONLY classification of `sys_secret` rows against the settings
+// subsystem's references. Published because the operator-facing vehicle for it
+// (admin command / opt-in script) is still an open maintainer decision and will
+// live outside this package; the classifier is the part that is safe to settle
+// now. ⛔ Contains no deletion and must not grow one — and note the verdict
+// vocabulary's third value: `sys_secret` has three producers, so "unreferenced
+// by `sys_setting`" is NOT "unreferenced". See the module header.
+export {
+  classifySysSecretRows,
+  collectEncryptedSpecifierRefs,
+  isSecretHandle,
+  SECRET_HANDLE_PREFIX,
+  type ClassifiedSecretRow,
+  type EncryptedSpecifierRef,
+  type SecretRowSnapshot,
+  type SecretRowVerdict,
+  type SettingRowSnapshot,
+  type SysSecretOrphanReport,
+} from './sys-secret-orphan-report.js';
 export {
   settingsObjects,
   settingsPluginManifestHeader,
