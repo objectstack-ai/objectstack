@@ -704,3 +704,111 @@ describe('validateRecord — messages name the field by its label (#3957)', () =
     }
   });
 });
+
+/**
+ * #7501 — a number field's declared `scale` is ENFORCED, by rejection.
+ *
+ * `scale` sat in the field contract next to `precision`/`min`/`max` (all
+ * constraints) but had no validator branch at all: `{ scale: 0 }` accepted
+ * `11.5` and stored it verbatim. Maintainer ruling 2026-08-11: enforce by
+ * refusing (`max_scale`), NEVER by rounding — silent rounding is silently
+ * altering data. Applies to new writes only; stored legacy values rest.
+ *
+ * The fixture is the issue's own repro declaration (`work_hours`).
+ */
+describe('validateRecord — number `scale` is enforced by rejection (#7501)', () => {
+  const schema = {
+    fields: {
+      work_hours: {
+        type: 'number', label: 'Max hours per shift',
+        precision: 5, scale: 0, min: 1, max: 12,
+      },
+      rate: { type: 'number', label: 'Rate', scale: 2 },
+      free: { type: 'number', label: 'Free' }, // no scale — unconstrained
+    },
+  };
+
+  const fieldsOf = (data: Record<string, unknown>, mode: 'insert' | 'update' = 'insert', options = {}) => {
+    try {
+      validateRecord(schema, data, mode, options);
+    } catch (e) {
+      return (e as ValidationError).fields;
+    }
+    throw new Error('expected a ValidationError');
+  };
+
+  it('rejects the issue repro: 11.5 into scale: 0 — with the envelope, not just a throw', () => {
+    const [err] = fieldsOf({ work_hours: 11.5 });
+    expect(err).toMatchObject({
+      field: 'work_hours',
+      code: 'max_scale',
+      constraint: { scale: 0, actual: 1 },
+    });
+    expect(err.message).toBe('Max hours per shift must have at most 0 decimal places (got 1)');
+    // The thrown error is the VALIDATION_FAILED envelope REST maps to 400.
+    try {
+      validateRecord(schema, { work_hours: 11.5 }, 'insert');
+      throw new Error('expected a ValidationError');
+    } catch (e) {
+      expect((e as ValidationError).code).toBe('VALIDATION_FAILED');
+    }
+  });
+
+  it('scale: 0 does NOT start refusing integers (the repro declaration keeps working)', () => {
+    expect(() => validateRecord(schema, { work_hours: 12 }, 'insert')).not.toThrow();
+    expect(() => validateRecord(schema, { work_hours: 1 }, 'update')).not.toThrow();
+  });
+
+  it('a value within a non-zero scale still writes; one past it is refused', () => {
+    expect(() => validateRecord(schema, { rate: 3.25 }, 'insert')).not.toThrow();
+    expect(() => validateRecord(schema, { rate: 3.2 }, 'insert')).not.toThrow();
+    expect(() => validateRecord(schema, { rate: 3 }, 'insert')).not.toThrow();
+    const [err] = fieldsOf({ rate: 3.256 });
+    expect(err).toMatchObject({ code: 'max_scale', constraint: { scale: 2, actual: 3 } });
+  });
+
+  it('rejects on update too — the same branch runs for both modes', () => {
+    const [err] = fieldsOf({ work_hours: 2.5 }, 'update');
+    expect(err).toMatchObject({ field: 'work_hours', code: 'max_scale' });
+  });
+
+  it('string-carried numbers (a CSV cell) are judged after coercion, same as min/max', () => {
+    const [err] = fieldsOf({ work_hours: '11.5' });
+    expect(err).toMatchObject({ code: 'max_scale', constraint: { scale: 0, actual: 1 } });
+    expect(() => validateRecord(schema, { work_hours: '11' }, 'insert')).not.toThrow();
+  });
+
+  it('exponent forms are normalized, not read as zero decimals', () => {
+    const [err] = fieldsOf({ rate: 1e-7 }); // 0.0000001 — 7 places
+    expect(err).toMatchObject({ code: 'max_scale', constraint: { scale: 2, actual: 7 } });
+    // A positive exponent means an INTEGER — must not be refused.
+    expect(() => validateRecord(schema, { work_hours: 1.2e1 }, 'insert')).not.toThrow();
+  });
+
+  it('min/max on the same field are unchanged — and outrank scale in report order', () => {
+    // -1 violates min AND scale is fine (integer): still min_value, as before.
+    const [minErr] = fieldsOf({ work_hours: -1 });
+    expect(minErr).toMatchObject({ code: 'min_value', constraint: { min: 1 } });
+    const [maxErr] = fieldsOf({ work_hours: 13 });
+    expect(maxErr).toMatchObject({ code: 'max_value', constraint: { max: 12 } });
+  });
+
+  it('a field with no declared scale accepts any precision (no new default)', () => {
+    expect(() => validateRecord(schema, { free: 0.123456789 }, 'insert')).not.toThrow();
+  });
+
+  it('a malformed declaration (non-integer or negative scale) stays unenforced', () => {
+    // `scale: 2.5` has no defined meaning; inventing floor/round semantics
+    // here would be consumer-side guessing (PD #12). It behaves exactly as
+    // every declaration did before the branch existed: not at all.
+    const bad = { fields: { x: { type: 'number', scale: 2.5 }, y: { type: 'number', scale: -1 } } };
+    expect(() => validateRecord(bad, { x: 1.234, y: 5.5 }, 'insert')).not.toThrow();
+  });
+
+  it('renders the refusal fully localized (no half-translated sentence)', () => {
+    const [err] = fieldsOf({ work_hours: 11.5 }, 'insert', {
+      messages: { locale: 'zh-CN', objectName: 'shift' },
+    });
+    expect(err.message).toBe('Max hours per shift的小数位数不能超过 0 位(当前 1 位)');
+  });
+});

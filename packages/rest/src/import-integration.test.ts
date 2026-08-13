@@ -103,6 +103,14 @@ const MEMBER = {
     // framework#3956 — bounded fields. The dry run used to ignore both.
     penalty_amount: { name: 'penalty_amount', type: 'number' as const, label: '处罚金额', min: 0, max: 9999999.99 },
     nickname: { name: 'nickname', type: 'text' as const, label: 'Nickname', maxLength: 5 },
+    // framework#7501 — the issue's own repro declaration: `scale: 0` declares
+    // "integer, no decimals", and the import path is the leg that proves the
+    // ruling (reject, never round) — a rounding validator would have quietly
+    // stored 12 here and every assertion below would still need to fail it.
+    work_hours: {
+      name: 'work_hours', type: 'number' as const, label: 'Max hours per shift',
+      precision: 5, scale: 0, min: 1, max: 12,
+    },
   },
 };
 
@@ -142,7 +150,7 @@ async function boot() {
   const route = rest.getRoutes().find(
     (r: any) => r.method === 'POST' && r.path === '/api/v1/data/:object/import',
   );
-  return { engine, protocol, route };
+  return { engine, protocol, route, rest };
 }
 
 const call = (route: any, body: any) => {
@@ -583,5 +591,87 @@ describe('import route — named mapping artifact (#2611)', () => {
     const res = await call(route, { format: 'csv', csv: 'ID\nx', mappingName: 'task_json_mapping' });
     expect(res._status).toBe(400);
     expect(res._json.code).toBe('MAPPING_FORMAT_MISMATCH');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// framework#7501 — declared `scale` is enforced by REJECTION on both write
+// legs the issue measured: the direct data create route and the CSV import
+// route. Ruling 2026-08-11: refuse (`max_scale`), never round — the import
+// leg is the one that proves it, because a rounding "fix" would store 12 for
+// 11.5 and report the row created; only a refusal leaves the row unwritten.
+// New writes only: nothing here migrates or re-judges stored rows.
+// ---------------------------------------------------------------------------
+describe('import + create routes — number `scale` enforcement (#7501)', () => {
+  let route: any;
+  let engine: any;
+  let rest: any;
+  beforeEach(async () => { ({ route, engine, rest } = await boot()); });
+
+  const imp = (body: any) => {
+    const res = makeRes();
+    return route.handler({ params: { object: 'member' }, body } as any, res).then(() => res);
+  };
+
+  it('CSV import refuses an over-scale cell and does NOT store a rounded value', async () => {
+    const csv = [
+      'ID,Name,Status,Hours',
+      'w1,Ivy,active,11.5',   // scale: 0 — must be refused, not rounded to 12
+      'w2,Joe,active,12',     // integer, in range — must still write
+    ].join('\n');
+    const res = await imp({
+      format: 'csv', csv,
+      mapping: { ID: 'id', Name: 'member_name', Status: 'status', Hours: 'work_hours' },
+    });
+    expect(res._json).toMatchObject({ total: 2, ok: 1, errors: 1, created: 1 });
+    const failed = res._json.results.find((r: any) => !r.ok);
+    expect(failed).toMatchObject({
+      ok: false, action: 'failed', field: 'work_hours', code: 'max_scale',
+      error: 'Max hours per shift must have at most 0 decimal places (got 1)',
+    });
+    // The refused row left NOTHING behind — neither 11.5 nor a rounded 12.
+    expect(await engine.findOne('member', { where: { id: 'w1' } })).toBeNull();
+    expect((await engine.findOne('member', { where: { id: 'w2' } }))?.work_hours).toBe(12);
+  });
+
+  it('dry run predicts the same refusal — same verdict, same message', async () => {
+    // 2.5 is inside [min: 1, max: 12] — the ONLY violated constraint is scale,
+    // so this cannot pass by riding the pre-existing min_value branch.
+    const rows = [{ id: 'w3', member_name: 'Kim', status: 'active', work_hours: 2.5 }];
+    const dry = await imp({ format: 'json', dryRun: true, rows });
+    expect(dry._json).toMatchObject({ dryRun: true, total: 1, ok: 0, errors: 1, created: 0 });
+    expect(dry._json.results[0]).toMatchObject({
+      row: 1, ok: false, action: 'failed', field: 'work_hours', code: 'max_scale',
+      error: 'Max hours per shift must have at most 0 decimal places (got 1)',
+    });
+    expect(await engine.findOne('member', { where: { id: 'w3' } })).toBeNull();
+  });
+
+  it('the direct create route answers 400 VALIDATION_FAILED + max_scale (code AND status)', async () => {
+    const create = rest.getRoutes().find(
+      (r: any) => r.method === 'POST' && r.path === '/api/v1/data/:object',
+    );
+    expect(create).toBeDefined();
+    const res = makeRes();
+    await create.handler({
+      params: { object: 'member' },
+      body: { id: 'w4', member_name: 'Lea', status: 'active', work_hours: 11.5 },
+    } as any, res);
+    expect(res._status).toBe(400);
+    expect(res._json).toMatchObject({ code: 'VALIDATION_FAILED' });
+    expect(res._json.fields[0]).toMatchObject({
+      field: 'work_hours', code: 'max_scale',
+      constraint: { scale: 0, actual: 1 },
+    });
+    expect(await engine.findOne('member', { where: { id: 'w4' } })).toBeNull();
+
+    // …and a within-scale value on the same declaration still writes (201-class).
+    const ok = makeRes();
+    await create.handler({
+      params: { object: 'member' },
+      body: { id: 'w5', member_name: 'Mo', status: 'active', work_hours: 8 },
+    } as any, ok);
+    expect(ok._status ?? 200).toBeLessThan(400);
+    expect((await engine.findOne('member', { where: { id: 'w5' } }))?.work_hours).toBe(8);
   });
 });
