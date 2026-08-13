@@ -78,6 +78,56 @@ export function isSecretProtectionFailure(err: unknown): boolean {
 }
 
 /**
+ * [#8542] A signing secret IS stored on the row and could not be recovered.
+ *
+ * ## Why this is an error and not a `undefined`
+ * `resolveWebhookSecret` used to return `undefined` for two different facts —
+ * *"the author configured this webhook unsigned"* and *"a key is stored but
+ * nothing came back"* — and its caller acts on the first reading, which is the
+ * legitimate one. So the second silently became the first: the subscription
+ * ARMED and every delivery went out unauthenticated while `sys_webhook` kept
+ * reading `active: true`. Nothing logged, nothing dropped. That is the #7799
+ * signing invariant failing OPEN, and the direction is the whole defect — the
+ * two adjacent failure modes (a throwing resolver, an engine with no encrypted
+ * channel) both fail CLOSED and loud.
+ *
+ * Presence is decidable even when the value is not: the generic read path
+ * returns the engine's mask for a set secret and `null` for an unset one, so
+ * the caller already knows a value is stored before it asks for the plaintext.
+ * Raising here rather than at each caller is what makes the rule one rule —
+ * `AutoEnqueuer.attachSecret` needs no new branch, because a stored-but-
+ * unresolvable key now arrives exactly the way a throwing resolver already did.
+ *
+ * Carries the ADR-0112 pair as fields so a consumer branches on `code`/`status`
+ * rather than on message text. Same pair the seeder's refusal already reports
+ * for the same underlying cause.
+ */
+export class WebhookSecretUnresolvableError extends Error {
+  readonly code = WEBHOOK_SECRET_REFUSAL_CODE;
+  readonly status = WEBHOOK_SECRET_REFUSAL_STATUS;
+  constructor(message: string) {
+    super(message);
+    this.name = 'WebhookSecretUnresolvableError';
+  }
+}
+
+/**
+ * True when `err` is this seam's refusal to hand back a key it could not
+ * recover — as opposed to any other failure, which means "we could not even
+ * check" and must not be softened into a verdict.
+ *
+ * The distinction has one consumer today: the redeliver guard, whose contract
+ * is a returned refusal REASON rather than a throw (#8069). Everything on the
+ * enqueue path just lets it propagate into the `catch` that already parks the
+ * subscription.
+ */
+export function isWebhookSecretUnresolvable(
+  err: unknown,
+): err is WebhookSecretUnresolvableError {
+  return err instanceof WebhookSecretUnresolvableError;
+}
+
+/**
  * Split an authored envelope into the part that is safe to serialize into
  * `definition_json` and the key that must go to the encrypted column.
  *
@@ -188,12 +238,32 @@ export function onCryptoProviderChange(
 }
 
 /**
- * Recover a row's signing key. Returns `undefined` when the row has no stored
- * key — which is not an error: `secret` is optional on the authoring envelope,
- * and an unsigned webhook is a legitimate (authored) configuration.
+ * Recover a row's signing key. Returns `undefined` for EXACTLY one fact — the
+ * row has no stored key — which is not an error: `secret` is optional on the
+ * authoring envelope, and an unsigned webhook is a legitimate authored choice.
  *
- * Throws when a key IS stored but cannot be dereferenced. Callers must treat
- * that as "drop this subscription", never as "deliver unsigned".
+ * Throws {@link WebhookSecretUnresolvableError} when a key IS stored and does
+ * not come back. Callers must treat that as "drop this subscription", never as
+ * "deliver unsigned".
+ *
+ * ## [#8542] Why "did not come back" is not spelled `undefined`
+ * The dereference has three measured ways to answer `null` while a value is
+ * genuinely stored, all of them reaching this function identically:
+ *
+ *  1. the `sys_webhook` row is deleted between the enqueuer's cache read and
+ *     this dereference (`resolveSecretField` opens `if (!row) return null`);
+ *  2. the column holds something that is not a `secret:` ref — measured as
+ *     reachable only through a write that BYPASSES the engine (a hand-edited
+ *     column, a dump restored without its `sys_secret` rows, a seed script
+ *     writing at driver level). The engine's own write path defends both
+ *     obvious routes: an echoed mask is dropped and cleartext is re-encrypted;
+ *  3. the ciphertext decrypts to the empty string — reachable through the
+ *     ORDINARY data API, which accepts `signing_secret: ''`, mints a real
+ *     `sys_secret` row for it, and leaves the column holding a perfectly valid
+ *     ref that reads back as the mask.
+ *
+ * In all three the row still advertises a stored secret on every read path, so
+ * returning `undefined` told the caller the opposite of what the row says.
  */
 export async function resolveWebhookSecret(
   engine: IDataEngine,
@@ -203,7 +273,9 @@ export async function resolveWebhookSecret(
   const stored = row[WEBHOOK_SECRET_FIELD];
   // Unset / cleared. On the generic read path a set secret comes back as the
   // engine's mask (a non-empty string) and an unset one as `null`, so presence
-  // is decidable here WITHOUT the value ever being readable.
+  // is decidable here WITHOUT the value ever being readable. Everything below
+  // this line therefore runs with "a secret IS stored" already established —
+  // which is the knowledge the old `undefined` return threw away.
   if (stored == null || stored === '') return undefined;
 
   const resolver = engine as SecretResolvingEngine;
@@ -213,12 +285,24 @@ export async function resolveWebhookSecret(
     // fallback. The refusal below is for the narrow case where the value is one
     // of objectql's opaque forms and there is no way to invert it.
     if (!isOpaqueSecretForm(stored)) return String(stored);
-    throw new Error(
+    throw new WebhookSecretUnresolvableError(
       `Webhook "${String(row.name ?? row.id)}" stores an encrypted signing secret, but this data `
         + 'engine does not implement resolveSecretField() — the key cannot be recovered, so the '
         + 'subscription is dropped rather than delivered unsigned (#7799).',
     );
   }
   const plain = await resolver.resolveSecretField(object, String(row.id), WEBHOOK_SECRET_FIELD);
-  return typeof plain === 'string' && plain.length > 0 ? plain : undefined;
+  if (typeof plain === 'string' && plain.length > 0) return plain;
+
+  throw new WebhookSecretUnresolvableError(
+    `Webhook "${String(row.name ?? row.id)}" stores a signing secret in `
+      + `${object}.${WEBHOOK_SECRET_FIELD} that resolved to nothing. A value IS stored — the read `
+      + 'path returns the engine mask for it — so this is NOT an unsigned webhook, and delivering '
+      + 'it unsigned would strip the receiver of its only proof of origin (#7799, #8542). Causes, '
+      + 'in the order worth checking: the row was deleted while this refresh was reading it; the '
+      + 'column holds something that is not a secret: ref (a hand-edited column, or a dump restored '
+      + 'without its sys_secret rows); or the stored value decrypts to an empty string. Fix: re-save '
+      + 'the webhook secret so the column holds a fresh ref, or CLEAR the field to null if this '
+      + 'webhook is meant to be unsigned — an empty secret is not the same thing as no secret.',
+  );
 }

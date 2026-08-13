@@ -41,7 +41,11 @@ import { AutoEnqueuer } from './auto-enqueuer.js';
 import { bootstrapDeclaredWebhooks } from './bootstrap-declared-webhooks.js';
 import { migrateLegacyWebhookSecrets } from './migrate-webhook-secrets.js';
 import { SysWebhook } from './sys-webhook.object.js';
-import { WEBHOOK_SECRET_FIELD, __objectqlSecretWireForms } from './webhook-secret.js';
+import {
+    WEBHOOK_SECRET_FIELD,
+    __objectqlSecretWireForms,
+    resolveWebhookSecret,
+} from './webhook-secret.js';
 import { WEBHOOK_HEADERS_FIELD } from './webhook-headers.js';
 
 /**
@@ -949,5 +953,177 @@ describe('fail-closed and re-arm, extended to headers (#7986 × #7799/#8022)', (
         expect(calls[0].headers.Authorization).toBe(BEARER);
         const expected = createHmac('sha256', SECRET).update(calls[0].body).digest('hex');
         expect(calls[0].headers['X-Objectstack-Signature']).toBe(`sha256=${expected}`);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// #8542 — the same invariant, failing in the OPPOSITE direction.
+//
+// Every fail-closed pin above is reached by making the resolver THROW. There is
+// a second way for a stored key not to come back, and it used to be silent:
+// `resolveSecretField` answers `null`, `resolveWebhookSecret` folded that onto
+// the `undefined` it uses for "authored unsigned", and `attachSecret` acted on
+// that reading — the subscription ARMED and every delivery went out
+// unauthenticated while `sys_webhook` kept reading `active: true`. Nothing
+// logged, nothing dropped, no `sys_http_delivery` row to find. The receiver's
+// only proof of origin simply stopped being attached.
+//
+// That is why these pins are written on the WIRE and on the durable record
+// rather than on the resolver's return value: the defect's entire signature is
+// a request that arrives looking normal.
+//
+// ⚠️ Every pin here first asserts that a secret is genuinely STORED (the row
+// reads back as the mask, and the operator sees `active: true`). Without that
+// precondition a fixture that had quietly lost its secret would exercise only
+// the legitimate-unsigned arm and pass against a completely unfixed tree — the
+// control at the end of this block is that arm, deliberately kept separate.
+// ---------------------------------------------------------------------------
+
+describe('a stored signing secret that resolves to nothing (#8542)', () => {
+    /** Drive one create event through the PRODUCTION wiring; report all three surfaces. */
+    async function driveOnce(engine: any) {
+        const realtime = new FakeRealtime();
+        const outbox = new MemoryHttpOutbox();
+        const errors: Array<{ msg: string; meta: any }> = [];
+        const enqueuer = new AutoEnqueuer(engine, realtime, enqueueVia(outbox), {
+            // The 60s escape hatch held shut, as in the #8022 pins: whatever the
+            // first cache build concluded is what these assertions see.
+            refreshIntervalMs: 0,
+            logger: {
+                error: (msg: string, _e?: unknown, meta?: unknown) => { errors.push({ msg, meta: meta as any }); },
+                debug: () => {}, warn: () => {},
+            },
+        });
+        await enqueuer.start();
+        await realtime.publish(recordEvent('contact', { id: 'c1', name: 'Ada' }));
+        await new Promise((r) => setTimeout(r, 0));
+        await new Promise((r) => setTimeout(r, 0));
+        const { impl, calls } = makeFetch();
+        await new HttpDispatcher({ nodeId: 'n1', outbox, fetchImpl: impl, partitionCount: 1 }).tick();
+        await enqueuer.stop();
+        return { calls, rows: await outbox.list(), errors };
+    }
+
+    /**
+     * The anti-vacuity precondition. Asserts the state the whole card is about:
+     * a secret IS stored, everything an operator can read says so, and the
+     * webhook is armed. A test that reached the assertions below WITHOUT this
+     * state would be testing the legitimate unsigned arm and would pass on an
+     * unfixed tree.
+     */
+    async function expectSecretGenuinelyStored(engine: any, stores: any) {
+        const [viaApi] = await engine.find('sys_webhook', { where: { name: 'crm_hook' } });
+        expect(viaApi[WEBHOOK_SECRET_FIELD]).toBe(SECRET_MASK);
+        expect(viaApi.active).toBe(true);
+        const atRest = Array.from(stores.get('sys_webhook')!.values())[0] as any;
+        expect(atRest[WEBHOOK_SECRET_FIELD]).toBeTruthy();
+        return viaApi;
+    }
+
+    /** What a fail-closed outcome has to look like on all three surfaces. */
+    function expectParkedNotDelivered(result: Awaited<ReturnType<typeof driveOnce>>) {
+        // ── The invariant, on the wire: nothing arrives, and in particular
+        // nothing arrives UNSIGNED. Asserting the absence of the signature
+        // header alone would pass on a tree that delivers, which is the defect.
+        expect(result.calls).toHaveLength(0);
+        // ── #8069: the discarded event still leaves a durable trace.
+        expect(result.rows).toHaveLength(1);
+        expect(result.rows[0]).toMatchObject({ status: 'dead', attempts: 0 });
+        expect(result.rows[0].signature).toBeUndefined();
+        // ── #8022/#8043: one say-once `error`, carrying the ADR-0112 pair a
+        // consumer branches on, and naming the credential so this cannot be
+        // confused with the header map's identical-looking drop (#7986).
+        expect(result.errors).toHaveLength(1);
+        expect(result.errors[0].meta).toMatchObject({
+            code: 'INTERNAL_ERROR',
+            status: 500,
+            field: WEBHOOK_SECRET_FIELD,
+        });
+    }
+
+    it('refuses to arm when the stored secret was emptied through the ordinary data API', async () => {
+        const { engine, stores } = await buildEngine();
+        await bootstrapDeclaredWebhooks(engine, metadataWith([declaredWebhook()]));
+        const [row] = await engine.find('sys_webhook', { where: { name: 'crm_hook' } });
+
+        // The trigger that needs no privileged access at all — measured, not
+        // assumed. The engine accepts an empty string for a `secret` field,
+        // encrypts it like any other, mints a real `sys_secret` row, and leaves
+        // the column holding a perfectly VALID ref. Every read path then
+        // reports a secret is set, and the dereference answers ''.
+        await engine.update('sys_webhook', { [WEBHOOK_SECRET_FIELD]: '' }, { where: { id: row.id } });
+
+        await expectSecretGenuinelyStored(engine, stores);
+        const result = await driveOnce(engine);
+        expectParkedNotDelivered(result);
+        // The remedy this state specifically needs, since "re-save the secret"
+        // is not the only fix and an operator who wanted it unsigned has to be
+        // told the difference between an empty secret and no secret.
+        expect(result.rows[0].error).toMatch(/could not be decrypted/);
+        expect(result.errors[0].msg).toMatch(/NO delivery/);
+    });
+
+    it('refuses to arm when the column no longer holds a resolvable ref', async () => {
+        const { engine, stores, driver } = await buildEngine();
+        await bootstrapDeclaredWebhooks(engine, metadataWith([declaredWebhook()]));
+        const [row] = await engine.find('sys_webhook', { where: { name: 'crm_hook' } });
+
+        // Written BELOW the engine deliberately, because that is the only route
+        // measured to reach this state: the engine's own write path DROPS an
+        // echoed mask and RE-ENCRYPTS cleartext, so neither lands. What does
+        // land here is a dump restored without its sys_secret rows, a column
+        // edited in SQL, or a seed script writing at driver level.
+        await driver.update('sys_webhook', row.id, { [WEBHOOK_SECRET_FIELD]: 'whsec_pasted_by_hand' });
+
+        // …and the row still reads back as the mask, so nothing an operator can
+        // see distinguishes this from the healthy webhook it was a moment ago.
+        await expectSecretGenuinelyStored(engine, stores);
+        expectParkedNotDelivered(await driveOnce(engine));
+    });
+
+    it('refuses when the row is deleted between the cache read and the dereference', async () => {
+        const { engine } = await buildEngine();
+        await bootstrapDeclaredWebhooks(engine, metadataWith([declaredWebhook()]));
+
+        // The snapshot the enqueuer's refresh loop holds while it dereferences
+        // each row's credentials, one at a time.
+        const [snapshot] = await engine.find('sys_webhook', { where: { name: 'crm_hook' } });
+        expect(snapshot[WEBHOOK_SECRET_FIELD]).toBe(SECRET_MASK);
+
+        await engine.delete('sys_webhook', { where: { id: snapshot.id } });
+
+        // Pinned at the seam rather than through the enqueuer because the race
+        // is a property of the seam: `resolveSecretField` opens `if (!row)
+        // return null`, and the caller holding the snapshot cannot tell that
+        // `null` apart from "this webhook was authored unsigned".
+        await expect(resolveWebhookSecret(engine, snapshot as any)).rejects.toThrow(
+            /resolved to nothing/,
+        );
+    });
+
+    it('a webhook authored unsigned still arms and delivers — the refusal is not a blanket', async () => {
+        const { engine } = await buildEngine();
+        await bootstrapDeclaredWebhooks(
+            engine,
+            metadataWith([declaredWebhook({ secret: undefined })]),
+        );
+
+        // The control's precondition is the exact mirror of the anti-vacuity
+        // one above: NOTHING is stored, so `undefined` is the legitimate
+        // authored fact and not a swallowed failure. Its header map is left
+        // declared on purpose — the signing refusal must not spill onto the
+        // sibling credential that resolves perfectly well (#7986).
+        const [viaApi] = await engine.find('sys_webhook', { where: { name: 'crm_hook' } });
+        expect(viaApi[WEBHOOK_SECRET_FIELD] ?? null).toBeNull();
+
+        const { calls, rows, errors } = await driveOnce(engine);
+        expect(calls).toHaveLength(1);
+        expect(calls[0].headers['X-Objectstack-Signature']).toBeUndefined();
+        expect(calls[0].headers['X-Team']).toBe('crm');
+        // `success`, not `pending`: the dispatcher ran, so this control asserts
+        // a delivery that COMPLETED — the working feature a blanket refusal
+        // would have turned into a parked `dead` row.
+        expect(rows[0].status).toBe('success');
+        expect(errors).toHaveLength(0);
     });
 });
