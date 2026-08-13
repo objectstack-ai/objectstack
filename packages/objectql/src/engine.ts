@@ -28,7 +28,12 @@ import type { ValidateDataIssue, ValidateDataResponse } from '@objectstack/spec/
 import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readAutonumberCounter, missingFieldValues, isTenancyDisabled, FILE_REFERENCE_TYPES, REFERENCE_VALUE_TYPES, referenceTargetOf, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY, isCurrentUserDefaultToken, isNowDefaultToken } from '@objectstack/spec/data';
 // [#5158] Door 2's lowering sink — the SAME pair the protocol face (Door 1)
 // runs, so `FilterArray` has exactly one lowering in the product.
-import { isFilterAST, parseFilterAST, VALID_AST_OPERATORS } from '@objectstack/spec/data';
+import {
+  isFilterAST,
+  parseFilterAST,
+  normalizeFilterComparandTypes,
+  VALID_AST_OPERATORS,
+} from '@objectstack/spec/data';
 // [#5574] D6, executable. The ceiling and the refusal message live in
 // `packages/spec/src/data/bulk-write-hook-conformance.ts` so BOTH phases and
 // both verbs enforce one definition; the engine raises, the contract decides.
@@ -626,6 +631,19 @@ function lowerWhereFilterArray<T extends object | undefined>(
     // one either way — it reads the lowered condition, which is what both doors
     // produce.
     assertListComparandShapes(object, operation, where);
+    // [#7872] The comparand-type door, on the OBJECT form. `parseFilterAST`
+    // runs the same walk on everything it lowers or passes through, but
+    // NEITHER door routes an object-form filter through it — Door 1 gates on
+    // `isFilterAST` first and Door 2 is this very branch — so without this
+    // call the dominant form would bypass the door entirely (the #7956
+    // divergence matrix arrived through it). Shape gate first (#5869 keeps
+    // its pinned wording for the list-operator shapes), type door second;
+    // the walk is copy-on-write, so the common path allocates nothing and a
+    // narrowed bigint replaces the bag rather than editing the caller's.
+    const normalized = normalizeFilterComparandTypes(where, `${operation}('${object}')`);
+    if (normalized !== where) {
+      return { ...(bag as Record<string, unknown>), where: normalized } as T;
+    }
     return bag;
   }
 
@@ -9879,8 +9897,8 @@ export class ObjectQL implements IObjectQLEngine {
       const field = (agg as { field?: string })?.field;
       if (field && field !== '*') referenced.add(field);
     }
-    for (const g of (query?.groupBy as unknown[]) ?? []) {
-      const field = typeof g === 'string' ? g : (g as { field?: string })?.field;
+    for (const g of query?.groupBy ?? []) {
+      const field = typeof g === 'string' ? g : g?.field;
       if (field) referenced.add(field);
     }
 
@@ -9916,7 +9934,7 @@ export class ObjectQL implements IObjectQLEngine {
         ast: {
             object,
             where: query.where,
-            groupBy: query.groupBy as any,
+            groupBy: query.groupBy,
             aggregations: query.aggregations,
             // ENFORCED since #4286 (step 3). On the ast so the FLS predicate
             // guard walks its references (predicate-guard.ts) and a future
@@ -9943,11 +9961,11 @@ export class ObjectQL implements IObjectQLEngine {
         // supported we can push the aggregate down to the driver; otherwise
         // we fall back to driver.find() + in-memory bucketing so the result
         // remains correct on partial-support dialects (e.g. SQLite + week).
-        const groupByItems = Array.isArray(query.groupBy) ? (query.groupBy as any[]) : [];
+        const groupByItems = Array.isArray(query.groupBy) ? query.groupBy : [];
         const granularityCaps: Record<string, boolean> | undefined =
             drv?.supports?.queryDateGranularity;
         const structuredItems = groupByItems.filter((g) => typeof g !== 'string');
-        const allStructuredSupported = structuredItems.every((g: any) => {
+        const allStructuredSupported = structuredItems.every((g) => {
             if (!g?.dateGranularity) return true; // plain {field} object is fine
             return granularityCaps?.[g.dateGranularity] === true;
         });
@@ -9959,7 +9977,7 @@ export class ObjectQL implements IObjectQLEngine {
         // matching rows are fetched), but bucketing runs uniformly in JS so a
         // row near a tz day-boundary lands identically on every driver.
         const tz = query.timezone;
-        const hasDateBucket = structuredItems.some((g: any) => !!g?.dateGranularity);
+        const hasDateBucket = structuredItems.some((g) => !!g?.dateGranularity);
         const tzRequiresInMemory = !!tz && tz !== 'UTC' && hasDateBucket;
         if (typeof drv.aggregate === 'function' && allStructuredSupported && !tzRequiresInMemory) {
             // HAVING is engine-owned (#4286): applied AFTER aggregation, over

@@ -276,7 +276,8 @@
 // the exclusion from tsconfig.json and delete the entry here in the same PR.
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, posix, resolve } from 'node:path';
 
 // Anchored to the script, not to cwd: the verdict must not depend on where the
@@ -1217,10 +1218,26 @@ const TSC_ERROR_LINE = /^(?!\s)(?:.*\s)?error TS\d+: /;
  * A missing/unreadable project or an empty file list would otherwise be counted
  * as one tidy little error and silently *lower* a package's number -- a gate
  * that measures nothing and reports an improvement is worse than no gate.
+ *
+ * TS2688 ("Cannot find type definition file for 'node'") is here for the same
+ * reason and was measured, not reasoned about (#8218). A generated project whose
+ * `typeRoots` do not resolve loses every global the package compiles against, so
+ * tsc stops at the type-library entry point and prints ONE diagnostic:
+ * packages/cli measured 188 with `typeRoots` resolving and **1** without, same
+ * tree, same sources. Counted as debt that is a 187-error improvement handed to
+ * the ledger by a broken measurement -- and `--lower` would then write it down.
+ * No ledger `note` in this file records a TS2688, and none can while this line
+ * stands: a package that really cannot resolve its own type libraries has a
+ * broken tsconfig, which is a defect to fix rather than a number to freeze.
  */
-const TSC_SETUP_ERROR = /\berror TS(5058|5083|6053|18003|5012)\b/;
+const TSC_SETUP_ERROR = /\berror TS(5058|5083|6053|18003|5012|2688)\b/;
 
-/** Temp project used to lift a tsconfig's own test exclusion. Never committed. */
+/**
+ * Temp project used to lift a tsconfig's own test exclusion. Written into a
+ * fresh `os.tmpdir()` directory -- never anywhere inside the repository. See
+ * `remeasureProject` for why that costs a page of path rewriting, and what the
+ * in-tree version cost instead.
+ */
 const REMEASURE_CONFIG = 'tsconfig.debt-remeasure.json';
 const REMEASURE_ISSUE = 'https://github.com/objectstack-ai/objectstack/issues/5278';
 const SURPLUS_ISSUE = 'https://github.com/objectstack-ai/objectstack/issues/6376';
@@ -1368,7 +1385,9 @@ function countTscErrors(output) {
  * `--pretty false` so the count does not depend on whether a TTY is attached;
  * cwd is ROOT so reported paths are repo-relative however the gate was invoked.
  *
- * @param {string} project repo-relative path to a tsconfig
+ * @param {string} project path to a tsconfig -- repo-relative for the ledgered
+ *   packages' own configs, absolute for the generated re-measure project, which
+ *   lives outside the repo entirely
  * @returns {number}
  */
 function tscErrorCount(project) {
@@ -1411,13 +1430,104 @@ function measureDebt(dir) {
 }
 
 /**
- * The TEST_DEBT number: what the package reports once its tsconfig stops
- * steering tsc away from its own tests -- AND once it starts steering tsc toward
- * the ones it had merely never reached. Written as a sibling project that
- * `extends` the real one and re-declares `exclude` without the test globs --
- * a sibling, in the package's own directory, because tsconfig resolves
- * `include`/`outDir`/`rootDir` relative to the file that DECLARES them, so a
- * config generated anywhere else would silently repoint every one of them.
+ * What the extends chain above one package's `tsconfig.json` already decides for
+ * itself. Two facts, and both of them are only interesting because the generated
+ * project below lives OUTSIDE the repository:
+ *
+ *   `include`   whether anything in the chain selects files at all. If nothing
+ *               does, tsc falls back to `**\/*` resolved against the directory of
+ *               the config it was handed -- which used to be the package and is
+ *               now a temp dir holding one file.
+ *   `typeRoots` whether the chain names them explicitly. If it does, they are
+ *               already absolute-by-origin and the generated project must not
+ *               override them.
+ *
+ * `files` counts as selecting: a chain that declares `files` and no `include`
+ * compiles exactly those, and adding an `include` would widen the program.
+ *
+ * Relative `extends` only -- which is every one in this workspace. A bare
+ * specifier (`@tsconfig/node22/tsconfig.json`) stops the walk and reads as
+ * "declares neither", the conservative answer for shared bases that carry
+ * `compilerOptions` and nothing else.
+ *
+ * @returns {{selectsFiles: boolean, declaresTypeRoots: boolean}}
+ */
+function tsconfigChainFacts(dir) {
+  let configAbs = join(ROOT, dir, 'tsconfig.json');
+  const facts = { selectsFiles: false, declaresTypeRoots: false };
+  for (let depth = 0; depth < 8; depth++) {
+    let parsed;
+    try {
+      parsed = JSON.parse(readFileSync(configAbs, 'utf8').replace(/^\s*\/\/.*$/gm, ''));
+    } catch {
+      return facts;
+    }
+    if (Array.isArray(parsed.include) && parsed.include.length > 0) facts.selectsFiles = true;
+    if (Array.isArray(parsed.files)) facts.selectsFiles = true;
+    if (parsed.compilerOptions?.typeRoots !== undefined) facts.declaresTypeRoots = true;
+    const next = parsed.extends;
+    if (typeof next !== 'string' || !next.startsWith('.')) return facts;
+    configAbs = resolve(configAbs, '..', next.endsWith('.json') ? next : `${next}.json`);
+  }
+  return facts;
+}
+
+/**
+ * The default `typeRoots` tsc would have computed for a config sitting IN the
+ * package: every `node_modules/@types` from the package directory up. Stopped at
+ * the repo root on purpose -- tsc would keep walking to `/`, and a measurement
+ * that changes with whatever is installed above the checkout is not a
+ * measurement. Nothing above ROOT resolves in CI either way.
+ *
+ * @param {string} pkgAbs absolute, posix-separated package directory
+ * @param {string} rootAbs absolute, posix-separated repo root
+ * @returns {string[]} outermost-last, the order tsc searches
+ */
+function defaultTypeRoots(pkgAbs, rootAbs) {
+  const roots = [];
+  let cursor = pkgAbs;
+  for (let depth = 0; depth < 12; depth++) {
+    roots.push(`${cursor}/node_modules/@types`);
+    if (cursor === rootAbs) break;
+    const parent = cursor.slice(0, cursor.lastIndexOf('/'));
+    if (!parent || parent === cursor) break;
+    cursor = parent;
+  }
+  return roots;
+}
+
+/**
+ * The generated re-measure project, pure over one package's own tsconfig so the
+ * self-test can pin the property the whole design rests on: EVERY path it emits
+ * is absolute and rooted at the package.
+ *
+ * It has to be, because the file is written into `os.tmpdir()` rather than
+ * beside the config it extends (#8218). The old sibling-in-the-package-directory
+ * placement made the relative paths free, and charged for them somewhere else:
+ * the scratch file sat in a TRACKED directory, matched by no `.gitignore` rule,
+ * for as long as that package's tsc ran -- around 250s across the ledger. Any
+ * `git add -A` in the same worktree during that window staged it, which is how a
+ * 71-line generated tsconfig reached a real commit, and no crash was required.
+ * The `finally` that removes it was never the gap; the ADDRESS was.
+ *
+ * What the move costs, item by item -- each one is a path tsc would otherwise
+ * resolve against the temp dir:
+ *
+ *   `extends`     absolute, so the chain still starts at the real config. Paths
+ *                 declared UP that chain keep resolving against the file that
+ *                 declared them, which is why the package's own `include`,
+ *                 `outDir` and `rootDir` need no help here.
+ *   `exclude`     absolutised: these patterns are re-declared HERE, so they
+ *                 originate in this file and would otherwise mean `/tmp/x/dist`.
+ *   `include`     same, and additionally never left implicit -- see
+ *                 `tsconfigChainFacts`.
+ *   `rootDir`     absolute for the same reason as `exclude`.
+ *   `typeRoots`   not a re-declared path at all, and the one that bites. tsc
+ *                 derives the default from the directory of the ROOT config
+ *                 file, so from a temp dir `types: ["node"]` resolves to
+ *                 nothing: packages/cli measures 188 with them and 1 without.
+ *                 Reconstructed here, and TS2688 joined TSC_SETUP_ERROR above so
+ *                 the next way this breaks is loud instead of a free 187.
  *
  * Dropping exclusions is only half of un-hiding, because only half of hiding is
  * an exclusion (#7353). A package whose `include` never named its `test/` tree
@@ -1435,38 +1545,81 @@ function measureDebt(dir) {
  * protect, so a TS6059 here is a diagnostic about this generated config rather
  * than about the package, and counting it would be measuring the tape measure.
  *
- * Removed in a `finally`: a stray `tsconfig.*.json` left behind would be picked
- * up by this very script's own tsconfig scan on the next run.
- *
- * @param {string[]} hiddenTests package-relative paths of the unread test files
+ * @param {object} input
+ * @param {string} input.pkgAbs absolute, posix-separated package directory
+ * @param {string} input.rootAbs absolute, posix-separated repo root
+ * @param {object} input.parsed the package's own parsed `tsconfig.json`
+ * @param {string[]} input.unreachable package-relative test files its `include` cannot reach
+ * @param {{selectsFiles: boolean, declaresTypeRoots: boolean}} input.chain
+ * @returns {object} the project to serialise
  */
-function measureTestDebt(dir, hiddenTests = []) {
-  const configPath = join(ROOT, dir, REMEASURE_CONFIG);
-  const raw = readFileSync(join(ROOT, dir, 'tsconfig.json'), 'utf8').replace(/^\s*\/\/.*$/gm, '');
-  const parsed = JSON.parse(raw);
+function remeasureProject({ pkgAbs, rootAbs, parsed, unreachable, chain }) {
+  const absolutise = (p) => (p.startsWith('/') ? p : posix.join(pkgAbs, p));
   const kept = (parsed.exclude ?? []).filter((pattern) => !TEST_GLOB.test(pattern));
-  const project = { extends: './tsconfig.json', exclude: kept };
+  const project = {
+    extends: `${pkgAbs}/tsconfig.json`,
+    exclude: kept.map(absolutise),
+  };
+  const compilerOptions = {};
 
   // Only the files this config's OWN `include` cannot reach need adding; the
   // ones it already selects are back in the program the moment `exclude` stops
   // subtracting them, and re-listing those would say nothing.
   const include = Array.isArray(parsed.include) && parsed.include.length > 0 ? parsed.include : null;
   if (include) {
-    const { roots } = readTsconfig(dir, 'tsconfig.json');
-    const unreachable = hiddenTests.filter(
-      (rel) => !roots.some((root) => root === '' || rel === root || rel.startsWith(`${root}/`)),
-    );
-    if (unreachable.length > 0) {
-      project.include = [...include, ...unreachable];
-      project.compilerOptions = { rootDir: '.' };
-    }
+    project.include = (unreachable.length > 0 ? [...include, ...unreachable] : include).map(absolutise);
+    if (unreachable.length > 0) compilerOptions.rootDir = pkgAbs;
+  } else if (!chain.selectsFiles) {
+    project.include = [`${pkgAbs}/**/*`];
   }
 
+  if (!chain.declaresTypeRoots) compilerOptions.typeRoots = defaultTypeRoots(pkgAbs, rootAbs);
+  if (Object.keys(compilerOptions).length > 0) project.compilerOptions = compilerOptions;
+  return project;
+}
+
+/**
+ * The TEST_DEBT number: what the package reports once its tsconfig stops
+ * steering tsc away from its own tests -- AND once it starts steering tsc toward
+ * the ones it had merely never reached.
+ *
+ * The project is `remeasureProject`'s, and it is written into a fresh temp
+ * directory that this function owns and removes. Nothing is created inside the
+ * repository at any point, so there is no window in which `git status`, `git add
+ * -A`, a `git clean`, an editor's file watcher or a parallel agent can see a
+ * generated artifact in a tracked directory -- and no `tsconfig.*.json` for this
+ * script's own next-run scan to trip over either. The cleanup below is now
+ * housekeeping rather than the only thing standing between a scratch file and a
+ * commit: a `finally` covers a throw and a non-zero exit, and covers neither a
+ * SIGKILL nor a cancelled CI step, which is what an in-tree address needed it to.
+ *
+ * @param {string[]} hiddenTests package-relative paths of the unread test files
+ */
+function measureTestDebt(dir, hiddenTests = []) {
+  const rootAbs = ROOT.replaceAll('\\', '/').replace(/\/$/, '');
+  const pkgAbs = join(ROOT, dir).replaceAll('\\', '/').replace(/\/$/, '');
+  const parsed = JSON.parse(
+    readFileSync(join(ROOT, dir, 'tsconfig.json'), 'utf8').replace(/^\s*\/\/.*$/gm, ''),
+  );
+  const { roots } = readTsconfig(dir, 'tsconfig.json');
+  const unreachable = hiddenTests.filter(
+    (rel) => !roots.some((root) => root === '' || rel === root || rel.startsWith(`${root}/`)),
+  );
+  const project = remeasureProject({
+    pkgAbs,
+    rootAbs,
+    parsed,
+    unreachable,
+    chain: tsconfigChainFacts(dir),
+  });
+
+  const holder = mkdtempSync(join(tmpdir(), 'objectstack-debt-remeasure-'));
+  const configPath = join(holder, REMEASURE_CONFIG);
   writeFileSync(configPath, `${JSON.stringify(project, null, 2)}\n`);
   try {
-    return tscErrorCount(posix.join(dir, REMEASURE_CONFIG));
+    return tscErrorCount(configPath);
   } finally {
-    rmSync(configPath, { force: true });
+    rmSync(holder, { force: true, recursive: true });
   }
 }
 
@@ -2283,6 +2436,119 @@ function selfTest() {
     }
   }
 
+  // THE GENERATED RE-MEASURE PROJECT (#8218). The invariant is one sentence --
+  // no path in this object may be relative -- and it is worth a case table
+  // because the file is written into `os.tmpdir()`, where a relative path does
+  // not fail, it QUIETLY MEANS SOMETHING ELSE. The two shapes that bit hardest
+  // are the ones nobody writes down: an omitted `include` (tsc substitutes
+  // `**\/*` against the temp dir) and an omitted `typeRoots` (tsc derives them
+  // from the temp dir, and packages/cli drops from 188 errors to 1).
+  const PKG = '/repo/packages/a';
+  const REPO = '/repo';
+  const chain = (extra = {}) => ({ selectsFiles: false, declaresTypeRoots: false, ...extra });
+  const projectCases = [
+    {
+      label: 'the usual shape: own include, no exclude, nothing unreachable',
+      input: { parsed: { include: ['src/**/*'] }, unreachable: [], chain: chain({ selectsFiles: true }) },
+      expect: {
+        extends: '/repo/packages/a/tsconfig.json',
+        exclude: [],
+        include: ['/repo/packages/a/src/**/*'],
+        compilerOptions: { typeRoots: ['/repo/packages/a/node_modules/@types', '/repo/packages/node_modules/@types', '/repo/node_modules/@types'] },
+      },
+    },
+    {
+      label: 'the test globs are dropped from exclude and the survivors are absolutised',
+      input: {
+        parsed: { include: ['src/**/*'], exclude: ['dist', 'node_modules', '**/*.test.ts', '**/*.spec.tsx'] },
+        unreachable: [],
+        chain: chain({ selectsFiles: true }),
+      },
+      expectPart: { exclude: ['/repo/packages/a/dist', '/repo/packages/a/node_modules'] },
+    },
+    {
+      label: 'unreachable test files are appended one at a time and rootDir is neutralised to the package',
+      input: {
+        parsed: { include: ['src'], exclude: [] },
+        unreachable: ['test/x.test.ts', 'e2e/y.spec.ts'],
+        chain: chain({ selectsFiles: true }),
+      },
+      expectPart: {
+        include: ['/repo/packages/a/src', '/repo/packages/a/test/x.test.ts', '/repo/packages/a/e2e/y.spec.ts'],
+      },
+      expectOption: { rootDir: '/repo/packages/a' },
+    },
+    {
+      label: 'a config that selects nothing gets an EXPLICIT include — the default would name the temp dir',
+      input: { parsed: {}, unreachable: [], chain: chain() },
+      expectPart: { include: ['/repo/packages/a/**/*'] },
+    },
+    {
+      label: 'a chain that selects files keeps selecting them: no include is invented over its head',
+      input: { parsed: {}, unreachable: [], chain: chain({ selectsFiles: true }) },
+      expectAbsent: ['include'],
+    },
+    {
+      label: 'a chain that names its own typeRoots is not overridden — those already resolve from their own file',
+      input: { parsed: { include: ['src'] }, unreachable: [], chain: chain({ selectsFiles: true, declaresTypeRoots: true }) },
+      expectAbsentOption: ['typeRoots'],
+    },
+  ];
+  for (const c of projectCases) {
+    const got = remeasureProject({ pkgAbs: PKG, rootAbs: REPO, ...c.input });
+    const problems = [];
+    if (c.expect && JSON.stringify(got) !== JSON.stringify(c.expect)) {
+      problems.push(`expected ${JSON.stringify(c.expect)}, got ${JSON.stringify(got)}`);
+    }
+    for (const [key, want] of Object.entries(c.expectPart ?? {})) {
+      if (JSON.stringify(got[key]) !== JSON.stringify(want)) {
+        problems.push(`${key}: expected ${JSON.stringify(want)}, got ${JSON.stringify(got[key])}`);
+      }
+    }
+    for (const [key, want] of Object.entries(c.expectOption ?? {})) {
+      if (JSON.stringify(got.compilerOptions?.[key]) !== JSON.stringify(want)) {
+        problems.push(`compilerOptions.${key}: expected ${JSON.stringify(want)}, got ${JSON.stringify(got.compilerOptions?.[key])}`);
+      }
+    }
+    for (const key of c.expectAbsent ?? []) {
+      if (got[key] !== undefined) problems.push(`${key} should be absent, got ${JSON.stringify(got[key])}`);
+    }
+    for (const key of c.expectAbsentOption ?? []) {
+      if (got.compilerOptions?.[key] !== undefined) {
+        problems.push(`compilerOptions.${key} should be absent, got ${JSON.stringify(got.compilerOptions[key])}`);
+      }
+    }
+    // The blanket property, checked on EVERY case rather than spelled per
+    // expectation: one relative path anywhere in this object is a silently
+    // different measurement, so no case is allowed to introduce one.
+    for (const [where, value] of [
+      ['extends', [got.extends]],
+      ['include', got.include ?? []],
+      ['exclude', got.exclude ?? []],
+      ['compilerOptions.rootDir', got.compilerOptions?.rootDir ? [got.compilerOptions.rootDir] : []],
+      ['compilerOptions.typeRoots', got.compilerOptions?.typeRoots ?? []],
+    ]) {
+      for (const p of value) {
+        if (!String(p).startsWith('/')) problems.push(`${where} emits a relative path: ${JSON.stringify(p)}`);
+      }
+    }
+    if (problems.length > 0) failures.push(`remeasureProject — ${c.label}: ${problems.join('; ')}`);
+  }
+
+  // The measurement is only as good as its refusal to record a broken one. A
+  // generated project whose type libraries do not resolve prints ONE diagnostic
+  // and nothing else, which is why TS2688 must never reach the counter (#8218).
+  const setupErrorCases = [
+    { label: 'an unresolvable type library is a broken measurement, not one error', output: "error TS2688: Cannot find type definition file for 'node'.", expect: true },
+    { label: 'an unreadable project is a broken measurement', output: "error TS5058: The specified path does not exist: 'x.json'.", expect: true },
+    { label: 'an ordinary type error is debt', output: "packages/a/src/x.ts(1,2): error TS2322: Type 'A' is not assignable to type 'B'.", expect: false },
+    { label: 'a code that merely starts with the same digits is not a setup error', output: 'packages/a/src/x.ts(1,2): error TS26881: invented.', expect: false },
+  ];
+  for (const c of setupErrorCases) {
+    const got = TSC_SETUP_ERROR.test(c.output);
+    if (got !== c.expect) failures.push(`TSC_SETUP_ERROR — ${c.label}: expected ${c.expect}, got ${got}`);
+  }
+
   // AUTO-LOWERING (#6376). What it refuses matters more than what it writes.
   const planCases = [
     {
@@ -2383,7 +2649,7 @@ function selfTest() {
     `✓ check:type-check-coverage --self-test — ${cases.length} semantic case(s) + ` +
       `${namedCases.length + coverCases.length + unreadCases.length + accountedCases.length
         + derivedCases.length} observation case(s) + ` +
-      `${driftCases.length + countCases.length} re-measure case(s) + ` +
+      `${driftCases.length + countCases.length + projectCases.length + setupErrorCases.length} re-measure case(s) + ` +
       `${typeEntryCases.length + closureCases.length} built-closure case(s) + ` +
       `${planCases.length + rewriteCases.length} auto-lowering case(s) hold.`,
   );
