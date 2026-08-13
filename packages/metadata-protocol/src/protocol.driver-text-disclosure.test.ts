@@ -88,7 +88,10 @@
  * from "refused correctly". Every refusal case asserts `code` AND `status`.
  */
 import { describe, expect, it } from 'vitest';
-import { assertEngineDeleteDispatch } from '@objectstack/metadata-core';
+// [#5619] The producer's OWN write-verb dispatch decisions (#4550 delete /
+// #5480 update). From `@objectstack/metadata-core`, never `@objectstack/objectql`
+// — objectql depends on THIS package, so that import would close a cycle.
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { looksLikeInternalErrorLeak } from '@objectstack/types';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { ObjectStackProtocolImplementation } from './protocol.js';
@@ -214,7 +217,10 @@ function makeKernel(opts: {
             boom('insert');
             return { id: String(data.id ?? 'r_new') };
         },
-        async update() {
+        async update(_table: string, data: Record<string, unknown>, o?: Record<string, unknown>) {
+            // [#5480] The producer's own update-verb dispatch contract, so this
+            // double cannot accept a call `ObjectQL.update` refuses.
+            assertEngineUpdateDispatch(data, o);
             boom('update');
             return { id: null };
         },
