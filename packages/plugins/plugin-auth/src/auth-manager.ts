@@ -34,6 +34,13 @@ import {
   isPlainMemberInvitation,
   isOrgAdminGrade,
 } from './invitation-role-cap.js';
+import {
+  DEFAULT_CREATOR_ROLE,
+  REMOVE_MEMBER_DENIAL_CODE,
+  REMOVE_MEMBER_DENIAL_MESSAGE,
+  isSoleOwnerGuardTerritory,
+  removalBlockedByOwnerTarget,
+} from './remove-member-permission-guard.js';
 import { isPlaceholderEmail } from './placeholder-email.js';
 import { reconcileMembership, type MembershipPolicy } from './reconcile-membership.js';
 import type { TenancyService } from './tenancy-service.js';
@@ -835,6 +842,15 @@ async function smsQuotaExceededApiError(message: string): Promise<Error> {
 export class AuthManager {
   private auth: Auth<any> | null = null;
   private config: AuthManagerOptions;
+  /**
+   * [#8289] The org-role ac map handed to the `organization` plugin as `roles`
+   * (`undefined` → the plugin runs on better-auth's `defaultRoles`). Stashed at
+   * plugin-build time because `assertRemoveMemberPermitted` has to ask the
+   * vendor's own `hasPermission` the same question the route will, and the
+   * global before-hook runs BEFORE the org plugin shims `ctx.context.orgOptions`
+   * into scope — so the map is not reachable from `ctx` at that point.
+   */
+  private orgRolesMap: Record<string, any> | undefined;
   // ADR-0069 — cached "does any org require MFA" flag (per-org tightening).
   // Refreshed lazily with a TTL so isAuthGateActive() stays synchronous + cheap.
   private _orgMfaCache: { value: boolean; at: number } = { value: false, at: 0 };
@@ -1360,6 +1376,23 @@ export class AuthManager {
               // session middleware still rejects the request with 401, so this
               // never silently drops a notice for a change that proceeds.
             }
+          }
+
+          // ── #8289: remove-member answers its PERMISSION denial itself ──
+          // better-auth's `removeMember` orders "only an owner may remove an
+          // owner" AHEAD of its real permission check and reports it with the
+          // sole-owner invariant's code and a 400, so a caller who merely lacks
+          // permission is told they "cannot leave the organization as the only
+          // owner" — every clause false, and a 400 where every sibling denial is
+          // a 403. Answer the permission class here instead; the sole-owner
+          // invariant and every 200 path stay the vendor's, untouched.
+          // `remove-member-permission-guard.ts` carries the full reading,
+          // including why this MUST be a before-hook (an after-hook cannot
+          // change the status) and why the guard's refusal set is exactly the
+          // vendor's.
+          if (ctx?.path === '/organization/remove-member') {
+            await this.assertRemoveMemberPermitted(ctx);
+            // fall through — the vendor still re-decides everything it owns
           }
 
           // ── ADR-0024: admin-gate self-service SSO provider registration ──
@@ -2080,6 +2113,9 @@ export class AuthManager {
       } catch {
         customOrgRoles = undefined;
       }
+      // [#8289] Same map, same request lifetime — see the field's doc for why
+      // the before-hook cannot read it back off `ctx`.
+      this.orgRolesMap = customOrgRoles;
       return organization({
         schema: buildOrganizationPluginSchema(),
         // Enable the team sub-feature so the framework's `sys_team` /
@@ -4089,6 +4125,129 @@ export class AuthManager {
       return false;
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * [#8289] Answer `/organization/remove-member`'s PERMISSION denial with the
+   * `403 YOU_ARE_NOT_ALLOWED_TO_*` envelope its siblings use, ahead of the
+   * vendor handler that would answer it with the sole-owner invariant's `400`.
+   *
+   * `remove-member-permission-guard.ts` carries the full reading of the vendor
+   * defect and of the two properties that make pre-empting it safe. The shape
+   * here follows from them:
+   *
+   *  - **Silent on the sole-owner path.** A caller removing THEMSELVES while
+   *    carrying the creator role is the one reading under which the vendor's
+   *    message is true, so the guard returns and lets the vendor answer.
+   *  - **FAIL-OPEN on anything unresolvable.** Unlike the `/sso/register` gate,
+   *    this is not a security boundary — better-auth still enforces the whole
+   *    policy after us, and refuses everything it refused before. The guard only
+   *    RESTATES a refusal the vendor is already going to make, so a lookup that
+   *    cannot be completed must fall back to today's behaviour (the vendor's own
+   *    answer), never to an invented refusal. Failing closed here would turn an
+   *    engine hiccup into a 403 on a legitimate owner's removal.
+   *  - **The permission half is the vendor's own `hasPermission`**, called with
+   *    the same roles map we hand the org plugin, so this never becomes a second
+   *    spelling of the authorization question.
+   */
+  private async assertRemoveMemberPermitted(ctx: any): Promise<void> {
+    const engine = this.getDataEngine();
+    if (!engine) return;
+
+    const memberIdOrEmail =
+      typeof ctx?.body?.memberIdOrEmail === 'string' ? ctx.body.memberIdOrEmail : '';
+    if (!memberIdOrEmail) return;
+
+    try {
+      const actor = await this.resolveActor(ctx);
+      // No resolvable session → better-auth's `sessionMiddleware` issues the
+      // 401. Not ours to pre-empt.
+      if (!actor?.userId) return;
+
+      const orgId =
+        (typeof ctx?.body?.organizationId === 'string' && ctx.body.organizationId) ||
+        actor.activeOrgId;
+      // No org in play → the vendor answers NO_ACTIVE_ORGANIZATION.
+      if (!orgId) return;
+
+      const sys = withSystemReadContext(engine);
+
+      const callerRow: any = await sys.findOne('sys_member', {
+        where: { organization_id: orgId, user_id: actor.userId },
+      });
+      if (!callerRow) return; // vendor answers MEMBER_NOT_FOUND
+
+      // Resolve the target exactly the way better-auth's org adapter does:
+      // an `@` means "by email" (lower-cased), anything else is a member id.
+      let targetRow: any = null;
+      if (memberIdOrEmail.includes('@')) {
+        const user: any = await sys.findOne('sys_user', {
+          where: { email: memberIdOrEmail.toLowerCase() },
+        });
+        if (user?.id) {
+          targetRow = await sys.findOne('sys_member', {
+            where: { organization_id: orgId, user_id: user.id },
+          });
+        }
+      } else {
+        targetRow = await sys.findOne('sys_member', { where: { id: memberIdOrEmail } });
+      }
+      if (!targetRow) return; // vendor answers MEMBER_NOT_FOUND
+
+      const creatorRole =
+        (typeof ctx?.context?.orgOptions?.creatorRole === 'string' &&
+          ctx.context.orgOptions.creatorRole) ||
+        DEFAULT_CREATOR_ROLE;
+
+      // (1) The sole-owner invariant's territory — never answer over it.
+      if (
+        isSoleOwnerGuardTerritory(
+          String(actor.userId),
+          String(targetRow.user_id ?? ''),
+          callerRow.role,
+          creatorRole,
+        )
+      ) {
+        return;
+      }
+
+      // (2) The vendor's (3a) predicate: an owner target and a non-owner
+      // caller. A permission refusal — say so, with the right status.
+      if (removalBlockedByOwnerTarget(callerRow.role, targetRow.role, creatorRole)) {
+        const { APIError } = await import('better-auth/api');
+        throw new APIError('FORBIDDEN', {
+          message: REMOVE_MEMBER_DENIAL_MESSAGE,
+          code: REMOVE_MEMBER_DENIAL_CODE,
+        });
+      }
+
+      // (3) The vendor's (4): the real `member: ['delete']` check, decided by
+      // the vendor's own function so there is only ever one answer to it. Only
+      // the envelope differs — better-auth reports this one as 401.
+      const { hasPermission } = await import('better-auth/plugins/organization');
+      const permitted = await hasPermission(
+        {
+          role: callerRow.role,
+          options: (this.orgRolesMap ? { roles: this.orgRolesMap } : {}) as any,
+          permissions: { member: ['delete'] },
+          organizationId: orgId,
+        } as any,
+        ctx,
+      );
+      if (!permitted) {
+        const { APIError } = await import('better-auth/api');
+        throw new APIError('FORBIDDEN', {
+          message: REMOVE_MEMBER_DENIAL_MESSAGE,
+          code: REMOVE_MEMBER_DENIAL_CODE,
+        });
+      }
+    } catch (error) {
+      // Our own refusal must propagate; anything else is a lookup that did not
+      // complete, and per the fail-open contract above that hands the request
+      // back to better-auth unchanged.
+      const { isAPIError } = await import('better-auth/api');
+      if (isAPIError(error)) throw error;
     }
   }
 

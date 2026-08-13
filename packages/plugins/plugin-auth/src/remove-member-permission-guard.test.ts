@@ -45,7 +45,7 @@
 // so the mounted route is what has to answer here.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { assertEngineDeleteDispatch } from '@objectstack/objectql';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { AuthManager } from './auth-manager';
 
 const SECRET = 'test-secret-at-least-32-chars-long!!';
@@ -54,17 +54,41 @@ const ORG = 'org_acme';
 const PASSWORD = 'S3cure!Passw0rd-8289';
 
 /**
- * The same minimal in-memory `IDataEngine` double the other end-to-end
- * auth-manager suites use, with `delete` pinned to ObjectQL's own dispatch
- * predicate ({@link assertEngineDeleteDispatch}) rather than a hand-written
- * copy — a fake that accepts a call the real engine refuses is how a dead route
- * ships with its suite green (#4550).
+ * The in-memory `IDataEngine` double the other end-to-end auth-manager suites
+ * use, with three places where it is deliberately NO more forgiving than the
+ * real engine — a fake that accepts a call ObjectQL refuses is how #4434
+ * shipped a dead REST route with its suite green (#4550):
+ *
+ *  - `delete` routes through {@link assertEngineDeleteDispatch};
+ *  - `update` routes through {@link assertEngineUpdateDispatch};
+ *  - `sys_member`'s declared `{ organization_id, user_id }` UNIQUE index is
+ *    ENFORCED. That one matters specifically here: every assertion in this file
+ *    reads the membership rows back to prove a removal did or did not happen, so
+ *    a fake that silently tolerated a duplicate membership would let a
+ *    miscounted org read as a correct one — and the owner COUNT is exactly the
+ *    fact the vendor's sole-owner branch turns on.
  */
 const createMemoryEngine = () => {
   const tables = new Map<string, any[]>();
   const rows = (name: string) => {
     if (!tables.has(name)) tables.set(name, []);
     return tables.get(name)!;
+  };
+  /** `sys_member` declares `{ organization_id, user_id }` UNIQUE. */
+  const assertMemberUnique = (name: string, row: any, ignoreId?: string) => {
+    if (name !== 'sys_member') return;
+    const clash = rows(name).some(
+      (r) =>
+        r.id !== ignoreId &&
+        r.organization_id === row.organization_id &&
+        r.user_id === row.user_id,
+    );
+    if (clash) {
+      throw new Error(
+        'insert into sys_member … UNIQUE constraint failed: ' +
+          'sys_member.organization_id, sys_member.user_id',
+      );
+    }
   };
   const eq = (a: any, b: any) =>
     a instanceof Date || b instanceof Date
@@ -90,6 +114,7 @@ const createMemoryEngine = () => {
     tables,
     async insert(name: string, data: any) {
       const row = { id: data.id ?? `row_${++seq}`, ...data };
+      assertMemberUnique(name, row);
       rows(name).push(row);
       return { ...row };
     },
@@ -106,9 +131,11 @@ const createMemoryEngine = () => {
     async count(name: string, q: any = {}) {
       return rows(name).filter((r) => matches(r, q.where)).length;
     },
-    async update(name: string, patch: any) {
+    async update(name: string, patch: any, options?: any) {
+      assertEngineUpdateDispatch(patch, options);
       const row = rows(name).find((r) => r.id === patch.id);
       if (!row) return null;
+      assertMemberUnique(name, { ...row, ...patch }, row.id);
       Object.assign(row, patch);
       return { ...row };
     },
