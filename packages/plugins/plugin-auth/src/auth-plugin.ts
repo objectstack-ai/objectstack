@@ -43,6 +43,7 @@ import {
   type SecondaryStorageLike,
 } from './identity-write-guard.js';
 import { registerLastAdminGuard } from './last-admin-guard.js';
+import { registerMemberRoleCanonicalization } from './member-role-canonical.js';
 import { SYS_USER_PROFILE_EDIT_FIELDS } from './sys-user-writable-fields.js';
 import { MANAGED_EXTENSION_EDITABLE_FIELDS } from './managed-extension-fields.js';
 import { runSetInitialPassword } from './set-initial-password.js';
@@ -843,6 +844,26 @@ export class AuthPlugin implements Plugin {
       }
     });
 
+    // [#8317] The one-off half of the ruling: rows written BEFORE the
+    // canonicalisation hook above — or written outside ObjectQL entirely by an
+    // operator SQL fix-up, an import or a SCIM group remap — still carry a
+    // non-canonical `sys_member.role`, and each one is a live authorization
+    // inversion (owner to us, plain member to better-auth). The pass is
+    // convergent, idempotent and reports a census of every distinct spelling it
+    // found, so a database already canonical costs one query.
+    ctx.hook('kernel:ready', async () => {
+      try {
+        const ql = ctx.getService<IDataEngine>('objectql');
+        if (!ql) return;
+        const { canonicalizeStoredMemberRoles } = await import('./member-role-canonical.js');
+        await canonicalizeStoredMemberRoles(ql, { logger: ctx.logger });
+      } catch (e) {
+        ctx.logger.warn?.('[auth] sys_member.role canonicalisation pass failed', {
+          error: (e as Error).message,
+        });
+      }
+    });
+
     // ADR-0081 D1 — single-org default-organization bootstrap. Every WALLED
     // posture (`group` and `isolated`) keeps its existing owner: the enterprise
     // organizations package, which runs the same idempotent helper with the
@@ -1019,6 +1040,19 @@ export class AuthPlugin implements Plugin {
           if (object === SystemObjectName.USER) continue; // sys_user tiering above
           registerManagedUpdateWhitelist(object, fields);
         }
+        // [#8317] Canonicalise `sys_member.role` on every ObjectQL write, at
+        // priority 5 — AHEAD of both guards below. better-auth reads that
+        // column with a raw `split(',')` (no trim, no lower-case), so a stored
+        // `Owner` / `' owner'` is an owner to our grade ladder and a plain
+        // member to the vendor, and its "only an owner may remove an owner"
+        // branch never fires: an org admin could remove an owner. Normalising
+        // at the write makes that disagreement unrepresentable instead of
+        // adjudicated per-reader (maintainer ruling 2026-08-13, option A), and
+        // it runs first so both guards judge the value's normal form.
+        registerMemberRoleCanonicalization(engine, {
+          packageId: 'com.objectstack.plugin-auth.member-role-canonical',
+          logger: ctx.logger,
+        });
         registerIdentityWriteGuard(engine, {
           packageId: 'com.objectstack.plugin-auth.identity-write-guard',
           logger: ctx.logger,
