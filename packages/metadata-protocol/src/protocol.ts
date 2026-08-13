@@ -4261,6 +4261,50 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#8284] The PACKAGED (code-layer) OWNER declaration of an object —
+     * the base layer, BEFORE `objectExtensions` are folded onto it
+     * (ADR-0029 D9.2) and before any tenant `sys_metadata` overlay.
+     *
+     * Read-only, synchronous, and the ONE fact the localization boundary
+     * cannot derive for itself. `translateObject`
+     * (`@objectstack/spec/system`) resolves an object's `label` /
+     * `pluralLabel` / `description` against the i18n catalog, which is keyed
+     * by object name and is the packaged translation of exactly this
+     * declaration. Consulting it unconditionally overwrote every scalar that
+     * had been authored ON TOP of the declaration — a code-shipped extension
+     * scalar, and the tenant's own Studio rename, which answered `200` and
+     * then appeared on neither `/meta/object` read (#8284, maintainer ruling
+     * 2026-08-13: the catalog loses to an explicit override, decided by
+     * comparison against this value).
+     *
+     * ⛔ NOT {@link lookupArtifactItem}, whose object branch answers
+     * `resolveOwnerLayer` — owner **plus its extenders** (see
+     * `SchemaRegistry.getArtifactItem`). That body already carries the
+     * extension's scalar, so comparing against it would call the extension's
+     * label "unchanged" and hand the catalog back the very case #8037 filed.
+     * The discriminator is `getPackagedObjectOwner`, which is the same
+     * "does a code package ship this?" test (`isCodeArtifactBody`) applied to
+     * the OWNER contributor alone.
+     *
+     * Returns `undefined` — meaning "no packaged baseline, do not infer
+     * anything" — for a runtime/tenant-authored object (no code owner), an
+     * unknown name, and a partial registry double. The caller's contract is
+     * that absence restores the pre-#8284 behaviour rather than guessing.
+     */
+    getPackagedObjectBase(name: string): unknown {
+        if (typeof name !== 'string' || name === '') return undefined;
+        const registry = (this.engine as any)?.registry;
+        if (!registry || typeof registry.getPackagedObjectOwner !== 'function') return undefined;
+        try {
+            return registry.getPackagedObjectOwner(name)?.definition;
+        } catch {
+            // Same rule as the fold above: a read over in-memory contributors
+            // must never turn a served schema into a 5xx.
+            return undefined;
+        }
+    }
+
+    /**
      * [#8268, generalising #8038] The REGISTRY-SIDE half of
      * {@link governServedItem}'s presence convergence: replay the registry's
      * object-materialization seam onto the served body.

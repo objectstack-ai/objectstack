@@ -125,6 +125,34 @@ export interface ResolveOptions {
 }
 
 /**
+ * [#8284] Options for the metadata-DOCUMENT translators
+ * ({@link translateMetadataDocument} and the per-type functions it dispatches
+ * to), adding the packaged base document the catalog-vs-explicit-override rule
+ * compares against.
+ *
+ * Separate from {@link ResolveOptions} because the per-attribute resolvers
+ * (`resolveViewLabel`, `resolveActionLabel`, …) answer "what does the bundle
+ * say" and have no document to compare anything to. Only a translator holding
+ * a whole document can ask whether that document still carries what the
+ * package shipped.
+ */
+export interface TranslateDocumentOptions extends ResolveOptions {
+  /**
+   * The PACKAGED (code-layer) base document this one was resolved from — the
+   * owner's own declaration, BEFORE `objectExtensions` are folded on
+   * (ADR-0029 D9.2) and before any tenant `sys_metadata` overlay.
+   *
+   * Supplied by the serving layer, which is the only one that knows it; when
+   * it is absent the translators behave exactly as they did before #8284 (the
+   * catalog applies unconditionally), because "no baseline known" is not
+   * evidence that a value was authored.
+   *
+   * See {@link translateObject} for the rule it feeds.
+   */
+  packagedBase?: unknown;
+}
+
+/**
  * Resolve a requested locale code against the locales actually present in a
  * bundle, applying BCP-47 fallback so callers that pass a base language
  * (e.g. `zh`) or a differently-cased / region-qualified variant still hit the
@@ -543,7 +571,7 @@ export function translateAction<T extends ActionLike>(
  */
 const METADATA_DOCUMENT_TRANSLATORS: Record<
   string,
-  (doc: any, bundle: TranslationBundle | undefined, opts?: ResolveOptions) => any
+  (doc: any, bundle: TranslationBundle | undefined, opts?: TranslateDocumentOptions) => any
 > = {
   view: translateView,
   action: translateAction,
@@ -569,13 +597,15 @@ export const TRANSLATABLE_METADATA_TYPES: ReadonlySet<string> = new Set(
  * @param type Canonical metadata type string (see `MetadataTypeSchema`).
  * @param doc The metadata document to translate.
  * @param bundle Translation bundle (typically loaded from the i18n service).
- * @param opts Locale + fallback chain.
+ * @param opts Locale + fallback chain, plus the packaged base document
+ *   ({@link TranslateDocumentOptions.packagedBase}) when the serving layer can
+ *   supply it.
  */
 export function translateMetadataDocument(
   type: string,
   doc: any,
   bundle: TranslationBundle | undefined,
-  opts?: ResolveOptions,
+  opts?: TranslateDocumentOptions,
 ): any {
   if (!doc || typeof doc !== 'object') return doc;
   const translate = METADATA_DOCUMENT_TRANSLATORS[type];
@@ -1363,6 +1393,40 @@ function builtinSystemFieldLabel(
 }
 
 /**
+ * [#8284] Whether one of an object document's three scalars has been
+ * EXPLICITLY set — i.e. it no longer carries the value the package shipped.
+ *
+ * This is comparison-based provenance, and it is the whole mechanism: no flag
+ * is carried through the fold, nothing is stamped on the document, and the
+ * question is answered from the two values alone. A scalar that still equals
+ * the packaged base is a packaged default (the catalog is its translation); a
+ * scalar that differs was authored by somebody — a code-shipped
+ * `objectExtensions` overlay, or the tenant's own Studio rename — and the
+ * catalog, which translates the packaged default, has nothing to say about it.
+ *
+ * Deliberately conservative in three ways, so this can only ever WITHHOLD the
+ * catalog from a value that provably diverged:
+ *
+ *  - no base document supplied → `false` (the serving layer could not answer;
+ *    "unknown" is not "authored", and every pre-#8284 caller keeps its
+ *    behaviour);
+ *  - a non-string / empty document value → `false` (there is nothing to
+ *    protect, and the catalog is still the best answer available);
+ *  - equality is exact. The ruled edge — a tenant renaming an object to
+ *    exactly the packaged string — is a no-op: the catalog still applies, and
+ *    the tenant sees the packaged translation of the word they typed.
+ */
+function scalarOverridesPackagedBase(
+  base: unknown,
+  key: 'label' | 'pluralLabel' | 'description',
+  value: unknown,
+): boolean {
+  if (!base || typeof base !== 'object') return false;
+  if (typeof value !== 'string' || value.length === 0) return false;
+  return (base as Record<string, unknown>)[key] !== value;
+}
+
+/**
  * Apply the active locale to an object metadata document. Translates the
  * object's `label` / `pluralLabel` / `description`, walks each field to
  * translate its `label`, `help`, and per-option `label`s, and walks any
@@ -1380,11 +1444,34 @@ function builtinSystemFieldLabel(
  * for them. The Console papered over it by re-resolving labels client-side
  * against a separately fetched bundle, which left every other consumer — mobile,
  * plain HTTP, SDUI — rendering the source language (#3370).
+ *
+ * ## [#8284] The catalog LOSES to an explicit override
+ *
+ * The three scalars are not resolved as a flat `catalog ?? document`. The
+ * catalog is keyed by object name and is the packaged translation of the
+ * PACKAGED declaration, so consulting it first overwrote every value that had
+ * been authored on top of that declaration — a code-shipped `objectExtensions`
+ * scalar, and (the severe half) the tenant's own Studio rename, which answered
+ * `200` and then reached neither `GET /meta/object` nor
+ * `GET /meta/object/:name`, i.e. neither read a writable form derives from.
+ * One object served three labels, and the only surface showing the saved value
+ * was `?layers=true`, documented as a diagnostic.
+ *
+ * Maintainer ruling (2026-08-13): a tenant's explicit scalar is authored data
+ * and must win, decided by COMPARISON — the catalog applies only while the
+ * document's scalar still equals {@link TranslateDocumentOptions.packagedBase}'s.
+ * See {@link scalarOverridesPackagedBase} for the exact test and its three
+ * conservative edges. `?layers=true` stays untranslated and diagnostic,
+ * unchanged.
+ *
+ * The rule is scoped to the three SCALARS, which are what the ruling covers:
+ * `fields` is a key-keyed spread whose per-field labels have their own
+ * (per-field) catalog keys, and no read has been measured to diverge on them.
  */
 export function translateObject<T extends ObjectLike>(
   doc: T,
   bundle: TranslationBundle | undefined,
-  opts?: ResolveOptions,
+  opts?: TranslateDocumentOptions,
 ): T {
   if (!doc || typeof doc !== 'object') return doc;
   const objectName = doc.name;
@@ -1392,11 +1479,20 @@ export function translateObject<T extends ObjectLike>(
   // still apply (custom objects typically ship no translation entries).
   if (!objectName) return doc;
 
-  const label = lookupObjectField(bundle, objectName, 'label', opts) ?? doc.label;
-  const pluralLabel =
-    lookupObjectField(bundle, objectName, 'pluralLabel', opts) ?? doc.pluralLabel;
-  const description =
-    lookupObjectField(bundle, objectName, 'description', opts) ?? doc.description;
+  // [#8284] `catalog ?? document`, EXCEPT where the document's own value has
+  // diverged from the packaged declaration — there the document is authored
+  // data and the catalog yields to it.
+  const resolveScalar = (
+    key: 'label' | 'pluralLabel' | 'description',
+    authored: string | undefined,
+  ): string | undefined =>
+    scalarOverridesPackagedBase(opts?.packagedBase, key, authored)
+      ? authored
+      : lookupObjectField(bundle, objectName, key, opts) ?? authored;
+
+  const label = resolveScalar('label', doc.label);
+  const pluralLabel = resolveScalar('pluralLabel', doc.pluralLabel);
+  const description = resolveScalar('description', doc.description);
 
   const translateField = (name: string, def: ObjectFieldLike): ObjectFieldLike => {
     const next: ObjectFieldLike = { ...def };
