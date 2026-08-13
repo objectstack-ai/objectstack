@@ -75,7 +75,19 @@
  * deliberately, because it pins the SUBSTITUTED value rather than mere absence,
  * and absence is the failure this card must not ship. Green: section 4 (2) and
  * section 5's no-code case (1) and section 6 (1), none of which involve a code
- * that should survive. Measured: **8 red / 4 green** — as predicted.
+ * that should survive.
+ *
+ * Measured: **9 red / 3 green**.
+ *
+ * ⚠️ ONE MISSED PREDICTION, kept because the miss is the useful part — and it
+ * is the SAME miss #8333 recorded for its own P7 log case, one card later in
+ * the same lane. **Section 6 came back red.** The prediction reasoned only
+ * about the log half and forgot the case also asserts the payload:
+ * `expectCataloged(r.failed[0].code)` runs before the log assertion, and under
+ * the drop variant there is no code to be catalogued. So section 6 is evidence
+ * for the SUBSTITUTION as well as for the logging — which is the stronger
+ * reading, and the reason it is left exactly as it is. Every other prediction
+ * held in both directions.
  *
  * Together the two directions bound the fix on both sides: (a) proves it does
  * something, (b) proves it does not do too much.
@@ -501,9 +513,13 @@ describe('[#8441] what replaces an uncatalogued code, and what stays absent', ()
      * a second vocabulary invented for this card.
      */
     it('a 4xx refusal spelling its code off-catalog keeps its sentence and gets the status’s code', async () => {
+        // A postgres SQLSTATE — `42501` is `insufficient_privilege`, so the
+        // dialect and the declared 403 genuinely agree about WHAT happened and
+        // disagree only about the vocabulary. That is the honest hard case: the
+        // substitution has to preserve the meaning, not merely erase the code.
         const refusalWithDialect = () => Object.assign(
             new Error('[item_locked] Cannot overlay this item: the package is read-only.'),
-            { code: 'sqlite_item_locked', status: 403 },
+            { code: '42501', status: 403 },
         );
         const { protocol } = makeKernel({
             failOn: ['insert'],
@@ -520,8 +536,8 @@ describe('[#8441] what replaces an uncatalogued code, and what stays absent', ()
         // #8441's rule: not a catalog member, so the status's standard code.
         expect(r.failed[0].code).toBe('PERMISSION_DENIED');
         expectCataloged(r.failed[0].code);
-        // …and the dialect itself is gone.
-        expect(JSON.stringify(r)).not.toContain('sqlite_item_locked');
+        // …and the SQLSTATE itself is gone.
+        expect(JSON.stringify(r)).not.toContain('42501');
     });
 
     /**
