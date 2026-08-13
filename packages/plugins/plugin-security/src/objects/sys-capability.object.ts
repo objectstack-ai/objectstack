@@ -215,8 +215,18 @@ export const SysCapability = ObjectSchema.create({
     //
     // Platform-seeded rows carry no organization, and the organization key part
     // is NULL-safe (`COALESCE(organization_id, '__global__')`, ADR-0120 D3), so
-    // they remain unique among themselves and `bootstrapSystemCapabilities`'
-    // upsert-by-name is unaffected.
+    // they remain unique among themselves.
+    //
+    // [#8470] This comment used to end "…and `bootstrapSystemCapabilities`'
+    // upsert-by-name is unaffected". That was WRONG, and the correction belongs
+    // next to the index that unmasked it. Widening the key to per-organization
+    // made the two-row state (platform row + an org's row, same `name`)
+    // REACHABLE, and the seeder's `find({ name }, limit: 1)` had no way to say
+    // which of the two it meant. The index is not the defect and must not be
+    // narrowed back — that would reinstate #8323's cross-tenant existence
+    // oracle. The seeder now scopes its curated lookup to `managed_by:
+    // 'platform'` + `organization_id: null`, i.e. exactly the bucket this key
+    // part keeps a singleton.
     { fields: ['name'], unique: 'organization' },
     { fields: ['scope'] },
     { fields: ['active'] },

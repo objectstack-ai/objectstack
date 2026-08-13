@@ -15,6 +15,7 @@ import { ObjectPermissionSchema, PermissionSetSchema } from '@objectstack/spec/s
 import {
   SECURITY_FLS_UNQUALIFIED_KEY,
   validateSecurityPosture,
+  validateSecurityRoleWord,
   SECURITY_OWD_UNSET,
   SECURITY_OWD_ALIAS,
   SECURITY_EXTERNAL_WIDER,
@@ -208,8 +209,11 @@ describe('validateSecurityPosture (ADR-0090 D7)', () => {
   });
 
   // ── Rule: security-role-word (ADR-0090 D3) ──────────────────────────
+  // [#8310] Its own function (and registry entry) since the rest of the block
+  // crossed the runtime publish surface — same file, same rule id, same
+  // findings; see `validateSecurityRoleWord`'s docblock for the #7220 reason.
   it('errors on "role" in identifiers and labels across kinds', () => {
-    const findings = validateSecurityPosture({
+    const findings = validateSecurityRoleWord({
       objects: [
         {
           name: 'user_role', // identifier token
@@ -228,7 +232,7 @@ describe('validateSecurityPosture (ADR-0090 D7)', () => {
 
   it('does not flag words merely containing the letters (payroll, controlled)', () => {
     expect(
-      rulesOf({
+      validateSecurityRoleWord({
         objects: [
           { name: 'payroll_run', label: 'Payroll — Controlled Rollout', sharingModel: 'private' },
         ],
@@ -238,7 +242,7 @@ describe('validateSecurityPosture (ADR-0090 D7)', () => {
 
   it('skips system objects (better-auth sys_member.role is the documented exception)', () => {
     expect(
-      rulesOf({ objects: [{ name: 'sys_member', fields: { role: { name: 'role', label: 'Role' } } }] }),
+      validateSecurityRoleWord({ objects: [{ name: 'sys_member', fields: { role: { name: 'role', label: 'Role' } } }] }),
     ).toEqual([]);
   });
 
@@ -504,7 +508,7 @@ describe('validateSecurityPosture · controlled_by_parent with no relation (#750
 
 describe('validateSecurityPosture · book audience (ADR-0046 §6.7 / ADR-0090)', () => {
   it('flags the reserved word in book names and labels', () => {
-    const findings = validateSecurityPosture({
+    const findings = validateSecurityRoleWord({
       books: [
         { name: 'crm_role_guide', label: 'CRM Guide', groups: [] },
         { name: 'crm_admin_guide', label: 'Admin Roles Handbook', groups: [] },
@@ -1008,10 +1012,13 @@ describe('validateSecurityPosture — every branch is reachable without an undec
   });
 
   it('reaches every `findings.push` site from that corpus', () => {
+    // [#8310] Both exported rules of this module: `pushedRuleIds()` scans the
+    // whole source file, so the corpus must drive the whole file too.
     const emitted = new Set(
-      REACHABILITY_CORPUS.flatMap(({ stack }) =>
-        validateSecurityPosture(stack, { nowMs: Date.parse('2026-07-10T12:00:00Z') }).map((f) => f.rule),
-      ),
+      REACHABILITY_CORPUS.flatMap(({ stack }) => [
+        ...validateSecurityPosture(stack, { nowMs: Date.parse('2026-07-10T12:00:00Z') }),
+        ...validateSecurityRoleWord(stack),
+      ].map((f) => f.rule)),
     );
     expect(
       [...new Set(pushedRuleIds())].filter((id) => !emitted.has(id)),

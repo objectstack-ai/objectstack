@@ -312,9 +312,10 @@ describe('urlUserinfoPassword — the shared value-level parse (#8082)', () => {
   });
 
   it('userinfo ends at the LAST `@`, so a malformed literal-`@` password is caught whole', () => {
-    // Mirrors the read-path redactor's boundary (service-datasource
-    // `redactUrlPassword`): a URL malformed in exactly the way that hides part
-    // of a password must not be the case that goes unjudged.
+    // Mirrors the read-path redactor's boundary (`redactUrlPassword`, now in
+    // this package's `data/datasource-credential-redaction.ts` — #8300): a URL
+    // malformed in exactly the way that hides part of a password must not be
+    // the case that goes unjudged.
     expect(urlUserinfoPassword('postgres://u:p@ss@host/db')).toBe('p@ss');
   });
 

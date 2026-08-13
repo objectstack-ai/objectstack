@@ -32,6 +32,9 @@ export * from './metadata-protection.zod';
 // a persisted body or a strict re-parse (#4326, cloud#971).
 export * from './metadata-read-decorations';
 export * from './metadata-type-schemas';
+// Per-type read-path redaction seam (#8300) — the registry #8154's metadata
+// read exits consume, beside the schema/actions registries it mirrors.
+export * from './metadata-type-redaction';
 // Pre-parse unknown-key walker over EVERY metadata collection (#3786). Lives
 // here, not in data/, because covering every type means importing every schema.
 export * from './metadata-authoring-lint';

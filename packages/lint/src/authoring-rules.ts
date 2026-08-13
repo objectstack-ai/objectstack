@@ -122,7 +122,7 @@ import { validateSeedReplaySafety } from './validate-seed-replay-safety.js';
 import { validateSeedStateMachine } from './validate-seed-state-machine.js';
 import { validateVisibilityPredicates } from './validate-visibility-predicates.js';
 import { validatePredicatePathRefs } from './validate-predicate-path-refs.js';
-import { validateSecurityPosture } from './validate-security-posture.js';
+import { validateSecurityPosture, validateSecurityRoleWord } from './validate-security-posture.js';
 import { validateOrgAxisRedLines } from './validate-org-axis-red-lines.js';
 import { validateSharingRuleEnforceability } from './validate-sharing-rule-enforceability.js';
 import { validateRlsPredicateEnforceability } from './validate-rls-predicate-enforceability.js';
@@ -1126,65 +1126,68 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   //    sees one refusal, never two. The stated cost of moving was imaginary; the
   //    reason it has not moved is the measured one below.
   //
-  // Why the move is not taken HERE, measured rather than assumed (#7576 stage 1):
+  // The move IS taken now — the #7891 programme's three slices, in order:
   //
-  //  - The four shipped stacks (showcase, CRM, todo, the `blank` template — 30
-  //    objects, 10 permission sets, 1 book, 12 positions, 3 apps, 24 seeds) are
-  //    CLEAN of `error` findings at both surfaces. No shipped app trips.
-  //  - The PLATFORM's own runtime write path does. Declaring `object` here makes
-  //    `security-owd-unset` refuse any object published without an OWD, and that
-  //    is the shape the runtime create door actually emits: it turns 26 writes
-  //    into 422s across 8 files of `@objectstack/metadata-protocol`'s own suite,
-  //    and `METADATA_CREATE_SEEDS.object` — the authoritative minimal create body
-  //    — carries no `sharingModel` either. That is a strictness rollout
-  //    (#4001 pattern), not a registry-honesty fix, and its repair sites are in
-  //    packages this card may not edit.
-  //  - `permission` and `book` failed for a different, structural reason —
-  //    REPAIRED under #8309. The gate used to carry `objects` as resolution
-  //    context and nothing else (`RuntimeStackContext`), so the three
-  //    cross-collection rules judged a snapshot missing the collection they
-  //    compare against. Measured: one simulated runtime write per shipped
-  //    permission set produced 38 `security-master-detail-ungranted` warnings
-  //    where the same rule over the whole stack produces 4 — with one set in
-  //    the snapshot, every detail object the tenant's OTHER sets grant read as
-  //    ungranted. `security-private-no-readscope` and
-  //    `security-book-audience-unknown-set` failed identically. The snapshot
-  //    now carries `permissions` and `books` in both differential passes and
-  //    `TYPE_TO_STACK_KEY` maps both types, so the per-write verdict agrees
-  //    with the whole-stack one (pinned in
-  //    `validate-security-posture.runtime-surface.test.ts`); what remains for
-  //    these two types is ONLY the `runtimeTypes` declaration itself — #8310.
+  //  - #8307: the ADR-0091 seed pair crossed (`runtimeTypes: ['seed']`), with
+  //    the isolation proof that the differential cancels every finding this
+  //    function derives from the sibling collections.
+  //  - #8309: the snapshot repair. The gate used to carry `objects` and
+  //    nothing else, so the three cross-collection rules judged a universe
+  //    missing the collection they compare against (measured: 38 phantom
+  //    `security-master-detail-ungranted` per-write vs 4 whole-stack,
+  //    PR #7886). `RuntimeStackContext` now carries `permissions`/`books` in
+  //    BOTH differential passes and `TYPE_TO_STACK_KEY` maps both types.
+  //  - #8310 (this state): `runtimeTypes` gains `permission` + `book`.
+  //    `object` measured DIRTY and stays behind — see below.
   //
-  // The residue that WAS ready, and now crosses (#8307): the two ADR-0091 seed
-  // rules (`security-grant-expired-at-authoring`, `security-delegation-missing-
-  // reason`) read only `stack.data[]` and cross the wall together as a whole
-  // sub-family, with zero measured trips (re-run for this card — see
-  // `validate-security-posture.runtime-surface.test.ts`). `security-role-word`
-  // is deliberately NOT in this slice: it judges six collections, and wiring the
-  // two that need no snapshot would split ONE rule id across the wall — a door
-  // where a position named `sales_role` is refused and an object named
-  // `sales_role` is not, which is the #7220 failure this table already refuses
-  // to build.
+  // Why `object` is still not declared, re-measured on the #8308-repaired
+  // tree rather than inherited (#4001: zero breakage is demonstrated, never
+  // assumed). The OLD blocker is genuinely gone: with `object` declared, the
+  // full `@objectstack/metadata-protocol` suite passes (the 26-refusal
+  // measurement predates #8308's `METADATA_CREATE_SEEDS.object` repair) and a
+  // replay of every shipped-corpus object through the real gate refuses
+  // nothing. But one package over the same declaration still breaks the
+  // platform's own write paths — measured on this exact tree:
   //
-  // `object` / `permission` / `book` remain UNDECLARED here (that is #8310):
-  // (a) declaring `object` makes `security-owd-unset` refuse every OWD-less
-  // runtime object publish — a strictness rollout (#4001), not a wiring fix;
-  // (b) `permission` / `book` needed a second collection the per-write
-  // snapshot did not carry, and were measured inventing findings without it
-  // (38 vs 4 over the shipped corpus). #8309 closed (b) — the snapshot now
-  // carries `permissions`/`books` and both types map to stack keys — so
-  // declaring them here is #8310's remaining one-line flip. This
-  // entry is the WHOLE `validateSecurityPosture` function (all 13 rule ids), not
-  // a per-rule split: `runtimeTypes: ['seed']` is safe to declare on the whole
-  // entry ONLY because of `runtime-gate.ts`'s baseline/candidate differential —
-  // a `seed` write's candidate stack carries `objects` IDENTICAL to the
-  // baseline (only `data` differs), so every finding this function derives from
-  // `stack.objects` / `stack.permissions` / `stack.positions` / `stack.apps` /
-  // `stack.books` is produced, byte-identical, in BOTH passes and cancels in the
-  // diff — only the ADR-0091 pair's `stack.data[]` reads can differ. Splitting
-  // this entry into a seed-only registration is not needed for correctness; it
-  // would only be needed if a future rule in this function read `stack.data[]`
-  // in a way that also depended on `stack.objects` context (none does today).
+  //  - `@objectstack/objectql`: 83 tests across 13 files fail, every one
+  //    `security-owd-unset` (85 refusals) — the suites publish objects with
+  //    no authored `sharingModel` through `saveMetaItem`.
+  //  - `@objectstack/rest`: 12 tests across 3 files — the same owd-unset
+  //    class, PLUS two genuine CONTRACT collisions no fixture edit can
+  //    honestly settle: `meta-object-owd-gate.test.ts` pins #7674's ADR-0094
+  //    403 `owd_external_wider` door, which this 422 gate now PREEMPTS for
+  //    the same defect (`saveMetaItem` runs this table first), and it pins
+  //    that a write with NO OWD keys at all SAVES (ADR-0094 reads absence as
+  //    the D1 `private` default) — which `security-owd-unset` exists to
+  //    refuse (absence must be an authored decision).
+  //
+  //  So declaring `object` is not a wiring fix and not even only fixture
+  //  repair in two packages outside this card's surface: it is a decision
+  //  about which door answers for OWD defects (403 ADR-0094 vocabulary vs
+  //  422 lint vocabulary) and whether an unauthored OWD refuses at runtime.
+  //  That decision is escalated on #8310; until it is ruled, `object` stays
+  //  undeclared and the pins in
+  //  `validate-security-posture.runtime-surface.test.ts` record both what
+  //  WOULD happen (via the gate's own snapshot builder) and that it does not.
+  //
+  // `security-role-word` is NOT in this entry any more — that is what the
+  // `validateSecurityRoleWord` entry below records. It judges six collections
+  // (objects, fields, actions, permission sets, positions, apps — plus books),
+  // and `positions`/`apps` are neither carried by the per-write snapshot nor
+  // mapped in `TYPE_TO_STACK_KEY`, so declaring `permission`/`book` on a
+  // function that still contained it would have enforced ONE rule id for a
+  // strict subset of its collections: a door where a permission set named
+  // `role_manager` is refused and a position named `sales_role` walks through
+  // — the #7220 failure this table refuses to build, in either direction. The
+  // rule therefore stays behind WHOLE (#8310's explicit call), as its own
+  // entry.
+  //
+  // This entry remains the rest of the D7 block (12 rule ids) as ONE
+  // registration, not a per-rule split: the baseline/candidate differential is
+  // what keeps a write of one declared type from leaking the other rules'
+  // whole-stack findings — every finding derived from a sibling collection is
+  // produced byte-identically in both passes and cancels in the diff. Only
+  // findings the written item itself adds are attributed to the write.
   {
     name: 'validateSecurityPosture',
     tier: 'gating',
@@ -1192,8 +1195,40 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     commands: ALL,
     source: 'packages/lint/src/validate-security-posture.ts',
     surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['seed'],
+    runtimeTypes: ['seed', 'permission', 'book'],
     run: (stack) => validateSecurityPosture(stack),
+  },
+  // [ADR-0090 D3 / #8310] The vocabulary freeze, split out of
+  // `validateSecurityPosture` the day the rest of that block crossed the
+  // runtime wall — so that it could stay behind WHOLE rather than cross for
+  // three of the six collections it judges (#7220: one rule id must sit on ONE
+  // side of the wall). The split is a surface boundary, not taste: the rule's
+  // verdict and findings are byte-identical to before on every CLI command
+  // (both entries run on all three), and the runtime door does not run it for
+  // ANY type.
+  //
+  // The road to crossing is concrete and short, recorded here so the next
+  // seat prices it correctly: carry `positions`/`apps` in
+  // `RuntimeStackContext` + `CONTEXT_STACK_KEYS`, map both types in
+  // `TYPE_TO_STACK_KEY` (both are `allowRuntimeCreate: true`, so the writes
+  // are real), then declare `runtimeTypes: ['object', 'permission', 'book',
+  // 'position', 'app']` on THIS entry — all six collections in one edit, the
+  // #7220 discipline satisfied.
+  {
+    name: 'validateSecurityRoleWord',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-security-posture.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason:
+      'P2 (#4463)/#8310: judges six collections (objects, fields, actions, permission sets, ' +
+      'positions, apps — plus books), and the per-write snapshot neither carries nor maps ' +
+      'positions/apps. Wiring it for the mapped types alone would enforce one rule id for three of ' +
+      'its six collections — the #7220 split (an object named sales_role refused while a position ' +
+      'named sales_role walks through). It crosses whole — positions/apps carried, mapped and ' +
+      'declared — or stays behind; it stays behind until that wiring exists.',
+    run: (stack) => validateSecurityRoleWord(stack),
   },
   // ADR-0105 D6 — the org tree is a REPORTING dimension. An RLS policy or
   // sharing rule that walks it builds a second permission hierarchy (the

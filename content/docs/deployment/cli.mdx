@@ -319,6 +319,7 @@ os start
 | Flag | Env equivalent | Purpose |
 |---|---|---|
 | `-a, --artifact <path\|url>` | `OS_ARTIFACT_PATH` | File path or `http(s)://` URL to the compiled artifact |
+| — | `OS_ARTIFACT_URL` | Boot a published artifact **by reference**, optionally content-hash pinned via a `#sha256=` fragment. See [Artifact-pinned boot](/docs/deployment/self-hosting#artifact-pinned-boot-os_artifact_url) |
 | `-d, --database <url>` | `OS_DATABASE_URL` | `file:…` / `libsql://` / `postgres://` / `mongodb://` / `memory://` |
 | `--database-driver <kind>` | `OS_DATABASE_DRIVER` | Force `sqlite` \| `sqlite-wasm` \| `turso` \| `postgres` \| `mysql` \| `mongodb` \| `memory` when the URL is ambiguous |
 | `--database-auth-token <token>` | `OS_DATABASE_AUTH_TOKEN` | Auth token for libsql/Turso |
@@ -336,7 +337,7 @@ os start
 > (CORS). **Pin the port explicitly** (`OS_PORT=8080 os start`) and keep
 > `OS_AUTH_URL` / `OS_TRUSTED_ORIGINS` in sync when you change it.
 
-**Resolution priority (artifact):** `--artifact` > `OS_ARTIFACT_PATH` > `<cwd>/dist/objectstack.json` > `<home>/dist/objectstack.json` > auto-compile from `objectstack.config.ts` (when present) > empty kernel.
+**Resolution priority (artifact):** `--artifact` > `OS_ARTIFACT_URL` > `OS_ARTIFACT_PATH` > `<cwd>/dist/objectstack.json` > `<home>/dist/objectstack.json` > auto-compile from `objectstack.config.ts` (when present) > empty kernel.
 **Resolution priority (database):** `--database` > `OS_DATABASE_URL` > `DATABASE_URL` (legacy) > `file:<home>/data/objectstack.db`.
 
 <Callout type="warn">

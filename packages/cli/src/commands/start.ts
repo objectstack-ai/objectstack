@@ -52,6 +52,14 @@ export default class Start extends Command {
     '<%= config.bin %> start --home ~/my-objectstack',
     '<%= config.bin %> start --artifact ./build/myapp.json',
     '<%= config.bin %> start --artifact https://cdn.example.com/app.json --port 8080',
+    {
+      // #8368: artifact-pinned boot. One env var names the app; the integrity
+      // pin is SRI-style INSIDE the fragment (a fragment is client-side by
+      // standard and never sent to the artifact host), so there is no second
+      // variable to keep in sync with the first.
+      command: 'OS_ARTIFACT_URL="https://cdn.example.com/hotcrm-2.2.2.json#sha256=<64 hex chars>" <%= config.bin %> start',
+      description: 'Boot a published artifact by reference, content-hash verified before boot',
+    },
     '<%= config.bin %> start --database file:./data/prod.db',
     '<%= config.bin %> start --database postgres://user:pass@host:5432/mydb',
     {
@@ -89,7 +97,7 @@ export default class Start extends Command {
     // Artifact source
     artifact: Flags.string({
       char: 'a',
-      description: 'Path or http(s):// URL to the compiled objectstack.json (overrides $OS_ARTIFACT_PATH; auto-detected from ./dist/objectstack.json or <home>/dist/objectstack.json; when an objectstack.config.ts is present and no artifact exists, it is compiled automatically)',
+      description: 'Path or http(s):// URL to the compiled objectstack.json (overrides $OS_ARTIFACT_URL and $OS_ARTIFACT_PATH; auto-detected from ./dist/objectstack.json or <home>/dist/objectstack.json; when an objectstack.config.ts is present and no artifact exists, it is compiled automatically)',
     }),
 
     compile: Flags.boolean({
@@ -178,10 +186,24 @@ export default class Start extends Command {
     // auto-compile the config to ./dist/objectstack.json when no
     // artifact has been built yet, so `os start` works on a fresh
     // clone without needing a separate `os build`.
-    let artifactSource = resolveArtifactSource(flags.artifact, homeDir);
+    // ── Artifact-pinned boot (#8368) ────────────────────────────────
+    // `OS_ARTIFACT_URL` names a published artifact by reference. `start` does
+    // NOT resolve it — `serve` does, once, and owns the fetch, the `#sha256=`
+    // verification, the protocol handshake and the migration gate. All `start`
+    // does is get out of the way: no local lookup, no auto-compile, and no
+    // OS_ARTIFACT_PATH / OS_BOOT_EMPTY in the child env that would contradict
+    // the reference. The variable itself is inherited by the child.
+    //
+    // An explicit `--artifact` still wins (flags over env, as everywhere in
+    // this command), and it wins by REMOVING the variable from the child env —
+    // leaving both set would hand `serve` two answers and let it pick.
+    const artifactUrl = flags.artifact ? undefined : process.env.OS_ARTIFACT_URL?.trim() || undefined;
+
+    let artifactSource = artifactUrl ? undefined : resolveArtifactSource(flags.artifact, homeDir);
 
     const shouldAutoCompile = hasProjectConfig
       && !flags.artifact
+      && !artifactUrl
       && !process.env.OS_ARTIFACT_PATH
       && (flags.compile || !artifactSource);
 
@@ -247,7 +269,13 @@ export default class Start extends Command {
       printKV('Config', path.relative(cwd, projectConfigPath) || 'objectstack.config.ts', '📂');
     }
     printKV('Home', homeDir, '🏠');
-    if (artifactSource) {
+    if (artifactUrl) {
+      // Redacted: the reference may be a pre-signed URL whose query string IS
+      // the credential (#8368 acceptance #6). The banner prints scheme, host
+      // and path only — enough to recognise which artifact was named.
+      const { redactArtifactUrl } = await import('@objectstack/runtime');
+      printKV('Artifact', `${redactArtifactUrl(artifactUrl)} (OS_ARTIFACT_URL)`, '📦');
+    } else if (artifactSource) {
       printKV('Artifact', artifactSource.display, '📦');
     } else {
       printKV('Artifact', 'none (empty kernel — install apps via the Console marketplace)', '📦');
@@ -274,8 +302,21 @@ export default class Start extends Command {
       ...(flags['database-driver'] ? { OS_DATABASE_DRIVER: flags['database-driver'] } : {}),
       ...(flags['database-auth-token'] ? { OS_DATABASE_AUTH_TOKEN: flags['database-auth-token'] } : {}),
       AUTH_SECRET: authSecret,
-      ...(artifactSource ? { OS_ARTIFACT_PATH: artifactSource.path } : { OS_BOOT_EMPTY: '1' }),
+      // #8368: with OS_ARTIFACT_URL in play, neither knob is set — the child
+      // resolves the reference itself. OS_BOOT_EMPTY in particular must NOT be
+      // set here: it would tell `serve` that booting an app-less kernel is an
+      // acceptable outcome, turning an unreachable artifact host into a
+      // silently empty platform instead of the loud refusal acceptance #2 asks
+      // for.
+      ...(artifactUrl
+        ? {}
+        : artifactSource
+          ? { OS_ARTIFACT_PATH: artifactSource.path }
+          : { OS_BOOT_EMPTY: '1' }),
     };
+    // Flags over env: an explicit --artifact removes the reference rather than
+    // racing it (see the resolution note above).
+    if (flags.artifact) delete localEnv.OS_ARTIFACT_URL;
     // NODE_ENV is only forced to production when the user has not set it.
     // Allows `NODE_ENV=development objectstack start` to work for debugging.
     if (!localEnv.NODE_ENV) localEnv.NODE_ENV = 'production';

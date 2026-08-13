@@ -114,6 +114,53 @@ docker run -p 8080:8080 \
 (`OS_ARTIFACT_PATH` also accepts an `https://` URL, so the artifact can come
 straight from release storage instead of a mount.)
 
+### Artifact-pinned boot (`OS_ARTIFACT_URL`)
+
+The image above carries no app. `OS_ARTIFACT_URL` names one **by reference**, so
+a fixed runtime image plus one environment variable is a running app — and
+upgrading the app is an env change plus a restart, never an image rebuild. The
+runtime image and the app artifact become two independent release axes.
+
+```bash
+docker run -p 8080:8080 \
+  -e OS_ARTIFACT_URL="https://releases.example.com/hotcrm-2.2.2.json#sha256=<64 hex chars>" \
+  -e OS_DATABASE_URL="postgres://user:pass@db-host:5432/myapp" \
+  -e OS_AUTH_SECRET -e OS_SECRET_KEY \
+  ghcr.io/objectstack-ai/objectstack:14.8.0
+```
+
+Both schemes work: `https://…` is fetched at boot, `file:///…` is read directly
+(the volume-mount workflow above, spelled as a URL). The variable overrides the
+image's preset `OS_ARTIFACT_PATH` and any `objectstack.config.ts` in the working
+directory.
+
+**The integrity pin lives in the URL fragment.** `#sha256=<64 hex chars>` is
+SRI-style and there is deliberately no companion `OS_ARTIFACT_SHA256`: a
+fragment is client-side by standard and is never sent to the server, so the pin
+travels with the reference as a single value to copy and a single value to
+rotate. Two variables would make "URL updated, hash not" a state you can reach.
+
+| Situation | What the runtime does |
+|---|---|
+| No `#sha256=` fragment | Boots without verification. A fetch or read failure **fails the boot** so your orchestrator retries — there is no cache fallback, because there is nothing to authenticate a cached copy with. |
+| `#sha256=` present, content matches | Boots, and keeps the verified copy under `<home>/artifacts`. |
+| `#sha256=` present, content differs | **Refuses to boot**, naming the expected *and* the actual digest. |
+| `#sha256=` present, artifact host unreachable | Falls back to the cached copy **only** if it still hashes to the pin, with a loud warning that the instance is running on cached content. |
+| Artifact's `engines.protocol` excludes this runtime | **Refuses to boot** — the safety belt of the two-axis split. Repoint the reference, or run a matching image version. |
+| The artifact needs a destructive schema change | Safe migrations run at boot; a destructive one **refuses to boot** and names each change. Run `os migrate apply --allow-destructive` deliberately, then restart. Never skipped in silence. |
+
+**Recommended production discipline** (convention, not enforced by the runtime):
+publish immutable, version-named objects; give only CI write access to the
+artifact host; and pin the digest in the fragment. Together these make "which
+bytes is this instance running?" a question with one answer.
+
+**Pre-signed URLs are safe to use.** The reference may carry auth material — a
+signature query parameter, or `user:token@host` — and it is never echoed into
+logs or HTTP responses. Userinfo is sent as an `Authorization: Basic` header
+rather than in the request line (so it does not land in your artifact host's
+access log), and remote bytes are materialised to a local file before the boot
+continues, so the URL does not reach any downstream surface at all.
+
 For a self-contained deployable image, extend it. The Dockerfile below (plus
 the compose stack in the next section and a `.dockerignore`) ships ready-made
 in the project scaffold —

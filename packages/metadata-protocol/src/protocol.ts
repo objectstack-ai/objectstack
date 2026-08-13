@@ -1664,8 +1664,19 @@ function overlayDeleteFailureMessage(err: unknown, type: string, name: string): 
  *   existing no-message fallback at every call site (`'delete failed'`,
  *   `'cleanup failed'`), so the withheld case reuses the sentence the caller
  *   could already receive rather than inventing a second vocabulary.
+ *
+ * [#8443] EXPORTED (via `index.ts`) for the same reason `recordNotFoundError`
+ * is: `@objectstack/runtime`'s package-publish door carries a seed-apply
+ * fallback for protocols that do not self-apply, and it reports failure as
+ * data on the same `seedApplied` field this package's `applySeedBodies` does.
+ * A second private restatement of the rule over there is exactly how the rule
+ * drifts out of sync — the withhold and the quote must be ONE decision, in one
+ * place, for both producers. `declaresClientRefusal` stays private on purpose:
+ * nothing outside this file needs the raw predicate, and an exported surface
+ * with no consumer is the "declared but nobody pulls it" shape AGENTS.md
+ * treats as debt.
  */
-function clientFacingFailureText(err: unknown, fallback: string): string {
+export function clientFacingFailureText(err: unknown, fallback: string): string {
     if (declaresClientRefusal(err)) {
         const declared = (err as { message?: unknown } | null | undefined)?.message;
         if (typeof declared === 'string' && declared.length > 0) return declared;
@@ -1866,8 +1877,16 @@ function clientFacingFailureCode(err: unknown): string | undefined {
  * `ZodError`, so `seedApplied.error` was a multi-line JSON dump of raw zod
  * internals. This is the curated summary {@link zodIssuesToMetadataIssues}
  * already produces for every other authoring surface.
+ *
+ * [#8443] EXPORTED alongside {@link clientFacingFailureText}: the runtime
+ * package-publish door parses the SAME `SeedLoaderRequestSchema` in its own
+ * seed-apply fallback and hits the identical two-population catch, so it needs
+ * the identical declaration — same sentence, same `INVALID_METADATA`/422, same
+ * curated `issues`. Minting a second 422 over there would give one authoring
+ * mistake two different envelopes depending on which protocol served the
+ * publish.
  */
-function seedRequestValidationError(zodIssues: unknown): Error {
+export function seedRequestValidationError(zodIssues: unknown): Error {
     const issues = zodIssuesToMetadataIssues(zodIssues);
     const summary = issues.slice(0, 3)
         .map((i: { path: string; message: string }) => `${i.path || '<root>'}: ${i.message}`)

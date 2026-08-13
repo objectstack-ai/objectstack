@@ -48,7 +48,10 @@
 // Growing the ledger is possible (add the file and its count) but it is a
 // visible line in this repo's diff and needs the same justification any DEBT
 // entry needs — the idiom of `scripts/check-type-check-coverage.mjs`, applied
-// per file rather than per package.
+// per file rather than per package. That authority rule is stated to the AUTHOR
+// too, not only here: the unledgered-file message marks the ledger-expanding
+// path `⛔ MAINTAINER-ONLY` per the #8435 convention, and the self-test holds
+// the marker in place. See the convention block below `LEDGER_COMMENT`.
 //
 // Usage (`--package` is repo-relative and required for everything but
 // `--self-test`, which judges the ledger semantics alone):
@@ -111,6 +114,61 @@ const LEDGER_COMMENT =
   'its entry is deleted, and a file NOT listed here may have no errors at all. Regenerate with: ' +
   UPDATE_COMMAND;
 
+// ── The ratchet-remedy authority convention (#8435) ─────────────────────────
+//
+// The unledgered-file verdict's second remedy is "add the file to the ledger",
+// which EXPANDS a shrink-only ratchet. The rule saying that is a maintainer's
+// call was written only in this file's prose — where a maintainer reading the
+// script sees it and the author who trips the gate never does — while the
+// message itself offered the path as the plain second of two things to do.
+// The convention landed for check-engine-double-contract.mjs and
+// check-type-check-coverage.mjs; the twin blocks there are the reference.
+//
+// The words in the marked message are lifted from this file's own two
+// statements of the rule — `LEDGER_COMMENT`'s "EXACT ratchet" and the GREW
+// verdict's "the ledger only ratchets down" — rather than invented: one rule
+// stated twice in two voices is two rules by the next reading.
+//
+// Deliberately NOT extended to this file's other two ledger-naming verdicts.
+// SHRANK tells the author to re-record a number that already fell, and
+// GRADUATED tells them to DELETE an entry; both are the ratchet TIGHTENING and
+// squarely the author's job. Note GRADUATED names the ledger file too, so the
+// detector below is keyed on the EXPANDING phrasing ("add the file to …") and
+// not on the ledger's name — a detector that caught GRADUATED would stamp
+// maintainer-only onto the improvement path and teach the opposite of the rule.
+//
+// ⛔ This STRENGTHENS ratchet governance and weakens nothing. No verdict moves,
+// no ledger entry is added, and the problems `evaluate()` reports are the same
+// set on the same inputs — only the diagnostic text of one of them changes.
+
+/** Kept identical to the other gates' token so the convention is greppable. */
+const RATCHET_AUTHORITY_MARKER = '⛔ MAINTAINER-ONLY';
+
+/**
+ * How this gate OFFERS the privileged path, as a detector rather than a string
+ * compare, so the self-test can prove it still reaches its subject: a reworded
+ * offer that stopped matching would make the convention check pass vacuously on
+ * every message.
+ *
+ * The optional `(?:\S*\/)?` accepts the ledger named by PATH as well as by bare
+ * filename — a gap spelled to exclude the dot would silently stop matching the
+ * moment the message qualified the name with a directory, and the self-test
+ * carries a path-spelled control precisely because that failure is invisible.
+ */
+const RATCHET_EXPANSION_OFFER = new RegExp(
+  `add the file to\\s+(?:\\S*\\/)?${LEDGER_NAME.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`,
+);
+
+/**
+ * The convention: a message that hands the author the ledger-expanding path
+ * must say in the same breath that the path is not theirs. A message offering no
+ * such path is unaffected — this is an authority label, not a vocabulary ban.
+ */
+export function ratchetRemedyCarriesAuthority(message: string): boolean {
+  if (!RATCHET_EXPANSION_OFFER.test(message)) return true;
+  return message.includes(RATCHET_AUTHORITY_MARKER);
+}
+
 type Ledger = { _comment: string; entries: Record<string, number> };
 
 /** `path(line,col): error TSxxxx: …` — continuation lines of a multi-line message never match. */
@@ -144,7 +202,11 @@ export function evaluate(actual: Map<string, number>, ledger: Record<string, num
       problems.push(
         `${file}: ${count} type error(s) in a file the ledger does not cover. Fix them — this file is ` +
           `inside the checked zone, which is the point of ${PROJECT}. (A deleted \`@ts-expect-error\` ` +
-          `shows up exactly here, as TS2578/TS2694.) Only with a reason: add the file to ${LEDGER_NAME}.`,
+          `shows up exactly here, as TS2578/TS2694.) That is the fix, and the only one of the two you ` +
+          `can take on your own. ${RATCHET_AUTHORITY_MARKER}, NOT a co-equal option: add the file to ` +
+          `${LEDGER_NAME}. This is an EXACT ratchet and the ledger only ratchets down, so a new entry ` +
+          `EXPANDS it — that needs a maintainer to agree the debt is legitimate first (${ISSUE}). Do ` +
+          `not take this path to get CI green.`,
       );
       continue;
     }
@@ -301,12 +363,140 @@ function selfTest(): void {
     failures.push(`parseDiagnostics mis-read a multi-line transcript: ${JSON.stringify([...parsed])}`);
   }
 
+  // ── The ratchet-remedy authority convention (#8435) ────────────────────────
+  //
+  // Asserted against the text `evaluate()` REALLY emits rather than a copy of
+  // it: a hand-copied fixture would prove the convention about a string no
+  // author ever reads. The assertions are deliberately non-overlapping, so each
+  // way this can rot is caught by exactly one NAMED failure:
+  //
+  //   (1) the detector still reaches its subject — the only one that fails if
+  //       the offer is reworded out from under RATCHET_EXPANSION_OFFER, which
+  //       would make (3) pass vacuously forever after;
+  //   (2) the real emitted verdict carries the marker — the only one that fails
+  //       if the label is dropped from the unledgered-file message;
+  //   (3) an offer WITHOUT the marker is REJECTED — the only one that fails if
+  //       the predicate stops discriminating (e.g. is reduced to `return true`);
+  //   (4) an offer naming the ledger by PATH is still matched — the only one
+  //       that fails if the detector's gap is narrowed to exclude directories;
+  //   (5)/(6)/(7) the detector does NOT reach the SHRANK, GRADUATED and GREW
+  //       verdicts. Those are the ratchet TIGHTENING, squarely the author's
+  //       job. (6) is the one that earns its keep: GRADUATED names the ledger
+  //       FILE while telling the author to delete an entry, so a detector keyed
+  //       on the name rather than on the act would over-reach onto it and stamp
+  //       maintainer-only on the improvement path.
+  //
+  // (3) is what makes (2) worth having: without it, a predicate that approved
+  // everything would keep this block green while the convention is gone.
+  const expect = (label: string, cond: boolean): void => {
+    if (!cond) failures.push(label);
+  };
+
+  const unledgered = evaluate(new Map([['pin.test.ts', 1]]), {})[0] ?? '';
+  expect(
+    '#8435 — the ratchet-offer DETECTOR still matches the unledgered-file verdict (else every '
+      + 'assertion below it passes vacuously)',
+    RATCHET_EXPANSION_OFFER.test(unledgered),
+  );
+  expect(
+    `#8435 — the unledgered-file verdict marks the ledger path ${RATCHET_AUTHORITY_MARKER} (the ledger `
+      + 'is an EXACT, shrink-only ratchet, so ADDING a file to it is a maintainer action — the author '
+      + "must be told that where they read it, not only in this file's prose)",
+    ratchetRemedyCarriesAuthority(unledgered),
+  );
+
+  {
+    // SYNTHETIC — and specifically the pre-#8538 wording — rather than the real
+    // verdict with the marker stripped out: derived, it would also fire on a
+    // rewording, giving two named failures for one rot with the second
+    // misdescribing the cause. if/else, not two flat asserts, so exactly one of
+    // the two below can fire.
+    const unmarkedOffer = `pin.test.ts: 1 type error(s) … Only with a reason: add the file to ${LEDGER_NAME}.`;
+    if (!RATCHET_EXPANSION_OFFER.test(unmarkedOffer)) {
+      expect(
+        '#8435 — the synthetic unmarked-offer fixture is no longer recognised as an offer, so it '
+          + 'cannot test discrimination at all. Re-spell it to match RATCHET_EXPANSION_OFFER',
+        false,
+      );
+    } else {
+      expect(
+        '#8435 — ratchetRemedyCarriesAuthority() REJECTS an offer carrying no marker (proves the '
+          + 'predicate discriminates rather than approving everything)',
+        !ratchetRemedyCarriesAuthority(unmarkedOffer),
+      );
+    }
+  }
+
+  // The hand-classified control for the detector's GAP. A sibling gate's
+  // first-cut regex spelled its gap to exclude the dot, so every offer naming
+  // its registry BY PATH silently stopped matching — a vacuous pass that no
+  // green run can reveal, because the fail path is where these strings live.
+  const pathSpelledOffer = `pin.test.ts: 1 type error(s) … add the file to packages/spec/${LEDGER_NAME}.`;
+  expect(
+    '#8435 — the detector still matches an offer that names the ledger by PATH rather than by bare '
+      + 'filename (a gap narrowed to exclude directories would make the convention unenforceable the '
+      + 'moment the message qualified the name)',
+    RATCHET_EXPANSION_OFFER.test(pathSpelledOffer),
+  );
+
+  const shrank = evaluate(new Map([['a.test.ts', 2]]), { 'a.test.ts': 3 })[0] ?? '';
+  if (!shrank.includes('SHRANK')) {
+    expect(
+      '#8435 — the ratchet-DOWN control is no longer the SHRANK verdict, so it cannot prove the '
+        + 'detector leaves the improvement path alone. Re-point it at the re-record message',
+      false,
+    );
+  } else {
+    expect(
+      '#8435 — the detector does NOT reach the SHRANK verdict (re-recording a number that already fell '
+        + "is the ratchet tightening and squarely the author's job; a maintainer-only marker there "
+        + 'would teach the opposite of the rule)',
+      !RATCHET_EXPANSION_OFFER.test(shrank) && ratchetRemedyCarriesAuthority(shrank),
+    );
+  }
+
+  const graduated = evaluate(new Map<string, number>(), { 'a.test.ts': 3 })[0] ?? '';
+  if (!graduated.includes(LEDGER_NAME)) {
+    expect(
+      `#8435 — the GRADUATED control no longer names ${LEDGER_NAME}, so it cannot prove the detector is `
+        + "keyed on the ACT rather than on the ledger's name. Re-point it at the delete-the-entry message",
+      false,
+    );
+  } else {
+    expect(
+      '#8435 — the detector does NOT reach the GRADUATED verdict, which names the ledger file while '
+        + `telling the author to DELETE an entry. This is the over-reach control: a detector keyed on `
+        + `${LEDGER_NAME} instead of on the "add the file to …" ACT would mark the ratchet-tightening `
+        + 'path maintainer-only',
+      !RATCHET_EXPANSION_OFFER.test(graduated) && ratchetRemedyCarriesAuthority(graduated),
+    );
+  }
+
+  const grew = evaluate(new Map([['a.test.ts', 4]]), { 'a.test.ts': 3 })[0] ?? '';
+  if (!grew.includes('GREW')) {
+    expect(
+      '#8435 — the GREW control is no longer the debt-grew verdict, so it cannot prove the detector '
+        + 'leaves it alone. Re-point it at the grew message',
+      false,
+    );
+  } else {
+    expect(
+      '#8435 — the detector does NOT reach the GREW verdict (it offers no ledger-expanding path at all; '
+        + 'it tells the author to fix the new errors)',
+      !RATCHET_EXPANSION_OFFER.test(grew) && ratchetRemedyCarriesAuthority(grew),
+    );
+  }
+
   if (failures.length) {
     console.error(`✗ check:test-typecheck --self-test — ${failures.length} failure(s)\n`);
     for (const f of failures) console.error('  • ' + f);
     process.exit(1);
   }
-  console.log(`✓ check:test-typecheck --self-test — ${cases.length} semantic case(s) + the parser hold.`);
+  console.log(
+    `✓ check:test-typecheck --self-test — ${cases.length} semantic case(s), the parser, and the #8435 `
+      + 'convention hold (the unledgered-file verdict keeps its ledger offer marked maintainer-only, '
+      + 'and the SHRANK / GRADUATED / GREW verdicts stay unmarked).',
+  );
 }
 
 if (process.argv.includes('--self-test')) {

@@ -862,7 +862,75 @@ export default class Serve extends Command {
     const configMissing = !fs.existsSync(absolutePath);
     let useArtifactFallback = false;
     let useEmptyBoot = false;
-    if (configMissing) {
+
+    // ── Artifact-pinned boot (#8368) ─────────────────────────────────
+    // `OS_ARTIFACT_URL` names the artifact BY REFERENCE — an https:// URL
+    // fetched at boot, or a file:// URL read directly (the volume-mount
+    // workflow) — with an optional SRI-style `#sha256=` integrity pin in the
+    // fragment. It is resolved here, before anything else looks for an
+    // artifact, and it wins over every local lookup:
+    //
+    //   --artifact  >  OS_ARTIFACT_URL  >  OS_ARTIFACT_PATH  >  <cwd>/dist/…
+    //
+    // Beating OS_ARTIFACT_PATH is not a nicety, it is the acceptance
+    // criterion: the official runtime image sets
+    // `ENV OS_ARTIFACT_PATH=/srv/app/objectstack.json`, so on a container that
+    // carries no app at all that variable is always set and always points at a
+    // file that does not exist. Without this precedence, "runtime container +
+    // one env var" would refuse with "the artifact named by OS_ARTIFACT_PATH
+    // does not exist" and the feature would be unreachable exactly where it
+    // was designed to be used.
+    //
+    // It also wins over an `objectstack.config.ts` that happens to be in the
+    // cwd. Setting this variable is an explicit instruction to boot a specific
+    // published artifact; silently preferring whatever source tree the process
+    // is standing in would make the deployed app depend on the container's
+    // working directory.
+    //
+    // The resolver hands back a LOCAL path — remote bytes are materialised
+    // under `<home>/artifacts` — so nothing downstream of this line ever sees
+    // the URL. That is what keeps a pre-signed reference out of the banner,
+    // the metadata service's artifact-source record and every log line, and it
+    // also means the bytes that were hashed are the bytes that boot.
+    let pinnedArtifact: { localPath: string; display: string } | undefined;
+    const artifactUrlEnv = process.env.OS_ARTIFACT_URL;
+    if (artifactUrlEnv && artifactUrlEnv.trim() !== '') {
+      const runtimeMod = await import('@objectstack/runtime');
+      const { resolveArtifactReference, resolveArtifactFetchTimeoutMs, resolveObjectStackHome } = runtimeMod;
+      try {
+        const resolved = await resolveArtifactReference(artifactUrlEnv, {
+          homeDir: resolveObjectStackHome(),
+          fetchTimeoutMs: resolveArtifactFetchTimeoutMs(process.env),
+          // The cache-fallback warning must survive the boot-quiet window —
+          // "this instance is serving cached content" is the one degraded-boot
+          // note an operator must not miss.
+          warn: (m) => process.stderr.write(chalk.yellow(m) + '\n'),
+        });
+        pinnedArtifact = { localPath: resolved.localPath, display: resolved.display };
+        printDiagnostic();
+        printDiagnostic(chalk.dim(
+          `  Artifact (OS_ARTIFACT_URL): ${resolved.display}`
+          + ` [${resolved.origin}${resolved.expectedSha256 ? `, sha256 verified` : ', unpinned'}]`,
+        ));
+        useArtifactFallback = true;
+      } catch (err: any) {
+        // Every message from the resolver is already scrubbed of the URL's
+        // credential-bearing parts, so it is printed verbatim. ONE write, for
+        // the reason spelled out at the "Nothing to serve" exit below.
+        printDiagnostic(
+          '\n'
+          + chalk.red(`  ✗ Cannot boot from OS_ARTIFACT_URL.\n`)
+          + chalk.dim('     ') + String(err?.message ?? err).split('\n').join('\n     ') + '\n'
+          + '\n'
+          + chalk.dim('     The boot is refused rather than degraded — container orchestration\n')
+          + chalk.dim('     should retry, and a runtime told to serve one specific artifact must\n')
+          + chalk.dim('     never invent a different one.'),
+        );
+        this.exit(1);
+      }
+    }
+
+    if (configMissing && !pinnedArtifact) {
       const { resolveDefaultArtifactPath } = await import('@objectstack/runtime');
       const artifactSource = resolveDefaultArtifactPath();
       if (!artifactSource) {
@@ -895,11 +963,13 @@ export default class Serve extends Command {
             chalk.red('  ✗ Nothing to serve — no config and no compiled artifact.') + '\n'
             + chalk.dim(`     Looked for a config at:    ${absolutePath}\n`)
             + chalk.dim(`     Looked for an artifact at: ${path.resolve(process.cwd(), 'dist/objectstack.json')}\n`)
-            + chalk.dim('     OS_ARTIFACT_PATH is not set.\n')
+            + chalk.dim('     Neither OS_ARTIFACT_URL nor OS_ARTIFACT_PATH is set.\n')
             + '\n'
             + chalk.dim('     Hint: `objectstack init` scaffolds a new project;\n')
             + chalk.dim('           `objectstack start` boots an app-less kernel against your marketplace;\n')
-            + chalk.dim('           `objectstack build` (or OS_ARTIFACT_PATH) supplies a compiled artifact.\n')
+            + chalk.dim('           `objectstack build` (or OS_ARTIFACT_PATH) supplies a compiled artifact;\n')
+            + chalk.dim('           OS_ARTIFACT_URL=https://…/objectstack.json boots a published artifact\n')
+            + chalk.dim('           by reference (optionally pinned with #sha256=<64 hex chars>).\n')
             + chalk.dim('           Already have a project? Check your working directory.'),
           );
           this.exit(1);
@@ -912,6 +982,8 @@ export default class Serve extends Command {
     printDiagnostic();
     if (useEmptyBoot) {
       printDiagnostic(chalk.dim('  No objectstack.config.ts or artifact found — booting empty kernel...'));
+    } else if (pinnedArtifact) {
+      printDiagnostic(chalk.dim('  Booting from the artifact named by OS_ARTIFACT_URL (default host)...'));
     } else if (useArtifactFallback) {
       printDiagnostic(chalk.dim('  No objectstack.config.ts found — booting from artifact (default host)...'));
     } else {
@@ -1080,7 +1152,16 @@ export default class Serve extends Command {
           // "missing artifact" error and assemble a bare kernel that
           // can later install marketplace apps at runtime.
           const { createDefaultHostConfig } = await import('@objectstack/runtime');
-          const bootResult = await createDefaultHostConfig({ requireArtifact: !useEmptyBoot, dev: isDev });
+          const bootResult = await createDefaultHostConfig({
+            requireArtifact: !useEmptyBoot,
+            dev: isDev,
+            // #8368: the already-fetched, already-verified LOCAL copy. Passing
+            // it explicitly (rather than re-deriving from the environment) is
+            // what stops the loader from fetching the URL a second time — a pin
+            // that verifies one response while a different response boots would
+            // verify nothing.
+            ...(pinnedArtifact ? { artifactPath: pinnedArtifact.localPath } : {}),
+          });
           // [#4002] `api` merges per key — see mergeBootConfig. A shallow spread
           // let the boot builder's two scoping keys wipe the author's whole `api`
           // block, silently dropping `requireAuth` / `enforceProjectMembership`.
@@ -3012,6 +3093,51 @@ export default class Serve extends Command {
             console.warn(chalk.yellow(`  ⚠ Console dist not found — install \`@object-ui/console\` (already built) or run \`pnpm --filter @object-ui/console build\` in the objectui workspace`));
           }
         }
+      }
+
+      // ── Artifact-pinned boot: migration policy (#8368, acceptance #5) ──
+      // Only on the OS_ARTIFACT_URL path. On this path "upgrade the app" is an
+      // env change plus a restart, with nobody at a terminal to read a drift
+      // warning at the moment it matters — so safe changes are applied and a
+      // destructive one refuses the boot instead of being warned about and
+      // skipped. Every other boot keeps the standing production policy
+      // untouched (schema is never auto-altered under NODE_ENV=production).
+      //
+      // Registered as a plugin whose `kernel:ready` hook runs the gate: Phase 3
+      // is after every plugin's start() — so ObjectQL's schema sync has already
+      // created tables and added columns — and before Phase 4 opens the HTTP
+      // socket. A throw from a boot-path hook propagates and fails the boot, so
+      // "refuse to boot" is literal: the port never binds.
+      if (pinnedArtifact) {
+        const artifactDisplay = pinnedArtifact.display;
+        await kernel.use({
+          name: 'com.objectstack.cli.artifact-boot-migration-gate',
+          version: '1.0.0',
+          init: async (ctx: any) => {
+            ctx.hook('kernel:ready', async () => {
+              const { findSqlDriverForKernel } = await import('../utils/schema-migrate.js');
+              const { runArtifactBootMigrationGate } = await import('../utils/artifact-boot-migration.js');
+              const verdict = await runArtifactBootMigrationGate({
+                driver: findSqlDriverForKernel(kernel),
+                artifactDisplay,
+                info: (m) => printDiagnostic(chalk.dim(m)),
+                warn: (m) => console.warn(chalk.yellow(m)),
+              });
+              if (!verdict.ok) {
+                // Restore stdout before the refusal so the boot-quiet window
+                // cannot swallow the one message that explains the exit.
+                restoreOutput();
+                console.error('\n' + verdict.refusal);
+                throw new Error(
+                  `Refusing to boot: ${verdict.destructive.length} destructive schema change(s) `
+                  + `required by the artifact named by OS_ARTIFACT_URL. `
+                  + `Run 'os migrate apply --allow-destructive' deliberately, then restart.`,
+                );
+              }
+            });
+          },
+        } as any);
+        trackPlugin('ArtifactBootMigrationGate');
       }
 
       // Boot the runtime

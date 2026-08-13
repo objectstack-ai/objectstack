@@ -357,6 +357,7 @@ export const ERROR_CODE_LEDGER = {
     'AUTH_CONFIG_ERROR',             // auth service threw while the adapter mounted it
   ],
   '@objectstack/service-messaging': [
+    'DELIVERY_NEVER_SENT',           // [#8069] terminal delivery row with 0 attempts — a PARKED record of a delivery that could never be prepared, not one that failed. Redelivering it would be a FIRST send, and the row carries no HMAC signature because the secret that would have produced one is exactly what went missing, so it would go out unsigned (#7799). Distinct from DELIVERY_NOT_ELIGIBLE: that one says "wrong state, try when it settles"; this one says "never, fix the configuration instead"
     'DELIVERY_NOT_ELIGIBLE',         // delivery row is in a non-terminal state
   ],
   '@objectstack/trigger-api': [

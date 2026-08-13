@@ -9,6 +9,10 @@ import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
 
 // ---------------------------------------------------------------------------
 // CLOSED AGAINST UNKNOWN KEYS as of #4001 batch A -- all 31 object sites.
+// (#7751 then GREW the map by the `object-*` block family -- six entries,
+// strict from birth, key sets derived from objectui's renderer read points;
+// see the "Object-bound SDUI blocks" section below. The "31"s in this header
+// are batch A's own count, kept as the historical measurement they were.)
 //
 // SDUI component prop schemas: the declarative shape of every `page:*`,
 // `record:*`, `element:*`, `nav:*` and `ai:*` node a page can carry.
@@ -1452,6 +1456,384 @@ export const ElementTextInputPropsSchema = lazySchema(() => strictObject({
 
 /**
  * ----------------------------------------------------------------------
+ * 5. Object-bound SDUI blocks (#7751, maintainer ruling 2026-08-12: direction A)
+ * ----------------------------------------------------------------------
+ *
+ * The `object-*` family — the platform's data-bound authoring surface — was
+ * absent from this map, so the #5068 authoring gate had no schema to dispatch
+ * and SKIPPED every node (the silent skip is a required semantic, not
+ * leniency — `packages/lint/src/validate-component-props.ts`, module header).
+ * The live cost was #7750: `object-grid` authored `filters:` (plural) where
+ * the renderer reads `filter`, the wire carried no `$filter`, and a personal
+ * work queue listed every row with a success receipt.
+ *
+ * KEY SETS ARE DERIVED FROM THE RENDERERS' OWN READ POINTS — measured against
+ * an objectui checkout at `eb7f586b`, per-block citations below — never from
+ * the designer palette or the registry `inputs` alone. Both of those have
+ * published keys with zero read points (`object-grid` `striped`/`bordered`,
+ * `object-kanban` `groupField` — the objectui#3829 / #7973 class), and
+ * re-declaring one here would recreate the declared-but-inert trap this
+ * section exists to close. The registry-declared `inputs` of each block are a
+ * strict SUBSET of its declared set here, so `check:react-declaration-parity`
+ * reports zero `registry-only` drift on these blocks; the surplus is
+ * `spec-only`, the soft signal ADR-0082 §2 expects (the palette is a curated
+ * subset). That existing gate — not a new one — carries the spec↔objectui
+ * parity burden going forward (the ruling's third point).
+ *
+ * VALUE posture, first step: the #7750 class is a KEY typo, so keys are the
+ * contract here. Value schemas are deliberately conservative — scalars and
+ * enums only where renderer, registry and designer agree; `z.unknown()` where
+ * the value contract still lives in objectui (filter shapes, column defs,
+ * grouping configs). Tightening values is a later ratchet with its own
+ * inventory, exactly like the #5068 → #4001-batch-A sequence above.
+ *
+ * The warning→error upgrade is untouched by this section: findings on these
+ * entries are advisory, still gated on the #5068 inventory (the ruling:
+ * 「warning 层先行,error 升级仍以 inventory 为闸,本裁定不改那个闸」).
+ *
+ * Deliberately NOT declared, each with its reason:
+ *
+ *  - `object-chart` gets NO entry yet. Its authored vocabulary is two-layered
+ *    (`chartType` on the SDUI node vs `type` in `ChartConfigSchema`; corpus
+ *    pages author `dataset`/`dimensions`/`values` that `ObjectChart.tsx` reads
+ *    while the rest of the bag spreads into the generic chart component), so
+ *    its key set is not derivable with the confidence the rest of this section
+ *    meets. A partial entry would warn on working keys — worse than the
+ *    status-quo skip. It stays silently skipped, like every other unregistered
+ *    type.
+ *  - `bind` (read by grid/kanban/chart via objectui's `useDataScope`) is an
+ *    objectui data-scope key, not spec page vocabulary — the spec's binding is
+ *    the component-level `dataSource` (ADR-0089 / #6953). Declaring it here
+ *    would fossilize a non-spec spelling into the contract.
+ *  - Callbacks (`onNavigate`, `onSuccess`, `onCardMove`, `submitHandler`, …)
+ *    and host-injected props (`objectFields`, adapter-shaped `dataSource`) are
+ *    not authorable metadata.
+ */
+
+/**
+ * What silently happened to a typo'd key on an `object-*` block before #7751 —
+ * the history line each of this section's rejections carries. Distinct from
+ * {@link PROPS_HISTORY}: these types were not merely strip-mode, they were
+ * absent from the map entirely, so even the #5068 gate said nothing.
+ */
+const objectBlockHistory = (type: string) =>
+  `Until #7751 \`${type}\` had no entry in ComponentPropsMap at all, so the #5068 authoring gate `
+  + 'skipped the type: a misspelled key inside `properties` parsed clean, was stored, reached '
+  + "objectui's renderer and was ignored there (the #7750 shape — `filters` for `filter` silently "
+  + 'unfiltered a personal work queue, with a success receipt).';
+
+/**
+ * The plural `filters` never had a read point on any `object-*` renderer —
+ * `ObjectNavItem.filters` and the react-tier `ListView.filters` declare the
+ * plural, so an author moving between tiers switches spelling with no signal
+ * (#7750's actual mechanism). Shared by every block that reads `filter`, so
+ * the alias cannot drift per block. objectui#4041 retired the plural from the
+ * `object-grid` registry declaration; this is the spec-side half.
+ */
+const FILTERS_TO_FILTER = { filters: 'filter' } as const;
+
+/**
+ * `object-grid` (objectui `plugin-grid/src/ObjectGrid.tsx` @ `eb7f586b`).
+ * Read points per key: `objectName` (throughout), `columns`/`fields` (:714-715),
+ * `filter` (:739, lowered via `toFilterNode` to `$filter`), `defaultFilters`
+ * (:922 — the LEGACY fallback read only when `filter` is absent; it is read,
+ * so it stays declared — only the plural `filters` has zero read points),
+ * `sort` (:741) / `defaultSort` (:943), `pagination`/`pageSize`/`showPagination`
+ * (:567, :752, :2475-2480), `searchableFields`/`showSearch` (:959, :2484-2486),
+ * `rowHeight` (:549), `grouping`/`aggregations` (:1076, :1136), `rowColor`
+ * (:1052), `conditionalFormatting` (:884, :1061), `selection`/`selectable`
+ * (:2186-2190), `rowActions` (:1927), `batchActions`/`bulkActions` (:2150),
+ * `bulkActionDefs` (:2165), `navigation` (:1032), `editable`/`singleClickEdit`
+ * (:2597, :2632), `resizable`/`resizableColumns` (:2598), `reorderableColumns`
+ * (:2599), `frozenColumns` (:2135), `showColumnTypeIcons` (:1296 …),
+ * `exportOptions`/`operations` (:1697-1721), `label`/`title` (:1732, :2557),
+ * `data`/`staticData` (:372, :386).
+ */
+export const ObjectGridPropsSchema = lazySchema(() => strictObject({
+  surface: 'this `object-grid`',
+  history: objectBlockHistory('object-grid'),
+  guidanceSets: COMPONENT_LEVEL_GUIDANCE,
+  aliases: FILTERS_TO_FILTER,
+}, {
+  objectName: z.string().optional()
+    .describe('Object this grid binds to. Optional because the component-level `dataSource` binding can supply the object instead (#6953)'),
+  label: I18nLabelSchema.optional().describe('Grid label — used as the table caption and export file title'),
+  title: I18nLabelSchema.optional().describe('Fallback for `label` (the renderer reads `label || title`)'),
+  columns: z.array(z.unknown()).optional()
+    .describe('Columns: field names or column definition objects'),
+  fields: z.array(z.unknown()).optional()
+    .describe('Field list fallback used when `columns` is absent'),
+  filter: z.unknown().optional()
+    .describe('Base query filter (ObjectQL filter array/AST) — lowered to the wire `$filter`. THE key #7750 misspelled as plural'),
+  defaultFilters: z.unknown().optional()
+    .describe('Legacy base-filter fallback, read only when `filter` is absent. Prefer `filter`'),
+  sort: z.unknown().optional().describe('Initial sort (array of { field, order })'),
+  defaultSort: z.unknown().optional()
+    .describe('Legacy single-sort fallback ({ field, order }), read only when `sort` is absent. Prefer `sort`'),
+  pagination: z.unknown().optional()
+    .describe('Pagination config ({ pageSize, pageSizeOptions, … }); its presence enables paging'),
+  pageSize: z.number().optional().describe('Flat page-size shorthand; `pagination.pageSize` wins when both are set'),
+  showPagination: z.boolean().optional().describe('Show the pager (read only when `pagination` is absent)'),
+  searchableFields: z.array(z.string()).optional()
+    .describe('Fields the toolbar search queries; a non-empty list enables search'),
+  showSearch: z.boolean().optional().describe('Show the search box (read only when `searchableFields` is absent)'),
+  rowHeight: z.unknown().optional().describe('Row density mode (e.g. compact / comfortable)'),
+  grouping: z.unknown().optional().describe('Row grouping config'),
+  aggregations: z.unknown().optional().describe('Group aggregation config (sum/avg/… per column)'),
+  conditionalFormatting: z.unknown().optional().describe('Conditional row/cell formatting rules'),
+  rowColor: z.unknown().optional().describe('Row color rules'),
+  selection: z.unknown().optional().describe('Selection config ({ type: none | single | multiple })'),
+  selectable: z.unknown().optional().describe('Legacy selection shorthand, read only when `selection` is absent. Prefer `selection`'),
+  rowActions: z.array(z.unknown()).optional().describe('Per-row action names'),
+  bulkActions: z.array(z.unknown()).optional().describe('Bulk action names shown on selection'),
+  batchActions: z.array(z.unknown()).optional().describe('Alternate spelling the renderer reads FIRST (`batchActions ?? bulkActions`)'),
+  bulkActionDefs: z.array(z.unknown()).optional().describe('Inline bulk-action definitions (full defs, not names)'),
+  navigation: z.unknown().optional().describe('Row-click navigation config ({ mode: page | drawer | modal | split | none })'),
+  editable: z.boolean().optional().describe('Enable inline cell editing'),
+  singleClickEdit: z.boolean().optional().describe('Enter cell edit on single click (default true when editable)'),
+  resizable: z.boolean().optional().describe('Allow column resize (read before `resizableColumns`)'),
+  resizableColumns: z.boolean().optional().describe('Alternate spelling of `resizable` (the renderer reads `resizable ?? resizableColumns`)'),
+  reorderableColumns: z.boolean().optional().describe('Allow column drag-reorder'),
+  frozenColumns: z.number().optional().describe('How many leading columns stay frozen (default 1)'),
+  showColumnTypeIcons: z.boolean().optional().describe('Show field-type icons in column headers'),
+  exportOptions: z.unknown().optional().describe('Export config ({ formats, streaming })'),
+  operations: z.unknown().optional().describe('Operation toggles ({ export: false, … })'),
+  data: z.array(z.unknown()).optional().describe('Static inline rows — bypasses the object query'),
+  staticData: z.array(z.unknown()).optional().describe('Alternate spelling of `data` the renderer also reads'),
+}));
+/** Author state (ADR-0122: the bare name is the author state). */
+export type ObjectGridProps = z.input<typeof ObjectGridPropsSchema>;
+
+/**
+ * `object-metric` (objectui `plugin-dashboard/src/ObjectMetricWidget.tsx` @
+ * `eb7f586b`). The widget destructures every prop it reads
+ * (`ObjectMetricWidgetProps`, :40-110 — the complete read set), and the
+ * registry shell forwards the authored bag onto it. `columns`/`sort`/`limit`
+ * are deliberately absent — a metric is one aggregated number; the registry's
+ * own `ElementDataSourceMapping` comment records that they have no read site.
+ */
+export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
+  surface: 'this `object-metric`',
+  history: objectBlockHistory('object-metric'),
+  guidanceSets: COMPONENT_LEVEL_GUIDANCE,
+  aliases: FILTERS_TO_FILTER,
+}, {
+  objectName: z.string().optional()
+    .describe('Object this metric aggregates. Optional because the component-level `dataSource` binding can supply the object instead (#6953)'),
+  label: I18nLabelSchema.optional().describe('Metric label'),
+  description: I18nLabelSchema.optional().describe('Helper text under the value'),
+  title: I18nLabelSchema.optional().describe('Drill-down panel title; defaults to the metric label'),
+  icon: z.string().optional().describe('Icon name (Lucide)'),
+  colorVariant: z.enum(['default', 'blue', 'teal', 'orange', 'purple', 'success', 'warning', 'danger'])
+    .optional().describe('Icon container color variant'),
+  aggregate: z.unknown().optional()
+    .describe('Aggregation config ({ field, function, groupBy? }) run against the object'),
+  filter: z.unknown().optional().describe('Filter the aggregation is scoped by'),
+  format: z.string().optional().describe("Number format pattern (e.g. '0,0', '$0,0', '0%')"),
+  currency: z.string().optional().describe("ISO currency code (e.g. 'USD') — enables currency formatting"),
+  prefix: z.string().optional().describe('Static prefix before the formatted value'),
+  suffix: z.string().optional().describe('Static suffix after the formatted value'),
+  invert: z.boolean().optional().describe('Display `1 - value` for opposite-signal gauges (compliance/uptime)'),
+  variant: z.enum(['card', 'bare']).optional().describe('Layout variant'),
+  fallbackValue: z.union([z.string(), z.number()]).optional()
+    .describe('Static value shown when no data source is available'),
+  trend: z.unknown().optional().describe('Static trend info ({ value, label, direction })'),
+  drillDown: z.unknown().optional().describe('Click-through drill config — opens the underlying records'),
+  compareTo: z.unknown().optional().describe("Period-over-period comparison ({ kind: 'previousPeriod' | 'previousYear' })"),
+}));
+/** Author state (ADR-0122: the bare name is the author state). */
+export type ObjectMetricProps = z.input<typeof ObjectMetricPropsSchema>;
+
+/**
+ * `object-kanban` (objectui `plugin-kanban/src/ObjectKanban.tsx` +
+ * `KanbanRenderer` in `plugin-kanban/src/index.tsx` @ `eb7f586b` — the board
+ * forwards the authored bag on). Read points: `objectName`/`groupBy`
+ * (throughout), `columns` (:474 — SWIMLANES, `{ id, title }` per `groupBy`
+ * value or bare strings, NOT a field projection), `filter` (:198, the
+ * `$filter` handoff), `data` (:217-224), `cardTitle`/`titleField` (:233),
+ * `cardFields` (:322), `swimlaneField`/`grouping` (:518-519), and via the
+ * forwarded schema `quickAdd`/`coverImageField`/`conditionalFormatting`
+ * (`KanbanRenderer`, index.tsx). `groupField` is the DESIGNER's spelling with
+ * zero read points (#7973 class) — aliased to the `groupBy` the board reads.
+ */
+export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
+  surface: 'this `object-kanban`',
+  history: objectBlockHistory('object-kanban'),
+  guidanceSets: COMPONENT_LEVEL_GUIDANCE,
+  aliases: {
+    ...FILTERS_TO_FILTER,
+    // The Studio designer's published spelling; no renderer read point —
+    // the board reads `groupBy` (objectui#3829 / #7973 class).
+    groupField: 'groupBy',
+  },
+}, {
+  objectName: z.string().optional()
+    .describe('Object this board binds to. Optional because the component-level `dataSource` binding can supply the object instead (#6953)'),
+  groupBy: z.string().optional().describe('Field whose values become the board columns'),
+  columns: z.array(z.unknown()).optional()
+    .describe('Swimlane definitions ({ id, title } per `groupBy` value, or bare value strings) — NOT a field projection'),
+  filter: z.unknown().optional().describe('Base query filter, handed to the wire `$filter`'),
+  data: z.array(z.unknown()).optional().describe('Static inline cards — bypasses the object query'),
+  cardTitle: z.string().optional().describe('Field rendered as each card title'),
+  titleField: z.string().optional().describe('Legacy fallback for `cardTitle` (the board reads `cardTitle || titleField`). Prefer `cardTitle`'),
+  cardFields: z.array(z.string()).optional().describe('Fields rendered on each card'),
+  swimlaneField: z.string().optional().describe('Field for horizontal swimlanes (in addition to columns)'),
+  grouping: z.unknown().optional().describe('View grouping config; its first field is the swimlane fallback'),
+  quickAdd: z.boolean().optional().describe('Show the per-column quick-add affordance'),
+  coverImageField: z.string().optional().describe('Image field rendered as the card cover'),
+  conditionalFormatting: z.unknown().optional().describe('Card conditional formatting rules'),
+}));
+/** Author state (ADR-0122: the bare name is the author state). */
+export type ObjectKanbanProps = z.input<typeof ObjectKanbanPropsSchema>;
+
+/**
+ * The flat per-field spellings `ObjectCalendar` keeps reading as a
+ * backward-compat fallback (`getCalendarConfig`, ObjectCalendar.tsx:150-158)
+ * and that `ObjectView`/`ListView` emit on their runtime handoff. Read, but
+ * NOT authorable — one composition key per concept (Prime Directive #12, the
+ * `body` → `children` precedent on {@link PageContainerProps}): the authored
+ * spelling is the `calendar` object.
+ */
+const OBJECT_CALENDAR_FLAT_FIELD_GUIDANCE: readonly KeySetGuidance[] = [
+  ...COMPONENT_LEVEL_GUIDANCE,
+  {
+    name: 'OBJECT_CALENDAR_FLAT_FIELD_KEYS',
+    keys: ['startDateField', 'dateField', 'endDateField', 'endField', 'titleField', 'colorField', 'allDayField'],
+    examples: ['startDateField', 'titleField'],
+    prescription:
+      'Write this as a key of the `calendar` config object instead — `calendar: { startDateField, '
+      + 'endDateField, titleField, colorField, allDayField }`. The flat spelling is the runtime handoff '
+      + '`ObjectView`/`ListView` emit and a stored-document fallback the renderer keeps reading; it is '
+      + 'not a second authorable spelling (one key per concept, Prime Directive #12).',
+  },
+];
+
+/**
+ * `object-calendar` (objectui `plugin-calendar/src/ObjectCalendar.tsx` +
+ * registry shell in `plugin-calendar/src/index.tsx` @ `eb7f586b`). Read
+ * points: `objectName` (throughout), `calendar` (:145 — the canonical config
+ * object), `defaultView` (:188), `filter`/`sort` (fetch params), `data`/
+ * `staticData` (external rows), and via the registry shell's declared host
+ * hatches `locale` and `loading`.
+ */
+export const ObjectCalendarPropsSchema = lazySchema(() => strictObject({
+  surface: 'this `object-calendar`',
+  history: objectBlockHistory('object-calendar'),
+  guidanceSets: OBJECT_CALENDAR_FLAT_FIELD_GUIDANCE,
+  aliases: FILTERS_TO_FILTER,
+}, {
+  objectName: z.string().optional()
+    .describe('Object this calendar binds to. Optional because the component-level `dataSource` binding can supply the object instead (#6953)'),
+  calendar: z.unknown().optional()
+    .describe('Calendar field config: { startDateField, endDateField?, titleField?, colorField?, allDayField? }'),
+  defaultView: z.enum(['month', 'week', 'day']).optional().describe('Initial view mode'),
+  filter: z.unknown().optional().describe('Base query filter'),
+  sort: z.unknown().optional().describe('Sort for the fetched events'),
+  data: z.array(z.unknown()).optional().describe('Pre-fetched records — skips the internal fetch'),
+  staticData: z.array(z.unknown()).optional().describe('Static inline records'),
+  locale: z.string().optional().describe('Locale override for the calendar chrome'),
+  loading: z.boolean().optional().describe('External loading state (honoured only alongside `data`)'),
+}));
+/** Author state (ADR-0122: the bare name is the author state). */
+export type ObjectCalendarProps = z.input<typeof ObjectCalendarPropsSchema>;
+
+/**
+ * `object-form` (objectui `plugin-form/src/ObjectForm.tsx` @ `eb7f586b`, plus
+ * the sub-forms it forwards the whole bag into: `TabbedForm`, `WizardForm`,
+ * `SplitForm`, `DrawerForm`, `ModalForm` — the declared set is the UNION of
+ * their `schema.*` reads, which is how `description` earns its place: the
+ * top-level key is read by the drawer/modal presentations, not by the simple
+ * form). Enum values are declared only where renderer, registry `inputs` and
+ * designer palette agree. Callbacks (`onSuccess`, `submitHandler`, …) and the
+ * controlled `open` state are React-tier props, not authorable metadata — the
+ * react tier publishes those separately (`react-blocks.ts`).
+ */
+export const ObjectFormPropsSchema = lazySchema(() => strictObject({
+  surface: 'this `object-form`',
+  history: objectBlockHistory('object-form'),
+  guidanceSets: COMPONENT_LEVEL_GUIDANCE,
+}, {
+  objectName: z.string().optional()
+    .describe('Object this form creates/edits. Optional because the component-level `dataSource` binding can supply the object instead (#6953)'),
+  recordId: z.union([z.string(), z.number()]).optional().describe('Record to load (edit/view modes)'),
+  mode: z.enum(['create', 'edit', 'view']).optional().describe('Form mode'),
+  formType: z.enum(['simple', 'tabbed', 'wizard', 'split', 'drawer', 'modal']).optional()
+    .describe('Form presentation'),
+  layout: z.enum(['vertical', 'horizontal', 'inline', 'grid']).optional().describe('Field layout'),
+  columns: z.number().optional().describe('Field columns in grid layout'),
+  fields: z.array(z.unknown()).optional().describe('Limit/order the fields shown'),
+  customFields: z.unknown().optional().describe('Custom field definitions merged into the generated set'),
+  sections: z.array(z.unknown()).optional()
+    .describe('Form sections ({ label, description?, fields } — wizard steps / tab panes)'),
+  title: I18nLabelSchema.optional().describe('Form title'),
+  description: I18nLabelSchema.optional().describe('Form description (rendered by the drawer/modal presentations)'),
+  defaultTab: z.string().optional().describe('Initially active tab (tabbed)'),
+  tabPosition: z.enum(['top', 'bottom', 'left', 'right']).optional().describe('Tab strip position (tabbed)'),
+  allowSkip: z.boolean().optional().describe('Allow skipping steps (wizard)'),
+  showStepIndicator: z.boolean().optional().describe('Show the step indicator (wizard)'),
+  splitDirection: z.enum(['horizontal', 'vertical']).optional().describe('Split direction (split)'),
+  splitSize: z.number().optional().describe('Split panel size in percent (split)'),
+  splitResizable: z.boolean().optional().describe('Allow resizing the split (split)'),
+  drawerSide: z.enum(['top', 'bottom', 'left', 'right']).optional().describe('Drawer side (drawer)'),
+  drawerWidth: z.union([z.string(), z.number()]).optional().describe('Drawer width (drawer)'),
+  modalSize: z.enum(['sm', 'default', 'lg', 'xl', 'full']).optional().describe('Modal size (modal)'),
+  modalCloseButton: z.boolean().optional().describe('Show the modal close button (modal)'),
+  contentLayout: z.unknown().optional().describe('Modal content layout config (modal)'),
+  confirmOnDiscard: z.boolean().optional().describe('Confirm before discarding edits (drawer/modal)'),
+  submitText: I18nLabelSchema.optional().describe('Submit button label'),
+  cancelText: I18nLabelSchema.optional().describe('Cancel button label'),
+  nextText: I18nLabelSchema.optional().describe('Next-step button label (wizard)'),
+  prevText: I18nLabelSchema.optional().describe('Previous-step button label (wizard)'),
+  showSubmit: z.boolean().optional().describe('Show the submit button'),
+  showCancel: z.boolean().optional().describe('Show the cancel button'),
+  showReset: z.boolean().optional().describe('Show the reset button'),
+  submitBehavior: z.unknown().optional()
+    .describe("What happens after a successful submit ({ kind: 'thank-you' | …, title?, message? })"),
+  successMessage: I18nLabelSchema.optional().describe('Toast message on successful submit'),
+  resetOnSuccess: z.boolean().optional().describe('Reset the form after a successful submit'),
+  navigateOnSuccess: z.unknown().optional().describe('Navigate after a successful submit'),
+  readOnly: z.boolean().optional().describe('Render every field read-only'),
+  initialValues: z.record(z.string(), z.unknown()).optional().describe('Prefill values (create mode)'),
+  initialData: z.record(z.string(), z.unknown()).optional().describe('Alternate spelling of `initialValues` the renderer also reads'),
+  mobile: z.unknown().optional().describe('Mobile presentation overrides'),
+}));
+/** Author state (ADR-0122: the bare name is the author state). */
+export type ObjectFormProps = z.input<typeof ObjectFormPropsSchema>;
+
+/**
+ * `object-master-detail-form` (objectui `plugin-form/src/MasterDetailForm.tsx`
+ * @ `eb7f586b`). Parent + child line items entered together (ADR-0001). The
+ * child collections come from `details` — the FK and editable-grid columns
+ * are auto-derived from the child object's metadata (`deriveMasterDetail.ts`),
+ * so `details[].columns` is an override, not a requirement.
+ */
+export const ObjectMasterDetailFormPropsSchema = lazySchema(() => strictObject({
+  surface: 'this `object-master-detail-form`',
+  history: objectBlockHistory('object-master-detail-form'),
+  guidanceSets: COMPONENT_LEVEL_GUIDANCE,
+}, {
+  objectName: z.string().optional()
+    .describe('PARENT object. Optional because the component-level `dataSource` binding can supply the object instead (#7121)'),
+  recordId: z.union([z.string(), z.number()]).optional().describe('Parent record to load (edit mode)'),
+  mode: z.enum(['create', 'edit']).optional().describe('Form mode'),
+  formType: z.string().optional().describe('Parent form presentation'),
+  sections: z.array(z.unknown()).optional().describe('Parent form sections'),
+  fields: z.array(z.unknown()).optional().describe('Parent fields shown'),
+  details: z.array(z.unknown()).optional()
+    .describe('Detail collections ({ title, childObject, addLabel?, columns?, relationshipField? } — FK and columns auto-derive from child metadata)'),
+  title: I18nLabelSchema.optional().describe('Form title'),
+  submitText: I18nLabelSchema.optional().describe('Submit button label'),
+  cancelText: I18nLabelSchema.optional().describe('Cancel button label'),
+  showSubmit: z.boolean().optional().describe('Show the submit button'),
+  initialValues: z.record(z.string(), z.unknown()).optional().describe('Prefill values for the parent (create mode)'),
+  initialData: z.record(z.string(), z.unknown()).optional().describe('Alternate spelling of `initialValues` the renderer also reads'),
+  taxRateField: z.string().optional().describe('Child field holding the per-line tax rate (line-items totals)'),
+}));
+/** Author state (ADR-0122: the bare name is the author state). */
+export type ObjectMasterDetailFormProps = z.input<typeof ObjectMasterDetailFormPropsSchema>;
+
+/**
+ * ----------------------------------------------------------------------
  * Component Props Map
  * Maps Component Type to its Property Schema
  * ----------------------------------------------------------------------
@@ -1507,6 +1889,16 @@ export const ComponentPropsMap = {
   'element:form': ElementFormPropsSchema,
   'element:record_picker': ElementRecordPickerPropsSchema,
   'element:text_input': ElementTextInputPropsSchema,
+
+  // Object-bound SDUI blocks (#7751, maintainer ruling 2026-08-12 direction A).
+  // Key sets derived from the objectui renderers' own read points — see the
+  // section header above. `object-chart` is deliberately absent (ditto).
+  'object-grid': ObjectGridPropsSchema,
+  'object-metric': ObjectMetricPropsSchema,
+  'object-kanban': ObjectKanbanPropsSchema,
+  'object-calendar': ObjectCalendarPropsSchema,
+  'object-form': ObjectFormPropsSchema,
+  'object-master-detail-form': ObjectMasterDetailFormPropsSchema,
 } as const;
 
 /**

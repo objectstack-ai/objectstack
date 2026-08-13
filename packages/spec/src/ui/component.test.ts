@@ -1617,3 +1617,143 @@ describe('#4001 batch A — the prescriptions, each backed by a measured produce
     expect('maxVisible' in PageHeaderProps.parse({})).toBe(false);
   });
 });
+
+/**
+ * ── #7751: the `object-*` block family enters the map (ruling 2026-08-12) ────
+ *
+ * Direction A, quoted from the maintainer's ruling: 「object-* 块族的 props
+ * schema 进 ComponentPropsMap」. Key sets are derived from the objectui
+ * renderers' own read points (section header in component.zod.ts carries the
+ * per-key citations); the corpus shapes below are COPIES of the showcase
+ * pages' authored nodes (examples/app-showcase/src/ui/pages/*), not imports —
+ * cross-package test inputs are their own failure class.
+ */
+describe('#7751 — object-* block props schemas', () => {
+  const refuse = (schema: { safeParse(v: unknown): any }, value: unknown): string => {
+    const r = schema.safeParse(value);
+    expect(r.success).toBe(false);
+    return r.error.issues.map((i: { message: string }) => i.message).join('\n');
+  };
+
+  it('the six ruled blocks are registered; object-chart deliberately is NOT', () => {
+    for (const type of [
+      'object-grid', 'object-metric', 'object-kanban', 'object-calendar',
+      'object-form', 'object-master-detail-form',
+    ]) {
+      expect(ComponentPropsMap[type as keyof typeof ComponentPropsMap], type).toBeDefined();
+    }
+    // Two-vocabulary problem (`chartType` vs ChartConfigSchema `type`; bag
+    // spread into the generic chart component) — its key set is not derivable
+    // with this section's confidence, so it stays a SKIPPED unregistered type
+    // rather than a partial entry that warns on working keys.
+    expect((ComponentPropsMap as Record<string, unknown>)['object-chart']).toBeUndefined();
+  });
+
+  it('the #7750 specimen shape is REJECTED, with the rename in the message: `filters` → `filter`', () => {
+    const message = refuse(ComponentPropsMap['object-grid'], {
+      objectName: 'showcase_task',
+      columns: ['title', 'project', 'status', 'priority', 'due_date'],
+      filters: [['owner_id', '=', '{current_user_id}']],
+    });
+    expect(message).toContain('`filters`');
+    expect(message).toContain('Did you mean `filters` → `filter`?');
+  });
+
+  it('the corrected #7750 node (my-work.page.ts, post-fix) parses GREEN and retains its filter', () => {
+    const parsed = ComponentPropsMap['object-grid'].parse({
+      objectName: 'showcase_task',
+      columns: ['title', 'project', 'status', 'priority', 'due_date'],
+      filter: [['owner_id', '=', '{current_user_id}']],
+    });
+    expect(parsed.filter).toEqual([['owner_id', '=', '{current_user_id}']]);
+  });
+
+  it('`defaultFilters` stays HONOURED — it is a read legacy fallback, not an inert spelling', () => {
+    // ObjectGrid.tsx reads it and lowers it to `$filter` when `filter` is
+    // absent (the routed finding on #7751 verified the read point). Only the
+    // plural `filters` has zero read points.
+    const parsed = ComponentPropsMap['object-grid'].parse({
+      objectName: 'showcase_task',
+      defaultFilters: [['status', '=', 'open']],
+    });
+    expect(parsed.defaultFilters).toEqual([['status', '=', 'open']]);
+  });
+
+  it('every object-metric node of the showcase corpus parses GREEN (the clean-corpus control)', () => {
+    // Copies of all three my-work.page.ts metrics + the command-center shape
+    // (variant/format) — the exact nodes the lint must NOT start warning on.
+    const nodes = [
+      { objectName: 'showcase_task', label: 'Open Tasks', icon: 'list-checks', colorVariant: 'blue', description: 'not done', aggregate: { field: 'id', function: 'count' }, filter: { status: { $ne: 'done' } } },
+      { objectName: 'showcase_task', label: 'In Review', icon: 'eye', colorVariant: 'warning', description: 'awaiting review', aggregate: { field: 'id', function: 'count' }, filter: { status: 'in_review' } },
+      { objectName: 'showcase_project', label: 'At-Risk Projects', icon: 'alert-triangle', colorVariant: 'danger', description: 'health red', aggregate: { field: 'id', function: 'count' }, filter: { health: 'red' } },
+      { objectName: 'showcase_task', label: 'Tasks', colorVariant: 'purple', variant: 'bare', aggregate: { field: 'id', function: 'count' }, format: '0,0' },
+    ];
+    for (const node of nodes) {
+      const r = ComponentPropsMap['object-metric'].safeParse(node);
+      expect(r.success, JSON.stringify(node) + '\n' + JSON.stringify((r as any).error?.issues)).toBe(true);
+    }
+  });
+
+  it('the showcase object-form wizard node parses GREEN', () => {
+    const r = ComponentPropsMap['object-form'].safeParse({
+      objectName: 'showcase_project',
+      mode: 'create',
+      formType: 'wizard',
+      showStepIndicator: true,
+      title: 'Create a Project',
+      description: 'A three-step wizard — basics, status, then budget & schedule.',
+      sections: [
+        { label: 'Basics', description: 'Name the project and bind its account.', fields: ['name', 'account', 'owner'] },
+      ],
+      submitBehavior: { kind: 'thank-you', title: 'Project created', message: 'Ready.' },
+    });
+    expect(r.success, JSON.stringify((r as any).error?.issues)).toBe(true);
+  });
+
+  it('the showcase object-master-detail-form node parses GREEN', () => {
+    const r = ComponentPropsMap['object-master-detail-form'].safeParse({
+      objectName: 'showcase_project',
+      mode: 'create',
+      formType: 'simple',
+      submitText: 'Create Project + Tasks',
+      fields: ['name', 'account', 'status', 'health', 'budget', 'end_date'],
+      details: [{ title: 'Tasks', childObject: 'showcase_task', addLabel: 'Add task' }],
+    });
+    expect(r.success, JSON.stringify((r as any).error?.issues)).toBe(true);
+  });
+
+  it("the designer's dead `groupField` spelling is answered with the `groupBy` the board reads", () => {
+    // Producer: objectui previews/block-config.ts publishes `groupField` for
+    // object-kanban; ObjectKanban.tsx reads only `groupBy` (#7973 class).
+    const message = refuse(ComponentPropsMap['object-kanban'], { objectName: 'task', groupField: 'status' });
+    expect(message).toContain('Did you mean `groupField` → `groupBy`?');
+  });
+
+  it('the plural `filters` is rejected by name on every block that reads `filter`', () => {
+    for (const type of ['object-grid', 'object-metric', 'object-kanban', 'object-calendar'] as const) {
+      const message = refuse(ComponentPropsMap[type], { filters: [] });
+      expect(message, type).toContain('Did you mean `filters` → `filter`?');
+    }
+  });
+
+  it("object-calendar's flat field spellings get the wrong-layer prescription, not a rename", () => {
+    // Read as back-compat by getCalendarConfig, emitted by ObjectView/ListView
+    // handoffs — but the authored spelling is the `calendar` object (one key
+    // per concept; the `body` → `children` precedent).
+    const message = refuse(ComponentPropsMap['object-calendar'], { objectName: 'task', startDateField: 'due_date' });
+    expect(message).toContain('`calendar`');
+    expect(message).toContain('startDateField');
+  });
+
+  it('objectName is OPTIONAL on every entry — the dataSource binding can supply the object (#6953)', () => {
+    // A required `objectName` would false-flag every node bound through the
+    // component-level `dataSource`; the lint's required-prop exemption only
+    // covers the key spelled `object`. Measured, not assumed.
+    for (const type of [
+      'object-grid', 'object-metric', 'object-kanban', 'object-calendar',
+      'object-form', 'object-master-detail-form',
+    ] as const) {
+      expect(ComponentPropsMap[type].safeParse({}).success, type).toBe(true);
+    }
+  });
+});

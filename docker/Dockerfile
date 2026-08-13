@@ -18,6 +18,19 @@
 # OS_ARTIFACT_PATH also accepts an https:// URL, so the artifact can be
 # fetched from your release storage instead of copied in.
 #
+# Or name the artifact BY REFERENCE and skip the image build entirely
+# (#8368) — OS_ARTIFACT_URL overrides the OS_ARTIFACT_PATH preset below, so a
+# container carrying no app boots the referenced one:
+#
+#   docker run -p 8080:8080 \
+#     -e OS_ARTIFACT_URL="https://releases.example.com/hotcrm-2.2.2.json#sha256=<64 hex chars>" \
+#     -e OS_DATABASE_URL=... -e OS_AUTH_SECRET -e OS_SECRET_KEY \
+#     ghcr.io/objectstack-ai/objectstack:<version>
+#
+# The `#sha256=` fragment is an optional SRI-style integrity pin, verified
+# before boot; a mismatch refuses to boot. Docs:
+# https://docs.objectstack.ai/docs/deployment/self-hosting#artifact-pinned-boot-os_artifact_url
+#
 # Published by .github/workflows/docker-publish.yml on every framework
 # release; the image tag always matches the @objectstack/cli version inside.
 # Docs: https://docs.objectstack.ai/docs/deployment/self-hosting

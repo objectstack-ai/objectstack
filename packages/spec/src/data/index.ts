@@ -156,6 +156,12 @@ export * from './datasource.zod';
 // they were merely the shapes authors were TOLD to write against.
 export * from './driver/index';
 
+// The ONE definition of "what is a credential key" in a driver config, derived
+// from the contracts above, plus the read-path redaction built on it (#8300 —
+// moved here from service-datasource so the datasource-admin read path and the
+// metadata read path's per-type redaction hook share a single security list).
+export * from './datasource-credential-redaction';
+
 // External Datasource Federation — SQL↔field type compatibility (ADR-0015)
 export * from './type-compat';
 export * from './external-catalog.zod';

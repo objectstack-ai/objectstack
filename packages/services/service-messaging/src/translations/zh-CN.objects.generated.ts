@@ -371,7 +371,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "响应体(截断)"
       },
       error: {
-        label: "错误"
+        label: "错误",
+        help: "Why this row is not a delivered callout: the last transport error, or — on a row with 0 attempts — why the delivery could never be prepared (#8069)."
       },
       created_at: {
         label: "创建时间"

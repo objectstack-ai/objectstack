@@ -1524,17 +1524,36 @@ export const APPROVAL_REQUEST_LIST_PARAMS: readonly string[] = [
  * so every other parameter on this route is dropped in the fullest sense: it
  * never reaches `getData` at all.
  *
- * ⚠️ The dropped names include the CANONICAL spelling of one slot. The spec's
- * alias table (`RPC_QUERY_ALIAS_SLOTS`) declares the fields slot as canonical
- * `fields` with alias `select`, and the expand slot as canonical `expand` with
- * alias `populate` — but this route folds no aliases, so `?fields=name`
- * silently returns the FULL record and `?populate=…` silently expands nothing.
- * Both are outside this set on purpose: adding them here would advertise a
- * capability the handler does not implement, which is the declared-≠-enforced
- * trap in the other direction. Refusing them instead makes the gap
- * self-reporting — the located message names `select` / `expand` as what this
- * route does accept. Tracked as #8039 (an alias-coverage question for the spec
- * table and this handler to settle together) rather than widened here.
+ * ⚠️ The accepted names deliberately EXCLUDE the CANONICAL spelling of one
+ * slot. The spec's alias table (`RPC_QUERY_ALIAS_SLOTS`) declares the fields
+ * slot as canonical `fields` with alias `select`, and the expand slot as
+ * canonical `expand` with alias `populate` — but this route folds no aliases,
+ * so `fields` / `populate` are not synonyms for anything this handler reads.
+ * Putting them in the allowlist unfolded would advertise a capability the
+ * handler does not implement — the declared-≠-enforced trap in the other
+ * direction, and strictly worse than refusing them: a caller sending
+ * `?fields=title` would pass recognition, then silently get back the FULL
+ * record because nothing downstream of the gate consumes the name. Refusing
+ * them instead makes the gap self-reporting — the located `400` names
+ * `select` / `expand` as what this route accepts.
+ *
+ * **[#8039] Settled by maintainer ruling, 2026-08-12 — record, not an open
+ * question.** Three shapes were on the table for the mismatch between this
+ * route's two names and the spec's alias table: (1) fold
+ * `RPC_QUERY_ALIAS_SLOTS` onto this route, so `fields` / `populate` start
+ * working here too; (2) keep this narrow set, but refuse the alias-table
+ * spellings loudly instead of dropping them; (3) keep + document as-is. The
+ * ruling took **option 2**, which is exactly what `refuseUnknownQueryParams`
+ * below already does — `fields` and `populate` are refused the same way any
+ * other unrecognised name is, naming `select` / `expand` as the accepted
+ * pair. ⛔ **Option 1 was explicitly rejected** and stays rejected here:
+ * folding the alias table onto this ONE route is surface expansion on a
+ * public route with no measured pull behind it, and doing it for this route
+ * alone would leave every other data route's ingress inconsistent in the
+ * opposite direction. The only thing that changes this: a ruling that
+ * declares `RPC_QUERY_ALIAS_SLOTS` universal across ALL data routes, landed
+ * as one card applying the fold everywhere at once — never a quiet widening
+ * of this route's set in isolation.
  */
 export const DATA_RECORD_READ_PARAMS: readonly string[] = ['select', 'expand'];
 

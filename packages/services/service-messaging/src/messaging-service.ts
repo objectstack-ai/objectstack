@@ -10,7 +10,13 @@ import type {
 import { RecipientResolver } from './recipient-resolver.js';
 import { PreferenceResolver, type PreferenceTarget } from './preference-resolver.js';
 import type { INotificationOutbox } from './outbox.js';
-import type { EnqueueHttpInput, HttpDelivery, HttpDeliveryStatus, IHttpOutbox } from './http-outbox.js';
+import type {
+    EnqueueHttpInput,
+    HttpDelivery,
+    HttpDeliveryStatus,
+    IHttpOutbox,
+    RedeliverGuard,
+} from './http-outbox.js';
 import { INBOX_OBJECT, RECEIPT_OBJECT } from './inbox-channel.js';
 
 /** The L2 event object every `emit()` writes one row to (ADR-0030). */
@@ -174,6 +180,8 @@ export class MessagingService {
     private readonly preferences: PreferenceResolver;
     private outbox?: INotificationOutbox;
     private httpOutbox?: IHttpOutbox;
+    /** [#8069] Producer vetoes over redelivery, keyed by `HttpDelivery.source`. */
+    private readonly redeliverGuards = new Map<string, RedeliverGuard>();
 
     constructor(private readonly ctx: MessagingServiceContext) {
         this.now = ctx.now ?? (() => new Date().toISOString());
@@ -220,12 +228,46 @@ export class MessagingService {
     /**
      * Enqueue a durable outbound-HTTP delivery (ADR-0018 M3). Returns the row id.
      * Throws if no HTTP outbox is wired — guard with {@link isHttpDeliveryReady}.
+     *
+     * [#8069] This is the ONE function a producer plugin is handed, so it is
+     * also where the two kinds of write part company. An input carrying
+     * {@link EnqueueHttpInput.undeliverableReason} is not a delivery — the
+     * producer could not obtain the credentials it needed — and is routed to
+     * `recordUndeliverable()`, which parks it `dead` with the reason on the row.
+     * It never reaches `enqueue()`, which refuses the discriminator outright.
      */
     async enqueueHttp(input: EnqueueHttpInput): Promise<string> {
         if (!this.httpOutbox) {
             throw new Error('messaging: HTTP delivery outbox not configured (no data engine / reliableDelivery off)');
         }
+        const { undeliverableReason, signingSecret, ...rest } = input;
+        if (undeliverableReason !== undefined) {
+            return this.httpOutbox.recordUndeliverable({ ...rest, reason: undeliverableReason });
+        }
         return this.httpOutbox.enqueue(input);
+    }
+
+    /**
+     * [#8069] Register a producer's veto over redelivery of ITS rows, keyed by
+     * `HttpDelivery.source` (`'webhook'`, `'flow'`, …).
+     *
+     * The outbox cannot answer "is the signing configuration for this row still
+     * available?" — `sys_webhook` and its encrypted secret are the webhook
+     * plugin's, and this package deliberately knows nothing about them. This is
+     * how that knowledge reaches `redeliver()` without inverting the dependency.
+     *
+     * Registering here rather than in the `POST /api/v1/webhooks/redeliver`
+     * route is deliberate: the route is one door, and the failure this guards
+     * against is precisely a delivery going out through a door nobody audited.
+     * Every caller of {@link redeliverHttp} is covered.
+     */
+    registerRedeliverGuard(source: string, guard: RedeliverGuard): void {
+        if (this.redeliverGuards.has(source)) {
+            this.ctx.logger.warn(
+                `[messaging] redeliver guard for source '${source}' already registered; replacing`,
+            );
+        }
+        this.redeliverGuards.set(source, guard);
     }
 
     /**
@@ -233,12 +275,17 @@ export class MessagingService {
      * re-sends it (ADR-0018 M3). Backs the webhook redeliver admin endpoint.
      * Throws if no HTTP outbox is wired, or `HttpRedeliverError` for a missing /
      * non-terminal row.
+     *
+     * [#8069] Also throws `HttpRedeliverError` for a row that was never sent
+     * (a parked drop record — sending it would be a FIRST delivery, unsigned),
+     * and for a row whose producer's {@link registerRedeliverGuard} verdict
+     * refuses. Both refusals happen before anything is written.
      */
     async redeliverHttp(id: string): Promise<HttpDelivery> {
         if (!this.httpOutbox) {
             throw new Error('messaging: HTTP delivery outbox not configured');
         }
-        return this.httpOutbox.redeliver(id);
+        return this.httpOutbox.redeliver(id, (row) => this.redeliverGuards.get(row.source)?.(row));
     }
 
     /** List HTTP delivery rows (admin/tests). Empty when no outbox is wired. */
