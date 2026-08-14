@@ -539,8 +539,8 @@ const EXEMPT = {
 //     the fix: widen a hidden test layer's `include` one file at a time and
 //     measure each addition, because a wholesale glob can bill the layer for a
 //     non-test file it never asked to cover.)
-// `@objectstack/cli` (188 raw across 56 files then, 146 across 65 files after
-// #8612's first two extension repairs) is deliberately NOT part of that
+// `@objectstack/cli` (146 raw across 65 files, after #8612 repaired the first
+// two of its 59 missing import extensions) is deliberately NOT part of that
 // graduation -- it is a programme rather than a sitting, and its entry stands.
 const TEST_DEBT = {
   '@objectstack/plugin-approvals': {
@@ -606,8 +606,9 @@ const TEST_DEBT = {
       + '`pnpm --filter @objectstack/cli typecheck`, which exits 0 on this package today, not CI, only this '
       + 'ledger. 65 hidden files now, up from 56 at #7353 while the layer itself stayed frozen; the other 57 '
       + 'test files sit under `src` and always compiled, which is why the file count reads 65 and not 122. '
-      + 'Lowered 188 -> 146 (#8612), both numbers measured on main at 00ee416eb with the closure built, and '
-      + 'the -42 is FULLY ATTRIBUTED with no unexplained remainder: test/i18n-coverage.test.ts 35 -> 0 '
+      + 'Lowered 188 -> 146 (#8612), both numbers measured on main at 35086781b with the closure built and '
+      + 'the two import extensions as the ONLY difference between the two trees, so the -42 is FULLY '
+      + 'ATTRIBUTED with no unexplained remainder: test/i18n-coverage.test.ts 35 -> 0 '
       + '(1 TS2835 + 34 TS7006) and test/i18n-extract.test.ts 7 -> 0 (1 TS2835 + 6 TS7006), from adding the '
       + '`.js` extension to one import each. Outside those two files the before and after diagnostic sets '
       + 'are identical line for line, and nothing new appeared anywhere. '
