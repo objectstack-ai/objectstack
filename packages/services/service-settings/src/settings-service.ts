@@ -2018,7 +2018,10 @@ export class SettingsService {
    */
   private rowIdentity(row: SettingsRow): {
     where: Record<string, unknown>;
-    bypass: Record<string, unknown>;
+    // Narrow on purpose: spread into a `SettingsEngine.find` options object it
+    // has to stay assignable to the DECLARED option type, so the verification
+    // read below needs no `as any` erasure of the contract it depends on.
+    bypass: { bypassTenantAudit?: true };
   } {
     return {
       where: {
@@ -2215,11 +2218,7 @@ export class SettingsService {
   ): Promise<{ found: boolean; handle: string | null }> {
     if (this.engine) {
       const { where, bypass } = this.rowIdentity(row);
-      const rows = await this.engine.find(this.objectName, {
-        where,
-        limit: 1,
-        ...bypass,
-      } as any);
+      const rows = await this.engine.find(this.objectName, { where, limit: 1, ...bypass });
       const current = Array.isArray(rows) ? rows[0] : undefined;
       if (!current) return { found: false, handle: null };
       return {
