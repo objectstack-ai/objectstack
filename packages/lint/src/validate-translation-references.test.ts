@@ -10,6 +10,9 @@ import {
 // imported rather than reduced by hand.
 import { Contact } from '../../../examples/app-showcase/src/data/objects/contact.object.js';
 import { ContactViews } from '../../../examples/app-showcase/src/ui/views/contact.view.js';
+// …and the frozen snapshot of it (#8515), for the one case whose control needs
+// a section that has no name.
+import { SnapshotContact, SnapshotContactViews } from './showcase-shape.fixtures.js';
 
 /** A stack shaped like the HotCRM lead surface: fields, options, a view, an action. */
 const leadStack = (translations: unknown[]) => ({
@@ -923,6 +926,21 @@ describe('validateTranslationReferences — the showcase contact surface (#5415)
     translations,
   });
 
+  /**
+   * The same surface, read from the frozen snapshot instead of `examples/**`
+   * (#8515). Used by the ONE case here whose control depends on
+   * `formViews.create`'s section having no name: that namelessness is the defect
+   * #8231 is fixing, and pinning it live made this rule's coverage require the
+   * shipped app to stay broken. The cases above keep reading the live app,
+   * because what they pin — the four named sections, and `_views.default` — is
+   * what it gets right.
+   */
+  const snapshotContactStack = (translations: unknown[]) => ({
+    objects: [SnapshotContact],
+    views: [SnapshotContactViews],
+    translations,
+  });
+
   const sectionBundle = (sections: Record<string, unknown>) => [
     { 'zh-CN': { objects: { showcase_contact: { _sections: sections } } } },
   ];
@@ -975,7 +993,7 @@ describe('validateTranslationReferences — the showcase contact surface (#5415)
     // `who_is_this` is the LABEL of `formViews.create`'s unnamed section — an
     // unnamed section is not translatable, so neither key may resolve.
     const findings = validateTranslationReferences(
-      showcaseContactStack(sectionBundle({ contract: { label: '合同' }, who_is_this: { label: '这是谁' } })),
+      snapshotContactStack(sectionBundle({ contract: { label: '合同' }, who_is_this: { label: '这是谁' } })),
     );
     expect(findings).toHaveLength(2);
     expect(findings.map((f) => f.rule)).toEqual([TRANSLATION_TARGET_UNKNOWN, TRANSLATION_TARGET_UNKNOWN]);
