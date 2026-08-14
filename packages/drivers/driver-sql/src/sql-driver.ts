@@ -4923,15 +4923,26 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * Columns `upsert`'s merge branch must never write ([#7011]): `created_at`
-   * (the row's birth timestamp belongs to the original insert) and every
-   * `auto_number` column — an autonumber is an immutable business identifier
-   * once assigned, so an upsert that lands on an existing row keeps that row's
-   * number (see the fuller rationale at the merge site). Autonumber columns
-   * are returned under their PHYSICAL names (an external object can remap
-   * logical fields via `external.columnMap`), matching the
-   * `applyWriteColumnMap`-processed row the merge column list is derived from;
-   * `created_at` stays the literal post-map key it has always been filtered as.
+   * Columns `upsert`'s merge branch must never write ([#7011]): `id` (the row's
+   * stable identity — see below), `created_at` (the row's birth timestamp
+   * belongs to the original insert) and every `auto_number` column — an
+   * autonumber is an immutable business identifier once assigned, so an upsert
+   * that lands on an existing row keeps that row's number (see the fuller
+   * rationale at the merge site). Autonumber columns are returned under their
+   * PHYSICAL names (an external object can remap logical fields via
+   * `external.columnMap`), matching the `applyWriteColumnMap`-processed row the
+   * merge column list is derived from; `created_at` stays the literal post-map
+   * key it has always been filtered as.
+   *
+   * ## `id` is resolved through {@link remoteColumn}, and that is not defensive
+   *
+   * [#8622] The primary key takes the autonumber spelling rather than
+   * `created_at`'s literal one because `id` is demonstrably remappable: the
+   * ADR-0015 §18 fixture in `sql-driver-external-columnmap.test.ts` binds a
+   * federated object with `columnMap: { …, cust_id: 'id' }`, so `formatted`
+   * carries the key `cust_id` and a literal `'id'` in this set would filter
+   * nothing at all on exactly the objects federation exists to serve. Measured
+   * on the shipped fixture, not inferred.
    *
    * ## What that identifier guarantees: unique and monotonic, NOT gapless (#8283)
    *
@@ -4983,7 +4994,7 @@ export class SqlDriver implements IDataDriver {
     // then the storage-mapped table name.
     const tableName = this.physicalTableByObject[object] ?? StorageNameMapping.resolveTableName({ name: object } as any);
     const cfgs = this.autoNumberFields[object] || this.autoNumberFields[tableName] || [];
-    const columns = new Set<string>(['created_at']);
+    const columns = new Set<string>(['created_at', this.remoteColumn(object, 'id', 'id')]);
     for (const cfg of cfgs) columns.add(this.remoteColumn(object, cfg.name, cfg.name));
     return columns;
   }
@@ -5039,14 +5050,67 @@ export class SqlDriver implements IDataDriver {
       // renumber on merge either; `update()` is the deliberate renumbering
       // path. The reservation itself still happens on the merge path (a gap,
       // not a rewrite) — that pre-burn half is #6943's reseed family, not
-      // this exclusion's. Everything else (incl. `updated_at`) merges as
-      // before, so an upsert that updates a row still advances `updated_at`.
+      // this exclusion's.
+      //
+      // [#8622] `id` is insert-only for the SAME argument at its strongest.
+      // `upsert` mints a nanoid whenever the caller supplies none (just above),
+      // so the merge set carried `id = excluded.id` — the freshly minted id of
+      // the insert that LOST. On the default `['id']` conflict target that
+      // clause is a no-op (both sides are the same value), which is precisely
+      // why it stayed invisible; the moment `conflictKeys` names a business key
+      // the merged row's identity is silently replaced. Measured here on SQLite
+      // and live Postgres 16.13, and on live MySQL 8.0.46 in #8592 — a
+      // dialect-independent defect, because the mechanism is the merge set this
+      // driver builds, not anything a server decides:
+      //
+      //   upsert({email:'x@b.com', title:'first'},  ['email'])  -> id=rSxhabt0…
+      //   upsert({email:'x@b.com', title:'second'}, ['email'])  -> id=hXqcSC45…
+      //                                              ONE row, NEW primary key.
+      //
+      // `id` is what relationships, audit records, external id mappings and any
+      // client-held reference point at, so this dangles every one of them with
+      // no error on any dialect. The exclusion is unconditional for #7011's
+      // reason: an explicit payload `id` (or its `_id` alias, folded into `id`
+      // before `formatted` is built) does not re-key on merge either. `update()`
+      // is the deliberate path — it writes exactly the columns it is handed,
+      // `id` included.
+      //
+      // Everything else (incl. `updated_at`) merges as before, so an upsert
+      // that updates a row still advances `updated_at`.
       const insertOnlyColumns = this.insertOnlyUpsertColumns(object);
       const mergeColumns = Object.keys(formatted).filter((c) => !insertOnlyColumns.has(c));
       const insertion = builder.insert(formatted).onConflict(mergeKeys);
 
+      // [#8622] Excluding `id` made a branch REACHABLE that could not fire
+      // before, and the bare `merge()` below is merge-ALL: it re-admits every
+      // insert-only column. Measured on live Postgres with an object whose only
+      // non-`id` column is an `auto_number` — `upsert({ id: seeded }, ['id'])`
+      // left `mergeColumns` empty and the merge-ALL fallback rewrote the row's
+      // `case_no` from `0003` to `0004`, defeating #7011's exclusion. (SQLite
+      // never reached it: `stampInsertTimestamps` puts a mergeable `updated_at`
+      // in the payload there.)
+      //
+      // The remedy keeps the emitted SQL byte-identical to what `main` emits
+      // for this shape. Falling back to the CONFLICT-TARGET columns present in
+      // the payload is a provable no-op — a conflict means those columns matched,
+      // so `excluded.<target>` IS the stored value — and it reproduces exactly
+      // the `merge(['id'])` `main` produces here, because `id` was `main`'s only
+      // mergeable column in this case. So this PR's net behavioural delta on the
+      // degenerate path is nil rather than a #7011 regression.
+      //
+      // The last-ditch `merge()` is left as-is: it needs the conflict target to
+      // be absent from the payload, which means the INSERT never supplies it, so
+      // on every dialect here the target is NULL and cannot collide — the DO
+      // UPDATE clause is unreachable rather than merely unused. Filed separately
+      // rather than widened into: merge-ALL is the wrong shape for "nothing to
+      // merge" on any dialect, and the alternatives are not accept-set-neutral
+      // (knex compiles `.ignore()` to MySQL's `insert ignore`, which swallows
+      // unrelated errors too — measured).
+      const noopMergeColumns = Object.keys(formatted).filter((c) => mergeKeys.includes(c));
+      const columnsToMerge = mergeColumns.length > 0 ? mergeColumns : noopMergeColumns;
+
       try {
-        await (mergeColumns.length > 0 ? insertion.merge(mergeColumns) : insertion.merge());
+        await (columnsToMerge.length > 0 ? insertion.merge(columnsToMerge) : insertion.merge());
         break;
       } catch (error) {
         // [#8445] Classified BEFORE the autonumber retry logic, for three

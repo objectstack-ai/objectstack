@@ -22,6 +22,13 @@ const sysMetadataObject = {
         type: { name: 'type', label: 'Type', type: 'text' as const, required: true },
         name: { name: 'name', label: 'Name', type: 'text' as const, required: true },
         organization_id: { name: 'organization_id', label: 'Org', type: 'text' as const },
+        // [#8682] The real `sys_metadata` carries this — it is part of the
+        // row's uniqueness key `(type, name, organization_id, package_id)` and
+        // `SysMetadataRepository` writes it — but this minimal stub had omitted
+        // it. Nothing noticed while an undeclared write key simply travelled to
+        // the driver; the declared-field door judges the payload against this
+        // map, so the omission now shows up as the fixture defect it always was.
+        package_id: { name: 'package_id', label: 'Package', type: 'text' as const },
         metadata: { name: 'metadata', label: 'Body', type: 'longtext' as const },
         checksum: { name: 'checksum', label: 'Checksum', type: 'text' as const, maxLength: 71 },
         state: { name: 'state', label: 'State', type: 'text' as const },
