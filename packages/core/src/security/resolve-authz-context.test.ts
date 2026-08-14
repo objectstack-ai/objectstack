@@ -587,3 +587,228 @@ describe('resolveAuthzContext — API-key organization (#8287)', () => {
     expect(memberReads).toBe(2);
   });
 });
+
+/**
+ * [#8613 / ADR-0049] `sys_permission_set.active` and `sys_position.active` —
+ * enforce-or-remove, enforced.
+ *
+ * Both objects ship a Deactivate action whose dialog promises, in four locales,
+ * that access stops. Nothing read the column, so the promise was false: the
+ * assignments kept granting and the admin who trusted the dialog did not take
+ * the action that would actually have worked.
+ *
+ * This is the ONLY seam where either flag is enforceable. Downstream in
+ * plugin-security the position → permission-set linkage is already collapsed
+ * into a flat `permissions` list, so a set held via a deactivated position is
+ * indistinguishable there from one granted directly — filtering there would
+ * over-revoke a set the user also holds in their own right.
+ *
+ * The predicate is "explicitly deactivated", not "explicitly active": absent
+ * means ACTIVE, so a row that predates the column keeps working. Every fixture
+ * above this block carries no `active` key at all and is the pin for that
+ * direction — requiring `true` would have turned this file red wholesale, which
+ * is what it would do to deployed data.
+ */
+describe('[#8613] the `active` flag on the grant catalogues (ADR-0049)', () => {
+  const withActive = (v: unknown) => ({
+    sys_user: [{ id: 'u1' }],
+    sys_member: [],
+    sys_user_position: [{ user_id: 'u1', position: 'contributor', organization_id: null }],
+    sys_user_permission_set: [],
+    sys_position: [{ id: 'r1', name: 'contributor', active: v }],
+    sys_position_permission_set: [{ position_id: 'r1', permission_set_id: 'ps1' }],
+    sys_permission_set: [{ id: 'ps1', name: 'contributor_ps', system_permissions: ['cap_x'] }],
+  });
+
+  // ── sys_position ──────────────────────────────────────────────────────────
+
+  it('a DEACTIVATED position stops granting its permission sets', async () => {
+    const ctx = await resolveAuthzContext({
+      ql: makeQl(withActive(false)),
+      headers: H(),
+      getSession: session('u1'),
+    });
+    expect(ctx.permissions).not.toContain('contributor_ps');
+    expect(ctx.systemPermissions).not.toContain('cap_x');
+  });
+
+  it('…and its NAME leaves `positions` too, or the name alone would resolve the set', async () => {
+    // `resolvePermissionSetsForContext` requests `context.positions` as
+    // permission-set names (position names are commonly reused as set names),
+    // so a name left standing would resolve the same grant one layer down.
+    const ctx = await resolveAuthzContext({
+      ql: makeQl(withActive(false)),
+      headers: H(),
+      getSession: session('u1'),
+    });
+    expect(ctx.positions).not.toContain('contributor');
+    // The audience anchor is untouched — it is not the deactivated row.
+    expect(ctx.positions).toContain('everyone');
+  });
+
+  it('an ACTIVE position still grants (the flag is not a blanket revocation)', async () => {
+    const ctx = await resolveAuthzContext({
+      ql: makeQl(withActive(true)),
+      headers: H(),
+      getSession: session('u1'),
+    });
+    expect(ctx.positions).toContain('contributor');
+    expect(ctx.permissions).toContain('contributor_ps');
+    expect(ctx.systemPermissions).toContain('cap_x');
+  });
+
+  it('an ABSENT `active` column grants — deployed rows are not mass-revoked', async () => {
+    const ctx = await resolveAuthzContext({
+      ql: makeQl(withActive(undefined)),
+      headers: H(),
+      getSession: session('u1'),
+    });
+    expect(ctx.positions).toContain('contributor');
+    expect(ctx.permissions).toContain('contributor_ps');
+  });
+
+  it('the 0/1 storage shape deactivates too — what the primary driver returns', async () => {
+    const off = await resolveAuthzContext({
+      ql: makeQl(withActive(0)),
+      headers: H(),
+      getSession: session('u1'),
+    });
+    expect(off.permissions).not.toContain('contributor_ps');
+    const on = await resolveAuthzContext({
+      ql: makeQl(withActive(1)),
+      headers: H(),
+      getSession: session('u1'),
+    });
+    expect(on.permissions).toContain('contributor_ps');
+  });
+
+  it('a position name with NO `sys_position` row is untouched (org roles, memberships)', async () => {
+    const ql = makeQl({
+      sys_user: [{ id: 'u1' }],
+      sys_member: [{ user_id: 'u1', role: 'owner', organization_id: 'o1' }],
+      sys_user_position: [],
+      sys_user_permission_set: [],
+      // `org_owner` is projected from the membership and has no catalogue row —
+      // there is no flag to read, so nothing may be inferred from its absence.
+      sys_position: [{ id: 'r9', name: 'something_else', active: false }],
+    });
+    const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('u1', { org: 'o1' }) });
+    expect(ctx.positions).toContain('org_owner');
+  });
+
+  it('deactivating ONE position leaves the others granting', async () => {
+    const ql = makeQl({
+      sys_user: [{ id: 'u1' }],
+      sys_member: [],
+      sys_user_position: [
+        { user_id: 'u1', position: 'contributor', organization_id: null },
+        { user_id: 'u1', position: 'reviewer', organization_id: null },
+      ],
+      sys_user_permission_set: [],
+      sys_position: [
+        { id: 'r1', name: 'contributor', active: false },
+        { id: 'r2', name: 'reviewer', active: true },
+      ],
+      sys_position_permission_set: [
+        { position_id: 'r1', permission_set_id: 'ps1' },
+        { position_id: 'r2', permission_set_id: 'ps2' },
+      ],
+      sys_permission_set: [
+        { id: 'ps1', name: 'contributor_ps' },
+        { id: 'ps2', name: 'reviewer_ps' },
+      ],
+    });
+    const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('u1') });
+    expect(ctx.permissions).not.toContain('contributor_ps');
+    expect(ctx.permissions).toContain('reviewer_ps');
+    expect(ctx.positions).not.toContain('contributor');
+    expect(ctx.positions).toContain('reviewer');
+  });
+
+  // ── sys_permission_set ────────────────────────────────────────────────────
+
+  it('a DEACTIVATED permission set grants nothing — name, capabilities and tabs', async () => {
+    const ql = makeQl({
+      sys_user: [{ id: 'u1' }],
+      sys_member: [],
+      sys_user_position: [],
+      sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'ps1', organization_id: null }],
+      sys_permission_set: [{
+        id: 'ps1',
+        name: 'crm_full',
+        active: false,
+        system_permissions: ['cap_x'],
+        tab_permissions: { crm: 'visible' },
+      }],
+    });
+    const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('u1') });
+    expect(ctx.permissions).not.toContain('crm_full');
+    expect(ctx.systemPermissions).not.toContain('cap_x');
+    expect(ctx.tabPermissions?.crm).toBeUndefined();
+  });
+
+  it('THE HIGH-BLAST-RADIUS CASE: a deactivated admin_full_access confers no PLATFORM_ADMIN', async () => {
+    const ql = makeQl({
+      sys_user: [{ id: 'u1' }],
+      sys_member: [],
+      sys_user_position: [],
+      sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'psA', organization_id: null }],
+      sys_permission_set: [{
+        id: 'psA',
+        name: 'admin_full_access',
+        active: false,
+        system_permissions: ['manage_users'],
+      }],
+    });
+    const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('u1') });
+    // Dropped BEFORE the derivation, so the posture cannot be read off a set
+    // that no longer grants — the whole point of filtering at §6b rather than
+    // after it.
+    expect(ctx.permissions).not.toContain('admin_full_access');
+    expect(ctx.posture).not.toBe('PLATFORM_ADMIN');
+    expect(ctx.positions).not.toContain('platform_admin');
+    expect(ctx.systemPermissions).not.toContain('manage_users');
+  });
+
+  it('deactivating ONE set leaves the others granting', async () => {
+    const ql = makeQl({
+      sys_user: [{ id: 'u1' }],
+      sys_member: [],
+      sys_user_position: [],
+      sys_user_permission_set: [
+        { user_id: 'u1', permission_set_id: 'ps1', organization_id: null },
+        { user_id: 'u1', permission_set_id: 'ps2', organization_id: null },
+      ],
+      sys_permission_set: [
+        { id: 'ps1', name: 'crm_full', active: false },
+        { id: 'ps2', name: 'crm_read', active: true },
+      ],
+    });
+    const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('u1') });
+    expect(ctx.permissions).not.toContain('crm_full');
+    expect(ctx.permissions).toContain('crm_read');
+  });
+
+  it('a set held via BOTH a deactivated position and a direct grant still resolves', async () => {
+    // The over-revocation this seam is chosen to avoid: the direct grant is a
+    // separate authority and the position's deactivation may not touch it.
+    const ql = makeQl({
+      sys_user: [{ id: 'u1' }],
+      sys_member: [],
+      sys_user_position: [{ user_id: 'u1', position: 'contributor', organization_id: null }],
+      sys_user_permission_set: [{ user_id: 'u1', permission_set_id: 'ps1', organization_id: null }],
+      sys_position: [{ id: 'r1', name: 'contributor', active: false }],
+      sys_position_permission_set: [{ position_id: 'r1', permission_set_id: 'ps1' }],
+      sys_permission_set: [{ id: 'ps1', name: 'crm_full' }],
+    });
+    const ctx = await resolveAuthzContext({ ql, headers: H(), getSession: session('u1') });
+    expect(ctx.permissions).toContain('crm_full');
+    expect(ctx.positions).not.toContain('contributor');
+  });
+
+  it('resolveUserAuthzGrants enforces it too — the non-HTTP surfaces share the seam', async () => {
+    const grants = await resolveUserAuthzGrants(makeQl(withActive(false)), 'u1');
+    expect(grants.permissions).not.toContain('contributor_ps');
+    expect(grants.positions).not.toContain('contributor');
+  });
+});

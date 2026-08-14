@@ -26,18 +26,21 @@
  *     ADR-0091 validity window). The end state is identical to (2): everyone is
  *     still there, nobody can administer anything, and there is no recovery
  *     path from inside the product.
- *  4. **deleting — or RENAMING — the `admin_full_access` `sys_permission_set`
- *     row** (#6084) — the one table the enumeration reads that is not itself an
- *     identity table. "Who is a platform admin" is resolved by NAME: the first
- *     step of `resolveAdminUserIds` looks the permission set up as
- *     `where: { name: 'admin_full_access' }` and only then reads the grants
- *     pointing at its id. Remove that row, or call it something else, and every
- *     grant, every `sys_user` row and every `sys_member` row survives untouched
- *     while nobody is a platform admin any more — one write, the whole
- *     platform-admin population. Unlike (3) this one is not driven by an IdP at
- *     all: it is written by a metadata delete, an `os meta` run or a package
- *     uninstall, which is why it needs its own two hooks rather than a wider
- *     filter on the three tables above.
+ *  4. **deleting, RENAMING — or DEACTIVATING — the `admin_full_access`
+ *     `sys_permission_set` row** (#6084) — the one table the enumeration reads
+ *     that is not itself an identity table. "Who is a platform admin" is
+ *     resolved by NAME: the first step of `resolveAdminUserIds` looks the
+ *     permission set up as `where: { name: 'admin_full_access' }` and only then
+ *     reads the grants pointing at its id. Remove that row, call it something
+ *     else, or (ADR-0049, since `active` became a resolution-time predicate)
+ *     switch it off, and every grant, every `sys_user` row and every
+ *     `sys_member` row survives untouched while nobody is a platform admin any
+ *     more — one write, the whole platform-admin population. Unlike (3) this one
+ *     is not driven by an IdP at all: it is written by a metadata delete, an
+ *     `os meta` run, a package uninstall — or, for the deactivation spelling, by
+ *     one click on a Setup row action that carries no visibility or condition
+ *     guard — which is why it needs its own two hooks rather than a wider filter
+ *     on the three tables above.
  *
  * In the case that matters both are driven by an EXTERNAL system: nobody reads
  * the payload before it commits, so one mis-scoped IdP group or one over-broad
@@ -146,6 +149,15 @@
  *  - **an environment that was EMPTIED** — an unscoped, in-window
  *    `sys_user_permission_set` grant still points at a `sys_permission_set` row
  *    that no longer exists. Refused, loudly, naming the dangling grants.
+ *  - **an environment whose break-glass set was switched OFF** (ADR-0049) — the
+ *    `admin_full_access` row is present and named correctly, and unscoped,
+ *    in-window grants still point at it, but `active` is false so it confers
+ *    nothing. Refused too, with its own remedy: re-activate the row. This state
+ *    became reachable the moment `active` became a resolution-time predicate,
+ *    and it produces the identical emptiness while leaving no dangling grant to
+ *    read. A write that RESTORES standing — re-activation itself — is exempt,
+ *    measured through the same simulation, or the refusal would have no way out
+ *    from inside the product.
  *
  * The evidence is chosen so the FRESH-INSTALL answer cannot change: a dangling
  * grant is unreachable on the happy path in either direction. Every writer
@@ -261,7 +273,7 @@ import {
   MEMBERSHIP_ROLE_OWNER,
 } from '@objectstack/spec/identity';
 import { SystemObjectName, SystemUserId } from '@objectstack/spec/system';
-import { isGrantActive } from '@objectstack/core';
+import { isGrantActive, isRowActive } from '@objectstack/core';
 
 import { isOrgAdminGrade } from './invitation-role-cap.js';
 
@@ -556,22 +568,47 @@ const GRANT_STANDING_KEYS = [
 ] as const;
 
 /**
- * [#6084] Same, for `sys_permission_set` — and it is a one-element list,
- * because the platform-admin half of the enumeration reads exactly one column
- * of that table: the `name` it looks the set up by. Everything else a
- * permission-set write touches (`label`, `description`, the four permission
- * JSON blobs, `active`, provenance) is invisible to "who is an administrator" —
- * `resolveAuthzContext` derives `platform_admin` from the NAME, not from the
- * capabilities the set carries — so those writes, which is every projection
- * pass and every Setup edit, cost this guard no reads at all.
+ * [#6084] Same, for `sys_permission_set` — the two columns of that table the
+ * platform-admin half of the enumeration reads:
+ *
+ *  - `name`, the column it looks the set up by. Renaming the row takes the
+ *    standing away from everyone holding a grant to it, in one write.
+ *  - `active` [ADR-0049]. This column USED to be inert, and this comment used
+ *    to say so: `resolveAuthzContext` derived `platform_admin` from the name
+ *    alone and read no flag. It now drops a DEACTIVATED set before any
+ *    derivation, so `active: false` on `admin_full_access` un-makes every
+ *    platform admin at once — the same end state as renaming or deleting the
+ *    row, reached by a payload that touches neither. Enforcing the flag without
+ *    listing it here would have left exactly one unguarded route to an
+ *    installation-wide lockout: the action is offered on every row with no
+ *    visibility or condition guard, the seeders deliberately never reconcile
+ *    `active`, and re-activating requires the permission the click just took
+ *    away.
+ *
+ * Everything else a permission-set write touches (`label`, `description`, the
+ * four permission JSON blobs, provenance) is still invisible to "who is an
+ * administrator" — `resolveAuthzContext` derives `platform_admin` from the NAME
+ * of an ACTIVE set, never from the capabilities it carries — so those writes
+ * still cost this guard no reads at all. Adding `active` does not walk that
+ * back: the projection is FACETS ONLY and deliberately never re-flips a
+ * record's on/off switch (`permission-set-projection.ts`, #4669), so every
+ * projection pass, every `os meta resync` and every ordinary Setup edit still
+ * misses this list entirely. What now pays for an enumeration is the write that
+ * actually toggles the switch — which is the write this list exists to judge.
  *
  * `id` is deliberately NOT here even though the enumeration reads it. On this
  * engine `data.id` on an update ADDRESSES the row (it is what
  * `resolveTargetIds` resolves the target from) rather than proposing a new
  * primary key, so a key rewrite is not expressible through this write path; the
  * two standing key lists above exclude `id` for the same reason.
+ *
+ * `sys_position` gets no analogous list because it has no route into this
+ * enumeration to guard: platform-admin standing is read from UNSCOPED
+ * `sys_user_permission_set` grants only (a position-bound `admin_full_access`
+ * never conferred it, in the resolver or here), and org-administrator standing
+ * is read from `sys_member.role`. Deactivating a position cannot empty either.
  */
-const PERMISSION_SET_STANDING_KEYS = ['name'] as const;
+const PERMISSION_SET_STANDING_KEYS = ['name', 'active'] as const;
 
 function touchesAny(data: Record<string, unknown>, keys: readonly string[]): boolean {
   return keys.some((k) => k in data);
@@ -633,19 +670,28 @@ export function registerLastAdminGuard(
     //
     // [#6084] The set row is simulated exactly like the grant rows below it: a
     // pending write on `sys_permission_set` can DELETE this row (it drops out of
-    // `adminSetIds`, and with it every grant that pointed at it) or RENAME it,
-    // and the name is RE-TESTED for the same reason the grant's
+    // `adminSetIds`, and with it every grant that pointed at it), RENAME it, or
+    // DEACTIVATE it, and each is RE-TESTED for the same reason the grant's
     // `permission_set_id` is — the scan's own `where` only proved what the row
     // was called BEFORE the write.
+    //
+    // [ADR-0049] `active` rides the projection because the flag is now read at
+    // resolution time: `fields` is a projection, so a column left out of this
+    // list would read as absent here and absent means ACTIVE — the guard would
+    // model an environment in which no set is ever deactivated and permit the
+    // one write that empties it.
     const sets = await scan(op, SystemObjectName.PERMISSION_SET, {
       where: { name: ADMIN_FULL_ACCESS },
-      fields: ['id', 'name'],
+      fields: ['id', 'name', 'active'],
     });
     const adminSetIds: string[] = [];
     for (const rawSet of sets) {
       const set = applyPending(rawSet, pending, SystemObjectName.PERMISSION_SET);
       if (!set) continue; // removed outright by the pending write
       if (set.name !== ADMIN_FULL_ACCESS) continue; // renamed away — the row survives, the meaning does not
+      // Deactivated — the row survives under its own name and grants nothing,
+      // judged by the SAME predicate `resolveAuthzContext` resolves with.
+      if (!isRowActive(set)) continue;
       const sid = toId(set.id);
       if (sid) adminSetIds.push(sid);
     }
@@ -741,13 +787,56 @@ export function registerLastAdminGuard(
    * guard cannot tell the two apart (the name it would compare went away with
    * the row), and refusing in an environment that has zero administrators AND a
    * grant pointing into nowhere is the fail-closed direction.
+   *
+   * [ADR-0049] DEACTIVATION is the second way to reach the same emptiness, and
+   * it leaves NO dangling grant to read — the row is still there, still named
+   * `admin_full_access`, and simply grants nothing. Left unhandled, enforcing
+   * the flag would turn this exemption into the amplifier the paragraph above
+   * exists to prevent: one deactivation empties the administrator population
+   * and every later ban, delete and downgrade sails through unguarded. So the
+   * deactivated row with unscoped, in-window grants still pointing at it is
+   * read as the SAME evidence, with its own remedy — re-activate it.
    */
   const refuseIfEmptiedRatherThanFresh = async (op: GuardedOp): Promise<void> => {
-    const sets = await scan(op, SystemObjectName.PERMISSION_SET, { fields: ['id'] });
+    const sets = await scan(op, SystemObjectName.PERMISSION_SET, { fields: ['id', 'name', 'active'] });
     const known = new Set<string>();
+    const deactivatedAdminSetIds: string[] = [];
     for (const row of sets) {
       const sid = toId(row.id);
-      if (sid) known.add(sid);
+      if (!sid) continue;
+      known.add(sid);
+      if (row.name === ADMIN_FULL_ACCESS && !isRowActive(row)) deactivatedAdminSetIds.push(sid);
+    }
+
+    // The deactivated-break-glass case, checked before the dangling one: it has
+    // a precise diagnosis and a one-click remedy, so it must not be reported as
+    // the vaguer "something was deleted" story.
+    if (deactivatedAdminSetIds.length > 0) {
+      const held = await scan(op, USER_PERMISSION_SET, {
+        where: { permission_set_id: { $in: deactivatedAdminSetIds } },
+      });
+      const nowMs = Date.now();
+      const stranded = held.filter(
+        (link) => !(link.organization_id ?? link.organizationId) && isGrantActive(link, nowMs),
+      );
+      if (stranded.length > 0) {
+        const words = OP_WORDS[op];
+        logger?.warn(
+          `[LastAdminGuard] refused a ${words.noun} in an environment whose '${ADMIN_FULL_ACCESS}' ` +
+            `permission set is DEACTIVATED — ${stranded.length} unscoped grant(s) confer nothing`,
+        );
+        throw refuse(
+          `Refusing this ${words.noun}: this environment recognises NO administrator because its ` +
+            `'${ADMIN_FULL_ACCESS}' '${SystemObjectName.PERMISSION_SET}' row is DEACTIVATED — ` +
+            `${stranded.length} unscoped, in-window '${USER_PERMISSION_SET}' grant(s) still point ` +
+            'at it and confer nothing while it is off. That is not the bootstrap window, and ' +
+            'reading the resulting emptiness as "no administrator to protect" would switch this ' +
+            `guard off for every other write too (${BREAK_GLASS_CITATION}). Re-activate the ` +
+            `'${ADMIN_FULL_ACCESS}' permission set (set 'active' back to true) — the grants naming ` +
+            'it are still there — before writing the identity tables again.',
+          words.table,
+        );
+      }
     }
     // With no permission set at all every grant is dangling, and `$nin: []` is
     // not a predicate every driver agrees on — so that case reads unfiltered
@@ -984,6 +1073,23 @@ export function registerLastAdminGuard(
       // break-glass account to protect — unless the environment got there by
       // being emptied rather than by being new.
       if (before.size === 0) {
+        // [ADR-0049] …and unless THIS write is the way back. A write that
+        // RESTORES standing can never be the write that takes the last one
+        // away, and re-activating a deactivated `admin_full_access` row is
+        // exactly the remedy the refusal below prescribes — judged by the same
+        // simulation as everything else, so the exemption is a measurement and
+        // not a special case for one column. Without it the refusal would be
+        // unrecoverable from inside the product: the only fix is an update, and
+        // every update would be refused.
+        const restoringIds = await resolveTargetIds(op, table, input?.id, input?.options, input?.data);
+        if (restoringIds.size > 0) {
+          const restored = await resolveAdminUserIds(op, {
+            table,
+            ids: restoringIds,
+            ...(patch ? { patch } : {}),
+          });
+          if (restored.size > 0) return;
+        }
         await refuseIfEmptiedRatherThanFresh(op);
         return;
       }

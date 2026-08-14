@@ -106,6 +106,12 @@ const sysPermissionSet = {
     // (`permissionSetRowFields`), so it is the column the "costs no reads"
     // pin drives.
     label: { name: 'label', type: 'text' as const },
+    // [#8613 / ADR-0049] The Deactivate switch. Declared `boolean`, so on this
+    // real sqlite database it stores as 0/1 and the guard's flag handling is
+    // exercised against the shape the primary driver actually returns — not
+    // against a hand-written `false`. Seeded rows leave it NULL, which is the
+    // deployed shape of a row that predates the column: absent means ACTIVE.
+    active: { name: 'active', type: 'boolean' as const },
   },
 };
 
@@ -1993,6 +1999,258 @@ describe('[#6084] reverse verification: one unguarded write takes the admins AND
     await seedUser(engine, 'usr_platform', { platformAdmin: true });
 
     await engine.delete('sys_permission_set', { where: { id: PS_ADMIN }, ...SYSTEM });
+    await expect(ban(engine, 'usr_platform')).resolves.toBeTruthy();
+    expect(await bannedFlag(engine, 'usr_platform')).toBeTruthy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#8613 / ADR-0049] Write shape (4), third spelling: DEACTIVATING the row
+//
+// `sys_permission_set.active` used to be inert — a badge in Setup and nothing
+// else — so the #6084 standing-key list could exclude it in writing, and did.
+// Enforcing the flag at the resolution seam makes `active: false` on
+// `admin_full_access` un-make every platform admin at once, by a payload that
+// touches neither `name` nor any identity table, through a row action that
+// carries no visibility or condition guard. Unguarded, that is one click and an
+// installation-wide lockout with no path back: the seeders deliberately never
+// reconcile `active`, and re-activating needs the permission just lost.
+//
+// Deactivation also leaves NO dangling grant, so the #6084 bootstrap predicate
+// cannot see it — the set row is still there, still correctly named. Hence the
+// second half of this block: the same emptiness, its own evidence, its own
+// remedy, and an exemption for the write that IS the remedy.
+// ---------------------------------------------------------------------------
+
+describe('[#8613] path 4, third spelling — deactivating the admin_full_access permission set', () => {
+  let engine: ObjectQL;
+
+  beforeEach(async () => {
+    engine = await boot();
+    await seedAdminPermissionSet(engine);
+  });
+
+  /** Exactly what the `deactivate_permission_set` row action PATCHes. */
+  const deactivate = (id: string) =>
+    engine.update('sys_permission_set', { id, active: false }, SYSTEM);
+
+  /**
+   * Whether the STORED row reads as deactivated, in whichever shape sqlite
+   * hands back — `0`, `false`, or the NULL a never-written column keeps. The
+   * predicate under test treats absent as ACTIVE, so this asserts the write did
+   * not land rather than asserting one particular spelling of "off".
+   */
+  const isDeactivated = async (id: string): Promise<boolean> => {
+    const row = await engine.findOne('sys_permission_set', { where: { id } }, SYSTEM);
+    const flag = row?.active as unknown;
+    return flag === 0 || flag === false || flag === '0';
+  };
+
+  it('THE ONE-CLICK LOCKOUT: deactivating it is refused and the row stays active', async () => {
+    await seedUser(engine, 'usr_platform', { platformAdmin: true });
+
+    await expect(deactivate(PS_ADMIN)).rejects.toMatchObject({
+      code: 'PERMISSION_DENIED',
+      status: 403,
+      object: 'sys_permission_set',
+    });
+    // Nothing was written — the row is still there and still grants.
+    expect(await isDeactivated(PS_ADMIN)).toBe(false);
+    expect(await rowExists(engine, 'sys_permission_set', PS_ADMIN)).toBe(true);
+  });
+
+  it('no identity table is touched, exactly as in the delete and rename spellings', async () => {
+    await seedUser(engine, 'usr_platform', { platformAdmin: true, accountProvider: 'oidc' });
+
+    await expect(deactivate(PS_ADMIN)).rejects.toThrow(/ADR-0024 D5\.2/);
+    await expectUserRowUntouched(engine, 'usr_platform');
+    expect(await rowExists(engine, 'sys_user_permission_set', 'ups_usr_platform')).toBe(true);
+  });
+
+  it('the refusal names the user who would lose standing', async () => {
+    await seedUser(engine, 'usr_platform', { platformAdmin: true });
+
+    await expect(deactivate(PS_ADMIN)).rejects.toThrow(/'usr_platform'/);
+    await expect(deactivate(PS_ADMIN)).rejects.toThrow(/last administrator/i);
+  });
+
+  it('RE-activating is never refused — the payload is simulated, not pattern-matched', async () => {
+    await seedUser(engine, 'usr_platform', { platformAdmin: true });
+
+    // Same column, same standing-key hit, opposite direction: the simulation
+    // finds the administrator still there afterwards, so it proceeds.
+    await expect(
+      engine.update('sys_permission_set', { id: PS_ADMIN, active: true }, SYSTEM),
+    ).resolves.toBeTruthy();
+  });
+
+  it('an org admin elsewhere keeps the deactivation legal — the invariant is the ENVIRONMENT\'s', async () => {
+    await seedUser(engine, 'usr_platform', { platformAdmin: true });
+    await seedUser(engine, 'usr_owner', { role: 'owner' });
+
+    await expect(deactivate(PS_ADMIN)).resolves.toBeTruthy();
+  });
+
+  it('deactivating ANOTHER permission set is unaffected', async () => {
+    await seedUser(engine, 'usr_platform', { platformAdmin: true });
+
+    await expect(deactivate('ps_member')).resolves.toBeTruthy();
+    expect(await isDeactivated('ps_member')).toBe(true);
+    expect(await isDeactivated(PS_ADMIN)).toBe(false);
+  });
+
+  it('a predicate write that sweeps every set at once is refused', async () => {
+    await seedUser(engine, 'usr_platform', { platformAdmin: true });
+
+    await expect(
+      engine.update(
+        'sys_permission_set',
+        { active: false },
+        { multi: true, where: { id: { $in: [PS_ADMIN, 'ps_member'] } }, ...SYSTEM },
+      ),
+    ).rejects.toThrow(/last administrator/i);
+  });
+
+  it('a payload that touches NEITHER `name` nor `active` still costs no reads at all', async () => {
+    const quiet = await boot({
+      readThrough: (real) => ({
+        registerHook: (event, handler, options) => real.registerHook(event, handler, options),
+        find: async () => {
+          throw new Error('the guard must not read anything for a row-state-free payload');
+        },
+      }),
+    });
+    await seedAdminPermissionSet(quiet);
+    await seedUser(quiet, 'usr_platform', { platformAdmin: true });
+
+    // Adding `active` to the standing keys must not walk back the #6084
+    // read-freeness: the projection is facets-only and never re-flips the
+    // switch, so every projection pass and `os meta resync` still skips this
+    // guard statically. Any read would surface as a refusal.
+    await expect(
+      quiet.update('sys_permission_set', { id: PS_ADMIN, label: 'Full Access (edited)' }, SYSTEM),
+    ).resolves.toBeTruthy();
+  });
+});
+
+describe('[#8613] a DEACTIVATED break-glass set is an emptied environment, not a fresh one', () => {
+  /**
+   * The state the third spelling leaves behind, reachable the same way #6084's
+   * is: the deactivation lands while the guard is not registered (a pre-#8613
+   * deployment that clicked Deactivate while the flag was inert, a migration, a
+   * direct database edit), and the platform then boots with the guard on.
+   *
+   * This is the population the behaviour flip lands hardest on, which is why it
+   * is pinned rather than reasoned about: on those installations `active:false`
+   * was a no-op until this change, so the row can already be off on upgrade.
+   */
+  async function deactivatedEnvironment(): Promise<ObjectQL> {
+    const engine = await boot({ unguarded: true });
+    await seedAdminPermissionSet(engine);
+    await seedUser(engine, 'usr_platform', { platformAdmin: true, accountProvider: 'oidc' });
+    await engine.update('sys_permission_set', { id: PS_ADMIN, active: false }, SYSTEM);
+    registerLastAdminGuard(engine as unknown as LastAdminGuardEngine, {
+      packageId: 'test.last-admin-guard',
+    });
+    return engine;
+  }
+
+  it('THE AMPLIFIER PIN: the ban the bootstrap exemption would have waved through is refused', async () => {
+    const engine = await deactivatedEnvironment();
+
+    await expect(ban(engine, 'usr_platform')).rejects.toMatchObject({
+      code: 'PERMISSION_DENIED',
+      status: 403,
+    });
+    expect(await bannedFlag(engine, 'usr_platform')).toBeFalsy();
+  });
+
+  it('…and the user delete and the grant revoke with it — all three halves stay on', async () => {
+    const engine = await deactivatedEnvironment();
+
+    await expect(removeUser(engine, 'usr_platform')).rejects.toThrow(/DEACTIVATED/);
+    await expect(
+      engine.delete('sys_user_permission_set', { where: { id: 'ups_usr_platform' }, ...SYSTEM }),
+    ).rejects.toThrow(/DEACTIVATED/);
+    expect(await userExists(engine, 'usr_platform')).toBe(true);
+  });
+
+  it('the refusal names the evidence, the cause and the way back', async () => {
+    const engine = await deactivatedEnvironment();
+
+    await expect(ban(engine, 'usr_platform')).rejects.toThrow(/recognises NO administrator/);
+    await expect(ban(engine, 'usr_platform')).rejects.toThrow(/DEACTIVATED/);
+    // The remedy is the one that actually works here — re-activate, NOT the
+    // "restore the deleted row" sentence the #6084 wipe prescribes.
+    await expect(ban(engine, 'usr_platform')).rejects.toThrow(/Re-activate/);
+    await expect(ban(engine, 'usr_platform')).rejects.toThrow(new RegExp(ADMIN_FULL_ACCESS));
+    await expect(ban(engine, 'usr_platform')).rejects.toThrow(/ADR-0024 D5\.2/);
+  });
+
+  it('THE WAY BACK IS OPEN: re-activating the set is permitted from inside that environment', async () => {
+    const engine = await deactivatedEnvironment();
+
+    // Every other guarded write is refused above. If the remedy the refusal
+    // prescribes were refused too, the guard itself would be the lockout.
+    await expect(
+      engine.update('sys_permission_set', { id: PS_ADMIN, active: true }, SYSTEM),
+    ).resolves.toBeTruthy();
+    // …and the environment is whole again: the ordinary verdict is back.
+    await expect(ban(engine, 'usr_platform')).rejects.toThrow(/last administrator/i);
+  });
+
+  it('a deactivated set nobody holds an unscoped grant to is NOT evidence', async () => {
+    const engine = await boot();
+    await seedAdminPermissionSet(engine);
+    await seedUser(engine, 'usr_a', { grant: { permission_set_id: 'ps_member' } });
+    // No unscoped grant points at `admin_full_access`, so switching it off
+    // strands nobody — this is an ordinary pre-first-admin environment.
+    await engine.update('sys_permission_set', { id: PS_ADMIN, active: false }, SYSTEM);
+
+    await expect(ban(engine, 'usr_a')).resolves.toBeTruthy();
+  });
+
+  it('a genuinely fresh environment is untouched — no set is deactivated at all', async () => {
+    const engine = await boot();
+    await seedAdminPermissionSet(engine);
+    await seedUser(engine, 'usr_first', { role: 'member' });
+
+    await expect(ban(engine, 'usr_first')).resolves.toBeTruthy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#8613] Reverse verification — the same fixtures with the guard NOT registered
+//
+// Direction, decided before running: RED, the usual one. Without
+// `registerLastAdminGuard` the deactivation succeeds, every platform admin
+// evaporates while every row survives untouched, and the ban that follows
+// succeeds too. The guarded halves above are measured against exactly this.
+// ---------------------------------------------------------------------------
+
+describe('[#8613] reverse verification: unguarded, one click takes the admins AND the guard', () => {
+  it('the unguarded engine deactivates the row and leaves every other row intact', async () => {
+    const engine = await boot({ unguarded: true });
+    await seedAdminPermissionSet(engine);
+    await seedUser(engine, 'usr_platform', { platformAdmin: true, accountProvider: 'oidc' });
+
+    await expect(
+      engine.update('sys_permission_set', { id: PS_ADMIN, active: false }, SYSTEM),
+    ).resolves.toBeTruthy();
+    expect(await userExists(engine, 'usr_platform')).toBe(true);
+    expect(await bannedFlag(engine, 'usr_platform')).toBeFalsy();
+    expect(await rowExists(engine, 'sys_user_permission_set', 'ups_usr_platform')).toBe(true);
+    // The row is STILL THERE and still correctly named — which is exactly why
+    // the #6084 dangling-grant predicate cannot see this state.
+    expect(await rowExists(engine, 'sys_permission_set', PS_ADMIN)).toBe(true);
+  });
+
+  it('THE AMPLIFICATION: on that same engine the ban of the last administrator then succeeds', async () => {
+    const engine = await boot({ unguarded: true });
+    await seedAdminPermissionSet(engine);
+    await seedUser(engine, 'usr_platform', { platformAdmin: true });
+
+    await engine.update('sys_permission_set', { id: PS_ADMIN, active: false }, SYSTEM);
     await expect(ban(engine, 'usr_platform')).resolves.toBeTruthy();
     expect(await bannedFlag(engine, 'usr_platform')).toBeTruthy();
   });

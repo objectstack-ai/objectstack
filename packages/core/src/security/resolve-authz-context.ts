@@ -38,6 +38,7 @@ import { resolveApiKeyAdmission } from './api-key.js';
 import type { ApiKeyRefusalReason } from './api-key.js';
 import { isGrantActive } from './grant-validity.js';
 import { derivePosture } from './posture-ladder.js';
+import { isRowActive } from './row-active.js';
 
 /** The transport-agnostic authorization envelope produced from a request. */
 export interface ResolvedAuthzContext {
@@ -444,9 +445,31 @@ export async function resolveUserAuthzGrants(
 
   // 6a. Position-bound permission sets (sys_position_permission_set): a position
   //     carries its permission sets.
+  //
+  //     [ADR-0049] A DEACTIVATED position grants nothing — the `deactivate_position`
+  //     dialog's promise ("users keep their assignment but the position stops
+  //     granting permissions"), enforced at the ONE place it is enforceable.
+  //     Downstream in plugin-security the position→set linkage is already
+  //     collapsed into a flat `permissions` list, so a set held via a
+  //     deactivated position is indistinguishable there from one granted
+  //     directly and filtering there would over-revoke.
+  //
+  //     The name is dropped from `positions` too, not merely from the junction
+  //     read: `resolvePermissionSetsForContext` requests `positions` as
+  //     permission-set NAMES (position names are commonly reused as set names),
+  //     so a name left standing would resolve the same grant one layer down.
+  //     Only a name whose row is explicitly deactivated is dropped — a name
+  //     with no `sys_position` row at all (`org_owner`, a membership-derived
+  //     role) has no flag to read and is untouched.
   if (grants.positions.length > 0) {
     const positionRows = await tryFind(ql, 'sys_position', { name: { $in: grants.positions } }, 100);
-    const positionIds = positionRows.map((r) => r.id).filter(Boolean);
+    const deactivatedNames = new Set<string>(
+      positionRows.filter((r) => !isRowActive(r)).map((r) => r.name).filter(Boolean),
+    );
+    if (deactivatedNames.size > 0) {
+      grants.positions = grants.positions.filter((n) => !deactivatedNames.has(n));
+    }
+    const positionIds = positionRows.filter((r) => isRowActive(r)).map((r) => r.id).filter(Boolean);
     if (positionIds.length > 0) {
       const rpsRows = await tryFind(ql, 'sys_position_permission_set', { position_id: { $in: positionIds } }, 500);
       for (const r of rpsRows) {
@@ -459,7 +482,14 @@ export async function resolveUserAuthzGrants(
   // 6b. Resolve permission-set details (names → grants.permissions; system_permissions;
   //     tab_permissions merged by highest visibility).
   if (psIds.size > 0) {
-    const psRows = await tryFind(ql, 'sys_permission_set', { id: { $in: Array.from(psIds) } }, 500);
+    const psRowsAll = await tryFind(ql, 'sys_permission_set', { id: { $in: Array.from(psIds) } }, 500);
+    // [ADR-0049] A DEACTIVATED permission set grants nothing — the
+    // `deactivate_permission_set` dialog's promise ("existing assignments stay
+    // in place but stop granting access"). Dropped BEFORE any derivation, the
+    // same discipline the validity window gets at §6, so `hasPlatformAdminGrant`
+    // cannot be derived from a set that no longer grants either: a deactivated
+    // `admin_full_access` must not keep conferring PLATFORM_ADMIN.
+    const psRows = psRowsAll.filter((r) => isRowActive(r));
     const tabRank: Record<string, number> = { hidden: 0, default_off: 1, default_on: 2, visible: 3 };
     const mergedTabs: Record<string, 'visible' | 'hidden' | 'default_on' | 'default_off'> = {};
     for (const ps of psRows) {

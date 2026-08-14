@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { Plugin, PluginContext, POSTURE_LADDER } from '@objectstack/core';
+import { Plugin, PluginContext, POSTURE_LADDER, isRowActive } from '@objectstack/core';
 import type { PermissionSet, RowLevelSecurityPolicy } from '@objectstack/spec/security';
 import { describeHighPrivilegeBits, describeAnchorForbiddenBits, PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
 import { MCP_AGENT_PERMISSION_SET_RESTRICTED } from '@objectstack/spec/ai';
@@ -826,7 +826,19 @@ export class SecurityPlugin implements Plugin {
           } catch {
             rows = [];
           }
-          const list = Array.isArray(rows) ? rows : rows?.records ?? [];
+          const all = Array.isArray(rows) ? rows : rows?.records ?? [];
+          // [ADR-0049] A DEACTIVATED set grants nothing. Not defence in depth
+          // that nothing reaches: `resolvePermissionSetsForContext` requests
+          // `context.positions` as permission-set NAMES too (a position name is
+          // commonly reused as a set name), so an ACTIVE position whose name
+          // matches a DEACTIVATED `sys_permission_set` row arrives here with
+          // that name still standing — this loader is the only place that read
+          // is judged. Filtered in memory rather than by a `where` predicate:
+          // `active: true` would also drop rows whose column is NULL (rows
+          // predating the field), and boolean `where` coercion differs per
+          // driver. `isRowActive` is the same predicate the core resolver and
+          // the break-glass guard use, so the three cannot drift.
+          const list = all.filter((r: any) => isRowActive(r));
           const parseJson = (v: any, fallback: any) => {
             if (typeof v !== 'string') return v ?? fallback;
             try { return JSON.parse(v || JSON.stringify(fallback)); } catch { return fallback; }
