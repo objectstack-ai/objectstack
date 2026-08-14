@@ -51,6 +51,15 @@ halves are now pinned end to end: two organizations installing the same package
 each end up with their own pending row, and re-running one organization's sync
 still adds nothing.
 
+### One caveat on `sys_audience_binding_suggestion`
+
+This release makes a per-organization suggestion row **possible**; it is not yet
+what the platform writes. The reconciler still reads and writes through a
+tenant-less system context, so on a shared-runtime multi-organization
+installation the surface continues to hold one organization-less row that every
+tenant reads — measured, recorded as a test, and tracked in #8617, which remains
+open. Single-organization installations are unaffected either way.
+
 ## ⚠️ Operators: a migration is REQUIRED, and deploying this release is not it
 
 Respelling a declared index changes its generated **name**. On an existing

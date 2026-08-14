@@ -324,11 +324,13 @@ describe('#8577 — the package-install path of sys_audience_binding_suggestion'
    * end as the index, reached by a different road, and NOT repaired by
    * respelling the index. The index fix is necessary (without it even a
    * correctly tenant-scoped write is refused) and it is what this card was
-   * ruled to deliver; the reconciler's tenant blindness is filed separately.
+   * ruled to deliver; the reconciler's tenant blindness is filed as **#8617**,
+   * which also carries the measurements above and the tenancy question they
+   * raise about this object.
    *
    * The two assertions below RECORD today's behaviour rather than endorse it.
-   * The follow-up that threads the tenant through must DELETE them, not update
-   * them — if they still pass afterwards, that fix did not work.
+   * #8617's fix must DELETE them, not update them — if they still pass
+   * afterwards, that fix did not work.
    */
   describe('the shipped SYSTEM_CTX call path is tenant-blind (recorded, not endorsed)', () => {
     /** The reconciler wired exactly as `security-plugin.ts` wires it. */

@@ -131,6 +131,12 @@ export const SysAudienceBindingSuggestion = ObjectSchema.create({
     // org_yi (com.acme.crm, sales_readonly, guest) 201 / org_yi's own GET on
     // the colliding triple 0 rows. And through the REAL sync on a real engine:
     // org_jia created 1, org_yi created 0 with no throw and no log line.
+    //
+    // ⚠️ This is the STORAGE half only. `syncAudienceBindingSuggestions` still
+    // reads and writes through a tenant-less `{ isSystem: true }` context, so
+    // the shipped path writes ONE organization-less row every tenant reads —
+    // measured, and filed as #8617. Until that lands, this respelling is what
+    // makes a per-organization row possible, not what produces one.
     { fields: ['package_id', 'permission_set_name', 'anchor'], unique: 'organization' },
     { fields: ['status'] },
     { fields: ['package_id'] },
