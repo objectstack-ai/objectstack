@@ -67,8 +67,8 @@ const result = CurrencyConfigSchema.parse(data);
 | **defaultValue** | `any` | optional | Default applied on INSERT when the field is omitted or null (`''` is a real value, not absence). Three legal shapes (#7127), discriminated in the engine's own order: a CEL Expression envelope `{ dialect: 'cel', source: 'today()' }` (accepted structurally; result type is a runtime concern); a runtime TOKEN — `NOW()` on `datetime`/`date`/`time` only, `current_user` on `user` or `lookup` with `reference: 'sys_user'` only, neither on a multi-value field; or a LITERAL, which must satisfy this field's own stored value contract (ADR-0104 D1 `valueSchemaFor`). Anything else is refused at parse time with a prescriptive message. |
 | **maxLength** | `number` | optional | Max character length |
 | **minLength** | `number` | optional | Min character length |
-| **precision** | `integer` | optional | Total digits (non-negative integer) |
-| **scale** | `integer` | optional | Decimal places (non-negative integer) |
+| **precision** | `number` | optional | Total digits |
+| **scale** | `number` | optional | Decimal places |
 | **min** | `number` | optional | Minimum value |
 | **max** | `number` | optional | Maximum value |
 | **useGrouping** | `boolean` | optional | Digit-grouping presentation hint for `number` fields (#7768) — maps to `Intl.NumberFormat`'s `useGrouping`. Absent = renderer decides (interim heuristic today, locale default eventually); `false` = author opts out of grouping (e.g. a year or other ordinal/identifier integer); `true` = author pins grouping on. |
