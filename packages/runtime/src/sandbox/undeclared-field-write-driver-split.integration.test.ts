@@ -148,6 +148,15 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { InMemoryDriver } from '@objectstack/driver-memory';
 import { hookBodyRunnerFactory } from './body-runner.js';
 import { QuickJSScriptRunner } from './quickjs-runner.js';
+import type { EngineQueryOptions } from '@objectstack/spec/data';
+
+/**
+ * The read-back query, TYPED rather than cast. The `as any` reads elsewhere in
+ * this file predate the `query-options-erasure` ratchet and are counted as
+ * grandfathered residue; new ones are not, and there is no reason for these
+ * two to be erased — the options bag is an ordinary `where`.
+ */
+const rowById = (id: unknown): EngineQueryOptions => ({ where: { id } });
 
 /** `stagee` is the typo under test; `stage` is the field that exists. */
 const DEAL = {
@@ -337,7 +346,7 @@ describe('#4271 an undeclared field written by an L2 body — the real runtime s
 
       expect(err?.code).toBe('INVALID_FIELD');
       expect(err?.status).toBe(400);
-      const after: any = (await e.find('deal', { where: { id: row.id } } as any))[0];
+      const after: any = (await e.find('deal', rowById(row.id)))[0];
       expect(after.stage).toBe('open');
     }, 30000);
 
@@ -351,7 +360,7 @@ describe('#4271 an undeclared field written by an L2 body — the real runtime s
 
       expect(err?.code).toBe('INVALID_FIELD');
       expect(err?.status).toBe(400);
-      const stored: any = (await e.find('deal', { where: { id: row.id } } as any))[0];
+      const stored: any = (await e.find('deal', rowById(row.id)))[0];
       expect(stored).not.toHaveProperty('stagee');
     }, 30000);
   });

@@ -41,6 +41,14 @@
 
 import { describe, it, expect } from 'vitest';
 import { ObjectQL } from './engine.js';
+import type { EngineUpdateOptions } from '@objectstack/spec/data';
+
+/**
+ * The predicate branch's options bag, TYPED rather than cast — the payload is
+ * what these cases are about, and an `as any` here would erase the contract on
+ * the argument that decides which branch of `update()` runs.
+ */
+const MULTI_OPTIONS: EngineUpdateOptions = { where: { name: 'stored' }, multi: true };
 
 /** Records everything that reached the driver — presence is the point. */
 function makeRecordingDriver(missingColumns: readonly string[] = []) {
@@ -51,7 +59,7 @@ function makeRecordingDriver(missingColumns: readonly string[] = []) {
     async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
     async find() { return [{ ...stored }]; },
     async findOne() { return { ...stored }; },
-    async create(object: string, data: Record<string, unknown>) {
+    async create(_object: string, data: Record<string, unknown>) {
       writes.push({ fn: 'create', data: { ...data } });
       return { id: 'rec_1', ...data };
     },
@@ -171,7 +179,7 @@ describe('#8738 — the declared-field door on update()', () => {
       await refusalOf(() => engine.update(
         'acct',
         { name: 'bad', zzz_nonexistent_field: 'x' } as any,
-        { where: { name: 'stored' }, multi: true } as any,
+        MULTI_OPTIONS,
       ));
 
       expect(hookRuns).toEqual([]);
@@ -210,7 +218,7 @@ describe('#8738 — the declared-field door on update()', () => {
       await refusalOf(() => engine.update(
         'acct',
         { name: 'bad', zzz_nonexistent_field: 'x' } as any,
-        { where: { name: 'stored' }, multi: true } as any,
+        MULTI_OPTIONS,
       ));
 
       expect(writes).toHaveLength(0);
@@ -275,7 +283,7 @@ describe('#8738 — the declared-field door on update()', () => {
       await engine.update(
         'acct',
         { name: 'renamed' } as any,
-        { where: { name: 'stored' }, multi: true } as any,
+        MULTI_OPTIONS,
       );
 
       expect(writes).toHaveLength(1);
