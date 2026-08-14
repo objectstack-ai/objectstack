@@ -3299,6 +3299,36 @@ function withPendingAudit<E extends Error>(err: E, audit: MetadataAuditEntry): E
 }
 
 /**
+ * [#8595] The PRE-FLIGHT gate's refusal vocabulary — the closed set of codes
+ * `publishPackageDrafts` can refuse a batch with BEFORE it opens its
+ * transaction, and the spelling each one takes in `sys_metadata_audit.code`.
+ *
+ * Why a declared map and not `code.toLowerCase()`. `batch_aborted` (#8400)
+ * deliberately took ONE fixed value because its causal code is whatever the
+ * error catalog threw, and lower-casing that would turn this column's
+ * documented closed set into an open one that grows with the catalog. The
+ * pre-flight codes are a different animal — they are minted in
+ * `publishPackageDrafts`'s own pre-flight block, not caught from below — so the
+ * violation's own code CAN be carried honestly, which is what a compliance
+ * query filters on ("show me every publish refused by the namespace rule").
+ *
+ * The precedent's principle still binds, though: the column must not drift
+ * silently. Hence `Record<PreflightViolationCode, …>` over an index signature —
+ * a new pre-flight gate (ADR-0121's endpoint gates, should #2657 Part B bring
+ * them back) cannot reach this column without failing to compile until its
+ * audit spelling is declared here AND added to the column's documented set in
+ * `sys-metadata-audit.object.ts`. A mechanical lower-case would have let it
+ * land silently; a runtime fallback would have put an unreachable value in a
+ * documented closed set. The compiler is the enforcement.
+ */
+type PreflightViolationCode = 'NAMESPACE_PREFIX';
+
+const PREFLIGHT_AUDIT_CODE: Record<PreflightViolationCode, string> = {
+    // adr0112-ok: D6b — persisted audit column, its own lowercase vocabulary
+    NAMESPACE_PREFIX: 'namespace_prefix',
+};
+
+/**
  * Implements the per-domain contracts this class ACTUALLY provides (ADR-0076
  * D10 — the facade never implemented the other domains; those live in their
  * owning services and are reached through the discovery `services` registry,
@@ -13033,12 +13063,36 @@ export class ObjectStackProtocolImplementation implements
          * package sees the object-name violations AND the endpoint violations
          * in one round trip instead of one class per publish attempt.
          */
-        const preflightViolations: Array<{ type: string; name: string; error: string; code: string }> = [];
+        const preflightViolations: Array<{
+            type: string;
+            name: string;
+            error: string;
+            code: PreflightViolationCode;
+            /**
+             * [#8595] The DRAFT's own scope, captured at detection — the same
+             * rule the promoted rows follow (`PromotedDraft.draftOrgId`) and for
+             * the same reason: `listDrafts` surfaces env-wide drafts
+             * (`organization_id IS NULL`) to a non-null-org caller, so an audit
+             * row keyed on the caller's active org would record the refusal
+             * against a partition the item never lived in. Internal to this
+             * method — deliberately NOT part of `failed[]`, which is a wire
+             * shape; the projection at the refusal site drops it.
+             */
+            organizationId: string | null;
+        }> = [];
         if (pkgNamespace) {
             for (const d of drafts) {
                 if (d.type !== 'object') continue;
                 const err = validateObjectNamespacePrefix(d.name, pkgNamespace);
-                if (err) preflightViolations.push({ type: d.type, name: d.name, error: err, code: 'NAMESPACE_PREFIX' });
+                if (err) {
+                    preflightViolations.push({
+                        type: d.type,
+                        name: d.name,
+                        error: err,
+                        code: 'NAMESPACE_PREFIX',
+                        organizationId: d.organizationId ?? null,
+                    });
+                }
             }
         }
 
@@ -13081,12 +13135,80 @@ export class ObjectStackProtocolImplementation implements
         // back with it — implementation first, declaration second.
 
         if (preflightViolations.length > 0) {
+            // ═══ [#8595] The PRE-FLIGHT refusal's own audit rows ═══════════════
+            //
+            // Without these, this `return` left `sys_metadata_audit` completely
+            // empty: a package refused for a bad object name was indistinguish-
+            // able in the trail from a package nobody ever pressed Publish on —
+            // the #7748 defect, at the one refusal site neither #8400 nor #8594
+            // could reach. Both of those write from BELOW: #8400's rows are
+            // driven off the post-commit state and its `batch_aborted` row from
+            // the transaction's `catch`, and #8594's inner verdicts ride out on
+            // an error thrown inside the promotion loop. This `return` is ABOVE
+            // `engine.transaction()`, so no error is ever thrown and no
+            // promotion is ever attempted — control never reaches either site.
+            //
+            // ── Shape: ONE ROW PER VIOLATION, keyed on its own (type, name) ───
+            //
+            // Not one row for the batch. A pre-flight refusal is not "one causal
+            // item aborted the batch" — it is N violations, each naming a
+            // different draft, so there is no single causal item to key a batch
+            // row on. `batch_aborted`'s own note records why that matters: the
+            // audit row is keyed on `(type, name)`, and minting an identity for
+            // an unattributable failure "would put a fictional item in a
+            // compliance ledger" — which is exactly what a single batch-level
+            // row would need here. Every violation, by contrast, already HAS an
+            // honest identity: the draft that broke the rule.
+            //
+            // Measured against the reader rather than assumed: `auditMetaItem`
+            // (the door `GET /api/v1/meta/:type/:name/audit` serves Studio's
+            // audit-log tab from) queries `where { type, name }` ordered by
+            // `occurred_at desc`. One row per violation is therefore readable
+            // per item; a synthetic batch row would be readable under no real
+            // item at all.
+            //
+            // ── Durability ────────────────────────────────────────────────────
+            //
+            // Written outside any transaction because there is not one here yet
+            // — the pre-flight is the code above `engine.transaction()`. So
+            // unlike every other denial on this route there is nothing to
+            // survive: the row lands when it is written. `publishPackageDrafts`
+            // audits its refusals from a position a rollback cannot reach at
+            // every site, and this one gets it by construction.
+            for (const v of preflightViolations) {
+                await this.recordMetadataAudit({
+                    type: v.type,
+                    name: v.name,
+                    // The draft's OWN scope — see the violation type above.
+                    organizationId: v.organizationId,
+                    operation: 'publish',
+                    outcome: 'denied',
+                    // The violation's own verdict, in the audit column's
+                    // lowercase vocabulary — the value a compliance query
+                    // filters on. See `PREFLIGHT_AUDIT_CODE` for why this one
+                    // carries the specific rule while `batch_aborted` carries a
+                    // fixed value.
+                    code: PREFLIGHT_AUDIT_CODE[v.code],
+                    ...(request.actor ? { actor: request.actor } : {}),
+                    source: 'protocol.publishPackageDrafts',
+                    // `note` is WIRE-VISIBLE (`auditMetaItem` maps it straight
+                    // onto the `/audit` response). Safe here: this text is
+                    // `validateObjectNamespacePrefix`'s own authored, actionable
+                    // message — no driver dialect to withhold, unlike the
+                    // `batch_aborted` note's `clientFacingFailureText`.
+                    note: `refused before publish — package '${request.packageId}': ${v.error}`,
+                });
+            }
             return {
                 success: false,
                 publishedCount: 0,
                 failedCount: preflightViolations.length,
                 published: [],
-                failed: preflightViolations,
+                // Projected explicitly: `organizationId` is internal bookkeeping
+                // for the audit rows above and must not widen this response.
+                failed: preflightViolations.map((v) => ({
+                    type: v.type, name: v.name, error: v.error, code: v.code,
+                })),
             };
         }
 

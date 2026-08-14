@@ -123,8 +123,21 @@ export const SysMetadataAuditObject = ObjectSchema.create({
      *  - on `allowed`: `'ok'`
      *  - on `denied`: `'not_overridable'` | `'not_creatable'` |
      *    `'item_locked'` | `'invalid_metadata'` | `'destructive_change'` |
-     *    `'metadata_conflict'` | `'batch_aborted'`
+     *    `'metadata_conflict'` | `'batch_aborted'` | `'namespace_prefix'`
      *  - on `forced`: `'lock_override'` (Phase 3)
+     *
+     * `namespace_prefix` (#8595) is a PRE-FLIGHT refusal of a package publish —
+     * the ADR-0028 namespace rule rejecting an object draft's name before
+     * anything is promoted. It is the one refusal class on that route that
+     * carries the violated rule in `code` rather than a fixed value, and the
+     * distinction is not arbitrary: `batch_aborted`'s cause is whatever the
+     * error catalog threw (open set — see below), while the pre-flight codes
+     * are minted by the publish path itself (closed set, enumerated in
+     * `PreflightViolationCode` in `metadata-protocol`, whose `Record<>` map
+     * fails to compile if a new gate arrives without a spelling declared here).
+     * One row per violation, each keyed on the offending draft's own
+     * `(type, name)` — a pre-flight refusal names N items and no single causal
+     * one, so a batch-level row would have to invent an identity.
      *
      * `batch_aborted` (#8400) is the batch publish's own refusal value:
      * `publishPackageDrafts` promotes a whole package inside ONE transaction,

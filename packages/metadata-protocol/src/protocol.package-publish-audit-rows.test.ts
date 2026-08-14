@@ -1030,3 +1030,265 @@ describe('[#8594] a refused publish leaves the INNER verdict, in its own vocabul
         });
     });
 });
+
+/**
+ * [#8595] The PRE-FLIGHT refusal — the one site above the transaction.
+ *
+ * ---------------------------------------------------------------------------
+ * Why neither #8400 nor #8594 reached it
+ * ---------------------------------------------------------------------------
+ * Both of those write from BELOW the `engine.transaction()`: #8400's `allowed`
+ * rows are driven off the post-commit state and its `batch_aborted` row off the
+ * transaction's `catch`, and #8594's inner verdicts ride out on an error thrown
+ * inside the promotion loop. `publishPackageDrafts` also has a gate ABOVE all of
+ * that — the ADR-0028 namespace-prefix rule — whose `return` fires before any
+ * transaction is opened and without throwing anything. Control reaches none of
+ * the three sites, so that refusal wrote NOTHING: a package rejected for a bad
+ * object name was indistinguishable in `sys_metadata_audit` from a package
+ * nobody ever pressed Publish on. Same #7748 class, different refusal site.
+ *
+ * ---------------------------------------------------------------------------
+ * The shape, and the reader it was verified against
+ * ---------------------------------------------------------------------------
+ * ONE `denied` row PER VIOLATION, each keyed on the offending draft's own
+ * `(type, name)` — not one row for the batch. A pre-flight refusal names N
+ * violating items and no single causal one, so a batch-level row would have to
+ * mint a synthetic identity, which is precisely what `batch_aborted` declined to
+ * do for its unattributable case ("a fictional item in a compliance ledger").
+ *
+ * That choice rests on a claim about the READER, so it was measured rather than
+ * assumed: `auditMetaItem` — the door `GET /api/v1/meta/:type/:name/audit`
+ * serves Studio's audit-log tab from — queries `where { type, name }` ordered by
+ * `occurred_at desc`. Per-violation rows are readable per item; a synthetic
+ * batch row would be readable under no real item at all. The read-door case
+ * below asserts through that same door rather than only through `auditRows`.
+ *
+ * ---------------------------------------------------------------------------
+ * What "it works" has to mean here: the DISTINCTION, not just "a row exists"
+ * ---------------------------------------------------------------------------
+ * The defect is that a refused publish looked exactly like a publish that never
+ * happened, so a case that only asserts "rows appear after a refusal" would pass
+ * on a harness that writes rows unconditionally. Hence the opposite-direction
+ * control below: the identical violating drafts, staged and NEVER published,
+ * must still leave nothing. The two cases together are the fix; either alone is
+ * not.
+ *
+ * And the assertions are on LANDED rows (`auditRows`), not merely attempted
+ * ones. Unlike every other refusal on this route there is no transaction here to
+ * survive — the pre-flight sits above it — so `auditRows` and `auditAttempts`
+ * must AGREE, and one case pins that agreement rather than leaving it implied.
+ */
+describe('[#8595] a PRE-FLIGHT refused publish leaves a row per violation', () => {
+    const NS = 'helpdesk';
+
+    const objectBody = (name: string) => ({
+        name,
+        label: `Object ${name}`,
+        // [#8308] Authored OWD — the publish gate refuses an OWD-less custom object.
+        sharingModel: 'private',
+        fields: {
+            title: { type: 'text', label: 'Title' },
+        },
+    });
+
+    /**
+     * Declare the package's `manifest.namespace`, which is what ARMS the
+     * ADR-0028 pre-flight gate (`publishPackageDrafts` skips the check entirely
+     * for a package that declares none — legacy-grandfathered).
+     *
+     * Called AFTER the drafts are staged, mirroring `failMetadataWriteFor`
+     * above: staging is itself a metadata write and must not be judged by the
+     * gate under test.
+     */
+    const declareNamespace = (h: Harness) => {
+        h.engine.registry.getPackage = () => ({ manifest: { id: PKG, namespace: NS } });
+    };
+
+    /** Stage one ENV-WIDE object draft — how Studio/package authoring writes. */
+    const stageObjectDraft = async (protocol: ObjectStackProtocolImplementation, name: string) => {
+        await protocol.saveMetaItem({
+            type: 'object',
+            name,
+            item: objectBody(name),
+            mode: 'draft',
+            packageId: PKG,
+            actor: 'admin',
+        } as any);
+    };
+
+    // ── the deliverable ─────────────────────────────────────────────────────
+    it('two bad object names leave TWO `namespace_prefix` rows, each keyed on its own (type, name)', async () => {
+        const h = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(h.engine);
+
+        // Two violations (no `helpdesk_` prefix) and one compliant sibling.
+        await stageObjectDraft(protocol, 'ticket');
+        await stageObjectDraft(protocol, 'escalation');
+        await stageObjectDraft(protocol, 'helpdesk_agent');
+        declareNamespace(h);
+
+        // ABSENT BEFORE: staging is three `save` rows and no publish row at all.
+        expect(publishRows(h, 'denied')).toHaveLength(0);
+
+        const res = await protocol.publishPackageDrafts({
+            packageId: PKG, organizationId: ORG, actor: 'admin',
+        } as any);
+
+        // The whole batch is refused pre-flight — nothing promoted.
+        expect(res.success).toBe(false);
+        expect(res.publishedCount).toBe(0);
+        expect(res.failedCount).toBe(2);
+        expect(res.failed.map((f) => f.code)).toEqual(['NAMESPACE_PREFIX', 'NAMESPACE_PREFIX']);
+
+        // ── PRESENT AFTER — one row per violation, on its OWN identity ────────
+        const denied = publishRows(h, 'denied');
+        expect(denied.map((a) => a.name).sort()).toEqual(['escalation', 'ticket']);
+        for (const row of denied) {
+            expect(row).toMatchObject({
+                type: 'object',
+                operation: 'publish',
+                outcome: 'denied',
+                // The violated rule itself — the value a compliance query filters
+                // on. `batch_aborted` carries a fixed value because its cause is
+                // whatever the error catalog threw; the pre-flight codes are a
+                // closed set minted by this path, so the rule can be carried.
+                // adr0112-ok: D6b — persisted audit column, its own vocabulary
+                code: 'namespace_prefix',
+                actor: 'admin',
+                source: 'protocol.publishPackageDrafts',
+            });
+            // The note carries the rule's own actionable message (it is
+            // wire-visible through `auditMetaItem`), naming the fix.
+            expect(String(row.note)).toContain(PKG);
+            expect(String(row.note)).toContain(`${NS}_`);
+        }
+
+        // Scope: the DRAFT's own partition (env-wide), not the caller's active
+        // org — the same rule the promoted rows follow. Keyed on the caller's
+        // org these would be `ORG` and the trail would record the refusal
+        // against a partition the item never lived in.
+        for (const row of denied) {
+            expect(row.organization_id).toBeNull();
+            expect(row.organization_id).not.toBe(ORG);
+        }
+
+        // The COMPLIANT sibling gets no row of either kind: the batch is
+        // all-or-nothing, so it was never published — and it broke no rule, so
+        // it was never refused. A fix that audited the whole batch instead of
+        // the violations would put a row here.
+        expect(denied.some((a) => a.name === 'helpdesk_agent')).toBe(false);
+        expect(publishRows(h, 'allowed')).toHaveLength(0);
+
+        // NOT `batch_aborted`: that row means "the transaction rolled back and
+        // nothing landed". Here no transaction ever opened, and reporting a
+        // rollback that never happened would be a false statement in a
+        // compliance ledger.
+        // adr0112-ok: D6b — persisted audit column, its own vocabulary
+        expect(denied.some((a) => a.code === 'batch_aborted')).toBe(false);
+        // Nothing was promoted and no commit was recorded.
+        expect(h.commitRows).toHaveLength(0);
+        expect([...h.rows.values()].some((r) => r.state === 'active')).toBe(false);
+    });
+
+    // ── the opposite-direction control ──────────────────────────────────────
+    // The defect was that a refusal and a never-attempted publish were the SAME
+    // empty trail. The case above shows the refusal now writes; this one shows
+    // the other side still does not. Without it, "rows exist after a refusal"
+    // would also pass on a harness that wrote rows unconditionally, and the
+    // distinction — which IS the deliverable — would go unmeasured.
+    it('control: the SAME drafts, never published, still leave nothing (the distinction the defect erased)', async () => {
+        const h = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(h.engine);
+
+        await stageObjectDraft(protocol, 'ticket');
+        await stageObjectDraft(protocol, 'escalation');
+        declareNamespace(h);
+
+        // …and Publish is never pressed.
+
+        expect(opRows(h, 'publish')).toHaveLength(0);
+        expect(h.auditAttempts.some((a) => a.operation === 'publish')).toBe(false);
+        // The staging saves DID land, so "no publish row" is a real observation
+        // about the publish path and not a dead harness.
+        expect(opRows(h, 'save')).toHaveLength(2);
+    });
+
+    // ── landed, not merely attempted ────────────────────────────────────────
+    it('the rows LAND: `auditRows` and `auditAttempts` agree (no transaction to survive here)', async () => {
+        const h = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(h.engine);
+
+        await stageObjectDraft(protocol, 'ticket');
+        declareNamespace(h);
+        await protocol.publishPackageDrafts({
+            packageId: PKG, organizationId: ORG, actor: 'admin',
+        } as any);
+
+        // adr0112-ok: D6b — persisted audit column, its own vocabulary
+        const landed = h.auditRows.filter((a) => a.code === 'namespace_prefix');
+        // adr0112-ok: D6b — persisted audit column, its own vocabulary
+        const attempted = h.auditAttempts.filter((a) => a.code === 'namespace_prefix');
+        expect(landed).toHaveLength(1);
+        // Equal counts is the whole claim: the pre-flight is ABOVE the
+        // transaction, so unlike the lock refusal (attempted-then-rolled-back
+        // before #8594) there is nothing here that can be undone. A future
+        // change that moved this write inside the transaction would split these
+        // two numbers apart, which is exactly the regression worth catching.
+        expect(attempted).toHaveLength(landed.length);
+    });
+
+    // ── the read door ───────────────────────────────────────────────────────
+    // A row nobody can query is not a trail. This is also the case that
+    // validates the SHAPE decision: the reader keys on `(type, name)`, so a row
+    // keyed on the violating draft is reachable and a synthetic batch-level row
+    // would not have been.
+    it('auditMetaItem surfaces the refusal under the violating object\'s own identity', async () => {
+        const h = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(h.engine);
+
+        await stageObjectDraft(protocol, 'ticket');
+        await stageObjectDraft(protocol, 'escalation');
+        declareNamespace(h);
+        await protocol.publishPackageDrafts({
+            packageId: PKG, organizationId: ORG, actor: 'admin',
+        } as any);
+
+        const { events } = await protocol.auditMetaItem({ type: 'object', name: 'ticket' });
+        const refusal = events.find((e) => e.operation === 'publish');
+        expect(refusal).toMatchObject({
+            outcome: 'denied',
+            // adr0112-ok: D6b — persisted audit column, its own vocabulary
+            code: 'namespace_prefix',
+            actor: 'admin',
+            source: 'protocol.publishPackageDrafts',
+        });
+
+        // Each violation is readable under ITS OWN name — the per-item history
+        // tab for `escalation` shows `escalation`'s refusal, not a batch row.
+        const other = await protocol.auditMetaItem({ type: 'object', name: 'escalation' });
+        expect(other.events.map((e) => e.code)).toContain('namespace_prefix');
+        // …and the compliant sibling's tab stays empty of publish events.
+        const clean = await protocol.auditMetaItem({ type: 'object', name: 'helpdesk_agent' });
+        expect(clean.events.some((e) => e.operation === 'publish')).toBe(false);
+    });
+
+    // ── the gate does not fire on a compliant batch ─────────────────────────
+    // The over-broad guard: a "fix" that wrote a refusal row whenever a
+    // namespace is declared would pass every case above.
+    it('a COMPLIANT batch under the same namespace writes `allowed` rows and no refusal', async () => {
+        const h = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(h.engine);
+
+        await stageObjectDraft(protocol, 'helpdesk_ticket');
+        declareNamespace(h);
+
+        const res = await protocol.publishPackageDrafts({
+            packageId: PKG, organizationId: ORG, actor: 'admin',
+        } as any);
+        expect(res.success).toBe(true);
+        expect(res.publishedCount).toBe(1);
+
+        expect(publishRows(h, 'denied')).toHaveLength(0);
+        expect(publishRows(h, 'allowed').map((a) => a.name)).toEqual(['helpdesk_ticket']);
+    });
+});
