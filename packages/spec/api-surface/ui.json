@@ -288,6 +288,7 @@
     "RecordAlertAction (type)",
     "RecordAlertActionSchema (const)",
     "RecordAlertProps (type)",
+    "RecordAlertPropsParsed (type)",
     "RecordChatterProps (const)",
     "RecordDetailsProps (const)",
     "RecordHighlightsField (type)",

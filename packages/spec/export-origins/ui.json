@@ -288,6 +288,7 @@
     "RecordAlertAction": "src/ui/component.zod.ts#RecordAlertAction (type)",
     "RecordAlertActionSchema": "src/ui/component.zod.ts#RecordAlertActionSchema (const)",
     "RecordAlertProps": "src/ui/component.zod.ts#RecordAlertProps (type)",
+    "RecordAlertPropsParsed": "src/ui/component.zod.ts#RecordAlertPropsParsed (type)",
     "RecordChatterProps": "src/ui/component.zod.ts#RecordChatterProps (const)",
     "RecordDetailsProps": "src/ui/component.zod.ts#RecordDetailsProps (const)",
     "RecordHighlightsField": "src/ui/component.zod.ts#RecordHighlightsField (type)",

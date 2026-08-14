@@ -1273,6 +1273,12 @@ export const RecordAlertProps = strictObject({
   dismissKey: z.string().optional().describe('Stable key the dismissal is remembered under, so reworded titles do not resurrect a dismissed banner (renderer default: the English resolution of `title`, else the severity).'),
 });
 export type RecordAlertProps = z.input<typeof RecordAlertProps>;
+/**
+ * ADR-0122: the parsed state differs from the authored state on exactly one
+ * key — `visible`'s bare-string arm normalizes to the canonical
+ * `{ dialect: 'cel', source }` envelope (ExpressionInputSchema's transform).
+ */
+export type RecordAlertPropsParsed = z.infer<typeof RecordAlertProps>;
 
 /**
  * `record:quick_actions` — #8744. See the family header above. The bar
