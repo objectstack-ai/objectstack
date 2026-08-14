@@ -853,12 +853,26 @@ function assertOrderByIsMaterializable(
     + '. It was not applied, and an unapplied sort returns the rows in an arbitrary order — '
     + "which 'limit'/'offset' then slices into an arbitrary page."
     // Deliberately the SAME remedy, in the same words, as the ingress door's
-    // formula and dotted refusals (#6994, #6924) and #6673's SEARCH-axis
-    // correction. One vocabulary across the doors: a caller refused at the REST
-    // boundary and a caller refused here must not be sent two different ways.
-    // `query-expression-conformance.test.ts` pins the three wordings as EQUAL
-    // rather than each separately, because separate wordings is exactly how
-    // #4256 and #6673 drifted apart in the first place.
+    // formula and dotted refusals (#6994, #6924). One vocabulary across the
+    // doors: a caller refused at the REST boundary and a caller refused here
+    // must not be sent two different ways.
+    //
+    // [#8648] With the SEARCH axis the agreement is in SUBSTANCE, not in
+    // words, and saying otherwise here was simply false — measured from the
+    // running doors, #6673's correction emits "Mirror the computed value onto
+    // a stored text field on '<object>' and search that instead." All three
+    // axes prescribe the same thing (put the value on a stored column of the
+    // queried object and query THAT instead); SEARCH narrows the target to a
+    // TEXT column, which is right for an axis that scans text-like columns and
+    // is a shipped, user-visible message on an axis that already landed.
+    //
+    // `query-expression-conformance.test.ts` pins that agreement as ONE thing
+    // rather than each wording separately, because separate wordings is
+    // exactly how #4256 and #6673 drifted apart in the first place. It holds
+    // three layers: the four SORT/FILTER doors' emitted remedies compared
+    // against EACH OTHER, every axis' exact sentence (SEARCH included — the
+    // door this claim used to skip), and the substance none of them may drop.
+    // So a rewording of any axis goes red.
     + ` Denormalise the value onto '${object}' (a stored field, written when the`
     + ' source changes) and sort by that. A formula field is virtual: with no'
     + ' column behind it the ORDER BY reaches the driver, finds nothing, and is'

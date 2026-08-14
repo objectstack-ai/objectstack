@@ -6603,10 +6603,16 @@ export class ObjectStackProtocolImplementation implements
             + 'returns no records where the same test against a stored boolean returns every '
             + 'record.'
             // Deliberately the same remedy, in the same words, as the SORT
-            // axis' formula refusal (#6994) and #6673's SEARCH-axis
-            // correction, with only the verb changed to name this axis. One
-            // vocabulary across the doors: an author refused on two axes must
-            // not be sent two different ways.
+            // axis' formula refusal (#6994), with only the verb changed to
+            // name this axis. One vocabulary across the doors: an author
+            // refused on two axes must not be sent two different ways.
+            // [#8648] The SEARCH axis (#6673) agrees in SUBSTANCE and words it
+            // its own way — "Mirror the computed value onto a stored text
+            // field on '<object>' and search that instead." Same prescription,
+            // narrowed to the column type that axis can scan; claiming
+            // word-identity with it was false. `query-expression-conformance
+            // .test.ts` pins both halves — each door's exact sentence, and the
+            // substance all three axes share.
             + ` Denormalise the value onto '${object}' (a stored field, written when the source`
             + ' changes) and filter that.',
         );
@@ -6815,9 +6821,13 @@ export class ObjectStackProtocolImplementation implements
             + (unmaterialized.length > 1 ? ` (also: ${unmaterialized.slice(1).join(', ')})` : ''),
             {
                 // Deliberately the same remedy, in the same words, as the
-                // dotted refusal above and as #6673's SEARCH-axis correction:
-                // one vocabulary across the doors, so an author refused twice
-                // is not sent two different ways.
+                // dotted refusal above: one vocabulary across the doors, so an
+                // author refused twice is not sent two different ways.
+                // [#8648] #6673's SEARCH-axis correction agrees in SUBSTANCE,
+                // in its own words ("Mirror the computed value onto a stored
+                // text field on '<object>' and search that instead") — the
+                // same prescription with a TEXT target, not the same sentence.
+                // Pinned as such in `query-expression-conformance.test.ts`.
                 hint: ` Denormalise the value onto '${object}' (a stored field, written when the`
                     + ' source changes) and sort by that. A formula field is virtual: with no'
                     + ' column behind it the ORDER BY reaches the driver, finds nothing, and is'

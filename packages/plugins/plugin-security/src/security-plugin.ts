@@ -4904,8 +4904,47 @@ export class SecurityPlugin implements Plugin {
     // [#5386] The OWD / record-share half — asked UNCONDITIONALLY, because the
     // RLS half above is skipped whole when the master authors no write policy,
     // which is exactly the common case this closes.
+    //
+    // [#8679] …and it DEFERS before it hard-refuses, exactly as the by-id write
+    // path has since #5493 (PR #6909). Record sharing answering "not editable"
+    // is not the whole determination: an app-authored RLS update-widener on the
+    // MASTER can admit the row by declaration, and asking that question is what
+    // #6909 installed on the sharing middleware's refusal branch. This call site
+    // never asked it, so one principal, one master row and one operation got two
+    // different answers depending on WHO WAS ASKING — the master itself: allowed;
+    // a child of it: `403 … (record sharing)`. `security/explain` agreed with the
+    // first. Measured on 17.0.0 GA with the only variable being who created the
+    // master (the enrolment path of a real app's core write surface).
+    //
+    // This is the SAME composition, not a second one and not a relaxation:
+    //   • the verdict comes from {@link checkAuthoredRowWrite} — the method
+    //     `SharingService.probeAuthoredRowWrite` passes straight through to, so
+    //     the answer here is byte-for-byte the one a direct by-id write of this
+    //     master would get. There is no copy to drift, which matters because a
+    //     duplicated permission composition is how these two paths diverged;
+    //   • the operation asked is `update`, matching the two legs above — this
+    //     gate's whole question is EDIT access to the master, never the detail's
+    //     own verb (deleting a child does not delete the master);
+    //   • `admit` retracts only THIS leg's refusal. The object-level `update`
+    //     grant and the master's own write-RLS leg have already run above and
+    //     still refuse on their own terms, mirroring the by-id path where an
+    //     `admit` hands the row on to the pre-image gate rather than authorizing
+    //     anything;
+    //   • every other outcome — `abstain`, no authored policy, a `check`-only
+    //     policy, a principal-less or delegated context, a throwing probe —
+    //     leaves the refusal below untouched, byte for byte. The method is
+    //     fail-closed in the `abstain` direction and swallows its own throws, so
+    //     no failure mode here can widen access.
     if (!(await this.resolveSharingCanEdit(rel.master, String(masterId), context, permissionSets))) {
-      denyMasterEdit(`master '${rel.master}' not editable by this user (record sharing)`, masterId);
+      const authored = await this.checkAuthoredRowWrite(
+        rel.master,
+        String(masterId),
+        'update',
+        context,
+      );
+      if (authored !== 'admit') {
+        denyMasterEdit(`master '${rel.master}' not editable by this user (record sharing)`, masterId);
+      }
     }
   }
 

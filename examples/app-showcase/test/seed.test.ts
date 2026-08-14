@@ -84,11 +84,12 @@ describe('showcase stack', () => {
   });
 
   /**
-   * #5420 — the section headings the registration makes translatable, pinned
-   * from BOTH sides on the real stack.
+   * #5420 (extended by #8231's remainder) — the section headings the
+   * registration makes translatable, pinned from BOTH sides on the real
+   * stack.
    *
-   * Registering `ContactViews` is what puts its four named `form.sections` in
-   * front of the i18n gates, and the two gates read the same set in opposite
+   * Registering `ContactViews` is what puts its named sections in front of
+   * the i18n gates, and the two gates read the same set in opposite
    * directions: `i18n/missing-section` (#5405) fails on a declared section
    * with no bundle entry, `translation-target-unknown` (#5415/#5422) fails on
    * a bundle entry no section declares. A test that checked one direction
@@ -96,19 +97,23 @@ describe('showcase stack', () => {
    *
    * Read on the composed stack, not on the imported container: what the gates
    * see is `stack.views`, and that is exactly the reachability this issue was
-   * about. A section with no `name` (the sparse `formViews.create` section) is
-   * untranslatable by construction — every renderer guards the lookup on
-   * `name` — so it is deliberately outside the set.
+   * about. The default `form`'s four sections AND the sparse
+   * `formViews.create` override's one section are both named as of #8231's
+   * remainder, so both contribute to the set below — `formViews.create` is no
+   * longer excluded.
    */
   it('keys the contact form sections to exactly what the container declares', () => {
     const contact = (stack.views ?? []).find((v) => targetObject(v) === 'showcase_contact');
+    const namesOf = (view: unknown): string[] => {
+      const sections = (view as { sections?: unknown } | undefined)?.sections;
+      return (Array.isArray(sections) ? sections : [])
+        .map((s) => (s as { name?: unknown } | undefined)?.name)
+        .filter((n): n is string => typeof n === 'string');
+    };
     const form = (contact as { form?: unknown } | undefined)?.form;
-    const sections = (form as { sections?: unknown } | undefined)?.sections;
-    const declared = (Array.isArray(sections) ? sections : [])
-      .map((s) => (s as { name?: unknown } | undefined)?.name)
-      .filter((n): n is string => typeof n === 'string')
-      .sort();
-    expect(declared).toEqual(['contact', 'notes', 'status', 'work']);
+    const formViews = (contact as { formViews?: Record<string, unknown> } | undefined)?.formViews ?? {};
+    const declared = [...namesOf(form), ...Object.values(formViews).flatMap(namesOf)].sort();
+    expect(declared).toEqual(['contact', 'notes', 'status', 'who_is_this', 'work']);
 
     const zh = ShowcaseTranslationBundle['zh-CN']?.objects?.showcase_contact as
       | { _sections?: Record<string, { label?: string }> }
@@ -218,25 +223,21 @@ describe('showcase form + page section i18n coverage (#8231)', () => {
   }
 
   /**
-   * KNOWN EXCLUSIONS — deliberately left unnamed by #8231's own scope.
+   * Formerly KNOWN EXCLUSIONS, now named (#8231 remainder).
    *
-   * Naming any of these three would flip a currently-green, currently-PINNED
-   * finding in `packages/lint/src/validate-translatable-sections.test.ts`
-   * ("reports both nameless headings the shipped task container declares",
-   * "reports the sparse create override and nothing from the named default
-   * form") and `validate-translation-references.test.ts` ("still reports a
-   * section name nothing declares") — all three import `TaskViews` /
-   * `ContactViews` directly from this app and pin their CURRENT nameless
-   * state as the regression fixture. Fixing them requires a coordinated
-   * `packages/lint` test update, which is `packages/**` — out of #8231's
-   * declared file surface. Tracked as a follow-up rather than silently
-   * widening scope; see this test's introducing PR for the issue link.
+   * Three sections used to be excluded here — `showcase_task`'s
+   * `formViews.edit` ("Task") and `formViews.quick` ("Quick Edit"), and
+   * `showcase_contact`'s `formViews.create` ("Who is this?"). Naming them
+   * would have flipped a currently-PINNED finding in
+   * `packages/lint/src/validate-translatable-sections.test.ts` and
+   * `validate-translation-references.test.ts`, which imported `TaskViews` /
+   * `ContactViews` directly from this app and pinned their nameless state as
+   * the regression fixture. #8515 (PR #8610) moved those pins onto a frozen
+   * snapshot (`packages/lint/src/showcase-shape.fixtures.ts`) that no longer
+   * reads live `examples/**` for the nameless cases, which is what freed this
+   * app to name all three. No exclusion set is needed any more — every
+   * section the sweep below finds is asserted individually.
    */
-  const KNOWN_UNNAMED = new Set<string>([
-    'showcase_task::formViews.edit::Task',
-    'showcase_task::formViews.quick::Quick Edit',
-    'showcase_contact::formViews.create::Who is this?',
-  ]);
 
   function collectFormSections(): Found[] {
     const out: Found[] = [];
@@ -291,9 +292,7 @@ describe('showcase form + page section i18n coverage (#8231)', () => {
     return out;
   }
 
-  const found = [...collectFormSections(), ...collectPageDetailSections()].filter(
-    (f) => !KNOWN_UNNAMED.has(`${f.object}::${f.where}::${f.label}`),
-  );
+  const found = [...collectFormSections(), ...collectPageDetailSections()];
 
   it('found more than a token number of sections (guards against a vacuous sweep)', () => {
     expect(found.length).toBeGreaterThanOrEqual(12);

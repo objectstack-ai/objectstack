@@ -3373,6 +3373,23 @@ export class SqlDriver implements IDataDriver {
   /** Declared indexes per managed table (tableName → indexes[]), captured in `initObjects`. Used to recreate indexes after a SQLite table rebuild. */
   protected managedObjectIndexes = new Map<string, any[]>();
 
+  /**
+   * [#8621] PHYSICAL key indexes per table (tableName → the PRIMARY KEY and
+   * UNIQUE indexes that actually exist), for {@link assertConflictTargetBacked}.
+   *
+   * Deliberately not `managedObjectIndexes`, which records what metadata
+   * DECLARES. The pre-flight answers "can this conflict target resolve to a key
+   * on the database in front of me", and the two differ in both directions: a
+   * table created before its `unique` declaration was emitted as DDL is declared
+   * and unbacked (the case the refusal wording already names), and a federated
+   * or hand-indexed table is backed while declaring nothing here at all.
+   *
+   * Invalidated per table in {@link initObjects} — the one seam that creates
+   * indexes — and re-read from the database before any refusal, so a stale entry
+   * can cost a redundant read but can never produce a false refusal.
+   */
+  private physicalKeyIndexes = new Map<string, PhysicalIndex[]>();
+
   /** De-dup set for boot-time drift warnings (keyed by {@link driftKey}). */
   protected driftWarned = new Set<string>();
 
@@ -4999,6 +5016,166 @@ export class SqlDriver implements IDataDriver {
     return columns;
   }
 
+  /**
+   * The PRIMARY KEY and UNIQUE indexes a table PHYSICALLY carries, or `null`
+   * when the database could not be asked.
+   *
+   * Partial indexes are excluded: a `WHERE`-restricted unique index constrains
+   * only the rows its predicate admits, so it cannot serve as a conflict target
+   * for an arbitrary row. (MySQL — the only dialect the pre-flight runs on
+   * today — has no partial indexes at all, so this arm is defensive rather than
+   * exercised; it is written here so extending the pre-flight to SQLite or
+   * Postgres does not have to rediscover it.)
+   *
+   * `null` and `[]` are different answers and both mean "do not refuse": a read
+   * that threw is unknown, and a table that reports NO keys whatsoever is a
+   * table this driver did not create — every managed table has an `id` PRIMARY
+   * KEY — most likely one that does not exist yet. An empty result is
+   * indistinguishable from a missing table on MySQL, whose `information_schema`
+   * answers zero rows either way, so treating it as "unbacked" would answer
+   * *"no unique index backs your conflict keys"* to a caller whose real problem
+   * is a typo in the table name.
+   */
+  private async introspectKeyIndexes(
+    tableName: string,
+    opts: { fresh?: boolean } = {},
+  ): Promise<PhysicalIndex[] | null> {
+    if (!opts.fresh) {
+      const cached = this.physicalKeyIndexes.get(tableName);
+      if (cached) return cached;
+    }
+    let indexes: PhysicalIndex[];
+    try {
+      indexes = await this.introspectIndexes(tableName);
+    } catch {
+      // #7332's direction, for the same reason: a failed read is not evidence
+      // of an absent index, and this caller's whole output is a refusal.
+      return null;
+    }
+    const keys = indexes.filter(
+      (i) => (i.unique === true || i.primary === true) && i.partial !== true && i.columns.length > 0,
+    );
+    this.physicalKeyIndexes.set(tableName, keys);
+    return keys;
+  }
+
+  /**
+   * [#8621] Refuse an upsert whose `conflictKeys` no PRIMARY KEY or UNIQUE index
+   * backs — BEFORE the statement is compiled, on the dialect where the server
+   * will never say so itself.
+   *
+   * # Why a pre-flight exists at all, when a refusal already did
+   *
+   * The refusal this throws is the one #8445/#8567 already landed, and the
+   * catch that raises it (`isUnbackedConflictTargetError` in {@link upsert}) is
+   * REACTIVE — it classifies an error the server raised. On SQLite and Postgres
+   * the server does raise one: `ON CONFLICT (email)` names an arbiter index, the
+   * planner fails to find it, and the statement is refused before it writes.
+   *
+   * On MySQL no error is ever raised, because the conflict target never reaches
+   * the server. knex compiles the driver's exact call to `ON DUPLICATE KEY
+   * UPDATE`, which takes no target at all — pinned with no server needed in
+   * `sql-driver-upsert-conflict-target-dialects.test.ts`:
+   *
+   * ```
+   * knex('t').insert({...}).onConflict(['email']).merge(['title']).toSQL()
+   *   mysql2 -> insert into `t` (…) values (?, ?, ?)
+   *             on duplicate key update `title` = values(`title`)   ← no `email`
+   * ```
+   *
+   * So the reactive catch cannot fire there, and what MySQL does instead is
+   * strictly worse than the illegible errors the other two dialects were fixed
+   * for — measured on live MySQL 8.0.46 (#8592, re-measured here): it merges on
+   * whichever unique index the row happens to collide with, and does NOT merge
+   * on the key it was given. A wrong write, with no error.
+   *
+   * Consulting the declared indexes before compiling is therefore a genuinely
+   * different mechanism, not a re-use of the existing path. What IS re-used is
+   * the answer: the same `refuseUnbackedConflictTarget` wording, `code` and
+   * `status`, per #5240 — one condition, one wording — so all three dialects
+   * now answer the same sentence for the same mistake.
+   *
+   * # Why it runs on MySQL ONLY
+   *
+   * Not a dialect exemption — the opposite. SQLite and Postgres already refuse
+   * this exact call with this exact sentence, and they refuse it with the
+   * SERVER's own text attached as `cause`, which is the ground truth an operator
+   * debugging the table wants and which no pre-flight can reconstruct. Running
+   * the pre-flight there would replace a server verdict with an introspection
+   * verdict, discard that `cause`, and make the accept set depend on this
+   * driver's reading of `pg_index` rather than on the planner's — a strictly
+   * worse trade on the two dialects that are already correct. The criterion is
+   * "the compiler drops the conflict target, so the server can never be asked",
+   * and MySQL is the dialect that meets it.
+   *
+   * # Why it refuses only what it can PROVE is unbacked
+   *
+   * A false refusal breaks a working merge, which is the expensive direction —
+   * the same asymmetry `isUnbackedConflictTargetError` records. So every
+   * uncertain answer proceeds: a failed introspection, a table with no keys at
+   * all (see {@link introspectKeyIndexes}), and a possibly stale cache, which is
+   * re-read from the database before any refusal is thrown.
+   *
+   * The comparison is against the conflict target as EMITTED. `onConflict()`
+   * receives `mergeKeys` verbatim — the write column map is applied to the row,
+   * never to the target — so the identifiers compared here are the identifiers
+   * the statement would carry, and a key set matches an index when the two hold
+   * the same columns, order-insensitively (which is how both `ON CONFLICT`
+   * dialects infer an arbiter index, and the only reading under which a
+   * composite key means anything).
+   *
+   * ⚠️ **This closes the unbacked-target hole, and not the whole MySQL gap.**
+   * `ON DUPLICATE KEY UPDATE` carries no target even when the target IS backed,
+   * so a table with a second unique index can still merge on a key the caller
+   * never named. Measured here on live MySQL 8.0.46, both columns unique,
+   * caller naming `email`:
+   *
+   * ```
+   * upsert({email:'a@b.com',     tax_id:'T-1', title:'first'},  ['email']) -> seeded
+   * upsert({email:'other@b.com', tax_id:'T-1', title:'second'}, ['email'])
+   *   -> ONE row, merged on `tax_id`. The named target was backed the whole time.
+   * ```
+   *
+   * That is a different condition with a different fix and is filed separately
+   * (#8755); it is deliberately NOT smuggled in here, because refusing it would
+   * mean refusing every `conflictKeys` upsert on any MySQL table carrying more
+   * than one unique index — an accept-set change far past what this card rules.
+   */
+  protected async assertConflictTargetBacked(object: string, mergeKeys: string[]): Promise<void> {
+    // The table the statement will actually hit — same resolution `getBuilder`
+    // performs for the insert, rotation shard included.
+    const target = this.rotationWriteTarget(object) ?? object;
+    const tableName = this.physicalTableByObject[target] ?? target;
+
+    const wanted = new Set(mergeKeys);
+    const backs = (keys: PhysicalIndex[]): boolean =>
+      keys.some((i) => i.columns.length === wanted.size && i.columns.every((c) => wanted.has(c)));
+
+    let keys = await this.introspectKeyIndexes(tableName);
+    if (keys !== null && keys.length > 0 && !backs(keys)) {
+      // A cache filled before the index was created is the only way a real key
+      // can be missing here, and it is cheaper to re-read once on the refusing
+      // path than to risk refusing a call the database would have merged.
+      keys = await this.introspectKeyIndexes(tableName, { fresh: true });
+    }
+    if (keys === null || keys.length === 0 || backs(keys)) return;
+
+    // The introspected keys stand where the server's sentence stands on the
+    // other two dialects: the caller-visible message is the shared wording, and
+    // `cause` carries the ground truth an operator needs to act. Schema
+    // identifiers only — no row values, matching the payload contract the
+    // refusal already keeps.
+    const found = keys.map((i) => `${i.name}(${i.columns.join(', ')})`).join(', ');
+    throw refuseUnbackedConflictTarget(
+      object,
+      mergeKeys,
+      new Error(
+        `no PRIMARY KEY or UNIQUE index on "${tableName}" covers (${mergeKeys.join(', ')}); ` +
+          `keys present: ${found}`,
+      ),
+    );
+  }
+
   async upsert(object: string, data: Record<string, any>, conflictKeys?: string[], options?: DriverOptions): Promise<Record<string, any>> {
     const { _id, ...rest } = data;
     const toUpsert = { ...rest };
@@ -5013,6 +5190,24 @@ export class SqlDriver implements IDataDriver {
     this.injectTenantOnInsert(object, toUpsert, options);
 
     const mergeKeys = conflictKeys && conflictKeys.length > 0 ? conflictKeys : ['id'];
+
+    // [#8621] Pre-flight the conflict target — see
+    // {@link assertConflictTargetBacked} for the mechanism and why it is
+    // MySQL-only. Two placement facts, both load-bearing:
+    //
+    //  - It runs only when the CALLER named a target. The default `['id']` is
+    //    this driver's own primary key on every table it creates, so a probe
+    //    there could only ever confirm what the driver just built — a round
+    //    trip added to the hot path of every ordinary upsert to answer a
+    //    question that has no other answer. The defect, the card and the ruling
+    //    are all about a caller-named target.
+    //  - It runs BEFORE the retry loop, therefore before
+    //    `fillAutoNumberFields`. Refusing after it would burn an autonumber
+    //    reservation for a statement that never executes — a visible gap in an
+    //    externally meaningful sequence, handed out for a rejected call.
+    if (conflictKeys && conflictKeys.length > 0 && this.isMysql) {
+      await this.assertConflictTargetBacked(object, mergeKeys);
+    }
 
     // #6943. Measured: `upsert` does NOT share `bulkCreate`'s shape. It is
     // single-row, so a stale counter costs it exactly one burned number per
@@ -6350,6 +6545,11 @@ export class SqlDriver implements IDataDriver {
       } else {
         this.managedObjectIndexes.delete(tableName);
       }
+      // [#8621] This call may create the table, or add a unique index to one
+      // that already exists, so whatever the upsert pre-flight introspected
+      // before it is stale. Dropping the entry is enough — the entry is
+      // re-read lazily, and a refusal re-reads unconditionally.
+      this.physicalKeyIndexes.delete(tableName);
 
       const jsonCols: string[] = [];
       const booleanCols: string[] = [];
