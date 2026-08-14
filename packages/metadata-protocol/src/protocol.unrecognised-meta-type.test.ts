@@ -37,6 +37,12 @@
  *    works, or the accumulation this card was filed about would become
  *    unremovable.
  *
+ * The last two describe blocks pin the two exemptions the first cut lacked, each
+ * paired with the refusal that must survive it: the COMPOUND arity (whose
+ * `:type` segment carries an OBJECT name) and an already-stored namespace (which
+ * is not being minted by definition). `protocol.stored-residue-resave.test.ts`
+ * carries the production paths that made the second one necessary.
+ *
  * Harness: the real `saveMetaItem` write path over a stub engine, the shape
  * `protocol.code-only-types.test.ts` uses. A gate INSIDE `saveMetaItem` cannot
  * be measured against a harness that mocks `saveMetaItem`.
@@ -257,11 +263,84 @@ describe('#8421 — the refusal is scoped to the door that MINTS', () => {
 
     it('still refuses the same name on a re-mint after the delete', async () => {
         // The pair that proves the scoping is a policy rather than an accident
-        // of ordering: the row can leave, and it cannot come back.
+        // of ordering: the row can leave, and it cannot come back. It is also
+        // the negative half of the already-stored exemption below — with the
+        // last `fieldz` row gone the namespace no longer exists, so the door
+        // closes again on the very name it had just let out.
         const { protocol } = makeProtocol([{ type: 'fieldz', name: 'showcase_task.title' }]);
         await protocol.deleteMetaItem({ type: 'fieldz', name: 'showcase_task.title' });
         await expect(
             protocol.saveMetaItem({ type: 'fieldz', name: 'showcase_task.title', item: { name: 'x' } }),
         ).rejects.toMatchObject({ code: 'INVALID_REQUEST', status: 400 });
+    });
+});
+
+describe('#8421 — the COMPOUND arity carries an OBJECT name, not a type claim', () => {
+    // `/metadata/lead/views/all_leads` → `type='lead'`, `name='views/all_leads'`.
+    // One operation, one `saveMetaItem`; the runtime dispatcher's `/meta` branch
+    // and `rest`'s `PUBLISHED_COMPOUND` route both document that shape verbatim.
+    // `lead` is an OBJECT — runtime data no static contract can enumerate — so
+    // a type verdict applied to that segment refuses every object name that is
+    // not coincidentally a metadata type. Measured as a regression of the first
+    // cut in two packages; the ruling this card implements is about metadata
+    // TYPE names like `fieldz`.
+    const VIEW_BODY = { name: 'all_leads', label: 'All Leads', columns: ['name'] };
+
+    it('saves a sub-resource under an object name the static contract cannot know', async () => {
+        const { protocol, rows } = makeProtocol();
+
+        const result = await protocol.saveMetaItem({
+            type: 'lead', name: 'views/all_leads', item: VIEW_BODY,
+        });
+
+        expect(result.success).toBe(true);
+        // The compound name is ONE key — not split, not truncated to its last
+        // segment — which is what makes this the same operation the two
+        // transports document rather than a lookalike.
+        expect(metaRows(rows)).toHaveLength(1);
+        expect(metaRows(rows)[0]).toMatchObject({ type: 'lead', name: 'views/all_leads' });
+    });
+
+    it('and the exemption is the ARITY, not the name — `lead` alone is still refused', async () => {
+        // ANTI-VACUITY, and the line between the two fixes: at the simple arity
+        // the `:type` segment IS a type claim, so the same string that is a
+        // legal owner above is an illegal type here. Without this case the
+        // exemption above would be indistinguishable from "stop refusing".
+        const { protocol, rows } = makeProtocol();
+
+        await expect(
+            protocol.saveMetaItem({ type: 'lead', name: 'all_leads', item: VIEW_BODY }),
+        ).rejects.toMatchObject({ code: 'INVALID_REQUEST', status: 400 });
+        expect(metaRows(rows)).toHaveLength(0);
+    });
+});
+
+describe('#8421 — a namespace that ALREADY EXISTS is not being minted', () => {
+    it('accepts a NEW item under a residue type that has stored rows', async () => {
+        // The exemption `duplicatePackage` needs (measured in
+        // `protocol.stored-residue-resave.test.ts`): the copy re-saves a stored
+        // row's type under a NEW name, so an exemption keyed on the exact item
+        // would not reach it. What is exempt is the namespace, and the STORE is
+        // what says it exists — never the caller.
+        const { protocol, rows } = makeProtocol([{ type: 'fieldz', name: 'showcase_task.title' }]);
+
+        const result = await protocol.saveMetaItem({
+            type: 'fieldz', name: 'showcase_task.due_at', item: { name: 'showcase_task.due_at' },
+        });
+
+        expect(result.success).toBe(true);
+        expect(metaRows(rows)).toHaveLength(2);
+    });
+
+    it('POSITIVE CONTROL — a FRESH unrecognised type is still refused in the same store', async () => {
+        // The pair is the whole point: residue stays workable, and the door
+        // that mints the FIRST row of a namespace nothing serves stays shut.
+        // Same protocol instance, so this cannot pass by the store being empty.
+        const { protocol, rows } = makeProtocol([{ type: 'fieldz', name: 'showcase_task.title' }]);
+
+        await expect(
+            protocol.saveMetaItem({ type: 'objectt', name: 'showcase_task', item: { name: 'x' } }),
+        ).rejects.toMatchObject({ code: 'INVALID_REQUEST', status: 400 });
+        expect(metaRows(rows)).toHaveLength(1);
     });
 });

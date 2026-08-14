@@ -208,39 +208,18 @@ function canonicalMetaType(type: string): string {
  * and (#8424) for why this boundary consumes the composed VERDICT rather than
  * the predicate parts: the spelling contract stays whole at its producer.
  *
- * ## [#8421] `opts.minting` — the second verdict, and why it is not on all six
+ * ## [#8421] The SECOND verdict is not here
  *
- * The refusal above is silent for a name that is not a plural of ANYTHING
+ * This refusal is silent for a name that is not a plural of ANYTHING
  * (`fieldz`), because such a name reaches for no declared type. That residue
- * was left open deliberately in #7894 and closed by the maintainer's ruling of
- * 2026-08-14 (「同意」), joint with #8586: retiring `additionalTypes` removed the
- * last channel by which a plugin could DECLARE a metadata kind, so an
- * unrecognised name can no longer be a declaration this boundary has not heard
- * about. {@link unrecognisedMetaTypeRefusal} is that verdict.
- *
- * It is passed ONLY by {@link saveMetaItem} — the one entry point that MINTS a
- * `sys_metadata` namespace — and that scoping is measured, not timid:
- *
- *  - **The live type set legitimately holds keys the static contract does
- *    not.** An ordinary `registerApp` puts `data` (a manifest's seed
- *    datasets), `kind` (`contributes.kinds`) and `package` into
- *    `SchemaRegistry`, and {@link listLiveMetadataTypes} — hence `GET
- *    /api/v1/meta/types` — enumerates exactly that set. Refusing unrecognised
- *    names on the READ entries would answer 400 for types this same service
- *    advertises, trading one declared-≠-served gap for another.
- *  - **`deleteMetaItem` must stay open for the opposite reason.** Rows minted
- *    under an unrecognised type BEFORE this refusal are real and nothing
- *    rewrites them on upgrade; refusing delete would strand them permanently —
- *    turning the accumulation this card was filed about into an accumulation
- *    nobody can clear.
- *
- * So reads stay permissive, deletes stay possible, and the door that creates a
- * namespace for a type that does not exist is the one that closes.
+ * was closed by the maintainer's ruling of 2026-08-14 (「同意」), joint with
+ * #8586 — but not in this function, because the verdict that closes it cannot
+ * be answered from the request alone: it has to know whether the namespace it
+ * would create already exists. It lives on the mint door itself, as
+ * {@link ObjectStackProtocolImplementation.refuseUnmintableMetaType}, which
+ * carries the scoping argument and the measurements behind it.
  */
-function canonicalizeMetaRequestType<T extends { type: string }>(
-    request: T,
-    opts?: { minting?: boolean },
-): T {
+function canonicalizeMetaRequestType<T extends { type: string }>(request: T): T {
     const refusal = metaUrlSpellingRefusal(request.type);
     if (refusal) {
         const err = new Error(
@@ -252,21 +231,6 @@ function canonicalizeMetaRequestType<T extends { type: string }>(
         (err as any).code = 'INVALID_REQUEST';
         (err as any).status = 400;
         throw err;
-    }
-    if (opts?.minting === true) {
-        const unrecognised = unrecognisedMetaTypeRefusal(request.type);
-        if (unrecognised) {
-            const err = new Error(
-                `[invalid_request] '${unrecognised.type}' is not a metadata type. The platform declares `
-                + `no such type, and since #8586 retired 'additionalTypes' a plugin cannot declare one `
-                + `either — so this write would mint a sys_metadata namespace under `
-                + `type='${unrecognised.type}' that nothing reads and nothing serves. Address a real `
-                + `metadata type; GET /api/v1/meta/types lists the ones this deployment carries.`,
-            );
-            (err as any).code = 'INVALID_REQUEST';
-            (err as any).status = 400;
-            throw err;
-        }
     }
     const type = canonicalMetaType(request.type);
     return type === request.type ? request : { ...request, type };
@@ -11289,18 +11253,129 @@ export class ObjectStackProtocolImplementation implements
         return true;
     }
 
+    /**
+     * [#8421] The SECOND `/meta` verdict: refuse a `:type` segment that is not
+     * a metadata type AT ALL, on the one entry point that MINTS a
+     * `sys_metadata` namespace.
+     *
+     * {@link metaUrlSpellingRefusal} (#7894) is silent for a name that is not a
+     * plural of anything — `fieldz` reaches for no declared type — so
+     * `PUT /api/v1/meta/fieldz/showcase_task.title` answered 200 and persisted
+     * a row under `type='fieldz'`. Maintainer ruling 2026-08-14 (「同意」), joint
+     * with #8586: retiring `additionalTypes` removed the last channel by which
+     * a plugin could DECLARE a metadata kind, so an unrecognised name can no
+     * longer be a declaration this boundary has not heard about.
+     * {@link unrecognisedMetaTypeRefusal} is that verdict.
+     *
+     * ## Why the verdict is not raised on all six `/meta` entry points
+     *
+     * Measured, not timid:
+     *
+     *  - **The live type set legitimately holds keys the static contract does
+     *    not.** An ordinary `registerApp` puts `data` (a manifest's seed
+     *    datasets), `kind` (`contributes.kinds`) and `package` into
+     *    `SchemaRegistry`, and {@link listLiveMetadataTypes} — hence `GET
+     *    /api/v1/meta/types` — enumerates exactly that set. Refusing
+     *    unrecognised names on the READ entries would answer 400 for types this
+     *    same service advertises, trading one declared-≠-served gap for another.
+     *  - **`deleteMetaItem` must stay open for the opposite reason.** Rows
+     *    minted under an unrecognised type BEFORE this refusal are real and
+     *    nothing rewrites them on upgrade; refusing delete would strand them
+     *    permanently — turning the accumulation this card was filed about into
+     *    an accumulation nobody can clear.
+     *
+     * ## …and why two shapes reaching THIS door are exempt (#8421 rework)
+     *
+     * Both were regressions in the first cut, both measured on the three
+     * consumer packages the first cut never ran:
+     *
+     *  1. **The COMPOUND arity puts an OBJECT name in the `:type` segment.**
+     *     `/metadata/lead/views/all_leads` is `type='lead'`,
+     *     `name='views/all_leads'` — one operation reaching one
+     *     `saveMetaItem`, documented verbatim in the runtime dispatcher's own
+     *     `/meta` branch and in `rest`'s `PUBLISHED_COMPOUND` route. `lead` is
+     *     an object, i.e. RUNTIME DATA, and no static contract can enumerate
+     *     the objects a deployment carries — so applying a static type verdict
+     *     to that segment refuses every object name that is not coincidentally
+     *     a metadata type. The maintainer's ruling is about metadata TYPE names
+     *     like `fieldz`; this was not a narrowing anyone approved.
+     *     ⚠️ Residue, stated rather than hidden: `PUT /meta/fieldz/a/b` is
+     *     therefore still accepted, because at that arity `fieldz` is a claim
+     *     about an object and the alternative is a live-registry check — option
+     *     C, ruled out on this very card.
+     *  2. **A namespace that ALREADY EXISTS is not being minted.** Two
+     *     production paths re-save a row taking its type from an existing
+     *     `sys_metadata` row: {@link migrateStoredMetadata} (`source:
+     *     'migrate-stored'`) and {@link duplicatePackage}'s copy/clone. Measured
+     *     on this branch: migrate never reaches this door for such a row
+     *     (`applyConversionsToStoredItem` returns it untouched — an unrecognised
+     *     type has no manifest collection, hence no conversion chain, hence no
+     *     notice, hence `outcome: 'canonical'`), while **`duplicatePackage`
+     *     DID** — a package holding one residue row answered
+     *     `{success: false, copiedCount: 0, failedCount: 1}`. That contradicts
+     *     the `deleteMetaItem` reasoning directly above, so the exemption is a
+     *     repair of this change rather than a new decision.
+     *
+     * The store — not the caller — is what says the namespace exists, so the
+     * exemption cannot be claimed by a request: the probe runs only once the
+     * static verdict has already fired (never on the ordinary save path), and
+     * a store that cannot answer refuses, because a fresh deployment has no
+     * residue to protect.
+     */
+    private async refuseUnmintableMetaType(request: { type: string, name: string }): Promise<void> {
+        const unrecognised = unrecognisedMetaTypeRefusal(request.type);
+        if (!unrecognised) return;
+        // Exemption 1 — the compound arity. Cheap, and first: it is a statement
+        // about the REQUEST SHAPE and needs no store at all.
+        if (request.name.includes('/')) return;
+        // Exemption 2 — the namespace predates this write.
+        if (await this.metaTypeNamespaceExists(unrecognised.type)) return;
+        const err = new Error(
+            `[invalid_request] '${unrecognised.type}' is not a metadata type. The platform declares `
+            + `no such type, and since #8586 retired 'additionalTypes' a plugin cannot declare one `
+            + `either — so this write would mint a sys_metadata namespace under `
+            + `type='${unrecognised.type}' that nothing reads and nothing serves. Address a real `
+            + `metadata type; GET /api/v1/meta/types lists the ones this deployment carries.`,
+        );
+        (err as any).code = 'INVALID_REQUEST';
+        (err as any).status = 400;
+        throw err;
+    }
+
+    /**
+     * Does `sys_metadata` already carry a row under this type key?
+     *
+     * Reached ONLY from {@link refuseUnmintableMetaType} after the static
+     * verdict has fired, so it costs nothing on the ordinary save path. Not
+     * scoped by name, org or state on purpose: the question is whether the
+     * NAMESPACE exists, and a residue row is exactly as real in a draft or in
+     * another org's overlay as it is here.
+     *
+     * A store that cannot answer counts as "no" — the refusal stands. A fresh
+     * deployment has no residue to protect, and a table that is not provisioned
+     * yet is the state in which the card's own defect (minting the first row of
+     * a namespace nothing serves) is at its most reachable.
+     */
+    private async metaTypeNamespaceExists(type: string): Promise<boolean> {
+        try {
+            const row = await this.engine.findOne('sys_metadata', { where: { type } });
+            return row != null;
+        } catch {
+            return false;
+        }
+    }
+
     async saveMetaItem(request: { type: string, name: string, item?: any, organizationId?: string, parentVersion?: string | null, actor?: string, force?: boolean, mode?: 'draft' | 'publish', packageId?: string | null, source?: string }) {
         if (!request.item) {
             throw new Error('Item data is required');
         }
         // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}.
-        //
-        // [#8421] `minting: true` — this is the entry point that CREATES a
-        // `sys_metadata` namespace, so it is the one that refuses a type name
-        // the platform has never heard of instead of forwarding it to the
-        // permissive plugin path. The read entries deliberately do not pass it;
-        // `canonicalizeMetaRequestType`'s doc carries the measurement.
-        request = canonicalizeMetaRequestType(request, { minting: true });
+        request = canonicalizeMetaRequestType(request);
+        // [#8421] …and the second verdict, on the door that MINTS. Kept here
+        // rather than inside the fold above because it is not answerable from
+        // the request alone — see {@link refuseUnmintableMetaType} for the
+        // scoping, its two exemptions, and the measurements behind both.
+        await this.refuseUnmintableMetaType(request);
         // What the history row, the audit row and the watch event record as the
         // origin of this write. Defaults to this method — the ordinary Studio /
         // REST / SDK save. The only caller that overrides it is

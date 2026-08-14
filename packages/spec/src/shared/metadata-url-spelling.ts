@@ -313,8 +313,15 @@ const CANONICAL_META_TYPES: ReadonlySet<string> = new Set(Object.values(META_URL
  * type keys this set does not — `data`, `kind` and `package` all enter
  * `SchemaRegistry` during a perfectly ordinary `registerApp` — which is why
  * the boundary applies this verdict where a namespace is MINTED and nowhere
- * else. See `canonicalizeMetaRequestType` in `@objectstack/metadata-protocol`
- * for that scoping and the measurement behind it.
+ * else. See `refuseUnmintableMetaType` in `@objectstack/metadata-protocol` for
+ * that scoping and the measurement behind it.
+ * ⛔ Not the whole answer at the boundary either, and deliberately not: this
+ * predicate reads ONE path segment, while whether that segment is even making
+ * a claim about a metadata type depends on the request's arity (the compound
+ * form `/meta/lead/views/all_leads` carries an OBJECT name there) and whether
+ * the namespace already exists. Both are the consumer's to know — a predicate
+ * that guessed at them from a bare string is exactly the spelling GUESSER this
+ * module refuses to contain.
  */
 export function unrecognisedMetaTypeRefusal(urlType: string): { type: string } | null {
   if (urlType in META_URL_TO_SINGULAR) return null;
