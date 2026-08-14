@@ -5,7 +5,7 @@ import {
   collectExpectedEntries,
   extractTranslations,
   renderTranslationModule,
-} from '../src/utils/i18n-extract';
+} from '../src/utils/i18n-extract.js';
 
 const config: any = {
   objects: [
@@ -163,11 +163,8 @@ describe('collectExpectedEntries', () => {
       ],
     };
     const entries = collectExpectedEntries(cfg);
-    // Structural annotation: the module import is outside this file's tsc
-    // program reach (frozen TS2835 debt), so the parameter would otherwise be
-    // an implicitly-any addition to the package's TEST_DEBT ledger.
     const byPath = Object.fromEntries(
-      entries.map((e: { path: string[] }) => [e.path.join('.'), e]),
+      entries.map((e) => [e.path.join('.'), e]),
     );
     const opt = (p: string) => byPath[`objects.w.fields.${p}`];
 

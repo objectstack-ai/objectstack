@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { computeI18nCoverage } from '../src/utils/i18n-coverage';
+import { computeI18nCoverage } from '../src/utils/i18n-coverage.js';
 
 const baseConfig: any = {
   objects: [
