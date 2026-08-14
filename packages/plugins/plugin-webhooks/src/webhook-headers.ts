@@ -213,8 +213,15 @@ export class WebhookHeadersUnresolvableError extends Error {
   }
 }
 
-/** The remedy clause both refusals end with — one wording, stated once. */
-const HEADERS_REMEDY =
+/**
+ * The remedy clause both refusals end with — one wording, stated once.
+ *
+ * [#8566] Exported because the WRITE door quotes it too: the shape gate refuses
+ * the same malformed map at authoring time that this file refuses at delivery
+ * time, and an author who meets both should be told to do the same thing both
+ * times. Two hand-kept copies of one remedy is how they drift.
+ */
+export const HEADERS_REMEDY =
   'Fix: re-save the webhook headers as a flat JSON object of string values so the column holds a '
   + 'fresh ref, or CLEAR the field to null if this webhook is meant to send no custom headers — an '
   + 'empty or unparseable header map is not the same thing as no header map, and only the second '

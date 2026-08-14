@@ -14,6 +14,10 @@ import { bootstrapDeclaredWebhooks } from './bootstrap-declared-webhooks.js';
 import { migrateLegacyWebhookSecrets } from './migrate-webhook-secrets.js';
 import { createWebhookRedeliverGuard } from './redeliver-guard.js';
 import { bindWebhookProvenanceStamp, unbindWebhookProvenanceStamp } from './webhook-provenance.js';
+import {
+    bindWebhookHeadersShapeGate,
+    unbindWebhookHeadersShapeGate,
+} from './webhook-headers-gate.js';
 
 /**
  * Structural view of `@objectstack/service-messaging`'s HTTP-outbox surface
@@ -169,6 +173,7 @@ export class WebhookOutboxPlugin implements Plugin {
         await this.autoEnqueuer?.stop();
         if (this.boundEngine) {
             try { unbindWebhookProvenanceStamp(this.boundEngine); } catch { /* best effort */ }
+            try { unbindWebhookHeadersShapeGate(this.boundEngine); } catch { /* best effort */ }
             this.boundEngine = undefined;
         }
     }
@@ -199,6 +204,13 @@ export class WebhookOutboxPlugin implements Plugin {
         // Bind the provenance stamp so an admin edit freezes a seeded row.
         this.boundEngine = engine;
         bindWebhookProvenanceStamp(engine as any, ctx.logger as any);
+        // [#8566] And the headers_secret shape gate, BEFORE the seeder below
+        // runs its first write — a validation door that arms after the first
+        // write it is meant to judge is not a door. It covers every write path
+        // at once (the generic data API included, which is the measured
+        // trigger), so the plugin's own writers deliberately carry no second
+        // check of their own.
+        bindWebhookHeadersShapeGate(engine as any, ctx.logger as any);
         let metadataService: IMetadataService | undefined;
         try { metadataService = ctx.getService<IMetadataService>('metadata'); } catch { /* optional */ }
         try {
