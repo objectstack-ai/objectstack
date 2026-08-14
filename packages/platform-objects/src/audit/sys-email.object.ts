@@ -115,13 +115,51 @@ export const SysEmail = ObjectSchema.create({
     // part of the message the row cannot carry is therefore a part a durable
     // delivery silently drops — which is why messages with headers or
     // attachments used to be pushed back onto inline delivery instead.
+    // [#8149] `internal: true` — custom headers are the ordinary place a
+    // credential goes (an SMTP relay's `Authorization`, a provider token, a
+    // routing secret), the same shape #8118 ruled on for
+    // `sys_http_delivery.headers_json`, and this table is readable over the
+    // ordinary data API (`enable.apiMethods` below). So the engine OMITS the
+    // column from every generic read: list, get, an explicit
+    // `?select=headers_json`, and the write-response bodies — with no system
+    // carve-out (#7728's explicit design; `SYSTEM_CTX` does not reopen it).
+    //
+    // The redaction sits at the ROW layer, so it covers every producer of the
+    // column by construction, not just the one that exists today
+    // (`IEmailService.send` → `encodeHeadersForRow`). Unlike
+    // `sys_http_delivery`, `sys_email` has no second authoring population to
+    // cover — `apiMethods` admits no `create`, so the only writer is the mail
+    // service's own persistence seam — but the placement means an in-process
+    // writer added later inherits the protection instead of having to
+    // re-declare it.
+    //
+    // Delivery is unaffected: the durable delivery paths (queue worker, boot
+    // outbox sweep, the after-insert drain hook) all re-read the row and hand
+    // it to `EmailService.deliverPersistedRow`, which recovers this column
+    // through ObjectQL's privileged accessor (`resolveInternalField`, the
+    // remedy #7728 named and #8118 landed) — see
+    // `plugin-email/src/internal-header-readback.ts`. Fail-closed: a message
+    // whose authored headers cannot be recovered is NOT sent without them (a
+    // header that silently goes missing is not self-announcing — the receiver
+    // that does not require it accepts the mail while the delivery deviates
+    // from the authored configuration).
+    //
+    // Read-side only, deliberately, exactly as #8118 ruled for the sibling
+    // column: storage is untouched and the row still carries the map in
+    // cleartext. `Field.secret()` was measured and REJECTED there (an orphan
+    // `sys_secret` row per delivery with no cascade or retention, a
+    // boot-window fail-open, a per-row decrypt on every tick); this card
+    // adopts that decision rather than re-deciding it.
     headers_json: Field.textarea({
       label: 'Headers (JSON)',
       required: false,
+      internal: true,
       description:
         'Custom headers supplied to IEmailService.send, as a JSON object of name → value. '
         + 'Written in both delivery modes (it is audit evidence as much as delivery input). '
-        + 'Absent on rows written before this column existed, which read back as "no custom headers".',
+        + 'Absent on rows written before this column existed, which read back as "no custom headers". '
+        + 'Never returned on the generic data path (#8149) — headers are the ordinary place a '
+        + 'credential goes; the delivery paths recover it through the engine\'s privileged accessor.',
       group: 'Content',
     }),
 

@@ -322,12 +322,8 @@ describe('MetadataPluginProtocol', () => {
           defaultStrategy: 'three-way-merge' as const,
           alwaysKeepCustom: ['fields.*.label'],
         },
-        additionalTypes: [{
-          type: 'chart',
-          label: 'Chart',
-          filePatterns: ['**/*.chart.ts'],
-          domain: 'ui',
-        }],
+        // `additionalTypes` was retired by #8586 (ADR-0049) — authoring it is
+        // now a parse error; see additional-types-retirement.test.ts for the pins.
         enableEvents: true,
         validateOnWrite: true,
         enableVersioning: true,
@@ -337,7 +333,6 @@ describe('MetadataPluginProtocol', () => {
       const result = MetadataPluginConfigSchema.parse(config);
       expect(result.storage.datasource).toBe('default');
       expect(result.customizationPolicies).toHaveLength(1);
-      expect(result.additionalTypes).toHaveLength(1);
       expect(result.cacheMaxItems).toBe(5000);
     });
 

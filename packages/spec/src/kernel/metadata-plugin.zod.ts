@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+import { retiredKey } from '../shared/retired-key';
 import { MetadataManagerConfigSchema } from './metadata-loader.zod';
 import { MergeStrategyConfigSchema, CustomizationPolicySchema } from './metadata-customization.zod';
 import { ActionSchema } from '../ui/action.zod';
@@ -52,7 +53,12 @@ import { ActionSchema } from '../ui/action.zod';
  *
  * The canonical list of all metadata types managed by the platform.
  * Each type maps to a specific Zod schema (e.g., ObjectSchema, ViewSchema).
- * Plugins can extend this registry via `contributes.kinds` in the manifest.
+ * There is no declared-kind channel beyond this list (#8586): a plugin's kind
+ * enters the LIVE type set only as a side effect of registering an item of
+ * that kind (`SchemaRegistry.registerItem` / `MetadataManager.register`).
+ * A manifest's `contributes.kinds` stores kind DESCRIPTORS as items of the
+ * `kind` type (`SchemaRegistry.registerKind`); it does not extend this enum
+ * or the type registry.
  *
  * ## Naming Convention
  * **IMPORTANT:** All metadata type names are in **SINGULAR** form:
@@ -473,12 +479,36 @@ export const MetadataPluginConfigSchema = lazySchema(() => z.object({
     .describe('Merge strategy for package upgrades'),
 
   /**
-   * Additional metadata type registrations.
-   * Used by plugins to register custom metadata types beyond the built-in set.
+   * REMOVED in v17 (#8586, ADR-0049 enforce-or-remove).
+   *
+   * `additionalTypes` was declared, documented on four docs pages as THE way a
+   * plugin registers a custom metadata type, and read by NOTHING: the only
+   * production writer of the manager's type registry is
+   * `setTypeRegistry(DEFAULT_METADATA_TYPE_REGISTRY)` (`packages/metadata/src/
+   * plugin.ts`), called exactly once, and it REPLACES the array outright.
+   * Measured: declared count == live count (27 == 27) — the live type set is
+   * exactly the built-in registry, whatever was authored here. The same
+   * silence trap as #4212's `onInstall`, one level down: write it per the
+   * docs, get no error, nothing happens.
+   *
+   * Tombstoned rather than deleted because `MetadataPluginConfigSchema` is not
+   * `.strict()`: a plain deletion would silently strip the key, replacing an
+   * inert declaration with an invisible one (the #3726 / #3733 shape,
+   * ADR-0104). How a kind ACTUALLY reaches the live set is in the
+   * prescription below.
    */
-  additionalTypes: z.array(MetadataTypeRegistryEntryBaseSchema.omit({ type: true }).extend({
-    type: z.string().describe('Custom metadata type identifier'),
-  })).optional().describe('Additional custom metadata types'),
+  additionalTypes: retiredKey(
+    '`config.additionalTypes` was removed from `MetadataPluginConfig` in @objectstack/spec 17 ' +
+    '(#8586, ADR-0049 enforce-or-remove) — it never had an effect: the only production writer ' +
+    'of the metadata type registry is `setTypeRegistry(DEFAULT_METADATA_TYPE_REGISTRY)`, which ' +
+    'replaces the array outright, so nothing ever merged these entries and the live type set ' +
+    'was exactly the built-in registry whatever you declared here. Delete the key. There is no ' +
+    'declared-kind channel: a kind enters the live metadata-type set as a side effect of ' +
+    'registering an ITEM of that kind (`SchemaRegistry.registerItem` during app/manifest ' +
+    'registration, or `MetadataManager.register` at runtime); bind its schema with ' +
+    "`registerMetadataTypeSchema(type, schema)` from your plugin's `init(ctx)` so " +
+    '`GET /api/v1/meta` serves a real JSON Schema for it.',
+  ),
 
   /**
    * Enable metadata change events.
@@ -612,7 +642,13 @@ export type MetadataPluginManifestParsed = z.infer<typeof MetadataPluginManifest
  * Default Type Registry
  *
  * The built-in metadata type registry with default configurations.
- * Plugins extend this via `contributes.kinds` in the manifest.
+ * This array is the TOTAL universe of declared metadata types (#8586): the
+ * only production writer of the manager's type registry is
+ * `setTypeRegistry(DEFAULT_METADATA_TYPE_REGISTRY)`, and no channel extends
+ * it — `config.additionalTypes` was retired as inert (ADR-0049), and a
+ * manifest's `contributes.kinds` registers kind descriptors as ITEMS of the
+ * `kind` type, not entries here. A plugin's kind reaches the live set as a
+ * side effect of registering an item of that kind.
  */
 export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] = [
   // Data Protocol (load first)

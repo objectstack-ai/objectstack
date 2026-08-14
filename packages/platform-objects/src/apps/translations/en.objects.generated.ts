@@ -2053,7 +2053,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       headers_json: {
         label: "Headers (JSON)",
-        help: "Custom headers supplied to IEmailService.send, as a JSON object of name → value. Written in both delivery modes (it is audit evidence as much as delivery input). Absent on rows written before this column existed, which read back as \"no custom headers\"."
+        help: "Custom headers supplied to IEmailService.send, as a JSON object of name → value. Written in both delivery modes (it is audit evidence as much as delivery input). Absent on rows written before this column existed, which read back as \"no custom headers\". Never returned on the generic data path (#8149) — headers are the ordinary place a credential goes; the delivery paths recover it through the engine's privileged accessor."
       },
       attachments_json: {
         label: "Attachments (JSON)",

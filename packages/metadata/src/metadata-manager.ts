@@ -2466,9 +2466,11 @@ export class MetadataManager implements IMetadataService {
     const entry = this.typeRegistry.find(e => e.type === type);
     if (!entry) return undefined;
 
-    // Merge declarative (live registry entry — covers built-ins AND
-    // plugin-contributed `additionalTypes`) + plugin-registered type-level
-    // actions. Deduped by name; imperatively-registered actions win on
+    // Merge declarative (live registry entry — the built-in
+    // `DEFAULT_METADATA_TYPE_REGISTRY`, the registry's only production writer;
+    // the plugin-contributed `additionalTypes` channel this comment used to
+    // claim never existed and was retired by #8586) + plugin-registered
+    // type-level actions. Deduped by name; imperatively-registered actions win on
     // collision. Emitted so the metadata-admin engine can render per-type
     // buttons (e.g. datasource "Test connection"). Omit the key entirely
     // when the type has none, to keep the response lean.
