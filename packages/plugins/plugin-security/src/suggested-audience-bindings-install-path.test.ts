@@ -2,6 +2,18 @@
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
+// [#5619] The producer's OWN write-verb dispatch decisions. The two `ql` handles
+// below are seams in front of a real engine, not fakes — but they are still
+// doubles by the shape the contract gate reads, and routing their write verbs
+// through the producer's predicates is what keeps a seam from accepting a call
+// `ObjectQL` refuses. Imported from `@objectstack/objectql` rather than
+// `@objectstack/metadata-core` (its home since #5619) on purpose: objectql
+// re-exports both, it is already a devDependency of this package, and — measured,
+// not assumed — `@objectstack/plugin-security` is NOT in objectql's runtime
+// closure (12 packages), so this direction is not the cycle turbo refuses. It is
+// also the specifier this package's `vitest.config.ts` already aliases to SOURCE,
+// so it adds no new artifact-resolved import.
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 // The REAL shipped reconciler — not a re-implementation. A local copy would
 // make this suite a test of the copy, which is exactly the failure mode the
@@ -137,14 +149,28 @@ async function boot(scope: true | 'organization'): Promise<ObjectQL> {
  * `listItems` returns `[]` on purpose — this models a RUNTIME package install
  * (`POST /api/v1/packages`), where the declaration reaches the reconciler
  * through the registry rather than through boot-declared stack metadata.
+ *
+ * ⚠️ `update` and `delete` open with the producer's dispatch predicates. Both
+ * verbs are seams the reconciler really uses — `update` on the
+ * pending→confirmed-observed branch, `delete` on the prune branch — even though
+ * this suite's fixtures (declaration present, binding absent) reach neither.
+ * Forwarding to a real engine cannot make a seam LOOSER than that engine, but
+ * the gate reads shape rather than provenance and the assertion costs nothing:
+ * it pins that whatever this seam forwards is a call `ObjectQL` would accept.
  */
 function runtimeOf(engine: ObjectQL, organizationId: string): any {
   const withOrg = (o: any = {}) => ({ ...o, context: { ...(o.context ?? {}), tenantId: organizationId } });
   return {
     find: (object: string, q: any = {}) => (engine as any).find(object, withOrg(q)),
     insert: (object: string, data: any, opt: any = {}) => (engine as any).insert(object, data, withOrg(opt)),
-    update: (object: string, data: any, opt: any = {}) => (engine as any).update(object, data, withOrg(opt)),
-    delete: (object: string, opt: any = {}) => (engine as any).delete(object, withOrg(opt)),
+    update: (object: string, data: any, opt: any = {}) => {
+      assertEngineUpdateDispatch(data, opt);
+      return (engine as any).update(object, data, withOrg(opt));
+    },
+    delete: (object: string, opt: any = {}) => {
+      assertEngineDeleteDispatch(opt);
+      return (engine as any).delete(object, withOrg(opt));
+    },
     registry: {
       listItems: () => [],
       getAllPackages: () => [{ enabled: true, manifest: PACKAGE_MANIFEST }],
@@ -333,12 +359,22 @@ describe('#8577 — the package-install path of sys_audience_binding_suggestion'
    * afterwards, that fix did not work.
    */
   describe('the shipped SYSTEM_CTX call path is tenant-blind (recorded, not endorsed)', () => {
-    /** The reconciler wired exactly as `security-plugin.ts` wires it. */
+    /**
+     * The reconciler wired exactly as `security-plugin.ts` wires it — the bare
+     * engine, no tenant threaded. Write verbs route through the producer's
+     * dispatch predicates for the same reason as `runtimeOf` above.
+     */
     const asShipped = (engine: ObjectQL): any => ({
       find: (object: string, q: any = {}) => (engine as any).find(object, q),
       insert: (object: string, data: any, opt: any = {}) => (engine as any).insert(object, data, opt),
-      update: (object: string, data: any, opt: any = {}) => (engine as any).update(object, data, opt),
-      delete: (object: string, opt: any = {}) => (engine as any).delete(object, opt),
+      update: (object: string, data: any, opt: any = {}) => {
+        assertEngineUpdateDispatch(data, opt);
+        return (engine as any).update(object, data, opt);
+      },
+      delete: (object: string, opt: any = {}) => {
+        assertEngineDeleteDispatch(opt);
+        return (engine as any).delete(object, opt);
+      },
       registry: {
         listItems: () => [],
         getAllPackages: () => [{ enabled: true, manifest: PACKAGE_MANIFEST }],
