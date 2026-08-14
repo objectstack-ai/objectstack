@@ -263,8 +263,16 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 **2. API Key:**
 ```http
 GET /api/v1/data/task
-X-API-Key: sk_live_abc123...
+X-API-Key: osk_abc123...
 ```
+
+ObjectStack API keys always carry the `osk_` prefix, and the prefix is load-bearing
+rather than decorative. Besides the `X-API-Key` header, a key may be presented with the
+`Authorization` header using either the `ApiKey` scheme or the `Bearer` scheme — but the
+`Bearer` form is accepted **only** when the token starts with `osk_`. That prefix test is
+what keeps the two senses of `Bearer` apart: a session token never starts with `osk_`, so
+it still resolves down the session path in method 1 and can never be read as an API key.
+A key without the prefix does not authenticate.
 
 **3. Session Cookie:**
 ```http
