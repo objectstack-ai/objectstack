@@ -804,6 +804,7 @@
     "resolveViewDescription": "src/system/i18n-resolver.ts#resolveViewDescription (function)",
     "resolveViewLabel": "src/system/i18n-resolver.ts#resolveViewLabel (function)",
     "s3StorageExample": "src/system/object-storage.zod.ts#s3StorageExample (const)",
+    "scalarOverridesPackagedBase": "src/system/i18n-resolver.ts#scalarOverridesPackagedBase (function)",
     "serviceUnavailableMessage": "src/system/core-services.zod.ts#serviceUnavailableMessage (function)",
     "toLocaleDescriptors": "src/system/i18n-resolver.ts#toLocaleDescriptors (function)",
     "translateAction": "src/system/i18n-resolver.ts#translateAction (function)",

@@ -55,23 +55,43 @@
 // So the first `it.fails` above is now a plain green case: the three reads of
 // one object serve ONE label, and it is the folded one.
 //
-// ⛔ THE SECOND ONE IS NOT, AND THE REASON IS A SECOND DEFECT ONE LAYER DOWN.
-// A tenant's rename still does not reach those reads — but no longer because of
-// the catalog. `mergeObjectDefinitions` applies an extender's scalars LAST onto
-// whatever base it is given, and ADR-0029 D9.2 makes the tenant's overlay that
+// ⛔ THE SECOND ONE WAS NOT, AND THE REASON WAS A SECOND DEFECT ONE LAYER DOWN.
+// A tenant's rename still did not reach those reads — but no longer because of
+// the catalog. `mergeObjectDefinitions` applied an extender's scalars LAST onto
+// whatever base it was given, and ADR-0029 D9.2 makes the tenant's overlay that
 // base (`overlay ?? own`, extenders folded on). So the showcase extension's
-// `label: 'Account (Success Overlay)'` overwrites the tenant's 'Customer'
-// inside the fold, and the value is simply not in the document any read is
+// `label: 'Account (Success Overlay)'` overwrote the tenant's 'Customer'
+// inside the fold, and the value was simply not in the document any read was
 // serving. The card measured this without naming it — its own table records
 // `layers.effective = "Account (Success Overlay)"` after the rename, i.e. the
 // extension had already beaten the overlay before i18n ever ran.
 //
 // Whether a package extension's label should outrank a tenant's Studio rename
 // is a fold-precedence decision the 2026-08-13 ruling did not make, and it is
-// NOT arm B (nothing here proposes dropping scalars from the fold). It is filed
-// as a sub-issue of #8284; the `it.fails` case below stays exactly as it was
-// written, so it flips to green the day that ruling lands — and the case after
-// it pins what IS true today, so the state is not merely absent from the file.
+// NOT arm B (nothing here proposes dropping scalars from the fold). It was filed
+// as a sub-issue of #8284 — #8460 — and ruled on separately.
+//
+// ══════════════════════════════════════════════════════════════════════════
+// [#8460] THE FOLD LAYER, RULED AND FIXED — THE SECOND PIN IS NOW GREEN
+// ══════════════════════════════════════════════════════════════════════════
+//
+// Maintainer ruling, 2026-08-13 (option A, "tenant wins"): an extender's scalar
+// applies only while the fold's BASE still carries the packaged owner's value;
+// a diverged base has been authored by the tenant and the extender YIELDS.
+// Deliberately the same comparison-based mechanism as #8284 one layer up — the
+// same predicate, imported rather than re-spelled — so one sentence governs
+// both layers: *an explicit override beats a packaged default.* No provenance
+// flags, no migration, and no escape hatch: a package can no longer relabel an
+// object a tenant deliberately renamed, which the ruling records as the point
+// rather than a regression. Implemented in `SchemaRegistry`, at the single fold
+// both read exits already funnel through.
+//
+// So the `it.fails` below is flipped to a plain `it` — UNMODIFIED otherwise,
+// because it was written as the acceptance evidence for exactly this ruling.
+// The case after it still passes as written too: it asserts that the three
+// reads AGREE and that they do not serve the catalog string, both of which
+// remain true — what changed is the value they agree ON, which it deliberately
+// never named. Its prose is updated where the fix falsified it.
 
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -199,7 +219,7 @@ describe('dogfood: the object-extension fold and the i18n catalog disagree on sc
         expect(labelOf(singleBody?.item)).toBe(EXTENSION_LABEL);
     });
 
-    it.fails('SHOULD: a tenant\'s own rename reaches the reads its forms derive from', async () => {
+    it('SHOULD: a tenant\'s own rename reaches the reads its forms derive from', async () => {
         // The ordinary Studio round-trip: GET the served document, rename it,
         // PUT it back. The write path persists the request body verbatim
         // (ADR-0005 §Validation), so this is exactly what an admin's save stores.
@@ -220,18 +240,21 @@ describe('dogfood: the object-extension fold and the i18n catalog disagree on sc
     });
 
     it('[#8284] after the rename the three reads still AGREE — on the extension, not the catalog', async () => {
-        // What the ruling actually bought in the renamed state, pinned so the
-        // `it.fails` above is not the file's only word about it. The tenant's
-        // value is absent from every read because `mergeObjectDefinitions`
-        // applies the extender's scalar LAST onto the overlay base
-        // (ADR-0029 D9.2) — the second defect named in this file's header, and
-        // the one the `it.fails` is now waiting on. What #8284 removed is the
-        // DISAGREEMENT: no read serves the packaged catalog string any more.
+        // What the ruling bought in the renamed state, pinned so the case above
+        // is not the file's only word about it. This case asserts AGREEMENT and
+        // the absence of the catalog string — never which value they agree on —
+        // so it held under #8284 (all three served the extension's label, the
+        // tenant's rename lost inside the fold) and it holds under #8460 (all
+        // three serve the tenant's 'Customer', because the extender now yields
+        // to a diverged base). That is the point of stating it this way: the
+        // convergence #8284 bought is pinned independently of the fold
+        // precedence #8460 then settled, so a regression in either is visible
+        // here without this case having to be rewritten when the other moves.
         //
-        // Performs its own PUT rather than leaning on the case above: an
-        // `it.fails` stops at its first failing assertion, so depending on its
-        // side effects would make this case's meaning depend on where that
-        // happens to be.
+        // Performs its own PUT rather than leaning on the case above: that case
+        // was written as an `it.fails`, which stops at its first failing
+        // assertion, so depending on its side effects would have made this
+        // case's meaning depend on where that happened to be.
         const before: any = await (await stack.apiAs(token, 'GET', '/meta/object/showcase_account')).json();
         const put = await stack.apiAs(token, 'PUT', '/meta/object/showcase_account', {
             ...(before?.item ?? {}), label: 'Customer',

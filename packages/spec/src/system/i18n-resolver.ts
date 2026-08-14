@@ -1415,8 +1415,23 @@ function builtinSystemFieldLabel(
  *  - equality is exact. The ruled edge — a tenant renaming an object to
  *    exactly the packaged string — is a no-op: the catalog still applies, and
  *    the tenant sees the packaged translation of the word they typed.
+ *
+ * ## [#8460] Exported, because the SAME question is asked one layer down
+ *
+ * The 2026-08-13 ruling settled catalog-vs-explicit-scalar here. The 2026-08-13
+ * ruling on #8460 settled extension-vs-tenant-overlay inside the object FOLD —
+ * `mergeObjectDefinitions` applies an extender's scalar only while the fold's
+ * base still carries the packaged owner's value — and required it be "the same
+ * comparison-based mechanism, one layer down", explicitly not a second
+ * comparison shape. So it is this predicate, imported by
+ * `@objectstack/objectql`'s `SchemaRegistry`, rather than a copy free to drift
+ * from it: one sentence — *an explicit override beats a packaged default* —
+ * with one implementation, at both layers.
+ *
+ * ⛔ The three conservative edges above are therefore load-bearing in two
+ * places. Widening any of them widens the fold's precedence rule too.
  */
-function scalarOverridesPackagedBase(
+export function scalarOverridesPackagedBase(
   base: unknown,
   key: 'label' | 'pluralLabel' | 'description',
   value: unknown,

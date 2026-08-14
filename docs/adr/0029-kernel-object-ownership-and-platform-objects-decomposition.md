@@ -472,6 +472,68 @@ the one the ruling asked for:
   nobody asked for, arriving as a silent re-appearance of deleted fields.
 - **A second `own` is refused** — see § 4.
 
+##### D9.2a — AMENDMENT (2026-08-13, #8460): an extender's SCALAR yields to a diverged base
+
+D9.2 above says the fold runs "exactly as it does today", and for `fields`,
+`validations` and `indexes` it still does. For the three **scalars** — `label`,
+`pluralLabel`, `description` — it no longer does, and this clause is the
+difference.
+
+**Ruling (maintainer, 2026-08-13, option A — "tenant wins"):** an extender's
+scalar applies only while the fold's base still carries the **packaged owner's**
+value. A base whose scalar has diverged from the owner's has been authored by
+the tenant, and the extender **yields**.
+
+Why this had to be decided rather than left to D9.2's "last writer wins": D9.2
+makes the tenant's overlay the *base* of the fold, so last-writer-wins meant a
+code package's `objectExtensions` scalar overwrote the tenant's own Studio
+rename *inside* the fold. The tenant's value was then absent from the document
+every read serves — `PUT /meta/object/:name` answered `200`, `?layers=true`
+showed the saved value under `overlay`, and no read a writable form derives from
+ever showed it (#8037, #8027/#8045, and the severe half of #8284).
+
+The mechanism is **comparison-based provenance**, and is deliberately the *same*
+mechanism [#8284](https://github.com/objectstack-ai/objectstack/issues/8284)
+established one layer up for the i18n catalog — the same predicate, imported by
+`SchemaRegistry` from `@objectstack/spec`, not a second copy free to drift. One
+sentence now governs both layers: **an explicit override beats a packaged
+default.**
+
+Binding consequences:
+
+- **No provenance flag and no migration.** Nothing is stamped on the document;
+  the question is answered from two values at fold time. A flag threaded through
+  the fold was explicitly rejected.
+- **The comparison is against the packaged owner ALONE**, never against the
+  owner with extenders already folded on (D9.6's `resolveOwnerLayer`) — that
+  body reports every extender's scalar as "unchanged" and would yield nothing,
+  ever.
+- **Computed once, over the base the fold starts from**, never re-derived from
+  the running merge. Re-deriving would make one extender's scalar look
+  "authored" to the next and silently invert extender-vs-extender precedence,
+  which D9.3 reserves to declared priority.
+- **Conservative edges** (inherited from the shared predicate): an absent base,
+  a non-string or empty value, and inexact equality all mean "no opinion", so
+  this can only ever *withhold* an extender's scalar from a value that provably
+  diverged. A tenant who renames an object to exactly the packaged string is a
+  no-op, by construction.
+- **Idempotence (#8027) is preserved.** A base that already carries an
+  extender's scalar reads as diverged, so the extenders yield and the value
+  stays what the first fold produced — the same answer, reached by yielding
+  instead of by re-applying.
+- **The accepted cost is the point, not a regression:** a package can no longer
+  relabel an object a tenant has deliberately renamed. There is **no escape
+  hatch**, by ruling. Note the honest edge this implies: because the write path
+  persists the served body verbatim (ADR-0005 §Validation), a tenant who
+  round-trips an object *without* renaming it freezes the extender's current
+  scalar into the overlay row, and a later change to the package's extension
+  scalar will not reach that tenant. That follows from comparison-based
+  provenance with no flags, which is what the ruling required; it is recorded
+  here rather than papered over.
+- Options B (status quo — the extension keeps winning) and C (refuse the write)
+  were considered and **rejected**. Dropping scalars from the fold entirely
+  (#8284's arm B) remains rejected and is not this clause.
+
 #### D9.3 — selection is by KIND; priority stays descriptive
 
 `contributors.sort((a, b) => a.priority - b.priority)` (`:1189`) totals the whole

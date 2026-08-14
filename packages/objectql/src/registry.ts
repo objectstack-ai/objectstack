@@ -17,7 +17,11 @@ import {
   ITEM_KEY_DISCRIMINATORS,
   readDiscriminatorValue as discriminatorValue,
 } from '@objectstack/metadata-core';
-import { SystemFieldName } from '@objectstack/spec/system';
+// [#8460] `scalarOverridesPackagedBase` is the #8284 comparison, imported rather
+// than re-spelled: the object FOLD asks the same question one layer down (has
+// this scalar been authored away from the packaged default?), and the ruling
+// required the same mechanism, not a second comparison shape.
+import { SystemFieldName, scalarOverridesPackagedBase } from '@objectstack/spec/system';
 import { resolveTenancyPosture, resolveSearchPinyinEnabled } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { provisionSearchCompanion, SEARCH_COMPANION_FIELD } from './search-companion.js';
@@ -112,10 +116,29 @@ export function parseFQN(fqn: string): { namespace: string | undefined; shortNam
 }
 
 /**
+ * The three SCALAR props {@link mergeObjectDefinitions} resolves last-writer-wins
+ * — the exact set the #8284 and #8460 rulings both cover, and the same three
+ * {@link scalarOverridesPackagedBase} answers for.
+ */
+const OBJECT_FOLD_SCALAR_KEYS = ['label', 'pluralLabel', 'description'] as const;
+
+type ObjectFoldScalarKey = (typeof OBJECT_FOLD_SCALAR_KEYS)[number];
+
+/**
  * Deep merge two ServiceObject definitions.
  * Fields are merged additively. Other props: later value wins.
+ *
+ * [#8460] …except that "later value wins" is now conditional for the three
+ * SCALARS. `tenantAuthored` names the scalars the fold's BASE has authored away
+ * from the packaged owner's value; an extender yields on those. See
+ * {@link SchemaRegistry.tenantAuthoredScalars} for why the set is computed once
+ * over the base rather than re-derived from the running `merged`.
  */
-function mergeObjectDefinitions(base: ServiceObject, extension: Partial<ServiceObject>): ServiceObject {
+function mergeObjectDefinitions(
+  base: ServiceObject,
+  extension: Partial<ServiceObject>,
+  tenantAuthored?: ReadonlySet<ObjectFoldScalarKey>,
+): ServiceObject {
   const merged = { ...base };
 
   // Merge fields additively
@@ -133,10 +156,16 @@ function mergeObjectDefinitions(base: ServiceObject, extension: Partial<ServiceO
     merged.indexes = [...(base.indexes || []), ...extension.indexes];
   }
 
-  // Override scalar props (last writer wins)
-  if (extension.label !== undefined) merged.label = extension.label;
-  if (extension.pluralLabel !== undefined) merged.pluralLabel = extension.pluralLabel;
-  if (extension.description !== undefined) merged.description = extension.description;
+  // Override scalar props (last writer wins) — [#8460] unless the base has been
+  // authored by the tenant, in which case the extender's packaged default yields.
+  const yields = (key: ObjectFoldScalarKey): boolean => tenantAuthored?.has(key) === true;
+  if (extension.label !== undefined && !yields('label')) merged.label = extension.label;
+  if (extension.pluralLabel !== undefined && !yields('pluralLabel')) {
+    merged.pluralLabel = extension.pluralLabel;
+  }
+  if (extension.description !== undefined && !yields('description')) {
+    merged.description = extension.description;
+  }
 
   return merged;
 }
@@ -1576,13 +1605,89 @@ export class SchemaRegistry {
     contributors: ObjectContributor[],
     baseDefinition: ServiceObject,
   ): ServiceObject {
+    // [#8460] Computed ONCE, over the base the fold starts from — never
+    // re-derived from the running `merged`, which would make an extender's own
+    // scalar look "authored" to the next extender and silently invert
+    // extender-vs-extender precedence (D9.3: declared numbers order peers).
+    const tenantAuthored = this.tenantAuthoredScalars(contributors, baseDefinition);
     let merged = { ...baseDefinition };
     for (const contrib of contributors) {
       if (contrib.ownership === 'extend') {
-        merged = mergeObjectDefinitions(merged, contrib.definition);
+        merged = mergeObjectDefinitions(merged, contrib.definition, tenantAuthored);
       }
     }
     return merged;
+  }
+
+  /**
+   * [#8460] Which of the three fold scalars the BASE layer carries a
+   * TENANT-AUTHORED value for — i.e. one that no longer equals the packaged
+   * owner's.
+   *
+   * Maintainer ruling, 2026-08-13 (option A, "tenant wins"): an extender's
+   * scalar applies only while the fold's base still carries the packaged
+   * owner's value; a diverged base has been authored by the tenant and the
+   * extender yields. This **amends ADR-0029 D9.2**, whose fold was
+   * unconditionally last-writer-wins on the scalars, and it is deliberately the
+   * SAME comparison-based mechanism the #8284 fix applies one layer up — the
+   * predicate is literally {@link scalarOverridesPackagedBase}, imported from
+   * `@objectstack/spec`, not a second copy of the shape. One sentence at both
+   * layers: *an explicit override beats a packaged default.*
+   *
+   * ⛔ No provenance flag is stamped on the document and no migration is
+   * implied: the question is answered from two values, at fold time.
+   *
+   * The accepted cost is the point, not a regression — a package can no longer
+   * relabel an object a tenant has deliberately renamed. There is no escape
+   * hatch for it, by ruling.
+   *
+   * Conservative in the same three ways the predicate is (absent base, non-string
+   * or empty value, exact equality), plus two of this layer's own:
+   *
+   *  - **no `own` contributor → no opinion.** An orphan overlay (D9.5) keeps
+   *    today's fold exactly.
+   *  - **base IS the packaged owner → no opinion, by reference.** That is
+   *    {@link resolveObject} with no overlay registered and every
+   *    {@link resolveOwnerLayer} call (D9.6), so the common shape pays one
+   *    identity comparison and cannot change answer. It is an OPTIMISATION, not
+   *    a correctness edge: comparing that base against itself answers "not
+   *    diverged" for every key anyway. ⛔ So it must never be relaxed into
+   *    something weaker than identity — a value-equality test here would start
+   *    answering for bodies that merely LOOK like the owner.
+   *
+   * ⛔ The owner is read as the `own` CONTRIBUTOR, deliberately NOT through
+   * {@link getPackagedObjectOwner} — whose extra `isCodeArtifactBody` test
+   * (D9.8) would make this decline to protect a RUNTIME-authored object, i.e.
+   * exactly the object whose owner row the tenant wrote by hand. The two agree
+   * wherever a packaged owner exists, which is every shape #8460 measured; they
+   * differ only on a tenant-authored owner, and there the ruled sentence still
+   * reads the same way — the tenant's own row is the explicit override and a
+   * package's `objectExtensions` entry is the packaged default. The rejected
+   * alternative is the trap PR #8454 named one layer up, in its own form:
+   * comparing against a body that already has extenders folded onto it
+   * ({@link resolveOwnerLayer}) would report every extender's scalar as
+   * "unchanged" and yield nothing, ever.
+   *
+   * IDEMPOTENCE is preserved, which matters because
+   * {@link foldObjectExtendersOnto} is documented as idempotent (#8027) and two
+   * shipped call sites really do hand it an already-folded base. A base that
+   * already carries an extender's scalar reads as "diverged", so every extender
+   * yields and the value stays exactly what the first fold produced — the same
+   * answer, reached by yielding instead of by re-applying.
+   */
+  private tenantAuthoredScalars(
+    contributors: ObjectContributor[],
+    baseDefinition: ServiceObject,
+  ): ReadonlySet<ObjectFoldScalarKey> | undefined {
+    const owner = contributors.find((c) => c.ownership === 'own')?.definition;
+    if (!owner || owner === baseDefinition) return undefined;
+    let authored: Set<ObjectFoldScalarKey> | undefined;
+    for (const key of OBJECT_FOLD_SCALAR_KEYS) {
+      if (scalarOverridesPackagedBase(owner, key, baseDefinition[key])) {
+        (authored ??= new Set()).add(key);
+      }
+    }
+    return authored;
   }
 
   /**
