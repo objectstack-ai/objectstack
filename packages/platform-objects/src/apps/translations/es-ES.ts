@@ -151,7 +151,7 @@ export const esES: TranslationData = {
         widget_config_changes: { title: 'Cambios de Configuración', description: 'Modificaciones de configuración del sistema' },
         widget_events_by_type: { title: 'Eventos de Auditoría por Acción', description: 'Distribución de eventos de auditoría por tipo de acción' },
         widget_events_by_user: { title: 'Eventos por Usuario', description: 'Distribución de actividad entre usuarios' },
-        widget_recent_events: { title: 'Eventos de Auditoría Recientes', description: 'Últimos eventos de la plataforma (inicio de sesión, cierre de sesión, configuración, …)' },
+        widget_recent_events: { title: 'Volumen de Eventos por Acción', description: 'Volumen de eventos agrupado por acción (inicio de sesión, cierre de sesión, configuración, …)' },
       },
     },
   },

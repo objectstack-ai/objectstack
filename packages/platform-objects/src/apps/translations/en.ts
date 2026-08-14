@@ -224,8 +224,8 @@ export const en: TranslationData = {
           description: 'Activity distribution across users',
         },
         widget_recent_events: {
-          title: 'Recent Audit Events',
-          description: 'Latest platform events (login, logout, config, …)',
+          title: 'Event Volume by Action',
+          description: 'Event volume grouped by action (login, logout, config, …)',
         },
       },
     },
