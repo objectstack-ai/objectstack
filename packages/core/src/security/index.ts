@@ -137,6 +137,11 @@ export {
 // ADR-0091 D1/D2 — grant validity windows, the shared resolution-time predicate.
 export { isGrantActive, isGrantExpired, type GrantValidityWindow } from './grant-validity.js';
 
+// ADR-0049 enforce-or-remove — the `active` flag on the RBAC grant catalogues
+// (`sys_permission_set` / `sys_position`). One predicate for the resolver that
+// enforces it and the break-glass guard that simulates a write to it.
+export { isRowActive, type ActivatableRow } from './row-active.js';
+
 // [#7678] ADR-0090 D5/D9 — the audience-binding suggestion `?status=` vocabulary,
 // shared by the runtime dispatcher's `/security` domain and the live REST route.
 export {
