@@ -338,6 +338,10 @@ export const TaskViews = defineView({
       data,
       sections: [
         {
+          // #8231 remainder — a stable `name` is the only thing that makes
+          // this heading translatable; see `_sections.task` in
+          // `system/translations/index.ts`.
+          name: 'task',
           label: 'Task',
           columns: 2,
           fields: [
@@ -395,7 +399,9 @@ export const TaskViews = defineView({
     quick: {
       type: 'drawer',
       data,
-      sections: [{ label: 'Quick Edit', columns: 1, fields: ['status', 'priority', 'progress'] }],
+      // #8231 remainder — `name` is what makes the heading translatable; see
+      // `_sections.quick_edit` in `system/translations/index.ts`.
+      sections: [{ name: 'quick_edit', label: 'Quick Edit', columns: 1, fields: ['status', 'priority', 'progress'] }],
     },
   },
 });
