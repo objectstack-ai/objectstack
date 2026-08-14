@@ -494,7 +494,7 @@ describe('#8555 — sys_setting: the declared unique index becomes per-organizat
   //    mistaken for fixed, and so the follow-up card has a live repro
   // ─────────────────────────────────────────────────────────────────────────
 
-  describe('the NULL-distinct user_id hole (out of scope here, filed separately)', () => {
+  describe('the NULL-distinct user_id hole (out of scope here — filed as #8629)', () => {
     /**
      * `user_id` is NULL on every `scope='tenant'` and `scope='global'` row —
      * `SettingsService` writes `scope === 'user' ? ctx.userId : null` — and SQL
@@ -505,7 +505,8 @@ describe('#8555 — sys_setting: the declared unique index becomes per-organizat
      * The organization key part is NULL-safe (ADR-0120 D3); the author-declared
      * `user_id` column is not, and extending null-safety to arbitrary declared
      * columns is a contract decision plus a duplicate pre-flight for the
-     * databases that have already accumulated duplicates. Hence a separate card.
+     * databases that have already accumulated duplicates. Hence a separate card:
+     * #8629.
      *
      * These assertions are written to go RED when that card lands — a fix must
      * come here and rewrite them, rather than leaving a stale "known hole"

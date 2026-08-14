@@ -62,7 +62,7 @@ within one organization, two rows for the same `(namespace, key, scope)` are
 accepted. The organization key part is NULL-safe; the author-declared `user_id`
 column is not. Closing that needs a contract decision about null-safety on
 author-declared columns plus a duplicate pre-flight for databases that have
-already accumulated duplicates, so it is filed separately rather than smuggled in
+already accumulated duplicates, so it is filed as #8629 rather than smuggled in
 here. It is pinned as a live fact in the driver suite so this change cannot be
 read as having fixed it.
 

@@ -221,8 +221,11 @@ export const SysSetting = ObjectSchema.create({
     // `tenant`/`global` row and SQL UNIQUE is NULL-distinct, so the declared
     // row identity is void on those limbs — even within ONE organization.
     // Closing it means null-safety on an author-declared column plus a
-    // duplicate pre-flight for databases that already carry duplicates; filed
-    // separately rather than smuggled in here.
+    // duplicate pre-flight for databases that already carry duplicates, so it
+    // is #8629 rather than a rider here: this respelling is a pure relaxation
+    // and applies to any database, while that one is a TIGHTENING that cannot
+    // build its index on an installation which has already accumulated the
+    // duplicates this hole permits.
     //
     // The organization key part is NULL-safe (`COALESCE(organization_id,
     // '__global__')`, ADR-0120 D3), which is what preserves the `scope='global'`
