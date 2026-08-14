@@ -488,3 +488,84 @@ describe('[#5462] the declared-status band is untouched', () => {
         expect(r.body.field).toBe('label');
     });
 });
+
+// ---------------------------------------------------------------------------
+// 5. [#8264] The Postgres limb is anchored on the quoted template — both
+//    decision paths this one const feeds
+// ---------------------------------------------------------------------------
+//
+// `looksLikeMissingRelation` used to read `relation` and `does not exist`
+// anywhere in the message, not necessarily the same sentence, so ordinary
+// business prose using both words matched — `error-leak.test.ts` pins the
+// identical negative case (`'This relation does not exist in the diagram'`)
+// for the shared #8132 leak predicate this heuristic was never wired to.
+// This section pins the same anchor here, for BOTH of this file's readers of
+// the const: the 500 gate right where it is defined, and the
+// `looksLikeUnknownObject` 404 limb a few lines below it.
+//
+// ---------------------------------------------------------------------------
+// Reverse verification, direction predicted BEFORE running
+// ---------------------------------------------------------------------------
+// Restoring the old `(lower.includes('relation') && lower.includes('does not
+// exist'))` conjunction:
+//
+//   §5a (decision 1, the 500 gate)   RED — the business message reverts to
+//                                          `DATABASE_ERROR`/500 instead of the
+//                                          generic terminal `INTERNAL_ERROR`
+//   §5b (decision 2, the 404 limb)   RED — the crafted unattributed-but-
+//                                          word-matching message reverts to a
+//                                          SILENT 404 `OBJECT_NOT_FOUND`
+//   §5c/§5d (real driver phrasings)  GREEN — untouched; every case here is
+//                                          already quoted, matching both the
+//                                          old and the new predicate
+//
+// Both are the ordinary RED direction, not one of the inverted families.
+// Measured after predicting it; the run is quoted in the PR.
+
+describe('[#8264] anchored on the driver quoted template, not a bare conjunction', () => {
+    it('§5a decision 1 (the 500 gate): business prose using both words is no longer DATA_STORE_FAULT', () => {
+        // The card's own counter-example. No `object`, so it could never be
+        // attributed either way — the fixed predicate simply stops calling it
+        // a missing-relation condition at all, and it falls through to the
+        // generic terminal fault instead of the DATABASE-flavoured one.
+        const r = mapDataError(driverError('This relation does not exist in the diagram'));
+        expect(r.status).toBe(500);
+        expect(r.body.code).not.toBe('DATABASE_ERROR');
+        expect(r.body.code).toBe('INTERNAL_ERROR');
+    });
+
+    it('§5a holds with an object present too, and does not spill into the 404 limb either', () => {
+        const r = mapDataError(driverError('This relation does not exist in the diagram'), 'diagram');
+        expect(r.body.code).not.toBe('DATABASE_ERROR');
+        expect(r.body.code).not.toBe('OBJECT_NOT_FOUND');
+    });
+
+    it('§5b decision 2 (the 404 limb): an unquoted "relation <name> does not exist" no longer silently 404s', () => {
+        // Crafted to isolate decision 2, which the card's own example cannot
+        // reach: `missingRelationIsObject`'s Postgres branch tolerates
+        // UNQUOTED names (it answers a different, narrower question — which
+        // relation, once one is already suspected), so it still extracts
+        // `acct` and matches it to the object. Under the OLD predicate this
+        // fell through to the `looksLikeMissingRelation` OR-limb of
+        // `looksLikeUnknownObject` and silently answered 404 — the exact
+        // second consequence the card's own text never measured.
+        const r = mapDataError(driverError('Sorry, relation acct does not exist in our records'), 'acct');
+        expect(r.status).not.toBe(404);
+        expect(r.body.code).not.toBe('OBJECT_NOT_FOUND');
+    });
+
+    it('§5c quoted forms — every quote style Postgres could use — still trip the 500 gate', () => {
+        for (const quote of ['"', "'", '`']) {
+            const msg = `relation ${quote}sys_metadata${quote} does not exist`;
+            const r = mapDataError(driverError(msg));
+            expect(r.status, msg).toBe(500);
+            expect(r.body.code, msg).toBe('DATABASE_ERROR');
+        }
+    });
+
+    it('§5d the quoted form still attributes to 404 when the relation IS the object — decision 2, real case, unchanged', () => {
+        const r = mapDataError(driverError('relation "ghost" does not exist'), 'ghost');
+        expect(r.status).toBe(404);
+        expect(r.body.code).toBe('OBJECT_NOT_FOUND');
+    });
+});
