@@ -96,7 +96,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           },
           name: {
             label: "Nuevo nombre de API",
-            helpText: "Nombre de máquina snake_case único"
+            helpText: "Nombre de máquina snake_case, único por organización"
           }
         }
       }

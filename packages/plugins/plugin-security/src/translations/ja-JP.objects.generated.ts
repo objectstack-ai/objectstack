@@ -96,7 +96,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           },
           name: {
             label: "新しい API 名",
-            helpText: "一意の snake_case マシン名"
+            helpText: "snake_case マシン名（組織ごとに一意）"
           }
         }
       }

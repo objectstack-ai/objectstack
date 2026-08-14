@@ -96,7 +96,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           },
           name: {
             label: "新 API 名称",
-            helpText: "唯一的 snake_case 机器名称"
+            helpText: "snake_case 机器名称，在每个组织内唯一"
           }
         }
       }
