@@ -84,6 +84,7 @@ function makeDriver() {
     if (!where || typeof where !== 'object') return true;
     return Object.entries(where).every(([k, v]) => {
       if (k === '$and') return (v as any[]).every((sub) => matches(row, sub));
+      if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
       return row?.[k] === v;
     });
   };

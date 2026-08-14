@@ -42,7 +42,10 @@ function makeQl() {
   const tableFor = (object: string): any[] | null =>
     object === 'sys_permission_set' ? permRows : object === 'sys_metadata' ? metaRows : null;
   const matches = (r: any, where: any) =>
-    Object.entries(where ?? {}).every(([k, v]) => (v === null ? (r[k] ?? null) === null : r[k] === v));
+    Object.entries(where ?? {}).every(([k, v]) => {
+      if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+      return v === null ? (r[k] ?? null) === null : r[k] === v;
+    });
   return {
     permRows,
     metaRows,

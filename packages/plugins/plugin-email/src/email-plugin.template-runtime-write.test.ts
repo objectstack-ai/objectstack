@@ -43,7 +43,11 @@ type AnyRecord = Record<string, any>;
 function fakeEngine(seed: AnyRecord[] = []) {
   const rows: AnyRecord[] = seed.map((r) => ({ ...r }));
   const matches = (row: AnyRecord, cond?: AnyRecord) =>
-    !cond || Object.entries(cond).every(([k, v]) => row[k] === v);
+    !cond ||
+    Object.entries(cond).every(([k, v]) => {
+      if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+      return row[k] === v;
+    });
   return {
     rows,
     _registry: { listItems: () => [] },

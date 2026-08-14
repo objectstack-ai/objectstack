@@ -39,7 +39,10 @@ function makeDriver() {
   };
   const matches = (row: any, where: any): boolean => {
     if (!where || typeof where !== 'object') return true;
-    return Object.entries(where).every(([k, v]: [string, any]) => row?.[k] === v);
+    return Object.entries(where).every(([k, v]: [string, any]) => {
+      if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+      return row?.[k] === v;
+    });
   };
   let n = 0;
   const driver: any = {

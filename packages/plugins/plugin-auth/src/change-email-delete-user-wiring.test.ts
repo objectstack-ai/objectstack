@@ -75,6 +75,7 @@ function createMemoryEngine() {
       : a === b;
   const matches = (row: MemoryRow, where: Record<string, unknown> = {}): boolean =>
     Object.entries(where).every(([key, expected]) => {
+      if (key.startsWith('$')) throw new Error(`fake driver: unsupported operator ${key}`);
       const actual = row[key];
       if (expected && typeof expected === 'object' && !Array.isArray(expected) && !(expected instanceof Date)) {
         const operators = expected as Record<string, unknown>;

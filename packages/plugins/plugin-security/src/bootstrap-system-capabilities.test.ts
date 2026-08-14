@@ -450,6 +450,11 @@ describe('[#8470] the curated half owns its row, not whichever row shares the na
         managedBy === undefined ? 'a row carrying no managed_by value' : `managed_by='${managedBy}'`,
       );
       expect(warn.mock.calls[0][0]).not.toContain('does not own');
+      // [#8552] The ruling leaves an existing colliding row to the OPERATOR,
+      // so the warning that reports it carries the one line that says how to
+      // resolve it by hand.
+      expect(warn.mock.calls[0][0]).toContain('To resolve by hand');
+      expect(warn.mock.calls[0][0]).toContain('rename the blocking row to a name outside the curated set');
       expect(warn.mock.calls[0][1]).toEqual({
         name: 'manage_users',
         blockingRowId: 'aaa_pre_existing',
@@ -487,6 +492,11 @@ describe('[#8470] the curated half owns its row, not whichever row shares the na
     // …and it must NOT borrow either of the other two branches' sentences.
     expect(warn.mock.calls[0][0]).not.toContain('carrying no managed_by value');
     expect(warn.mock.calls[0][0]).not.toContain('left exactly as it is');
+    // [#8552] The remediation line instructs renaming THE BLOCKING ROW; with
+    // no row visible there is nothing to rename, so it must not print here —
+    // telling the operator to rename a row the read just failed to find would
+    // assert what was not seen.
+    expect(warn.mock.calls[0][0]).not.toContain('To resolve by hand');
     expect(warn.mock.calls[0][1]).toEqual({
       name: 'manage_users', blockingRowId: undefined, blockingManagedBy: null,
     });

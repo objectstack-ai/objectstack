@@ -93,7 +93,10 @@ function makeMemoryDriver() {
   };
   const matches = (row: Record<string, unknown>, where: any): boolean => {
     if (!where || typeof where !== 'object') return true;
-    return Object.entries(where).every(([k, v]) => (row[k] ?? null) === (v ?? null));
+    return Object.entries(where).every(([k, v]) => {
+      if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+      return (row[k] ?? null) === (v ?? null);
+    });
   };
   const driver: any = {
     name: 'memory', version: '0.0.0', supports: {} as any,

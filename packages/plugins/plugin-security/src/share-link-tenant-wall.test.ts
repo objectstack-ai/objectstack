@@ -63,6 +63,7 @@ const TENANT_OBJECTS = new Set([OBJECT]);
 
 function matches(row: any, where: Record<string, any>): boolean {
   return Object.entries(where).every(([k, v]) => {
+    if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
     if (v && typeof v === 'object' && '$in' in v) return (v as any).$in.includes(row[k]);
     return row[k] === v;
   });

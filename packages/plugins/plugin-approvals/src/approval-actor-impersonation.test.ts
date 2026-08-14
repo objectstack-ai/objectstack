@@ -44,6 +44,7 @@ function makeFakeEngine() {
         if (!(v as any[]).some(sub => matches(row, sub))) return false;
         continue;
       }
+      if (k.startsWith('$')) throw new Error(`fake engine: unsupported filter operator ${k}`);
       const rv = row[k];
       if (v != null && typeof v === 'object' && '$in' in (v as any)) {
         if (!(v as any).$in.includes(rv)) return false;

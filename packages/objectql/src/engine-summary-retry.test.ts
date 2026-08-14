@@ -17,7 +17,10 @@ function makeDriver(opts: { onParentUpdate?: (parentId: string, callN: number) =
   };
   const matches = (row: any, where: any): boolean => {
     if (!where || typeof where !== 'object') return true;
-    return Object.entries(where).every(([k, v]) => row?.[k] === v);
+    return Object.entries(where).every(([k, v]) => {
+      if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+      return row?.[k] === v;
+    });
   };
   const parentCalls = new Map<string, number>();
   let n = 0;

@@ -64,6 +64,7 @@ import {
   postureUsesUnionScope,
   type TenancyPosture,
 } from '@objectstack/spec/security';
+import { PLATFORM_CAPABILITY_NAMES } from '@objectstack/spec/security';
 import {
   RLS_MEMBERSHIP_RESOLVER_SERVICE,
   RESERVED_RLS_MEMBERSHIP_KEYS,
@@ -1155,6 +1156,18 @@ export class SecurityPlugin implements Plugin {
       // System/boot writes carry `isSystem` and already short-circuited above,
       // so the seeder and package publish are unaffected.
       await this.assertSystemRowWriteGate(opCtx);
+
+      // [#8552 / ADR-0066 D1] Curated-name authoring refusal for
+      // sys_capability. A name in PLATFORM_CAPABILITY_NAMES is a capability
+      // the PLATFORM defines; a Setup-authored row claiming one is a
+      // declaration the platform cannot honour, so it is refused here —
+      // create and rename-to both — rather than answered 200 and then
+      // declined by the seeder on every boot. Runs AFTER the provenance gate
+      // above (a platform/package row's rename is already refused there on
+      // provenance) and, like it, BEFORE the empty-principal fall-open and
+      // the CRUD check. System/boot writes carry `isSystem` and
+      // short-circuited above, so the curated seeder itself is unaffected.
+      await this.assertCuratedCapabilityNameGate(opCtx);
 
       // [ADR-0090 D5/D9] Audience-anchor binding guard — like the package
       // gate above, an unconditional data-layer boundary: a permission set
@@ -4006,6 +4019,108 @@ export class SecurityPlugin implements Plugin {
           `its ${source} and re-publishing (ADR-0066 asset ownership).`,
         { operation: op, object: opCtx.object, recordId: targetId, managedBy: existingManagedBy },
       );
+    }
+  }
+
+  /**
+   * [#8552 / ADR-0066 D1] Curated-name authoring refusal for `sys_capability`.
+   *
+   * A name in `PLATFORM_CAPABILITY_NAMES` is a capability the PLATFORM
+   * defines: grants (`systemPermissions`) and requirements
+   * (`requiredPermissions`) resolve it by name, and the curated seeder owns
+   * the row for it in the NULL-organization bucket
+   * (`bootstrap-system-capabilities.ts`). A Setup-authored row claiming such
+   * a name is a declaration the platform cannot honour — it can never BE the
+   * curated capability (provenance forging is refused by the gate above), and
+   * once it holds the name's bucket slot the seeder must decline the
+   * collision on every boot (`blockedCurated`, #8470). Maintainer ruling on
+   * #8552 (2026-08-13): refuse the collision AT THE WRITE DOOR — create and
+   * rename both — naming the colliding curated name; never answer 200.
+   *
+   * What is refused, and exactly that:
+   *   - `insert` whose payload names a curated capability (every row of an
+   *     array payload);
+   *   - `update` that RENAMES a row TO a curated name. A payload repeating
+   *     the row's OWN existing curated name is not a rename and passes: the
+   *     ruling deliberately leaves pre-existing colliding rows to the
+   *     operator, so the operator's remediation on one (edit the label,
+   *     deactivate, rename AWAY) must stay open, and a full-record PATCH from
+   *     Setup echoes `name` unchanged. The pre-image is read under a system
+   *     context to establish that fact; per the #7505 ruling the read fails
+   *     CLOSED — an engine fault propagates, and an absent pre-image refuses,
+   *     because a write claiming a curated name for a row that cannot be
+   *     shown to already hold it is exactly the state this gate prevents.
+   *   - a FILTER update stamping a curated name is allowed only when the
+   *     filter provably matches nothing but rows already holding that name
+   *     (`$ne` probe, the sibling gate's bulk-check shape); no filter at all
+   *     is a whole-table stamp and is refused.
+   *
+   * Deliberately NOT covered: `restore` of a soft-deleted row that already
+   * held a curated name re-establishes a pre-existing collision rather than
+   * minting a new one — that residue is the operator's (option 1 of the
+   * ruling), not this gate's. Creating NON-curated names stays open — the
+   * legitimate half of both measured flows (community NULL-bucket `admin`
+   * rows, package declarations), and the seeders themselves carry `isSystem`
+   * and short-circuit the middleware entirely.
+   */
+  private async assertCuratedCapabilityNameGate(opCtx: any): Promise<void> {
+    if (opCtx?.object !== 'sys_capability') return;
+    const op = opCtx.operation;
+    if (op !== 'insert' && op !== 'update') return;
+
+    const payloadRows: unknown[] = Array.isArray(opCtx.data)
+      ? opCtx.data
+      : opCtx.data && typeof opCtx.data === 'object'
+        ? [opCtx.data]
+        : [];
+
+    const curatedNameOf = (r: unknown): string | null => {
+      if (!r || typeof r !== 'object') return null;
+      const name = (r as Record<string, unknown>).name;
+      return typeof name === 'string' && PLATFORM_CAPABILITY_NAMES.has(name) ? name : null;
+    };
+
+    const refuse = (name: string): never => {
+      throw new PermissionDeniedError(
+        `[Security] Access denied: '${name}' is a platform-curated capability name — a sys_capability ` +
+          `row cannot be created with it or renamed to it through the admin door. The platform defines ` +
+          `this capability and seeds its own row for it; grants and requiredPermissions already resolve ` +
+          `the name. Choose a different capability name (ADR-0066 asset ownership, #8552).`,
+        { operation: op, object: opCtx.object, name, curated: true },
+      );
+    };
+
+    if (op === 'insert') {
+      for (const r of payloadRows) {
+        const name = curatedNameOf(r);
+        if (name != null) refuse(name);
+      }
+      return;
+    }
+
+    // update — refuse a rename TO a curated name.
+    const isScalarId = (v: unknown): v is string | number | bigint =>
+      v !== null && (typeof v === 'string' || typeof v === 'number' || typeof v === 'bigint');
+    for (const r of payloadRows) {
+      const name = curatedNameOf(r);
+      if (name == null) continue;
+      const ownId = (r as Record<string, unknown>).id;
+      const rowId = isScalarId(ownId) ? ownId : this.extractSingleId(opCtx);
+      if (rowId != null) {
+        if (!this.ql) refuse(name);
+        // [#7505] Fail-closed: a probe fault propagates; `null` means absent.
+        const existing = await this.readRowById('sys_capability', rowId, { isSystem: true });
+        if (existing && String((existing as Record<string, unknown>).name ?? '') === name) continue;
+        refuse(name);
+      }
+      const writeWhere = opCtx?.options?.where;
+      if (!writeWhere || typeof writeWhere !== 'object' || !this.ql) refuse(name);
+      // [#7505] No swallow here either — a probe fault propagates (fail closed).
+      const renamesOtherRow = await this.ql.findOne('sys_capability', {
+        where: { $and: [writeWhere, { name: { $ne: name } }] },
+        context: { isSystem: true },
+      });
+      if (renamesOtherRow) refuse(name);
     }
   }
 

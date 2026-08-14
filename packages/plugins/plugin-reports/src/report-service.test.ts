@@ -14,6 +14,7 @@ function makeFakeEngine() {
   function matches(row: FakeRow, filter: any): boolean {
     if (!filter || typeof filter !== 'object') return true;
     for (const [k, v] of Object.entries(filter)) {
+      if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
       if (row[k] !== v) return false;
     }
     return true;

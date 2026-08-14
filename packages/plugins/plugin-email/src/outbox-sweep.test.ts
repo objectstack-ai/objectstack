@@ -41,10 +41,11 @@ function fakeEngine(seed: RowSeed[]) {
   const rows = seed.map((r) => ({ status: 'queued', ...r }) as Record<string, any>);
   const matches = (row: any, where: Record<string, any>) =>
     Object.entries(where).every(([k, v]) => {
+      if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
       if (v && typeof v === 'object' && !Array.isArray(v)) {
         return Object.entries(v).every(([op, target]) => {
           if (op === '$lt') return row[k] < (target as any);
-          throw new Error(`fakeEngine: unsupported operator ${op}`);
+          throw new Error(`fake driver: unsupported operator ${op}`);
         });
       }
       return row[k] === v;

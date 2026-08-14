@@ -63,6 +63,7 @@ function seedRows() {
 /** Scalar-equality match — enough for these fixtures, no operator dialect. */
 function matches(row: Record<string, unknown>, where: Record<string, unknown> | undefined): boolean {
     for (const [k, v] of Object.entries(where ?? {})) {
+        if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
         if (row[k] !== v) return false;
     }
     return true;
