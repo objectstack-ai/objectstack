@@ -59,6 +59,9 @@ type AggOpts = {
 function matches(row: Row, filter: Record<string, unknown>): boolean {
   return Object.entries(filter).every(([key, cond]) => {
     if (key === '$and') return (cond as Record<string, unknown>[]).every((sub) => matches(row, sub));
+    // [#5298] `fieldLeaves` emits a NULL-safe `$ne` as `$or: [{ field: null }, { field: { $ne } }]`,
+    // so a real query genuinely hands this double an `$or` — it is not dormant here.
+    if (key === '$or') return (cond as Record<string, unknown>[]).some((sub) => matches(row, sub));
     if (key.startsWith('$')) throw new Error(`test bridge: unhandled operator ${key}`);
     const v = row[key];
     if (cond && typeof cond === 'object' && !Array.isArray(cond)) {
