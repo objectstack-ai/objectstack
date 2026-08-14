@@ -32,8 +32,21 @@
 // `os validate` stops at the schema step), `defineStack(x, { strict: false })`,
 // and direct API callers.
 //
-// Independent ViewItems (`viewKind` + `config`) are legal `views: []` entries
-// (the loader registers them as-is) and are not flagged.
+// ## Independent ViewItems are NOT legal `views: []` entries any more (#5320)
+//
+// This header used to say a ViewItem (`viewKind` + `config`) "is registered
+// as-is by the loader" and skip it. That was a description of the runtime
+// loop's UNDECLARED wider acceptance — the exact "runtime wider than schema"
+// hole #5320 records — not of the declared contract, which was always
+// container-only (`stack.zod.ts`, `z.array(ViewSchema)`). The 2026-08-12 fork
+// ruling tightened the loop to the declared contract, so this rule's verdict
+// aligns: a `viewKind`-bearing entry in `views:` is now an ERROR with the same
+// wrap-it prescription the schema and the loop carry. Standalone views are
+// authored through the metadata door; runtime-ASSEMBLED manifests carry
+// non-container view artifacts under the machine-only `viewItems:` channel
+// (`ui/assembled-views.zod.ts`), which this rule flags when hand-authored —
+// the schema refuses it too, but `os lint` never parses, so the pre-parse
+// door needs its own voice.
 
 export type ViewContainerSeverity = 'error' | 'warning';
 
@@ -80,13 +93,51 @@ export function validateViewContainers(stack: Record<string, unknown>): ViewCont
   const out: ViewContainerFinding[] = [];
   if (!stack || typeof stack !== 'object') return out;
 
+  // [#5320] `viewItems:` is the machine-assembled channel, never an authoring
+  // surface — the stack schema types it `never`, and this pre-parse door says
+  // the same thing to `os lint` callers the parse never reaches.
+  const viewItems = (stack as AnyRec).viewItems;
+  if (viewItems != null && asEntries(viewItems).length > 0) {
+    out.push({
+      severity: 'error',
+      rule: VIEW_CONTAINER_SHAPE,
+      where: 'viewItems',
+      path: 'viewItems',
+      message:
+        '`viewItems` is the machine-assembled channel for non-container view artifacts in '
+        + 'runtime-assembled manifests (package export, environment artifacts) — it is not an '
+        + 'authoring surface.',
+      hint: 'Author views as defineView containers in `views:`; author a standalone view through '
+        + 'the metadata door (Studio / `PUT /api/v1/meta/view`), not in stack source.',
+    });
+  }
+
   for (const { key, value } of asEntries((stack as AnyRec).views)) {
     // Non-object entries are the schema step's problem, not this rule's.
     if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
     const rec = value as AnyRec;
 
-    // Independent ViewItem (`viewKind` discriminator) — registered as-is.
-    if (rec.viewKind != null) continue;
+    // [#5320] Independent ViewItem (`viewKind` discriminator) in `views:` —
+    // refused by the schema AND (since the tighten) by the registration loop;
+    // this rule now reaches the same verdict pre-parse, prescription included.
+    if (rec.viewKind != null) {
+      const label = typeof rec.name === 'string' ? ` ("${rec.name}")` : '';
+      out.push({
+        severity: 'error',
+        rule: VIEW_CONTAINER_SHAPE,
+        where: `views${key}${label}`,
+        path: `views${key}`,
+        message:
+          'A ViewItem record is not a view container: the stack `views:` collection carries '
+          + 'containers only — `viewKind` belongs to a single VIEW, not to the container. The '
+          + 'registration loop refuses this entry (#5320).',
+        hint: 'Wrap it in a defineView container: defineView({ list: { type, data, columns, ... }, '
+          + 'listViews: { ... } }) — or author the standalone view through the metadata door '
+          + '(Studio / `PUT /api/v1/meta/view`). Machine-assembled manifests carry it under '
+          + '`viewItems:`.',
+      });
+      continue;
+    }
 
     if (containerViewCount(rec) > 0) continue;
 

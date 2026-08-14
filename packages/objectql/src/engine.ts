@@ -146,7 +146,16 @@ import { expandSearchToFilter } from './search-filter.js';
 import { isSearchCompanionRequested, stripSearchCompanion } from './search-companion.js';
 import { ExpressionEngine } from '@objectstack/formula';
 import type { Expression } from '@objectstack/spec';
-import { isAggregatedViewContainer, expandViewContainer } from '@objectstack/spec';
+import {
+  isAggregatedViewContainer,
+  expandViewContainer,
+  // [#5320] The assembled-manifest view channel: `views:` carries containers
+  // only (judged by the SAME classifier the producers partition with), and
+  // non-container view artifacts enter through the declared `viewItems:` key.
+  ASSEMBLED_VIEW_ITEMS_KEY,
+  AssembledViewArtifactSchema,
+  isViewContainerShaped,
+} from '@objectstack/spec';
 import { bindHooksToEngine } from './hook-binder.js';
 import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError, buildFieldError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
@@ -3958,6 +3967,34 @@ export class ObjectQL implements IObjectQLEngine {
                   continue;
               }
               const toRegister = item.name === itemName ? item : { ...item, name: itemName };
+              // [#5320] The `views:` tighten — containers ONLY, the contract the
+              // stack schema has always declared (`stack.zod.ts`,
+              // `z.array(ViewSchema)`). This loop used to register EVERY entry
+              // as type `view` — the "runtime wider than schema" hole #5320
+              // records: a ViewItem or flattened overlay that `defineStack`
+              // refuses registered here in silence. Judged by the SAME
+              // classifier the manifest assemblers partition with
+              // (`isViewContainerShaped`), so a produced manifest cannot carry
+              // a `views:` entry this seam refuses. Deliberately a SHAPE-CLASS
+              // judgement, not a full `ViewSchema.parse`: which class an entry
+              // belongs to is this seam's contract; whether a container's
+              // internals are well-formed stays the authoring/publish doors'
+              // job (defineStack, `os validate`, the metadata door).
+              if (key === 'views' && !isViewContainerShaped(toRegister)) {
+                  const err: Error & { code?: string; status?: number } = new Error(
+                      `Invalid \`views:\` entry '${itemName}' from ${sourceLabel} '${ownerId}': the stack `
+                      + '`views:` collection carries view CONTAINERS only. `viewKind`/`config`/inline view '
+                      + 'config belong to a single VIEW, not to the container — wrap it: '
+                      + '`defineView({ list: { type, data, columns, … } })`, or name it — '
+                      + '`defineView({ listViews: { my_view: { … } } })`. A machine-assembled manifest '
+                      + `(package export, environment artifact) carries non-container view artifacts under `
+                      + `\`${ASSEMBLED_VIEW_ITEMS_KEY}:\` instead — re-export the package with a runtime that `
+                      + 'writes that channel.',
+                  );
+                  err.code = 'INVALID_METADATA';
+                  err.status = 422;
+                  throw err;
+              }
               this._registry.registerItem(pluralToSingular(key), toRegister, 'name' as any, ownerId);
               // "Object has-many View" (ADR-0017): a `defineView` document
               // aggregates an object's views. Register the container under the
@@ -3973,6 +4010,46 @@ export class ObjectQL implements IObjectQLEngine {
                       this._registry.registerItem('view', vi, 'name' as any, ownerId);
                   }
               }
+          }
+      }
+
+      // [#5320] The `viewItems:` channel — the declared entry for the
+      // NON-container view artifacts a runtime-ASSEMBLED manifest carries
+      // (tenant-authored standalone ViewItems, flattened overlays, expanded
+      // items a travelling container cannot re-derive). Written by the manifest
+      // assemblers (`partitionAssembledViewArtifacts` — package export, the
+      // artifact factories); refused at the authoring door (`defineStack` types
+      // the key `never`), so only machine-assembled manifests legitimately
+      // reach here carrying it. Strictly schema'd: each entry is judged by
+      // `AssembledViewArtifactSchema` and the PARSED body is what registers, so
+      // an undeclared bag neither passes nor rides through — declared =
+      // enforced, in both directions.
+      const assembledItems = (source as any)?.[ASSEMBLED_VIEW_ITEMS_KEY];
+      if (Array.isArray(assembledItems) && assembledItems.length > 0) {
+          this.logger.debug(`Registering ${ASSEMBLED_VIEW_ITEMS_KEY} from ${sourceLabel}`, { id: ownerId, count: assembledItems.length });
+          for (const item of assembledItems) {
+              const parsed = AssembledViewArtifactSchema.safeParse(item);
+              if (!parsed.success) {
+                  const itemName = resolveMetadataItemName('views', item) ?? '(unnamed)';
+                  const err: Error & { code?: string; status?: number } = new Error(
+                      `Invalid \`${ASSEMBLED_VIEW_ITEMS_KEY}:\` entry '${itemName}' from ${sourceLabel} '${ownerId}': `
+                      + 'the assembled-manifest channel carries non-container view artifacts only — a ViewItem '
+                      + 'record (`viewKind` + `config`) or a flattened list/form overlay '
+                      + '(`AssembledViewArtifactSchema`, @objectstack/spec). A view CONTAINER travels in `views:`. '
+                      + `First issue: ${parsed.error.issues[0]?.message ?? 'no issue detail'}`,
+                  );
+                  err.code = 'INVALID_METADATA';
+                  err.status = 422;
+                  throw err;
+              }
+              const body = parsed.data as Record<string, unknown>;
+              const itemName = resolveMetadataItemName('views', body);
+              if (!itemName) {
+                  this.logger.warn('Skipping viewItems entry without a derivable name', { id: ownerId });
+                  continue;
+              }
+              const toRegister = body.name === itemName ? body : { ...body, name: itemName };
+              this._registry.registerItem('view', toRegister, 'name' as any, ownerId);
           }
       }
   }

@@ -968,6 +968,120 @@ function refuseDateBucketedGroupBy(granularity: string, bucketedHere: string[], 
 }
 
 /**
+ * [#8445] Is this the "the conflict target is not a key" failure?
+ *
+ * # Which channel answers, and why it is the message
+ *
+ * SQLite fills exactly one: the MESSAGE. It raises a plain `SQLITE_ERROR` —
+ * the same generic code a syntax error carries — so `code` cannot discriminate,
+ * and a `code`-based test would swallow every other statement failure as an
+ * unbacked conflict target. Measured on this face, through knex +
+ * better-sqlite3, before the fix:
+ *
+ * ```
+ * upsert('plain', { email: 'a@b.com', title: 'x' }, ['email'])
+ *   -> THREW name=SqliteError code=SQLITE_ERROR status=undefined
+ *      msg=insert into `plain` (...) values (...) on conflict (`email`) do update set ...
+ *          - ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint
+ * ```
+ *
+ * Note what knex does to the message: it prefixes the STATEMENT and keeps
+ * SQLite's own sentence after ` - `. So the tail this predicate matches is
+ * present on the local face too, and the regex is anchored on that tail rather
+ * than on the whole string. The text is SQLite's own, stable since `ON
+ * CONFLICT` arrived in 3.24, and narrow enough that no other failure shares it.
+ *
+ * # What it deliberately does NOT cover — measured, not assumed
+ *
+ * `driver-sql` serves three dialects, and only SQLite's wording for this
+ * condition has been measured (this container has no Postgres or MySQL server
+ * to raise the other two). Recognition is therefore SQLite-first by decision:
+ * a Postgres deployment still gets its raw error here, exactly as before, which
+ * is no worse than today and is a condition nobody has to guess at. Widening it
+ * — most likely as a dialect-spanning predicate in `@objectstack/types` beside
+ * `isUniqueViolationError`, whose vocabulary table is the shape it would take —
+ * is #8567, and it is gated on measuring the other two dialects' text rather
+ * than transcribing it from memory.
+ *
+ * ⚠️ Deliberately NOT `isUniqueViolationError`: that predicate answers the
+ * OPPOSITE condition (a unique index exists and the row violated it).
+ * Confusing the two would report a working constraint as a missing one.
+ *
+ * The twin lives in `driver-turso`'s `remote-transport.ts`
+ * ({@link https://github.com/objectstack-ai/objectstack/issues/8413}); the two
+ * faces state this recognition once each, for the reason that file's header
+ * gives — the remote transport is deliberately free of knex and of `SqlDriver`,
+ * so it cannot import this one.
+ */
+function isUnbackedConflictTargetError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return /ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint/i.test(message);
+}
+
+/**
+ * [#8445] A `conflictKeys` upsert whose target no unique index backs.
+ *
+ * # What the raw throw did
+ *
+ * `mapDataError` builds the response envelope from `error.code` / `error.status`.
+ * With neither set it falls through to its default branch and ships the thrown
+ * message as the whole body — and the message above is the STATEMENT, values
+ * included: `{ "error": "insert into `plain` (...) values ('a@b.com', ...) ..." }`.
+ * Unbranchable by any client, and an information leak of the statement text.
+ * That fall-through is not a guess about `mapDataError`; it is the shape
+ * `sql-driver-date-bucket.test.ts` already records for a `code`/`status`-less
+ * driver throw.
+ *
+ * # Why `VALIDATION_ERROR` / 400
+ *
+ * Reused, deliberately, from the remote twin — the rationale is written out in
+ * full at `driver-turso`'s `refuseUnbackedConflictTarget` (#8413) and is not
+ * re-derived here. In one line: a client branching on why its call failed needs
+ * two facts — **do not retry** (the next attempt fails identically; nothing is
+ * transient, so a 5xx would invite a retry storm) and **nothing collided** (the
+ * merge could not be attempted at all, which is why it is not
+ * `RESOURCE_CONFLICT`/409 and not `DUPLICATE_VALUE`). `conflictKeys` is a
+ * request argument that did not validate against the target, which is exactly
+ * what the catalogued generic covers. `status: 400` puts the rejection on
+ * `@objectstack/rest`'s expected-rejection list, so a caller's un-satisfiable
+ * upsert stops being logged once per request as an unhandled SERVER fault.
+ *
+ * # The wording is the remote refusal's, first sentence for first sentence
+ *
+ * #5240 — one condition, one wording. `TursoDriver` picks its face from `url`,
+ * so this condition can be answered by either compiler in one deployment, and a
+ * second wording would make the answer a property of the connection string.
+ * The text below is #8413's, verbatim, including the "table created before its
+ * `unique` declaration was emitted as DDL" clause: that leg is not remote-only
+ * — this face creates declared indexes, but it cannot create one over a table
+ * that already holds duplicates (`syncDeclaredIndexes` degrades rather than
+ * rewriting rows), so the same table arrives here with the same missing index.
+ *
+ * ⚠️ The original error is kept as `cause` rather than discarded — the SQLite
+ * text is the ground truth an operator debugging the table wants, and nothing
+ * above this layer can recover it once replaced. It is ASSIGNED rather than
+ * passed to the `Error` constructor, matching the twin: the two-argument form
+ * needs the ES2022 `ErrorOptions` overload.
+ */
+function refuseUnbackedConflictTarget(object: string, mergeKeys: string[], cause: unknown): Error {
+  const keys = mergeKeys.map((k) => `"${k}"`).join(', ');
+  const err = new Error(
+    `Cannot upsert into "${object}" on conflict keys (${keys}): no PRIMARY KEY or UNIQUE index ` +
+      `backs them, so the merge target does not exist and SQLite refuses the statement. This is ` +
+      `usually a table created before its "unique" declaration was emitted as DDL, or conflict ` +
+      `keys naming columns that were never declared unique. Fix by declaring the column(s) ` +
+      `"unique: true" and re-running schema sync so the unique index is created — if the table ` +
+      `already holds duplicate values the index cannot be created until they are resolved, and ` +
+      `this driver does not rewrite stored rows to force it. Alternatively upsert on the primary ` +
+      `key by supplying "id" and omitting conflictKeys.`,
+  ) as Error & { code?: string; status?: number; cause?: unknown };
+  err.code = StandardErrorCode.enum.VALIDATION_ERROR;
+  err.status = 400;
+  err.cause = cause;
+  return err;
+}
+
+/**
  * [#5158] A `FilterArray` reached the driver unlowered.
  *
  * `where` is a `FilterCondition` — `QueryASTSchema.where: FilterConditionSchema`
@@ -4948,6 +5062,17 @@ export class SqlDriver implements IDataDriver {
         await (mergeColumns.length > 0 ? insertion.merge(mergeColumns) : insertion.merge());
         break;
       } catch (error) {
+        // [#8445] Classified BEFORE the autonumber retry logic, for three
+        // reasons that all point the same way. It is not an autonumber
+        // collision — `collidingAutoNumberReservations` asks
+        // `isUniqueViolationError`, which is false for this error, so the
+        // reservation probe would query the sequences table for nothing and
+        // then rethrow the raw error anyway. It is not transient — the same
+        // statement fails identically on every attempt, so a retry is a wasted
+        // round trip by construction. And it is the only placement that
+        // envelopes BOTH exits below: a refusal recognised after the branch
+        // would still escape raw whenever `mayRetry` is false.
+        if (isUnbackedConflictTargetError(error)) throw refuseUnbackedConflictTarget(object, mergeKeys, error);
         if (!mayRetry || attempt >= AUTONUMBER_COLLISION_RETRIES) throw error;
         const colliding = await this.collidingAutoNumberReservations(error, reservations, options);
         if (colliding.length === 0) throw error;

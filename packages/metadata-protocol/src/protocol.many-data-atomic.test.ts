@@ -203,8 +203,10 @@ describe('updateManyData atomic — the option is finally read (#4620)', () => {
         expect(res.failed).toBe(3);
         expect(res.results[0].id).toBe('a');
         expect(res.results[0].errors?.[0]?.code).toBe('ROLLED_BACK');
-        expect(res.results[0].errors?.[0]?.message).toContain('update exploded'); // carries the cause
-        expect(res.results[1].errors?.[0]?.message).toBe('update exploded');      // the causal row, verbatim
+        // [#8502] withheld sentence; the propagation claim is asserted against
+        // the causal row's own message so the two cannot drift.
+        expect(res.results[1].errors?.[0]?.message).toBe('The update of this record failed. The reason is in the server log.');
+        expect(res.results[0].errors?.[0]?.message).toContain(res.results[1].errors?.[0]?.message); // carries the cause
         expect(res.results[2].errors?.[0]?.code).toBe('NOT_ATTEMPTED');
         // Nothing persisted, so no reverted write may be reported as a success
         // or carry a record payload.
@@ -311,7 +313,10 @@ describe('many-data non-atomic — unchanged (#4620 regression net)', () => {
         expect(res.results).toHaveLength(3);
         expect(res.succeeded + res.failed).toBe(res.total);
         expect(res.results[0]).toMatchObject({ id: 'a', success: true, index: 0 });
-        expect(res.results[1]).toMatchObject({ id: 'b', success: false, index: 1, errors: [{ message: 'update exploded' }] });
+        expect(res.results[1]).toMatchObject({
+            id: 'b', success: false, index: 1,
+            errors: [{ message: 'The update of this record failed. The reason is in the server log.' }], // [#8502]
+        });
         expect(res.results[2]).toMatchObject({ id: 'c', success: false, index: 2 });
         expect(res.results[2].errors[0].code).toBe('NOT_ATTEMPTED');
         expect(t.rows.get('c')).toEqual({ id: 'c', title: 'c-old' }); // stops without continueOnError

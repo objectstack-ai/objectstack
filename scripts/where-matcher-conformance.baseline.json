@@ -1,0 +1,271 @@
+{
+  "$comment": [
+    "Measured baseline for scripts/check-where-matcher-conformance.mjs (#8494, from #7620).",
+    "",
+    "Each entry is ONE test file holding in-memory WHERE matcher(s) that answer a combinator",
+    "query SILENTLY WRONG — they neither handle `$or`/`$and` correctly nor refuse them. The",
+    "counts are measured by the gate, never asserted by hand; run the gate and it prints the",
+    "current number for every file it disagrees with.",
+    "",
+    "`silent`   the matcher answers the combinator battery wrongly without erroring. Every",
+    "           entry here today is failure shape (b) from #8494: an `Object.entries(where)`",
+    "           matcher with NO combinator branch, which reads `$or` as an ordinary field",
+    "           name, compares `row.$or` (undefined) against the array, and drops the row.",
+    "           Dormant, not harmless — the day a test adds an `$or` to one of these, the",
+    "           suite asserts on an empty result set with nothing erroring.",
+    "",
+    "`unjudged` the matcher could not be lifted out of its file and executed, so the gate has",
+    "           no verdict on it. Declared rather than skipped: \"could not run\" is a failure,",
+    "           not a pass (AGENTS.md, \"Absence must be loud\").",
+    "",
+    "NOTE what is NOT here: failure shape (a), the `$or` early return that discards sibling",
+    "keys. That shape has ZERO grandfathered instances on purpose — the five still live on",
+    "`main` when this gate was built (four in objectql, one in plugin-security, all missed by",
+    "the three correction lanes) were fixed in the gate's own PR rather than baselined. A",
+    "ledger that grandfathered the exact defect its gate exists to stop would be worth",
+    "nothing. Shape (a) is enforced with an EMPTY ledger; shape (b) is the sweep still owed.",
+    "",
+    "TWO ways to clear an entry, and the cheap one is usually right:",
+    "  1. make the matcher conjoin `$or`/`$and` with its sibling keys, or",
+    "  2. make it REFUSE what it does not implement (`throw` on an unrecognised `$`-key).",
+    "Option 2 is one line and is already the recorded practice in",
+    "`packages/objectql/src/engine-autonumber-*.test.ts` — \"silently ignoring an unknown",
+    "operator would let a bad query pass as a good one\". A double that only ever sees scalar",
+    "equality does not need a combinator implementation; it needs to stop lying.",
+    "",
+    "SHRINK-ONLY and hand-edited under review. The gate fails in BOTH directions: a count that",
+    "went down must be lowered here in the same PR, and a file with nothing left must lose its",
+    "entry entirely. The key set is additionally checked against the merge base with",
+    "origin/main, because counts alone cannot see a newly-added file matching its own count —",
+    "that would turn this ledger into a general-purpose mute button (the SLOT_LOOKUP_UNSWEPT",
+    "precedent, #4251). There is deliberately no --update flag: a generator would let a new",
+    "silently-wrong double in by \"just run the update command\"."
+  ],
+  "files": {
+    "packages/metadata-protocol/src/protocol.delete-rewrap-envelope.test.ts": {
+      "silent": 1
+    },
+    "packages/metadata-protocol/src/protocol.duplicate-package-bundle-key.test.ts": {
+      "silent": 1
+    },
+    "packages/metadata-protocol/src/protocol.flow-canonicalizer.test.ts": {
+      "silent": 1
+    },
+    "packages/metadata-protocol/src/protocol.legacy-overlay-delete.test.ts": {
+      "silent": 1
+    },
+    "packages/metadata-protocol/src/protocol.stored-migration.test.ts": {
+      "silent": 1
+    },
+    "packages/metadata-protocol/src/sys-metadata-repository.draft-drain.test.ts": {
+      "silent": 1
+    },
+    "packages/metadata-protocol/src/sys-metadata-repository.history-counters.test.ts": {
+      "silent": 1
+    },
+    "packages/metadata-protocol/src/sys-metadata-repository.package-writability.test.ts": {
+      "silent": 1
+    },
+    "packages/metadata-protocol/src/sys-metadata-repository.recorded-by.test.ts": {
+      "silent": 1
+    },
+    "packages/objectql/src/adr0104-attestation-evidence.test.ts": {
+      "silent": 1
+    },
+    "packages/objectql/src/adr0104-lax-deviation-marker.test.ts": {
+      "silent": 1
+    },
+    "packages/objectql/src/engine-readonly-strict-writes.test.ts": {
+      "silent": 1
+    },
+    "packages/objectql/src/engine-readonly-strip-caller-values.test.ts": {
+      "silent": 1
+    },
+    "packages/objectql/src/engine-readonly-strip-signal.test.ts": {
+      "silent": 1
+    },
+    "packages/objectql/src/engine-summary-recompute-context.test.ts": {
+      "silent": 1
+    },
+    "packages/objectql/src/engine-summary-retry.test.ts": {
+      "silent": 1
+    },
+    "packages/objectql/src/package-disable-enforcement.test.ts": {
+      "silent": 1
+    },
+    "packages/objectql/src/protocol-delete-object-registry-heal.test.ts": {
+      "silent": 1
+    },
+    "packages/objectql/src/protocol-object-overlay-layer.test.ts": {
+      "silent": 1
+    },
+    "packages/objectql/src/protocol-packaged-object-base.test.ts": {
+      "silent": 1
+    },
+    "packages/plugins/plugin-approvals/src/approval-actor-impersonation.test.ts": {
+      "silent": 1
+    },
+    "packages/plugins/plugin-approvals/src/approval-node.test.ts": {
+      "silent": 1
+    },
+    "packages/plugins/plugin-approvals/src/approval-override-audit.test.ts": {
+      "silent": 1
+    },
+    "packages/plugins/plugin-approvals/src/approval-restart-resume.test.ts": {
+      "silent": 1
+    },
+    "packages/plugins/plugin-approvals/src/approval-revise.test.ts": {
+      "silent": 1
+    },
+    "packages/plugins/plugin-approvals/src/approver-cross-org.integration.test.ts": {
+      "silent": 1
+    },
+    "packages/plugins/plugin-approvals/src/stranded-request-inspection.test.ts": {
+      "silent": 1
+    },
+    "packages/plugins/plugin-auth/src/accept-invitation-adopt-membership.test.ts": {
+      "silent": 1
+    },
+    "packages/plugins/plugin-auth/src/auth-manager.jwt-eddsa-fallback.test.ts": {
+      "silent": 1
+    },
+    "packages/plugins/plugin-auth/src/auth-manager.optional-plugin-isolation.test.ts": {
+      "silent": 1
+    },
+    "packages/plugins/plugin-auth/src/auth-plugin.test.ts": {
+      "silent": 2
+    },
+    "packages/plugins/plugin-auth/src/change-email-delete-user-wiring.test.ts": {
+      "silent": 1
+    },
+    "packages/plugins/plugin-auth/src/ensure-default-organization.test.ts": {
+      "silent": 1
+    },
+    "packages/plugins/plugin-auth/src/impersonation-bearer-rotation.test.ts": {
+      "silent": 1
+    },
+    "packages/plugins/plugin-auth/src/org-create-posture-gate.test.ts": {
+      "silent": 1
+    },
+    "packages/plugins/plugin-auth/src/remove-member-permission-guard.test.ts": {
+      "silent": 1
+    },
+    "packages/plugins/plugin-auth/src/remove-user-atomicity.test.ts": {
+      "silent": 1
+    },
+    "packages/plugins/plugin-auth/src/session-of-record.test.ts": {
+      "silent": 1
+    },
+    "packages/plugins/plugin-auth/src/session-tombstone.test.ts": {
+      "silent": 1
+    },
+    "packages/plugins/plugin-email/src/email-plugin.attachment-storage.test.ts": {
+      "silent": 1
+    },
+    "packages/plugins/plugin-email/src/email-plugin.outbox-sweep.test.ts": {
+      "silent": 1
+    },
+    "packages/plugins/plugin-email/src/email-plugin.queue-delivery.test.ts": {
+      "silent": 1
+    },
+    "packages/plugins/plugin-email/src/email-plugin.template-runtime-write.test.ts": {
+      "silent": 1
+    },
+    "packages/plugins/plugin-email/src/outbox-sweep.test.ts": {
+      "unjudged": 1
+    },
+    "packages/plugins/plugin-hono-server/src/current-user-endpoints-additive-baseline.test.ts": {
+      "silent": 1
+    },
+    "packages/plugins/plugin-hono-server/src/current-user-endpoints-position-grants.test.ts": {
+      "silent": 1
+    },
+    "packages/plugins/plugin-reports/src/report-export-axis.test.ts": {
+      "silent": 1
+    },
+    "packages/plugins/plugin-reports/src/report-service.test.ts": {
+      "silent": 1
+    },
+    "packages/plugins/plugin-security/src/auto-org-admin-grant.test.ts": {
+      "silent": 1
+    },
+    "packages/plugins/plugin-security/src/delegated-admin-gate.test.ts": {
+      "silent": 3
+    },
+    "packages/plugins/plugin-security/src/permission-denied-user-copy.test.ts": {
+      "silent": 1
+    },
+    "packages/plugins/plugin-security/src/permission-set-projection.test.ts": {
+      "silent": 1
+    },
+    "packages/plugins/plugin-security/src/security-plugin.test.ts": {
+      "silent": 2
+    },
+    "packages/plugins/plugin-security/src/share-link-tenant-wall.test.ts": {
+      "silent": 1
+    },
+    "packages/plugins/plugin-sharing/src/business-unit-graph.test.ts": {
+      "silent": 1
+    },
+    "packages/plugins/plugin-sharing/src/federated-phantom-owner-scoping.test.ts": {
+      "silent": 1
+    },
+    "packages/plugins/plugin-sharing/src/share-link-enforcement-context.test.ts": {
+      "silent": 1
+    },
+    "packages/plugins/plugin-sharing/src/share-link-service.test.ts": {
+      "silent": 1
+    },
+    "packages/plugins/plugin-sharing/src/sharing-rule-provenance.test.ts": {
+      "silent": 1
+    },
+    "packages/rest/src/meta-object-extension-property-classes.test.ts": {
+      "silent": 1
+    },
+    "packages/rest/src/meta-object-overlay-extension-fold.test.ts": {
+      "silent": 1
+    },
+    "packages/services/service-analytics/src/__tests__/objectql-daterange.test.ts": {
+      "silent": 1
+    },
+    "packages/services/service-analytics/src/__tests__/objectql-read-scope.test.ts": {
+      "silent": 1
+    },
+    "packages/services/service-automation/src/builtin/crud-bulk-intent.test.ts": {
+      "silent": 1
+    },
+    "packages/services/service-automation/src/suspended-run-store.test.ts": {
+      "silent": 1
+    },
+    "packages/services/service-messaging/src/messaging-service.test.ts": {
+      "silent": 1
+    },
+    "packages/services/service-messaging/src/notification-schema-conformance.test.ts": {
+      "silent": 1
+    },
+    "packages/services/service-queue/src/db-queue-adapter.test.ts": {
+      "silent": 1
+    },
+    "packages/services/service-queue/src/job-queue-retention.test.ts": {
+      "silent": 1
+    },
+    "packages/services/service-settings/src/config-change-audit.test.ts": {
+      "silent": 1
+    },
+    "packages/services/service-settings/src/settings-crypto-fail-closed.test.ts": {
+      "silent": 1
+    },
+    "packages/services/service-settings/src/settings-secret-rotation.test.ts": {
+      "silent": 1
+    },
+    "packages/services/service-storage/src/attachment-lifecycle.test.ts": {
+      "silent": 1
+    },
+    "packages/services/service-storage/src/file-reference-lifecycle.test.ts": {
+      "silent": 1
+    },
+    "packages/triggers/trigger-schedule/src/time-relative-trigger.test.ts": {
+      "silent": 1
+    }
+  }
+}

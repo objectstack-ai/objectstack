@@ -178,7 +178,16 @@ describe('atomic batchData over the real engine (ADR-0119 D4 / ADR-0034)', () =>
         expect(res.succeeded).toBe(0);
         expect(res.results.every((r: any) => r.success === false)).toBe(true);
         expect(res.results[0].errors?.[0]?.code).toBe('ROLLED_BACK');
-        expect(res.results[2].errors?.[0]?.message).toContain('constraint violated');
+        // [#8502] `constraint violated` is a bare driver `Error` — it declares
+        // no client refusal, so its sentence is withheld and the causal row
+        // says the stable operation-named line. The claim here is unchanged:
+        // row 2 is the CAUSAL row and rows 0/1 are its collateral, which is
+        // what `ROLLED_BACK` above and this row's own message together say.
+        expect(res.results[2].errors?.[0]?.message).toBe(
+            'The create of this record failed. The reason is in the server log.',
+        );
+        // …and the driver's own text is nowhere in the response.
+        expect(JSON.stringify(res)).not.toContain('constraint violated');
     });
 
     it('leaves rows written BEFORE the batch untouched when it rolls back', async () => {

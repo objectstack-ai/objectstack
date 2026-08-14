@@ -11,6 +11,13 @@
 
 import { CoreServiceName } from '@objectstack/spec/system';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
+// [#5320] A's mechanical half of the fork ruling: on export, view artifacts
+// are PARTITIONED — containers travel in `views:`, expanded items a travelling
+// container re-derives exactly are folded away (the import side's own
+// expansion recreates them), and everything else (tenant-authored standalone
+// ViewItems, flattened overlays, edited expanded items) travels under the
+// declared `viewItems:` channel the registration loop ingests.
+import { ASSEMBLED_VIEW_ITEMS_KEY, partitionAssembledViewArtifacts } from '@objectstack/spec/ui';
 import {
     shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
 } from '@objectstack/core';
@@ -953,6 +960,20 @@ context: HttpProtocolContext,
             continue;
         }
         if (items.length === 0) continue;
+        // [#5320] `views` is partitioned rather than dumped: the registry's
+        // ADR-0017 dual-read returns the container AND its expanded per-view
+        // items, and the stack `views:` vocabulary (container-only) refuses the
+        // expanded ones. Containers go to `views:`; expanded items the
+        // container re-derives exactly are dropped (`folded` — the importing
+        // loop's own expansion recreates them); the rest — standalone
+        // ViewItems, overlays, edited expansions — go to `viewItems:`.
+        if (plural === 'views') {
+            const { views, viewItems } = partitionAssembledViewArtifacts(items.map(clean));
+            if (views.length > 0) manifest[plural] = views;
+            if (viewItems.length > 0) manifest[ASSEMBLED_VIEW_ITEMS_KEY] = viewItems;
+            total += views.length + viewItems.length;
+            continue;
+        }
         manifest[plural] = items.map(clean);
         total += items.length;
     }

@@ -51,7 +51,17 @@ function makeDriver() {
     const matches = (row: any, where: any): boolean => {
         if (!where || typeof where !== 'object') return true;
         for (const [k, v] of Object.entries(where)) {
-            if (k === '$and') return (v as any[]).every((w) => matches(row, w));
+            // `$and` / `$or` are CONJOINED with their sibling keys, the way a
+            // real driver reads them — never `return`ed, which would discard
+            // every sibling the loop has not reached yet (#7620 / #8494).
+            if (k === '$and') {
+                if (!(v as any[]).every((w) => matches(row, w))) return false;
+                continue;
+            }
+            if (k === '$or') {
+                if (!(v as any[]).some((w) => matches(row, w))) return false;
+                continue;
+            }
             if (k.startsWith('$')) continue;
             const exp = (v && typeof v === 'object' && '$in' in (v as any)) ? (v as any).$in : v;
             if (Array.isArray(exp)) { if (!exp.includes(row[k])) return false; }
