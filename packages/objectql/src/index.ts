@@ -263,7 +263,13 @@ export {
   parseSecretRef,
   collectSecretFields,
   collectMaskedReadFields,
+  collectMaskedPasswordFields,
   collectCredentialFields,
+  // [#8559] The empty-string refusal at the credential write door — exported
+  // so consumers branch on `code`/`status` rather than message text.
+  EmptyCredentialWriteError,
+  EMPTY_CREDENTIAL_REFUSAL_CODE,
+  EMPTY_CREDENTIAL_REFUSAL_STATUS,
 } from './secret-fields.js';
 
 // Export Utilities
