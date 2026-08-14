@@ -240,7 +240,7 @@ export async function rotateCallerBearerOnImpersonation(ctx: any): Promise<void>
   // admin had selected, which is the only piece of session state they would
   // notice losing on the way back. Everything else is re-derived for a session
   // minted now — `ipAddress`/`userAgent` from this request, and
-  // `activeOrganizationId` itself by ADR-0081 D1's `session.create.before`
+  // `activeOrganizationId` itself by ADR-0093 D9's `session.create.before`
   // stamp when the admin had not switched away from their default.
   //
   // Spreading the whole old row here instead would be handing the producer a

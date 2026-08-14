@@ -878,7 +878,12 @@ function check(root, registry) {
     if (added.length > 0)
       failures.push(
         `${name}: NEW dist-resolved type import(s) since this entry was measured: ${added.join(', ')}.\n` +
-          "    Add the `paths` rules to the package's tsconfig.json — widening the registry entry is not the fix.",
+          "    Add the `paths` rules to the package's tsconfig.json — widening the registry entry is not the fix.\n" +
+          // The REASON for that refusal, in the text the author actually reads (#8576).
+          // Mirrors `KNOWN_DIST_RESOLVED_TYPE_IMPORTS`'s own words verbatim rather than
+          // restating them: one rule in two voices becomes two rules by the next reading.
+          '    That registry is ⛔ SHRINK-ONLY: entries are audited in both directions, so one that is no\n' +
+          '    longer needed fails the gate and names itself for deletion.',
       );
     if (gone.length > 0)
       failures.push(
@@ -1283,6 +1288,14 @@ function selfTest() {
     });
     const grown = check(root, measuredNames);
     expect(has(grown.failures, 'NEW dist-resolved type import'), 'a new dist-resolved import under an entry did not fail');
+    // #8576. The refusal above turns the registry remedy down; this pins that it
+    // also says WHY, in the text the author reads. Asserted on the planted
+    // violation, never on a green run — the string only ever prints on failure.
+    expect(
+      has(grown.failures, '⛔ SHRINK-ONLY'),
+      'the refusal no longer states WHY it refuses — the registry\'s shrink-only nature is back to being '
+        + 'comment-only, which tells the maintainer reading the script and not the author tripping the gate',
+    );
 
     const wide = check(root, { ...measuredNames, '@fx/violator': ['@fx/spec', '@fx/other', '@fx/gone'] });
     expect(has(wide.failures, 'STALE'), 'a registry entry listing a dep that is no longer dist-resolved did not fail');

@@ -519,7 +519,7 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
   appName?: string;
 
   /**
-   * ADR-0081 D1 — default active-org on session create. When enabled
+   * ADR-0093 D9 — default active-org on session create. When enabled
    * (default), a `session.create.before` hook stamps `activeOrganizationId`
    * from the caller's `sys_member` row (owner-preferred) whenever the draft
    * lacks one. A host-supplied `session.create.before` (see
@@ -4417,7 +4417,7 @@ export class AuthManager {
         }
       : stamp;
 
-    // ADR-0081 D1 — default active-org on session create. Without it, a user
+    // ADR-0093 D9 — default active-org on session create. Without it, a user
     // with memberships logs in with `activeOrganizationId = null`: better-auth
     // org endpoints can't resolve an active org (single-org invite dead-end)
     // and `{current_org_id}` nav tokens fall back to list views. Resolve the

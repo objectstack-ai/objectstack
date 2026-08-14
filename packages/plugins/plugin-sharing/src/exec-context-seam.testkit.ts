@@ -42,7 +42,7 @@ export interface SeamPrincipal {
   email?: string;
   /**
    * better-auth `session.activeOrganizationId` — the ONE wire field a real
-   * login carries the caller's active organization on (ADR-0081 D1 stamps it
+   * login carries the caller's active organization on (ADR-0093 D9 stamps it
    * from the user's `sys_member` row on session create). `null` reproduces a
    * membership-less / platform-scoped session.
    */

@@ -539,7 +539,57 @@ describe('SchemaMode & External Federation (ADR-0015)', () => {
     }
   });
 
-  it('should forbid external settings when schemaMode === "managed"', () => {
+  // ── #8153 — the managed `credentialsRef` allowance ─────────────────────────
+  //
+  // The Studio wizard's `createDatasource` stores the secret in the secrets
+  // store and writes `external: { credentialsRef }` onto the row — without
+  // consulting `schemaMode`, which defaults to 'managed'. Until #8153 the
+  // refinement refused ANY `external` on managed, so every wizard-created
+  // datasource with a password was badged `_diagnostics.valid:false` and
+  // `PUT /meta` answered 422 on the service's own output. Maintainer ruling
+  // (issue #8153 comment, 2026-08-13): allow `external.credentialsRef` — and
+  // only it — on managed; keep refusing every federation key.
+
+  it('accepts the exact shape createDatasource writes on a managed row (#8153 happy path)', () => {
+    // The measured persisted shape from #8153 — no `schemaMode`, so it
+    // defaults to 'managed'; `external` carries only the secrets-store ref.
+    const wizardRow = {
+      name: 'good_pg',
+      driver: 'postgres',
+      config: { host: 'db.internal', database: 'mydb', username: 'app' },
+      origin: 'runtime',
+      external: { credentialsRef: 'sys_secret:bound' },
+    } as const;
+    const result = DatasourceSchema.safeParse(wizardRow);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.schemaMode).toBe('managed');
+      expect(result.data.external?.credentialsRef).toBe('sys_secret:bound');
+    }
+  });
+
+  it('round-trips the wizard row: the parsed output (defaults applied) re-parses valid (#8153)', () => {
+    // `PUT /meta` re-parses what `GET` served — the parsed shape, with every
+    // `external` default key materialized. The allowance judges VALUES, not
+    // key presence, precisely so this round-trip stays valid.
+    const first = DatasourceSchema.parse({
+      name: 'good_pg',
+      driver: 'postgres',
+      config: { host: 'db.internal', database: 'mydb', username: 'app' },
+      origin: 'runtime',
+      external: { credentialsRef: 'sys_secret:bound' },
+    });
+    // Defaults really were applied — the second parse sees the full block.
+    expect(first.external?.allowWrites).toBe(false);
+    expect(first.external?.queryTimeoutMs).toBe(30_000);
+    const second = DatasourceSchema.safeParse(first);
+    expect(second.success).toBe(true);
+    if (second.success) {
+      expect(second.data.external?.credentialsRef).toBe('sys_secret:bound');
+    }
+  });
+
+  it('still refuses `external.allowWrites` on a managed row, with the existing guidance (#8153)', () => {
     const result = DatasourceSchema.safeParse({
       name: 'default',
       driver: 'postgres',
@@ -549,8 +599,92 @@ describe('SchemaMode & External Federation (ADR-0015)', () => {
     });
     expect(result.success).toBe(false);
     if (!result.success) {
-      expect(result.error.issues.some((i) => i.path.includes('external'))).toBe(true);
+      const issue = result.error.issues.find((i) => i.path.includes('external'));
+      expect(issue?.message).toContain(`'external' settings only apply when schemaMode != 'managed'.`);
+      expect(issue?.message).toContain('allowWrites');
     }
+  });
+
+  it('still refuses `external.allowedSchemas` on a managed row (#8153)', () => {
+    const result = DatasourceSchema.safeParse({
+      name: 'default',
+      driver: 'postgres',
+      config: { database: 'mydb' },
+      external: { allowedSchemas: ['public'] },
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const issue = result.error.issues.find((i) => i.path.includes('external'));
+      expect(issue?.message).toContain(`'external' settings only apply when schemaMode != 'managed'.`);
+      expect(issue?.message).toContain('allowedSchemas');
+    }
+  });
+
+  it('still refuses non-default `validation` and `queryTimeoutMs` on a managed row (#8153)', () => {
+    const result = DatasourceSchema.safeParse({
+      name: 'default',
+      driver: 'postgres',
+      config: { database: 'mydb' },
+      external: { validation: { onMismatch: 'warn' }, queryTimeoutMs: 5_000 },
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const issue = result.error.issues.find((i) => i.path.includes('external'));
+      expect(issue?.message).toContain('queryTimeoutMs');
+      expect(issue?.message).toContain('validation');
+    }
+  });
+
+  it('refuses credentialsRef + a federation key together — the allowance does not smuggle (#8153)', () => {
+    const result = DatasourceSchema.safeParse({
+      name: 'default',
+      driver: 'postgres',
+      config: { database: 'mydb' },
+      external: { credentialsRef: 'sys_secret:bound', allowWrites: true },
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const issue = result.error.issues.find((i) => i.path.includes('external'));
+      // The refusal names the federation key, never the allowed ref.
+      expect(issue?.message).toContain('allowWrites');
+      expect(issue?.message).not.toContain('remove: credentialsRef');
+    }
+  });
+
+  it('accepts explicitly-written DEFAULT federation values on a managed row — inert content (#8153)', () => {
+    // Deliberate: the check judges effective federation content. An explicit
+    // `allowWrites: false` is byte-equal to the applied default and gates
+    // nothing — refusing it would 422 re-parses of served output, which
+    // materializes every default key.
+    const result = DatasourceSchema.safeParse({
+      name: 'default',
+      driver: 'postgres',
+      config: { database: 'mydb' },
+      external: {
+        credentialsRef: 'sys_secret:bound',
+        allowWrites: false,
+        queryTimeoutMs: 30_000,
+        validation: { onMismatch: 'fail', checkOnBoot: true },
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('keeps full external acceptance on schemaMode="external" — unchanged by #8153', () => {
+    const result = DatasourceSchema.safeParse({
+      name: 'warehouse',
+      driver: 'postgres',
+      config: { url: 'postgres://user@warehouse.internal/analytics' },
+      schemaMode: 'external',
+      external: {
+        allowedSchemas: ['public', 'mart'],
+        allowWrites: true,
+        validation: { onMismatch: 'warn', checkOnBoot: false, checkIntervalMs: 60_000 },
+        credentialsRef: 'secret:warehouse/readonly',
+        queryTimeoutMs: 15_000,
+      },
+    });
+    expect(result.success).toBe(true);
   });
 
   it('should require external settings for validate-only mode too', () => {
