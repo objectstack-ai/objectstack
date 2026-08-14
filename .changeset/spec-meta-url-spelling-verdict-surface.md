@@ -4,33 +4,27 @@
 
 refactor(spec): narrow the `@objectstack/spec/shared` metadata-url-spelling surface to the verdict (#8424)
 
-**BREAKING** — three exports are removed from `@objectstack/spec/shared` and one
-purpose-shaped export is added, per the #8424 spec-seat ruling (amended, option A):
+Per the #8424 spec-seat ruling (amended, option A), the `/meta` URL-spelling
+module's surface is three symbols with three roles: `META_URL_TO_SINGULAR` (the
+spelling contract), `canonicalMetaUrlType` (the fold), and the new
+`metaUrlSpellingRefusal(urlType)` → `{ declared, hint } | null` (the composed
+#7894 boundary refusal verdict: "this spelling is an unrecognised plural of
+declared type `declared`; the accepted spellings are `declared` and `hint`").
 
-| removed export | successor |
-|:--|:--|
-| `unmappedDeclaredTypeSpelling(type)` | `metaUrlSpellingRefusal(type)?.declared` |
-| `restPluralOfMetaType(type)` | `metaUrlSpellingRefusal(type)?.hint` (the declared type's canonical REST plural) |
-| `DECLARED_META_TYPES` | none — it looked like a live registry and is not one; the refusal verdict is the supported question |
+Three helpers that briefly rode the surface become module-internal:
+`unmappedDeclaredTypeSpelling` and `restPluralOfMetaType` (their one
+out-of-package consumer, `metadata-protocol`'s 400 refusal, now consumes the
+composed verdict — `metaUrlSpellingRefusal(t)?.declared` / `?.hint` replace the
+two calls) and `DECLARED_META_TYPES` (no consumer; it read like a live registry
+of registered types and is not one).
 
-FROM → TO: replace
-`unmappedDeclaredTypeSpelling(t)` / `restPluralOfMetaType(t)` compositions with a
-single `metaUrlSpellingRefusal(t)` call — it returns
-`{ declared, hint } | null`, i.e. the composed #7894 boundary verdict ("this
-spelling is an unrecognised plural of declared type `declared`; the accepted
-spellings are `declared` and `hint`"), which is the one measured out-of-package
-use. `META_URL_TO_SINGULAR` and `canonicalMetaUrlType` are unchanged.
-
-Graded `minor`, not `major`: every publishable package sits in the Changesets
-`fixed` lockstep group during the launch window
-(`scripts/check-changeset-no-major.mjs`), so a `major` here would promote the
-whole ~70-package stack for a three-symbol surface trim. The removed exports
-have never been published: they landed on `main` 2026-08-13 (PR #8420) and the
-last published version is `17.0.0-rc.6` (2026-08-10), so no released consumer
-can hold an import of them.
+**Not a breaking change for any released consumer, hence no breaking
+declaration**: the three internalized exports landed on `main` 2026-08-13
+(PR #8420) and no version has published since `17.0.0-rc.6` (2026-08-10), so no
+released artifact ever carried them — relative to every published version this
+release only *adds* spelling exports. Even had they been published, the
+launch-window convention (`scripts/check-changeset-no-major.mjs`) would ship the
+trim as `minor`.
 
 No runtime behaviour changes: the `/meta` boundary's 400 `INVALID_REQUEST`
-refusal wording and status are byte-identical (#7894's pins are the proof);
-`metadata-protocol` now consumes the composed verdict instead of the parts.
-
-<!-- adr-0087: not-required (unpublished) the three removed exports merged 2026-08-13 (PR #8420) and no version has published since 17.0.0-rc.6 (2026-08-10), so they exist in no released artifact an upgrader could hold; TypeScript-surface change only, no stored metadata shape involved -->
+refusal wording and status are byte-identical (#7894's pins are the proof).
