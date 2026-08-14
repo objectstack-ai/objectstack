@@ -61,7 +61,7 @@ import {
     type QueryAliasConflict, type QueryAliasSlot,
     type DroppedFieldsEvent, type QueryAST, type EngineQueryOptionsParsed,
 } from '@objectstack/spec/data';
-import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, unmappedDeclaredTypeSpelling, restPluralOfMetaType } from '@objectstack/spec/shared';
+import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSpellingRefusal } from '@objectstack/spec/shared';
 import { applyConversionsToStoredItem, type ConversionNotice } from '@objectstack/spec';
 import { type FormView, isAggregatedViewContainer, expandViewContainer } from '@objectstack/spec/ui';
 import { METADATA_FORM_REGISTRY, CORE_SERVICE_PROVIDER, serviceUnavailableMessage, inProcessServiceMessage } from '@objectstack/spec/system';
@@ -191,17 +191,19 @@ function canonicalMetaType(type: string): string {
  * `stripServedSystemColumns`, where the type is already canonical and a throw
  * would be a bug rather than a refusal.
  *
- * The refusal is deliberately narrow: {@link unmappedDeclaredTypeSpelling}
- * fires only for a spelling whose singular is a type the platform itself
+ * The refusal is deliberately narrow: {@link metaUrlSpellingRefusal} returns a
+ * verdict only for a spelling whose singular is a type the platform itself
  * DECLARES, so a plugin-registered runtime kind can never trip it. See that
- * function for why the rule is static rather than a live-registry lookup.
+ * function for why the rule is static rather than a live-registry lookup —
+ * and (#8424) for why this boundary consumes the composed VERDICT rather than
+ * the predicate parts: the spelling contract stays whole at its producer.
  */
 function canonicalizeMetaRequestType<T extends { type: string }>(request: T): T {
-    const declared = unmappedDeclaredTypeSpelling(request.type);
-    if (declared) {
+    const refusal = metaUrlSpellingRefusal(request.type);
+    if (refusal) {
         const err = new Error(
             `[invalid_request] '${request.type}' is not a recognised spelling of metadata type `
-            + `'${declared}'. Address it as '${declared}' or '${restPluralOfMetaType(declared)}'. `
+            + `'${refusal.declared}'. Address it as '${refusal.declared}' or '${refusal.hint}'. `
             + `Refused rather than treated as a plugin-registered type, because forwarding an unrecognised `
             + `spelling of a declared type would create a second namespace under type='${request.type}'.`,
         );

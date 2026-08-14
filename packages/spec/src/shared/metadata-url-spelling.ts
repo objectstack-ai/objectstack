@@ -65,6 +65,14 @@
  * layers below keep reading the single canonical singular. Nothing here should
  * ever be consulted by a predicate one layer down.
  *
+ * ## The published surface is three symbols, by ruling (#8424)
+ *
+ * {@link META_URL_TO_SINGULAR} (the spelling contract) ·
+ * {@link canonicalMetaUrlType} (the fold) · {@link metaUrlSpellingRefusal}
+ * (the boundary refusal verdict). The helpers behind them are module-internal;
+ * see {@link metaUrlSpellingRefusal}'s doc for why the verdict is exported and
+ * the parts are not.
+ *
  * @module
  */
 
@@ -80,8 +88,11 @@ import { PLURAL_TO_SINGULAR } from './metadata-collection.zod';
  * carried for correctness of future types rather than for any type declared
  * today. Anything more clever would be a spelling GUESSER, which is precisely
  * what the boundary must not contain.
+ *
+ * Module-internal (#8424): the published surface carries the VERDICT
+ * ({@link metaUrlSpellingRefusal}), never the predicate parts.
  */
-export function restPluralOfMetaType(type: string): string {
+function restPluralOfMetaType(type: string): string {
   if (/[^aeiou]y$/.test(type)) return `${type.slice(0, -1)}ies`;
   if (/(s|x|z|ch|sh)$/.test(type)) return `${type}es`;
   return `${type}s`;
@@ -99,8 +110,12 @@ function camelCaseOf(type: string): string {
  * itself ships a contract for, so an unresolvable spelling of it is a caller
  * error rather than a plugin the platform has not heard of. That distinction is
  * the whole basis of {@link unmappedDeclaredTypeSpelling}.
+ *
+ * Module-internal (#8424) — deliberately so: this set LOOKS like a live
+ * registry of registered types and is not one (it is the static declared set),
+ * which is exactly the misreading a public export would invite.
  */
-export const DECLARED_META_TYPES: ReadonlySet<string> = new Set(
+const DECLARED_META_TYPES: ReadonlySet<string> = new Set(
   DEFAULT_METADATA_TYPE_REGISTRY.map((e) => e.type),
 );
 
@@ -192,12 +207,47 @@ function singularCandidates(type: string): string[] {
  * indistinguishable from a plugin kind by static means, so it still takes the
  * plugin path. Closing that needs the live registered-type set at the boundary,
  * which is a different change with a different risk profile.
+ *
+ * Module-internal (#8424): consumers get the composed verdict from
+ * {@link metaUrlSpellingRefusal}, never this predicate on its own.
  */
-export function unmappedDeclaredTypeSpelling(type: string): string | null {
+function unmappedDeclaredTypeSpelling(type: string): string | null {
   if (type in META_URL_TO_SINGULAR) return null;
   if (DECLARED_META_TYPES.has(type)) return null;
   for (const candidate of singularCandidates(type)) {
     if (DECLARED_META_TYPES.has(candidate)) return candidate;
   }
   return null;
+}
+
+/**
+ * The refusal VERDICT for a `/meta/:type` path segment (#7894 · #8424).
+ *
+ * Returns `null` when the spelling is not the platform's to refuse — it is
+ * canonical, a mapped plural, or a possible plugin kind. Returns the verdict
+ * when the spelling is an unrecognised plural of a type the platform itself
+ * DECLARES: `declared` is that type, `hint` its canonical REST-plural spelling,
+ * so the refusing boundary can name both accepted spellings without owning any
+ * spelling logic of its own.
+ *
+ * ## Why the surface exports the verdict and not the parts (#8424)
+ *
+ * The predicate ({@link unmappedDeclaredTypeSpelling}), the pluralizer
+ * ({@link restPluralOfMetaType}) and the declared set (`DECLARED_META_TYPES`)
+ * are module-internal on purpose. Every `@objectstack/spec` export is a
+ * compatibility commitment, and the one measured need outside this module —
+ * `metadata-protocol`'s 400 refusal at the request boundary — is "is this
+ * spelling refusable, and what does the refusal say". Exporting the parts
+ * would invite a consumer to recompose them in the wrong order (ask the
+ * declared set a live-registry question, derive a plural the map disagrees
+ * with); exporting the verdict makes the correct use the only expressible one.
+ * The spelling contract stays whole, at its producer (Prime Directive #8:
+ * derived, never re-derived downstream).
+ */
+export function metaUrlSpellingRefusal(
+  urlType: string,
+): { declared: string; hint: string } | null {
+  const declared = unmappedDeclaredTypeSpelling(urlType);
+  if (declared === null) return null;
+  return { declared, hint: restPluralOfMetaType(declared) };
 }
