@@ -719,6 +719,30 @@ export function i18nBundlePackageDirs() {
  *   CI does not silently stop being suggested — the run prints it as STALE and
  *   says to fix this table. A hand-written list that reports its own rot is a
  *   different object from one that quietly ages.
+ * - Every `name` here is an INVOCATION, not a script. One check script can be
+ *   wired into CI under two package scripts that answer different questions, and
+ *   a rationale that names the script instead of the invocation sends a seat to
+ *   a command which cannot reproduce the failure it describes.
+ *   `check:type-check-coverage` and `check:type-check-debt` are one file
+ *   (`scripts/check-type-check-coverage.mjs`); only the second passes
+ *   `--re-measure`, which is the half a new test file's type errors move. This
+ *   entry named the first while explaining the second, so a dev seat ran it in
+ *   good faith, reported the union green, and CI found four new type errors.
+ *   Swept over this tree when that was fixed: of the 73 families the workflows
+ *   discover, 8 resolve to a script some other family also resolves to — and 7
+ *   of those 8 are the other shape, a `check:` script beside a direct
+ *   `node scripts/check-x.mjs` step in a second workflow, which `derive`
+ *   discovers as its own family and prints with its own runnable invocation.
+ *   The pair below is the only one where two ROOT SCRIPTS differ by a flag, so
+ *   this is a one-off today and the rule is what generalises, not the fix.
+ * - Prose in a `why` is a MODULE-BODY string, so it is scanned for watch hints
+ *   like any other literal — comment masking cannot reach it. The ratchet
+ *   entry's remedy command therefore spells its `--filter` values unquoted (and
+ *   says to quote them for the shell): measured, the shell-quoted spelling adds
+ *   both of its glob filter values to THIS file's own hint set as hints, inert
+ *   only because `hintCovers` rejects one that collapses to a bare top-level
+ *   directory. A gate list that fabricates hints out of its own explanations is
+ *   the failure this whole script is written against.
  * - Each entry is deletable, with a stated criterion:
  *   - test-file entry: when a gate on it grows a discoverable path literal,
  *     the ordinary derivation names it and its line becomes redundant.
@@ -741,7 +765,11 @@ export const CHANGE_KIND_GATES = [
       },
       {
         name: 'check:type-check-coverage',
-        why: "TEST_DEBT ratchets a package's test-layer type errors, so a new test file that does not typecheck cleanly moves it",
+        why: "the STRUCTURAL half: a package whose test files sit outside every tsc program accounting for it must carry a TEST_DEBT entry, so a new test file no tsconfig reaches moves this one. It re-measures no count — the ratchet is the invocation below",
+      },
+      {
+        name: 'check:type-check-debt',
+        why: "the RATCHET half, and the invocation CI runs for it: `--re-measure` re-runs tsc per ledger entry and fails when a count drifts up, so a new test file that does not typecheck cleanly moves it. Needs the workspace closure BUILT — on an unbuilt worktree it refuses outright, and that throw means NOT MEASURED, never `not applicable to me`. Build first, exactly as lint.yml does: pnpm exec turbo run build --filter=./packages/* --filter=./packages/*/* (quote the filter values for your shell)",
       },
     ],
   },
@@ -1077,8 +1105,8 @@ function selfTest() {
 
   const resolved = (name) => `pnpm ${name}`;
   const kindHit = changeKindLines(['packages/objectql/src/engine.test.ts'], resolved);
-  t('a test path emits the convention section', kindHit.length === 3 && kindHit[0].includes('adds or edits a test file'));
-  // Both halves anchor on the rendered DELIMITERS (`- pnpm x   —`), for the
+  t('a test path emits the convention section', kindHit.length === 4 && kindHit[0].includes('adds or edits a test file'));
+  // All three halves anchor on the rendered DELIMITERS (`- pnpm x   —`), for the
   // reason the i18n entry's pins below state at length: a bare `includes` is
   // satisfied by every name that merely STARTS WITH the expected one, so a
   // prefix-preserving rename is invisible to it — the single rot class the STALE
@@ -1087,7 +1115,20 @@ function selfTest() {
   // `check:type-check-coverage-v2` in CHANGE_KIND_GATES left the substring form
   // green at 61/61 while the live run printed both as STALE; anchored, the same
   // rename fails this case. The two conventions in this file now agree.
-  t('the section names both convention gates, runnably', kindHit.some((l) => l.includes('- pnpm check:query-options-erasure   —')) && kindHit.some((l) => l.includes('- pnpm check:type-check-coverage   —')));
+  //
+  // The coverage/debt PAIR is pinned as a pair on purpose (#8545): they are two
+  // invocations of one script, and the anchored form is what tells them apart —
+  // `includes('pnpm check:type-check-coverage')` is satisfied by the debt line's
+  // absence AND by a `-v2` rename, which is how a rationale describing the
+  // ratchet went on naming the invocation that never runs it.
+  t('the section names all three convention gates, runnably', kindHit.some((l) => l.includes('- pnpm check:query-options-erasure   —')) && kindHit.some((l) => l.includes('- pnpm check:type-check-coverage   —')) && kindHit.some((l) => l.includes('- pnpm check:type-check-debt   —')));
+  // The ratchet line's prerequisite is part of the product, not decoration: a
+  // seat that runs `--re-measure` on an unbuilt worktree gets a throw, and an
+  // unexplained throw reads as "not applicable to me" — which is a green report
+  // over a gate that never ran. So the printed line must carry both the
+  // condition and a command that satisfies it.
+  const debtLine = kindHit.find((l) => l.includes('- pnpm check:type-check-debt   —')) ?? '';
+  t('the ratchet line states its built-closure prerequisite', /closure BUILT|BUILT closure/.test(debtLine) && debtLine.includes('turbo run build'));
   t('a non-test path emits nothing', changeKindLines(['scripts/pm/dispatch-gates.mjs'], resolved).length === 0);
 
   // i18n change-kind derivation — the pure judgments first, each mirroring one
@@ -1287,7 +1328,14 @@ function selfTest() {
   // The table's own rot detector: a name no live run discovers must say so,
   // never disappear quietly.
   const stale = changeKindLines(['a.test.ts'], () => null);
-  t('an undiscoverable gate renders as STALE', stale.filter((l) => l.includes('STALE')).length === 2);
+  t('an undiscoverable gate renders as STALE', stale.filter((l) => l.includes('STALE')).length === 3);
+  // Per NAME, anchored on both sides of the rendered name (`⚠ x: STALE`), so the
+  // pair that shares one script is reported apart: a count alone stays green if
+  // one of the two is dropped from the table and something else is added, and a
+  // leading substring stays green through a `-v2` rename — the two ways this
+  // table has actually rotted.
+  t('the coverage half renders STALE under its own name', stale.some((l) => l.includes('⚠ check:type-check-coverage: STALE')));
+  t('the ratchet half renders STALE under its own name', stale.some((l) => l.includes('⚠ check:type-check-debt: STALE')));
   const i18nStale = changeKindLines(['packages/services/service-messaging/scripts/i18n-extract.config.ts'], () => null);
   t('an undiscoverable check:i18n renders as STALE', i18nStale.filter((l) => l.includes('⚠ check:i18n: STALE')).length === 1);
   t('every declared convention gate carries a reason', CHANGE_KIND_GATES.every((k) => k.gates.every((g) => g.name && g.why)));
