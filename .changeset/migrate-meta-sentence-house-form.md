@@ -1,5 +1,0 @@
----
-'@objectstack/spec': patch
----
-
-One house sentence for every `os migrate meta` prescription (#6856, maintainer-ruled route D). The 41 tombstone prescriptions that closed with `to rewrite it automatically.` / `to remove it.` / `to remove it automatically.` / `rewrites it for you.` now all close with exactly `Run 'os migrate meta --from 16' to rewrite existing sources automatically.` — the sentence states a property of the tool (it rewrites your source files), never the fate of the key, whose disposition stays in the body prose ("Delete the key…", "Rename the key to…"). The two partial conversions keep the precise two-clause form naming which part of the value converts (`dashboard.widgets[].compareTo.offset`, script `config.actionType`). The `agent.tools` prescription additionally states that the migration DELETES the key — not a rename — and each listed tool must be re-declared in a skill by hand. The rule is recorded in `shared/retired-key.ts`'s docblock and pinned class-wide by `retired-key-migrate-sentence.test.ts`. Acceptance is byte-identical everywhere: `retiredKey()` rejects with the guidance string regardless of its wording.
