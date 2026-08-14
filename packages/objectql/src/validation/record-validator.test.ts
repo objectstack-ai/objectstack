@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
+import { FieldSchema } from '@objectstack/spec/data';
 import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError } from './record-validator.js';
 
 /**
@@ -797,10 +798,30 @@ describe('validateRecord — number `scale` is enforced by rejection (#7501)', (
     expect(() => validateRecord(schema, { free: 0.123456789 }, 'insert')).not.toThrow();
   });
 
-  it('a malformed declaration (non-integer or negative scale) stays unenforced', () => {
-    // `scale: 2.5` has no defined meaning; inventing floor/round semantics
-    // here would be consumer-side guessing (PD #12). It behaves exactly as
-    // every declaration did before the branch existed: not at all.
+  it('a malformed declaration (non-integer or negative scale) is refused at AUTHORING time (#8321)', () => {
+    // FLIPPED by #8321 (was: "stays unenforced"). `scale: 2.5` has no defined
+    // meaning; inventing floor/round semantics here would be consumer-side
+    // guessing (PD #12), so the runtime branch deliberately guarded on
+    // `Number.isInteger && >= 0` — which left a typo'd declaration silently
+    // inert. The producer now refuses it: FieldSchema rejects non-integer and
+    // negative scale/precision at parse, so a malformed declaration can no
+    // longer reach this validator through authored metadata.
+    for (const [key, value, code] of [
+      ['scale', 2.5, 'invalid_type'],
+      ['scale', -1, 'too_small'],
+      ['precision', 2.5, 'invalid_type'],
+      ['precision', -1, 'too_small'],
+    ] as const) {
+      const result = FieldSchema.safeParse({ name: 'x', label: 'X', type: 'number', [key]: value });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues.find((i) => i.path[0] === key)?.code).toBe(code);
+      }
+    }
+    // Defense-in-depth is UNCHANGED: handed a raw malformed def that bypassed
+    // the schema (a hand-built runtime schema object, not authored metadata),
+    // the runtime still refuses to invent semantics — the declaration enforces
+    // nothing rather than something the author never wrote.
     const bad = { fields: { x: { type: 'number', scale: 2.5 }, y: { type: 'number', scale: -1 } } };
     expect(() => validateRecord(bad, { x: 1.234, y: 5.5 }, 'insert')).not.toThrow();
   });

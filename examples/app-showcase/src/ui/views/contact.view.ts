@@ -85,6 +85,10 @@ export const ContactViews = defineView({
       title: 'New contact',
       sections: [
         {
+          // #8231 remainder — a stable `name` is the only thing that makes
+          // this heading translatable; see `_sections.who_is_this` in
+          // `system/translations/index.ts`.
+          name: 'who_is_this',
           label: 'Who is this?',
           columns: 1,
           fields: ['name', 'email', 'phone', 'company'],

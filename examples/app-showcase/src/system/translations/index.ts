@@ -335,15 +335,17 @@ export const ShowcaseTranslationBundle = {
             successMessage: '已为整个选中集重算工时。',
           },
         },
-        // Section headings of the four form-view projections in
-        // `ui/views/task.view.ts` (tabbed / wizard / split). Each section
-        // there declares a stable `name`, which is the only thing that makes
-        // the heading translatable — `ObjectForm` looks it up as
-        // `objects.showcase_task._sections.<name>.label` and otherwise renders
-        // the English `label` verbatim. Wording follows the vocabulary the
-        // rest of this bundle already uses (任务 / 负责人 / 进度), rather than
-        // introducing a second word per idea.
+        // Section headings of the six form-view projections in
+        // `ui/views/task.view.ts` (edit / tabbed / wizard / split / quick).
+        // Each section there declares a stable `name`, which is the only
+        // thing that makes the heading translatable — `ObjectForm` looks it
+        // up as `objects.showcase_task._sections.<name>.label` and otherwise
+        // renders the English `label` verbatim. Wording follows the
+        // vocabulary the rest of this bundle already uses (任务 / 负责人 /
+        // 进度), rather than introducing a second word per idea.
         _sections: {
+          // edit (#8231 remainder)
+          task: { label: '任务信息' },
           // tabbed
           overview: { label: '概览' },
           schedule: { label: '排期' },
@@ -355,6 +357,8 @@ export const ShowcaseTranslationBundle = {
           // split panes
           split_task: { label: '任务' },
           split_schedule: { label: '排期' },
+          // quick (drawer, #8231 remainder)
+          quick_edit: { label: '快速编辑' },
         },
         // The filter-preset tab bar of `ui/pages/task-triage.page.ts` — four
         // tabs carrying a `filter` and no `view`, which is the shape that had
@@ -418,21 +422,27 @@ export const ShowcaseTranslationBundle = {
           default: { label: '联系人' },
         },
         // `_sections` — the four groups of the default edit form in
-        // `ui/views/contact.view.ts`. Each declares a stable `name`, which is
-        // the only reason the heading is translatable (`ObjectForm` looks it up
-        // as `objects.showcase_contact._sections.<name>.label` and otherwise
+        // `ui/views/contact.view.ts`, plus the sparse `formViews.create`
+        // override's single section (#8231 remainder). Each declares a
+        // stable `name`, which is the only reason the heading is
+        // translatable (`ObjectForm` looks it up as
+        // `objects.showcase_contact._sections.<name>.label` and otherwise
         // renders the English `label` verbatim). Wording reuses the vocabulary
         // this bundle already established — 状态 and 备注 are exactly the words
         // its `stage`-family and `notes` entries use — rather than minting a
         // second term per idea. `contact` reads 联系方式 (contact DETAILS, its
         // fields being 姓名/邮箱/电话) instead of a circular 联系人 heading
         // inside a contact record; `work` follows the `…信息` shape the
-        // showcase_semantic_zoo headings set.
+        // showcase_semantic_zoo headings set. `who_is_this` is the create
+        // form's own heading — a plain rendering of the English question,
+        // matching the no-punctuation style every other heading in this file
+        // uses.
         _sections: {
           contact: { label: '联系方式' },
           work: { label: '工作信息' },
           status: { label: '状态' },
           notes: { label: '备注' },
+          who_is_this: { label: '这是谁' },
         },
       },
       showcase_invoice: {
