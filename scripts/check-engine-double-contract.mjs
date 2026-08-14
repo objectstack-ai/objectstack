@@ -350,19 +350,86 @@ function testFiles() {
   return out.sort();
 }
 
+/**
+ * The implementation a MOCK CONSTRUCTOR wraps, or null (#8639).
+ *
+ * `delete: vi.fn(async (o, opts) => …)` is a CallExpression, so the two
+ * initializer branches of `implOf` below used to answer `null` for it —
+ * `consider()` then returned before the sibling and shape tests ever ran, and
+ * the double was discovered by NEITHER side of a ledger that reconciles in both
+ * directions. Not "declared out of scope": absent. That is the DISCOVERED
+ * invariant's blind half, one layer down — `DISCOVERED != 0` catches a scan
+ * that breaks entirely and cannot catch a scan that quietly skips one spelling,
+ * and `vi.fn` is the spelling a test reaches for precisely when it wants to
+ * assert call counts on the double it just wrote.
+ *
+ * ## How wide to unwrap, measured rather than assumed
+ *
+ * Full census of the scanned corpus — every `delete`/`update` member whose
+ * initializer is a CallExpression, 310 of them, no truncation:
+ *
+ *   163  vi.fn()                              no argument at all
+ *    89  vi.fn(fn)                            ← the implementation
+ *    39  vi.fn().mockResolvedValue(value)     a VALUE, not an implementation
+ *     9  rec('DELETE')                        local recorder factory, string arg
+ *     4  vi.fn().mockImplementation(fn)       ← the implementation
+ *     3  record('DELETE')                     ditto
+ *     2  on('DELETE')                         ditto
+ *     1  vi.fn().mockRejectedValue(ERR())     a value, from a call
+ *
+ * So the criterion is STRUCTURAL and callee-agnostic: a call carrying EXACTLY
+ * ONE argument which is a function expression / arrow function. That admits the
+ * 93 that hold an implementation (`vi.fn(fn)` and, for free and correctly, the
+ * chained `.mockImplementation(fn)` — the arrow there IS what the double runs)
+ * and rejects all 217 that do not, without an allowlist of callee names that
+ * would go silently blind the day someone writes `vitest.fn` or a local wrapper.
+ *
+ * Deliberately NOT widened, both measured at ZERO occurrences on this corpus:
+ *
+ *   - a function among SEVERAL arguments (`traced('delete', fn)`). The card's
+ *     phrasing is "sole function argument" and the narrow reading is the one
+ *     that cannot mistake a lifecycle callback for the verb's implementation.
+ *   - a function in the chained receiver (`vi.fn(fn).mockResolvedValue(v)`),
+ *     which would need this to recurse into `init.expression`.
+ *
+ * Both are measurements, not opinions — re-run that census before widening,
+ * exactly as the REPOSITORY_ONLY_MEMBERS note above asks.
+ *
+ * Note which way the remaining error leans. A `vi.fn()` with no argument stays
+ * `null` and stays undiscovered, and that is correct rather than a residual
+ * gap: there is no implementation to read, so there is no function for
+ * `isEngineVerbShape` to judge and nothing that could be looser than
+ * `ObjectQL.<verb>` — the double's behaviour is `undefined`, not a lax guard.
+ */
+function unwrapCallImpl(init) {
+  if (!ts.isCallExpression(init)) return null;
+  const args = init.arguments ?? [];
+  if (args.length !== 1) return null;
+  const only = args[0];
+  if (ts.isFunctionExpression(only) || ts.isArrowFunction(only)) return only;
+  return null;
+}
+
+/**
+ * One initializer reading, shared by BOTH initializer spellings below.
+ *
+ * Shared on purpose: the object-literal (`PropertyAssignment`) and class-field
+ * (`PropertyDeclaration`) branches carried the same three lines twice and drifted
+ * apart in exactly the way that produced #8639's sibling half — a fix applied to
+ * one spelling and not the other reproduces this card at the next reading. With
+ * one function there is no second copy to forget.
+ */
+function fnInitializer(init) {
+  if (!init) return null;
+  if (ts.isFunctionExpression(init) || ts.isArrowFunction(init)) return init;
+  return unwrapCallImpl(init);
+}
+
 /** A member's function-ish implementation, or null. */
 function implOf(member) {
   if (ts.isMethodDeclaration(member) || ts.isMethodSignature(member)) return member;
-  if (ts.isPropertyAssignment(member)) {
-    const init = member.initializer;
-    if (init && (ts.isFunctionExpression(init) || ts.isArrowFunction(init))) return init;
-    return null;
-  }
-  if (ts.isPropertyDeclaration(member) && member.initializer) {
-    const init = member.initializer;
-    if (ts.isFunctionExpression(init) || ts.isArrowFunction(init)) return init;
-    return null;
-  }
+  if (ts.isPropertyAssignment(member)) return fnInitializer(member.initializer);
+  if (ts.isPropertyDeclaration(member)) return fnInitializer(member.initializer);
   if (ts.isShorthandPropertyAssignment(member)) return null;
   return null;
 }
