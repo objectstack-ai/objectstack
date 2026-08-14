@@ -1084,6 +1084,11 @@ export function validateReactPageProps(stack: AnyRec): ReactPropFinding[] {
                 where,
                 `${path} › searchableFields`,
                 'searchableFields',
+                // A `<ListView>` prop is a view-level narrowing — the checker's
+                // default, spelled out here because the #8404 provenance index
+                // follows it positionally.
+                'narrowing',
+                unprovisionedAnchors,
               ),
             );
           }
