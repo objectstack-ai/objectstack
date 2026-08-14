@@ -173,6 +173,18 @@ describe('legacyUniqueReplacements — per-guard attribution (#8557)', () => {
     it('`if (legacyNames.length === 0) continue` — BOTH legacy spellings are currently declared (#3955, field arm)', () => {
       // `legacyUniqueIndexNames` offers two names; the declared set contains both,
       // so nothing is left to retire. The twin gives one of them back.
+      //
+      // Measured cross-arm note: this is the one case whose isolation is
+      // single-guard only. Its fixture must declare indexes (that is how
+      // `declaredNames` gets populated at all), and those declarations are the
+      // realistic #3955 shape — an unnamed bare `true` alongside the knex-style
+      // name. Ablate the bare-spelling filter, the S6 guard and `declaredNames`
+      // TOGETHER and the DECLARED arm starts claiming that same fixture, so this
+      // case reddens alongside the S6 ones. That is the three-guard combination
+      // the #8557 measurement calls D3, not a defect in the isolation: removing
+      // any ONE guard still turns exactly one case red. Spelling the fixture so
+      // no multi-guard ablation could reach it would cost the realistic shape,
+      // which is the more useful thing to keep.
       onlyThisGuardRejects(
         'the nothing-left-to-retire guard (`legacyNames.length === 0`)',
         'a `replace_unique_index` op with an EMPTY drop list — a create dressed up as a ' +
