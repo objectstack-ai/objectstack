@@ -14,8 +14,8 @@ Empty Properties Schema
 ## TypeScript Usage
 
 ```typescript
-import { AIChatWindowProps, ElementButtonPropsSchema, ElementFilterPropsSchema, ElementFormPropsSchema, ElementImagePropsSchema, ElementMetadataViewerPropsSchema, ElementNumberPropsSchema, ElementRecordPickerPropsSchema, ElementTextInputPropsSchema, ElementTextPropsSchema, ObjectCalendarPropsSchema, ObjectFormPropsSchema, ObjectGridPropsSchema, ObjectKanbanPropsSchema, ObjectMasterDetailFormPropsSchema, ObjectMetricPropsSchema, PageAccordionProps, PageCardProps, PageContainerProps, PageHeaderProps, PageTabsProps, RecordActivityProps, RecordChatterProps, RecordDetailsProps, RecordHighlightsField, RecordHighlightsProps, RecordPathProps, RecordRelatedListProps } from '@objectstack/spec/ui';
-import type { ElementNumberProps, ElementRecordPickerProps, ObjectCalendarProps, ObjectFormProps, ObjectGridProps, ObjectKanbanProps, ObjectMasterDetailFormProps, ObjectMetricProps, PageContainerProps, RecordHighlightsField, RecordPathProps } from '@objectstack/spec/ui';
+import { AIChatWindowProps, ElementButtonPropsSchema, ElementFilterPropsSchema, ElementFormPropsSchema, ElementImagePropsSchema, ElementMetadataViewerPropsSchema, ElementNumberPropsSchema, ElementRecordPickerPropsSchema, ElementTextInputPropsSchema, ElementTextPropsSchema, ObjectCalendarPropsSchema, ObjectFormPropsSchema, ObjectGridPropsSchema, ObjectKanbanPropsSchema, ObjectMasterDetailFormPropsSchema, ObjectMetricPropsSchema, PageAccordionProps, PageCardProps, PageContainerProps, PageHeaderProps, PageTabsProps, RecordActivityProps, RecordChatterProps, RecordDetailsProps, RecordHighlightsField, RecordHighlightsProps, RecordPathProps, RecordReferenceRailProps, RecordRelatedListProps, ReferenceRailEntrySchema } from '@objectstack/spec/ui';
+import type { ElementNumberProps, ElementRecordPickerProps, ObjectCalendarProps, ObjectFormProps, ObjectGridProps, ObjectKanbanProps, ObjectMasterDetailFormProps, ObjectMetricProps, PageContainerProps, RecordHighlightsField, RecordPathProps, RecordReferenceRailProps, ReferenceRailEntry } from '@objectstack/spec/ui';
 
 // Validate data
 const result = AIChatWindowProps.parse(data);
@@ -575,6 +575,18 @@ Type: `string`
 
 ---
 
+## RecordReferenceRailProps
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **entries** | `{ objectName: string; relationshipField: string; title?: string; limit?: integer; … }[]` | ✅ | Related collections to summarize — one compact card per entry (icon-less title, total-count badge, top-N preview rows). An empty rail renders nothing, so at least one entry is required. |
+| **hideEmpty** | `boolean` | optional | Fold entries whose related count is 0 into a single "+ N empty" expander chip (renderer default: on; set `false` to always render every card). |
+
+
+---
+
 ## RecordRelatedListProps
 
 ### Properties
@@ -593,6 +605,21 @@ Type: `string`
 | **actions** | `string[]` | optional | Action IDs available for related records |
 | **add** | `{ picker: object; linkField?: string; label?: string \| Record<string, string> }` | optional | Add-existing-via-picker config (generic m2m/junction assignment). |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
+
+
+---
+
+## ReferenceRailEntry
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **objectName** | `string` | ✅ | Related object name whose records this card summarizes (e.g. "task", "opportunity_quote") |
+| **relationshipField** | `string` | ✅ | Field on the related object that points back to this record (e.g. "account_id") |
+| **title** | `string` | optional | Literal card title. Rendered as-is in EVERY locale (no inline locale map — the rail renders it as a raw React child); omit to use the related object's localized label. |
+| **limit** | `integer` | optional | Preview rows per card, and the `$top` of the one query this entry issues (renderer default: 3). |
+| **displayField** | `string` | optional | Field of the related record rendered in each preview row (renderer fallback when omitted: name / title / subject / label / … / id). |
 
 
 ---
