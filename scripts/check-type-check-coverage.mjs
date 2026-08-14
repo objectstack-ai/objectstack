@@ -304,6 +304,30 @@ const SOURCE_FILE = /\.([cm]?ts|tsx)$/;
 const PIN_DIRECTIVE = /^[ \t]*(?:\/\/|\/\*|\*)[ \t]*@ts-expect-error\b/m;
 const PIN_ISSUE = 'https://github.com/objectstack-ai/objectstack/issues/5286';
 
+// A path in the root program whose edits move the `@objectstack/spec-monorepo`
+// count below, declared as a bare, whole-literal path so the dispatch
+// derivation can read it. It accounts for 29 of that entry's 80 -- the largest
+// single contributor, and the one an ordinary card actually edits. The note on
+// that entry carries the accounting and references this constant instead of
+// spelling the path inside its sentence.
+//
+// Why the SHAPE and not just the mention: scripts/pm/dispatch-gates.mjs scans
+// each gate's own module body for path literals and accepts one only when the
+// WHOLE string is path-shaped. Named mid-sentence, this path was discarded, and
+// the family then scored neither matched nor undetermined but SILENT -- printed
+// nowhere at all. A card editing that file was told no check family names its
+// paths, which reads as "no gates apply" when it means "no gate names this
+// path", and a dev who trusted it would skip the gate most likely to redden the
+// diff (measured on such a card: this gate stayed green only because the change
+// was designed around the coupling).
+//
+// This is per-coupling manual upkeep, deliberately. The root program is
+// everything outside packages/apps/examples, so no list here can ever be
+// complete -- add a constant when a coupling has actually been measured, the way
+// this one was. Deleting this one does not go quiet: dispatch-gates' own
+// self-test pins that a card editing this path derives check:type-check-coverage.
+const ROOT_PROGRAM_COUPLED_SCRIPT = 'scripts/check-test-typecheck.mts';
+
 // Package name -> { errors, note? }. `errors` is the raw `tsc --noEmit` count
 // measured per package. Seeded on main @ b07d829 (2026-07-31), re-measured
 // after the NodeNext repair below, and re-measured WHOLESALE on main @ 5ab08428
@@ -424,7 +448,7 @@ const DEBT = {
       + 'and TS2550); noise 8 (TS7006 x7, TS6133). Re-measured 80 at 5ab08428, up from 50. This entry '
       + 'drifts differently from a package: the root program is `scripts/` and the top-level configs '
       + '(everything outside packages/apps/examples), so it grows whenever the repo gains a script -- '
-      + 'scripts/check-test-typecheck.mts alone accounts for 29 of the 80, and the analytics-reconcile '
+      + ROOT_PROGRAM_COUPLED_SCRIPT + ' alone accounts for 29 of the 80, and the analytics-reconcile '
       + 'tree for 32. Almost all of it is one missing `types:["node"]`, not 80 defects. One wrinkle to '
       + 'know before reading this number as "the root scripts": `exclude` only drops files from the '
       + 'initial walk, so example sources IMPORTED by a script are still pulled into the program -- 4 of '

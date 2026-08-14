@@ -1196,6 +1196,43 @@ function selfTest() {
   t('this tool still hints the workflow directory it reads', covers(ownHints, '.github/workflows/lint.yml'));
   t('this tool no longer hints the spec paths its own fixtures name', !covers(ownHints, 'packages/spec/src/data/filter.zod.ts'));
 
+  // ── The one DECLARED coupling (#8551) ─────────────────────────────────────
+  //
+  // The narrowing above is about gates that MENTION a path without reading it.
+  // This is its mirror image: a gate that really does move with a path it never
+  // opens. The type-check ledgers ratchet a count for the workspace root, whose
+  // program is the scripts tree, and one script accounts for 29 of that entry's
+  // 80 errors — so editing it moves a number this farm holds. The coupling was
+  // written down all along, inside the ledger note's prose, where whole-literal
+  // extraction discards it: the family then scored `silent` — neither matched
+  // nor undetermined, printed nowhere — and a card editing that script was told
+  // no family names its paths.
+  //
+  // The remedy is per-coupling and manual (a bare, whole-literal constant in
+  // the gate's own module body), which is exactly the kind of declaration that
+  // rots quietly. So it is pinned LIVE, against both real files: delete the
+  // constant and this gate reddens instead of the silence coming back. If the
+  // ledger's coupling genuinely ends, delete the constant AND these cases in
+  // the same change — the evidence goes with the claim, never ahead of it.
+  //
+  // This does NOT retire the test-file entry in CHANGE_KIND_GATES, whose
+  // deletion criterion is a discoverable literal for that KIND: the constant
+  // names one script carrying no `.test.` infix, while that entry answers for
+  // every test file in the tree.
+  const coverageHints = readHints('scripts/check-type-check-coverage.mjs');
+  t(
+    'the type-check ledger gate declares the root-program script whose errors it ratchets',
+    covers(coverageHints, 'scripts/check-test-typecheck.mts'),
+  );
+  const coupledVerdict = classifyEntry(
+    { files: ['scripts/check-type-check-coverage.mjs'], hints: coverageHints },
+    ['scripts/check-test-typecheck.mts'],
+  );
+  t(
+    'so a card editing that script is MATCHED through that constant, not dropped as silent',
+    coupledVerdict.verdict === 'matched' && coupledVerdict.hits[0]?.hint === 'scripts/check-test-typecheck.mts',
+  );
+
   // ── A family's OWN script files as match keys (#8509) ─────────────────────
   //
   // Both directions are the product, and both are pinned: a card editing a
