@@ -135,7 +135,10 @@ quote.
 - A new fake engine's `delete()` opens with `assertEngineDeleteDispatch(options)` from
   `@objectstack/objectql` — never a hand-mirrored id/multi check, which has exactly the hole
   `check:engine-double-contract` names. Copy one of the pinned fakes the gate lists on a
-  green run.
+  green run. Needing a double the file does not already have? The gate's message offers
+  "pin the new one rather than raising it", but a third remedy it does not name is usually
+  better: **override the file's existing double** instead of declaring a second one — then
+  there is no new double to pin and no ledger to touch at all.
 
 ## Local verification scope — targeted gates locally, the full farm is CI's job
 
@@ -155,6 +158,21 @@ accepted cost is an occasional extra push-fix lap; the safety half lives with th
 reads the real gate-job conclusions after your report. ⛔ Not licence to skip the named
 families — they are the cheap half you still owe; what you no longer owe is waiting for CI
 before reporting.
+
+**Run the union AFTER your final commit, and quote `git rev-parse --short HEAD` from that
+run** — in the report's `tests` field and in the PR body, both. A gate log carries no sha,
+so a union run taken before the last commit reports green over a tree that is no longer the
+head and **nothing anywhere notices**: neither you re-reading your own transcript nor the
+PM reading the PR body can tell a covering run from a stale one, and the natural order
+(implement, verify, then answer review) puts the verification before the last commits by
+construction — so the failure lands hardest on the PRs that got the most review, which is
+the wrong way round. Ratchets are why this bites: a stale ordinary-lint run is usually
+still true, but a stale **ratchet** run is a claim about a ledger measured against
+different code, and the ratchets are precisely the gates a late commit moves. On any
+post-review push, re-run the union — or at minimum the ratchet family — at the new head
+**before** the report or the PR body is updated. An unquoted HEAD is not a small omission:
+it makes a green union unreviewable, so quote it even when the union and the final commit
+were obviously the same tree.
 
 ## Standard clauses live HERE, not in your dispatch prompt
 
