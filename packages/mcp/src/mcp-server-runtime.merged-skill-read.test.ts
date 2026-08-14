@@ -50,7 +50,15 @@
  *     `listDiagnosed` before this change and still does. It would go red if a
  *     future change spent the #6504 contract while switching layers, which is
  *     the specific regression this fix had to avoid.
- * The measured result is recorded in the PR body as it came out.
+ *
+ * MEASURED: **5 red / 3 green** — the prediction was wrong, and the third green
+ * was a defective assertion rather than a third invariant. The case then read
+ * *"the un-merged `list()` is not consulted"*, which is true in BOTH directions:
+ * `diagnosedList` prefers `listDiagnosed` whenever the service has it, so the
+ * un-merged path never touches `list` either. It was rewritten to assert
+ * PROVENANCE (the service holds a projectable skill, the merged read holds
+ * none, and nothing is bridged), which discriminates. Re-measured after that
+ * rewrite: **6 red / 2 green**, as recorded in the PR body.
  *
  * The doubles declare metadata reads only — no engine write verb — so there is
  * no `delete`/`update` dispatch for `check:engine-double-contract` to scan.
@@ -164,13 +172,21 @@ describe('#8328 — the skill read goes through the protocol\'s merged listing',
     expect(infoLines(logger)).toMatch(/Bridged 1 skill prompts/);
   });
 
-  it('the un-merged `list()` is not consulted for the items at all', async () => {
+  it('the metadata service\'s own listing contributes NO items', async () => {
     const logger = makeLogger();
-    const service = packagedService();
-    await bridge(service, logger, mergedRead([OVERRIDDEN_SKILL]));
+    // Provenance, asserted the only way that discriminates: the service holds a
+    // perfectly projectable skill and the merged read holds none. If any item
+    // still reached the surface it came from the layer this fix stopped
+    // reading.
+    //
+    // An earlier draft asserted `list()` was never called, which is TRUE in
+    // both directions and therefore measures nothing: `diagnosedList` prefers
+    // `listDiagnosed` when the service has it, so the un-merged path reads that
+    // member instead. Kept as a secondary assertion, not the discriminator.
+    const service = packagedService([{ ...PACKAGED_SKILL, name: 'stale_skill', active: true }]);
+    await bridge(service, logger, mergedRead([]));
 
-    // The layer switch is the whole fix: reading BOTH and preferring one would
-    // leave the un-merged answer able to win a future edit by accident.
+    expect(infoLines(logger)).toMatch(/Bridged 0 skill prompts/);
     expect(service.list).not.toHaveBeenCalled();
   });
 
