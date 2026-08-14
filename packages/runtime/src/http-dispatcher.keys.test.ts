@@ -2,6 +2,8 @@
 
 import { describe, it, expect } from 'vitest';
 
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+
 import { HttpDispatcher } from './http-dispatcher.js';
 import { resolveExecutionContext } from './security/resolve-execution-context.js';
 import { hashApiKey } from './security/api-key.js';
@@ -188,8 +190,21 @@ function makeOrgKernel(members: any[], posture?: string) {
       const table = obj === 'sys_api_key' ? rows : obj === 'sys_member' ? members : [];
       return table.filter((r: any) => Object.entries(where).every(([k, v]) => r[k] === v));
     },
-    update: async () => ({}),
-    delete: async () => ({}),
+    // The write verbs route through `ObjectQL`'s OWN dispatch predicates rather
+    // than a hand-written approximation of them (`check:engine-double-contract`,
+    // #4434/#5480). A double that imports the producer's decision cannot be
+    // looser than the producer — which is what keeps a green suite from meaning
+    // nothing on the day one of these stops being dormant. Only this second
+    // double is pinned; the file's pre-existing `makeKernel` double is the
+    // shrink-only baseline's measured DEBT entry and is left exactly as it was.
+    update: async (_obj: string, data: any, options?: any) => {
+      assertEngineUpdateDispatch(data, options);
+      return {};
+    },
+    delete: async (_obj: string, options?: any) => {
+      assertEngineDeleteDispatch(options);
+      return {};
+    },
   };
   // [#8287] The mint path resolves the EFFECTIVE posture from the kernel's
   // `tenancy` service (ADR-0093 D4/D5), never from OS_TENANCY_POSTURE — a
