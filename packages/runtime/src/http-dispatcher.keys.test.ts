@@ -185,10 +185,21 @@ function makeOrgKernel(members: any[], posture?: string) {
       rows.push({ id, ...data });
       return { id };
     },
+    // REFUSES combinators rather than answering them wrong, exactly as the
+    // `makeKernel` matcher above does (`check:where-matcher-conformance`,
+    // #8494). Without the throw, `Object.entries` reads `$or`/`$and` as an
+    // ordinary FIELD NAME, compares `row.$or` (undefined) against the array,
+    // matches nothing, and hands the suite an empty result set with nothing
+    // erroring — a test that passes while asserting on a query the double
+    // never ran. Refusal is the cheap correct answer for a double that only
+    // ever sees scalar equality: it cannot go green on the wrong query.
     find: async (obj: string, opts: any) => {
       const where = opts?.where ?? {};
       const table = obj === 'sys_api_key' ? rows : obj === 'sys_member' ? members : [];
-      return table.filter((r: any) => Object.entries(where).every(([k, v]) => r[k] === v));
+      return table.filter((r: any) => Object.entries(where).every(([k, v]) => {
+        if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+        return r[k] === v;
+      }));
     },
     // The write verbs route through `ObjectQL`'s OWN dispatch predicates rather
     // than a hand-written approximation of them (`check:engine-double-contract`,
