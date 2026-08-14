@@ -50,11 +50,20 @@
  * written from the compiled SQL alone would be exactly the inferred evidence
  * that card existed to stop accepting. **[#8592] has now observed it on a live
  * MySQL 8.0.46**, and the last section of this file pins what the server
- * actually did: it merges on a unique key the caller never named, rewrites the
+ * actually did: it merges on a unique key the caller never named, rewrote the
  * merged row's primary key, and does not merge on the key it was given. Those
  * pins describe a defect and are marked as such — the fix that makes them go
  * red is #8621, deliberately a separate card because it moves MySQL's accept
  * set.
+ *
+ * ✅ **[#8622] has since repaired the primary-key half**, and only that half.
+ * `id` is now insert-only on the merge path for every dialect, so the pin that
+ * measured the rewrite has been rewritten to assert PRESERVATION. It was not a
+ * MySQL defect at all: the merge set is built in this process, so the same
+ * rewrite was measured on SQLite and live Postgres 16.13 against a properly
+ * BACKED conflict target — the supported path, no unbacked target anywhere near
+ * it. That is why the repair lives in the sweep above as well, and why it did
+ * not have to wait for #8621.
  *
  * # Reverse verification — direction predicted BEFORE it was run
  *
@@ -264,6 +273,196 @@ function declareRefusalSweep(cell: DialectCell): void {
       expect(err!.message).not.toMatch(/Cannot upsert into/);
       expect(err!.code).not.toBe(StandardErrorCode.enum.VALIDATION_ERROR);
     });
+
+    // ───────────────────────────────────────────────────────────────────
+    // Pin 4 — [#8622] the merged row keeps its IDENTITY
+    // ───────────────────────────────────────────────────────────────────
+
+    /**
+     * The control above (`MERGES when a declared unique index does back the
+     * conflict target`) asserts the row COUNT and the `title`, and never the
+     * `id` — which is exactly why the primary-key rewrite survived a green
+     * suite. These pins read the column that control does not.
+     *
+     * Measured before the fix, on this same backed (i.e. fully supported) path:
+     *
+     * ```
+     * [sqlite] before=[{id:'yMh3oywrp0Z6p-oJ', title:'first'}]
+     *          after =[{id:'d8T8rUlTxlRlaUhN', title:'second'}]  idPreserved=false
+     * [pg]     before=[{id:'T3AlYiyDi5buzGvW', title:'first'}]
+     *          after =[{id:'TvbCTa5mydWPYP76', title:'second'}]  idPreserved=false
+     * ```
+     *
+     * `upsert` mints a nanoid for every call that supplies none, and `id` rode
+     * the merge set (`… do update set …, "id" = excluded."id"`), so the LOSING
+     * insert's fresh id overwrote the winning row's. Invisible on the default
+     * `['id']` conflict target, where both sides hold the same value.
+     */
+    it('[#8622] preserves the merged row’s primary key across a backed merge', async () => {
+      await driver.upsert(BACKED.name, { email: 'pk@b.com', title: 'first' }, ['email']);
+      const before = await driver.find(BACKED.name, { where: { email: 'pk@b.com' } });
+      expect(before).toHaveLength(1);
+
+      await driver.upsert(BACKED.name, { email: 'pk@b.com', title: 'second' }, ['email']);
+      const after = await driver.find(BACKED.name, { where: { email: 'pk@b.com' } });
+
+      // The merge still HAPPENS — the accept set is unchanged by this fix, so a
+      // green here must not be reachable by refusing the call or by inserting a
+      // second row. Both halves are asserted before the identity is.
+      expect(after, 'the backed merge must still collapse to one row').toHaveLength(1);
+      expect(after[0].title, 'the mergeable columns must still merge').toBe('second');
+
+      expect(
+        after[0].id,
+        'the merged row was re-identified — `id` is back in the merge set, so every relationship, ' +
+          'audit record and external id mapping pointing at the old row now dangles silently',
+      ).toBe(before[0].id);
+    });
+
+    /**
+     * `created_at` is the sibling exclusion (#7011) and rides the same set, so
+     * asserting it here is the cheap proof that the fix widened the existing
+     * mechanism rather than special-casing one column somewhere else.
+     */
+    it('[#8622] keeps `created_at` insert-only alongside it', async () => {
+      await driver.upsert(BACKED.name, { email: 'ts@b.com', title: 'first' }, ['email']);
+      const before = await driver.find(BACKED.name, { where: { email: 'ts@b.com' } });
+
+      await driver.upsert(BACKED.name, { email: 'ts@b.com', title: 'second' }, ['email']);
+      const after = await driver.find(BACKED.name, { where: { email: 'ts@b.com' } });
+
+      const stamp = (v: unknown): string => (v instanceof Date ? v.toISOString() : String(v));
+      expect(stamp(after[0].created_at)).toBe(stamp(before[0].created_at));
+    });
+
+    /**
+     * The exclusion is UNCONDITIONAL, per #7011's ruling for `auto_number`: an
+     * explicit payload value does not re-key on merge either. Both spellings are
+     * exercised because `upsert` folds the `_id` alias into `id` before the merge
+     * set is built (`const { _id, ...rest } = data`) — so the alias branch is
+     * covered by the same exclusion, and this is what says so out loud.
+     */
+    it('[#8622] does not re-key even when the caller supplies an explicit `id` / `_id`', async () => {
+      await driver.upsert(BACKED.name, { id: 'os8622_seed', email: 'ex@b.com', title: 'first' }, ['email']);
+
+      await driver.upsert(BACKED.name, { id: 'os8622_other', email: 'ex@b.com', title: 'second' }, ['email']);
+      let rows = await driver.find(BACKED.name, { where: { email: 'ex@b.com' } });
+      expect(rows).toHaveLength(1);
+      expect(rows[0].id).toBe('os8622_seed');
+
+      // The `_id` alias reaches `id` through a different line of `upsert`; it
+      // must land on the same exclusion rather than on a second code path.
+      await driver.upsert(BACKED.name, { _id: 'os8622_alias', email: 'ex@b.com', title: 'third' }, ['email']);
+      rows = await driver.find(BACKED.name, { where: { email: 'ex@b.com' } });
+      expect(rows).toHaveLength(1);
+      expect(rows[0].id, 'the `_id` alias branch re-keyed where `id` did not').toBe('os8622_seed');
+      expect(rows[0].title, 'the alias call must still have merged its other columns').toBe('third');
+    });
+
+    /**
+     * The counterweight, and the reason the three pins above are a repair rather
+     * than a capability removal: re-keying a row is still possible, through the
+     * call whose entire job is to write the columns it is handed. This is
+     * #7011's own framing — `update()` is the deliberate path — and it is
+     * measured here rather than asserted, on both cells.
+     */
+    it('[#8622] leaves `update()` as the deliberate re-key path', async () => {
+      await driver.create(BACKED.name, { id: 'os8622_from', email: 'rekey@b.com', title: 'x' });
+
+      await driver.update(BACKED.name, 'os8622_from', { id: 'os8622_to' });
+
+      const rows = await driver.find(BACKED.name, { where: { email: 'rekey@b.com' } });
+      expect(rows).toHaveLength(1);
+      expect(rows[0].id, '`update()` must still be able to re-key a row deliberately').toBe('os8622_to');
+    });
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// [#8622] The branch the `id` exclusion made REACHABLE
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * `upsert` builds its merge set as "every formatted column that is not
+ * insert-only", and falls back to a bare `insertion.merge()` when that set comes
+ * out empty. A bare `merge()` is merge-**ALL** — it re-admits every insert-only
+ * column — and before the `id` exclusion it was DEAD code: `id` is in every
+ * payload (minted when absent) and was always mergeable, so the set could never
+ * empty.
+ *
+ * Excluding `id` woke it up. Measured on live Postgres 16.13 with an object
+ * whose only non-`id` column is an `auto_number`, mid-fix:
+ *
+ * ```
+ * upsert({ email:'f@b.com' }, ['email'])   -> seeded, case_no=0003
+ * upsert({ id: <seeded id> },  ['id'])     -> ok rows=1 idPreserved=true
+ *                                             case_no 0003 -> 0004   ← #7011 defeated
+ * ```
+ *
+ * `formatted` was `{ id, case_no }`, both insert-only, so the fallback fired and
+ * merge-ALL rewrote the autonumber from the reservation the losing insert had
+ * just burned. SQLite never reaches it — `stampInsertTimestamps` puts a mergeable
+ * `updated_at` in the payload on that dialect — which is precisely the kind of
+ * one-cell blind spot the dialect matrix exists for.
+ *
+ * The remedy falls back to the CONFLICT-TARGET columns present in the payload
+ * instead: on a conflict those matched by definition, so `excluded.<target>` is
+ * the stored value and the UPDATE is a provable no-op. It also reproduces the
+ * exact SQL `main` emits for this shape (`merge(['id'])`, `id` having been
+ * `main`'s only mergeable column here), so this file's subject — the PR's net
+ * behavioural delta — is the `id` exclusion and nothing else.
+ *
+ * These pins therefore guard #7011, not #8622: they go red if the `id` exclusion
+ * is ever landed without the fallback that pairs with it.
+ */
+const EXHAUSTED = {
+  name: 'os8622_exhausted',
+  fields: {
+    email: { type: 'string', unique: true },
+    case_no: { type: 'auto_number', format: 'CASE-{0000}' },
+  },
+} as any;
+
+for (const cell of DIALECT_CELLS) {
+  if (!ON_CONFLICT_DIALECTS.has(cell.id)) continue;
+  declareDialectCell(cell, 'insert-only exhaustion on the upsert merge path', declareExhaustionPins);
+}
+
+function declareExhaustionPins(cell: DialectCell): void {
+  describe(`[#8622] SqlDriver.upsert — every column insert-only (${cell.label})`, () => {
+    let driver: SqlDriver;
+    let knexInstance: any;
+
+    beforeAll(async () => {
+      driver = new SqlDriver(cell.config());
+      knexInstance = (driver as any).knex;
+      await knexInstance.schema.dropTableIfExists(EXHAUSTED.name);
+      await driver.initObjects([EXHAUSTED]);
+    });
+
+    afterAll(async () => {
+      await knexInstance?.schema.dropTableIfExists(EXHAUSTED.name).catch(() => {});
+      await driver?.disconnect?.();
+    });
+
+    it('does not rewrite the row’s `auto_number` when nothing is left to merge', async () => {
+      await driver.upsert(EXHAUSTED.name, { email: 'ex@b.com' }, ['email']);
+      const before = await driver.find(EXHAUSTED.name, { where: { email: 'ex@b.com' } });
+      expect(before).toHaveLength(1);
+
+      // A payload of `{ id }` alone: after the exclusion every formatted column
+      // is insert-only, which is what empties the merge set.
+      await driver.upsert(EXHAUSTED.name, { id: before[0].id }, ['id']);
+      const after = await driver.find(EXHAUSTED.name, { where: { email: 'ex@b.com' } });
+
+      expect(after, 'the upsert must still resolve to one row').toHaveLength(1);
+      expect(
+        after[0].case_no,
+        'the merge-ALL fallback fired and renumbered the row — #7011’s exclusion is defeated ' +
+          'whenever the insert-only set covers every column in the payload',
+      ).toBe(before[0].case_no);
+      expect(after[0].id).toBe(before[0].id);
+    });
   });
 }
 
@@ -327,6 +526,11 @@ describe('[#8567] MySQL: `onConflict().merge()` compiles the conflict target awa
  * MySQL's accept set and is a `minor` with its own argument), these tests go red
  * and must be REWRITTEN to the refusal, not relaxed to keep them green.
  *
+ * ✅ **One exception, as of [#8622]: the primary-key pin is now a CONTRACT.**
+ * The rewrite it characterized was the driver's own merge set, not the server's
+ * doing, and it is fixed — so that pin asserts preservation and is not #8621's
+ * to move. The rest of this suite is unchanged characterization.
+ *
  * # How this was measured
  *
  * #8567 left the MySQL half as an inference from compiled SQL — "merges on
@@ -371,6 +575,14 @@ describe('[#8567] MySQL: `onConflict().merge()` compiles the conflict target awa
  * merge and did not contain the primary-key rewrite, which is the sharpest edge —
  * the row's identity is silently replaced, so anything holding the old `id`
  * dangles with no error anywhere.
+ *
+ * ✅ **[#8622] repaired that third fact; the transcript above is left verbatim**
+ * because it is a record of what was measured on 2026-08-14, not a description
+ * of current behaviour. Read the `id` values in it as historical. The repair was
+ * NOT MySQL-specific and did not need a live MySQL to find: the same rewrite
+ * reproduced on SQLite and live Postgres 16.13 against a *backed* conflict
+ * target, because `id` was in the merge set this driver builds before any server
+ * is involved. The other two facts stand exactly as recorded.
  *
  * # Reverse verification — direction predicted BEFORE running it
  *
@@ -464,22 +676,51 @@ function declareMysqlObservedBehaviour(cell: DialectCell): void {
       expect(after[0].title).toBe('second');
     });
 
-    it('REPLACES the surviving row’s primary key while merging on that wrong key', async () => {
+    /**
+     * ✅ **[#8622] This one pin is no longer a defect characterization.** #8592
+     * measured `id` being replaced here and wrote the pin as `not.toBe`, with a
+     * failure message instructing whoever fixed it to rewrite the pin to describe
+     * the repair. That is this rewrite.
+     *
+     * The cause was never MySQL's: `upsert` mints a nanoid for every call that
+     * supplies none, and `id` rode the merge set, so `on duplicate key update …
+     * id = values(id)` wrote the LOSING insert's fresh id over the stored row.
+     * `id` is now insert-only (`insertOnlyUpsertColumns`), on every dialect.
+     *
+     * ⚠️ **Un-run where it was written.** The #8622 container could raise SQLite
+     * and Postgres 16.13 but not MySQL — no `mysqld` — so the id-preservation
+     * assertion below was measured on those two cells (in the sweep above, whose
+     * pins are the same claim on a *backed* target) and is carried here for the
+     * MySQL cell on the driver-level argument: the merge set is built in this
+     * process, before any dialect sees a statement. CI's
+     * `Temporal Conformance (live PG + MySQL)` job is the first runner to
+     * actually execute it. If it is red there, the driver-level reasoning is
+     * wrong for MySQL specifically and that is worth a card of its own — do not
+     * relax it back to `not.toBe` without one.
+     *
+     * The two pins around it are untouched: MySQL still merges on a key the
+     * caller never named, and still does not merge on the key it was given.
+     * Those are #8621's to move, and this card deliberately does not.
+     */
+    it('KEEPS the surviving row’s primary key, even merging on that wrong key', async () => {
       await driver.upsert(MISMATCHED.name, { email: 'a@b.com', tax_id: 'T-1', title: 'first' }, ['email']);
       const seededId = (await rows())[0].id;
 
       await driver.upsert(MISMATCHED.name, { email: 'other@b.com', tax_id: 'T-1', title: 'second' }, ['email']);
-      const mergedId = (await rows())[0].id;
+      const merged = (await rows())[0];
 
-      // `id` sits in the merge set, so `on duplicate key update … id = values(id)`
-      // overwrites the stored row's identity with the fresh nanoid minted for the
-      // insert that lost. Every external reference to `seededId` now dangles, and
-      // nothing anywhere reported an error.
       expect(
-        mergedId,
-        'the merged row kept its original id — the primary-key rewrite measured in #8592 is gone, ' +
-          'which is good news that this pin must be rewritten to describe',
-      ).not.toBe(seededId);
+        merged.id,
+        'the merged row was re-identified — `id` is back in the merge set (#8622), so every ' +
+          'relationship, audit record and external id mapping pointing at the old row now dangles',
+      ).toBe(seededId);
+
+      // The wrong-key merge itself is UNCHANGED and still wrong: one row, and
+      // the columns that are not insert-only still took the losing insert's
+      // values. Without this half, the pin above would also pass if the merge
+      // had simply stopped happening.
+      expect(merged.title, 'the mergeable columns must still merge — only identity is excluded').toBe('second');
+      expect(merged.email).toBe('other@b.com');
     });
 
     it('does NOT merge on the key it WAS told to merge on — duplicates on `email`', async () => {
