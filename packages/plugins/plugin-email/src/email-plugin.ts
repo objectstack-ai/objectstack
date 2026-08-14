@@ -44,6 +44,7 @@ import {
   unbindEmailTemplateProvenanceStamp,
 } from './email-template-provenance.js';
 import { sweepStrandedOutbox, type OutboxSweepResult } from './outbox-sweep.js';
+import { readInternalHeadersJson } from './internal-header-readback.js';
 import {
   EMAIL_ATTACHMENT_RECLAIM_QUEUE,
   EMAIL_ATTACHMENT_RECLAIM_GRACE_MS,
@@ -580,6 +581,16 @@ export class EmailServicePlugin implements Plugin {
             await (engine as any).update('sys_email', { id, ...patch }, {
               context: SYSTEM_CTX,
             });
+          },
+          // [#8149] The privileged readback for the `internal: true`
+          // `headers_json` column. Taken off the RAW engine on purpose: the
+          // dereference is a separately-named privileged verb (#8118)
+          // precisely so it cannot be reached from a query string, and the
+          // delivery paths above re-read rows through `find`, which omits the
+          // column for every caller including `SYSTEM_CTX`. Inert — and never
+          // calls the accessor — when the column is not flagged.
+          async readHeadersJson(rowIds) {
+            return readInternalHeadersJson(engine as any, rowIds);
           },
         };
 

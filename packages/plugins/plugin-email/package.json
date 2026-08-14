@@ -25,6 +25,7 @@
     "nodemailer": "^9.0.3"
   },
   "devDependencies": {
+    "@objectstack/driver-memory": "workspace:*",
     "@objectstack/objectql": "workspace:*",
     "@objectstack/service-queue": "workspace:*",
     "@objectstack/service-settings": "workspace:*",

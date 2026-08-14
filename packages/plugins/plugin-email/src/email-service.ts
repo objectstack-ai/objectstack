@@ -24,6 +24,7 @@ import {
   storageKeysInColumn,
   type EncodedAttachments,
 } from './sys-email-payload.js';
+import { withRecoveredHeaders } from './internal-header-readback.js';
 import {
   EMAIL_ATTACHMENT_RECLAIM_QUEUE,
   EMAIL_ATTACHMENT_RECLAIM_GRACE_MS,
@@ -150,6 +151,19 @@ export interface EmailPersistence {
    */
   insert(row: Record<string, any>): Promise<{ id: string } | string>;
   update?(id: string, patch: Record<string, any>): Promise<void>;
+  /**
+   * [#8149] Recover the `internal: true` `headers_json` column for rows the
+   * engine's generic read path handed back without it.
+   *
+   * Optional because it is only meaningful over a redacting engine: the
+   * implementation returns `undefined` ("nothing was withheld — use the row's
+   * own value") whenever the column is not flagged, and THROWS when it is
+   * flagged but the engine cannot dereference it, so a message is never sent
+   * missing headers it was authored with. See
+   * {@link ../internal-header-readback} for why the probe is the schema flag
+   * and never the absence of the key.
+   */
+  readHeadersJson?(rowIds: readonly string[]): Promise<Map<string, unknown> | undefined>;
 }
 
 /**
@@ -1079,9 +1093,28 @@ export class EmailService implements IEmailService {
   ): Promise<SendEmailResult> {
     const rowId = String(row?.id ?? '');
     if (!rowId) throw new Error('deliverPersistedRow: row.id is required');
+
+    // [#8149] `headers_json` is `internal: true`, so EVERY path that reaches
+    // here by re-reading the row (the drain hook, the queue subscriber, the
+    // boot outbox sweep) was handed the row WITHOUT its custom headers —
+    // `SYSTEM_CTX` does not reopen the omission (#7728 has no system
+    // carve-out). Recover them through the engine's privileged accessor
+    // before the row becomes a message, so the durable paths send exactly
+    // what was authored.
+    //
+    // Deliberately OUTSIDE the try/catch below: a recovery failure is a
+    // composition error (a redacting engine with no accessor), not a bad
+    // message, so it must NOT land the row at `failed` — it propagates, the
+    // row stays `queued`, and a healthy process (the queue's retry, the next
+    // boot's sweep) delivers it intact. Marking it `failed` here would burn
+    // the one durable record of a message that is still perfectly
+    // deliverable. Inert when nothing redacts: no accessor call at all.
+    const recoveredHeaders = await this.options.persistence?.readHeadersJson?.([rowId]);
+    const source = withRecoveredHeaders(row, recoveredHeaders);
+
     // Keys read from the ROW, so a row delivered by the queue worker (which
     // never saw the send) still schedules its own content's reclamation.
-    const reclaimKeys = storageKeysInColumn(row.attachments_json);
+    const reclaimKeys = storageKeysInColumn(source.attachments_json);
     let normalized: NormalizedEmailMessage;
     try {
       // Async because a row's attachments may live in the file-storage
@@ -1089,7 +1122,7 @@ export class EmailService implements IEmailService {
       // capability mounted at all — throws and lands the row at `failed` with
       // the reason, which is the whole point: an unfetchable attachment must
       // never become a message delivered without it.
-      normalized = await rowToNormalizedAsync(row, { fetchContent: this.attachmentFetcher() });
+      normalized = await rowToNormalizedAsync(source, { fetchContent: this.attachmentFetcher() });
     } catch (err: any) {
       const errMessage = String(err?.message ?? err ?? 'invalid row').slice(0, 1000);
       await this.updateRow(rowId, {

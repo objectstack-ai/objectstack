@@ -120,6 +120,15 @@ export {
   unbindEmailTemplateProvenanceStamp,
   EMAIL_TEMPLATE_PROVENANCE_PACKAGE,
 } from './email-template-provenance.js';
+// [#8149] The `internal: true` header readback seam.
+export {
+  readInternalHeadersJson,
+  isHeadersColumnRedacted,
+  withRecoveredHeaders,
+  SYS_EMAIL_OBJECT,
+  HEADERS_COLUMN,
+  type InternalFieldResolvingEngine,
+} from './internal-header-readback.js';
 export {
   AUTH_PASSWORD_RESET_TEMPLATE,
   AUTH_VERIFY_EMAIL_TEMPLATE,
