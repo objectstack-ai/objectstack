@@ -184,7 +184,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       name: {
         label: "API Name",
-        help: "Unique machine name for the permission set"
+        help: "Machine name for the permission set, unique per organization"
       },
       description: {
         label: "Description"
@@ -273,7 +273,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           },
           name: {
             label: "New API Name",
-            helpText: "Unique snake_case machine name"
+            helpText: "snake_case machine name, unique per organization"
           }
         }
       }

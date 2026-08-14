@@ -19,7 +19,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       name: {
         label: "Name",
-        help: "Unique snake_case name — referenced in logs and audit"
+        help: "snake_case name, unique per organization — referenced in logs and audit"
       },
       label: {
         label: "Display Label"

@@ -19,7 +19,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       name: {
         label: "名前",
-        help: "一意の snake_case 名 — ログおよび監査で参照"
+        help: "snake_case 名（組織ごとに一意）— ログおよび監査で参照"
       },
       label: {
         label: "表示名"

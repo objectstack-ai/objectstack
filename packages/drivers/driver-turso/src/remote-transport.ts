@@ -579,6 +579,17 @@ function invalidFilterError(message: string): Error {
  * predicate answers the OPPOSITE condition (a unique index exists and the row
  * violated it). Confusing the two would report a working constraint as a
  * missing one.
+ *
+ * [#8567] `@objectstack/types` now also exports the dialect-spanning
+ * `isUnbackedConflictTargetError` — the same question, with a measured Postgres
+ * limb beside this SQLite one — and `driver-sql` reads it from there. This copy
+ * deliberately stays: this package does not depend on `@objectstack/types`
+ * today (`@libsql/client`, `@objectstack/core`, `@objectstack/driver-sql`,
+ * `@objectstack/spec`, `nanoid`, `zod`), and adding a dependency edge to
+ * de-duplicate six lines that can never need the Postgres limb — this transport
+ * speaks libsql/SQLite and only ever will — buys nothing. If this package ever
+ * takes that dependency for another reason, delete this and import the shared
+ * one; the wording it feeds is already pinned across faces by #8568.
  */
 function isUnbackedConflictTargetError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error ?? '');
@@ -616,6 +627,18 @@ function isUnbackedConflictTargetError(error: unknown): boolean {
  * list, so a caller's un-satisfiable upsert stops being logged as an unhandled
  * SERVER error once per request.
  *
+ * # [#8567] Why one clause of the wording moved
+ *
+ * "and SQLite refuses the statement" became "and **the database** refuses the
+ * statement". Nothing about this face changed — the remote transport speaks
+ * libsql/SQLite and only ever will. The clause moved because #5240 binds this
+ * refusal to `driver-sql`'s word for word, and THAT face serves Postgres and
+ * MySQL too: once its recognition covers Postgres, a sentence naming SQLite
+ * points a Postgres operator at the wrong engine. The two faces are held
+ * identical by #8568's parity pin, so the correct response to that pin
+ * reddening is to move both, which is what the same commit did — never to
+ * update the pin to accept a divergence.
+ *
  * ⚠️ The original error is kept as `cause` rather than discarded — the SQLite
  * text is the ground truth an operator debugging the table will want, and
  * nothing above this layer can recover it once it is replaced. It is ASSIGNED
@@ -627,7 +650,7 @@ function refuseUnbackedConflictTarget(object: string, mergeKeys: string[], cause
   const keys = mergeKeys.map((k) => `"${k}"`).join(', ');
   const err = new Error(
     `Cannot upsert into "${object}" on conflict keys (${keys}): no PRIMARY KEY or UNIQUE index ` +
-      `backs them, so the merge target does not exist and SQLite refuses the statement. This is ` +
+      `backs them, so the merge target does not exist and the database refuses the statement. This is ` +
       `usually a table created before its "unique" declaration was emitted as DDL, or conflict ` +
       `keys naming columns that were never declared unique. Fix by declaring the column(s) ` +
       `"unique: true" and re-running schema sync so the unique index is created — if the table ` +

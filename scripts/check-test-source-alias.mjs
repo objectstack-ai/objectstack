@@ -1370,6 +1370,11 @@ function check(root, registry) {
       failures.push(
         `${name}: NEW unaliased artifact import(s) since this entry was measured: ${added.join(', ')}.\n` +
           "    Alias them in the package's vitest.config.* — widening the registry entry is not the fix.\n" +
+          // The REASON for that refusal, in the text the author actually reads (#8576).
+          // Mirrors `KNOWN_UNALIASED_TEST_IMPORTS`'s own words verbatim rather than
+          // restating them: one rule in two voices becomes two rules by the next reading.
+          '    That registry is ⛔ SHRINK-ONLY: entries are audited in both directions, so one that is no\n' +
+          '    longer needed fails the gate and names itself for deletion.\n' +
           // Same defect, same fix: this branch also named bare packages and left
           // the reader to guess the specifier shape (#8256).
           remediationHint(
@@ -1824,6 +1829,14 @@ function selfTest() {
     });
     const grown = check(root, { '@fx/violator': ['@fx/core'] });
     expect(has(grown.failures, 'NEW unaliased artifact import'), 'a new unaliased import under an existing entry did not fail');
+    // #8576. The refusal above turns the registry remedy down; this pins that it
+    // also says WHY, in the text the author reads. Asserted on the planted
+    // violation, never on a green run — the string only ever prints on failure.
+    expect(
+      has(grown.failures, '⛔ SHRINK-ONLY'),
+      'the refusal no longer states WHY it refuses — the registry\'s shrink-only nature is back to being '
+        + 'comment-only, which tells the maintainer reading the script and not the author tripping the gate',
+    );
 
     // Shrink: an entry wider than the measurement must fail too — no headroom.
     const wide = check(root, { '@fx/violator': ['@fx/core', '@fx/other', '@fx/gone'] });

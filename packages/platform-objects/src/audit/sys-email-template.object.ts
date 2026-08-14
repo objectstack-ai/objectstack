@@ -190,7 +190,17 @@ export const SysEmailTemplate = ObjectSchema.create({
   },
 
   indexes: [
-    { fields: ['name', 'locale'], unique: true },
+    // [#8554] Scope spelled EXPLICITLY (ADR-0120 D1). On a DECLARED index bare
+    // `unique: true` is the positional spelling of `'global'` — the listed
+    // columns VERBATIM, composite included — so `(name, locale)` was an
+    // installation-wide key on a tenant-scoped object. Measured live before the
+    // fix: org_jia creates (welcome, en-US) 201 / org_yi the SAME pair 409
+    // UNIQUE_VIOLATION / org_yi (other_tpl, en-US) 201 / org_yi (welcome, zh-CN)
+    // 201 / org_yi's own GET on the colliding pair 0 rows. The last two controls
+    // are what prove the key was the composite rather than `name` alone.
+    // Admins author and overlay templates per tenant, so two organizations both
+    // holding a `welcome` / `en-US` template is the normal case.
+    { fields: ['name', 'locale'], unique: 'organization' },
     { fields: ['category'] },
     { fields: ['active'] },
   ],

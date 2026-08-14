@@ -271,7 +271,15 @@ export const SysSharingRule = ObjectSchema.create({
 
   indexes: [
     { fields: ['object_name', 'active'] },
-    { fields: ['name'], unique: true },
+    // [#8554] Scope spelled EXPLICITLY (ADR-0120 D1). On a DECLARED index bare
+    // `unique: true` is the positional spelling of `'global'` — the listed
+    // columns verbatim — so this was an installation-wide key on a tenant-scoped
+    // object. Measured live before the fix: org_jia 201 / org_yi 409
+    // UNIQUE_VIOLATION on the same name / org_yi unused name 201 / org_yi's own
+    // GET on the colliding name 0 rows. Sharing rules are authored by admins in
+    // the Studio criteria builder, so two organizations naming a rule
+    // `share_west_region` are not in conflict.
+    { fields: ['name'], unique: 'organization' },
     { fields: ['organization_id'] },
   ],
 });

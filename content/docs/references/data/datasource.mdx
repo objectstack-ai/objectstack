@@ -40,7 +40,7 @@ const result = DatasourceSchema.parse(data);
 | **active** | `boolean` | ✅ | Is datasource enabled |
 | **autoConnect** | `boolean` | ✅ | Force a live driver connection at boot even when managed + unrouted (ADR-0062 D2). |
 | **schemaMode** | `Enum<'managed' \| 'external' \| 'validate-only'>` | ✅ | Schema ownership mode |
-| **external** | `{ allowedSchemas?: string[]; allowWrites: boolean; validation: object; credentialsRef?: string; … }` | optional | External datasource federation settings (schemaMode != "managed") |
+| **external** | `{ allowedSchemas?: string[]; allowWrites: boolean; validation: object; credentialsRef?: string; … }` | optional | External datasource settings: federation policy (schemaMode != "managed") plus the secrets-store credentials reference (valid in every schemaMode) |
 | **origin** | `Enum<'code' \| 'runtime'>` | ✅ | Datasource provenance (server-managed, read-only) |
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
@@ -79,7 +79,7 @@ Underlying driver identifier
 
 ## ExternalDatasourceSettings
 
-External datasource federation settings (schemaMode != "managed")
+External datasource settings: federation policy (schemaMode != "managed") plus the secrets-store credentials reference (valid in every schemaMode)
 
 ### Properties
 
@@ -88,7 +88,7 @@ External datasource federation settings (schemaMode != "managed")
 | **allowedSchemas** | `string[]` | optional | Whitelist of remote schemas/databases that may be exposed. |
 | **allowWrites** | `boolean` | ✅ | Global write gate. Individual objects must also opt in via object.external.writable. |
 | **validation** | `{ onMismatch: Enum<'fail' \| 'warn' \| 'ignore'>; checkOnBoot: boolean; checkIntervalMs?: number }` | ✅ | Boot/drift validation policy |
-| **credentialsRef** | `string` | optional | Reference into the secrets store; never inline credentials. |
+| **credentialsRef** | `string` | optional | Reference into the secrets store; never inline credentials. Valid in every schemaMode — the one `external` key a managed datasource may carry (#8153). |
 | **queryTimeoutMs** | `number` | ✅ | Hard cap on per-query execution time. |
 
 
