@@ -804,6 +804,7 @@
     "resolveViewDescription (function)",
     "resolveViewLabel (function)",
     "s3StorageExample (const)",
+    "scalarOverridesPackagedBase (function)",
     "serviceUnavailableMessage (function)",
     "toLocaleDescriptors (function)",
     "translateAction (function)",
