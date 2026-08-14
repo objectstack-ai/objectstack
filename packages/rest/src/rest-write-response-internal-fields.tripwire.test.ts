@@ -74,7 +74,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { omitInternalFieldsFromWriteResponse } from '@objectstack/core';
-import { RestServer } from './rest-server';
+import { RestServer } from './rest-server.js';
 
 /** The value that must NEVER appear in any write response. */
 const SENTINEL = 'INTERNAL-SENTINEL-8497-NEVER-SERIALIZED';
@@ -193,7 +193,7 @@ async function bootRest() {
   const engine = new ObjectQL();
   engine.registerDriver(memoryDriver() as never, true);
   await engine.init();
-  engine.registry.registerObject(VAULT as never);
+  engine.registry.registerObject(VAULT as never, 'tripwire-8497');
   const protocol = new ObjectStackProtocolImplementation(engine as never);
   const rest = new RestServer(
     createMockServer() as never,
