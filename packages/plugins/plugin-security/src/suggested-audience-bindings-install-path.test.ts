@@ -18,7 +18,11 @@ import { SqlDriver } from '@objectstack/driver-sql';
 // The REAL shipped reconciler — not a re-implementation. A local copy would
 // make this suite a test of the copy, which is exactly the failure mode the
 // file exists to close.
-import { syncAudienceBindingSuggestions } from './suggested-audience-bindings.js';
+import {
+  syncAudienceBindingSuggestions,
+  reconcileAudienceBindingSuggestions,
+  dismissAudienceBindingSuggestion,
+} from './suggested-audience-bindings.js';
 import { SysAudienceBindingSuggestion } from './objects/sys-audience-binding-suggestion.object.js';
 // The other three tables the reconciler consults, as the REAL declarations —
 // never hand-rolled stand-ins. With them registered the anchor lookup and the
@@ -29,6 +33,12 @@ import { SysAudienceBindingSuggestion } from './objects/sys-audience-binding-sug
 import { SysPosition } from './objects/sys-position.object.js';
 import { SysPermissionSet } from './objects/sys-permission-set.object.js';
 import { SysPositionPermissionSet } from './objects/sys-position-permission-set.object.js';
+// [#8617] The reconciler enumerates `sys_organization` to know which surfaces
+// to reconcile, so the real declaration is registered here too — a hand-rolled
+// stand-in would make "can the shipped entry point find the tenants?" a
+// question about the stand-in. `@objectstack/platform-objects` is a runtime
+// dependency of this package, not a new edge.
+import { SysOrganization } from '@objectstack/platform-objects/identity';
 
 /**
  * #8577 — the INSTALL PATH of `sys_audience_binding_suggestion`, on a real
@@ -68,8 +78,12 @@ import { SysPositionPermissionSet } from './objects/sys-position-permission-set.
  * supplies the installed-package manifest the reconciler reads through
  * `registry.getAllPackages()`.
  *
- * ⚠️ Section 3 records a measured LIMIT of that faithfulness, and it is the
- * finding this file exists to keep visible.
+ * ⚠️ Sections 1-2 measure the STORAGE half with a tenant threaded by hand.
+ * Section 3 ([#8617]) drives the entry point `security-plugin.ts` really
+ * calls, with the bare engine it really passes, and is where "does the shipped
+ * runtime prompt both tenants?" is answered. It used to record that it does
+ * not; the two assertions that recorded it were deleted by #8617's fix rather
+ * than updated, because a recording of the defect cannot survive its repair.
  */
 
 /** The package both organizations install. */
@@ -117,7 +131,7 @@ async function boot(scope: true | 'organization'): Promise<ObjectQL> {
     version: '1.0.0',
     type: 'plugin',
     scope: 'system',
-    objects: [declaration(scope), SysPosition, SysPermissionSet, SysPositionPermissionSet],
+    objects: [declaration(scope), SysPosition, SysPermissionSet, SysPositionPermissionSet, SysOrganization],
   } as any);
   await engine.syncSchemas();
   engines.push(engine);
@@ -127,6 +141,12 @@ async function boot(scope: true | 'organization'): Promise<ObjectQL> {
   // but NO binding between them — which is exactly the state a package install
   // leaves behind and the state a `pending` suggestion describes.
   for (const org of ORGANIZATIONS) {
+    // [#8617] The organization row itself: what the boot-time sweep enumerates.
+    await (engine as any).insert(
+      'sys_organization',
+      { id: org, name: org },
+      { context: { isSystem: true } },
+    );
     await (engine as any).insert(
       'sys_position',
       { id: `pos_everyone_${org}`, name: 'everyone', label: 'Everyone' },
@@ -205,7 +225,10 @@ async function uniqueIndexNames(engine: ObjectQL): Promise<string[]> {
 
 const KEY = 'com.acme.crm/sales_readonly/everyone';
 
-describe('#8577 — the package-install path of sys_audience_binding_suggestion', () => {
+/** [#8617] A tenant-level administrator, as `isTenantAdmin` recognizes one. */
+const TENANT_ADMIN_SET = { name: 'admin_full', objects: { '*': { modifyAllRecords: true } } } as any;
+
+describe('#8577/#8617 — the package-install path of sys_audience_binding_suggestion', () => {
   // ─────────────────────────────────────────────────────────────────────────
   // 1. BEFORE — the dead end, measured through the real reconciler
   // ─────────────────────────────────────────────────────────────────────────
@@ -327,41 +350,40 @@ describe('#8577 — the package-install path of sys_audience_binding_suggestion'
   });
 
   // ─────────────────────────────────────────────────────────────────────────
-  // 3. The remaining half — a MEASURED limit of this fix, kept visible
+  // 3. [#8617] The SHIPPED call path — the other half of the same dead end
   // ─────────────────────────────────────────────────────────────────────────
 
   /**
-   * ⚠️ Read this before concluding the install path is whole.
+   * Section 2 threads a tenant onto the reconciler's calls by hand. This
+   * section drives the entry point `security-plugin.ts` actually calls, with
+   * the bare engine it actually passes — which is where #8617 lived: a
+   * module-level `SYSTEM_CTX = { isSystem: true }` carrying no tenant, so one
+   * organization-less row was written and every tenant read it.
    *
-   * Everything above threads a tenant context onto the reconciler's calls.
-   * The SHIPPED call sites do not: `suggested-audience-bindings.ts` writes with
-   * a module-level `SYSTEM_CTX = { isSystem: true }` that carries no tenant, and
-   * `security-plugin.ts` invokes it at boot and after a package-door publish
-   * with the bare engine. Measured on this engine:
+   * ⚠️ Where this file previously recorded that behaviour (`the shipped
+   * SYSTEM_CTX call path is tenant-blind (recorded, not endorsed)`), it now
+   * asserts the repair. The recording was deleted by #8617's fix rather than
+   * updated, exactly as its note required: an assertion that the shipped path
+   * writes ONE organization-less row cannot both hold and be fixed.
+   *
+   * Three facts about this engine make the shape of the fix non-obvious, all
+   * measured here rather than assumed:
    *
    *   - an insert under `{ isSystem: true }` stores `organization_id` NULL;
-   *   - a read under `{ isSystem: true }` sees every organization's rows;
-   *   - a read under `{ isSystem: true, tenantId: X }` sees X's rows AND the
-   *     NULL-organization rows (the driver expands the tenant predicate to
-   *     `organization_id = :tenant OR organization_id IS NULL`).
-   *
-   * So on the shipped path the reconciler writes ONE organization-less row that
-   * every tenant reads, and the second run finds it and skips — the same dead
-   * end as the index, reached by a different road, and NOT repaired by
-   * respelling the index. The index fix is necessary (without it even a
-   * correctly tenant-scoped write is refused) and it is what this card was
-   * ruled to deliver; the reconciler's tenant blindness is filed as **#8617**,
-   * which also carries the measurements above and the tenancy question they
-   * raise about this object.
-   *
-   * The two assertions below RECORD today's behaviour rather than endorse it.
-   * #8617's fix must DELETE them, not update them — if they still pass
-   * afterwards, that fix did not work.
+   *   - a read under `{ isSystem: true, tenantId: X }` sees X's rows **and**
+   *     the NULL-organization ones — ADR-0120 D3's platform bucket expands the
+   *     tenant predicate to `organization_id = :tenant OR organization_id IS
+   *     NULL`, so scoping the reads alone does NOT hide a legacy row;
+   *   - therefore a per-organization pass run against a surviving pre-fix row
+   *     creates nothing for anybody. That counterfactual is asserted below, so
+   *     the reap is pinned as load-bearing and not merely tidy.
    */
-  describe('the shipped SYSTEM_CTX call path is tenant-blind (recorded, not endorsed)', () => {
+  describe('[#8617] the shipped call path reconciles PER ORGANIZATION', () => {
     /**
      * The reconciler wired exactly as `security-plugin.ts` wires it — the bare
-     * engine, no tenant threaded. Write verbs route through the producer's
+     * engine, no tenant threaded by the caller. The tenant scoping under test
+     * is the one the module puts on its own calls, so anything this seam added
+     * would be testing the seam. Write verbs route through the producer's
      * dispatch predicates for the same reason as `runtimeOf` above.
      */
     const asShipped = (engine: ObjectQL): any => ({
@@ -381,26 +403,155 @@ describe('#8577 — the package-install path of sys_audience_binding_suggestion'
       },
     });
 
-    it('writes ONE organization-less row, and the organization-scoped index does not change that', async () => {
+    /** A pre-fix row: what the shipped tenant-less reconciler left behind. */
+    async function seedLegacyOrganizationLessRow(engine: ObjectQL, status = 'pending'): Promise<void> {
+      await (engine as any).insert('sys_audience_binding_suggestion', {
+        id: 'sug_legacy',
+        package_id: PACKAGE_MANIFEST.id,
+        permission_set_name: 'sales_readonly',
+        anchor: 'everyone',
+        status,
+      }, { context: { isSystem: true } });
+    }
+
+    it('EACH organization gets its own row — no organization-less row is written at all', async () => {
       const engine = await boot('organization');
 
-      const first = await syncAudienceBindingSuggestions(asShipped(engine));
-      const second = await syncAudienceBindingSuggestions(asShipped(engine));
+      const out = await reconcileAudienceBindingSuggestions(asShipped(engine), undefined, undefined, {
+        posture: 'isolated',
+      });
 
-      expect(first).toMatchObject({ created: 1 });
-      expect(second).toMatchObject({ created: 0 });
+      expect(out).toMatchObject({ created: 2, organizations: 2, reaped: 0 });
+      expect((await storedRows(engine)).sort((a, b) => String(a.org).localeCompare(String(b.org)))).toEqual([
+        { org: 'org_jia', key: KEY, status: 'pending' },
+        { org: 'org_yi', key: KEY, status: 'pending' },
+      ]);
+      // …and stated the way an admin experiences it: each tenant is prompted
+      // once, for its own installation.
+      for (const org of ORGANIZATIONS) {
+        const rows = await visibleTo(engine, org);
+        expect(rows, org).toHaveLength(1);
+        expect(rows[0].organization_id, org).toBe(org);
+        expect(rows[0].status, org).toBe('pending');
+      }
+    });
+
+    it('ANTI-VACUITY: re-running the shipped entry point adds nothing', async () => {
+      // The mirror of section 2's anti-vacuity case, one layer up: a "fix" that
+      // reconciled per organization but lost idempotence would satisfy the
+      // assertion above and be strictly worse than the defect.
+      const engine = await boot('organization');
+      await reconcileAudienceBindingSuggestions(asShipped(engine), undefined, undefined, { posture: 'isolated' });
+      const again = await reconcileAudienceBindingSuggestions(asShipped(engine), undefined, undefined, { posture: 'isolated' });
+
+      expect(again).toMatchObject({ created: 0, confirmedObserved: 0, pruned: 0, reaped: 0 });
+      expect(await storedRows(engine)).toHaveLength(2);
+    });
+
+    it('a surviving pre-fix row would BLOCK every tenant — which is what the reap is for', async () => {
+      // The counterfactual, run first so the number it produces is real: with
+      // the legacy organization-less row present, tenant-scoped passes alone
+      // create NOTHING, because the platform bucket shows that row to both
+      // organizations and both read the key as already represented.
+      const engine = await boot('organization');
+      await seedLegacyOrganizationLessRow(engine);
+
+      const jia = await syncAudienceBindingSuggestions(runtimeOf(engine, 'org_jia'));
+      const yi = await syncAudienceBindingSuggestions(runtimeOf(engine, 'org_yi'));
+      expect(jia).toMatchObject({ created: 0 });
+      expect(yi).toMatchObject({ created: 0 });
+      expect(await storedRows(engine)).toEqual([{ org: null, key: KEY, status: 'pending' }]);
+
+      // The shipped entry point reaps it first, and then both tenants are
+      // prompted for their own installation.
+      const out = await reconcileAudienceBindingSuggestions(asShipped(engine), undefined, undefined, {
+        posture: 'isolated',
+      });
+      expect(out).toMatchObject({ reaped: 1, created: 2, organizations: 2 });
+      expect((await storedRows(engine)).sort((a, b) => String(a.org).localeCompare(String(b.org)))).toEqual([
+        { org: 'org_jia', key: KEY, status: 'pending' },
+        { org: 'org_yi', key: KEY, status: 'pending' },
+      ]);
+    });
+
+    it('the reap regenerates a RESOLVED legacy row per organization, and touches no binding', async () => {
+      // The disposition of legacy state, measured rather than described. The
+      // legacy row is `dismissed` — the hardest case, because a dismissal is an
+      // admin decision. It was never attributable to an organization (that IS
+      // the defect: one row carried every tenant's answer), so it cannot be
+      // migrated to one; each tenant is re-prompted for its own decision.
+      const engine = await boot('organization');
+      await seedLegacyOrganizationLessRow(engine, 'dismissed');
+      const bindingsBefore = await (engine as any).find('sys_position_permission_set', {
+        context: { isSystem: true },
+      });
+
+      const out = await reconcileAudienceBindingSuggestions(asShipped(engine), undefined, undefined, {
+        posture: 'isolated',
+      });
+
+      expect(out).toMatchObject({ reaped: 1, created: 2 });
+      // No grant moved: the reap deletes prompt state, never a binding.
+      expect(await (engine as any).find('sys_position_permission_set', { context: { isSystem: true } }))
+        .toHaveLength(bindingsBefore.length);
+      for (const org of ORGANIZATIONS) {
+        const rows = await visibleTo(engine, org);
+        expect(rows, org).toHaveLength(1);
+        expect(rows[0].organization_id, org).toBe(org);
+        expect(rows[0].status, org).toBe('pending');
+      }
+    });
+
+    it('one tenant resolving its row leaves the other tenant still prompted', async () => {
+      // The consequence the card is ultimately about, asserted end to end: the
+      // first admin to answer used to answer for everyone.
+      const engine = await boot('organization');
+      await reconcileAudienceBindingSuggestions(asShipped(engine), undefined, undefined, { posture: 'isolated' });
+
+      const jiaRow = (await visibleTo(engine, 'org_jia'))[0];
+      await dismissAudienceBindingSuggestion(
+        { ql: runtimeOf(engine, 'org_jia'), resolveSets: async () => [TENANT_ADMIN_SET] },
+        { userId: 'usr_jia_admin', tenantId: 'org_jia' },
+        jiaRow.id,
+      );
+
+      const jiaAfter = await visibleTo(engine, 'org_jia');
+      expect(jiaAfter).toHaveLength(1);
+      expect(jiaAfter[0].status).toBe('dismissed');
+
+      const yiAfter = await visibleTo(engine, 'org_yi');
+      expect(yiAfter).toHaveLength(1);
+      expect(yiAfter[0].status, 'org_yi must still be asked for its own decision').toBe('pending');
+    });
+
+    it('a single-organization deployment is byte-for-byte unchanged — one pass, no reap', async () => {
+      // `single` posture has no organization to scope to, so the
+      // organization-less row is the CORRECT one there and reaping it would be
+      // a regression rather than a repair.
+      const engine = await boot('organization');
+
+      const out = await reconcileAudienceBindingSuggestions(asShipped(engine), undefined, undefined, {
+        posture: 'single',
+      });
+
+      expect(out).toMatchObject({ created: 1, organizations: 0, reaped: 0 });
       expect(await storedRows(engine)).toEqual([{ org: null, key: KEY, status: 'pending' }]);
     });
 
-    it('every tenant reads that same organization-less row, so only one decision exists', async () => {
+    it('the package-door publish path reconciles only the PUBLISHING organization', async () => {
+      // `PublishMaterializer` hands the draft's org scope to the materializer,
+      // so a tenant's publish prompts that tenant — not a sweep of every
+      // organization on the installation.
       const engine = await boot('organization');
-      await syncAudienceBindingSuggestions(asShipped(engine));
 
-      for (const org of ['org_jia', 'org_yi']) {
-        const rows = await visibleTo(engine, org);
-        expect(rows, org).toHaveLength(1);
-        expect(rows[0].organization_id ?? null, org).toBeNull();
-      }
+      const out = await reconcileAudienceBindingSuggestions(asShipped(engine), undefined, undefined, {
+        posture: 'isolated',
+        organizationId: 'org_yi',
+      });
+
+      expect(out).toMatchObject({ created: 1, organizations: 1 });
+      expect(await storedRows(engine)).toEqual([{ org: 'org_yi', key: KEY, status: 'pending' }]);
+      expect(await visibleTo(engine, 'org_jia')).toHaveLength(0);
     });
   });
 });
