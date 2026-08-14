@@ -1216,13 +1216,15 @@ function selfTest() {
     'the empty-changeset gate no longer claims a skills path through its own fixtures',
     !covers(emptyHints, 'skills/demo/SKILL.md'),
   );
-  // The load-bearing survivor: this gate's ONLY real literal is a module-
-  // relative URL, and before the narrowing it reached SKILL.md through the copy
-  // of that path in its own header — a real input carried by prose.
+  // The load-bearing survivor: this gate's real literals are the per-file
+  // ceiling keys (repo-relative paths in its CEILINGS map) — before the
+  // narrowing it reached SKILL.md only through a path copy in its own header,
+  // a real input carried by prose.
   const ratchetHints = readHints('scripts/pm/check-skill-line-ratchet.mjs');
   t('the skill ratchet still reaches the SKILL.md it counts', covers(ratchetHints, '.claude/skills/pm-dispatch/SKILL.md'));
+  t('the skill ratchet reaches the references files it now counts', covers(ratchetHints, '.claude/skills/pm-dispatch/references/dispatch-runbook.md'));
   t(
-    'the skill ratchet no longer claims references/, which it does not count',
+    'the skill ratchet claims only its covered files, not all of references/',
     !covers(ratchetHints, '.claude/skills/pm-dispatch/references/facts.md'),
   );
   // The control the card called "what a clean one looks like": two hints, both

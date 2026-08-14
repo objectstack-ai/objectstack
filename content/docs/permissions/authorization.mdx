@@ -330,6 +330,48 @@ product — see ADR-0091 D4–D7 for the open-core line; their community *shapes
 (a time-boxed direct grant with a reason; certification stamps) are the L1
 substrate above.
 
+## Grant lifecycle: the `active` switch (ADR-0049)
+
+Validity windows above date a **user's grant row**. The second lifecycle
+control dates the **catalogue row itself**: `sys_permission_set.active` and
+`sys_position.active`, the switch behind the Deactivate action on both objects.
+It answers a different question — "switch this grant off for everyone, without
+deleting it or unwinding the assignments" — and it is enforced in the same
+place, by the same discipline: **resolution-time filtering, fail-closed**, in
+`resolveAuthzContext`, with no cleanup job involved.
+
+- A deactivated **permission set** contributes nothing: not its name, not its
+  `system_permissions`, not its `tab_permissions`. As with an expired grant, a
+  deactivated unscoped `admin_full_access` no longer derives `platform_admin`
+  — the flag is applied *before* the posture is derived, not after.
+- A deactivated **position** stops carrying its permission sets, and its name
+  stops appearing in `positions`, so a permission set that merely shares the
+  position's name cannot resolve through it either.
+- Assignments are untouched. `sys_user_position` and
+  `sys_user_permission_set` rows stay exactly as they were, and re-activating
+  the catalogue row restores every grant it carried, at the next resolution.
+
+**Absent is ACTIVE.** Only a stored value that really reads false takes a grant
+away, so a row that predates the column keeps granting. The same predicate
+(`isRowActive`) is used by every reader, including the last-administrator
+guard's simulation — a guard that modelled "deactivated" differently from the
+resolver would permit exactly the write it exists to refuse.
+
+**Deactivating the break-glass set is refused.** `admin_full_access` is what
+makes the environment's platform admins, so switching it off would un-make all
+of them in one write — and re-activating it needs the permission just lost.
+That write is judged like deleting or renaming the row (ADR-0024 D5.2): it is
+refused while it would leave the environment with no administrator who can
+sign in. Re-activation is never refused.
+
+Deactivation is an incident-response control, so what it does **not** touch is
+deliberate. Administration surfaces keep listing and editing a deactivated
+position — an admin must still be able to unbind and clean up what they just
+switched off — and the write gates that judge audience-anchor bindings and a
+delegated administrator's blast radius keep reading every row, deactivated
+included: dropping rows there would make a refused binding *permitted* and a
+delegate's boundary *narrower*, which is the opposite of switching access off.
+
 ## Governance: how "declared = enforced" is kept true
 
 Five mechanisms — four CI-time, one runtime — make the security posture a

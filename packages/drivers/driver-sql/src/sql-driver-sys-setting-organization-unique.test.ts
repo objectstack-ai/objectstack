@@ -47,9 +47,12 @@ import { SqlDriver, classifyIndexKeyPart, parseIndexDdl, legacyUniqueReplacement
  * the `user` limb exactly as predicted, but on the `tenant` and `global` limbs
  * the installation-wide index enforces **nothing at all**: `user_id` is NULL on
  * every such row and SQL UNIQUE is NULL-distinct, so even a SAME-organization
- * duplicate is accepted. Section 4 pins that as a live fact. It is a second,
- * independent defect, it is filed separately, and this respelling does not fix
- * it — stated here so the suite cannot be read as claiming otherwise.
+ * duplicate is accepted. It is a second, independent defect, it was filed
+ * separately as #8629, and **this respelling does not fix it** — that is still
+ * true and section 4 still measures it on both spellings, so the suite cannot
+ * be read as claiming otherwise. What section 4 additionally pins since #8629
+ * landed is the fix that DOES close it: a runtime NULL-safe UNIQUE index over
+ * `COALESCE(user_id, '')`, claiming this same declared index name.
  *
  * ## Why this suite is at the DRIVER level
  *
@@ -490,45 +493,77 @@ describe('#8555 — sys_setting: the declared unique index becomes per-organizat
   });
 
   // ─────────────────────────────────────────────────────────────────────────
-  // 4. The OTHER defect this card does not fix — pinned so it cannot be
-  //    mistaken for fixed, and so the follow-up card has a live repro
+  // 4. The OTHER defect — filed as #8629 and CLOSED there. What was pinned
+  //    here as a live hole is now pinned as the fix, on the same rows.
   // ─────────────────────────────────────────────────────────────────────────
 
-  describe('the NULL-distinct user_id hole (out of scope here — filed as #8629)', () => {
+  describe('the NULL-distinct user_id hole — closed by the #8629 runtime migration', () => {
     /**
      * `user_id` is NULL on every `scope='tenant'` and `scope='global'` row —
      * `SettingsService` writes `scope === 'user' ? ctx.userId : null` — and SQL
-     * UNIQUE treats NULLs as distinct. The declared row identity is therefore
+     * UNIQUE treats NULLs as distinct. The declared row identity was therefore
      * void on exactly the two limbs that carry organization-level and
-     * platform-level configuration, BEFORE and AFTER this card.
+     * platform-level configuration, both before and after #8555.
      *
-     * The organization key part is NULL-safe (ADR-0120 D3); the author-declared
-     * `user_id` column is not, and extending null-safety to arbitrary declared
-     * columns is a contract decision plus a duplicate pre-flight for the
-     * databases that have already accumulated duplicates. Hence a separate card:
-     * #8629.
+     * #8629 closed it the way the maintainer ruled on 2026-08-14: **route 1**,
+     * a runtime NULL-safe UNIQUE index issued at `kernel:ready` (the PR #6666
+     * paradigm), reusing this same declared index NAME so the additive sync —
+     * which skips by name — never re-imposes the NULL-distinct form. The
+     * declaration itself is unchanged; extending the authorable vocabulary so it
+     * could state this is route 2, deferred to v18.
      *
-     * These assertions are written to go RED when that card lands — a fix must
-     * come here and rewrite them, rather than leaving a stale "known hole"
-     * comment behind.
+     * ## What these cases assert, and what they deliberately do not
+     *
+     * The migration lives in `@objectstack/metadata-protocol`, which this
+     * package must not depend on (the boundary #8461 / #8554 / #8556 kept, and
+     * the reason the declaration above is hand-copied too). So the DDL is
+     * applied here through the driver's own raw seam, from a literal
+     * hand-copied from `sys-setting-identity-index.ts`'s
+     * `buildSysSettingIdentityIndexSql`.
+     *
+     * ⚠️ Guarded in ONE direction, like the declaration mirror above:
+     * `metadata-protocol`'s `sys-setting-identity-index.test.ts` pins the
+     * builder's output against its own literal, and pins the index-name literal
+     * that `REPLACEMENT_NAME` also spells — so a change to the shipped migration
+     * that is not mirrored here goes red over there. The reverse is unguarded —
+     * change these only together.
+     *
+     * What is asserted here is the half only a driver can answer: that THIS DDL,
+     * over the REAL declared index this driver materializes, closes the hole
+     * without weakening anything else, survives a later boot's additive sync,
+     * and is not reported as drift the reconciler would undo.
      */
+    const NULL_SAFE_IDENTITY_DDL =
+      `CREATE UNIQUE INDEX IF NOT EXISTS ${REPLACEMENT_NAME} ON ${TABLE} ` +
+      "(COALESCE(organization_id, '__global__'), namespace, key, scope, COALESCE(user_id, ''))";
+
+    /** The migration's probe-first order, through the driver's raw seam. */
+    const runIdentityMigration = async (d: SqlDriver): Promise<void> => {
+      await d.execute(`DROP INDEX IF EXISTS ${REPLACEMENT_NAME}`);
+      await d.execute(NULL_SAFE_IDENTITY_DDL);
+    };
+
+    const tenantRow = { scope: 'tenant', user_id: null, namespace: 'lifecycle', key: 'retention_overrides' };
+    const globalRow = { scope: 'global', user_id: null, key: 'platform_default' };
+
     it('BEFORE: two organizations CAN both hold the same tenant-scope key — the constraint is void, not oracular', async () => {
+      // Kept as measured on the PRE declaration: the installation-wide index
+      // did not refuse this either, and the reason was never the organization
+      // scope — it is that the index cannot see these rows as equal at all.
       const d = makeDriver();
       await d.initObjects(app('pre') as any);
 
-      const tenantRow = { scope: 'tenant', user_id: null, namespace: 'lifecycle', key: 'retention_overrides' };
       expect((await createAsApi(d, row('a', 'org_jia', tenantRow))).status).toBe(201);
-      // 201, not 409: the card predicted a refusal here. The refusal never
-      // happens because the index cannot see these rows as equal at all.
       expect((await createAsApi(d, row('b', 'org_yi', tenantRow))).status).toBe(201);
     });
 
-    it('BEFORE and AFTER: a SAME-organization tenant-scope duplicate is accepted — declared row identity unenforced', async () => {
+    it('BEFORE: a SAME-organization tenant-scope duplicate is accepted — the declared row identity is unenforced', async () => {
+      // The defect, still measured on both spellings of the declaration, because
+      // it is what the runtime migration below has to be measured AGAINST.
       for (const which of ['pre', 'fixed'] as const) {
         const d = makeDriver();
         await d.initObjects(app(which) as any);
 
-        const tenantRow = { scope: 'tenant', user_id: null, namespace: 'lifecycle', key: 'retention_overrides' };
         expect((await createAsApi(d, row('a', 'org_jia', tenantRow))).status, which).toBe(201);
         expect((await createAsApi(d, row('b', 'org_jia', tenantRow))).status, which).toBe(201);
         expect(await d.count(TABLE, {}), which).toBe(2);
@@ -538,29 +573,118 @@ describe('#8555 — sys_setting: the declared unique index becomes per-organizat
       }
     });
 
-    it('BEFORE and AFTER: the same hole on the platform (`scope=global`) layer', async () => {
-      for (const which of ['pre', 'fixed'] as const) {
-        const d = makeDriver();
-        await d.initObjects(app(which) as any);
+    it('AFTER the migration: the SAME-organization tenant-scope duplicate is refused — 201 flips to 409', async () => {
+      const d = makeDriver();
+      await d.initObjects(app('fixed') as any);
+      await runIdentityMigration(d);
 
-        const globalRow = { scope: 'global', user_id: null, key: 'platform_default' };
-        expect((await createAsApi(d, row('a', undefined, globalRow))).status, which).toBe(201);
-        expect((await createAsApi(d, row('b', undefined, globalRow))).status, which).toBe(201);
-
-        await d.disconnect();
-        driver = undefined;
-      }
+      expect((await createAsApi(d, row('a', 'org_jia', tenantRow))).status).toBe(201);
+      expect(await createAsApi(d, row('b', 'org_jia', tenantRow))).toMatchObject(CONFLICT_ENVELOPE);
+      expect(await d.count(TABLE, {})).toBe(1);
     });
 
-    it('the hole is the NULL, not the layer — the same rows with a non-null user_id ARE constrained', async () => {
-      // The control that identifies the mechanism. Without it, "tenant rows are
-      // unconstrained" could be read as something about the `scope` value.
+    it('AFTER the migration: two platform defaults on the `scope=global` layer are refused', async () => {
+      const d = makeDriver();
+      await d.initObjects(app('fixed') as any);
+      await runIdentityMigration(d);
+
+      expect((await createAsApi(d, row('a', undefined, globalRow))).status).toBe(201);
+      expect(await createAsApi(d, row('b', undefined, globalRow))).toMatchObject(CONFLICT_ENVELOPE);
+    });
+
+    it('AFTER the migration (anti-vacuity): the key is still PER-ORGANIZATION', async () => {
+      // The tightening must not quietly become the installation-wide constraint
+      // #8555 just relaxed — a strictly worse index would satisfy the two cases
+      // above just as well.
+      const d = makeDriver();
+      await d.initObjects(app('fixed') as any);
+      await runIdentityMigration(d);
+
+      expect((await createAsApi(d, row('a', 'org_jia', tenantRow))).status).toBe(201);
+      expect((await createAsApi(d, row('b', 'org_yi', tenantRow))).status).toBe(201);
+    });
+
+    it('AFTER the migration: the user layer is untouched — same user refused, different user allowed', async () => {
+      const d = makeDriver();
+      await d.initObjects(app('fixed') as any);
+      await runIdentityMigration(d);
+
+      const named = { scope: 'tenant', user_id: 'usr_1', namespace: 'lifecycle', key: 'retention_overrides' };
+      expect((await createAsApi(d, row('a', 'org_jia', named))).status).toBe(201);
+      expect(await createAsApi(d, row('b', 'org_jia', named))).toMatchObject(CONFLICT_ENVELOPE);
+      expect((await createAsApi(d, row('c', 'org_jia', { ...named, user_id: 'usr_2' }))).status).toBe(201);
+    });
+
+    it('the hole was the NULL, not the layer — the control still reads the same on both sides', async () => {
+      // The control that identifies the mechanism. It was already 409 before the
+      // migration and stays 409 after, which is what makes the two flips above
+      // attributable to the NULL folding and to nothing else.
       const d = makeDriver();
       await d.initObjects(app('fixed') as any);
 
       const named = { scope: 'tenant', user_id: 'usr_1', namespace: 'lifecycle', key: 'retention_overrides' };
       expect((await createAsApi(d, row('a', 'org_jia', named))).status).toBe(201);
       expect(await createAsApi(d, row('b', 'org_jia', named))).toMatchObject(CONFLICT_ENVELOPE);
+    });
+
+    it('the migrated index survives a later boot — the additive sync skips the name', async () => {
+      // The durability half of route 1, and the reason the migration reuses the
+      // DECLARED name: `syncDeclaredIndexes` skips by name, so a differently
+      // named index would be silently undone on the next boot.
+      const d = makeDriver();
+      await d.initObjects(app('fixed') as any);
+      await runIdentityMigration(d);
+
+      await d.initObjects(app('fixed') as any);
+
+      expect(await uniqueKeyParts()).toEqual({
+        [REPLACEMENT_NAME]: ['COALESCE(organization_id)', 'namespace', 'key', 'scope', 'COALESCE(user_id)'],
+      });
+      expect(await createAsApi(d, row('a', 'org_jia', tenantRow))).toMatchObject({ status: 201 });
+      expect(await createAsApi(d, row('b', 'org_jia', tenantRow))).toMatchObject(CONFLICT_ENVELOPE);
+    });
+
+    it('is NOT reported as drift — the reconciler must never propose rebuilding it away', async () => {
+      // `recreate_index` drops before it creates, so a drift finding here would
+      // be a proposal to replace this index with the NULL-distinct one. It is
+      // silent by construction, not by luck: `isSyncReproducibleIndex` admits
+      // only the tenant column's COALESCE, this index carries a second one over
+      // `user_id`, so `isRuntimeManagedIndex` claims it (#4884).
+      const d = makeDriver();
+      await d.initObjects(app('fixed') as any);
+      await runIdentityMigration(d);
+
+      expect(await d.detectManagedDrift()).toHaveLength(0);
+      // Again after a later boot's sync, when the runtime ledger no longer
+      // remembers issuing the DDL — the durable witness is the index's shape.
+      await d.initObjects(app('fixed') as any);
+      expect(await d.detectManagedDrift()).toHaveLength(0);
+    });
+
+    it('on a duplicate-carrying database the tightening is REFUSED, and nothing is deleted', async () => {
+      // The maintainer's 2026-08-14 disposition, at the layer that would do the
+      // deleting: the CREATE fails on the existing rows, every row survives, and
+      // the previous index is still the one on the table. `metadata-protocol`
+      // owns the probe-first order that keeps it there; this asserts the fact
+      // the driver can see — the refusal is a UNIQUE violation over real rows.
+      const d = makeDriver();
+      await d.initObjects(app('fixed') as any);
+      await d.create(TABLE, row('a', 'org_jia', tenantRow) as any);
+      await d.create(TABLE, row('b', 'org_jia', tenantRow) as any);
+
+      let refusal: unknown;
+      try {
+        await d.execute(NULL_SAFE_IDENTITY_DDL.replace(REPLACEMENT_NAME, 'idx_sys_setting_identity_probe'));
+      } catch (error) {
+        refusal = error;
+      }
+
+      expect(isUniqueViolationError(refusal)).toBe(true);
+      expect(await d.count(TABLE, {})).toBe(2);
+      expect(Object.keys(await uniqueKeyParts())).toEqual([REPLACEMENT_NAME]);
+      expect(await uniqueKeyParts()).toEqual({
+        [REPLACEMENT_NAME]: ['COALESCE(organization_id)', ...KEY_COLUMNS],
+      });
     });
   });
 

@@ -646,10 +646,36 @@ export function registerPackageRoutes(
         return;
       }
 
-      // The other bare `{ success: false }`.
+      // [#8275] A REPORTED delete failure is a DRIVER FAULT, and a driver fault
+      // is a **5xx**. The statement that failed is `DELETE FROM sys_packages
+      // WHERE id = ? [AND version = ?]`; a missing table, a lock timeout or a
+      // foreign-key restriction there is a SERVER fault, and answering `400`
+      // invited the caller to fix a request that was never the problem while
+      // hiding a real fault from every dashboard that buckets by status. The
+      // sibling of what #8131 fixed for `publish` and #8016 for the throw path.
+      //
+      // The CALLER's own errors on this route are unaffected and still 4xx: the
+      // repeated-`?version=` refusal above is checked before `delete` is called
+      // at all, `PACKAGE_DELETE_PARTIAL` keeps its 400 (per-item uninstall
+      // failures are a different outcome, not this one), and a coded refusal
+      // thrown from below `delete` is re-thrown by the producer and answered by
+      // {@link sendThrownError} with its own status — so a `409
+      // DESTRUCTIVE_CHANGE` is still a 409, not swept in here.
+      //
+      // The code stays `PACKAGE_DELETE_FAILED` rather than becoming
+      // `INTERNAL_ERROR`: it is registered, it says more than the generic
+      // fallback, and it discloses nothing. `envelopeViolations` imposes no
+      // code↔status agreement, so a registered code on a 5xx is conformant.
+      //
+      // Unlike `publish`, the MESSAGE needed no fixing and gets none: it is
+      // built here from the request's own `:id` and `?version=`, so it echoes
+      // only what the caller sent and has never carried driver text. The
+      // producer returns a bare flag with no message channel at all
+      // (`PackageDeleteResult`), which is what keeps that true — this route is
+      // a status-classification defect only, never a disclosure.
       sendError(
         res,
-        400,
+        500,
         'PACKAGE_DELETE_FAILED',
         `Failed to delete ${packageId}${version ? `@${version}` : ''}.`,
       );

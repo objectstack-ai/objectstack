@@ -14,8 +14,9 @@ files; a third file is required only if you want a bespoke editor.
 ## TL;DR
 
 ```
-1. Register the type entry: built-in -> DEFAULT_METADATA_TYPE_REGISTRY;
-   plugin -> additionalTypes on MetadataPluginConfig  (packages/spec)
+1. Register the type: built-in -> add an entry to DEFAULT_METADATA_TYPE_REGISTRY
+   (packages/spec); plugin -> register items of the type (the kind enters the
+   live set as a side effect -- there is no declared-kind config key)
 2. Define a Zod schema for the type                  (packages/spec/src/<domain>/)
 3. (Optional) Register a custom editor               (objectui/.../builtinComponents.tsx)
 ```
@@ -67,11 +68,20 @@ use, not pinned at process start.
 
 `DEFAULT_METADATA_TYPE_REGISTRY` is the core built-in array — edit it (and
 `BUILTIN_METADATA_TYPE_SCHEMAS`, step 2) only for types that ship with the
-platform. A third-party package contributes its own types instead through
-the **`additionalTypes`** array on `MetadataPluginConfig`, and registers the
-matching Zod schema with `registerMetadataTypeSchema(type, schema)` from its
-plugin's `init(ctx)` so `GET /api/v1/meta` emits a real JSON Schema. The
-registry entry shape is the same in both cases.
+platform. It is also the **total universe of declared types**: there is no
+config key through which a package declares a new type. (Through v17 the
+schema carried an `additionalTypes` array on `MetadataPluginConfig` that was
+documented for exactly that — it had no reader anywhere and was retired by
+#8586, ADR-0049; authoring it is now a loud parse error.)
+
+A third-party package's type instead enters the live set **as a side effect
+of registering items of that type**: items your package's manifest carries
+are registered through `SchemaRegistry.registerItem` during app/manifest
+registration, and runtime code can register items with
+`MetadataManager.register`. The first registered item admits the type; a
+type with no items is not in the live set. Alongside the items, register the
+matching Zod schema with `registerMetadataTypeSchema(type, schema)` from
+your plugin's `init(ctx)` so `GET /api/v1/meta` emits a real JSON Schema.
 
 ## 2. Define the Zod schema
 
@@ -126,11 +136,12 @@ editor consumes from the registered Zod schema.
   }
   ```
 
-  `getMetaTypes()` reads this registry on every request, so a type registered
+  `getMetaTypes()` reads this registry on every request, so a schema registered
   during `init` is served from the first call onward. Registering the schema
   does not by itself put the type in the listing — `getMetaTypes()` enumerates
   types from the engine registry and the metadata service and then decorates
-  each with its schema, so declare the type (via `additionalTypes`) as well.
+  each with its schema, so the type must also have at least one registered
+  item (that side effect is what admits it; see step 1).
 
 The Metadata Admin **SchemaForm** consumes the JSON Schema derived from this
 Zod schema and produces:
@@ -232,7 +243,7 @@ If you omit them, the directory falls back to the registry `label`.
 
 ## Checklist
 
-- [ ] Registry entry added (`type`, `label`, `domain`, required `filePatterns`, flags) — for plugins, via `additionalTypes` on `MetadataPluginConfig`
+- [ ] Type registered: built-in → registry entry added to `DEFAULT_METADATA_TYPE_REGISTRY` (`type`, `label`, `domain`, required `filePatterns`, flags); plugin → at least one item of the type registered (the side effect that admits the type — there is no declared-kind config key)
 - [ ] Zod schema authored under `packages/spec/src/<domain>/<name>.zod.ts`
 - [ ] Zod schema wired up: built-in → `BUILTIN_METADATA_TYPE_SCHEMAS`; plugin → `registerMetadataTypeSchema()` in the plugin's `init()`
 - [ ] (Optional) Custom editor registered in `builtinComponents.tsx`
