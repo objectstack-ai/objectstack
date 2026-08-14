@@ -507,13 +507,35 @@ jobs:
         # The deterministic in-repo floor is @objectstack/downstream-contract;
         # this is the live ceiling.
         #
-        # RC pre-mode amendment (#3600): while .changeset/pre.json says
-        # mode:"pre", the smoke still runs and reports but does NOT block. A
-        # major train exists precisely to ship deliberate surface removals, and
-        # a hotcrm release migrated off them cannot exist until the rc.N
-        # artifacts it would migrate against are published — blocking here
-        # deadlocks the train. The gate re-arms by itself the moment
-        # `changeset pre exit` lands.
+        # ⚠️ CURRENTLY ADVISORY — it runs and reports on every publish, but a
+        # failure does NOT block. `BLOCKING` below is the whole switch.
+        #
+        # Why, and what changed (supersedes the #3600 amendment). #3600 made
+        # this advisory for the duration of the rc pre-mode window, keyed on
+        # `.changeset/pre.json` saying mode:"pre", with the reasoning: a major
+        # train exists precisely to ship deliberate surface removals, and a
+        # hotcrm release migrated off them cannot exist until the rc.N artifacts
+        # it would migrate against are published — blocking here deadlocks the
+        # train. It promised the gate would "re-arm by itself the moment
+        # `changeset pre exit` lands".
+        #
+        # It did exactly that (#8643, 2026-08-14) — and the deadlock was still
+        # on, because HOTCRM_REF was and is `v2.1.0`, i.e. ObjectStack 14.7. So
+        # the re-armed gate stood between the 17.0.0 GA publish and a migration
+        # nobody had done yet, which is the same deadlock #3600 named, one event
+        # later. The keying was the bug: pre-exit is not when a migrated hotcrm
+        # release starts existing. Shipping one is.
+        #
+        # So the posture is now tied to THAT event instead. Note this is a
+        # WEAKER gate than #2035 intended and it is meant to be temporary — the
+        # deterministic in-repo floor (@objectstack/downstream-contract, which
+        # still blocks) is what carries backward-compat enforcement until it is
+        # restored.
+        #
+        # TO RE-ARM: ship a hotcrm release migrated to v17, bump HOTCRM_REF to
+        # it, set BLOCKING to '1'. Nothing else changes. Because the smoke keeps
+        # running and reporting throughout, the run log shows the day it goes
+        # green — you flip the switch on evidence, not on hope.
         env:
           # v2.1.0: hotcrm upgraded to ObjectStack 14.7 (hotcrm#448) and
           # dropped the agent `visibility` field that spec 15 removes as
@@ -521,17 +543,20 @@ jobs:
           # Bump this ref whenever a deliberate spec surface removal ships a
           # matching hotcrm release.
           HOTCRM_REF: v2.1.0
+          # '1' = a failure fails the publish. '0' = reported only.
+          BLOCKING: '0'
         run: |
-          if [ "$(jq -r '.mode // empty' .changeset/pre.json 2>/dev/null)" = "pre" ]; then
-            echo "::notice::Changesets pre-mode active — the hotcrm smoke is advisory (reported, non-blocking) until 'changeset pre exit'."
-            if bash scripts/downstream-smoke.sh; then
-              echo "::notice::hotcrm@${HOTCRM_REF} is still compatible with the pre-release train."
-            else
-              echo "::warning::hotcrm@${HOTCRM_REF} is incompatible with the pre-release train — expected for the window's deliberate removals. Ship a migrated hotcrm release and bump HOTCRM_REF before 'changeset pre exit' re-arms this gate."
-            fi
-          else
-            bash scripts/downstream-smoke.sh
+          if bash scripts/downstream-smoke.sh; then
+            echo "::notice::hotcrm@${HOTCRM_REF} is compatible with the about-to-publish @objectstack/spec."
+            exit 0
           fi
+
+          if [ "$BLOCKING" = '1' ]; then
+            echo "::error::hotcrm@${HOTCRM_REF} is incompatible with the about-to-publish @objectstack/spec — refusing to publish a release that breaks a real downstream consumer."
+            exit 1
+          fi
+
+          echo "::warning::hotcrm@${HOTCRM_REF} is incompatible with the about-to-publish @objectstack/spec. ADVISORY ONLY — the publish continues. HOTCRM_REF is pre-v17; ship a migrated hotcrm release, bump it, and set BLOCKING=1 in .github/workflows/release.yml to re-arm this gate."
 
       # ──────────────────────────────────────────────────────────────────────
       # The publish itself. `pnpm run release` = build + build-console +

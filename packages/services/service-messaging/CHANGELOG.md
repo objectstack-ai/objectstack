@@ -1,5 +1,1539 @@
 # @objectstack/service-messaging
 
+## 17.0.0
+
+### Minor Changes
+
+- f5a4ef0: refactor!: ADR-0112 batch 2 — sweep the lowercase error-code emitters (#4003)
+
+  Continues #3841 per ADR-0112. Batch 1 (#3988) settled the vocabulary and closed
+  the set; this batch moves the emitters that still spoke lowercase `snake_case`
+  onto it.
+
+  **Wire-visible change.** Error codes on these surfaces change spelling. Generic
+  conditions collapse onto the standard catalog rather than keeping a synonym:
+  `unauthorized`/`unauthenticated` → `UNAUTHENTICATED`, `forbidden` →
+  `PERMISSION_DENIED`, `not_found` → `RESOURCE_NOT_FOUND`, `internal` →
+  `INTERNAL_ERROR`, `unavailable` → `SERVICE_UNAVAILABLE`, `not_supported` →
+  `NOT_IMPLEMENTED`, `bad_request` → `INVALID_REQUEST`. Domain conditions get codes
+  registered in `ERROR_CODE_LEDGER` (`MARKETPLACE_STORAGE_FAILED`,
+  `PLUGIN_MANIFEST_INVALID`, `ITEM_LOCKED`, `DELIVERY_NOT_ELIGIBLE`, …). Swept:
+  `cloud-connection`, `plugin-auth`, `hono`, `metadata-protocol`, `rest`,
+  `service-messaging`, `service-automation`, `trigger-api`.
+
+  Branch on `error.code` values rather than pattern-matching their case: the
+  console's fix for the same rename (objectui#2977) reads codes case-insensitively
+  for exactly this reason, and that is the pattern to copy in your own consumers if
+  you support servers on both sides of the change.
+
+  **Four routes stop putting a code in the message slot.** The webhook redeliver
+  route, the API-trigger webhook, and two `rest` routes answered
+  `{ success: false, error: '<code>', message }` — the code occupying `error`, the
+  declared object envelope nowhere. They now emit `error: { code, message }`, and
+  three API-trigger branches gained a message they never had. Clients reading
+  `body.error` as a string on those routes must read `body.error.code`.
+
+  **`ConnectorErrorCategory` / `ConnectorRetryStrategy`** (ADR-0112 D9a):
+  `@objectstack/spec` exported two mutually incompatible `ErrorCategory` types and
+  two `RetryStrategy` types. The connector-side pair is renamed; importers of the
+  `integration` subpath update the name. Side effect: the api-side `ErrorCategory`
+  and `RetryStrategy` now appear in the generated API reference at all — the name
+  collision had been silently dropping them.
+
+  **`OAUTH_REGISTER_FAILED` replaces an unbounded code source.** The OAuth client
+  registration route put better-auth's arbitrary `body.error` string straight into
+  `error.code`. The code is now ours and the upstream discriminator moved to
+  `details.upstreamError`.
+
+  **Not swept, deliberately.** `sys_metadata_audit.code` keeps its lowercase values
+  (ADR-0112 D6b): it is persisted audit history, and the same column holds
+  non-error outcomes (`ok`, `lock_override`). Diagnostics records that ship inside a
+  200 keep theirs (D6c), as do field-level codes (D6, #3977) and the CLI's
+  `--json` output contract.
+
+  A `check:error-code-casing` CI guard now fails on a new lowercase literal in a
+  code position, since the ledger's casing rule can only police codes that someone
+  registers.
+
+- 0848bea: feat(spec)!: retire the overloaded `managedBy: 'system'` bucket — the residue becomes `system-data` (#3355)
+
+  **FROM → TO: `managedBy: 'system'` → `managedBy: 'system-data'`.** One-line fix:
+  rename the value. Nothing else about the object changes. `os migrate meta --from 16`
+  rewrites it for you; stored metadata is CONVERTED by the ADR-0087 entry
+  `object-managed-by-system-to-system-data`, never silently reinterpreted.
+
+  ADR-0103 split the overloaded `system` bucket in v16, and it split it
+  **additively**: the 20 engine-owned objects moved to the new explicit
+  `engine-owned`, while the 8 admin/user-writable ones — the RBAC link tables
+  (`sys_user_position`, `sys_user_permission_set`, `sys_position_permission_set`),
+  `sys_user_preference`, `sys_approval_delegation`, and the three messaging config
+  grids — stayed behind on `system`. That was the right move for a v16 that could
+  not break authors, but it left the enum in a state where the surviving value
+  names the half that had already moved out: `system` sitting on precisely the
+  objects a user writes.
+
+  That is not a cosmetic complaint. An author choosing between `system` and
+  `engine-owned` had nothing in the vocabulary to choose _on_, so the bucket was
+  re-overloadable by anyone reading the name in good faith — a model author most
+  of all, since "system table" reads as "the engine owns this" in every other
+  codebase. `system-data` states both boundaries explicitly: the **schema** is the
+  platform's (versus `platform`, which is tenant-modelled), the **data** is the
+  admin's or the user's (versus `engine-owned`, where the engine owns both).
+
+  Because v16 already drained the engine side, the conversion is a **one-to-one
+  mechanical value rename** with no judgement call — by construction every
+  remaining `system` declaration is writable platform data.
+
+  **One deliberate consequence — the affordance default flips.** `system` defaulted
+  LOCKED and each of the 8 objects re-opened its writes with a
+  `userActions: { create: true, edit: true, delete: true }` block. `system-data`
+  defaults **WRITABLE** (full CRUD), because a bucket that exists to say "the data
+  is yours" should not make every member ask for it back. Those blocks are now
+  redundant and have been deleted from the 8 platform objects; keep `userActions`
+  only to **NARROW**. If you converted an object that carried no `userActions`, it
+  gains the generic affordances — the honest reading of the bucket it moved into.
+
+  **No enforcement moves.** The engine write guard, the `DelegatedAdminGate`, RLS
+  and permission sets all adjudicate off resolved affordances and the principal,
+  never off the bucket name. `system-data` simply joins `platform` / `config` as a
+  bucket the fail-closed guard does not cover, because a writable default has
+  nothing to close on. The 8 objects passed that guard before (via `userActions`)
+  and pass it now (via the bucket default), for the same resolved-affordance
+  reason.
+
+  `'system'` is **retired from the load path**: the enum rejects it with a
+  prescription naming `system-data` and the one-line fix. Absorbing it silently at
+  load would leave every author still writing the name this rename exists to
+  unteach.
+
+- 9c90ea0: feat(sms): 短信全局日发送配额 —— 成本总量闸 (#2814)
+
+  #2780 给 OTP 端点落了**按号码**的防滥用（60s 冷却 + 每号码 5 条/小时）。那挡住的是「一个号码花多少钱」，挡不住「这套部署一天花多少钱」：攻击者轮换上万个不同号码时，每个号码都稳稳待在自己的预算里，而日累计账单没有任何上限——这正是 SMS pumping / toll fraud 的典型打法。更要紧的是，按号码那道闸住在 better-auth 的 `hooks.before` 里，只看得见 auth 端点：`notify(channels:['sms'])` 与邀请短信从旁边直接走过去，一条都不计数。
+
+  本次新增一道**总量**闸，扣减点放在所有出站短信本来就必经的那一处 —— `SmsService.send()`。OTP、邀请、messaging `sms` channel 三条路无论从哪扇门进来，都记在同一本账上。
+
+  ## 新增设置项
+
+  `sms` 命名空间新增 `daily_quota`（Daily send limit，number，默认 `0` = 不限）：这套部署每个 **UTC 自然日**允许发出的短信总条数。超出后拒发，直到 00:00 UTC。env 覆盖沿用既有的每键机制，无需额外接线：`OS_SMS_DAILY_QUOTA=2500`。
+
+  `0` 是出厂姿态，所以升级本身不改变任何现有部署的发送行为——闸门要由运营者显式配置才会闭合。
+
+  ## Observable behaviour change
+
+  **配置配额后，发送可能被拒**，两条路径的表现分别是：
+
+  - OTP / 邀请路径 —— `SendSmsResult.status='failed'`，`error` 为 `TOO_MANY_REQUESTS: daily SMS quota exhausted`。刻意与按号码闸抛出的 `TOO_MANY_REQUESTS` 用同一个码，且**不带任何剩余额度细节**：从外面看，两道墙必须长得一样，攻击者不该能试探出自己撞的是哪一道。
+    ⚠️ 但这个码**目前到不了 HTTP 调用方**：`AuthManager.deliverPhoneOtp` 把它重抛成普通 `Error`，而 better-call 对非 `APIError` 一律回 500（实测，见 #6039）。也就是说 OTP 端点上，按号码闸回 429、总量闸回 500。补齐要动 plugin-auth，已单独立案。
+  - messaging `sms` channel —— `SendResult.ok=false`，且 `classifyError` 返回 `'rate_limited'`（此前一律 `'retryable'`）。投递落进 outbox 走退避重试 / 死信，不会被静默丢弃；`rate_limited` 与 `retryable` 走同一条重试阶梯，但把「额度用尽」与「网关抖动」在投递记录上区分开。
+
+  ## 计数落在哪里
+
+  复用仓内唯一那份定窗计数（`incrementFixedWindow`）与它的惰性存储解析（`createLazyCounterStore`，#4772/#4790），不写第三份：
+
+  - 有 kernel `cache` 服务时计在共享 cache（集群共享与否取决于 cache 本身）；
+  - 解析不到时降级为有界的进程内计数，并由解析器**点名**打一条 warn，说明降级的代价（N 节点部署最多可花 N× 配额）；
+  - 解析在**计数被消费时**发生，而非插件 init —— 后注册的 cache 也能在下一次发送时被接上（#4772 的坑）。
+
+  窗口是 UTC 自然日，且由两个机制同时保证：计数键带 UTC 日期（`sms-daily-sends:2026-08-06`），窗口开启时的 TTL 恰为距下一个 UTC 午夜的秒数。任一机制单独也能翻窗，合起来则不可能互相矛盾。
+
+  ## 两条刻意的姿态
+
+  - **fail-open**：计数存储读不到时，闸门**放行**并打一次 warn。短信成本闸不能把登录拖下水（#2814 诉求 4）。
+  - **配额值的钳制在消费侧**：manifest 上的 `min: 0` 今天并不被 `validatePatch` 执行（#5932），所以负值 / `NaN` / `Infinity` / 非数字都会原样抵达读取方。这些一律降级为 `0`（不限）并**点名**打 warn，而不是拒发、也不是替运营者编一个别的默认值——一个设置表单里的手误不该变成手机登录的全站故障，而编一个没人声明过的上限只会把手误藏进看似合理的行为里。
+
+  ## 不在本次范围
+
+  诉求中的**每租户日配额**（`daily_quota_per_tenant`）未实现：`SendSmsInput`（`@objectstack/spec/contracts`）不携带任何租户标识，而在 service 侧另造一个只此一家的拼法就是 Prime Directive #12 明令禁止的影子契约。租户维度要么落在 spec 契约上，要么不落——详见 #2814 上的讨论。
+
+### Patch Changes
+
+- 2e836de: chore(packaging): CHANGELOG.md ships in every npm tarball (#4261)
+
+  The AGENTS.md post-task checklist requires breaking changesets to carry their
+  FROM → TO migration because "this text ships to consumers as `CHANGELOG.md`
+  inside the npm package and is what an upgrading agent greps after the tombstone
+  error." That delivery path was severed for 68 of the 69 publishable packages:
+  npm packs `package.json` / `README*` / `LICENSE*` unconditionally but — unlike
+  older npm versions — not `CHANGELOG.md`, and the canonical
+  `"files": ["dist", "README.md"]` whitelist never named it. Measured on npm
+  10.9.7: `npm pack --dry-run` on `@objectstack/types` shipped 3 files while its
+  70KB `CHANGELOG.md` stayed behind. Only `@objectstack/spec` listed it
+  explicitly.
+
+  The tombstone-error scenario is precisely the one where the repo is out of
+  reach — the upgrading agent has `node_modules` and nothing else — so the
+  migration text has to ride in the tarball. Every publishable package now
+  declares `CHANGELOG.md` in `files`, and the canonical whitelist is
+  `["dist", "README.md", "CHANGELOG.md"]`.
+
+  The other half is the gate: `check:published-files` gains a fifth invariant,
+  COMPLETE — a whitelist that fails to cover `CHANGELOG.md` fails the
+  always-required lint job, so the next package cannot silently sever the path
+  again. `@objectstack/spec`'s per-package EXTRA_ENTRIES exemption dissolves
+  into the canonical set.
+
+  Consumer-visible change: one more file per install (the package's changelog,
+  e.g. 70.8KB for `@objectstack/types`), and `grep -r "removed key"
+node_modules/@objectstack/*/CHANGELOG.md` now finds the migration it was
+  promised.
+
+- c519533: Stop serving webhook/flow callout credentials through the generic data-API read of `sys_http_delivery` (#8118).
+
+  **What this closes.** `sys_http_delivery.headers_json` — the authored request-header map, the ordinary place an `Authorization: Bearer …` goes — was readable by every caller the data API admits (list, get, an explicit `?select=headers_json`). The column is now declared `internal: true`, so the engine omits it from every generic read with no system carve-out (#7728). The redaction sits at the row layer, so it covers the whole delivery population: `source: 'webhook'` rows (WebhookSchema-authored headers) and `source: 'flow'` rows (per-run interpolated headers that never pass through WebhookSchema at all). Deliveries are unaffected on the wire: the dispatcher's claim path recovers the map through the engine's privileged accessor and still sends every authored header verbatim — fail-closed, a delivery never goes out missing a header, and one that cannot recover its headers refuses loudly instead of going out incomplete. `IHttpOutbox.list()` and `redeliver()` now return the redacted view (`headers: undefined`) under a redacting engine; `claim()` results carry the map verbatim.
+
+  **New public API.** `ObjectQL.resolveInternalField(object, recordIds, field)` — the purpose-built privileged accessor #7728 itself named as the remedy for a legitimate system reader of an `internal: true` field: a batch, driver-level read of one flagged field, refusing (ADR-0112 `INVALID_FIELD`, status 400) any field not so declared. The sibling of `resolveSecretField`, batch-shaped because its consumer claims a batch per dispatcher tick.
+
+  **What this deliberately does NOT close.**
+
+  - The delivery row still holds the header map in cleartext at rest until the 30d telemetry retention ages it out. Encrypting it (`Field.secret()`) was measured and rejected on #8118: one orphan `sys_secret` row per delivery with no cascade or retention, a boot-window fail-open on the fire-and-forget enqueue, and a per-row decrypt on every dispatcher tick.
+  - `sys_email.headers_json` (#7986 ①-f) has the same shape; it follows this card's decision but is not part of this change.
+
+- f9a5c59: fix(service-messaging): close `DeliveryPayload.severity` to `'info' | 'warning' | 'critical'` (#7174)
+
+  `DeliveryPayload.severity` was declared `'info' | 'warning' | 'critical' | string`.
+  TypeScript absorbs a literal union member into the wider primitive it is unioned
+  with, so this was exactly `string` — the three names read as a closed vocabulary
+  but enforced nothing. `severity: 'urgent'` (or `''`) type-checked with no error,
+  even though the value flows into `inbox-channel.ts`'s `n.severity ?? 'info'` and
+  the `sys_inbox_message.severity` select column, whose options are the three
+  names, and even though this package's three sibling declarations of the same
+  concept — `MessagingService['emit']`'s `EmitInput.severity`
+  (`messaging-service.ts`), `MessagingChannel`'s `Notification['severity']`
+  (`channel.ts`), and the `inbox-message` object's `severity` select field — are
+  already closed to exactly this set.
+
+  Dropping the trailing `| string` makes the type mean what it says. No runtime
+  behaviour changes — every real producer already writes `input.severity ?? 'info'`
+  where `input.severity` is itself the already-closed `EmitInput.severity`, so no
+  in-repo construction site changes shape. This is the type-level twin of #7086
+  (`NotifyConfigSchema.severity`, closed in PR #7192): a construction site that
+  would previously narrow silently through the collapsed union now gets a
+  compiler refusal instead, named as a `@ts-expect-error` pin.
+
+  This is a narrowing of a publicly exported type
+  (`packages/services/service-messaging/src/outbox.ts`), so a consumer assigning
+  an out-of-vocabulary literal directly to `DeliveryPayload.severity` would newly
+  fail to compile — hence `patch`, following the #7140 precedent for a type-side
+  enforcement tightening with no runtime behaviour change.
+
+- 8af76ae: The i18n extractor's default locale now tracks the source instead of merging (#8543), and the approval vocabularies carry authored English labels in the contract (#8580).
+
+  - `os i18n extract` merge mode no longer applies to the default locale: `en` is a copy of the source, not a translation, so an edited label/description/help now reaches the regenerated `en` bundle instead of being silently shadowed by the stale entry forever (53 stale entries had accumulated across 6 packages under the old behavior; all rewritten here). Translated locales (`zh-CN` / `ja-JP` / `es-ES`) keep merge semantics exactly as before — no existing translation is overwritten.
+  - Bare-string and label-less select options now seed through the extractor's derived channel: the machine value still seeds the skeleton, but the coverage gate no longer demands "translations" of machine identifiers, and a copied value can no longer masquerade as authored display text.
+  - New `@objectstack/spec/contracts` exports `APPROVAL_STATUS_LABELS` and `APPROVAL_ACTION_KIND_LABELS`: the authored English for `sys_approval_request.status` (previously living only in the generated `en` bundle) and `sys_approval_action.action` (previously shipping raw machine values such as `submit` / `request_info` — the #7232 humanization missed this sibling field). Both columns derive their option labels from these maps; the regenerated `en` bundles copy them verbatim.
+
+- a8dcc37: fix(service-messaging,plugin-audit): the service that writes `sys_notification` is the one that declares it (#4154)
+
+  `MessagingService.emit()` writes `sys_notification` on every call — it is the
+  pipeline's single ingress (ADR-0030 L2). But the object was contributed to the
+  manifest by **`AuditPlugin`**, parked there with a comment saying it would stay
+  "until that [ADR-0030] migration lands". The migration landed; the parking did
+  not move.
+
+  That left a real deployment hole, because `AuditPlugin` is an **optional** pair
+  in the CLI's plugin table. Install messaging without audit and nothing registers
+  the object, so the engine has no schema to issue DDL from and every `notify()`
+  fails with `no such table: sys_notification`. AuditPlugin never wrote the row
+  itself — it deliberately routes through this service's `emit()` ingress
+  (`getMessaging()` in `audit-writers.ts`), and its own exclusion list already
+  annotates the object as "messaging-owned (ADR-0030)".
+
+  The contribution now lives with the writer, matching how every other
+  service-owned platform object is handled in this repo — `service-job` imports
+  `SysJob`/`SysJobRun`, `service-queue` imports `SysJobQueue`, `rest` imports
+  `SysImportJob`. Ownership of the _definition_ is unchanged: the object stays in
+  `@objectstack/platform-objects` and in `PLATFORM_OBJECTS_BY_PACKAGE`, because
+  owning a definition and contributing it to a running kernel are different
+  things. It is also added to the service's `provisionSystemTables`, so the table
+  is created with the rest of the pipeline it heads rather than lazily on the
+  first write.
+
+  Found while migrating `notifications.hono.integration.test.ts` to in-memory
+  SQLite in #4065: that suite had to register the object itself to boot, which was
+  the deployment bug in miniature. The workaround is deleted in this change — the
+  suite now boots messaging alone and passes, which is the proof the product
+  declares what it writes.
+
+- 040ecd2: fix(service-messaging): stop the SQL outboxes from writing `updated_at` on UPDATE — `pnpm dev` no longer floods the console
+
+  An idle dev server printed the same warning 48 times a second, forever:
+
+  ```
+  WARN Field 'updated_at' is read-only — ignoring incoming change (#2948)
+  ```
+
+  `SqlNotificationOutbox.claim()` / `.claimDigest()` and `SqlHttpOutbox.claim()`
+  open with an unconditional "reap stale in_flight" UPDATE — visibility-timeout
+  recovery that runs on every dispatcher tick whether or not any row is actually
+  stale — and every one of those payloads carried `updated_at`. That column is
+  `readonly` and owned by ObjectQL's builtin `sys_stamp_audit_update` hook, so the
+  value was stripped by `stripReadonlyFields` and re-stamped by the platform: a
+  no-op write that cost one warning per call. Three claim paths × 8 partitions ×
+  the dispatcher's 500 ms tick = 48 identical lines a second, which buried every
+  real warning and error in the dev log.
+
+  `updated_at` is now gone from every UPDATE payload in both outboxes (`claim`,
+  `claimDigest`, `ack`, `redeliver`); the platform hook keeps stamping it, so
+  stored rows are unchanged. INSERT still writes both audit columns, as `Date`s —
+  `created_at` is caller-owned there, and a native `TIMESTAMP` column rejects a
+  bare epoch-ms number on Postgres.
+
+  That last point was also a latent bug this removes: `enqueue()` correctly used
+  `new Date()`, but the UPDATE paths passed epoch-ms numbers. Nothing broke only
+  because the strip discarded them before they reached the driver.
+
+- 932d7e2: Migrate the inbox read-receipt race fallback onto the shared `isUniqueViolationError` predicate from `@objectstack/types` (#6542), deleting the last hand-written `isUniqueViolation()` copy that #6250 inventoried. One behaviour change, in the direction the call site wants: the shared predicate follows a bounded step down the `cause` chain, so a unique-constraint conflict wrapped by a pool or query-builder layer now triggers the `flipToRead()` convergence instead of being rethrown as a failed mark-read.
+- f1850d8: fix(services): `markAllRead` clears the WHOLE inbox, not one 200-row window (#6436)
+
+  `POST /api/v1/notifications/read/all` is published as "mark **every**
+  currently-unread inbox message as read". It swept
+  `listInbox(userId, { read: false, limit: 200 })` — one page of the LIST, and
+  `200` is that list's hard cap — so it cleared at most 200 receipts per call.
+
+  Measured over the real stack (sqlite-wasm + ObjectQL + service-messaging + hono
+
+  - dispatcher), one user, 260 unread:
+
+  | request                                |            before |            after |
+  | :------------------------------------- | ----------------: | ---------------: |
+  | `POST /notifications/read/all`         |  `readCount: 200` | `readCount: 260` |
+  | `GET /notifications` (same user, next) | `unreadCount: 60` | `unreadCount: 0` |
+
+  **#6363 did not cause this — it removed the cover.** While `unreadCount` was
+  itself window-scoped the shortfall was self-consistent and invisible: clear 200,
+  poll, see a window with nothing unread in it, badge 0. Now that the badge is a
+  true total, the same request pair states the contradiction out loud, which also
+  raises the severity — a user presses "mark all read" and the badge stays lit.
+
+  **A second, sharper face of the same defect, fixed with it.** That window was
+  `created_at desc` over ALL rows, with the `read` filter applied in memory AFTER
+  the truncation. An inbox whose newest 200 were already read therefore handed the
+  sweep an EMPTY id list and marked **nothing at all**, however much older unread
+  sat behind it. That is also why "loop the pages until one comes back empty" is
+  not the fix: it exits on exactly that empty first page.
+
+  **What it does now.** It reads the unread SET rather than a page of the list, in
+  a FIXED two reads whatever the inbox size — the same one-column, unwindowed
+  projection of `sys_inbox_message` that #6363's `countUnreadTotal` already issues
+  to answer the badge, joined against the receipt spine `listInbox` already reads
+  unbounded. No loop and no page count to bound; nothing is asked of the data
+  layer that the bell's poll does not already ask on every saturated page. The
+  write stays one receipt per unread notification — that is the receipt model
+  itself (ADR-0030) — and `markRead`'s check-then-act upsert, its unique-conflict
+  convergence and its "no receipt row yet" insert are untouched.
+
+  `readCount` now reports the number of **distinct notifications this call flipped
+  to `read`** (it reported "the unread ones inside the newest 200 rows"). Two
+  consequences: a notification materialized by several inbox rows counts once, and
+  an inbox row carrying no `notification_id` is skipped rather than counted —
+  read-state is keyed by the event id, so the receipt the old code wrote for those
+  (keyed by the inbox ROW id) was one the join could never read back.
+
+  Unchanged: the list window (default 50, cap 200, newest first), `unreadCount`,
+  `markRead`, and an inbox smaller than the old window — which does the same
+  writes it always did, and no extra ones.
+
+- 17d0954: fix(services): `unreadCount` counts the TOTAL unread, not the returned window (#6363)
+
+  `ListNotificationsResponseSchema.unreadCount` is published into the API
+  reference as **"Total number of unread notifications"** — a `.describe()`, so it
+  is the documentation shipped to every consumer of
+  `GET /api/v1/notifications`. It was counted inside `rows.map(...)` in
+  `MessagingService.listInbox`, i.e. over the rows that `limit` had already
+  truncated, so the badge saturated at the window size forever.
+
+  Measured on a real stack (sqlite-wasm + ObjectQL + service-messaging + hono +
+  dispatcher) with 60 unread messages:
+
+  | request     | `notifications[]` | `unreadCount` (before) | `unreadCount` (after) |
+  | :---------- | ----------------: | ---------------------: | --------------------: |
+  | no `limit`  |                50 |                 **50** |                **60** |
+  | `?limit=10` |                10 |                 **10** |                **60** |
+
+  The declaration was right and the implementation was wrong, so the
+  implementation moved (maintainer ruling, 2026-08-07). Every consumer that
+  renders `unreadCount` as a bell badge now gets the number it asked for; nothing
+  had to learn an implementation detail to read the field correctly.
+
+  **The list itself is unchanged.** `notifications[]` is still the window —
+  `limit` rows, default 50, hard cap 200, newest first. The two bounds were
+  conflated, not shared.
+
+  Read-state lives on `sys_notification_receipt`, not on the inbox row
+  (ADR-0030), so the total is a reverse join rather than a `count()`. It is
+  computed only when the window came back **saturated** (`rows.length === limit`)
+  — a short window is already the whole matching set, so the common inbox costs
+  exactly what it cost before. When the window does saturate, the extra work is
+  one projection read of a single column (`notification_id`) under the same
+  `where`, no `orderBy` and no `limit`: the same order as the receipt scan
+  `listInbox` already performs unconditionally, and exact under a `type` filter
+  and for rows carrying no `notification_id`.
+
+  Two related behaviours are unchanged and now pinned: a `read` filter narrows
+  the list and never the badge (asking for the read half does not mean zero
+  unread), and a `type` filter narrows both (the count answers the query that was
+  asked).
+
+- f28ef3b: fix(services): a notify flow-run summary no longer reports a delivery the delivery record dead-lettered (#7747)
+
+  Boot a stack without the `push` channel registered, fire a flow whose `notify`
+  node targets `['push']`, and the two records an operator can read **contradicted
+  each other**: `sys_notification_delivery` held `status: 'dead'`,
+  `error: "channel 'push' not registered"`, while the flow-run summary said
+  `status: 'success', acted: 1`. Nothing was delivered, and the surface built to
+  answer "did this sweep actually do anything" (#4354) said it had.
+
+  The seam is `EmitResult.delivered`. With the durable outbox in play (ADR-0030
+  P1), `emit()` returns as soon as the `(recipient × channel)` rows are enqueued —
+  the dispatcher sends and decides the outcome afterwards — but `delivered`
+  counted those _enqueued_ rows anyway, under a name that says they arrived. The
+  `notify` node then fed that number straight into `acted`, so a count minted
+  before any send attempt survived unrevised through the dead-letter. It was never
+  a "stale by a moment" number either: nothing ever revisits it.
+
+  - `EmitResult` now separates the two. `delivered` means a channel **accepted**
+    the delivery — a terminal, observed outcome, which only the inline (P0)
+    fan-out can report. New `enqueued` carries the outbox path's accepted rows:
+    durable, unsent, outcome pending on `sys_notification_delivery`.
+  - The `notify` node counts only what was delivered toward `acted`. When
+    deliveries are merely enqueued it reports `unmeasuredEffect` instead — the
+    qualifier a `connector_action` already uses for an effect the platform cannot
+    count, and deliberately **not** a bare `acted: 0`, which would claim the run
+    did nothing. The broken-sweep alert is
+    `selected > 0 AND acted = 0 AND unmeasured = 0`, so a pending delivery
+    suppresses the alert without asserting success. The node's output gains
+    `enqueued` alongside `delivered` and `notificationId`.
+
+  The run still reports `success`: the flow did everything it can do
+  synchronously, and failing it would let a channel registered a moment later
+  retroactively break the flow. Notify does not block a flow on a downstream
+  channel, so "delivered" is not a claim it is ever in a position to make — what
+  changes is that it no longer makes it. Inline (P0) fan-out is untouched: it has
+  the channel's answer by the time `emit()` returns, so `acted` stays a real
+  measurement there, including the measured zero for an unregistered channel.
+
+- be7360c: chore(plugins,services): declare `providesServices` on the 20 remaining init-time service providers (ADR-0116 follow-up, #4131)
+
+  ADR-0116 gave the kernel a declared ordering contract, but only
+  `ObjectQLPlugin` and `MetadataPlugin` had declared what their `init()`
+  registers. The pre-Phase-1 ordering check can only _name a provider_ for
+  services someone declared, so its coverage was two plugins wide.
+
+  An audit of every plugin's `init()` body (brace-matched, comments stripped,
+  each call classified by whether it sits inside a `try`/`if`) found 20 plugins
+  that register a service on every path without declaring it. All 20 now
+  declare `providesServices`. Purely additive: no ordering changes, no new
+  failure modes — a `providesServices` entry only lets the kernel say _who_
+  provides a service when it reports a misordering, and enriches the Phase-1
+  `getService` miss diagnostic.
+
+  Three needed a closer read before declaring, because they register the same
+  service from several branches (`cache`, `queue`, `job`): each early-return
+  branch plus the fallback registers it, so every path does — the declaration
+  is honest. ADR-0116's rule that a _conditionally_ registered service must
+  never be declared is unchanged and was applied throughout.
+
+  The same audit found 12 plugins that hard-resolve a service during `init()`
+  (11 of them `manifest`) without declaring `requiresServices`. None is a live
+  exposure — every one already declares a hard `dependencies` entry on the
+  provider, so the kernel orders them correctly today. Those are tracked
+  separately: with a hard dependency in place, `requiresServices` mostly
+  restates what the kernel already enforces, and its real value is on
+  _soft_-dependency consumers, of which `AppPlugin` is currently the only one.
+
+- 7e4783f: fix(plugin-security,service-messaging): two more tenant-scoped declared unique indexes become per-organization (#8577)
+
+  Two platform objects declared their uniqueness as a table-level index with bare
+  `unique: true`. At the DECLARED-index level that is the positional spelling of
+  `'global'` — the listed columns verbatim — so on a tenant-scoped object each
+  materialized an **installation-wide** unique index. (Field-level `unique: true`
+  means the opposite, per-organization, and has since #3696; `packages/lint` names
+  that divergence "the #4986 trap" and warns on it via
+  `unique/unscoped-declared-index`.) These are the fifth act of the class ruled on
+  2026-08-13, after `sys_user_preference` / `sys_capability` (#8461),
+  `sys_position` (#8556) and the five of #8554.
+
+  | object                            | package             | was                                                | now                    |
+  | --------------------------------- | ------------------- | -------------------------------------------------- | ---------------------- |
+  | `sys_notification_subscription`   | `service-messaging` | `[topic, principal]` global                        | same, per organization |
+  | `sys_audience_binding_suggestion` | `plugin-security`   | `[package_id, permission_set_name, anchor]` global | same, per organization |
+
+  Measured live on a real engine before the fix — two organizations, the same key,
+  `OS_TENANCY_POSTURE=isolated`, driving the real shipped declarations. Both
+  reproduced identically:
+
+  ```
+  org_jia POST the key   → 201
+  org_yi  POST the SAME  → 409 UNIQUE_VIOLATION
+  org_yi  POST an unused → 201            ← the control that makes it an oracle
+  org_yi  GET  the key   → total 0        ← refused by a row it cannot see
+  ```
+
+  `sys_notification_subscription` is the class's usual shape and the direct sibling
+  of `sys_notification_preference`: a user belonging to two organizations could not
+  subscribe to the same topic in both, and since `role:x` / `team:x` principal
+  names are themselves per-organization, the same string denoted different
+  subscribers while colliding on one installation-wide key.
+
+  `sys_audience_binding_suggestion` is **more serious, and it is not a naming
+  collision at all.** Its key is the owning package's id, the package's own
+  permission-set name and the anchor — the same triple for every tenant that
+  installs the same package — while the row is per-tenant by construction
+  (ADR-0090 D5/D9: raised when a package's `isDefault` set is observed, resolved
+  when a tenant admin confirms). So the second and every later organization to
+  install a package never got its suggestion row: its admins were never prompted to
+  bind the package's default permission set, its users never received that set, and
+  nothing reported it — the reconciler cannot distinguish the cross-tenant UNIQUE
+  violation from the benign concurrent-sync race its `catch` was written for. Both
+  halves are now pinned end to end: two organizations installing the same package
+  each end up with their own pending row, and re-running one organization's sync
+  still adds nothing.
+
+  ### One caveat on `sys_audience_binding_suggestion`
+
+  This release makes a per-organization suggestion row **possible**; it is not yet
+  what the platform writes. The reconciler still reads and writes through a
+  tenant-less system context, so on a shared-runtime multi-organization
+  installation the surface continues to hold one organization-less row that every
+  tenant reads — measured, recorded as a test, and tracked in #8617, which remains
+  open. Single-organization installations are unaffected either way.
+
+  ## ⚠️ Operators: a migration is REQUIRED, and deploying this release is not it
+
+  Respelling a declared index changes its generated **name**. On an existing
+  database `initObjects` is additive: it creates the new per-organization composite
+  at boot and **never drops the old global index**, which goes on enforcing. Until
+  the retirement is applied, a deployed installation that has taken this release
+  still refuses the second organization's row — that is asserted as a test, not
+  assumed.
+
+  Run the migration:
+
+  ```
+  os migrate plan       # shows one `replace_unique_index` per object, categorised `safe`
+  os migrate apply      # no --allow-destructive needed
+  ```
+
+  Each object plans as **one pure relaxation**, not as two findings. That matters:
+  if it read as "composite missing" (safe) plus "old global index orphaned"
+  (destructive, opt-in), an operator applying only the safe half would keep the
+  global index — keep the defect — while the plan read as applied. The #8461
+  `replace_unique_index` arm covers both unchanged (no driver change in this
+  release), applies CREATE-before-DROP so uniqueness is never unenforced in
+  between, drops the legacy index only once the replacement is confirmed present,
+  preserves every row, and converges to no drift.
+
+  Two details worth an operator's attention:
+
+  - **Both** replacement index names are **hash-suffixed**, because their natural
+    names are 66 and 90 characters against a 60-character limit:
+    `uniq_sys_notification_subscription_799a483c` and
+    `uniq_sys_audience_binding_suggestion_a736dc5a`. On
+    `sys_audience_binding_suggestion` the legacy name
+    (`uniq_sys_audience_binding_suggestion_79a05fef`) is hash-suffixed too, so the
+    two differ only in the hash. That is expected, not corruption.
+  - Rows with no `organization_id` (platform/seed rows) stay unique **among
+    themselves**: the organization key part is NULL-safe
+    (`COALESCE(organization_id, '__global__')`, ADR-0120 D3), so seeding by name
+    keeps working and a tenant may hold its own row of the same key.
+
+  ## Not breaking
+
+  A relaxation admits key pairs that were previously refused and refuses nothing
+  that previously succeeded, so no caller that worked before fails now. Every read
+  path for these two objects goes through the tenant-scoped data API, so no
+  consumer resolves one of these keys across organizations expecting at most one
+  row. Shipped as `patch` for that reason — the same call #8556 and #8554 made for
+  the same shape.
+
+  The one published uniqueness claim about either object — "one per package × set ×
+  anchor" on the permission-sets guide — now reads "one per organization × package
+  × set × anchor". Neither object's field text made a uniqueness claim, so no
+  translation bundle changed.
+
+- b45c71e: fix(plugin-security,plugin-sharing,plugin-webhooks,platform-objects,service-messaging,spec): five tenant-scoped declared unique indexes become per-organization (#8554)
+
+  Five platform objects declared their uniqueness as a table-level index with bare
+  `unique: true`. At the DECLARED-index level that is the positional spelling of
+  `'global'` — the listed columns verbatim — so on a tenant-scoped object each
+  materialized an **installation-wide** unique index. (Field-level `unique: true`
+  means the opposite, per-organization, and has since #3696; `packages/lint` names
+  that divergence "the #4986 trap" and warns on it via
+  `unique/unscoped-declared-index`.) These are the fourth act of the class ruled on
+  2026-08-13, after `sys_user_preference` / `sys_capability` (#8461) and
+  `sys_position` (#8556).
+
+  | object                        | package             | was                                | now                               |
+  | ----------------------------- | ------------------- | ---------------------------------- | --------------------------------- |
+  | `sys_permission_set`          | `plugin-security`   | `[name]` global                    | `[name]` per organization         |
+  | `sys_sharing_rule`            | `plugin-sharing`    | `[name]` global                    | `[name]` per organization         |
+  | `sys_webhook`                 | `plugin-webhooks`   | `[name]` global                    | `[name]` per organization         |
+  | `sys_email_template`          | `platform-objects`  | `[name, locale]` global            | `[name, locale]` per organization |
+  | `sys_notification_preference` | `service-messaging` | `[user_id, topic, channel]` global | same, per organization            |
+
+  Measured live on a real engine before the fix — two organizations, the same key,
+  `OS_TENANCY_POSTURE=isolated`, driving the real shipped declarations. All five
+  reproduced identically:
+
+  ```
+  org_jia POST the key   → 201
+  org_yi  POST the SAME  → 409 UNIQUE_VIOLATION
+  org_yi  POST an unused → 201            ← the control that makes it an oracle
+  org_yi  GET  the key   → total 0        ← refused by a row it cannot see
+  ```
+
+  Two consequences, both removed. **A cross-tenant existence oracle:** the 409 is a
+  per-value answer about a row the caller cannot read, so an organization could
+  enumerate another organization's permission-set, sharing-rule, webhook and
+  template naming. **A functional dead end:** the second organization simply could
+  not use the name, and the refusal did not say why. For
+  `sys_notification_preference` the shape is the one #8323 measured on
+  `sys_user_preference` — a user belonging to two organizations could not hold
+  independent per-topic delivery toggles.
+
+  ## ⚠️ Operators: a migration is REQUIRED, and deploying this release is not it
+
+  Respelling a declared index changes its generated **name**. On an existing
+  database `initObjects` is additive: it creates the new per-organization composite
+  at boot and **never drops the old global index**, which goes on enforcing. Until
+  the retirement is applied, a deployed installation that has taken this release is
+  still enumerable — that is asserted as a test, not assumed.
+
+  Run the migration:
+
+  ```
+  os migrate plan       # shows one `replace_unique_index` per object, categorised `safe`
+  os migrate apply      # no --allow-destructive needed
+  ```
+
+  Each object plans as **one pure relaxation**, not as two findings. That matters:
+  if it read as "composite missing" (safe) plus "old global index orphaned"
+  (destructive, opt-in), an operator applying only the safe half would keep the
+  global index — keep the defect — while the plan read as applied. The `#8461`
+  `replace_unique_index` arm covers all five unchanged (no driver change in this
+  release), applies CREATE-before-DROP so uniqueness is never unenforced in
+  between, drops the legacy index only once the replacement is confirmed present,
+  preserves every row, and converges to no drift.
+
+  Two columns are worth an operator's attention:
+
+  - `sys_notification_preference`'s replacement index name is **hash-suffixed** —
+    `uniq_sys_notification_preference_a22d7d27` — because the natural name is 70
+    characters and the limit is 60. That is expected, not corruption.
+  - Rows with no `organization_id` (platform/seed rows) stay unique **among
+    themselves**: the organization key part is NULL-safe
+    (`COALESCE(organization_id, '__global__')`, ADR-0120 D3), so seeding by name
+    keeps working and a tenant may hold its own row of the same name.
+
+  ## Not breaking
+
+  A relaxation admits key pairs that were previously refused and refuses nothing
+  that previously succeeded, so no caller that worked before fails now. Every read
+  path for these five objects goes through the tenant-scoped data API, so no
+  consumer resolves one of these names across organizations expecting at most one
+  row. Shipped as `patch` for that reason — the same call #8556 made for the same
+  shape.
+
+  Published text carrying the bare uniqueness claim was corrected at its source and
+  the generated reference pages regenerated (`security/permission.mdx`,
+  `automation/webhook.mdx`, and `integration/connector.mdx`, which embeds the same
+  webhook schema), together with the `sys_permission_set` field description, its
+  clone-dialog help text, the `sys_webhook` field description, and the matching
+  translation bundles in all four shipped locales.
+
+- 06306f1: fix(service-messaging): stop persisting webhook HMAC signing secrets on every delivery row (#7722)
+
+  `sys_http_delivery` carried the caller's `signingSecret` verbatim, once per
+  delivery attempt, in a plain `signing_secret` column — and that table is
+  readable over the ordinary data API (`GET /api/v1/data/sys_http_delivery`).
+  Anyone who could read deliveries recovered the shared key that authenticates
+  ObjectStack to the receiver, for **every** subscriber at once. The signature is
+  the receiver's only proof of origin, so the blast radius reaches outside the
+  deployment: a leaked key mints payloads the receiver accepts as genuine, and
+  rotating it means re-coordinating with every receiver operator.
+
+  **The row now carries the signature, not the key.** A delivery's body is
+  decided at enqueue and replayed byte-for-byte by every retry and by
+  `redeliver()` — so the HMAC has exactly one correct value for the row's whole
+  life. `enqueue()` computes it once from the producer's secret and stores only
+  the result (`signature`, `sha256=<hex>`); the secret is consumed and dropped.
+  The stored value is what the receiver is handed on the wire anyway and is
+  one-way in the key, so reading a delivery row tells you what was sent, not how
+  to forge something else.
+
+  Signing behaviour on the wire is unchanged: `X-Objectstack-Signature` still
+  carries `sha256=HMAC-SHA256(raw body, secret)` and verifies against the
+  subscriber's secret exactly as before — now pinned by tests that recompute the
+  HMAC over the delivered body rather than asserting a header is merely present,
+  and by an at-rest guard that byte-scans every column of a real delivery table
+  after a real delivery.
+
+  Producers are unaffected: `enqueueHttp({ …, signingSecret })` keeps its shape
+  for both callers (webhook fan-out and the Flow `http` node), and the fix sits at
+  the outbox, so both stop writing cleartext.
+
+  **Upgrading.** The `signing_secret` column is no longer declared, so an existing
+  database keeps it as an unmapped column holding the old cleartext until it is
+  dropped: run `os migrate plan` and apply the reported `drop_column` op (it is
+  classified destructive, so it is never applied unattended). Until then those
+  rows also age out on the table's existing 30-day telemetry retention. Rotate any
+  signing secret that was exposed. Code reading `HttpDelivery.signingSecret` off a
+  row should read `signature` instead — the secret is not available there by
+  design.
+
+- bbe05de: A dropped webhook subscription now leaves a durable record, and no operator action can turn that record into an unsigned delivery (#8069).
+
+  When the auto-enqueuer cannot decrypt a webhook's signing secret or its custom header map, it drops the subscription rather than delivering unsigned (#7799, #7986). Until now the drop left no `sys_http_delivery` row at all: every matching record change was discarded with nothing an operator reading the delivery table could find. `#8043` made that loud in the logs; it did not make it durable.
+
+  Each discarded event is now recorded as a `sys_http_delivery` row with `status: dead`, `attempts: 0`, and the cause and remedy in the existing `error` column — so it appears in the object's existing "Failures" view with no new lifecycle state and no migration.
+
+  The record is unsendable by construction, which is the half that matters:
+
+  - `redeliver()` refuses any terminal row with `attempts: 0`. Such a row was never sent, so re-sending it would be a **first** delivery — and a parked row carries no HMAC signature, because the secret that would have produced one is exactly what went missing. New error code `DELIVERY_NEVER_SENT` (409 on `POST /api/v1/webhooks/redeliver`).
+  - `redeliver()` also consults a producer-registered guard, so a webhook row whose `sys_webhook` subscription was deleted, or whose stored signing secret can no longer be recovered, is refused rather than replayed. A guard whose own lookup fails refuses too.
+  - The parked row never carries the authored header map, so a credential is not copied onto a row that will sit out the retention window without ever being sent.
+
+  Redelivery of a genuine dead-letter is unchanged: the same bytes, the same signature.
+
+- Updated dependencies [50616d9]
+- Updated dependencies [430dcc2]
+- Updated dependencies [690ccf2]
+- Updated dependencies [6a67d7a]
+- Updated dependencies [098f4bb]
+- Updated dependencies [333a374]
+- Updated dependencies [9fe9c1d]
+- Updated dependencies [3d5c090]
+- Updated dependencies [e5bd768]
+- Updated dependencies [08b5a3d]
+- Updated dependencies [e027b3e]
+- Updated dependencies [e6ac4bd]
+- Updated dependencies [c2429b0]
+- Updated dependencies [445a0c2]
+- Updated dependencies [d99aeb3]
+- Updated dependencies [f6609e6]
+- Updated dependencies [4727eb8]
+- Updated dependencies [a70358a]
+- Updated dependencies [0ecc656]
+- Updated dependencies [06772eb]
+- Updated dependencies [d4e0809]
+- Updated dependencies [80334c7]
+- Updated dependencies [f63cd09]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [ce5242c]
+- Updated dependencies [a7163ea]
+- Updated dependencies [e6e9379]
+- Updated dependencies [5823d59]
+- Updated dependencies [3140f9c]
+- Updated dependencies [9500ba4]
+- Updated dependencies [fa3d0cf]
+- Updated dependencies [af5a224]
+- Updated dependencies [71f76e1]
+- Updated dependencies [37b1346]
+- Updated dependencies [99736a0]
+- Updated dependencies [fe67e34]
+- Updated dependencies [fdb4f50]
+- Updated dependencies [270650f]
+- Updated dependencies [3aef718]
+- Updated dependencies [1bd5652]
+- Updated dependencies [14252d3]
+- Updated dependencies [7fb436c]
+- Updated dependencies [879ea13]
+- Updated dependencies [8828b9e]
+- Updated dependencies [1ea6bce]
+- Updated dependencies [c1dcacd]
+- Updated dependencies [ad303ed]
+- Updated dependencies [32ccb23]
+- Updated dependencies [f5a4ef0]
+- Updated dependencies [2d3e255]
+- Updated dependencies [a8940e4]
+- Updated dependencies [7d7521f]
+- Updated dependencies [5dc4d02]
+- Updated dependencies [f724f69]
+- Updated dependencies [98877c9]
+- Updated dependencies [98877c9]
+- Updated dependencies [53068c1]
+- Updated dependencies [ee58392]
+- Updated dependencies [f16e54e]
+- Updated dependencies [c44dd5e]
+- Updated dependencies [06be54e]
+- Updated dependencies [28ad90e]
+- Updated dependencies [76d74ec]
+- Updated dependencies [201b31f]
+- Updated dependencies [e6b1b69]
+- Updated dependencies [259459d]
+- Updated dependencies [3f7f14e]
+- Updated dependencies [e2616e0]
+- Updated dependencies [6fdc5c6]
+- Updated dependencies [8b9d71e]
+- Updated dependencies [05154a1]
+- Updated dependencies [33f5e23]
+- Updated dependencies [259af21]
+- Updated dependencies [f8644c7]
+- Updated dependencies [306ca50]
+- Updated dependencies [840ee4b]
+- Updated dependencies [978fed2]
+- Updated dependencies [cfc293f]
+- Updated dependencies [587fc91]
+- Updated dependencies [de70b42]
+- Updated dependencies [9b6fe7c]
+- Updated dependencies [64cd010]
+- Updated dependencies [fb3d99b]
+- Updated dependencies [1986594]
+- Updated dependencies [6968885]
+- Updated dependencies [eaed61f]
+- Updated dependencies [52200b4]
+- Updated dependencies [cdfbee2]
+- Updated dependencies [ad4af62]
+- Updated dependencies [debe2f6]
+- Updated dependencies [d44dbfa]
+- Updated dependencies [29c6c9d]
+- Updated dependencies [d21c001]
+- Updated dependencies [ad047d2]
+- Updated dependencies [8c711fb]
+- Updated dependencies [f1cc3a3]
+- Updated dependencies [09e4547]
+- Updated dependencies [97b0798]
+- Updated dependencies [474fe39]
+- Updated dependencies [0bc685a]
+- Updated dependencies [b949059]
+- Updated dependencies [2826d1e]
+- Updated dependencies [be1c52c]
+- Updated dependencies [c5ff96d]
+- Updated dependencies [5a84d41]
+- Updated dependencies [84e7be9]
+- Updated dependencies [91f4c78]
+- Updated dependencies [ddc2527]
+- Updated dependencies [820eff9]
+- Updated dependencies [a6c3f38]
+- Updated dependencies [5fa04fb]
+- Updated dependencies [debc23a]
+- Updated dependencies [0f8ad09]
+- Updated dependencies [553a47f]
+- Updated dependencies [43a7a8d]
+- Updated dependencies [a98085f]
+- Updated dependencies [20b1a9e]
+- Updated dependencies [344a22a]
+- Updated dependencies [4827e91]
+- Updated dependencies [8d895ff]
+- Updated dependencies [86f7a20]
+- Updated dependencies [a3a884d]
+- Updated dependencies [cfed092]
+- Updated dependencies [203a449]
+- Updated dependencies [8f9689f]
+- Updated dependencies [73f69dc]
+- Updated dependencies [04c56aa]
+- Updated dependencies [f6472d7]
+- Updated dependencies [57a3bb3]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [ddd075a]
+- Updated dependencies [88154be]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [9c82146]
+- Updated dependencies [5f9a987]
+- Updated dependencies [744b8f5]
+- Updated dependencies [9f5cc79]
+- Updated dependencies [ac37fc6]
+- Updated dependencies [9f060e5]
+- Updated dependencies [bc17d39]
+- Updated dependencies [2f3e793]
+- Updated dependencies [4820f55]
+- Updated dependencies [462d9c4]
+- Updated dependencies [78caf51]
+- Updated dependencies [7d21581]
+- Updated dependencies [37785ed]
+- Updated dependencies [62a789b]
+- Updated dependencies [2e284b2]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [789ad63]
+- Updated dependencies [f2445c9]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [2af1988]
+- Updated dependencies [0af50a3]
+- Updated dependencies [1b49eaf]
+- Updated dependencies [ae31a19]
+- Updated dependencies [2e836de]
+- Updated dependencies [e0f300b]
+- Updated dependencies [0161c7f]
+- Updated dependencies [e900015]
+- Updated dependencies [db02d47]
+- Updated dependencies [b5bdf48]
+- Updated dependencies [23338c3]
+- Updated dependencies [12a19a8]
+- Updated dependencies [5b843fb]
+- Updated dependencies [62b6a2f]
+- Updated dependencies [7e5af5c]
+- Updated dependencies [5b4780b]
+- Updated dependencies [a933452]
+- Updated dependencies [9d1d9c7]
+- Updated dependencies [8140915]
+- Updated dependencies [a019e52]
+- Updated dependencies [e8f8f6c]
+- Updated dependencies [41dcda3]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [b5404f4]
+- Updated dependencies [64fc6d5]
+- Updated dependencies [b746aa0]
+- Updated dependencies [b4487aa]
+- Updated dependencies [1007379]
+- Updated dependencies [65ca83a]
+- Updated dependencies [0bfdf46]
+- Updated dependencies [947d4f9]
+- Updated dependencies [f764691]
+- Updated dependencies [e120a5a]
+- Updated dependencies [e5bd2f6]
+- Updated dependencies [e650d67]
+- Updated dependencies [04476e7]
+- Updated dependencies [67bf2e2]
+- Updated dependencies [eaaf03c]
+- Updated dependencies [d17df80]
+- Updated dependencies [7d0e7b5]
+- Updated dependencies [c6d1cb4]
+- Updated dependencies [6513c17]
+- Updated dependencies [36030ff]
+- Updated dependencies [79228cd]
+- Updated dependencies [6117f7b]
+- Updated dependencies [87aca93]
+- Updated dependencies [e533b0b]
+- Updated dependencies [cdf4d9a]
+- Updated dependencies [aee1806]
+- Updated dependencies [c13350b]
+- Updated dependencies [c13350b]
+- Updated dependencies [2c1988c]
+- Updated dependencies [9ca2d85]
+- Updated dependencies [c13350b]
+- Updated dependencies [891d345]
+- Updated dependencies [c8124e5]
+- Updated dependencies [a52e2ef]
+- Updated dependencies [5293114]
+- Updated dependencies [376a061]
+- Updated dependencies [c142ced]
+- Updated dependencies [211abdb]
+- Updated dependencies [b3363e9]
+- Updated dependencies [eda599e]
+- Updated dependencies [a1a4140]
+- Updated dependencies [c20b875]
+- Updated dependencies [7c7e246]
+- Updated dependencies [2ef1807]
+- Updated dependencies [f35cdc5]
+- Updated dependencies [d03fe25]
+- Updated dependencies [2a37694]
+- Updated dependencies [217e2e6]
+- Updated dependencies [2672f85]
+- Updated dependencies [20bc357]
+- Updated dependencies [11066f6]
+- Updated dependencies [916af17]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [86a71d1]
+- Updated dependencies [c001422]
+- Updated dependencies [77022a9]
+- Updated dependencies [d5c75e2]
+- Updated dependencies [03d26f7]
+- Updated dependencies [5966c2a]
+- Updated dependencies [2382580]
+- Updated dependencies [9ea2bc5]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [52760bf]
+- Updated dependencies [5543020]
+- Updated dependencies [880d343]
+- Updated dependencies [6e82972]
+- Updated dependencies [d4df105]
+- Updated dependencies [4615a18]
+- Updated dependencies [f505689]
+- Updated dependencies [d9fa683]
+- Updated dependencies [32d3800]
+- Updated dependencies [606d577]
+- Updated dependencies [4384921]
+- Updated dependencies [e2798fa]
+- Updated dependencies [3c628ce]
+- Updated dependencies [c2d9098]
+- Updated dependencies [0fd8556]
+- Updated dependencies [3c7bcc0]
+- Updated dependencies [4b6cac7]
+- Updated dependencies [7631964]
+- Updated dependencies [ac471a0]
+- Updated dependencies [60ae58e]
+- Updated dependencies [7f62706]
+- Updated dependencies [667fa44]
+- Updated dependencies [37e38d1]
+- Updated dependencies [e906126]
+- Updated dependencies [ce92674]
+- Updated dependencies [08363a0]
+- Updated dependencies [444de5b]
+- Updated dependencies [a227ed7]
+- Updated dependencies [7cb922e]
+- Updated dependencies [1d22114]
+- Updated dependencies [1eb13a0]
+- Updated dependencies [c52e608]
+- Updated dependencies [9613396]
+- Updated dependencies [3f7b4ff]
+- Updated dependencies [74155c7]
+- Updated dependencies [b5f9397]
+- Updated dependencies [ed77493]
+- Updated dependencies [6908830]
+- Updated dependencies [8b06bba]
+- Updated dependencies [58a03d2]
+- Updated dependencies [2bacd1a]
+- Updated dependencies [e47b342]
+- Updated dependencies [4c54037]
+- Updated dependencies [dc530b4]
+- Updated dependencies [9f601e8]
+- Updated dependencies [6a9dec6]
+- Updated dependencies [0f7157b]
+- Updated dependencies [4dc1c7d]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f598aa8]
+- Updated dependencies [4dfd002]
+- Updated dependencies [f549a0d]
+- Updated dependencies [51c5227]
+- Updated dependencies [82da264]
+- Updated dependencies [f586f1a]
+- Updated dependencies [77be690]
+- Updated dependencies [4ed7ed4]
+- Updated dependencies [9b9b70f]
+- Updated dependencies [f5a9bc2]
+- Updated dependencies [e59786e]
+- Updated dependencies [2fa4ca1]
+- Updated dependencies [bcf1112]
+- Updated dependencies [baeb4f0]
+- Updated dependencies [29488cc]
+- Updated dependencies [881a3cc]
+- Updated dependencies [f5a2320]
+- Updated dependencies [ad6317b]
+- Updated dependencies [811c30c]
+- Updated dependencies [a4a85c8]
+- Updated dependencies [859cb83]
+- Updated dependencies [07a4e26]
+- Updated dependencies [9774b78]
+- Updated dependencies [8a88885]
+- Updated dependencies [deb538f]
+- Updated dependencies [b49ccfd]
+- Updated dependencies [5b89711]
+- Updated dependencies [85d95e7]
+- Updated dependencies [08cd163]
+- Updated dependencies [0c8a22f]
+- Updated dependencies [5f7669e]
+- Updated dependencies [becbe53]
+- Updated dependencies [b127c8b]
+- Updated dependencies [763931e]
+- Updated dependencies [ec975f1]
+- Updated dependencies [168f60f]
+- Updated dependencies [b07d829]
+- Updated dependencies [de9af8a]
+- Updated dependencies [eb4204b]
+- Updated dependencies [a80302a]
+- Updated dependencies [a648e96]
+- Updated dependencies [a47ac06]
+- Updated dependencies [e4c61a7]
+- Updated dependencies [cc60165]
+- Updated dependencies [474f131]
+- Updated dependencies [081aa6f]
+- Updated dependencies [91f4c78]
+- Updated dependencies [050cd82]
+- Updated dependencies [4d552af]
+- Updated dependencies [44d677c]
+- Updated dependencies [c32944d]
+- Updated dependencies [1dd780f]
+- Updated dependencies [e8d0c21]
+- Updated dependencies [244ca86]
+- Updated dependencies [546ab3c]
+- Updated dependencies [c4df271]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [0b51bb6]
+- Updated dependencies [08f93bc]
+- Updated dependencies [d9971d3]
+- Updated dependencies [7dc1067]
+- Updated dependencies [4f13be2]
+- Updated dependencies [a41ba5c]
+- Updated dependencies [189854c]
+- Updated dependencies [0e3a226]
+- Updated dependencies [92a67f2]
+- Updated dependencies [9136327]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [eb3e650]
+- Updated dependencies [abeb375]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [73b7234]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [61cc079]
+- Updated dependencies [45dc446]
+- Updated dependencies [0e96e46]
+- Updated dependencies [c1d44f7]
+- Updated dependencies [59b794f]
+- Updated dependencies [ef4efa8]
+- Updated dependencies [cbb6a5c]
+- Updated dependencies [fc3a36a]
+- Updated dependencies [ab9fb5c]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [b25a116]
+- Updated dependencies [02dc076]
+- Updated dependencies [f985b3f]
+- Updated dependencies [795b6e1]
+- Updated dependencies [d52d4fe]
+- Updated dependencies [742cebb]
+- Updated dependencies [175d789]
+- Updated dependencies [f549a0d]
+- Updated dependencies [524151c]
+- Updated dependencies [427344c]
+- Updated dependencies [8af76ae]
+- Updated dependencies [1d4756e]
+- Updated dependencies [720c5ad]
+- Updated dependencies [a8d1e24]
+- Updated dependencies [b85cc54]
+- Updated dependencies [a36db28]
+- Updated dependencies [7a8476f]
+- Updated dependencies [518ca7a]
+- Updated dependencies [d1cabaa]
+- Updated dependencies [41642b0]
+- Updated dependencies [4cca74c]
+- Updated dependencies [88ef03e]
+- Updated dependencies [9a4932a]
+- Updated dependencies [3f8817a]
+- Updated dependencies [a2443e3]
+- Updated dependencies [e1554b1]
+- Updated dependencies [9e2caf3]
+- Updated dependencies [4856789]
+- Updated dependencies [81ce41a]
+- Updated dependencies [85e1e4e]
+- Updated dependencies [c3f4916]
+- Updated dependencies [55dbbba]
+- Updated dependencies [33e0385]
+- Updated dependencies [dac6a08]
+- Updated dependencies [72c3c86]
+- Updated dependencies [2d8dba3]
+- Updated dependencies [7f1a635]
+- Updated dependencies [2205363]
+- Updated dependencies [09fe58d]
+- Updated dependencies [f9fc874]
+- Updated dependencies [d62f8eb]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [a7586cd]
+- Updated dependencies [4c5e80e]
+- Updated dependencies [4b5702a]
+- Updated dependencies [011b386]
+- Updated dependencies [e18a162]
+- Updated dependencies [e98fb14]
+- Updated dependencies [394b7a1]
+- Updated dependencies [ce92674]
+- Updated dependencies [0f2fdcd]
+- Updated dependencies [d6d1a50]
+- Updated dependencies [cf2c9b7]
+- Updated dependencies [8ffa8b9]
+- Updated dependencies [d127ff0]
+- Updated dependencies [674ac99]
+- Updated dependencies [833b512]
+- Updated dependencies [9881074]
+- Updated dependencies [1b9a53b]
+- Updated dependencies [36d90fc]
+- Updated dependencies [7777e8f]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [d063a96]
+- Updated dependencies [8825a06]
+- Updated dependencies [5087ac6]
+- Updated dependencies [677b591]
+- Updated dependencies [cf7c694]
+- Updated dependencies [ddd0f06]
+- Updated dependencies [d77d1b7]
+- Updated dependencies [0f9faa2]
+- Updated dependencies [2d1ddf0]
+- Updated dependencies [354b00f]
+- Updated dependencies [3de535b]
+- Updated dependencies [fe2e15a]
+- Updated dependencies [5b79a34]
+- Updated dependencies [502564d]
+- Updated dependencies [603cab8]
+- Updated dependencies [c757854]
+- Updated dependencies [471839d]
+- Updated dependencies [507b92a]
+- Updated dependencies [46365ab]
+- Updated dependencies [b508244]
+- Updated dependencies [df95346]
+- Updated dependencies [3dede58]
+- Updated dependencies [c6b6bb4]
+- Updated dependencies [594508e]
+- Updated dependencies [7cf42fe]
+- Updated dependencies [5966c2a]
+- Updated dependencies [59c544d]
+- Updated dependencies [0045682]
+- Updated dependencies [7309c81]
+- Updated dependencies [2f59da0]
+- Updated dependencies [d56012f]
+- Updated dependencies [f78dd83]
+- Updated dependencies [a2cd18a]
+- Updated dependencies [9051802]
+- Updated dependencies [20bc1ec]
+- Updated dependencies [1c625ca]
+- Updated dependencies [2f8328c]
+- Updated dependencies [2a6c279]
+- Updated dependencies [9319586]
+- Updated dependencies [8c8f0df]
+- Updated dependencies [8ad609c]
+- Updated dependencies [bbee302]
+- Updated dependencies [90c2b15]
+- Updated dependencies [4638aaa]
+- Updated dependencies [0222d3c]
+- Updated dependencies [08863dd]
+- Updated dependencies [39eb01b]
+- Updated dependencies [071d0dc]
+- Updated dependencies [f293d45]
+- Updated dependencies [56664f5]
+- Updated dependencies [71f205d]
+- Updated dependencies [f067930]
+- Updated dependencies [414395b]
+- Updated dependencies [42eeb7d]
+- Updated dependencies [31cbe90]
+- Updated dependencies [6b7129a]
+- Updated dependencies [c5adfe1]
+- Updated dependencies [97ace2a]
+- Updated dependencies [26e1029]
+- Updated dependencies [0a936ea]
+- Updated dependencies [90bbf25]
+- Updated dependencies [023c00b]
+- Updated dependencies [eb91eba]
+- Updated dependencies [42da73d]
+- Updated dependencies [01e124d]
+- Updated dependencies [ef7b5ef]
+- Updated dependencies [9514767]
+- Updated dependencies [8f20201]
+- Updated dependencies [155507e]
+- Updated dependencies [643b7c7]
+- Updated dependencies [7bba90b]
+- Updated dependencies [8813b90]
+- Updated dependencies [108ba8d]
+- Updated dependencies [2a5f04a]
+- Updated dependencies [4f740b0]
+- Updated dependencies [030125b]
+- Updated dependencies [7ce02eb]
+- Updated dependencies [b4ad984]
+- Updated dependencies [e7a7506]
+- Updated dependencies [a9f32df]
+- Updated dependencies [aeb9b27]
+- Updated dependencies [7d27da0]
+- Updated dependencies [d0d5205]
+- Updated dependencies [1a15893]
+- Updated dependencies [b70e534]
+- Updated dependencies [7e05d8e]
+- Updated dependencies [8f1851e]
+- Updated dependencies [b4b2c7d]
+- Updated dependencies [61ea810]
+- Updated dependencies [2233a85]
+- Updated dependencies [67452d1]
+- Updated dependencies [089767f]
+- Updated dependencies [a13827e]
+- Updated dependencies [66d99ec]
+- Updated dependencies [cb43296]
+- Updated dependencies [b61afc1]
+- Updated dependencies [79021fc]
+- Updated dependencies [7733604]
+- Updated dependencies [4921a95]
+- Updated dependencies [40e420f]
+- Updated dependencies [62dd69a]
+- Updated dependencies [d13004a]
+- Updated dependencies [be7360c]
+- Updated dependencies [e15e679]
+- Updated dependencies [2ab1257]
+- Updated dependencies [0fc6219]
+- Updated dependencies [061406d]
+- Updated dependencies [e4c8b6c]
+- Updated dependencies [acb10f6]
+- Updated dependencies [605e190]
+- Updated dependencies [c6c59f1]
+- Updated dependencies [b0e78a8]
+- Updated dependencies [f31cc8d]
+- Updated dependencies [f343dc4]
+- Updated dependencies [8269e32]
+- Updated dependencies [74f7339]
+- Updated dependencies [a6c35a2]
+- Updated dependencies [c2f1002]
+- Updated dependencies [4cc4fb7]
+- Updated dependencies [97b6658]
+- Updated dependencies [28d1eb7]
+- Updated dependencies [06770c0]
+- Updated dependencies [2c26040]
+- Updated dependencies [f758cec]
+- Updated dependencies [5b47ab5]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [8675db6]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [27358d5]
+- Updated dependencies [1c3da1f]
+- Updated dependencies [c1f344b]
+- Updated dependencies [3eb1b2b]
+- Updated dependencies [9c93465]
+- Updated dependencies [a34fd2e]
+- Updated dependencies [ebb209c]
+- Updated dependencies [76bcb83]
+- Updated dependencies [59b85c0]
+- Updated dependencies [889ae47]
+- Updated dependencies [4f4c3fb]
+- Updated dependencies [78f0be8]
+- Updated dependencies [6e357ed]
+- Updated dependencies [d6938bf]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [0410522]
+- Updated dependencies [63b33e6]
+- Updated dependencies [f163028]
+- Updated dependencies [814db6d]
+- Updated dependencies [a5302c7]
+- Updated dependencies [31e0be9]
+- Updated dependencies [4bfd455]
+- Updated dependencies [ffd2ce2]
+- Updated dependencies [2a44c1d]
+- Updated dependencies [7084313]
+- Updated dependencies [f07808c]
+- Updated dependencies [91cefb8]
+- Updated dependencies [7ffc3d3]
+- Updated dependencies [88346ba]
+- Updated dependencies [4631592]
+- Updated dependencies [62f8017]
+- Updated dependencies [32ff033]
+- Updated dependencies [a831df1]
+- Updated dependencies [f752ee3]
+- Updated dependencies [a1b61e0]
+- Updated dependencies [cd6b9f2]
+- Updated dependencies [2cb6d3c]
+- Updated dependencies [af2a095]
+- Updated dependencies [5ac93d4]
+- Updated dependencies [695cfbd]
+- Updated dependencies [0e043d8]
+- Updated dependencies [93f267f]
+- Updated dependencies [7445149]
+- Updated dependencies [ec796d5]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0024abf]
+- Updated dependencies [8dd98bf]
+- Updated dependencies [e87fea1]
+- Updated dependencies [c65e529]
+- Updated dependencies [0848bea]
+- Updated dependencies [d51bed2]
+- Updated dependencies [dadd1ad]
+- Updated dependencies [acbf364]
+- Updated dependencies [3ca34c1]
+- Updated dependencies [7adc841]
+- Updated dependencies [239c3a3]
+- Updated dependencies [b8b3c64]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [4845f85]
+- Updated dependencies [486d526]
+- Updated dependencies [94a0bbc]
+- Updated dependencies [d6bfb3d]
+- Updated dependencies [8a9c079]
+- Updated dependencies [7b005b4]
+- Updated dependencies [cc3555e]
+- Updated dependencies [a2266a6]
+- Updated dependencies [d25a0ec]
+- Updated dependencies [89d7b35]
+- Updated dependencies [94f7b6a]
+- Updated dependencies [5c94f83]
+- Updated dependencies [ea936f3]
+- Updated dependencies [0c0fbd9]
+- Updated dependencies [667b83e]
+- Updated dependencies [f3141d8]
+- Updated dependencies [5487c20]
+- Updated dependencies [aa8b847]
+- Updated dependencies [7687f7b]
+- Updated dependencies [5a84d41]
+- Updated dependencies [fd3013a]
+- Updated dependencies [85ec26d]
+- Updated dependencies [73e576f]
+- Updated dependencies [f6476fc]
+- Updated dependencies [69ac82c]
+- Updated dependencies [4ac12ef]
+- Updated dependencies [833ed84]
+- Updated dependencies [a18abf3]
+- Updated dependencies [c6a4eeb]
+- Updated dependencies [1659072]
+- Updated dependencies [f450ae7]
+- Updated dependencies [abceb0d]
+- Updated dependencies [627b188]
+- Updated dependencies [8d4eae7]
+- Updated dependencies [c5a5996]
+- Updated dependencies [0c302a7]
+- Updated dependencies [b88f5e8]
+- Updated dependencies [857a6cf]
+- Updated dependencies [65a3a84]
+- Updated dependencies [6633337]
+- Updated dependencies [21676eb]
+- Updated dependencies [3f296bf]
+- Updated dependencies [e474853]
+- Updated dependencies [e9cb9ab]
+- Updated dependencies [42cc219]
+- Updated dependencies [d42a92f]
+- Updated dependencies [569611f]
+- Updated dependencies [51d74ad]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [d5749d7]
+- Updated dependencies [f00d8d4]
+- Updated dependencies [5326b36]
+- Updated dependencies [aa4b90d]
+- Updated dependencies [ccd9397]
+- Updated dependencies [503be86]
+- Updated dependencies [54299ca]
+- Updated dependencies [ae490ef]
+- Updated dependencies [e124711]
+- Updated dependencies [dc61def]
+- Updated dependencies [bca935b]
+- Updated dependencies [d92c72d]
+- Updated dependencies [c54c822]
+- Updated dependencies [8dcc0f5]
+- Updated dependencies [75b9e51]
+- Updated dependencies [f61c8cf]
+- Updated dependencies [e3ef52b]
+- Updated dependencies [0a2f233]
+- Updated dependencies [8621cdd]
+- Updated dependencies [251e888]
+- Updated dependencies [07f1822]
+- Updated dependencies [e336549]
+- Updated dependencies [3bb9340]
+- Updated dependencies [1e604c4]
+- Updated dependencies [04fab5e]
+- Updated dependencies [183b4c4]
+- Updated dependencies [7f713b6]
+- Updated dependencies [d40f43a]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [e787608]
+- Updated dependencies [6f23667]
+- Updated dependencies [cde1975]
+- Updated dependencies [0bc685a]
+- Updated dependencies [20526f5]
+- Updated dependencies [efedd28]
+- Updated dependencies [5d21a48]
+- Updated dependencies [5278e11]
+- Updated dependencies [c5eef1d]
+- Updated dependencies [e5e7ee0]
+- Updated dependencies [23dba62]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [c960170]
+- Updated dependencies [19365b7]
+- Updated dependencies [ba98e26]
+- Updated dependencies [b7ed26d]
+- Updated dependencies [a2ebea2]
+- Updated dependencies [800bdb0]
+- Updated dependencies [9d4dfc4]
+- Updated dependencies [1059965]
+- Updated dependencies [def5919]
+- Updated dependencies [ee264b2]
+- Updated dependencies [60b672e]
+- Updated dependencies [f104bab]
+- Updated dependencies [68dea0b]
+- Updated dependencies [6b441a8]
+- Updated dependencies [64f8cbe]
+- Updated dependencies [6cb81c7]
+- Updated dependencies [61282f9]
+- Updated dependencies [ce0cfe9]
+- Updated dependencies [04f1182]
+- Updated dependencies [3a2dde7]
+- Updated dependencies [8c20f75]
+- Updated dependencies [be87153]
+- Updated dependencies [dd0f681]
+- Updated dependencies [60f0dd8]
+- Updated dependencies [a87c5cd]
+- Updated dependencies [a47f338]
+- Updated dependencies [b3a3d83]
+- Updated dependencies [7a55913]
+- Updated dependencies [35accbf]
+- Updated dependencies [6038de7]
+- Updated dependencies [fc5f536]
+- Updated dependencies [5647006]
+- Updated dependencies [e654bfd]
+- Updated dependencies [01a7337]
+- Updated dependencies [b45c71e]
+- Updated dependencies [d71ff32]
+- Updated dependencies [f8cfbb4]
+- Updated dependencies [6e6c872]
+- Updated dependencies [2598216]
+- Updated dependencies [11949fc]
+- Updated dependencies [2c7e62d]
+- Updated dependencies [eb95d97]
+- Updated dependencies [b098b0e]
+- Updated dependencies [4d00b13]
+- Updated dependencies [1363084]
+- Updated dependencies [fa5758e]
+- Updated dependencies [38f7e4f]
+- Updated dependencies [eb7613c]
+- Updated dependencies [c57f3cf]
+- Updated dependencies [ecc9110]
+- Updated dependencies [9aa5510]
+- Updated dependencies [e4c2dc8]
+- Updated dependencies [97faca3]
+- Updated dependencies [57bab76]
+- Updated dependencies [c89d18c]
+- Updated dependencies [1bd2795]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [694c350]
+- Updated dependencies [361bd5b]
+- Updated dependencies [aac90a5]
+- Updated dependencies [3da3da5]
+- Updated dependencies [1e6ab15]
+- Updated dependencies [b90086a]
+- Updated dependencies [129b378]
+- Updated dependencies [88f9d94]
+- Updated dependencies [8186a70]
+- Updated dependencies [a329cca]
+- Updated dependencies [c87ef70]
+- Updated dependencies [3cb0618]
+- Updated dependencies [32a0874]
+- Updated dependencies [6eec18c]
+- Updated dependencies [4d7bebf]
+- Updated dependencies [821ac7a]
+- Updated dependencies [8f81731]
+- Updated dependencies [7055c22]
+- Updated dependencies [785a748]
+- Updated dependencies [3af0354]
+- Updated dependencies [866ff16]
+- Updated dependencies [5a85e67]
+- Updated dependencies [8b50cb3]
+- Updated dependencies [a0fdc56]
+- Updated dependencies [b95577a]
+- Updated dependencies [0dcbc11]
+- Updated dependencies [d88f3e9]
+- Updated dependencies [ad5fe25]
+- Updated dependencies [c183a12]
+- Updated dependencies [83c161f]
+- Updated dependencies [d8c4957]
+- Updated dependencies [b9f930b]
+- Updated dependencies [f24cb83]
+- Updated dependencies [5dbbb92]
+- Updated dependencies [ea90179]
+- Updated dependencies [1818998]
+- Updated dependencies [ce92674]
+- Updated dependencies [5ef0b5b]
+- Updated dependencies [8c2db68]
+- Updated dependencies [22b5e54]
+- Updated dependencies [0166bd5]
+- Updated dependencies [8064b07]
+- Updated dependencies [09ee21c]
+- Updated dependencies [4a56dbd]
+- Updated dependencies [289d04a]
+- Updated dependencies [f549a0d]
+- Updated dependencies [48fbacb]
+- Updated dependencies [06df4fa]
+- Updated dependencies [3fc2e48]
+- Updated dependencies [c9b809f]
+- Updated dependencies [e8f435c]
+- Updated dependencies [32386f8]
+- Updated dependencies [9b702dc]
+- Updated dependencies [ab16331]
+- Updated dependencies [41610f6]
+- Updated dependencies [69f1dfd]
+- Updated dependencies [bbe05de]
+- Updated dependencies [355e951]
+- Updated dependencies [a1dd1e4]
+- Updated dependencies [dadb43f]
+- Updated dependencies [3556b67]
+  - @objectstack/spec@17.0.0
+  - @objectstack/core@17.0.0
+  - @objectstack/platform-objects@17.0.0
+  - @objectstack/types@17.0.0
+
 ## 17.0.0-rc.6
 
 ### Patch Changes
