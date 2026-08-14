@@ -49,6 +49,30 @@ export type {
     EnsureViewIndexStatus,
     EnsureViewIndexResult,
 } from './migrations/view-definition-active-index.js';
+
+// [#8629] `sys_setting`'s declared ROW IDENTITY, delivered as a runtime
+// NULL-safe UNIQUE migration — the same paradigm again, for the object whose
+// `user_id` key part is NULL on every tenant- and global-scope row and was
+// therefore constraining nothing there (maintainer ruling 2026-08-14: route 1
+// now, refuse-to-migrate on duplicates, never keep-newest).
+export {
+    ensureSysSettingIdentityIndex,
+    resolveSysSettingIndexExec,
+    buildSysSettingIdentityIndexSql,
+    buildSysSettingDuplicateProbeSql,
+    buildSysSettingPresenceSql,
+    sysSettingIdentityKeyParts,
+    SYS_SETTING_TABLE,
+    SYS_SETTING_IDENTITY_INDEX_NAME,
+    SYS_SETTING_IDENTITY_PROBE_INDEX_NAME,
+    SYS_SETTING_IDENTITY_INDEX_COLUMNS,
+    SYS_SETTING_NULL_SENTINELS,
+} from './migrations/sys-setting-identity-index.js';
+export type {
+    EnsureSysSettingIndexLogger,
+    EnsureSysSettingIndexStatus,
+    EnsureSysSettingIndexResult,
+} from './migrations/sys-setting-identity-index.js';
 export type { UninstallCleanup, UninstallCleanupOutcome } from './protocol.js';
 export type { MetadataMutationEvent, MetadataMutationProjector, MutationProjectionOutcome } from './protocol.js';
 export type { MetadataAuthoringGate, MetadataAuthoringGateContext } from './protocol.js';

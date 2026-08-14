@@ -120,6 +120,7 @@
 import {
     logProblem,
     probeThenReplaceIndex,
+    resolveIndexExecForTable,
     type IndexExec,
     type IndexMigrationLogger,
     type PartialIndexStatus,
@@ -262,50 +263,15 @@ export function buildDuplicateProbeSql(): string {
 /**
  * Resolve a raw-SQL seam for `sys_view_definition`.
  *
- * Asks the engine which driver OWNS this table first
- * (`getDriverForObject`) rather than grabbing the engine-wide default: on a
- * multi-datasource kernel the platform objects can sit on their own datasource,
- * and issuing this DDL to the wrong connection would either fail or tighten a
- * table in the wrong database.
- *
- * ⚠️ Deliberately does NOT use `ensureOverlayIndex`'s bare `getDriver?.()`.
- * `ObjectQL.getDriver(objectName)` is REQUIRED to take an object name and
- * THROWS `No driver available for object 'undefined'` without one; the
- * paradigm gets away with it only because its whole body sits inside a
- * swallow-everything try/catch. Every probe here is individually guarded so
- * this function returns `undefined` instead of throwing into a boot hook.
- *
- * Returns `undefined` on hosts with no raw-SQL-capable driver — memory
- * engines and test doubles, where there is no DDL to issue and nothing to
- * warn about.
+ * The body moved to `partial-index-probe.ts` as
+ * {@link resolveIndexExecForTable} when #8629 made `sys_setting` the third
+ * caller of the same eight-line probe. This name stays because it is exported
+ * from the package index and armed by `plugin.ts`; what it resolves — the driver
+ * that OWNS this table, never the engine-wide default — is unchanged, and the
+ * shared function's header states why each fallback is in the order it is.
  */
 export function resolveIndexExec(engine: unknown): IndexExec | undefined {
-    const engineAny = engine as any;
-    const attempt = (fn: () => unknown): any => {
-        try {
-            return fn();
-        } catch {
-            return undefined;
-        }
-    };
-    const canRunSql = (d: any): boolean =>
-        !!d && (typeof d.raw === 'function' || typeof d.execute === 'function');
-
-    let driver: any = attempt(() => engineAny?.getDriverForObject?.(VIEW_DEFINITION_TABLE));
-    if (!canRunSql(driver)) driver = attempt(() => engineAny?.driver);
-    if (!canRunSql(driver)) driver = attempt(() => engineAny?.getDriver?.(VIEW_DEFINITION_TABLE));
-    if (!canRunSql(driver) && engineAny?.drivers instanceof Map) {
-        driver = undefined;
-        for (const candidate of engineAny.drivers.values()) {
-            if (canRunSql(candidate)) {
-                driver = candidate;
-                break;
-            }
-        }
-    }
-    if (!canRunSql(driver)) return undefined;
-    if (typeof driver.raw === 'function') return (sql: string) => driver.raw(sql);
-    return (sql: string) => driver.execute(sql);
+    return resolveIndexExecForTable(engine, VIEW_DEFINITION_TABLE);
 }
 
 /**
