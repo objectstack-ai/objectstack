@@ -3,15 +3,6 @@
   "compilerOptions": {
     "outDir": "./dist",
     "rootDir": "./src",
-    // [#8287] `@objectstack/types` is resolved to its SOURCE, not its built
-    // `dist/*.d.ts`. `pnpm check:type-source-resolution` requires this of every
-    // cross-package type import: a typecheck that reads a stale sibling `dist`
-    // is a verdict about a build, not about the code in this checkout — and the
-    // dangerous direction is the one that PASSES.
-    "paths": {
-      "@objectstack/types": ["../types/src/index.ts"],
-      "@objectstack/types/node": ["../types/src/node.ts"]
-    },
     "types": ["node"]
   },
   "include": ["src/**/*"],
