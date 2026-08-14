@@ -739,6 +739,15 @@ describe('applySystemFields', () => {
         // organization_id preserved; audit fields still injected
         expect(out.fields.organization_id.label).toBe('Org Code');
         expect(out.fields.created_at).toBeDefined();
+        // [#8459] …and the INDEX is declared on it all the same. The two halves
+        // used to be one condition by nesting, and the ruling separated them:
+        // the platform never overwrites the author's column (this test's
+        // subject, unchanged), and it always indexes the wall's predicate on a
+        // walled deployment (the line below). A `text` org code is deliberately
+        // the fixture — indexing only a `lookup` to `sys_organization` was the
+        // rejected option. Full coverage in
+        // `registry-tenant-index-author-declared-column.test.ts`.
+        expect((out as any).indexes).toEqual([{ fields: ['organization_id'] }]);
     });
 
     it('respects systemFields: false opt-out', () => {

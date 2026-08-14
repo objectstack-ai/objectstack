@@ -65,15 +65,31 @@
 // the case below now pins agreement plus the single-tenant control, without
 // which "converged" would be indistinguishable from "always stamps an index".
 //
-// ## The divergence this file still MEASURES but does not fix
+// ## The POSITION defect this file measured, and now pins as converged
 //
 // [#8376] `__search` on an extended title-less base — `registerObject`
 // materializes the BASE and `resolveObject` folds `extend` contributors on
 // afterwards WITHOUT re-materializing, while the read exits transform the
 // ALREADY FOLDED document. So a base with no title-eligible field that an
-// extension gives a text field to gets a companion from both `/meta` reads and
-// none from the registry. A POSITION defect of the seam, not a stamp defect,
-// live since #8038 and unchanged here.
+// extension gives a text field to got a companion from both `/meta` reads and
+// none from the registry: a column the driver's `syncSchema` never created.
+// A POSITION defect of the seam, not a stamp defect, live since #8038.
+//
+// Ruled 2026-08-13: the REGISTRY is authoritative — extensions do not
+// redesignate the owner's title, and the divergence is removed rather than
+// repaired by growing the schema (branch 2, an ADR-0045 additive migration
+// against live tenant data, was rejected).
+//
+// ⛔ The fix is NOT a call-site move, and the reason is worth keeping. On the
+// registry-only host that reproduces it, the served body never meets a
+// protocol-side fold at all — `resolveObject` folded it before the protocol saw
+// it — so there is no exit-side call to reorder. Nor can the exit un-fold: the
+// fold's idempotence subtracts `validations` and `indexes` only, and `fields`
+// is a key-keyed spread with no inverse (an extender may replace a base field
+// under the same key). Measured both ways. So the seam instead REFUSES to
+// re-decide a document-sensitive stamp over the folded document, and defers to
+// the verdict the registry reached over the base at registration. See
+// `SchemaRegistry.materializeServedObjectOnto`.
 
 import { describe, it, expect, vi } from 'vitest';
 import { SchemaRegistry } from '@objectstack/objectql';
@@ -466,15 +482,71 @@ describe('[#8268] every /meta object read exit materializes the base the way the
         expect(divergingKeys(host.byName, host.registryResolved)).toEqual([]);
     });
 
-    it('MEASURES the companion over-provisioned on an extended title-less base — filed as #8376', async () => {
-        // Reproduces on the REGISTRY-ONLY host too, so it is not the artifact
-        // seam: it is the seam's POSITION relative to the extender fold.
+    it('never PROVISIONS a companion the registry itself declined — the #8376 inversion', async () => {
+        // ⇄ THE DELIVERABLE OF #8376. Until it landed this case read
+        // `.toContain(SEARCH_COMPANION)` and `toEqual(['fields'])` — it MEASURED
+        // the divergence as expected rather than fixing it. Its inversion is the
+        // proof that the fix works; the rest of this file staying green is the
+        // proof that it cost nothing.
+        //
+        // Reproduces on the REGISTRY-ONLY host, so it is not the artifact seam:
+        // this body never meets a protocol-side fold at all (`resolveObject`
+        // folded it), which is why the fix could not be a call-site move and is
+        // instead the seam refusing to RE-decide a stamp over the folded
+        // document. Maintainer ruling 2026-08-13: the registry is authoritative,
+        // and `syncSchema` never created this column.
         const host = await measure({ serviceMode: 'absent', untitled: true, extendWithText: true });
+        expectNonEmptyRead(host);
+
+        // The fold really did happen — otherwise this case is vacuous and would
+        // pass on an object that simply has no extension.
+        expect(Object.keys((host.byName?.fields ?? {}) as Record<string, unknown>))
+            .toContain('nickname');
+        // …and the extension's field really is a title-eligible companion
+        // SOURCE, so withholding is a decision and not an inability. Without
+        // this line the case passes for the wrong reason the day `nickname`
+        // stops being `text`.
+        expect((host.byName?.fields as Record<string, { type?: string }>)?.nickname?.type)
+            .toBe('text');
+        // …and companions are ON for this deployment, so the gate is not what
+        // makes the case empty either.
+        expect(host.registryResolved?.[NAME_FIELD]).toBeUndefined();
 
         expect(Object.keys((host.registryResolved?.fields ?? {}) as Record<string, unknown>))
             .not.toContain(SEARCH_COMPANION);
+        // THE INVERSION — was `.toContain(...)`.
+        expect(Object.keys((host.byName?.fields ?? {}) as Record<string, unknown>))
+            .not.toContain(SEARCH_COMPANION);
+        // Both other exits move with it, or the fix is one route deep.
+        expect(Object.keys((host.listed?.fields ?? {}) as Record<string, unknown>))
+            .not.toContain(SEARCH_COMPANION);
+        expect(Object.keys((host.layerEffective?.fields ?? {}) as Record<string, unknown>))
+            .not.toContain(SEARCH_COMPANION);
+        // …and at the level of the CLASS — was `toEqual(['fields'])`.
+        expect(divergingKeys(host.byName, host.registryResolved)).toEqual([]);
+    });
+
+    it('KEEPS provisioning the companion when the base itself carries the source, extension or not', async () => {
+        // The control the inversion above is worthless without, and the exact
+        // trap the ruling named: do not trade one divergence for another. A fix
+        // that withheld the companion whenever an object had an extender at all
+        // passes every assertion above and fails every one of these.
+        const host = await measure({ serviceMode: 'artifact', extendWithText: true });
+        expectNonEmptyRead(host);
+
+        // Same shape as the withheld case — extended, companions on — differing
+        // ONLY in that the BASE carries the title-eligible field itself.
+        expect(Object.keys((host.byName?.fields ?? {}) as Record<string, unknown>))
+            .toContain('nickname');
+        // The service copy genuinely lacks the column, so agreement here cannot
+        // be reached by this host having had nothing to converge.
+        expect(Object.keys((host.serviceBody?.fields ?? {}) as Record<string, unknown>))
+            .not.toContain(SEARCH_COMPANION);
+
+        expect(Object.keys((host.registryResolved?.fields ?? {}) as Record<string, unknown>))
+            .toContain(SEARCH_COMPANION);
         expect(Object.keys((host.byName?.fields ?? {}) as Record<string, unknown>))
             .toContain(SEARCH_COMPANION);
-        expect(divergingKeys(host.byName, host.registryResolved)).toEqual(['fields']);
+        expect(divergingKeys(host.byName, host.registryResolved)).toEqual([]);
     });
 });

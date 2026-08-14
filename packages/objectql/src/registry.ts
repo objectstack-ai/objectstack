@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveInjectedSystemColumns, isInjectedColumnDefinition, checkManagedApiMethodAffordances, LEGACY_API_METHODS, AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
+import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveInjectedSystemColumns, checkManagedApiMethodAffordances, LEGACY_API_METHODS, AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
 // [#4513] The audit-family governance table, and [#6562] the injected-column
 // DEFINITION tables it governs — see the re-exports below for why both live in a
 // package `objectql` and `metadata-protocol` both depend on.
@@ -646,21 +646,41 @@ export function applySystemFields(
  *
  * ## The predicate, stated exactly
  *
- * "The object carries a tenant column the PLATFORM provisioned" — not "this call
- * just injected one". The distinction is the whole reason the decision moved out
- * of the injection branch: at a read exit the column is ALREADY present
- * (`governServedItem` runs `applyInjectedSystemColumns` before the seam), so a
- * condition reading `!schema.fields?.organization_id` is false exactly where the
- * convergence is needed. `isInjectedColumnDefinition` answers the question the
- * old nesting was really asking, at either site, in either order.
+ * "The object carries a tenant column" — not "this call just injected one", and
+ * [#8459] not "the PLATFORM provisioned it". The first distinction is the whole
+ * reason the decision moved out of the injection branch: at a read exit the
+ * column is ALREADY present (`governServedItem` runs
+ * `applyInjectedSystemColumns` before the seam), so a condition reading
+ * `!schema.fields?.organization_id` is false exactly where the convergence is
+ * needed. {@link carriesTenantScopeColumn} answers the question the old nesting
+ * was really asking, at either site, in either order.
  *
- * An author-declared `organization_id` of the author's own shape therefore still
- * gets NO platform index, exactly as before. The one behaviour this widens is an
- * author who declares the column BYTE-IDENTICAL to `TENANT_SCOPE_FIELD_DEF`
- * (all eight keys, same values) and then gets the index — accepted for the
- * reason `stripProvisionedSearchCompanionFrom` accepts its twin: the two are
- * indistinguishable by construction, and the platform's own answer for that
- * column is the one being served either way.
+ * The second distinction is the 2026-08-13 maintainer ruling on #8459. This
+ * predicate also required the column to be the platform's OWN definition
+ * (`isInjectedColumnDefinition`, byte-for-byte), which #8375 preserved exactly
+ * rather than widening inside a convergence fix. The effect was that an author
+ * who declared their own `organization_id` — adding a label, making it
+ * `required`, pointing it at their own org table — kept the column and silently
+ * lost the index on it, while `computeTenantLayer0Filter` (plugin-security)
+ * went on AND-composing `organization_id = <org>` onto essentially every read of
+ * that object. The deployment's hottest predicate, unindexed, reached by an
+ * additive-looking authoring move that removed a guarantee the author never knew
+ * they held.
+ *
+ * The ruling is one rule, stated once: on a walled deployment the wall's
+ * predicate is indexed, whoever typed the column. ⛔ Not a type judgement — an
+ * `organization_id` declared as `text` gets the index too. Inspecting the
+ * declared type to decide whether it is "really" the tenant anchor was
+ * considered and REJECTED: it is a third predicate at the site where #8375 just
+ * reduced two to one, and its boundary is itself something an author gets
+ * subtly wrong (a `text` org code would lose the index and look fine).
+ *
+ * ⚠️ Recorded gap, deliberately left uncovered by that ruling: an author who
+ * wants NO index on the tenant column has no way to say so. If that need
+ * appears it becomes an explicit declared key — ⛔ it is not grounds to restore
+ * the injected-column condition. What exists today for a DIFFERENT index shape
+ * is {@link declaresTenantIndex}: declare your own single-column tenant index
+ * and the platform declares none.
  *
  * `multiTenant: false` declares NO index rather than a false one: on an unwalled
  * stack nothing filters by organization, so the index is dead weight — the same
@@ -690,7 +710,7 @@ function provisionTenantScopeIndex(
   opts: { multiTenant: boolean },
 ): ServiceObject {
   if (!opts.multiTenant) return schema;
-  if (!platformOwnsTenantColumn(schema)) return schema;
+  if (!carriesTenantScopeColumn(schema)) return schema;
   if (declaresTenantIndex(schema)) return schema;
 
   return {
@@ -704,26 +724,44 @@ function provisionTenantScopeIndex(
 }
 
 /**
- * [#8375] Is this object's `organization_id` the PLATFORM's column rather than
- * one the author declared?
+ * [#8375, widened by #8459] Is this object tenant-scoped — i.e. does it carry an
+ * `organization_id` column for the wall to filter on?
  *
- * Two independent conditions, and both are load-bearing:
+ * The spec's own derivation (`resolveInjectedSystemColumns`, #5378) and nothing
+ * else, so `systemFields: false`, `systemFields.tenant: false`,
+ * `tenancy.enabled: false` and `managedBy: 'better-auth'` all withhold the index
+ * exactly as they withhold the column. Re-deriving any of those rows here is the
+ * drift that plan exists to prevent.
  *
- *  - the object must carry a tenant column at all — the spec's own derivation
- *    (`resolveInjectedSystemColumns`, #5378), so `systemFields: false`,
- *    `systemFields.tenant: false`, `tenancy.enabled: false` and
- *    `managedBy: 'better-auth'` all withhold the index exactly as they withhold
- *    the column. Re-deriving any of those rows here is the drift that plan
- *    exists to prevent;
- *  - the column present must be the platform's own definition, or absent
- *    (the pre-injection shape). `isInjectedColumnDefinition` compares against
- *    the shipped table byte-for-byte, which is the same exactness
- *    `stripInjectedSystemColumns` uses to decide the same question in reverse.
+ * ⚠️ That gate is NOT a leftover of the condition #8459 lifted, and it does not
+ * contradict the ruling's "whenever the object carries `organization_id`": it is
+ * the same reasoning as `multiTenant: false`, one scope down. An object that
+ * declares itself non-tenant-scoped is one the wall composes NO predicate on —
+ * `computeTenantLayer0Filter` (plugin-security) returns `null` when
+ * `tenancyDisabled`, which reads the very same `systemFields.tenant` /
+ * `tenancy.enabled` declarations — so an index there would serve nothing. What
+ * #8459 removed is the SECOND condition this function used to carry: that the
+ * `organization_id` present be the platform's own definition byte-for-byte
+ * (`isInjectedColumnDefinition`). Where the column comes from is no longer part
+ * of the question; whether the object is walled still is.
+ *
+ * ⛔ Do NOT "simplify" this to a field-map check (`fields.organization_id !==
+ * undefined`), however closely that reads to the ruling's sentence. Measured:
+ * it breaks the WRITE path for ordinary platform-provisioned objects. The save
+ * path strips the injected COLUMNS before it strips the materialized stamps
+ * (`stripMaterializedFromRegistry(type, stripServedSystemColumns(type, item))`,
+ * `@objectstack/metadata-protocol`), so by the time
+ * {@link SchemaRegistry.stripProvisionedTenantIndexFrom} re-stamps the
+ * remainder through this function, the body no longer HAS an
+ * `organization_id` — a field-map predicate answers "not tenant-scoped", the
+ * re-stamp adds nothing, the lists differ, the strip refuses, and the
+ * platform's own index entry is baked into `sys_metadata.metadata`, its
+ * checksum and every history diff (the #4326 regression). Reading the object's
+ * DECLARATIONS instead reaches the same verdict on a stripped body as on a
+ * whole one, which is what makes the stamp and its inverse agree.
  */
-function platformOwnsTenantColumn(schema: ServiceObject): boolean {
-  if (!resolveInjectedSystemColumns(schema).tenant) return false;
-  const declared = (schema.fields as Record<string, unknown> | undefined)?.organization_id;
-  return declared === undefined || isInjectedColumnDefinition(declared, TENANT_SCOPE_FIELD_DEF);
+function carriesTenantScopeColumn(schema: ServiceObject): boolean {
+  return resolveInjectedSystemColumns(schema).tenant;
 }
 
 /**
@@ -1673,10 +1711,12 @@ export class SchemaRegistry {
    * @param opts.designatePrimary - `false` withholds ONLY the ADR-0079
    *   designation step. See {@link materializeServedObjectOnto} for the one
    *   caller that passes it and why the choice is not this method's to make.
+   * @param opts.provisionCompanion - `false` withholds ONLY the `__search`
+   *   step, for the same reason and from the same caller (#8376).
    */
   private materializeBaseLayer(
     schema: ServiceObject,
-    opts?: { designatePrimary?: boolean },
+    opts?: { designatePrimary?: boolean; provisionCompanion?: boolean },
   ): ServiceObject {
     let out = schema;
 
@@ -1694,7 +1734,7 @@ export class SchemaRegistry {
     // additive migration (ADR-0045) that the driver's `syncSchema`
     // materializes, populated by plugin-pinyin-search's before-save hooks and
     // OR-ed into `$search` by the engine's `expandSearchToFilter`.
-    if (this.searchCompanion) {
+    if (this.searchCompanion && opts?.provisionCompanion !== false) {
       out = provisionSearchCompanion(out);
     }
 
@@ -1725,25 +1765,41 @@ export class SchemaRegistry {
    *  - the served document is materialized in the seam's own ORDER, so the two
    *    answers cannot differ by sequencing either.
    *
-   * ⛔ `designatePrimary` is withheld when this registry HAS resolved the named
-   * object and its own answer carries no `nameField`. Without that check the
-   * convergence would over-reach in exactly one measured case: `registerObject`
-   * designates over the BASE layer and `resolveObject` folds `extend`
-   * contributors on afterwards WITHOUT re-designating, so a title-less base
-   * that an extension gives a text field to resolves with NO `nameField` — while
-   * a transform run at the read exit sees the folded document and would
-   * designate the extension's field. Withholding is the safe half of that
-   * disagreement: this seam may only converge the served copy ONTO the
-   * registry's answer, never invent a designation the registry declined. The
-   * mirror-image case — the registry designates and the served body cannot —
-   * needs no check, because `provisionPrimary` is a pure function of the body it
-   * is handed and can only ever point at a field that body really declares.
+   * ⛔ [#8376] THE SEAM MATERIALIZES A **BASE LAYER**, AND THE BODY HANDED HERE
+   * MAY ALREADY BE FOLDED. That is the whole of what this method has to get
+   * right, and it is one rule rather than a list of per-stamp exceptions.
    *
-   * ⚠️ The same base-vs-folded asymmetry applies to the `__search` stamp and is
-   * NOT closed here: `provisionSearchCompanionOnto` has served the folded
-   * document since #8038 and this method preserves that behaviour exactly
-   * rather than re-spelling it. Measured, and filed separately — see the PR's
-   * stamp inventory.
+   * `registerObject` materializes the BASE and `resolveObject` folds `extend`
+   * contributors on afterwards WITHOUT re-materializing. A read exit holds the
+   * FOLDED document, so any stamp whose decision reads the field set would be
+   * re-decided here over a strictly larger map than the registry ever judged —
+   * and would answer differently for a title-less base that an extension gives
+   * a text field to. Both document-sensitive stamps have that shape:
+   * `provisionPrimary` would designate the extension's field, and
+   * `provisionSearchCompanion` would find it as a companion SOURCE and provision
+   * a `__search` column the registry never provisioned and the driver's
+   * `syncSchema` therefore never created.
+   *
+   * ⛔ The fix cannot be to un-fold here: the fold's own idempotence
+   * ({@link subtractExtenderContributions}) reaches `validations` and `indexes`
+   * only — `fields` is a key-keyed spread with no inverse, because an extender
+   * may legitimately REPLACE a base field under the same key. Measured: after
+   * `foldObjectExtendersOnto`, the extension's field is still in the map.
+   *
+   * So the pre-fold verdict is taken from the one party that reached it BEFORE
+   * the fold — this registry, at registration. Each document-sensitive stamp is
+   * withheld when this registry HAS resolved the named object and its own
+   * answer does not carry that stamp. Convergence may only move the served copy
+   * ONTO the registry's answer, never manufacture a stamp the registry declined.
+   *
+   * The mirror-image case — the registry stamps and the served body cannot —
+   * needs no check: both provisioners are pure functions of the body they are
+   * handed, so each can only ever point at a field that body really declares.
+   *
+   * ⚠️ A stamp added to {@link materializeBaseLayer} needs a withhold here ONLY
+   * IF its decision reads the document. #8375's tenant-scope index does not (it
+   * is gated on a deployment flag alone), which is why it has no entry and needs
+   * none. That is the test to apply to stamp five.
    *
    * Returns `base` by reference when nothing was owed, so a registry-sourced
    * body (materialized at registration) pays comparisons and no copy, and a
@@ -1751,26 +1807,42 @@ export class SchemaRegistry {
    */
   materializeServedObjectOnto<T>(base: T): T {
     if (base === null || typeof base !== 'object') return base;
+    const declined = this.declinedBaseLayerStamps(base);
     return this.materializeBaseLayer(base as never, {
-      designatePrimary: !this.declinedPrimaryDesignation(base),
+      designatePrimary: !declined.primary,
+      provisionCompanion: !declined.companion,
     }) as unknown as T;
   }
 
   /**
-   * Did this registry resolve the object `base` names, and decline to designate
-   * a primary title for it? See {@link materializeServedObjectOnto}.
+   * Which document-sensitive stamps did this registry resolve the object `base`
+   * names and then DECLINE to apply to its base layer?
+   * See {@link materializeServedObjectOnto} for why the question is asked at all.
    *
-   * `false` — "no opinion" — for a body with no usable name and for a name this
-   * registry does not know, which is the honest answer in both cases: an object
-   * that never reached `registerObject` has no registry designation to converge
-   * onto, and the pure transform is then the only answer available.
+   * All-`false` — "no opinion" — for a body with no usable name and for a name
+   * this registry does not know, which is the honest answer in both cases and is
+   * also the safe one: an object that never reached `registerObject` has no
+   * registry verdict to converge onto, and nothing could have folded such a body
+   * either (the fold reads this same contributor list), so the body IS its own
+   * base layer and the pure transform is exactly right for it.
    */
-  private declinedPrimaryDesignation(base: unknown): boolean {
+  private declinedBaseLayerStamps(base: unknown): { primary: boolean; companion: boolean } {
+    const noOpinion = { primary: false, companion: false };
     const name = (base as { name?: unknown }).name;
-    if (typeof name !== 'string' || name === '') return false;
-    const resolved = this.getObject(name);
-    if (!resolved) return false;
-    return (resolved as { nameField?: unknown }).nameField === undefined;
+    if (typeof name !== 'string' || name === '') return noOpinion;
+    const resolved = this.getObject(name) as
+      | { nameField?: unknown; fields?: unknown }
+      | undefined;
+    if (!resolved) return noOpinion;
+    const fields = resolved.fields;
+    const resolvedFields =
+      fields && typeof fields === 'object' && !Array.isArray(fields)
+        ? (fields as Record<string, unknown>)
+        : undefined;
+    return {
+      primary: resolved.nameField === undefined,
+      companion: resolvedFields?.[SEARCH_COMPANION_FIELD] === undefined,
+    };
   }
 
   /**
