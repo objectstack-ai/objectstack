@@ -79,11 +79,41 @@ export interface PackagePublishResult {
   driverFault?: PackagePublishDriverFault;
 }
 
+/**
+ * [#8275] The outcome of {@link PackageService.delete}.
+ *
+ * Same CHANNEL discipline as {@link PackagePublishResult}, and for the same
+ * reason — a `DELETE FROM sys_packages` that breaks is a server fault, not a
+ * caller's mistake:
+ *
+ *  - **Returned** `{ success: false }` — the delete itself broke. The caller
+ *    did nothing wrong, so the door answers a **5xx**.
+ *  - **Thrown**, carrying an ADR-0112 envelope — a *refusal*. `delete` does not
+ *    swallow those; they leave by the door's `sendThrownError`, where #8016's
+ *    mapping answers with the producer's own status and code (a `409
+ *    DESTRUCTIVE_CHANGE` stays a 409).
+ *
+ * ⛔ **It deliberately carries NO message field, and that absence is the
+ * design.** `publish` needed `driverFault` because it had a pre-existing
+ * `error?: string` limb that was carrying the raw driver line to the wire;
+ * this path never had one — the producer returns a bare flag and the door
+ * writes its own sentence from the request's own `:id`/`?version=`. Adding a
+ * message channel here would CREATE the thing #8131 had to remove there, and
+ * it would land on the wire unfiltered: the 5xx withhold (#8086) lives in the
+ * door's `sendThrownError`, which a RETURNED failure never reaches at any
+ * status (pinned in `package-publish-status-classification.test.ts` §3). No
+ * channel, nothing to withhold — see `delete-driver-fault.test.ts` §1, which
+ * asserts the returned shape has exactly one key.
+ */
+export interface PackageDeleteResult {
+  success: boolean;
+}
+
 export interface PackageService {
   publish(data: { manifest: ObjectStackManifest; metadata: PackageMetadata }): Promise<PackagePublishResult>;
   get(packageId: string, version?: string): Promise<PackageRecord | null>;
   list(): Promise<PackageRecord[]>;
-  delete(packageId: string, version?: string): Promise<{ success: boolean }>;
+  delete(packageId: string, version?: string): Promise<PackageDeleteResult>;
 }
 
 /**
@@ -120,6 +150,12 @@ export interface PackageService {
  * Note this is a test of DECLARATION, not of the status's band. A declared
  * 5xx is re-thrown too: the producer said what it was, so the door's shared
  * mapping — not this catch — is what should answer for it.
+ *
+ * [#8275] Now consumed by BOTH swallowing catches in this service — `publish`
+ * and `delete`. It stays ONE predicate rather than a second copy next to
+ * `delete`: the two catches ask the same question, and the `.code` regression
+ * above is exactly the kind a second implementation re-introduces on its own
+ * schedule. Each caller's per-dialect pin is in its own suite.
  */
 function declaresHttpAnswer(error: unknown): boolean {
   if (typeof error !== 'object' || error === null) return false;
@@ -312,7 +348,31 @@ export class PackageServicePlugin implements Plugin {
           logger.info(`Deleted package: ${packageId}${version ? `@${version}` : ''}`);
           return { success: true };
         } catch (error) {
+          // [#8275] ① The raw driver text goes to the LOG, and only there.
+          // Unchanged — it already went here, and nothing about the operator's
+          // diagnostics changes.
           logger.error('Failed to delete package', error as Error);
+
+          // ② A throw that DECLARES its own envelope is a REFUSAL, and a
+          // refusal is not this method's to swallow. Re-thrown so it leaves by
+          // the door's catch-all, where #8016's shared mapping answers it with
+          // the producer's own status and code. Swallowing them flattened every
+          // coded refusal reachable from this call path into one
+          // `400 PACKAGE_DELETE_FAILED`, losing both.
+          //
+          // ⛔ The discriminant is the **status** channel, never `.code`: every
+          // SQL driver populates a string `code` on its errors, so reading it
+          // would re-throw genuine driver faults as if they were refusals —
+          // straight back into a 500 whose message the leak heuristic does not
+          // withhold. `declaresHttpAnswer`'s note carries the full argument and
+          // `delete-driver-fault.test.ts` pins it per dialect.
+          if (declaresHttpAnswer(error)) throw error;
+
+          // ③ Everything else is a DRIVER FAULT: the `DELETE FROM sys_packages`
+          // broke — a missing table, a lock timeout, a foreign-key restriction
+          // — and the caller's request was never the problem. The bare flag is
+          // all that goes back (see `PackageDeleteResult`: no message channel,
+          // deliberately), and the door answers it 5xx.
           return { success: false };
         }
       },

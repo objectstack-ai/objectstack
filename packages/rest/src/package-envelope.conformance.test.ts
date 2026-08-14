@@ -313,8 +313,15 @@ describe('packages envelope (#3843) — error bodies', () => {
     },
     {
       // And the other one: a bare `{ success: false }`.
-      name: 'a version-scoped delete the service refuses',
-      status: 400,
+      //
+      // [#8275] Re-spelled, not replaced: the fixture and its envelope
+      // assertion are unchanged, only the STATUS this outcome answers moved.
+      // A returned failure here means the `DELETE FROM sys_packages` broke —
+      // a server fault — so it is a 5xx, the sibling of the `publish` case
+      // above. The code is untouched, and this suite's subject (the declared
+      // envelope) is unaffected by which status carries it.
+      name: 'a version-scoped delete whose statement broke — a driver fault, so a 5xx',
+      status: 500,
       code: 'PACKAGE_DELETE_FAILED',
       run: () => drive(
         mount({ delete: async () => ({ success: false }) }),
