@@ -23,9 +23,8 @@
 
 import { createHash, randomBytes } from 'node:crypto';
 
-import { postureEnforcesWall, postureUsesUnionScope } from '@objectstack/spec/security';
+import { postureEnforcesWall, postureUsesUnionScope, normalizeTenancyPosture } from '@objectstack/spec/security';
 import type { TenancyPosture } from '@objectstack/spec/security';
-import { resolveTenancyPosture } from '@objectstack/types';
 
 /** Default visible prefix for generated keys (helps users identify a key). */
 export const API_KEY_PREFIX = 'osk_';
@@ -168,21 +167,39 @@ export type ApiKeyAdmission =
   | { outcome: 'refused'; reason: ApiKeyRefusalReason; message: string };
 
 /**
- * Read the deployment's tenancy posture, fail-closed.
- *
- * `resolveTenancyPosture` THROWS on an unrecognized `OS_TENANCY_POSTURE` — by
- * design, so a typo cannot silently drop the organization wall. The CLI's boot
- * gate refuses to serve in that state, so this branch is unreachable on a
- * running deployment; if it is ever reached anyway, treat the posture as
- * `isolated` (the strictest) rather than letting an unreadable posture become
- * the reason a credential is admitted.
+ * The shape of the kernel's `tenancy` service this module reads a posture from.
+ * Structural on purpose: `@objectstack/core` must not depend on the plugin that
+ * provides it, and an embedding without that plugin simply supplies nothing.
  */
-export function currentTenancyPosture(): TenancyPosture {
-  try {
-    return resolveTenancyPosture();
-  } catch {
-    return 'isolated';
-  }
+export interface TenancyPostureSource {
+  posture?: string;
+  isolationActive?: boolean;
+}
+
+/**
+ * [#8287] Resolve the EFFECTIVE tenancy posture from the kernel's `tenancy`
+ * service — the same reconciliation `plugin-security` performs before handing a
+ * posture to `computeTenantLayer0Filter`, so the wall and the API-key admission
+ * can never disagree about which posture is in force.
+ *
+ * ⚠️ Deliberately NOT `resolveTenancyPosture()` from `@objectstack/types`, which
+ * reads `OS_TENANCY_POSTURE` directly. That answers what the operator ASKED
+ * for, not what is ENFORCED: under ADR-0093 D4/D5 a deployment that requests
+ * `isolated` without the enterprise `@objectstack/organizations` runtime
+ * resolves to `single` and runs with NO organization wall. Reading the env
+ * there would refuse org-less API keys on a deployment whose wall is not even
+ * active — breaking working automation to enforce a boundary that does not
+ * exist. The `tenancy` service is the one place that already knows the
+ * difference.
+ *
+ * Returns `undefined` when no service is available, which callers must treat as
+ * "no posture-conditional refusal" — see {@link resolveApiKeyAdmission}.
+ */
+export function effectiveTenancyPosture(
+  tenancy: TenancyPostureSource | undefined | null,
+): TenancyPosture | undefined {
+  if (!tenancy) return undefined;
+  return normalizeTenancyPosture(tenancy.posture) ?? (tenancy.isolationActive ? 'isolated' : 'single');
 }
 
 /**
@@ -200,8 +217,9 @@ export async function resolveApiKeyPrincipal(
   ql: any,
   headers: any,
   nowMs: number = Date.now(),
+  tenancyPosture?: TenancyPosture,
 ): Promise<ApiKeyPrincipal | undefined> {
-  const admission = await resolveApiKeyAdmission(ql, headers, nowMs);
+  const admission = await resolveApiKeyAdmission(ql, headers, nowMs, tenancyPosture);
   return admission.outcome === 'admitted' ? admission.principal : undefined;
 }
 
@@ -222,6 +240,7 @@ export async function resolveApiKeyAdmission(
   ql: any,
   headers: any,
   nowMs: number = Date.now(),
+  tenancyPosture?: TenancyPosture,
 ): Promise<ApiKeyAdmission> {
   const apiKey = extractApiKey(headers);
   if (!apiKey) return { outcome: 'none' };
@@ -275,8 +294,16 @@ export async function resolveApiKeyAdmission(
   //                 no active organization NOTHING can match, which is exactly
   //                 the `200 + total 0` this card was filed for. Refuse, so the
   //                 failure is loud at call time instead of silently empty.
-  if (!tenantId) {
-    const posture = currentTenancyPosture();
+  //
+  // ⚠️ An ABSENT posture means "the caller could not tell us which posture is in
+  // force", and the answer to that is to admit — i.e. today's behaviour. Not
+  // fail-closed, deliberately, and this is the one place in this module where
+  // that is the right call: refusing on an unknown posture would break every
+  // org-less key on every `single` deployment whose transport has not been
+  // wired, to enforce a wall that may not exist. Fail-closed belongs on
+  // questions about THIS credential; this is a question about the deployment.
+  if (!tenantId && tenancyPosture) {
+    const posture = tenancyPosture;
     if (postureEnforcesWall(posture) && !postureUsesUnionScope(posture)) {
       return {
         outcome: 'refused',

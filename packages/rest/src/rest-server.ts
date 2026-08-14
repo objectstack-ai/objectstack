@@ -2,6 +2,7 @@
 
 import {
     IHttpServer, resolveAuthzContext, resolveLocalizationContext, isAuthGateAllowlisted,
+    effectiveTenancyPosture,
     assembleExecutionContext, normalizeAuthGate, type AuthGate,
     shouldDenyAnonymous, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS,
     // [#7678] ADR-0090 D5/D9 suggested-binding `?status=` vocabulary — the one
@@ -2887,7 +2888,17 @@ export class RestServer {
             const getSession = async (h: any) => {
                 try { return await api.getSession({ headers: h }); } catch { return undefined; }
             };
-            const authz = await resolveAuthzContext({ ql, headers, getSession });
+            // [#8287] The EFFECTIVE tenancy posture, from the kernel's `tenancy`
+            // service — the same source plugin-security reconciles for the Layer 0
+            // wall, so API-key admission and the wall agree. Absent ⇒ undefined ⇒
+            // no posture-conditional refusal (behaviour unchanged).
+            let tenancyPosture;
+            try {
+                tenancyPosture = effectiveTenancyPosture(await kernel.getServiceAsync('tenancy') as any);
+            } catch {
+                tenancyPosture = undefined;
+            }
+            const authz = await resolveAuthzContext({ ql, headers, getSession, tenancyPosture });
             // [#6216] The anonymous contract IS the shared assembler's default
             // entry: no resolved principal → no context → 401. Taken early here
             // only so an anonymous request does not pay for the localization and

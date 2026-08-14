@@ -478,16 +478,6 @@ describe('resolveUserAuthzGrants — userId-driven authz for non-HTTP surfaces (
 describe('resolveAuthzContext — API-key organization (#8287)', () => {
   const raw = 'osk_ctx_probe';
   const keyHeaders = () => ({ 'x-api-key': raw });
-  const withPosture = async <T>(posture: string, fn: () => Promise<T>): Promise<T> => {
-    const previous = process.env.OS_TENANCY_POSTURE;
-    process.env.OS_TENANCY_POSTURE = posture;
-    try {
-      return await fn();
-    } finally {
-      if (previous === undefined) delete process.env.OS_TENANCY_POSTURE;
-      else process.env.OS_TENANCY_POSTURE = previous;
-    }
-  };
   const tables = (member: any[]) => ({
     sys_api_key: [{ key: hashApiKey(raw), revoked: false, user_id: 'u1', active_organization_id: 'org_a' }],
     sys_user: [{ id: 'u1', email: 'ada@x.com' }],
@@ -498,7 +488,7 @@ describe('resolveAuthzContext — API-key organization (#8287)', () => {
 
   it('adopts the key organization as the request tenant when membership holds', async () => {
     const ql = makeQl(tables([{ user_id: 'u1', organization_id: 'org_a', role: 'member' }]));
-    const ctx = await withPosture('isolated', () => resolveAuthzContext({ ql, headers: keyHeaders() }));
+    const ctx = await resolveAuthzContext({ ql, headers: keyHeaders(), tenancyPosture: 'isolated' });
     expect(ctx.userId).toBe('u1');
     expect(ctx.tenantId).toBe('org_a');
     expect(ctx.authRefusal).toBeUndefined();
@@ -516,7 +506,7 @@ describe('resolveAuthzContext — API-key organization (#8287)', () => {
    */
   it('refuses a key whose owner is no longer a member of its organization', async () => {
     const ql = makeQl(tables([{ user_id: 'u1', organization_id: 'org_other', role: 'member' }]));
-    const ctx = await withPosture('isolated', () => resolveAuthzContext({ ql, headers: keyHeaders() }));
+    const ctx = await resolveAuthzContext({ ql, headers: keyHeaders(), tenancyPosture: 'isolated' });
     expect(ctx.userId).toBeUndefined();
     expect(ctx.tenantId).toBeUndefined();
     expect(ctx.permissions).toEqual([]);
@@ -527,14 +517,14 @@ describe('resolveAuthzContext — API-key organization (#8287)', () => {
     const ql = makeQl(tables([
       { user_id: 'u1', organization_id: 'org_a', role: 'member', valid_until: '2000-01-01T00:00:00Z' },
     ]));
-    const ctx = await withPosture('isolated', () => resolveAuthzContext({ ql, headers: keyHeaders() }));
+    const ctx = await resolveAuthzContext({ ql, headers: keyHeaders(), tenancyPosture: 'isolated' });
     expect(ctx.userId).toBeUndefined();
     expect(ctx.authRefusal?.reason).toBe('organization_membership_ended');
   });
 
   it('the same key under `group` is refused too — the wall is membership-derived there as well', async () => {
     const ql = makeQl(tables([{ user_id: 'u1', organization_id: 'org_other', role: 'member' }]));
-    const ctx = await withPosture('group', () => resolveAuthzContext({ ql, headers: keyHeaders() }));
+    const ctx = await resolveAuthzContext({ ql, headers: keyHeaders(), tenancyPosture: 'group' });
     expect(ctx.userId).toBeUndefined();
     expect(ctx.authRefusal?.reason).toBe('organization_membership_ended');
   });
@@ -546,7 +536,7 @@ describe('resolveAuthzContext — API-key organization (#8287)', () => {
    */
   it('does NOT apply the membership check under `single`', async () => {
     const ql = makeQl(tables([]));
-    const ctx = await withPosture('single', () => resolveAuthzContext({ ql, headers: keyHeaders() }));
+    const ctx = await resolveAuthzContext({ ql, headers: keyHeaders(), tenancyPosture: 'single' });
     expect(ctx.userId).toBe('u1');
     expect(ctx.authRefusal).toBeUndefined();
   });
@@ -565,11 +555,12 @@ describe('resolveAuthzContext — API-key organization (#8287)', () => {
       sys_user_position: [],
       sys_user_permission_set: [],
     });
-    const ctx = await withPosture('isolated', () => resolveAuthzContext({
+    const ctx = await resolveAuthzContext({
       ql,
       headers: keyHeaders(),
       getSession: session('u1', { org: 'org_a' }),
-    }));
+      tenancyPosture: 'isolated',
+    });
     expect(ctx.userId).toBeUndefined();
     expect(ctx.authRefusal?.reason).toBe('organization_required');
   });
@@ -589,7 +580,7 @@ describe('resolveAuthzContext — API-key organization (#8287)', () => {
         return inner.find(object, opts);
       },
     };
-    await withPosture('isolated', () => resolveAuthzContext({ ql, headers: keyHeaders() }));
+    await resolveAuthzContext({ ql, headers: keyHeaders(), tenancyPosture: 'isolated' });
     // One read for `accessible_org_ids`, one for the fellow-org peer list that
     // an ACTIVE tenant already triggered before this change. The membership
     // assertion adds neither.

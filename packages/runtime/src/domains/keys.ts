@@ -31,9 +31,8 @@
  *    organization is re-checked here, against `sys_member`, at mint time.
  */
 
-import { isGrantActive } from '@objectstack/core';
+import { isGrantActive, effectiveTenancyPosture } from '@objectstack/core';
 import { postureEnforcesWall } from '@objectstack/spec/security';
-import { resolveTenancyPosture } from '@objectstack/types';
 
 import { generateApiKey } from '../security/api-key.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
@@ -103,17 +102,21 @@ export async function handleKeysRequest(
         ? ec.tenantId.trim()
         : undefined;
 
+    // The EFFECTIVE posture, from the kernel's `tenancy` service — what is
+    // ENFORCED, not what `OS_TENANCY_POSTURE` requested (ADR-0093 D4/D5: a
+    // requested-but-unenforceable wall resolves to `single`). An absent service
+    // means we cannot tell, and the honest answer to that at MINT time is to
+    // mint: refusing would block key creation on a deployment that may have no
+    // wall at all.
     let tenancyPosture;
     try {
-        tenancyPosture = resolveTenancyPosture();
+        tenancyPosture = effectiveTenancyPosture(
+            await deps.resolveService(context, 'tenancy' as any, context.environmentId),
+        );
     } catch {
-        // Unrecognized OS_TENANCY_POSTURE — the CLI's boot gate refuses to
-        // serve in that state, so this is unreachable on a running deployment.
-        // Treat it as walled rather than letting an unreadable posture be the
-        // reason a key is minted without an organization.
-        tenancyPosture = 'isolated' as const;
+        tenancyPosture = undefined;
     }
-    const walled = postureEnforcesWall(tenancyPosture);
+    const walled = tenancyPosture ? postureEnforcesWall(tenancyPosture) : false;
 
     if (walled && !activeOrganizationId) {
         // Refuse rather than mint. Under a walled posture an org-less key
@@ -126,7 +129,7 @@ export async function handleKeysRequest(
             handled: true,
             response: deps.error(
                 'Cannot create an API key without an active organization: this deployment runs a walled '
-                + `tenancy posture ('${tenancyPosture}') in which every organization-scoped read requires one. `
+                + `tenancy posture ('${String(tenancyPosture)}') in which every organization-scoped read requires one. `
                 + 'Select an organization and try again.',
                 400,
             ),

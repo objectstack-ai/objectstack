@@ -175,7 +175,7 @@ describe('HttpDispatcher.handleKeys (POST /keys — key generation)', () => {
  * Kernel whose ObjectQL also serves `sys_member`, so the mint-time membership
  * check has something real to read.
  */
-function makeOrgKernel(members: any[]) {
+function makeOrgKernel(members: any[], posture?: string) {
   const rows: any[] = [];
   const ql = {
     insert: async (_obj: string, data: any) => {
@@ -191,9 +191,14 @@ function makeOrgKernel(members: any[]) {
     update: async () => ({}),
     delete: async () => ({}),
   };
+  // [#8287] The mint path resolves the EFFECTIVE posture from the kernel's
+  // `tenancy` service (ADR-0093 D4/D5), never from OS_TENANCY_POSTURE — a
+  // requested-but-unenforceable wall resolves to `single` there, and minting
+  // must follow what is ENFORCED.
+  const tenancy = posture ? { posture } : undefined;
   const kernel: any = {
-    getService: (n: string) => (n === 'objectql' ? ql : undefined),
-    getServiceAsync: async (n: string) => (n === 'objectql' ? ql : undefined),
+    getService: (n: string) => (n === 'objectql' ? ql : n === 'tenancy' ? tenancy : undefined),
+    getServiceAsync: async (n: string) => (n === 'objectql' ? ql : n === 'tenancy' ? tenancy : undefined),
   };
   return { kernel, rows };
 }
@@ -205,22 +210,10 @@ const orgCtx = (tenantId?: string) => ({
   executionContext: { userId: 'u1', isSystem: false, positions: [], permissions: [], tenantId },
 });
 
-const withPosture = async <T>(posture: string, fn: () => Promise<T>): Promise<T> => {
-  const previous = process.env.OS_TENANCY_POSTURE;
-  process.env.OS_TENANCY_POSTURE = posture;
-  try {
-    return await fn();
-  } finally {
-    if (previous === undefined) delete process.env.OS_TENANCY_POSTURE;
-    else process.env.OS_TENANCY_POSTURE = previous;
-  }
-};
-
 describe('HttpDispatcher.handleKeys — organization inheritance (#8287)', () => {
   it('stamps the minter’s active organization on the row and echoes it once', async () => {
-    const { kernel, rows } = makeOrgKernel([{ user_id: 'u1', organization_id: 'org_a', role: 'owner' }]);
-    const res = await withPosture('isolated', () =>
-      dispatcher(kernel).handleKeys('POST', { name: 'agent' }, orgCtx('org_a')));
+    const { kernel, rows } = makeOrgKernel([{ user_id: 'u1', organization_id: 'org_a', role: 'owner' }], 'isolated');
+    const res = await dispatcher(kernel).handleKeys('POST', { name: 'agent' }, orgCtx('org_a'));
 
     expect(res.response.status).toBe(201);
     expect(rows[0].active_organization_id).toBe('org_a');
@@ -234,21 +227,20 @@ describe('HttpDispatcher.handleKeys — organization inheritance (#8287)', () =>
    * lateral-movement step.
    */
   it('ignores an organization supplied in the body (inherited, never parameterized)', async () => {
-    const { kernel, rows } = makeOrgKernel([{ user_id: 'u1', organization_id: 'org_a', role: 'owner' }]);
-    const res = await withPosture('isolated', () => dispatcher(kernel).handleKeys(
+    const { kernel, rows } = makeOrgKernel([{ user_id: 'u1', organization_id: 'org_a', role: 'owner' }], 'isolated');
+    const res = await dispatcher(kernel).handleKeys(
       'POST',
       { name: 'agent', organization_id: 'org_evil', active_organization_id: 'org_evil', organizationId: 'org_evil' },
       orgCtx('org_a'),
-    ));
+    );
 
     expect(res.response.status).toBe(201);
     expect(rows[0].active_organization_id).toBe('org_a');
   });
 
   it('refuses when the caller is not a member of their own active organization', async () => {
-    const { kernel, rows } = makeOrgKernel([{ user_id: 'u1', organization_id: 'org_other', role: 'owner' }]);
-    const res = await withPosture('isolated', () =>
-      dispatcher(kernel).handleKeys('POST', { name: 'agent' }, orgCtx('org_a')));
+    const { kernel, rows } = makeOrgKernel([{ user_id: 'u1', organization_id: 'org_other', role: 'owner' }], 'isolated');
+    const res = await dispatcher(kernel).handleKeys('POST', { name: 'agent' }, orgCtx('org_a'));
 
     expect(res.response.status).toBe(403);
     // Nothing was minted — a refused mint must not leave a credential behind.
@@ -258,9 +250,8 @@ describe('HttpDispatcher.handleKeys — organization inheritance (#8287)', () =>
   it('refuses when the membership row exists but its ADR-0091 window has lapsed', async () => {
     const { kernel, rows } = makeOrgKernel([
       { user_id: 'u1', organization_id: 'org_a', role: 'owner', valid_until: '2000-01-01T00:00:00Z' },
-    ]);
-    const res = await withPosture('isolated', () =>
-      dispatcher(kernel).handleKeys('POST', { name: 'agent' }, orgCtx('org_a')));
+    ], 'isolated');
+    const res = await dispatcher(kernel).handleKeys('POST', { name: 'agent' }, orgCtx('org_a'));
 
     expect(res.response.status).toBe(403);
     expect(rows).toHaveLength(0);
@@ -273,18 +264,16 @@ describe('HttpDispatcher.handleKeys — organization inheritance (#8287)', () =>
    * human at a console who can act on it.
    */
   it('refuses to mint an org-less key under a walled posture', async () => {
-    const { kernel, rows } = makeOrgKernel([]);
-    const res = await withPosture('isolated', () =>
-      dispatcher(kernel).handleKeys('POST', { name: 'agent' }, orgCtx(undefined)));
+    const { kernel, rows } = makeOrgKernel([], 'isolated');
+    const res = await dispatcher(kernel).handleKeys('POST', { name: 'agent' }, orgCtx(undefined));
 
     expect(res.response.status).toBe(400);
     expect(rows).toHaveLength(0);
   });
 
   it('still mints an org-less key under `single` — there is no organization to inherit', async () => {
-    const { kernel, rows } = makeOrgKernel([]);
-    const res = await withPosture('single', () =>
-      dispatcher(kernel).handleKeys('POST', { name: 'agent' }, orgCtx(undefined)));
+    const { kernel, rows } = makeOrgKernel([], 'single');
+    const res = await dispatcher(kernel).handleKeys('POST', { name: 'agent' }, orgCtx(undefined));
 
     expect(res.response.status).toBe(201);
     expect(rows).toHaveLength(1);

@@ -31,10 +31,10 @@ import {
   ADMIN_FULL_ACCESS,
   ORGANIZATION_ADMIN_GRANTS,
 } from '@objectstack/spec';
-import type { AuthzPosture } from '@objectstack/spec/security';
+import type { AuthzPosture, TenancyPosture } from '@objectstack/spec/security';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 
-import { resolveApiKeyAdmission, currentTenancyPosture } from './api-key.js';
+import { resolveApiKeyAdmission } from './api-key.js';
 import type { ApiKeyRefusalReason } from './api-key.js';
 import { isGrantActive } from './grant-validity.js';
 import { derivePosture } from './posture-ladder.js';
@@ -99,6 +99,18 @@ export interface ResolveAuthzInput {
   getSession?: (headers: any) => Promise<any> | any;
   /** Clock injection for API-key expiry (tests). */
   nowMs?: number;
+  /**
+   * [#8287] The deployment's EFFECTIVE tenancy posture, as resolved from the
+   * kernel's `tenancy` service (`effectiveTenancyPosture`) — never from
+   * `OS_TENANCY_POSTURE`, which reports what was requested rather than what is
+   * enforced (ADR-0093 D4/D5).
+   *
+   * Supplied by the transport because this resolver is deliberately
+   * kernel-agnostic. OMITTING it disables the two posture-conditional API-key
+   * refusals and leaves behaviour exactly as it was — so an unwired caller is
+   * never made WORSE, only less strict.
+   */
+  tenancyPosture?: TenancyPosture;
 }
 
 function safeJsonParse<T>(s: string, fallback: T): T {
@@ -134,7 +146,7 @@ export async function resolveAuthzContext(input: ResolveAuthzInput): Promise<Res
   let tenantId: string | undefined;
 
   // 1. API key (explicit opt-in via header) takes precedence over session.
-  const admission = await resolveApiKeyAdmission(ql, headers, input.nowMs);
+  const admission = await resolveApiKeyAdmission(ql, headers, input.nowMs, input.tenancyPosture);
   // [#8287] A REFUSED key stops here and does NOT fall through to the session
   // path. Falling through would be more permissive than the behaviour this
   // replaced (an API key already outranks a session), and a refusal that
@@ -204,8 +216,8 @@ export async function resolveAuthzContext(input: ResolveAuthzInput): Promise<Res
   // Degrading would hand back exactly the `200 + total 0` silent-empty this
   // card exists to kill — an ex-member's automation would keep answering
   // success while reading nothing.
-  if (keyPrincipal?.tenantId) {
-    const posture = currentTenancyPosture();
+  if (keyPrincipal?.tenantId && input.tenancyPosture) {
+    const posture = input.tenancyPosture;
     if (postureEnforcesWall(posture) && !grants.accessible_org_ids.includes(keyPrincipal.tenantId)) {
       return {
         positions: [],

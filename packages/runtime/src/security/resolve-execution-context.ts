@@ -29,6 +29,7 @@ import {
   resolveLocalizationContext,
   assembleExecutionContextOrGuest,
   type EntryLocalization,
+  effectiveTenancyPosture,
 } from '@objectstack/core';
 
 /**
@@ -162,7 +163,25 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
       ? async () => undefined
       : getSession;
 
-  const authz = await resolveAuthzContext({ ql, headers, getSession: getSessionForProvenance });
+  // [#8287] The EFFECTIVE tenancy posture, from the kernel's `tenancy` service —
+  // the same source `plugin-security` reconciles before handing a posture to the
+  // Layer 0 wall, so admission and the wall can never disagree. Deliberately not
+  // `OS_TENANCY_POSTURE`: that is what the operator ASKED for, and under
+  // ADR-0093 D4/D5 a requested-but-unenforceable wall resolves to `single`.
+  // Absent service ⇒ undefined ⇒ no posture-conditional refusal.
+  let tenancyPosture;
+  try {
+    tenancyPosture = effectiveTenancyPosture(await opts.getService('tenancy'));
+  } catch {
+    tenancyPosture = undefined;
+  }
+
+  const authz = await resolveAuthzContext({
+    ql,
+    headers,
+    getSession: getSessionForProvenance,
+    tenancyPosture,
+  });
 
   // [#6216 — maintainer ruling 2026-08-08, Option A] The ExecutionContext
   // ASSEMBLY now lives in ONE place too (`assembleExecutionContext*`,

@@ -10,6 +10,7 @@ import {
   isExpired,
   resolveApiKeyPrincipal,
   resolveApiKeyAdmission,
+  effectiveTenancyPosture,
 } from './api-key.js';
 
 /** In-memory sys_api_key store exposing the `find` shape the verifier uses. */
@@ -123,17 +124,10 @@ describe('resolveApiKeyPrincipal (shared verifier)', () => {
  */
 describe('resolveApiKeyAdmission — organization (#8287)', () => {
   const raw = 'osk_org_probe';
-  const withPosture = async <T>(posture: string | undefined, fn: () => Promise<T>): Promise<T> => {
-    const previous = process.env.OS_TENANCY_POSTURE;
-    if (posture === undefined) delete process.env.OS_TENANCY_POSTURE;
-    else process.env.OS_TENANCY_POSTURE = posture;
-    try {
-      return await fn();
-    } finally {
-      if (previous === undefined) delete process.env.OS_TENANCY_POSTURE;
-      else process.env.OS_TENANCY_POSTURE = previous;
-    }
-  };
+  // The posture is an INPUT now, resolved by the transport from the kernel's
+  // `tenancy` service — never read from the environment here. `effectiveTenancyPosture`
+  // is what performs that reconciliation; these tests exercise both it and the
+  // admission behaviour it feeds.
 
   it('reads the organization off the row and carries it as tenantId', async () => {
     const ql = makeQl([
@@ -164,7 +158,7 @@ describe('resolveApiKeyAdmission — organization (#8287)', () => {
 
   it('admits an org-less key under `single` — there is no wall to fail', async () => {
     const ql = makeQl([{ key: hashApiKey(raw), revoked: false, user_id: 'u1' }]);
-    const admission = await withPosture('single', () => resolveApiKeyAdmission(ql, { 'x-api-key': raw }));
+    const admission = await resolveApiKeyAdmission(ql, { 'x-api-key': raw }, Date.now(), 'single');
     expect(admission.outcome).toBe('admitted');
   });
 
@@ -178,13 +172,13 @@ describe('resolveApiKeyAdmission — organization (#8287)', () => {
    */
   it('admits an org-less key under `group` — it already works there', async () => {
     const ql = makeQl([{ key: hashApiKey(raw), revoked: false, user_id: 'u1' }]);
-    const admission = await withPosture('group', () => resolveApiKeyAdmission(ql, { 'x-api-key': raw }));
+    const admission = await resolveApiKeyAdmission(ql, { 'x-api-key': raw }, Date.now(), 'group');
     expect(admission.outcome).toBe('admitted');
   });
 
   it('REFUSES an org-less key under `isolated` — the posture where it is provably dead', async () => {
     const ql = makeQl([{ key: hashApiKey(raw), revoked: false, user_id: 'u1' }]);
-    const admission = await withPosture('isolated', () => resolveApiKeyAdmission(ql, { 'x-api-key': raw }));
+    const admission = await resolveApiKeyAdmission(ql, { 'x-api-key': raw }, Date.now(), 'isolated');
     expect(admission.outcome).toBe('refused');
     expect(admission.outcome === 'refused' && admission.reason).toBe('organization_required');
     // The message is the operator-facing half of "loud at call time": it must
@@ -192,17 +186,40 @@ describe('resolveApiKeyAdmission — organization (#8287)', () => {
     expect(admission.outcome === 'refused' && admission.message).toMatch(/isolated/);
   });
 
-  it('the legacy `multi` spelling refuses too (it normalizes to `isolated`)', async () => {
+  /**
+   * The posture must be the ENFORCED one, not the requested one. ADR-0093 D4/D5:
+   * a deployment that asks for `isolated` without the enterprise organizations
+   * runtime runs with NO wall, and `tenancy.isolationActive` is how the service
+   * says so. Reading `OS_TENANCY_POSTURE` instead would refuse org-less keys on
+   * a deployment that has no wall at all.
+   */
+  it('effectiveTenancyPosture reads the ENFORCED posture from the tenancy service', () => {
+    expect(effectiveTenancyPosture({ posture: 'isolated' })).toBe('isolated');
+    expect(effectiveTenancyPosture({ posture: 'multi' })).toBe('isolated'); // legacy alias
+    expect(effectiveTenancyPosture({ posture: 'group' })).toBe('group');
+    // No posture field: fall back to the boolean the service exposes.
+    expect(effectiveTenancyPosture({ isolationActive: true })).toBe('isolated');
+    expect(effectiveTenancyPosture({ isolationActive: false })).toBe('single');
+    // No service at all ⇒ undefined ⇒ callers apply no posture-conditional refusal.
+    expect(effectiveTenancyPosture(undefined)).toBeUndefined();
+  });
+
+  /**
+   * An unknown posture must NOT refuse. This is a question about the DEPLOYMENT,
+   * not about the credential: refusing here would break every org-less key on a
+   * `single` deployment whose transport has not been wired.
+   */
+  it('admits an org-less key when the posture is unknown (no tenancy service)', async () => {
     const ql = makeQl([{ key: hashApiKey(raw), revoked: false, user_id: 'u1' }]);
-    const admission = await withPosture('multi', () => resolveApiKeyAdmission(ql, { 'x-api-key': raw }));
-    expect(admission.outcome).toBe('refused');
+    const admission = await resolveApiKeyAdmission(ql, { 'x-api-key': raw }, Date.now(), undefined);
+    expect(admission.outcome).toBe('admitted');
   });
 
   it('an ORG-STAMPED key is admitted under `isolated` — the fix, not just the refusal', async () => {
     const ql = makeQl([
       { key: hashApiKey(raw), revoked: false, user_id: 'u1', active_organization_id: 'org_a' },
     ]);
-    const admission = await withPosture('isolated', () => resolveApiKeyAdmission(ql, { 'x-api-key': raw }));
+    const admission = await resolveApiKeyAdmission(ql, { 'x-api-key': raw }, Date.now(), 'isolated');
     expect(admission.outcome).toBe('admitted');
     expect(admission.outcome === 'admitted' && admission.principal.tenantId).toBe('org_a');
   });
@@ -214,13 +231,13 @@ describe('resolveApiKeyAdmission — organization (#8287)', () => {
    */
   it('resolveApiKeyPrincipal collapses a refusal to undefined (fail-closed for old callers)', async () => {
     const ql = makeQl([{ key: hashApiKey(raw), revoked: false, user_id: 'u1' }]);
-    const principal = await withPosture('isolated', () => resolveApiKeyPrincipal(ql, { 'x-api-key': raw }));
+    const principal = await resolveApiKeyPrincipal(ql, { 'x-api-key': raw }, Date.now(), 'isolated');
     expect(principal).toBeUndefined();
   });
 
   it('an absent key is `none`, never a refusal', async () => {
     const ql = makeQl([{ key: hashApiKey(raw), revoked: false, user_id: 'u1' }]);
-    const admission = await withPosture('isolated', () => resolveApiKeyAdmission(ql, {}));
+    const admission = await resolveApiKeyAdmission(ql, {}, Date.now(), 'isolated');
     expect(admission.outcome).toBe('none');
   });
 });

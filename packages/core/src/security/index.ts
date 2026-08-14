@@ -76,8 +76,13 @@ export {
   parseScopes,
   isExpired,
   resolveApiKeyPrincipal,
+  resolveApiKeyAdmission,
+  effectiveTenancyPosture,
   type GeneratedApiKey,
   type ApiKeyPrincipal,
+  type ApiKeyAdmission,
+  type ApiKeyRefusalReason,
+  type TenancyPostureSource,
 } from './api-key.js';
 
 export {
