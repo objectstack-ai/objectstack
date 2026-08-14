@@ -3189,6 +3189,53 @@ export type MetadataAuthoringGate = (ctx: MetadataAuthoringGateContext) => void 
 export type MetadataAuthoringChannel = 'environment' | 'package-author';
 
 /**
+ * One `sys_metadata_audit` row as a VALUE — exactly the entry
+ * `recordMetadataAudit` writes, named so a refusal can hand its row to whoever
+ * is in a position to make it durable instead of writing it where it stands.
+ *
+ * [#8594] Why the entry became a value. `promoteDraftForPublish` used to audit
+ * its own denials inline, and it has two callers standing on opposite sides of
+ * a transaction boundary: `publishMetaItem` runs it in no transaction of its
+ * own, `publishPackageDrafts` runs it inside ONE `engine.transaction()` for the
+ * whole batch (ADR-0067 D2). A denial row written inline therefore landed on
+ * the single-item route and ROLLED BACK on the batch route — destroyed by the
+ * very rollback its own refusal had caused, which is the defect #7748 exists to
+ * close. Making the row data lets the helper stay ignorant of whose transaction
+ * it is inside (it cannot know, and guessing is what broke) and puts the
+ * placement decision where the transaction actually is: in the caller.
+ */
+interface MetadataAuditEntry {
+    type: string;
+    name: string;
+    organizationId?: string | null;
+    operation: 'save' | 'publish' | 'rollback' | 'delete' | 'reset';
+    outcome: 'allowed' | 'denied' | 'forced';
+    code: string;
+    lockState?: MetadataLock;
+    lockOverridden?: boolean;
+    actor?: string;
+    source?: string;
+    requestId?: string;
+    note?: string;
+}
+
+/**
+ * An `Error` carrying the denial row it still owes (see {@link MetadataAuditEntry}).
+ *
+ * The property is name-mangled like `__batchItem` beside it: it is an internal
+ * hand-off between one private helper and its callers inside this file, never a
+ * wire field. `clientFacingFailureText` / `clientFacingFailureCode` read
+ * `message` / `code`, so nothing here reaches a response body.
+ */
+type ErrorWithPendingAudit = Error & { __pendingAudit?: MetadataAuditEntry };
+
+/** Attach the denial row `err` owes, and return `err` so call sites read as one `throw`. */
+function withPendingAudit<E extends Error>(err: E, audit: MetadataAuditEntry): E {
+    (err as E & { __pendingAudit?: MetadataAuditEntry }).__pendingAudit = audit;
+    return err;
+}
+
+/**
  * Implements the per-domain contracts this class ACTUALLY provides (ADR-0076
  * D10 — the facade never implemented the other domains; those live in their
  * owning services and are reached through the discovery `services` registry,
@@ -10015,20 +10062,7 @@ export class ObjectStackProtocolImplementation implements
      * compliance trail. Phase 2 will make the audit table a hard
      * dependency.
      */
-    private async recordMetadataAudit(entry: {
-        type: string;
-        name: string;
-        organizationId?: string | null;
-        operation: 'save' | 'publish' | 'rollback' | 'delete' | 'reset';
-        outcome: 'allowed' | 'denied' | 'forced';
-        code: string;
-        lockState?: MetadataLock;
-        lockOverridden?: boolean;
-        actor?: string;
-        source?: string;
-        requestId?: string;
-        note?: string;
-    }): Promise<void> {
+    private async recordMetadataAudit(entry: MetadataAuditEntry): Promise<void> {
         try {
             await this.engine.insert('sys_metadata_audit', {
                 occurred_at: new Date().toISOString(),
@@ -10055,13 +10089,20 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * Phase 1 L3 enforcement for write operations (save / publish /
-     * rollback). Returns null on allow. Returns the structured `Error`
-     * the caller should `throw` on deny — also records the denial in
-     * the audit log so refused attempts are visible in compliance
-     * reports (refused writes never reach sys_metadata_history).
+     * [#8594] The ADR-0010 L3 write verdict as a VALUE: the structured `Error`
+     * a refused caller should throw, PLUS the denial row that refusal owes —
+     * and it writes NOTHING itself. Null on allow.
+     *
+     * Split out of {@link assertLockAllowsWrite} (which is now this plus the
+     * write) for the one caller that cannot let the row be written where the
+     * verdict is reached: `promoteDraftForPublish` runs inside a batch
+     * transaction on one of its two routes, so a row written here would roll
+     * back with the batch its own refusal aborted. Callers that are not inside
+     * a transaction keep using `assertLockAllowsWrite` unchanged — this is an
+     * extraction, not a behaviour change, and `save` / `rollback` still get
+     * their row from the same expression they always did.
      */
-    private async assertLockAllowsWrite(args: {
+    private async lockWriteRefusal(args: {
         type: string;
         name: string;
         organizationId?: string;
@@ -10069,7 +10110,7 @@ export class ObjectStackProtocolImplementation implements
         actor?: string;
         source?: string;
         requestId?: string;
-    }): Promise<Error | null> {
+    }): Promise<{ err: Error; audit: MetadataAuditEntry } | null> {
         if (this.environmentId === undefined) return null;
         const state = await this.getEffectiveLock(args.type, args.name, args.organizationId ?? null);
         const refusal = evaluateLockForWrite(state.lock);
@@ -10083,21 +10124,50 @@ export class ObjectStackProtocolImplementation implements
         (err as any).status = 403;
         (err as any).lock = state.lock;
         (err as any).lockReason = reason;
-        await this.recordMetadataAudit({
-            type: args.type,
-            name: args.name,
-            organizationId: args.organizationId ?? null,
-            operation: args.operation,
-            outcome: 'denied',
-            // adr0112-ok: D6b — persisted audit column, its own vocabulary
-            code: 'item_locked',
-            lockState: state.lock,
-            actor: args.actor,
-            source: args.source ?? `protocol.${args.operation}MetaItem`,
-            requestId: args.requestId,
-            note: reason,
-        });
-        return err;
+        return {
+            err,
+            audit: {
+                type: args.type,
+                name: args.name,
+                organizationId: args.organizationId ?? null,
+                operation: args.operation,
+                outcome: 'denied',
+                // adr0112-ok: D6b — persisted audit column, its own vocabulary
+                code: 'item_locked',
+                lockState: state.lock,
+                actor: args.actor,
+                source: args.source ?? `protocol.${args.operation}MetaItem`,
+                requestId: args.requestId,
+                note: reason,
+            },
+        };
+    }
+
+    /**
+     * Phase 1 L3 enforcement for write operations (save / publish /
+     * rollback). Returns null on allow. Returns the structured `Error`
+     * the caller should `throw` on deny — also records the denial in
+     * the audit log so refused attempts are visible in compliance
+     * reports (refused writes never reach sys_metadata_history).
+     *
+     * ⚠️ Records the row WHERE IT STANDS, so only call it from a site that is
+     * not inside a transaction it could be rolled back by. From inside one, use
+     * {@link lockWriteRefusal} and hand the row to the caller that owns the
+     * transaction (see `promoteDraftForPublish`).
+     */
+    private async assertLockAllowsWrite(args: {
+        type: string;
+        name: string;
+        organizationId?: string;
+        operation: 'save' | 'publish' | 'rollback';
+        actor?: string;
+        source?: string;
+        requestId?: string;
+    }): Promise<Error | null> {
+        const refusal = await this.lockWriteRefusal(args);
+        if (!refusal) return null;
+        await this.recordMetadataAudit(refusal.audit);
+        return refusal.err;
     }
 
     /** Counterpart of {@link assertLockAllowsWrite} for delete. */
@@ -10170,7 +10240,28 @@ export class ObjectStackProtocolImplementation implements
         expectedParent?: unknown;
         actualHead?: unknown;
     }): Promise<void> {
-        await this.recordMetadataAudit({
+        await this.recordMetadataAudit(ObjectStackProtocolImplementation.optimisticConflictAuditEntry(args));
+    }
+
+    /**
+     * [#8594] The same row as a VALUE, for the site that must not write it
+     * where the conflict is caught — see {@link lockWriteRefusal} for the full
+     * argument. `recordOptimisticConflictAudit` above is now this plus the
+     * write, so the four routes that call it are byte-identical to before and
+     * the fifth (`promoteDraftForPublish`) hands the row to its caller.
+     */
+    private static optimisticConflictAuditEntry(args: {
+        type: string;
+        name: string;
+        organizationId?: string | null;
+        operation: 'save' | 'publish' | 'rollback' | 'delete';
+        actor?: string;
+        source: string;
+        requestId?: string;
+        expectedParent?: unknown;
+        actualHead?: unknown;
+    }): MetadataAuditEntry {
+        return {
             type: args.type,
             name: args.name,
             organizationId: args.organizationId ?? null,
@@ -10182,6 +10273,35 @@ export class ObjectStackProtocolImplementation implements
             source: args.source,
             ...(args.requestId ? { requestId: args.requestId } : {}),
             note: `expected parent ${args.expectedParent ?? 'null'} but current is ${args.actualHead ?? 'null'}`,
+        };
+    }
+
+    /**
+     * [#8594] Write the denial row a refusal is still carrying — on the
+     * CALLER's side of the caller's transaction.
+     *
+     * The counterpart of {@link withPendingAudit}: `promoteDraftForPublish`
+     * attaches the row to the error it throws instead of writing it, and each
+     * of its two callers records it from a position where a rollback cannot
+     * reach it. A no-op for every other refusal (the driver faults,
+     * `NOT_OVERRIDABLE`, `INVALID_METADATA` …), which carry no row and never
+     * did — this closes the two denials that USED to write one and lose it, and
+     * mints nothing new.
+     *
+     * `source` is overridable because the row is now written by the route that
+     * owns it: the batch route must not file its rows under
+     * `protocol.publishMetaItem`, which is the name the shared Phase-1 helper
+     * passes for both of them.
+     */
+    private async recordPendingDenialAudit(
+        err: unknown,
+        overrides?: { source?: string },
+    ): Promise<void> {
+        const pending = (err as ErrorWithPendingAudit | null | undefined)?.__pendingAudit;
+        if (!pending) return;
+        await this.recordMetadataAudit({
+            ...pending,
+            ...(overrides?.source ? { source: overrides.source } : {}),
         });
     }
 
@@ -12153,7 +12273,16 @@ export class ObjectStackProtocolImplementation implements
          */
         projectionApplied?: MutationProjectionOutcome;
     }> {
-        const { singularType, orgId, result } = await this.promoteDraftForPublish(request);
+        // [#8594] The refusal's own row is written HERE, by the route that owns
+        // the (absent) transaction — see `promoteDraftForPublish`'s header. This
+        // site has no transaction of its own, so recording it in the `catch` is
+        // where it always effectively landed; what changed is that the helper no
+        // longer assumes that on behalf of the batch route too.
+        const { singularType, orgId, result } = await this.promoteDraftForPublish(request)
+            .catch(async (err: unknown) => {
+                await this.recordPendingDenialAudit(err);
+                throw err;
+            });
         // [#7748] ADR-0010 — success audit (best-effort), the same shape
         // `saveMetaItem` and `deleteMetaItem` write on their allowed paths.
         //
@@ -12224,6 +12353,29 @@ export class ObjectStackProtocolImplementation implements
      * back together — the "a commit cannot half-land" invariant.
      * `publishMetaItem` composes it with {@link runPublishSideEffects} for
      * the single-item path.
+     *
+     * ## [#8594] …and NO AUDIT WRITES either — refusals carry their row out
+     *
+     * Both denials this method can raise — the ADR-0010 lock refusal and the
+     * optimistic-lock 409 — used to write their `sys_metadata_audit` row right
+     * here. Which is durable on one of its two routes and destroyed on the
+     * other: `publishMetaItem` calls this outside any transaction, while
+     * `publishPackageDrafts` calls it inside the batch's, so the row describing
+     * the refusal was rolled back BY THAT REFUSAL — the trail ended up with
+     * nothing about a publish refused by a lock, which is the exact defect
+     * #7748 exists to close. `batch_aborted` (#8400) gave the batch route *a*
+     * trail but not the inner verdict's vocabulary: a compliance query on
+     * `code = 'item_locked'` still found nothing.
+     *
+     * So the row leaves as data on the thrown error ({@link withPendingAudit}),
+     * and each caller records it with {@link recordPendingDenialAudit} from a
+     * position a rollback cannot reach. This helper does not know whose
+     * transaction it is inside — it cannot, and guessing is what broke — so the
+     * placement decision moves to the only two places that do know.
+     *
+     * ⚠️ A NEW CALLER INHERITS THAT OBLIGATION: catch, call
+     * `recordPendingDenialAudit`, rethrow. Skip it and the refusal is silent
+     * again — the pre-#7748 state, not merely a worse one.
      */
     private async promoteDraftForPublish(request: {
         type: string; name: string; organizationId?: string; actor?: string; message?: string;
@@ -12258,7 +12410,11 @@ export class ObjectStackProtocolImplementation implements
             if (orgRefusal) throw orgRefusal;
         }
         // ADR-0010 L3 — lock blocks publish too (publishing is a write).
-        const _publishLockErr = await this.assertLockAllowsWrite({
+        //
+        // [#8594] `lockWriteRefusal`, not `assertLockAllowsWrite`: the row rides
+        // OUT on the error and each caller records it on its own side of its own
+        // transaction. See this method's header for why it cannot be written here.
+        const _publishLockRefusal = await this.lockWriteRefusal({
             type: request.type,
             name: request.name,
             ...(request.organizationId ? { organizationId: request.organizationId } : {}),
@@ -12266,7 +12422,9 @@ export class ObjectStackProtocolImplementation implements
             ...(request.actor ? { actor: request.actor } : {}),
             source: 'protocol.publishMetaItem',
         });
-        if (_publishLockErr) throw _publishLockErr;
+        if (_publishLockRefusal) {
+            throw withPendingAudit(_publishLockRefusal.err, _publishLockRefusal.audit);
+        }
         await this.ensureOverlayIndex();
         const orgId = request.organizationId ?? null;
         const repo = this.getOverlayRepo(orgId);
@@ -12321,17 +12479,22 @@ export class ObjectStackProtocolImplementation implements
                 conflict.status = 409;
                 conflict.expectedParent = err.expectedParent;
                 conflict.actualHead = err.actualHead;
-                await this.recordOptimisticConflictAudit({
-                    type: request.type,
-                    name: request.name,
-                    organizationId: orgId,
-                    operation: 'publish',
-                    ...(request.actor ? { actor: request.actor } : {}),
-                    source: 'protocol.publishMetaItem',
-                    expectedParent: err.expectedParent,
-                    actualHead: err.actualHead,
-                });
-                throw conflict;
+                // [#8594] Attached, not written — same reason as the lock gate
+                // above. The repository's own transaction has already unwound by
+                // the time this `catch` runs, but the BATCH caller's has not.
+                throw withPendingAudit(
+                    conflict,
+                    ObjectStackProtocolImplementation.optimisticConflictAuditEntry({
+                        type: request.type,
+                        name: request.name,
+                        organizationId: orgId,
+                        operation: 'publish',
+                        ...(request.actor ? { actor: request.actor } : {}),
+                        source: 'protocol.publishMetaItem',
+                        expectedParent: err.expectedParent,
+                        actualHead: err.actualHead,
+                    }),
+                );
             }
             throw err;
         }
@@ -12913,13 +13076,23 @@ export class ObjectStackProtocolImplementation implements
             // the exact defect #7748 exists to close, reintroduced on the batch
             // route.
             //
-            // ⚠️ Note the pre-existing sibling this does NOT fix: the denial
-            // rows `assertLockAllowsWrite` / `recordOptimisticConflictAudit`
-            // write from inside `promoteDraftForPublish` ARE inside this
-            // transaction on the batch route, so they roll back. That is why
-            // this row is unconditional rather than "only when the inner gates
-            // didn't already record one": on a transactional engine there is
-            // nothing left of theirs to duplicate. Filed separately.
+            // ⚠️ [#8594 — the sibling above is now FIXED, one line below.] The
+            // note that stood here said the inner denial rows were written from
+            // inside this transaction and rolled back with it, so this row could
+            // be unconditional: there was never anything of theirs to duplicate.
+            // That is no longer true — `promoteDraftForPublish` hands its refusal
+            // row out instead of writing it, and the line below lands it here,
+            // outside the transaction, in the INNER verdict's own vocabulary
+            // (`item_locked` / `metadata_conflict`, with its `lock_state`).
+            //
+            // The row below stays unconditional anyway, for a different reason:
+            // it records a DIFFERENT fact. `item_locked` says why THIS item was
+            // refused; `batch_aborted` says the whole batch rolled back and
+            // nothing landed — the ADR-0067 D2 consequence, which is what the
+            // other drafts' authors need to read, and the only row there is when
+            // the cause carries no inner verdict at all (a driver fault,
+            // `NOT_OVERRIDABLE`, `INVALID_METADATA`). Two facts, two rows, same
+            // causal item.
             //
             // ⚠️ `note` is WIRE-VISIBLE — `auditMetaItem` maps it straight onto
             // the `GET /api/v1/meta/:type/:name/audit` response — so it carries
@@ -12928,6 +13101,20 @@ export class ObjectStackProtocolImplementation implements
             // `failed[].error` around that rule through a second door. The full
             // untruncated text is already in the `console.warn` above, which is
             // where an operator reads it.
+            // ═══ [#8594] The INNER verdict's own row — also outside the txn ═══
+            //
+            // `promoteDraftForPublish` refused this batch and handed its denial
+            // row out on the error rather than writing it inside the closure
+            // that has since unwound. Recording it here gives a package publish
+            // refused by a lock the same `code = 'item_locked'` + `lock_state`
+            // row a single-item publish has always left — the vocabulary a
+            // compliance query actually filters on, which `batch_aborted` alone
+            // could not supply. No-op when the cause carries no inner verdict.
+            //
+            // `source` is re-stamped: the shared Phase-1 helper passes
+            // `protocol.publishMetaItem` for both of its routes, and this row
+            // was written by the batch route.
+            await this.recordPendingDenialAudit(e, { source: 'protocol.publishPackageDrafts' });
             if (causal) {
                 await this.recordMetadataAudit({
                     type: causal.type,
