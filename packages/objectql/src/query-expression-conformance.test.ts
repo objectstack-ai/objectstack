@@ -1008,32 +1008,159 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
         expect(err.fields).toEqual(['is_open']);
     });
 
-    it('the FILTER refusals agree word-for-word with the SORT refusals on the remedy', async () => {
+    it('the FILTER, SORT and SEARCH refusals agree in SUBSTANCE on the remedy — every door pinned to its emitted wording', async () => {
         // Pins the AGREEMENT itself rather than each wording separately — the
-        // one-vocabulary-across-doors discipline. Four doors share one
-        // sentence, differing only in the verb that names the axis: an author
+        // one-vocabulary-across-doors discipline, and the invariant three
+        // source comments assert as a fact (`engine.ts`
+        // `assertOrderByIsMaterializable`, and `protocol.ts`
+        // `assertFilterFieldsExist` / `assertSortFieldsExist`). An author
         // refused on two axes must not be sent two different ways, which is
         // exactly how #4256 and #6673 drifted apart in the first place.
-        const stem = /Denormalise the value onto 'showcase_task' \(a stored field, written when the source changes\) and /;
-        const filterIngress: any = await protocol
-            .findData({ object: 'showcase_task', query: { where: { is_open: true } } })
-            .then(() => null, (e: unknown) => e);
-        const filterEngine: any = await engine
-            .find('showcase_task', { where: { is_open: true } })
-            .then(() => null, (e: unknown) => e);
-        const sortIngress: any = await protocol
-            .findData({ object: 'showcase_task', query: { sort: 'sort_key' } })
-            .then(() => null, (e: unknown) => e);
-        const sortEngine: any = await engine
-            .find('showcase_task', { orderBy: [{ field: 'sort_key', order: 'asc' }] })
-            .then(() => null, (e: unknown) => e);
-        for (const err of [filterIngress, filterEngine, sortIngress, sortEngine]) {
-            expect(err.message).toMatch(stem);
+        //
+        // [#8648] It used to assert only that the four SORT/FILTER doors share
+        // one stem — which left the claim unpinned in the one place where
+        // reading it as word-identity was FALSE. The SEARCH axis cannot match
+        // that stem and never did; measured from the running doors on this
+        // fixture (a literal in the tree can be dead or shadowed, so the pin
+        // triggers each refusal and reads what a caller would actually see):
+        //
+        //   FILTER  Denormalise the value onto 'showcase_task' (a stored
+        //           field, written when the source changes) and filter that.
+        //   SORT    …the same sentence, closing "and sort by that."
+        //   SEARCH  Mirror the computed value onto a stored text field on
+        //           'showcase_task' and search that instead.
+        //
+        // The divergence is DELIBERATE and stays: SEARCH's message is shipped
+        // and user-visible on an axis that already landed, and narrowing the
+        // target to a TEXT column is correct for an axis that scans text-like
+        // columns. So the enforceable invariant is SUBSTANCE — put the value
+        // on a stored column of the queried object and query THAT instead —
+        // and it is pinned in three layers, each catching what the others
+        // cannot:
+        //
+        //   1. AGREEMENT, emitted-vs-emitted. The four SORT/FILTER doors are
+        //      compared against EACH OTHER, not against a literal: their
+        //      longest common prefix must be exactly the shared stem. Reword
+        //      one door and the prefix shrinks; reword all four together and
+        //      it stops equalling the stem. No single-door drift survives it.
+        //   2. WORDING, per axis, including SEARCH — the door this pin used to
+        //      skip. Each axis' remedy is pinned to the sentence it emits
+        //      today, so rewording ANY axis goes red rather than only the two
+        //      that happen to share a stem.
+        //   3. SUBSTANCE, as a ratchet on layer 2's constants. When layer 2
+        //      goes red the next author updates those strings; these three
+        //      assertions are what that rewrite cannot quietly walk away from
+        //      — a STORED target, named ON the queried object, with THIS axis
+        //      redirected onto it. Whatever the words, the remedy stays
+        //      actionable.
+        //
+        // ⛔ Unifying the SEARCH wording onto the shared stem is route 3 of
+        // #8648 and was NOT taken: it changes a shipped error message and
+        // needs somewhere for the `text` narrowing to live. Layer 2 is what
+        // makes that a decision someone takes on purpose instead of a silent
+        // edit — if you are here because it went red, that is the pin working.
+        const stem = "Denormalise the value onto 'showcase_task' "
+            + '(a stored field, written when the source changes) and ';
+
+        /**
+         * The remedy SPAN of an emitted refusal — the imperative sentence that
+         * tells the author what to do instead, sliced off the real message
+         * rather than assumed. A door that stops emitting one yields '' and
+         * fails loudly, instead of silently comparing two empty strings.
+         */
+        const remedyOf = (message: string): string => {
+            const m = /(?:Denormalise|Mirror) [\s\S]*$/.exec(message);
+            return m ? m[0] : '';
+        };
+        /** Longest common prefix — how layer 1 compares doors to each other. */
+        const sharedPrefix = (parts: readonly string[]): string => parts.reduce((a, b) => {
+            let i = 0;
+            while (i < a.length && i < b.length && a[i] === b[i]) i++;
+            return a.slice(0, i);
+        });
+
+        const doors: ReadonlyArray<{
+            door: string;
+            axis: 'filter' | 'sort' | 'search';
+            remedy: string;
+            emit: () => Promise<unknown>;
+        }> = [
+            {
+                door: 'filter-ingress', axis: 'filter', remedy: `${stem}filter that.`,
+                emit: () => protocol.findData({ object: 'showcase_task', query: { where: { is_open: true } } }),
+            },
+            {
+                door: 'filter-engine', axis: 'filter', remedy: `${stem}filter that.`,
+                emit: () => engine.find('showcase_task', { where: { is_open: true } }),
+            },
+            {
+                door: 'sort-ingress', axis: 'sort', remedy: `${stem}sort by that.`,
+                emit: () => protocol.findData({ object: 'showcase_task', query: { sort: 'sort_key' } }),
+            },
+            {
+                door: 'sort-engine', axis: 'sort', remedy: `${stem}sort by that.`,
+                emit: () => engine.find('showcase_task', { orderBy: [{ field: 'sort_key', order: 'asc' }] }),
+            },
+            {
+                // [#8648] The door the claim was missing. SEARCH has no engine
+                // twin to pair with: `search` is expanded at ingress into the
+                // `$or` of `$icontains` the engine receives (ADR-0061), so
+                // this axis has exactly one door — which is why "the three
+                // wordings" was never a count of doors, and why its absence
+                // from a four-door pin was so easy to miss.
+                door: 'search-ingress', axis: 'search',
+                remedy: "Mirror the computed value onto a stored text field on 'showcase_task' and search that instead.",
+                emit: () => protocol.findData({ object: 'showcase_task', query: { search: 'x', searchFields: 'sort_key' } }),
+            },
+        ];
+
+        const emitted = new Map<string, string>();
+        for (const { door, axis, remedy, emit } of doors) {
+            const err: any = await emit().then(() => null, (e: unknown) => e);
+            // Non-vacuity: a door that stopped refusing would otherwise make
+            // every assertion below unreachable and this pin silently green.
+            expect(err, `${door} must refuse`).toBeTruthy();
+            expect(err.status, `${door} status`).toBe(400);
+
+            // Layer 2 — this axis' exact wording, as emitted today. Asserted
+            // FIRST because it is the assertion that DIAGNOSES a rewording: it
+            // prints the sentence this pin expects beside the one the door now
+            // emits, which is what the author needs to see. (Measured while
+            // building this pin: with the extraction below running first, a
+            // reworded SEARCH failed as "emits no remedy" — true of the
+            // extractor, misleading about the door, and the wrong sentence to
+            // hand someone whose next move is to update this pin.)
+            expect(err.message, `${door} remedy wording`).toContain(remedy);
+
+            // Layer 3 — the substance that must survive any rewording of it.
+            expect(remedy, `${door} prescribes a STORED column`).toMatch(/\bstored\b/);
+            expect(remedy, `${door} names the queried object`).toContain("'showcase_task'");
+            expect(remedy, `${door} redirects its own axis onto it`)
+                .toMatch(new RegExp(`\\band ${axis}(?: by)? that\\b`));
+
+            // The emitted span, collected for layer 1's cross-door comparison
+            // below. Its own guard is about THIS pin's extractor, not about
+            // the door — hence the message: an author who deliberately
+            // reworded the opening imperative updates the verb list above.
+            const span = remedyOf(String(err.message));
+            expect(span, `${door} remedy opens with an imperative remedyOf() knows`).not.toBe('');
+            emitted.set(door, span);
         }
-        expect(filterIngress.message).toMatch(new RegExp(stem.source + 'filter that\\.'));
-        expect(filterEngine.message).toMatch(new RegExp(stem.source + 'filter that\\.'));
-        expect(sortIngress.message).toMatch(new RegExp(stem.source + 'sort by that\\.'));
-        expect(sortEngine.message).toMatch(new RegExp(stem.source + 'sort by that\\.'));
+
+        // Layer 1 — the four stem-sharing doors, compared to each other.
+        const stemDoors = ['filter-ingress', 'filter-engine', 'sort-ingress', 'sort-engine']
+            .map((d) => emitted.get(d) as string);
+        expect(sharedPrefix(stemDoors)).toBe(stem);
+        // …and per axis the agreement is total, not merely a shared prefix.
+        expect(emitted.get('filter-engine')).toBe(emitted.get('filter-ingress'));
+        expect(emitted.get('sort-engine')).toBe(emitted.get('sort-ingress'));
+
+        // SEARCH's divergence, pinned as deliberate. Asserting it cannot match
+        // the stem is what stops a future author "repairing" the difference —
+        // i.e. taking route 3 — while believing they are aligning wording that
+        // was always meant to be identical.
+        expect(emitted.get('search-ingress')?.startsWith(stem)).toBe(false);
+        expect(emitted.get('search-ingress')).toContain('a stored text field');
     });
 
     it('BLAST RADIUS — a formula field is still readable, projectable and computed', async () => {
