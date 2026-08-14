@@ -413,6 +413,35 @@ export default class Serve extends Command {
   ];
 
   /**
+   * Identities of the marketplace BROWSE surface (`MarketplaceProxyPlugin`),
+   * matched EXACTLY by {@link Serve.providesCapability}.
+   *
+   * Cloud-arm counterpart of {@link Serve.INSTALL_LOCAL_IDENTITIES} (#8357).
+   * The host's instance carries its own `controlPlaneUrl`, its public-snapshot
+   * base URL and its LRU cache tuning — none of which the CLI's auto-wiring
+   * can know, because it constructs from `resolveCloudUrl()` alone.
+   */
+  static readonly MARKETPLACE_PROXY_IDENTITIES: readonly string[] = [
+    'com.objectstack.runtime.marketplace-proxy',
+    'MarketplaceProxyPlugin',
+  ];
+
+  /**
+   * Identities of the same-origin cloud-connection surface
+   * (`CloudConnectionPlugin`, built by `createCloudConnectionPlugin`), matched
+   * EXACTLY by {@link Serve.providesCapability}.
+   *
+   * Both spellings matter here for a reason the other three do not have: the
+   * host reaches this plugin through a FACTORY, so the only class name in
+   * play is the one the factory returns. `createCloudConnectionPlugin` is not
+   * an identity — a factory function is not what lands in the kernel.
+   */
+  static readonly CLOUD_CONNECTION_IDENTITIES: readonly string[] = [
+    'com.objectstack.cloud.connection',
+    'CloudConnectionPlugin',
+  ];
+
+  /**
    * Constructor options for the `RuntimeConfigPlugin` the marketplace wiring
    * mounts — ONE object, shared by both arms on purpose (#8389).
    *
@@ -466,8 +495,11 @@ export default class Serve extends Command {
    * The two arms are deliberately asymmetric, because the two surfaces need
    * different things:
    *
-   *  - `cloudSurfaces` — proxy + cloud-connection + runtime-config. These
-   *    *are* the control plane's client, so a resolved URL is their precondition.
+   *  - `cloudSurfaces` — the ARM SELECTOR, not a mount decision: true when this
+   *    boot takes the cloud-connected arm at all (proxy + install-local +
+   *    cloud-connection + runtime-config). Those surfaces *are* the control
+   *    plane's client, so a resolved URL is their precondition. WHICH of them
+   *    the CLI actually mounts is carried by the four `cloud*` flags below.
    *  - `offlineInstallLocal` — the air-gapped install surface. Its inline
    *    branch reads no URL at all, so a control plane is precisely what it
    *    does NOT need; gating it on one is what left a self-hosted EE box with
@@ -493,20 +525,74 @@ export default class Serve extends Command {
    * skip the dynamic import) so this function is the whole rule in one place:
    * the cloud distribution wires its own marketplace on the host kernel, so
    * NO arm mounts there.
+   *
+   * ## The cloud arm honours the host too (#8357)
+   *
+   * Every mount on BOTH arms is now per-surface, under the same
+   * `providesCapability` rule: the CLI's auto-wiring is a FALLBACK for hosts
+   * that wire nothing, never a second opinion about a surface the host already
+   * composed. `objectos-ee`'s single-environment config is exactly such a host
+   * — it wires proxy, install-local, cloud-connection and runtime-config
+   * itself — and it is NOT covered by the `isRuntimeHostKernel` guard above,
+   * which detects `ObjectOSEnvironmentPlugin`: only the `OS_MULTI_TENANT`
+   * branch constructs one, via `createObjectOSStack`. Hanging this rule off
+   * that sentinel would leave the shipped single-environment shape unguarded.
+   *
+   * What this fixes is PRECEDENCE, not a live downgrade — say it plainly,
+   * because the two read alike and only one is true. Measured on this tree:
+   * the CLI's wiring block runs several hundred lines BEFORE `config.plugins`
+   * are registered, and `Kernel.use` -> `this.plugins.set(name, meta)`
+   * overwrites by name, so today the host's instance is the one that survives
+   * — the CLI's is constructed, registered and then dropped. The host winning
+   * is therefore an ACCIDENT OF ORDERING between two blocks that never mention
+   * each other, not a rule anything states or pins; it inverts silently if
+   * either block moves, and on a kernel whose `use` rejects duplicates
+   * (`LiteKernel` throws) it is the HOST's registration that fails instead.
+   * Checking presence makes the outcome independent of all of that, and stops
+   * the CLI constructing four plugins it is about to discard.
    */
   static planMarketplaceWiring(input: {
     isRuntimeHostKernel: boolean;
     marketplaceUrl: string;
     plugins: readonly unknown[];
-  }): { cloudSurfaces: boolean; offlineInstallLocal: boolean; offlineRuntimeConfig: boolean } {
+  }): {
+    cloudSurfaces: boolean;
+    cloudProxy: boolean;
+    cloudInstallLocal: boolean;
+    cloudConnection: boolean;
+    cloudRuntimeConfig: boolean;
+    offlineInstallLocal: boolean;
+    offlineRuntimeConfig: boolean;
+  } {
+    const NO_CLOUD_ARM = {
+      cloudSurfaces: false,
+      cloudProxy: false,
+      cloudInstallLocal: false,
+      cloudConnection: false,
+      cloudRuntimeConfig: false,
+    } as const;
+
     if (input.isRuntimeHostKernel) {
-      return { cloudSurfaces: false, offlineInstallLocal: false, offlineRuntimeConfig: false };
+      return { ...NO_CLOUD_ARM, offlineInstallLocal: false, offlineRuntimeConfig: false };
     }
     if (input.marketplaceUrl) {
-      return { cloudSurfaces: true, offlineInstallLocal: false, offlineRuntimeConfig: false };
+      return {
+        cloudSurfaces: true,
+        // Each surface is guarded on its OWN presence, never on a shared gate:
+        // a host may compose any subset of the four (objectos-ee wires
+        // runtime-config unconditionally but the other three only when it has
+        // a resolved cloud URL), and one gate would either overwrite what the
+        // host did wire or withhold what it did not.
+        cloudProxy: !Serve.providesCapability(input.plugins, Serve.MARKETPLACE_PROXY_IDENTITIES),
+        cloudInstallLocal: !Serve.providesCapability(input.plugins, Serve.INSTALL_LOCAL_IDENTITIES),
+        cloudConnection: !Serve.providesCapability(input.plugins, Serve.CLOUD_CONNECTION_IDENTITIES),
+        cloudRuntimeConfig: !Serve.providesCapability(input.plugins, Serve.RUNTIME_CONFIG_IDENTITIES),
+        offlineInstallLocal: false,
+        offlineRuntimeConfig: false,
+      };
     }
     return {
-      cloudSurfaces: false,
+      ...NO_CLOUD_ARM,
       // A host config that wires its own install-local keeps it — see the
       // call site for why replacing it would be a silent downgrade.
       offlineInstallLocal: !Serve.providesCapability(input.plugins, Serve.INSTALL_LOCAL_IDENTITIES),
@@ -1967,15 +2053,43 @@ export default class Serve extends Command {
           const marketplaceUrl = resolveCloudUrl();
           const wiring = Serve.planMarketplaceWiring({ isRuntimeHostKernel, marketplaceUrl, plugins });
           if (wiring.cloudSurfaces) {
-            await kernel.use(new MarketplaceProxyPlugin({ controlPlaneUrl: marketplaceUrl }));
-            await kernel.use(new MarketplaceInstallLocalPlugin({ controlPlaneUrl: marketplaceUrl }));
+            // Every mount here is guarded on what the HOST already wired
+            // (#8357), the same rule and the same idiom the offline arm below
+            // uses. `kernel.use` keys by name, so an unguarded mount is not a
+            // harmless double-mount: one of the two instances is discarded,
+            // and WHICH one depends on registration order rather than on any
+            // stated rule. The host composed its instance deliberately, with
+            // arguments the CLI cannot reconstruct from `resolveCloudUrl()`
+            // alone — a distinct control plane, a custom install storageDir, a
+            // credential path, cache tuning — so the host's is the one that
+            // must stand. See `planMarketplaceWiring` for the measurement.
+            let mountedAny = false;
+            if (wiring.cloudProxy) {
+              await kernel.use(new MarketplaceProxyPlugin({ controlPlaneUrl: marketplaceUrl }));
+              mountedAny = true;
+            }
+            if (wiring.cloudInstallLocal) {
+              await kernel.use(new MarketplaceInstallLocalPlugin({ controlPlaneUrl: marketplaceUrl }));
+              mountedAny = true;
+            }
             // Same-origin /cloud-connection/* surface (status + device-code
             // bind + control-plane catalog views) in single-environment mode.
-            await kernel.use(createCloudConnectionPlugin({ singleEnvironment: true, controlPlaneUrl: marketplaceUrl }));
+            if (wiring.cloudConnection) {
+              await kernel.use(createCloudConnectionPlugin({ singleEnvironment: true, controlPlaneUrl: marketplaceUrl }));
+              mountedAny = true;
+            }
             // Server-pushed runtime config so the Console knows marketplace +
             // install-local are live (same-origin; install into THIS kernel).
-            await kernel.use(new RuntimeConfigPlugin({ ...Serve.RUNTIME_CONFIG_OPTIONS }));
-            trackPlugin('Marketplace');
+            if (wiring.cloudRuntimeConfig) {
+              await kernel.use(new RuntimeConfigPlugin({ ...Serve.RUNTIME_CONFIG_OPTIONS }));
+              mountedAny = true;
+            }
+            // Report the banner line only when this block actually mounted
+            // something. A host that wires the whole set gets no entry from
+            // here — it will report its own plugins through the config-plugin
+            // loader — and an unconditional `trackPlugin` would otherwise
+            // credit the CLI with a mount it did not make.
+            if (mountedAny) trackPlugin('Marketplace');
           } else if (wiring.offlineInstallLocal || wiring.offlineRuntimeConfig) {
             // Cloud explicitly disabled -> mount the OFFLINE surfaces only:
             // the install route, and the runtime config that makes it
