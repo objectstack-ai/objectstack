@@ -62,7 +62,11 @@ interface Row {
 function makeProtocol(seedRows: Array<Partial<Row>> = []) {
     const rows = new Map<string, Row>();
     let nextId = 0;
-    const keyOf = (w: Record<string, unknown>) =>
+    // Reads the four key fields structurally, so both a stored `Row` and the
+    // loose record `insert` hands over key identically (an interface is not
+    // assignable to `Record<string, unknown>`, and this package's tsc error
+    // count is a shrink-only ratchet — a cast here would spend it).
+    const keyOf = (w: { type?: unknown; name?: unknown; organization_id?: unknown; state?: unknown }) =>
         `${w.type}|${w.name}|${w.organization_id ?? '__env__'}|${w.state ?? 'active'}`;
     for (const seed of seedRows) {
         nextId += 1;
