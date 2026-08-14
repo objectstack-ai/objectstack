@@ -1890,6 +1890,16 @@ function selfTest() {
       'packages/spec/spec-changes.json',
       `${JSON.stringify({ perMajor: [{ to: 17, migrated: [{ migrationId: 'old-entry-one' }] }] }, null, 2)}\n`,
     );
+    // ADR-0087 itself, an input the gate refuses to report a verdict without
+    // since #8299: it pins its `CATEGORIES` vocabulary against the categories the
+    // record documents, in BOTH directions, so a category with no written
+    // description cannot be claimed. Copied from this repo rather than written out
+    // here — the same idiom as the gate copy above, and the only spelling that
+    // cannot drift when the vocabulary next changes.
+    gw(
+      'docs/adr/0087-metadata-protocol-upgrade-contract.md',
+      readFileSync(join(__dirname, '..', 'docs', 'adr', '0087-metadata-protocol-upgrade-contract.md'), 'utf8'),
+    );
     // One declared-breaking changeset in STOCK (committed at base, so it is not
     // in the judged diff) — the gate's convention-rot assertion needs its
     // breaking detector to match something.

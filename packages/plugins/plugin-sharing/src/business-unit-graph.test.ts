@@ -57,6 +57,7 @@ function makeEngine(units: UnitRow[], members: MemberRow[]) {
         if (!(v as any[]).some((sub) => matches(row, sub))) return false;
         continue;
       }
+      if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
       const rv = row[k];
       if (v && typeof v === 'object' && '$ne' in (v as any)) {
         if (rv === (v as any).$ne) return false;

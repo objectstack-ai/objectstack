@@ -73,6 +73,25 @@
 // Reverse verification, direction predicted BEFORE running
 // ---------------------------------------------------------------------------
 // See the PR body for prediction vs. measurement.
+//
+// ---------------------------------------------------------------------------
+// [#8594] One assertion in here was MEASURING the defect, and was inverted
+// ---------------------------------------------------------------------------
+// The locked-item case above ended on
+//
+//     expect(h.auditRows.some((a) => a.code === 'item_locked')).toBe(false);
+//
+// which pinned the fact that the INNER verdict's row was destroyed by the
+// rollback its own refusal caused — a true statement about `main` on the day it
+// was written, and the defect #8594 exists to close, not a contract. It now
+// reads `.toBe(true)`, deliberately, and the second `describe` at the bottom of
+// this file asserts that row in full (its `code`, its `lock_state`, its route),
+// plus the `metadata_conflict` sibling that had no coverage at all.
+//
+// An inversion on its own would be satisfied by a "fix" that stopped rolling
+// anything back, so every case that asserts a surviving denial also asserts
+// ADR-0067 D2 in the same breath — nothing promoted, no commit row, no
+// `allowed` row. See that block's header.
 
 import { describe, expect, it, vi } from 'vitest';
 // [#5619] The producer's OWN write-verb dispatch decisions, imported from
@@ -140,8 +159,16 @@ type Harness = {
      * Arm a driver fault on every `sys_metadata` write for this item name.
      * Mutable so a test can stage its drafts through a healthy engine and break
      * it only for the batch under test.
+     *
+     * [#8594] `advanceActiveOnRead` arms an OPTIMISTIC-LOCK race instead of a
+     * driver fault: a rival author advancing the active row in the window
+     * between the two reads `promoteDraft` makes (`get` for the parent version,
+     * then `put`'s own read inside its transaction), which is exactly the
+     * 409 `METADATA_CONFLICT` the repository raises. Scoped to package-scoped
+     * active reads so the pre-flight `commitItems` scan — which reads active
+     * rows WITHOUT a `package_id` — does not consume the one-shot.
      */
-    faults: { failMetadataWriteFor?: string };
+    faults: { failMetadataWriteFor?: string; advanceActiveOnRead?: string };
     /** Audit rows that LANDED and were not rolled back. */
     auditRows: any[];
     /**
@@ -153,7 +180,7 @@ type Harness = {
 };
 
 function makeStubEngine(opts: { failAudit?: boolean } = {}): Harness {
-    const faults: { failMetadataWriteFor?: string } = {};
+    const faults: { failMetadataWriteFor?: string; advanceActiveOnRead?: string } = {};
     const rows = new Map<string, Row>();
     const historyRows: HistoryRow[] = [];
     const commitRows: any[] = [];
@@ -196,7 +223,23 @@ function makeStubEngine(opts: { failAudit?: boolean } = {}): Harness {
                 return historyRows.find((h) => matchesHistory(h, opts2.where)) ?? null;
             }
             if (table === 'sys_metadata_commit') return null;
-            return findRow(opts2.where)?.row ?? null;
+            const hit = findRow(opts2.where);
+            if (!hit) return null;
+            // [#8594] The rival author lands BETWEEN the two reads. THIS read is
+            // answered with the row as it stood (the snapshot below), and the
+            // stored row is advanced immediately after — so the next read, the
+            // one `put` makes inside its own transaction, sees a different
+            // checksum, the parent-version check fails, and the repository
+            // raises the ConflictError that really produces `metadata_conflict`.
+            if (faults.advanceActiveOnRead === hit.row.name
+                && opts2.where?.state === 'active'
+                && 'package_id' in (opts2.where ?? {})) {
+                delete faults.advanceActiveOnRead;
+                const asItStood = { ...hit.row };
+                hit.row.checksum = 'sha256:advanced_by_a_rival';
+                return asItStood;
+            }
+            return hit.row;
         },
         async find(table: string, opts2: { where: Record<string, unknown>; orderBy?: any; limit?: number }) {
             if (table === 'sys_metadata_audit') {
@@ -533,16 +576,23 @@ describe('[#8400] publishPackageDrafts audits the batch it publishes', () => {
         } as any);
         expect(res.publishedCount).toBe(0);
 
+        // Membership, not length: [#8594] a lock refusal now leaves BOTH the
+        // batch row and the inner verdict's own row, and the scope claim under
+        // test here is about each row's `organization_id`, not about how many
+        // rows one refusal produces.
         const denied = publishRows(h, 'denied');
-        expect(denied).toHaveLength(1);
-        expect(denied[0].name).toBe('envwide_locked');
-        // The denied row reads its scope from `__batchItem`, which is the
-        // `listDrafts` row — the draft's OWN scope, the same source the allowed
-        // row's `draftOrgId` comes from. Keyed on the caller's active org this
-        // would be `ORG` and the two outcomes would disagree about where the
-        // publish was refused.
-        expect(denied[0].organization_id).toBeNull();
-        expect(denied[0].organization_id).not.toBe(ORG);
+        expect(denied.map((a) => a.code).sort()).toEqual(['batch_aborted', 'item_locked']);
+        for (const row of denied) {
+            expect(row.name).toBe('envwide_locked');
+            // The denied rows read their scope from the draft's OWN scope — the
+            // `listDrafts` row (`__batchItem` for the batch row, the promote
+            // request for the inner one), the same source the allowed row's
+            // `draftOrgId` comes from. Keyed on the caller's active org these
+            // would be `ORG` and the two outcomes would disagree about where the
+            // publish was refused.
+            expect(row.organization_id).toBeNull();
+            expect(row.organization_id).not.toBe(ORG);
+        }
     });
 
     // ── the denied outcome, and the placement that makes it durable ──────────
@@ -586,12 +636,16 @@ describe('[#8400] publishPackageDrafts audits the batch it publishes', () => {
         // allowed rows are driven off a COMMITTED batch, not an attempted one.
         expect(publishRows(h, 'allowed')).toHaveLength(0);
 
-        // Exactly ONE denial survives, and it is the one written outside the
-        // transaction.
+        // The batch-level row survives, and it is the one written outside the
+        // transaction. Asserted by MEMBERSHIP on its `code`, never by counting
+        // the list: #8594 adds a SECOND denial beside it (the inner verdict's
+        // own row, below), and a length assertion here would have read that
+        // addition as a regression instead of as the fix.
         const denied = publishRows(h, 'denied');
-        expect(denied).toHaveLength(1);
-        expect(h.auditRows).toHaveLength(auditedBefore + 1);
-        expect(denied[0]).toMatchObject({
+        // adr0112-ok: D6b — persisted audit column, its own vocabulary
+        const batchAborted = denied.filter((a) => a.code === 'batch_aborted');
+        expect(batchAborted).toHaveLength(1);
+        expect(batchAborted[0]).toMatchObject({
             type: 'view',
             name: 'locked_grid',
             organization_id: ORG,
@@ -604,15 +658,26 @@ describe('[#8400] publishPackageDrafts audits the batch it publishes', () => {
             actor: 'admin',
             source: 'protocol.publishPackageDrafts',
         });
-        expect(String(denied[0].note)).toContain(PKG);
+        expect(String(batchAborted[0].note)).toContain(PKG);
+        expect(auditedBefore).toBeGreaterThan(0); // the staging saves really ran
 
-        // THE PLACEMENT MEASUREMENT. `assertLockAllowsWrite` wrote its
-        // `item_locked` row from inside the transaction: it was ATTEMPTED…
+        // ── THE PLACEMENT MEASUREMENT ────────────────────────────────────────
+        // The lock gate's `item_locked` row was ATTEMPTED…
         expect(h.auditAttempts.some((a) => a.code === 'item_locked')).toBe(true);
-        // …and it is GONE, rolled back with the batch it was recording. A
-        // refusal audited from in there leaves nothing behind — which is why
-        // the row above is written from the `catch` instead.
-        expect(h.auditRows.some((a) => a.code === 'item_locked')).toBe(false);
+        // …and [#8594] it now SURVIVES.
+        //
+        // ⚠️ THIS ASSERTION WAS INVERTED, deliberately. It read `.toBe(false)`
+        // and that was this file MEASURING the defect rather than fixing it:
+        // `assertLockAllowsWrite` wrote the row from INSIDE the batch
+        // transaction, so the refusal's own record was destroyed by the very
+        // rollback the refusal caused, and a compliance query on
+        // `code = 'item_locked'` found nothing for a package publish refused by
+        // a lock. `batch_aborted` above gave the batch route *a* trail but not
+        // the inner verdict's vocabulary. `promoteDraftForPublish` now hands the
+        // row to its caller instead of writing it, and the caller records it
+        // outside the transaction — so both rows survive, each carrying its own
+        // fact. The inner one is asserted in full in the `[#8594]` block below.
+        expect(h.auditRows.some((a) => a.code === 'item_locked')).toBe(true);
     });
 
     it('the denied row quotes the refusal but never the driver dialect (the note is wire-visible)', async () => {
@@ -632,6 +697,12 @@ describe('[#8400] publishPackageDrafts audits the batch it publishes', () => {
             } as any);
             expect(res.publishedCount).toBe(0);
 
+            // [#8594] Exactly ONE row here, and the length assertion is the
+            // point: a driver fault carries NO inner verdict, so nothing may
+            // appear beside `batch_aborted`. This is the over-broad guard for
+            // #8594's shape — a fix that minted an inner-vocabulary row for
+            // every refusal, instead of replaying only the ones the gates really
+            // reached, would put a second row here and go red.
             const denied = publishRows(h, 'denied');
             expect(denied).toHaveLength(1);
             expect(denied[0]).toMatchObject({
@@ -681,5 +752,281 @@ describe('[#8400] publishPackageDrafts audits the batch it publishes', () => {
         } finally {
             warn.mockRestore();
         }
+    });
+});
+
+/**
+ * [#8594] The INNER verdict's own row survives the rollback it caused.
+ *
+ * ---------------------------------------------------------------------------
+ * What #8400 left, and why it was not enough
+ * ---------------------------------------------------------------------------
+ * #8400 gave a refused batch a `batch_aborted` row written from the `catch`,
+ * outside the transaction. That is a real trail, but it is the BATCH's fact.
+ * The item-level verdicts — `assertLockAllowsWrite`'s `item_locked` (with its
+ * `lock_state` column) and `recordOptimisticConflictAudit`'s `metadata_conflict`
+ * — were still written from INSIDE `promoteDraftForPublish`, i.e. inside the
+ * batch transaction, and were destroyed by the very rollback their own refusal
+ * caused. A compliance query filtering `code = 'item_locked'` therefore found
+ * nothing for a package publish refused by a lock: the vocabulary that query
+ * runs on never reached the table on this route.
+ *
+ * ---------------------------------------------------------------------------
+ * The shape, and the premise it rests on (measured, not assumed)
+ * ---------------------------------------------------------------------------
+ * `promoteDraftForPublish` no longer writes those rows. It attaches them to the
+ * refusal it throws, and each of its two callers records them on ITS side of
+ * ITS transaction. The whole argument for that shape is a claim about the
+ * single-item route — that it already audits outside a transaction — so the
+ * first case below MEASURES it rather than taking it on faith, against the same
+ * really-rolling-back harness. That case is green before AND after the
+ * production change: it is the premise, not the deliverable.
+ *
+ * ---------------------------------------------------------------------------
+ * The control that keeps the inversion honest
+ * ---------------------------------------------------------------------------
+ * "The denial rows survive" is also satisfied by a fix that simply stopped
+ * rolling anything back — the trap a sibling inversion fell into. So every case
+ * here that asserts a surviving denial ALSO asserts ADR-0067 D2 in the same
+ * breath: the batch promoted NOTHING (`publishedCount: 0`, every draft still a
+ * draft with no active row, no `sys_metadata_commit` row, no `allowed` row).
+ * If the transaction stopped rolling back, those go red while the denial
+ * assertions stay green — which is the whole point of asserting both.
+ */
+describe('[#8594] a refused publish leaves the INNER verdict, in its own vocabulary', () => {
+    /** Every audit row for `code`, whatever the operation. */
+    const byCode = (h: Harness, code: string) => h.auditRows.filter((a) => a.code === code);
+
+    // ── the premise ──────────────────────────────────────────────────────────
+    // The single-item route's denial row lands and STAYS on the same harness
+    // whose `transaction()` really rolls back — because `publishMetaItem` opens
+    // no transaction of its own. That is the fact the whole "hand the row to the
+    // caller" shape is built on, so it is pinned here instead of assumed.
+    it('premise: the SINGLE-ITEM publish route audits outside a transaction — its `item_locked` row survives', async () => {
+        const h = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(h.engine, undefined, 'env_test');
+
+        await stageDraft(protocol, 'solo_locked');
+        await protocol.saveMetaItem({
+            type: 'view', name: 'solo_locked', organizationId: ORG,
+            item: viewBody('solo_locked', 'protected', { _lock: 'no-overlay' }),
+            packageId: PKG, actor: 'admin',
+        } as any);
+
+        let caught: any;
+        try {
+            await protocol.publishMetaItem({
+                type: 'view', name: 'solo_locked', organizationId: ORG, actor: 'admin',
+            } as any);
+        } catch (e) { caught = e; }
+
+        // ADR-0112 envelope: `code` AND `status`, never a bare `toThrow()`.
+        expect(caught?.code).toBe('ITEM_LOCKED');
+        expect(caught?.status).toBe(403);
+
+        const locked = byCode(h, 'item_locked');
+        expect(locked).toHaveLength(1);
+        expect(locked[0]).toMatchObject({
+            type: 'view',
+            name: 'solo_locked',
+            organization_id: ORG,
+            operation: 'publish',
+            outcome: 'denied',
+            // adr0112-ok: D6b — persisted audit column, its own vocabulary
+            code: 'item_locked',
+            lock_state: 'no-overlay',
+            actor: 'admin',
+            // The single-item route keeps naming itself — unchanged by #8594.
+            source: 'protocol.publishMetaItem',
+        });
+    });
+
+    // ── the deliverable: the lock refusal ───────────────────────────────────
+    it('a batch refused by a LOCK leaves an `item_locked` row with its `lock_state` — and still promotes nothing', async () => {
+        const h = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(h.engine, undefined, 'env_test');
+
+        await stageDraft(protocol, 'case_grid');
+        await stageDraft(protocol, 'locked_grid');
+        await protocol.saveMetaItem({
+            type: 'view', name: 'locked_grid', organizationId: ORG,
+            item: viewBody('locked_grid', 'protected', { _lock: 'no-overlay' }),
+            packageId: PKG, actor: 'admin',
+        } as any);
+
+        const res = await protocol.publishPackageDrafts({
+            packageId: PKG, organizationId: ORG, actor: 'admin',
+        } as any);
+
+        // ── THE DELIVERABLE ──────────────────────────────────────────────────
+        // The verdict that aborted the batch, in the vocabulary a compliance
+        // query filters on, with the lock column that says WHICH lock.
+        const locked = byCode(h, 'item_locked');
+        expect(locked).toHaveLength(1);
+        expect(locked[0]).toMatchObject({
+            type: 'view',
+            name: 'locked_grid',
+            organization_id: ORG,
+            operation: 'publish',
+            outcome: 'denied',
+            // adr0112-ok: D6b — persisted audit column, its own vocabulary
+            code: 'item_locked',
+            lock_state: 'no-overlay',
+            actor: 'admin',
+            // Re-stamped by the route that wrote it: the shared Phase-1 helper
+            // passes `protocol.publishMetaItem` for both of its callers, and
+            // filing a batch publish under the single-item route's name would
+            // make the trail lie about which door was used.
+            source: 'protocol.publishPackageDrafts',
+        });
+
+        // …beside #8400's batch-level row, which records a different fact and is
+        // NOT replaced. Membership on the pair, never a count of the list.
+        expect(publishRows(h, 'denied').map((a) => a.code).sort())
+            .toEqual(['batch_aborted', 'item_locked']);
+
+        // ── THE ADR-0067 D2 CONTROL ──────────────────────────────────────────
+        // Rows surviving is only the fix if the rollback still happens. A fix
+        // that made the denial durable by no longer rolling anything back would
+        // satisfy every assertion above and fail every one below.
+        expect(res.success).toBe(false);
+        expect(res.publishedCount).toBe(0);
+        expect(res.published).toEqual([]);
+        // `case_grid` was promoted BEFORE `locked_grid` refused, and it unwound:
+        // still a draft, with no active row anywhere.
+        expect([...h.rows.values()].filter((r) => r.name === 'case_grid').map((r) => r.state))
+            .toEqual(['draft']);
+        expect([...h.rows.values()].some((r) => r.state === 'active' && r.name === 'case_grid'))
+            .toBe(false);
+        // The ADR-0067 commit row is written inside the same transaction, so it
+        // unwound too — a recorded commit can never describe a partial publish.
+        expect(h.commitRows).toHaveLength(0);
+        // And no item was audited as published.
+        expect(publishRows(h, 'allowed')).toHaveLength(0);
+    });
+
+    // ── the read door ───────────────────────────────────────────────────────
+    // A row nobody can query is not a trail. `GET /api/v1/meta/:type/:name/audit`
+    // serves from `auditMetaItem`, and that is where a compliance report reads
+    // `code` / `lockState` from.
+    it('auditMetaItem surfaces the `item_locked` verdict for a batch-refused item', async () => {
+        const h = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(h.engine, undefined, 'env_test');
+
+        await stageDraft(protocol, 'locked_grid');
+        await protocol.saveMetaItem({
+            type: 'view', name: 'locked_grid', organizationId: ORG,
+            item: viewBody('locked_grid', 'protected', { _lock: 'no-overlay' }),
+            packageId: PKG, actor: 'admin',
+        } as any);
+        await protocol.publishPackageDrafts({
+            packageId: PKG, organizationId: ORG, actor: 'admin',
+        } as any);
+
+        const { events } = await protocol.auditMetaItem({ type: 'view', name: 'locked_grid' });
+        const verdict = events.find((e) => e.code === 'item_locked');
+        expect(verdict).toBeDefined();
+        expect(verdict).toMatchObject({
+            operation: 'publish',
+            outcome: 'denied',
+            lockState: 'no-overlay',
+            source: 'protocol.publishPackageDrafts',
+        });
+    });
+
+    // ── the deliverable: the optimistic-lock refusal ─────────────────────────
+    // The card's other inner verdict. `recordOptimisticConflictAudit` sat in the
+    // same place with the same fate, and no case anywhere measured it on the
+    // batch route: the 409 is raised by the repository's parent-version check,
+    // which needs a real rival write between `promoteDraft`'s two reads (see
+    // `advanceActiveOnRead`), not an injected error.
+    it('a batch refused by a 409 CONFLICT leaves a `metadata_conflict` row — and still promotes nothing', async () => {
+        const h = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(h.engine);
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+            // Staged FIRST so it is promoted first and is genuinely unwound by
+            // the conflict that follows it — the ADR-0067 D2 control below is
+            // about a promotion that really happened, not one never attempted.
+            await stageDraft(protocol, 'bystander_grid');
+            await stageDraft(protocol, 'raced_grid');
+            // An active row for the draft to advance PAST — with no active row
+            // the parent version is null on both reads and there is no race.
+            await protocol.saveMetaItem({
+                type: 'view', name: 'raced_grid', organizationId: ORG,
+                item: viewBody('raced_grid', 'head'), packageId: PKG, actor: 'admin',
+            } as any);
+
+            // The rival lands between the two reads of `raced_grid`'s active row.
+            h.faults.advanceActiveOnRead = 'raced_grid';
+
+            const res = await protocol.publishPackageDrafts({
+                packageId: PKG, organizationId: ORG, actor: 'admin',
+            } as any);
+
+            // ── THE DELIVERABLE ──────────────────────────────────────────────
+            const conflict = byCode(h, 'metadata_conflict');
+            expect(conflict).toHaveLength(1);
+            expect(conflict[0]).toMatchObject({
+                type: 'view',
+                name: 'raced_grid',
+                organization_id: ORG,
+                operation: 'publish',
+                outcome: 'denied',
+                // adr0112-ok: D6b — persisted audit column, its own vocabulary
+                code: 'metadata_conflict',
+                actor: 'admin',
+                source: 'protocol.publishPackageDrafts',
+            });
+            // The note names the losing race, which is the fact an author needs.
+            expect(String(conflict[0].note)).toContain('sha256:advanced_by_a_rival');
+            expect(publishRows(h, 'denied').map((a) => a.code).sort())
+                .toEqual(['batch_aborted', 'metadata_conflict']);
+            // The batch reports the refusal in its own envelope too.
+            expect(res.failed.some((f) => f.code === 'METADATA_CONFLICT')).toBe(true);
+
+            // ── THE ADR-0067 D2 CONTROL ──────────────────────────────────────
+            expect(res.success).toBe(false);
+            expect(res.publishedCount).toBe(0);
+            expect(h.commitRows).toHaveLength(0);
+            expect(publishRows(h, 'allowed')).toHaveLength(0);
+            // The bystander draft that promoted before the conflict unwound.
+            expect([...h.rows.values()].filter((r) => r.name === 'bystander_grid').map((r) => r.state))
+                .toEqual(['draft']);
+        } finally {
+            warn.mockRestore();
+        }
+    });
+
+    // ── the engine without a transaction ─────────────────────────────────────
+    // `publishPackageDrafts` falls through to a plain sequential run when the
+    // engine has no `transaction()` (memory driver, minimal stubs). The row must
+    // land there too: after #8594 the placement no longer depends on the
+    // engine's capabilities, which is the reason the helper stopped guessing.
+    it('an engine with NO transaction() still lands the `item_locked` row', async () => {
+        const h = makeStubEngine();
+        delete h.engine.transaction;
+        const protocol = new ObjectStackProtocolImplementation(h.engine, undefined, 'env_test');
+
+        await stageDraft(protocol, 'locked_grid');
+        await protocol.saveMetaItem({
+            type: 'view', name: 'locked_grid', organizationId: ORG,
+            item: viewBody('locked_grid', 'protected', { _lock: 'no-overlay' }),
+            packageId: PKG, actor: 'admin',
+        } as any);
+
+        const res = await protocol.publishPackageDrafts({
+            packageId: PKG, organizationId: ORG, actor: 'admin',
+        } as any);
+        expect(res.publishedCount).toBe(0);
+
+        expect(byCode(h, 'item_locked')).toHaveLength(1);
+        expect(byCode(h, 'item_locked')[0]).toMatchObject({
+            name: 'locked_grid',
+            operation: 'publish',
+            outcome: 'denied',
+            lock_state: 'no-overlay',
+            source: 'protocol.publishPackageDrafts',
+        });
     });
 });

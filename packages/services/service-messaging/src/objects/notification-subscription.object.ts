@@ -58,7 +58,34 @@ export const NotificationSubscription = ObjectSchema.create({
     },
 
     indexes: [
-        { fields: ['topic', 'principal'], unique: true },
+        // [#8577] Scope spelled EXPLICITLY (ADR-0120 D1). On a DECLARED index
+        // bare `unique: true` is the positional spelling of `'global'` — the
+        // listed columns VERBATIM — so `(topic, principal)` was an
+        // installation-wide key on a tenant-scoped object. Direct sibling of
+        // `sys_notification_preference` (#8554): same package, same directory,
+        // same ADR-0030 Layer 3, same archetype.
+        // Measured live before the fix (real SqlDriver, better-sqlite3,
+        // OS_TENANCY_POSTURE=isolated, this shipped declaration):
+        // org_jia creates (billing.invoice, role:sales_manager) 201 / org_yi
+        // the SAME pair 409 UNIQUE_VIOLATION / org_yi (billing.invoice,
+        // role:only_yi) 201 / org_yi (crm.lead, role:sales_manager) 201 /
+        // org_yi (billing.invoice, user:u1) 201 / org_yi's own GET on the
+        // colliding pair 0 rows.
+        //
+        // ⚠️ `principal` names are per-organization: `role:x` and `team:x`
+        // resolve against `sys_permission_set` / `sys_position` rows that
+        // #8461 and #8556 already scoped per organization, so `role:sales_manager`
+        // denoted a DIFFERENT principal in each organization while colliding on
+        // one installation-wide key. And a user who belongs to two
+        // organizations could not subscribe to the same topic in both — the
+        // symptom #8323 measured on `sys_user_preference`.
+        //
+        // ⚠️ `managedBy: 'system-data'` is NOT a reason to exempt this object;
+        // the already-ruled `sys_user_preference` is `system-data` too. The
+        // ruling's phrase is ADMIN-AUTHORED CONTENT — the provenance of the
+        // rows (this object's own header: authored from the Setup
+        // "Notification Subscriptions" grid), not the management mode.
+        { fields: ['topic', 'principal'], unique: 'organization' },
         { fields: ['topic'] },
     ],
 });

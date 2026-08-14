@@ -2392,6 +2392,208 @@ describe('SecurityPlugin', () => {
       ).resolves.toBeDefined();
     });
   });
+
+  // ── #8552 / ADR-0066 D1 — curated capability-name refusal (create + rename) ──
+  // A `sys_capability` name in PLATFORM_CAPABILITY_NAMES is the platform's:
+  // Setup may neither CREATE a row with it nor RENAME a row TO it — refused at
+  // this write door with an error naming the colliding curated name, never
+  // answered 200. Existing colliding rows stay the operator's (ruling option
+  // 1): a payload repeating a row's own curated name is not a rename and
+  // passes, and renaming AWAY stays open. The load-bearing half of this suite
+  // is the POSITIVE controls — a refusal too broad passes every "it refuses"
+  // assertion, so non-curated authoring is pinned open in BOTH deployment
+  // shapes (org-scoped, and the community NULL-bucket shape with no tenant).
+  describe('curated capability-name write gate (#8552, sys_capability create/rename)', () => {
+    const adminSet: PermissionSet = {
+      name: 'admin_full_access', label: 'Admin',
+      objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true, modifyAllRecords: true } },
+    } as any;
+    // Enterprise / org-scoped shape: the caller carries an active organization.
+    const orgCtx = { userId: 'admin1', tenantId: 'org-1', positions: [], permissions: ['admin_full_access'] };
+    // Community NULL-bucket shape: no `@objectstack/organizations` stamper, no
+    // tenantId — every Setup-authored row lands in the NULL-organization
+    // bucket. This is the default community deployment, not an edge case.
+    const communityCtx = { userId: 'admin1', positions: [], permissions: ['admin_full_access'] };
+
+    const runGate = async (opCtx: any, findOneImpl?: (q: any) => any) => {
+      const plugin = new SecurityPlugin({ fallbackPermissionSet: 'admin_full_access' });
+      const harness = makeMiddlewareCtx({
+        permissionSets: [adminSet],
+        objectFields: ['id', 'name', 'label', 'managed_by', 'active'],
+        ...(findOneImpl ? { findOneImpl } : {}),
+      });
+      await plugin.init(harness.ctx);
+      await plugin.start(harness.ctx);
+      return harness.run(opCtx);
+    };
+
+    // The refusal envelope, asserted whole (code AND status, plus the located
+    // name) — `rejects.toThrow()` alone would stay green on any refusal from
+    // any gate, which is exactly the vacuity this suite must not have.
+    const curatedRefusal = (name: string) => ({
+      name: 'PermissionDeniedError',
+      code: 'PERMISSION_DENIED',
+      statusCode: 403,
+      message: expect.stringContaining(`'${name}' is a platform-curated capability name`),
+    });
+
+    it('DENIES creating a capability with a curated name (org-scoped shape), naming the collision', async () => {
+      const opCtx: any = {
+        object: 'sys_capability', operation: 'insert',
+        data: { name: 'manage_users', label: 'Mine now' }, context: orgCtx,
+      };
+      await expect(runGate(opCtx)).rejects.toMatchObject(curatedRefusal('manage_users'));
+    });
+
+    it('DENIES creating a capability with a curated name (community NULL-bucket shape)', async () => {
+      const opCtx: any = {
+        object: 'sys_capability', operation: 'insert',
+        data: { name: 'setup.write', label: 'Setup Write' }, context: communityCtx,
+      };
+      await expect(runGate(opCtx)).rejects.toMatchObject(curatedRefusal('setup.write'));
+    });
+
+    it('DENIES an ARRAY insert when ANY element claims a curated name', async () => {
+      const opCtx: any = {
+        object: 'sys_capability', operation: 'insert',
+        data: [{ name: 'my_cap_a' }, { name: 'manage_sharing' }],
+        context: orgCtx,
+      };
+      await expect(runGate(opCtx)).rejects.toMatchObject(curatedRefusal('manage_sharing'));
+    });
+
+    it('DENIES RENAMING an admin-authored capability TO a curated name (by-id update)', async () => {
+      const opCtx: any = {
+        object: 'sys_capability', operation: 'update',
+        data: { id: 'cap_admin', name: 'manage_users' }, options: { where: { id: 'cap_admin' } },
+        context: orgCtx,
+      };
+      await expect(
+        runGate(opCtx, () => ({ id: 'cap_admin', name: 'my_cap', managed_by: 'admin' })),
+      ).rejects.toMatchObject(curatedRefusal('manage_users'));
+    });
+
+    it('DENIES a rename-to-curated even for a principal-less context (gate is before the fall-open)', async () => {
+      const opCtx: any = {
+        object: 'sys_capability', operation: 'update',
+        data: { id: 'cap_admin', name: 'manage_users' }, options: { where: { id: 'cap_admin' } },
+        context: {},
+      };
+      await expect(
+        runGate(opCtx, () => ({ id: 'cap_admin', name: 'my_cap', managed_by: 'admin' })),
+      ).rejects.toMatchObject(curatedRefusal('manage_users'));
+    });
+
+    it('FAILS CLOSED when the renamed row cannot be read back (absent pre-image refuses)', async () => {
+      const opCtx: any = {
+        object: 'sys_capability', operation: 'update',
+        data: { id: 'cap_gone', name: 'manage_users' }, options: { where: { id: 'cap_gone' } },
+        context: orgCtx,
+      };
+      // Every findOne answers null: no pre-image exists to prove the payload
+      // repeats the row's own name, so the write is refused.
+      await expect(runGate(opCtx, () => null)).rejects.toMatchObject(curatedRefusal('manage_users'));
+    });
+
+    it('DENIES a FILTER update stamping a curated name onto differently-named rows', async () => {
+      const opCtx: any = {
+        object: 'sys_capability', operation: 'update',
+        data: { name: 'manage_users', active: false }, options: { where: { active: true } },
+        context: orgCtx,
+      };
+      // The $ne probe (and only it) finds a row NOT already named
+      // manage_users inside the write's own filter; the system-row gate's
+      // managed-row probe finds nothing, so the refusal measured here is this
+      // gate's, not a neighbour's.
+      const impl = (q: any) => {
+        const and = q?.where?.$and;
+        if (Array.isArray(and) && and.some((c: any) => c && typeof c === 'object' && c.name && typeof c.name === 'object' && '$ne' in c.name)) {
+          return { id: 'cap_other', name: 'my_cap', managed_by: 'admin' };
+        }
+        return null;
+      };
+      await expect(runGate(opCtx, impl)).rejects.toMatchObject(curatedRefusal('manage_users'));
+    });
+
+    it('DENIES a WHOLE-TABLE update stamping a curated name (no filter to scope the rename)', async () => {
+      const opCtx: any = {
+        object: 'sys_capability', operation: 'update',
+        data: { name: 'manage_users' }, context: orgCtx,
+      };
+      await expect(runGate(opCtx, () => null)).rejects.toMatchObject(curatedRefusal('manage_users'));
+    });
+
+    // ── positive controls — the load-bearing half ──
+
+    it('ALLOWS creating a NON-curated capability (org-scoped shape)', async () => {
+      const opCtx: any = {
+        object: 'sys_capability', operation: 'insert',
+        data: { name: 'org_export_reports', label: 'Export Reports', managed_by: 'admin' },
+        context: orgCtx,
+      };
+      await expect(runGate(opCtx)).resolves.toBeDefined();
+    });
+
+    it('ALLOWS creating a NON-curated capability (community NULL-bucket shape)', async () => {
+      const opCtx: any = {
+        object: 'sys_capability', operation: 'insert',
+        data: { name: 'org_export_reports', label: 'Export Reports', managed_by: 'admin' },
+        context: communityCtx,
+      };
+      await expect(runGate(opCtx)).resolves.toBeDefined();
+    });
+
+    it('ALLOWS a full-record update of an EXISTING colliding admin row that repeats its own name (not a rename)', async () => {
+      const opCtx: any = {
+        object: 'sys_capability', operation: 'update',
+        data: { id: 'cap_collide', name: 'manage_users', label: 'Renamed label', active: false },
+        options: { where: { id: 'cap_collide' } },
+        context: communityCtx,
+      };
+      await expect(
+        runGate(opCtx, () => ({ id: 'cap_collide', name: 'manage_users', managed_by: 'admin' })),
+      ).resolves.toBeDefined();
+    });
+
+    it('ALLOWS renaming an EXISTING colliding admin row AWAY from the curated name (the operator remediation)', async () => {
+      const opCtx: any = {
+        object: 'sys_capability', operation: 'update',
+        data: { id: 'cap_collide', name: 'org_manage_users' },
+        options: { where: { id: 'cap_collide' } },
+        context: communityCtx,
+      };
+      await expect(
+        runGate(opCtx, () => ({ id: 'cap_collide', name: 'manage_users', managed_by: 'admin' })),
+      ).resolves.toBeDefined();
+    });
+
+    it('ALLOWS a FILTER update stamping a curated name when it provably renames nothing (probe finds no other-named row)', async () => {
+      const opCtx: any = {
+        object: 'sys_capability', operation: 'update',
+        data: { name: 'manage_users', active: true }, options: { where: { name: 'manage_users' } },
+        context: communityCtx,
+      };
+      await expect(runGate(opCtx, () => null)).resolves.toBeDefined();
+    });
+
+    it('lets system/boot writes through (isSystem bypass) — the curated seeder itself is unaffected', async () => {
+      const opCtx: any = {
+        object: 'sys_capability', operation: 'insert',
+        data: { name: 'manage_users', label: 'Manage Users', managed_by: 'platform' },
+        context: { isSystem: true },
+      };
+      await expect(runGate(opCtx)).resolves.toBeDefined();
+    });
+
+    it('does NOT reach sys_position — a position may share a curated capability STRING (scope control)', async () => {
+      const opCtx: any = {
+        object: 'sys_position', operation: 'insert',
+        data: { name: 'manage_users', label: 'A position, not a capability' },
+        context: orgCtx,
+      };
+      await expect(runGate(opCtx)).resolves.toBeDefined();
+    });
+  });
 });
 // ---------------------------------------------------------------------------
 describe('PermissionEvaluator', () => {
@@ -3353,6 +3555,7 @@ describe('explainAccessForCaller (ADR-0090 D6/D12)', () => {
     };
     const matches = (row: any, where: any): boolean =>
       Object.entries(where ?? {}).every(([k, v]) => {
+        if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
         if (v && typeof v === 'object' && Array.isArray((v as any).$in)) return (v as any).$in.includes(row[k]);
         return row[k] === v;
       });
@@ -3472,6 +3675,7 @@ describe('SecurityPlugin — ADR-0090 D10 agent intersection', () => {
     }
     const matches = (row: any, where: any): boolean =>
       Object.entries(where ?? {}).every(([k, v]) => {
+        if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
         if (v && typeof v === 'object' && Array.isArray((v as any).$in)) return (v as any).$in.includes(row[k]);
         return row[k] === v;
       });

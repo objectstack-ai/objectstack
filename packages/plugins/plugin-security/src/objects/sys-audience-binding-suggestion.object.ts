@@ -105,7 +105,39 @@ export const SysAudienceBindingSuggestion = ObjectSchema.create({
   },
 
   indexes: [
-    { fields: ['package_id', 'permission_set_name', 'anchor'], unique: true },
+    // [#8577] Scope spelled EXPLICITLY (ADR-0120 D1). On a DECLARED index bare
+    // `unique: true` is the positional spelling of `'global'` — the listed
+    // columns VERBATIM — so `(package_id, permission_set_name, anchor)` was an
+    // installation-wide key on a tenant-scoped object.
+    //
+    // ⚠️ This is not the class's usual naming oracle. The key is the owning
+    // package's id, the PACKAGE'S OWN permission-set name and the anchor —
+    // the SAME TRIPLE for every tenant that installs the same package — while
+    // the row is per-tenant by construction (produced when the declaration is
+    // observed, resolved when a TENANT ADMIN confirms). So the second and every
+    // later organization to install a package never got its suggestion row:
+    // its admins were never prompted and its users never received the package's
+    // default permission set. ADR-0090 D5/D9 exists so this is never
+    // auto-bound; the effect was that for every tenant after the first it was
+    // never bound AT ALL, and nothing said so —
+    // `syncAudienceBindingSuggestions` swallows the insert failure in a bare
+    // `catch` (read as a benign concurrent-sync race).
+    //
+    // Measured live before the fix (real SqlDriver, better-sqlite3,
+    // OS_TENANCY_POSTURE=isolated, this shipped declaration):
+    // org_jia creates (com.acme.crm, sales_readonly, everyone) 201 / org_yi the
+    // SAME triple 409 UNIQUE_VIOLATION / org_yi (com.acme.crm, other_set,
+    // everyone) 201 / org_yi (com.other.pkg, sales_readonly, everyone) 201 /
+    // org_yi (com.acme.crm, sales_readonly, guest) 201 / org_yi's own GET on
+    // the colliding triple 0 rows. And through the REAL sync on a real engine:
+    // org_jia created 1, org_yi created 0 with no throw and no log line.
+    //
+    // ⚠️ This is the STORAGE half only. `syncAudienceBindingSuggestions` still
+    // reads and writes through a tenant-less `{ isSystem: true }` context, so
+    // the shipped path writes ONE organization-less row every tenant reads —
+    // measured, and filed as #8617. Until that lands, this respelling is what
+    // makes a per-organization row possible, not what produces one.
+    { fields: ['package_id', 'permission_set_name', 'anchor'], unique: 'organization' },
     { fields: ['status'] },
     { fields: ['package_id'] },
   ],

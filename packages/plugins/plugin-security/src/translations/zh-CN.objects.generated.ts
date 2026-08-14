@@ -139,7 +139,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         help: "发布该能力的应用包（为空表示平台内置或管理员创建）。"
       },
       active: {
-        label: "启用"
+        label: "启用",
+        help: "目录/可见性标记，用于筛选和查看。它对授权没有任何影响：权限集的授予与资源的 requiredPermissions 都按字符串匹配能力名称，从不读取该行，因此清除它不会撤销任何权限。"
       },
       id: {
         label: "能力 ID"
@@ -169,7 +170,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       deactivate_capability: {
         label: "停用",
-        confirmText: "停用该能力？引用它的授权和资源要求将无法解析，直到重新启用。",
+        confirmText: "停用该能力？这只是目录标记，用于在 Setup 中筛选和查看。授权不受影响——授予该能力的权限集，以及要求该能力的资源，都按名称匹配，仍会照常解析。",
         successMessage: "已停用能力"
       }
     }

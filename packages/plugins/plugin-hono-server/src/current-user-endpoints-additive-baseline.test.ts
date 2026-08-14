@@ -61,6 +61,7 @@ type Row = Record<string, any>;
 
 function matches(row: Row, where: Row | undefined): boolean {
     return Object.entries(where ?? {}).every(([key, cond]) => {
+        if (key.startsWith('$')) throw new Error(`fake driver: unsupported operator ${key}`);
         const value = row[key] ?? null;
         if (cond && typeof cond === 'object' && Array.isArray((cond as any).$in)) {
             return (cond as any).$in.includes(value);

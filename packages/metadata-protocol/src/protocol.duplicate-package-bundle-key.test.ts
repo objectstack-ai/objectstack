@@ -94,6 +94,7 @@ function matches(r: Record<string, any>, where: Record<string, unknown>): boolea
             if (!clauses.some((c) => matches(r, c))) return false;
             continue;
         }
+        if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
         if ((r[k] ?? null) !== v) return false;
     }
     return true;

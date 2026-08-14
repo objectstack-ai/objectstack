@@ -12,7 +12,15 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectQL } from './engine.js';
-import { SECRET_MASK, isSecretRef } from './secret-fields.js';
+import {
+  SECRET_MASK,
+  isSecretRef,
+  EmptyCredentialWriteError,
+  EMPTY_CREDENTIAL_REFUSAL_CODE,
+  EMPTY_CREDENTIAL_REFUSAL_STATUS,
+  collectMaskedPasswordFields,
+  collectMaskedReadFields,
+} from './secret-fields.js';
 import { SECRET_MASK as SPEC_SECRET_MASK } from '@objectstack/spec/data';
 import type { ICryptoProvider, CryptoHandle, CryptoContext } from '@objectstack/spec/contracts';
 
@@ -65,6 +73,21 @@ function makeStubDriver() {
       const updated = { ...cur, ...data, id };
       s.set(id, updated);
       return copy(updated);
+    },
+    // Predicate update, contracted to resolve an affected COUNT. Declared so
+    // the engine's multi:true path exists on this double at all — without it
+    // the capability check (`typeof driver.updateMany === 'function'`) rejects
+    // a multi update before any write-door seam is reached (#8559 pins that
+    // door on this path).
+    async updateMany(object: string, ast: any, data: Record<string, unknown>) {
+      const s = storeFor(object);
+      let n = 0;
+      for (const [id, row] of s.entries()) {
+        if (!matches(row, ast?.where)) continue;
+        s.set(id, { ...row, ...data, id });
+        n += 1;
+      }
+      return n;
     },
     async upsert(object: string, data: Record<string, unknown>) {
       const id = data.id as string | undefined;
@@ -407,6 +430,185 @@ describe('objectql password-field masking (ADR-0100)', () => {
     const viaOne = await ctx.engine.findOne('authy_user', { where: { id: created.id } }) as any;
     // Masking here would break login — the auth subsystem must read its own value.
     expect(viaOne.password).toBe('hashed-by-auth');
+  });
+});
+
+/**
+ * [#8559] The credential write door refuses the empty string (maintainer
+ * ruling 2026-08-13, option 2 — loud refusal over silent reinterpretation).
+ *
+ * `""` is neither a clear (`null` is) nor a storable credential: encrypting it
+ * mints a `sys_secret` row that decrypts to nothing behind a valid ref, and
+ * storing it verbatim in a `password` column produces the same contradiction
+ * without the cipher row — every read reports "set" while the credential holds
+ * nothing. Both arms answer the ADR-0112 pair (`VALIDATION_ERROR`/400) with a
+ * located message naming `null` as the clear spelling.
+ *
+ * The adjacent defended shapes are PINNED UNCHANGED alongside the refusal —
+ * the card's measured contrast table: echoed-mask drop (tests above), cleartext
+ * re-encrypt (above), and `null` clears (pinned in this block).
+ */
+describe('[#8559] the credential write door refuses the empty string', () => {
+  /** The full envelope is contract: class, ADR-0112 pair, located first sentence, null prescription. */
+  function expectRefusal(err: unknown, object: string, field: string, fieldType: 'secret' | 'password') {
+    expect(err).toBeInstanceOf(EmptyCredentialWriteError);
+    const e = err as EmptyCredentialWriteError;
+    expect(e.code).toBe('VALIDATION_ERROR');
+    expect(e.status).toBe(400);
+    expect(e.code).toBe(EMPTY_CREDENTIAL_REFUSAL_CODE);
+    expect(e.status).toBe(EMPTY_CREDENTIAL_REFUSAL_STATUS);
+    expect(e.object).toBe(object);
+    expect(e.field).toBe(field);
+    expect(e.fieldType).toBe(fieldType);
+    // Located first sentence + the prescription: null clears, omit keeps.
+    expect(e.message).toMatch(new RegExp(`^Empty string refused for ${fieldType} field "${object}\\.${field}"`));
+    expect(e.message).toContain(`To clear the stored ${fieldType}, write null`);
+  }
+
+  describe('secret arm', () => {
+    let ctx: Awaited<ReturnType<typeof buildEngine>>;
+    beforeEach(async () => { ctx = await buildEngine(true); });
+
+    it('insert with "" is refused: full envelope, no business row, no sys_secret row, no crypto call', async () => {
+      const err = await ctx.engine
+        .insert('ext_datasource', { name: 'pg', db_password: '' })
+        .then(() => null, (e: unknown) => e);
+      expectRefusal(err, 'ext_datasource', 'db_password', 'secret');
+
+      // Nothing was minted anywhere — the door refused before any side effect.
+      expect(ctx.stores.get('ext_datasource')?.size ?? 0).toBe(0);
+      expect(ctx.stores.get('sys_secret')?.size ?? 0).toBe(0);
+      expect(ctx.crypto.calls.encrypt).toBe(0);
+    });
+
+    it('update with "" is refused and the stored ref survives byte-identical', async () => {
+      const created = await ctx.engine.insert('ext_datasource', { name: 'pg', db_password: 'keep' });
+      const refBefore = (ctx.stores.get('ext_datasource')!.get(created.id) as any).db_password;
+
+      const err = await ctx.engine
+        .update('ext_datasource', { id: created.id, db_password: '' })
+        .then(() => null, (e: unknown) => e);
+      expectRefusal(err, 'ext_datasource', 'db_password', 'secret');
+
+      const after = ctx.stores.get('ext_datasource')!.get(created.id) as any;
+      expect(after.db_password).toBe(refBefore); // unchanged ref
+      expect(ctx.stores.get('sys_secret')!.size).toBe(1); // no second cipher row
+      expect(ctx.crypto.calls.encrypt).toBe(1); // only the original insert
+    });
+
+    it('the refusal is a payload verdict — it fires even with NO CryptoProvider wired', async () => {
+      const bare = await buildEngine(false);
+      const err = await bare.engine
+        .insert('ext_datasource', { name: 'pg', db_password: '' })
+        .then(() => null, (e: unknown) => e);
+      // EmptyCredentialWriteError, not the fail-closed "no CryptoProvider" error:
+      // judging the payload must not depend on what crypto happens to be wired.
+      expectRefusal(err, 'ext_datasource', 'db_password', 'secret');
+    });
+
+    it('insertMany reports the refusal per-row; good rows land with their own cipher rows', async () => {
+      const outcomes = await ctx.engine.insertMany('ext_datasource', [
+        { name: 'a', db_password: 'ok-1' },
+        { name: 'b', db_password: '' },
+        { name: 'c', db_password: 'ok-2' },
+      ]);
+
+      expect(outcomes).toHaveLength(3);
+      expect(outcomes[0]).toMatchObject({ ok: true });
+      expect(outcomes[1].ok).toBe(false);
+      expectRefusal((outcomes[1] as any).error, 'ext_datasource', 'db_password', 'secret');
+      expect(outcomes[2]).toMatchObject({ ok: true });
+
+      expect(ctx.stores.get('ext_datasource')!.size).toBe(2); // only good rows
+      expect(ctx.stores.get('sys_secret')!.size).toBe(2); // no cipher row for the dead one
+    });
+
+    it('multi update with "" is refused at the same door', async () => {
+      const created = await ctx.engine.insert('ext_datasource', { name: 'pg', db_password: 'keep' });
+      const err = await ctx.engine
+        .update('ext_datasource', { id: { $in: [created.id] }, db_password: '' } as any, { multi: true } as any)
+        .then(() => null, (e: unknown) => e);
+      expectRefusal(err, 'ext_datasource', 'db_password', 'secret');
+      expect(ctx.crypto.calls.encrypt).toBe(1); // only the original insert
+    });
+
+    it('PINNED UNCHANGED: null still clears the secret — stored null, read null (not the mask)', async () => {
+      const created = await ctx.engine.insert('ext_datasource', { name: 'pg', db_password: 'gone-soon' });
+      await ctx.engine.update('ext_datasource', { id: created.id, db_password: null });
+
+      const stored = ctx.stores.get('ext_datasource')!.get(created.id) as any;
+      expect(stored.db_password).toBeNull();
+      const viaOne = await ctx.engine.findOne('ext_datasource', { where: { id: created.id } }) as any;
+      expect(viaOne.db_password).toBeNull(); // "not set" — and now that is true
+    });
+  });
+
+  describe('password arm — its own write seam, not the encryption path', () => {
+    let ctx: Awaited<ReturnType<typeof buildPasswordEngine>>;
+    beforeEach(async () => { ctx = await buildPasswordEngine(); });
+
+    it('insert with "" is refused: full envelope, nothing stored', async () => {
+      const err = await ctx.engine
+        .insert('device', { name: 'router', admin_password: '' })
+        .then(() => null, (e: unknown) => e);
+      expectRefusal(err, 'device', 'admin_password', 'password');
+      expect(ctx.stores.get('device')?.size ?? 0).toBe(0);
+    });
+
+    it('update with "" is refused and the stored plaintext survives', async () => {
+      const created = await ctx.engine.insert('device', { name: 'router', admin_password: 'keep-me' });
+      const err = await ctx.engine
+        .update('device', { id: created.id, admin_password: '' })
+        .then(() => null, (e: unknown) => e);
+      expectRefusal(err, 'device', 'admin_password', 'password');
+
+      const stored = ctx.stores.get('device')!.get(created.id) as any;
+      expect(stored.admin_password).toBe('keep-me');
+    });
+
+    it('multi update with "" is refused at the same door', async () => {
+      const created = await ctx.engine.insert('device', { name: 'router', admin_password: 'keep-me' });
+      const err = await ctx.engine
+        .update('device', { id: { $in: [created.id] }, admin_password: '' } as any, { multi: true } as any)
+        .then(() => null, (e: unknown) => e);
+      expectRefusal(err, 'device', 'admin_password', 'password');
+      expect((ctx.stores.get('device')!.get(created.id) as any).admin_password).toBe('keep-me');
+    });
+
+    it('better-auth objects are exempt: the auth subsystem owns that write path', async () => {
+      // No read mask there ⇒ the "reads as set, holds nothing" contradiction
+      // cannot arise; scope mirrors collectMaskedPasswordFields exactly.
+      const created = await ctx.engine.insert('authy_user', { password: '' });
+      const stored = ctx.stores.get('authy_user')!.get(created.id) as any;
+      expect(stored.password).toBe('');
+    });
+
+    it('PINNED UNCHANGED: null still clears the password — stored null, read null (not the mask)', async () => {
+      const created = await ctx.engine.insert('device', { name: 'router', admin_password: 'gone-soon' });
+      await ctx.engine.update('device', { id: created.id, admin_password: null });
+
+      const stored = ctx.stores.get('device')!.get(created.id) as any;
+      expect(stored.admin_password).toBeNull();
+      const viaOne = await ctx.engine.findOne('device', { where: { id: created.id } }) as any;
+      expect(viaOne.admin_password).toBeNull();
+    });
+  });
+
+  describe('collectMaskedPasswordFields — the password arm’s scope collector', () => {
+    it('collects generic password fields, exempts better-auth, and mirrors the read mask’s password half', () => {
+      expect(collectMaskedPasswordFields(deviceObject as any)).toEqual(['admin_password']);
+      expect(collectMaskedPasswordFields(authUserObject as any)).toEqual([]);
+      expect(collectMaskedPasswordFields(undefined)).toEqual([]);
+      expect(collectMaskedPasswordFields({ name: 'x' } as any)).toEqual([]);
+      // Drift guard: a secret field is NOT in the password arm's scope…
+      expect(collectMaskedPasswordFields(dsObject as any)).toEqual([]);
+      // …and on a generic object the collector is exactly the password half of
+      // the read-mask collector (they must not drift — same file, same rule).
+      const passwordHalf = collectMaskedPasswordFields(deviceObject as any);
+      for (const f of passwordHalf) {
+        expect(collectMaskedReadFields(deviceObject as any)).toContain(f);
+      }
+    });
   });
 });
 

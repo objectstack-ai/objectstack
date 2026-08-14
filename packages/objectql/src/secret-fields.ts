@@ -93,6 +93,67 @@ export function collectSecretFields(schema: ServiceObject | undefined | null): s
 }
 
 /**
+ * [#8559] The ADR-0112 pair carried by the refusal to write `""` into a
+ * credential field. `VALIDATION_ERROR` is the standard-catalog member for a
+ * generic 400 — the caller's payload is wrong and the caller can fix it —
+ * so no ledger registration is needed. Exported so consumers branch on
+ * `code`/`status` rather than on message text, exactly like the webhook
+ * seam's refusal pair (`plugin-webhooks/src/webhook-secret.ts`).
+ */
+export const EMPTY_CREDENTIAL_REFUSAL_CODE = 'VALIDATION_ERROR';
+export const EMPTY_CREDENTIAL_REFUSAL_STATUS = 400;
+
+/**
+ * [#8559] Refusal to persist the empty string into a `secret`- or
+ * `password`-typed field (maintainer ruling 2026-08-13 on #8559: option 2 —
+ * loud refusal over silent reinterpretation).
+ *
+ * ## Why `""` is refused rather than stored or reinterpreted
+ * `null` already has a defined meaning on the credential write path — clear
+ * the stored value — and `""` is neither that nor a storable credential:
+ *
+ *  - **`secret`**: encrypting `""` mints a real `sys_secret` row whose
+ *    ciphertext decrypts to nothing, and rewrites the column to a perfectly
+ *    valid `secret:` ref. From then on every read path reports "a secret is
+ *    set" ({@link SECRET_MASK}) while the dereference returns nothing — the
+ *    contradictory state #8542/#8558 had to defend consumers against.
+ *  - **`password`**: storing `""` verbatim produces the same contradiction
+ *    without the cipher row — a non-null stored value masks on every read as
+ *    "a password is set" while the credential has no content.
+ *
+ * Folding `""` into the `null` branch (option 1) was explicitly rejected: it
+ * silently rewrites the caller's intent, and a caller that meant something
+ * else learns nothing. The refusal names the correct spelling instead.
+ *
+ * Carries the ADR-0112 pair as fields so consumers branch on `code`/`status`
+ * rather than message text; the message is located (`object.field`) and names
+ * `null` as the way to clear — both halves are contract, pinned in
+ * `secret-fields.test.ts`.
+ */
+export class EmptyCredentialWriteError extends Error {
+  readonly code = EMPTY_CREDENTIAL_REFUSAL_CODE;
+  readonly status = EMPTY_CREDENTIAL_REFUSAL_STATUS;
+  readonly object: string;
+  readonly field: string;
+  readonly fieldType: 'secret' | 'password';
+  constructor(object: string, field: string, fieldType: 'secret' | 'password') {
+    const consequence =
+      fieldType === 'secret'
+        ? 'persisting it would mint a sys_secret row whose ciphertext decrypts to nothing while every read path reports a value is set'
+        : 'persisting it would store an empty credential that every read path reports as set';
+    super(
+      `Empty string refused for ${fieldType} field "${object}.${field}": `
+        + `"" is not a storable ${fieldType} — ${consequence}. `
+        + `To clear the stored ${fieldType}, write null; to leave it unchanged, omit the field.`,
+    );
+    this.name = 'EmptyCredentialWriteError';
+    this.object = object;
+    this.field = field;
+    this.fieldType = fieldType;
+  }
+}
+
+/**
  * Collect the names of fields that must be masked to {@link SECRET_MASK} on the
  * generic read path: every `secret` field, plus every `password` field — the
  * latter only when the object is **not** `managedBy: 'better-auth'`.
@@ -115,6 +176,34 @@ export function collectMaskedReadFields(schema: ServiceObject | undefined | null
     if (!def) continue;
     if (def.type === 'secret') out.push(name);
     else if (def.type === 'password' && !isBetterAuth) out.push(name);
+  }
+  return out;
+}
+
+/**
+ * [#8559] Collect the names of `password`-typed fields on a **generic**
+ * (non-`better-auth`) object — exactly the `password` half of
+ * {@link collectMaskedReadFields}, kept beside it so the two cannot drift.
+ *
+ * This is the scope of the empty-string refusal's `password` arm
+ * ({@link EmptyCredentialWriteError}): the ruling covers the fields that share
+ * the read mask and the echoed-mask drop with `secret`, because the
+ * contradiction being refused ("reads as set, holds nothing") only exists
+ * where the mask does. A `managedBy: 'better-auth'` object's password column
+ * is not masked on read, is owned by the auth subsystem's own write path, and
+ * is deliberately not judged here — same exemption, same reason, as the read
+ * mask's.
+ *
+ * Returns an empty array when the schema has no such fields, so callers can
+ * fast-path on `length === 0`.
+ */
+export function collectMaskedPasswordFields(schema: ServiceObject | undefined | null): string[] {
+  const fields = (schema as any)?.fields as Record<string, { type?: string }> | undefined;
+  if (!fields) return [];
+  if ((schema as any)?.managedBy === 'better-auth') return [];
+  const out: string[] = [];
+  for (const [name, def] of Object.entries(fields)) {
+    if (def && def.type === 'password') out.push(name);
   }
   return out;
 }

@@ -12,7 +12,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
   sys_webhook: {
     label: "Webhook",
     pluralLabel: "Webhooks",
-    description: "Outbound HTTP webhook subscription. Authored via defineWebhook() in code or the Studio editor; executed by the HTTP connector plugin.",
+    description: "Outbound HTTP webhook subscription. Declared in code via defineStack({ webhooks }) / defineWebhook() (materialized into rows on boot) or authored directly in the Studio editor; dispatched by the webhook auto-enqueuer onto the shared HTTP outbox.",
     fields: {
       id: {
         label: "Webhook ID"
@@ -30,7 +30,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       triggers: {
         label: "Triggers",
-        help: "Record events that fire this webhook. bulk_update / bulk_delete fire on predicate writes and deliver a count, not a record.",
+        help: "Record events that fire this webhook (bulk_* deliver a count, not a record)",
         options: {
           create: "create",
           update: "update",
@@ -45,7 +45,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       method: {
         label: "HTTP Method",
-        help: "GET / POST / PUT / PATCH / DELETE",
+        help: "HTTP method used for the callback request",
         options: {
           get: "GET",
           post: "POST",
@@ -63,7 +63,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       definition_json: {
         label: "Definition",
-        help: "Serialised Webhook JSON (see @objectstack/spec/automation/webhook) — full headers/auth/retry/payload config"
+        help: "Serialised Webhook JSON (see @objectstack/spec/automation/webhook) — timeout and the rest of the authored envelope. Credentials are NOT stored here: the signing secret lives in the encrypted `signing_secret` field and the custom headers in the encrypted `headers_secret` field."
       },
       headers_secret: {
         label: "Custom Headers",

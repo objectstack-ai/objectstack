@@ -13,7 +13,6 @@
     "CorsConfigSchema": "src/shared/http.zod.ts#CorsConfigSchema (const)",
     "CronExpressionInput": "src/shared/expression.zod.ts#CronExpressionInput (type)",
     "CronExpressionInputSchema": "src/shared/expression.zod.ts#CronExpressionInputSchema (const)",
-    "DECLARED_META_TYPES": "src/shared/metadata-url-spelling.ts#DECLARED_META_TYPES (const)",
     "EXTERNAL_ERROR_CODES": "src/shared/external-errors.ts#EXTERNAL_ERROR_CODES (const)",
     "EXTERNAL_ERROR_HTTP_STATUS": "src/shared/external-errors.ts#EXTERNAL_ERROR_HTTP_STATUS (const)",
     "EventName": "src/shared/identifiers.zod.ts#EventName (type)",
@@ -109,6 +108,7 @@
     "keySetMatches": "src/shared/suggestions.zod.ts#keySetMatches (function)",
     "lazySchema": "src/shared/lazy-schema.ts#lazySchema (function)",
     "levenshteinDistance": "src/shared/suggestions.zod.ts#levenshteinDistance (function)",
+    "metaUrlSpellingRefusal": "src/shared/metadata-url-spelling.ts#metaUrlSpellingRefusal (function)",
     "normalizeMetadataCollection": "src/shared/metadata-collection.zod.ts#normalizeMetadataCollection (function)",
     "normalizePluginMetadata": "src/shared/metadata-collection.zod.ts#normalizePluginMetadata (function)",
     "normalizeStackInput": "src/shared/metadata-collection.zod.ts#normalizeStackInput (function)",
@@ -117,12 +117,10 @@
     "pluralToSingular": "src/shared/metadata-collection.zod.ts#pluralToSingular (function)",
     "renderDiffMessage": "src/shared/external-errors.ts#renderDiffMessage (function)",
     "resilientFetch": "src/shared/resilient-fetch.ts#resilientFetch (function)",
-    "restPluralOfMetaType": "src/shared/metadata-url-spelling.ts#restPluralOfMetaType (function)",
     "safeParsePretty": "src/shared/error-map.zod.ts#safeParsePretty (function)",
     "singularToPlural": "src/shared/metadata-collection.zod.ts#singularToPlural (function)",
     "strictUnknownKeyError": "src/shared/suggestions.zod.ts#strictUnknownKeyError (function)",
     "suggestFieldType": "src/shared/suggestions.zod.ts#suggestFieldType (function)",
-    "tmpl": "src/shared/expression.zod.ts#tmpl (function)",
-    "unmappedDeclaredTypeSpelling": "src/shared/metadata-url-spelling.ts#unmappedDeclaredTypeSpelling (function)"
+    "tmpl": "src/shared/expression.zod.ts#tmpl (function)"
   }
 }

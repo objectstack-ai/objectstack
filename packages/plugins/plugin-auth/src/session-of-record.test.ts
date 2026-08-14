@@ -57,6 +57,7 @@ const createMemoryEngine = () => {
       : a === b;
   const matches = (row: any, where: Record<string, any> = {}) =>
     Object.entries(where).every(([k, v]) => {
+      if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
       const actual = row[k];
       if (v && typeof v === 'object' && !Array.isArray(v) && !(v instanceof Date)) {
         if ('$ne' in v) return !eq(actual, v.$ne);

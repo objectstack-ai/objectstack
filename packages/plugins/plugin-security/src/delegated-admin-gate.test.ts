@@ -65,6 +65,7 @@ function makeHarness() {
 
   const matches = (row: any, where: any): boolean =>
     Object.entries(where ?? {}).every(([k, v]) => {
+      if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
       if (v && typeof v === 'object' && Array.isArray((v as any).$in)) {
         return (v as any).$in.includes(row[k]);
       }
@@ -441,6 +442,7 @@ function makeDelegationHarness(nowMs = T0) {
   };
   const matches = (row: any, where: any): boolean =>
     Object.entries(where ?? {}).every(([k, v]) => {
+      if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
       if (v && typeof v === 'object' && Array.isArray((v as any).$in)) return (v as any).$in.includes(row[k]);
       return row[k] === v;
     });
@@ -591,6 +593,7 @@ function makeAnchoredDelegationHarness(nowMs = T0) {
   };
   const matches = (row: any, where: any): boolean =>
     Object.entries(where ?? {}).every(([k, v]) => {
+      if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
       if (v && typeof v === 'object' && Array.isArray((v as any).$in)) return (v as any).$in.includes(row[k]);
       return row[k] === v;
     });

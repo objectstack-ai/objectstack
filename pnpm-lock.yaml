@@ -1731,6 +1731,12 @@ importers:
         specifier: workspace:*
         version: link:../../spec
     devDependencies:
+      '@objectstack/driver-sql':
+        specifier: workspace:*
+        version: link:../../drivers/driver-sql
+      '@objectstack/objectql':
+        specifier: workspace:*
+        version: link:../../objectql
       '@objectstack/plugin-sharing':
         specifier: workspace:*
         version: link:../plugin-sharing

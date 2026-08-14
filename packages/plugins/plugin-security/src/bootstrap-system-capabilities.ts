@@ -296,12 +296,24 @@ export async function bootstrapSystemCapabilities(
             ? 'a row carrying no managed_by value already holds the name, and was left exactly as it is'
             : `a row with managed_by='${String(blocking.managed_by)}' already holds the name, and was ` +
               'left exactly as it is';
+        // [#8552] The maintainer's ruling deliberately leaves an existing
+        // colliding row to the OPERATOR (option 1: no adoption, no backfill),
+        // so the warning that reports the collision owes them the one line
+        // that says how to resolve it by hand. Only when a blocking row was
+        // actually observed — telling an operator to rename a row the read
+        // just failed to find would be asserting what was not seen.
+        const remediation = blocking === undefined
+          ? ''
+          : ' To resolve by hand: rename the blocking row to a name outside the curated set (or delete ' +
+            'it) — through Setup for an admin-authored row, or by editing and re-publishing the owning ' +
+            "package for a package-declared one — then restart; the seeder will then seed the platform's " +
+            'definition. (New Setup rows can no longer take a curated name — refused at the write door.)';
         options.logger?.warn?.(
           `[security] curated capability "${def.name}" has no platform row and could not be seeded. ` +
             'In the platform (NULL-organization) bucket, where the declared unique key admits one row ' +
             `per name: ${observation}. The platform definition is therefore missing from sys_capability ` +
             'installation-wide. Grants and requiredPermissions referencing the name are unaffected — ' +
-            'they resolve by name, not by row.',
+            `they resolve by name, not by row.${remediation}`,
           { name: def.name, blockingRowId: blocking?.id, blockingManagedBy: blocking?.managed_by ?? null },
         );
       }

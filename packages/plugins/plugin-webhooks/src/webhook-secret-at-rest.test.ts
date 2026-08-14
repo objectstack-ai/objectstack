@@ -1041,17 +1041,30 @@ describe('a stored signing secret that resolves to nothing (#8542)', () => {
         });
     }
 
-    it('refuses to arm when the stored secret was emptied through the ordinary data API', async () => {
-        const { engine, stores } = await buildEngine();
+    it('refuses to arm when the stored secret decrypts to nothing (historical row — the data-API road is closed by #8559)', async () => {
+        const { engine, stores, driver } = await buildEngine();
         await bootstrapDeclaredWebhooks(engine, metadataWith([declaredWebhook()]));
         const [row] = await engine.find('sys_webhook', { where: { name: 'crm_hook' } });
 
-        // The trigger that needs no privileged access at all — measured, not
-        // assumed. The engine accepts an empty string for a `secret` field,
-        // encrypts it like any other, mints a real `sys_secret` row, and leaves
-        // the column holding a perfectly VALID ref. Every read path then
-        // reports a secret is set, and the dereference answers ''.
-        await engine.update('sys_webhook', { [WEBHOOK_SECRET_FIELD]: '' }, { where: { id: row.id } });
+        // This state USED to be reachable from the ordinary data API with no
+        // privileged access — measured on this exact field: the engine accepted
+        // '', encrypted it like any other value, minted a real `sys_secret` row
+        // and left the column holding a perfectly VALID ref. #8559 closed that
+        // road (`engine.update` with '' now gets a located VALIDATION_ERROR —
+        // pinned in objectql's secret-fields tests), but it deliberately did
+        // NOT migrate history, so rows minted before the refusal still hold
+        // exactly this shape. Plant one BELOW the engine, the same route as the
+        // hand-pasted-column pin next door: a cipher row whose ciphertext
+        // decrypts to '' behind a valid ref. This pin is what keeps the
+        // consumer-side defense load-bearing for those rows.
+        await driver.create('sys_secret', {
+            id: 'sec_planted_empty', namespace: 'sys_webhook', key: WEBHOOK_SECRET_FIELD,
+            kms_key_id: 'local', alg: 'test-b64', version: 1,
+            ciphertext: '', created_at: new Date().toISOString(),
+        });
+        await driver.update('sys_webhook', row.id, {
+            [WEBHOOK_SECRET_FIELD]: `${SECRET_REF_PREFIX}sec_planted_empty`,
+        });
 
         await expectSecretGenuinelyStored(engine, stores);
         const result = await driveOnce(engine);
@@ -1233,16 +1246,29 @@ describe('a stored header map that resolves to nothing (#8558)', () => {
         });
     }
 
-    it('refuses to arm when the stored map was emptied through the ordinary data API', async () => {
-        const { engine, stores } = await buildEngine();
+    it('refuses to arm when the stored map decrypts to nothing (historical row — the data-API road is closed by #8559)', async () => {
+        const { engine, stores, driver } = await buildEngine();
         await bootstrapDeclaredWebhooks(engine, metadataWith([headerBearingWebhook()]));
         const [row] = await engine.find('sys_webhook', { where: { name: 'crm_hook' } });
 
-        // Needs no privileged access at all: the engine accepts an empty string
-        // for a `secret` field, encrypts it like any other value, mints a real
-        // `sys_secret` row and leaves the column holding a VALID ref. Every read
-        // path then reports headers are configured, and the dereference answers ''.
-        await engine.update('sys_webhook', { [WEBHOOK_HEADERS_FIELD]: '' }, { where: { id: row.id } });
+        // The '' member of the unusable-spellings family below is special: it
+        // USED to be writable through the ordinary data API (the engine
+        // encrypted it, minted a real `sys_secret` row and left a VALID ref),
+        // and #8559 closed exactly that road — the door now refuses '' with a
+        // located VALIDATION_ERROR. Every other unusable spelling ('{}', '[]',
+        // bad JSON…) is non-empty and still walks in through the front door,
+        // which is why the it.each below still writes via `engine.update`.
+        // History is deliberately not migrated, so a pre-#8559 row can still
+        // hold this shape: plant it BELOW the engine, cipher row + ref, and
+        // keep the consumer-side defense pinned for those rows.
+        await driver.create('sys_secret', {
+            id: 'sec_planted_empty_map', namespace: 'sys_webhook', key: WEBHOOK_HEADERS_FIELD,
+            kms_key_id: 'local', alg: 'test-b64', version: 1,
+            ciphertext: '', created_at: new Date().toISOString(),
+        });
+        await driver.update('sys_webhook', row.id, {
+            [WEBHOOK_HEADERS_FIELD]: `${SECRET_REF_PREFIX}sec_planted_empty_map`,
+        });
 
         await expectHeadersGenuinelyStored(engine, stores);
         const result = await driveOnce(engine);

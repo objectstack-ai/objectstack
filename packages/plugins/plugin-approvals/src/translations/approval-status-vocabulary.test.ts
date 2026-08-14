@@ -17,10 +17,15 @@
 //   • Re-reading `zhCNObjects.…options.pending` and expecting 待审批 restates
 //     the line it is guarding. Every assertion here goes through the real
 //     resolver (`translateObject` / `resolveViewLabel`) against the real
-//     `SysApprovalRequest`, so it also proves the bundle is REACHED — the
-//     declared option label is the bare enum value (see the guard-the-guard
-//     case), so a bundle that stopped being consulted would surface here as
-//     raw values rather than as a silent pass.
+//     `SysApprovalRequest`, so the TRANSLATED-locale cases also prove the
+//     bundle is REACHED — the declared option label is the authored English
+//     from `APPROVAL_STATUS_LABELS` (#8543 promoted it into the contract; see
+//     the guard-the-guard case), so a bundle that stopped being consulted
+//     would surface in the zh-CN case as English rather than as a silent
+//     pass. (Before #8543 the declared label was the bare enum value and the
+//     `en` bundle was the only home of the humanized text; now `en` is a
+//     verbatim copy of the contract labels, so for `en` alone bundle-reach is
+//     indistinguishable from source fallback — by design.)
 //
 //   • Pinning each locale in isolation lets the layers drift apart again, which
 //     is the whole defect. The parity case compares this plugin's `my_pending`
@@ -33,7 +38,7 @@
 // thing are pinned to keep saying it.
 
 import { describe, it, expect } from 'vitest';
-import { APPROVAL_STATUSES } from '@objectstack/spec/contracts';
+import { APPROVAL_STATUSES, APPROVAL_STATUS_LABELS } from '@objectstack/spec/contracts';
 import { translateObject, resolveViewLabel } from '@objectstack/spec/system';
 import type { TranslationData } from '@objectstack/spec/system';
 import { zhCN, jaJP, esES } from '@objectstack/platform-objects/apps';
@@ -59,18 +64,25 @@ const navApprovalsLabel = (data: TranslationData): string | undefined =>
   (data as any)?.apps?.account?.navigation?.nav_account_approvals?.label;
 
 describe('approval status vocabulary (#7232)', () => {
-  it('guard the guard: the DECLARED option label is the bare enum value', () => {
-    // `Field.select([...APPROVAL_STATUSES])` normalizes each bare string to
-    // `{ label: 'pending', value: 'pending' }` — the label IS the value. Every
-    // humanized label below therefore comes from the bundle and nowhere else;
-    // without this case a resolver that silently stopped consulting the bundle
-    // could still satisfy an en expectation of "pending".
+  it('guard the guard: the DECLARED option label is the authored contract label', () => {
+    // #8543: the column derives `{ value, label }` from `APPROVAL_STATUSES` +
+    // `APPROVAL_STATUS_LABELS`, so the humanized English now lives in the
+    // CONTRACT and the `en` bundle is a verbatim copy of it (the extractor's
+    // default-locale channel rewrites `en` from the source on every run).
+    // This case goes red if someone re-inlines the labels at the column or
+    // reverts to the bare-value spread — either would put the English back in
+    // a place the regeneration does not read. Bundle-reach for translated
+    // locales is proven by the zh-CN case below: the declared label is
+    // English, so 待审批 can only come from the bundle.
     const declared = (SysApprovalRequest as any).fields.status.options as Array<{
       value: string;
       label?: string;
     }>;
     expect(declared.length).toBe(APPROVAL_STATUSES.length);
-    expect(declared.map((o) => o.label)).toEqual(declared.map((o) => o.value));
+    expect(declared.map((o) => o.value)).toEqual([...APPROVAL_STATUSES]);
+    expect(declared.map((o) => o.label)).toEqual(
+      APPROVAL_STATUSES.map((s) => APPROVAL_STATUS_LABELS[s]),
+    );
   });
 
   it('en humanizes every status instead of shipping the raw enum value', () => {

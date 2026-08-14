@@ -8,8 +8,18 @@ import {
 import { validateTranslationReferences } from './validate-translation-references.js';
 import { Contact } from '../../../examples/app-showcase/src/data/objects/contact.object.js';
 import { ContactViews } from '../../../examples/app-showcase/src/ui/views/contact.view.js';
-import { TaskViews } from '../../../examples/app-showcase/src/ui/views/task.view.js';
 import { ShowcaseTranslationBundle } from '../../../examples/app-showcase/src/system/translations/index.js';
+// The frozen snapshot of that same shipped shape (#8515). Every case that pins
+// a NAMELESS section reads it from here rather than from `examples/**` — see
+// `showcase-shape.fixtures.ts` for why, and for what the lift did and did not
+// carry across. The live imports above survive only in the cases that pin what
+// the shipped app gets RIGHT, which no fix to the app can pull out from under.
+import {
+  SnapshotContact,
+  SnapshotContactViews,
+  SnapshotTaskViews,
+  SnapshotTranslationBundle,
+} from './showcase-shape.fixtures.js';
 
 /** A `crm_case` object with the two fields the fixtures below lay out. */
 const crmCase = {
@@ -378,26 +388,37 @@ describe('validateTranslatableSections — what it deliberately leaves alone', (
 });
 
 /**
- * #5417 measured against the metadata the repo actually ships.
+ * #5417 measured against the metadata the repo actually ships — on a FROZEN
+ * SNAPSHOT of it since #8515.
  *
- * `examples/app-showcase` is imported rather than reduced by hand for the same
- * reason #5415's sibling test does it: the defect is an anchor MISSING from a
- * list, and a hand-written fixture can only pin the anchors its author
- * remembered.
+ * The shape is still the shipped one and is still not reduced by hand: the
+ * defect this rule reports is an anchor MISSING from a list, and a fixture built
+ * from memory can only pin the anchors whoever wrote it remembered. So the
+ * container below is a copy of the whole shipped task container — all thirteen
+ * list views included, precisely because they declare no sections and the
+ * assertion here is exhaustive — parsed through the same `defineView` the app
+ * uses, and verified structurally identical to the live one at snapshot time.
  *
- * `TaskViews` is registered in the showcase's `views:` array and its object is
- * translated in both `en` and `zh-CN` by the shipped bundle, so its two nameless
- * headings are the in-repo counterpart of HotCRM's 70/70 — real metadata, really
- * rendering in the source locale on a zh-CN session. Running `os validate` over
- * the whole showcase config reports 14 of them (6 from form views, 8 from
- * `record:details` pages) and still exits 0: these are `warning` findings and
- * only `error` gates, so the showcase stays green and the advisory is the point.
+ * What changed in #8515 is only WHERE it is read from. `TaskViews` was imported
+ * live from `examples/app-showcase` until then, which made the rule's regression
+ * coverage depend on the shipped app STAYING defective: the two nameless
+ * headings asserted below were simultaneously the defect #8231 was sweeping up
+ * and the evidence that the rule fires on real metadata. The maintainer ruled
+ * (2026-08-13) that the fixture moves and the app gets fixed; this is the first
+ * half. ⚠️ The honest cost, recorded rather than papered over: after #8231's
+ * remainder names those sections, this case no longer proves the rule fires on
+ * metadata that actually ships today — it proves it fires on metadata that
+ * really did, in the shape it really had.
+ *
+ * (Historic measurement, unchanged: `os validate` over the whole showcase config
+ * reported 14 of these — 6 from form views, 8 from `record:details` pages — and
+ * still exited 0, because they are `warning` findings and only `error` gates.)
  */
-describe('validateTranslatableSections — the shipped showcase task views', () => {
+describe('validateTranslatableSections — the snapshotted showcase task views', () => {
   it('reports both nameless headings the shipped task container declares', () => {
     const findings = validateTranslatableSections({
-      views: [TaskViews],
-      translations: [ShowcaseTranslationBundle],
+      views: [SnapshotTaskViews],
+      translations: [SnapshotTranslationBundle],
     });
     expect(findings.map((f) => f.where)).toEqual([
       'object "showcase_task" · formViews.edit · section "Task"',
@@ -421,8 +442,27 @@ describe('validateTranslatableSections — the shipped showcase task views', () 
  * exactly those four), while the sparse `formViews.create` override names none.
  * One rule must therefore be silent about the first and loud about the second,
  * or the two rules would tell an author opposite things about one surface.
+ *
+ * ⚠️ The two cases below read the same surface from DIFFERENT places, and the
+ * split is the point of #8515 rather than an oversight:
+ *
+ *   - the NAMELESS half — `formViews.create`'s "Who is this?" — is the defect
+ *     #8231 is fixing, so pinning it against the live app made the rule's
+ *     coverage depend on the app staying broken. It reads the frozen snapshot.
+ *   - the NAMED half — the four sections of the default `form` — is what the
+ *     shipped app gets RIGHT. Nothing about fixing the create override can
+ *     remove it, so it stays pinned against the metadata that really ships, and
+ *     the rule keeps one live real-metadata anchor.
  */
 describe('validateTranslatableSections — the showcase contact surface (#5415)', () => {
+  /** The frozen snapshot (#8515) — the nameless-section half. */
+  const snapshotContactStack = {
+    objects: [SnapshotContact],
+    views: [SnapshotContactViews],
+    translations: [SnapshotTranslationBundle],
+  };
+
+  /** The live shipped metadata — the named-section half. */
   const showcaseContactStack = {
     objects: [Contact],
     views: [ContactViews],
@@ -430,7 +470,7 @@ describe('validateTranslatableSections — the showcase contact surface (#5415)'
   };
 
   it('reports the sparse create override and nothing from the named default form', () => {
-    const findings = validateTranslatableSections(showcaseContactStack);
+    const findings = validateTranslatableSections(snapshotContactStack);
     expect(findings).toHaveLength(1);
     expect(findings[0].rule).toBe(TRANSLATION_SECTION_NAME_MISSING);
     expect(findings[0].path).toBe('views[0].formViews.create.sections[0]');

@@ -157,7 +157,16 @@ describe('computeI18nCoverage', () => {
     expect(zhKeys.has('objects.account.fields.stage.options.direct_mail')).toBe(true);
   });
 
-  it('covers options declared as a bare string array', () => {
+  it('#8543: bare-string options are DERIVED — no translation demanded for a machine identifier', () => {
+    // A bare-string option has no authored display text: its "label" is a
+    // copy of the machine value (`Field.select(['planning'])` normalizes to
+    // `{ value: 'planning', label: 'planning' }`). This test used to pin the
+    // opposite — that the gate demands a zh-CN translation of `planning` /
+    // `closed` — which both erased the authored/derived axis the extractor
+    // documents and taught authors to "translate" machine identifiers.
+    // Authored option labels (previous test) stay gated; a bundle that
+    // externalizes text for a derived key re-enters the expected set via
+    // `authoredInBundle`.
     const stringOptionConfig: any = {
       objects: [
         {
@@ -170,8 +179,42 @@ describe('computeI18nCoverage', () => {
     };
     const report = computeI18nCoverage(stringOptionConfig, { defaultLocale: 'en' });
     const zhKeys = new Set(report.issues.filter((i) => i.locale === 'zh-CN').map((i) => i.key));
+    expect(zhKeys.has('objects.account.fields.stage.options.planning')).toBe(false);
+    expect(zhKeys.has('objects.account.fields.stage.options.closed')).toBe(false);
+    // The field's own authored label is still owed.
+    expect(zhKeys.has('objects.account.fields.stage.label')).toBe(true);
+  });
+
+  it('#8543: a bundle that authors text for a derived option key re-enters the expected set', () => {
+    // The other half of the derived-channel contract: `inline` unset does not
+    // mean "never gated" — a project that externalizes display text for a
+    // bare-string option into some bundle owes the other locales a
+    // translation of it, exactly like any externalized string.
+    const externalized: any = {
+      objects: [
+        {
+          name: 'account',
+          label: 'Account',
+          fields: { stage: { label: 'Stage', options: ['planning'] } },
+        },
+      ],
+      translations: [
+        {
+          en: { objects: { account: { fields: { stage: { options: { planning: 'Planning' } } } } } },
+          'zh-CN': {},
+        },
+      ],
+    };
+    const report = computeI18nCoverage(externalized, { defaultLocale: 'en' });
+    // Structural annotations: the module import is outside this file's tsc
+    // program reach (frozen TS2835 debt), so bare parameters here would be
+    // implicitly-any additions to the package's TEST_DEBT ledger.
+    const zhKeys = new Set(
+      report.issues
+        .filter((i: { locale: string }) => i.locale === 'zh-CN')
+        .map((i: { key: string }) => i.key),
+    );
     expect(zhKeys.has('objects.account.fields.stage.options.planning')).toBe(true);
-    expect(zhKeys.has('objects.account.fields.stage.options.closed')).toBe(true);
   });
 
   it('promotes warnings to errors under --strict', () => {

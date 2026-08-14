@@ -63,7 +63,10 @@ interface DriverProbe {
 function makeDriver(store: Store, probe: DriverProbe): IDataDriver {
   const matches = (row: Record<string, unknown>, where: any): boolean => {
     if (!where || typeof where !== 'object') return true;
-    return Object.entries(where).every(([k, v]) => row[k] === v);
+    return Object.entries(where).every(([k, v]) => {
+      if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+      return row[k] === v;
+    });
   };
   return {
     name: 'default',

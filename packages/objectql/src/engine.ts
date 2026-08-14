@@ -133,11 +133,13 @@ import type { ICryptoProvider, CryptoHandle } from '@objectstack/spec/contracts'
 import {
   collectSecretFields,
   collectMaskedReadFields,
+  collectMaskedPasswordFields,
   collectInternalReadFields,
   collectCredentialFields,
   makeSecretRef,
   parseSecretRef,
   isSecretRef,
+  EmptyCredentialWriteError,
   SECRET_MASK,
 } from './secret-fields.js';
 import { pluralToSingular, ExternalWriteForbiddenError } from '@objectstack/spec/shared';
@@ -4928,6 +4930,16 @@ export class ObjectQL implements IObjectQLEngine {
    *    overwrite the stored value.
    *  - No secret fields on the object ⇒ no further work (fast path, no crypto).
    *  - `null`/`undefined` secret value ⇒ left as-is (clears the secret).
+   *  - [#8559] `""` secret value ⇒ REFUSED with {@link EmptyCredentialWriteError}
+   *    (ADR-0112 `VALIDATION_ERROR`/400, message names `null` as the clear
+   *    spelling). Encrypting it would mint a `sys_secret` row that decrypts to
+   *    nothing behind a perfectly valid ref, so every read reports "a secret is
+   *    set" while the dereference returns nothing — the contradictory state
+   *    #8542/#8558 defend consumers against. Refused, not folded into the
+   *    `null` branch: silently reinterpreting the write was explicitly rejected
+   *    (maintainer ruling 2026-08-13 on #8559). The `password` half of the same
+   *    ruling lands at its own seam — {@link refuseEmptyPasswordFields} — since
+   *    the two types share the read mask but not this encryption path.
    *  - Secret value already a ref (re-save of an unchanged ref) ⇒ left as-is.
    *  - **Fail-closed:** any other secret value with no CryptoProvider registered,
    *    or no reachable `sys_secret` store, THROWS — never persists cleartext.
@@ -4960,6 +4972,11 @@ export class ObjectQL implements IObjectQLEngine {
       const value = row[field];
 
       if (value === null || typeof value === 'undefined') continue; // clear
+      // [#8559] The empty string is neither a clear (`null` is) nor a storable
+      // credential — refuse it BEFORE the crypto gates below: this is a verdict
+      // on the payload, so it must not depend on whether a CryptoProvider or
+      // sys_secret store happens to be wired.
+      if (value === '') throw new EmptyCredentialWriteError(object, field, 'secret');
       if (isSecretRef(value)) continue; // already encrypted ref
 
       if (!this.cryptoProvider) {
@@ -5003,6 +5020,39 @@ export class ObjectQL implements IObjectQLEngine {
       );
 
       row[field] = makeSecretRef(handle.id);
+    }
+  }
+
+  /**
+   * [#8559] Refuse `""` on a `password`-typed field before it reaches the
+   * driver — the `password` half of the same maintainer ruling (2026-08-13)
+   * that makes {@link encryptSecretFields} refuse `""` on a `secret` field.
+   *
+   * Its own seam, deliberately NOT routed through the encryption path: the two
+   * types share the read mask and the echoed-mask drop but a `password` field
+   * is plaintext at rest (no CryptoProvider, no `sys_secret` row — ADR-0100),
+   * so the refusal binds where its write actually flows. Storing `""` verbatim
+   * would produce the same contradiction as the secret arm without the cipher
+   * row: a non-null stored value that every read masks as "a password is set"
+   * while the credential has no content. `null` (clear) and the echoed mask
+   * (drop, handled in {@link encryptSecretFields}) keep their meanings.
+   *
+   * Scope is {@link collectMaskedPasswordFields}: `managedBy: 'better-auth'`
+   * objects are exempt — their password column is not masked on read, so the
+   * "reads as set, holds nothing" contradiction cannot arise there, and its
+   * write path belongs to the auth subsystem.
+   *
+   * Called at every call site of {@link encryptSecretFields} (single/bulk
+   * insert, single-id update, multi update) so the two halves of the ruling
+   * guard the same doors.
+   */
+  private refuseEmptyPasswordFields(object: string, row: Record<string, unknown>): void {
+    if (!row || typeof row !== 'object') return;
+    const schema = this._registry.getObject(object);
+    for (const field of collectMaskedPasswordFields(schema)) {
+      if (field in row && row[field] === '') {
+        throw new EmptyCredentialWriteError(object, field, 'password');
+      }
     }
   }
 
@@ -8012,6 +8062,11 @@ export class ObjectQL implements IObjectQLEngine {
         const rowErrors: (unknown | undefined)[] = new Array(rows.length);
         for (let i = 0; i < rows.length; i++) {
           try {
+            // [#8559] Both halves of the credential write door, per row: the
+            // password refusal at its own seam, then the secret channel (which
+            // carries the secret-arm refusal). Same try, so partial mode
+            // reports either refusal per-row instead of killing the batch.
+            this.refuseEmptyPasswordFields(object, rows[i]);
             await this.encryptSecretFields(object, rows[i], opCtx.context, driverOptions);
           } catch (e) {
             if (!partialMode) throw e;
@@ -8937,6 +8992,9 @@ export class ObjectQL implements IObjectQLEngine {
                    );
                    reportDroppedFields(preIdById, hookContext.input.data as Record<string, unknown>, 'primary_key');
                }
+               // [#8559] Password half of the credential write door, then the
+               // secret channel (which carries the secret-arm refusal).
+               this.refuseEmptyPasswordFields(object, hookContext.input.data as Record<string, unknown>);
                await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);
                normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>);
                validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation });
@@ -9142,6 +9200,9 @@ export class ObjectQL implements IObjectQLEngine {
                    );
                    reportDroppedFields(preIdMulti, hookContext.input.data as Record<string, unknown>, 'primary_key');
                }
+               // [#8559] Password half of the credential write door, then the
+               // secret channel (which carries the secret-arm refusal).
+               this.refuseEmptyPasswordFields(object, hookContext.input.data as Record<string, unknown>);
                await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, hookContext.input.options);
                normalizeMultiValueFields(updateSchema, hookContext.input.data as Record<string, unknown>);
                validateRecord(updateSchema, hookContext.input.data as Record<string, unknown>, 'update', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation });

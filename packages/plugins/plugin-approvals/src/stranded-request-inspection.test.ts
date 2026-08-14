@@ -30,6 +30,7 @@ function makeFakeEngine() {
   function matches(row: FakeRow, filter: any): boolean {
     if (!filter || typeof filter !== 'object') return true;
     for (const [k, v] of Object.entries(filter)) {
+      if (k.startsWith('$')) throw new Error(`fake engine: unsupported filter operator ${k}`);
       const rv = row[k];
       if (v != null && typeof v === 'object' && '$in' in (v as any)) {
         if (!(v as any).$in.includes(rv)) return false;

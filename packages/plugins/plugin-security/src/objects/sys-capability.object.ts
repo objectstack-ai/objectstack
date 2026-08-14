@@ -41,7 +41,13 @@ export const SysCapability = ObjectSchema.create({
   displayNameField: 'label',
   nameField: 'label', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   titleFormat: '{label}',
-  highlightFields: ['label', 'name', 'scope', 'managed_by', 'active'],
+  // [#8535] `active` is deliberately NOT highlighted. It is a catalogue flag with
+  // no authorization effect (see the field's own comment), and record-header
+  // prominence next to `scope`/`managed_by` is itself a claim that it belongs to
+  // the authorization posture. Demoting it is half the fix; rewording the dialog
+  // is the other half — a truthful dialog under a field still presented as
+  // first-class tells the admin the flag matters after all.
+  highlightFields: ['label', 'name', 'scope', 'managed_by'],
 
   actions: [
     {
@@ -62,26 +68,59 @@ export const SysCapability = ObjectSchema.create({
       name: 'deactivate_capability',
       label: 'Deactivate',
       icon: 'circle-off',
-      variant: 'danger',
+      // [#8535] Was `danger`. A danger variant is a claim in itself — it tells the
+      // admin the click has consequences proportionate to a security control. This
+      // one writes a catalogue column and nothing else.
+      variant: 'secondary',
       mode: 'custom',
       locations: ['list_item', 'record_header'],
       type: 'api',
       method: 'PATCH',
       target: '/api/v1/data/sys_capability/{id}',
       bodyExtra: { active: false },
-      confirmText: 'Deactivate this capability? Grants and resource requirements that reference it stop resolving until re-activated.',
+      // [#8535] This used to read: "Deactivate this capability? Grants and resource
+      // requirements that reference it stop resolving until re-activated." No code
+      // path has ever enforced that. `PermissionEvaluator.getSystemPermissions()`
+      // unions `permissionSets[].systemPermissions` — plain strings — and
+      // `requiredPermissions` is compared against that string set; neither loads a
+      // `sys_capability` row. The two production readers of the table are both
+      // seeders (`bootstrap-system-capabilities.ts`,
+      // `bootstrap-declared-capabilities.ts`), which WRITE `active: true` on insert
+      // and never read it back.
+      //
+      // The direction of that falsehood was the dangerous one: an admin withdrawing
+      // a capability was told in a confirmation dialog that the withdrawal took
+      // effect, and it silently did not — the escalation is what they believed they
+      // had prevented. ADR-0049 enforce-or-remove; the maintainer ruled (2026-08-13)
+      // that enforcement is NOT the answer here — putting the registry on the
+      // authorization hot path is an architectural change (caching, fail-closed
+      // semantics, org-authored rows influencing platform capabilities) that needs
+      // its own designed card if capability lifecycle management ever earns real
+      // pull. So the claim is withdrawn instead, and the dialog now states the
+      // non-effect explicitly rather than merely omitting the promise: an admin who
+      // remembers the old wording has to be told it was wrong, not left to infer it.
+      confirmText:
+        'Deactivate this capability? This is a catalogue flag only: it marks the row inactive for filtering and review in Setup. Authorization is NOT affected — permission sets that grant this capability, and resources that require it, match it by name and keep resolving exactly as before.',
       successMessage: 'Capability deactivated',
       refreshAfter: true,
     },
   ],
 
+  // [#8535] `active` was a column in ALL THREE views. It is now shown only in
+  // `all_capabilities` — the full-catalogue view, where a catalogue attribute
+  // genuinely belongs and stays observable and filterable for the admin who sets
+  // it. The two SCOPED views (`platform`, `org`) are the ones an admin works in
+  // to reason about who can do what, and a column sitting next to `managed_by`
+  // there reads as part of the authorization posture. Dropping it from all three
+  // was rejected as the opposite error: a flag the product lets you set but never
+  // lets you see is its own kind of dishonest surface.
   listViews: {
     platform: {
       type: 'grid',
       name: 'platform',
       label: 'Platform',
       data: { provider: 'object', object: 'sys_capability' },
-      columns: ['label', 'name', 'managed_by', 'active'],
+      columns: ['label', 'name', 'managed_by'],
       filter: [{ field: 'scope', operator: 'equals', value: 'platform' }],
       sort: [{ field: 'name', order: 'asc' }],
       pagination: { pageSize: 50 },
@@ -91,7 +130,7 @@ export const SysCapability = ObjectSchema.create({
       name: 'org',
       label: 'Organization',
       data: { provider: 'object', object: 'sys_capability' },
-      columns: ['label', 'name', 'managed_by', 'active'],
+      columns: ['label', 'name', 'managed_by'],
       filter: [{ field: 'scope', operator: 'equals', value: 'org' }],
       sort: [{ field: 'name', order: 'asc' }],
       pagination: { pageSize: 50 },
@@ -173,9 +212,19 @@ export const SysCapability = ObjectSchema.create({
     }),
 
     // ── Status ───────────────────────────────────────────────────
+    // [#8535] Catalogue flag, NOT an enforcement switch. It carried no
+    // `description` at all, which is how the `deactivate_capability` dialog
+    // became the only place its meaning was stated — and that statement was
+    // false. The semantics are declared here now, negative half included, so the
+    // field documents its own inertness at the point an author or an admin meets
+    // it. If capability lifecycle ever becomes enforceable it arrives as a
+    // designed feature with its own card (maintainer ruling, 2026-08-13), and
+    // this comment plus the description are what must change with it.
     active: Field.boolean({
       label: 'Active',
       defaultValue: true,
+      description:
+        'Catalogue/visibility flag for filtering and review. It has NO authorization effect: permission-set grants and resource requiredPermissions match capability names as strings and never read this row, so clearing it revokes nothing.',
       group: 'Status',
     }),
 

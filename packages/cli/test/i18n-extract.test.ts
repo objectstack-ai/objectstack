@@ -133,6 +133,55 @@ describe('collectExpectedEntries', () => {
     expect(byPath['metadataForms.flow.fields.name.label']).toBe('Name');
   });
 
+  it('#8543: label-less options seed through the DERIVED channel, authored labels stay authored', () => {
+    // `Field.select(['pending'])` normalizes a bare string to
+    // `{ value: 'pending', label: 'pending' }` — the label is a copy of the
+    // machine value, not authored English. Recording that as authored is how
+    // the coverage gate came to demand translations of machine identifiers,
+    // and how a raw machine value could ship as rendered text without any
+    // gate noticing (#8580 is the shipped instance). All three authoring
+    // shapes are pinned: `{value,label}` with the label equal to the value,
+    // a bare string, and a record map whose label restates the key.
+    const cfg: any = {
+      objects: [
+        {
+          name: 'w',
+          label: 'W',
+          fields: {
+            normalized: {
+              label: 'Normalized',
+              options: [
+                { value: 'pending', label: 'pending' }, // Field.select(['pending']) shape
+                { value: 'approved', label: 'Approved' }, // genuinely authored
+                { value: 'rejected' }, // no label at all
+              ],
+            },
+            bare: { label: 'Bare', options: ['draft'] },
+            map: { label: 'Map', options: { open: 'open', closed: 'Closed' } },
+          },
+        },
+      ],
+    };
+    const entries = collectExpectedEntries(cfg);
+    // Structural annotation: the module import is outside this file's tsc
+    // program reach (frozen TS2835 debt), so the parameter would otherwise be
+    // an implicitly-any addition to the package's TEST_DEBT ledger.
+    const byPath = Object.fromEntries(
+      entries.map((e: { path: string[] }) => [e.path.join('.'), e]),
+    );
+    const opt = (p: string) => byPath[`objects.w.fields.${p}`];
+
+    // Derived: seeded from the value so skeletons stay usable, but `inline`
+    // stays unset — nobody authored display text.
+    for (const p of ['normalized.options.pending', 'normalized.options.rejected', 'bare.options.draft', 'map.options.open']) {
+      expect(opt(p)?.sourceValue, p).toBe(p.split('.').pop());
+      expect(opt(p)?.inline, p).toBeUndefined();
+    }
+    // Authored: the label is real display text and drives the coverage gate.
+    expect(opt('normalized.options.approved')?.inline).toBe('Approved');
+    expect(opt('map.options.closed')?.inline).toBe('Closed');
+  });
+
   it('emits action param entries (inline + top-level), skipping field-backed labels without overrides', () => {
     const entries = collectExpectedEntries(config);
     const byPath = Object.fromEntries(entries.map((e) => [e.path.join('.'), e.sourceValue]));
@@ -265,13 +314,59 @@ describe('extractTranslations', () => {
       locales: ['en'],
       mergeExisting: true,
     });
-    // Existing translations are preserved verbatim so the generated file
-    // is a complete, self-contained bundle (not just a delta).
+    // The fixture's en bundle matches the source, so this only proves the
+    // seed path; the divergence cases live in the #8543 test below.
     expect(bundles.en.objects?.sys_position?.label).toBe('Role');
     expect(bundles.en.objects?.sys_position?.fields?.active?.label).toBe('Active');
     // Missing keys are still filled from schema defaults.
     expect(bundles.en.objects?.sys_position?.pluralLabel).toBe('Roles');
     expect(bundles.en.objects?.sys_position?.fields?.label?.label).toBe('Display Name');
+  });
+
+  it('#8543: the default locale tracks the SOURCE, not a stale existing entry; translated locales keep merge', () => {
+    // The en bundle is a copy of the source, not a translation. Before #8543
+    // the merge branch ran for every locale, so an author editing a field
+    // description could never get the edit into the committed en bundle — the
+    // stale entry always won and the drift gate stayed green (53 stale
+    // entries had accumulated across 6 packages when this was fixed).
+    const cfg: any = {
+      objects: [
+        {
+          name: 'thing',
+          label: 'Thing (new wording)',
+          fields: { note: { label: 'Note', help: 'New help text' } },
+        },
+      ],
+      translations: [
+        {
+          en: {
+            objects: {
+              thing: {
+                label: 'Thing (stale wording)',
+                fields: { note: { label: 'Note', help: 'Old help text' } },
+              },
+            },
+          },
+          'zh-CN': {
+            objects: {
+              thing: { label: '事物', fields: { note: { label: '备注', help: '说明' } } },
+            },
+          },
+        },
+      ],
+    };
+    const { bundles } = extractTranslations(cfg, {
+      defaultLocale: 'en',
+      locales: ['zh-CN'],
+      mergeExisting: true,
+    });
+    // en: the source seed wins over the stale bundle entry.
+    expect(bundles.en.objects?.thing?.label).toBe('Thing (new wording)');
+    expect(bundles.en.objects?.thing?.fields?.note?.help).toBe('New help text');
+    // zh-CN: the human translation is preserved verbatim — merge semantics
+    // for translated locales are exactly what they were.
+    expect(bundles['zh-CN'].objects?.thing?.label).toBe('事物');
+    expect(bundles['zh-CN'].objects?.thing?.fields?.note?.help).toBe('说明');
   });
 
   it('filters by object name regex', () => {

@@ -20,6 +20,7 @@ function makeFakeEngine() {
   }
   function matches(row: any, where: Record<string, any>): boolean {
     for (const [k, v] of Object.entries(where)) {
+      if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
       if (row[k] !== v) return false;
     }
     return true;

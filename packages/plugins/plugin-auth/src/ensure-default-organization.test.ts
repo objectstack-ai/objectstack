@@ -20,7 +20,10 @@ function makeQl(seed: Partial<Record<string, Row[]>> = {}) {
     ...seed,
   };
   const matches = (row: Row, where: Row) =>
-    Object.entries(where ?? {}).every(([k, v]) => (v === null ? row[k] == null : row[k] === v));
+    Object.entries(where ?? {}).every(([k, v]) => {
+      if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+      return v === null ? row[k] == null : row[k] === v;
+    });
   return {
     tables,
     find: vi.fn(async (object: string, q: any) =>

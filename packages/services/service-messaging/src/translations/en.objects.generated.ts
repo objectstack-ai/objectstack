@@ -350,7 +350,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       attempts: {
         label: "Attempts",
-        help: "Number of attempts made so far"
+        help: "Number of attempts made so far. 0 on a terminal row means the delivery was PARKED — never sent, and not redeliverable (#8069); see `error` for the cause."
       },
       claimed_by: {
         label: "Claimed By"

@@ -51,6 +51,7 @@ function makeFakeEngine() {
   const tables = new Map<string, Row[]>();
   function matches(row: Row, where: Record<string, any>): boolean {
     for (const [k, v] of Object.entries(where)) {
+      if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
       if (v && typeof v === 'object' && !Array.isArray(v)) {
         // NULL-safe like SQL: a row with no value never satisfies `$lt`.
         if ('$lt' in v && (row[k] == null || !(String(row[k]) < String(v.$lt)))) return false;

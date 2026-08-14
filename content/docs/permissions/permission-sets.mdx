@@ -194,9 +194,9 @@ bit for `everyone` — the platform's own `member_default` baseline is exactly
 that shape; the wildcard ban is the stricter `guest` tier's rule.
 
 Pending suggestions are materialized as `sys_audience_binding_suggestion`
-rows (one per package × set × anchor, read-only over the data API) and
-resolved through the security surface — both installing a package at runtime
-and declaring the set in the stack produce them:
+rows (one per organization × package × set × anchor, read-only over the data
+API) and resolved through the security surface — both installing a package at
+runtime and declaring the set in the stack produce them:
 
 ```http
 GET  /api/v1/security/suggested-bindings?status=pending   # list (reconciles first)

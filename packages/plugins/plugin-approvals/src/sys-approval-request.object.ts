@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
-import { APPROVAL_STATUSES } from '@objectstack/spec/contracts';
+import { APPROVAL_STATUSES, APPROVAL_STATUS_LABELS } from '@objectstack/spec/contracts';
 
 /**
  * sys_approval_request — Live approval instance.
@@ -129,10 +129,13 @@ export const SysApprovalRequest = ObjectSchema.create({
     }),
 
     status: Field.select(
-      // Spread from the contract, not re-typed (#3786). `APPROVAL_STATUSES` is
+      // Derived from the contract, not re-typed (#3786). `APPROVAL_STATUSES` is
       // where the list and the reason for each entry live; `ApprovalStatus` is
-      // derived from it, so this column and the contract cannot disagree.
-      [...APPROVAL_STATUSES],
+      // derived from it, so this column and the contract cannot disagree. The
+      // authored English label per entry lives beside it in
+      // `APPROVAL_STATUS_LABELS` (#8543) — mapped here, never re-typed, so the
+      // `en` bundle regenerates from the contract's own text.
+      APPROVAL_STATUSES.map((value) => ({ value, label: APPROVAL_STATUS_LABELS[value] })),
       {
         label: 'Status',
         required: true,

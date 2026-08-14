@@ -75,6 +75,7 @@ function fakeDataEngine(rows: Row[], knownObjects: string[] = ['contracts']) {
 /** Minimal where matcher: temporal range on the date field + scalar equality. */
 function matches(row: Row, where: Record<string, unknown>): boolean {
     for (const [key, cond] of Object.entries(where)) {
+        if (key.startsWith('$')) throw new Error(`fake driver: unsupported operator ${key}`);
         const val = row[key];
         if (cond && typeof cond === 'object' && !Array.isArray(cond)) {
             const c = cond as Record<string, unknown>;

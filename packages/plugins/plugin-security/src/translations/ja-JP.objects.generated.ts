@@ -139,7 +139,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         help: "このケーパビリティを提供するパッケージ（未設定はプラットフォーム標準または管理者作成）。"
       },
       active: {
-        label: "有効"
+        label: "有効",
+        help: "絞り込みと確認のためのカタログ／表示用フラグです。認可には一切影響しません。権限セットの付与もリソースの requiredPermissions も、ケーパビリティ名を文字列として照合し、この行を読むことはないため、これを解除しても何も取り消されません。"
       },
       id: {
         label: "ケーパビリティ ID"
@@ -169,7 +170,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       deactivate_capability: {
         label: "無効化",
-        confirmText: "このケーパビリティを無効化しますか？これを参照する付与とリソース要件は、再度有効化するまで解決されなくなります。",
+        confirmText: "このケーパビリティを無効化しますか？これはカタログ上のフラグにすぎず、Setup での絞り込みと確認に使われます。認可には影響しません。このケーパビリティを付与する権限セットも、これを要求するリソースも、名前で照合されるため、これまでどおり解決され続けます。",
         successMessage: "ケーパビリティを無効化しました"
       }
     }

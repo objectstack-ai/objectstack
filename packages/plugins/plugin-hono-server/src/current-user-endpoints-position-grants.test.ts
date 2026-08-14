@@ -46,6 +46,7 @@ type Row = Record<string, any>;
 /** `where` matcher: scalar equality plus the `$in` form both resolvers use. */
 function matches(row: Row, where: Row | undefined): boolean {
     return Object.entries(where ?? {}).every(([key, cond]) => {
+        if (key.startsWith('$')) throw new Error(`fake driver: unsupported operator ${key}`);
         const value = row[key] ?? null;
         if (cond && typeof cond === 'object' && Array.isArray((cond as any).$in)) {
             return (cond as any).$in.includes(value);

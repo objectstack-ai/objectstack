@@ -13,7 +13,6 @@
     "CorsConfigSchema (const)",
     "CronExpressionInput (type)",
     "CronExpressionInputSchema (const)",
-    "DECLARED_META_TYPES (const)",
     "EXTERNAL_ERROR_CODES (const)",
     "EXTERNAL_ERROR_HTTP_STATUS (const)",
     "EventName (type)",
@@ -109,6 +108,7 @@
     "keySetMatches (function)",
     "lazySchema (function)",
     "levenshteinDistance (function)",
+    "metaUrlSpellingRefusal (function)",
     "normalizeMetadataCollection (function)",
     "normalizePluginMetadata (function)",
     "normalizeStackInput (function)",
@@ -117,12 +117,10 @@
     "pluralToSingular (function)",
     "renderDiffMessage (function)",
     "resilientFetch (function)",
-    "restPluralOfMetaType (function)",
     "safeParsePretty (function)",
     "singularToPlural (function)",
     "strictUnknownKeyError (function)",
     "suggestFieldType (function)",
-    "tmpl (function)",
-    "unmappedDeclaredTypeSpelling (function)"
+    "tmpl (function)"
   ]
 }
