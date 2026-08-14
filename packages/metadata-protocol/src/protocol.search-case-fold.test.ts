@@ -1,22 +1,37 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// [#7641] `searchAll` — the global-search palette — is the SECOND producer of
-// search clauses, and it carried the same declared≠enforced defect as
-// objectql's `search-filter.ts`: it built its AND-of-OR from `$contains` under
-// a comment asserting that `$contains` was "case-insensitive substring
-// matching". It is not — #4706 Q2 = A rules the `$contains` family case-
-// SENSITIVE, and `$icontains` is the operator that folds.
+// [#7641 → #7643] `searchAll` — the global-search palette — used to be the
+// SECOND producer of search clauses, and it carried the same declared≠enforced
+// defect as objectql's `search-filter.ts`: it built its AND-of-OR from
+// `$contains` under a comment asserting that `$contains` was "case-insensitive
+// substring matching". It is not — #4706 Q2 = A rules the `$contains` family
+// case-SENSITIVE, and `$icontains` is the operator that folds. #7641 fixed the
+// operator in both producers.
 //
-// The two producers were found and fixed together, but they are NOT one code
-// path: `search-filter.ts` serves per-object `find({ $search })` and this one
-// serves `GET /api/v1/search`. `search.console-global-search`'s knownGaps had
-// already recorded that the palette inherits the gap and that #7641 owns it.
+// #7643 removed the second producer instead: the palette now hands the engine
+// `search: <q>` and the ADR-0061 expansion resolves the fields and compiles the
+// clause, so there is one definition of recall rather than two that agreed by
+// maintenance. That moves what THIS file can honestly assert.
 //
-// Why this asserts on the FILTER handed to `engine.find` rather than on matched
-// rows: the fake below deliberately does not implement filtering, so a row
-// assertion here would pass against any filter at all. The operator IS the
-// contract this producer is responsible for — every backend that executes it is
-// separately conformance-checked against `$icontains` (`FILTER_TEXT_CASES`).
+// ## What moved, and where it went
+//
+// The operator pin — "$icontains on source columns, never $contains" — is now a
+// claim about a filter the ENGINE produces, so it cannot be observed here: this
+// suite's fake engine has no expansion, and asserting on the options bag would
+// only re-state the delegation. It is pinned end-to-end, over a real `ObjectQL`
+// and a real driver, in `objectql/src/global-search-palette-recall.test.ts`
+// ("source columns still compile to $icontains"), alongside the companion-recall
+// parity that was #7643's actual defect.
+//
+// ## What is pinned HERE
+//
+// The DELEGATION itself, which is this package's own contract surface and is
+// invisible from the engine side: `searchAll` must hand the engine the query
+// TEXT and no filter of its own. A regression that rebuilt a local `where` —
+// the exact shape of the #7643 defect — would restore a second producer, and
+// every parity test one package over would keep passing right up until the two
+// definitions drifted again. That is what this file exists to catch, and why it
+// was rewritten rather than deleted.
 
 import { describe, it, expect, vi } from 'vitest';
 import { ObjectStackProtocolImplementation } from './protocol.js';
@@ -27,11 +42,10 @@ interface SearchRow {
     updated_at: string;
 }
 
-/** The shape `searchAll` builds: `{$or:[…]}`, or `{$and:[{$or:[…]}, …]}`. */
-type SearchFilter = Record<string, unknown>;
-
 interface FindOptions {
-    where?: SearchFilter;
+    where?: Record<string, unknown>;
+    search?: unknown;
+    searchFields?: unknown;
     orderBy?: Array<{ field: string; order?: string }>;
     limit?: number;
 }
@@ -43,16 +57,16 @@ const ROWS: SearchRow[] = [
 
 const CONTACT = {
     name: 'contact',
-    fields: { name: { name: 'name', type: 'text', searchable: true } },
+    fields: { name: { name: 'name', type: 'text' } },
 };
 
 function makeProtocol(): {
     p: ObjectStackProtocolImplementation;
     find: ReturnType<typeof vi.fn>;
 } {
-    // No filtering: see the header — what is under test is the filter this
-    // producer EMITS, so the double must not be able to satisfy an assertion
-    // by filtering correctly on its own.
+    // No filtering and no `$search` expansion: this double stands in for the
+    // engine BOUNDARY, not for the engine. What is under test is what the
+    // protocol hands across it.
     const find = vi.fn(async (_object: string, _opts: FindOptions = {}) => ROWS);
     const engine = {
         registry: {
@@ -64,47 +78,54 @@ function makeProtocol(): {
     return { p: new ObjectStackProtocolImplementation(engine as never), find };
 }
 
-/** The filter the protocol handed to `engine.find` on its first call. */
-function filterFrom(find: ReturnType<typeof vi.fn>): SearchFilter {
-    const opts = find.mock.calls[0][1] as FindOptions;
-    return opts.where as SearchFilter;
+/** The options bag the protocol handed to `engine.find` on its first call. */
+function optionsFrom(find: ReturnType<typeof vi.fn>): FindOptions {
+    return find.mock.calls[0][1] as FindOptions;
 }
 
-describe('[#7641] searchAll compiles to the case-folding operator', () => {
-    it('emits $icontains — never the case-SENSITIVE $contains', async () => {
+describe('[#7643] searchAll delegates recall to the engine', () => {
+    it('sends the query TEXT and builds no filter of its own', async () => {
         const { p, find } = makeProtocol();
         await p.searchAll({ q: 'retail', perObject: 5 });
 
-        expect(filterFrom(find)).toEqual({ $or: [{ name: { $icontains: 'retail' } }] });
-        // Spelled separately so a regression reads as "went back to the
-        // case-sensitive operator" rather than as an object-shape diff.
-        expect(JSON.stringify(filterFrom(find))).not.toContain('$contains');
+        const opts = optionsFrom(find);
+        expect(opts.search).toBe('retail');
+        // The whole point: a locally compiled predicate is what #7643 removed.
+        expect(opts.where).toBeUndefined();
     });
 
-    it('picks the operator by field type, not by the term\'s own casing', async () => {
-        // The defect was invisible whenever the term's casing happened to match
-        // the stored value. Both spellings must compile the same way — folding
-        // is the operator's job, not the caller's.
-        const lower = makeProtocol();
-        await lower.p.searchAll({ q: 'retail', perObject: 5 });
-        const upper = makeProtocol();
-        await upper.p.searchAll({ q: 'Retail', perObject: 5 });
-
-        expect(filterFrom(lower.find)).toEqual({ $or: [{ name: { $icontains: 'retail' } }] });
-        expect(filterFrom(upper.find)).toEqual({ $or: [{ name: { $icontains: 'Retail' } }] });
-    });
-
-    it('folds every term of a multi-term query, which stays AND-of-OR', async () => {
+    it('passes the query verbatim — no pre-tokenising, no per-field fan-out', async () => {
+        // A multi-term query used to become `{$and:[{$or:[…]},{$or:[…]}]}` here.
+        // Term semantics are unchanged, but they are now the engine's to apply;
+        // splitting the text before handing it over would be a second
+        // definition of "what a term is" in the very place this card merged.
         const { p, find } = makeProtocol();
         await p.searchAll({ q: 'acme retail', perObject: 5 });
 
-        // Term semantics are untouched by #7641 — asserted here so the operator
-        // change is pinned as operator-only.
-        expect(filterFrom(find)).toEqual({
-            $and: [
-                { $or: [{ name: { $icontains: 'acme' } }] },
-                { $or: [{ name: { $icontains: 'retail' } }] },
-            ],
-        });
+        const opts = optionsFrom(find);
+        expect(opts.search).toBe('acme retail');
+        expect(opts.where).toBeUndefined();
+    });
+
+    it('sends no searchFields — the palette wants the object\'s full default reach', async () => {
+        // `searchFields` can only NARROW the resolved set (ADR-0061). Sending
+        // one would reintroduce a palette-specific field policy through the
+        // back door, which is the same defect wearing the engine's key.
+        const { p, find } = makeProtocol();
+        await p.searchAll({ q: 'retail', perObject: 5 });
+
+        expect(optionsFrom(find).searchFields).toBeUndefined();
+    });
+
+    it('still caps and orders per object', async () => {
+        // Unchanged by #7643 and asserted so the delegation cannot quietly take
+        // the cross-object half — the one part that IS this method's own — with
+        // it. `order`, not `direction` (#4674).
+        const { p, find } = makeProtocol();
+        await p.searchAll({ q: 'retail', perObject: 3 });
+
+        const opts = optionsFrom(find);
+        expect(opts.limit).toBe(3);
+        expect(opts.orderBy).toEqual([{ field: 'updated_at', order: 'desc' }]);
     });
 });
