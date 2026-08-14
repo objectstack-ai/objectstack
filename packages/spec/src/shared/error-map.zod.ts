@@ -3,6 +3,11 @@
 import { z } from 'zod';
 import { suggestFieldType, formatSuggestion, findClosestMatches } from './suggestions.zod';
 import { FieldType } from '../data/field.zod';
+import {
+  CONTAINER_ISSUE_CODES,
+  NESTED_EXPANSION_DEPTH_LIMIT,
+  selectUnionBranches,
+} from './union-branch-policy';
 
 /**
  * Zod v4 raw issue type used by the error map.
@@ -155,122 +160,8 @@ interface ZodIssueMinimal {
   issues?: readonly ZodIssueMinimal[];
 }
 
-/**
- * [#5389] The issue codes that hang their real diagnosis on `issue.issues`.
- *
- * Zod raises these when a CONTAINER's inner schema rejects a key or an element
- * that cannot be addressed by a path segment:
- *
- * - `invalid_key` — `z.record(K, V)`'s **key** schema rejected a key, and
- *   `z.map(K, V)`'s key schema rejected a non-`PropertyKey` key;
- * - `invalid_element` — `z.map(K, V)`'s **value** schema rejected the value
- *   under a non-`PropertyKey` key.
- *
- * In both cases the issue's own `message` is a bare wrapper ("Invalid key in
- * record") and everything the author needs sits one level down, exactly as
- * `invalid_union` hides a branch's prescription in `errors` (#4971). Zod's own
- * `treeifyError` / `formatError` descend both codes with `[...path,
- * ...issue.path]` as the parent path; this renderer did not, which is the
- * defect #5389 records.
- */
-const CONTAINER_ISSUE_CODES: ReadonlySet<string> = new Set(['invalid_key', 'invalid_element']);
-
 /** One indent step of a formatted issue line. */
 const ISSUE_INDENT = '  ';
-
-/**
- * How many levels of nested issues are expanded below a top-level issue —
- * `invalid_union` branches and, since #5389, `invalid_key` / `invalid_element`
- * container issues alike. Both nest (a union member that is itself a union —
- * `StateMachine → on.GO → actions[0]` is two levels in this repo today; a
- * record whose value schema is a union is another), and a union level can
- * render several branches, so the expansion is bounded rather than left to the
- * shape of whatever the author typed.
- */
-const NESTED_EXPANSION_DEPTH_LIMIT = 3;
-
-/** How many equally-informative branches are rendered at one level. */
-const UNION_BRANCH_RENDER_LIMIT = 3;
-
-/**
- * True when a branch only complains that the value is the wrong *kind* at the
- * branch root — `expected string, received object` for the string member of
- * `z.union([z.string(), SomeObject])`.
- *
- * Such a branch carries no prescription: the author never intended it, and
- * printing it is the "N branches, N times the noise" failure that made
- * `view.zod.ts`'s `submitBehavior` reach for `discriminatedUnion`. An empty
- * branch (the `invalid_union` "matched multiple" variant carries `errors: []`)
- * counts as uninformative too — `every` on an empty list is `true`.
- */
-function isKindMismatchOnly(issues: readonly ZodIssueMinimal[]): boolean {
-  return issues.every(
-    (issue) =>
-      issue.path.length === 0 &&
-      (issue.code === 'invalid_type' || issue.code === 'invalid_value'),
-  );
-}
-
-/** True when a branch carries the #4001 campaign's unknown-key prescription. */
-function carriesUnknownKey(issues: readonly ZodIssueMinimal[]): boolean {
-  return issues.some((issue) => issue.code === 'unrecognized_keys');
-}
-
-/**
- * Pick the branch(es) of a failed union whose issues actually explain the
- * failure.
- *
- * Ranking, in order:
- *
- * 1. **Kind-mismatch-only branches are dropped entirely** (see
- *    {@link isKindMismatchOnly}). If *every* branch is one — a plain
- *    `z.union([z.string(), z.number()])` handed an object — nothing is
- *    selected and the union renders exactly as it always has.
- * 2. **Fewest issues wins.** The branch the author was closest to hitting
- *    complains least: given `z.union([A, B, C])` of strict objects and one
- *    mistyped key, the intended member reports *only* that key while the other
- *    two also report a wrong discriminator and their own missing requireds. So
- *    "fewest" is what keeps a single unknown key from being reported once per
- *    branch.
- * 3. **A branch carrying `unrecognized_keys` breaks a tie**, because that is
- *    where the curated prose lives.
- * 4. Declaration order breaks what remains, so the output is deterministic.
- *
- * Branches that tie at the top are *all* rendered (capped): when two shapes
- * explain the failure equally well, privileging the first one by accident of
- * declaration order would be a lie about which shape was expected.
- */
-function selectUnionBranches(
-  branches: readonly (readonly ZodIssueMinimal[])[],
-): { selected: readonly (readonly ZodIssueMinimal[])[]; omitted: number } {
-  const informative = branches
-    .map((issues, index) => ({ issues, index }))
-    .filter((branch) => !isKindMismatchOnly(branch.issues));
-
-  if (informative.length === 0) return { selected: [], omitted: 0 };
-
-  const rank = (branch: { issues: readonly ZodIssueMinimal[] }): [number, number] => [
-    branch.issues.length,
-    carriesUnknownKey(branch.issues) ? 0 : 1,
-  ];
-
-  const sorted = [...informative].sort((a, b) => {
-    const [aCount, aKeys] = rank(a);
-    const [bCount, bKeys] = rank(b);
-    return aCount - bCount || aKeys - bKeys || a.index - b.index;
-  });
-
-  const [bestCount, bestKeys] = rank(sorted[0]!);
-  const tied = sorted.filter((branch) => {
-    const [count, keys] = rank(branch);
-    return count === bestCount && keys === bestKeys;
-  });
-
-  return {
-    selected: tied.slice(0, UNION_BRANCH_RENDER_LIMIT).map((branch) => branch.issues),
-    omitted: Math.max(0, tied.length - UNION_BRANCH_RENDER_LIMIT),
-  };
-}
 
 /** Render a path array the way the CLI has always rendered it. */
 function renderPath(path: PropertyKey[]): string {
@@ -288,6 +179,16 @@ function renderPath(path: PropertyKey[]): string {
  * being reported once per member; a container's `issues` are the one list the
  * key/element schema actually produced, so every one of them is rendered —
  * there is no branch to choose between and nothing to omit.
+ *
+ * [#8318] The ranking, the two limits and {@link CONTAINER_ISSUE_CODES} are NOT
+ * declared here: they are the package-internal policy in
+ * `./union-branch-policy.ts`, which `../api/zod-issues-to-fields.ts` imports
+ * too. This walk owns the PROSE — the indent, the `✗` glyph, the `(root)`
+ * spelling and the trailing "… and N more branches" line the wire deliberately
+ * omits — and nothing about which branches explain the failure. ⛔ Do not
+ * re-declare the ranking here to tune the rendering; a verdict that differs
+ * between the terminal and the API is the defect #5014 named, and
+ * `union-branch-policy.parity.test.ts` will refuse it.
  *
  * `seen` de-duplicates leaf lines *within one top-level issue*: two branches
  * that reject the same key with the same words say it once. Expanded lines

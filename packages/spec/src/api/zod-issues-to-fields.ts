@@ -25,18 +25,31 @@
  *
  * ## Relation to `shared/error-map.zod.ts`
  *
- * The union-branch selection policy below (limits, ranking, container descent)
- * is the one `formatZodIssue`'s STRING renderer applies (#4971/#5389, one
- * directory over in `shared/error-map.zod.ts`). The two walks stay separate
+ * The union-branch selection policy (limits, ranking, container descent) is the
+ * one `formatZodIssue`'s STRING renderer applies (#4971/#5389, one directory
+ * over in `shared/error-map.zod.ts`). The two walks stay separate
  * implementations on purpose — one renders indented prose lines, this one
  * produces structured `{field, code, message}` entries — but the *verdict*
  * (which branches explain a failure) must match, or one mistake gets two
  * different prescriptions depending on whether the author published from the
- * terminal or POSTed to the API (#5014). Change the policy in either file and
- * the sibling moves in the same PR.
+ * terminal or POSTed to the API (#5014).
+ *
+ * [#8318] That agreement used to rest on two copies of the ranking and a
+ * module header asking whoever edits one to edit the other. It is now
+ * structural: both walks import `../shared/union-branch-policy.ts`, and
+ * `../shared/union-branch-policy.parity.test.ts` pins the two outputs over one
+ * fixture corpus. ⛔ Do not re-declare the ranking, the limits or
+ * `CONTAINER_ISSUE_CODES` in this file — what belongs here is the D3 code
+ * table and the `{field, code, message}` shape, not which branch explains a
+ * failure.
  */
 
 import type { FieldErrorCode } from './errors.zod';
+import {
+    CONTAINER_ISSUE_CODES,
+    NESTED_EXPANSION_DEPTH_LIMIT,
+    selectUnionBranches,
+} from '../shared/union-branch-policy';
 
 /**
  * A Zod issue → the field-level catalog (ADR-0114 D3).
@@ -117,105 +130,6 @@ function valueAtPath(input: unknown, path: unknown): unknown {
 }
 
 /**
- * How many levels of nested issues are expanded below a top-level issue, and
- * how many equally-informative union branches are emitted at one level.
- *
- * Both bounds — and the whole selection policy below — are the ones
- * `formatZodError` landed for the CLI/spec side of this defect (#4971,
- * `shared/error-map.zod.ts`). See the module header for why the two walks are
- * siblings that must agree rather than one shared implementation.
- */
-const NESTED_EXPANSION_DEPTH_LIMIT = 3;
-const UNION_BRANCH_EMIT_LIMIT = 3;
-
-/**
- * [#5389] The issue codes that hang their real diagnosis on `issue.issues`
- * rather than on `invalid_union`'s `issue.errors`.
- *
- * `invalid_key` is raised when `z.record(K, V)`'s KEY schema rejects a key (and
- * by `z.map` for a non-`PropertyKey` key); `invalid_element` when `z.map`'s
- * VALUE schema rejects the value under such a key. Both carry a bare wrapper
- * message ("Invalid key in record") with everything the client needs one level
- * down — the same defect as #5014, one property name over. Kept in step with
- * `CONTAINER_ISSUE_CODES` in `shared/error-map.zod.ts`.
- */
-const CONTAINER_ISSUE_CODES: ReadonlySet<string> = new Set(['invalid_key', 'invalid_element']);
-
-/** A Zod issue path, normalised to the array Zod always produces. */
-function issuePathOf(issue: any): Array<string | number> {
-    return Array.isArray(issue?.path) ? issue.path : [];
-}
-
-/**
- * True when a branch only complains that the value is the wrong *kind* at the
- * branch root — `expected string, received object` for the string member of
- * `z.union([z.string(), SomeObject])`.
- *
- * Such a branch carries no prescription: the author never intended it, and
- * emitting it is the "N branches, N times the noise" failure. An empty branch
- * (zod's "matched multiple" variant carries `errors: []`) counts as
- * uninformative too — `every` on an empty list is `true`.
- */
-function isKindMismatchOnly(issues: readonly any[]): boolean {
-    return issues.every(
-        (issue) =>
-            issuePathOf(issue).length === 0
-            && (issue?.code === 'invalid_type' || issue?.code === 'invalid_value'),
-    );
-}
-
-/** True when a branch carries the #4001 campaign's unknown-key prescription. */
-function carriesUnknownKey(issues: readonly any[]): boolean {
-    return issues.some((issue) => issue?.code === 'unrecognized_keys');
-}
-
-/**
- * Pick the branch(es) of a failed union whose issues actually explain the
- * failure. Ranking, in order (identical to `selectUnionBranches` in
- * `shared/error-map.zod.ts`):
- *
- * 1. **Kind-mismatch-only branches are dropped entirely.** If *every* branch is
- *    one — a plain `z.union([z.string(), z.number()])` handed an object —
- *    nothing is selected and the union reports exactly what it always has.
- * 2. **Fewest issues wins.** The branch the author was closest to hitting
- *    complains least, so "fewest" is what keeps ONE unknown key from arriving as
- *    N `fields[]` entries, one per branch.
- * 3. **A branch carrying `unrecognized_keys` breaks a tie**, because that is
- *    where the curated prose lives.
- * 4. Declaration order breaks what remains, so the wire is deterministic.
- *
- * Branches that tie at the top are all emitted (capped): when two shapes explain
- * the failure equally well, privileging the first by accident of declaration
- * order would be a lie about which shape was expected.
- */
-function selectUnionBranches(branches: readonly (readonly any[])[]): readonly (readonly any[])[] {
-    const informative = branches
-        .map((issues, index) => ({ issues, index }))
-        .filter((branch) => !isKindMismatchOnly(branch.issues));
-    if (informative.length === 0) return [];
-
-    const rank = (branch: { issues: readonly any[] }): [number, number] => [
-        branch.issues.length,
-        carriesUnknownKey(branch.issues) ? 0 : 1,
-    ];
-
-    const sorted = [...informative].sort((a, b) => {
-        const [aCount, aKeys] = rank(a);
-        const [bCount, bKeys] = rank(b);
-        return aCount - bCount || aKeys - bKeys || a.index - b.index;
-    });
-
-    const [bestCount, bestKeys] = rank(sorted[0]!);
-    return sorted
-        .filter((branch) => {
-            const [count, keys] = rank(branch);
-            return count === bestCount && keys === bestKeys;
-        })
-        .slice(0, UNION_BRANCH_EMIT_LIMIT)
-        .map((branch) => branch.issues);
-}
-
-/**
  * One issue → its `fields[]` entries, appended to `out`.
  *
  * An ordinary issue is one entry. An `invalid_union` is its own entry (zod's
@@ -246,7 +160,11 @@ function selectUnionBranches(branches: readonly (readonly any[])[]): readonly (r
  * Deliberate divergence from the spec-side renderer: where it prints a trailing
  * "… and N more branches rejected this value", this emits nothing. That line is
  * a rendering affordance; a `fields[]` entry must name a real field and carry a
- * catalog code, and the omission note has neither.
+ * catalog code, and the omission note has neither. [#8318] Since the shared
+ * policy computes the number either way, the divergence is now VISIBLE rather
+ * than implicit: `selectUnionBranches` hands back `{selected, omitted}` and
+ * this walk destructures `selected` alone, at the one line below — the wire
+ * dropping `omitted` is a decision recorded in code, not an absence.
  */
 function collectIssueFields(
     issue: any,
@@ -289,7 +207,11 @@ function collectIssueFields(
     if (!expandable) return;
 
     if (branches.length > 0) {
-        for (const branch of selectUnionBranches(branches)) {
+        // `omitted` is deliberately unread here — see the note above. The
+        // renderer turns it into a trailing prose line; the wire has nowhere to
+        // put a count that names no field.
+        const { selected } = selectUnionBranches(branches);
+        for (const branch of selected) {
             for (const nested of branch) {
                 collectIssueFields(nested, path, depth + 1, seen, input, inputProvided, out);
             }
