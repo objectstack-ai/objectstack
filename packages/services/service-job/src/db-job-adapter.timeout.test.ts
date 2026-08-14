@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { Cron, scheduledJobs } from 'croner';
 import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { DbJobAdapter } from './db-job-adapter.js';
 import { CronJobAdapter } from './cron-job-adapter.js';
@@ -45,7 +46,27 @@ function makeFakeEngine() {
   };
 }
 
-const CRON = { type: 'cron', expression: '* * * * *' } as const;
+/**
+ * A cron expression croner PARSES but can never fire: February 30th does not
+ * exist, so `nextRun()` is `null` and the registration carries no schedule of
+ * its own. The explicit `trigger()` in each case below is therefore the ONLY
+ * writer of `sys_job_run`, which is what entitles these cases to assert an
+ * EXACT row count.
+ *
+ * This was `'* * * * *'`, and under that spelling the exact-count assertions
+ * were a claim about the wall clock rather than about the adapter: when a run
+ * straddled a minute boundary croner fired the registration on its own, a
+ * second `sys_job_run` row landed, and CI reddened on a package the offending
+ * PR had usually not touched (#8628).
+ *
+ * `'0 0 29 2 *'` is NOT a substitute — croner resolves Feb 29 to the next leap
+ * year and it would fire there. Only a date that never occurs is inert.
+ *
+ * Nothing here depends on the registration being schedulable: `trigger()`
+ * executes the stored record directly and never consults the schedule.
+ */
+const NEVER_FIRES = '0 0 30 2 *';
+const CRON = { type: 'cron', expression: NEVER_FIRES } as const;
 const TIMEOUT_MS = 20;
 const HANDLER_MS = 300;
 
@@ -205,6 +226,16 @@ describe('DbJobAdapter — a timed-out run is recorded as one (#7734)', () => {
 });
 
 describe('the timeout policy still applies through an injected cron adapter (#7734)', () => {
+  /**
+   * The fixture guard for every exact-count assertion in this file (#8628).
+   * Stated as an assertion and not a comment because the failure it prevents is
+   * invisible locally: restoring an every-minute spelling passes on this
+   * machine and reds CI only when a run happens to straddle `:00`.
+   */
+  it('the shared CRON fixture cannot fire on its own', () => {
+    expect(new Cron(CRON.expression, { timezone: 'UTC' }).nextRun()).toBeNull();
+  });
+
   it('a cron-scheduled run lands a timeout row even though the adapter no longer sees the policy', async () => {
     // DbJobAdapter now runs `retryPolicy`/`timeout` itself and hands the timer
     // adapter a policy-free registration. If that stripping ever outran the
@@ -215,6 +246,15 @@ describe('the timeout policy still applies through an injected cron adapter (#77
     const { handler } = slowHandler();
 
     await adapter.schedule('cronic', CRON, handler, { timeout: TIMEOUT_MS });
+
+    // This case registers a REAL croner job, so the exact-count assertion below
+    // holds only while that registration owns no schedule of its own. Pin both
+    // halves: the job is genuinely registered (the case still exercises the
+    // real adapter) and it will never fire itself (#8628).
+    const registered = scheduledJobs.find((j) => j.name === cron.cronRegistryName('cronic'));
+    expect(registered, 'the case must register a REAL croner job').toBeDefined();
+    expect(registered!.nextRun()).toBeNull();
+
     await cron.trigger('cronic'); // fire the copy the cron adapter holds
 
     const runs = engine.tables.get('sys_job_run') ?? [];
