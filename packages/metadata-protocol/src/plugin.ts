@@ -35,6 +35,10 @@ import {
     ensureViewDefinitionActiveIndex,
     resolveIndexExec,
 } from './migrations/view-definition-active-index.js';
+import {
+    ensureSysSettingIdentityIndex,
+    resolveSysSettingIndexExec,
+} from './migrations/sys-setting-identity-index.js';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import type { MetadataAuthoringChannel } from './protocol.js';
 
@@ -199,6 +203,23 @@ export function assembleMetadataProtocol(
             // refuse to boot. (`ensureOverlayIndex` gets this by wrapping its
             // whole body in a swallow-everything try/catch; the same guarantee,
             // stated once here, keeps the migration itself readable.)
+            // #8629 rides the SAME seam and the same gate, for the same reasons
+            // — `sys_setting`'s declared row identity
+            // (`namespace, key, scope, user_id`) is NULL-distinct on `user_id`,
+            // which is NULL on every row that is not `scope='user'`, so the
+            // constraint is void on exactly the tenant and global layers.
+            //
+            // Two differences from its sibling, both handled inside the
+            // migration rather than here: `sys_setting` is registered by the
+            // OPTIONAL `service-settings`, so the table may legitimately not
+            // exist on this kernel (probed for, and its absence is a silent
+            // no-op); and the tightening can be REFUSED by existing duplicate
+            // rows, which per the 2026-08-14 ruling leaves the previous index in
+            // place and hands the operator the list — never a keep-one rule.
+            //
+            // Separate try/catch per migration, deliberately: they protect
+            // different tables and one that could not be armed must not skip the
+            // other.
             if (environmentId === undefined) {
                 (ctx as any)?.hook?.('kernel:ready', async () => {
                     try {
@@ -206,6 +227,14 @@ export function assembleMetadataProtocol(
                     } catch (e: unknown) {
                         ctx.logger.warn(
                             '[metadata-protocol] sys_view_definition active-row index migration skipped (#5839)',
+                            { error: e instanceof Error ? e.message : String(e) },
+                        );
+                    }
+                    try {
+                        await ensureSysSettingIdentityIndex(resolveSysSettingIndexExec(ql), ctx.logger);
+                    } catch (e: unknown) {
+                        ctx.logger.warn(
+                            '[metadata-protocol] sys_setting row-identity index migration skipped (#8629)',
                             { error: e instanceof Error ? e.message : String(e) },
                         );
                     }
