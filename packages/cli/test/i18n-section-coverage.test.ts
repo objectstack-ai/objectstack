@@ -535,11 +535,17 @@ describe('the showcase app, walked for real', () => {
       'objects.showcase_semantic_zoo._sections.basics.label',
       'objects.showcase_semantic_zoo._sections.money.label',
       // `ContactViews.form.sections[].name` — the container's DEFAULT form,
-      // which `ObjectForm` renders and translates like any other.
+      // which `ObjectForm` renders and translates like any other. NOT the
+      // only contributor: `formViews.create`'s sparse override names its own
+      // section too (objectstack#8231), which is the entry right below.
       'objects.showcase_contact._sections.contact.label',
       'objects.showcase_contact._sections.notes.label',
       'objects.showcase_contact._sections.status.label',
       'objects.showcase_contact._sections.work.label',
+      // `ContactViews.formViews.create.sections[0].name` — the sparse create
+      // override's own section ("Who is this?"), named by objectstack#8231's
+      // remainder. Distinct surface, same object, same walker.
+      'objects.showcase_contact._sections.who_is_this.label',
     ].sort());
   }, 60_000);
 });
