@@ -1067,6 +1067,98 @@ export const RecordPathProps = strictObject({
 });
 export type RecordPathProps = z.input<typeof RecordPathProps>;
 
+/**
+ * `record:reference_rail` — #8691. The rail had a registered renderer, a
+ * `PageComponentType` entry and a place in the console block palette, but no
+ * row here — so an authored entry `filter` parsed, typechecked, validated,
+ * built, shipped verbatim in the artifact and silently filtered nothing,
+ * while the very same build emitted loud diagnostics for `record:related_list`
+ * keys in the same file. This row is what makes the #5068 gate's dispatch
+ * reach the rail.
+ *
+ * Key set measured from the renderer's ACTUAL read points at the
+ * `.objectui-sha` pin (objectui `plugin-detail/src/renderers/
+ * record-reference-rail.tsx`), not transcribed from its TS interface — the
+ * two disagree, and the disagreement is load-bearing:
+ *
+ * - The interface declares an entry `icon` and the page synthesizer
+ *   (`buildDefaultPageSchema.ts`) emits it, but NO render path reads it — the
+ *   rail card has no icon slot at all. Declaring it here would be the same
+ *   defect this row exists to close, one direction over (declared ≠ enforced,
+ *   Prime Directive #10). It is a `guidance` entry instead: refused, with the
+ *   reason.
+ * - `title` is rendered as a raw React child, so it is `z.string()`, NOT
+ *   `I18nLabelSchema`: an inline locale map would render `[object Object]`.
+ *   Declaring the map spelling would advertise a translation capability the
+ *   renderer does not deliver (that capability question is the downstream
+ *   card's, pending a maintainer pull ruling — deliberately not decided here).
+ * - `limit` / `hideEmpty` are optional with NO schema default (the `maxVisible`
+ *   principle at `record:details`): `3` and `true` are the RENDERER'S
+ *   fallbacks, and a schema default would turn "the author said nothing" into
+ *   "the author asked for the default" — a different fact.
+ *
+ * Deliberately NOT declared, per the file conventions: `className` on the
+ * props bag (a component-NODE key — `COMPONENT_LEVEL_GUIDANCE` carries the
+ * wrong-layer pointer; the renderer reads it off the hoisted node).
+ */
+export const ReferenceRailEntrySchema = strictObject({
+  surface: 'this `record:reference_rail` entry',
+  history: PROPS_HISTORY,
+  aliases: {
+    // `object` is the spelling on every element data source
+    // (`ElementDataSourceSchema`) and on the related-list add picker; an
+    // author carrying it over is not making a typo distance could reach.
+    object: 'objectName',
+    // `label` is what the neighbouring `record:highlights` field and
+    // `record:path` stage call their display override; the rail calls its
+    // card-title override `title`.
+    label: 'title',
+  },
+  guidance: {
+    /**
+     * The card's own planted key (#8691): authored on a real app, it passed
+     * tsc, `objectstack validate` and `objectstack build`, shipped verbatim in
+     * `dist/objectstack.json`, and the rendered badge kept counting everything.
+     */
+    filter: 'The rail honours no per-entry `filter`: it issues one fixed query per entry '
+      + '(`{ [relationshipField]: parentId }`, `$top` = `limit`) and reads nothing else — before '
+      + 'this shape existed the key parsed, shipped, and silently filtered nothing (#8691). '
+      + '`record:related_list` is the component whose `filter` is real; if the rail is ever '
+      + 'granted one, this entry shape is where it gets declared and enforced.',
+    icon: '`icon` is read by nothing: the rail renderer declares it in its TS interface and the '
+      + 'page synthesizer emits it, but no render path reads it — the card has no icon slot, so '
+      + 'a declared icon draws nothing. Remove it; if the rail gains an icon slot, this entry '
+      + 'shape is where it gets declared.',
+    hideEmpty: '`hideEmpty` is a COMPONENT-level key: write it beside `entries`, not on an '
+      + 'entry — the renderer folds empty cards per rail, never per entry.',
+  },
+}, {
+  objectName: z.string().describe('Related object name whose records this card summarizes (e.g. "task", "opportunity_quote")'),
+  relationshipField: z.string().describe('Field on the related object that points back to this record (e.g. "account_id")'),
+  title: z.string().optional().describe('Literal card title. Rendered as-is in EVERY locale (no inline locale map — the rail renders it as a raw React child); omit to use the related object\'s localized label.'),
+  limit: z.number().int().positive().optional().describe('Preview rows per card, and the `$top` of the one query this entry issues (renderer default: 3).'),
+  displayField: z.string().optional().describe('Field of the related record rendered in each preview row (renderer fallback when omitted: name / title / subject / label / … / id).'),
+});
+export type ReferenceRailEntry = z.input<typeof ReferenceRailEntrySchema>;
+
+export const RecordReferenceRailProps = strictObject({
+  surface: 'this `record:reference_rail`',
+  history: PROPS_HISTORY,
+  guidanceSets: COMPONENT_LEVEL_GUIDANCE,
+  aliases: {
+    // `items` is what `page:tabs` / `page:accordion` call their collection;
+    // `related` is the page synthesizer's option name for the same data
+    // (`buildDefaultPageSchema({ related })`). Both are neighbouring-surface
+    // spellings, not typos.
+    items: 'entries',
+    related: 'entries',
+  },
+}, {
+  entries: z.array(ReferenceRailEntrySchema).min(1).describe('Related collections to summarize — one compact card per entry (icon-less title, total-count badge, top-N preview rows). An empty rail renders nothing, so at least one entry is required.'),
+  hideEmpty: z.boolean().optional().describe('Fold entries whose related count is 0 into a single "+ N empty" expander chip (renderer default: on; set `false` to always render every card).'),
+});
+export type RecordReferenceRailProps = z.input<typeof RecordReferenceRailProps>;
+
 export const PageAccordionProps = strictObject({
   surface: 'this `page:accordion`',
   history: PROPS_HISTORY,
@@ -1857,6 +1949,13 @@ export const ComponentPropsMap = {
   'record:activity': RecordActivityProps,
   'record:chatter': RecordChatterProps,
   'record:path': RecordPathProps,
+  // #8691 — the rail had a renderer, a `PageComponentType` entry and a palette
+  // slot, but no row here, so an entry `filter` shipped as a silent no-op while
+  // sibling components in the same file got loud diagnostics. Key set measured
+  // from the renderer's read points at the `.objectui-sha` pin — see the
+  // schema's own header for the two places that measurement diverges from the
+  // renderer's TS interface (`icon`, `title`).
+  'record:reference_rail': RecordReferenceRailProps,
 
   // Navigation
   'app:launcher': emptyProps('app:launcher'),

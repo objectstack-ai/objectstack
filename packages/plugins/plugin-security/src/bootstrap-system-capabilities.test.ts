@@ -528,3 +528,183 @@ describe('[#8470] the curated half owns its row, not whichever row shares the na
     expect(ql.rows.filter((r) => r.name === 'manage_users')).toHaveLength(3);
   });
 });
+
+// ───────────────────────────────────────────────────────────────────────────
+// [#8536] The DERIVED half's skip is REPORTED, never silent.
+//
+// The #5876 guard keeps skipping — that is the ruled behaviour and none of the
+// pins below change it. What changes is that a skip which leaves the platform
+// (NULL-organization) bucket with no platform-owned row is COUNTED and WARNED
+// with the same provenance-naming shape the curated half emits, instead of
+// being visible only as a number in the boot summary.
+//
+// Two facts have to be told apart, and #8461 is why they are no longer the same
+// statement. The derived lookup is `{ name }` and runs with no `tenantId`, so it
+// reads ACROSS organizations: an organization's row can satisfy it while the
+// platform bucket is never written at all. So "the guard skipped" does NOT imply
+// "the platform's definition is missing", and the last two pins here are the
+// opposite-direction controls that force the difference — an implementation that
+// warned on every skip, or that warned unconditionally, fails them.
+// ───────────────────────────────────────────────────────────────────────────
+describe('[#8536] the derived skip is counted and warned when it leaves the bucket unseeded', () => {
+  const GRANTS = [{ systemPermissions: ['showcase.export_data'] }];
+  const AUTHORED = { label: 'Admin Made', description: 'Admin wrote this.' };
+  /** Deliberately distinctive: a message that merely prints a placeholder cannot contain it. */
+  const ORG = 'org_jia_9f2';
+  const NAME = 'showcase.export_data';
+
+  const platformRowFor = (ql: ReturnType<typeof makeQl>, name: string) =>
+    ql.rows.find((r) => r.name === name && r.organization_id == null);
+
+  /**
+   * An organization's authored row for the derived name. `aaa_` sorts before
+   * every `cap_…`, so the `{ name }` lookup selects it under the #4363
+   * tie-breaker the double models.
+   *
+   * `managed_by` is REQUIRED, with no default value: a parameter defaulted to
+   * `'admin'` would silently rebuild the `undefined` row of the provenance
+   * matrix below as an admin row (JS defaults fire on an explicitly passed
+   * `undefined`), collapsing that case into its neighbour while staying green.
+   */
+  const orgRow = (managed_by: string | undefined) => ({
+    id: 'aaa_org_derived',
+    organization_id: ORG,
+    name: NAME,
+    ...AUTHORED,
+    scope: 'org',
+    active: true,
+    ...(managed_by === undefined ? {} : { managed_by }),
+  });
+
+  // ── The headline state: the bucket is FREE and stays empty ──
+  it('counts and warns when an ORGANIZATION row blocks the derivation', async () => {
+    const ql = makeQl();
+    ql.rows.push(orgRow('admin'));
+    const warn = vi.fn();
+    const out = await bootstrapSystemCapabilities(ql, GRANTS, { logger: { warn } });
+
+    // BEHAVIOUR IS UNCHANGED — this card is observability only. The guard still
+    // skips, the organization's copy is untouched, and nothing is adopted into
+    // the platform's identity or backfilled into its bucket (#8552).
+    expect(out.skippedAuthored).toBe(1);
+    expect(ql.rows.find((r) => r.id === 'aaa_org_derived')).toEqual(orgRow('admin'));
+    expect(platformRowFor(ql, NAME)).toBeUndefined();
+    expect(out.seeded).toBe(KNOWN_CAPABILITIES.length);
+
+    // …and the gap the skip leaves behind is now stated out loud.
+    expect(out.unseededDerived).toBe(1);
+    expect(warn).toHaveBeenCalledTimes(1);
+    const [message, meta] = warn.mock.calls[0];
+    expect(message).toContain(NAME);
+    expect(message).toContain("managed_by='admin'");
+    expect(message).toContain(ORG); // the blocking row's REAL organization, not a placeholder
+    expect(message).toContain('NO row holds the name in that bucket at all');
+    // The organization's row is a supported ADR-0066 D1 extension, so the
+    // hand-resolution line — which tells an operator to rename or delete the
+    // blocking row — must NOT print here. It belongs to a blocked PLATFORM
+    // bucket only; printing it here would advise removing a legitimate row.
+    expect(message).not.toContain('To resolve by hand');
+    expect(meta).toEqual({
+      name: NAME,
+      blockingRowId: 'aaa_org_derived',
+      blockingManagedBy: 'admin',
+      blockingOrganizationId: ORG,
+      platformRowId: undefined,
+    });
+  });
+
+  // The message must name the provenance it READ. Same fixture, same grant —
+  // only `managed_by` differs, so a diagnostic that printed a fixed string (or
+  // asserted an ownership verdict) cannot pass all three rows.
+  it.each([
+    ['admin    — Setup-authored inside the organization', 'admin'],
+    ['package  — declared by an installed package', 'package'],
+    ['(absent) — not engine-reachable; the message must still be truthful', undefined],
+  ])('names the provenance it READ (%s)', async (_label, managedBy) => {
+    const ql = makeQl();
+    ql.rows.push(orgRow(managedBy));
+    const warn = vi.fn();
+    const out = await bootstrapSystemCapabilities(ql, GRANTS, { logger: { warn } });
+
+    expect(out.unseededDerived).toBe(1);
+    expect(warn).toHaveBeenCalledTimes(1);
+    const message = warn.mock.calls[0][0] as string;
+    if (managedBy === undefined) {
+      expect(message).toContain('a row carrying no managed_by value');
+      // never `managed_by='undefined'` / `managed_by='null'` — the field is absent.
+      expect(message).not.toContain('managed_by=');
+    } else {
+      expect(message).toContain(`managed_by='${managedBy}'`);
+      expect(message).not.toContain('carrying no managed_by value');
+      // …and never the OTHER row's provenance: the value is read, not guessed.
+      expect(message).not.toContain(`managed_by='${managedBy === 'admin' ? 'package' : 'admin'}'`);
+    }
+    expect(warn.mock.calls[0][1]).toMatchObject({ blockingManagedBy: managedBy ?? null });
+  });
+
+  // ── The other unseeded state: the PLATFORM bucket itself is occupied ──
+  // This is #5876's own fixture (no `organization_id` at all), which post-#8461
+  // means the platform bucket. The platform's placeholder is just as absent
+  // here, so it warns too — and here the blocking row IS one an operator may
+  // legitimately rename, so the #8552 hand-resolution line applies.
+  it('counts and warns when the PLATFORM bucket itself is held by an authored row', async () => {
+    const ql = makeQl();
+    ql.rows.push({
+      id: 'cap_existing', name: NAME, ...AUTHORED, scope: 'org', managed_by: 'admin', active: true,
+    });
+    const warn = vi.fn();
+    const out = await bootstrapSystemCapabilities(ql, GRANTS, { logger: { warn } });
+
+    expect(out.skippedAuthored).toBe(1);
+    expect(out.unseededDerived).toBe(1);
+    expect(ql.rows.find((r) => r.id === 'cap_existing')).toMatchObject({ ...AUTHORED, managed_by: 'admin' });
+    expect(warn).toHaveBeenCalledTimes(1);
+    const [message, meta] = warn.mock.calls[0];
+    expect(message).toContain("managed_by='admin'");
+    expect(message).toContain('that row is itself the one holder the bucket admits');
+    expect(message).toContain('To resolve by hand');
+    expect(meta).toEqual({
+      name: NAME,
+      blockingRowId: 'cap_existing',
+      blockingManagedBy: 'admin',
+      blockingOrganizationId: null,
+      platformRowId: 'cap_existing',
+    });
+  });
+
+  // ── Opposite-direction control #1: the ordinary path ──
+  // Without this an unconditional warn would pass every pin above.
+  it('OPPOSITE-DIRECTION CONTROL: an ordinary derivation warns nothing and moves no counter', async () => {
+    const ql = makeQl();
+    const warn = vi.fn();
+    const out = await bootstrapSystemCapabilities(ql, GRANTS, { logger: { warn } });
+
+    expect(out.seeded).toBe(KNOWN_CAPABILITIES.length + 1);
+    expect(platformRowFor(ql, NAME)).toMatchObject({ managed_by: 'platform' });
+    expect(out.skippedAuthored).toBe(0);
+    expect(out.unseededDerived).toBe(0);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  // ── Opposite-direction control #2: a skip that is NOT a gap ──
+  // The sharp one. The guard fires, `skippedAuthored` moves — and nothing is
+  // missing, because the platform's placeholder is sitting in its bucket; the
+  // cross-organization lookup simply selected the organization's row first.
+  // "Warn on every skip" fails here, which is what makes the warning mean one
+  // specific thing: the platform's definition for this name is absent.
+  it('OPPOSITE-DIRECTION CONTROL: a skip whose platform placeholder EXISTS is not reported', async () => {
+    const ql = makeQl();
+    await bootstrapSystemCapabilities(ql, GRANTS); // boot 1 derives the placeholder
+    expect(platformRowFor(ql, NAME)).toMatchObject({ managed_by: 'platform' });
+    // An organization then authors its own row, with an id that sorts FIRST — so
+    // the `{ name }` lookup selects it and the #5876 guard fires on boot 2.
+    ql.rows.push(orgRow('admin'));
+    const warn = vi.fn();
+    const out = await bootstrapSystemCapabilities(ql, GRANTS, { logger: { warn } });
+
+    expect(out.skippedAuthored).toBe(1); // the guard really did fire…
+    expect(out.unseededDerived).toBe(0); // …and there is no missing definition to report
+    expect(warn).not.toHaveBeenCalled();
+    expect(platformRowFor(ql, NAME)).toMatchObject({ managed_by: 'platform' });
+  });
+});

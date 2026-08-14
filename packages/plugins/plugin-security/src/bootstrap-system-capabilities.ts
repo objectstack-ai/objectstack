@@ -75,6 +75,29 @@
  *
  * The DERIVED half's lookup is deliberately UNCHANGED (its own guard, #5876,
  * already refuses to touch a row it does not own).
+ *
+ * [#8536] The DERIVED half's skip is REPORTED. The guard stays exactly as #5876
+ * wrote it — it keeps declining, and #8552 settled the posture on an occupied
+ * platform bucket: keep declining, LOUDLY, with no adoption and no backfill.
+ * Only the observability changes here.
+ *
+ * What made the silence wrong is again #8461. "A row resolves this name" and
+ * "the platform holds a row for this name" used to be ONE statement, which is
+ * what #5876's reasoning rests on ("the capability resolves and the authored
+ * copy is the better one"). Per-organization uniqueness split them: the derived
+ * lookup reads across organizations, so an organization's row satisfies it while
+ * the NULL-organization bucket is never written at all — and `continue` runs
+ * before any insert is attempted, so nothing anywhere reports the empty bucket.
+ *
+ * So the skip branch reads the platform bucket once — on that branch only, the
+ * same cost the curated half accepted — and warns with the same provenance-
+ * naming shape. It warns only where the platform's OWN placeholder is genuinely
+ * absent: a skip that declines a mere REFRESH (the placeholder is present, it
+ * simply was not the row the cross-organization lookup selected) stays
+ * summary-only. That keeps the warning meaning exactly one thing — the
+ * platform's definition for this name is missing from sys_capability — instead
+ * of firing on every authored row, which is the state #4632 declined to alarm
+ * about and which remains counted in `skippedAuthored`.
  */
 
 import { PLATFORM_CAPABILITIES, type PlatformCapability } from '@objectstack/spec/security';
@@ -144,11 +167,31 @@ export interface CapabilitySeedResult {
   /**
    * [#5876] Derived names whose existing row is authored elsewhere
    * (`managed_by` anything but `'platform'`), so its `label`/`description` were
-   * left as their author wrote them. Not a degradation — the capability
-   * resolves and the authored copy is the better one — so it is reported in the
-   * boot summary rather than warned about (#4632).
+   * left as their author wrote them. Not a degradation where the platform's own
+   * placeholder exists — the capability resolves and the authored copy is the
+   * better one — so THAT case is reported in the boot summary rather than
+   * warned about (#4632).
+   *
+   * [#8536] Counts EVERY such skip, unchanged. The subset where the skip also
+   * leaves the platform bucket without a platform-owned row is the degradation
+   * #4632 never had to consider, and is counted again — and warned — as
+   * {@link CapabilitySeedResult.unseededDerived}.
    */
   skippedAuthored: number;
+  /**
+   * [#8536] The subset of {@link CapabilitySeedResult.skippedAuthored} whose
+   * skip leaves the platform (NULL-organization) bucket with NO platform-owned
+   * row: the derived placeholder exists nowhere the platform owns, installation-
+   * wide. The derived counterpart of {@link CapabilitySeedResult.blockedCurated}
+   * — same harm, reached by a different route (the #5876 guard `continue`s
+   * before an insert is ever attempted, so there is no refusal to observe).
+   *
+   * A SUBSET rather than a split, deliberately: `skippedAuthored` keeps its
+   * meaning and its value, because "an authored row was left alone" and "the
+   * platform's definition is missing" are different facts and #8461 is what made
+   * them separable. Both are reported; neither is inferred from the other.
+   */
+  unseededDerived: number;
   /**
    * [#8470] Curated definitions whose platform row is ABSENT and could not be
    * written, because a row this pass does not own already holds the name in the
@@ -174,7 +217,7 @@ export async function bootstrapSystemCapabilities(
   options: SeedOptions = {},
 ): Promise<CapabilitySeedResult> {
   if (!ql || typeof ql.find !== 'function' || typeof ql.insert !== 'function') {
-    return { seeded: 0, updated: 0, skippedAuthored: 0, blockedCurated: 0, total: 0 };
+    return { seeded: 0, updated: 0, skippedAuthored: 0, unseededDerived: 0, blockedCurated: 0, total: 0 };
   }
 
   const materialized = new Set<string>(options.materializedCapabilityNames ?? []);
@@ -201,6 +244,7 @@ export async function bootstrapSystemCapabilities(
   let seeded = 0;
   let updated = 0;
   let skippedAuthored = 0;
+  let unseededDerived = 0;
   let blockedCurated = 0;
   for (const def of byName.values()) {
     const isDerived = derivedNames.has(def.name);
@@ -237,6 +281,81 @@ export async function bootstrapSystemCapabilities(
       // no package ever declared is invisible to that list.
       if (isDerived && row.managed_by !== 'platform') {
         skippedAuthored += 1;
+        // [#8536] Declining is the ruled behaviour (#5876, reaffirmed by #8552);
+        // being SILENT about what the decline leaves behind is not. The lookup
+        // above reads across organizations, so the row just skipped says nothing
+        // about the platform's own bucket: it may be an organization's row while
+        // the NULL-organization bucket sits empty, or the bucket's own occupant,
+        // or neither — the platform's placeholder may be present and simply not
+        // have been the row selected. Those are different facts, so read the
+        // bucket rather than infer it, once, on this branch only.
+        //
+        // The unique key `(COALESCE(organization_id, …), name)` admits one row
+        // per name there, so this read returns THE occupant or nothing.
+        const platformRow = (
+          await tryFind(ql, 'sys_capability', { name: def.name, organization_id: null }, 1)
+        )[0];
+        if (platformRow?.managed_by === 'platform') {
+          // The placeholder exists; only a refresh of somebody else's row was
+          // declined. Nothing is missing, so this stays summary-only (#4632) —
+          // and warning here would make the warning mean nothing in particular.
+          continue;
+        }
+        unseededDerived += 1;
+        // Name the provenance READ, never an ownership verdict: on a row
+        // carrying some other `managed_by` a sentence like "a row this pass does
+        // not own" would be false, printed every boot (the curated half's rule,
+        // applied to the row THIS half actually skipped).
+        const provenance = row.managed_by == null
+          ? 'a row carrying no managed_by value'
+          : `a row with managed_by='${String(row.managed_by)}'`;
+        const locality = row.organization_id == null
+          ? 'in the platform (NULL-organization) bucket itself'
+          : `inside organization '${String(row.organization_id)}'`;
+        // THREE outcomes for the bucket, as on the curated side — and here a
+        // fourth is impossible by construction: a platform-owned occupant
+        // returned above.
+        const bucket = platformRow === undefined
+          ? 'NO row holds the name in that bucket at all — it is free, and nothing was written to it ' +
+            'because the guard declines before any insert is attempted'
+          : platformRow.id === row.id
+            ? 'that row is itself the one holder the bucket admits for this name'
+            : platformRow.managed_by == null
+              ? 'a row carrying no managed_by value already holds the name there, and was left exactly as it is'
+              : `a row with managed_by='${String(platformRow.managed_by)}' already holds the name there, ` +
+                'and was left exactly as it is';
+        // [#8552] The ruling leaves a colliding row to the OPERATOR, so where one
+        // blocks the platform bucket the warning owes them the line that says how
+        // to clear it by hand. Where the bucket is FREE there is nothing of theirs
+        // to clear: what stands in the way is an organization's row, which
+        // ADR-0066 D1 explicitly supports ("admins EXTEND the registry"), so
+        // saying "rename it" would be advising the removal of a legitimate row.
+        const remediation = platformRow !== undefined
+          ? ' To resolve by hand: rename the row that holds the name in the platform bucket (or delete ' +
+            'it) — through Setup for an admin-authored row, or by editing and re-publishing the owning ' +
+            "package for a package-declared one — then restart; the seeder will then derive the platform's " +
+            'placeholder.'
+          : row.organization_id == null
+            ? ''
+            : " The organization's row is a supported extension (ADR-0066 D1 — admins EXTEND the " +
+              'registry), so there is nothing for an operator to remove; the platform bucket is left empty ' +
+              'deliberately, and adopting or backfilling it was rejected in #8552.';
+        options.logger?.warn?.(
+          `[security] derived capability "${def.name}" has no platform placeholder and none was seeded. ` +
+            `The row this pass found for the name is ${provenance} ${locality}, and its label and ` +
+            'description were left as their author wrote them (#5876 — unchanged). In the platform ' +
+            `(NULL-organization) bucket, where the declared unique key admits one row per name: ${bucket}. ` +
+            "The platform's own derived placeholder is therefore missing from sys_capability " +
+            'installation-wide. Grants and requiredPermissions referencing the name are unaffected — ' +
+            `they resolve by name, not by row.${remediation}`,
+          {
+            name: def.name,
+            blockingRowId: row.id,
+            blockingManagedBy: row.managed_by ?? null,
+            blockingOrganizationId: row.organization_id ?? null,
+            platformRowId: platformRow?.id,
+          },
+        );
         continue;
       }
       // Keep label/description fresh from the platform's own definition.
@@ -320,7 +439,7 @@ export async function bootstrapSystemCapabilities(
     }
   }
   options.logger?.info?.('[security] system capabilities seeded into sys_capability (ADR-0066 D1)', {
-    seeded, updated, skippedAuthored, blockedCurated, total: byName.size,
+    seeded, updated, skippedAuthored, unseededDerived, blockedCurated, total: byName.size,
   });
-  return { seeded, updated, skippedAuthored, blockedCurated, total: byName.size };
+  return { seeded, updated, skippedAuthored, unseededDerived, blockedCurated, total: byName.size };
 }

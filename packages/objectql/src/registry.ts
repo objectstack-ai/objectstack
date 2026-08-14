@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveInjectedSystemColumns, checkManagedApiMethodAffordances, LEGACY_API_METHODS, AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
+import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveInjectedSystemColumns, isTenancyDisabled, checkManagedApiMethodAffordances, LEGACY_API_METHODS, AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
 // [#4513] The audit-family governance table, and [#6562] the injected-column
 // DEFINITION tables it governs — see the re-exports below for why both live in a
 // package `objectql` and `metadata-protocol` both depend on.
@@ -511,10 +511,21 @@ export function applySystemFields(
   const wantOwner = plan.owner;
   const wantOwningBusinessUnit = plan.owningBusinessUnit;
 
-  // Nothing to inject and nothing to govern — the cheap path for the two
-  // opt-out rows (`systemFields: false`, `managedBy: 'better-auth'`) and for
-  // objects whose every column is already declared.
-  if (!wantTenant && !wantAudit && !wantOwner && !wantOwningBusinessUnit) return schema;
+  // Nothing to INJECT — the two opt-out rows (`systemFields: false`,
+  // `managedBy: 'better-auth'`) and objects whose every column is already
+  // declared.
+  //
+  // [#8608] It still routes through {@link provisionTenantScopeIndex}, like
+  // every other exit below. An object that injects nothing can still CARRY the
+  // tenant column — the author declares their own `organization_id` — and the
+  // wall composes its predicate on exactly that column (measured, not inferred:
+  // plugin-security's `tenancyDisabled` reads `tenancy.enabled` and
+  // `systemFields.tenant` only, so `systemFields: false` leaves the wall live).
+  // Returning `schema` here was the last exit that decided the index by NOT
+  // asking, which is how the withholding survived #8375's convergence.
+  if (!wantTenant && !wantAudit && !wantOwner && !wantOwningBusinessUnit) {
+    return provisionTenantScopeIndex(schema, opts);
+  }
 
   const additions: Record<string, any> = {};
   // Platform-owned field settings that must WIN over a declared field, rather
@@ -753,44 +764,91 @@ function provisionTenantScopeIndex(
 }
 
 /**
- * [#8375, widened by #8459] Is this object tenant-scoped — i.e. does it carry an
- * `organization_id` column for the wall to filter on?
+ * [#8375, widened by #8459, rebound to the wall by #8608] Is this object
+ * tenant-scoped — i.e. does the WALL filter it by `organization_id`?
  *
- * The spec's own derivation (`resolveInjectedSystemColumns`, #5378) and nothing
- * else, so `systemFields: false`, `systemFields.tenant: false`,
- * `tenancy.enabled: false` and `managedBy: 'better-auth'` all withhold the index
- * exactly as they withhold the column. Re-deriving any of those rows here is the
- * drift that plan exists to prevent.
+ * ## One question, one authority
  *
- * ⚠️ That gate is NOT a leftover of the condition #8459 lifted, and it does not
- * contradict the ruling's "whenever the object carries `organization_id`": it is
- * the same reasoning as `multiTenant: false`, one scope down. An object that
- * declares itself non-tenant-scoped is one the wall composes NO predicate on —
- * `computeTenantLayer0Filter` (plugin-security) returns `null` when
- * `tenancyDisabled`, which reads the very same `systemFields.tenant` /
- * `tenancy.enabled` declarations — so an index there would serve nothing. What
- * #8459 removed is the SECOND condition this function used to carry: that the
- * `organization_id` present be the platform's own definition byte-for-byte
- * (`isInjectedColumnDefinition`). Where the column comes from is no longer part
- * of the question; whether the object is walled still is.
+ * This read `resolveInjectedSystemColumns(schema).tenant` — the spec's
+ * INJECTION plan — on the reasoning that an object withholding the COLUMN has
+ * nothing for an index to serve. That reasoning holds for three of the plan's
+ * opt-out rows and fails on the fourth. `systemFields: false` is the hard
+ * object-level opt-out, so the plan answers "inject nothing"; plugin-security
+ * derives `tenancyDisabled` from exactly two clauses —
  *
- * ⛔ Do NOT "simplify" this to a field-map check (`fields.organization_id !==
- * undefined`), however closely that reads to the ruling's sentence. Measured:
- * it breaks the WRITE path for ordinary platform-provisioned objects. The save
- * path strips the injected COLUMNS before it strips the materialized stamps
+ *     tenancy.enabled === false || systemFields.tenant === false
+ *
+ * — and `systemFields: false` is in neither. An object using the hard opt-out
+ * while declaring its OWN `organization_id` therefore had the wall predicate
+ * AND-composed onto essentially every read with no index behind it: the same
+ * "hottest predicate unindexed" shape #6810 and #8459 exist to prevent, reached
+ * by a third route. Measured end to end on #8608 rather than inferred — for one
+ * such object the registry answered `indexes: null` while plugin-security's
+ * `getReadFilter` answered `{ organization_id: <org> }`.
+ *
+ * Triage ruling, 2026-08-14 (option A), applying the standing meta-rule that
+ * when one question has two disagreeing implementations the GOVERNED side wins
+ * by default and the ungoverned side rebinds to it: **the wall's derivation is
+ * authoritative and the index follows it.** ⛔ Option B — teaching
+ * plugin-security to read `systemFields: false` as tenancy-disabled — was
+ * REJECTED, because it narrows a wall and only an explicit product ruling can
+ * do that. So this predicate is now the wall's, in the wall's own terms:
+ *
+ *  1. the wall's two clauses, and nothing else, decide "is tenancy off here";
+ *  2. the object carries `organization_id` — either the platform provisions it
+ *     (the injection plan) or the author declared it.
+ *
+ * `managedBy: 'better-auth'` is deliberately NOT a third clause: the wall does
+ * not read it either, so a better-auth table that DECLARES `organization_id`
+ * (`sys_member`) is walled on that column and is now indexed on it. Re-adding
+ * an exclusion the wall does not have is precisely the drift this rebinding
+ * closes — and `declaresTenantIndex` already covers the tables that declare
+ * their own tenant index (`sys_invitation`, `sys_team`, `sys_scim_provider`).
+ *
+ * ⚠️ The clause-1 rows are NOT a leftover of the condition #8459 lifted: an
+ * object that declares itself non-tenant-scoped is one the wall composes NO
+ * predicate on (`computeTenantLayer0Filter` returns `null` when
+ * `tenancyDisabled`), so an index there would serve nothing — the same
+ * reasoning as `multiTenant: false`, one scope down. What #8459 removed is a
+ * different condition: that the `organization_id` present be the platform's own
+ * definition byte-for-byte (`isInjectedColumnDefinition`). Where the column
+ * comes from is no longer part of the question; whether the object is WALLED
+ * still is.
+ *
+ * ⛔ Do NOT reduce clause 2 to its field-map half alone
+ * (`fields.organization_id !== undefined`), however closely that reads to the
+ * ruling's sentence. Measured: it breaks the WRITE path for ordinary
+ * platform-provisioned objects. The save path strips the injected COLUMNS
+ * before it strips the materialized stamps
  * (`stripMaterializedFromRegistry(type, stripServedSystemColumns(type, item))`,
  * `@objectstack/metadata-protocol`), so by the time
  * {@link SchemaRegistry.stripProvisionedTenantIndexFrom} re-stamps the
  * remainder through this function, the body no longer HAS an
- * `organization_id` — a field-map predicate answers "not tenant-scoped", the
- * re-stamp adds nothing, the lists differ, the strip refuses, and the
+ * `organization_id` — a field-map-only predicate answers "not tenant-scoped",
+ * the re-stamp adds nothing, the lists differ, the strip refuses, and the
  * platform's own index entry is baked into `sys_metadata.metadata`, its
- * checksum and every history diff (the #4326 regression). Reading the object's
- * DECLARATIONS instead reaches the same verdict on a stripped body as on a
- * whole one, which is what makes the stamp and its inverse agree.
+ * checksum and every history diff (the #4326 regression). The injection-plan
+ * branch is what answers on a stripped body; the field-map branch only ever
+ * ADDS objects whose column that plan cannot see. And the addition is safe on
+ * the write path for the mirrored reason: on exactly those rows the plan also
+ * strips nothing (`plan.names` is `{ id }`), so the author's declared column is
+ * still present when the re-stamp asks.
  */
 function carriesTenantScopeColumn(schema: ServiceObject): boolean {
-  return resolveInjectedSystemColumns(schema).tenant;
+  // Clause 1 — the wall's own two clauses, spelled here because
+  // plugin-security spells them there (option C, the single exported
+  // predicate, is bounded to no new `@objectstack/spec` export and no
+  // plugin-security behaviour change, so the convergence itself is a
+  // follow-up; `isTenancyDisabled` is already the shared reading of the first).
+  if (isTenancyDisabled(schema)) return false;
+  if ((schema as { systemFields?: { tenant?: boolean } }).systemFields?.tenant === false) {
+    return false;
+  }
+  // Clause 2 — there is a column for the wall's predicate to filter on.
+  return (
+    resolveInjectedSystemColumns(schema).tenant ||
+    (schema as { fields?: Record<string, unknown> }).fields?.organization_id != null
+  );
 }
 
 /**

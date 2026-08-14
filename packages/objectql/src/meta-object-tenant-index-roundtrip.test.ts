@@ -330,6 +330,58 @@ describe('[#8375] the write path takes back the tenant index the read added (#43
         }
     });
 
+    it('[#8608] round-trips a `systemFields: false` object that declares its own organization_id', async () => {
+        // The row #8608 moved: the hard object-level opt-out is not one of the
+        // wall's two `tenancyDisabled` clauses, so plugin-security composes
+        // `organization_id = <org>` on such an object and the platform now
+        // indexes the column it filters. The stamp reaching a new row means the
+        // STRIP owes that row too — and the write path is where the cost of
+        // getting it wrong is permanent rather than recomputed: an entry that
+        // is not taken back is baked into `sys_metadata.metadata`, its checksum
+        // and every history diff (#4326).
+        //
+        // It is not a separate implementation to check — the strip re-stamps
+        // the remainder through `provisionTenantScopeIndex` itself — but this
+        // row exercises the branch the OTHER cases cannot: on the hard opt-out
+        // the injected-column strip removes nothing (the plan's `names` is
+        // `{ id }`), so the author's declared column is still present when the
+        // re-stamp asks. That is what makes the field-map half of the predicate
+        // safe here; a stripped body on any other row is answered by the
+        // injection-plan half.
+        //
+        // Two cycles and the STORED ROW, for the reason the head of this file
+        // gives: one cycle read at the served document cannot separate a strip
+        // that is bounded from one that never fires.
+        const authored = {
+            ...clone(AUTHORED),
+            systemFields: false,
+            fields: {
+                ...clone(AUTHORED).fields,
+                organization_id: { type: 'lookup', reference: 'sys_organization', label: 'Org' },
+            },
+        };
+        const host = await seed(true, authored);
+        const firstStored = host.storedBody()!;
+        expect(firstStored.indexes).toBeUndefined();
+        expect(firstStored.fields.organization_id).toEqual(authored.fields.organization_id);
+
+        for (const cycle of [1, 2]) {
+            const item = await served(host);
+            expect(item.indexes, `cycle ${cycle} served`).toEqual([PLATFORM_TENANT_INDEX]);
+            // The hard opt-out still injects nothing: the index travels, the
+            // platform columns do not.
+            expect(Object.keys(item.fields).sort(), `cycle ${cycle} fields`)
+                .toEqual(['code_label', 'name', 'organization_id']);
+
+            await host.protocol.saveMetaItem({
+                type: 'object', name: AUTHORED.name, item,
+            } as never);
+
+            expect(host.storedBody()!.indexes, `cycle ${cycle} stored`).toBeUndefined();
+            expect(host.storedBody(), `cycle ${cycle} body`).toEqual(firstStored);
+        }
+    });
+
     it('adds and strips NOTHING on an object that opts out of the tenant column', async () => {
         // The stamp is gated on the spec's own derivation, not on the
         // deployment flag alone: `systemFields.tenant: false` withholds the
