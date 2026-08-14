@@ -420,7 +420,11 @@ describe('validateComponentProps — unregistered types are skipped', () => {
   // registered now. `object-chart` replaces it: deliberately still absent from
   // the map (two-vocabulary problem — see component.zod.ts's object-block
   // section header), so it is the family's own living proof the skip survives.
-  it.each(['record:line_items', 'flex', 'object-chart', 'record:quick_actions'])(
+  // `record:quick_actions` left it at #8744 for the same reason — it has a row
+  // now, and its dispatch is pinned in the #8744 suite at the end of this
+  // file. `record:line_items` stays: still row-less, still the corpus's own
+  // specimen.
+  it.each(['record:line_items', 'flex', 'object-chart'])(
     'says nothing about `%s`, whatever its props carry',
     (type) => {
       const findings = validateComponentProps(
@@ -663,5 +667,111 @@ describe('validateComponentProps — record:reference_rail is dispatched (#8691)
       }]),
     );
     expect(findings).toEqual([]);
+  });
+});
+
+/**
+ * #8744 — the rows for the four types the rail fix left behind, so the gate's
+ * dispatch reaches them.
+ *
+ * The pre-fix state these pin against: `record:alert`, `record:quick_actions`,
+ * `record:history` and `record:discussion` had no `ComponentPropsMap` row, so
+ * the walker's unregistered-type skip swallowed the whole props bag — the
+ * card's planted `severty` produced ZERO findings from validate/build while
+ * `record:related_list` keys in the same file were loudly reported. Remove any
+ * of the map rows and its first test here goes back to that silence.
+ */
+describe('validateComponentProps — record:alert / record:quick_actions / record:history / record:discussion are dispatched (#8744)', () => {
+  it('reports the card\'s planted `severty`, loudly, through the same rule as its siblings', () => {
+    const findings = validateComponentProps(
+      stackWith([{
+        type: 'record:alert',
+        properties: { severty: 'warning', title: 'Awaiting review' },
+      }]),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(COMPONENT_PROPS_UNKNOWN_KEY);
+    expect(findings[0].where).toBe('page "probe_page" · record:alert');
+    expect(findings[0].message).toContain('`severty`');
+    expect(findings[0].message).toContain('severity');
+  });
+
+  it('stays silent on the platform sys_user banner shape — inline locale maps and CEL predicate included', () => {
+    const findings = validateComponentProps(
+      stackWith([{
+        type: 'record:alert',
+        properties: {
+          severity: 'warning',
+          icon: 'mail',
+          title: { en: 'Email not verified', 'zh-CN': '邮箱未验证' },
+          body: { en: 'Verify your email.' },
+          visible: 'record.id == ctx.user.id && record.email_verified == false',
+          dismissible: false,
+          action: { actionName: 'resend_verification_email', label: { en: 'Resend' } },
+        },
+      }]),
+    );
+    expect(findings).toEqual([]);
+  });
+
+  it('reports quick_actions\' host-channel `actions` and routes the author to `actionNames`', () => {
+    const findings = validateComponentProps(
+      stackWith([{
+        type: 'record:quick_actions',
+        properties: { actions: ['showcase_mark_done'], location: 'record_section' },
+      }]),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(COMPONENT_PROPS_UNKNOWN_KEY);
+    expect(findings[0].message).toContain('`actions`');
+    expect(findings[0].message).toContain('actionNames');
+  });
+
+  it('stays silent on the showcase quick_actions bar', () => {
+    const findings = validateComponentProps(
+      stackWith([{
+        type: 'record:quick_actions',
+        properties: {
+          location: 'record_section',
+          align: 'start',
+          actionNames: ['showcase_mark_done', 'showcase_log_time', 'showcase_archive_task'],
+        },
+      }]),
+    );
+    expect(findings).toEqual([]);
+  });
+
+  it('reports history\'s host-channel `entries` with the self-fetch prescription, and accepts its three presentation keys', () => {
+    const loud = validateComponentProps(
+      stackWith([{
+        type: 'record:history',
+        properties: { entries: [], limit: 20 },
+      }]),
+    );
+    expect(loud).toHaveLength(1);
+    expect(loud[0].rule).toBe(COMPONENT_PROPS_UNKNOWN_KEY);
+    expect(loud[0].message).toContain('`entries`');
+    expect(loud[0].message).toContain('sys_activity');
+
+    const silent = validateComponentProps(
+      stackWith([{
+        type: 'record:history',
+        properties: { limit: 20, emptyText: 'No changes yet', unknownUserText: 'System' },
+      }]),
+    );
+    expect(silent).toEqual([]);
+  });
+
+  it('judges `record:discussion` — the fifth silent surface — with `record:chatter`\'s own row', () => {
+    const findings = validateComponentProps(
+      stackWith([{
+        type: 'record:discussion',
+        properties: { dock: 'right' },
+      }]),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(COMPONENT_PROPS_UNKNOWN_KEY);
+    expect(findings[0].where).toBe('page "probe_page" · record:discussion');
+    expect(findings[0].message).toContain('`dock`');
   });
 });

@@ -264,7 +264,7 @@ import type * as M167 from './ui/view.zod.js';
 import type * as M170 from './ui/component.zod.js';
 
 // ---------------------------------------------------------------------------
-// 833 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 836 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1544,6 +1544,15 @@ export type Iso821 = Assert<Eq< z.input< typeof M170.RecordPathProps >, z.infer<
 // said nothing" survives the parse, and input === infer holds for both shapes.
 export type Iso845 = Assert<Eq< z.input< typeof M170.ReferenceRailEntrySchema >, z.infer< typeof M170.ReferenceRailEntrySchema > >>;
 export type Iso846 = Assert<Eq< z.input< typeof M170.RecordReferenceRailProps >, z.infer< typeof M170.RecordReferenceRailProps > >>;
+// #8744 — the three record types the rail fix left behind, default-free on
+// the same principle. `RecordAlertProps` itself is deliberately NOT pinned:
+// its `visible` carries `ExpressionInputSchema`, whose bare-string arm
+// TRANSFORMS to the canonical `{ dialect, source }` envelope, so
+// input ≠ infer by construction — the alias stays `z.input` (the authoring
+// face), per the convention's own rule for Expression-carrying shapes.
+export type Iso847 = Assert<Eq< z.input< typeof M170.RecordAlertActionSchema >, z.infer< typeof M170.RecordAlertActionSchema > >>;
+export type Iso848 = Assert<Eq< z.input< typeof M170.RecordQuickActionsProps >, z.infer< typeof M170.RecordQuickActionsProps > >>;
+export type Iso849 = Assert<Eq< z.input< typeof M170.RecordHistoryProps >, z.infer< typeof M170.RecordHistoryProps > >>;
 // The object-* block family (#7751) — deliberately default-free in its first,
 // warning-tier step ("the author said nothing" must stay distinguishable from
 // "the author asked for the renderer's fallback"), so input === infer holds.
@@ -1642,7 +1651,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 833 isomorphic pins', () => {
+  it('still declares all 836 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -1863,9 +1872,16 @@ describe('ADR-0122 type-alias convention', () => {
     // default-free on the object-* family's principle (the renderer's
     // `limit ?? 3` / `hideEmpty !== false` fallbacks stay the renderer's
     // facts), so both pin isomorphic as `Iso845`/`Iso846`.
+    //
+    // 833 -> 836 is #8744 — the three record types the rail fix left behind
+    // (`RecordAlertActionSchema`, `RecordQuickActionsProps`,
+    // `RecordHistoryProps`), default-free on the same principle, pinned as
+    // `Iso847`-`Iso849`. `RecordAlertProps` is deliberately unpinned: its
+    // `visible` carries `ExpressionInputSchema`, whose bare-string arm
+    // transforms to the canonical envelope, so input ≠ infer by construction.
     const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     const pins = self.match(/^export type Iso\d+ = Assert</gm) ?? [];
-    expect(pins).toHaveLength(833);
+    expect(pins).toHaveLength(836);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either

@@ -3,7 +3,7 @@
 import { z } from 'zod';
 import { FilterConditionSchema } from '../data/filter.zod';
 import { ViewFilterRuleSchema } from './view.zod';
-import { InlineActionSchema } from './action.zod';
+import { InlineActionSchema, ActionLocationSchema } from './action.zod';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
 
@@ -260,7 +260,14 @@ const PROPS_HISTORY =
  * #5775 — deliberately never declared, because it is a page to rewrite rather
  * than a key to add.
  */
-const COMPONENT_LEVEL_GUIDANCE: readonly KeySetGuidance[] = [
+/**
+ * The two sets are NAMED individually (#8744) because one row cannot carry the
+ * visibility set: `record:alert` DECLARES `visible` — the one record component
+ * whose renderer evaluates a props-level predicate — and the #6619 audit
+ * rightly refuses a pattern set whose example is a declared key. Every other
+ * row keeps taking the pair via `COMPONENT_LEVEL_GUIDANCE` below, unchanged.
+ */
+const COMPONENT_NODE_VISIBILITY_GUIDANCE: KeySetGuidance =
   {
     name: 'COMPONENT_NODE_VISIBILITY_KEYS',
     keys: /^(visible|visibility|visibleOn|visibleIf|visibleWhen|hidden|hiddenWhen|conceal|showWhen)$/,
@@ -271,7 +278,9 @@ const COMPONENT_LEVEL_GUIDANCE: readonly KeySetGuidance[] = [
       + '`id`. Inside `properties` it is hoisted onto the node by the renderer but evaluated by '
       + 'nothing — the component renders unconditionally, which is a visibility gate that '
       + 'silently does not gate.',
-  },
+  };
+
+const COMPONENT_NODE_KEYS_GUIDANCE: KeySetGuidance =
   {
     name: 'COMPONENT_NODE_KEYS',
     /**
@@ -295,7 +304,11 @@ const COMPONENT_LEVEL_GUIDANCE: readonly KeySetGuidance[] = [
       + 'of `type`. `SchemaRenderer` skips `id` when it hoists `properties`, and `dataSource` / '
       + '`responsive` / `events` / `style` / `className` / `responsiveStyles` are read off the '
       + 'node by the page runtime, so the inner spelling is parsed by nothing.',
-  },
+  };
+
+const COMPONENT_LEVEL_GUIDANCE: readonly KeySetGuidance[] = [
+  COMPONENT_NODE_VISIBILITY_GUIDANCE,
+  COMPONENT_NODE_KEYS_GUIDANCE,
 ];
 
 /**
@@ -1159,6 +1172,197 @@ export const RecordReferenceRailProps = strictObject({
 });
 export type RecordReferenceRailProps = z.input<typeof RecordReferenceRailProps>;
 
+/**
+ * `record:alert` / `record:quick_actions` / `record:history` — #8744, the
+ * three `record:*` types #8691's fix left in exactly the rail's pre-fix
+ * position: a registered objectui renderer, a `PageComponentType` entry, a
+ * console palette slot, and no row here — so the #5068 gate's dispatch skipped
+ * them as unregistered and a typo'd `severty` (or any other undeclared key)
+ * parsed, typechecked, validated, built, shipped, and did nothing.
+ *
+ * Key sets measured from the renderers' ACTUAL read points at the
+ * `.objectui-sha` pin (`record-alert.tsx`, `record-quick-actions.tsx`,
+ * `record-history.tsx` + `HistoryTimeline.tsx`), not transcribed from the
+ * registrations' declared-input lists — which are wrong in both directions
+ * here, exactly as #8691 found with the rail's `icon`:
+ *
+ * - `record:quick_actions`' registration says an empty bar falls back to
+ *   "every action declared for the object at this location"; the renderer
+ *   resolves NOTHING when no names are given and renders its empty
+ *   placeholder. The declared list also omits `aria`, whose `label` the
+ *   renderer DOES read — but under a spelling the shared `AriaPropsSchema`
+ *   refuses (see the row's `guidance.aria`).
+ * - `record:history`'s renderer reads `entries` / `loading`, which the
+ *   registration rightly does not declare: they are the HOST's data channel
+ *   (see the row's guidance), not authorable surface.
+ * - `record:alert`'s `icon`, unlike the rail's, IS read (`props.icon ||
+ *   severity icon`), so it is declared here — same method, opposite verdict,
+ *   which is why the method is "name the line that reads it", not "copy the
+ *   sibling row".
+ */
+
+/**
+ * The alert's optional call-to-action. All three keys are read: `actionName`
+ * resolves the def from the object's own `actions[]` metadata and executes it
+ * through the shared action engine (`useActionEngine` — confirm/param dialogs,
+ * toast, reload, exactly as in `record:quick_actions`); `label` is resolved
+ * with the same `pickLocalized` chain as `title`/`body`; `variant` is
+ * forwarded to the Button primitive.
+ */
+export const RecordAlertActionSchema = strictObject({
+  surface: 'this `record:alert` action',
+  history: PROPS_HISTORY,
+  aliases: {
+    // `name` is how the action itself is keyed in the object's `actions[]`
+    // (`ActionSchema.name`) — an author copying the identifier out of the
+    // action definition brings that spelling along; it is not a typo distance
+    // could reach.
+    name: 'actionName',
+  },
+}, {
+  actionName: z.string().describe('Name of an action declared on this object (`actions[]`) — resolved from object metadata and run through the shared action engine, so confirm/param dialogs, toast and reload behave exactly as in `record:quick_actions`.'),
+  label: I18nLabelSchema.optional().describe('CTA button label — a string or an inline locale map, resolved with the same pickLocalized chain as `title`/`body` (default: the action\'s own label).'),
+  variant: z.enum(['default', 'destructive', 'outline', 'secondary', 'ghost', 'link']).optional().describe('Button variant — the Button primitive\'s own vocabulary (renderer default: `destructive` when severity is `error`, else `default`).'),
+});
+export type RecordAlertAction = z.input<typeof RecordAlertActionSchema>;
+
+/**
+ * `record:alert` — #8744. See the family header above.
+ *
+ * Two deliberate departures from this file's own defaults:
+ *
+ * - `guidanceSets` carries only `COMPONENT_NODE_KEYS_GUIDANCE`, because this
+ *   is the one record component whose PROPS carry a real visibility predicate:
+ *   the renderer evaluates `properties.visible` (via `toPredicateInput` +
+ *   `useCondition` — the same pipeline as every action button), so `visible`
+ *   is a declared key here and the visibility pattern set's "move it up to
+ *   the node" prescription would be wrong on this surface. The node-spelling
+ *   near-misses become ALIASES onto `visible` instead — the same direction
+ *   `ActionSchema` already takes for its own `visible`.
+ * - `severity` is a closed enum with NO schema default: the renderer
+ *   whitelists the four values and falls back to `info` on anything else —
+ *   that fallback is the renderer's fact, and at authoring time an
+ *   out-of-vocabulary severity is a mistake to refuse, not to absorb.
+ *
+ * `title` / `body` are `I18nLabelSchema`, NOT literal strings — the opposite
+ * verdict from the rail's `title`, and measured the same way: this renderer
+ * resolves both through `pickLocalized(…, language)` before rendering, so the
+ * inline `{ en, 'zh-CN', … }` map is a delivered capability (the platform's
+ * own `sys_user` page authors it on this very component).
+ */
+export const RecordAlertProps = strictObject({
+  surface: 'this `record:alert`',
+  history: PROPS_HISTORY,
+  guidanceSets: [COMPONENT_NODE_KEYS_GUIDANCE],
+  aliases: {
+    // ADR-0089 made `visibleWhen` canonical for the component-NODE predicate,
+    // and `visibility` is the pre-ADR-0089 page spelling — an author bringing
+    // either down into this props bag is reaching for exactly what `visible`
+    // delivers here (same evaluation scope), not making a typo.
+    visibleWhen: 'visible',
+    visibility: 'visible',
+  },
+}, {
+  severity: z.enum(['info', 'warning', 'error', 'success']).optional().describe('Banner severity — styling, default icon, and the a11y role (`error` renders `role="alert"`/assertive; the rest `role="status"`/polite). Renderer default: `info`.'),
+  title: I18nLabelSchema.optional().describe('Banner title — a string or an inline locale map ({ en, "zh-CN", … }), resolved to the current language at render (pickLocalized).'),
+  body: I18nLabelSchema.optional().describe('Banner body — a string or an inline locale map, resolved like `title`.'),
+  visible: z.union([z.boolean(), ExpressionInputSchema]).optional().describe('Visibility predicate evaluated against the record page scope (`record`, `user` + `ctx.*` mirror, `objectName`, `features`) — a boolean literal, a CEL string, or a `{ dialect, source }` envelope. Omit for always-visible; the banner is hidden while the record is still loading either way.'),
+  icon: z.string().optional().describe('Lucide icon name (renderer default: the severity\'s own icon). Read on this component — contrast the rail\'s refused `icon`, which no render path reads.'),
+  action: RecordAlertActionSchema.optional().describe('Optional call-to-action button rendered under the body — `{ actionName, label?, variant? }`, resolved from the object\'s declared actions.'),
+  dismissible: z.boolean().optional().describe('Render an X control; dismissal is remembered per object/record in localStorage (renderer default: off).'),
+  dismissKey: z.string().optional().describe('Stable key the dismissal is remembered under, so reworded titles do not resurrect a dismissed banner (renderer default: the English resolution of `title`, else the severity).'),
+});
+export type RecordAlertProps = z.input<typeof RecordAlertProps>;
+
+/**
+ * `record:quick_actions` — #8744. See the family header above. The bar
+ * renders actions DECLARED ON THE OBJECT, referenced by name; the engine
+ * location-filters even explicitly named actions (`showcase_task_detail` and
+ * the platform's `sys_user` page are the live specimens).
+ */
+export const RecordQuickActionsProps = strictObject({
+  surface: 'this `record:quick_actions`',
+  history: PROPS_HISTORY,
+  guidanceSets: COMPONENT_LEVEL_GUIDANCE,
+  guidance: {
+    /**
+     * Read-but-not-authorable, in two forms: as a string list the renderer
+     * treats `actions` identically to `actionNames` (the spelling comes from
+     * `record:related_list`, where `actions` IS the declared key); as inline
+     * `ActionDef` objects it is the HOST channel — the default-page
+     * synthesizer hands RESOLVED defs to the same read at runtime
+     * (`buildDefaultActions`). Declaring the inline form would bless pages
+     * that carry their own action definitions, bypassing the object's
+     * `actions[]` — the single place the engine, the permissions gate and the
+     * translation bundles resolve an action from.
+     */
+    actions: 'Write `actionNames` — this bar renders actions declared on the OBJECT, referenced '
+      + 'by name (the `actions` spelling belongs to `record:related_list`). Inline action '
+      + 'definitions are the host synthesizer\'s runtime channel, not authorable surface: an '
+      + 'action a page defines for itself bypasses the object\'s declared `actions[]`, where '
+      + 'the engine, permissions and translations resolve from.',
+    /**
+     * The #8691 `icon` class, on this card: the renderer reads `aria.label`
+     * (`record-quick-actions.tsx`, the toolbar's `aria-label` fallback chain)
+     * — but `label` is the one spelling the shared `AriaPropsSchema` refuses
+     * (it is that shape's alias FOR `ariaLabel`), while the `ariaLabel` the
+     * schema would accept is read by nothing on this renderer. Declaring
+     * `aria: AriaPropsSchema` here would mint a declared-but-unenforced key on
+     * the very card that abolishes them; declaring a bespoke `{ label }` shape
+     * would contradict the platform-wide ARIA contract. Producer-side defect,
+     * objectui's to fix (objectui#4663); the row declares `aria` the day the
+     * renderer reads the contract spelling.
+     */
+    aria: 'Not declared on this component: the renderer reads `aria.label`, a spelling the '
+      + 'shared ARIA shape refuses (`label` is its alias for `ariaLabel`), and reads nothing '
+      + 'else of the bag — declaring either spelling would be declared-but-unenforced surface. '
+      + 'The toolbar falls back to its built-in "Quick actions" label; the renderer-side fix is '
+      + 'objectui\'s, and this row declares `aria` when the two agree.',
+  },
+}, {
+  actionNames: z.array(z.string()).optional().describe('Names of actions declared on this object (`actions[]`), in display order. The engine still location-filters named actions. Measured: when omitted (and the host supplies nothing) the bar resolves NO actions and renders its empty placeholder — it does not fall back to "every action at this location", whatever the registration\'s input list claims.'),
+  requiredPermissions: z.array(z.string()).optional().describe('Hide the whole bar unless the current user holds every named permission on this object.'),
+  location: ActionLocationSchema.optional().describe('Which declared action location this bar renders (renderer default: `record_header`).'),
+  align: z.enum(['start', 'center', 'end']).optional().describe('Horizontal alignment of the button row (renderer default: `end`).'),
+  inline: z.boolean().optional().describe('Render in the flow instead of pulling up into the record-header band. The page header sets this itself when it hosts the bar in its own action slot.'),
+  variant: z.enum(['default', 'destructive', 'outline', 'secondary', 'ghost', 'link']).optional().describe('Button variant for every action — the Button primitive\'s own vocabulary; a per-action `variant` on the resolved def wins (renderer default: `default`).'),
+  size: z.enum(['default', 'sm', 'lg', 'icon']).optional().describe('Button size for every action — the Button primitive\'s own vocabulary; a per-action `size` wins (renderer default: `sm`).'),
+});
+export type RecordQuickActionsProps = z.input<typeof RecordQuickActionsProps>;
+
+/**
+ * `record:history` — #8744. See the family header above. Drop-anywhere audit
+ * timeline: with no host-supplied rows the renderer SELF-FETCHES the record's
+ * own `sys_activity` entries, which is why the authorable surface is three
+ * presentation keys and the data channel is guidance, not declaration.
+ *
+ * `emptyText` / `unknownUserText` are literal strings, NOT `I18nLabelSchema` —
+ * the rail's `title` verdict, re-measured here: `HistoryTimeline` renders both
+ * as raw React children / bare string fallbacks, so an inline locale map would
+ * paint `[object Object]` (or never match). Declaring the map spelling would
+ * advertise a translation capability the renderer does not deliver.
+ */
+export const RecordHistoryProps = strictObject({
+  surface: 'this `record:history`',
+  history: PROPS_HISTORY,
+  guidanceSets: COMPONENT_LEVEL_GUIDANCE,
+  guidance: {
+    entries: '`entries` is the HOST\'s data channel, not authorable surface: RecordDetailView\'s '
+      + 'synthesizer passes the rows it fetched through it at runtime '
+      + '(`buildDefaultPageSchema({ history })`). Hand-authored rows would ship a static, fake '
+      + 'audit trail that never updates. Omit it — with no host entries the block self-fetches '
+      + 'the record\'s own `sys_activity` history.',
+    loading: '`loading` is the host synthesizer\'s fetch state, not authorable surface: authored '
+      + '`true` pins the skeleton on forever. Omit it with `entries` — the self-fetch manages '
+      + 'its own loading state.',
+  },
+}, {
+  limit: z.number().int().positive().optional().describe('Maximum history entries displayed, and the `$top` of the self-fetch query (renderer default: 50).'),
+  emptyText: z.string().optional().describe('Copy shown when the record has no history. Literal string rendered as-is in EVERY locale (no inline locale map — the timeline renders it as a raw React child; renderer default: "No history yet").'),
+  unknownUserText: z.string().optional().describe('Copy substituted when an entry has no resolvable actor. Literal string, every locale (renderer default: "Unknown user").'),
+});
+export type RecordHistoryProps = z.input<typeof RecordHistoryProps>;
+
 export const PageAccordionProps = strictObject({
   surface: 'this `page:accordion`',
   history: PROPS_HISTORY,
@@ -1948,6 +2152,20 @@ export const ComponentPropsMap = {
   'record:highlights': RecordHighlightsProps,
   'record:activity': RecordActivityProps,
   'record:chatter': RecordChatterProps,
+  // #8744 — `record:discussion` is the same renderer under the
+  // registration-preferred name (one `RecordChatterRenderer`, one shared
+  // `CHATTER_INPUTS` list, registered under both; the default-page synthesizer
+  // emits `record:discussion`, and `RecordDetailView` treats the pair as
+  // duplicates). Deliberately the SAME schema object, not a copy: two rows
+  // would give one renderer two accept faces to drift apart. Until this row a
+  // `record:discussion` node was the fifth silent-no-op surface — its props
+  // bag was skipped as unregistered while `record:chatter` beside it was
+  // judged. ⚠️ The shared row itself has a measured value-level divergence
+  // from the renderer (`position` vocabulary, `collapsible` default) — #8762,
+  // deliberately not fixed here: the pair measurement is #8744's scope, the
+  // repair is its own accept-face change, and landing it once on this shared
+  // const fixes both names.
+  'record:discussion': RecordChatterProps,
   'record:path': RecordPathProps,
   // #8691 — the rail had a renderer, a `PageComponentType` entry and a palette
   // slot, but no row here, so an entry `filter` shipped as a silent no-op while
@@ -1956,6 +2174,18 @@ export const ComponentPropsMap = {
   // schema's own header for the two places that measurement diverges from the
   // renderer's TS interface (`icon`, `title`).
   'record:reference_rail': RecordReferenceRailProps,
+  // #8744 — the same mechanism as #8691 one row up, for the three types that
+  // fix left behind: registered renderers, `PageComponentType` entries,
+  // palette slots, no rows — so the #5068 gate's dispatch skipped all three
+  // and every authored key rode through in silence. Key sets measured from
+  // the renderers' read points at the `.objectui-sha` pin; see the schemas'
+  // own headers for where the measurement diverges from the registrations'
+  // declared-input claims (`aria` and the empty-bar fallback on
+  // quick_actions; the host-channel `entries`/`loading` on history; the
+  // read-and-declared `icon` on alert, the rail's opposite).
+  'record:alert': RecordAlertProps,
+  'record:quick_actions': RecordQuickActionsProps,
+  'record:history': RecordHistoryProps,
 
   // Navigation
   'app:launcher': emptyProps('app:launcher'),

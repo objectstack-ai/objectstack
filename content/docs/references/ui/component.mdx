@@ -14,8 +14,8 @@ Empty Properties Schema
 ## TypeScript Usage
 
 ```typescript
-import { AIChatWindowProps, ElementButtonPropsSchema, ElementFilterPropsSchema, ElementFormPropsSchema, ElementImagePropsSchema, ElementMetadataViewerPropsSchema, ElementNumberPropsSchema, ElementRecordPickerPropsSchema, ElementTextInputPropsSchema, ElementTextPropsSchema, ObjectCalendarPropsSchema, ObjectFormPropsSchema, ObjectGridPropsSchema, ObjectKanbanPropsSchema, ObjectMasterDetailFormPropsSchema, ObjectMetricPropsSchema, PageAccordionProps, PageCardProps, PageContainerProps, PageHeaderProps, PageTabsProps, RecordActivityProps, RecordChatterProps, RecordDetailsProps, RecordHighlightsField, RecordHighlightsProps, RecordPathProps, RecordReferenceRailProps, RecordRelatedListProps, ReferenceRailEntrySchema } from '@objectstack/spec/ui';
-import type { ElementNumberProps, ElementRecordPickerProps, ObjectCalendarProps, ObjectFormProps, ObjectGridProps, ObjectKanbanProps, ObjectMasterDetailFormProps, ObjectMetricProps, PageContainerProps, RecordHighlightsField, RecordPathProps, RecordReferenceRailProps, ReferenceRailEntry } from '@objectstack/spec/ui';
+import { AIChatWindowProps, ElementButtonPropsSchema, ElementFilterPropsSchema, ElementFormPropsSchema, ElementImagePropsSchema, ElementMetadataViewerPropsSchema, ElementNumberPropsSchema, ElementRecordPickerPropsSchema, ElementTextInputPropsSchema, ElementTextPropsSchema, ObjectCalendarPropsSchema, ObjectFormPropsSchema, ObjectGridPropsSchema, ObjectKanbanPropsSchema, ObjectMasterDetailFormPropsSchema, ObjectMetricPropsSchema, PageAccordionProps, PageCardProps, PageContainerProps, PageHeaderProps, PageTabsProps, RecordActivityProps, RecordAlertActionSchema, RecordAlertProps, RecordChatterProps, RecordDetailsProps, RecordHighlightsField, RecordHighlightsProps, RecordHistoryProps, RecordPathProps, RecordQuickActionsProps, RecordReferenceRailProps, RecordRelatedListProps, ReferenceRailEntrySchema } from '@objectstack/spec/ui';
+import type { ElementNumberProps, ElementRecordPickerProps, ObjectCalendarProps, ObjectFormProps, ObjectGridProps, ObjectKanbanProps, ObjectMasterDetailFormProps, ObjectMetricProps, PageContainerProps, RecordAlertAction, RecordAlertProps, RecordHighlightsField, RecordHistoryProps, RecordPathProps, RecordQuickActionsProps, RecordReferenceRailProps, ReferenceRailEntry } from '@objectstack/spec/ui';
 
 // Validate data
 const result = AIChatWindowProps.parse(data);
@@ -484,6 +484,37 @@ const result = AIChatWindowProps.parse(data);
 
 ---
 
+## RecordAlertAction
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **actionName** | `string` | ✅ | Name of an action declared on this object (`actions[]`) — resolved from object metadata and run through the shared action engine, so confirm/param dialogs, toast and reload behave exactly as in `record:quick_actions`. |
+| **label** | `string \| Record<string, string>` | optional | CTA button label — a string or an inline locale map, resolved with the same pickLocalized chain as `title`/`body` (default: the action's own label). |
+| **variant** | `Enum<'default' \| 'destructive' \| 'outline' \| 'secondary' \| 'ghost' \| 'link'>` | optional | Button variant — the Button primitive's own vocabulary (renderer default: `destructive` when severity is `error`, else `default`). |
+
+
+---
+
+## RecordAlertProps
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **severity** | `Enum<'info' \| 'warning' \| 'error' \| 'success'>` | optional | Banner severity — styling, default icon, and the a11y role (`error` renders `role="alert"`/assertive; the rest `role="status"`/polite). Renderer default: `info`. |
+| **title** | `string \| Record<string, string>` | optional | Banner title — a string or an inline locale map (`{ en, "zh-CN", … }`), resolved to the current language at render (pickLocalized). |
+| **body** | `string \| Record<string, string>` | optional | Banner body — a string or an inline locale map, resolved like `title`. |
+| **visible** | `boolean \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Visibility predicate evaluated against the record page scope (`record`, `user` + `ctx.*` mirror, `objectName`, `features`) — a boolean literal, a CEL string, or a `{ dialect, source }` envelope. Omit for always-visible; the banner is hidden while the record is still loading either way. |
+| **icon** | `string` | optional | Lucide icon name (renderer default: the severity's own icon). Read on this component — contrast the rail's refused `icon`, which no render path reads. |
+| **action** | `{ actionName: string; label?: string \| Record<string, string>; variant?: Enum<'default' \| 'destructive' \| 'outline' \| 'secondary' \| 'ghost' \| 'link'> }` | optional | Optional call-to-action button rendered under the body — `{ actionName, label?, variant? }`, resolved from the object's declared actions. |
+| **dismissible** | `boolean` | optional | Render an X control; dismissal is remembered per object/record in localStorage (renderer default: off). |
+| **dismissKey** | `string` | optional | Stable key the dismissal is remembered under, so reworded titles do not resurrect a dismissed banner (renderer default: the English resolution of `title`, else the severity). |
+
+
+---
+
 ## RecordChatterProps
 
 ### Properties
@@ -562,6 +593,19 @@ Type: `string`
 
 ---
 
+## RecordHistoryProps
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **limit** | `integer` | optional | Maximum history entries displayed, and the `$top` of the self-fetch query (renderer default: 50). |
+| **emptyText** | `string` | optional | Copy shown when the record has no history. Literal string rendered as-is in EVERY locale (no inline locale map — the timeline renders it as a raw React child; renderer default: "No history yet"). |
+| **unknownUserText** | `string` | optional | Copy substituted when an entry has no resolvable actor. Literal string, every locale (renderer default: "Unknown user"). |
+
+
+---
+
 ## RecordPathProps
 
 ### Properties
@@ -571,6 +615,23 @@ Type: `string`
 | **statusField** | `string` | ✅ | Field name representing the current status/stage |
 | **stages** | `{ value: string; label: string \| Record<string, string>; terminal?: Enum<'won' \| 'lost'> }[]` | optional | Explicit stage definitions (if not using field metadata) |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
+
+
+---
+
+## RecordQuickActionsProps
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **actionNames** | `string[]` | optional | Names of actions declared on this object (`actions[]`), in display order. The engine still location-filters named actions. Measured: when omitted (and the host supplies nothing) the bar resolves NO actions and renders its empty placeholder — it does not fall back to "every action at this location", whatever the registration's input list claims. |
+| **requiredPermissions** | `string[]` | optional | Hide the whole bar unless the current user holds every named permission on this object. |
+| **location** | `Enum<'list_toolbar' \| 'list_item' \| 'record_header' \| 'record_more' \| 'record_related' \| 'record_section'>` | optional | Which declared action location this bar renders (renderer default: `record_header`). |
+| **align** | `Enum<'start' \| 'center' \| 'end'>` | optional | Horizontal alignment of the button row (renderer default: `end`). |
+| **inline** | `boolean` | optional | Render in the flow instead of pulling up into the record-header band. The page header sets this itself when it hosts the bar in its own action slot. |
+| **variant** | `Enum<'default' \| 'destructive' \| 'outline' \| 'secondary' \| 'ghost' \| 'link'>` | optional | Button variant for every action — the Button primitive's own vocabulary; a per-action `variant` on the resolved def wins (renderer default: `default`). |
+| **size** | `Enum<'default' \| 'sm' \| 'lg' \| 'icon'>` | optional | Button size for every action — the Button primitive's own vocabulary; a per-action `size` wins (renderer default: `sm`). |
 
 
 ---
