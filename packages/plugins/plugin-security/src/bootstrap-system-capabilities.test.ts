@@ -708,3 +708,230 @@ describe('[#8536] the derived skip is counted and warned when it leaves the buck
     expect(platformRowFor(ql, NAME)).toMatchObject({ managed_by: 'platform' });
   });
 });
+
+// ───────────────────────────────────────────────────────────────────────────
+// [#8751] The DERIVED half owns its row by the SAME conjunction as the curated
+// half — `managed_by:'platform'` AND `organization_id: null`.
+//
+// #5876 chose `managed_by:'platform'` as the test for "this is our own
+// placeholder, so we may refresh it", and it was sufficient while `name` was
+// unique installation-wide. #8461 (ADR-0120 D1) made `name` unique per
+// ORGANIZATION, at which point a platform-STAMPED row can sit inside an
+// organization's bucket — the shape the file header names ("from seed data or a
+// legacy import") and the shape #8470 refused to let `managed_by` alone stand
+// for on the curated side, in as many words: it "would not carry that
+// guarantee".
+//
+// ## What each direction is for
+//
+// The suite has to fail in BOTH directions, because the two easy wrong fixes
+// fail in opposite ones:
+//
+//   - Delete the guard (or loosen it) ⇒ the organization's copy is rewritten
+//     with `humanize(name)`. Pinned by the OVERWRITE assertions.
+//   - Make the guard always decline (or scope the derived LOOKUP the way the
+//     curated one is scoped) ⇒ the derived half stops refreshing its OWN
+//     placeholder and #8536's whole skip branch goes unreachable. Pinned by the
+//     POSITIVE CONTROLS.
+//
+// ## The ordering pair, and why it is the anti-vacuity argument
+//
+// `makeQl` models #4363's `ORDER BY id` tie-breaker, so which of two same-named
+// rows the cross-organization lookup returns is decided by `id`. `aaa_org_…`
+// sorts before every seeder-minted `cap_…` and `zzz_org_…` after it. Where both
+// rows exist the organization's copy must survive under BOTH orderings — under
+// `aaa_` because the guard declines it, under `zzz_` because it is never the row
+// selected. Before this change the `aaa_` leg overwrote it and the `zzz_` leg did
+// not, so the pair separates "the guard works" from "the fixture got lucky".
+//
+// ## What this does NOT fix, asserted so nobody reads it as a win
+//
+// The platform bucket is STILL not seeded when an organization's row satisfies
+// the lookup. That is #8552's ruled posture (no adoption, no backfill), shipped
+// for the admin-authored case in #8536 and unchanged here; what changes is that
+// the state stops being invisible. `platformRowFor(...)` is therefore asserted
+// ABSENT on purpose — a future "fix" that starts backfilling the bucket must
+// fail this suite, not pass it.
+// ───────────────────────────────────────────────────────────────────────────
+describe('[#8751] a platform-STAMPED row inside an organization is not the platform\'s own row', () => {
+  const GRANTS = [{ systemPermissions: ['showcase.export_data'] }];
+  const NAME = 'showcase.export_data';
+  const ORG = 'org_jia_9f2';
+  /** Distinctive on purpose: `humanize(NAME)` is "Showcase Export Data". */
+  const AUTHORED = { label: 'Stale Org Label', description: 'Authored inside the organization.' };
+
+  /** The row the card is about: platform provenance, organization bucket. */
+  const stampedOrgRow = (id = 'aaa_org_derived') => ({
+    id,
+    organization_id: ORG,
+    name: NAME,
+    ...AUTHORED,
+    scope: 'org',
+    managed_by: 'platform',
+    active: true,
+  });
+
+  const platformRowFor = (ql: ReturnType<typeof makeQl>, name: string) =>
+    ql.rows.find((r) => r.name === name && r.organization_id == null);
+
+  // ── Direction 1: the overwrite. #5876's guarantee, restored ──
+  it("leaves the organization's copy exactly as its author wrote it", async () => {
+    const ql = makeQl();
+    ql.rows.push(stampedOrgRow());
+    await bootstrapSystemCapabilities(ql, GRANTS);
+
+    expect(ql.rows.find((r) => r.id === 'aaa_org_derived')).toEqual(stampedOrgRow());
+    // Stated positively too: the generated placeholder never reached the row.
+    expect(ql.rows.find((r) => r.id === 'aaa_org_derived')!.label).not.toBe('Showcase Export Data');
+  });
+
+  // ── Direction 2: the silence. Every counter read 0 and nothing was logged ──
+  it('counts the misplaced stamp, and reports the bucket it leaves unseeded', async () => {
+    const ql = makeQl();
+    ql.rows.push(stampedOrgRow());
+    const warn = vi.fn();
+    const info = vi.fn();
+    const out = await bootstrapSystemCapabilities(ql, GRANTS, { logger: { warn, info } });
+
+    expect(out.platformStampedInOrg).toBe(1);
+    // #8536's counters are NOT re-scoped: the newly-declined row is an ordinary
+    // skip that leaves the bucket empty, which is exactly what they mean.
+    expect(out.skippedAuthored).toBe(1);
+    expect(out.unseededDerived).toBe(1);
+    // …and the SUBSET invariant #8536 documented still holds.
+    expect(out.unseededDerived).toBeLessThanOrEqual(out.skippedAuthored);
+    expect(out.platformStampedInOrg).toBeLessThanOrEqual(out.skippedAuthored);
+
+    // The boot summary is the other half of "invisible": the card's measured run
+    // had every counter reading zero there too.
+    expect(info).toHaveBeenCalledTimes(1);
+    expect(info.mock.calls[0][1]).toMatchObject({ platformStampedInOrg: 1, unseededDerived: 1 });
+  });
+
+  // ── NOT fixed, and pinned as not fixed (#8552: no adoption, no backfill) ──
+  it('does NOT backfill the platform bucket — the empty bucket is the ruled posture', async () => {
+    const ql = makeQl();
+    ql.rows.push(stampedOrgRow());
+    const out = await bootstrapSystemCapabilities(ql, GRANTS);
+
+    expect(platformRowFor(ql, NAME)).toBeUndefined();
+    // The curated names still land; only the derived one is left underived.
+    expect(out.seeded).toBe(KNOWN_CAPABILITIES.length);
+  });
+
+  it('names the stamp, the organization, and the source — not the org-extension line', async () => {
+    const ql = makeQl();
+    ql.rows.push(stampedOrgRow());
+    const warn = vi.fn();
+    await bootstrapSystemCapabilities(ql, GRANTS, { logger: { warn } });
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    const [message, meta] = warn.mock.calls[0];
+    expect(message).toContain(NAME);
+    expect(message).toContain("managed_by='platform'");
+    expect(message).toContain(ORG); // the real organization, not a placeholder
+    expect(message).toContain('NO row holds the name in that bucket at all');
+    expect(message).toContain("wears the platform's OWN provenance stamp");
+    expect(message).toContain('Fix it AT ITS SOURCE');
+    // The admin-row remediation must NOT print: this row is not "a supported
+    // extension", and it is the one row Setup cannot touch at all.
+    expect(message).not.toContain('supported extension');
+    expect(message).not.toContain('there is nothing for an operator to remove');
+    // Nor the blocked-platform-bucket line — that bucket is free.
+    expect(message).not.toContain('To resolve by hand');
+    expect(meta).toEqual({
+      name: NAME,
+      blockingRowId: 'aaa_org_derived',
+      blockingManagedBy: 'platform',
+      blockingOrganizationId: ORG,
+      platformRowId: undefined,
+    });
+  });
+
+  // ── POSITIVE CONTROL 1: the guard must not over-decline ──
+  // The derived half's whole job is to refresh its OWN placeholder. A "fix" that
+  // declined everything, or that scoped the derived LOOKUP the way the curated
+  // one is scoped, passes every pin above and fails here.
+  it('POSITIVE CONTROL: still refreshes its own placeholder in the platform bucket', async () => {
+    const ql = makeQl();
+    await bootstrapSystemCapabilities(ql, GRANTS); // boot 1 derives it
+    const own = platformRowFor(ql, NAME)!;
+    expect(own).toMatchObject({ managed_by: 'platform' });
+    own.label = 'stale placeholder';
+    own.description = 'stale placeholder';
+
+    const warn = vi.fn();
+    const out = await bootstrapSystemCapabilities(ql, GRANTS, { logger: { warn } });
+
+    expect(own.label).toBe('Showcase Export Data');
+    expect(own.description).toBe(`Capability ${NAME}.`);
+    expect(out.skippedAuthored).toBe(0);
+    expect(out.platformStampedInOrg).toBe(0);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  // ── POSITIVE CONTROL 2: the counter is not a synonym for "skipped" ──
+  it('OPPOSITE-DIRECTION CONTROL: an ADMIN-authored org row moves the #8536 counters only', async () => {
+    const ql = makeQl();
+    ql.rows.push({ ...stampedOrgRow(), managed_by: 'admin' });
+    const warn = vi.fn();
+    const out = await bootstrapSystemCapabilities(ql, GRANTS, { logger: { warn } });
+
+    expect(out.skippedAuthored).toBe(1);
+    expect(out.unseededDerived).toBe(1);
+    expect(out.platformStampedInOrg).toBe(0); // the stamp is what this counts
+    // …and #8536's own remediation still prints for the row it was written for.
+    expect(warn.mock.calls[0][0]).toContain('supported extension');
+    expect(warn.mock.calls[0][0]).not.toContain("wears the platform's OWN provenance stamp");
+  });
+
+  // ── The ordering pair: the organization's copy survives either tie-break ──
+  //
+  // Both rows exist here, so `id` really does decide which one the
+  // cross-organization lookup returns. Before this change the two legs diverged
+  // (the `aaa_` leg overwrote the organization's copy); now they agree, because
+  // the outcome never depended on the ordering in the first place.
+  it.each([
+    ['adverse — the org row sorts FIRST, so the lookup returns it', 'aaa_org_derived', 1],
+    ['benign  — the org row sorts LAST, so the lookup never sees it', 'zzz_org_derived', 0],
+  ])('the organization copy survives (%s)', async (_label, orgId, expectedStamped) => {
+    const ql = makeQl();
+    await bootstrapSystemCapabilities(ql, GRANTS); // the platform's placeholder exists
+    ql.rows.push(stampedOrgRow(orgId));
+
+    const warn = vi.fn();
+    const out = await bootstrapSystemCapabilities(ql, GRANTS, { logger: { warn } });
+
+    // Identical in both legs: the authored copy is untouched.
+    expect(ql.rows.find((r) => r.id === orgId)).toEqual(stampedOrgRow(orgId));
+    // Nothing is MISSING in either leg — the placeholder is in its bucket — so
+    // this stays summary-only (#4632) and warns nothing, exactly as #8536 ruled
+    // for the admin-authored equivalent.
+    expect(out.unseededDerived).toBe(0);
+    expect(warn).not.toHaveBeenCalled();
+    // What differs is only which row the lookup had to judge.
+    expect(out.platformStampedInOrg).toBe(expectedStamped);
+    expect(out.skippedAuthored).toBe(expectedStamped);
+    expect(platformRowFor(ql, NAME)).toMatchObject({ managed_by: 'platform' });
+  });
+
+  // ── The absent-column case the `== null` in the guard is written for ──
+  // A projection that does not return `organization_id` leaves ownership
+  // undecidable; the historical answer ("ours") is kept, so a missing column can
+  // never manufacture a skip.
+  it('treats an ABSENT organization_id as the platform bucket, not as an organization', async () => {
+    const ql = makeQl();
+    const { organization_id: _omitted, ...noOrgColumn } = stampedOrgRow('cap_no_org_column');
+    ql.rows.push(noOrgColumn);
+    const warn = vi.fn();
+    const out = await bootstrapSystemCapabilities(ql, GRANTS, { logger: { warn } });
+
+    expect(out.platformStampedInOrg).toBe(0);
+    expect(out.skippedAuthored).toBe(0);
+    // It is treated as the platform's own placeholder — so it is REFRESHED.
+    expect(ql.rows.find((r) => r.id === 'cap_no_org_column')).toMatchObject({
+      label: 'Showcase Export Data', description: `Capability ${NAME}.`,
+    });
+    expect(warn).not.toHaveBeenCalled();
+  });
+});

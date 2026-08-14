@@ -76,6 +76,55 @@
  * The DERIVED half's lookup is deliberately UNCHANGED (its own guard, #5876,
  * already refuses to touch a row it does not own).
  *
+ * [#8751] …and that guard now spells "a row it does not own" with the SAME
+ * conjunction. The lookup stays cross-organization; the OWNERSHIP TEST is what
+ * changes, from `managed_by === 'platform'` to
+ * `managed_by === 'platform' AND organization_id == null`.
+ *
+ * The paragraph four blocks up already stated why, for the curated half:
+ * `managed_by` alone "would not carry that guarantee (a platform-marked row
+ * sitting inside an organization — from seed data or a legacy import — would
+ * restore the two-candidate state)". The derived half kept the single-condition
+ * test, so post-#8461 it ADMITTED exactly that row: the guard passed, and the
+ * update below rewrote an organization's `label`/`description` with
+ * `humanize(name)` — the precise harm #5876 exists to prevent — while the
+ * platform bucket was never written. No counter moved and nothing was logged,
+ * because both #5876's counter and #8536's live on the branch where the guard
+ * DECLINES.
+ *
+ * This restores a declared invariant; it does not widen an accept set. What the
+ * derived half may refresh is narrowed to the rows it provably owns, and the
+ * newly-declined row flows through the #8536 skip branch unchanged — counted in
+ * `skippedAuthored`, its bucket read once, warned only where the platform's own
+ * placeholder is genuinely absent. The misplaced stamp gets its OWN signal
+ * ({@link CapabilitySeedResult.platformStampedInOrg}) rather than being folded
+ * into `unseededDerived`: "the platform's definition is missing" and "a row is
+ * wearing the platform's stamp where the platform never writes" are different
+ * facts, and #8536's counter is left meaning exactly what it was defined to
+ * mean.
+ *
+ * REACHABILITY, measured (the filing declined to guess, and this is the answer).
+ * The platform's own artifacts do NOT produce such a row: both capability
+ * seeders run under `SYSTEM_CTX` with no `tenantId` and never write
+ * `organization_id`; `normalizeManagedByVocab` does not touch this object; and
+ * the admin door refuses the stamp outright — `assertSystemRowWriteGate` (a)
+ * rejects any payload CLAIMING platform/package provenance on `sys_capability`.
+ * No `sys_capability` seed dataset exists anywhere in this repository.
+ *
+ * The ROUTE, however, is live and needs no unsupported step. `SeedLoaderService`
+ * writes as `isSystem` precisely "so seeds can target system tables like
+ * `sys_*`", which short-circuits the write gate above; `defineSeed(SysCapability,
+ * …)` type-checks `managed_by: 'platform'` because the column is a plain
+ * authorable select; and on the per-organization replay the loader's tenant stamp
+ * is `config.organizationId ?? (/^(sys_|cloud_|ai_)/.test(objectName) ? undefined
+ * : fallbackOrgId)` — the pinned organization SHORT-CIRCUITS the `sys_` exemption,
+ * so a replayed `sys_capability` seed lands stamped with that organization's id.
+ * So: an app that seeds a capability with platform provenance produces this row
+ * on every new organization of a multi-tenant install. Dormant on a stock install,
+ * one ordinary authoring mistake away from live — and the mistake is invisible,
+ * since the resulting row is also one ADR-0066 asset ownership forbids the
+ * organization's own admin from editing or deleting through Setup.
+ *
  * [#8536] The DERIVED half's skip is REPORTED. The guard stays exactly as #5876
  * wrote it — it keeps declining, and #8552 settled the posture on an occupied
  * platform bucket: keep declining, LOUDLY, with no adoption and no backfill.
@@ -165,12 +214,19 @@ export interface CapabilitySeedResult {
   /** Rows whose platform display fields were reconciled. */
   updated: number;
   /**
-   * [#5876] Derived names whose existing row is authored elsewhere
-   * (`managed_by` anything but `'platform'`), so its `label`/`description` were
-   * left as their author wrote them. Not a degradation where the platform's own
-   * placeholder exists — the capability resolves and the authored copy is the
-   * better one — so THAT case is reported in the boot summary rather than
-   * warned about (#4632).
+   * [#5876] Derived names whose existing row is NOT the platform's own, so its
+   * `label`/`description` were left as their author wrote them. Not a
+   * degradation where the platform's own placeholder exists — the capability
+   * resolves and the authored copy is the better one — so THAT case is reported
+   * in the boot summary rather than warned about (#4632).
+   *
+   * [#8751] "The platform's own" is the #8470 conjunction — `managed_by:
+   * 'platform'` AND `organization_id: null`. This doc used to read "`managed_by`
+   * anything but `'platform'`", which is what the guard actually tested; the
+   * text is corrected in step with the guard, not repurposed. The concept is
+   * untouched (a row this pass does not own was left alone); what changed is
+   * that a platform-STAMPED row inside an organization now falls inside it,
+   * instead of being silently reconciled as though the platform had written it.
    *
    * [#8536] Counts EVERY such skip, unchanged. The subset where the skip also
    * leaves the platform bucket without a platform-owned row is the degradation
@@ -192,6 +248,28 @@ export interface CapabilitySeedResult {
    * them separable. Both are reported; neither is inferred from the other.
    */
   unseededDerived: number;
+  /**
+   * [#8751] The subset of {@link CapabilitySeedResult.skippedAuthored} whose
+   * skipped row carries the platform's OWN provenance stamp
+   * (`managed_by: 'platform'`) while sitting INSIDE an organization — the shape
+   * the header contemplates ("from seed data or a legacy import"), and the one
+   * the derived guard used to ADMIT and overwrite.
+   *
+   * Its own signal, deliberately, and NOT a re-scoping of
+   * {@link CapabilitySeedResult.unseededDerived}. The two answer different
+   * questions and neither implies the other: `unseededDerived` says the
+   * platform's definition is missing installation-wide; this says a row is
+   * wearing the platform's stamp somewhere no platform writer writes. They
+   * co-occur on the headline fixture, but this one is counted even when the
+   * platform bucket IS properly occupied and nothing is missing — a state that
+   * stays summary-only (#4632) and warns nothing, yet is still an anomaly worth
+   * seeing in the boot summary, because a platform-stamped row is one ADR-0066
+   * asset ownership refuses to let the organization's own admin edit or delete.
+   *
+   * Reported, never acted on: adoption and backfill were both rejected in
+   * #8552, and re-stamping somebody else's row is a data migration either way.
+   */
+  platformStampedInOrg: number;
   /**
    * [#8470] Curated definitions whose platform row is ABSENT and could not be
    * written, because a row this pass does not own already holds the name in the
@@ -217,7 +295,10 @@ export async function bootstrapSystemCapabilities(
   options: SeedOptions = {},
 ): Promise<CapabilitySeedResult> {
   if (!ql || typeof ql.find !== 'function' || typeof ql.insert !== 'function') {
-    return { seeded: 0, updated: 0, skippedAuthored: 0, unseededDerived: 0, blockedCurated: 0, total: 0 };
+    return {
+      seeded: 0, updated: 0, skippedAuthored: 0, unseededDerived: 0,
+      platformStampedInOrg: 0, blockedCurated: 0, total: 0,
+    };
   }
 
   const materialized = new Set<string>(options.materializedCapabilityNames ?? []);
@@ -245,6 +326,7 @@ export async function bootstrapSystemCapabilities(
   let updated = 0;
   let skippedAuthored = 0;
   let unseededDerived = 0;
+  let platformStampedInOrg = 0;
   let blockedCurated = 0;
   for (const def of byName.values()) {
     const isDerived = derivedNames.has(def.name);
@@ -279,8 +361,25 @@ export async function bootstrapSystemCapabilities(
       // the caller says which names another pass already materialized, and
       // this guard holds even when nothing said so — an admin row for a name
       // no package ever declared is invisible to that list.
-      if (isDerived && row.managed_by !== 'platform') {
+      // [#8751] "Ours" is the #8470 conjunction, applied to the row the
+      // cross-organization lookup returned. `managed_by` alone was the #5876
+      // test, and it was sufficient only while `name` was unique
+      // installation-wide; since #8461 it admits a platform-STAMPED row an
+      // organization holds, which this half would then rewrite with
+      // `humanize(name)` — the one thing #5876 exists to prevent.
+      //
+      // `== null` covers null AND absent, on purpose. A driver or projection
+      // that does not return `organization_id` at all leaves ownership
+      // undecidable, and the historical answer there is "this is our row" —
+      // which is also the only answer that cannot invent a skip out of a
+      // missing column.
+      const derivedRowIsOurs = row.managed_by === 'platform' && row.organization_id == null;
+      if (isDerived && !derivedRowIsOurs) {
         skippedAuthored += 1;
+        // Counted for the CLASS, before the bucket read below decides whether
+        // anything is missing: a misplaced stamp is an anomaly whether or not
+        // the platform's placeholder happens to exist elsewhere.
+        if (row.managed_by === 'platform') platformStampedInOrg += 1;
         // [#8536] Declining is the ruled behaviour (#5876, reaffirmed by #8552);
         // being SILENT about what the decline leaves behind is not. The lookup
         // above reads across organizations, so the row just skipped says nothing
@@ -330,6 +429,14 @@ export async function bootstrapSystemCapabilities(
         // to clear: what stands in the way is an organization's row, which
         // ADR-0066 D1 explicitly supports ("admins EXTEND the registry"), so
         // saying "rename it" would be advising the removal of a legitimate row.
+        //
+        // [#8751] …and a THIRD shape reaches this branch now that the guard
+        // spells ownership as the conjunction: a row wearing the platform's own
+        // stamp inside an organization. The organization-row sentence below must
+        // NOT print for it — "a supported extension (admins EXTEND the registry)"
+        // is true of `managed_by:'admin'` and false of this one, and "there is
+        // nothing for an operator to remove" would be the wrong advice about the
+        // one row here that nobody can remove through Setup at all.
         const remediation = platformRow !== undefined
           ? ' To resolve by hand: rename the row that holds the name in the platform bucket (or delete ' +
             'it) — through Setup for an admin-authored row, or by editing and re-publishing the owning ' +
@@ -337,9 +444,17 @@ export async function bootstrapSystemCapabilities(
             'placeholder.'
           : row.organization_id == null
             ? ''
-            : " The organization's row is a supported extension (ADR-0066 D1 — admins EXTEND the " +
-              'registry), so there is nothing for an operator to remove; the platform bucket is left empty ' +
-              'deliberately, and adopting or backfilling it was rejected in #8552.';
+            : row.managed_by === 'platform'
+              ? " That row wears the platform's OWN provenance stamp while sitting inside an organization — " +
+                'a shape no platform writer produces (both capability seeders write the NULL-organization ' +
+                'bucket and never set organization_id, and the admin door refuses to stamp a platform value ' +
+                'at all), so it most likely arrived as app seed data replayed per organization, or a legacy ' +
+                'import. Fix it AT ITS SOURCE: Setup cannot, because ADR-0066 asset ownership refuses every ' +
+                'admin-door edit and delete on a platform-stamped row. Note the platform bucket stays empty ' +
+                "either way — that is the #8552 posture for an occupied name, not a consequence of the stamp."
+              : " The organization's row is a supported extension (ADR-0066 D1 — admins EXTEND the " +
+                'registry), so there is nothing for an operator to remove; the platform bucket is left empty ' +
+                'deliberately, and adopting or backfilling it was rejected in #8552.';
         options.logger?.warn?.(
           `[security] derived capability "${def.name}" has no platform placeholder and none was seeded. ` +
             `The row this pass found for the name is ${provenance} ${locality}, and its label and ` +
@@ -439,7 +554,11 @@ export async function bootstrapSystemCapabilities(
     }
   }
   options.logger?.info?.('[security] system capabilities seeded into sys_capability (ADR-0066 D1)', {
-    seeded, updated, skippedAuthored, unseededDerived, blockedCurated, total: byName.size,
+    seeded, updated, skippedAuthored, unseededDerived, platformStampedInOrg, blockedCurated,
+    total: byName.size,
   });
-  return { seeded, updated, skippedAuthored, unseededDerived, blockedCurated, total: byName.size };
+  return {
+    seeded, updated, skippedAuthored, unseededDerived, platformStampedInOrg, blockedCurated,
+    total: byName.size,
+  };
 }
