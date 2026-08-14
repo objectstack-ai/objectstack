@@ -78,10 +78,19 @@ export type { ExplainEngineDeps, ExplainInput } from './explain-engine.js';
 export type { DelegatedAdminGateDeps } from './delegated-admin-gate.js';
 export {
   syncAudienceBindingSuggestions,
+  reconcileAudienceBindingSuggestions,
+  reapOrganizationLessSuggestions,
+  listSuggestionOrganizationIds,
   listAudienceBindingSuggestions,
   confirmAudienceBindingSuggestion,
   dismissAudienceBindingSuggestion,
   SuggestionNotFoundError,
   SuggestionStateError,
 } from './suggested-audience-bindings.js';
-export type { SuggestionDeps, SuggestionListFilter, SuggestionSyncOutcome } from './suggested-audience-bindings.js';
+export type {
+  SuggestionDeps,
+  SuggestionListFilter,
+  SuggestionSyncOutcome,
+  SuggestionReconcileOutcome,
+  SuggestionReconcileScope,
+} from './suggested-audience-bindings.js';

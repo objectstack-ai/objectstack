@@ -39,7 +39,7 @@ they live in one skill.
 ## When to Use This Skill
 
 - Creating a **new ObjectStack project** from scratch.
-- Choosing the right **project template** (blank, todo, compliance, content, contracts, procurement).
+- Scaffolding a **new project** with the bundled `blank` template.
 - Writing or modifying **`objectstack.config.ts`** (`defineStack()` config).
 - Selecting a **database driver** (Memory, SQL, MongoDB).
 - Integrating with a **web framework** (Hono via `@objectstack/hono` / `@objectstack/plugin-hono-server`).
@@ -49,37 +49,28 @@ they live in one skill.
 
 ---
 
-## Decision Tree: Choosing a Template
+## The Template
 
-```
-What are you building?
-│
-├── Starting from scratch / learning the platform?
-│   └── ✅ blank (default)
-│       • Bundled with create-objectstack — works offline
-│       • One example object, in-memory driver, Hono server
-│
-├── A small task app to study end-to-end patterns?
-│   └── ✅ todo
-│
-└── A domain starter with richer metadata?
-    └── ✅ compliance | content | contracts | procurement
-        • Fetched remotely from the objectstack-ai/templates repo
-```
+`blank` is the only template `create-objectstack` offers, and it is the default:
+
+- Bundled with `create-objectstack` — works offline, no network fetch
+- One example object, in-memory driver, Hono server
+- A clean slate to extend with the metadata this skill describes
+
+The five remote content templates (`todo`, `compliance`, `content`,
+`contracts`, `procurement`) are **retired** — delisted from the marketplace and
+no longer maintained. Do not recommend them; asking for one by name is refused.
+Build domain metadata on top of `blank` instead.
 
 ### Scaffolding Command
 
 ```bash
-# Interactive — prompts for name and template
+# Interactive — prompts for a name
 npx create-objectstack
 
-# Direct — skip prompts (blank is the default template)
-npx create-objectstack my-app --template todo
+# Direct — skip prompts (blank is the default, and the only, template)
+npx create-objectstack my-app
 ```
-
-Templates: `blank` (default, bundled) | `todo` | `compliance` | `content` |
-`contracts` | `procurement` (all except `blank` are fetched remotely from
-`objectstack-ai/templates`)
 
 ---
 

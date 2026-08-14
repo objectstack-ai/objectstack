@@ -318,10 +318,12 @@ export class SettingsServicePlugin implements Plugin {
         );
       },
       async delete(id) {
-        // [#8030] The rotated-away ciphertext. `sys_setting.value_enc` has
-        // already been repointed by the time this runs, so the row is
-        // unreferenced — see `SettingsService.reapRotatedSecret` for why
-        // leaving it is a security problem rather than untidiness.
+        // [#8030] The rotated-away ciphertext. By the time this runs the
+        // caller has re-read `sys_setting.value_enc` and CONFIRMED it no
+        // longer names this handle ([#8262] — it used to infer that), so the
+        // row is genuinely unreferenced — see `SettingsService.reapRotatedSecret`
+        // for why leaving it is a security problem rather than untidiness, and
+        // why the confirmation is not optional.
         //
         // System-elevated for the same reason the settings row update is:
         // `sys_secret` is a platform-owned table and this is the platform

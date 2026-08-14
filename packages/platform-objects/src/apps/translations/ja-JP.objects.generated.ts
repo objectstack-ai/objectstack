@@ -398,13 +398,16 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         help: "ユーザーテーブルへのリンク"
       },
       access_token: {
-        label: "アクセストークン"
+        label: "アクセストークン",
+        help: "Live OAuth access token issued by the provider — never returned on the data API (#7987); better-auth reads it back through the engine's privileged internal-field accessor"
       },
       refresh_token: {
-        label: "リフレッシュトークン"
+        label: "リフレッシュトークン",
+        help: "Live OAuth refresh token — long-lived and not revoked by revoking an ObjectStack session; never returned on the data API (#7987)"
       },
       id_token: {
-        label: "ID トークン"
+        label: "ID トークン",
+        help: "OIDC ID token issued by the provider — never returned on the data API (#7987)"
       },
       access_token_expires_at: {
         label: "アクセストークン有効期限"

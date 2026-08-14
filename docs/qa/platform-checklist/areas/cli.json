@@ -360,7 +360,7 @@
       "title": "The published first-run closes: create-objectstack scaffold → install → validate → build → boot → health, with the skills boundary holding",
       "since": "v15",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["new user (published-registry consumer)"],
@@ -416,7 +416,7 @@
         "an internal skill appearing in a scaffolded project is the exact leak the boundary step exists for — FAIL",
         "a template that builds only from the repo checkout but not from the registry is the #2908 class this whole item guards"
       ],
-      "variants": ["blank", "todo", "compliance", "content", "contracts", "procurement"],
+      "variants": ["blank"],
       "traps": ["stale-dist"],
       "automated": { "kind": "ci", "ref": ".github/workflows/scaffold-e2e.yml" },
       "source": [
@@ -424,7 +424,8 @@
         "packages/create-objectstack (the scaffolder under test)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "new item: the published first-run experience mirrored step-for-step from scaffold-e2e.yml, template matrix as variants, RC-window protocol refusal recorded as gate-working instead of failure", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-07", "change": "new item: the published first-run experience mirrored step-for-step from scaffold-e2e.yml, template matrix as variants, RC-window protocol refusal recorded as gate-working instead of failure", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-08-14", "change": "variants narrowed to [blank]: the five remote content templates were delisted from the marketplace and retired from the create-objectstack catalog, and the scaffold-e2e registry-canary matrix this item mirrors was trimmed with them", "ref": "claude/issue-8677-retire-remote-template-catalog" }
       ]
     },
     {

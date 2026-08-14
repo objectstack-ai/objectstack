@@ -252,7 +252,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        template: [blank, todo, compliance, content, contracts, procurement]
+        # `blank` is the whole catalog: the five remote content templates
+        # (todo, compliance, content, contracts, procurement) were delisted
+        # from the marketplace and retired from the scaffolder, so canarying
+        # them would gate the release on unmaintained content.
+        template: [blank]
     steps:
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -264,7 +268,9 @@ jobs:
           cd "$RUNNER_TEMP"
           npx -y create-objectstack@latest canary-app -t ${{ matrix.template }} --skip-skills
 
-      # Remote templates ship `build` (same gates) but not always `validate`.
+      # `build` is the gate every template must pass; `validate` is run only
+      # when the scaffolded project defines it (the now-retired remote
+      # templates did not always ship it).
       - name: Gate the generated project
         run: |
           cd "$RUNNER_TEMP/canary-app"

@@ -398,13 +398,16 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         help: "Link to user table"
       },
       access_token: {
-        label: "Access Token"
+        label: "Access Token",
+        help: "Live OAuth access token issued by the provider — never returned on the data API (#7987); better-auth reads it back through the engine's privileged internal-field accessor"
       },
       refresh_token: {
-        label: "Refresh Token"
+        label: "Refresh Token",
+        help: "Live OAuth refresh token — long-lived and not revoked by revoking an ObjectStack session; never returned on the data API (#7987)"
       },
       id_token: {
-        label: "ID Token"
+        label: "ID Token",
+        help: "OIDC ID token issued by the provider — never returned on the data API (#7987)"
       },
       access_token_expires_at: {
         label: "Access Token Expires At"

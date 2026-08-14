@@ -13,23 +13,19 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { syncObjectStackDeps } from './pkg-utils.js';
 import { copyDir, TEMPLATE_FILE_ALIASES } from './template-copy.js';
+import { TEMPLATES } from './template-registry.js';
 
 const pkgRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const repoRoot = path.resolve(pkgRoot, '..', '..');
 const ownPkg = JSON.parse(fs.readFileSync(path.join(pkgRoot, 'package.json'), 'utf8'));
 const ownMajor = Number(ownPkg.version.split('.')[0]);
 
-// The TEMPLATES registry, read from src/index.ts as text — importing the
-// module would run the CLI (it calls program.parse() on import). Parse only
-// the lines between the TEMPLATES declaration and its closing brace.
+// The catalog is imported, not text-parsed: it lives in template-registry.ts
+// precisely so tests can read it directly (importing index.ts would run the
+// CLI — it calls program.parse() at module scope). index.ts is still read as
+// text below, for assertions about the scaffolder's *commands*.
+const registryTemplates = Object.keys(TEMPLATES);
 const REGISTRY_SOURCE = fs.readFileSync(path.join(pkgRoot, 'src', 'index.ts'), 'utf8');
-const registryBlock =
-  /const TEMPLATES: Record<string, TemplateInfo> = \{([\s\S]*?)\n\};/.exec(
-    REGISTRY_SOURCE,
-  )?.[1] ?? '';
-const registryTemplates = [...registryBlock.matchAll(/^  ([a-z][a-z0-9_]*): \{$/gm)].map(
-  (m) => m[1],
-);
 
 describe('blank template package.json', () => {
   const templatePkg = JSON.parse(

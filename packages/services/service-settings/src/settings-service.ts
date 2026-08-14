@@ -1431,7 +1431,9 @@ export class SettingsService {
         }
       }
 
-      const previousEnc = await this.upsertRow({
+      // Hoisted so the reap below can re-read the SAME row this write targeted
+      // (#8262) — the composite key is what makes the verification meaningful.
+      const rowForKey: SettingsRow = {
         namespace,
         key,
         scope,
@@ -1441,14 +1443,18 @@ export class SettingsService {
         encrypted: isEncrypted,
         updated_at: new Date().toISOString(),
         updated_by: ctx.userId ?? null,
-      });
+      };
+      const previousEnc = await this.upsertRow(rowForKey);
 
-      // The handle the row USED to point at is now unreferenced — destroy the
-      // ciphertext it names (#8030). Ordered after the repoint on purpose, and
-      // never allowed to fail the write; see `reapRotatedSecret`. Not gated on
-      // `isEncrypted`: a key that STOPS being encrypted (a manifest edit) orphans
-      // its handle in exactly the same way, and the helper is self-guarding.
-      await this.reapRotatedSecret(previousEnc, storedEnc);
+      // Destroy the ciphertext the row USED to name (#8030) — but only once a
+      // re-read confirms the row really stopped naming it (#8262); "a new
+      // ciphertext was written" is not evidence that the repoint landed.
+      // Ordered after the repoint on purpose, and never allowed to fail the
+      // write — a guarantee that now covers the verification read as well as
+      // the delete; see `reapRotatedSecret`. Not gated on `isEncrypted`: a key
+      // that STOPS being encrypted (a manifest edit) orphans its handle in
+      // exactly the same way, and the helper is self-guarding.
+      await this.reapRotatedSecret(rowForKey, previousEnc, storedEnc);
 
       if (this.audit) {
         try {
@@ -2001,18 +2007,60 @@ export class SettingsService {
    * flag is a security control, and removing it is the wrong direction on this
    * defect.
    */
-  private async upsertRow(row: SettingsRow): Promise<string | null> {
-    if (this.engine) {
-      const where: Record<string, unknown> = {
+  /**
+   * The composite key identifying ONE settings row, in the shape the engine
+   * path needs.
+   *
+   * Extracted rather than repeated (#8262): `reapRotatedSecret`'s verification
+   * read has to target **exactly** the row `upsertRow` just wrote. A re-read
+   * aimed at a slightly different row would answer a different question while
+   * looking correct — and the answer decides whether a ciphertext is deleted.
+   */
+  private rowIdentity(row: SettingsRow): {
+    where: Record<string, unknown>;
+    // Narrow on purpose: spread into a `SettingsEngine.find` options object it
+    // has to stay assignable to the DECLARED option type, so the verification
+    // read below needs no `as any` erasure of the contract it depends on.
+    bypass: { bypassTenantAudit?: true };
+  } {
+    return {
+      where: {
         namespace: row.namespace,
         key: row.key,
         scope: row.scope,
         user_id: row.user_id ?? null,
-      };
+      },
       // global rows are platform-wide — bypass the tenant audit warning
       // (we intentionally write tenant_id=null). tenant/user rows still
       // benefit from the warning when ctx.tenantId is missing.
-      const bypass = row.scope === 'global' ? { bypassTenantAudit: true } : {};
+      bypass: row.scope === 'global' ? { bypassTenantAudit: true } : {},
+    };
+  }
+
+  /** The in-memory store's index for the same composite key. */
+  private memoryIndexOf(row: SettingsRow): number {
+    return this.memory.findIndex(
+      (r) =>
+        r.namespace === row.namespace &&
+        r.key === row.key &&
+        r.scope === row.scope &&
+        (r.user_id ?? null) === (row.user_id ?? null),
+    );
+  }
+
+  /**
+   * `value_enc` as a handle-or-nothing. One normalisation for both the value
+   * `upsertRow` REPORTS and the value `reapRotatedSecret` COMPARES it against
+   * (#8262) — two spellings of "no handle" (`''` vs `null`) diverging across
+   * those two call sites would make the comparison decide wrongly.
+   */
+  private static handleOf(value: unknown): string | null {
+    return typeof value === 'string' && value !== '' ? value : null;
+  }
+
+  private async upsertRow(row: SettingsRow): Promise<string | null> {
+    if (this.engine) {
+      const { where, bypass } = this.rowIdentity(row);
       const existing = await this.engine.find(this.objectName, {
         where,
         limit: 1,
@@ -2026,22 +2074,16 @@ export class SettingsService {
           context: SETTINGS_SYSTEM_WRITE_CONTEXT,
           ...bypass,
         } as any);
-        return typeof previousEnc === 'string' && previousEnc !== '' ? previousEnc : null;
+        return SettingsService.handleOf(previousEnc);
       }
       await this.engine.insert(this.objectName, { ...row }, bypass as any);
       return null;
     }
-    const idx = this.memory.findIndex(
-      (r) =>
-        r.namespace === row.namespace &&
-        r.key === row.key &&
-        r.scope === row.scope &&
-        (r.user_id ?? null) === (row.user_id ?? null),
-    );
+    const idx = this.memoryIndexOf(row);
     if (idx >= 0) {
       const previousEnc = this.memory[idx].value_enc;
       this.memory[idx] = row;
-      return typeof previousEnc === 'string' && previousEnc !== '' ? previousEnc : null;
+      return SettingsService.handleOf(previousEnc);
     }
     this.memory.push(row);
     return null;
@@ -2070,27 +2112,133 @@ export class SettingsService {
    * path simply have none) or a delete that throws must never turn a
    * SUCCESSFUL rotation into an error — the new secret is already in force,
    * which is the property that matters.
+   *
+   * ## VERIFY the repoint; never infer it (#8262)
+   *
+   * `previousEnc !== nextEnc` says a new ciphertext was written. It does NOT
+   * say the row stopped pointing at the old one — and the two come apart on a
+   * `SettingsEngine` adapter that drops `context`: `value_enc` is
+   * `readonly: true`, so a non-system UPDATE has it stripped
+   * (`stripReadonlyFields`), the row keeps naming `previousEnc`, and deleting
+   * on the inference destroys **the ciphertext still in force**.
+   * `materialiseRow` then dereferences a dangling handle, gets nothing, and
+   * the setting silently reads empty — unrecoverably, because the audit trail
+   * records digests rather than handles, so nothing can even name what was
+   * lost. That adapter is a documented extension point (see the ⛔ note on
+   * `SettingsEngine.update`), which is exactly why the reaper cannot assume
+   * the ideal one.
+   *
+   * So: re-read the row and delete only once storage confirms it no longer
+   * names the handle. The criterion is `current !== previousEnc` rather than
+   * the narrower `current === nextEnc`, deliberately — under a concurrent
+   * rotation the row may already have moved on to a THIRD handle, in which
+   * case `previousEnc` is genuinely unreferenced and the narrower test would
+   * leak the orphan #8030 exists to prevent. Both refuse the case that
+   * matters, where the row still names `previousEnc`.
+   *
+   * ⚠️ Every refusal branch leaves an ORPHAN, which is the recoverable
+   * direction and the one #8103 sweeps. There is no recoverable direction on
+   * the other side. And the added read is inside the same best-effort
+   * guarantee as the delete: it runs after all cheap guards, only where a
+   * destructive delete would otherwise follow, and can never fail the write.
    */
-  private async reapRotatedSecret(previousEnc: string | null, nextEnc: string | null): Promise<void> {
+  private async reapRotatedSecret(
+    row: SettingsRow,
+    previousEnc: string | null,
+    nextEnc: string | null,
+  ): Promise<void> {
     if (!previousEnc || previousEnc === nextEnc) return;
     // Handles only. The legacy inline-crypto path stores the ciphertext ITSELF
     // in `value_enc`, and there is no `sys_secret` row to reap for it.
     if (!previousEnc.startsWith('sec_')) return;
     const del = this.secretStore?.delete;
     if (!del) return;
+
+    // ── Verification read. Ordered after every cheap guard above so a rotation
+    // that cannot reap anything never pays for it. ────────────────────────────
+    let current: { found: boolean; handle: string | null };
+    try {
+      current = await this.readStoredHandle(row);
+    } catch (err: any) {
+      this.reportReapRefusal(
+        `[SettingsService] could not confirm the secret rotation of '${row.namespace}.${row.key}' ` +
+          `took effect, so the previous ciphertext '${previousEnc}' was LEFT IN PLACE rather than ` +
+          `deleted. The rotation itself SUCCEEDED; that ciphertext is still stored and remains ` +
+          `decryptable. Reason: ${err?.message ?? err}`,
+      );
+      return;
+    }
+    if (!current.found) {
+      this.reportReapRefusal(
+        `[SettingsService] could not confirm the secret rotation of '${row.namespace}.${row.key}' ` +
+          `took effect — the row could not be read back after the write — so the previous ` +
+          `ciphertext '${previousEnc}' was LEFT IN PLACE rather than deleted. It is still stored ` +
+          `and remains decryptable.`,
+      );
+      return;
+    }
+    if (current.handle === previousEnc) {
+      this.reportReapRefusal(
+        `[SettingsService] REFUSED to delete rotated secret '${previousEnc}' for ` +
+          `'${row.namespace}.${row.key}': the rotation did NOT take effect. The stored row still ` +
+          `names that handle, so it is the ciphertext currently IN FORCE and deleting it would ` +
+          `destroy the value. The newly written ciphertext (${nextEnc ?? 'none'}) is unreferenced. ` +
+          `Cause: the SettingsEngine adapter in use is not forwarding the execution context — ` +
+          `sys_setting.value_enc is declared readonly, and the engine strips it from a NON-system ` +
+          `UPDATE. Fix the adapter to forward context verbatim, then re-apply the value: as far ` +
+          `as storage is concerned this rotation never happened.`,
+      );
+      return;
+    }
+
     try {
       await del.call(this.secretStore, previousEnc);
     } catch (err: any) {
       // Loud, because the operator's mental model after a rotation is "the old
       // credential is gone" and this is the one branch where it is not.
-      const message =
+      this.reportReapRefusal(
         `[SettingsService] rotated secret '${previousEnc}' could not be deleted from ` +
-        `sys_secret — the rotation itself SUCCEEDED (the new value is in force), but the ` +
-        `previous ciphertext is still stored and remains decryptable. ` +
-        `Reason: ${err?.message ?? err}`;
-      if (this.logger?.error) this.logger.error(message);
-      else console.error(message);
+          `sys_secret — the rotation itself SUCCEEDED (the new value is in force), but the ` +
+          `previous ciphertext is still stored and remains decryptable. ` +
+          `Reason: ${err?.message ?? err}`,
+      );
     }
+  }
+
+  /**
+   * Re-read the row's CURRENT `value_enc` straight from storage (#8262).
+   *
+   * `found: false` (the row could not be read back at all) is deliberately
+   * distinct from `handle: null` (the row exists and holds no handle): the two
+   * lead to OPPOSITE decisions in `reapRotatedSecret` — a reset-to-null must
+   * still reap, an unreadable row must not.
+   */
+  private async readStoredHandle(
+    row: SettingsRow,
+  ): Promise<{ found: boolean; handle: string | null }> {
+    if (this.engine) {
+      const { where, bypass } = this.rowIdentity(row);
+      const rows = await this.engine.find(this.objectName, { where, limit: 1, ...bypass });
+      const current = Array.isArray(rows) ? rows[0] : undefined;
+      if (!current) return { found: false, handle: null };
+      return {
+        found: true,
+        handle: SettingsService.handleOf((current as { value_enc?: unknown }).value_enc),
+      };
+    }
+    const idx = this.memoryIndexOf(row);
+    if (idx < 0) return { found: false, handle: null };
+    return { found: true, handle: SettingsService.handleOf(this.memory[idx].value_enc) };
+  }
+
+  /**
+   * One channel for every branch in which a retired ciphertext outlives the
+   * rotation. Loud on purpose: the operator's mental model afterwards is "the
+   * old credential is gone", and these are the branches where it is not.
+   */
+  private reportReapRefusal(message: string): void {
+    if (this.logger?.error) this.logger.error(message);
+    else console.error(message);
   }
 
   private async materialiseRow(row: SettingsRow): Promise<unknown> {
