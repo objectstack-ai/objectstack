@@ -75,16 +75,17 @@
  * "add a unique index" sends an operator after an index that is already there.
  * Neither predicate may grow a limb belonging to the other.
  *
- * ⚠️ This predicate is ALREADY on the wrong side of that line for one dialect:
- * `message`'s `unique constraint` limb matches SQLite's *missing*-index
- * sentence, which ends `…any PRIMARY KEY or UNIQUE constraint`, so an unbacked
- * conflict target is reported here as a violation of a constraint that does not
- * exist. Measured on the real driver error and filed as **#8590** — read it
- * before touching `UNIQUE_VIOLATION.message`, because the naive narrowing also
- * drops Postgres' `violates unique constraint "..."`, which this limb has
- * covered since it was inherited verbatim from the REST branch it replaced.
- * `unbacked-conflict-target.test.ts` pins both predicates' verdicts per dialect
- * so the fix cannot land silently in either direction.
+ * ⚠️ This predicate WAS on the wrong side of that line, and #8590 moved it
+ * back. The `message` limb used to read `unique constraint` as a bare word
+ * pair, which matched every sentence containing those two words **including
+ * the ones saying the constraint is absent**. Since #8590 the limb requires a
+ * VIOLATION phrasing — `unique constraint failed` (SQLite) or
+ * `violates unique constraint` (Postgres) — so a sentence that merely mentions
+ * a unique constraint no longer answers yes. The reasoning, and the measured
+ * sentences that forced it, are on {@link UNIQUE_VIOLATION} below;
+ * `unique-violation-absence-sentences.test.ts` pins the absence sentences and
+ * `unbacked-conflict-target.test.ts` pins both predicates' verdicts per dialect,
+ * so neither the fix nor a fresh drift can land silently in either direction.
  */
 
 /**
@@ -125,9 +126,12 @@ interface UniqueViolationSignature {
  * 409**, which is what makes routing REST through this predicate incapable of
  * narrowing a verdict a client relies on today:
  *
- *  - `unique constraint` — SQLite's `UNIQUE constraint failed: t.c` *and*
- *    Postgres' `... violates unique constraint "..."`. Inherited verbatim from
- *    the REST limb being replaced.
+ *  - `unique constraint failed` — SQLite's `UNIQUE constraint failed: t.c`.
+ *  - `violates unique constraint` — Postgres' `... violates unique constraint
+ *    "..."`. These two replaced a single bare `unique constraint` limb that was
+ *    inherited verbatim from the REST branch; see "Why a VIOLATION phrasing"
+ *    below for the sentences that forced the split. Both dialects' genuine
+ *    spellings are preserved exactly — that was the constraint on the fix.
  *  - `unique violation` — inherited verbatim from the same limb (SQLSTATE
  *    23505's condition name, which some transports render as prose).
  *  - `duplicate key` — Postgres' `duplicate key value violates ...`
@@ -141,11 +145,45 @@ interface UniqueViolationSignature {
  * worse bug than the one being fixed — a not-null violation answered as
  * `409 UNIQUE_VIOLATION` tells the client to change a value that is not the
  * problem, and 409 is a status an SDK will not retry.
+ *
+ * ## Why a VIOLATION phrasing, not the word pair (#8590)
+ *
+ * The limb used to be a bare `unique constraint`, and a word pair is not a
+ * condition: databases put those two words in sentences that say a unique
+ * constraint is **ABSENT** just as readily as in ones that say a row broke it.
+ * Both spellings below were raised on real servers — SQLite via
+ * better-sqlite3, PostgreSQL 16.13 via `pg` 8.22.0, both through knex 3.3.0 —
+ * and the bare limb answered `true` to every one of them:
+ *
+ * ```
+ * # SQLITE — no unique index backs the ON CONFLICT target (#8445, #8590)
+ *   ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint
+ *
+ * # POSTGRES 42830 — a FOREIGN KEY referencing a non-unique column
+ *   there is no unique constraint matching given keys for referenced table "t"
+ * ```
+ *
+ * The Postgres sentence is why this is an allowlist of violation phrasings and
+ * not a negative lookahead on SQLite's sentence. #8590 was filed believing the
+ * collision was SQLite-only and that Postgres escaped "by luck of word order";
+ * measuring the dialects for the fix found 42830, where Postgres puts the same
+ * two words adjacent in its own absence sentence. A lookahead keyed on the
+ * SQLite wording answers `true` there — it is a blocklist, and it can only ever
+ * enumerate the absence sentences somebody already tripped over. Requiring a
+ * violation phrasing inverts the default to match this module's stated one:
+ * **unrecognised is `false`**, so a sentence nobody has measured is not a
+ * conflict until a limb says it is.
+ *
+ * ⚠️ The three supported dialect families are exactly sqlite / postgres / mysql
+ * (`sql-driver.ts` recognises no others), and all three were measured on live
+ * servers for #8590, in both directions, including MySQL's `Duplicate entry`
+ * path. A dialect added later needs its violation spelling added HERE, measured
+ * off a thrown error — not a loosened limb.
  */
 const UNIQUE_VIOLATION: UniqueViolationSignature = {
     codes: new Set(['23505', 'ER_DUP_ENTRY', 'SQLITE_CONSTRAINT_UNIQUE']),
     errnos: new Set([1062]),
-    message: /unique constraint|unique violation|duplicate key|duplicate entry/i,
+    message: /unique constraint failed|violates unique constraint|unique violation|duplicate key|duplicate entry/i,
 };
 
 /** How far to follow an `error.cause` chain — drivers wrap, but not deeply. */

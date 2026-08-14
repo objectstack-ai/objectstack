@@ -17,6 +17,13 @@
  * `ExecutionContext` carries — and falls back to UTC when there is none, which
  * is byte-identical to the pre-#8373 output. A `date` cell is a timezone-naive
  * calendar day and never reads it (ADR-0053). See {@link formatDate}.
+ *
+ * Third contract, same clock, OPPOSITE fallback (#8484): the download
+ * filename's timestamp reads that same business timezone, so the name a
+ * browser saves agrees with the rows inside the file. Its no-timezone fallback
+ * is the PROCESS-LOCAL clock, not UTC — see {@link exportContentDisposition}
+ * for why the two contracts deliberately differ, and {@link zonedWallClock}
+ * for where that choice is left to each caller.
  */
 
 export interface ExportFieldMeta {
@@ -60,17 +67,39 @@ export interface ExportFieldMeta {
  * Non-ASCII labels ride the RFC 5987/6266 `filename*` parameter; the plain
  * `filename` keeps an ASCII-safe fallback derived from the object API name
  * for clients that don't understand `filename*`.
+ *
+ * **The stamp's clock (#8484).** `timezone` is the request's business timezone
+ * (`ExecutionContext.timezone`, the platform-default → global → tenant
+ * cascade) — the SAME value the cells are rendered in. Before #8373 both the
+ * name and the contents were wrong in different directions; #8373 moved the
+ * contents onto the business zone and left this the last export surface on the
+ * host clock, so a container at `TZ=UTC` serving an Asia/Shanghai tenant
+ * downloaded `orders-20260731-220000.csv` whose first row read
+ * `2026-08-01 06:00:00`. Reading one clock for both is the whole point.
+ *
+ * **⚠️ The no-timezone fallback is PROCESS-LOCAL, not UTC — deliberately the
+ * opposite of {@link formatDate}'s.** Each fallback preserves ITS OWN surface's
+ * historical output, and the two surfaces have different histories: the cells
+ * were hardcoded to UTC, this filename has always used the process clock. UTC
+ * here would look like the "safe default" and would in fact re-time the
+ * filename of every deployment that sets a host `TZ` but resolves no business
+ * timezone — a silent change to a user-visible name, for zero correctness gain.
+ * A deployment that explicitly resolves `'UTC'` is a resolved zone, not a
+ * missing one, and does get UTC.
  */
 export function exportContentDisposition(
   objectName: string,
   label: string | undefined,
   ext: string,
+  timezone?: string,
   now: Date = new Date(),
 ): string {
   const pad = (n: number) => String(n).padStart(2, '0');
-  const stamp =
-    `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}` +
-    `-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  const zoned = zonedWallClock(now, timezone);
+  const stamp = zoned
+    ? `${zoned.ymd.replace(/-/g, '')}-${zoned.hms.replace(/:/g, '')}`
+    : `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}` +
+      `-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
   const asciiBase = objectName.replace(/[^A-Za-z0-9_.-]/g, '_') || 'export';
   // Keep unicode letters (CJK labels) but drop filesystem-hostile characters.
   // eslint-disable-next-line no-control-regex
@@ -200,40 +229,62 @@ function zonedFormatter(timezone: string): Intl.DateTimeFormat | null {
   return fmt;
 }
 
+/** The UTC wall clock of an instant — `YYYY-MM-DD` + `HH:mm:ss`. */
+function utcWallClock(d: Date): { ymd: string; hms: string } {
+  return {
+    ymd: `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`,
+    hms: `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}:${pad2(d.getUTCSeconds())}`,
+  };
+}
+
 /**
- * The wall clock an instant shows in `timezone` — `YYYY-MM-DD` + `HH:mm:ss`,
- * split so callers can use either half.
+ * The wall clock an instant shows in `timezone`, or **`null` when there is no
+ * usable zone** — `timezone` absent, or not a zone this platform knows.
  *
  * Reads the calendar components from `Intl.DateTimeFormat().formatToParts()`
  * so DST transitions come from the platform's tz database rather than
  * hand-rolled offset arithmetic (the same primitive `@objectstack/core`'s
  * `calendarPartsInTz` and `@objectstack/spec`'s autonumber date tokens use).
  *
- * Falls back to the UTC wall clock whenever `timezone` is absent, `'UTC'`, or
- * not a zone this platform knows — the pre-#8373 behaviour, kept as the
- * backward-compatibility contract for deployments that never set one.
+ * WHY THIS RETURNS `null` INSTEAD OF FALLING BACK: its two callers need
+ * OPPOSITE fallbacks, and that difference is a contract rather than a detail.
+ * The cell path ({@link formatDate}) falls back to UTC — its pre-#8373 output;
+ * the filename stamp ({@link exportContentDisposition}) falls back to the
+ * process-local clock — its own pre-#8484 output. Each preserves the history of
+ * the surface it serves. Baking either one in here would silently re-time the
+ * other surface for every deployment that resolves no business timezone, so the
+ * choice is left at each call site where it can be read and pinned.
+ *
+ * `'UTC'` is a RESOLVED zone, not a missing one, so it yields UTC parts rather
+ * than `null`: a deployment that configures UTC gets UTC on both surfaces
+ * whatever the host `TZ` says.
+ */
+function zonedWallClock(d: Date, timezone?: string): { ymd: string; hms: string } | null {
+  if (!timezone) return null;
+  if (timezone === 'UTC') return utcWallClock(d);
+  const fmt = zonedFormatter(timezone);
+  if (!fmt) return null;
+  const parts = fmt.formatToParts(d);
+  const get = (t: string) => parts.find((p) => p.type === t)?.value;
+  const y = get('year');
+  const mo = get('month');
+  const da = get('day');
+  const h = get('hour');
+  const mi = get('minute');
+  const s = get('second');
+  if (!(y && mo && da && h && mi && s)) return null;
+  return { ymd: `${y}-${mo}-${da}`, hms: `${h}:${mi}:${s}` };
+}
+
+/**
+ * The wall clock an instant shows in `timezone`, falling back to UTC whenever
+ * `timezone` is absent, `'UTC'`, or not a zone this platform knows — the
+ * pre-#8373 behaviour, kept as the backward-compatibility contract for
+ * deployments that never set one. See {@link zonedWallClock} for why the
+ * fallback lives here rather than inside it.
  */
 function wallClock(d: Date, timezone?: string): { ymd: string; hms: string } {
-  if (timezone && timezone !== 'UTC') {
-    const fmt = zonedFormatter(timezone);
-    if (fmt) {
-      const parts = fmt.formatToParts(d);
-      const get = (t: string) => parts.find((p) => p.type === t)?.value;
-      const y = get('year');
-      const mo = get('month');
-      const da = get('day');
-      const h = get('hour');
-      const mi = get('minute');
-      const s = get('second');
-      if (y && mo && da && h && mi && s) {
-        return { ymd: `${y}-${mo}-${da}`, hms: `${h}:${mi}:${s}` };
-      }
-    }
-  }
-  return {
-    ymd: `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`,
-    hms: `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}:${pad2(d.getUTCSeconds())}`,
-  };
+  return zonedWallClock(d, timezone) ?? utcWallClock(d);
 }
 
 function toDate(value: unknown): Date | null {
