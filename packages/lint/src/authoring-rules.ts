@@ -1137,38 +1137,21 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   //    `security-master-detail-ungranted` per-write vs 4 whole-stack,
   //    PR #7886). `RuntimeStackContext` now carries `permissions`/`books` in
   //    BOTH differential passes and `TYPE_TO_STACK_KEY` maps both types.
-  //  - #8310 (this state): `runtimeTypes` gains `permission` + `book`.
-  //    `object` measured DIRTY and stays behind — see below.
-  //
-  // Why `object` is still not declared, re-measured on the #8308-repaired
-  // tree rather than inherited (#4001: zero breakage is demonstrated, never
-  // assumed). The OLD blocker is genuinely gone: with `object` declared, the
-  // full `@objectstack/metadata-protocol` suite passes (the 26-refusal
-  // measurement predates #8308's `METADATA_CREATE_SEEDS.object` repair) and a
-  // replay of every shipped-corpus object through the real gate refuses
-  // nothing. But one package over the same declaration still breaks the
-  // platform's own write paths — measured on this exact tree:
-  //
-  //  - `@objectstack/objectql`: 83 tests across 13 files fail, every one
-  //    `security-owd-unset` (85 refusals) — the suites publish objects with
-  //    no authored `sharingModel` through `saveMetaItem`.
-  //  - `@objectstack/rest`: 12 tests across 3 files — the same owd-unset
-  //    class, PLUS two genuine CONTRACT collisions no fixture edit can
-  //    honestly settle: `meta-object-owd-gate.test.ts` pins #7674's ADR-0094
-  //    403 `owd_external_wider` door, which this 422 gate now PREEMPTS for
-  //    the same defect (`saveMetaItem` runs this table first), and it pins
-  //    that a write with NO OWD keys at all SAVES (ADR-0094 reads absence as
-  //    the D1 `private` default) — which `security-owd-unset` exists to
-  //    refuse (absence must be an authored decision).
-  //
-  //  So declaring `object` is not a wiring fix and not even only fixture
-  //  repair in two packages outside this card's surface: it is a decision
-  //  about which door answers for OWD defects (403 ADR-0094 vocabulary vs
-  //  422 lint vocabulary) and whether an unauthored OWD refuses at runtime.
-  //  That decision is escalated on #8310; until it is ruled, `object` stays
-  //  undeclared and the pins in
-  //  `validate-security-posture.runtime-surface.test.ts` record both what
-  //  WOULD happen (via the gate's own snapshot builder) and that it does not.
+  //  - #8310 slice 1: `runtimeTypes` gains `permission` + `book` (PR #8546).
+  //    `object` measured DIRTY on that tree and was escalated, not forced.
+  //  - #8310 slice 2 (this state): `object` crosses under the maintainer
+  //    ruling recorded on #8310 (2026-08-13, 「接受你的全部建议」): an
+  //    authored OWD is REQUIRED at the runtime object door — an object
+  //    publish with no authored `sharingModel` is refused with the 422 lint
+  //    envelope (`security-owd-unset`); absence is not a decision. The ~16
+  //    objectql/rest suite files that relied on OWD-less publishes were
+  //    repaired honestly (fixtures author their posture), and
+  //    `meta-object-owd-gate.test.ts` re-pins the door ORDER: this table
+  //    answers first (`saveMetaItem` runs it before `runAuthoringGate`), the
+  //    ADR-0094-seam 403 doors answer for what passes lint. The same ruling
+  //    retired the plugin gate's R2 `owd_external_wider` arm as a duplicate
+  //    of this door (R1 env-tighten-only STAYS — no lint rule covers it);
+  //    see `object-posture-gate.ts` and the ADR-0094 amendment.
   //
   // `security-role-word` is NOT in this entry any more — that is what the
   // `validateSecurityRoleWord` entry below records. It judges six collections
@@ -1195,7 +1178,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     commands: ALL,
     source: 'packages/lint/src/validate-security-posture.ts',
     surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['seed', 'permission', 'book'],
+    runtimeTypes: ['seed', 'permission', 'book', 'object'],
     run: (stack) => validateSecurityPosture(stack),
   },
   // [ADR-0090 D3 / #8310] The vocabulary freeze, split out of

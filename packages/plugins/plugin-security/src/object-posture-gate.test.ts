@@ -1,8 +1,15 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 // #3050 — OWD posture authoring gate: env-tighten-only over packaged
-// declarations (ADR-0086 D1) + external ≤ internal (ADR-0090 D11), enforced
-// on the runtime write path (previously CLI-lint-only).
+// declarations (ADR-0086 D1), enforced on the runtime write path.
+//
+// R2 (`owd_external_wider`, external ≤ internal) is RETIRED from this gate —
+// maintainer ruling on #8310: since `validateSecurityPosture` declares
+// `object` in `runtimeTypes`, the runtime lint door refuses the same defect
+// as a 422 (`security-external-wider-than-internal`, and `security-owd-unset`
+// for the unset-internal shape) BEFORE this gate runs. The retirement pins
+// below keep that removal deliberate; the 422-door coverage is pinned
+// end-to-end in `packages/rest/src/meta-object-owd-gate.test.ts`.
 
 import { describe, it, expect } from 'vitest';
 import { objectPostureGate, registerObjectPostureGate } from './object-posture-gate.js';
@@ -15,51 +22,38 @@ const base = (over: Partial<Parameters<typeof objectPostureGate>[0]> = {}) => ({
   ...over,
 });
 
-describe('R2 — external ≤ internal (ADR-0090 D11)', () => {
-  it('rejects external wider than internal', () => {
+describe('R2 retirement (#8310) — this gate no longer judges external ≤ internal', () => {
+  it('passes an external-wider pair on a non-artifact body — the 422 lint door owns this refusal now', () => {
+    // Before #8310 this threw 403 `owd_external_wider`. The refusal is NOT
+    // gone from the platform: `saveMetaItem` runs the runtime lint table
+    // first, and an active-state publish of this body answers 422
+    // `security-external-wider-than-internal` before this gate is reached.
     expect(() => objectPostureGate(base({
       body: { sharingModel: 'public_read', externalSharingModel: 'public_read_write' },
-    }))).toThrowError(/owd_external_wider/);
+    }))).not.toThrow();
   });
 
-  it('rejects explicit external on an OWD-less body (internal defaults to private, ADR-0090 D1)', () => {
+  it('passes an explicit external on an OWD-less body — 422 `security-owd-unset` answers upstream', () => {
+    // R2 resolved the unset internal to `private` and refused. The ruled door
+    // is stricter about the CAUSE: an unauthored `sharingModel` is itself the
+    // refusal (absence is not a decision) — and for system objects, where
+    // owd-unset deliberately does not apply, the runtime default is PUBLIC
+    // (`effectiveSharingModel`), so R2's private baseline was a false
+    // premise there, not protection.
     expect(() => objectPostureGate(base({
       body: { externalSharingModel: 'public_read' },
-    }))).toThrowError(/owd_external_wider/);
-  });
-
-  it('accepts external equal to internal', () => {
-    expect(() => objectPostureGate(base({
-      body: { sharingModel: 'public_read', externalSharingModel: 'public_read' },
     }))).not.toThrow();
   });
 
-  it('accepts external tighter than internal', () => {
-    expect(() => objectPostureGate(base({
-      body: { sharingModel: 'public_read_write', externalSharingModel: 'private' },
-    }))).not.toThrow();
-  });
-
-  it('skips ordering when either side is controlled_by_parent (inherits master pair)', () => {
-    expect(() => objectPostureGate(base({
-      body: { sharingModel: 'controlled_by_parent', externalSharingModel: 'public_read' },
-    }))).not.toThrow();
-    expect(() => objectPostureGate(base({
-      body: { sharingModel: 'public_read', externalSharingModel: 'controlled_by_parent' },
-    }))).not.toThrow();
-  });
-
-  it('accepts a body with no posture fields at all', () => {
-    expect(() => objectPostureGate(base({ body: { name: 'crm_account', fields: {} } }))).not.toThrow();
-  });
-
-  it('carries 403 + code on the error', () => {
-    try {
-      objectPostureGate(base({ body: { sharingModel: 'private', externalSharingModel: 'public_read' } }));
-      expect.unreachable('should have thrown');
-    } catch (e: any) {
-      expect(e.status).toBe(403);
-      expect(e.code).toBe('owd_external_wider');
+  it('still accepts every legal pair (nothing new is refused by the retirement)', () => {
+    for (const body of [
+      { sharingModel: 'public_read', externalSharingModel: 'public_read' },
+      { sharingModel: 'public_read_write', externalSharingModel: 'private' },
+      { sharingModel: 'controlled_by_parent', externalSharingModel: 'public_read' },
+      { sharingModel: 'public_read', externalSharingModel: 'controlled_by_parent' },
+      { name: 'crm_account', fields: {} },
+    ]) {
+      expect(() => objectPostureGate(base({ body }))).not.toThrow();
     }
   });
 });
@@ -145,10 +139,12 @@ describe('registerObjectPostureGate wiring', () => {
     expect(registerObjectPostureGate(protocol)).toBe(true);
     const gate = gates.get('object')!;
     expect(gate).toBeTypeOf('function');
+    // R1 through the registered seam (R2 is retired, so the wiring pin uses
+    // the surviving rule: widening a packaged declaration).
     await expect(async () => gate({
-      type: 'object', name: 'crm_account', body: { sharingModel: 'private', externalSharingModel: 'public_read' },
-      isArtifactBacked: false,
-    })).rejects.toThrowError(/owd_external_wider/);
+      type: 'object', name: 'crm_account', body: { sharingModel: 'public_read_write' },
+      isArtifactBacked: true, declaredBody: { sharingModel: 'private' },
+    })).rejects.toThrowError(/owd_widening_forbidden/);
   });
 
   it('feature-detects: returns false on a protocol without the seam', () => {

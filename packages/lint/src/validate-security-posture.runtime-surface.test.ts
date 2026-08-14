@@ -23,40 +23,40 @@
 //    `permissions`/`books` in BOTH differential passes and `TYPE_TO_STACK_KEY`
 //    maps both types, killing the measured phantom findings (38-vs-4,
 //    PR #7886) that made crossing `permission`/`book` unshippable.
-//  - #8310 (this state): `runtimeTypes` gains `permission` + `book`, and
-//    `security-role-word` is split into its own CLI-only entry
+//  - #8310 slice 1 (PR #8546): `runtimeTypes` gains `permission` + `book`,
+//    and `security-role-word` is split into its own CLI-only entry
 //    (`validateSecurityRoleWord`) so it stays behind WHOLE rather than cross
 //    for a strict subset of the six collections it judges — the #7220
 //    discipline: one rule id sits on ONE side of the wall. `object` measured
-//    DIRTY on this exact tree and stays behind, escalated on #8310: the
-//    #8308 repair really did clean `@objectstack/metadata-protocol` (full
-//    suite green with `object` declared) and the shipped corpus replays
-//    clean, but `@objectstack/objectql` (83 tests / 13 files, all
-//    `security-owd-unset`) and `@objectstack/rest` (12 tests / 3 files,
-//    owd-unset + external-wider — including #7674's pins that the ADR-0094
-//    403 `owd_external_wider` door answers, which this 422 gate would
-//    preempt, and that a write with NO OWD keys saves) still refuse. Which
-//    door answers, and whether an unauthored OWD refuses at runtime, is a
-//    contract decision — not a fixture repair.
+//    DIRTY on that tree (objectql 83 tests / 13 files, all
+//    `security-owd-unset`; rest 12 / 3) and was escalated, not forced.
+//  - #8310 slice 2 (this state): `object` crosses under the maintainer
+//    ruling (2026-08-13, 「接受你的全部建议」): an authored OWD is REQUIRED
+//    at the runtime object door — an OWD-less object publish is refused with
+//    the 422 lint envelope (`security-owd-unset`); absence is not a
+//    decision. The red suite files were repaired honestly (fixtures author
+//    their posture), `meta-object-owd-gate.test.ts` re-pins the door ORDER
+//    (this 422 table answers first; the ADR-0094-seam 403 R1 door answers
+//    for what passes lint), and the same ruling retired the plugin gate's
+//    R2 `owd_external_wider` arm as this door's duplicate.
 //
 // ## What each case is evidence FOR
 //
 //  1. `the mirror still matches the real gate (flow)` — non-vacuity for
 //     `wouldGateAdd` (builder-vs-gate parity on a wired type).
-//  2. The crossing pins: `permission`/`book` now reach this block at the
-//     REAL gate; `object` and `position`/`app` reach no rule (the escalated
-//     residue and role-word's residue respectively — see 3 and 4).
+//  2. The crossing pins: `seed`/`permission`/`book`/`object` all reach this
+//     block at the REAL gate; `position`/`app` reach no rule (role-word's
+//     residue — see 3).
 //  3. `security-role-word` stays behind WHOLE: its entry is CLI-only, no
 //     runtime-gated type reaches it, and the door does NOT refuse a
 //     `role_manager`-named permission set for it — while the CLI still
 //     refuses exactly what it refused before the split (both entries run on
 //     all three commands; the union of their findings is the pre-split set).
-//  4. The `object` residue, kept executable through the gate's OWN snapshot
-//     builder: an OWD-less object write WOULD be refused, the platform's own
-//     create seed WOULD be clean (#8308's repair, re-measured), and a clean
-//     write is not blamed for the context's pre-existing defects — so the
-//     day the escalation rules, the flip is one array element plus flipping
-//     these pins to the real gate.
+//  4. The `object` crossing, at the real gate: an OWD-less object publish IS
+//     refused (`security-owd-unset` — the ruled strictness), the platform's
+//     own create seed is clean (#8308's repair), a clean write is not blamed
+//     for the context's pre-existing defects, and the system-object boundary
+//     of the retired R2 arm is pinned as deliberate.
 //  5. The #8309 agreement pins, upgraded to the REAL gate now that
 //     `permission`/`book` are declared: the write agrees with the
 //     whole-stack verdict against the full context, and the pre-#8309
@@ -175,16 +175,16 @@ describe('validateSecurityPosture at the runtime publish surface (#7576 → #830
     expect(stackKeyForType('flow')).toBe('flows');
   });
 
-  it('[#8310] permission / book now cross — the measured half of the flip, on the whole 12-rule entry', () => {
-    // The registration this card makes: the `validateSecurityPosture` entry
-    // (12 rule ids — `security-role-word` is its own entry now, see below)
-    // declares `permission` and `book` beside `seed`. Both measured ZERO
-    // refusals across the full `@objectstack/metadata-protocol` suite, the
-    // `@objectstack/objectql` and `@objectstack/rest` suites, and a replay of
-    // every shipped-corpus permission set and book through the real gate.
+  it('[#8310] seed / permission / book / object all cross — the completed flip, on the whole 12-rule entry', () => {
+    // The registration the #7891 programme was for: the
+    // `validateSecurityPosture` entry (12 rule ids — `security-role-word` is
+    // its own entry now, see below) declares all four mapped types.
+    // `permission`/`book` measured ZERO refusals when they crossed (PR
+    // #8546); `object` crosses under the #8310 maintainer ruling with the
+    // red suites repaired honestly (fixtures author their `sharingModel`).
     expect(ENTRY.surfaces).toEqual(['cli', 'runtime-publish']);
-    expect(ENTRY.runtimeTypes).toEqual(['seed', 'permission', 'book']);
-    for (const type of ['seed', 'permission', 'book']) {
+    expect(ENTRY.runtimeTypes).toEqual(['seed', 'permission', 'book', 'object']);
+    for (const type of ['seed', 'permission', 'book', 'object']) {
       expect(
         runtimeAuthoringRulesFor(type).map((r) => r.name),
         `'${type}' writes must reach this block at the door`,
@@ -193,26 +193,46 @@ describe('validateSecurityPosture at the runtime publish surface (#7576 → #830
     }
   });
 
-  it("[#8310] object still reaches no rule — measured dirty, escalated, NOT silently crossed", () => {
-    // The re-measurement this card ran (#4001: demonstrated, never assumed):
-    // with `object` declared, `@objectstack/metadata-protocol` is fully green
-    // (#8308's seed repair killed the old 26-refusal blocker) and the corpus
-    // replays clean — but `@objectstack/objectql` fails 83 tests across 13
-    // files (every one `security-owd-unset`) and `@objectstack/rest` fails 12
-    // across 3, including #7674's pins of the ADR-0094 403
-    // `owd_external_wider` door this 422 gate would preempt, and of "a write
-    // with NO OWD keys at all saves". Declaring `object` is therefore a
-    // contract decision (which door answers; is an unauthored OWD a refusal),
-    // escalated on #8310. A future declaration is a deliberate edit to THIS
-    // test, with that decision in hand.
-    expect(ENTRY.runtimeTypes).not.toContain('object');
-    expect(runtimeAuthoringRulesFor('object')).toEqual([]);
+  it('[#8310] an OWD-less object publish is REFUSED at the real gate — absence is not a decision', () => {
+    // The object crossing pin, same shape as the permission/book pins: the
+    // maintainer-ruled strictness itself. An object write with no authored
+    // `sharingModel` is refused by `security-owd-unset` at the REAL runtime
+    // gate — the body `METADATA_CREATE_SEEDS.object` carried before #8308.
     const real = runRuntimeAuthoringRules({
       type: 'object',
-      item: { name: 'new_object', label: 'New Object', fields: {} }, // would trip owd-unset if gated
+      item: { name: 'new_object', label: 'New Object', fields: {} },
+    });
+    expect(real.errors.map((f) => f.rule)).toEqual([SECURITY_OWD_UNSET]);
+    expect(real.errors[0].severity).toBe('error');
+    expect(real.errors[0].path).toBe('objects[0].sharingModel');
+    expect(real.rulesRun).toContain('validateSecurityPosture');
+
+    // And the same write with the OWD authored is clean — the refusal is
+    // about the missing decision, not about object writes as such.
+    const clean = runRuntimeAuthoringRules({
+      type: 'object',
+      item: { name: 'new_object', label: 'New Object', sharingModel: 'private', fields: {} },
+    });
+    expect(clean.errors).toEqual([]);
+    expect(clean.advisories).toEqual([]);
+  });
+
+  it('[#8310] the R2-retirement boundary: a SYSTEM object with unset OWD is not refused at this door', () => {
+    // The one active-path shape the retired plugin-gate R2 refused that this
+    // door does not: a system object (`isSystem` / `sys_*`) with no authored
+    // `sharingModel` and an explicit external side. Deliberate, not a gap:
+    // `security-owd-unset` exempts system objects because their runtime
+    // default is PUBLIC (`effectiveSharingModel`, plugin-sharing) — R2's
+    // hardcoded private baseline misread that default, so its refusal here
+    // was a false positive, which is exactly why the #8310 ruling could
+    // retire it as duplicate. A deliberate edit to THIS pin is required to
+    // change that boundary.
+    const real = runRuntimeAuthoringRules({
+      type: 'object',
+      item: { name: 'sys_probe', label: 'Probe', externalSharingModel: 'public_read', fields: {} },
     });
     expect(real.errors).toEqual([]);
-    expect(real.rulesRun, 'no rule runs for an object write — clean by absence, not by verdict').toEqual([]);
+    expect(real.rulesRun).toContain('validateSecurityPosture');
   });
 
   it("[#8310] position / app still reach no rule — role-word's residue, not an oversight", () => {
@@ -292,51 +312,50 @@ describe('validateSecurityPosture at the runtime publish surface (#7576 → #830
     expect(stackKeyForType('seed')).toBe('data');
   });
 
-  it('an OWD-less object write WOULD be refused — the strictness the escalation is about', () => {
-    // The body `METADATA_CREATE_SEEDS.object` carried BEFORE #8308: name,
-    // label, fields — and no `sharingModel`. Kept literal as the would-be
-    // refusal's positive control, through the gate's OWN snapshot builder
-    // (the type is not declared, so the real gate cannot be asked).
+  it('the builder mirror agrees with the real gate on the object refusal — parity, not duplication', () => {
+    // `wouldGateAdd` (the gate's OWN snapshot builder, this block in
+    // isolation) and the real gate must attribute the same finding to the
+    // same OWD-less write, now that `object` is declared and both are
+    // askable.
     const added = wouldGateAdd('object', { name: 'new_object', label: 'New Object', fields: {} });
     expect(added.map((f) => f.rule)).toEqual([SECURITY_OWD_UNSET]);
-    expect(added[0].severity).toBe('error');
-    expect(added[0].path).toBe('objects[0].sharingModel');
-
-    // And the same write with the OWD authored would be clean, so the refusal
-    // is about the missing decision and not about object writes as such.
-    expect(
-      wouldGateAdd('object', { name: 'new_object', label: 'New Object', sharingModel: 'private', fields: {} }),
-    ).toEqual([]);
+    const real = runRuntimeAuthoringRules({
+      type: 'object',
+      item: { name: 'new_object', label: 'New Object', fields: {} },
+    });
+    expect(real.errors.map((f) => f.rule)).toEqual(added.map((f) => f.rule));
   });
 
-  it('[#8308] the REAL create seed would be clean at this gate — blocker A repaired, re-measured', () => {
+  it('[#8308] the REAL create seed is clean at the real gate — blocker A repaired, still holding', () => {
     // The platform's own minimal create body AUTHORS its OWD
     // (`sharingModel: 'private'` — the measured runtime default, ADR-0090 D1 /
-    // `effectiveSharingModel` in plugin-sharing), so the gate the escalation
-    // would register for `object` refuses nothing on the platform's own
-    // create path — the fallout that was 26 refusals across 8 suite files
-    // before #8308 is measured ZERO on the repaired tree. Consumed from the
-    // seed registry, not re-spelled, so a seed regression re-opens THIS pin
-    // rather than passing silently.
+    // `effectiveSharingModel` in plugin-sharing), so the gate this card
+    // registered for `object` refuses nothing on the platform's own create
+    // path — the fallout that was 26 refusals across 8 suite files before
+    // #8308 is measured ZERO. Consumed from the seed registry, not
+    // re-spelled, so a seed regression re-opens THIS pin rather than passing
+    // silently.
     const seed = getMetadataCreateSeed('object') as AnyRec;
     expect(seed.sharingModel).toBe('private');
-    expect(wouldGateAdd('object', seed)).toEqual([]);
+    const real = runRuntimeAuthoringRules({ type: 'object', item: seed });
+    expect(real.errors).toEqual([]);
+    expect(real.rulesRun).toContain('validateSecurityPosture');
   });
 
-  it('a clean object write would not be blamed for the context\'s pre-existing defects', () => {
-    // The differential's D4 promise, pre-verified for the day `object`
-    // crosses: a clean object write against a universe that ALREADY carries
-    // an OWD-less object must not inherit that finding — it fires identically
-    // in both passes and cancels. Without this, one legacy row would block
-    // every future publish.
+  it('a clean object write is not blamed for the context\'s pre-existing defects', () => {
+    // The differential's D4 promise, now live at the real gate: a clean
+    // object write against a universe that ALREADY carries an OWD-less
+    // object must not inherit that finding — it fires identically in both
+    // passes and cancels. Without this, one legacy row would block every
+    // future publish.
     const legacyContext = [{ name: 'legacy_thing', label: 'Legacy', fields: {} }]; // no sharingModel
-    expect(
-      wouldGateAdd(
-        'object',
-        { name: 'new_object', label: 'New Object', sharingModel: 'private', fields: {} },
-        { objects: legacyContext },
-      ),
-    ).toEqual([]);
+    const real = runRuntimeAuthoringRules({
+      type: 'object',
+      item: { name: 'new_object', label: 'New Object', sharingModel: 'private', fields: {} },
+      context: { objects: legacyContext },
+    });
+    expect(real.errors).toEqual([]);
+    expect(real.advisories).toEqual([]);
   });
 
   it('[#8309→#8310] a permission-set write AGREES with the whole-stack verdict at the real gate', () => {

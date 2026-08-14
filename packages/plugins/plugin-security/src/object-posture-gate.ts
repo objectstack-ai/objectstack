@@ -6,10 +6,8 @@
  * Registered on the metadata protocol's pre-persistence authoring-gate seam
  * (ADR-0094 addendum; `registerAuthoringGate`), so it fires on EVERY
  * runtime-authored object body — Studio drafts, direct REST saves, AI
- * builders — regardless of which HTTP surface produced the write. It closes
- * the two posture rules that were previously CLI-lint-only
- * (`packages/lint/src/validate-security-posture.ts` runs at `os compile` /
- * `os lint`, never on `saveMetaItem`):
+ * builders — regardless of which HTTP surface produced the write. It carries
+ * ONE rule:
  *
  *  - **R1 — env-tighten-only (ADR-0086 D1, ADR-0049).** An environment write
  *    over a PACKAGED object (artifact-backed — reachable only via the
@@ -17,11 +15,24 @@
  *    `allowOrgOverride:false`) may not set `sharingModel` /
  *    `externalSharingModel` WIDER than the packaged declaration. Widening
  *    legitimately = author it in the package source and publish (ADR-0090
- *    D7), never an env overlay.
- *  - **R2 — external ≤ internal (ADR-0090 D11).** Any object write must keep
- *    `externalSharingModel` no wider than `sharingModel`. Previously stated
- *    only in `.describe()` prose (`object.zod.ts`) and the lint rule
- *    `SECURITY_EXTERNAL_WIDER`.
+ *    D7), never an env overlay. No lint rule covers this comparison — it
+ *    needs the packaged DECLARATION, a deployment fact only this seam holds.
+ *
+ * **R2 (`owd_external_wider`, external ≤ internal, ADR-0090 D11) is RETIRED
+ * from this gate** — maintainer ruling on #8310 (2026-08-13): duplicate of
+ * the runtime lint door. Since `AUTHORING_RULES` declares `object` in
+ * `validateSecurityPosture`'s `runtimeTypes`, every active-state object
+ * publish is judged by the D7 lint block FIRST (`saveMetaItem` runs
+ * `assertRuntimeAuthoringRules` before `runAuthoringGate`), which refuses
+ * the same defect as 422 `security-external-wider-than-internal` — and
+ * refuses an unset `sharingModel` outright (422 `security-owd-unset`:
+ * absence is not a decision), which is stricter than R2's private-default
+ * comparison. R2's only non-shadowed refusals were false positives: a
+ * system object (`isSystem` / `sys_*`) with no authored `sharingModel` is
+ * effectively PUBLIC at runtime (`effectiveSharingModel`, plugin-sharing),
+ * so R2's hardcoded private baseline refused pairs that are not actually
+ * external-wider; and draft-state saves, which the lint discipline
+ * deliberately defers to the draft→active promotion gate (#4463 D1).
  *
  * Deliberately write-path only — no zod refine, so grandfathered stored
  * metadata keeps loading (the ADR-0090 D1 lesson: never change behavior of
@@ -63,8 +74,10 @@ export interface ObjectPostureGateContext {
 }
 
 /**
- * The gate. Throws 403 `owd_external_wider` / `owd_widening_forbidden` to
- * reject the write; returns silently when the body passes.
+ * The gate. Throws 403 `owd_widening_forbidden` to reject the write; returns
+ * silently when the body passes. (R2 `owd_external_wider` retired — #8310
+ * ruling; the external ≤ internal ordering is refused upstream by the 422
+ * runtime lint door, see the header.)
  */
 export function objectPostureGate(ctx: ObjectPostureGateContext): void {
   const body = ctx.body as Record<string, unknown> | null;
@@ -74,21 +87,6 @@ export function objectPostureGate(ctx: ObjectPostureGateContext): void {
   const external = body['externalSharingModel'];
   const wInternal = widthOf(internal);
   const wExternal = widthOf(external);
-
-  // R2 — ADR-0090 D11: external ≤ internal. Both sides must be orderable
-  // canonical scalars; `controlled_by_parent` (or an unset side) is skipped,
-  // mirroring the lint's SECURITY_EXTERNAL_WIDER rule. An unset internal on
-  // a custom object resolves to `private` at runtime (ADR-0090 D1), so an
-  // explicit external wider than that is also caught.
-  const wInternalEffective = wInternal ?? (internal == null ? OWD_WIDTH['private'] : undefined);
-  if (wExternal !== undefined && wInternalEffective !== undefined && wExternal > wInternalEffective) {
-    throw postureError(
-      'owd_external_wider',
-      `object/${ctx.name}: externalSharingModel '${String(external)}' is wider than sharingModel `
-      + `'${String(internal ?? 'private (default)')}' — external must be ≤ internal (ADR-0090 D11). `
-      + `Tighten externalSharingModel or widen sharingModel in the object definition.`,
-    );
-  }
 
   // R1 — ADR-0086 D1: an environment may only TIGHTEN a packaged object's
   // posture. Applies only to overlay writes over an artifact-backed object
