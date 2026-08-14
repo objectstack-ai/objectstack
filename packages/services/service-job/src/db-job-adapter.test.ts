@@ -4,6 +4,11 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { scheduledJobs } from 'croner';
 import { DbJobAdapter } from './db-job-adapter.js';
 import { CronJobAdapter } from './cron-job-adapter.js';
+import {
+  NEVER_FIRES_SCHEDULE as CRON,
+  expectFixtureCannotFire,
+  expectInertRegistration,
+} from './never-fires.fixture.js';
 
 function makeFakeEngine() {
   const tables = new Map<string, any[]>();
@@ -167,7 +172,16 @@ describe('DbJobAdapter — kernel rebuild (#8362)', () => {
   const registeredFor = (jobName: string) =>
     scheduledJobs.filter((j) => (j.name ?? '').endsWith(jobName));
 
-  const DAILY = { type: 'cron', expression: '0 8 * * *' } as const;
+  /**
+   * These cases inject a REAL CronJobAdapter, so `schedule()` builds a REAL
+   * croner job. They scheduled on a daily expression, whose one instant a day
+   * is a window the exact-count assertion below (`fired`) straddles just as an
+   * every-minute expression's is — 1440x rarer, same defect. The inert fixture
+   * removes the schedule entirely; see `never-fires.fixture.ts`.
+   */
+  it('the shared cron fixture cannot fire on its own', () => {
+    expectFixtureCannotFire(CRON.expression);
+  });
 
   /** One kernel's job-service wiring: the pair JobServicePlugin builds. */
   function kernel() {
@@ -178,7 +192,8 @@ describe('DbJobAdapter — kernel rebuild (#8362)', () => {
   it('destroy() destroys the CRON adapter too, freeing the process-global name', async () => {
     const NAME = 'flow-time-relative:xqao_contract_expiry_reminder_flow';
     const k = kernel();
-    await k.db.schedule(NAME, DAILY, async () => {});
+    await k.db.schedule(NAME, CRON, async () => {});
+    expectInertRegistration(k.cron, NAME);
 
     const [job] = registeredFor(NAME);
     expect(job, 'the first bind must register a REAL croner named job').toBeDefined();
@@ -197,7 +212,8 @@ describe('DbJobAdapter — kernel rebuild (#8362)', () => {
     const fired: string[] = [];
 
     const old = kernel();
-    await old.db.schedule(NAME, DAILY, async () => { fired.push('old-kernel'); });
+    await old.db.schedule(NAME, CRON, async () => { fired.push('old-kernel'); });
+    expectInertRegistration(old.cron, NAME);
     // Assert the FIRST bind landed before asserting anything about the second.
     expect(registeredFor(NAME)).toHaveLength(1);
     const oldJob = registeredFor(NAME)[0];
@@ -205,7 +221,8 @@ describe('DbJobAdapter — kernel rebuild (#8362)', () => {
     await old.db.destroy(); // kernel evicted by the freshness probe
 
     const rebuilt = kernel();
-    await rebuilt.db.schedule(NAME, DAILY, async () => { fired.push('new-kernel'); });
+    await rebuilt.db.schedule(NAME, CRON, async () => { fired.push('new-kernel'); });
+    expectInertRegistration(rebuilt.cron, NAME);
 
     const held = registeredFor(NAME);
     expect(held).toHaveLength(1); // exactly once — not one live + one zombie
