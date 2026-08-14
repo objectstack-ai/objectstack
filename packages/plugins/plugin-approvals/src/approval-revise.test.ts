@@ -37,6 +37,7 @@ function makeFakeEngine() {
   const tables = new Map<string, any[]>();
   const rows = (o: string) => (tables.get(o) ?? (tables.set(o, []), tables.get(o)!));
   const matches = (row: any, where: any) => Object.entries(where ?? {}).every(([k, v]) => {
+    if (k.startsWith('$')) throw new Error(`fake engine: unsupported filter operator ${k}`);
     if (v && typeof v === 'object' && '$in' in (v as any)) return (v as any).$in.includes(row[k]);
     if (v && typeof v === 'object' && '$ne' in (v as any)) return row[k] !== (v as any).$ne;
     return row[k] === v;

@@ -41,6 +41,7 @@ const rowKey = (w: Record<string, unknown>) =>
 
 const matchesWhere = (row: Record<string, unknown>, where: Record<string, unknown>) =>
     Object.entries(where ?? {}).every(([k, v]) => {
+        if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
         if (v === null) return row[k] === null || row[k] === undefined;
         return row[k] === v;
     });

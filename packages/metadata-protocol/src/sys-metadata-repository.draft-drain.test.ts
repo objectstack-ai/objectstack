@@ -80,7 +80,10 @@ function makeFakeEngine() {
   };
 
   const matchesHistory = (h: Row, where: Record<string, unknown>): boolean =>
-    Object.entries(where).every(([k, v]) => v === undefined || h[k] === v);
+    Object.entries(where).every(([k, v]) => {
+      if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+      return v === undefined || h[k] === v;
+    });
 
   return {
     rows,

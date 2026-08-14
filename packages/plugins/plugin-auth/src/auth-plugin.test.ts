@@ -1018,7 +1018,10 @@ describe('AuthPlugin', () => {
         sys_organization: [],
       };
       const matches = (row: any, where: any) =>
-        Object.entries(where ?? {}).every(([k, v]) => (v === null ? row[k] == null : row[k] === v));
+        Object.entries(where ?? {}).every(([k, v]) => {
+          if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+          return v === null ? row[k] == null : row[k] === v;
+        });
       return {
         tables,
         registerMiddleware: (mw: any) => middlewares.push(mw),
@@ -1131,7 +1134,10 @@ describe('AuthPlugin', () => {
         sys_organization: [],
       };
       const matches = (row: any, where: any) =>
-        Object.entries(where ?? {}).every(([k, v]) => (v === null ? row[k] == null : row[k] === v));
+        Object.entries(where ?? {}).every(([k, v]) => {
+          if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+          return v === null ? row[k] == null : row[k] === v;
+        });
       return {
         tables,
         registerMiddleware: vi.fn(),

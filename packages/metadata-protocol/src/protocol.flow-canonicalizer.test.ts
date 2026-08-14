@@ -58,6 +58,7 @@ const canonicalizeStoredFlow = (_name: string, body: any) => {
 function matches(r: Record<string, any>, where: Record<string, unknown>): boolean {
     for (const [k, v] of Object.entries(where)) {
         if (v === undefined) continue;
+        if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
         if ((r[k] ?? null) !== v) return false;
     }
     return true;
