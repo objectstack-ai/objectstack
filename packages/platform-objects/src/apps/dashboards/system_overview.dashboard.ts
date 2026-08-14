@@ -13,7 +13,7 @@ import { Dashboard } from '@objectstack/spec/ui';
  *
  * Layout (4 rows on a 12-col grid):
  *   1. Platform KPIs       — users / orgs / sessions / packages
- *   2. Security KPIs       — login / permission / config audit counts
+ *   2. Security KPIs       — login / config audit counts
  *   3. Distribution charts — audit events by action + by user
  *   4. Recent audit events table
  *
@@ -134,32 +134,45 @@ export const SystemOverviewDashboard = Dashboard.create({
     // successful logins (both fold into `action='login'`). Surfacing a
     // total Login Events count is honest; a "Failed Logins" widget will
     // need a richer enum or a separate detail field first.
+    //
+    // This row carried a THIRD tile, "Permission Changes", filtering
+    // `action: 'permission_change'`. It is gone, and no replacement tile takes
+    // its place. The value had no writer anywhere in the repo — the only two
+    // `sys_audit_log` writers are plugin-audit's generic hook (whose `actionFor`
+    // maps afterInsert/Update/Delete to create/update/delete and nothing else)
+    // and plugin-auth's admin user-import — so the tile read `0` on every
+    // deployment that has ever existed, and then its action value was retired
+    // from the enum outright, leaving a filter no row can ever match. An empty
+    // widget on a COMPLIANCE surface is worse than a missing one: an auditor
+    // reading "Permission Changes: 0" concludes the platform watched for them
+    // and found none, which is false. 审计面宁窄勿谎 — a narrow audit surface
+    // beats a lying one.
+    //
+    // Not replaced by a refiltered tile, deliberately: permission and role
+    // edits ARE captured, as ordinary `create`/`update` rows on the permission
+    // objects written by the generic hook, so the honest lens on them is
+    // `object_name` on the audit list view — a row-level question, not a
+    // single-number KPI. Inventing a tile that approximates it here would put
+    // a second not-quite-true number on the same board.
+    //
+    // The two survivors split the 12-col row in half (the Row 3 shape) rather
+    // than leaving a 4-col hole where the removed tile sat.
     {
       id: 'widget_login_events',
       dataset: 'sys_audit_log_metrics', values: ['event_count'],
       title: 'Login Events',
       type: 'metric',
-      layout: { x: 0, y: 2, w: 4, h: 2 },
+      layout: { x: 0, y: 2, w: 6, h: 2 },
       filter: { action: 'login' },
       colorVariant: 'blue',
       description: 'Authentication events recorded by the audit log',
-    },
-    {
-      id: 'widget_permission_changes',
-      dataset: 'sys_audit_log_metrics', values: ['event_count'],
-      title: 'Permission Changes',
-      type: 'metric',
-      layout: { x: 4, y: 2, w: 4, h: 2 },
-      filter: { action: 'permission_change' },
-      colorVariant: 'warning',
-      description: 'Recent permission and role modifications',
     },
     {
       id: 'widget_config_changes',
       dataset: 'sys_audit_log_metrics', values: ['event_count'],
       title: 'Config Changes',
       type: 'metric',
-      layout: { x: 8, y: 2, w: 4, h: 2 },
+      layout: { x: 6, y: 2, w: 6, h: 2 },
       filter: { action: 'config_change' },
       colorVariant: 'blue',
       description: 'System configuration modifications',
@@ -195,7 +208,10 @@ export const SystemOverviewDashboard = Dashboard.create({
     {
       id: 'widget_recent_events',
       title: 'Audit Events by Action',
-      description: 'Event volume grouped by action (login, permission, config, …)',
+      // The example actions named here have to be actions the platform can
+      // actually emit — this string used to lead with `permission`, which
+      // advertised the retired value from a second place on the same board.
+      description: 'Event volume grouped by action (login, logout, config, …)',
       type: 'table',
       dataset: 'sys_audit_log_metrics',
       dimensions: ['action'],

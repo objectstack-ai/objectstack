@@ -238,7 +238,6 @@ describe('the dashboard filter the Row 1 inventory tiles opt out of', () => {
   it('still reaches every audit widget', () => {
     const auditWidgets = [
       'widget_login_events',
-      'widget_permission_changes',
       'widget_config_changes',
       'widget_events_by_type',
       'widget_events_by_user',
@@ -247,6 +246,64 @@ describe('the dashboard filter the Row 1 inventory tiles opt out of', () => {
     for (const id of auditWidgets) {
       expect(widgetById(id).filterBindings?.created_at, `${id} must stay windowed`).not.toBe(false);
     }
+  });
+});
+
+// ── Tombstone: no tile filters on a retired action value ────────────────────
+//
+// The board carried a "Permission Changes" tile filtering
+// `action: 'permission_change'` for its whole life. Nothing ever wrote that
+// value — the only two `sys_audit_log` writers are plugin-audit's generic hook
+// (`actionFor` maps afterInsert/Update/Delete to create/update/delete and
+// nothing else) and plugin-auth's admin user-import — so the tile reported `0`
+// on every deployment that has ever existed, and the value was then retired
+// from the enum outright. `export` retired alongside it.
+//
+// This is the same defect class as the rest of this file, one level up: not "the
+// query answers a different question from the label" but "the query can answer
+// nothing at all, under a label that implies it did". On a COMPLIANCE board the
+// empty tile is the more dangerous of the two — "Permission Changes: 0" reads as
+// a negative finding, not as an absent feature.
+//
+// ⚠️ `import` is NOT on this list and must not be added. It was named in the
+// same ruling but survives with a live writer (plugin-auth's admin user-import
+// writes a run-level row) and a shipped list view that filters it. Retiring it
+// from the UI while the platform still emits it would produce the inverse defect
+// — an action that can be written but not found.
+//
+// Why hard-coded rather than diffed against the enum: `sys_audit_log` lives in
+// `@objectstack/plugin-audit`, which this package does not depend on (the audit
+// objects moved OUT of here under ADR-0029 K2/D8) — and it must not start
+// depending on it for a test. Hard-coded ids checked one by one is the same
+// disposition `setup-nav-dead-key-tombstone.test.ts` records for the same
+// reason.
+describe('retired `sys_audit_log.action` values are gone from the board', () => {
+  const RETIRED_ACTIONS = ['permission_change', 'export'];
+
+  const actionFilterOf = (w: { filter?: FilterCondition }): unknown =>
+    (w.filter as Record<string, unknown> | undefined)?.action;
+
+  it('no widget filters on one', () => {
+    const offenders = (board.widgets ?? [])
+      .filter((w) => RETIRED_ACTIONS.includes(String(actionFilterOf(w))))
+      .map((w) => `${w.id} → action=${String(actionFilterOf(w))}`);
+    expect(offenders, 'widgets filtering a retired audit action').toEqual([]);
+  });
+
+  it('and the removed tile itself is not back', () => {
+    expect((board.widgets ?? []).map((w) => w.id)).not.toContain('widget_permission_changes');
+  });
+
+  // Opposite direction. Both assertions above also pass on a board with no
+  // widgets, or if `filter.action` stopped being where a tile's action
+  // predicate lives — in which case they would be pinning nothing at all. A
+  // LIVE action filter must still be visible through exactly the same read.
+  it('opposite direction — a live action filter is still found by the same read', () => {
+    const live = (board.widgets ?? [])
+      .map((w) => actionFilterOf(w))
+      .filter((a): a is string => typeof a === 'string');
+    expect(live, 'the board still filters on live actions').toContain('login');
+    expect(live).toContain('config_change');
   });
 });
 
