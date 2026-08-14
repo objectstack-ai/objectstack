@@ -268,10 +268,11 @@ export function getMetadataTypeSchema(type: string): z.ZodType | undefined {
 /**
  * Register (or replace) the canonical Zod schema for a metadata type.
  *
- * Plugins that introduce custom metadata types — declared through
- * `additionalTypes` on `MetadataPluginConfig` — should call this from their
+ * Plugins that introduce custom metadata types should call this from their
  * plugin's **`init(ctx)`**, so `GET /api/v1/meta` starts emitting a real JSON
- * Schema for them. Idempotent.
+ * Schema for them. Idempotent. (This used to say the type is "declared
+ * through `additionalTypes` on `MetadataPluginConfig`" — that key never had a
+ * reader and was retired by #8586, ADR-0049.)
  *
  * This used to say "from their `onInstall` hook", pointing at a hook that
  * never ran (#4212). The kernel's `Plugin` contract is `init` / `start` /
@@ -286,8 +287,12 @@ export function getMetadataTypeSchema(type: string): z.ZodType | undefined {
  * NOTE — registering a schema alone does not make a type appear in the
  * listing. `getMetaTypes()` enumerates types from the engine registry and the
  * metadata service, then decorates each with its schema; a type present here
- * but in neither of those is not reached. Register the type as well as its
- * schema.
+ * but in neither of those is not reached. There is no declared-kind channel
+ * to register the type through (#8586 retired the inert `additionalTypes`):
+ * a kind enters the live set as a side effect of registering an ITEM of that
+ * kind (`SchemaRegistry.registerItem` during app/manifest registration, or
+ * `MetadataManager.register` at runtime), which is what #6245's schema-only
+ * bindings for `webhook` / `connector` / `sharing_rule` rely on.
  */
 export function registerMetadataTypeSchema(type: string, schema: z.ZodType): void {
   EXTRA_METADATA_TYPE_SCHEMAS.set(type, schema);

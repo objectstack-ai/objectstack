@@ -4373,8 +4373,10 @@ export class ObjectStackProtocolImplementation implements
      *    MetadataManager knows. Its `typeRegistry` is seeded with
      *    `DEFAULT_METADATA_TYPE_REGISTRY` in the manager's constructor, so
      *    early in boot this source contributes only declared types; it grows
-     *    later (artifact load, `additionalTypes`) and is read for the types
-     *    the SchemaRegistry has not been told about.
+     *    later as items are registered (artifact load, runtime `register()`)
+     *    and is read for the types the SchemaRegistry has not been told
+     *    about. (This comment used to also name `additionalTypes` as a growth
+     *    path — that key never had a reader and was retired by #8586.)
      *
      * Extracted from {@link getMetaTypes} rather than copied: the listing and
      * {@link reportUnhydratableOrgScopedRows} must answer "which types exist
