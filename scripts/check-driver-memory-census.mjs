@@ -376,7 +376,12 @@ export function reconcile(scan, ledger, read = (f) => readFileSync(join(ROOT, f)
           : '')
         + ' A new arrival is not a bookkeeping chore: it is the #6664 defect itself. Do NOT add an entry to make '
         + 'this green if the answer is "this should have been migrated" — take the disposition through the '
-        + 'process #5704 / #6664 record (rule it, migrate it, or file it), then write down what was decided.',
+        + 'process #5704 / #6664 record (rule it, migrate it, or file it), then write down what was decided.'
+        // The REASON for that refusal, in the text the author actually reads (#8576).
+        // Mirrors this file's own header verbatim rather than restating it: one rule in
+        // two voices becomes two rules by the next reading.
+        + ' "Is this consumer legitimate?" is a maintainer ruling (#5704 Q2, #6664 A) and this gate is the '
+        + 'bookkeeping under it, not a second opinion on it.',
     );
   }
   // LIVE — bindings
@@ -580,6 +585,11 @@ function selfTest() {
   arrival.bindings.push({ file: 'p/new.test.ts', kind: 'import', line: 2, specifier: SPECIFIER });
   let ps = reconcile(arrival, okLedger(), readFrom({ [ruledFile]: textOk(), 'p/new.test.ts': '' }));
   expect('an unledgered arrival is a finding', ps.some((p) => p.startsWith('LEDGERED:') && p.includes('p/new.test.ts')));
+  // #8576. The refusal above turns the bookkeeping remedy down; this pins that it
+  // also says WHOSE call the disposition is, in the text the author reads.
+  // Asserted on the planted arrival — the string only ever prints on failure.
+  expect('the LEDGERED refusal states whose call the disposition is, not just that it is refused',
+    ps.some((p) => p.startsWith('LEDGERED:') && p.includes('is a maintainer ruling')));
 
   // The mirror: a ledger entry whose consumer was migrated away.
   ps = reconcile({ bindings: [], mentions: [], manifests: [] }, okLedger(), readFrom({ [ruledFile]: textOk() }));

@@ -104,7 +104,9 @@ export const SysWebhook = ObjectSchema.create({
       label: 'Name',
       required: true,
       maxLength: 100,
-      description: 'Unique snake_case name — referenced in logs and audit',
+      // [#8554] "unique per organization", not bare "unique" — the bare wording
+      // described the installation-wide index this card removed.
+      description: 'snake_case name, unique per organization — referenced in logs and audit',
       group: 'Definition',
     }),
 
@@ -301,7 +303,14 @@ export const SysWebhook = ObjectSchema.create({
   },
 
   indexes: [
-    { fields: ['name'], unique: true },
+    // [#8554] Scope spelled EXPLICITLY (ADR-0120 D1). On a DECLARED index bare
+    // `unique: true` is the positional spelling of `'global'` — the listed
+    // columns verbatim — so this was an installation-wide key on a tenant-scoped
+    // object. Measured live before the fix: org_jia 201 / org_yi 409
+    // UNIQUE_VIOLATION on the same name / org_yi unused name 201 / org_yi's own
+    // GET on the colliding name 0 rows. Webhooks are named by admins from the
+    // UI, so two organizations both wanting `order_created_hook` is ordinary.
+    { fields: ['name'], unique: 'organization' },
     { fields: ['object_name'] },
     { fields: ['active', 'object_name'] },
   ],

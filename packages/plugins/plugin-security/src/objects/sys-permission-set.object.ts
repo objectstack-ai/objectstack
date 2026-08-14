@@ -83,7 +83,10 @@ export const SysPermissionSet = ObjectSchema.create({
       refreshAfter: true,
       params: [
         { name: 'label', label: 'New Display Name', type: 'text', required: true },
-        { name: 'name', label: 'New API Name', type: 'text', required: true, helpText: 'Unique snake_case machine name' },
+        // [#8554] The clone dialog is the exact moment an admin types a NEW
+        // name, so the scope has to be right here — a bare "Unique" tells the
+        // author the name is taken installation-wide when it is not.
+        { name: 'name', label: 'New API Name', type: 'text', required: true, helpText: 'snake_case machine name, unique per organization' },
         { field: 'description', defaultFromRow: true },
         { field: 'object_permissions', defaultFromRow: true },
         { field: 'field_permissions', defaultFromRow: true },
@@ -140,10 +143,12 @@ export const SysPermissionSet = ObjectSchema.create({
       required: true,
       searchable: true,
       maxLength: 100,
+      // [#8554] "unique per organization", not bare "unique". The bare wording
+      // described the installation-wide index this card removed.
       description:
-        'Unique machine name for the permission set. This is the set’s metadata identity ' +
-        '(ADR-0094) and cannot be changed after creation — the data door rejects a rename; ' +
-        'clone the set to a new name instead.',
+        'Machine name for the permission set, unique per organization. This is the set’s ' +
+        'metadata identity (ADR-0094) and cannot be changed after creation — the data door ' +
+        'rejects a rename; clone the set to a new name instead.',
       // [ADR-0094] The name is the metadata key the record projects from, so it
       // is immutable once the record exists. `record.id` is server-assigned:
       // absent on the create form (editable), present on edit (locked). The
@@ -289,7 +294,15 @@ export const SysPermissionSet = ObjectSchema.create({
   },
 
   indexes: [
-    { fields: ['name'], unique: true },
+    // [#8554] Scope spelled EXPLICITLY (ADR-0120 D1). On a DECLARED index bare
+    // `unique: true` is the positional spelling of `'global'` — the listed
+    // columns verbatim — so this was an installation-wide key on a tenant-scoped
+    // object. Measured live before the fix, two organizations and the same name:
+    // org_jia 201 / org_yi 409 UNIQUE_VIOLATION / org_yi unused name 201 /
+    // org_yi's own GET on the colliding name 0 rows. A per-value refusal on a
+    // row the caller cannot read is the #8323 cross-tenant existence oracle, and
+    // two tenants could not both name a set `sales_readonly`.
+    { fields: ['name'], unique: 'organization' },
     { fields: ['active'] },
     // ADR-0086 D3 — uninstall/upgrade query: "this package's own sets".
     { fields: ['package_id'] },

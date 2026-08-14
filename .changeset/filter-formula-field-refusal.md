@@ -5,6 +5,16 @@
 
 fix(filter): a `where` on a virtual `formula` field is refused, not answered with zero rows (#8296)
 
+**BREAKING** — this is a public API contract change on the query engine, not a
+plain bug fix: a `where` on a `formula` field used to succeed (with the wrong
+answer) and now throws. Every call site that reaches `assertFilterIsMaterializable`
+— `engine.find`, `findOne`, `count`, `aggregate`, `update`, `delete` — can newly
+raise `400 INVALID_FIELD` for input it previously accepted with a `200`. Graded
+`minor`, not `major`: every publishable package sits in the Changesets `fixed`
+lockstep group during the launch window (`scripts/check-changeset-no-major.mjs`),
+so a `major` here would promote the whole ~70-package stack for one engine seam.
+See "What to change if this refuses one of your queries" below for the fix.
+
 `formula` is the one field type no driver materialises a column for. Three query
 axes can name a field; until now only two of them said so.
 
@@ -81,3 +91,5 @@ filtering a formula answering 0 rows with no error. It now asserts the
 formula still cannot be filtered. The first sweep read app source only, which is
 the wrong half: current behaviour is pinned in tests, so a behaviour change lands
 there first.
+
+<!-- adr-0087: not-required (no-migration-prescription) this is a runtime query-validation behavior change, not a spec/metadata key rename or removal -- no field, key or stored value moves, so there is nothing for the migration ledger or `objectstack migrate meta` to register. The guidance above (denormalise onto a stored field and filter that) is behavioral advice for API consumers, not a mechanical rewrite of stored metadata. -->

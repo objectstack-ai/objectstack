@@ -68,7 +68,13 @@ branch-early、draft-PR 时点报告、transcript 复活与 worktree 接手协�
 `fire_trigger` + 用后即 `delete_trigger`);巡检退为兜底心跳,每轮先核订阅已覆盖哪
 些面、只补盲区(会话停摆、未开 PR 的分支、姊妹仓动静)。CCR 云会话不注册跨会话消息
 roster —— `ListAgents` 列不到、`SendMessage` 直投 not-reachable 是设计而非故障(维
-护者 2026-08-11 裁定:事件驱动架构即长期方案),⛔ 不复测 roster 路径。
+护者 2026-08-11 裁定:事件驱动架构即长期方案),⛔ 不复测 roster 路径。会话句柄同
+时是**账号作用域**的:`get_session` / `archive_session` / 绑会话的 poke 触发器,对
+另一个账号建的会话一律答 `not found`,且该回答与「会话从不存在」在响应里不可区分
+—— **⛔ 永不把它读作死亡信号**(误判死会招来往可能还活着的 worktree 里塞第二个
+agent);实测另一账号读作 `not found` 的会话,其 PM 在数十分钟前刚读到它
+RUNNING。跨账号接班时前任的会话三条路都不可达,活性判定只能走 GitHub 上的产出读
+数;draft-PR 时点交报的契约正是为此存在 —— 报告落在卡上,无需探活即可收口。
 
 ## subagent 批(`mode:subagent`)派发前置:先快进本地检出
 

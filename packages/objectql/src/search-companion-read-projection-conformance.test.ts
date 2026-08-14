@@ -88,8 +88,17 @@ function makeStoreDriver(): { driver: unknown } & StoreDriver {
   const matches = (row: Row, where: Record<string, unknown> | undefined): boolean => {
     if (!where) return true;
     for (const [k, v] of Object.entries(where)) {
-      if (k === '$and') return (v as Array<Record<string, unknown>>).every((w) => matches(row, w));
-      if (k === '$or') return (v as Array<Record<string, unknown>>).some((w) => matches(row, w));
+      // `$and` / `$or` are CONJOINED with their sibling keys, the way a real
+      // driver reads them — never `return`ed, which would discard every
+      // sibling the loop has not reached yet (#7620 / #8494).
+      if (k === '$and') {
+        if (!(v as Array<Record<string, unknown>>).every((w) => matches(row, w))) return false;
+        continue;
+      }
+      if (k === '$or') {
+        if (!(v as Array<Record<string, unknown>>).some((w) => matches(row, w))) return false;
+        continue;
+      }
       if (k.startsWith('$')) continue;
       if (v !== null && typeof v === 'object') {
         const cmp = v as Record<string, unknown>;

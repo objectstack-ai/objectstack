@@ -12,14 +12,14 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
   sys_position: {
     label: "Position",
     pluralLabel: "Positions",
-    description: "Position definitions for capability distribution (ADR-0090)",
+    description: "Position definitions — flat capability-distribution groups (ADR-0090 D3)",
     fields: {
       label: {
         label: "Display Name"
       },
       name: {
         label: "API Name",
-        help: "Machine name for the position, unique per organization (e.g. sales_manager, hr_specialist)"
+        help: "Unique machine name for the position (e.g. admin, editor, viewer)"
       },
       description: {
         label: "Description"
@@ -41,7 +41,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       managed_by: {
         label: "Managed By",
-        help: "Record provenance (unified tri-state, A4 #2920): platform = framework built-in (read-only) / package = stack/package-declared / admin = tenant-created. Legacy rows may carry system (== platform) / config (== package) / user (== admin).",
+        help: "Record provenance: platform (built-in) / package (declared) / admin (tenant-created).",
         options: {
           platform: "Platform",
           package: "Package",
@@ -79,7 +79,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       deactivate_position: {
         label: "Deactivate Position",
-        confirmText: "Deactivate this position? Users keep their assignment but the position stops granting permissions until re-activated.",
+        confirmText: "Deactivate this position? Users with the position keep their assignment but the position stops granting permissions until re-activated.",
         successMessage: "Position deactivated"
       },
       set_default_position: {
@@ -96,7 +96,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           },
           name: {
             label: "New API Name",
-            helpText: "snake_case machine name, unique per organization"
+            helpText: "Unique snake_case machine name"
           }
         }
       }
@@ -105,7 +105,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
   sys_capability: {
     label: "Capability",
     pluralLabel: "Capabilities",
-    description: "Authorization capability definitions (ADR-0066 D1). Referenced by name from permission-set systemPermissions and resource requiredPermissions.",
+    description: "Authorization capability definitions referenced by name from permission sets and resource requirements.",
     fields: {
       label: {
         label: "Display Name"
@@ -127,7 +127,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       managed_by: {
         label: "Managed By",
-        help: "platform/package-owned capabilities are shipped and not user-deletable; admin-owned are created in Setup.",
+        help: "Record provenance: platform / package (shipped, not user-deletable) / admin (created in Setup).",
         options: {
           platform: "Platform",
           package: "Package",
@@ -184,7 +184,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       name: {
         label: "API Name",
-        help: "Unique machine name for the permission set. This is the set’s metadata identity (ADR-0094) and cannot be changed after creation — the data door rejects a rename; clone the set to a new name instead."
+        help: "Machine name for the permission set, unique per organization"
       },
       description: {
         label: "Description"
@@ -222,7 +222,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       managed_by: {
         label: "Managed By",
-        help: "Record provenance (unified tri-state, A4 #2920): 'platform' = shipped by the platform; 'package' = versioned package metadata (re-seeded on upgrade, read-mostly for admins); 'admin' = created/owned in this environment by an administrator (live-edited, never touched by package seeding). Legacy rows may carry 'user' (== admin).",
+        help: "Record provenance: platform (shipped) / package (packaged) / admin (env-authored).",
         options: {
           platform: "Platform",
           package: "Package",
@@ -273,7 +273,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           },
           name: {
             label: "New API Name",
-            helpText: "Unique snake_case machine name"
+            helpText: "snake_case machine name, unique per organization"
           }
         }
       }

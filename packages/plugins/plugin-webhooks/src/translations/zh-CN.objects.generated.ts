@@ -19,7 +19,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       name: {
         label: "名称",
-        help: "唯一的 snake_case 名称——用于日志和审计引用"
+        help: "snake_case 名称，在每个组织内唯一——用于日志和审计引用"
       },
       label: {
         label: "显示标签"

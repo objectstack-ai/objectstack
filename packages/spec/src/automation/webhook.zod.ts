@@ -180,7 +180,12 @@ export const WebhookSchema = lazySchema(() => strictObject({
   // it is never the unrecognized key there anyway.
   extraKeys: ['signatureAlgorithm'],
 }, {
-  name: SnakeCaseIdentifierSchema.describe('Webhook unique name (lowercase snake_case)'),
+  // [#8554] "unique per organization", not bare "unique". This `describe()` is
+  // the SOURCE of the generated reference page
+  // (`content/docs/references/automation/webhook.mdx`), so the bare wording had
+  // already reached authors as published contract. `sys_webhook` is
+  // tenant-scoped and the declared index is now `unique: 'organization'`.
+  name: SnakeCaseIdentifierSchema.describe('Webhook name, unique per organization (lowercase snake_case)'),
   label: z.string().optional().describe('Human-readable webhook label'),
 
   /** Scope */

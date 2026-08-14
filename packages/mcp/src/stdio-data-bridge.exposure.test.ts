@@ -329,7 +329,19 @@ describe('#8083 the fail-open and bypass behaviours match the HTTP path', () => 
     await expect(bridge.create('task', { title: 'x' })).resolves.toMatchObject({ object: 'task' });
     expect(engine.insert).toHaveBeenCalledTimes(1);
     // Bypassed outright — not "read the metadata then allow".
-    expect(metadataService.getObject).not.toHaveBeenCalled();
+    //
+    // [#8497] This used to assert `getObject` was never called AT ALL, which
+    // was a proxy for the property, not the property: since #8497 the create
+    // arm reads the object definition a SECOND time, after the write, to strip
+    // `internal: true` columns out of the response body. That read cannot
+    // inform a gate that already ran. So the assertion now says what it always
+    // meant — nothing reads metadata BEFORE the dispatch decision — and stays
+    // falsifiable: a gate that read the definition and then allowed would land
+    // its read ahead of `engine.insert` and fail this.
+    const gateRead = (metadataService.getObject.mock.invocationCallOrder ?? []).filter(
+      (order) => order < engine.insert.mock.invocationCallOrder[0],
+    );
+    expect(gateRead, 'the exposure gate read metadata before dispatching a system-context write').toEqual([]);
   });
 });
 

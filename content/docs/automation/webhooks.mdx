@@ -93,7 +93,7 @@ its own encrypted column, see below.
 | Field             | Type      | Notes                                                                              |
 |-------------------|-----------|------------------------------------------------------------------------------------|
 | `id`              | text      | Primary key.                                                                       |
-| `name`            | text      | Unique snake_case name — referenced in logs and audit.                             |
+| `name`            | text      | snake_case name, unique **per organization** ([#8554](https://github.com/objectstack-ai/objectstack/issues/8554)) — referenced in logs and audit. |
 | `label`           | text      | Optional display label.                                                            |
 | `object_name`     | text      | Short object name whose record events fire this webhook.                           |
 | `triggers`        | select    | Multi-select of `create` / `update` / `delete` plus the opt-in bulk pair `bulk_update` / `bulk_delete` ([see below](#bulk-writes-bulk_update-and-bulk_delete)), stored as an array (the enqueuer also accepts a legacy comma-separated string). |
