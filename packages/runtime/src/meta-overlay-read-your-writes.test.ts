@@ -45,7 +45,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ObjectStackProtocolImplementation, resetEnvWritableMetadataTypes } from '@objectstack/metadata-protocol';
-import { SchemaRegistry } from '@objectstack/objectql';
+import { SchemaRegistry, assertEngineUpdateDispatch, assertEngineDeleteDispatch } from '@objectstack/objectql';
 import { resolveRouteActionDeclaration, type ActionExecutionDeps } from './action-execution.js';
 
 /**
@@ -72,11 +72,13 @@ function makeEngine(registry: SchemaRegistry) {
             return row;
         }),
         update: vi.fn(async (_table: string, data: any, opts: any) => {
+            assertEngineUpdateDispatch(data, opts);
             const target = rows.find((r) => matches(r, opts?.where ?? {}));
             if (target) Object.assign(target, data);
             return target ?? null;
         }),
         delete: vi.fn(async (_table: string, opts: any) => {
+            assertEngineDeleteDispatch(opts);
             const before = rows.length;
             rows = rows.filter((r) => !matches(r, opts?.where ?? {}));
             return { deleted: before - rows.length };

@@ -3,6 +3,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { SeedLoaderService } from './seed-loader';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
 /**
  * #5127 — pass 2 RESOLVES the target and then has no record to write it onto.
@@ -66,6 +67,7 @@ function createFaithfulEngine(): { engine: IDataEngine; store: Record<string, an
       return record;
     }),
     update: vi.fn(async (objectName: string, data: any) => {
+      assertEngineUpdateDispatch(data, undefined);
       const records = store[objectName] || [];
       const idx = records.findIndex((r) => r.id === data.id);
       if (idx >= 0) { records[idx] = { ...records[idx], ...data }; return records[idx]; }

@@ -57,7 +57,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { assertEngineDeleteDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { resolveThrownHttpError } from '@objectstack/types';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
@@ -172,6 +172,7 @@ function makeEngine(throwOn: (verb: string, id: unknown) => unknown | undefined)
             return rec;
         }),
         update: vi.fn(async (_o: string, data: any, opts?: any) => {
+            assertEngineUpdateDispatch(data, opts);
             const id = opts?.where?.id;
             const boom = throwOn('update', id);
             if (boom) throw boom;

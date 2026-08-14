@@ -1574,6 +1574,73 @@ const engine = {
   d = scanSource('p.test.ts', arrowFake);
   expect('an arrow-property fake engine is in scope', d.length === 1 && d[0].pinned === false);
 
+  // ── The MOCK CONSTRUCTOR spelling (#8639).
+  //
+  // `delete: vi.fn(async …)` is a CallExpression, so `implOf` answered null and
+  // the double was discovered by NEITHER side of the ledger — no output at all,
+  // the same silence #5629 found behind the arity test. Each fixture below
+  // drives ONE arm of `unwrapCallImpl`, because this file has already measured
+  // what an unfixtured arm is worth: "with only the `new Error` fixture above,
+  // neutering the call-expression arm left the self-test GREEN".
+  const viFake = (init) => `
+const engine = {
+  find: vi.fn(async (o: string) => []),
+  insert: vi.fn(async (o: string, d: any) => d),
+  update: vi.fn(async (o: string, d: any) => d),
+  delete: ${init},
+};
+`;
+  d = scanSource('v.test.ts', viFake('vi.fn(async (o: string, opts?: any) => ({ ok: true }))'));
+  expect('a vi.fn-wrapped engine delete is in scope', d.length === 1 && d[0].pinned === false);
+
+  d = scanSource('v.test.ts', IMPORT
+    + viFake('vi.fn(async (o: string, opts?: any) => { assertEngineDeleteDispatch(opts); return 1; })'));
+  expect('a vi.fn-wrapped delete that calls the predicate is pinned',
+    d.length === 1 && d[0].pinned === true);
+
+  // `.mockImplementation(fn)` holds the implementation in the SAME position the
+  // criterion reads, so it is admitted by the same rule rather than a special case.
+  d = scanSource('v.test.ts', viFake('vi.fn().mockImplementation(async (o: string, opts?: any) => 1)'));
+  expect('a .mockImplementation-wrapped engine delete is in scope', d.length === 1);
+
+  // The three call shapes that hold NO implementation must stay out: there is no
+  // function to judge, so there is nothing that could be looser than the producer.
+  expect('a bare vi.fn() with no argument is not an implementation',
+    scanSource('v.test.ts', viFake('vi.fn()')).length === 0);
+  expect('a call whose sole argument is not a function is not an implementation',
+    scanSource('v.test.ts', viFake("rec('DELETE')")).length === 0);
+  expect('a mock resolving to a VALUE is not an implementation',
+    scanSource('v.test.ts', viFake('vi.fn().mockResolvedValue(true)')).length === 0);
+
+  // The CLASS-FIELD spelling of the same thing — `implOf`'s PropertyDeclaration
+  // branch. Measured at ZERO occurrences in the corpus the fix landed against,
+  // so this fixture is the only evidence that branch works at all; without it
+  // the branch would be reachable only by a future test nobody has written yet,
+  // which is exactly how the object-literal half stayed broken unnoticed.
+  const viClassFake = `
+class FakeEngine {
+  find = vi.fn(async (o: string) => []);
+  insert = vi.fn(async (o: string, d: any) => d);
+  update = vi.fn(async (o: string, d: any) => d);
+  delete = vi.fn(async (o: string, opts?: any) => ({ ok: true }));
+}
+`;
+  d = scanSource('vc.test.ts', viClassFake);
+  expect('a vi.fn-wrapped delete on a CLASS FIELD is in scope', d.length === 1 && d[0].pinned === false);
+
+  // Unwrapping must not smuggle a double past the vetoes: the driver evidence
+  // still outranks, at the new spelling exactly as at every other one.
+  const viDriverFake = `
+const driver = {
+  find: vi.fn(async (o: string) => []),
+  create: vi.fn(async (o: string, d: any) => d),
+  update: vi.fn(async (o: string, id: string, d: any) => d),
+  delete: vi.fn(async (o: string, opts?: any) => true),
+};
+`;
+  expect('a vi.fn-wrapped DRIVER delete stays out of scope',
+    scanSource('vd.test.ts', viDriverFake).length === 0);
+
   // ── Arity: a fake omits the parameters it ignores (#5629).
   //
   // `async delete() { return false; }` is the commonest engine-double spelling
@@ -2168,6 +2235,9 @@ class Svc {
       + "engine-vs-driver sibling evidence, accepts only that slice's producer predicate (direct or "
       + "one helper deep) and never the other slice's, rejects unused imports, hand-mirrored guards "
       + 'and look-alikes, keeps an engine double in scope however many by-id helpers it declares, '
+      + 'reads the implementation a MOCK CONSTRUCTOR wraps on both the object-literal and the '
+      + 'class-field spelling while refusing the three call shapes that wrap no implementation and '
+      + 'still vetoing a driver at that spelling, '
       + 'reports EXACTLY the engine double out of a fixture holding both shapes, and proves '
       + 'discovery reaches the real tree for every slice; and, on the CONSUMER SEAMS, admits a '
       + 'by-id write only when the id is caller-supplied AND a receipt is answered, reads the '

@@ -3,6 +3,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { SeedLoaderService } from './seed-loader';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
 /**
  * Reference-graph fallback to the ENGINE schema registry.
@@ -63,6 +64,7 @@ function createFaithfulEngine(schemas: Record<string, any>) {
       return record;
     }),
     update: vi.fn(async (objectName: string, data: any) => {
+      assertEngineUpdateDispatch(data, undefined);
       const records = store[objectName] || [];
       const idx = records.findIndex((r) => r.id === data.id);
       if (idx >= 0) {

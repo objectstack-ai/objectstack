@@ -27,6 +27,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { BatchOperationResultSchema, BatchUpdateResponseSchema } from '@objectstack/spec/api';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { assertEngineUpdateDispatch, assertEngineDeleteDispatch } from '@objectstack/metadata-core';
 
 const SCHEMA = { name: 'invoice', fields: { title: { name: 'title', type: 'text' } } };
 
@@ -56,6 +57,7 @@ function makeStoreEngine() {
             return rec;
         }),
         update: vi.fn(async (_object: string, data: any, options?: any) => {
+            assertEngineUpdateDispatch(data, options);
             const id = options?.where?.id;
             const current = rows.get(id);
             if (!current) throw new Error(`no such record: ${id}`);
@@ -66,6 +68,7 @@ function makeStoreEngine() {
         }),
         // Contract per #4435: `false` is the positive not-found value.
         delete: vi.fn(async (_object: string, options?: any) => {
+            assertEngineDeleteDispatch(options);
             const id = options?.where?.id;
             if (!rows.has(id)) return false;
             rows.delete(id);
