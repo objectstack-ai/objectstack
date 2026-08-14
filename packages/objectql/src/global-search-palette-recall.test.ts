@@ -378,12 +378,26 @@ describe('[#7643] the companion OR is what the palette gained', () => {
 });
 
 describe('[#7643] an object with nothing scannable is SKIPPED, never dumped', () => {
-  it('contributes no hits and is not counted as scanned', async () => {
-    // The cliff this guards: `expandSearchToFilter` answers an empty field set
-    // with `null`, the engine then leaves `where` unset, and an unfiltered
-    // `find` returns the object's first rows — every query answering with
-    // unrelated records. The old code's own `continue` guarded the same cliff
-    // one layer up, so this is a PRESERVED behaviour, not a new one.
+  it('contributes no hits, and is never queried at all', async () => {
+    // TWO different facts, and the second was measured rather than assumed —
+    // an ablation run predicted this test would stay green against the old
+    // code and it went RED, which is how the third divergence axis was found.
+    //
+    // 1. The cliff: `expandSearchToFilter` answers an empty field set with
+    //    `null`, the engine then leaves `where` unset, and an unfiltered `find`
+    //    returns the object's first rows — a palette answering every query with
+    //    unrelated records. Hence the skip before the query is built.
+    //
+    // 2. `showcase_ledger_entry` HAS no scannable column — its only text-typed
+    //    field is `id` — and the old palette queried it anyway. Its fallback
+    //    chain ended in "the first text-typed field", which on such an object
+    //    selects the PRIMARY KEY, so every keystroke ran
+    //    `{id: {$icontains: term}}` against every system/junction/log table.
+    //    That is #4483's defect exactly (`SEARCH_AUTO_EXCLUDED_FIELDS` names
+    //    `id` for precisely this reason), which the executor had fixed and this
+    //    path had not. Sharing the resolution retires it here too — so the
+    //    `captures` assertion below is the pin on a behaviour that CHANGED, not
+    //    on one that was preserved.
     const h = await makeHarness();
     const res = await h.protocol.searchAll({ q: 'zzzznope', perObject: 25, limit: 25 });
 
