@@ -1,5 +1,5 @@
 ---
-"@objectstack/lint": patch
+"@objectstack/lint": minor
 ---
 
 fix(lint): ask the provenance question at the fifth blanket-`SYSTEM_FIELDS` read site — `searchableFields` (#8404)
