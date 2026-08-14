@@ -161,7 +161,7 @@ export const zhCN: TranslationData = {
         widget_config_changes: { title: '配置变更', description: '系统配置修改' },
         widget_events_by_type: { title: '按操作分布的审计事件', description: '审计事件按操作类型分布' },
         widget_events_by_user: { title: '按用户分布的事件', description: '用户活动分布' },
-        widget_recent_events: { title: '最近审计事件', description: '最新的平台事件（登录、登出、配置等）' },
+        widget_recent_events: { title: '按操作统计的事件量', description: '按操作分组的事件量（登录、登出、配置等）' },
       },
     },
   },

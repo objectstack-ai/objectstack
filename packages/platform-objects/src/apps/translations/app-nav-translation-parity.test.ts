@@ -20,9 +20,12 @@
 // complete and the ratchet at 0, that tool now reports the truth; this test is
 // the local, CLI-independent version of the same invariant.
 //
-// Setup is deliberately NOT covered here: its nav ids do not exist on the app
-// object at all until the runtime merges contributions in, so this file would
-// have nothing to walk.
+// Setup's nav LEAVES are deliberately NOT covered by the presence direction
+// below: they do not exist on the app object at all until the runtime merges
+// contributions in, so this file would have nothing to walk. (Its nine static
+// group anchors do exist statically, and the default-locale content check at
+// the bottom of this file walks exactly those — see that block's own note for
+// why a content claim can be made where a coverage claim cannot.)
 //
 // Where they ARE covered: `pnpm check:app-nav-i18n`
 // (`packages/cli/scripts/check-app-nav-i18n.mjs`), which boots the real
@@ -42,6 +45,7 @@
 import { describe, it, expect } from 'vitest';
 import { STUDIO_APP } from '../studio.app.js';
 import { ACCOUNT_APP } from '../account.app.js';
+import { SETUP_APP } from '../setup.app.js';
 import { SystemOverviewDashboard } from '../dashboards/index.js';
 import { en } from './en.js';
 import { zhCN } from './zh-CN.js';
@@ -50,18 +54,23 @@ import { esES } from './es-ES.js';
 
 const LOCALES = { en, 'zh-CN': zhCN, 'ja-JP': jaJP, 'es-ES': esES } as const;
 
-/** Every nav id in an app's statically declared navigation tree, depth-first. */
-function navIds(app: { navigation?: unknown[] }): string[] {
-  const out: string[] = [];
+/** Every statically declared nav item of an app, depth-first, with its label. */
+function navItems(app: { navigation?: unknown[] }): Array<{ id: string; label?: string }> {
+  const out: Array<{ id: string; label?: string }> = [];
   const walk = (items: unknown[]) => {
     for (const raw of items ?? []) {
-      const item = raw as { id?: string; children?: unknown[] };
-      if (item?.id) out.push(item.id);
+      const item = raw as { id?: string; label?: string; children?: unknown[] };
+      if (item?.id) out.push({ id: item.id, label: item.label });
       if (Array.isArray(item?.children)) walk(item.children);
     }
   };
   walk(app.navigation ?? []);
   return out;
+}
+
+/** Every nav id in an app's statically declared navigation tree, depth-first. */
+function navIds(app: { navigation?: unknown[] }): string[] {
+  return navItems(app).map((item) => item.id);
 }
 
 describe('statically declared app navigation is translated in every locale', () => {
@@ -134,4 +143,132 @@ describe('dashboard widgets are translated in every locale', () => {
       ).toEqual([]);
     });
   }
+});
+
+// ── The default locale serves the SOURCE string, not an old copy of it ───────
+//
+// Every claim above is a key-set claim: it judges whether a key exists on one
+// side or both. A key whose VALUE has gone stale satisfies all of them, and one
+// did — `widget_recent_events` kept `Recent Audit Events` in all four bundles
+// after the widget was converted into an ADR-0021 by-action breakdown whose
+// declared title says so. Since the translation is what renders, the declared
+// string reached nobody in any locale, under a fully green build.
+//
+// What can be asserted mechanically is the DEFAULT locale, because `en.ts` is a
+// copy of the source rather than a translation of it. That is the same
+// invariant the generated half of this package's i18n already enforces by
+// rewriting the `en` bundle from the source on every extract (see
+// `scripts/i18n-extract.config.ts`); this half is hand-authored and cannot be
+// regenerated — regenerating it would delete ~40 runtime-contributed nav
+// translations per locale — so the invariant is asserted here instead of being
+// produced by a generator.
+//
+// Deliberately NOT claimed here: anything about zh-CN / ja-JP / es-ES. What a
+// translated locale should do when its source string changes (keep serving the
+// stale value, fall back to the source, fail the build) is a product decision,
+// not a test's to invent. This block is the half that needs no decision; the
+// half that does is #8765, and note what pinning `en` does to it — the drift
+// stops being uniform across all four bundles and becomes locale-specific,
+// invisible to every reviewer who reads the product in English.
+//
+// Direction: source ⇒ en, one-way. A key in `en.ts` with no declaring source is
+// NOT judged — that set is exactly Setup's runtime-contributed nav leaves,
+// which no static walk can see and which `pnpm check:app-nav-i18n` and
+// `setup-nav-dead-key-tombstone.test.ts` own. Setup's nine static group anchors
+// ARE walked: a coverage claim over Setup is impossible here (most of its ids
+// are absent at import time), but a content claim over the few it does declare
+// is sound — the walk judges what it finds, and finds nothing it cannot judge.
+//
+// `pages.*` is out of the walk on purpose: those entries mirror page metadata
+// authored in OTHER packages (@objectstack/cloud-connection, @objectstack/mcp),
+// which this package does not import and must not depend on to run its tests.
+// That leaves the third of this bundle with no source comparison in ANY locale,
+// `en` included — the same shape as the defect above, one section over, and a
+// static walk in this package cannot close it. Tracked as #8764; the gate that
+// can see those pages is `check:app-nav-i18n`, which already boots the real
+// composition. All three were in parity when this block was written.
+describe('the default locale bundle serves the declared source string verbatim', () => {
+  type Drift = { path: string; source: string; en: string | undefined };
+
+  const collect = (
+    drift: Drift[],
+    path: string,
+    source: string | undefined,
+    served: string | undefined,
+  ) => {
+    // An undeclared source string makes no claim — only a declared one does.
+    if (typeof source !== 'string') return;
+    if (served !== source) drift.push({ path, source, en: served });
+  };
+
+  const APPS = [SETUP_APP, STUDIO_APP, ACCOUNT_APP] as unknown as Array<{
+    name: string;
+    label?: string;
+    description?: string;
+    navigation?: unknown[];
+  }>;
+
+  for (const app of APPS) {
+    it(`apps.${app.name} — label, description and every statically declared nav label`, () => {
+      const served = (en.apps?.[app.name] ?? {}) as {
+        label?: string;
+        description?: string;
+        navigation?: Record<string, { label?: string }>;
+      };
+      const drift: Drift[] = [];
+      collect(drift, `apps.${app.name}.label`, app.label, served.label);
+      collect(drift, `apps.${app.name}.description`, app.description, served.description);
+      for (const item of navItems(app)) {
+        collect(
+          drift,
+          `apps.${app.name}.navigation.${item.id}.label`,
+          item.label,
+          served.navigation?.[item.id]?.label,
+        );
+      }
+      expect(
+        drift,
+        `en.ts no longer matches the declared source in apps.${app.name} — `
+          + 'edit the bundle to the source string (this half is hand-authored; do NOT regenerate it)',
+      ).toEqual([]);
+    });
+  }
+
+  it('dashboards.system_overview — label, description and every widget title/description', () => {
+    const dashboard = SystemOverviewDashboard as unknown as {
+      name: string;
+      label?: string;
+      description?: string;
+      widgets?: Array<{ id?: string; title?: string; description?: string }>;
+    };
+    const served = (en.dashboards?.[dashboard.name] ?? {}) as {
+      label?: string;
+      description?: string;
+      widgets?: Record<string, { title?: string; description?: string }>;
+    };
+    const drift: Drift[] = [];
+    collect(drift, `dashboards.${dashboard.name}.label`, dashboard.label, served.label);
+    collect(
+      drift,
+      `dashboards.${dashboard.name}.description`,
+      dashboard.description,
+      served.description,
+    );
+    for (const widget of dashboard.widgets ?? []) {
+      if (!widget.id) continue;
+      const base = `dashboards.${dashboard.name}.widgets.${widget.id}`;
+      collect(drift, `${base}.title`, widget.title, served.widgets?.[widget.id]?.title);
+      collect(
+        drift,
+        `${base}.description`,
+        widget.description,
+        served.widgets?.[widget.id]?.description,
+      );
+    }
+    expect(
+      drift,
+      'en.ts no longer matches the declared source in dashboards.system_overview — '
+        + 'edit the bundle to the source string (this half is hand-authored; do NOT regenerate it)',
+    ).toEqual([]);
+  });
 });
