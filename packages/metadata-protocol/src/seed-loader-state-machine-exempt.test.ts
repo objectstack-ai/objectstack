@@ -68,7 +68,7 @@ function createEnforcingEngine(): { engine: IDataEngine; store: Record<string, a
     find: vi.fn(async (objectName: string, query?: any) => {
       let rows = store[objectName] || [];
       if (query?.where) {
-        rows = rows.filter((r) => Object.entries(query.where).every(([k, v]) => r[k] === v));
+        rows = rows.filter((r) => Object.entries(query.where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }));
       }
       if (typeof query?.limit === 'number') rows = rows.slice(0, query.limit);
       return rows;

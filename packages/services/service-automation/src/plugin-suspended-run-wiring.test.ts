@@ -32,7 +32,7 @@ function fakeDataEngine(opts: { failReads?: string } = {}) {
             if (opts.failReads) throw new Error(opts.failReads);
             const where = options?.where ?? {};
             return [...rows.values()].filter(r =>
-                Object.entries(where).every(([k, v]) => r[k] === v));
+                Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }));
         },
         async insert(_object, data) { rows.set(String(data.id), { ...data }); return data; },
         async update(_object, data, options) {

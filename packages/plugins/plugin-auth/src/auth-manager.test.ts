@@ -3862,7 +3862,7 @@ describe('isOrgOrPlatformAdmin – one grade ruler for "is this membership an ad
       if (object === 'sys_member') {
         const where = query?.where ?? {};
         return (opts.members ?? []).filter((row) =>
-          Object.entries(where).every(([k, v]) => row[k] === v),
+          Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return row[k] === v; }),
         );
       }
       return [];

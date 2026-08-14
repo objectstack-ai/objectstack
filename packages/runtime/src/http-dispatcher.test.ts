@@ -3944,7 +3944,7 @@ describe('HttpDispatcher — action body ctx.user identity (#2701)', () => {
       find: async (obj: string, opts: any) => {
         const where = opts?.where ?? {};
         if (obj !== 'sys_api_key') return [];
-        return rows.filter((r) => Object.entries(where).every(([k, v]) => r[k] === v));
+        return rows.filter((r) => Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }));
       },
       update: async () => ({}), delete: async () => ({}),
     };

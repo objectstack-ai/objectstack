@@ -58,7 +58,7 @@ function ledgerEngine(rows: Array<Record<string, unknown>>) {
     getObject: (name: string) => (name in tables ? { name } : undefined),
     async find(object, options: any) {
       const where = options?.where ?? {};
-      return tables[object].filter((r) => Object.entries(where).every(([k, v]) => r[k] === v));
+      return tables[object].filter((r) => Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }));
     },
     async insert(object, data) {
       tables[object].push({ ...data });
@@ -85,11 +85,11 @@ function reapEngine() {
     registerHook() {},
     async find(object: string, options: any) {
       const where = options?.where ?? {};
-      return tables[object].filter((r) => Object.entries(where).every(([k, v]) => r[k] === v));
+      return tables[object].filter((r) => Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }));
     },
     async findOne(object: string, options: any) {
       const where = options?.where ?? {};
-      return tables[object].find((r) => Object.entries(where).every(([k, v]) => r[k] === v)) ?? null;
+      return tables[object].find((r) => Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; })) ?? null;
     },
     async update(object: string, data: any, options?: any) {
       assertEngineUpdateDispatch(data, options);

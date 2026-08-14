@@ -31,6 +31,7 @@ function createMockEngine(data: Record<string, any[]> = {}): IDataEngine {
       if (query?.filter) {
         return records.filter(r => {
           for (const [k, v] of Object.entries(query.filter)) {
+            if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
             if (r[k] !== v) return false;
           }
           return true;

@@ -37,7 +37,7 @@ function createFaithfulEngine(): { engine: IDataEngine; store: Record<string, an
       let records = store[objectName] || [];
       if (query?.where) {
         records = records.filter((r) =>
-          Object.entries(query.where).every(([k, v]) => r[k] === v),
+          Object.entries(query.where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }),
         );
       }
       if (typeof query?.limit === 'number') records = records.slice(0, query.limit);

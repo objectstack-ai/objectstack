@@ -17,7 +17,7 @@ function makeQl(rows: any[]) {
     find: async (object: string, opts: any) => {
       if (object !== 'sys_api_key') return [];
       const where = opts?.where ?? {};
-      return rows.filter((r) => Object.entries(where).every(([k, v]) => r[k] === v));
+      return rows.filter((r) => Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }));
     },
   };
 }

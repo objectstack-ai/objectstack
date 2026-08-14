@@ -32,9 +32,9 @@ function makeQl(tables: Record<string, any[]> = {}) {
       const where = opts?.where ?? {};
       return rows.filter((row) =>
         Object.entries(where).every(([k, v]) =>
-          v && typeof v === 'object' && '$in' in (v as any)
+          { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return v && typeof v === 'object' && '$in' in (v as any)
             ? (v as any).$in.includes(row[k])
-            : row[k] === v,
+            : row[k] === v; },
         ),
       );
     }),

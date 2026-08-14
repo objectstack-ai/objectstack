@@ -26,7 +26,7 @@ function makeQl(tables: Record<string, any[]>) {
       const where = query?.where ?? {};
       return rows.filter((row) =>
         Object.entries(where).every(([field, value]) =>
-          value === null ? row[field] == null : row[field] === value,
+          { if (field.startsWith('$')) throw new Error(`fake driver: unsupported operator ${field}`); return value === null ? row[field] == null : row[field] === value; },
         ),
       );
     }),

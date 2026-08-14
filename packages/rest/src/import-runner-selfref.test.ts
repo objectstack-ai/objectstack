@@ -44,7 +44,7 @@ function makeProtocol(seed: Array<Record<string, any>> = []) {
   }));
   const findData = vi.fn(async (args: { query?: { $filter?: Record<string, any> } }) => {
     const filter = args.query?.$filter ?? {};
-    return store.filter((row) => Object.entries(filter).every(([k, v]) => row[k] === v));
+    return store.filter((row) => Object.entries(filter).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return row[k] === v; }));
   });
   const p: ImportProtocolLike = { findData, createData: vi.fn(), updateData: vi.fn(), createManyData };
   return { p, store, createManyData };

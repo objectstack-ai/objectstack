@@ -45,7 +45,7 @@ function engineWith(rows: any[], opts: { failFind?: boolean; noJournalObject?: b
       if (opts.failFind) throw new Error('table is gone');
       if (obj !== JOURNAL) return [];
       const where = q?.where ?? {};
-      return rows.filter((r) => Object.entries(where).every(([k, v]) => r[k] === v));
+      return rows.filter((r) => Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }));
     },
     insert: async () => ({}),
   };

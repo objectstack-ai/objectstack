@@ -27,7 +27,7 @@ function makeQl(seedRows: any[] = []) {
     async find(object: string, q: any) {
       if (object !== 'sys_permission_set') return [];
       const where = q?.where ?? {};
-      return rows.filter((r) => Object.entries(where).every(([k, v]) => r[k] === v));
+      return rows.filter((r) => Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }));
     },
     async insert(object: string, data: any) {
       if (object !== 'sys_permission_set') return null;

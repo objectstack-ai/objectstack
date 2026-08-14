@@ -81,11 +81,69 @@
 //
 // ## How a candidate is discovered -- and why the control probe IS the filter
 //
-// Discovery is structural: a function in `packages/**/*.test.ts` with two or
-// more identifier parameters `(R, W, …)` whose body both indexes R by a
-// computed key (`R[k]` -- it reads fields off a row generically) and treats W
-// as a filter object (`Object.entries(W)` / `Object.keys(W)`, or a read of
-// `W.$or` / `W.$and`).
+// Discovery is structural: a function in `packages/**/*.test.ts` whose body
+// both indexes its FIRST parameter R by a computed key (`R[k]` -- it reads
+// fields off a row generically) and treats some other identifier W as a filter
+// object (`Object.entries(W)` / `Object.keys(W)`, or a read of `W.$or` /
+// `W.$and`).
+//
+// W is looked for in two places, in this order (#8615):
+//
+//   1. the function's OWN second parameter -- the `(row, where)` spelling, and
+//      the only one this gate could see before #8615.
+//   2. FAILING THAT, an ACCESS PATH the body reads as a filter, whose root is
+//      not one of this function's own parameters and RESOLVES in an enclosing
+//      scope -- either a same-file declaration (the `visibleDeclarations` walk
+//      already built for extraction) or a parameter bound by an enclosing
+//      function. This is the single-param `.filter()` callback that CLOSES OVER
+//      its `where`:
+//
+//        const where = query?.where ?? {};
+//        return rows.filter((r) => Object.entries(where).every(([k,v]) => r[k]===v));
+//
+//      Byte-for-byte the shape (b) body this gate already grades everywhere it
+//      appears as a second parameter -- the arity was never the defect, it was
+//      only what discovery happened to key on. "Not in the ledger" read as
+//      "conforming" for every one of them.
+//
+// A PATH rather than a bare identifier, because the capture is written both
+// ways and roughly half the corpus uses the indirect spelling: `where` (a local
+// `const`), but equally `opts.where`, `query?.where`, `q.where`,
+// `options.where`, `query.filter`. Keying on the identifier alone read the ROOT
+// of those (`opts`) as the filter, which is not a widening but a MIS-binding --
+// it made 21 real matchers UNJUDGED with a `TypeError` from the control probe,
+// i.e. it manufactured exactly the "could not run" failures this gate treats as
+// errors. Paths are reduced only through plain dotted access (optional chaining
+// and a `?? {}` / `|| {}` tail unwrapped); a call or a computed key yields no
+// path and no candidate, because the battery could not synthesise a binding.
+//
+// Requiring the root to RESOLVE is the load-bearing half of arm 2, and it is a
+// real scope walk rather than a name test on purpose: a root that binds nowhere
+// same-file is an import or a global, and grading those would have this gate
+// judge code it cannot see. What it is NOT is a tightening substitute for the
+// control probe -- arm 2 deliberately admits more structural candidates than it
+// admits matchers, and the probe below is what decides membership. Measured on
+// the corpus at #8615: arm 2 proposed 64 structural candidates, of which the
+// control probe seated 62 and dropped 2.
+//
+// The 2 it dropped are worth naming, because they are a REAL residual blind
+// spot rather than noise: both are inverted survivor filters inside a `delete`
+// double -- `(r) => !Object.entries(opts.where).every(…)`. They carry the same
+// shape (b) defect (a `$or` matches nothing, so the row is not deleted), but
+// they answer the control probe `false`/`true` instead of `true`/`false` and so
+// are correctly not row-SELECTING predicates by this gate's definition. Left
+// ungraded on purpose: teaching the probe to recognise a negated predicate
+// means guessing at intent, which is the naming-based reasoning this gate
+// exists to avoid. Tracked separately.
+//
+// For extraction, a captured W is RE-BOUND as a synthetic second parameter, so
+// the battery drives `(row, where)` uniformly whatever the source arity was --
+// the path is rebuilt outwards, so `opts.where` binds `opts` to
+// `{ where: <probe> }`. Re-binding rather than inlining W's declaration is
+// deliberate: the local-`const` spellings all initialise W from an enclosing
+// parameter (`query?.where ?? {}`, `opts?.where ?? {}`, `args.query?.$filter ??
+// {}`) that no standalone lift can supply, so inlining would have made every
+// one of them UNJUDGED -- a different way of not grading them.
 //
 // That heuristic alone over-matches. Rather than tighten it by guessing at
 // PARAMETER NAMES -- the failure `check-engine-double-contract` documents,
@@ -235,6 +293,93 @@ const identifiersIn = (src) => {
 };
 
 /**
+ * Does `body` read `id` as a filter object? The two spellings are exactly the
+ * ones the two-parameter rule has always tested for — kept as one helper so the
+ * own-parameter arm and the captured arm cannot drift apart (the drift that let
+ * one spelling get fixed and the other not, in `check-engine-double-contract`).
+ */
+const readsAsFilter = (body, id) =>
+  new RegExp(`Object\\.(entries|keys)\\(\\s*${id}`).test(body) ||
+  new RegExp(`\\b${id}\\s*\\??\\.\\s*\\$(or|and)`).test(body);
+
+/** `where ?? {}`, `(where)`, `where!`, `where as any` -> `where`. */
+function unwrapExpr(e) {
+  for (;;) {
+    if (ts.isParenthesizedExpression(e) || ts.isNonNullExpression(e) || ts.isAsExpression(e)) {
+      e = e.expression;
+    } else if (
+      ts.isBinaryExpression(e) &&
+      (e.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken ||
+        e.operatorToken.kind === ts.SyntaxKind.BarBarToken)
+    ) {
+      e = e.left;
+    } else {
+      return e;
+    }
+  }
+}
+
+/**
+ * Reduce an expression to a plain ACCESS PATH: a root identifier plus dotted
+ * property names (`where` -> [where]; `opts?.where` -> [opts, where];
+ * `args.query.$filter` -> [args, query, $filter]). Anything else — a call, an
+ * element access, a computed key — returns null, because the battery cannot
+ * synthesise a binding for it.
+ */
+function accessPath(e) {
+  const parts = [];
+  for (let cur = unwrapExpr(e); ; cur = unwrapExpr(cur.expression)) {
+    if (ts.isIdentifier(cur)) return [cur.text, ...parts];
+    if (!ts.isPropertyAccessExpression(cur) || !ts.isIdentifier(cur.name)) return null;
+    parts.unshift(cur.name.text);
+  }
+}
+
+/**
+ * The two filter spellings, harvested as access paths instead of asserted
+ * against a known parameter name. Source order, deduplicated.
+ */
+function filterPathsIn(fnNode) {
+  const out = [];
+  const seen = new Set();
+  const add = (expr) => {
+    const path = accessPath(expr);
+    if (!path) return;
+    const k = path.join('.');
+    if (!seen.has(k)) { seen.add(k); out.push(path); }
+  };
+  const visit = (n) => {
+    if (
+      ts.isCallExpression(n) &&
+      ts.isPropertyAccessExpression(n.expression) &&
+      ts.isIdentifier(n.expression.expression) &&
+      n.expression.expression.text === 'Object' &&
+      (n.expression.name.text === 'entries' || n.expression.name.text === 'keys') &&
+      n.arguments.length >= 1
+    ) {
+      add(n.arguments[0]);
+    }
+    if (ts.isPropertyAccessExpression(n) && (n.name.text === '$or' || n.name.text === '$and')) {
+      add(n.expression);
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(fnNode.body);
+  return out;
+}
+
+/** Parameter names bound by the functions/methods enclosing `node`. */
+function enclosingParameters(node) {
+  const out = new Set();
+  for (let cur = node.parent; cur; cur = cur.parent) {
+    if (Array.isArray(cur.parameters)) {
+      for (const p of cur.parameters) if (ts.isIdentifier(p.name)) out.add(p.name.text);
+    }
+  }
+  return out;
+}
+
+/**
  * Structural candidates in one source text. Behavioural admission (the control
  * probe) happens later, in `judge` — this stage only proposes.
  */
@@ -245,21 +390,39 @@ export function discoverInSource(text, label) {
   const visit = (node) => {
     if (isFn(node) && node.body) {
       const params = node.parameters.map((p) => (ts.isIdentifier(p.name) ? p.name.text : null));
-      if (params.length >= 2 && params[0] && params[1]) {
-        const body = node.body.getText(sf);
-        const [r, w] = params;
-        const indexesRow = new RegExp(`\\b${r}\\s*\\??\\.?\\[`).test(body);
-        const readsFilter =
-          new RegExp(`Object\\.(entries|keys)\\(\\s*${w}`).test(body) ||
-          new RegExp(`\\b${w}\\s*\\??\\.\\s*\\$(or|and)`).test(body);
-        if (indexesRow && readsFilter) {
+      const r = params[0];
+      const body = r ? node.body.getText(sf) : '';
+      if (r && new RegExp(`\\b${r}\\s*\\??\\.?\\[`).test(body)) {
+        // Arm 1 — the filter is this function's own second parameter.
+        let w = params.length >= 2 && params[1] && readsAsFilter(body, params[1]) ? params[1] : null;
+        let captured = false;
+        let declarations = null;
+        // Arm 2 (#8615) — no own filter parameter, so look for one CAPTURED
+        // from an enclosing scope. Resolution of the path's ROOT is required; a
+        // root binding nowhere in this file is an import or a global, and this
+        // gate does not grade code it cannot see.
+        if (!w) {
+          const own = new Set(params.filter(Boolean));
+          declarations = visibleDeclarations(node, sf);
+          const enclosing = enclosingParameters(node);
+          for (const path of filterPathsIn(node)) {
+            const root = path[0];
+            if (own.has(root)) continue;
+            if (!declarations.has(root) && !enclosing.has(root)) continue;
+            w = path;
+            captured = true;
+            break;
+          }
+        }
+        if (w) {
           const { line } = sf.getLineAndCharacterOfPosition(node.getStart(sf));
           out.push({
             file: label,
             line: line + 1,
             name: declaredName(node) ?? '(anonymous)',
             source: node.getText(sf),
-            declarations: visibleDeclarations(node, sf),
+            declarations: declarations ?? visibleDeclarations(node, sf),
+            capturedPath: captured ? w : null,
           });
         }
       }
@@ -275,12 +438,18 @@ export function discoverInSource(text, label) {
 // ---------------------------------------------------------------------------
 function buildCallable(candidate, dropped = new Set()) {
   const self = /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(candidate.name) ? candidate.name : '__matcher';
+  const captured = candidate.capturedPath ?? null;
+  // A captured filter is supplied by the battery, so the path's ROOT must NOT
+  // be lifted in: its declaration would shadow the synthetic binding below, and
+  // every real instance initialises it from an enclosing parameter this lift
+  // cannot supply anyway (`query?.where ?? {}`).
+  const skip = captured ? new Set([...dropped, captured[0]]) : dropped;
   const included = new Map();
   let frontier = identifiersIn(candidate.source);
   for (let depth = 0; depth < 6; depth++) {
     const next = new Set();
     for (const id of frontier) {
-      if (included.has(id) || id === self || dropped.has(id)) continue;
+      if (included.has(id) || id === self || skip.has(id)) continue;
       const decl = candidate.declarations.get(id);
       if (!decl) continue;
       included.set(id, decl);
@@ -293,9 +462,21 @@ function buildCallable(candidate, dropped = new Set()) {
     /^(export\s+)?(default\s+)?(async\s+)?function\s+[A-Za-z_$][A-Za-z0-9_$]*/,
     'function',
   );
-  const code =
-    `${[...included.values()].join('\n')}\n` +
-    `const ${self} = ${normalised};\nreturn ${self};`;
+  // Re-bind a captured filter as a synthetic second parameter so the battery
+  // drives `(row, where)` uniformly, whatever arity the source was written at.
+  // The path is rebuilt outwards, so `opts.where` becomes `{ where: <probe> }`
+  // and `args.query.$filter` becomes `{ query: { $filter: <probe> } }`.
+  let definition = `const ${self} = ${normalised};`;
+  if (captured) {
+    let bound = '__os_where';
+    for (const prop of captured.slice(1).reverse()) bound = `{ ${JSON.stringify(prop)}: ${bound} }`;
+    definition =
+      `const ${self} = (__os_row, __os_where) => {\n` +
+      `  const ${captured[0]} = ${bound};\n` +
+      `  return (${normalised})(__os_row);\n` +
+      `};`;
+  }
+  const code = `${[...included.values()].join('\n')}\n${definition}\nreturn ${self};`;
   const js = ts.transpileModule(code, {
     compilerOptions: { target: ts.ScriptTarget.ES2022, isolatedModules: true },
   }).outputText;
@@ -524,6 +705,65 @@ const matches = (row: any, where: any): boolean => {
   return Object.entries(where).every(([k, v]) => k.startsWith('$') || eq(row[k], v));
 };`;
 
+// --- #8615: the captured-filter arm -------------------------------------
+// Every fixture below is a SINGLE-parameter callback. None of them has a second
+// parameter to key on, which is the whole point: before #8615 discovery could
+// not see one of these, so the gate could grade them neither green nor red.
+
+// Captured from a same-file `const`, combinator-blind. The shape the 17 sites
+// on the card were written in.
+const FIXTURE_CAPTURED_BLIND = `
+const run = (rows: any[], query: any) => {
+  const where = query?.where ?? {};
+  return rows.filter((r) => Object.entries(where).every(([k, v]) => r[k] === v));
+};`;
+
+// Captured through an ACCESS PATH rooted at an ENCLOSING PARAMETER. Roughly
+// half the corpus is spelled this way (`opts.where`, `q.where`, `query.filter`)
+// and keying on the root identifier alone mis-binds it into a TypeError.
+const FIXTURE_CAPTURED_PATH = `
+function makeDriver(rows: any[]) {
+  return {
+    find: (opts: any) => rows.filter((r) => Object.entries(opts.where).every(([k, v]) => r[k] === v)),
+  };
+}`;
+
+// Same shape, but the filter root binds NOWHERE in the file — an import or a
+// global. Discovery must decline it: this gate does not grade code it cannot
+// see. This is the fixture that holds the resolution requirement in place.
+const FIXTURE_CAPTURED_UNRESOLVED = `
+const run = (rows: any[]) =>
+  rows.filter((r) => Object.entries(IMPORTED_FILTER).every(([k, v]) => r[k] === v));`;
+
+// The filter expression is a CALL, so it reduces to no access path and the
+// battery could not synthesise a binding for it. Declined, not guessed at.
+const FIXTURE_CAPTURED_CALL = `
+const run = (rows: any[], get: any) =>
+  rows.filter((r) => Object.entries(get()).every(([k, v]) => r[k] === v));`;
+
+// A captured matcher that conjoins correctly — discovery must not assume that
+// "single-param callback" implies "defective".
+const FIXTURE_CAPTURED_CORRECT = `
+const run = (rows: any[], query: any) => {
+  const where = query?.where ?? {};
+  return rows.filter((r) =>
+    Object.entries(where).every(([k, v]) =>
+      k === '$or'
+        ? (v as any[]).some((b) => Object.entries(b).every(([bk, bv]) => r[bk] === bv))
+        : k === '$and'
+          ? (v as any[]).every((b) => Object.entries(b).every(([bk, bv]) => r[bk] === bv))
+          : r[k] === v));
+};`;
+
+// An INVERTED survivor filter inside a delete double. Structurally a candidate,
+// and it carries the same shape (b) defect — but it answers the control probe
+// backwards, so it is not a row-SELECTING predicate and the probe drops it.
+// Pinned as a fixture so this residual stays a KNOWN limit rather than drifting
+// into an accidental one.
+const FIXTURE_CAPTURED_NEGATED = `
+const run = (rows: any[], opts: any) =>
+  rows.filter((r) => !Object.entries(opts.where).every(([k, v]) => r[k] === v));`;
+
 function judgeFixture(src) {
   const found = discoverInSource(src, 'fixture.test.ts');
   return { found, results: found.map(judge) };
@@ -576,6 +816,40 @@ function selfTest() {
   const closure = judgeFixture(FIXTURE_HELPER_CLOSURE);
   expect('a matcher using a same-file helper is lifted', closure.results[0]?.verdict === 'CONFORMING');
 
+  // --- #8615: the captured-filter arm ------------------------------------
+  const capBlind = judgeFixture(FIXTURE_CAPTURED_BLIND);
+  expect('a single-param callback capturing a same-file `where` is discovered', capBlind.found.length === 1);
+  expect('its captured path is recorded', capBlind.found[0]?.capturedPath?.join('.') === 'where');
+  expect('a captured combinator-blind matcher is SILENT', capBlind.results[0]?.verdict === 'SILENT');
+
+  const capPath = judgeFixture(FIXTURE_CAPTURED_PATH);
+  expect('a filter captured through opts.where is discovered', capPath.found.length === 1);
+  expect('the whole access path is recorded', capPath.found[0]?.capturedPath?.join('.') === 'opts.where');
+  expect(
+    'a path-captured matcher is JUDGED, not left unrunnable',
+    capPath.results[0]?.verdict === 'SILENT',
+  );
+
+  const capUnresolved = judgeFixture(FIXTURE_CAPTURED_UNRESOLVED);
+  expect(
+    'a filter root that resolves nowhere same-file is NOT discovered',
+    capUnresolved.found.length === 0,
+  );
+
+  const capCall = judgeFixture(FIXTURE_CAPTURED_CALL);
+  expect('a filter expression that is a call yields no candidate', capCall.found.length === 0);
+
+  const capCorrect = judgeFixture(FIXTURE_CAPTURED_CORRECT);
+  expect('a conjoining captured matcher is discovered', capCorrect.found.length === 1);
+  expect('a conjoining captured matcher is CONFORMING', capCorrect.results[0]?.verdict === 'CONFORMING');
+
+  const capNegated = judgeFixture(FIXTURE_CAPTURED_NEGATED);
+  expect('an inverted survivor filter is a structural candidate', capNegated.found.length === 1);
+  expect(
+    'the control probe drops the inverted survivor filter (documented residual)',
+    capNegated.results[0]?.verdict === 'OUT_OF_SCOPE',
+  );
+
   // Reconciliation, both directions.
   const fakeMeasured = new Map([['a.test.ts', { silent: 1, unjudged: 0, details: [{ line: 1, name: 'm', result: { shapes: ['x'] } }] }]]);
   expect('an unbaselined silent matcher is an error', reconcile(fakeMeasured, {}).length === 1);
@@ -592,7 +866,10 @@ function selfTest() {
   }
   console.log(
     'OK  self-test: separates conjoining, early-returning, combinator-blind and refusing\n' +
-    '    matchers on synthetic fixtures; the control probe drops a non-predicate; the\n' +
+    '    matchers on synthetic fixtures; the control probe drops a non-predicate; single-\n' +
+    '    parameter callbacks capturing their filter — by name and by access path — are\n' +
+    '    discovered and judged, while an unresolvable root, a computed filter and an\n' +
+    '    inverted survivor filter are each declined for their own recorded reason; the\n' +
     '    ledger reconciles in both directions.',
   );
 }

@@ -73,7 +73,7 @@ class FakeEngine {
 
   async find(objectName: string, query?: { where?: Record<string, unknown> }): Promise<FakeRow[]> {
     const where = query?.where ?? {};
-    return this.rows(objectName).filter((r) => Object.entries(where).every(([k, v]) => r[k] === v));
+    return this.rows(objectName).filter((r) => Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }));
   }
 
   async findOne(objectName: string, query?: { where?: Record<string, unknown> }): Promise<FakeRow | null> {
