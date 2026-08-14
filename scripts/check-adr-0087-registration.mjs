@@ -278,9 +278,16 @@
 //     instead. The direction is deliberate (projection is a SUBSET of source): a
 //     new entry not yet regenerated is `check:spec-changes`'s red, not this one's,
 //     so the two gates never double-report the same fact.
-//   * CONVENTION ROT -- at least one changeset in the current stock must match the
-//     breaking detector. If `**BREAKING**` / `major` / `feat!:` are ever reworded
-//     wholesale, this gate would match nothing and pass everything in silence.
+//   * CONVENTION ROT -- a fixed set of synthetic control texts, one per spelling
+//     `breakingDeclaration()` is specified to match plus shapes it must NOT
+//     match, is driven through the detector on every invocation. If
+//     `**BREAKING**` / `major` / `feat!:` are ever reworded wholesale, this gate
+//     would match nothing and pass everything in silence; the controls surface
+//     that as detector rot the moment convention and detector diverge. They
+//     deliberately never read the live stock: "at least one breaking changeset
+//     in stock" asserted repo PHASE -- false on every PR in the post-release
+//     window, once `version packages` has consumed the breaking population --
+//     not detector health (#8658).
 //   * VOCABULARY DRIFT (#8299) -- the categories `CATEGORIES` accepts and the ones
 //     ADR-0087 documents must be the SAME SET, checked both ways. A category this
 //     file accepts that the ADR never described is an exemption an author cannot
@@ -1367,11 +1374,27 @@ export function mergeBase(base, head, cwd) {
   try { return git(['merge-base', base, head], cwd).trim() || null; } catch { return null; }
 }
 
+/**
+ * Everything under `.changeset/` at a rev, split into "any entry at all" and
+ * "actual changesets", or `null` when the tree itself cannot be listed.
+ *
+ * The split is what lets `assertInputs` tell an EMPTY STOCK (zero pending
+ * changesets — the legitimate state of main right after a release cut, #8658)
+ * apart from a MISSING DIRECTORY (not even the tracked README.md/config.json
+ * found — unreadable input, still a #4690 refusal).
+ *
+ * @returns {{ entries: string[], changesets: string[] } | null}
+ */
+function changesetDirAt(rev, cwd) {
+  let out;
+  try { out = git(['ls-tree', '-r', '--name-only', rev, '--', '.changeset'], cwd); } catch { return null; }
+  const entries = out.split('\n').map((s) => s.trim()).filter(Boolean);
+  return { entries, changesets: entries.filter(isChangesetFile) };
+}
+
 /** Every changeset path present at a rev. */
 function changesetsAt(rev, cwd) {
-  let out;
-  try { out = git(['ls-tree', '-r', '--name-only', rev, '--', '.changeset'], cwd); } catch { return []; }
-  return out.split('\n').map((s) => s.trim()).filter((p) => p && isChangesetFile(p));
+  return changesetDirAt(rev, cwd)?.changesets ?? [];
 }
 
 /**
@@ -1406,13 +1429,24 @@ export function ledgerAt(rev, cwd) {
 export function assertInputs({ cwd, head }) {
   const problems = [];
 
-  // (1) the subject matter exists at all
-  const stock = changesetsAt(head, cwd);
-  if (stock.length === 0) {
+  // (1) the subject matter's DIRECTORY is readable at all. Its POPULATION is
+  //     repo phase, not an input problem (#8658): right after a release cut,
+  //     `version packages` has consumed the whole stock, and this gate's
+  //     subject is the DIFF — a PR that introduces no changeset over an empty
+  //     stock has nothing to judge and must be clean, not refused. What stays
+  //     a refusal is the directory itself being missing or unlistable at HEAD
+  //     (the #4690 posture, kept deliberately): `.changeset/README.md` and
+  //     `config.json` are tracked, so a rev where `ls-tree` finds NOTHING
+  //     under `.changeset/` is a rev this gate cannot trust — the directory
+  //     moved, or the read failed.
+  const csDir = changesetDirAt(head, cwd);
+  if (csDir === null || csDir.entries.length === 0) {
     problems.push(
-      'no changesets found at HEAD (`.changeset/*.md` is empty or absent).\n' +
-      '    This gate judges changesets; with none to read it would report success while checking\n' +
-      '    nothing (#4690). If the changeset directory genuinely moved, this gate moves with it.',
+      '`.changeset/` is missing or unlistable at HEAD — not even its tracked README.md/config.json\n' +
+      '    were found. This gate judges changesets; a rev where their directory cannot be read would\n' +
+      '    report success while checking nothing (#4690). If the changeset directory genuinely moved,\n' +
+      '    this gate moves with it. (An EMPTY stock is NOT this failure: zero pending changesets is\n' +
+      '    the legitimate state of main right after a release cut — #8658.)',
     );
   }
 
@@ -1478,18 +1512,52 @@ export function assertInputs({ cwd, head }) {
 
   // (4) CONVENTION ROT -- if `major` / `**BREAKING` / `feat!:` are ever reworded
   //     wholesale, this gate matches nothing and passes everything in silence.
-  let breakingInStock = 0;
-  for (const text of showManyOrNull(head, stock, cwd).values()) {
-    if (breakingDeclaration(parseChangeset(text)).breaking) breakingInStock++;
+  //     Guarded by SYNTHETIC controls, never by the live stock (#8658): "at
+  //     least one breaking changeset in the real stock" asserted repo PHASE,
+  //     not detector health -- a release's `version packages` consumes exactly
+  //     that population, so the old spelling went red on every post-cut PR
+  //     while proving nothing about this checker. These fixtures pin each
+  //     spelling `breakingDeclaration()` is specified to match (the three
+  //     signals its doc comment names, including the #7004 comment/quoting
+  //     dialects), plus shapes that must NOT match, and they run on EVERY
+  //     invocation regardless of what the release train last did to
+  //     `.changeset/`. A wholesale rewording of the convention now surfaces at
+  //     the moment convention and detector are changed apart: whoever rewords
+  //     `breakingDeclaration()` must reword these fixtures in the same edit,
+  //     or this refusal names the divergence.
+  const MUST_MATCH_BREAKING = [
+    ['a `major` frontmatter bump', "---\n'@objectstack/spec': major\n---\n\nan ordinary summary\n"],
+    ['a quoted `major` bump with a trailing YAML comment (#7004)', '---\n"@objectstack/spec": "major" # keep\n---\n\nan ordinary summary\n'],
+    ['a `**BREAKING**` body marker', "---\n'@objectstack/spec': minor\n---\n\na summary\n\n**BREAKING**: something changed\n"],
+    ['a `BREAKING CHANGE:` body line', "---\n'@objectstack/spec': minor\n---\n\na summary\n\nBREAKING CHANGE: something changed\n"],
+    ['a conventional-commit `!` summary', "---\n'@objectstack/spec': patch\n---\n\nfeat(spec)!: drop a key\n"],
+  ];
+  const MUST_NOT_MATCH_BREAKING = [
+    ['a plain `patch` changeset', "---\n'@objectstack/spec': patch\n---\n\nfix a typo\n"],
+    ['a `minor` changeset whose prose merely contains the word breaking', "---\n'@objectstack/spec': minor\n---\n\nnothing groundbreaking here\n"],
+  ];
+  for (const [label, text] of MUST_MATCH_BREAKING) {
+    if (!breakingDeclaration(parseChangeset(text)).breaking) {
+      problems.push(
+        `CONVENTION ROT: ${label} no longer matches the breaking-change detector.\n` +
+        '    This gate fires on declared-breaking changesets; a detector that misses a documented\n' +
+        '    spelling is a no-op reporting success on exactly those changesets (#4690). If the\n' +
+        '    breaking-change convention was deliberately reworded, this gate\'s contract changed with\n' +
+        '    it -- update breakingDeclaration() and these control fixtures together, rather than\n' +
+        '    leaving a green gate that checks nothing.',
+      );
+    }
   }
-  if (stock.length > 0 && breakingInStock === 0) {
-    problems.push(
-      `not one of ${stock.length} changeset(s) in stock matches the breaking-change detector.\n` +
-      '    This gate fires on declared-breaking changesets; with zero detectable it is a no-op\n' +
-      '    reporting success (#4690). If the breaking-change convention was deliberately reworded,\n' +
-      '    this gate\'s contract changed with it -- update breakingDeclaration() and this assertion\n' +
-      '    together, rather than leaving a green gate that checks nothing.',
-    );
+  for (const [label, text] of MUST_NOT_MATCH_BREAKING) {
+    if (breakingDeclaration(parseChangeset(text)).breaking) {
+      problems.push(
+        `CONVENTION ROT (inverted): ${label} now matches the breaking-change detector.\n` +
+        '    An over-matching detector demands an ADR-0087 disposition of authors who declared\n' +
+        '    nothing breaking, which teaches them to write markers by rote -- the allow-list decay\n' +
+        '    this gate exists to avoid. Narrow breakingDeclaration() and these control fixtures\n' +
+        '    together.',
+      );
+    }
   }
 
   // (5) VOCABULARY DRIFT (#8299) -- the categories this gate accepts and the ones
@@ -2376,7 +2444,7 @@ function selfTest() {
 
   /**
    * Build a two-commit repo: base carries the ledger + a breaking changeset in
-   * stock (so the convention assertion is satisfied), head adds `files`.
+   * stock (realistic mid-cycle stock), head adds `files`.
    *
    * `baseFiles` puts extra files on the BASE commit, and a `null` in `files`
    * deletes one at head. Together they are how a RENAME is expressed (#7045):
@@ -2405,7 +2473,9 @@ function selfTest() {
     w(LEDGER_SOURCES[1], CONV(['a-conversion']));
     w(SPEC_CHANGES, SPEC_CHANGES_JSON(baseIds));
     w(ADR_0087, ADR_DOC());
-    // stock: one declared-breaking changeset so the convention-rot assertion holds
+    // stock: one declared-breaking changeset -- realistic mid-cycle stock for
+    // the inherited-changeset cases. (No longer needed to satisfy assertInputs:
+    // since #8658 its convention-rot control is synthetic and phase-independent.)
     w('.changeset/stock-breaking.md', CS({ body: 'stock\n\n**BREAKING** something\n' }));
     for (const [name, p] of Object.entries(pkgs ?? { '@objectstack/spec': { dir: 'packages/spec', private: false } })) {
       w(`${p.dir}/package.json`, JSON.stringify({ name, version: '1.0.0', ...(p.private ? { private: true } : {}) }));
@@ -2984,7 +3054,13 @@ function selfTest() {
     assert(probs.some((p) => /parser drift/.test(p) && /invisible-to-the-parser/.test(p)), `I1: parser rot must be RED, got: ${probs.join('|')}`);
   }
   {
-    // convention rot: stock exists but nothing in it reads as breaking
+    // FLIPPED by #8658: a stock with nothing breaking in it is the legitimate
+    // shape of main between a release cut and the next breaking changeset
+    // landing -- repo PHASE, not an input problem, so it is GREEN now. The
+    // detector-rot guarantee the old red carried moved onto the synthetic
+    // controls inside assertInputs, which run here too (and on every other
+    // invocation in this self-test): rot breakingDeclaration() and every one
+    // of these fixtures refuses, this one included.
     const dir = mkdtempSync(join(tmpdir(), 'adr0087-conv-'));
     cleanup.push(dir);
     const w = (rel, text) => { mkdirSync(dirname(join(dir, rel)), { recursive: true }); writeFileSync(join(dir, rel), text); };
@@ -2994,10 +3070,71 @@ function selfTest() {
     w(LEDGER_SOURCES[0], REG(['seen-one']));
     w(LEDGER_SOURCES[1], CONV(['a-conversion']));
     w(SPEC_CHANGES, SPEC_CHANGES_JSON(['seen-one']));
+    w(ADR_0087, ADR_DOC());
     w('.changeset/quiet.md', CS({ bumps: [['@objectstack/spec', 'patch']], body: 'nothing breaking here\n' }));
     git(['add', '-A'], dir); git(['commit', '-qm', 'base'], dir);
     const probs = assertInputs({ cwd: dir, head: 'HEAD' });
-    assert(probs.some((p) => /breaking-change detector/.test(p)), `I2: convention rot must be RED, got: ${probs.join('|')}`);
+    assert(probs.length === 0, `I2 (#8658): a stock with no breaking changeset is repo phase, never an input problem -- got: ${probs.join('|')}`);
+  }
+  {
+    // I2b (#8658): the post-cut window proper -- ZERO changesets in stock, only
+    // the tracked README/config. `version packages` produces exactly this state
+    // on main, so it must be judged (and, with a diff introducing nothing,
+    // found clean), never refused.
+    const dir = mkdtempSync(join(tmpdir(), 'adr0087-postcut-'));
+    cleanup.push(dir);
+    const w = (rel, text) => { mkdirSync(dirname(join(dir, rel)), { recursive: true }); writeFileSync(join(dir, rel), text); };
+    git(['init', '-q', '-b', 'main'], dir);
+    git(['config', 'user.email', 't@t'], dir);
+    git(['config', 'user.name', 't'], dir);
+    w(LEDGER_SOURCES[0], REG(['seen-one']));
+    w(LEDGER_SOURCES[1], CONV(['a-conversion']));
+    w(SPEC_CHANGES, SPEC_CHANGES_JSON(['seen-one']));
+    w(ADR_0087, ADR_DOC());
+    w('.changeset/README.md', '# Changesets\n\ndocumentation only\n');
+    w('.changeset/config.json', '{}\n');
+    git(['add', '-A'], dir); git(['commit', '-qm', 'post-cut base'], dir);
+    const probs = assertInputs({ cwd: dir, head: 'HEAD' });
+    assert(probs.length === 0, `I2b (#8658): an EMPTY stock right after a release cut is a legal repo state -- got: ${probs.join('|')}`);
+    const base = git(['rev-parse', 'HEAD'], dir).trim();
+    const res = scan({ cwd: dir, base, head: 'HEAD' });
+    assert(
+      res.problems.length === 0 && res.judged.length === 0,
+      `I2b (#8658): ... and a diff introducing no changeset over it scans clean -- got ${JSON.stringify(res.problems)}`,
+    );
+  }
+  {
+    // I2c: the #4690 posture SURVIVES the #8658 repair -- a rev with no
+    // `.changeset/` at all (not even README/config) is unreadable input, and
+    // unreadable input is a refusal, never a pass.
+    const dir = mkdtempSync(join(tmpdir(), 'adr0087-nodir-'));
+    cleanup.push(dir);
+    const w = (rel, text) => { mkdirSync(dirname(join(dir, rel)), { recursive: true }); writeFileSync(join(dir, rel), text); };
+    git(['init', '-q', '-b', 'main'], dir);
+    git(['config', 'user.email', 't@t'], dir);
+    git(['config', 'user.name', 't'], dir);
+    w(LEDGER_SOURCES[0], REG(['seen-one']));
+    w(LEDGER_SOURCES[1], CONV(['a-conversion']));
+    w(SPEC_CHANGES, SPEC_CHANGES_JSON(['seen-one']));
+    w(ADR_0087, ADR_DOC());
+    git(['add', '-A'], dir); git(['commit', '-qm', 'no changeset dir'], dir);
+    const probs = assertInputs({ cwd: dir, head: 'HEAD' });
+    assert(
+      probs.some((p) => /`\.changeset\/` is missing or unlistable/.test(p)),
+      `I2c: a missing .changeset directory must still be RED (#4690) -- got: ${probs.join('|')}`,
+    );
+  }
+  {
+    // I2d: the synthetic convention-rot controls run on a repo whose stock DOES
+    // contain a breaking changeset too -- they are phase-independent in both
+    // directions, so a mid-cycle repo gains no problems from them either.
+    // (The rot direction itself -- a broken breakingDeclaration() making the
+    // controls refuse -- cannot be staged from here without mutating this
+    // module; it is verified by ablation: see the reverse-verification record
+    // on the PR that introduced the controls, #8658.)
+    const r = mk({ files: {} });
+    const probs = assertInputs({ cwd: r.dir, head: 'HEAD' });
+    assert(probs.length === 0, `I2d: the synthetic breaking-detector controls add no problems on a healthy detector -- got: ${probs.join('|')}`);
   }
   {
     // a missing ledger is a red, never a skip
