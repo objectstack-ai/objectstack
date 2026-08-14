@@ -2323,7 +2323,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       name: {
         label: "ジョブ名",
-        help: "一意のジョブ識別子（snake_case）"
+        help: "一意のジョブ識別子（snake_case）。インストール全体で一意です — ジョブカタログは組織ではなくデプロイメントに属する情報です"
       },
       schedule_type: {
         label: "スケジュールタイプ",
