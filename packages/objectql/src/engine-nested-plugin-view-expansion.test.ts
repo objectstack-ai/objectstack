@@ -202,13 +202,18 @@ describe('the expanded per-view identities a nested plugin now produces (#7163)'
   });
 });
 
-describe('control — a NON-aggregated view is unchanged by this card (#7163)', () => {
+describe('a NON-container `views:` entry is REFUSED by both seams (#5320)', () => {
   /**
-   * The fix is scoped by `isAggregatedViewContainer`, which is false for an
-   * already-independent `ViewItem` (it carries `viewKind`). Such a view must
-   * register exactly once, under its own name, through BOTH seams — no
-   * expansion, no new keys. This is what says the change is additive and only
-   * on the container shape.
+   * [#5320] REPLACED WHOLESALE, per the fork ruling's fixture disposition.
+   * The block this replaces was #7163's control: it PINNED that a standalone
+   * ViewItem in `views:` "registers as-is, through both seams" — i.e. it
+   * pinned exactly the undeclared runtime-wider acceptance this card removes
+   * (the stack vocabulary was always container-only, `stack.zod.ts:views`).
+   * Keeping it would have kept a green assertion over a deleted behaviour;
+   * loosening it would have judged nothing. It is now the rejection pin:
+   * both seams refuse the entry with the ADR-0112 envelope (`code` + `status`)
+   * and the wrap-it prescription, and the declared travel route for
+   * machine-assembled non-container artifacts is the `viewItems:` channel.
    */
   const viewItem = {
     name: 'account.hot',
@@ -217,12 +222,58 @@ describe('control — a NON-aggregated view is unchanged by this card (#7163)', 
     config: { type: 'grid', columns: [{ field: 'name' }] },
   };
 
-  it('registers a standalone ViewItem identically from both seams, with no expansion', () => {
-    const direct = boot({ id: PKG, name: 'sales', views: [viewItem] });
-    const nested = boot({ id: PKG, name: 'sales', plugins: [{ name: 'p', views: [viewItem] }] });
+  /** Envelope-first assertion: `code` AND `status`, never a bare toThrow. */
+  function expectRefusal(manifest: unknown) {
+    let thrown: (Error & { code?: string; status?: number }) | undefined;
+    try {
+      boot(manifest);
+    } catch (e) {
+      thrown = e as Error & { code?: string; status?: number };
+    }
+    expect(thrown, 'registration must refuse, not accept').toBeTruthy();
+    expect(thrown!.code).toBe('INVALID_METADATA');
+    expect(thrown!.status).toBe(422);
+    expect(thrown!.message).toMatch(/containers only/i);
+    expect(thrown!.message).toContain('defineView');
+    return thrown!;
+  }
 
-    expect(viewNames(nested)).toEqual(['account.hot']);
-    expect(viewNames(nested)).toEqual(viewNames(direct));
+  it('refuses a standalone ViewItem in `views:` from the manifest seam, envelope + prescription', () => {
+    const err = expectRefusal({ id: PKG, name: 'sales', views: [viewItem] });
+    // The refusal names the entry, so the author fixes the right view.
+    expect(err.message).toContain('account.hot');
+  });
+
+  it('refuses identically from the nested-plugin seam (one body, one verdict — #7163 kept)', () => {
+    expectRefusal({ id: PKG, name: 'sales', plugins: [{ name: 'p', views: [viewItem] }] });
+  });
+
+  it('refuses a flattened overlay in `views:` too (inline config, no container slot)', () => {
+    expectRefusal({
+      id: PKG,
+      name: 'sales',
+      views: [{ name: 'account.default', object: 'account', viewKind: 'list', type: 'grid', columns: [{ field: 'name' }] }],
+    });
+  });
+
+  it('accepts the SAME artifact through the declared `viewItems:` channel', () => {
+    const engine = boot({ id: PKG, name: 'sales', viewItems: [viewItem] });
+    expect(viewNames(engine)).toEqual(['account.hot']);
+    const stored = viewItems(engine).find((v: any) => v.name === 'account.hot');
+    expect(stored.viewKind).toBe('list');
+    expect(stored.object).toBe('account');
+  });
+
+  it('refuses an undeclared bag in `viewItems:` with the envelope (strict channel, no passthrough)', () => {
+    let thrown: (Error & { code?: string; status?: number }) | undefined;
+    try {
+      boot({ id: PKG, name: 'sales', viewItems: [{ name: 'account.junk', nope: 1 }] });
+    } catch (e) {
+      thrown = e as Error & { code?: string; status?: number };
+    }
+    expect(thrown, 'the viewItems channel must refuse an undeclared bag').toBeTruthy();
+    expect(thrown!.code).toBe('INVALID_METADATA');
+    expect(thrown!.status).toBe(422);
   });
 
   it('leaves a container-free manifest with no view items at all', () => {

@@ -61,6 +61,13 @@ Decision:
 - **D8** — Non-goals: single-org membership still does **not** gate data access;
   RLS strip semantics, the dual frontend feature flags, and better-auth's
   ownership of member CRUD are all unchanged.
+- **D9** *(recording, not a new ruling)* — The `session.create.before` hook
+  resolves a session's `activeOrganizationId` from the caller's `sys_member`
+  row (owner-preferred, else oldest), only when the draft lacks one,
+  best-effort, opt-out via `autoActiveOrganization: false`. Shipped behaviour,
+  previously cited in code as a pre-repo "ADR-0081 D1" whose number now
+  collides with this repo's ADR-0081; anchored here because it reads exactly
+  the invariant D1 states and D2 owns.
 
 ## Context
 
@@ -84,10 +91,10 @@ so paths that create users *outside* better-auth's org flows (`/admin/create-use
 `/admin/import-users`, plain email signup) produce **member-less users**. In
 single-org mode a member-less user is degraded in concrete ways:
 
-- the ADR-0081-D1 `session.create.before` hook resolves `activeOrganizationId`
-  from the user's `sys_member` row — no row ⇒ **null active org for every
-  session**, so better-auth org endpoints can't resolve an org for them and
-  `{current_org_id}` navigation tokens fall back;
+- the `session.create.before` hook resolves `activeOrganizationId` from the
+  user's `sys_member` row (recorded as D9) — no row ⇒ **null active org for
+  every session**, so better-auth org endpoints can't resolve an org for them
+  and `{current_org_id}` navigation tokens fall back;
 - the Setup app's Members list omits them, right next to an Invite flow that
   *does* create membership — the operator-visible inconsistency reported against
   PR #2882.
@@ -385,6 +392,56 @@ admin surfaces.
 4. **No new org-resolution cleverness in multi mode.** Domain matching,
    actor-active-org inheritance, etc. remain the province of the flows that
    have real context (JIT, invites, host hooks).
+
+### D9 — The session's active organization is resolved from membership, here
+
+> **This decision is a RECORDING, not a new ruling.** The behaviour below has
+> shipped since before this ADR, and nothing about it changes. What changes is
+> that it now has an anchor. The code carried it as **"ADR-0081 D1"**, a label
+> inherited from a decision record that predates this repo's ADR series (the
+> same pre-repo record the *Relates to* line names for the default-org
+> bootstrap). That number now collides with this repo's
+> [ADR-0081](./0081-trusted-react-page-tier.md) — the trusted `kind:'react'`
+> page tier — so a reader following the citation landed in a document about
+> React pages with no signal they were in the wrong record. The decision is
+> restated here because this is the record that owns the fact it depends on:
+> `sys_member` and the membership lifecycle (D1/D2).
+
+On session create, plugin-auth stamps the session's `activeOrganizationId` from
+the caller's membership. Mechanically (`AuthManager.composeDatabaseHooks` →
+`defaultActiveOrg`):
+
+- **Seam.** better-auth's `session.create.before` database hook. A
+  host-supplied `session.create.before` chains **first** and keeps precedence,
+  exactly as D2's reconciler yields to host hooks on `user.create.after`.
+- **Selection.** Owner-preferred, else the oldest `sys_member` row for the
+  user — one selection helper, so every call site resolves identically. The
+  read runs through the system context, because the caller has no organization
+  yet at this point.
+- **Only when absent.** A draft session that already carries an
+  `activeOrganizationId` is never overwritten.
+- **Best-effort.** Failures are swallowed; login never fails on this
+  bookkeeping.
+- **Opt-out.** `auth.autoActiveOrganization: false` restores raw better-auth
+  behaviour (sessions start org-less). Default `true`.
+- **Ordering (#8245 / #8247).** The hook settles membership through D2's
+  reconciler *before* resolving the organization, so a user's first session is
+  not minted tenant-less by a race with better-auth's deferred
+  `user.create.after`. This is an ordering change only — same reconciler, same
+  policy, same target-org resolution — so it never widens who gets bound.
+
+**Why it lives in this record.** The stamp is a *read* of the invariant D1
+states and D2 owns: it can only resolve an organization when a `sys_member` row
+exists, and which row exists is entirely decided by D1's policy and D2's
+reconciler. Recording it anywhere else would separate the read from the write
+that determines it.
+
+**What it does NOT decide.** When no `sys_member` row exists the hook declines,
+and the resulting session is authenticated with no active organization. That is
+a legal, declared state, and its semantics belong to
+[ADR-0123](./0123-no-active-organization-session-semantics.md) — not here. D9
+records how the organization is *found*; ADR-0123 governs what happens when
+there is none.
 
 ## Rollout
 
