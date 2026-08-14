@@ -529,8 +529,9 @@ describe('[#8400] publishPackageDrafts audits the batch it publishes', () => {
             organization_id: ORG,
             operation: 'publish',
             outcome: 'denied',
-            // The persisted audit column's own vocabulary (ADR-0112 D6b),
-            // lower-case like `item_locked` — NOT a wire `error.code`.
+            // The persisted audit column's own vocabulary, lower-case like
+            // `item_locked` — NOT a wire `error.code`.
+            // adr0112-ok: D6b — persisted audit column, its own vocabulary
             code: 'batch_aborted',
             actor: 'admin',
             source: 'protocol.publishPackageDrafts',
@@ -566,7 +567,9 @@ describe('[#8400] publishPackageDrafts audits the batch it publishes', () => {
             const denied = publishRows(h, 'denied');
             expect(denied).toHaveLength(1);
             expect(denied[0]).toMatchObject({
-                name: 'broken_grid', operation: 'publish', outcome: 'denied', code: 'batch_aborted',
+                name: 'broken_grid', operation: 'publish', outcome: 'denied',
+                // adr0112-ok: D6b — persisted audit column, its own vocabulary
+                code: 'batch_aborted',
             });
             expect(String(denied[0].note)).not.toContain('SQLITE_ERROR');
             expect(String(denied[0].note)).toContain('rolled back');
