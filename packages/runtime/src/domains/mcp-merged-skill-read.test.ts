@@ -163,7 +163,11 @@ function makeContext(overrides: any = {}) {
 async function bridgeFor(kernel: any, context: any = makeContext()) {
   const d = new HttpDispatcher(kernel, undefined, { enforceProjectMembership: false });
   const res = await d.handleMcp({ jsonrpc: '2.0', id: 1, method: 'prompts/list' }, context);
-  expect(res.response.status, 'precondition: the MCP route must have been served').toBe(200);
+  // `HttpDispatcherResult.response` is optional (a handler may decline), so it
+  // is read optionally rather than asserted non-null — the `toBe(200)` below is
+  // what proves it was served, and an undefined response fails it just as
+  // loudly as a wrong status would.
+  expect(res.response?.status, 'precondition: the MCP route must have been served').toBe(200);
   return (kernel.getService('mcp') as any).lastOpts.bridge;
 }
 
