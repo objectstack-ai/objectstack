@@ -5,6 +5,9 @@
 
 fix(metadata): `PUT /meta/:type` refuses a type name the platform does not have, instead of minting a namespace for it (#8421)
 
+<!-- adr-0087: not-required (no-migration-prescription) This narrows when an HTTP endpoint refuses. No authorable key, no stored shape and no spelling changes: `DEFAULT_METADATA_TYPE_REGISTRY` and the URL-spelling map are untouched, so `os migrate meta` has nothing to rewrite. Rows already at rest under an unrecognised type keep their shape, stay readable and stay deletable — the refusal is on the mint path only. #8586's own retirement entry (protocol 18) already carries the declared-kind half of this ruling. -->
+
+
 **BREAKING** accept-set narrowing on a published HTTP surface, landing after the
 v17.0.0 cut (the lockstep launch-window convention ships it as `minor`). A write
 that answered `200 {"success":true}` now answers `400 INVALID_REQUEST`:
