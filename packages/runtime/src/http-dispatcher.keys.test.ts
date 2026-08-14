@@ -4,7 +4,7 @@ import { describe, it, expect } from 'vitest';
 
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
-import { HttpDispatcher } from './http-dispatcher.js';
+import { HttpDispatcher, type HttpDispatcherResult } from './http-dispatcher.js';
 import { resolveExecutionContext } from './security/resolve-execution-context.js';
 import { hashApiKey } from './security/api-key.js';
 
@@ -225,14 +225,37 @@ const orgCtx = (tenantId?: string) => ({
   executionContext: { userId: 'u1', isSystem: false, positions: [], permissions: [], tenantId },
 });
 
+/**
+ * `HttpDispatcherResult.response` is OPTIONAL, so every read of it is a
+ * `possibly undefined` in a type-checked program — and this package's test
+ * layer IS type-checked, by `check:type-check-debt --re-measure` against a
+ * shrink-only ledger, even though `pnpm test` never sees it.
+ *
+ * Narrow once, and narrow LOUDLY. `expect(res.response).toBeDefined()` would
+ * satisfy a reader and narrow nothing (vitest's matchers are not assertion
+ * signatures), and a `!` would silence the compiler while leaving the failure
+ * to surface as `undefined is not an object` three lines later. A dispatcher
+ * that answered no response at all is a different defect from one that
+ * answered the wrong status; this keeps them distinguishable.
+ *
+ * Scoped to the #8287 suite below on purpose: the older suite's reads are the
+ * file's share of the frozen TEST_DEBT number, and pressing that number down is
+ * a separate improvement to bank, not a rider on this repair.
+ */
+function responseOf(res: HttpDispatcherResult): NonNullable<HttpDispatcherResult['response']> {
+  const { response } = res;
+  if (!response) throw new Error('handleKeys answered no response at all');
+  return response;
+}
+
 describe('HttpDispatcher.handleKeys — organization inheritance (#8287)', () => {
   it('stamps the minter’s active organization on the row and echoes it once', async () => {
     const { kernel, rows } = makeOrgKernel([{ user_id: 'u1', organization_id: 'org_a', role: 'owner' }], 'isolated');
-    const res = await dispatcher(kernel).handleKeys('POST', { name: 'agent' }, orgCtx('org_a'));
+    const res = responseOf(await dispatcher(kernel).handleKeys('POST', { name: 'agent' }, orgCtx('org_a')));
 
-    expect(res.response.status).toBe(201);
+    expect(res.status).toBe(201);
     expect(rows[0].active_organization_id).toBe('org_a');
-    expect(res.response.body.data.active_organization_id).toBe('org_a');
+    expect(res.body.data.active_organization_id).toBe('org_a');
   });
 
   /**
@@ -243,21 +266,21 @@ describe('HttpDispatcher.handleKeys — organization inheritance (#8287)', () =>
    */
   it('ignores an organization supplied in the body (inherited, never parameterized)', async () => {
     const { kernel, rows } = makeOrgKernel([{ user_id: 'u1', organization_id: 'org_a', role: 'owner' }], 'isolated');
-    const res = await dispatcher(kernel).handleKeys(
+    const res = responseOf(await dispatcher(kernel).handleKeys(
       'POST',
       { name: 'agent', organization_id: 'org_evil', active_organization_id: 'org_evil', organizationId: 'org_evil' },
       orgCtx('org_a'),
-    );
+    ));
 
-    expect(res.response.status).toBe(201);
+    expect(res.status).toBe(201);
     expect(rows[0].active_organization_id).toBe('org_a');
   });
 
   it('refuses when the caller is not a member of their own active organization', async () => {
     const { kernel, rows } = makeOrgKernel([{ user_id: 'u1', organization_id: 'org_other', role: 'owner' }], 'isolated');
-    const res = await dispatcher(kernel).handleKeys('POST', { name: 'agent' }, orgCtx('org_a'));
+    const res = responseOf(await dispatcher(kernel).handleKeys('POST', { name: 'agent' }, orgCtx('org_a')));
 
-    expect(res.response.status).toBe(403);
+    expect(res.status).toBe(403);
     // Nothing was minted — a refused mint must not leave a credential behind.
     expect(rows).toHaveLength(0);
   });
@@ -266,9 +289,9 @@ describe('HttpDispatcher.handleKeys — organization inheritance (#8287)', () =>
     const { kernel, rows } = makeOrgKernel([
       { user_id: 'u1', organization_id: 'org_a', role: 'owner', valid_until: '2000-01-01T00:00:00Z' },
     ], 'isolated');
-    const res = await dispatcher(kernel).handleKeys('POST', { name: 'agent' }, orgCtx('org_a'));
+    const res = responseOf(await dispatcher(kernel).handleKeys('POST', { name: 'agent' }, orgCtx('org_a')));
 
-    expect(res.response.status).toBe(403);
+    expect(res.status).toBe(403);
     expect(rows).toHaveLength(0);
   });
 
@@ -280,19 +303,19 @@ describe('HttpDispatcher.handleKeys — organization inheritance (#8287)', () =>
    */
   it('refuses to mint an org-less key under a walled posture', async () => {
     const { kernel, rows } = makeOrgKernel([], 'isolated');
-    const res = await dispatcher(kernel).handleKeys('POST', { name: 'agent' }, orgCtx(undefined));
+    const res = responseOf(await dispatcher(kernel).handleKeys('POST', { name: 'agent' }, orgCtx(undefined)));
 
-    expect(res.response.status).toBe(400);
+    expect(res.status).toBe(400);
     expect(rows).toHaveLength(0);
   });
 
   it('still mints an org-less key under `single` — there is no organization to inherit', async () => {
     const { kernel, rows } = makeOrgKernel([], 'single');
-    const res = await dispatcher(kernel).handleKeys('POST', { name: 'agent' }, orgCtx(undefined));
+    const res = responseOf(await dispatcher(kernel).handleKeys('POST', { name: 'agent' }, orgCtx(undefined)));
 
-    expect(res.response.status).toBe(201);
+    expect(res.status).toBe(201);
     expect(rows).toHaveLength(1);
     expect(rows[0].active_organization_id).toBeUndefined();
-    expect(res.response.body.data.active_organization_id).toBeUndefined();
+    expect(res.body.data.active_organization_id).toBeUndefined();
   });
 });
