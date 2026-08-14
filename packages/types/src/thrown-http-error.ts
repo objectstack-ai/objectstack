@@ -74,6 +74,35 @@ export interface ThrownHttpError {
   /** The producer's own `status`/`statusCode`, or the caller's fallback. */
   status: number;
   /**
+   * The status the THROW ITSELF declared — `.status`, `.statusCode`, or the
+   * 400 a validation-shaped throw declares by shape — and **absent** when it
+   * declared none, i.e. when {@link ThrownHttpError.status} above is the
+   * caller's `fallbackStatus`.
+   *
+   * ## Why `status` cannot answer this
+   *
+   * A producer that declares `500` and one that declares nothing both resolve
+   * to `status: 500`, so a caller that must tell "the producer said so" from
+   * "I supplied the default" cannot read it off the value. The workaround in
+   * the repo was to probe this function with a fallback no producer declares
+   * — `resolveThrownHttpError(e, 0).status !== 0`, still spelled by hand in
+   * `packages/rest`'s publish-classification suite. That is a magic number
+   * standing in for a fact this function already computed, and it fails
+   * silently the day a producer declares the sentinel. So the fact is stated.
+   *
+   * ## Who needs the distinction
+   *
+   * A sink that mirrors the status onto RESPONSE DATA instead of into the
+   * response's own status line — where the fallback would not be a default but
+   * an invention. `metadata-protocol`'s `toRowApiError` is the measured one
+   * (#8570): a batch row rides a **200**, so stamping `status` there would put
+   * `httpStatus: 500` on every undeclared driver fault, an ADDITION to the
+   * wire, where stamping `declaredStatus` restores only what a producer really
+   * declared. Boundaries that answer with the status itself keep reading
+   * `status` — the fallback is exactly what they want.
+   */
+  declaredStatus?: number;
+  /**
    * A member of the declared ADR-0112 vocabulary — for a boundary whose
    * envelope is checked against it. Never the HTTP status.
    */
@@ -103,6 +132,7 @@ export interface ThrownHttpError {
  * | Question | Answer |
  * |---|---|
  * | status | `.status` → `.statusCode` → 400 if it is a validation failure → `fallbackStatus` |
+ * | declaredStatus | the same chain WITHOUT the fallback — absent when the throw declared none |
  * | code | `VALIDATION_FAILED` if it is one → a REGISTERED `.code` → derived from the status |
  * | declaredCode | `VALIDATION_FAILED` if it is one → any non-empty string `.code` → absent |
  * | message | `.message` when it is a string → `String(error)` |
@@ -117,11 +147,17 @@ export function resolveThrownHttpError(error: unknown, fallbackStatus = 500): Th
   const e = error as any;
   const validation = validationFailureDetails(e);
 
+  // The validation SHAPE is a declaration too: `ValidationError` carries no
+  // status because deciding it means 400 is the boundary's job, but the
+  // producer did say "this is a client's input problem" — which is the fact
+  // `declaredStatus` reports. Only the `fallbackStatus` limb below is the
+  // caller's own invention, and it is the only one left out.
   const declaredStatus =
     typeof e?.status === 'number' ? e.status
     : typeof e?.statusCode === 'number' ? e.statusCode
+    : validation ? VALIDATION_FAILED_STATUS
     : undefined;
-  const status = declaredStatus ?? (validation ? VALIDATION_FAILED_STATUS : fallbackStatus);
+  const status = declaredStatus ?? fallbackStatus;
 
   const spelled = typeof e?.code === 'string' && e.code !== '' ? e.code : undefined;
   // A `.code` the ledger does not know cannot go in a slot typed as the closed
@@ -146,6 +182,7 @@ export function resolveThrownHttpError(error: unknown, fallbackStatus = 500): Th
 
   return {
     status,
+    ...(declaredStatus !== undefined ? { declaredStatus } : {}),
     code,
     ...(declaredCode !== undefined ? { declaredCode } : {}),
     message: typeof e?.message === 'string' ? e.message : String(error),

@@ -1489,16 +1489,67 @@ type BatchDataRowResult = BatchOperationResult;
  * ⛔ `fallback` is REQUIRED, not defaulted. All three catches that build a row
  * know their operation, and a default would let a fourth one be added that
  * silently reports the wrong verb.
+ *
+ * ## `httpStatus` reads the DECLARATION, not one spelling of it (#8570)
+ *
+ * This limb read `err.status` and nothing else, so of the producers measured at
+ * these catches — a real `ObjectQL` over a real `SqlDriver`, driven through all
+ * three bulk-write loops — two well-defined client refusals shipped a row with
+ * no status at all:
+ *
+ * | producer | code | `.status` | `.statusCode` | validation shape | was | is |
+ * |---|---|---|---|---|---|---|
+ * | {@link rowRequiredIdError} | VALIDATION_FAILED | **400** | — | no | 400 | 400 |
+ * | `recordNotFoundError` (`@objectstack/core`) | RECORD_NOT_FOUND | **404** | — | no | 404 | 404 |
+ * | objectql `ValidationError` | VALIDATION_FAILED | — | — | **yes** | — | **400** |
+ * | plugin-approvals' record lock | RECORD_LOCKED | — | **409** | no | — | **409** |
+ * | an app hook throwing a bare `Error` | — | — | — | no | — | — |
+ * | driver fault (`SqliteError`, …) | SQLITE_* | — | — | no | — | — |
+ *
+ * The first two are siblings of the last four *in the same response*: a caller
+ * branching on `httpStatus` to tell "fix your input" from "the server broke"
+ * got an answer for some failure rows and nothing for others, with no signal
+ * saying which. The single-spelling defect is #7525's, fixed there at the HTTP
+ * door; this is the same defect on the row.
+ *
+ * The question is answered by {@link resolveThrownHttpError}, IMPORTED — the
+ * `message` limb beside it already delegates there (#8502), and a second local
+ * chain would be the third derivation of "what status is this throw" in one
+ * function. ⛔ Do not re-spell it as `status ?? statusCode ?? validation`.
+ *
+ * ## ⛔ `declaredStatus`, never `status` — the over-broad direction is real
+ *
+ * That resolver answers for EVERY throw: its `status` is 500 for a bare hook
+ * `Error` and for a `SqliteError`, because 500 is the caller's fallback.
+ * Stamping that would put `httpStatus: 500` on the last two rows of the table,
+ * which never carried one — an ADDITION to the wire for those populations, and
+ * a claim the producer never made. `declaredStatus` is the same resolution
+ * minus the fallback: present exactly when the throw declared a status in one
+ * of the three spellings, absent otherwise. So a declared refusal gains the
+ * status it always meant, and an undeclared fault keeps carrying none.
+ *
+ * The gate is DECLARED-ness and deliberately not the 4xx band that
+ * {@link clientFacingRowFailureText} uses. That limb decides disclosure of free
+ * text, where a 5xx must be withheld; this one decides a number the producer
+ * itself authored, and a row already ships `httpStatus: 503` today when the
+ * refusal spells `.status` — narrowing to 4xx would WITHDRAW a status the wire
+ * carries, which is a different decision from this one.
+ *
+ * Both limbs read the same resolution for a second reason: they must agree.
+ * Deriving `code` from `err.status` while `httpStatus` came from
+ * `declaredStatus` would mint incoherent rows — `{ code: 'INTERNAL_ERROR',
+ * httpStatus: 409 }` for a `statusCode`-spelled refusal whose own code the
+ * ledger does not know.
  */
 function toRowApiError(err: any, fallback: string): ApiError {
     const thrown = typeof err?.code === 'string' && ErrorCode.safeParse(err.code).success
         ? (err.code as ApiError['code'])
         : undefined;
-    const status = typeof err?.status === 'number' ? err.status : undefined;
+    const { declaredStatus } = resolveThrownHttpError(err);
     return {
-        code: thrown ?? (status !== undefined ? standardErrorCodeForHttpStatus(status) : 'INTERNAL_ERROR'),
+        code: thrown ?? (declaredStatus !== undefined ? standardErrorCodeForHttpStatus(declaredStatus) : 'INTERNAL_ERROR'),
         message: clientFacingRowFailureText(err, fallback),
-        ...(status !== undefined ? { httpStatus: status } : {}),
+        ...(declaredStatus !== undefined ? { httpStatus: declaredStatus } : {}),
     };
 }
 

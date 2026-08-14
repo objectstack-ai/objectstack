@@ -1423,6 +1423,9 @@ importers:
       '@objectstack/driver-sql':
         specifier: workspace:*
         version: link:../../drivers/driver-sql
+      '@objectstack/metadata-protocol':
+        specifier: workspace:*
+        version: link:../../metadata-protocol
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../objectql

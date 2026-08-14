@@ -27,6 +27,7 @@
   },
   "devDependencies": {
     "@objectstack/driver-sql": "workspace:*",
+    "@objectstack/metadata-protocol": "workspace:*",
     "@objectstack/objectql": "workspace:*",
     "@objectstack/service-automation": "workspace:*",
     "@objectstack/trigger-record-change": "workspace:*",

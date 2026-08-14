@@ -38,6 +38,13 @@ export const ApiErrorSchema = lazySchema(() => z.object({
    * Optional and redundant on purpose: the response status is authoritative, so
    * a producer that emits only the semantic `code` is fully conformant. Callers
    * should branch on `code`, not on this.
+   *
+   * ABSENCE means the producer declared no status of its own — read it as "no
+   * claim made", never as a status of its own and never as 200 (#8570). It is
+   * load-bearing where this envelope rides response DATA rather than the
+   * response line: on a `BatchOperationResult` row, present = the throw behind
+   * that row declared a status, absent = an undeclared server-side fault the
+   * caller should treat as a 500.
    */
   httpStatus: z.number().int().optional().describe('HTTP status of the response carrying this error'),
   details: z.unknown().optional().describe('Additional error context (e.g. field validation errors)'),

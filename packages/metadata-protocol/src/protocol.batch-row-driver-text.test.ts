@@ -307,9 +307,13 @@ describe('[#8502] section 2 — the authored population survives, in all THREE d
 
         expect(res.results[0].errors[0].message).toBe('title must be ≤ 4 characters (got 15)');
         expect(res.results[0].errors[0].code).toBe('VALIDATION_FAILED');
-        // NO `httpStatus`: the producer declared none, and #8502 does not mint
-        // one — that would be an ADDITION to the wire, a separate decision.
-        expect(res.results[0].errors[0].httpStatus).toBeUndefined();
+        // `httpStatus: 400` since #8570 — the separate decision this line used
+        // to defer ("the producer declared no `.status`, and minting one is an
+        // ADDITION to the wire") was taken there: the limb now reads the same
+        // resolution this one does, so the validation SHAPE declares its 400.
+        // The undeclared populations still gain nothing; that half is pinned in
+        // `protocol.batch-row-http-status.test.ts` §3.
+        expect(res.results[0].errors[0].httpStatus).toBe(400);
     });
 
     it('a 4xx `statusCode` is quoted — THIS sink’s own population, met by neither sibling', async () => {
@@ -324,6 +328,9 @@ describe('[#8502] section 2 — the authored population survives, in all THREE d
             "RECORD_LOCKED: record 'r1' of 'leave_request' is locked while an approval is in progress",
         );
         expect(res.results[0].errors[0].code).toBe('RECORD_LOCKED');
+        // The `statusCode` spelling reaches `httpStatus` too since #8570 — this
+        // row is the card's second measured one.
+        expect(res.results[0].errors[0].httpStatus).toBe(409);
     });
 
     it('an UNDECLARED hook refusal is withheld — the measured cost of a positive list', async () => {
