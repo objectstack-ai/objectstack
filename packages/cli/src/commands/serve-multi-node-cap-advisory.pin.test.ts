@@ -32,10 +32,13 @@
 
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+const HERE = dirname(fileURLToPath(import.meta.url));
+
 /** `packages/cli/src/commands/serve.ts` — the consumer. */
-const SERVE_SOURCE = readFileSync(fileURLToPath(new URL('./serve.ts', import.meta.url)), 'utf8');
+const SERVE_SOURCE = readFileSync(resolve(HERE, 'serve.ts'), 'utf8');
 
 /**
  * `packages/services/service-cluster/src/multi-node-gate.ts` — the producer.
@@ -43,9 +46,19 @@ const SERVE_SOURCE = readFileSync(fileURLToPath(new URL('./serve.ts', import.met
  * Read from source rather than imported: the CLI has no dependency on this
  * package (that is the whole reason the cast exists), and reading `src` also
  * means the pin does not depend on anything having been built.
+ *
+ * ⚠️ Spelled as `resolve()` off a `dirname(fileURLToPath(import.meta.url))`
+ * seed on purpose — that is the shape `scripts/check-cross-package-test-inputs.mjs`
+ * can follow. A `new URL('…', import.meta.url)` seed reads identically at
+ * runtime but is invisible to that gate, which would leave this read undeclared:
+ * `@objectstack/cli` would then be absent from `turbo ls --affected` for a
+ * cluster-only change and its `test` cache would not hash this file — so the
+ * pin would sit green through exactly the drift it exists to catch. The
+ * declaration it needs lives in that script's `CROSS_PACKAGE_TEST_INPUTS` and
+ * in `turbo.json`'s `@objectstack/cli#test` inputs.
  */
 const GATE_SOURCE = readFileSync(
-  fileURLToPath(new URL('../../../services/service-cluster/src/multi-node-gate.ts', import.meta.url)),
+  resolve(HERE, '../../../services/service-cluster/src/multi-node-gate.ts'),
   'utf8',
 );
 

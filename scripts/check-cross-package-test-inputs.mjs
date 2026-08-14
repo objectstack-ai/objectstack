@@ -112,7 +112,18 @@ const CROSS_PACKAGE_TEST_INPUTS = {
     // src/commands/serve-verify-security-parity.contract.test.ts diffs
     // cli's serve.ts against verify's harness.ts.
     // It also pins plugin-security's permission-set test as a third witness.
-    globs: ['packages/verify/src/**', 'packages/plugins/plugin-security/src/**'],
+    //
+    // src/commands/serve-multi-node-cap-advisory.pin.test.ts reads the
+    // multi-node gate's own `ResolvedMultiNodeVerdict` declaration: serve.ts
+    // mirrors that shape by hand (the CLI has no static dependency on the
+    // cluster package), and the pin exists to fail when the two drift. It only
+    // does that if a producer-only change re-runs cli's tests, which is exactly
+    // what this declaration buys.
+    globs: [
+      'packages/verify/src/**',
+      'packages/plugins/plugin-security/src/**',
+      'packages/services/service-cluster/src/**',
+    ],
   },
   '@objectstack/lint': {
     // authoring-rule-wiring / validate-rule-compilability /
