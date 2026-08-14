@@ -1673,10 +1673,12 @@ export class SchemaRegistry {
    * @param opts.designatePrimary - `false` withholds ONLY the ADR-0079
    *   designation step. See {@link materializeServedObjectOnto} for the one
    *   caller that passes it and why the choice is not this method's to make.
+   * @param opts.provisionCompanion - `false` withholds ONLY the `__search`
+   *   step, for the same reason and from the same caller (#8376).
    */
   private materializeBaseLayer(
     schema: ServiceObject,
-    opts?: { designatePrimary?: boolean },
+    opts?: { designatePrimary?: boolean; provisionCompanion?: boolean },
   ): ServiceObject {
     let out = schema;
 
@@ -1694,7 +1696,7 @@ export class SchemaRegistry {
     // additive migration (ADR-0045) that the driver's `syncSchema`
     // materializes, populated by plugin-pinyin-search's before-save hooks and
     // OR-ed into `$search` by the engine's `expandSearchToFilter`.
-    if (this.searchCompanion) {
+    if (this.searchCompanion && opts?.provisionCompanion !== false) {
       out = provisionSearchCompanion(out);
     }
 
@@ -1725,25 +1727,41 @@ export class SchemaRegistry {
    *  - the served document is materialized in the seam's own ORDER, so the two
    *    answers cannot differ by sequencing either.
    *
-   * ⛔ `designatePrimary` is withheld when this registry HAS resolved the named
-   * object and its own answer carries no `nameField`. Without that check the
-   * convergence would over-reach in exactly one measured case: `registerObject`
-   * designates over the BASE layer and `resolveObject` folds `extend`
-   * contributors on afterwards WITHOUT re-designating, so a title-less base
-   * that an extension gives a text field to resolves with NO `nameField` — while
-   * a transform run at the read exit sees the folded document and would
-   * designate the extension's field. Withholding is the safe half of that
-   * disagreement: this seam may only converge the served copy ONTO the
-   * registry's answer, never invent a designation the registry declined. The
-   * mirror-image case — the registry designates and the served body cannot —
-   * needs no check, because `provisionPrimary` is a pure function of the body it
-   * is handed and can only ever point at a field that body really declares.
+   * ⛔ [#8376] THE SEAM MATERIALIZES A **BASE LAYER**, AND THE BODY HANDED HERE
+   * MAY ALREADY BE FOLDED. That is the whole of what this method has to get
+   * right, and it is one rule rather than a list of per-stamp exceptions.
    *
-   * ⚠️ The same base-vs-folded asymmetry applies to the `__search` stamp and is
-   * NOT closed here: `provisionSearchCompanionOnto` has served the folded
-   * document since #8038 and this method preserves that behaviour exactly
-   * rather than re-spelling it. Measured, and filed separately — see the PR's
-   * stamp inventory.
+   * `registerObject` materializes the BASE and `resolveObject` folds `extend`
+   * contributors on afterwards WITHOUT re-materializing. A read exit holds the
+   * FOLDED document, so any stamp whose decision reads the field set would be
+   * re-decided here over a strictly larger map than the registry ever judged —
+   * and would answer differently for a title-less base that an extension gives
+   * a text field to. Both document-sensitive stamps have that shape:
+   * `provisionPrimary` would designate the extension's field, and
+   * `provisionSearchCompanion` would find it as a companion SOURCE and provision
+   * a `__search` column the registry never provisioned and the driver's
+   * `syncSchema` therefore never created.
+   *
+   * ⛔ The fix cannot be to un-fold here: the fold's own idempotence
+   * ({@link subtractExtenderContributions}) reaches `validations` and `indexes`
+   * only — `fields` is a key-keyed spread with no inverse, because an extender
+   * may legitimately REPLACE a base field under the same key. Measured: after
+   * `foldObjectExtendersOnto`, the extension's field is still in the map.
+   *
+   * So the pre-fold verdict is taken from the one party that reached it BEFORE
+   * the fold — this registry, at registration. Each document-sensitive stamp is
+   * withheld when this registry HAS resolved the named object and its own
+   * answer does not carry that stamp. Convergence may only move the served copy
+   * ONTO the registry's answer, never manufacture a stamp the registry declined.
+   *
+   * The mirror-image case — the registry stamps and the served body cannot —
+   * needs no check: both provisioners are pure functions of the body they are
+   * handed, so each can only ever point at a field that body really declares.
+   *
+   * ⚠️ A stamp added to {@link materializeBaseLayer} needs a withhold here ONLY
+   * IF its decision reads the document. #8375's tenant-scope index does not (it
+   * is gated on a deployment flag alone), which is why it has no entry and needs
+   * none. That is the test to apply to stamp five.
    *
    * Returns `base` by reference when nothing was owed, so a registry-sourced
    * body (materialized at registration) pays comparisons and no copy, and a
@@ -1751,26 +1769,42 @@ export class SchemaRegistry {
    */
   materializeServedObjectOnto<T>(base: T): T {
     if (base === null || typeof base !== 'object') return base;
+    const declined = this.declinedBaseLayerStamps(base);
     return this.materializeBaseLayer(base as never, {
-      designatePrimary: !this.declinedPrimaryDesignation(base),
+      designatePrimary: !declined.primary,
+      provisionCompanion: !declined.companion,
     }) as unknown as T;
   }
 
   /**
-   * Did this registry resolve the object `base` names, and decline to designate
-   * a primary title for it? See {@link materializeServedObjectOnto}.
+   * Which document-sensitive stamps did this registry resolve the object `base`
+   * names and then DECLINE to apply to its base layer?
+   * See {@link materializeServedObjectOnto} for why the question is asked at all.
    *
-   * `false` — "no opinion" — for a body with no usable name and for a name this
-   * registry does not know, which is the honest answer in both cases: an object
-   * that never reached `registerObject` has no registry designation to converge
-   * onto, and the pure transform is then the only answer available.
+   * All-`false` — "no opinion" — for a body with no usable name and for a name
+   * this registry does not know, which is the honest answer in both cases and is
+   * also the safe one: an object that never reached `registerObject` has no
+   * registry verdict to converge onto, and nothing could have folded such a body
+   * either (the fold reads this same contributor list), so the body IS its own
+   * base layer and the pure transform is exactly right for it.
    */
-  private declinedPrimaryDesignation(base: unknown): boolean {
+  private declinedBaseLayerStamps(base: unknown): { primary: boolean; companion: boolean } {
+    const noOpinion = { primary: false, companion: false };
     const name = (base as { name?: unknown }).name;
-    if (typeof name !== 'string' || name === '') return false;
-    const resolved = this.getObject(name);
-    if (!resolved) return false;
-    return (resolved as { nameField?: unknown }).nameField === undefined;
+    if (typeof name !== 'string' || name === '') return noOpinion;
+    const resolved = this.getObject(name) as
+      | { nameField?: unknown; fields?: unknown }
+      | undefined;
+    if (!resolved) return noOpinion;
+    const fields = resolved.fields;
+    const resolvedFields =
+      fields && typeof fields === 'object' && !Array.isArray(fields)
+        ? (fields as Record<string, unknown>)
+        : undefined;
+    return {
+      primary: resolved.nameField === undefined,
+      companion: resolvedFields?.[SEARCH_COMPANION_FIELD] === undefined,
+    };
   }
 
   /**
