@@ -88,7 +88,13 @@ describe('[#8570] a locked record\'s batch row carries the 409 the hook declared
       useNullAsDefault: true,
     }), true);
     await engine.init();
-    for (const o of [opportunity, approvalRequest]) engine.registry.registerObject(o as any);
+    // `packageId` is REQUIRED by `registerObject` — passed rather than elided
+    // so this file adds no raw `tsc` error to the package's TEST_DEBT ledger,
+    // which is measured with the test layer in the program (the package's own
+    // `typecheck` script excludes `**/*.test.ts`, so it cannot see this).
+    for (const o of [opportunity, approvalRequest]) {
+      engine.registry.registerObject(o as any, 'com.objectstack.test.8570');
+    }
     // Real DDL through the real path.
     await engine.syncSchemas();
 
