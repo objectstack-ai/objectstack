@@ -40,6 +40,33 @@ describe('applyConversionsToStoredItem (stored sys_metadata rows, #3903)', () =>
     expect('execute' in out.actions[0]!).toBe(false);
   });
 
+  // #8321 — the authoring schema now refuses non-integer/negative
+  // `scale`/`precision`, but a tenant with `scale: 2.5` already at rest in
+  // `sys_metadata` must NOT become unloadable: the retired D2 conversion
+  // drops the meaningless key (behaviour-preserving — #7501's enforcement
+  // deliberately skipped malformed declarations, so it enforced nothing)
+  // and the rest of the row survives byte-identically.
+  it('drops a malformed stored scale/precision instead of breaking the row (#8321)', () => {
+    const row = {
+      name: 'crm_deal',
+      label: 'Deal',
+      fields: {
+        amount: { type: 'number', precision: 18, scale: 2.5 },
+        weight: { type: 'number', precision: -1, scale: 2 },
+        quantity: { type: 'number', precision: 10, scale: 0 },
+      },
+    };
+    const notices: ConversionNotice[] = [];
+    const out = applyConversionsToStoredItem('object', row, { onNotice: (n) => notices.push(n) });
+    expect(out.fields.amount).toEqual({ type: 'number', precision: 18 });
+    expect(out.fields.weight).toEqual({ type: 'number', scale: 2 });
+    // A well-formed count is untouched.
+    expect(out.fields.quantity).toEqual({ type: 'number', precision: 10, scale: 0 });
+    expect(
+      notices.filter((n) => n.conversionId === 'field-malformed-scale-precision-removed'),
+    ).toHaveLength(2);
+  });
+
   it('accepts the legacy PLURAL row-type spelling', () => {
     const row = { name: 'crm_deal', label: 'Deal', sharingModel: 'read' };
     const out = applyConversionsToStoredItem('objects', row) as Record<string, unknown>;

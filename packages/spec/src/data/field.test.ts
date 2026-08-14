@@ -238,6 +238,71 @@ describe('FieldSchema', () => {
 
       expect(() => FieldSchema.parse(numberField)).not.toThrow();
     });
+
+    /**
+     * #8321 — `scale`/`precision` are digit COUNTS, so a non-integer or
+     * negative declaration has no defined meaning. #7501's write-time
+     * enforcement deliberately leaves a malformed declaration UNENFORCED
+     * (inventing floor/round semantics would be PD #12 guessing), which made
+     * `scale: 2.5` silently inert. The producer now refuses it at parse
+     * (ADR-0078 declared=enforced; `z.number().int().min(0)`).
+     */
+    describe('malformed scale/precision declarations are refused at authoring (#8321)', () => {
+      const cases: Array<[key: 'scale' | 'precision', value: number, code: string]> = [
+        ['scale', 2.5, 'invalid_type'], // the issue repro: non-integer count
+        ['scale', -1, 'too_small'],
+        ['precision', 2.5, 'invalid_type'],
+        ['precision', -1, 'too_small'],
+      ];
+      for (const [key, value, code] of cases) {
+        it(`refuses ${key}: ${value} with a ${code} issue at [${key}]`, () => {
+          const result = FieldSchema.safeParse({
+            name: 'work_hours', label: 'Work Hours', type: 'number', [key]: value,
+          });
+          expect(result.success).toBe(false);
+          if (!result.success) {
+            const issue = result.error.issues.find((i) => i.path[0] === key);
+            expect(issue?.code).toBe(code);
+            // Message substance, not just a throw: the refusal names what a
+            // legal value looks like (int / >=0), so an AI author can fix it.
+            expect(issue?.message).toMatch(code === 'invalid_type' ? /expected int/ : />=0/);
+          }
+        });
+      }
+
+      it('every legal declaration still parses byte-identically (0, positive integers, absent)', () => {
+        for (const legal of [
+          { scale: 0 },
+          { scale: 2 },
+          { precision: 18, scale: 2 },
+          { precision: 0 },
+          {}, // neither declared — no new default appears
+        ]) {
+          const input = { name: 'amount', label: 'Amount', type: 'number' as const, ...legal };
+          const result = FieldSchema.safeParse(input);
+          expect(result.success).toBe(true);
+          if (result.success) {
+            // Byte-identical on this surface: the declared counts round-trip
+            // unchanged and absence stays absence.
+            expect(result.data.scale).toBe((legal as { scale?: number }).scale);
+            expect(result.data.precision).toBe((legal as { precision?: number }).precision);
+          }
+        }
+      });
+
+      it('does NOT touch CurrencyConfigSchema.precision — a different surface with its own bounds', () => {
+        // The currency config keeps its own `.int().min(0).max(10)` contract
+        // and its `scale → precision` alias table (#7501-thread trap): `10` is
+        // legal there, and `scale` under currencyConfig renames to precision
+        // rather than being judged by Field.scale's contract.
+        const result = FieldSchema.safeParse({
+          name: 'price', label: 'Price', type: 'currency',
+          currencyConfig: { precision: 10 },
+        });
+        expect(result.success).toBe(true);
+        if (result.success) expect(result.data.currencyConfig?.precision).toBe(10);
+      });
+    });
   });
 
   describe('useGrouping — number-field digit-grouping presentation hint (#7768)', () => {

@@ -639,8 +639,18 @@ export const FieldSchema = lazySchema(() => strictObject({
   minLength: z.number().optional().describe('Min character length'),
   
   /** Number Constraints */
-  precision: z.number().optional().describe('Total digits'),
-  scale: z.number().optional().describe('Decimal places'),
+  // #8321 — `precision`/`scale` are digit COUNTS, so a non-integer or negative
+  // declaration has no defined meaning. #7501 made `scale` enforced at write
+  // time with a deliberate `Number.isInteger(def.scale) && def.scale >= 0`
+  // runtime guard that leaves a malformed declaration UNENFORCED (inventing
+  // floor/round semantics in a consumer would be PD #12 guessing) — so
+  // `scale: 2.5` silently got no enforcement at all: the declared-but-inert
+  // shape that hides AI-authored metadata errors. Refuse it at the producer
+  // instead (ADR-0078 declared=enforced; house pattern `z.number().int().min(0)`).
+  // ⚠️ `CurrencyConfigSchema.precision` above is a DIFFERENT surface with its
+  // own alias table (`scale → precision` there) — do not conflate.
+  precision: z.number().int().min(0).optional().describe('Total digits (non-negative integer)'),
+  scale: z.number().int().min(0).optional().describe('Decimal places (non-negative integer)'),
   min: z.number().optional().describe('Minimum value'),
   max: z.number().optional().describe('Maximum value'),
   /**
