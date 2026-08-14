@@ -449,3 +449,38 @@ structurally* — is identical; only the per-type **direction** differs. A
 separate ADR would duplicate the rationale and split the classification from
 the decision that motivates it. This addendum keeps the rule and its
 applications in one place.
+
+## Amendment (2026-08-14): the object posture gate's R2 arm is retired — the runtime lint door owns external ≤ internal
+
+Maintainer ruling on #8310 (2026-08-13, accepting the escalated
+recommendation in full). This amendment records the retirement of one of the
+two rules the `object` authoring gate (`objectPostureGate`,
+`@objectstack/plugin-security` — registered on this ADR's
+`registerAuthoringGate` seam, #3050/#7674) carried:
+
+- **R2 (`403 owd_external_wider`, external ≤ internal, ADR-0090 D11) is
+  RETIRED as a duplicate.** The #7891 rollout completed on #8310:
+  `validateSecurityPosture` (`@objectstack/lint`) now declares `object` in
+  its `runtimeTypes`, so every active-state object publish is judged by the
+  D7 lint block BEFORE this seam's gate runs (`saveMetaItem` runs
+  `assertRuntimeAuthoringRules` first). The lint door refuses the same
+  defect as `422 INVALID_METADATA` / `security-external-wider-than-internal`
+  — and refuses an unauthored `sharingModel` outright
+  (`security-owd-unset`): under the same ruling, **absence is not a
+  decision** at the runtime object door, where this gate's R2 had silently
+  resolved it to `private`. R2's only non-shadowed refusals were false
+  positives: a system object (`isSystem` / `sys_*`) with no authored
+  `sharingModel` is effectively PUBLIC at runtime
+  (`effectiveSharingModel`, plugin-sharing), so R2's hardcoded private
+  baseline refused pairs that are not external-wider at runtime; and
+  draft-state saves, which the lint discipline deliberately defers to the
+  draft→active promotion gate (#4463 D1) — nothing enforcement-reads a
+  draft body.
+- **R1 (`403 owd_widening_forbidden`, env-tighten-only over a packaged
+  declaration, ADR-0086 D1) STAYS.** No lint rule can judge it: it compares
+  the write against the packaged DECLARATION, a deployment fact only this
+  seam holds.
+
+Door order, as pinned in `packages/rest/src/meta-object-owd-gate.test.ts`:
+the 422 lint gate answers first; this seam's 403 R1 door answers for writes
+that pass lint.

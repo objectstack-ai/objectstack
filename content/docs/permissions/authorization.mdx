@@ -336,29 +336,39 @@ Five mechanisms — four CI-time, one runtime — make the security posture a
 **checked artifact** rather than a belief:
 
 - **Security publish linter** (ADR-0090 D7, `validateSecurityPosture` in
-  `@objectstack/lint`, gating `os compile`): unset OWD on custom objects,
-  retired OWD aliases, an external dial wider than internal, `'*'` wildcards
-  carrying View/Modify All outside the platform admin set, high-privilege
-  `isDefault` (everyone-suggested) sets, the reserved word "role" in
-  security identifiers, a `controlled_by_parent` object with no relation the
-  platform can derive access from (ADR-0055: no required `master_detail`, no
-  `master_detail` at all, and no required `lookup` — so the runtime denies
-  every read and refuses every write), and the ADR-0091 grant-lifecycle rules
-  (a seed grant already expired at authoring time; a delegation row missing
-  its mandatory `reason`) — every error rule mirrors a runtime gate.
+  `@objectstack/lint`, gating `os compile` — and, since the #7891 rollout
+  completed with #8310, the **runtime publish door** for `object` /
+  `permission` / `book` / seed writes, where a gating finding refuses the
+  save with `422 INVALID_METADATA` and the rule id in `issues`): unset OWD
+  on custom objects (`security-owd-unset` — an object publish with no
+  authored `sharingModel` is refused; absence is not a decision, at the CLI
+  and at the runtime door alike), retired OWD aliases, an external dial
+  wider than internal (`security-external-wider-than-internal`), `'*'`
+  wildcards carrying View/Modify All outside the platform admin set,
+  high-privilege `isDefault` (everyone-suggested) sets, the reserved word
+  "role" in security identifiers, a `controlled_by_parent` object with no
+  relation the platform can derive access from (ADR-0055: no required
+  `master_detail`, no `master_detail` at all, and no required `lookup` — so
+  the runtime denies every read and refuses every write), and the ADR-0091
+  grant-lifecycle rules (a seed grant already expired at authoring time; a
+  delegation row missing its mandatory `reason`) — every error rule mirrors
+  a runtime gate.
 - **Runtime OWD posture gate** (#3050, `objectPostureGate` in
   `@objectstack/plugin-security`, registered on the metadata protocol's
-  pre-persistence `registerAuthoringGate` seam): the two OWD rules the CLI
-  linter can only check at build time are also enforced on every
-  runtime-authored object body — Studio drafts, REST saves, AI builders.
-  An environment overlay of a **packaged** object may only *tighten*
-  `sharingModel` / `externalSharingModel`, never widen them beyond the
-  packaged declaration (`403 owd_widening_forbidden` — widen it in the
-  package source and publish instead; this closes the
-  `OS_METADATA_WRITABLE=object` escape hatch as an unvalidated widening
-  path, ADR-0086 D1), and `externalSharingModel ≤ sharingModel` (ADR-0090
-  D11) is rejected at save time (`403 owd_external_wider`). Write-path
-  only: stored metadata keeps loading unchanged.
+  pre-persistence `registerAuthoringGate` seam): the packaged-baseline rule
+  no lint rule can judge, enforced on every runtime-authored object body —
+  Studio drafts, REST saves, AI builders. An environment overlay of a
+  **packaged** object may only *tighten* `sharingModel` /
+  `externalSharingModel`, never widen them beyond the packaged declaration
+  (`403 owd_widening_forbidden` — widen it in the package source and
+  publish instead; this closes the `OS_METADATA_WRITABLE=object` escape
+  hatch as an unvalidated widening path, ADR-0086 D1). Write-path only:
+  stored metadata keeps loading unchanged. The gate's former second rule
+  (`403 owd_external_wider`, external ≤ internal) was **retired as a
+  duplicate** when the lint block crossed to the runtime door (#8310
+  maintainer ruling): the 422 lint door answers first for external-wider
+  and for unauthored-OWD bodies, and the 403 gate remains for
+  packaged-baseline widening only.
 - **Access-matrix snapshot** (ADR-0090 D6, `buildAccessMatrix` /
   `diffAccessMatrix`): with `access-matrix.json` committed next to the config,
   `os compile` fails on any capability drift with semantic lines
