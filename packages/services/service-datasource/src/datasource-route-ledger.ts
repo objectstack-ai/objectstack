@@ -136,6 +136,8 @@ export const DATASOURCE_ROUTE_LEDGER: readonly DatasourceRouteLedgerEntry[] = [
     note: 'wizard edit; runtime-origin only (a code-defined datasource is read-only). Console surface.' },
   { route: 'DELETE /api/v1/datasources/:name', family: 'datasource-lifecycle', disposition: 'server-only',
     note: 'wizard delete; runtime-origin only, and refused while objects are still bound. Answers 204 with no body — the one route in this family outside the `{ success, data }` envelope, deliberately. Console surface.' },
+  { route: 'POST /api/v1/datasources/:name/migrate-credential', family: 'datasource-lifecycle', disposition: 'server-only',
+    note: 're-homes a saved runtime datasource\'s stored cleartext credential into `sys_secret` and drops the inline key (#8155). Console surface, and the target of the declared `migrate_credential` metadata-type action — the caller is the action, like `POST /:name/test` two rows down, not the SDK. Operator-initiated per datasource by construction: there is no batch spelling, deliberately (a boot-time sweep decides a secret\'s identity with no operator present).' },
   { route: 'POST /api/v1/datasources/test', family: 'datasource-lifecycle', disposition: 'server-only',
     note: 'probes an UNSAVED draft carried inline (with an optional cleartext `secret` that never reaches the persisted draft) — the wizard\'s "Test connection" before Save. Console surface. Registered before the `:name` routes so the literal `test` segment is never captured as a name.' },
 

@@ -58,20 +58,17 @@ bundle) with `--skip-skills` if you prefer — `AGENTS.md` is always written.
 | Template | Source | Description |
 |:---|:---|:---|
 | `blank` *(default)* | bundled, works offline | One object, REST API — a clean slate |
-| `todo` | remote | Universal task & project management starter |
-| `compliance` | remote | Compliance posture & evidence management (SOC2 / ISO27001) |
-| `content` | remote | Content marketing pipeline — editorial calendar & channel ROI |
-| `contracts` | remote | Post-signature CLM — approvals, obligations, renewals |
-| `procurement` | remote | Source-to-pay — vendors, POs, receipts, invoice matching |
 
 ```bash
-npm create objectstack@latest my-app -- --template todo
+npm create objectstack@latest my-app -- --template blank
 ```
 
-Remote templates are fetched from the
-[`objectstack-ai/templates`](https://github.com/objectstack-ai/templates)
-repository at scaffold time and need network access; `blank` is bundled inside
-the npm package and always works offline.
+`blank` is bundled inside the npm package, so scaffolding always works offline.
+
+The remote content templates (`todo`, `compliance`, `content`, `contracts`,
+`procurement`) have been retired: they were delisted from the ObjectStack
+template marketplace and are no longer maintained. Asking for one by name says
+so explicitly.
 
 <Callout type="tip">
 `os init` (from `@objectstack/cli`) is an alternative scaffolder with `app` /

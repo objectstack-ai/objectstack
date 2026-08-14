@@ -30,12 +30,14 @@
 import { validateDriverConfig } from '@objectstack/spec/data';
 import { assertDatasourcePoolSupported } from './datasource-pool-support.js';
 import { redactDatasourceConfig, restoreRedactedConfig } from './datasource-config-redaction.js';
+import { planCredentialMigration } from './datasource-credential-migration.js';
 import type {
   IDatasourceAdminService,
   DatasourceDraft,
   SecretInput,
   TestConnectionResult,
   DatasourceSummary,
+  CredentialMigrationResult,
 } from './contracts/index.js';
 import type { Logger } from './logger.js';
 
@@ -93,6 +95,19 @@ export interface DatasourceAdminServiceConfig {
   writeSecret: (input: SecretInput, hint: { name: string }) => Promise<string>;
   /** Best-effort delete of a stored secret by ref (cleanup on remove/rewrap). */
   removeSecret?: (credentialsRef: string) => Promise<void>;
+  /**
+   * Dereference a `credentialsRef` back to its cleartext — the secret store's
+   * READ side (`SecretBinder.resolve`).
+   *
+   * Optional, and its absence is load-bearing rather than cosmetic: the connect
+   * path is FAIL-CLOSED on a `credentialsRef` it cannot resolve (ADR-0062 D3),
+   * so a host that can write secrets but not read them back would have every
+   * ref-bearing datasource refuse to connect. {@link
+   * DatasourceAdminService.migrateCredential} therefore refuses to run at all
+   * without it — writing a ref it cannot verify is what would turn a working
+   * datasource into a broken one (#8155).
+   */
+  readSecret?: (credentialsRef: string) => Promise<string | undefined>;
   /** Count objects bound to a datasource (removal blocked while > 0). */
   countBoundObjects: (datasource: string) => Promise<number>;
   /** Hot-(re)register a runtime datasource's connection pool after write. */
@@ -129,6 +144,23 @@ function summaryStatus(
     default:
       return 'unvalidated';
   }
+}
+
+/**
+ * A copy of `record` whose driver `config` no longer carries `key`.
+ *
+ * Pure — the caller's stored record object is never mutated, so a concurrent
+ * reader (the connect path holds raw records) is unaffected until the write
+ * lands.
+ */
+function withoutConfigKey(record: StoredDatasource, key: string): StoredDatasource {
+  const { [key]: _removed, ...config } = (record.config ?? {}) as Record<string, unknown>;
+  return { ...record, config };
+}
+
+/** Spread `remaining` onto a result only when there is something to report. */
+function withRemaining(remaining: string[]): { remaining?: string[] } {
+  return remaining.length > 0 ? { remaining } : {};
 }
 
 export class DatasourceAdminService implements IDatasourceAdminService {
@@ -407,7 +439,162 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     await this.tryUnregisterPool(name);
   }
 
+  /**
+   * Re-home one runtime datasource's stored cleartext credential into
+   * `sys_secret` (#8155) — the execution half of
+   * {@link planCredentialMigration}.
+   *
+   * ## Ordering: durable secret first, cleartext removed last
+   *
+   * The card's hard requirement is that a crash must never leave the row
+   * credential-less. The sequence here is bind → **read the secret back** →
+   * one record write that adds the ref and drops the inline key together:
+   *
+   *  - Crash before the record write ⇒ the stored row is untouched and keeps
+   *    working on its inline credential.
+   *  - Crash after it ⇒ the row references a secret this run has already proved
+   *    readable.
+   *
+   * ⛔ It deliberately does NOT write the ref first in a separate step and drop
+   * the key in a second, which is the shape "durably written before" first
+   * suggests. Measured reason: the connect path is fail-closed on a
+   * `credentialsRef` (`failed-credentials` when it cannot resolve, ADR-0062 D3)
+   * and never falls back to `config`, so a row carrying an unverified ref
+   * ALONGSIDE its cleartext is not a safe intermediate state — it is a broken
+   * datasource with a cleartext credential the connect path will not read. The
+   * read-back is what makes the single write safe, and it is a stronger
+   * durability proof than a write ordering: it is the same decrypt the connect
+   * path will perform.
+   *
+   * ## Idempotency
+   *
+   * Compare-before-write, the discipline PR #8114's `headersPatch` established
+   * after the orphan accumulation measured on #8103: a row that already
+   * references a secret is never bound again. Re-running on a migrated row
+   * writes nothing and returns `already-bound`; a row that still holds the
+   * inline copy beside an existing ref has the copy dropped, reusing that ref.
+   * The only window this cannot close is a process crash between the
+   * `sys_secret` insert and the record write — the failure paths unbind the
+   * secret they just minted, but a hard crash leaves one orphan row, which is
+   * #8103's territory and not re-decided here.
+   *
+   * ## What it does not touch
+   *
+   * The live pool is left alone. The credential VALUE is unchanged — only where
+   * it is read from moves — and `DatasourceConnectionService.connect()` is
+   * idempotent for an already-registered driver, so re-registering would churn
+   * a working connection to no effect.
+   */
+  async migrateCredential(name: string): Promise<CredentialMigrationResult> {
+    const existing = await this.config.getDatasourceRecord(name);
+    if (!existing) throw new Error(`Datasource '${name}' not found.`);
+
+    const plan = planCredentialMigration(existing);
+    if (plan.action === 'refuse') {
+      return { name, status: 'refused', reason: plan.reason, remedy: plan.remedy };
+    }
+    if (plan.action === 'none') {
+      return { name, status: plan.status, ...withRemaining(plan.remaining) };
+    }
+
+    // The secret store's READ side is a precondition, not a nicety — see
+    // `readSecret` on the config type.
+    if (!this.config.readSecret) {
+      return this.refuse(
+        name,
+        'This host has no readable secret store wired (the secret binder exposes no `resolve`), so a '
+          + 'bound credential could not be verified — and the connect path refuses a `credentialsRef` '
+          + 'it cannot resolve, which would take this datasource out of service.',
+        'Wire a SecretBinder with `resolve` (CryptoProvider + `sys_secret`) into '
+          + 'DatasourceAdminServicePlugin, then run this action again.',
+      );
+    }
+
+    if (plan.action === 'drop-inline') {
+      // Never mint a second secret for a row that already references one. The
+      // inline copy is the last cleartext copy, so it is dropped only once the
+      // existing ref is proved resolvable.
+      const resolved = await this.tryReadSecret(plan.credentialsRef);
+      if (resolved == null || resolved === '') {
+        return this.refuse(
+          name,
+          `Datasource '${name}' already references a stored secret, but it could not be resolved or `
+            + 'decrypted (a missing `sys_secret` row, or a changed encryption key). Removing the inline '
+            + 'credential would leave this datasource with no working credential at all.',
+          'Re-enter the credential in the connection form\'s secret field — that rebinds it and '
+            + 'replaces the unresolvable reference; the inline copy can then be removed.',
+        );
+      }
+      await this.config.putDatasourceRecord(withoutConfigKey(existing, plan.key));
+      this.logger?.info?.(
+        `datasource '${name}': dropped inline 'config.${plan.key}' — the credential is already bound`,
+      );
+      return {
+        name,
+        status: 'migrated',
+        migratedKey: plan.key,
+        reusedExistingSecret: true,
+        ...withRemaining(plan.remaining),
+      };
+    }
+
+    const credentialsRef = await this.config.writeSecret({ value: plan.value }, { name });
+    const readBack = await this.tryReadSecret(credentialsRef);
+    if (readBack !== plan.value) {
+      // The secret is not durably readable, so the cleartext stays exactly
+      // where it is. Take the unusable row back out rather than leaving the
+      // orphan #8103 measured.
+      await this.tryRemoveSecret(credentialsRef);
+      return this.refuse(
+        name,
+        `The credential for datasource '${name}' was written to the secret store but did not read back `
+          + 'identically, so it is not durably recoverable. Nothing was changed: the stored credential is '
+          + 'untouched and the datasource keeps working.',
+        'Check the secret store (`sys_secret` writability, the crypto provider\'s key material), then '
+          + 'run this action again.',
+      );
+    }
+
+    const migrated: StoredDatasource = {
+      ...withoutConfigKey(existing, plan.key),
+      external: { ...(existing.external ?? {}), credentialsRef },
+    };
+    try {
+      await this.config.putDatasourceRecord(migrated);
+    } catch (err) {
+      // The record still holds the cleartext and still works; the secret we
+      // just minted has no referrer, so remove it rather than orphan it.
+      await this.tryRemoveSecret(credentialsRef);
+      throw err;
+    }
+    this.logger?.info?.(
+      `datasource '${name}': credential re-homed from 'config.${plan.key}' into the secret store`,
+    );
+    return {
+      name,
+      status: 'migrated',
+      migratedKey: plan.key,
+      reusedExistingSecret: false,
+      ...withRemaining(plan.remaining),
+    };
+  }
+
   // --- internals -----------------------------------------------------------
+
+  /** A refusal that leaves everything at rest exactly as it was. */
+  private refuse(name: string, reason: string, remedy: string): CredentialMigrationResult {
+    return { name, status: 'refused', reason, remedy };
+  }
+
+  /** Read a secret back, treating any failure as "not readable". */
+  private async tryReadSecret(credentialsRef: string): Promise<string | undefined> {
+    try {
+      return await this.config.readSecret?.(credentialsRef);
+    } catch (err) {
+      this.logger?.warn?.(`readSecret('${credentialsRef}') failed`, err);
+      return undefined;
+    }
+  }
 
   /**
    * Reject a `config` that does not satisfy its driver's contract (#4410).

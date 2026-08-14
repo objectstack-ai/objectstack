@@ -3,19 +3,19 @@
 /**
  * create-objectstack — scaffold a new ObjectStack environment.
  *
- * Two template sources:
+ * One template source: the bundled `blank` template. It lives at
+ * `dist/templates/blank/` (copied from `src/templates/blank/` by tsup
+ * `onSuccess`) and is cloned via recursive fs copy, which also restores the
+ * placeholder names npm strips at publish (see TEMPLATE_FILE_ALIASES). Always
+ * available offline.
  *
- *   1. Bundled `blank` template
- *      Lives at `dist/templates/blank/` (copied from `src/templates/blank/`
- *      by tsup `onSuccess`). Cloned via recursive fs copy, which also restores
- *      the placeholder names npm strips at publish (see TEMPLATE_FILE_ALIASES).
- *      Always available offline.
- *
- *   2. Remote content templates (`todo`, `compliance`, `content`,
- *      `contracts`, `procurement`)
- *      Fetched as a single tarball from the sibling repo
- *      `objectstack-ai/templates` on GitHub, then the `packages/<name>/`
- *      subtree is extracted. Requires network.
+ * There used to be a second category — remote content templates (`todo`,
+ * `compliance`, `content`, `contracts`, `procurement`) fetched as a tarball
+ * from the sibling repo `objectstack-ai/templates`. Those five were delisted
+ * from the official marketplace and are no longer maintained, so the catalog
+ * no longer offers them and the tarball-fetch path that served them is gone.
+ * `template-registry.ts` still names them, so `-t todo` refuses with an
+ * explanation instead of a bare "unknown template".
  *
  * After the files land in `targetDir`, four files are rewritten with the
  * user-supplied project name:
@@ -35,15 +35,8 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { pipeline } from 'node:stream/promises';
-import { createGunzip } from 'node:zlib';
-import { createWriteStream, createReadStream } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
-// eslint-disable-next-line import/no-unresolved
-import * as tar from 'tar';
 
 import { syncObjectStackDeps } from './pkg-utils.js';
 import { copyDir } from './template-copy.js';
@@ -52,52 +45,11 @@ import {
   rewriteObjectNamePrefix,
   findStaleNamespacePrefixes,
 } from './rewrite-identity.js';
+import { lookupTemplate, templateNames } from './template-registry.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const BUNDLED_TEMPLATES_DIR = path.resolve(__dirname, 'templates');
-
-const REMOTE_REPO = 'objectstack-ai/templates';
-const REMOTE_BRANCH = 'main';
-const REMOTE_TARBALL_URL = `https://codeload.github.com/${REMOTE_REPO}/tar.gz/refs/heads/${REMOTE_BRANCH}`;
-
-// ─── Template Registry ──────────────────────────────────────────────
-
-type TemplateSource =
-  | { kind: 'bundled'; dir: string }
-  | { kind: 'remote'; pkg: string };
-
-interface TemplateInfo {
-  description: string;
-  source: TemplateSource;
-}
-
-const TEMPLATES: Record<string, TemplateInfo> = {
-  blank: {
-    description: 'Minimal starter — one object, REST API, ready to extend',
-    source: { kind: 'bundled', dir: 'blank' },
-  },
-  todo: {
-    description: 'Universal task & project management starter',
-    source: { kind: 'remote', pkg: 'todo' },
-  },
-  compliance: {
-    description: 'Compliance posture & evidence management (SOC2 / ISO27001)',
-    source: { kind: 'remote', pkg: 'compliance' },
-  },
-  content: {
-    description: 'Content marketing pipeline — editorial calendar & channel ROI',
-    source: { kind: 'remote', pkg: 'content' },
-  },
-  contracts: {
-    description: 'Post-signature CLM — approvals, obligations, renewals',
-    source: { kind: 'remote', pkg: 'contracts' },
-  },
-  procurement: {
-    description: 'Source-to-pay — vendors, POs, receipts, invoice matching',
-    source: { kind: 'remote', pkg: 'procurement' },
-  },
-};
 
 // ─── Helpers ────────────────────────────────────────────────────────
 
@@ -163,72 +115,6 @@ function loadBundled(templateDir: string, targetDir: string): string[] {
   const collected: string[] = [];
   copyDir(src, targetDir, collected);
   return collected;
-}
-
-// ─── Loading: remote (GitHub tarball) ───────────────────────────────
-
-async function downloadTarball(url: string, destFile: string): Promise<void> {
-  const res = await fetch(url, { redirect: 'follow' });
-  if (!res.ok || !res.body) {
-    throw new Error(`Download failed: ${url} (${res.status})`);
-  }
-  const out = createWriteStream(destFile);
-  // node 18+: res.body is a web ReadableStream — pipe via async iterator
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  for await (const chunk of res.body as any) {
-    out.write(chunk);
-  }
-  await new Promise<void>((resolve, reject) => {
-    out.end((err: unknown) => (err ? reject(err as Error) : resolve()));
-  });
-}
-
-async function loadRemote(pkgName: string, targetDir: string): Promise<string[]> {
-  const tmp = await mkdtemp(path.join(os.tmpdir(), 'create-objectstack-'));
-  try {
-    const tarball = path.join(tmp, 'templates.tar.gz');
-    printStep(`Fetching template "${pkgName}" from ${REMOTE_REPO}@${REMOTE_BRANCH}…`);
-    await downloadTarball(REMOTE_TARBALL_URL, tarball);
-
-    // GitHub tarballs nest everything under `<repo>-<branch>/`. The package we
-    // want lives at `<repo>-<branch>/packages/<pkgName>/...`. We extract only
-    // that subtree, stripping the leading 3 path components so the contents
-    // of `packages/<pkgName>/` land directly in `targetDir`.
-    fs.mkdirSync(targetDir, { recursive: true });
-    const collected: string[] = [];
-    await pipeline(
-      createReadStream(tarball),
-      createGunzip(),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      tar.extract({
-        cwd: targetDir,
-        strip: 3,
-        filter: (p: string) => {
-          // p looks like: "templates-main/packages/<pkg>/..."
-          const parts = p.split('/');
-          return parts[1] === 'packages' && parts[2] === pkgName && parts.length > 3;
-        },
-        onentry: (entry: { path: string; type: string }) => {
-          if (entry.type === 'File') {
-            // entry.path is the original archive path; strip the 3 leading
-            // components ("templates-main/packages/<pkg>/") so the reported
-            // file matches what actually lands on disk.
-            const parts = entry.path.split('/').slice(3);
-            if (parts.length > 0) collected.push(parts.join('/'));
-          }
-        },
-      } as any),
-    );
-    if (collected.length === 0) {
-      throw new Error(
-        `Template "${pkgName}" not found in ${REMOTE_REPO}@${REMOTE_BRANCH} ` +
-          `(expected packages/${pkgName}/).`,
-      );
-    }
-    return collected;
-  } finally {
-    await rm(tmp, { recursive: true, force: true });
-  }
 }
 
 // ─── Field-aware rewrites ───────────────────────────────────────────
@@ -385,12 +271,16 @@ const program = new Command()
   .argument('[name]', 'Environment name (defaults to current directory name)')
   .option(
     '-t, --template <template>',
-    `Template: ${Object.keys(TEMPLATES).join(', ')}`,
+    `Template: ${templateNames().join(', ')}`,
     'blank',
   )
   .option('--skip-install', 'Skip dependency installation')
   .option('--skip-skills', 'Skip installing ObjectStack AI skills')
-  .action(async (
+  // Sync: nothing here awaits any more. The only asynchronous step was the
+  // remote tarball fetch, and `program.parse()` never awaited the action — so a
+  // rejection thrown outside the try/catch below would have been an unhandled
+  // rejection rather than a diagnosed failure.
+  .action((
     name: string | undefined,
     options: { template: string; skipInstall?: boolean; skipSkills?: boolean },
   ) => {
@@ -401,12 +291,24 @@ const program = new Command()
 
     printHeader('New Environment');
 
-    const template = TEMPLATES[options.template];
-    if (!template) {
-      printError(`Unknown template: ${options.template}`);
-      console.log(chalk.dim(`  Available: ${Object.keys(TEMPLATES).join(', ')}`));
+    const lookup = lookupTemplate(options.template);
+    if (lookup.kind !== 'found') {
+      if (lookup.kind === 'retired') {
+        // A returning user typed a name that used to work. Say what happened to
+        // it — the generic "Unknown template" would read as a typo on their end.
+        printError(`Template "${lookup.name}" has been retired and is no longer available.`);
+        console.log(
+          chalk.dim(
+            '  It was delisted from the ObjectStack template marketplace and is no longer maintained.',
+          ),
+        );
+      } else {
+        printError(`Unknown template: ${lookup.name}`);
+      }
+      console.log(chalk.dim(`  Available: ${templateNames().join(', ')}`));
       process.exit(1);
     }
+    const template = lookup.template;
 
     const cwd = process.cwd();
     const projectName = name || path.basename(cwd);
@@ -431,12 +333,7 @@ const program = new Command()
     try {
       fs.mkdirSync(targetDir, { recursive: true });
 
-      let createdFiles: string[];
-      if (template.source.kind === 'bundled') {
-        createdFiles = loadBundled(template.source.dir, targetDir);
-      } else {
-        createdFiles = await loadRemote(template.source.pkg, targetDir);
-      }
+      const createdFiles = loadBundled(template.source.dir, targetDir);
 
       rewriteProjectIdentity(targetDir, projectName, namespace);
 

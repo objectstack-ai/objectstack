@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
+import { DatasourceSchema } from '@objectstack/spec/data';
 import {
   DatasourceAdminService,
   type DatasourceAdminServiceConfig,
@@ -17,6 +18,12 @@ function makeHarness(opts?: {
   seed?: StoredDatasource[];
   probe?: (input: ProbeInput) => Promise<{ ok: boolean; error?: string; latencyMs?: number }>;
   boundCounts?: Record<string, number>;
+  /** Omit the secret store's READ side entirely (a host with no `resolve`). */
+  noReadSecret?: boolean;
+  /** Make every read-back answer this instead of the stored cleartext (#8155). */
+  readBackOverride?: () => Promise<string | undefined>;
+  /** Make the record write fail — the rollback path for a freshly-minted secret. */
+  failPut?: () => boolean;
 }) {
   // Flat list, not a name-keyed map: in production `listDatasourceRecords`
   // merges artefact (code) records with runtime-store records, so the same
@@ -29,6 +36,8 @@ function makeHarness(opts?: {
 
   const secrets = new Map<string, { value: string; namespace?: string; key?: string }>();
   let secretSeq = 0;
+  /** Ordered log of the store calls — the seam #8155's durability order is read from. */
+  const ops: string[] = [];
   const probed: ProbeInput[] = [];
   const registered: string[] = [];
   const unregistered: string[] = [];
@@ -45,6 +54,8 @@ function makeHarness(opts?: {
       return r ? { ...r } : undefined;
     },
     putDatasourceRecord: async (record) => {
+      ops.push(`put:${record.name}`);
+      if (opts?.failPut?.()) throw new Error('metadata store unavailable');
       const idx = records.findIndex((r) => r.name === record.name && r.origin === 'runtime');
       if (idx >= 0) records[idx] = { ...record };
       else records.push({ ...record });
@@ -54,14 +65,26 @@ function makeHarness(opts?: {
       if (idx >= 0) records.splice(idx, 1);
     },
     writeSecret: async (input, hint) => {
+      ops.push('writeSecret');
       const ref = `sys_secret://datasource/${input.key ?? hint.name}#${++secretSeq}`;
       secrets.set(ref, { value: input.value, namespace: input.namespace, key: input.key });
       return ref;
     },
     removeSecret: async (ref) => {
+      ops.push('removeSecret');
       removedSecrets.push(ref);
       secrets.delete(ref);
     },
+    // The store's READ side, mirroring `SecretBinder.resolve` (#8155).
+    ...(opts?.noReadSecret
+      ? {}
+      : {
+          readSecret: async (ref: string) => {
+            ops.push('readSecret');
+            if (opts?.readBackOverride) return opts.readBackOverride();
+            return secrets.get(ref)?.value;
+          },
+        }),
     countBoundObjects: async (n) => opts?.boundCounts?.[n] ?? 0,
     registerPool: (record) => {
       registered.push(record.name);
@@ -83,7 +106,7 @@ function makeHarness(opts?: {
       return records.length;
     },
   };
-  return { service, store, secrets, probed, registered, unregistered, removedSecrets };
+  return { service, store, secrets, probed, registered, unregistered, removedSecrets, ops };
 }
 
 describe('listDatasources', () => {
@@ -461,5 +484,227 @@ describe('listDatasources — status reflects the last connect verdict (framewor
     };
     const list = await new DatasourceAdminService(config).listDatasources();
     expect(list[0]!.status).toBe('unvalidated');
+  });
+});
+
+/**
+ * `migrateCredential` — the operator-initiated re-homing of a stored cleartext
+ * credential into the secret store (#8155).
+ *
+ * The two hard requirements the card states are asserted directly rather than
+ * inferred from a happy path: the credential is durably READABLE from the store
+ * before the cleartext is removed, and a re-run never mints a second secret.
+ */
+describe('migrateCredential (#8155)', () => {
+  /** A row written before #8078 closed the write door: cleartext in `config`. */
+  const legacyRow = (over: Partial<StoredDatasource> = {}): StoredDatasource => ({
+    name: 'warehouse',
+    driver: 'postgres',
+    origin: 'runtime',
+    config: { host: 'db.internal', port: 5432, database: 'app', username: 'app', password: 'hunter2' },
+    ...over,
+  });
+
+  it('re-homes the credential: secret stored, inline key gone, ref written', async () => {
+    const h = makeHarness({ seed: [legacyRow()] });
+    const result = await h.service.migrateCredential('warehouse');
+
+    expect(result).toMatchObject({
+      name: 'warehouse',
+      status: 'migrated',
+      migratedKey: 'password',
+      reusedExistingSecret: false,
+    });
+
+    const stored = h.store.get('warehouse')!;
+    expect(stored.config).not.toHaveProperty('password');
+    // Everything else about the connection is untouched — this moves a
+    // credential, it does not rewrite a datasource.
+    expect(stored.config).toEqual({ host: 'db.internal', port: 5432, database: 'app', username: 'app' });
+    const ref = stored.external?.credentialsRef;
+    expect(ref).toBeTruthy();
+    expect(h.secrets.get(ref!)?.value).toBe('hunter2');
+    // No cleartext survives anywhere in the persisted record.
+    expect(JSON.stringify(stored)).not.toContain('hunter2');
+  });
+
+  it('the secret is durably READABLE before the cleartext is removed', async () => {
+    // The card's ordering requirement, asserted on the actual call order: the
+    // record write that drops the inline key happens last, after a successful
+    // read-back of the secret that replaces it. A crash before that write
+    // leaves the row working on its inline credential.
+    const h = makeHarness({ seed: [legacyRow()] });
+    await h.service.migrateCredential('warehouse');
+    expect(h.ops).toEqual(['writeSecret', 'readSecret', 'put:warehouse']);
+  });
+
+  it('leaves the row untouched when the secret does not read back identically', async () => {
+    // A store that accepted the write but cannot return the value is exactly
+    // the case that must NOT reach the delete: the connect path is fail-closed
+    // on a ref it cannot resolve, so writing one would take a working
+    // datasource out of service.
+    const h = makeHarness({ seed: [legacyRow()], readBackOverride: async () => undefined });
+    const result = await h.service.migrateCredential('warehouse');
+
+    expect(result.status).toBe('refused');
+    expect(result.reason).toContain('did not read back');
+    expect(result.remedy).toBeTruthy();
+
+    const stored = h.store.get('warehouse')!;
+    expect(stored.config?.password).toBe('hunter2');
+    expect(stored.external?.credentialsRef).toBeUndefined();
+    // …and the secret it minted is taken back out rather than orphaned.
+    expect(h.secrets.size).toBe(0);
+    expect(h.removedSecrets).toHaveLength(1);
+  });
+
+  it('unbinds the freshly-minted secret when the record write fails', async () => {
+    let fail = true;
+    const h = makeHarness({ seed: [legacyRow()], failPut: () => fail });
+    await expect(h.service.migrateCredential('warehouse')).rejects.toThrow('metadata store unavailable');
+    fail = false;
+    expect(h.secrets.size).toBe(0);
+    expect(h.store.get('warehouse')!.config?.password).toBe('hunter2');
+  });
+
+  it('is idempotent — a second run binds nothing and writes nothing', async () => {
+    const h = makeHarness({ seed: [legacyRow()] });
+    const first = await h.service.migrateCredential('warehouse');
+    const opsAfterFirst = [...h.ops];
+
+    const second = await h.service.migrateCredential('warehouse');
+
+    expect(first.status).toBe('migrated');
+    expect(second).toEqual({ name: 'warehouse', status: 'already-bound' });
+    // The failure mode this guards is orphan accumulation (#8103): one secret,
+    // however many times an operator clicks.
+    expect(h.secrets.size).toBe(1);
+    expect(h.ops).toEqual(opsAfterFirst);
+  });
+
+  it('finishes a wizard re-entry: drops the inline copy against the EXISTING ref', async () => {
+    // The `ref + inline cleartext` state is built through the REAL update path
+    // rather than hand-written, because that is how it occurs: the wizard's
+    // redacted round-trip carries the stored credential forward by design
+    // (`restoreRedactedConfig`), so re-entering a secret on a legacy row leaves
+    // the inline copy behind.
+    const h = makeHarness({ seed: [legacyRow()] });
+    await h.service.updateDatasource(
+      'warehouse',
+      { config: { host: 'db.internal', port: 5432, database: 'app', username: 'app' } },
+      { value: 'hunter2' },
+    );
+    const beforeMigration = h.store.get('warehouse')!;
+    expect(beforeMigration.config?.password).toBe('hunter2');
+    expect(beforeMigration.external?.credentialsRef).toBeTruthy();
+    expect(h.secrets.size).toBe(1);
+
+    const result = await h.service.migrateCredential('warehouse');
+
+    expect(result).toMatchObject({ status: 'migrated', migratedKey: 'password', reusedExistingSecret: true });
+    expect(h.store.get('warehouse')!.config).not.toHaveProperty('password');
+    // Same ref, one secret — never a second row for an already-bound datasource.
+    expect(h.store.get('warehouse')!.external?.credentialsRef).toBe(beforeMigration.external?.credentialsRef);
+    expect(h.secrets.size).toBe(1);
+  });
+
+  it('refuses to drop the inline copy when the existing ref cannot be resolved', async () => {
+    const h = makeHarness({
+      seed: [legacyRow({ external: { credentialsRef: 'sys_secret://gone' } })],
+    });
+    const result = await h.service.migrateCredential('warehouse');
+
+    expect(result.status).toBe('refused');
+    expect(result.reason).toContain('could not be resolved');
+    // The inline copy is the only working credential left — it stays.
+    expect(h.store.get('warehouse')!.config?.password).toBe('hunter2');
+  });
+
+  it('refuses when the host has no readable secret store', async () => {
+    const h = makeHarness({ seed: [legacyRow()], noReadSecret: true });
+    const result = await h.service.migrateCredential('warehouse');
+
+    expect(result.status).toBe('refused');
+    expect(result.reason).toContain('readable secret store');
+    expect(h.secrets.size).toBe(0);
+    expect(h.store.get('warehouse')!.config?.password).toBe('hunter2');
+  });
+
+  it('reports the planner\'s refusals with their remedy, changing nothing', async () => {
+    const h = makeHarness({
+      seed: [
+        legacyRow({ name: 'url_row', config: { url: 'postgresql://app:hunter2@db.internal/app' } }),
+        legacyRow({ name: 'code_row', origin: 'code' }),
+      ],
+    });
+
+    const url = await h.service.migrateCredential('url_row');
+    expect(url.status).toBe('refused');
+    expect(url.reason).toContain('config.url');
+    expect(url.remedy).toContain('secret field');
+
+    const code = await h.service.migrateCredential('code_row');
+    expect(code.status).toBe('refused');
+    expect(code.reason).toContain('code-defined');
+
+    expect(h.secrets.size).toBe(0);
+    expect(h.ops).toEqual([]);
+  });
+
+  it('names credential-shaped keys it leaves behind rather than reporting a clean row', async () => {
+    const h = makeHarness({
+      seed: [legacyRow({ config: { host: 'h', username: 'app', password: 'hunter2', passwd: 'stale' } })],
+    });
+    const result = await h.service.migrateCredential('warehouse');
+
+    expect(result).toMatchObject({ status: 'migrated', migratedKey: 'password', remaining: ['passwd'] });
+    // The alias spelling reaches no connection builder, so it is not bound —
+    // and it is not silently deleted either.
+    expect(h.store.get('warehouse')!.config?.passwd).toBe('stale');
+  });
+
+  it('throws for an unknown datasource — the one arm the route answers 400 for', async () => {
+    const h = makeHarness();
+    await expect(h.service.migrateCredential('nope')).rejects.toThrow("Datasource 'nope' not found.");
+  });
+});
+
+/**
+ * The contract half the #8153 block was about: the row this migration WRITES
+ * must be spec-valid. Before PR #8588 a managed row carrying
+ * `external.credentialsRef` failed re-parse, so the migration would have moved
+ * rows from "invalid because it holds cleartext" to "invalid because it holds a
+ * credentialsRef" while reporting success.
+ *
+ * Pinned here, against the real `DatasourceSchema`, in both directions — the
+ * pre-migration row invalid, the post-migration row valid — because a one-sided
+ * assertion would pass just as well on a schema that accepts everything.
+ */
+describe('migrateCredential produces a spec-valid row (#8153)', () => {
+  it('turns a row the schema REFUSES into one it accepts', async () => {
+    const before: StoredDatasource = {
+      name: 'warehouse',
+      driver: 'postgres',
+      origin: 'runtime',
+      config: { host: 'db.internal', port: 5432, database: 'app', username: 'app', password: 'hunter2' },
+    };
+    const h = makeHarness({ seed: [before] });
+
+    const beforeParse = DatasourceSchema.safeParse(before);
+    expect(beforeParse.success).toBe(false);
+
+    await h.service.migrateCredential('warehouse');
+
+    const after = h.store.get('warehouse')!;
+    const afterParse = DatasourceSchema.safeParse(after);
+    expect(
+      afterParse.success,
+      `migrated row still refused: ${afterParse.success ? '' : JSON.stringify(afterParse.error.issues)}`,
+    ).toBe(true);
+    // The refusal that MUST survive: `credentialsRef` is the only `external`
+    // key a managed row may carry, so this is not a blanket allowance.
+    expect(
+      DatasourceSchema.safeParse({ ...after, external: { ...after.external, allowWrites: true } }).success,
+    ).toBe(false);
   });
 });
