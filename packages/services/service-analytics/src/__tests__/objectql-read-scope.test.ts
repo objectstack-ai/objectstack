@@ -49,6 +49,7 @@ type AggOpts = {
 function matches(row: Record<string, unknown>, filter: Record<string, unknown>): boolean {
   return Object.entries(filter).every(([k, v]) => {
     if (k === '$and') return (v as Record<string, unknown>[]).every((sub) => matches(row, sub));
+    if (k.startsWith('$')) throw new Error(`test bridge: unhandled operator ${k}`);
     return row[k] === v;
   });
 }

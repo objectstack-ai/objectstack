@@ -105,7 +105,10 @@ function inboxEngine() {
     const store: Record<string, any[]> = {};
     let seq = 0;
     const matches = (row: any, where: any = {}) =>
-        Object.entries(where).every(([k, v]) => String(row[k]) === String(v));
+        Object.entries(where).every(([k, v]) => {
+            if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+            return String(row[k]) === String(v);
+        });
     return {
         store,
         async find(object: string, query: any = {}) {

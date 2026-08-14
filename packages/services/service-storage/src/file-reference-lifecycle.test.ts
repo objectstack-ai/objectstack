@@ -48,7 +48,10 @@ function fakeEngine(opts: {
     return actual === expected;
   };
   const matches = (row: Record<string, unknown>, where: Record<string, unknown>) =>
-    Object.entries(where).every(([k, v]) => matchValue(row[k], v));
+    Object.entries(where).every(([k, v]) => {
+      if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+      return matchValue(row[k], v);
+    });
 
   const engine: FileReferenceEngine & {
     tables: typeof tables;

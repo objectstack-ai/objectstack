@@ -41,48 +41,5 @@
     "precedent, #4251). There is deliberately no --update flag: a generator would let a new",
     "silently-wrong double in by \"just run the update command\"."
   ],
-  "files": {
-    "packages/services/service-analytics/src/__tests__/objectql-daterange.test.ts": {
-      "silent": 1
-    },
-    "packages/services/service-analytics/src/__tests__/objectql-read-scope.test.ts": {
-      "silent": 1
-    },
-    "packages/services/service-automation/src/builtin/crud-bulk-intent.test.ts": {
-      "silent": 1
-    },
-    "packages/services/service-automation/src/suspended-run-store.test.ts": {
-      "silent": 1
-    },
-    "packages/services/service-messaging/src/messaging-service.test.ts": {
-      "silent": 1
-    },
-    "packages/services/service-messaging/src/notification-schema-conformance.test.ts": {
-      "silent": 1
-    },
-    "packages/services/service-queue/src/db-queue-adapter.test.ts": {
-      "silent": 1
-    },
-    "packages/services/service-queue/src/job-queue-retention.test.ts": {
-      "silent": 1
-    },
-    "packages/services/service-settings/src/config-change-audit.test.ts": {
-      "silent": 1
-    },
-    "packages/services/service-settings/src/settings-crypto-fail-closed.test.ts": {
-      "silent": 1
-    },
-    "packages/services/service-settings/src/settings-secret-rotation.test.ts": {
-      "silent": 1
-    },
-    "packages/services/service-storage/src/attachment-lifecycle.test.ts": {
-      "silent": 1
-    },
-    "packages/services/service-storage/src/file-reference-lifecycle.test.ts": {
-      "silent": 1
-    },
-    "packages/triggers/trigger-schedule/src/time-relative-trigger.test.ts": {
-      "silent": 1
-    }
-  }
+  "files": {}
 }

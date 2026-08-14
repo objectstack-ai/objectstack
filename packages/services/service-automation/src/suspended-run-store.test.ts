@@ -32,11 +32,12 @@ function createFakeEngine(): SuspendedRunStoreEngine & { rows: Map<string, any> 
     const rows = new Map<string, any>();
     // Equality plus the `$lt` operator (kept for where-clause generality).
     const matches = (row: any, where: any) =>
-        !where || Object.entries(where).every(([k, v]) =>
-            v && typeof v === 'object' && '$lt' in (v as any)
+        !where || Object.entries(where).every(([k, v]) => {
+            if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+            return v && typeof v === 'object' && '$lt' in (v as any)
                 ? row[k] < (v as any).$lt
-                : row[k] === v,
-        );
+                : row[k] === v;
+        });
     return {
         rows,
         async find(_object, options) {
