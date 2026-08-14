@@ -153,6 +153,9 @@ function makeProtocol(engine: any, metadata: unknown) {
 const RUNTIME_BODY = {
     name: 'proj_task',
     label: 'Project Task',
+    // [#8310] The runtime object door requires an authored OWD (the
+    // draft→active promotion runs the 422 lint gate).
+    sharingModel: 'private',
     fields: {
         title: { type: 'text', label: 'Title' },
         done: { type: 'boolean', label: 'Done' },

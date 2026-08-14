@@ -115,6 +115,10 @@ import type { HttpDispatcherResult } from './http-dispatcher.js';
 const PACKAGED_OBJECT = {
     name: 'showcase_task',
     label: 'Task',
+    // [#8310] The runtime object door requires an authored OWD — without it
+    // the 422 lint door answers first and the NOT_OVERRIDABLE control below
+    // would be refused for the wrong reason.
+    sharingModel: 'private',
     fields: {
         title: { type: 'text', label: 'Title', required: true },
         status: { type: 'select', label: 'Status' },
@@ -126,6 +130,8 @@ const PACKAGED_OBJECT = {
 const RUNTIME_OBJECT = {
     name: 'runtime_thing',
     label: 'Runtime Thing',
+    // [#8310] The runtime object door requires an authored OWD.
+    sharingModel: 'private',
     fields: { note: { type: 'text', label: 'Note' } },
 };
 

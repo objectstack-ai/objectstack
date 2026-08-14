@@ -348,6 +348,8 @@ describe('#7018 — the registry decides whether a metadata write carries the se
         const OBJECT = {
             name: 'ticket',
             label: 'Ticket',
+            // [#8310] The runtime object door requires an authored OWD.
+            sharingModel: 'private',
             fields: { subject: { type: 'text', label: 'Subject' } },
         };
 
