@@ -92,15 +92,15 @@ const result = MetadataBulkResultSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **storage** | `{ datasource?: string; tableName: string; fallback: Enum<'filesystem' \| 'memory' \| 'none'>; rootDir?: string; … }` | ✅ | Storage backend configuration |
-| **customizationPolicies** | `{ metadataType: string; allowCustomization: boolean; lockedFields?: string[]; customizableFields?: string[]; … }[]` | optional | Default customization policies per type |
-| **mergeStrategy** | `{ defaultStrategy: Enum<'keep-custom' \| 'accept-incoming' \| 'three-way-merge'>; alwaysAcceptIncoming?: string[]; alwaysKeepCustom?: string[]; autoResolveNonConflicting: boolean }` | optional | Merge strategy for package upgrades |
-| **additionalTypes** | `never` | optional | [REMOVED] `config.additionalTypes` was removed from `MetadataPluginConfig` in @objectstack/spec 17 (#8586, ADR-0049 enforce-or-remove) — it never had an effect: the only production writer of the metadata type registry is `setTypeRegistry(DEFAULT_METADATA_TYPE_REGISTRY)`, which replaces the array outright, so nothing ever merged these entries and the live type set was exactly the built-in registry whatever you declared here. Delete the key. There is no declared-kind channel: a kind enters the live metadata-type set as a side effect of registering an ITEM of that kind (`SchemaRegistry.registerItem` during app/manifest registration, or `MetadataManager.register` at runtime); bind its schema with `registerMetadataTypeSchema(type, schema)` from your plugin's `init(ctx)` so `GET /api/v1/meta` serves a real JSON Schema for it. |
-| **enableEvents** | `boolean` | ✅ | Emit metadata change events |
-| **validateOnWrite** | `boolean` | ✅ | Validate metadata on write |
-| **enableVersioning** | `boolean` | ✅ | Track metadata version history |
-| **cacheMaxItems** | `integer` | ✅ | Max items in memory cache |
-| **bootstrap** | `Enum<'eager' \| 'lazy' \| 'artifact-only'>` | ✅ | How metadata is primed at plugin start (eager / lazy / artifact-only) |
+| **storage** | `{ datasource?: string; tableName?: string; fallback?: Enum<'filesystem' \| 'memory' \| 'none'>; rootDir?: string; … }` | ✅ | Storage backend configuration |
+| **customizationPolicies** | `{ metadataType: string; allowCustomization?: boolean; lockedFields?: string[]; customizableFields?: string[]; … }[]` | optional | Default customization policies per type |
+| **mergeStrategy** | `{ defaultStrategy?: Enum<'keep-custom' \| 'accept-incoming' \| 'three-way-merge'>; alwaysAcceptIncoming?: string[]; alwaysKeepCustom?: string[]; autoResolveNonConflicting?: boolean }` | optional | Merge strategy for package upgrades |
+| **additionalTypes** | `{ label: string; description?: string; filePatterns: string[]; supportsOverlay?: boolean; … }[]` | optional | Additional custom metadata types |
+| **enableEvents** | `boolean` | optional | Emit metadata change events |
+| **validateOnWrite** | `boolean` | optional | Validate metadata on write |
+| **enableVersioning** | `boolean` | optional | Track metadata version history |
+| **cacheMaxItems** | `integer` | optional | Max items in memory cache |
+| **bootstrap** | `Enum<'eager' \| 'lazy' \| 'artifact-only'>` | optional | How metadata is primed at plugin start (eager / lazy / artifact-only) |
 
 
 ---
@@ -115,9 +115,9 @@ const result = MetadataBulkResultSchema.parse(data);
 | **name** | `'ObjectStack Metadata Service'` | ✅ | Plugin name |
 | **version** | `string` | ✅ | Plugin version |
 | **type** | `'standard'` | ✅ | Plugin type |
-| **description** | `string` | ✅ | Plugin description |
-| **capabilities** | `{ crud: boolean; query: boolean; overlay: boolean; watch: boolean; … }` | ✅ | Plugin capabilities |
-| **config** | `{ storage: object; customizationPolicies?: object[]; mergeStrategy?: object; enableEvents: boolean; … }` | optional | Plugin configuration |
+| **description** | `string` | optional | Plugin description |
+| **capabilities** | `{ crud?: boolean; query?: boolean; overlay?: boolean; watch?: boolean; … }` | ✅ | Plugin capabilities |
+| **config** | `{ storage: object; customizationPolicies?: object[]; mergeStrategy?: object; additionalTypes?: object[]; … }` | optional | Plugin configuration |
 
 
 ---
