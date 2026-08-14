@@ -8,6 +8,7 @@ export type {
   DatasourceDraft,
   TestConnectionResult,
   DatasourceSummary,
+  CredentialMigrationResult,
   IDatasourceAdminService,
 } from './datasource-admin-service.js';
 

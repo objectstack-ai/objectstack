@@ -121,6 +121,34 @@ describe('datasource-admin envelope (#3843) — success bodies', () => {
       dataKeys: ['datasource'],
       run: () => drive(mount({ updateDatasource: async () => ({ name: 'pg', origin: 'runtime' }) }), '/api/v1/datasources/pg', { method: 'PATCH', body: JSON.stringify({ active: false }) }),
     },
+    {
+      name: 'POST /datasources/:name/migrate-credential',
+      status: 200,
+      dataKeys: ['result'],
+      run: () => drive(
+        mount({ migrateCredential: async () => ({ name: 'pg', status: 'migrated', migratedKey: 'password' }) }),
+        '/api/v1/datasources/pg/migrate-credential',
+        { method: 'POST', body: '{}' },
+      ),
+    },
+    {
+      // A REFUSAL is a 200 answer, not a 400 (#8155): the datasource is intact
+      // and the operator's request was well-formed. It rides the same envelope
+      // as the success arm, which is what lets a caller read `data.result.status`
+      // without branching on the HTTP code first.
+      name: 'POST /datasources/:name/migrate-credential (refused)',
+      status: 200,
+      dataKeys: ['result'],
+      run: () => drive(
+        mount({
+          migrateCredential: async () => ({
+            name: 'pg', status: 'refused', reason: 'credential embedded in config.url', remedy: 're-enter it',
+          }),
+        }),
+        '/api/v1/datasources/pg/migrate-credential',
+        { method: 'POST', body: '{}' },
+      ),
+    },
   ];
 
   for (const c of CASES) {
@@ -231,6 +259,18 @@ describe('datasource-admin envelope (#3843) — error bodies', () => {
       status: 400,
       code: 'DATASOURCE_ADMIN_ERROR',
       run: () => drive(mount({ removeDatasource: async () => { throw new Error('not runtime-origin'); } }), '/api/v1/datasources/pg', { method: 'DELETE' }),
+    },
+    {
+      // The credential migration's THROW arm — an unknown name, a store that
+      // failed — as distinct from its `refused` result, which is a 200 above.
+      name: 'a credential-migration failure',
+      status: 400,
+      code: 'DATASOURCE_ADMIN_ERROR',
+      run: () => drive(
+        mount({ migrateCredential: async () => { throw new Error("Datasource 'nope' not found."); } }),
+        '/api/v1/datasources/nope/migrate-credential',
+        { method: 'POST', body: '{}' },
+      ),
     },
   ];
 

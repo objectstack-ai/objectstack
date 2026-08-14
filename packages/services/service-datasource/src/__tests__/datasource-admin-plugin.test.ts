@@ -134,6 +134,73 @@ describe('DatasourceAdminServicePlugin: secret fail-closed', () => {
   });
 });
 
+describe('DatasourceAdminServicePlugin: credential re-homing wiring (#8155)', () => {
+  /** Seed a legacy row straight into the registry — post-#8078 no door writes one. */
+  const seedLegacy = async (metadata: { register: (t: string, n: string, d: unknown) => Promise<void> }) =>
+    metadata.register('datasource', 'warehouse', {
+      name: 'warehouse',
+      driver: 'postgres',
+      origin: 'runtime',
+      config: { host: 'db.internal', database: 'app', username: 'app', password: 'hunter2' },
+    });
+
+  it('re-homes through the host binder when it can bind AND resolve', async () => {
+    const store = new Map<string, string>();
+    const { service, metadata, registry } = await boot({
+      driverFactory: fakeFactory(),
+      secrets: {
+        bind: async (input, hint) => {
+          const ref = `sys_secret://datasource/${hint.name}#1`;
+          store.set(ref, input.value);
+          return ref;
+        },
+        resolve: async (ref) => store.get(ref),
+      },
+    });
+    await seedLegacy(metadata);
+
+    const result = await service.migrateCredential('warehouse');
+
+    expect(result).toMatchObject({ status: 'migrated', migratedKey: 'password' });
+    const rec = registry.get('datasource')?.get('warehouse') as any;
+    expect(rec.config).not.toHaveProperty('password');
+    expect(store.get(rec.external.credentialsRef)).toBe('hunter2');
+  });
+
+  it('refuses when the host binder cannot READ a secret back', async () => {
+    // A binder with `bind` but no `resolve` is exactly the wiring that would
+    // produce a ref the connect path refuses (ADR-0062 D3 is fail-closed), so
+    // the migration must not write one. Fail-CLOSED, not fail-open: the
+    // cleartext stays and the operator is told what to wire.
+    const { service, metadata, registry } = await boot({
+      driverFactory: fakeFactory(),
+      secrets: { bind: async () => 'sys_secret://datasource/warehouse#1' },
+    });
+    await seedLegacy(metadata);
+
+    const result = await service.migrateCredential('warehouse');
+
+    expect(result.status).toBe('refused');
+    expect(result.reason).toContain('readable secret store');
+    const rec = registry.get('datasource')?.get('warehouse') as any;
+    expect(rec.config.password).toBe('hunter2');
+    expect(rec.external?.credentialsRef).toBeUndefined();
+  });
+
+  it('contributes the operator-facing Setup action that targets the route', async () => {
+    const { getMetadataTypeActions } = await import('@objectstack/spec/kernel');
+    await boot({ driverFactory: fakeFactory() });
+    const action = getMetadataTypeActions('datasource').find((a) => a.name === 'migrate_credential');
+    expect(action).toBeDefined();
+    expect(action!.target).toBe('/api/v1/datasources/${ctx.recordId}/migrate-credential');
+    expect(action!.method).toBe('POST');
+    // The row it acts on CHANGES, so the record must be re-read afterwards —
+    // which is also what recomputes the `_diagnostics` badge the operator is
+    // working from. Its sibling `test_connection` deliberately does not refresh.
+    expect(action!.refreshAfter).toBe(true);
+  });
+});
+
 describe('DatasourceAdminServicePlugin: boot rehydration', () => {
   /** Fake engine ('data') that records hot-registered drivers. */
   function fakeEngine() {

@@ -104,6 +104,47 @@ export interface DatasourceSummary {
 }
 
 /**
+ * Outcome of one operator-initiated credential re-homing run (#8155).
+ *
+ * Every field is safe to serve: the cleartext never appears, and neither does
+ * the `credentialsRef` itself — the read path deliberately reports a boolean
+ * `hasSecret` rather than the handle, and this result keeps that boundary.
+ */
+export interface CredentialMigrationResult {
+  name: string;
+  /**
+   *  - `migrated`          — a stored cleartext credential is now in the secret
+   *                          store and the inline key is gone.
+   *  - `already-bound`     — the row already referenced a secret and held no
+   *                          inline copy. A re-run is a no-op: nothing bound,
+   *                          nothing written, and **no second `sys_secret` row**.
+   *  - `nothing-to-migrate`— the row holds no bindable credential at all.
+   *  - `refused`           — it cannot be re-homed safely; see `reason` /
+   *                          `remedy`, which name the manual route instead.
+   */
+  status: 'migrated' | 'already-bound' | 'nothing-to-migrate' | 'refused';
+  /** The `config` key whose cleartext was re-homed (`migrated` only). */
+  migratedKey?: string;
+  /**
+   * True when an existing `credentialsRef` was reused — an interrupted earlier
+   * run, or a wizard re-entry that left the inline copy behind — so the run
+   * dropped the inline key without minting a second secret.
+   */
+  reusedExistingSecret?: boolean;
+  /**
+   * Credential-shaped `config` keys still at rest after this run: pre-#8078
+   * alias spellings and credential-shaped-but-writable keys, which no
+   * connection builder reads as the credential. Named rather than silently
+   * left, so "migrated" never reads as "this row is now clean".
+   */
+  remaining?: string[];
+  /** Why the run refused (operator-facing). Present when `status` is `refused`. */
+  reason?: string;
+  /** What to do instead. Present when `status` is `refused`. */
+  remedy?: string;
+}
+
+/**
  * Runtime datasource lifecycle service. Registered into the kernel as the
  * `'datasource-admin'` service; consumed by the REST layer and Studio wizard.
  */
@@ -138,4 +179,16 @@ export interface IDatasourceAdminService {
    * objects are still bound to it.
    */
   removeDatasource(name: string): Promise<void>;
+
+  /**
+   * Re-home ONE runtime datasource's stored cleartext credential into the
+   * secret store (#8155) — operator-initiated, per datasource, never a sweep.
+   *
+   * Reads the stored cleartext, binds it through the existing secret binder,
+   * writes `external.credentialsRef`, and removes the inline key only after the
+   * secret is durably readable back. Idempotent: a row that already references
+   * a secret is never bound a second time. Rows it cannot re-home safely are
+   * REFUSED with a stated reason and remedy rather than guessed at.
+   */
+  migrateCredential(name: string): Promise<CredentialMigrationResult>;
 }

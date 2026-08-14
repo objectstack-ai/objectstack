@@ -35,6 +35,7 @@ export type {
   DatasourceDraft,
   TestConnectionResult,
   DatasourceSummary,
+  CredentialMigrationResult,
   IDatasourceAdminService,
   DatasourceConnectionSpec,
   DatasourceDriverHandle,
@@ -59,6 +60,12 @@ export type {
   ConnectResult,
   ConnectStatus,
 } from './datasource-connection-service.js';
+
+// The #8155 credential re-homing planner — exported so a host that drives the
+// migration through its own surface asks the same question the Setup action
+// asks, rather than re-deriving which stored keys are safe to re-home.
+export { planCredentialMigration, urlCredentialKeys } from './datasource-credential-migration.js';
+export type { CredentialMigrationPlan } from './datasource-credential-migration.js';
 
 // Decoupled lifecycle service + injected-config shape.
 export { DatasourceAdminService } from './datasource-admin-service.js';
