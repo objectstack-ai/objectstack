@@ -25,6 +25,8 @@
     "@objectstack/spec": "workspace:*"
   },
   "devDependencies": {
+    "@objectstack/driver-sql": "workspace:*",
+    "@objectstack/objectql": "workspace:*",
     "@objectstack/plugin-sharing": "workspace:*",
     "@objectstack/service-i18n": "workspace:*",
     "@types/node": "^26.1.2",
