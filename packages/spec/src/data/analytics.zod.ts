@@ -18,6 +18,7 @@ import { FilterConditionSchema } from './filter.zod';
  * The mathematical operation to perform on a metric.
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { strictObject } from '../shared/strict-object';
 export const AggregationMetricType = z.enum([
   'count', 
   'sum', 
@@ -55,89 +56,196 @@ export type TimeUpdateInterval = z.input<typeof TimeUpdateInterval>;
 /**
  * Metric Schema
  * A quantitative measurement (e.g., "Total Revenue", "Average Order Value").
+ *
+ * Strict as of #4001 batch D: the cube family is a real authoring surface —
+ * `defineCube()` parses an author literal and `defineStack({ analyticsCubes })`
+ * carries every cube through `StackSchema.parse` (BFS from the 26 metadata-type
+ * roots + `ObjectStackSchema` resolves the whole family reachable, with
+ * `ObjectSchema` as positive control and a fresh uncarried shape as negative
+ * control in the same run).
  */
-export const MetricSchema = lazySchema(() => z.object({
-  name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Unique metric ID'),
-  label: z.string().describe('Human readable label'),
-  description: z.string().optional(),
-  
-  type: AggregationMetricType,
-  
-  /** Source Calculation */
-  sql: z.string().describe('SQL expression or field reference'),
-  
-  /** Filtering for this specific metric (e.g. "Revenue from Premium Users") */
-  filters: z.array(z.object({
-    sql: z.string()
-  })).optional(),
-  
-  /** Format for display (e.g. "currency", "percent") */
-  format: z.string().optional(),
-}));
+export const MetricSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this metric',
+    history: 'Until #4001 batch D an undeclared metric key was silently dropped — the cube '
+      + 'registered and the metric computed as if the key had never been written.',
+    // `title` is CORRECT one level up (`CubeSchema.title`); a metric spells it `label`.
+    aliases: { title: 'label' },
+  },
+  {
+    name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Unique metric ID'),
+    label: z.string().describe('Human readable label'),
+    description: z.string().optional(),
+
+    type: AggregationMetricType,
+
+    /** Source Calculation */
+    sql: z.string().describe('SQL expression or field reference'),
+
+    /** Filtering for this specific metric (e.g. "Revenue from Premium Users") */
+    filters: z.array(strictObject(
+      {
+        surface: 'this metric filter',
+        history: 'Until #4001 batch D an undeclared key beside `sql` was silently dropped.',
+      },
+      {
+        sql: z.string(),
+      },
+    )).optional(),
+
+    /** Format for display (e.g. "currency", "percent") */
+    format: z.string().optional(),
+  },
+));
 
 /**
  * Dimension Schema
  * A categorical attribute to group by (e.g., "Product Category", "Order Date").
+ *
+ * Strict as of #4001 batch D — same doors as {@link MetricSchema}.
  */
-export const DimensionSchema = lazySchema(() => z.object({
-  name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Unique dimension ID'),
-  label: z.string().describe('Human readable label'),
-  description: z.string().optional(),
-  
-  type: DimensionType,
-  
-  /** Source Column */
-  sql: z.string().describe('SQL expression or column reference'),
-  
-  /** For Time Dimensions: Supported Granularities */
-  granularities: z.array(TimeUpdateInterval).optional(),
-}));
+export const DimensionSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this dimension',
+    history: 'Until #4001 batch D an undeclared dimension key was silently dropped.',
+    aliases: {
+      // `title` is CORRECT one level up (`CubeSchema.title`); a dimension spells it `label`.
+      title: 'label',
+      // The singular names ONE granularity; this key declares the SUPPORTED list.
+      granularity: 'granularities',
+    },
+  },
+  {
+    name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Unique dimension ID'),
+    label: z.string().describe('Human readable label'),
+    description: z.string().optional(),
+
+    type: DimensionType,
+
+    /** Source Column */
+    sql: z.string().describe('SQL expression or column reference'),
+
+    /** For Time Dimensions: Supported Granularities */
+    granularities: z.array(TimeUpdateInterval).optional(),
+  },
+));
 
 /**
  * Join Schema
  * Defines how this cube relates to others.
+ *
+ * Strict as of #4001 batch D — same doors as {@link MetricSchema}. Before the
+ * close, a join authored with `relationshipp:` (or any near-miss) parsed clean
+ * and fell back to the `many_to_one` default — a different join shape than the
+ * author declared, under a successful parse.
  */
-export const CubeJoinSchema = lazySchema(() => z.object({
-  name: z.string().describe('Target cube name'),
-  relationship: z.enum(['one_to_one', 'one_to_many', 'many_to_one']).default('many_to_one'),
-  sql: z.string().describe('Join condition (ON clause)'),
-}));
+export const CubeJoinSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this cube join',
+    history: 'Until #4001 batch D an undeclared join key was silently dropped — a typo\'d '
+      + '`relationship` fell back to the `many_to_one` default.',
+    // The join condition is spelled `sql` here (its doc says "ON clause").
+    aliases: { on: 'sql' },
+  },
+  {
+    name: z.string().describe('Target cube name'),
+    relationship: z.enum(['one_to_one', 'one_to_many', 'many_to_one']).default('many_to_one'),
+    sql: z.string().describe('Join condition (ON clause)'),
+  },
+));
 
 /**
  * Cube Schema
  * A logical data model representing a business entity or process for analysis.
  * Maps physical tables to business metrics and dimensions.
+ *
+ * Strict as of #4001 batch D. Doors, measured: `defineCube()` (the factory the
+ * showcase example authors through) and `defineStack({ analyticsCubes })` /
+ * artifact ingest, both of which parse `StackSchema` → `analyticsCubes[]`.
+ * The ADR-0010 protection envelope is deliberately NOT declared here: no
+ * protected item re-parses through this schema — `CubeRegistry.register` takes
+ * typed objects without a parse, `analytics_cube` resolves no
+ * `getMetadataTypeSchema` entry (so `saveMetaItem` never 422s it), and
+ * artifact ingest parses the compiled definition BEFORE `applyProtection`
+ * stamps `_packageId`/`_provenance` at registration.
  */
-export const CubeSchema = lazySchema(() => z.object({
-  name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Cube name (snake_case)'),
-  title: z.string().optional(),
-  description: z.string().optional(),
-  
-  /** Physical Data Source */
-  sql: z.string().describe('Base SQL statement or Table Name'),
-  
-  /** Semantic Definitions */
-  measures: z.record(z.string(), MetricSchema).describe('Quantitative metrics'),
-  dimensions: z.record(z.string(), DimensionSchema).describe('Qualitative attributes'),
-  
-  /** Relationships */
-  joins: z.record(z.string(), CubeJoinSchema).optional(),
-  
-  /** Pre-aggregations / Caching */
-  refreshKey: z.object({
-    every: z.string().optional(), // e.g. "1 hour"
-    sql: z.string().optional(),   // SQL to check for data changes
-  }).optional(),
-  
-  /** Access Control */
-  public: z.boolean().default(false),
-}));
+export const CubeSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this cube',
+    history: 'Until #4001 batch D an undeclared cube key was silently dropped — the cube '
+      + 'registered without it and the analytics service served whatever remained.',
+    aliases: {
+      // `label` is the metric/dimension spelling; the cube itself uses `title`.
+      label: 'title',
+      // `sql` doubles as the base table name ("Base SQL statement or Table Name").
+      table: 'sql',
+      sqlTable: 'sql',
+    },
+  },
+  {
+    name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Cube name (snake_case)'),
+    title: z.string().optional(),
+    description: z.string().optional(),
+
+    /** Physical Data Source */
+    sql: z.string().describe('Base SQL statement or Table Name'),
+
+    /** Semantic Definitions */
+    measures: z.record(z.string(), MetricSchema).describe('Quantitative metrics'),
+    dimensions: z.record(z.string(), DimensionSchema).describe('Qualitative attributes'),
+
+    /** Relationships */
+    joins: z.record(z.string(), CubeJoinSchema).optional(),
+
+    /** Pre-aggregations / Caching */
+    refreshKey: strictObject(
+      {
+        surface: 'this cube refreshKey block',
+        history: 'Until #4001 batch D an undeclared refreshKey key was silently dropped — '
+          + 'a typo\'d `sql` probe left the cube refreshing on nothing.',
+      },
+      {
+        every: z.string().optional().describe('Refresh interval (e.g. "1 hour")'),
+        sql: z.string().optional().describe('SQL to check for data changes'),
+      },
+    ).optional(),
+
+    /** Access Control */
+    public: z.boolean().default(false),
+  },
+));
 
 /**
  * Analytics Query Schema
  * The request format for the Analytics API.
+ *
+ * Strict as of #4001 batch D. The TOP level was already gated at the one
+ * production door — `api/analytics.zod.ts`'s `AnalyticsQueryRequestSchema` is
+ * `.extend(…).strict()` since #3878, so an undeclared top-level key answered
+ * 400 at `/analytics/query` before this change. What was NOT gated is the
+ * level this file owns: closing the base makes the posture hold at every
+ * door (a future bare `AnalyticsQuerySchema.parse` included) instead of only
+ * at the wrapper that happened to re-apply it, and the nested
+ * `timeDimensions[]` item below carries the real behaviour change.
  */
-export const AnalyticsQuerySchema = lazySchema(() => z.object({
+export const AnalyticsQuerySchema = lazySchema(() => strictObject(
+  {
+    surface: 'this analytics query',
+    history: 'Until #4001 batch D an undeclared key here was silently dropped at every door '
+      + 'except the strict `/analytics/query` wrapper.',
+    // The sibling record dialect (`data/query.zod.ts` `BaseQuerySchema`) spells
+    // sorting `orderBy`; the analytics dialect spells it `order`.
+    aliases: { orderBy: 'order' },
+    guidance: {
+      filters: '`filters` is not an AnalyticsQuery field — use `where` (canonical Query DSL '
+        + 'FilterCondition, the same shape find() takes). Per-metric filtering lives on the '
+        + 'cube metric\'s own `filters`.',
+    },
+    // No `extraKeys`: the one extension (`AnalyticsQueryRequestSchema`) adds
+    // only the #3878 `retiredKey` tombstones, and a tombstone must never be
+    // suggested (the `triggerPhrase` lesson in strict-object.ts).
+  },
+  {
   cube: z.string().optional().describe('Target cube name (optional when provided externally, e.g. in API request wrapper)'),
   measures: z.array(z.string()).describe('List of metrics to calculate'),
   dimensions: z.array(z.string()).optional().describe('List of dimensions to group by'),
@@ -156,14 +264,32 @@ export const AnalyticsQuerySchema = lazySchema(() => z.object({
    */
   where: FilterConditionSchema.optional().describe('Filtering criteria (canonical Query DSL FilterCondition)'),
 
-  timeDimensions: z.array(z.object({
-    dimension: z.string(),
-    granularity: TimeUpdateInterval.optional(),
-    dateRange: z.union([
-      z.string(), // "Last 7 days"
-      z.array(z.string()) // ["2023-01-01", "2023-01-31"]
-    ]).optional(),
-  })).optional(),
+  /**
+   * Time-bucketed dimensions. Strict as of #4001 batch D — and this item is
+   * the batch's live behaviour change at the REST door: the `.strict()` on
+   * `AnalyticsQueryRequestSchema` guards only the TOP level, so before this
+   * close `{ dimension, granuarity: 'day' }` rode through the strict wrapper
+   * with the typo'd granularity silently stripped — the query bucketed the
+   * whole range as one group under an ordinary 200 (measured on `main`).
+   */
+  timeDimensions: z.array(strictObject(
+    {
+      surface: 'this time dimension',
+      history: 'Until #4001 batch D an undeclared key here was silently stripped even at the '
+        + 'strict `/analytics/query` door — top-level strictness does not recurse.',
+      // The plural is the cube DIMENSION's declaration key; a query's time
+      // dimension takes exactly one `granularity`.
+      aliases: { granularities: 'granularity' },
+    },
+    {
+      dimension: z.string(),
+      granularity: TimeUpdateInterval.optional(),
+      dateRange: z.union([
+        z.string(), // "Last 7 days"
+        z.array(z.string()) // ["2023-01-01", "2023-01-31"]
+      ]).optional(),
+    },
+  )).optional(),
 
   order: z.record(z.string(), z.enum(['asc', 'desc'])).optional(),
 
@@ -181,7 +307,8 @@ export const AnalyticsQuerySchema = lazySchema(() => z.object({
    * enforce.
    */
   timezone: z.string().optional(),
-}));
+  },
+));
 
 export type Metric = z.input<typeof MetricSchema>;
 export type Dimension = z.input<typeof DimensionSchema>;

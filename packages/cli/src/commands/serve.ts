@@ -1399,15 +1399,35 @@ export default class Serve extends Command {
         // on the cluster package (mirrors the remote-driver import below).
         const __clusterPkg: string = '@objectstack/service-cluster';
         const { checkMultiNodeAllowed } = (await import(__clusterPkg)) as {
-          checkMultiNodeAllowed: () => { allowed: boolean; reason?: string };
+          checkMultiNodeAllowed: (requested?: number) => MultiNodeGateVerdict;
         };
-        const __gate = checkMultiNodeAllowed();
+        // Ask the gate about the topology the operator actually DECLARED.
+        // Calling zero-arg leaves `requested` undefined, which a cap-aware gate
+        // has nothing to clamp against — so the licensed-overflow verdict was
+        // unreachable from here, not merely unread.
+        //
+        // `OS_CLUSTER_REPLICAS` is a **declared desired count**, identical in
+        // every replica, not a live membership count — no membership count
+        // exists at boot (see the gate module's own note). For an *advisory*
+        // message that is the right input by construction: the operator is being
+        // told about the configuration they wrote. It is NOT sufficient input
+        // for enforcement, which is why enforcement is a separate mechanism.
+        //
+        // `Number(undefined)` is `NaN`, which the gate normalizes to "not
+        // declared" — normalization lives at the seam on purpose, so there is
+        // deliberately no `?? 0` or pre-parse here.
+        const __gate = checkMultiNodeAllowed(Number(process.env.OS_CLUSTER_REPLICAS));
         if (!__gate.allowed) {
           console.warn(
             `[cluster] multi-node not authorized (${__gate.reason ?? 'denied'}) — ` +
             `downgrading to single-node (in-memory cluster). Remove OS_CLUSTER_DRIVER to silence.`,
           );
         } else {
+          // Licensed-overflow advisory: the cluster IS entitled to run, it just
+          // asked for more nodes than it paid for. Distinct from the denial
+          // above, and deliberately not a downgrade.
+          const __capAdvisory = formatMultiNodeCapAdvisory(__gate);
+          if (__capAdvisory) console.warn(__capAdvisory);
           try { await import(`@objectstack/service-cluster-${__clusterDriver}`); }
           catch { /* may already be registered by the loaded config */ }
           clusterConfig = { driver: __clusterDriver, url: process.env.OS_REDIS_URL };
@@ -3941,6 +3961,91 @@ export function resolveSmsCapabilityArg(
       ...(cfgSms.retries != null ? { retries: cfgSms.retries } : {}),
     },
   };
+}
+
+/**
+ * The multi-node gate verdict, as `os serve` consumes it.
+ *
+ * ⚠️ A **structural mirror** of `ResolvedMultiNodeVerdict` in
+ * `@objectstack/service-cluster` (`src/multi-node-gate.ts`), not an import: the
+ * CLI reaches that package through a dynamic, non-literal specifier so it
+ * carries no static dependency on it (open-core ships the memory driver;
+ * remote drivers arrive with a distribution). The cast at the call site is the
+ * only place the two shapes meet, so nothing about a widening on the producer
+ * side propagates here on its own — the narrow `{ allowed, reason }` copy that
+ * used to live inline is exactly why a licensed node cap stayed unreportable
+ * after the gate learned to express one. `serve-multi-node-cap-advisory.pin.test.ts`
+ * pins this declaration against the producer's so the next widening is a
+ * decision rather than a silent divergence.
+ */
+export interface MultiNodeGateVerdict {
+  /** Whether a multi-node topology is authorized at all. */
+  allowed: boolean;
+  /** Surfaced in logs. */
+  reason?: string;
+  /**
+   * How many of the requested nodes the gate admits. Absent when the gate
+   * imposes no count cap; `0` when it denied outright.
+   */
+  admitted?: number;
+  /**
+   * How many requested nodes exceed what the gate admits. `0` when uncapped,
+   * when the request fits, or when no count was declared.
+   */
+  refused: number;
+  /**
+   * True only for a **partial** refusal — the licensed-overflow case. `false`
+   * for an outright denial, so the two cannot be conflated.
+   */
+  capped: boolean;
+}
+
+/**
+ * The operator-facing text for a licensed node-cap overflow, or `null` when
+ * there is nothing to say.
+ *
+ * Clause 3 of the maintainer's 2026-08-13 `max_nodes` ruling (recorded on
+ * cloud#1275): a licensed overflow must **refuse the excess, run up to the paid
+ * limit, and warn loudly** — explicitly not a whole-cluster degrade. The first
+ * two clauses need an atomic slot claim across replicas and are tracked as
+ * their own mechanism; this is the third, and it is deliverable on its own
+ * because it needs nothing beyond the verdict the gate already returns.
+ *
+ * ⚠️ **The wording is the deliverable, not decoration.** While the enforcement
+ * mechanism is open, nothing is actually refused: the gate is consulted once
+ * per process at boot, every replica computes the *same* verdict, and none can
+ * know whether it is one of the admitted ones — so all of them join. Phrasing
+ * this as "2 replicas refused" would therefore be **false**, and would recreate
+ * the very declared-vs-delivered gap the warning exists to close. It says
+ * instead that the cap is advisory and that the excess replicas still join,
+ * which is exactly what happens today.
+ *
+ * `capped` alone is the trigger: the producer sets it **only** for the partial
+ * (licensed-overflow) case, keeping it `false` for an outright `allowed: false`
+ * denial — that one is the unlicensed case and the call site already reports it
+ * as a downgrade. Reading `refused > 0` instead would double-report it.
+ */
+export function formatMultiNodeCapAdvisory(verdict: MultiNodeGateVerdict): string | null {
+  // `capped: true` is produced only together with a numeric `admitted` and a
+  // positive `refused`. The extra narrowing is the type system asking for that
+  // invariant in writing — not tolerance of an off-spec producer: a stale build
+  // that set `capped` without a count would get silence rather than a warning
+  // with an invented number in it, and a wrong number here is worse than the
+  // silence it replaces.
+  if (!verdict.capped) return null;
+  const admitted = verdict.admitted;
+  const excess = verdict.refused;
+  if (typeof admitted !== 'number' || excess <= 0) return null;
+
+  const declared = admitted + excess;
+  const why = verdict.reason ? ` (${verdict.reason})` : '';
+  return (
+    `[cluster] licensed node cap exceeded${why}: the licence admits ${admitted} node(s), `
+    + `but OS_CLUSTER_REPLICAS declares ${declared} — ${excess} beyond the cap.\n`
+    + `[cluster] This cap is ADVISORY and is not enforced yet: nothing is refused, and all `
+    + `${declared} replicas will still join the cluster.\n`
+    + `[cluster] Reduce OS_CLUSTER_REPLICAS to ${admitted}, or raise the licensed node limit.`
+  );
 }
 
 /**

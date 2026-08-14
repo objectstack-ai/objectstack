@@ -60,7 +60,8 @@
         "!coverage/**",
         "!.turbo/**",
         "$TURBO_ROOT$/packages/verify/src/**",
-        "$TURBO_ROOT$/packages/plugins/plugin-security/src/**"
+        "$TURBO_ROOT$/packages/plugins/plugin-security/src/**",
+        "$TURBO_ROOT$/packages/services/service-cluster/src/**"
       ]
     },
     "@objectstack/lint#test": {
