@@ -37,7 +37,7 @@ import {
 } from './permission-set-projection.js';
 import { registerObjectPostureGate } from './object-posture-gate.js';
 import {
-  syncAudienceBindingSuggestions,
+  reconcileAudienceBindingSuggestions,
   listAudienceBindingSuggestions,
   confirmAudienceBindingSuggestion,
   dismissAudienceBindingSuggestion,
@@ -2546,14 +2546,25 @@ export class SecurityPlugin implements Plugin {
           if (protocol && typeof protocol.registerPublishMaterializer === 'function') {
             protocol.registerPublishMaterializer(
               'permission',
-              async (args: { body: unknown; packageId: string | null }) => {
+              async (args: { body: unknown; packageId: string | null; organizationId: string | null }) => {
                 const r = await upsertPackagePermissionSet(ql, args.body, args.packageId, ctx.logger);
                 const applied = r.seeded + r.updated;
                 // [ADR-0090 D5] A published set carrying the install-time
                 // suggestion flag surfaces (or retires) its pending
                 // suggestion row right away — same convergent sync as boot.
+                //
+                // [#8617] Scoped to the PUBLISHING organization when the draft
+                // carried one: the publish is that tenant's act, and the
+                // suggestion row it produces is that tenant's prompt. A
+                // package-door publish with no org scope is installation-wide,
+                // so it reconciles every organization — the same sweep as boot.
                 if (applied > 0 && (args.body as { isDefault?: boolean } | null)?.isDefault !== undefined) {
-                  try { await syncAudienceBindingSuggestions(ql, this.metadata, ctx.logger); } catch { /* non-fatal */ }
+                  try {
+                    await reconcileAudienceBindingSuggestions(ql, this.metadata, ctx.logger, {
+                      posture: this.tenancyPosture,
+                      organizationId: args.organizationId ?? undefined,
+                    });
+                  } catch { /* non-fatal */ }
                 }
                 // A publish that materialized nothing did NOT go live — report it
                 // as a failure with the reason so the package-door UI never shows
@@ -2688,8 +2699,18 @@ export class SecurityPlugin implements Plugin {
         // confirmation — never auto-bound. Runs after the anchors are seeded
         // and after the baseline binding above, so the app's own fallback set
         // (already bound) never nags.
+        //
+        // [#8617] ONE PASS PER ORGANIZATION under a walled posture. The rows
+        // are per-tenant by construction (ADR-0090 D5/D9: resolved when a
+        // TENANT admin confirms), so a single tenant-less pass wrote one
+        // organization-less row that every tenant read — and the first admin
+        // to answer answered for all of them, while the binding their confirm
+        // created existed only in their own organization. `single` posture is
+        // unchanged: exactly one organization-less pass.
         try {
-          await syncAudienceBindingSuggestions(ql, this.metadata, ctx.logger);
+          await reconcileAudienceBindingSuggestions(ql, this.metadata, ctx.logger, {
+            posture: this.tenancyPosture,
+          });
         } catch (e) {
           ctx.logger.warn('[security] audience-binding suggestion sync failed (non-fatal)', { error: (e as Error).message });
         }

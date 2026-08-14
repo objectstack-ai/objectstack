@@ -79,6 +79,18 @@ export {
 } from './metadata-diagnostics.js';
 export type { MetadataDiagnostics } from './metadata-diagnostics.js';
 
+// [#8154] The metadata read path's per-type credential redaction (consuming
+// #8300's `@objectstack/spec/kernel` registry) and its write-path inverse.
+// `decorateMetadataItem` above already composes the read half — these are
+// exported for the exits decoration does not reach, and so the invariant is
+// testable from the package surface rather than only through a live protocol.
+export {
+  carryForwardRedactedValues,
+  hasMetadataRedactor,
+  redactMetadataItem,
+  redactMetadataItems,
+} from './metadata-redaction.js';
+
 export type { MetadataHostEngine } from './host-engine.js';
 
 // [#7560] ADR-0070's read-only-package rule. The authoring path (`saveMetaItem`

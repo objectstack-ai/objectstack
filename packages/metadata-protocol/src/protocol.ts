@@ -93,6 +93,16 @@ import {
     decorateMetadataItems,
     type MetadataDiagnostics,
 } from './metadata-diagnostics.js';
+// [#8154] The per-type read-path redaction seam. `decorateMetadataItem` already
+// composes `redactMetadataItem` (see its ordering note), which covers the
+// `getMetaItems` / `getMetaItem` exits; the two named here are the exits that
+// decoration does not reach — `getMetaItemLayered`, which serves three RAW
+// layers, and `saveMetaItem`, which owes the redaction its write-path inverse.
+import {
+    carryForwardRedactedValues,
+    hasMetadataRedactor,
+    redactMetadataItem,
+} from './metadata-redaction.js';
 import type {
     StoredFlowCanonicalization,
     StoredMigrationNotice,
@@ -4861,6 +4871,58 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#8154] The write-path counterpart the read exits' credential redaction
+     * owes, in the same sense {@link stripServedObjectColumns} is owed to
+     * {@link governServedObject}: a body this service's READ subtracted
+     * something from must not persist that subtraction when it comes straight
+     * back. Here the stakes are higher than a phantom customization — the
+     * subtracted material is a credential nobody can retype from the wire.
+     *
+     * Reads the row at rest through the overlay repository, whose `get()` is
+     * documented VERBATIM (no ADR-0087 conversion): the comparison must be
+     * against the bytes that were written, because those are the bytes the read
+     * exit redacted. {@link carryForwardRedactedValues} then decides per
+     * redacted path — see its docblock for the three outcomes.
+     *
+     * ⚠️ THE DRAFT FALLBACK IS LOAD-BEARING, not defensive. A `?mode=draft`
+     * save of an item with no draft row yet has nothing at its own state to
+     * compare against, while the body the author edited came from the ACTIVE
+     * row — so without the fallback the first draft save drops the credential,
+     * and `promoteDraft` later publishes that loss into the active row. The
+     * leak's write-side twin, one lifecycle over.
+     *
+     * ⛔ No `try`/`catch`. A failed stored-row read must fail the SAVE: the
+     * alternative is persisting a body whose credential we could not confirm
+     * was carried, which is the silent deletion this method exists to prevent.
+     * The read is skipped entirely — no extra query, for any save — when the
+     * type has no registered redactor, which is every type but `datasource`
+     * today.
+     */
+    private async carryForwardRedactedCredentials(args: {
+        type: string;
+        repo: SysMetadataRepository;
+        ref: Parameters<SysMetadataRepository['get']>[0];
+        state: 'draft' | 'active';
+        packageId: string | null;
+        item: any;
+    }): Promise<any> {
+        if (!hasMetadataRedactor(args.type)) return args.item;
+        let stored = await args.repo.get(args.ref, {
+            state: args.state,
+            packageId: args.packageId,
+        });
+        if (!stored && args.state === 'draft') {
+            stored = await args.repo.get(args.ref, {
+                state: 'active',
+                packageId: args.packageId,
+            });
+        }
+        const body = stored?.body;
+        if (!body) return args.item;
+        return carryForwardRedactedValues(args.type, args.item, body);
+    }
+
+    /**
      * [#5840] Read ONE item from the `metadata` service, keeping the ADR-0110
      * D3 verdict instead of flattening it into `undefined`.
      *
@@ -5929,13 +5991,43 @@ export class ObjectStackProtocolImplementation implements
         const lockSource: any = code ?? overlay ?? {};
         const lockState = resolveLockState(lockSource, artifactBacked);
 
+        // [#8154] The per-type credential redaction, on the ONE read exit
+        // `decorateMetadataItem` does not reach — this method never calls it
+        // (it computes `_diagnostics` directly, above) and serves its three
+        // layers raw. Measured on `origin/main` before this change: a legacy
+        // `datasource` row came back with `config.password` in cleartext in
+        // BOTH `overlay` and `effective`, so a hook that covered only the
+        // decorated exits would have left this door open while the report said
+        // "the read path is closed" — the exact shape this card exists to end.
+        //
+        // ⚠️ ALL THREE LAYERS, `code` and `overlay` included, and that is a
+        // reading of ANOTHER lane's ruling rather than an inference from this
+        // one. #7556 keeps `code` / `overlay` deliberately RAW — ungoverned,
+        // uninjected, unfolded — so that a Studio diff shows what the tenant
+        // actually customised and nothing else. That reason does not extend to
+        // credentials, and redacting the key on BOTH sides leaves the diff
+        // itself unchanged: the key is absent from both layers, so "what was
+        // customised" reads exactly as before. Stated here, and in the PR body,
+        // so `domain:engine-core` / `domain:spec` reviewers can contest it
+        // rather than discover it. ⛔ It is NOT a licence to fold, govern or
+        // inject on these layers — redaction subtracts, and only a credential.
+        //
+        // Placed AFTER `_diagnostics` and AFTER `resolveLockState`, both of
+        // which must read the raw bodies: the diagnostics ordering is the
+        // migration-inventory badge (see `decorateMetadataItem`), and a lock
+        // resolved from a redacted body would be a lock resolved from a
+        // document this method is not serving.
+        const servedCode = redactMetadataItem(request.type, code);
+        const servedOverlay = redactMetadataItem(request.type, overlay);
+        const servedEffective = redactMetadataItem(request.type, effective);
+
         return {
             type: request.type,
             name: request.name,
-            code,
-            overlay,
+            code: servedCode,
+            overlay: servedOverlay,
             overlayScope,
-            effective,
+            effective: servedEffective,
             ...(_diagnostics ? { _diagnostics } : {}),
             lock: lockState.lock,
             ...(lockState.lockReason !== undefined ? { lockReason: lockState.lockReason } : {}),
@@ -11802,6 +11894,46 @@ export class ObjectStackProtocolImplementation implements
             });
             parentVersion = current?.hash ?? null;
         }
+        // [#8154] THE WRITE-PATH INVERSE of the read exits' credential
+        // redaction — the half without which this card's fix is a DATA-LOSS
+        // bug rather than a security fix.
+        //
+        // Measured on `origin/main` before this change: `saveMetaItem` ACCEPTS
+        // a redacted datasource body and persists the credential away. So the
+        // read scrub alone converts today's loud `422` (the stored cleartext
+        // `config.password` is refused by #8078's write gate) into SILENT
+        // credential DELETION on the ordinary `/meta` GET → edit → PUT round
+        // trip. `config.url` is what makes this unavoidable rather than a
+        // masking choice: a URL-embedded password is schema-ACCEPTED, so
+        // dropping it round-trips to deletion and masking it round-trips to
+        // storing the mask as the literal password.
+        //
+        // The generic form of the carry-forward PR #8126 added to
+        // `DatasourceAdminService.updateDatasource`, and placed for the same
+        // reason that one is: AFTER every gate, immediately before the put.
+        // The gates judge what the AUTHOR wrote, and #8078's refusal of an
+        // inline credential is aimed at exactly that; this restores material
+        // the author never saw, was never offered the chance to write, and is
+        // not asking to change. Running the schema gate over it would refuse a
+        // legacy row for the contents of its own stored config — i.e. keep
+        // today's 422 — and make an ordinary label edit unreachable on exactly
+        // the rows that need one.
+        //
+        // It also RESTORES the #4326 byte-identical round-trip invariant that
+        // read-redaction alone would have broken: an untouched GET → PUT of a
+        // legacy datasource now persists a body identical to the one at rest.
+        //
+        // ⛔ Preserves cleartext already at rest; creates none. Getting stored
+        // cleartext OUT of the store is #8081 item 3's migration, deliberately
+        // not attempted on a write door the author drove.
+        request.item = await this.carryForwardRedactedCredentials({
+            type: singularTypeForRepo,
+            repo,
+            ref,
+            state: mode === 'draft' ? 'draft' : 'active',
+            packageId: request.packageId ?? null,
+            item: request.item,
+        });
         try {
             const result = await repo.put(ref, request.item, {
                 parentVersion,

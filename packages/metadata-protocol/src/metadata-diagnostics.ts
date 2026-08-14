@@ -32,6 +32,10 @@ import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 // function, so a document's verdict cannot depend on whether it was being saved
 // or being opened. See the note above the `.safeParse()` below.
 import { zodIssuesToMetadataIssues } from './protocol.js';
+// [#8154] The per-type credential redactor seam (`@objectstack/spec/kernel`,
+// landed by #8300). Composed into `decorateMetadataItem` below — see the
+// ordering note there for why it is not applied per read exit.
+import { redactMetadataItem } from './metadata-redaction.js';
 
 /**
  * Re-export the canonical validation-result type so callers in this
@@ -119,18 +123,40 @@ export function computeMetadataDiagnostics(
 }
 
 /**
- * Attach `_diagnostics` to a single metadata item. Returns the item
- * unchanged when no diagnostics could be computed (unknown type) or
+ * Attach `_diagnostics` to a single metadata item, and apply the type's
+ * read-path redactor. Returns the item unchanged when neither applies, or
  * when the input is not an object.
  *
  * The returned reference is always a shallow copy when decoration
  * occurs — callers must not assume identity equality with the input.
+ *
+ * [#8154] ⛔ THE ORDER OF THE TWO STATEMENTS BELOW IS LOAD-BEARING, and it is
+ * why redaction is composed HERE rather than applied at each read exit beside
+ * `governServedObject` (whose own docblock in `protocol.ts` explains why
+ * governance and injection went the other way).
+ *
+ * Diagnostics MUST be computed on the RAW stored body. Measured, in the
+ * predicted direction: computing them on the redacted body flips
+ * `valid:false` → `valid:true` for exactly the rows holding a stored cleartext
+ * credential — because the redacted body is the one the post-#8078 schema
+ * ACCEPTS — which destroys the `#8081` item-3 migration inventory. That badge
+ * is the operator's only enumeration of which rows still need migrating, so
+ * inverting these two lines silently removes the remedy while the leak it was
+ * tracking looks fixed. Composed into one function so no call site can invert
+ * an ordering it cannot see.
+ *
+ * Redaction runs even when diagnostics are `undefined`. A type with a
+ * registered redactor and no registered Zod schema is exactly the shape a
+ * plugin's secret-bearing type arrives in, and an early `return item` on the
+ * diagnostics miss would serve its credentials in cleartext — a fail-open
+ * keyed on an unrelated registration.
  */
 export function decorateMetadataItem<T>(type: string, item: T): T {
     if (!item || typeof item !== 'object') return item;
     const diagnostics = computeMetadataDiagnostics(type, item);
-    if (!diagnostics) return item;
-    return { ...(item as Record<string, unknown>), _diagnostics: diagnostics } as T;
+    const served = redactMetadataItem(type, item);
+    if (!diagnostics) return served;
+    return { ...(served as Record<string, unknown>), _diagnostics: diagnostics } as T;
 }
 
 /**
