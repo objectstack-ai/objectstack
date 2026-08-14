@@ -30,12 +30,49 @@ import { HttpDispatcher } from '../http-dispatcher.js';
  *
  * ── Reverse verification (direction predicted BEFORE running) ─────────────
  *
- * Predicted, on restoring `return (await meta?.list?.('skill')) ?? []`:
- * 6 red / 4 green. MEASURED: 6 red / 4 green — the four greens are the
- * absent-host paths (no protocol service, no metadata service) and the two
- * multi-environment pins, which are invariants of the per-request seam and
- * hold in both directions by construction. Numbers recorded here so a later
- * reader can re-run the ablation and compare.
+ * The ablation restores the pre-fix body:
+ * `listSkills: async () => (await (await getMeta())?.list?.('skill')) ?? []`.
+ *
+ * **Predicted: 6 red / 4 green.** The four greens I named were the two
+ * absent-host paths plus BOTH multi-environment pins.
+ *
+ * **First measurement: 8 red / 4 green — the prediction was wrong**, and
+ * wrong in an instructive direction. One multi-environment pin went red (the
+ * scoped fake's metadata service lists nothing, so the ablated read answers
+ * `[]`), and two of the four greens turned out to be **vacuous assertions**
+ * rather than invariants:
+ *
+ * - *"does not let one environment see another's skills"* asserted only the
+ *   absence of env B's name, which an EMPTY list satisfies. It passed with the
+ *   fix ablated and therefore discriminated nothing.
+ * - *"stays silent when the read is complete"* asserted only that no warning
+ *   was logged — also true of a build with no verdict machinery at all.
+ *
+ * Both were rewritten to assert what actually distinguishes the two
+ * directions (env A still sees its own skill; the merged rows really were
+ * served). **Re-measured after the rewrite: 10 red / 2 green**, the two
+ * greens being exactly the absent-host invariants — the merged-read branch is
+ * not taken there in either direction, which is the point of those pins.
+ *
+ * Both numbers are recorded because the first one is the useful one: a failed
+ * prediction is what surfaced the two tests that could never have failed.
+ *
+ * ── Live end-to-end (#8328's own three-step reproduction) ─────────────────
+ *
+ * Run twice against a real booted showcase (`pnpm dev -- --fresh`), same three
+ * steps, the only difference being which build served them:
+ *
+ * ```
+ *              PUT /api/v1/meta/skill/repro_skill {active:true}  →  200   (both)
+ *              GET /api/v1/meta/skill  (control, merged read)    →  the row (both)
+ *   pre-fix    POST /api/v1/mcp  prompts/list  →  {"prompts":[]}          ← the defect
+ *   fixed      POST /api/v1/mcp  prompts/list  →  [{"name":"repro_skill"}] ← closed
+ * ```
+ *
+ * `prompts/get` returned the skill's `instructions` as the message body, and a
+ * follow-up `{active:false}` PUT removed the prompt again — so the surface
+ * tracks the overlay in BOTH directions rather than merely being non-empty
+ * once.
  */
 
 /** A `skill` row as the REGISTRY/loader layer has it — packaged, inactive. */
@@ -251,10 +288,22 @@ describe('buildMcpBridge.listSkills reads the merged metadata listing (#8726)', 
       expect(seen).toEqual(['env_a', 'env_b']);
     });
 
-    it('does not let one environment see another\'s skills', async () => {
+    it('does not let one environment see another\'s skills, even after B has been served', async () => {
+      // Interleaved deliberately: A, then B, then A AGAIN. A read captured
+      // once (at boot, or memoised on the module) would answer env A's second
+      // call with whatever the env B request installed.
+      //
+      // The non-empty assertion is load-bearing and was added after the
+      // reverse verification: the first version asserted only "A does not
+      // contain B's skill", which an EMPTY list satisfies — so it passed with
+      // the fix ablated and discriminated nothing.
       const { kernel } = makeScopedKernel();
       const envA = await bridgeFor(kernel, makeContext({ environmentId: 'env_a' }));
+      await (await bridgeFor(kernel, makeContext({ environmentId: 'env_b' }))).listSkills();
       const rowsA: any[] = await envA.listSkills();
+
+      expect(rowsA.length, 'env A must still see its own skill').toBe(1);
+      expect(rowsA.map((r) => r.name)).toEqual(['skill_of_env_a']);
       expect(rowsA.map((r) => r.name)).not.toContain('skill_of_env_b');
     });
   });
@@ -276,12 +325,16 @@ describe('buildMcpBridge.listSkills reads the merged metadata listing (#8726)', 
     });
 
     it('stays silent when the read is complete', async () => {
+      // The rows assertion is what makes the silence MEAN something: without
+      // it this passes against a build that has no verdict machinery at all —
+      // measured, it did. Silence has to be the verdict's answer, not its
+      // absence.
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const { kernel } = makeKernel({
         withProtocol: true,
         listDiagnosed: async () => ({ items: [MERGED_SKILL], degraded: false, errors: [] }),
       });
-      await (await bridgeFor(kernel)).listSkills();
+      expect(await (await bridgeFor(kernel)).listSkills()).toEqual([MERGED_SKILL]);
       expect(warn).not.toHaveBeenCalled();
     });
 
