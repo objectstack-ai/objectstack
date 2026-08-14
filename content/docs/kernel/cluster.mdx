@@ -532,6 +532,38 @@ string. A distribution may register a multi-node gate; when it denies,
 `os serve` logs a warning and downgrades to the single-node in-memory cluster
 rather than failing.
 
+A gate may instead admit **fewer** nodes than the deployment declares — a
+licensed node-cap overflow. That is a different verdict from a denial and is
+deliberately *not* a downgrade: the cluster is entitled to run, it simply asked
+for more nodes than it paid for. `os serve` passes the declared
+`OS_CLUSTER_REPLICAS` to the gate and, when the declaration exceeds what the
+gate admits, prints an advisory naming both counts:
+
+```
+[cluster] licensed node cap exceeded: the licence admits 3 node(s), but
+OS_CLUSTER_REPLICAS declares 5 — 2 beyond the cap.
+[cluster] This cap is ADVISORY and is not enforced yet: nothing is refused, and
+all 5 replicas will still join the cluster.
+[cluster] Reduce OS_CLUSTER_REPLICAS to 3, or raise the licensed node limit.
+```
+
+<Callout type="warn">
+  **The cap is advisory today — it does not bind.** Nothing is refused, and every
+  declared replica joins. The gate is consulted once per process at boot, so each
+  replica computes the *same* verdict and none can tell whether it is one of the
+  admitted ones: acting on it locally would mean either "all join" (what happens)
+  or "all refuse" (a whole-cluster outage, which is worse than the overflow).
+  Making it bind needs an atomic slot claim across replicas — each booting replica
+  claims a seat, the excess downgrades itself, and seats are released on shutdown
+  or TTL expiry — which does not exist yet. Treat the warning as a prompt to fix
+  the configuration or the licence, not as evidence that the limit is enforced.
+</Callout>
+
+Note this reads the operator-**declared** count, not live membership: no
+membership view exists at boot. It is the right input for telling an operator
+about the configuration they wrote, and is deliberately not sufficient for
+enforcement.
+
 Every cluster primitive selects its implementation from `cluster.driver`.
 When the field is absent, `Runtime` auto-registers the in-memory, single-node
 driver (pass `cluster: false` to skip registration entirely). No production
