@@ -230,7 +230,7 @@ describe('#8421 — the second verdict: not a metadata type AT ALL', () => {
   });
 
   it('carries the six plugin kinds by NAME, since quantification hides them', () => {
-    const declared = new Set(DEFAULT_METADATA_TYPE_REGISTRY.map((e) => e.type));
+    const declared = new Set<string>(DEFAULT_METADATA_TYPE_REGISTRY.map((e) => e.type));
     for (const kind of [
       'analytics_cube', 'connector', 'rag_pipeline', 'sharing_rule', 'theme', 'webhook',
     ]) {
