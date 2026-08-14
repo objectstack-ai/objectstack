@@ -108,7 +108,12 @@ describe('resolveExecutionContext — API key verify path', () => {
     expect(ctx.permissions).toContain('data:write');
   });
 
-  it('carries an organization_id through to tenantId when present', async () => {
+  // [#8287] Re-spelled from `organization_id` — and this is the end-to-end pin
+  // for the ruling's third clause ("key authentication establishes that
+  // organization as the request's active organization"). The clause was always
+  // implemented; before #8287 it read a column no mint path ever wrote, which
+  // is why the card measured the whole key surface as inert.
+  it('carries active_organization_id through to tenantId when present', async () => {
     const raw = 'osk_org';
     const rows = [
       {
@@ -116,7 +121,7 @@ describe('resolveExecutionContext — API key verify path', () => {
         key: hashApiKey(raw),
         revoked: false,
         user_id: 'u1',
-        organization_id: 'org1',
+        active_organization_id: 'org1',
       },
     ];
     const ctx = await resolveExecutionContext(makeOpts(rows, { 'x-api-key': raw }));
@@ -286,7 +291,12 @@ describe('resolveExecutionContext — platform-scoped (null-org) grants (ADR-006
   const RAW = 'osk_admin';
   function makeAuthQl(extraGrants = []) {
     const tables = {
-      sys_api_key: [{ id: 'k1', key: hashApiKey(RAW), revoked: false, user_id: 'u1', organization_id: 'orgA', expires_at: FUTURE }],
+      // [#8287] Re-spelled from `organization_id`: these fixtures use the key as a
+      // VEHICLE to authenticate u1 into orgA, and `active_organization_id` is the
+      // column the verifier reads for exactly that. The assertions below depend on
+      // the resulting tenantId being 'orgA' (the org-scoped grant must be filtered
+      // out), so this keeps them meaningful rather than merely green.
+      sys_api_key: [{ id: 'k1', key: hashApiKey(RAW), revoked: false, user_id: 'u1', active_organization_id: 'orgA', expires_at: FUTURE }],
       sys_member: [{ user_id: 'u1', organization_id: 'orgA', role: 'owner' }],
       sys_user_permission_set: [
         { id: 'ups_global', user_id: 'u1', permission_set_id: 'ps_admin', organization_id: null },
@@ -349,7 +359,12 @@ describe('resolveExecutionContext — posture plumbing (#2947)', () => {
   const RAW = 'osk_posture';
   function makeQlFor(permissionSets: any[], userPermSets: any[]) {
     const tables: Record<string, any[]> = {
-      sys_api_key: [{ id: 'k1', key: hashApiKey(RAW), revoked: false, user_id: 'u1', organization_id: 'orgA', expires_at: FUTURE }],
+      // [#8287] Re-spelled from `organization_id`: these fixtures use the key as a
+      // VEHICLE to authenticate u1 into orgA, and `active_organization_id` is the
+      // column the verifier reads for exactly that. The assertions below depend on
+      // the resulting tenantId being 'orgA' (the org-scoped grant must be filtered
+      // out), so this keeps them meaningful rather than merely green.
+      sys_api_key: [{ id: 'k1', key: hashApiKey(RAW), revoked: false, user_id: 'u1', active_organization_id: 'orgA', expires_at: FUTURE }],
       sys_member: [{ user_id: 'u1', organization_id: 'orgA', role: 'member' }],
       sys_user_permission_set: userPermSets,
       sys_permission_set: permissionSets,

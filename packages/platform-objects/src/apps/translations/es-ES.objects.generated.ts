@@ -942,6 +942,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Propietario",
         help: "Usuario que posee esta clave de API."
       },
+      active_organization_id: {
+        label: "Active Organization",
+        help: "Organization this key authenticates into — inherited from the minter at creation and established as the request’s active organization"
+      },
       scopes: {
         label: "Ámbitos",
         help: "Matriz JSON de ámbitos de permisos."

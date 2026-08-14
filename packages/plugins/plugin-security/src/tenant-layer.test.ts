@@ -13,6 +13,8 @@
 
 import { describe, it, expect } from 'vitest';
 
+import { SysApiKey } from '@objectstack/platform-objects';
+
 import { computeTenantLayer0Filter, andComposeLayers } from './tenant-layer.js';
 import { RLS_DENY_FILTER } from './rls-compiler.js';
 
@@ -179,5 +181,60 @@ describe('andComposeLayers — Layer 0 is always outermost', () => {
     expect(andComposeLayers(null, { owner_id: 'u1' })).toEqual({ owner_id: 'u1' });
     expect(andComposeLayers({ organization_id: 'org-a' }, null)).toEqual({ organization_id: 'org-a' });
     expect(andComposeLayers(null, null)).toBeNull();
+  });
+});
+
+// ── [#8287] sys_api_key must stay OUT of the wall ──────────────────────────
+
+/**
+ * The console list-behaviour pin for #8287, taken against the REAL field set
+ * rather than a hand-written `objectHasOrgIdField` boolean — the two can drift,
+ * and this is precisely the pair that must not.
+ *
+ * #8287 gave `sys_api_key` a column recording the organization a key
+ * authenticates into. The column is deliberately named
+ * `active_organization_id` (the `sys_session` spelling), NOT `organization_id`,
+ * and THIS is the behaviour that naming choice protects:
+ *
+ * `security-plugin.ts` answers `objectHasOrgIdField` by testing the registered
+ * field set for the literal `organization_id`, and `computeTenantLayer0Filter`
+ * exempts an object without it. Had the column been called `organization_id`,
+ * `sys_api_key` would itself have become org-walled — and BOTH walled postures
+ * exclude NULL. Every pre-existing org-less key row would then have vanished
+ * from the console's "My Keys" list FOR ITS OWN OWNER, while under `group`
+ * continuing to authenticate: a live credential its owner can neither see nor
+ * revoke. That is a NEW instance of the silent-empty class #8287 exists to
+ * remove, so it is pinned here rather than left to a comment.
+ */
+describe('sys_api_key is not org-walled (#8287)', () => {
+  const apiKeyFields = new Set(Object.keys(SysApiKey.fields ?? {}));
+
+  it('declares the organization stamp under the non-walling name', () => {
+    expect(apiKeyFields.has('active_organization_id')).toBe(true);
+    expect(apiKeyFields.has('organization_id')).toBe(false);
+  });
+
+  for (const tenancyPosture of ['single', 'group', 'isolated'] as const) {
+    it(`${tenancyPosture}: Layer 0 contributes nothing, so a key row stays visible to its owner`, () => {
+      const filter = computeTenantLayer0Filter({
+        ...base,
+        tenancyPosture,
+        // Exactly what security-plugin.ts computes from the registered fields.
+        objectHasOrgIdField: apiKeyFields.has('organization_id'),
+      });
+      expect(filter).toBeNull();
+    });
+  }
+
+  /**
+   * The counterfactual, so this suite fails if the exemption is ever the thing
+   * that breaks rather than the name: under the walled postures an object that
+   * DOES carry `organization_id` is walled, and the wall excludes NULL rows.
+   */
+  it('counterfactual: the same postures DO wall an object that carries organization_id', () => {
+    expect(computeTenantLayer0Filter({ ...base, tenancyPosture: 'isolated', objectHasOrgIdField: true }))
+      .toEqual({ organization_id: 'org-a' });
+    expect(computeTenantLayer0Filter({ ...base, tenancyPosture: 'group', objectHasOrgIdField: true }))
+      .toEqual({ organization_id: { $in: ['org-a', 'org-b'] } });
   });
 });

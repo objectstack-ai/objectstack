@@ -80,13 +80,37 @@ export const MANAGED_EXTENSION_FIELDS: Readonly<Record<string, ReadonlySet<strin
     'sort_order',
   ]),
   sys_api_key: new Set([
-    // #7727 — the revoke/restore lifecycle flag. `sys_api_key` is
-    // `managedBy: 'better-auth'` (which is what puts it under the D2 guard),
-    // but the table is hand-rolled ObjectStack: `packages/core/src/security/
-    // api-key.ts` mints and verifies it and better-auth's `apiKey` plugin is
-    // not loaded, so EVERY column here is an extension field. `revoked` is
-    // the only one a generic write surface may touch — see the editable map.
+    // `sys_api_key` is `managedBy: 'better-auth'` (which is what puts it under
+    // the D2 guard), but the table is hand-rolled ObjectStack: better-auth's
+    // `apiKey` plugin is not loaded at all, `packages/core/src/security/
+    // api-key.ts` verifies the rows and `packages/runtime/src/domains/keys.ts`
+    // mints them. So EVERY column on this object is an extension field.
+    //
+    // [#8287] That sentence used to sit above a set containing `revoked`
+    // alone — the declaration and its own doc comment disagreeing, in the one
+    // file whose job is to answer "which columns here are ours". The set is
+    // now what the comment always said it was. This is a widening of the
+    // DECLARATION only, not of any permission: `MANAGED_EXTENSION_FIELDS`
+    // answers "is this column ObjectStack's?", while what a generic write
+    // surface may actually touch is `MANAGED_EXTENSION_EDITABLE_FIELDS` below
+    // — still `revoked` and nothing else.
+    'name',
+    'prefix',
+    'user_id',
+    // [#8287] The organization this key authenticates into, stamped once on
+    // the mint path from the minter's active organization. Deliberately NOT in
+    // the editable map: re-pointing an existing credential at another
+    // organization is privilege transfer, exactly like re-owning it via
+    // `user_id`. A key's reach is decided at mint time, under the membership
+    // check, or not at all.
+    'active_organization_id',
+    'scopes',
+    'expires_at',
+    'last_used_at',
+    // #7727 — the revoke/restore lifecycle flag; the one generically-writable
+    // column here (see the editable map).
     'revoked',
+    'key',
   ]),
   sys_invitation: new Set([
     // ADR-0105 D8 — placement intent. NOT generically editable (absent from

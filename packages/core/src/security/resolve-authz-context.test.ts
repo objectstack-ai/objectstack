@@ -3,6 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import { resolveAuthzContext, resolveUserAuthzGrants, resolveLocalizationContext } from './resolve-authz-context.js';
 import { POSTURE_RANK } from './posture-ladder.js';
+import { hashApiKey } from './api-key.js';
 import type { AuthzPosture } from '@objectstack/spec/security';
 
 /**
@@ -466,3 +467,132 @@ describe('resolveUserAuthzGrants — userId-driven authz for non-HTTP surfaces (
   });
 });
 
+
+// ── [#8287] API-key organization admission ─────────────────────────────────
+
+/**
+ * The two refusals that need the resolver rather than the verifier: one
+ * because it needs the caller's membership set (resolved here, once), one
+ * because the refusal must not silently fall through to the session path.
+ */
+describe('resolveAuthzContext — API-key organization (#8287)', () => {
+  const raw = 'osk_ctx_probe';
+  const keyHeaders = () => ({ 'x-api-key': raw });
+  const withPosture = async <T>(posture: string, fn: () => Promise<T>): Promise<T> => {
+    const previous = process.env.OS_TENANCY_POSTURE;
+    process.env.OS_TENANCY_POSTURE = posture;
+    try {
+      return await fn();
+    } finally {
+      if (previous === undefined) delete process.env.OS_TENANCY_POSTURE;
+      else process.env.OS_TENANCY_POSTURE = previous;
+    }
+  };
+  const tables = (member: any[]) => ({
+    sys_api_key: [{ key: hashApiKey(raw), revoked: false, user_id: 'u1', active_organization_id: 'org_a' }],
+    sys_user: [{ id: 'u1', email: 'ada@x.com' }],
+    sys_member: member,
+    sys_user_position: [],
+    sys_user_permission_set: [],
+  });
+
+  it('adopts the key organization as the request tenant when membership holds', async () => {
+    const ql = makeQl(tables([{ user_id: 'u1', organization_id: 'org_a', role: 'member' }]));
+    const ctx = await withPosture('isolated', () => resolveAuthzContext({ ql, headers: keyHeaders() }));
+    expect(ctx.userId).toBe('u1');
+    expect(ctx.tenantId).toBe('org_a');
+    expect(ctx.authRefusal).toBeUndefined();
+  });
+
+  /**
+   * Fail-closed at VERIFY time, not revoke-on-event. Membership ends through
+   * better-auth org endpoints, SCIM deprovisioning, a direct `sys_member`
+   * delete, or an ADR-0091 window simply lapsing — a revoke-on-removal hook
+   * must catch every one of those or it silently misses.
+   *
+   * The result is NO PRINCIPAL, deliberately: degrading to a user-only
+   * principal would answer 200 with zero rows, which is the silent-empty class
+   * this card exists to remove.
+   */
+  it('refuses a key whose owner is no longer a member of its organization', async () => {
+    const ql = makeQl(tables([{ user_id: 'u1', organization_id: 'org_other', role: 'member' }]));
+    const ctx = await withPosture('isolated', () => resolveAuthzContext({ ql, headers: keyHeaders() }));
+    expect(ctx.userId).toBeUndefined();
+    expect(ctx.tenantId).toBeUndefined();
+    expect(ctx.permissions).toEqual([]);
+    expect(ctx.authRefusal?.reason).toBe('organization_membership_ended');
+  });
+
+  it('refuses when the membership row exists but its ADR-0091 window has lapsed', async () => {
+    const ql = makeQl(tables([
+      { user_id: 'u1', organization_id: 'org_a', role: 'member', valid_until: '2000-01-01T00:00:00Z' },
+    ]));
+    const ctx = await withPosture('isolated', () => resolveAuthzContext({ ql, headers: keyHeaders() }));
+    expect(ctx.userId).toBeUndefined();
+    expect(ctx.authRefusal?.reason).toBe('organization_membership_ended');
+  });
+
+  it('the same key under `group` is refused too — the wall is membership-derived there as well', async () => {
+    const ql = makeQl(tables([{ user_id: 'u1', organization_id: 'org_other', role: 'member' }]));
+    const ctx = await withPosture('group', () => resolveAuthzContext({ ql, headers: keyHeaders() }));
+    expect(ctx.userId).toBeUndefined();
+    expect(ctx.authRefusal?.reason).toBe('organization_membership_ended');
+  });
+
+  /**
+   * Under `single` there is no organization boundary to cross, and a
+   * deployment with no membership rows at all would otherwise have every
+   * stamped key refused.
+   */
+  it('does NOT apply the membership check under `single`', async () => {
+    const ql = makeQl(tables([]));
+    const ctx = await withPosture('single', () => resolveAuthzContext({ ql, headers: keyHeaders() }));
+    expect(ctx.userId).toBe('u1');
+    expect(ctx.authRefusal).toBeUndefined();
+  });
+
+  /**
+   * A refused key must NOT fall through to the session path. Falling through
+   * would be MORE permissive than the behaviour this replaced — an API key
+   * already outranks a session — and a refusal that quietly becomes a session
+   * login is not a refusal.
+   */
+  it('a refused org-less key does not fall through to the session', async () => {
+    const ql = makeQl({
+      sys_api_key: [{ key: hashApiKey(raw), revoked: false, user_id: 'u1' }],
+      sys_user: [{ id: 'u1' }],
+      sys_member: [{ user_id: 'u1', organization_id: 'org_a', role: 'owner' }],
+      sys_user_position: [],
+      sys_user_permission_set: [],
+    });
+    const ctx = await withPosture('isolated', () => resolveAuthzContext({
+      ql,
+      headers: keyHeaders(),
+      getSession: session('u1', { org: 'org_a' }),
+    }));
+    expect(ctx.userId).toBeUndefined();
+    expect(ctx.authRefusal?.reason).toBe('organization_required');
+  });
+
+  /**
+   * The membership check is a set test on data the resolver has ALREADY read
+   * to build `accessible_org_ids` — it must not add a query. Counting reads is
+   * how that stays true: a later refactor that re-reads `sys_member` for this
+   * check turns a free assertion into a per-request cost, silently.
+   */
+  it('costs zero additional queries (sys_member is read once)', async () => {
+    let memberReads = 0;
+    const inner = makeQl(tables([{ user_id: 'u1', organization_id: 'org_a', role: 'member' }]));
+    const ql = {
+      async find(object: string, opts: any) {
+        if (object === 'sys_member') memberReads += 1;
+        return inner.find(object, opts);
+      },
+    };
+    await withPosture('isolated', () => resolveAuthzContext({ ql, headers: keyHeaders() }));
+    // One read for `accessible_org_ids`, one for the fellow-org peer list that
+    // an ACTIVE tenant already triggered before this change. The membership
+    // assertion adds neither.
+    expect(memberReads).toBe(2);
+  });
+});

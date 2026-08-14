@@ -32,8 +32,10 @@ import {
   ORGANIZATION_ADMIN_GRANTS,
 } from '@objectstack/spec';
 import type { AuthzPosture } from '@objectstack/spec/security';
+import { postureEnforcesWall } from '@objectstack/spec/security';
 
-import { resolveApiKeyPrincipal } from './api-key.js';
+import { resolveApiKeyAdmission, currentTenancyPosture } from './api-key.js';
+import type { ApiKeyRefusalReason } from './api-key.js';
 import { isGrantActive } from './grant-validity.js';
 import { derivePosture } from './posture-ladder.js';
 
@@ -67,6 +69,21 @@ export interface ResolvedAuthzContext {
    * anonymous requests carry no rung.
    */
   posture?: AuthzPosture;
+  /**
+   * [#8287] Set when an inbound API key was REFUSED — a real, intact
+   * credential this deployment's tenancy posture cannot admit. The context is
+   * otherwise EMPTY (no `userId`), so every transport already fails it closed
+   * to 401 with no change; this field only lets a transport that wants to say
+   * WHY do so, instead of answering the operator with a bare "unauthenticated"
+   * for a key they can see is neither revoked nor expired.
+   *
+   * ⚠️ `reason` is NOT an `error.code`. The wire vocabulary is closed
+   * (ADR-0112: `StandardErrorCode ∪ ERROR_CODE_LEDGER`, both in `packages/spec`)
+   * and a refused credential's standard member is `UNAUTHENTICATED`. This is a
+   * diagnostic discriminator for the message, deliberately lowercase so it can
+   * never be mistaken for one.
+   */
+  authRefusal?: { reason: ApiKeyRefusalReason; message: string };
 }
 
 export interface ResolveAuthzInput {
@@ -117,7 +134,16 @@ export async function resolveAuthzContext(input: ResolveAuthzInput): Promise<Res
   let tenantId: string | undefined;
 
   // 1. API key (explicit opt-in via header) takes precedence over session.
-  const keyPrincipal = await resolveApiKeyPrincipal(ql, headers, input.nowMs);
+  const admission = await resolveApiKeyAdmission(ql, headers, input.nowMs);
+  // [#8287] A REFUSED key stops here and does NOT fall through to the session
+  // path. Falling through would be more permissive than the behaviour this
+  // replaced (an API key already outranks a session), and a refusal that
+  // quietly becomes a session login is not a refusal.
+  if (admission.outcome === 'refused') {
+    ctx.authRefusal = { reason: admission.reason, message: admission.message };
+    return ctx;
+  }
+  const keyPrincipal = admission.outcome === 'admitted' ? admission.principal : undefined;
   if (keyPrincipal) {
     userId = keyPrincipal.userId;
     tenantId = keyPrincipal.tenantId;
@@ -158,6 +184,45 @@ export async function resolveAuthzContext(input: ResolveAuthzInput): Promise<Res
     seedPermissions: ctx.permissions,
     seedEmail: ctx.email,
   });
+  // [#8287] An API key stamped with an organization is only as good as its
+  // owner's CURRENT membership in that organization. Checked here, at VERIFY
+  // time, rather than by revoking keys when a membership ends: membership can
+  // end through better-auth's org endpoints, SCIM deprovisioning, a direct
+  // `sys_member` delete, or an ADR-0091 validity window simply lapsing — a
+  // revoke-on-removal hook has to catch EVERY one of those or it silently
+  // misses, while a verify-time check cannot be bypassed by an unhooked path.
+  //
+  // It is also free: `resolveUserAuthzGrants` has just read `sys_member` for
+  // this very user to build `accessible_org_ids`, so this is a set membership
+  // test on data already in hand — zero additional queries.
+  //
+  // Scoped to the walled postures on purpose. Under `single` there is no
+  // organization boundary to cross, and a deployment with no membership rows
+  // at all would otherwise refuse every stamped key it has.
+  //
+  // The result is NO PRINCIPAL, not a degrade to a user-only principal.
+  // Degrading would hand back exactly the `200 + total 0` silent-empty this
+  // card exists to kill — an ex-member's automation would keep answering
+  // success while reading nothing.
+  if (keyPrincipal?.tenantId) {
+    const posture = currentTenancyPosture();
+    if (postureEnforcesWall(posture) && !grants.accessible_org_ids.includes(keyPrincipal.tenantId)) {
+      return {
+        positions: [],
+        permissions: [],
+        systemPermissions: [],
+        org_user_ids: [],
+        accessible_org_ids: [],
+        authRefusal: {
+          reason: 'organization_membership_ended',
+          message:
+            'This API key authenticates into an organization its owner is no longer a member of. '
+            + 'The key was not revoked — the membership that backed it ended.',
+        },
+      };
+    }
+  }
+
   ctx.positions = grants.positions;
   ctx.permissions = grants.permissions;
   ctx.systemPermissions = grants.systemPermissions;

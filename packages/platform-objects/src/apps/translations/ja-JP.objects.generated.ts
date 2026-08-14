@@ -942,6 +942,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "所有者",
         help: "この API キーを所有するユーザー"
       },
+      active_organization_id: {
+        label: "Active Organization",
+        help: "Organization this key authenticates into — inherited from the minter at creation and established as the request’s active organization"
+      },
       scopes: {
         label: "スコープ",
         help: "権限スコープの JSON 配列"

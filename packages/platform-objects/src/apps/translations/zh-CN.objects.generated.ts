@@ -942,6 +942,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "所有者",
         help: "拥有该 API 密钥的用户"
       },
+      active_organization_id: {
+        label: "Active Organization",
+        help: "Organization this key authenticates into — inherited from the minter at creation and established as the request’s active organization"
+      },
       scopes: {
         label: "范围",
         help: "权限范围的 JSON 数组"

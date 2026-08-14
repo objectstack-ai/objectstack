@@ -94,7 +94,10 @@ export const SysApiKey = ObjectSchema.create({
       name: 'mine',
       label: 'My Keys',
       data: { provider: 'object', object: 'sys_api_key' },
-      columns: ['name', 'prefix', 'expires_at', 'last_used_at', 'revoked'],
+      // [#8287] `active_organization_id` is shown here deliberately: the card's
+      // complaint was a valid-looking credential whose reach the owner could
+      // not see. The column IS the reach, so the "My Keys" list states it.
+      columns: ['name', 'prefix', 'active_organization_id', 'expires_at', 'last_used_at', 'revoked'],
       filter: [
         { field: 'user_id', operator: 'equals', value: '{current_user_id}' },
       ],
@@ -126,7 +129,7 @@ export const SysApiKey = ObjectSchema.create({
       name: 'all_keys',
       label: 'All',
       data: { provider: 'object', object: 'sys_api_key' },
-      columns: ['name', 'prefix', 'user_id', 'expires_at', 'last_used_at', 'revoked'],
+      columns: ['name', 'prefix', 'user_id', 'active_organization_id', 'expires_at', 'last_used_at', 'revoked'],
       sort: [{ field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 50 },
     },
@@ -168,6 +171,49 @@ export const SysApiKey = ObjectSchema.create({
     }),
 
     // ── Access ───────────────────────────────────────────────────
+    //
+    // [#8287] The organization this key authenticates INTO. Set once, on the
+    // mint path, from the minter's active organization (inherited — there is
+    // deliberately no org parameter and no cross-org key); the verifier reads
+    // it back and `resolveAuthzContext` establishes it as the request's active
+    // organization, which is what lets the ADR-0105 Layer 0 wall match. Before
+    // this column a minted key carried no organization at all, so under the
+    // `isolated` posture (`organization_id = activeOrganizationId`) no row
+    // could ever match and the whole key surface read nothing while the console
+    // went on offering minting.
+    //
+    // ⚠️ The NAME is load-bearing, and it is `active_organization_id` — the
+    // `sys_session.active_organization_id` spelling — NOT `organization_id`.
+    // Two reasons, one semantic and one measured:
+    //
+    //  - Semantic: this value is not "the organization that owns this row", it
+    //    is "the organization this credential makes ACTIVE". A session carries
+    //    exactly the same fact under exactly this name, and both are read into
+    //    `ExecutionContext.tenantId` by the one shared resolver. One concept,
+    //    one name (ADR-0089).
+    //  - Measured: `objectHasOrgIdField` (plugin-security `security-plugin.ts`)
+    //    tests for the literal `organization_id`, and `computeTenantLayer0Filter`
+    //    (`tenant-layer.ts`) exempts objects without it. Naming this column
+    //    `organization_id` would therefore make `sys_api_key` ITSELF org-walled,
+    //    and both walled postures exclude NULL: every pre-existing org-less row
+    //    would vanish from the console's "My Keys" list FOR ITS OWN OWNER, and
+    //    under `group` those rows still authenticate — a live credential its
+    //    owner can no longer see or revoke. New keys would fare little better:
+    //    a key minted in org A disappears from its owner's list whenever they
+    //    switch to org B. `sys_api_key` is an owner-scoped credential table
+    //    like `sys_user` / `sys_session` / `sys_account`; it is scoped by the
+    //    Layer 1 `sys_api_key_self` policy (`user_id == current_user.id`), and
+    //    keeping it that way is what stops this fix from creating a fresh
+    //    instance of the very silent-empty class it exists to remove.
+    active_organization_id: Field.lookup('sys_organization', {
+      label: 'Active Organization',
+      required: false,
+      readonly: true,
+      description:
+        'Organization this key authenticates into — inherited from the minter at creation and established as the request’s active organization',
+      group: 'Access',
+    }),
+
     scopes: Field.textarea({
       label: 'Scopes',
       required: false,
@@ -251,6 +297,11 @@ export const SysApiKey = ObjectSchema.create({
     { fields: ['user_id'] },
     { fields: ['prefix'] },
     { fields: ['revoked'] },
+    // [#8287] Not for the verify path — that matches the unique `key` hash and
+    // reads the organization off the row it already has. This serves the
+    // administrative direction ("which keys authenticate into this org?"),
+    // which is the query a tenant admin runs when a membership ends.
+    { fields: ['active_organization_id'] },
   ],
 
   enable: {

@@ -942,6 +942,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Owner",
         help: "User who owns this API key"
       },
+      active_organization_id: {
+        label: "Active Organization",
+        help: "Organization this key authenticates into — inherited from the minter at creation and established as the request’s active organization"
+      },
       scopes: {
         label: "Scopes",
         help: "JSON array of permission scopes"

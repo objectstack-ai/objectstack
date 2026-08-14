@@ -22,7 +22,18 @@
  *  - The row is written with an elevated `{ isSystem: true }` context
  *    because `sys_api_key` is protection-locked; safe because the row's
  *    contents are fully server-controlled (user_id pinned to caller).
+ *  - [#8287] `active_organization_id` is INHERITED from the caller's active
+ *    organization and is likewise never read from the body. There is
+ *    deliberately no org parameter and no cross-org key in v1: a caller cannot
+ *    mint a credential for an organization other than the one they are
+ *    currently working in, so minting can never be a lateral-movement step.
+ *    Inheritance alone is not trusted — the caller's membership in that
+ *    organization is re-checked here, against `sys_member`, at mint time.
  */
+
+import { isGrantActive } from '@objectstack/core';
+import { postureEnforcesWall } from '@objectstack/spec/security';
+import { resolveTenancyPosture } from '@objectstack/types';
 
 import { generateApiKey } from '../security/api-key.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
@@ -82,11 +93,85 @@ export async function handleKeysRequest(
         return { handled: true, response: deps.error('Data service not available', 503) };
     }
 
+    // ── [#8287] Resolve the organization this key will authenticate into. ──
+    //
+    // INHERITED from the caller's active organization (`ExecutionContext
+    // .tenantId`, which the one shared resolver fills from the session's
+    // `activeOrganizationId` or from the minting key's own stamp). Never a
+    // body parameter: see the header.
+    const activeOrganizationId = typeof ec.tenantId === 'string' && ec.tenantId.trim()
+        ? ec.tenantId.trim()
+        : undefined;
+
+    let tenancyPosture;
+    try {
+        tenancyPosture = resolveTenancyPosture();
+    } catch {
+        // Unrecognized OS_TENANCY_POSTURE — the CLI's boot gate refuses to
+        // serve in that state, so this is unreachable on a running deployment.
+        // Treat it as walled rather than letting an unreadable posture be the
+        // reason a key is minted without an organization.
+        tenancyPosture = 'isolated' as const;
+    }
+    const walled = postureEnforcesWall(tenancyPosture);
+
+    if (walled && !activeOrganizationId) {
+        // Refuse rather than mint. Under a walled posture an org-less key
+        // reads nothing (`isolated`) or reads by a rule that has nothing to do
+        // with what the caller asked for (`group`) — and handing back a
+        // valid-looking secret that cannot do its job is the exact defect this
+        // change removes. Fail at mint time, where the caller is a human at a
+        // console who can act on it.
+        return {
+            handled: true,
+            response: deps.error(
+                'Cannot create an API key without an active organization: this deployment runs a walled '
+                + `tenancy posture ('${tenancyPosture}') in which every organization-scoped read requires one. `
+                + 'Select an organization and try again.',
+                400,
+            ),
+        };
+    }
+
+    if (activeOrganizationId) {
+        // Membership check at mint time (the ruling's second clause). The
+        // inherited value comes from the caller's own context, so this is not
+        // guarding against a forged parameter — it guards against minting a
+        // long-lived credential off a STALE context: a session whose active
+        // organization outlived the membership that justified it. ADR-0091
+        // validity windows are honoured, so a lapsed membership does not mint
+        // either.
+        let memberRows: any;
+        try {
+            memberRows = await ql.find('sys_member', {
+                where: { user_id: ec.userId, organization_id: activeOrganizationId },
+                limit: 1,
+                context: { isSystem: true },
+            });
+        } catch {
+            // Fail closed: an unreadable membership table is not evidence of
+            // membership.
+            return { handled: true, response: deps.error('Failed to create API key', 500) };
+        }
+        if (memberRows && (memberRows as any).value) memberRows = (memberRows as any).value;
+        const member = Array.isArray(memberRows) ? memberRows[0] : undefined;
+        if (!member || !isGrantActive(member, Date.now())) {
+            return {
+                handled: true,
+                response: deps.error(
+                    'Cannot create an API key for an organization you are not a member of.',
+                    403,
+                ),
+            };
+        }
+    }
+
     // Generate AFTER validation so we never mint on a rejected request.
     const generated = generateApiKey();
 
     // Server-controlled row. user_id is pinned to the caller; only the hash
-    // is persisted. NOTHING from the body can set key/id/user_id/revoked.
+    // is persisted. NOTHING from the body can set key/id/user_id/revoked/
+    // active_organization_id.
     const row: Record<string, unknown> = {
         name,
         key: generated.hash,
@@ -95,6 +180,7 @@ export async function handleKeysRequest(
         revoked: false,
     };
     if (expiresAt) row.expires_at = expiresAt;
+    if (activeOrganizationId) row.active_organization_id = activeOrganizationId;
 
     let inserted: any;
     try {
@@ -117,6 +203,12 @@ export async function handleKeysRequest(
                     name,
                     prefix: generated.prefix,
                     key: generated.raw,
+                    // [#8287] Echo the organization the key is pinned to. The
+                    // card's complaint was a credential whose reach the caller
+                    // could not see; the mint response is the first and best
+                    // place to state it, and it is the only moment the caller
+                    // is definitely looking.
+                    ...(activeOrganizationId ? { active_organization_id: activeOrganizationId } : {}),
                     ...(expiresAt ? { expires_at: expiresAt } : {}),
                 },
             },
