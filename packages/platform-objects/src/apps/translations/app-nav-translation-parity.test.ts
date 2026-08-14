@@ -166,7 +166,10 @@ describe('dashboard widgets are translated in every locale', () => {
 // Deliberately NOT claimed here: anything about zh-CN / ja-JP / es-ES. What a
 // translated locale should do when its source string changes (keep serving the
 // stale value, fall back to the source, fail the build) is a product decision,
-// not a test's to invent. This block is the half that needs no decision.
+// not a test's to invent. This block is the half that needs no decision; the
+// half that does is #8765, and note what pinning `en` does to it — the drift
+// stops being uniform across all four bundles and becomes locale-specific,
+// invisible to every reviewer who reads the product in English.
 //
 // Direction: source ⇒ en, one-way. A key in `en.ts` with no declaring source is
 // NOT judged — that set is exactly Setup's runtime-contributed nav leaves,
@@ -179,6 +182,11 @@ describe('dashboard widgets are translated in every locale', () => {
 // `pages.*` is out of the walk on purpose: those entries mirror page metadata
 // authored in OTHER packages (@objectstack/cloud-connection, @objectstack/mcp),
 // which this package does not import and must not depend on to run its tests.
+// That leaves the third of this bundle with no source comparison in ANY locale,
+// `en` included — the same shape as the defect above, one section over, and a
+// static walk in this package cannot close it. Tracked as #8764; the gate that
+// can see those pages is `check:app-nav-i18n`, which already boots the real
+// composition. All three were in parity when this block was written.
 describe('the default locale bundle serves the declared source string verbatim', () => {
   type Drift = { path: string; source: string; en: string | undefined };
 
