@@ -10,6 +10,7 @@
 
 import { isMcpServerEnabled } from '@objectstack/types';
 import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
+import type { MetadataProtocol } from '@objectstack/spec/api';
 import { buildApiError } from '../error-envelope.js';
 import * as actionExec from '../action-execution.js';
 import { isSystemObjectName } from '../action-execution.js';
@@ -306,6 +307,164 @@ function toMcpWebRequest(_deps: DomainHandlerDeps, raw: any, parsedBody: any): R
 }
 
 /**
+ * [#8726] The protocol layer's overlay-aware merged read, as this package can
+ * name it.
+ *
+ * ⚠️ **Deliberately `Pick`ed from the DECLARED contract rather than restated.**
+ * `packages/mcp` declares its own `McpMergedMetadataRead` for the stdio half of
+ * #8328, and the obvious move here was to import that. It is not reachable:
+ * `@objectstack/mcp` re-exports only `MCPServerRuntime` + its config type from
+ * its package index, and `@objectstack/runtime` deliberately carries **no**
+ * `@objectstack/mcp` dependency at all — the MCP service is resolved by name
+ * and the bridge is duck-typed precisely so any host can mount the dispatcher
+ * without that package (the same property `@objectstack/rest` relies on).
+ *
+ * So this points at what `McpMergedMetadataRead` itself duck-types: the
+ * `MetadataProtocol` contract in `@objectstack/spec`, which
+ * `ObjectStackProtocolImplementation` declares `implements`. That is the
+ * "one rule, one place" the divergence rule is protecting — a `Pick` from the
+ * contract cannot drift from it, where a second hand-written `getMetaItems(…)`
+ * signature silently could.
+ */
+type McpMergedMetadataRead = Pick<MetadataProtocol, 'getMetaItems'>;
+
+/**
+ * [#8726] Read this environment's `skill` rows through the merged listing.
+ *
+ * ── The defect this closes ────────────────────────────────────────────────
+ *
+ * This read was `metadataService.list('skill')` — the registry/loader listing,
+ * one layer BELOW where any `sys_metadata` overlay merging happens. So
+ * `PUT /api/v1/meta/skill/<name>` with `{active:true}` returned 200, `GET
+ * /api/v1/meta/skill` served the flip from the merged read, and MCP prompts on
+ * this endpoint never saw it. Two surfaces, one skill name, two answers.
+ *
+ * The maintainer's ruling on #8328 (2026-08-13, option 3) is that the consumer
+ * moves up to the protocol's merged read — ⛔ NOT that the overlay merge is
+ * pushed down into `MetadataService.list()` for every consumer, which is a
+ * wider contract change archived unscheduled as #8722.
+ *
+ * ── Absent vs. degraded vs. failed — three outcomes, deliberately ─────────
+ *
+ * 1. **No merged read on this host** → the pre-#8726 registry listing,
+ *    unchanged, including its `?? []` for a host with no metadata service at
+ *    all. Structural absence is not degradation: a host that assembles this
+ *    runtime without the metadata protocol has no merged read to offer, so
+ *    there is nothing to have skipped. This is the same branch
+ *    `packages/mcp`'s `mergedDiagnosedList` takes for the stdio half.
+ * 2. **Merged read answers, metadata service known-partial** → the items are
+ *    served with #6504's verdict reported to the operator. See
+ *    {@link warnIfSkillListIncomplete}.
+ * 3. **Merged read THROWS** → ⛔ NO fallback to the un-merged listing. The
+ *    throw travels to the MCP client as a JSON-RPC error. Falling back would
+ *    answer registry rows in the shape of merged ones — this exact defect,
+ *    restored silently at the moment the overlay store is unreadable, which is
+ *    precisely when an overlay is most likely to be the thing being missed.
+ *    `getMetaItems` already answers registry-only for the one benign case (a
+ *    `sys_metadata` table not provisioned yet); anything it raises past that
+ *    means overlay rows may exist and were not seen. Per AGENTS.md
+ *    "Degradation log levels", a failure handed to the CALLER is not a
+ *    degradation at all — the requester was told — so this branch logs nothing.
+ *
+ * `organizationId` is deliberately NOT threaded: `skill` is declared
+ * `allowOrgOverride: false`, so the runtime write path lands its rows env-wide
+ * and `getMetaItems` reads env-wide rows unconditionally. Passing the active
+ * org would ask for a per-org overlay this type has no write channel for.
+ */
+async function readMergedSkillRows(
+    deps: DomainHandlerDeps,
+    protocol: McpMergedMetadataRead | undefined | null,
+    getMeta: () => Promise<any>,
+): Promise<unknown[]> {
+    if (!protocol || typeof protocol.getMetaItems !== 'function') {
+        const meta: any = await getMeta();
+        return (await meta?.list?.('skill')) ?? [];
+    }
+    const answer = await protocol.getMetaItems({ type: 'skill' });
+    // The declared `GetMetaItemsResponse` is `{ type, items }`, and the two
+    // other `getMetaItems` consumers in this package read `res.items` the same
+    // way. The bare-array arm matches what `packages/mcp` accepts for the stdio
+    // half of this same read: the slot is filled by name from a host-owned
+    // registry, and the two surfaces answering one question must not disagree
+    // about the shape they accept.
+    const items = Array.isArray(answer)
+        ? (answer as unknown[])
+        : Array.isArray(answer?.items)
+            ? answer.items
+            : [];
+    await warnIfSkillListIncomplete(deps, getMeta, items.length);
+    return items;
+}
+
+/**
+ * [#8726] Report #6504's completeness verdict for the skill prompt surface.
+ *
+ * This read never had a diagnosed wrapper at all — unlike the stdio bridge,
+ * where #6504 had already landed one — so a known-partial skill surface
+ * presented as a complete one. Closing that is a gap closed, not a contract
+ * preserved.
+ *
+ * The verdict has to be asked of the metadata service DIRECTLY rather than
+ * taken from the merged read: `getMetaItems` swallows a MetadataService read
+ * failure into its own `catch` and returns a merged list either way, so
+ * sourcing completeness from it would spend the contract while looking clean.
+ * The question stays addressed to the same set the items came from — the merged
+ * list is the overlay layer ON TOP of exactly this listing.
+ *
+ * `warn`, not `error`, per AGENTS.md "Degradation log levels": the prompt
+ * surface is *visibly* smaller than the environment declares and the next
+ * client to look finds out. Nothing claims to have persisted and did not.
+ *
+ * ⚠️ Unlike the stdio half's boot-time snapshot this runs **per request**, so a
+ * loader outage prints per MCP call rather than once. That is the honest rate:
+ * each of those requests really did serve a short prompt list to a client that
+ * was told nothing. It also means the surface self-heals the moment the loader
+ * does — which is why the line says the outage is current rather than pinned at
+ * boot, the one thing the stdio wording could not say.
+ *
+ * A verdict probe that THROWS must not fail a read whose items already
+ * succeeded — that would be a new failure mode bought with pure observability.
+ * It is reported as "could not be determined", never flattened into a
+ * completeness claim this code did not earn.
+ */
+async function warnIfSkillListIncomplete(
+    deps: DomainHandlerDeps,
+    getMeta: () => Promise<any>,
+    readable: number,
+): Promise<void> {
+    const logger = deps.logger ?? console;
+    let degraded = false;
+    let errors: string[] = [];
+    try {
+        const meta: any = await getMeta();
+        if (!meta || typeof meta.listDiagnosed !== 'function') return;
+        const diagnosed: any = await meta.listDiagnosed('skill');
+        degraded = diagnosed?.degraded === true;
+        errors = Array.isArray(diagnosed?.errors) ? diagnosed.errors : [];
+    } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.warn(
+            '[MCP] skill prompt list completeness could not be determined — the metadata service\'s '
+                + 'diagnosed read failed, so this surface may be short without saying so. The skills it DID '
+                + 'read are served normally. Fix: check the loaders behind the metadata service '
+                + `(datasource connection, credentials, table). Cause: ${message}`,
+            { readable },
+        );
+        return;
+    }
+    if (!degraded) return;
+    logger.warn(
+        '[MCP] skill prompt list is INCOMPLETE — the metadata service could not be fully read, so skills '
+            + 'held by the unreadable loader(s) are missing from this surface. They are missing, NOT '
+            + 'undeclared: an MCP client listing prompts on this request sees fewer than this environment '
+            + 'declares. The HTTP transport rebuilds per request, so this surface recovers on the first '
+            + 'request after the loader does — an outage reported here is current, not pinned at boot. '
+            + 'Fix: check the loaders behind the metadata service (datasource connection, credentials, table).',
+        { readable, errors },
+    );
+}
+
+/**
  * Build a principal-bound {@link McpDataBridge}: every method runs AS the
  * request's ExecutionContext through {@link callData} (RLS/permissions) and
  * the per-env metadata service. Keeps the MCP tool layer free of any direct
@@ -392,14 +551,21 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
         // MCP runtime projects each skill's `instructions` onto the `prompts`
         // primitive; the tool-binding half stays cloud-runtime-only.
         //
-        // Resolved through THIS request's per-environment metadata service —
-        // the same seam `listObjects` / `describeObject` use — so a
-        // multi-tenant host serves each environment its own skills. Metadata,
-        // not row data: no ExecutionContext filtering, exactly like
-        // `describeObject` (the MCP route itself is authenticated).
+        // Resolved through THIS request's per-environment services — the same
+        // seam `listObjects` / `describeObject` use — so a multi-tenant host
+        // serves each environment its own skills. Metadata, not row data: no
+        // ExecutionContext filtering, exactly like `describeObject` (the MCP
+        // route itself is authenticated).
+        //
+        // [#8726] Through the protocol layer's MERGED listing — the second half
+        // of #8328, whose own reproduction runs through THIS endpoint. See
+        // {@link readMergedSkillRows}.
         listSkills: async () => {
-            const meta: any = await getMeta();
-            return (await meta?.list?.('skill')) ?? [];
+            // Resolved per request on the SAME per-environment seam `getMeta`
+            // uses — never captured once at boot, which would serve one
+            // environment's overlay rows to every other one.
+            const protocol: any = await deps.resolveService(context, 'protocol', envId);
+            return await readMergedSkillRows(deps, protocol, getMeta);
         },
 
         create: async (object: string, data: any) =>
