@@ -3,7 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import { IndexSchema } from '@objectstack/spec/data';
 import { resolveInjectedSystemColumns } from '@objectstack/spec/data';
-import { SysWebhook } from './sys-webhook.object';
+import { SysWebhook } from './sys-webhook.object.js';
 
 /**
  * #8554 — `sys_webhook`'s declared uniqueness is organization-scoped.

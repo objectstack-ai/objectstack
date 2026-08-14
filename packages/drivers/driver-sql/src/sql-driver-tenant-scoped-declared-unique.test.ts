@@ -375,7 +375,7 @@ describe('#8554 — five tenant-scoped declared unique indexes become per-organi
 
         // …and the other half of the oracle: the caller's own read of the
         // colliding key returns nothing. It is refused by a row it cannot see.
-        const visible = (await d.find(sub.table, {} as any)).filter(
+        const visible = (await d.find(sub.table, {})).filter(
           (r: any) =>
             r.organization_id === 'org_yi' && Object.entries(sub.key).every(([k, v]) => r[k] === v),
         );
@@ -389,7 +389,7 @@ describe('#8554 — five tenant-scoped declared unique indexes become per-organi
         expect((await createAsApi(d, sub.table, row(sub, 'a', 'org_jia', sub.key))).status).toBe(201);
         expect((await createAsApi(d, sub.table, row(sub, 'b', 'org_yi', sub.key))).status).toBe(201);
 
-        const held = (await d.find(sub.table, {} as any)).filter((r: any) =>
+        const held = (await d.find(sub.table, {})).filter((r: any) =>
           Object.entries(sub.key).every(([k, v]) => r[k] === v),
         );
         expect(held.map((r: any) => r.organization_id).sort()).toEqual(['org_jia', 'org_yi']);
@@ -406,7 +406,7 @@ describe('#8554 — five tenant-scoped declared unique indexes become per-organi
         expect(await createAsApi(d, sub.table, row(sub, 'b', 'org_jia', sub.key))).toMatchObject(
           CONFLICT_ENVELOPE,
         );
-        expect(await d.count(sub.table, {} as any)).toBe(1);
+        expect(await d.count(sub.table, {})).toBe(1);
       });
 
       it('AFTER: rows with no organization stay unique among THEMSELVES (ADR-0120 D3)', async () => {
@@ -467,7 +467,7 @@ describe('#8554 — five tenant-scoped declared unique indexes become per-organi
           await seedDeployed(d);
 
           expect(await uniqueKeyParts(sub.table)).toEqual({ [sub.legacyName]: sub.keyColumns });
-          expect(await d.count(sub.table, {} as any)).toBe(3);
+          expect(await d.count(sub.table, {})).toBe(3);
           expect(await createAsApi(d, sub.table, row(sub, 'x', 'org_yi', sub.key))).toMatchObject(
             CONFLICT_ENVELOPE,
           );
@@ -517,7 +517,7 @@ describe('#8554 — five tenant-scoped declared unique indexes become per-organi
           expect(await uniqueKeyParts(sub.table)).toEqual({
             [sub.replacementName]: ['COALESCE(organization_id)', ...sub.keyColumns],
           });
-          expect(await d.count(sub.table, {} as any)).toBe(3);
+          expect(await d.count(sub.table, {})).toBe(3);
 
           // Re-running finds nothing: the plan is not a drop/create cycle.
           expect(await d.detectManagedDrift()).toHaveLength(0);

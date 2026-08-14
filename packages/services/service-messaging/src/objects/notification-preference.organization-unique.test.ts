@@ -3,7 +3,10 @@
 import { describe, it, expect } from 'vitest';
 import { IndexSchema } from '@objectstack/spec/data';
 import { resolveInjectedSystemColumns } from '@objectstack/spec/data';
-import { NotificationPreference } from './notification-preference.object';
+// Explicit `.js` extension: this package resolves under NodeNext, where an
+// extensionless relative import does not typecheck (its sibling suites all
+// spell it this way).
+import { NotificationPreference } from './notification-preference.object.js';
 
 /**
  * #8554 — `sys_notification_preference`'s declared uniqueness is organization-scoped.

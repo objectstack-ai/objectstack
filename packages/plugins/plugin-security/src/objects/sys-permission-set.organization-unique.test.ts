@@ -3,7 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import { IndexSchema } from '@objectstack/spec/data';
 import { resolveInjectedSystemColumns } from '@objectstack/spec/data';
-import { SysPermissionSet } from './sys-permission-set.object';
+import { SysPermissionSet } from './sys-permission-set.object.js';
 
 /**
  * #8554 — `sys_permission_set`'s declared uniqueness is organization-scoped.

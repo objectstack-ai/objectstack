@@ -3,7 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import { IndexSchema } from '@objectstack/spec/data';
 import { resolveInjectedSystemColumns } from '@objectstack/spec/data';
-import { SysEmailTemplate } from './sys-email-template.object';
+import { SysEmailTemplate } from './sys-email-template.object.js';
 
 /**
  * #8554 — `sys_email_template`'s declared uniqueness is organization-scoped.

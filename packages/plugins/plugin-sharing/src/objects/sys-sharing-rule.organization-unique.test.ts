@@ -3,7 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import { IndexSchema } from '@objectstack/spec/data';
 import { resolveInjectedSystemColumns } from '@objectstack/spec/data';
-import { SysSharingRule } from './sys-sharing-rule.object';
+import { SysSharingRule } from './sys-sharing-rule.object.js';
 
 /**
  * #8554 — `sys_sharing_rule`'s declared uniqueness is organization-scoped.
