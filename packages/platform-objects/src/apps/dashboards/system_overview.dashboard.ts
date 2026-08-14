@@ -15,7 +15,7 @@ import { Dashboard } from '@objectstack/spec/ui';
  *   1. Platform KPIs       — users / orgs / sessions / packages
  *   2. Security KPIs       — login / config audit counts
  *   3. Distribution charts — audit events by action + by user
- *   4. Recent audit events table
+ *   4. Event volume by action (table)
  *
  * This is a MIXED board, and the split decides who the date bar applies to
  * (#7531, #7613). Row 1 is INVENTORY — "how much of this exists right now" —
@@ -201,13 +201,27 @@ export const SystemOverviewDashboard = Dashboard.create({
       layout: { x: 6, y: 4, w: 6, h: 4 },
     },
 
-    // ── Row 4: Audit events by action ───────────────────────────────
+    // ── Row 4: Event volume by action ───────────────────────────────
     // ADR-0021 single-form: a dataset-bound breakdown of events by action.
     // (The raw recent-events record list belongs in a ListView on
     // sys_audit_log — a row-level lens, not a dashboard analytics widget.)
+    //
+    // The title says "volume", not "events by action", because the Row 3 pie
+    // (`widget_events_by_type`) breaks down the SAME dataset by the SAME
+    // dimension and had the identical title until now — two tiles on one board
+    // labelled `Audit Events by Action`. They read as distinct in a running
+    // instance only because this one was serving a stale translation from
+    // before the ADR-0021 conversion, so the duplicate was invisible in the UI
+    // and visible only in the source. The pair now splits on what each adds:
+    // the pie is the share picture, this table is the exact per-action count
+    // (`values: ['event_count']`).
+    //
+    // The id stays `widget_recent_events` deliberately — it predates the
+    // conversion, and renaming it would break every locale bundle's key and
+    // any persisted per-widget state for a cosmetic gain.
     {
       id: 'widget_recent_events',
-      title: 'Audit Events by Action',
+      title: 'Event Volume by Action',
       // The example actions named here have to be actions the platform can
       // actually emit — this string used to lead with `permission`, which
       // advertised the retired value from a second place on the same board.
