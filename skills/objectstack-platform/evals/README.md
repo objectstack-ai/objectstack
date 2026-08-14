@@ -15,7 +15,7 @@ evals/
 ├── bootstrap/
 │   ├── test-definestack-keys.md        # no phantom keys (driver:, workflows:, approvals:)
 │   ├── test-manifest-required-fields.md
-│   └── test-template-selection.md      # blank | todo | compliance | content | contracts | procurement
+│   └── test-template-selection.md      # blank is the whole catalog; the five remote templates are retired
 ├── drivers-adapters/
 │   ├── test-driver-selection.md        # memory / sql / mongodb / sqlite-wasm; turso = cloud/EE
 │   └── test-hono-integration.md        # @objectstack/hono vs plugin-hono-server; no adapter-*

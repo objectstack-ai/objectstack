@@ -27,16 +27,14 @@ npx create-objectstack my-app --skip-install
 | Template | Source | Description |
 | --- | --- | --- |
 | `blank` *(default)* | bundled (offline) | Minimal starter — one object, REST API, ready to extend |
-| `todo` | remote | Universal task & project management starter |
-| `compliance` | remote | Compliance posture & evidence management (SOC2 / ISO27001) |
-| `content` | remote | Content marketing pipeline — editorial calendar & channel ROI |
-| `contracts` | remote | Post-signature CLM — approvals, obligations, renewals |
-| `procurement` | remote | Source-to-pay — vendors, POs, receipts, invoice matching |
 
-Remote templates are fetched from
-[`objectstack-ai/templates`](https://github.com/objectstack-ai/templates) at
-scaffold time and require network access; `blank` is bundled and always works
-offline.
+`blank` is bundled inside the npm package, so scaffolding never needs network
+access.
+
+The remote content templates (`todo`, `compliance`, `content`, `contracts`,
+`procurement`) have been **retired** — they were delisted from the ObjectStack
+template marketplace and are no longer maintained. Asking for one by name tells
+you so rather than failing as an unknown template.
 
 ## Options
 
