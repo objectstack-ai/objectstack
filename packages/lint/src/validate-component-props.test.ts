@@ -616,3 +616,52 @@ describe('validateComponentProps — a STRICT union arm reports as an unknown ke
     expect(highlights([{ name: 'status', label: 'Status', readonly: true }])).toEqual([]);
   });
 });
+
+/**
+ * #8691 — the rail's row exists, so the gate's dispatch reaches it.
+ *
+ * The pre-fix state this pins against: `record:reference_rail` had no
+ * `ComponentPropsMap` row, so the walker's unregistered-type skip swallowed the
+ * whole props bag — the issue's planted `filter` produced ZERO findings from
+ * validate/build while `record:related_list` keys in the same file were loudly
+ * reported. Remove the map row and every assertion in the first test here goes
+ * back to that silence (the reverse verification the issue ran on a real app).
+ */
+describe('validateComponentProps — record:reference_rail is dispatched (#8691)', () => {
+  it('reports the issue\'s planted entry `filter`, loudly, through the same rule as its siblings', () => {
+    const findings = validateComponentProps(
+      stackWith([{
+        type: 'record:reference_rail',
+        properties: {
+          entries: [{
+            objectName: 'task',
+            relationshipField: 'project_id',
+            filter: [{ field: 'status', op: 'neq', value: 'completed' }],
+          }],
+        },
+      }]),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(COMPONENT_PROPS_UNKNOWN_KEY);
+    expect(findings[0].where).toBe('page "probe_page" · record:reference_rail');
+    expect(findings[0].message).toContain('`filter`');
+    // The prescription names where `filter` IS real, so the author is routed
+    // to the component that delivers it rather than left with a bare refusal.
+    expect(findings[0].message).toContain('record:related_list');
+  });
+
+  it('stays silent on the shape the renderer actually reads', () => {
+    const findings = validateComponentProps(
+      stackWith([{
+        type: 'record:reference_rail',
+        properties: {
+          entries: [
+            { objectName: 'task', relationshipField: 'project_id', title: 'Tasks', limit: 3, displayField: 'subject' },
+          ],
+          hideEmpty: false,
+        },
+      }]),
+    );
+    expect(findings).toEqual([]);
+  });
+});

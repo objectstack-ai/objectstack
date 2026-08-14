@@ -40,6 +40,21 @@ export { WEBHOOK_SECRET_FIELD } from './webhook-secret.js';
  * moved onto the same encrypted channel by the same boot sweep.
  */
 export { WEBHOOK_HEADERS_FIELD } from './webhook-headers.js';
+
+/**
+ * [#8566] The write door for that map's plaintext shape. Exported so a host
+ * that boots the pieces itself (rather than mounting {@link WebhookOutboxPlugin})
+ * still gets the refusal, and so a consumer can branch on the ADR-0112 pair
+ * rather than on message text.
+ */
+export {
+    bindWebhookHeadersShapeGate,
+    unbindWebhookHeadersShapeGate,
+    assertWritableWebhookHeaders,
+    WebhookHeadersShapeError,
+    WEBHOOK_HEADERS_SHAPE_REFUSAL_CODE,
+    WEBHOOK_HEADERS_SHAPE_REFUSAL_STATUS,
+} from './webhook-headers-gate.js';
 export {
     migrateLegacyWebhookSecrets,
     type MigrateWebhookSecretsResult,
