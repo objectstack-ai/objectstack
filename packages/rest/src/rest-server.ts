@@ -437,6 +437,17 @@ function declaredHttpStatus(error: any): number | undefined {
     return declared;
 }
 
+/**
+ * [#8264] Postgres' missing-relation template, anchored on the QUOTED
+ * identifier the driver always emits — never on the bare "does not exist"
+ * tail, which is ordinary business English. Module-scoped (not re-compiled
+ * per {@link mapDataError} call) and named, not inlined, so both of its
+ * readers share the literal same pattern. See the long note above
+ * `looksLikeMissingRelation`'s definition, further down this file, for why
+ * this is one width, not "two widths, on purpose".
+ */
+const RELATION_DOES_NOT_EXIST = /\brelation\s+["'`][^"'`]+["'`]\s+does not exist/i;
+
 function missingRelationIsObject(raw: string, object: string | undefined): boolean {
     if (!object) return false;
     const named =
@@ -1051,9 +1062,35 @@ export function mapDataError(error: any, object?: string): { status: number; bod
     // `code: 'OBJECT_NOT_FOUND'` and is matched far above) is the primary
     // producer of this 404 anyway; the driver-string limb has been a legacy
     // safety net since.
+    //
+    // [#8264] The Postgres limb used to be a two-`includes()` conjunction —
+    // `relation` and `does not exist` anywhere in the message, not necessarily
+    // the same sentence. `does not exist` is ordinary business English ("This
+    // relation does not exist in the diagram" — the exact negative case
+    // `error-leak.test.ts` pins for #8132's shared leak predicate), so that
+    // reading could re-verdict a legitimate business message through EITHER
+    // consumer below: the 500 gate right here, or the `looksLikeUnknownObject`
+    // 404 limb two lines further down (both read this same const). Anchored on
+    // Postgres' own errmsg template — a QUOTED identifier — the same technique
+    // #8132 used for `looksLikeInternalErrorLeak` in `@objectstack/types`.
+    //
+    // Deliberately NOT a call into that shared predicate: it answers a
+    // different question ("may this message be withheld from the client at
+    // all?"), and its other limbs — `sqlite_`, `unique constraint`,
+    // `foreign key`, a bare SQL statement — have nothing to do with THIS
+    // question (is this specifically an unknown-relation condition, for the
+    // 404-vs-500 split below?). `relation-sub-object.ts` documents "two
+    // widths, on purpose" for a neighbouring pair of consumers for exactly
+    // this reason — different questions get different patterns even when they
+    // share a substring. That precedent does NOT extend to the two USES right
+    // here, though: both the 500 gate and the 404 limb are asking this file's
+    // one question, and `missingRelationIsObject` below already gates the 500
+    // path on attribution — so one width for both is correct, not "two
+    // widths, on purpose" a second time. See the reverse-verification note in
+    // `rest-unknown-object-heuristic.test.ts` for both paths measured.
     const looksLikeMissingRelation =
         lower.includes('no such table') ||
-        (lower.includes('relation') && lower.includes('does not exist')) ||
+        RELATION_DOES_NOT_EXIST.test(raw) ||
         lower.includes('table not found');
     if (looksLikeMissingRelation && !missingRelationIsObject(raw, object)) {
         return DATA_STORE_FAULT();
