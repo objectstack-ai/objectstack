@@ -3055,28 +3055,20 @@ export class AutomationEngine implements IAutomationService {
         // flow that cannot run. See the helper for why here and not earlier.
         this.warnIfNodeTypeVocabularyNeverSealed();
 
-        // Re-entrancy loop guard (see `activeRecordFlows`). Break the SAME flow
-        // re-firing for the SAME record while a prior execution is still active —
-        // a self-trigger cascade whose start condition fails to suppress it would
-        // otherwise loop forever and wedge the caller (fatally, mid seed).
+        // Re-entrancy loop guard KEY (see `activeRecordFlows`). Only the key is
+        // computed here; the CHECK itself lives downstream of the start-condition
+        // gate inside the `try` below, and that placement is load-bearing — see
+        // the guard block there (#8689).
         const guardRecordId = (context?.record as { id?: unknown } | undefined)?.id;
         const reentryKey = guardRecordId != null ? `${flowName}::${String(guardRecordId)}` : undefined;
-        if (reentryKey && this.activeRecordFlows.has(reentryKey)) {
-            // #6654 — the record id is CALLER data (nothing schema-constrains
-            // it against newlines), so it rides the logger's structured slot,
-            // never the message; see `forgetSuspendedRun`'s catch for the full
-            // mechanism (#6299). #4632: FUNCTIONAL — stays `warn` (the run is
-            // deliberately skipped and the caller reads the skip envelope).
-            this.logger.warn(
-                `[automation] flow '${flowName}' re-entered for the same record while still running — breaking ` +
-                    `self-trigger loop; the triggering record's id is in this record's meta. Its start condition ` +
-                    `did not suppress the re-fire; if it guards on a boolean field (e.g. \`is_escalated != true\`), ` +
-                    `note booleans persist as 0/1 on SQLite/libsql and CEL \`1 != true\` is true.`,
-                { recordId: String(guardRecordId) },
-            );
-            return { success: true, output: { skipped: true, reason: 'reentrancy_loop_guard' } };
-        }
-        if (reentryKey) this.activeRecordFlows.add(reentryKey);
+        // Set ONLY by the run that actually added `reentryKey` to the active set.
+        // The `finally` releases the key on this flag, never on `reentryKey`
+        // alone: a re-entrant dispatch now returns from INSIDE the try (the guard
+        // block below), and an unconditional delete there would release the key
+        // belonging to the OUTER run still on the stack — disarming the breaker
+        // for every later re-entry in that same cascade, which is precisely the
+        // runaway it exists to stop.
+        let reentryHeld = false;
 
         // Initialize variable context
         const variables = this.seedDeclaredVariables(flow, context);
@@ -3146,6 +3138,56 @@ export class AutomationEngine implements IAutomationService {
                     this.logger.debug(`Flow '${flowName}' skipped: start condition not met`);
                     return { success: true, output: { skipped: true, reason: 'condition_not_met' } };
                 }
+            }
+
+            // Re-entrancy loop guard (see `activeRecordFlows`). Breaks the SAME
+            // flow re-firing for the SAME record while a prior execution is still
+            // active — a self-trigger cascade whose start condition is genuinely
+            // true on every pass (the 2026-07-06 incident: a `boolean` persists as
+            // integer 1 on SQLite/libsql and CEL `1 != true` is true, so
+            // `is_escalated != true` never tripped) would otherwise loop forever
+            // and wedge the caller, fatally mid seed.
+            //
+            // #8689 — this check sits AFTER the start-condition gate above, and
+            // the order is the contract, not a detail. The declared behaviour is
+            // "a record-change flow fires only when its start condition is true",
+            // and that has to hold on the re-entrant dispatch a flow's OWN write
+            // causes — it cannot if the breaker returns first, because then the
+            // gate is never reached on that dispatch at all. Measured before the
+            // reorder, on the real kernel (a `record-after-update` flow guarded on
+            // `record.status != "escalated"` whose data node writes
+            // `status = "escalated"`): TWO dispatches for the record, exactly ONE
+            // start-condition evaluation, and one breaker WARN. So the author's
+            // guard was never what stopped the loop — the breaker was, and its own
+            // message said so. The re-entrant dispatch already carries the
+            // POST-write row, so evaluating first suppresses it with
+            // `condition_not_met` and the breaker returns to being a backstop.
+            //
+            // The breaker is UNCHANGED in strength (deliberately — a stronger
+            // breaker is not the repair): a condition that really is true on
+            // re-entry still lands here, at the same depth, with the same WARN and
+            // the same skip envelope. What changed is that reaching it now MEANS
+            // something — the condition was evaluated and returned true — which is
+            // why the message can state that as fact.
+            if (reentryKey && this.activeRecordFlows.has(reentryKey)) {
+                // #6654 — the record id is CALLER data (nothing schema-constrains
+                // it against newlines), so it rides the logger's structured slot,
+                // never the message; see `forgetSuspendedRun`'s catch for the full
+                // mechanism (#6299). #4632: FUNCTIONAL — stays `warn` (the run is
+                // deliberately skipped and the caller reads the skip envelope).
+                this.logger.warn(
+                    `[automation] flow '${flowName}' re-entered for the same record while still running — breaking ` +
+                        `self-trigger loop; the triggering record's id is in this record's meta. Its start condition ` +
+                        `WAS evaluated on this re-fire and returned true, so the guard as authored does not exclude ` +
+                        `the flow's own write-back; if it guards on a boolean field (e.g. \`is_escalated != true\`), ` +
+                        `note booleans persist as 0/1 on SQLite/libsql and CEL \`1 != true\` is true.`,
+                    { recordId: String(guardRecordId) },
+                );
+                return { success: true, output: { skipped: true, reason: 'reentrancy_loop_guard' } };
+            }
+            if (reentryKey) {
+                this.activeRecordFlows.add(reentryKey);
+                reentryHeld = true;
             }
 
             // Validate node input schemas before execution
@@ -3268,7 +3310,13 @@ export class AutomationEngine implements IAutomationService {
             // Release the re-entrancy guard for this (flow, record). Runs before
             // the returned promise settles, so an error-retry re-run (whose inner
             // execute happens after its own await) is not falsely blocked.
-            if (reentryKey) this.activeRecordFlows.delete(reentryKey);
+            //
+            // Gated on `reentryHeld`, NOT on `reentryKey` (#8689): since the guard
+            // check moved below the start-condition gate, a run can now leave this
+            // try WITHOUT owning the key — the re-entrant dispatch that tripped the
+            // breaker, and a condition-not-met skip. Deleting then would release
+            // the OUTER run's key and disarm the breaker mid-cascade.
+            if (reentryHeld && reentryKey) this.activeRecordFlows.delete(reentryKey);
         }
     }
 

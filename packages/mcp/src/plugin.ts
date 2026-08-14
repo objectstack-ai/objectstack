@@ -6,7 +6,7 @@ import { readEnvWithDeprecation, isMcpServerEnabled, resolveMcpStdioAutoStart } 
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { IAIService, IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
 import { MCPServerRuntime } from './mcp-server-runtime.js';
-import type { MCPServerRuntimeConfig } from './mcp-server-runtime.js';
+import type { MCPServerRuntimeConfig, McpMergedMetadataRead } from './mcp-server-runtime.js';
 import type { ToolRegistry } from './types.js';
 import { createStdioDataBridge, enforceApiExposure, GATED_ACTIONS } from './stdio-data-bridge.js';
 import type { McpDataBridge } from './mcp-http-tools.js';
@@ -153,6 +153,35 @@ export class MCPServerPlugin implements Plugin {
       ctx.logger.debug('[MCP] Metadata service not available, skipping resource bridging');
     }
 
+    // ── Merged (overlay-aware) metadata read for the prompt bridge (#8328) ──
+    // The protocol service is the layer that merges `sys_metadata` overlay rows
+    // over the registry / MetadataService baselines; the metadata service alone
+    // is one layer BELOW that merge. Resolved here, next to the metadata
+    // service, because this assembly is the only place that can see both — the
+    // runtime is handed its collaborators and keeps no service registry.
+    //
+    // Absent is a supported state, not a failure: a host assembled without the
+    // metadata protocol has no merged read to give, and the bridge then reads
+    // exactly as it did before #8328. Same duck-typed `getMetaItems` probe the
+    // REST layer applies to this service, for the same reason — the shim is
+    // registered by two different mounts (`MetadataProtocolPlugin` and
+    // ObjectQLPlugin's built-in `registerProtocol` mode).
+    let mergedRead: McpMergedMetadataRead | undefined;
+    try {
+      const protocol = ctx.getService<McpMergedMetadataRead>('protocol');
+      if (protocol && typeof protocol.getMetaItems === 'function') {
+        mergedRead = protocol;
+      } else {
+        ctx.logger.debug(
+          '[MCP] Protocol service has no getMetaItems — skill prompts read the un-merged metadata listing (runtime meta overrides will not be reflected)',
+        );
+      }
+    } catch {
+      ctx.logger.debug(
+        '[MCP] Protocol service not available — skill prompts read the un-merged metadata listing (runtime meta overrides will not be reflected)',
+      );
+    }
+
     // ── stdio auto-start decision (opt-in, its OWN switch) ──
     // Deliberately stricter than the HTTP-surface default (`isMcpServerEnabled`,
     // default-on): start() attaches a long-lived transport claiming the
@@ -281,7 +310,9 @@ export class MCPServerPlugin implements Plugin {
       // Awaited: the prompt bridge reads `skill` metadata to project each
       // skill's instructions onto an MCP prompt (#3905), so the surface must be
       // complete before the transport attaches below.
-      await this.runtime.bridgePrompts(metadataService);
+      // [#8328] `mergedRead` points the skill read at the overlay-aware layer
+      // so a runtime `PUT /api/v1/meta/skill/<name>` reaches this surface.
+      await this.runtime.bridgePrompts(metadataService, mergedRead);
     }
 
     // [#8034] BEFORE `start()`, with the resources and prompts: registering a

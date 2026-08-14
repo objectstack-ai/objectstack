@@ -111,4 +111,27 @@ describe('dashboard widgets are translated in every locale', () => {
       expect(missing, `untranslated widget titles in dashboards.${dashboard.name}`).toEqual([]);
     });
   }
+
+  // The reverse direction, for the same reason it exists for Studio's nav above:
+  // a translation for a widget the board no longer declares is dead weight that
+  // reads as coverage. This half was missing, and a removal proved why — when
+  // `widget_permission_changes` was deleted from the board, its title and
+  // description stayed behind in all four locales and every gate in this package
+  // was green. A dashboard CAN be walked statically (unlike Setup, which is
+  // composed at runtime — see `setup-nav-dead-key-tombstone.test.ts`), so there
+  // is nothing here to stop the general claim being made.
+  for (const [locale, data] of Object.entries(LOCALES)) {
+    it(`${dashboard.name} — ${locale} carries no translation for a removed widget`, () => {
+      const declared = new Set(
+        (dashboard.widgets ?? []).map((w) => w.id).filter((id): id is string => !!id),
+      );
+      const translated = Object.keys(
+        (data.dashboards?.[dashboard.name]?.widgets ?? {}) as Record<string, unknown>,
+      );
+      expect(
+        translated.filter((id) => !declared.has(id)),
+        `dashboards.${dashboard.name}.widgets keys with no declaring widget`,
+      ).toEqual([]);
+    });
+  }
 });

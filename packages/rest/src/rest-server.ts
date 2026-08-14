@@ -8177,7 +8177,11 @@ export class RestServer {
                     } else {
                         res.header('Content-Type', 'application/json; charset=utf-8');
                     }
-                    res.header('Content-Disposition', exportContentDisposition(objectName, objectLabel, format));
+                    // [#8484] Same `timezone` the cells below render in — the
+                    // filename's stamp and the file's contents must not read
+                    // two different clocks. `undefined` keeps the historical
+                    // process-local stamp (NOT UTC — see the function's doc).
+                    res.header('Content-Disposition', exportContentDisposition(objectName, objectLabel, format, timezone));
                     res.header('X-Export-Format', format);
                     res.header('X-Export-Limit', String(limit));
                     // Signal whether select-option colours were applied. Only

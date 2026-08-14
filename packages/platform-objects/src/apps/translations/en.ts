@@ -211,10 +211,6 @@ export const en: TranslationData = {
           title: 'Login Events',
           description: 'Authentication events recorded by the audit log',
         },
-        widget_permission_changes: {
-          title: 'Permission Changes',
-          description: 'Recent permission and role modifications',
-        },
         widget_config_changes: {
           title: 'Config Changes',
           description: 'System configuration modifications',
@@ -229,7 +225,7 @@ export const en: TranslationData = {
         },
         widget_recent_events: {
           title: 'Recent Audit Events',
-          description: 'Latest platform events (login, permission, config, …)',
+          description: 'Latest platform events (login, logout, config, …)',
         },
       },
     },

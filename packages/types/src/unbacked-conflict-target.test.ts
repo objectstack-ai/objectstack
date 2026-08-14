@@ -30,13 +30,16 @@
  * vocabulary growing an `ON CONFLICT` one, because that is the file people
  * extend.
  *
- * ⚠️ Running it that way is what found **#8590**: on SQLite the separation is
- * ALREADY broken in the pre-existing direction — `isUniqueViolationError`
- * claims the unbacked-target error, because SQLite's missing-index sentence
- * ends `…PRIMARY KEY or UNIQUE constraint` and that vocabulary matches the word
- * pair `unique constraint` wherever it appears. Not fixed here (it moves
- * verdicts in six packages); pinned as measured, per dialect, so the fix
- * announces itself. See the suite below.
+ * ⚠️ Running it that way is what found **#8590**: on SQLite the separation was
+ * broken in the pre-existing direction — `isUniqueViolationError` claimed the
+ * unbacked-target error, because SQLite's missing-index sentence ends
+ * `…PRIMARY KEY or UNIQUE constraint` and that vocabulary matched the word pair
+ * `unique constraint` wherever it appeared. #8567 pinned it as measured rather
+ * than fixing it (the fix moves verdicts in six consuming packages); **#8590
+ * has since closed it** by requiring a violation phrasing in that limb, and the
+ * pin below was inverted rather than deleted — which is what a pin written to
+ * point at itself is for. The separation is now clean on both dialects, in both
+ * directions, and the suite below is what keeps it that way.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -157,29 +160,38 @@ describe('[#8567] the `code` channel is deliberately unread — measured over-ma
 describe('[#8567] ⚠️ separation from isUniqueViolationError — the inverse condition', () => {
     /**
      * ⚠️ This suite was written expecting clean disjointness in both
-     * directions. It went RED on the first run, and the measurement won: on
-     * SQLite, `isUniqueViolationError` ALREADY claims the unbacked-target
-     * error. Filed as **#8590**, deliberately not fixed here — narrowing that
-     * predicate moves verdicts in six consuming packages and needs its own
-     * measured pass.
+     * directions. It went RED on the first run and the measurement won: on
+     * SQLite, `isUniqueViolationError` claimed the unbacked-target error.
+     * #8567 filed that as **#8590** and pinned the wrong verdict as measured
+     * rather than fixing it, because narrowing that predicate moves verdicts in
+     * six consuming packages and needed its own measured pass.
      *
-     * The cause is a superstring collision, not a judgement call. Its message
-     * limb is `/unique constraint|…/i`, and SQLite's sentence for the MISSING
-     * index ends `…any PRIMARY KEY or UNIQUE constraint` — the two words sit
-     * adjacent inside a sentence that says the constraint is absent. Postgres
-     * escapes only on word order (`unique or exclusion constraint` is not
-     * adjacent), which is the tell that a word pair is being matched rather
-     * than a condition.
+     * **#8590 has since landed, and this pin was INVERTED — that is the pin
+     * working, not an obstacle to route around.** The cause was a superstring
+     * collision, not a judgement call: the limb was a bare `unique constraint`,
+     * and SQLite's sentence for the MISSING index ends `…any PRIMARY KEY or
+     * UNIQUE constraint`, so the two words sit adjacent inside a sentence that
+     * says the constraint is ABSENT. The limb now requires a violation
+     * phrasing (`unique constraint failed` / `violates unique constraint`), so
+     * mentioning a unique constraint is no longer enough to be claimed as one.
      *
-     * So the pins below record the state as MEASURED, per dialect, rather than
-     * as hoped. When #8590 lands, the SQLite row goes red and points straight
-     * at itself — which is the entire reason to pin a known defect instead of
-     * leaving the direction untested.
+     * ⚠️ Postgres was believed to escape "by luck of word order" — its
+     * `unique or exclusion constraint` is not adjacent. That reading was too
+     * kind: #8590's own dialect sweep raised PG 42830,
+     * `there is no unique constraint matching given keys for referenced table`,
+     * where Postgres puts the pair adjacent in its own ABSENCE sentence. Both
+     * dialects had the collision; only SQLite's instance was on the path this
+     * file measures. The absence sentences are pinned per dialect in
+     * `unique-violation-absence-sentences.test.ts`.
+     *
+     * Both rows are therefore `false` now, and the map is kept per dialect
+     * rather than collapsed to a constant so a regression names the dialect it
+     * came back on.
      */
     const UNIQUE_VIOLATION_VERDICT_ON_UNBACKED: Record<string, boolean> = {
-        // ⚠️ THE DEFECT (#8590). Correct value is `false`; flip it when #8590 lands.
-        sqlite: true,
-        // Correct today, and only by luck of word order — see above.
+        // [#8590] Was `true` — the defect. Inverted when the fix landed.
+        sqlite: false,
+        // Correct before #8590 on this sentence, and now correct by rule.
         postgres: false,
     };
 
@@ -188,8 +200,9 @@ describe('[#8567] ⚠️ separation from isUniqueViolationError — the inverse 
             expect(isUnbackedConflictTargetError(new Error(dialect.knexPrefixed))).toBe(true);
             expect(
                 isUniqueViolationError(new Error(dialect.knexPrefixed)),
-                'if this changed, #8590 either landed (SQLite → false: delete the exception) or ' +
-                    'regressed (Postgres → true: a new limb is matching the missing-index sentence)',
+                'both dialects are `false` since #8590. A `true` here means the unique-violation ' +
+                    'vocabulary has regrown a limb that matches a sentence saying the constraint is ' +
+                    'ABSENT — the superstring collision #8590 closed, back on this dialect',
             ).toBe(UNIQUE_VIOLATION_VERDICT_ON_UNBACKED[key]);
         });
     }
