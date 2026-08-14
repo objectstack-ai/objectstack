@@ -224,6 +224,30 @@ export class DatasourceAdminServicePlugin implements Plugin {
         refreshAfter: false,
         locations: ['record_header', 'list_item'],
       },
+      // The #8155 migration's operator-initiated door: one datasource, one
+      // click, by a human who is looking at the row. Deliberately NOT a
+      // boot-time sweep — deciding a stored secret's identity with no operator
+      // present and rewriting rows at boot is the destructive shape the
+      // standing ruling escalates rather than permits.
+      //
+      // `refreshAfter: true`, unlike its sibling: this action CHANGES the row
+      // (the inline credential leaves `config`, `external.credentialsRef`
+      // arrives), so the record the operator is looking at is stale the moment
+      // it returns — where "Test connection" only reports and leaves the row
+      // untouched. The `/meta` `_diagnostics.valid:false` badge that lists the
+      // rows still needing this is recomputed on that refresh, which is what
+      // makes the inventory shrink visibly as an operator works through it.
+      {
+        name: 'migrate_credential',
+        label: 'Move credential to the secret store',
+        icon: 'key-round',
+        type: 'api',
+        target: '/api/v1/datasources/${ctx.recordId}/migrate-credential',
+        method: 'POST',
+        variant: 'secondary',
+        refreshAfter: true,
+        locations: ['record_header'],
+      },
     ] as any);
 
     // Resolve infra services lazily, per call — `init()` may run before the
@@ -299,6 +323,14 @@ export class DatasourceAdminServicePlugin implements Plugin {
       removeSecret: async (ref) => {
         await this.options.secrets?.unbind?.(ref);
       },
+
+      // The secret store's READ side, wired only when the host's binder has one
+      // — `migrateCredential` refuses rather than writing a reference it cannot
+      // verify (#8155). Same `resolve` the connect path uses, so the read-back
+      // proves exactly what the next connect will do.
+      ...(this.options.secrets?.resolve
+        ? { readSecret: (ref: string) => this.options.secrets!.resolve!(ref) }
+        : {}),
 
       countBoundObjects: async (datasource) => {
         const metadata = metadataOf();

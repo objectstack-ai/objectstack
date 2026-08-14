@@ -67,9 +67,19 @@
  *       carrying a closing keyword bound to that same `#N` — contradictory by
  *       construction. `Part of` is the protocol saying "merging this must NOT
  *       close the card"; a closing keyword is GitHub being told it must.
- *       GitHub wins, silently, on merge. This is the only item over PULL
+ *       GitHub wins, silently, on merge. This was the first item over PULL
  *       REQUESTS rather than issues, because the PR body is the surface where
  *       the fact is still fixable — see the next section.
+ *   H8  a card's delivering PR is MERGED while the card still carries
+ *       `pm:dispatched` — the merge's paired write (drop the label, re-grade
+ *       the remainder) never landed (#8683). Delivery is read from merged PR
+ *       bodies with H7's code-stripped extractors (`Part of #N`, or a closing
+ *       keyword bound to `#N` — either way an OPEN dispatched card named by a
+ *       merged PR is a half-state, whichever mechanism failed). Live mode
+ *       feeds H8 a bounded window of recently merged PRs, so it is a patrol
+ *       accelerator, never an exhaustive audit: a delivery older than the
+ *       window is invisible, and the finding clears when the paired write
+ *       lands, not when the PR ages out.
  *
  * ## The close mechanism, measured (#8293)
  *
@@ -412,6 +422,45 @@ export function h7PartOfWithClosingKeyword(pr) {
         `addressed here" / "out of scope: #${n}", or put the keyword in backticks.`,
     )
     .join('; ');
+}
+
+// ---------------------------------------------------------------------------
+// H8 — delivering PR merged, card still `pm:dispatched` (#8683).
+//
+// Pure over the shapes the sweep already consumes (REST issue + `/pulls`
+// rows), reusing H7's code-stripped extractors so the measured reference-
+// parser behavior (#8293) carries over. No new API layer.
+// ---------------------------------------------------------------------------
+
+/**
+ * H8 — null when clean, else the finding sentence.
+ *
+ * A PR "delivers" card N when its body declares `Part of #N` or binds a
+ * closing keyword to `#N`, read through `stripMarkdownCode` (a body QUOTING
+ * either spelling in backticks does not deliver). Only `merged_at`-set PRs
+ * count — closed-unmerged is an abandoned attempt, not a delivery. Bound per
+ * issue number exactly like H7.
+ */
+export function h8MergedPrStillDispatched(issue, mergedPrs) {
+  if (!labelNames(issue).includes('pm:dispatched')) return null;
+  const n = String(issue.number);
+  const delivering = [];
+  for (const pr of mergedPrs ?? []) {
+    if (!pr?.merged_at) continue;
+    const body = pr.body ?? '';
+    if (partOfTargets(body).has(n) || closingKeywordTargets(body).has(n)) {
+      delivering.push(pr);
+    }
+  }
+  if (delivering.length === 0) return null;
+  const list = delivering
+    .map((p) => `#${p.number} (merged ${String(p.merged_at).slice(0, 10)})`)
+    .join(', ');
+  return (
+    `delivering PR ${list} is MERGED but the card still carries \`pm:dispatched\` — ` +
+    `the merge's paired write never landed. Drop \`pm:dispatched\` and re-grade the ` +
+    `remainder (re-queue, close, or block the un-delivered half) in the same stroke.`
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -776,10 +825,11 @@ async function sweep() {
   const findings = [];
   const seen = new Map();
   const seenPrs = new Map();
+  const seenMerged = new Map();
   try {
-    await sweepInto(findings, seen, seenPrs);
+    await sweepInto(findings, seen, seenPrs, seenMerged);
   } catch (err) {
-    err.sweptSoFar = seen.size + seenPrs.size;
+    err.sweptSoFar = seen.size + seenPrs.size + seenMerged.size;
     throw err;
   }
 
@@ -788,8 +838,8 @@ async function sweep() {
     console.log(`  ${code} #${issue.number} ${msg}\n     ${issue.html_url}`);
   }
   console.log(
-    `check-half-states: swept ${seen.size} open pm-labeled issue(s) and ${seenPrs.size} open PR(s) ` +
-      `in ${OWNER_REPO} — ${findings.length} half-state(s) found. ` +
+    `check-half-states: swept ${seen.size} open pm-labeled issue(s), ${seenPrs.size} open PR(s) ` +
+      `and ${seenMerged.size} recently-merged PR(s) in ${OWNER_REPO} — ${findings.length} half-state(s) found. ` +
       `Report-only: findings are patrol input, not a gate verdict.`,
   );
 }
@@ -804,7 +854,27 @@ async function listOpenPullRequests() {
   return out;
 }
 
-async function sweepInto(findings, seen, seenPrs) {
+/**
+ * The merged-PR window H8 reads: most recently UPDATED closed PRs, merged
+ * ones only, capped at two pages — a quota decision whose consequence is
+ * H8's stated boundary (a delivery older than the window is invisible). At
+ * ~18 merges/day two pages reach well past the longest measured
+ * unexecuted-verdict latency; `sort=updated` so a long-lived PR that merges
+ * late is still in the window when it matters.
+ */
+async function listRecentlyMergedPullRequests() {
+  const out = [];
+  for (let page = 1; page <= 2; page++) {
+    const batch = await rest(
+      `/repos/${OWNER_REPO}/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=${page}`,
+    );
+    out.push(...batch.filter((p) => p.merged_at));
+    if (batch.length < 100) break;
+  }
+  return out;
+}
+
+async function sweepInto(findings, seen, seenPrs, seenMerged) {
   for (const label of ['pm:dispatched', 'pm:queue', 'pm:blocked', 'pm:seat']) {
     for (const issue of await listIssues(label)) seen.set(issue.number, issue);
   }
@@ -847,6 +917,15 @@ async function sweepInto(findings, seen, seenPrs) {
     seenPrs.set(pr.number, pr);
     const contradiction = h7PartOfWithClosingKeyword(pr);
     if (contradiction) findings.push([pr, 'H7', contradiction]);
+  }
+
+  // H8 — one bounded merged-PR listing (window note at the helper), matched
+  // against the already-collected open `pm:dispatched` cards; no per-card fetch.
+  for (const pr of await listRecentlyMergedPullRequests()) seenMerged.set(pr.number, pr);
+  const mergedWindow = [...seenMerged.values()];
+  for (const issue of seen.values()) {
+    const stale = h8MergedPrStillDispatched(issue, mergedWindow);
+    if (stale) findings.push([issue, 'H8', stale]);
   }
 }
 
@@ -1010,6 +1089,74 @@ function selfTest() {
     null,
   );
   t('H7: a fenced-only keyword is not a finding', h7PartOfWithClosingKeyword(pr('Part of #5\n\n```\nFixes #5\n```')), null);
+
+  // -- H8: delivering PR merged, card still `pm:dispatched` (#8683) ----------
+  // Fixtures reuse H7's extractor pins, so the stripping and per-number-
+  // binding measurements carry over rather than being re-proved.
+  const dispatched = (n) => ({ ...issue(['pm:dispatched'], ['os-help']), number: n });
+  const mergedPr = (number, body, merged_at = '2026-08-13T10:00:00Z') => ({ number, body, merged_at });
+
+  t(
+    'H8: merged Part-of PR + still dispatched -> finding',
+    typeof h8MergedPrStillDispatched(dispatched(4321), [mergedPr(4400, 'Part of #4321 — the non-destructive half only.')]),
+    'string',
+  );
+  t(
+    'H8: …and the finding names the delivering PR',
+    h8MergedPrStillDispatched(dispatched(4321), [mergedPr(4400, 'Part of #4321')]).includes('#4400'),
+    true,
+  );
+  t(
+    'H8: …and prescribes the paired write, not just the fact',
+    h8MergedPrStillDispatched(dispatched(4321), [mergedPr(4400, 'Part of #4321')]).includes('pm:dispatched'),
+    true,
+  );
+  // The closing-keyword arm: an OPEN dispatched card named by a merged PR's
+  // closing keyword is a half-state whichever mechanism failed (see header).
+  t(
+    'H8: merged closing-keyword PR + still-open dispatched card -> finding',
+    typeof h8MergedPrStillDispatched(dispatched(4321), [mergedPr(4400, 'Fixes #4321')]),
+    'string',
+  );
+  t(
+    'H8: card without pm:dispatched is out of scope',
+    h8MergedPrStillDispatched({ ...issue(['pm:queue'], ['os-help']), number: 4321 }, [mergedPr(4400, 'Part of #4321')]),
+    null,
+  );
+  // Closed-unmerged is an abandoned attempt, not a delivery: demanding the
+  // paired write for work that never landed would be a phantom finding.
+  t(
+    'H8: closed-unmerged PR is not a delivery',
+    h8MergedPrStillDispatched(dispatched(4321), [{ number: 4400, body: 'Part of #4321', merged_at: null }]),
+    null,
+  );
+  // Bound per issue number, exactly like H7.
+  t(
+    'H8: merged PR delivering a DIFFERENT card -> clean',
+    h8MergedPrStillDispatched(dispatched(4321), [mergedPr(4400, 'Part of #9999\n\nFixes #8888')]),
+    null,
+  );
+  // Strip reuse: a body QUOTING the spelling in backticks does not deliver —
+  // the same careful-author protection H7's reading 4 measured.
+  t(
+    'H8: reference inside backticks does not deliver',
+    h8MergedPrStillDispatched(dispatched(4321), [mergedPr(4400, 'the dispatch asked for `Fixes #4321` and `Part of #4321`')]),
+    null,
+  );
+  // A plain prose mention is neither declaration: only the two protocol
+  // spellings establish the delivering relation.
+  t(
+    'H8: plain prose mention does not deliver',
+    h8MergedPrStillDispatched(dispatched(4321), [mergedPr(4400, 'follow-up to #4321, measurement only')]),
+    null,
+  );
+  t(
+    'H8: two merged deliverers -> both named',
+    h8MergedPrStillDispatched(dispatched(4321), [mergedPr(4400, 'Part of #4321'), mergedPr(4500, 'Fixes #4321')]).includes('#4500'),
+    true,
+  );
+  t('H8: empty merged window -> clean', h8MergedPrStillDispatched(dispatched(4321), []), null);
+  t('H8: missing merged window -> clean', h8MergedPrStillDispatched(dispatched(4321), undefined), null);
 
   // -- transport prerequisite (#7412) ---------------------------------------
   // The three container classes are REAL measurements, not invented fixtures;

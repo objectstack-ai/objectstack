@@ -54,6 +54,8 @@ const SERVICE_ERROR_CODE: Record<ServiceName, ErrorCode> = {
  *   POST   /datasources              → createDatasource (origin: 'runtime')
  *   PATCH  /datasources/:name        → updateDatasource (runtime only)
  *   DELETE /datasources/:name        → removeDatasource (runtime only)
+ *   POST   /datasources/:name/migrate-credential
+ *                                    → migrateCredential (runtime only, #8155)
  *
  * Served by `external-datasource`:
  *
@@ -255,6 +257,29 @@ export function registerDatasourceAdminRoutes(
       sendOk(res, result);
     } catch (err) {
       badRequest(res, 'external-datasource', err);
+    }
+  });
+
+  // Re-home a SAVED datasource's stored cleartext credential into the secret
+  // store (#8155) — the target of the declared `migrate_credential` metadata
+  // -type action, and the only door this migration has. Operator-initiated and
+  // per-datasource by construction: there is no batch spelling of this route.
+  //
+  // A row this action cannot re-home safely comes back `200` with
+  // `status: 'refused'` and a `reason`/`remedy` pair, NOT a `400`: the datasource
+  // is intact and still working, the operator asked a question and got an
+  // answer, and nothing about the request was wrong. A 400 here would read as
+  // "your call was malformed" for the one outcome the card requires be stated
+  // plainly. Genuine refusals — an unknown name, a throwing store — still take
+  // the `badRequest` arm below.
+  server.post(`${root}/:name/migrate-credential`, async (req: any, res: any) => {
+    const svc = resolve(res, 'datasource-admin', 'migrateCredential');
+    if (!svc) return;
+    try {
+      const result = await svc.migrateCredential(req.params.name);
+      sendOk(res, { result });
+    } catch (err) {
+      badRequest(res, 'datasource-admin', err);
     }
   });
 
