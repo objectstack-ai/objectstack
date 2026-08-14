@@ -206,7 +206,14 @@ describe('computeI18nCoverage', () => {
       ],
     };
     const report = computeI18nCoverage(externalized, { defaultLocale: 'en' });
-    const zhKeys = new Set(report.issues.filter((i) => i.locale === 'zh-CN').map((i) => i.key));
+    // Structural annotations: the module import is outside this file's tsc
+    // program reach (frozen TS2835 debt), so bare parameters here would be
+    // implicitly-any additions to the package's TEST_DEBT ledger.
+    const zhKeys = new Set(
+      report.issues
+        .filter((i: { locale: string }) => i.locale === 'zh-CN')
+        .map((i: { key: string }) => i.key),
+    );
     expect(zhKeys.has('objects.account.fields.stage.options.planning')).toBe(true);
   });
 

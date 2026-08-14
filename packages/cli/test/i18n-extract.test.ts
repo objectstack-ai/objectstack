@@ -163,7 +163,12 @@ describe('collectExpectedEntries', () => {
       ],
     };
     const entries = collectExpectedEntries(cfg);
-    const byPath = Object.fromEntries(entries.map((e) => [e.path.join('.'), e]));
+    // Structural annotation: the module import is outside this file's tsc
+    // program reach (frozen TS2835 debt), so the parameter would otherwise be
+    // an implicitly-any addition to the package's TEST_DEBT ledger.
+    const byPath = Object.fromEntries(
+      entries.map((e: { path: string[] }) => [e.path.join('.'), e]),
+    );
     const opt = (p: string) => byPath[`objects.w.fields.${p}`];
 
     // Derived: seeded from the value so skeletons stay usable, but `inline`
