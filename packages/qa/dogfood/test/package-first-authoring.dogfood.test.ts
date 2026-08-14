@@ -107,10 +107,12 @@ describe('dogfood: the package is the authoring & delete unit (ADR-0070 D3/D4)',
     expect(await ownedNames(ql, BASE)).toContain(OBJ);
 
     // 3. PUBLISH — promotes the draft to active (creates the physical table).
+    // [#8310] The publish authors its OWD — the runtime object door refuses
+    // an unauthored `sharingModel` (`security-owd-unset`).
     const published = await protocol.saveMetaItem({
       type: 'object',
       name: OBJ,
-      item: { name: OBJ, label: 'Widget', fields: { name: { type: 'text', label: 'Name' } } },
+      item: { name: OBJ, label: 'Widget', sharingModel: 'private', fields: { name: { type: 'text', label: 'Name' } } },
       packageId: BASE,
       mode: 'publish',
     });
@@ -125,6 +127,8 @@ describe('dogfood: the package is the authoring & delete unit (ADR-0070 D3/D4)',
       item: {
         name: OBJ,
         label: 'Widget (edited)',
+        // [#8310] The re-publish authors its OWD too.
+        sharingModel: 'private',
         fields: { name: { type: 'text', label: 'Name' }, qty: { type: 'number', label: 'Qty' } },
       },
       packageId: BASE,
@@ -215,10 +219,12 @@ describe('dogfood: duplicate a writable base (ADR-0070 D4)', () => {
     // Two objects in the source base; the ticket carries a lookup to the customer
     // (an intra-package reference that must be rewritten to the clone's new name).
     // duplicate() only clones state:'active' rows, so both must be published.
+    // [#8310] Both publishes author their OWD — the runtime object door
+    // refuses an unauthored `sharingModel` (`security-owd-unset`).
     await protocol.saveMetaItem({
       type: 'object',
       name: 'dfdup_customer',
-      item: { name: 'dfdup_customer', label: 'Customer', fields: { full_name: { type: 'text', label: 'Name' } } },
+      item: { name: 'dfdup_customer', label: 'Customer', sharingModel: 'private', fields: { full_name: { type: 'text', label: 'Name' } } },
       packageId: SRC,
       mode: 'publish',
     });
@@ -228,6 +234,7 @@ describe('dogfood: duplicate a writable base (ADR-0070 D4)', () => {
       item: {
         name: 'dfdup_ticket',
         label: 'Ticket',
+        sharingModel: 'private',
         fields: {
           title: { type: 'text', label: 'Title' },
           customer: { type: 'lookup', label: 'Customer', reference: 'dfdup_customer' },
