@@ -398,13 +398,16 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         help: "关联到用户表"
       },
       access_token: {
-        label: "访问令牌"
+        label: "访问令牌",
+        help: "Live OAuth access token issued by the provider — never returned on the data API (#7987); better-auth reads it back through the engine's privileged internal-field accessor"
       },
       refresh_token: {
-        label: "刷新令牌"
+        label: "刷新令牌",
+        help: "Live OAuth refresh token — long-lived and not revoked by revoking an ObjectStack session; never returned on the data API (#7987)"
       },
       id_token: {
-        label: "ID 令牌"
+        label: "ID 令牌",
+        help: "OIDC ID token issued by the provider — never returned on the data API (#7987)"
       },
       access_token_expires_at: {
         label: "Access Token 过期时间"

@@ -178,19 +178,72 @@ export const SysAccount = ObjectSchema.create({
       description: 'Link to user table',
     }),
     
+    // ── Live third-party credentials (never on the generic data path) ──────
+    //
+    // [#7987] These three columns hold the user's LIVE bearer credentials for
+    // SOMEONE ELSE'S service — the tokens ObjectStack received from Google,
+    // GitHub, an OIDC IdP — in cleartext. better-auth writes them plain here:
+    // its `account.encryptOAuthTokens` option is not set (see
+    // `AUTH_ACCOUNT_CONFIG` in plugin-auth's `auth-schema-config.ts`), so
+    // `setTokenUtil` stores the value verbatim.
+    //
+    // Before `internal: true` they serialized on the generic data path, on an
+    // object that declares `apiEnabled: true, apiMethods: ['get','list']`:
+    //
+    //  - an ADMIN read every user's tokens (list, get-by-id, `?select=`);
+    //  - a MEMBER read their own, because the `sys_account_self` RLS policy
+    //    (`plugin-security/objects/default-permission-sets.ts`) grants
+    //    `select` on `user_id == current_user.id`. That arm is the one this
+    //    object does NOT share with `sys_session`: it converts a short-lived,
+    //    revocable ObjectStack session bearer into the user's long-lived
+    //    third-party REFRESH token, which survives revocation here entirely.
+    //
+    // Neither collector reached them: `maskSecretFields` collects by field
+    // TYPE (`textarea` is not `secret`/`password`) *and* exempts objects with
+    // `managedBy: 'better-auth'` — which this object is — so the one mask that
+    // could have applied was exempt by construction (#7902's survey result).
+    //
+    // `internal: true` is the same flag #7728 minted for `sys_api_key.key` and
+    // #7823 applied to `sys_session.token`: the engine OMITS the key from
+    // find/findOne results, on the default projection and when a client names
+    // the column in `?select=`. Storage, filtering and indexing are untouched.
+    //
+    // ⛔ NOT retyped to `Field.secret()`, deliberately. better-auth owns every
+    // write to this object through its own adapter; routing them through the
+    // engine's encrypt-on-write path would sit between better-auth and its
+    // adapter. `Field.password()` is inert for the two reasons above (type-keyed
+    // collection + the `better-auth` exemption).
+    //
+    // ⚠️ better-auth READS these back off adapter result rows — measured, and
+    // the load-bearing risk this card was parked on:
+    // `internalAdapter.findAccounts(userId)` (no projection) feeds
+    // `resolveUserAccount`, and `/get-access-token`, `/account-info` and
+    // `/refresh-token` then read `account.refreshToken` / `.accessToken` /
+    // `.idToken` off those rows. The read strip alone would make the refresh
+    // exchange answer `REFRESH_TOKEN_NOT_FOUND` and hand back an empty access
+    // token. They are re-attached at better-auth's own storage seam through
+    // the privileged accessor — `internal-field-readback.ts` in plugin-auth,
+    // over `Engine.resolveInternalField` (#8118) — exactly as #7823 did for
+    // `sys_session.token`. ⛔ Do not add an engine-side carve-out.
     access_token: Field.textarea({
       label: 'Access Token',
       required: false,
+      internal: true,
+      description: "Live OAuth access token issued by the provider — never returned on the data API (#7987); better-auth reads it back through the engine's privileged internal-field accessor",
     }),
-    
+
     refresh_token: Field.textarea({
       label: 'Refresh Token',
       required: false,
+      internal: true,
+      description: 'Live OAuth refresh token — long-lived and not revoked by revoking an ObjectStack session; never returned on the data API (#7987)',
     }),
-    
+
     id_token: Field.textarea({
       label: 'ID Token',
       required: false,
+      internal: true,
+      description: 'OIDC ID token issued by the provider — never returned on the data API (#7987)',
     }),
     
     access_token_expires_at: Field.datetime({

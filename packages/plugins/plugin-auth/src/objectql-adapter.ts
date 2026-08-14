@@ -17,9 +17,9 @@ import {
   type SecretResolvingEngine,
 } from './sso-client-secret.js';
 import {
-  reattachSessionTokenOnRead,
+  reattachInternalFieldsOnRead,
   type InternalFieldResolvingEngine,
-} from './session-token-readback.js';
+} from './internal-field-readback.js';
 
 /**
  * Mapping from better-auth model names to ObjectStack protocol object names.
@@ -704,12 +704,14 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
   // privileged verb for exactly that reason (#7823), so it comes off the raw
   // engine. See `sso-client-secret.ts` for why the seam sits here at all.
   const secretEngine = rawDataEngine as unknown as SecretResolvingEngine;
-  // [#7823] Same access rule for the session-token readback seam:
+  // [#7823, #7987] Same access rule for the internal-field readback seam:
   // `resolveInternalField` (#8118) is the privileged batch accessor that
-  // recovers `sys_session.token` after the engine's `internal: true` read
-  // strip, so better-auth's lifecycle routes (revoke-other-sessions,
-  // sliding-expiry refresh, expired-session cleanup) see the row whole while
-  // the generic data API does not. See `session-token-readback.ts`.
+  // recovers `sys_session.token` and `sys_account`'s OAuth token columns after
+  // the engine's `internal: true` read strip, so better-auth's lifecycle
+  // routes (revoke-other-sessions, sliding-expiry refresh, expired-session
+  // cleanup) and its token-exchange routes (/get-access-token, /account-info,
+  // /refresh-token) see the row whole while the generic data API does not.
+  // See `internal-field-readback.ts`.
   const internalFieldEngine = rawDataEngine as unknown as InternalFieldResolvingEngine;
   // Field-name bridging for better-auth plugins that expose NO `schema` option
   // (e.g. @better-auth/sso): when a model is remapped via AUTH_MODEL_TO_PROTOCOL,
@@ -790,12 +792,15 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
         // and authenticates to the IdP with the plaintext; encrypt-on-write
         // without this breaks every federated login.
         await injectClientSecretOnRead(secretEngine, objectName, result);
-        // [#7823] Session rows come back token-less off the engine's generic
-        // read path (`internal: true`); better-auth reads `session.token` back
-        // off this result to re-sign cookies, refresh, sign out and revoke.
-        // Re-attach it through the privileged accessor. The projection guard
-        // uses the CALLER's select, not the tombstone-borrowed one above.
-        await reattachSessionTokenOnRead(
+        // [#7823, #7987] Session and account rows come back missing their
+        // credential columns off the engine's generic read path
+        // (`internal: true`); better-auth reads `session.token` back off this
+        // result to re-sign cookies, refresh, sign out and revoke, and reads
+        // `account.{accessToken,refreshToken,idToken}` back off it to answer
+        // and refresh OAuth tokens. Re-attach them through the privileged
+        // accessor. The projection guard uses the CALLER's select, not the
+        // tombstone-borrowed one above.
+        await reattachInternalFieldsOnRead(
           internalFieldEngine,
           objectName,
           result,
@@ -830,12 +835,15 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
         // [#8009] Same read half, per row — better-auth reaches the provider
         // through findMany as well as findOne.
         for (const r of results) await injectClientSecretOnRead(secretEngine, objectName, r);
-        // [#7823] Same token readback, batched over the whole result — this is
+        // [#7823, #7987] Same readback, batched over the whole result. This is
         // the read `revoke-other-sessions` filters by `session.token`, where a
         // token-less row set made it answer `200 {status:true}` while revoking
-        // nothing (measured). One privileged read serves the page (#8118's
-        // batch shape); this verb has no projection, so no guard is needed.
-        await reattachSessionTokenOnRead(internalFieldEngine, objectName, results);
+        // nothing (measured) — and it is ALSO the read better-auth's
+        // `internalAdapter.findAccounts(userId)` issues, which feeds every
+        // OAuth token-exchange route. One privileged read serves the page per
+        // column (#8118's batch shape); this verb has no projection, so no
+        // guard is needed.
+        await reattachInternalFieldsOnRead(internalFieldEngine, objectName, results);
 
         return results.map((r) => {
           const norm = normaliseLegacyDates(model, r as Record<string, any>);

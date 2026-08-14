@@ -398,13 +398,16 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         help: "Enlace a la tabla de usuarios."
       },
       access_token: {
-        label: "Token de acceso"
+        label: "Token de acceso",
+        help: "Live OAuth access token issued by the provider — never returned on the data API (#7987); better-auth reads it back through the engine's privileged internal-field accessor"
       },
       refresh_token: {
-        label: "Token de actualización"
+        label: "Token de actualización",
+        help: "Live OAuth refresh token — long-lived and not revoked by revoking an ObjectStack session; never returned on the data API (#7987)"
       },
       id_token: {
-        label: "Token de ID"
+        label: "Token de ID",
+        help: "OIDC ID token issued by the provider — never returned on the data API (#7987)"
       },
       access_token_expires_at: {
         label: "El token de acceso caduca el"
