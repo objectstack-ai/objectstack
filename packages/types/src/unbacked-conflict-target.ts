@@ -20,17 +20,38 @@
  * warning is repeated at both call sites and in `unique-violation.ts` because
  * it is the most expensive mistake available anywhere near this question.
  *
- * ⚠️ The separation is **not clean today, in the pre-existing direction**, and
- * pinning it is what found that: `isUniqueViolationError` claims SQLite's
+ * ⛔ **Nothing below may take a limb from that vocabulary, or give one to it.**
+ * Unconditional, and permanent: the two predicates answer inverse questions, so
+ * a limb that travels between them produces a confident inverted answer. This
+ * prohibition was once written as holding "while #8590 is open", which was
+ * wrong twice over — it reads as expiring, and #8590 has since closed.
+ *
+ * ⚠️ The separation **was** broken in the pre-existing direction, and pinning
+ * it is what found that: `isUniqueViolationError` claimed SQLite's
  * unbacked-target error, because that sentence ends `…PRIMARY KEY or UNIQUE
- * constraint` and its vocabulary matches the word pair `unique constraint`
- * wherever it appears — including inside a sentence saying the constraint is
- * ABSENT. Filed as #8590; not fixed by #8567, which would have moved verdicts
- * in six consuming packages on a card that measured a different question.
+ * constraint` and its vocabulary matched the word pair `unique constraint`
+ * wherever it appeared — including inside a sentence saying the constraint is
+ * ABSENT. #8567 filed that as #8590 and pinned it rather than fixing it, which
+ * would have moved verdicts in six consuming packages on a card that measured a
+ * different question. **#8590 has since closed it**: that predicate's message
+ * limb now requires a VIOLATION phrasing — `unique constraint failed` (SQLite)
+ * or `violates unique constraint` (Postgres) — so merely mentioning a unique
+ * constraint no longer answers yes.
+ *
+ * ⚠️ Postgres was believed to escape that collision "by luck of word order",
+ * its `unique or exclusion constraint` not being adjacent. #8590's dialect
+ * sweep disproved it: PG **42830**, `there is no unique constraint matching
+ * given keys for referenced table "t"` — a FOREIGN KEY referencing a non-unique
+ * column — puts the pair adjacent in Postgres' own ABSENCE sentence. Both
+ * dialects had the collision; only SQLite's instance sat on the path this file
+ * measures. That is why the fix is an allowlist of violation phrasings and not
+ * a negative lookahead on SQLite's sentence, which would still answer `true`
+ * there.
+ *
  * `unbacked-conflict-target.test.ts` records both predicates' verdicts on every
- * measured text, per dialect, so neither the fix nor a fresh drift can land
- * silently. Nothing below may take a limb from that vocabulary, or give one to
- * it, while #8590 is open.
+ * measured text, per dialect, and `unique-violation-absence-sentences.test.ts`
+ * pins the absence sentences on both sides — so neither a fix nor a fresh drift
+ * can land silently in either direction.
  *
  * ## What each dialect actually says — measured, never transcribed
  *
