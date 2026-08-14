@@ -84,6 +84,19 @@ function constructedWith<T>(plugin: unknown, field: string): T | undefined {
 }
 
 /**
+ * The plugin instances an `ObjectKernel` has registered, keyed by name.
+ *
+ * `ObjectKernel` publishes `hasPlugin(name)` but nothing that hands back the
+ * registered INSTANCE — and which instance survived is the entire question
+ * here. Same justification as {@link constructedWith}, and every read below is
+ * paired with the public `hasPlugin`, so if this field is ever renamed the
+ * pairing fails loudly instead of quietly reporting "not registered".
+ */
+function registeredPlugins(kernel: ObjectKernel): Map<string, unknown> {
+  return (kernel as unknown as { plugins: Map<string, unknown> }).plugins;
+}
+
+/**
  * The four surfaces the cloud-connected arm mounts, each with:
  *  - the host's instance, built with an argument the CLI cannot produce,
  *  - the CLI's instance, built EXACTLY as `serve.ts` builds it,
@@ -257,10 +270,32 @@ describe('#8357: the identities the cloud arm matches on are the real ones', () 
       const real = surface.host() as { name: string; constructor: { name: string } };
 
       expect(surface.identities()).toContain(real.name);
-      expect(surface.identities()).toContain(real.constructor.name);
       expect(Serve.providesCapability([real], surface.identities())).toBe(true);
+
+      // The class-name limb, compared modulo ONE leading underscore. Measured,
+      // not defensive: esbuild rewrites `export class X { … X.prototype … }`
+      // — a class that references itself by name inside its own body — into
+      // `var X = class _X { … _X.prototype … }`, so the BUILT class reports
+      // `_MarketplaceProxyPlugin`. The registry deliberately keeps the source
+      // spelling; pinning the bundler's is pinning an artifact. Stripping one
+      // underscore still catches a genuine rename, which is what this guard is
+      // for. See the `name`-limb test below for why the guard holds anyway.
+      expect(surface.identities()).toContain(real.constructor.name.replace(/^_/, ''));
     });
   }
+
+  it('the registered NAME alone satisfies every guard — the limb that survives bundling', () => {
+    // Load-bearing given the underscore above: against the shipped build the
+    // class-name limb is dead for at least one of these four, so the guard has
+    // to fire on `plugin.name` by itself or it does not fire at all on the
+    // deployments that matter.
+    for (const surface of SURFACES) {
+      expect(
+        Serve.providesCapability([{ name: surface.pluginName }], surface.identities()),
+        `${surface.label} must be recognised by its registered name alone`,
+      ).toBe(true);
+    }
+  });
 
   it('the cloud-connection identity names the CLASS the factory returns, not the factory', () => {
     // The one surface reached through a factory. `createCloudConnectionPlugin`
@@ -328,10 +363,11 @@ describe('#8357: the host instance survives REGARDLESS of registration order', (
         await mountCliCloudArm(kernel, wiring);
       }
 
-      const registered = kernel.getPlugins();
+      const registered = registeredPlugins(kernel);
 
       for (const [index, surface] of SURFACES.entries()) {
         const hostInstance = hostPlugins[index]!;
+        expect(kernel.hasPlugin(surface.pluginName), `${surface.label} must be registered`).toBe(true);
         const survivor = registered.get(surface.pluginName);
 
         // Precondition: the two instances really ARE distinguishable. Without
@@ -342,7 +378,6 @@ describe('#8357: the host instance survives REGARDLESS of registration order', (
           `${surface.label}: host fixture must differ from the CLI's instance`,
         ).not.toEqual(constructedWith(surface.cli(), surface.field));
 
-        expect(survivor, `${surface.label} must be registered`).toBeDefined();
         expect(survivor, `${surface.label}: the surviving instance must be the HOST's`).toBe(hostInstance);
         expect(
           constructedWith(survivor, surface.field),
@@ -363,9 +398,8 @@ describe('#8357: the host instance survives REGARDLESS of registration order', (
 
     await mountCliCloudArm(kernel, wiring);
 
-    const registered = kernel.getPlugins();
     for (const surface of SURFACES) {
-      expect(registered.get(surface.pluginName), `${surface.label} must be auto-wired`).toBeDefined();
+      expect(kernel.hasPlugin(surface.pluginName), `${surface.label} must be auto-wired`).toBe(true);
     }
   });
 
@@ -383,7 +417,7 @@ describe('#8357: the host instance survives REGARDLESS of registration order', (
     await kernel.use(host as never);
     await kernel.use(cli as never);
 
-    const registered = kernel.getPlugins();
+    const registered = registeredPlugins(kernel);
     expect(registered.size, 'two plugins, one name, one entry').toBe(1);
     expect(registered.get(SURFACES[0].pluginName)).toBe(cli);
     expect(constructedWith(registered.get(SURFACES[0].pluginName), 'cloudUrl')).toBe(CLOUD_URL);
