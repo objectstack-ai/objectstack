@@ -151,7 +151,7 @@ export const jaJP: TranslationData = {
         widget_config_changes: { title: '構成変更', description: 'システム構成の変更' },
         widget_events_by_type: { title: 'アクション別監査イベント', description: 'アクションタイプ別の監査イベント分布' },
         widget_events_by_user: { title: 'ユーザー別イベント', description: 'ユーザー別アクティビティ分布' },
-        widget_recent_events: { title: '最近の監査イベント', description: '最新のプラットフォームイベント（ログイン、ログアウト、構成など）' },
+        widget_recent_events: { title: 'アクション別イベント件数', description: 'アクション別にグループ化されたイベント件数（ログイン、ログアウト、構成など）' },
       },
     },
   },
