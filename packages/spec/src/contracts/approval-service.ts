@@ -55,6 +55,31 @@ export const APPROVAL_STATUSES = [
 /** Lifecycle state of an approval request — derived from {@link APPROVAL_STATUSES}. */
 export type ApprovalStatus = (typeof APPROVAL_STATUSES)[number];
 
+/**
+ * Authored English display label for each {@link APPROVAL_STATUSES} entry —
+ * what an English reader sees in the `sys_approval_request.status` select,
+ * badges, and the Approvals Inbox (#8543).
+ *
+ * These five strings used to live ONLY in `plugin-approvals`' generated `en`
+ * bundle (#7232 humanized them there), which made the bundle the sole home of
+ * deliberately-authored English — exactly what broke the "`en` is a copy of
+ * the source" invariant the i18n extractor's default-locale channel relies on.
+ * Promoting them here puts English in one place: the column derives its option
+ * labels from this map (never re-typed at the column — #3786's rule extended
+ * to labels), and the `en` bundle is regenerated from it verbatim.
+ *
+ * `satisfies` is exhaustive in both directions: a status added to
+ * {@link APPROVAL_STATUSES} without a label — or a label for a status the
+ * vocabulary dropped — fails to compile.
+ */
+export const APPROVAL_STATUS_LABELS = {
+  pending: 'Pending',
+  approved: 'Approved',
+  rejected: 'Rejected',
+  recalled: 'Recalled',
+  returned: 'Returned',
+} as const satisfies Record<ApprovalStatus, string>;
+
 /** Live request row. */
 export interface ApprovalRequestRow {
   id: string;
@@ -279,6 +304,36 @@ export const APPROVAL_ACTION_KINDS = [
 
 /** Kinds of entries on a request's audit trail — derived from {@link APPROVAL_ACTION_KINDS}. */
 export type ApprovalActionKind = (typeof APPROVAL_ACTION_KINDS)[number];
+
+/**
+ * Authored English display label for each {@link APPROVAL_ACTION_KINDS} entry —
+ * what an English reader sees in the `sys_approval_action.action` column of a
+ * request's audit trail (#8580).
+ *
+ * The #7232 humanization pass covered `sys_approval_request.status` and missed
+ * this sibling field, so the shipped `en` bundle rendered the raw machine
+ * values (`submit`, `request_info`, …) — `fieldOptionLabel` in
+ * `@object-ui/i18n` falls back to the option's own label with no humanization
+ * step, so what is in the bundle is what renders. Same contract-first shape as
+ * {@link APPROVAL_STATUS_LABELS}: the column derives its option labels from
+ * this map, and the `en` bundle is regenerated from it verbatim.
+ *
+ * `satisfies` is exhaustive in both directions, same as the status map.
+ */
+export const APPROVAL_ACTION_KIND_LABELS = {
+  submit: 'Submit',
+  approve: 'Approve',
+  reject: 'Reject',
+  recall: 'Recall',
+  escalate: 'Escalate',
+  reassign: 'Reassign',
+  remind: 'Remind',
+  request_info: 'Request Info',
+  comment: 'Comment',
+  revise: 'Revise',
+  resubmit: 'Resubmit',
+  ooo_substitute: 'Out-of-Office Substitution',
+} as const satisfies Record<ApprovalActionKind, string>;
 
 /**
  * A file attached to a decision action (#3266) — the READ shape of one

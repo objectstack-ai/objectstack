@@ -645,30 +645,38 @@ export function collectExpectedEntries(config: any): ExpectedEntry[] {
         pushOptional(out, ['objects', objectName, 'fields', fieldName, 'placeholder'], field.placeholder, 'field', { objectName });
 
         // Options — accept either `{value, label}[]` arrays or a record map.
+        //
+        // An option whose label is absent — or byte-equal to its own machine
+        // value, which is what `Field.select(['pending'])` normalizes a bare
+        // string into — is seeded from the value but recorded as DERIVED
+        // (#8543): the seed keeps the skeleton usable, while `inline` stays
+        // unset so the coverage gate never demands a translation of a machine
+        // identifier, and nothing downstream mistakes the copied value for
+        // deliberately-authored display text. Authored English for a select
+        // belongs on the option (or in the contract beside the vocabulary —
+        // see `APPROVAL_STATUS_LABELS` in @objectstack/spec/contracts), where
+        // this walk sees it as a real label.
+        const pushOption = (value: string, label: unknown): void => {
+          const path = ['objects', objectName, 'fields', fieldName, 'options', value];
+          const authored = inlineText(label);
+          if (authored !== undefined && authored !== value) {
+            pushEntry(out, path, authored, 'option', { objectName });
+          } else {
+            pushDerived(out, path, value, undefined, 'option', { objectName });
+          }
+        };
         const opts = field.options;
         if (Array.isArray(opts)) {
           for (const opt of opts) {
             if (opt && typeof opt === 'object' && 'value' in opt) {
-              pushEntry(
-                out,
-                ['objects', objectName, 'fields', fieldName, 'options', String(opt.value)],
-                String(opt.label ?? opt.value),
-                'option',
-                { objectName },
-              );
+              pushOption(String(opt.value), opt.label);
             } else if (typeof opt === 'string') {
-              pushEntry(out, ['objects', objectName, 'fields', fieldName, 'options', opt], opt, 'option', { objectName });
+              pushOption(opt, undefined);
             }
           }
         } else if (opts && typeof opts === 'object') {
           for (const [value, label] of Object.entries<any>(opts)) {
-            pushEntry(
-              out,
-              ['objects', objectName, 'fields', fieldName, 'options', value],
-              typeof label === 'string' ? label : String(value),
-              'option',
-              { objectName },
-            );
+            pushOption(value, label);
           }
         }
       }
@@ -1077,7 +1085,16 @@ export function extractTranslations(config: any, opts: ExtractOptions = {}): Ext
       // verbatim so the generated file remains a complete, self-contained
       // bundle (not just the missing-key delta). Set --no-merge to skip
       // baselines entirely.
-      if (opts.mergeExisting !== false) {
+      //
+      // The default locale is deliberately NOT merged (#8543): it is a copy of
+      // the source, not a translation, so "never overwrite an existing entry"
+      // protects the wrong thing there — an author edits a field description,
+      // the regeneration keeps the stale entry, and the served text drifts from
+      // the source silently while the drift gate reports OK (measured at 53
+      // stale entries across 6 packages when this branch ran for every locale).
+      // The seed IS the source text for the default locale (line below), so it
+      // always wins; translated locales keep merge semantics exactly as before.
+      if (opts.mergeExisting !== false && locale !== defaultLocale) {
         const existingValue = lookupDeep(existing[locale], entry.path);
         if (existingValue !== undefined && existingValue !== '') {
           value = String(existingValue);

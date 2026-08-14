@@ -820,8 +820,10 @@ if (broken.length || drifted.length || undeclared.length) {
     if (drifted.length) {
       console.error(
         `\nRegenerate and commit: node scripts/check-i18n-bundles.mjs --write\n` +
-          `Merge mode is on, so no existing translation is overwritten — new schema keys are\n` +
-          `added filled with the source text, and they still need translating.`,
+          `Merge mode is on for translated locales, so no existing translation is\n` +
+          `overwritten — new schema keys are added filled with the source text, and they\n` +
+          `still need translating. The default locale (en) is rewritten from the source\n` +
+          `on every run (#8543): it is a copy of the source, not a translation.`,
       );
     }
   }

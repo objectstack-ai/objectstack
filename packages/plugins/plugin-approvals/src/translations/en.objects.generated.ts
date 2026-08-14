@@ -215,18 +215,18 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       action: {
         label: "Action",
         options: {
-          submit: "submit",
-          approve: "approve",
-          reject: "reject",
-          recall: "recall",
-          escalate: "escalate",
-          reassign: "reassign",
-          remind: "remind",
-          request_info: "request_info",
-          comment: "comment",
-          revise: "revise",
-          resubmit: "resubmit",
-          ooo_substitute: "ooo_substitute"
+          submit: "Submit",
+          approve: "Approve",
+          reject: "Reject",
+          recall: "Recall",
+          escalate: "Escalate",
+          reassign: "Reassign",
+          remind: "Remind",
+          request_info: "Request Info",
+          comment: "Comment",
+          revise: "Revise",
+          resubmit: "Resubmit",
+          ooo_substitute: "Out-of-Office Substitution"
         }
       },
       actor_id: {

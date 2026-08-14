@@ -18,7 +18,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       fields: {
         label: "Fields",
-        description: "Define the data model — each row becomes a column in the database table."
+        description: "Define the data model — each entry becomes a column in the database table."
       },
       capabilities: {
         label: "Capabilities",
@@ -52,7 +52,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       isSystem: {
         label: "Is System",
-        helpText: "System object (protected from deletion)"
+        helpText: "System object (protected from deletion; defaults sharing to public)"
       },
       fields: {
         label: "Fields",
@@ -144,7 +144,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.reference": {
         label: "Reference",
-        helpText: "Target object (for lookup/master_detail)"
+        helpText: "Target object name"
       },
       "fields.lookupFilters": {
         label: "Lookup Filters",
@@ -192,7 +192,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.trackHistory": {
         label: "Track History",
-        helpText: "Keep change history"
+        helpText: "Summarize this field on the record activity timeline"
       },
       "fields.visibleWhen": {
         label: "Visible When",
@@ -624,7 +624,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       filter: {
         label: "Filter",
-        helpText: "Filter conditions"
+        helpText: "Filter conditions — same visual builder as the list toolbar, with field-type-aware operators and value inputs"
       },
       sort: {
         label: "Sort",
@@ -740,7 +740,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       type: {
         label: "Type",
-        helpText: "Page kind — list / record / home / app / utility. How a list page looks (grid / kanban / calendar) is a visualization set under Interface, not a page type."
+        helpText: "Page kind. \"List / Interface\" binds a source view into a curated surface — how it looks (grid / kanban / calendar / …) is a visualization set under Interface, not a page type."
       },
       template: {
         label: "Template",
@@ -974,7 +974,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       defaultAgent: {
         label: "Default Agent",
-        helpText: "AI agent for the ambient assistant button"
+        helpText: "Platform agent for the ambient assistant ('ask' by default; 'build' for authoring surfaces)"
       },
       branding: {
         label: "Branding",
@@ -1003,7 +1003,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       advanced: {
         label: "Advanced",
-        description: "Bulk operations, AI exposure, and API request shape."
+        description: "AI exposure and API request shape."
       }
     },
     fields: {
@@ -1041,7 +1041,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       body: {
         label: "Body",
-        helpText: "JavaScript code to execute"
+        helpText: "Either an L1 expression or an L2 sandboxed JS body"
       },
       "body.language": {
         label: "Language",
@@ -1118,7 +1118,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
     sections: {
       basics: {
         label: "Basics",
-        description: "Identity and data source."
+        description: "Identity and report type."
       },
       dataset_binding: {
         label: "Dataset binding",
@@ -1126,11 +1126,11 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       joined_blocks: {
         label: "Joined blocks",
-        description: "Additional blocks joined into a single report (joined reports only)."
+        description: "Additional dataset-bound blocks stacked into a single report (joined reports only)."
       },
       filter_and_chart: {
         label: "Filter & chart",
-        description: "Report-level filters and chart presentation."
+        description: "Render-time scope filter and chart presentation."
       }
     },
     fields: {
@@ -1162,7 +1162,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       columns: {
         label: "Columns",
-        helpText: "Columns to display in the report"
+        helpText: "Dimension names across (matrix only)"
       },
       order: {
         label: "Order",
@@ -1174,7 +1174,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       blocks: {
         label: "Blocks",
-        helpText: "Join multiple objects (joined report only)"
+        helpText: "Dataset-bound sub-reports (joined report only)"
       },
       runtimeFilter: {
         label: "Runtime Filter",
@@ -1238,7 +1238,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       measures: {
         label: "Measures",
-        helpText: "Each: name, aggregate, field (optional for count), display format/currency, and a “certified” governance flag"
+        helpText: "Each: name, aggregate, field (optional for count), and display format/currency"
       }
     }
   },
@@ -1326,7 +1326,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
     sections: {
       identity: {
         label: "Identity",
-        description: "Identifier and content type. The id is referenced by sendTemplate({ template: id, ... })."
+        description: "Template identifier resolved by IEmailService.sendTemplate({ template: name, locale, ... })."
       },
       subject: {
         label: "Subject",
@@ -1381,7 +1381,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       variables: {
         label: "Variables",
-        helpText: "List of variable names referenced in subject/body"
+        helpText: "[{ \"name\": \"user.name\", \"type\": \"string\", \"required\": true, \"description\": \"...\" }]"
       },
       fromOverride: {
         label: "From Override",
@@ -1426,7 +1426,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       tab_and_row_level_security: {
         label: "Tab & Row-Level Security",
-        description: "Tab visibility, RLS policies, and custom context variables for predicate evaluation."
+        description: "Tab visibility and RLS policies."
       }
     },
     fields: {
@@ -1498,7 +1498,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       capabilities: {
         label: "Capabilities",
-        description: "Skills, tools, and knowledge sources the agent can use."
+        description: "Skills and knowledge sources the agent can use."
       },
       access: {
         label: "Access & Security",

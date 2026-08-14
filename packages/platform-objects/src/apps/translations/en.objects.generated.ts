@@ -728,7 +728,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "Organization",
-        help: "Parent organization for this team"
+        help: "Parent organization for this team. Null in single-tenant; auto-stamped in multi-tenant."
       },
       member_count: {
         label: "Member Count",
@@ -805,7 +805,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
   sys_business_unit: {
     label: "Business Unit",
     pluralLabel: "Business Units",
-    description: "Hierarchical org-skeleton node (department / division / business unit / office).",
+    description: "Canonical Business Unit tree — hierarchical org/data-partition node (company / division / department / region / office). ADR-0057 D2.",
     fields: {
       name: {
         label: "Name"
@@ -831,7 +831,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       organization_id: {
         label: "Organization",
-        help: "Tenant scope."
+        help: "Tenant scope. Null in single-tenant; auto-stamped in multi-tenant."
       },
       manager_user_id: {
         label: "Business Unit Head",
@@ -906,7 +906,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       is_primary: {
         label: "Primary Assignment",
-        help: "When the user is in multiple departments, this marks the canonical one for reporting."
+        help: "When the user is in multiple business units, this marks the canonical one for reporting."
       },
       effective_from: {
         label: "Effective From"
@@ -1910,9 +1910,9 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
     }
   },
   sys_notification: {
-    label: "Notification",
-    pluralLabel: "Notifications",
-    description: "Per-user notification inbox entries",
+    label: "Notification Event",
+    pluralLabel: "Notification Events",
+    description: "Notification events — one row per emit() (ADR-0030 Layer 2 ingress)",
     fields: {
       id: {
         label: "Notification ID"
@@ -1948,7 +1948,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       actor_id: {
         label: "Actor",
-        help: "User who caused the notification (mentioner, assigner)"
+        help: "User who caused the event (mentioner, assigner)"
       },
       created_at: {
         label: "Created At"
@@ -2659,7 +2659,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         help: "Organization for multi-tenant isolation."
       },
       environment_id: {
-        label: "Project (deprecated)",
+        label: "Environment (deprecated)",
         help: "DEPRECATED. Use organization_id for tenant isolation."
       },
       version: {
@@ -2709,7 +2709,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
   sys_metadata_history: {
     label: "Metadata History",
     pluralLabel: "Metadata History",
-    description: "Version history and audit trail for metadata changes",
+    description: "Durable event log of metadata overlay changes (per-org, append-only)",
     fields: {
       id: {
         label: "ID"
@@ -2739,7 +2739,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       metadata: {
         label: "Metadata",
-        help: "JSON-serialized metadata snapshot at this version"
+        help: "JSON-serialized metadata snapshot at this version (null for deletes)."
       },
       checksum: {
         label: "Checksum"
@@ -2749,7 +2749,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       change_note: {
         label: "Change Note",
-        help: "Description of what changed in this version"
+        help: "Description of what changed in this version."
       },
       source: {
         label: "Source"

@@ -31,8 +31,8 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         }
       },
       user_id: {
-        label: "Actor",
-        help: "User who performed the action (null for system actions)"
+        label: "User",
+        help: "User who performed the action (null for non-user / service actions — see actor)"
       },
       actor: {
         label: "Actor",
@@ -158,7 +158,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         help: "Optional deep-link to the activity target"
       },
       environment_id: {
-        label: "Project",
+        label: "Environment",
         help: "Environment context (multi-environment deployments)"
       },
       metadata: {

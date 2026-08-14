@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
-import { APPROVAL_ACTION_KINDS } from '@objectstack/spec/contracts';
+import { APPROVAL_ACTION_KINDS, APPROVAL_ACTION_KIND_LABELS } from '@objectstack/spec/contracts';
 
 /**
  * sys_approval_action — Audit trail row per approval action.
@@ -99,11 +99,14 @@ export const SysApprovalAction = ObjectSchema.create({
     }),
 
     action: Field.select(
-      // Spread from the contract, not re-typed (#3786). `APPROVAL_ACTION_KINDS`
+      // Derived from the contract, not re-typed (#3786). `APPROVAL_ACTION_KINDS`
       // is where the list and the per-kind notes live (which kinds move the flow
       // and which are thread-only); `ApprovalActionKind` is derived from it, so
-      // this column and the contract cannot disagree.
-      [...APPROVAL_ACTION_KINDS],
+      // this column and the contract cannot disagree. The authored English label
+      // per kind lives beside it in `APPROVAL_ACTION_KIND_LABELS` (#8580 — the
+      // #7232 humanization pass missed this field) — mapped here, never
+      // re-typed, so the `en` bundle regenerates from the contract's own text.
+      APPROVAL_ACTION_KINDS.map((value) => ({ value, label: APPROVAL_ACTION_KIND_LABELS[value] })),
       {
         label: 'Action',
         required: true,

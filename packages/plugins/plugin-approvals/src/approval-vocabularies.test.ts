@@ -22,7 +22,12 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { APPROVAL_STATUSES, APPROVAL_ACTION_KINDS } from '@objectstack/spec/contracts';
+import {
+  APPROVAL_STATUSES,
+  APPROVAL_STATUS_LABELS,
+  APPROVAL_ACTION_KINDS,
+  APPROVAL_ACTION_KIND_LABELS,
+} from '@objectstack/spec/contracts';
 
 import { SysApprovalRequest } from './sys-approval-request.object.js';
 import { SysApprovalAction } from './sys-approval-action.object.js';
@@ -31,6 +36,11 @@ import { SysApprovalAction } from './sys-approval-action.object.js';
 const optionValues = (obj: unknown, field: string): string[] => {
   const raw = (obj as any)?.fields?.[field]?.options ?? [];
   return raw.map((o: unknown) => (typeof o === 'string' ? o : (o as any)?.value));
+};
+
+const optionLabels = (obj: unknown, field: string): string[] => {
+  const raw = (obj as any)?.fields?.[field]?.options ?? [];
+  return raw.map((o: unknown) => (typeof o === 'string' ? o : (o as any)?.label));
 };
 
 describe('approval vocabularies are derived from @objectstack/spec/contracts (#3786)', () => {
@@ -47,6 +57,31 @@ describe('approval vocabularies are derived from @objectstack/spec/contracts (#3
 
   it('sys_approval_action.action offers exactly the contract action kinds, in order', () => {
     expect(optionValues(SysApprovalAction, 'action')).toEqual([...APPROVAL_ACTION_KINDS]);
+  });
+
+  it('sys_approval_request.status labels are the authored contract labels (#8543)', () => {
+    // The English display text lives in APPROVAL_STATUS_LABELS, beside the
+    // vocabulary — never re-typed at the column, and the generated `en` bundle
+    // is a verbatim copy of it. A raw machine value leaking into a label here
+    // is exactly the defect #8543/#8580 closed.
+    expect(optionLabels(SysApprovalRequest, 'status')).toEqual(
+      APPROVAL_STATUSES.map((s) => APPROVAL_STATUS_LABELS[s]),
+    );
+    expect(optionLabels(SysApprovalRequest, 'status')).not.toEqual(
+      optionValues(SysApprovalRequest, 'status'),
+    );
+  });
+
+  it('sys_approval_action.action labels are the authored contract labels (#8580)', () => {
+    // The #7232 humanization covered `status` and missed this sibling — the
+    // shipped en bundle rendered `submit` / `request_info` raw. The labels now
+    // derive from APPROVAL_ACTION_KIND_LABELS in the contract.
+    expect(optionLabels(SysApprovalAction, 'action')).toEqual(
+      APPROVAL_ACTION_KINDS.map((k) => APPROVAL_ACTION_KIND_LABELS[k]),
+    );
+    expect(optionLabels(SysApprovalAction, 'action')).not.toEqual(
+      optionValues(SysApprovalAction, 'action'),
+    );
   });
 
   it('the two vocabularies stay distinct', () => {
