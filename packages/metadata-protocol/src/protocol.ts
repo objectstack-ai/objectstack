@@ -61,7 +61,7 @@ import {
     type QueryAliasConflict, type QueryAliasSlot,
     type DroppedFieldsEvent, type QueryAST, type EngineQueryOptionsParsed,
 } from '@objectstack/spec/data';
-import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSpellingRefusal } from '@objectstack/spec/shared';
+import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSpellingRefusal, unrecognisedMetaTypeRefusal } from '@objectstack/spec/shared';
 import { applyConversionsToStoredItem, type ConversionNotice } from '@objectstack/spec';
 import { type FormView, isAggregatedViewContainer, expandViewContainer } from '@objectstack/spec/ui';
 import { METADATA_FORM_REGISTRY, CORE_SERVICE_PROVIDER, serviceUnavailableMessage, inProcessServiceMessage } from '@objectstack/spec/system';
@@ -207,8 +207,40 @@ function canonicalMetaType(type: string): string {
  * function for why the rule is static rather than a live-registry lookup —
  * and (#8424) for why this boundary consumes the composed VERDICT rather than
  * the predicate parts: the spelling contract stays whole at its producer.
+ *
+ * ## [#8421] `opts.minting` — the second verdict, and why it is not on all six
+ *
+ * The refusal above is silent for a name that is not a plural of ANYTHING
+ * (`fieldz`), because such a name reaches for no declared type. That residue
+ * was left open deliberately in #7894 and closed by the maintainer's ruling of
+ * 2026-08-14 (「同意」), joint with #8586: retiring `additionalTypes` removed the
+ * last channel by which a plugin could DECLARE a metadata kind, so an
+ * unrecognised name can no longer be a declaration this boundary has not heard
+ * about. {@link unrecognisedMetaTypeRefusal} is that verdict.
+ *
+ * It is passed ONLY by {@link saveMetaItem} — the one entry point that MINTS a
+ * `sys_metadata` namespace — and that scoping is measured, not timid:
+ *
+ *  - **The live type set legitimately holds keys the static contract does
+ *    not.** An ordinary `registerApp` puts `data` (a manifest's seed
+ *    datasets), `kind` (`contributes.kinds`) and `package` into
+ *    `SchemaRegistry`, and {@link listLiveMetadataTypes} — hence `GET
+ *    /api/v1/meta/types` — enumerates exactly that set. Refusing unrecognised
+ *    names on the READ entries would answer 400 for types this same service
+ *    advertises, trading one declared-≠-served gap for another.
+ *  - **`deleteMetaItem` must stay open for the opposite reason.** Rows minted
+ *    under an unrecognised type BEFORE this refusal are real and nothing
+ *    rewrites them on upgrade; refusing delete would strand them permanently —
+ *    turning the accumulation this card was filed about into an accumulation
+ *    nobody can clear.
+ *
+ * So reads stay permissive, deletes stay possible, and the door that creates a
+ * namespace for a type that does not exist is the one that closes.
  */
-function canonicalizeMetaRequestType<T extends { type: string }>(request: T): T {
+function canonicalizeMetaRequestType<T extends { type: string }>(
+    request: T,
+    opts?: { minting?: boolean },
+): T {
     const refusal = metaUrlSpellingRefusal(request.type);
     if (refusal) {
         const err = new Error(
@@ -220,6 +252,21 @@ function canonicalizeMetaRequestType<T extends { type: string }>(request: T): T 
         (err as any).code = 'INVALID_REQUEST';
         (err as any).status = 400;
         throw err;
+    }
+    if (opts?.minting === true) {
+        const unrecognised = unrecognisedMetaTypeRefusal(request.type);
+        if (unrecognised) {
+            const err = new Error(
+                `[invalid_request] '${unrecognised.type}' is not a metadata type. The platform declares `
+                + `no such type, and since #8586 retired 'additionalTypes' a plugin cannot declare one `
+                + `either — so this write would mint a sys_metadata namespace under `
+                + `type='${unrecognised.type}' that nothing reads and nothing serves. Address a real `
+                + `metadata type; GET /api/v1/meta/types lists the ones this deployment carries.`,
+            );
+            (err as any).code = 'INVALID_REQUEST';
+            (err as any).status = 400;
+            throw err;
+        }
     }
     const type = canonicalMetaType(request.type);
     return type === request.type ? request : { ...request, type };
@@ -11247,7 +11294,13 @@ export class ObjectStackProtocolImplementation implements
             throw new Error('Item data is required');
         }
         // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}.
-        request = canonicalizeMetaRequestType(request);
+        //
+        // [#8421] `minting: true` — this is the entry point that CREATES a
+        // `sys_metadata` namespace, so it is the one that refuses a type name
+        // the platform has never heard of instead of forwarding it to the
+        // permissive plugin path. The read entries deliberately do not pass it;
+        // `canonicalizeMetaRequestType`'s doc carries the measurement.
+        request = canonicalizeMetaRequestType(request, { minting: true });
         // What the history row, the audit row and the watch event record as the
         // origin of this write. Defaults to this method — the ordinary Studio /
         // REST / SDK save. The only caller that overrides it is

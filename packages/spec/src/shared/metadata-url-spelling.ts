@@ -65,13 +65,17 @@
  * layers below keep reading the single canonical singular. Nothing here should
  * ever be consulted by a predicate one layer down.
  *
- * ## The published surface is three symbols, by ruling (#8424)
+ * ## The published surface is four symbols (#8424, extended by #8421)
  *
  * {@link META_URL_TO_SINGULAR} (the spelling contract) ·
  * {@link canonicalMetaUrlType} (the fold) · {@link metaUrlSpellingRefusal}
- * (the boundary refusal verdict). The helpers behind them are module-internal;
- * see {@link metaUrlSpellingRefusal}'s doc for why the verdict is exported and
- * the parts are not.
+ * (the misspelling verdict) · {@link unrecognisedMetaTypeRefusal} (the
+ * not-a-type-at-all verdict). The helpers behind them are module-internal;
+ * see {@link metaUrlSpellingRefusal}'s doc for why the verdicts are exported
+ * and the parts are not. The two verdicts answer different questions and are
+ * deliberately not merged: one says *you spelled a type we declare wrongly*,
+ * the other says *we have no such type*, and only the first can name a
+ * replacement spelling.
  *
  * @module
  */
@@ -201,12 +205,17 @@ function singularCandidates(type: string): string[] {
  * (`address`, `status`): `singularCandidates` produces `addre`/`addres` and
  * `statu`/`statue`, none of which is declared, so it is permitted. Good.
  *
- * ## Known residue, deliberately not closed here
+ * ## The residue this used to leave is now closed next door (#8421)
  *
  * A spelling that is not a plural of anything — `/meta/fieldz` — is
- * indistinguishable from a plugin kind by static means, so it still takes the
- * plugin path. Closing that needs the live registered-type set at the boundary,
- * which is a different change with a different risk profile.
+ * indistinguishable from a plugin kind BY THIS PREDICATE, and still is: it has
+ * no declared singular to reach for, so this function keeps returning `null`
+ * for it and the POSITIVE CONTROL above keeps holding by construction. What
+ * changed is that the boundary no longer treats "this predicate is silent" as
+ * "forward it to the plugin path" on a WRITE: {@link unrecognisedMetaTypeRefusal}
+ * answers the other question — *is this a metadata type at all?* — which became
+ * answerable statically only once #8586 retired `additionalTypes` and left the
+ * platform with no declared-kind channel to be ignorant of.
  *
  * Module-internal (#8424): consumers get the composed verdict from
  * {@link metaUrlSpellingRefusal}, never this predicate on its own.
@@ -250,4 +259,65 @@ export function metaUrlSpellingRefusal(
   const declared = unmappedDeclaredTypeSpelling(urlType);
   if (declared === null) return null;
   return { declared, hint: restPluralOfMetaType(declared) };
+}
+
+/**
+ * Every CANONICAL metadata type the static contract knows — the values of
+ * {@link META_URL_TO_SINGULAR} rather than its keys.
+ *
+ * Strictly larger than `DECLARED_META_TYPES`, and that difference is the whole
+ * reason this set exists: limb 1 carries six kinds that NO registry derivation
+ * could produce — `theme`, `webhook`, `connector`, `sharing_rule`,
+ * `analytics_cube`, `rag_pipeline` — which are legal, addressable metadata
+ * kinds with no static registry entry. A refusal quantified over the registry
+ * alone would refuse all six, i.e. break `PUT /meta/theme/dark`, which is the
+ * exact operation the plugin path exists to serve.
+ *
+ * Module-internal (#8424), for the same reason `DECLARED_META_TYPES` is: it
+ * LOOKS like a live registry of registered types and is not one.
+ */
+const CANONICAL_META_TYPES: ReadonlySet<string> = new Set(Object.values(META_URL_TO_SINGULAR));
+
+/**
+ * The verdict for a `/meta/:type` segment that is not a metadata type AT ALL
+ * (#8421, maintainer ruling 2026-08-14 「同意」, joint with #8586).
+ *
+ * Returns `null` when the segment is part of the platform's static spelling
+ * contract — a canonical type, or any spelling that folds to one. Returns the
+ * verdict when it is neither, i.e. when honouring it would mint a namespace
+ * for a metadata type that does not exist: `PUT /meta/fieldz/x` answering 200
+ * and persisting a `sys_metadata` row under `type='fieldz'`.
+ *
+ * ## Why this became answerable statically, having not been before
+ *
+ * The version of this module that shipped with #7894 called this residue
+ * explicitly unclosable: `fieldz` is indistinguishable from a plugin kind by
+ * static means, and a LIVE-registry lookup (the obvious alternative) was
+ * measured on #8421 to be worse than the defect — `listLiveMetadataTypes()` is
+ * an ITEM-POPULATION set, so it omits a legitimate kind that has zero items,
+ * which is precisely the state every kind is in immediately before its first
+ * runtime create.
+ *
+ * What changed is not the boundary's information but the platform's: #8586
+ * retired `MetadataPluginConfig.additionalTypes` (ADR-0049), and with it the
+ * last channel by which a plugin could DECLARE a metadata kind. There is now
+ * no declaration this predicate could be ignorant of, which is what makes
+ * refusing an unrecognised name safe by construction rather than by luck.
+ *
+ * ## What it is deliberately NOT
+ *
+ * ⛔ Not a spelling guesser. It offers no "did you mean" — {@link
+ * metaUrlSpellingRefusal} is the verdict that can name a replacement, because
+ * it is the only one holding evidence of what the caller was reaching for.
+ * ⛔ Not a claim about the LIVE type set. A running kernel legitimately holds
+ * type keys this set does not — `data`, `kind` and `package` all enter
+ * `SchemaRegistry` during a perfectly ordinary `registerApp` — which is why
+ * the boundary applies this verdict where a namespace is MINTED and nowhere
+ * else. See `canonicalizeMetaRequestType` in `@objectstack/metadata-protocol`
+ * for that scoping and the measurement behind it.
+ */
+export function unrecognisedMetaTypeRefusal(urlType: string): { type: string } | null {
+  if (urlType in META_URL_TO_SINGULAR) return null;
+  if (CANONICAL_META_TYPES.has(urlType)) return null;
+  return { type: urlType };
 }
