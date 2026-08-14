@@ -139,7 +139,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         help: "Paquete que distribuye esta capacidad (ausente = curada por la plataforma o creada por un administrador)."
       },
       active: {
-        label: "Activo"
+        label: "Activo",
+        help: "Indicador de catálogo/visibilidad para filtrar y revisar. NO tiene ningún efecto sobre la autorización: las concesiones de los conjuntos de permisos y los requiredPermissions de los recursos comparan los nombres de capacidad como cadenas y nunca leen esta fila, por lo que desmarcarlo no revoca nada."
       },
       id: {
         label: "ID de capacidad"
@@ -169,7 +170,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       deactivate_capability: {
         label: "Desactivar",
-        confirmText: "¿Desactivar esta capacidad? Las concesiones y los requisitos de recursos que la referencian dejarán de resolverse hasta que se reactive.",
+        confirmText: "¿Desactivar esta capacidad? Es solo un indicador de catálogo: marca la fila como inactiva para filtrar y revisar en Setup. La autorización NO se ve afectada: los conjuntos de permisos que la conceden, y los recursos que la requieren, la comparan por nombre y se siguen resolviendo exactamente igual que antes.",
         successMessage: "Capacidad desactivada"
       }
     }

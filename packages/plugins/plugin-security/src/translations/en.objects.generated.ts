@@ -139,7 +139,8 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         help: "Package that ships this capability (absent = platform-curated or admin-created)."
       },
       active: {
-        label: "Active"
+        label: "Active",
+        help: "Catalogue/visibility flag for filtering and review. It has NO authorization effect: permission-set grants and resource requiredPermissions match capability names as strings and never read this row, so clearing it revokes nothing."
       },
       id: {
         label: "Capability ID"
@@ -169,7 +170,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       deactivate_capability: {
         label: "Deactivate",
-        confirmText: "Deactivate this capability? Grants and resource requirements that reference it stop resolving until re-activated.",
+        confirmText: "Deactivate this capability? This is a catalogue flag only: it marks the row inactive for filtering and review in Setup. Authorization is NOT affected — permission sets that grant this capability, and resources that require it, match it by name and keep resolving exactly as before.",
         successMessage: "Capability deactivated"
       }
     }
