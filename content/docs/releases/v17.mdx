@@ -3065,10 +3065,10 @@ Beyond the credential doors above:
   the caller's token is rotated and `stop-impersonating` recovers the admin —
   and `/auth/change-password` clears the force-change flag and enforces
   password-reuse on the bearer lane, not only on cookies.
-- **`sys_member.role` is canonicalised at the write** (#8317), so an org admin
-  can no longer remove an owner; a member can revoke their **own** API key
-  (#8053); and `member_default` grants owner-scoped read on the personal inbox
-  (#7344).
+- **A member's stored membership grade is canonicalised at the write** (#8317),
+  so an org admin can no longer remove an owner; a member can revoke their
+  **own** API key (#8053); and `member_default` grants owner-scoped read on the
+  personal inbox (#7344).
 
 ### Protocol & wire changes since rc.6
 
