@@ -51,6 +51,7 @@ function fakeEngine(opts: EngineOpts = {}) {
   const rowsOf = (t: string) => tables.get(t) ?? [];
   const matches = (row: any, where: Record<string, any>) =>
     Object.entries(where).every(([k, v]) => {
+      if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
       if (v && typeof v === 'object' && !Array.isArray(v)) {
         return Object.entries(v).every(([op, target]) => {
           if (op === '$lt') return row[k] < (target as any);

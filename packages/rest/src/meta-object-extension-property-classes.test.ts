@@ -257,7 +257,10 @@ async function measure(opts: {
         metadata: JSON.stringify(storedBody),
     }];
     const matches = (r: Record<string, unknown>, w: Record<string, unknown>) =>
-        Object.entries(w).every(([k, v]) => (r[k] ?? null) === (v ?? null));
+        Object.entries(w).every(([k, v]) => {
+            if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+            return (r[k] ?? null) === (v ?? null);
+        });
 
     const engine = {
         registry,

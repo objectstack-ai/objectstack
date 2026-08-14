@@ -50,7 +50,10 @@ function fakeEngine() {
   const tables = new Map<string, any[]>();
   const rowsOf = (t: string) => tables.get(t) ?? [];
   const matches = (row: any, where: Record<string, any>) =>
-    Object.entries(where).every(([k, v]) => row[k] === v);
+    Object.entries(where).every(([k, v]) => {
+      if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+      return row[k] === v;
+    });
   return {
     tables,
     rows: (t: string) => [...rowsOf(t)],

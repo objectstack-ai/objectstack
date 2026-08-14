@@ -33,6 +33,7 @@ function makeEngine() {
   function matches(row: Row, f: any): boolean {
     if (!f || typeof f !== 'object') return true;
     for (const [k, v] of Object.entries(f)) {
+      if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
       if (row[k] !== v) return false;
     }
     return true;

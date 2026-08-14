@@ -152,6 +152,7 @@ function makeEngine(
    */
   const matches = (row: Record<string, unknown>, where: Record<string, unknown>) =>
     Object.entries(where).every(([key, cond]) => {
+      if (key.startsWith('$')) throw new Error(`fake engine: unsupported operator ${key}`);
       if (cond !== null && typeof cond === 'object' && !Array.isArray(cond)) {
         const ops = Object.keys(cond as object);
         if (ops.length !== 1 || ops[0] !== '$in') {

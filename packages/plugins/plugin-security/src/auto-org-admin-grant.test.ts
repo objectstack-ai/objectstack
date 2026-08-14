@@ -110,6 +110,7 @@ function makeStub(seed: {
 
   const matches = (row: any, where: any) => {
     for (const [k, v] of Object.entries(where ?? {})) {
+      if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
       // `$in` — the ADR-0105 D4 backfill sweeps BOTH org-admin variants in one read.
       if (v && typeof v === 'object' && Array.isArray((v as any).$in)) {
         if (!(v as any).$in.includes(row[k])) return false;

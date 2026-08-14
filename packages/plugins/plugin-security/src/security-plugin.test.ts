@@ -3353,6 +3353,7 @@ describe('explainAccessForCaller (ADR-0090 D6/D12)', () => {
     };
     const matches = (row: any, where: any): boolean =>
       Object.entries(where ?? {}).every(([k, v]) => {
+        if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
         if (v && typeof v === 'object' && Array.isArray((v as any).$in)) return (v as any).$in.includes(row[k]);
         return row[k] === v;
       });
@@ -3472,6 +3473,7 @@ describe('SecurityPlugin — ADR-0090 D10 agent intersection', () => {
     }
     const matches = (row: any, where: any): boolean =>
       Object.entries(where ?? {}).every(([k, v]) => {
+        if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
         if (v && typeof v === 'object' && Array.isArray((v as any).$in)) return (v as any).$in.includes(row[k]);
         return row[k] === v;
       });
