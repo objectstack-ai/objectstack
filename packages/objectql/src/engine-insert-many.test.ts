@@ -88,7 +88,14 @@ describe('engine.insertMany — partial-success batch insert (framework#3172)', 
     }, { object: 'task' });
 
     const outcomes = await engine.insertMany('task', [
-      { name: 'good1' }, { slug: 'no-name' }, { name: 'good2' },
+      // [#8682] The middle row's defect is the MISSING REQUIRED `name` — which
+      // is what this case is about, and what makes the hook run for it. It used
+      // to be spelled `{ slug: 'no-name' }`, which carried a second, undeclared
+      // defect nobody meant to test: `slug` is not a field of `task`, so the
+      // declared-field door now refuses that row BEFORE the hooks, and the
+      // assertion below would be measuring the wrong refusal. An empty row says
+      // exactly the one thing intended.
+      { name: 'good1' }, {}, { name: 'good2' },
     ]);
 
     // The #3152 acceptance criterion: hooks fired ONCE per row.

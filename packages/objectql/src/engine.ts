@@ -112,6 +112,8 @@ import { isMissingTableError } from '@objectstack/metadata/errors';
 // engine is the consumer-side tolerant parsing PD #12 forbids and precedent
 // #5841 retired.
 import { isUniqueViolationError, uniqueViolationColumn } from '@objectstack/types';
+// [#8682] The write-path loggers' redaction — bound values never reach the log.
+import { redactBoundStatement } from './driver-fault-redaction.js';
 
 /**
  * Per-row outcome of {@link ObjectQL.insertMany} (framework#3172). One entry
@@ -975,6 +977,115 @@ function assertProjectionHasNoDottedPaths(
   err.fields = dotted;
   err.object = object;
   throw err;
+}
+
+/**
+ * [#8682] The DECLARED-FIELD DOOR on the insert path: a key the object does not
+ * declare is refused by the SCHEMA, before anything is produced for a request
+ * that is about to be refused anyway.
+ *
+ * ## What ran before this door existed
+ *
+ * Nothing rejected an undeclared write key. The row travelled the whole insert
+ * path and was refused at the very end by the DRIVER — `table crm_account has
+ * no column named zzz_nonexistent_field` — which `mapDataError` then translated
+ * into the (correct, unchanged) `400 INVALID_FIELD` the caller sees. The client
+ * answer was never the defect; what happened behind it was. Measured on
+ * `origin/main` for one mistyped key:
+ *
+ *   - an id, a normalized name, owner/creator resolution and the column
+ *     defaults were all produced;
+ *   - the app's `beforeInsert` hooks RAN, and their derived values reached the
+ *     statement (`period_label = 'Q3 2026'`, computed for a request nobody
+ *     would ever store);
+ *   - an AUTONUMBER was issued and CONSUMED — the log-independent observable,
+ *     and the one this door is pinned on: a valid create before the bad request
+ *     numbered `ACC-000013`, the bad request took `ACC-000014` into the void,
+ *     and the next valid create came back `ACC-000015`. A sequence gap is
+ *     permanent and visible to end users on a document number.
+ *
+ * A hook is not a pure function — it writes rows, calls out, stamps ledgers —
+ * so "it ran and we threw the result away" is not a no-op, it is a side effect
+ * of a request the server had already decided to refuse.
+ *
+ * ## Why HERE and not one step later
+ *
+ * This runs as the first act inside the middleware body: after middleware (a
+ * middleware may legitimately rewrite `data`, and judging the caller's keys
+ * before it ran would refuse rows a sanitizing middleware had already fixed),
+ * and before `applyFieldDefaults` — hence before the defaults, the summary
+ * seeding, the hooks, the strips, validation, the autonumber and the statement.
+ * The same placement, and the same argument, as {@link assertWriteAllowed} and
+ * `enforceTransactionOrigin` one level up: a refusal this early costs nothing.
+ * Like those two it throws without logging — the caller is told exactly what is
+ * wrong, and a client typo is not a server fault to record at ERROR.
+ *
+ * ## The verdict is the SCHEMA's field map, and the wire answer is unchanged
+ *
+ * `INVALID_FIELD` + 400, and the message is byte-identical to the one
+ * `mapDataError`'s driver-string branch produced (`Unknown field 'x' on object
+ * 'y'`) — so this moves WHERE the refusal is decided without moving what the
+ * caller reads. One condition keeps one wire shape however it was noticed, the
+ * same rule the read path's dotted-projection and unmaterializable-sort doors
+ * record. The driver-string branch stays where it is: it still backstops schema
+ * drift (a DECLARED field whose physical column is missing), which this door by
+ * construction cannot see.
+ *
+ * ## Where this door deliberately has NO opinion
+ *
+ * A door that cannot see the field map must not invent an opinion about it —
+ * the read-path doors' rule, and it decides two cases here:
+ *
+ *  - **`schema.fields` absent** (a registry-less host), and **`schema.fields`
+ *    EMPTY**. An empty map is indistinguishable from an unpopulated one: a real
+ *    registered object always carries at least its primary key, and the
+ *    registry injects the tenancy and audit columns on top, so zero declared
+ *    fields means the host did not fill the map in — not that the object
+ *    forbids every key. Refusing everything on that reading would be a verdict
+ *    made from an absence, which is what this clause exists to prevent.
+ *  - **`id` / `created_at` / `updated_at`**, which are tolerated even when the
+ *    map does not list them. This mirrors `find()` / `findOne()`, which add
+ *    exactly these three to their known set for exactly this reason: they are
+ *    provisioned by the platform rather than authored, so an object may legally
+ *    omit them from its declaration while the physical table has them. Same
+ *    three names, same rationale, so a key accepted by a read is not refused by
+ *    a write.
+ *
+ * In every one of those cases the driver remains the backstop it has always
+ * been — nothing is widened, the refusal simply moves back to where it was.
+ *
+ * @returns one entry per row: an `Error` for a row carrying undeclared keys,
+ *   `undefined` for a row that passes. Per row rather than throw-on-first
+ *   because the partial-success path (`insertMany`) reports per row and must
+ *   cull the bad rows instead of failing the batch around them.
+ */
+const PLATFORM_PROVISIONED_COLUMNS = ['id', 'created_at', 'updated_at'] as const;
+
+function undeclaredInsertFieldErrors(
+  object: string,
+  schema: { fields?: unknown } | undefined,
+  rows: readonly unknown[],
+): Array<Error | undefined> {
+  const out: Array<Error | undefined> = new Array(rows.length);
+  const fields = schema?.fields;
+  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return out;
+  const declared = new Set(Object.keys(fields as Record<string, unknown>));
+  if (declared.size === 0) return out;
+  for (const provisioned of PLATFORM_PROVISIONED_COLUMNS) declared.add(provisioned);
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
+    const undeclared = Object.keys(row as Record<string, unknown>).filter((key) => !declared.has(key));
+    if (undeclared.length === 0) continue;
+    const err: any = new Error(`Unknown field '${undeclared[0]}' on object '${object}'`);
+    err.status = 400;
+    err.code = 'INVALID_FIELD';
+    err.field = undeclared[0];
+    err.fields = undeclared;
+    err.object = object;
+    out[i] = err as Error;
+  }
+  return out;
 }
 
 /**
@@ -7959,6 +8070,23 @@ export class ObjectQL implements IObjectQLEngine {
       // untouched, hooks run after and may override.
       const nowSnap = new Date();
       const isBatch = Array.isArray(opCtx.data);
+      // [#8682] The declared-field door — see `undeclaredInsertFieldErrors` for
+      // what used to run below it for a request that was already refused.
+      // FIRST, so nothing downstream (defaults, summary seeding, the hooks, the
+      // secret writes, validation, the autonumber) happens for a row the schema
+      // rejects. Non-partial callers get the refusal thrown here; the
+      // partial-success path (`insertMany`) carries it per row into `rowErrors`
+      // below, where the culled rows also skip the hooks and every producer.
+      const undeclaredPerRow = undeclaredInsertFieldErrors(
+        object,
+        this._registry.getObject(object) as { fields?: unknown } | undefined,
+        isBatch ? (opCtx.data as unknown[]) : [opCtx.data],
+      );
+      const partialRowMode = isBatch && (options as any)?.__partialRowErrors === true;
+      if (!partialRowMode) {
+        const refusal = undeclaredPerRow.find((e) => e !== undefined);
+        if (refusal) throw refusal;
+      }
       // [#4441] The RAW caller payload per row — before `applyFieldDefaults`
       // resolves any `defaultValue` / `current_user` token and before the
       // beforeInsert hooks stamp `owner_id` / `organization_id` /
@@ -8027,8 +8155,14 @@ export class ObjectQL implements IObjectQLEngine {
           ql: this,
         }),
       );
-      for (const rowCtx of rowHookContexts) {
-        await this.triggerHooks('beforeInsert', rowCtx);
+      // [#8682] A row the declared-field door refused runs NO hook. In
+      // non-partial mode the throw above already returned, so this skip only
+      // ever fires for a culled row of a partial batch — where the whole point
+      // is that one bad row costs the others nothing, and a hook that stamps a
+      // ledger or calls out must not fire for a row that will never be written.
+      for (let i = 0; i < rowHookContexts.length; i++) {
+        if (undeclaredPerRow[i] !== undefined) continue;
+        await this.triggerHooks('beforeInsert', rowHookContexts[i]);
       }
       // Thread the open transaction (if any) into the driver-facing
       // options so that knex's `.transacting(trx)` is honoured. Without
@@ -8058,9 +8192,16 @@ export class ObjectQL implements IObjectQLEngine {
         // whole-batch degradation that re-runs beforeInsert hooks on the good
         // rows. rowErrors[i] set = row i is dead; only live rows reach the
         // driver / afterInsert / summaries.
-        const partialMode = isBatch && (options as any)?.__partialRowErrors === true;
+        const partialMode = partialRowMode;
         const rowErrors: (unknown | undefined)[] = new Array(rows.length);
+        // [#8682] Rows the declared-field door refused are already dead on
+        // arrival — seeded BEFORE the credential loop below, which is the first
+        // pass with a real side effect (`encryptSecretFields` writes a
+        // `sys_secret` row), so a culled row cannot mint a secret for a write
+        // that will never happen.
+        for (let i = 0; i < rows.length; i++) rowErrors[i] = undeclaredPerRow[i];
         for (let i = 0; i < rows.length; i++) {
+          if (rowErrors[i] !== undefined) continue;
           try {
             // [#8559] Both halves of the credential write door, per row: the
             // password refusal at its own seam, then the secret channel (which
@@ -8378,7 +8519,14 @@ export class ObjectQL implements IObjectQLEngine {
         if (summaryFailures.length > 0) throw new SummaryRecomputeError(summaryFailures, written);
         return written;
       } catch (e) {
-        this.logger.error('Insert operation failed', e as Error, { object });
+        // [#8682] Same message, same ERROR level, same `object` — only the
+        // driver's inlined statement and its bound values are cut, from BOTH
+        // `message` and `stack` (the logger serializes exactly those two, and
+        // the stack re-opened with the statement a second time). What the
+        // database itself said, including the failing column, is kept; the
+        // error rethrown below is untouched, so the caller's answer does not
+        // move. See `redactBoundStatement`.
+        this.logger.error('Insert operation failed', redactBoundStatement(e) as Error, { object });
         throw e;
       }
     });
@@ -9441,7 +9589,12 @@ export class ObjectQL implements IObjectQLEngine {
            if (summaryFailures.length > 0) throw new SummaryRecomputeError(summaryFailures, hookContext.result);
            return hookContext.result;
        } catch (e) {
-          this.logger.error('Update operation failed', e as Error, { object });
+          // [#8682] The insert logger's twin, and measured to carry the same
+          // exposure: an UPDATE statement inlines the caller's values in its
+          // `set` clause exactly as an INSERT does in its `values` list. Same
+          // redaction, same one argument — the message, the level and the
+          // `object` are unchanged.
+          this.logger.error('Update operation failed', redactBoundStatement(e) as Error, { object });
           throw e;
        }
      });
@@ -10193,8 +10346,14 @@ export class ObjectQL implements IObjectQLEngine {
           // `deleteBehavior:'cascade'` remedy) would reach no channel at all,
           // and the server log of a zh-CN deployment would read in Chinese. An
           // error that carries no `developerMessage` logs exactly as before.
+          // [#8682] Same redaction as the insert/update loggers. A DELETE's
+          // statement carries the caller's values in its `where` clause — which
+          // is how a record is addressed, so it is the same class of payload.
+          // `developerMessage` is read off the ORIGINAL error: it is written by
+          // our own throw sites (#7307), never by a driver, so it carries no
+          // statement and the redaction has no opinion about it.
           const devDetail = (e as any)?.developerMessage;
-          this.logger.error('Delete operation failed', e as Error, {
+          this.logger.error('Delete operation failed', redactBoundStatement(e) as Error, {
             object,
             ...(typeof devDetail === 'string' && devDetail.length > 0 ? { developerMessage: devDetail } : {}),
           });

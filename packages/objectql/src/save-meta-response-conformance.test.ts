@@ -56,6 +56,16 @@ const sysMetadataObject: ServiceObject = {
         type: { name: 'type', label: 'Type', type: 'text' as const, required: true },
         name: { name: 'name', label: 'Name', type: 'text' as const, required: true },
         organization_id: { name: 'organization_id', label: 'Org', type: 'text' as const },
+        // [#8682] Declared on the real `sys_metadata`
+        // (`metadata-core/src/objects/sys-metadata.object.ts`), where it is part
+        // of the row's uniqueness key `(type, name, organization_id,
+        // package_id)`, and written by `SysMetadataRepository` — but omitted by
+        // this minimal stub. Nothing noticed while an undeclared write key just
+        // travelled on to the driver; the declared-field door judges the payload
+        // against this map, so the omission now shows up as the fixture defect
+        // it always was. (`sys_metadata_history` genuinely carries none, so its
+        // sibling stub below is left alone.)
+        package_id: { name: 'package_id', label: 'Package', type: 'text' as const },
         metadata: { name: 'metadata', label: 'Body', type: 'textarea' as const },
         checksum: { name: 'checksum', label: 'Checksum', type: 'text' as const, maxLength: 71 },
         state: { name: 'state', label: 'State', type: 'text' as const },
