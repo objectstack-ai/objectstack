@@ -33,12 +33,24 @@
  * `content/docs/automation/hook-bodies.mdx` all describe this split; if any of
  * them drifts back to "silently never lands", one half of this file fails.
  *
- * The insert cases run the FULL chain — real QuickJS sandbox, real hook body,
- * real engine, real driver — so link 1 is proved rather than assumed: if
- * `applyMutationsToInput` ever learned to filter, the SQL insert would stop
- * throwing. The update cases go straight at the engine, because that is where
- * `validateRecord`'s update branch lives and a `beforeUpdate` body would only
- * add the flat-input envelope to the thing under test.
+ * Every case runs the FULL chain — real QuickJS sandbox, real hook body, real
+ * engine, real driver — so link 1 is proved rather than assumed: if
+ * `applyMutationsToInput` ever learned to filter, the SQL write would stop
+ * throwing.
+ *
+ * [#8738] The update cases used to go straight at the engine instead, on the
+ * reasoning that a `beforeUpdate` body "would only add the flat-input envelope
+ * to the thing under test". That equivalence is gone, and its loss is what this
+ * file now has to say out loud: the DECLARED-FIELD DOOR (#8682 on insert,
+ * #8738 on update) refuses a key the CALLER names before any hook runs, so a
+ * caller payload no longer stands in for a body mutation. Both update cases
+ * therefore carry a real `beforeUpdate` body, matching the insert arm, and the
+ * caller-payload case is pinned separately at the foot of the file — where the
+ * answer is a schema refusal on BOTH families and there is no split at all.
+ *
+ * Which half is which matters for reading the three prose surfaces above: they
+ * describe what a BODY write does, and a body write is exactly the half the
+ * door does not touch.
  */
 
 /**
@@ -162,6 +174,34 @@ const CORRECT_HOOK = {
   body: { language: 'js', source: `ctx.input.stage = 'won';` },
 };
 
+/**
+ * [#8738] The same authoring mistake on the UPDATE verb, and it has to be a
+ * BODY rather than a caller payload — which is a change of METHOD, not of
+ * subject.
+ *
+ * These two cases used to call `engine.update(...)` with the typo in the
+ * caller's own payload, on the file's stated reasoning that "a `beforeUpdate`
+ * body would only add the flat-input envelope to the thing under test". The
+ * declared-field door falsifies that equivalence: since #8682 on insert and
+ * #8738 on update, a key the CALLER names is refused by the schema before any
+ * hook runs, so a caller payload no longer stands in for a body mutation — it
+ * tests the door instead, and the driver split it is supposed to reach is
+ * never exercised.
+ *
+ * The subject is unchanged and still measured on both families: a key a BODY
+ * writes is added AFTER the door and still reaches the driver verbatim, so
+ * `applyMutationsToInput` → `validateRecord`'s `if (!def) continue` → the
+ * driver is intact, and it is what `content/docs/automation/hook-bodies.mdx`
+ * ("What still happens at runtime") and the two lint messages describe. The
+ * caller-payload half now has its own cases below, pinning the door.
+ */
+const UPDATE_TYPO_HOOK = {
+  name: 'deal_stage_typo_update',
+  object: 'deal',
+  events: ['beforeUpdate'],
+  body: { language: 'js', source: `ctx.input.stagee = 'won';` },
+};
+
 describe('#4271 an undeclared field written by an L2 body — the real runtime split', () => {
   let engine: ObjectQL | null = null;
   let dir: string | null = null;
@@ -218,11 +258,13 @@ describe('#4271 an undeclared field written by an L2 body — the real runtime s
     }, 30000);
 
     it('fails an UPDATE the same way, and leaves the row untouched', async () => {
-      const e = await bootSql();
+      const e = await bootSql(UPDATE_TYPO_HOOK);
       const row = await e.insert('deal', { stage: 'open', amount: 10 });
-      // `validateRecord`'s update branch `continue`s past the unknown key
-      // rather than rejecting it, so the driver is what refuses the write.
-      await expect(e.update('deal', { id: row.id, stagee: 'won' } as any))
+      // The caller's payload is entirely DECLARED, so the door passes it; the
+      // body then adds the typo, and `validateRecord`'s update branch
+      // `continue`s past the unknown key rather than rejecting it, so the
+      // driver is still what refuses the write.
+      await expect(e.update('deal', { id: row.id, stage: 'negotiating' } as any))
         .rejects.toThrow(/stagee/);
       const after: any = (await e.find('deal', { where: { id: row.id } } as any))[0];
       expect(after.stage).toBe('open');
@@ -255,11 +297,62 @@ describe('#4271 an undeclared field written by an L2 body — the real runtime s
     }, 30000);
 
     it('persists it on UPDATE too', async () => {
-      const e = await bootMemory();
+      const e = await bootMemory(UPDATE_TYPO_HOOK);
       const row = await e.insert('deal', { stage: 'open', amount: 10 });
-      await e.update('deal', { id: row.id, stagee: 'won' } as any);
+      await e.update('deal', { id: row.id, stage: 'negotiating' } as any);
       const stored: any = (await e.find('deal', { where: { id: row.id } } as any))[0];
       expect(stored.stagee).toBe('won');
+      // The declared key of the same write landed as well — the body's typo
+      // costs the schemaless family nothing, which is the half of the split
+      // that makes "it fails" the wrong thing to tell an author here.
+      expect(stored.stage).toBe('negotiating');
+    }, 30000);
+  });
+
+  // ─── The other half of the same question: who refuses a CALLER's typo ──────
+
+  /**
+   * [#8682 / #8738] The declared-field door, and the reason the cases above had
+   * to move to bodies.
+   *
+   * The driver split is a fact about keys that arrive BELOW the engine's own
+   * validation — which is what a body mutation is, and what a caller payload
+   * has stopped being. A key the caller names is now refused by the object's
+   * FIELD MAP, before the hooks, before the statement, and — the point that
+   * decides these two cases — before any driver is consulted at all. So there
+   * is no split to observe: the verdict is a schema verdict, and both families
+   * get the identical ADR-0112 envelope.
+   *
+   * Pinned here rather than left implicit because this file is where a reader
+   * comes to learn what happens to an undeclared write, and half an answer
+   * ("SQL fails, schemaless persists") is what sent the old lint message
+   * wrong in the first place.
+   */
+  describe('a CALLER-supplied undeclared key — the schema refuses, on both families', () => {
+    it('SQL: refused before the driver, and the row is untouched', async () => {
+      const e = await bootSql();
+      const row = await e.insert('deal', { stage: 'open', amount: 10 });
+
+      const err: any = await e.update('deal', { id: row.id, stagee: 'won' } as any).catch((x: unknown) => x);
+
+      expect(err?.code).toBe('INVALID_FIELD');
+      expect(err?.status).toBe(400);
+      const after: any = (await e.find('deal', { where: { id: row.id } } as any))[0];
+      expect(after.stage).toBe('open');
+    }, 30000);
+
+    it('schemaless: refused too — the door is a schema verdict, not a driver one', async () => {
+      // The one case in this file where the two families AGREE, and it is not
+      // a coincidence: nothing here ever reaches a driver to disagree.
+      const e = await bootMemory();
+      const row = await e.insert('deal', { stage: 'open', amount: 10 });
+
+      const err: any = await e.update('deal', { id: row.id, stagee: 'won' } as any).catch((x: unknown) => x);
+
+      expect(err?.code).toBe('INVALID_FIELD');
+      expect(err?.status).toBe(400);
+      const stored: any = (await e.find('deal', { where: { id: row.id } } as any))[0];
+      expect(stored).not.toHaveProperty('stagee');
     }, 30000);
   });
 });
