@@ -6,8 +6,6 @@
  *
  *   node scripts/pm/check-dispatch-gates.mjs   # runs the tool's --self-test
  *
- * ⚠️ This header names repo paths UNQUOTED on purpose — see the last section.
- *
  * ## Why the gate exists
  *
  * scripts/pm/dispatch-gates.mjs derives the "local gates for this card" line of
@@ -53,21 +51,48 @@
  * none"), so shipping it as the price of gating the tool would have taken more
  * from every dispatch prompt than the gate gives back.
  *
+ * Those numbers are PRE-MASKING, and the decision they justify survives on
+ * narrower grounds than they describe. maskSelfTests now blanks the fixture
+ * half outright: measured on this tree, the tool's own source yields 4 hints,
+ * not 49 — .github/workflows, which it really reads, and packages/plugins,
+ * packages/drivers, packages/services, the bases its package resolver probes.
+ * Those three are real reads and still cover three of the largest directories
+ * in the tree, so a directly-wired gate would print MATCHED for every card
+ * under them — a smaller fabrication than the fixture one, of the same kind.
+ * The spec filter path from the incident above no longer matches at all.
+ *
  * A separate gate file is also what the other two pm gates look like
  * (check-skill-line-ratchet.mjs, check-skill-id-lint.mjs). Its watch hints are
  * the one constant below: this gate is matched for a card that edits the tool,
  * and for nothing else — which is the blind spot #8162 is about.
  *
- * ## Why the paths above are unquoted
+ * ## Why the paths above are unquoted, and why that is no longer required
  *
- * Watch-hint extraction reads any quoted-looking span, backticks included, and
- * does not skip comments. Written the ordinary way, with each path in backticks,
- * this header alone yielded ten hints — packages/spec/src, packages/objectql,
+ * The incident is real and worth keeping. Watch-hint extraction reads any
+ * quoted-looking span, backticks included, and it USED TO read comments as
+ * well. Written the ordinary way, with each path in backticks, this header
+ * alone yielded ten hints — packages/spec/src, packages/objectql,
  * packages/plugins, packages/drivers, .claude/agents, .changeset among them —
  * and reproduced, from the file explaining the pollution, the exact false
  * MATCHED leads it exists to avoid (measured, not predicted: the first draft of
- * this file did it). So paths are named unquoted here, and the only quoted path
- * in this file is the one input this gate genuinely has.
+ * this file did it). Hence the convention.
+ *
+ * The extractor no longer works that way: extractWatchHints opens with
+ * maskComments, whose own docblock names this file as the specimen it retires.
+ * Measured on this tree, with every repo path this header names rewritten into
+ * backticks: 1 hint under today's extractor — scripts/pm/dispatch-gates.mjs,
+ * the same single hint the file ships with — against 10 under the pre-masking
+ * one, reaching spec, objectql, plugins, drivers, .claude/agents and .changeset
+ * exactly as the incident describes. Comment masking alone accounts for the
+ * difference: masking self-test bodies instead changes nothing here, because
+ * this file has none.
+ *
+ * So the unquoting is no longer load-bearing, and this section is history
+ * rather than an instruction: quoting a path in a comment here is now free, and
+ * the paths stay unquoted because rewriting them buys nothing. What is NOT free
+ * is a path literal in a module body — masking cannot reach one — so the one
+ * quoted path below is still the one input this gate genuinely has, and that is
+ * the rule to carry into a new gate's header rather than the unquoting.
  *
  * Nothing else belongs in this file. Assertions go in the tool's own self-test,
  * beside the code they judge; this is the CI invocation and its reason.

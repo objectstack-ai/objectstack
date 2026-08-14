@@ -728,13 +728,14 @@ export function i18nBundlePackageDirs() {
  *   `--re-measure`, which is the half a new test file's type errors move. This
  *   entry named the first while explaining the second, so a dev seat ran it in
  *   good faith, reported the union green, and CI found four new type errors.
- *   Swept over this tree when that was fixed: of the 73 families the workflows
- *   discover, 8 resolve to a script some other family also resolves to — and 7
- *   of those 8 are the other shape, a `check:` script beside a direct
- *   `node scripts/check-x.mjs` step in a second workflow, which `derive`
- *   discovers as its own family and prints with its own runnable invocation.
- *   The pair below is the only one where two ROOT SCRIPTS differ by a flag, so
- *   this is a one-off today and the rule is what generalises, not the fix.
+ *   Swept over this tree when that was fixed: the workflows discover 96
+ *   families resolving to 73 distinct script files, and 8 of those files are
+ *   reached by more than one family — 7 of the 8 in the other shape, a `check:`
+ *   script beside a direct `node scripts/check-x.mjs` step in a second
+ *   workflow, which `derive` discovers as its own family and prints with its
+ *   own runnable invocation. The pair below is the only one where two ROOT
+ *   SCRIPTS differ by a flag, so this is a one-off today and what generalises
+ *   is the rule, not the fix.
  * - Prose in a `why` is a MODULE-BODY string, so it is scanned for watch hints
  *   like any other literal — comment masking cannot reach it. The ratchet
  *   entry's remedy command therefore spells its `--filter` values unquoted (and
