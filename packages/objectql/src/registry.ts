@@ -744,6 +744,21 @@ function provisionTenantScopeIndex(
  * `organization_id` present be the platform's own definition byte-for-byte
  * (`isInjectedColumnDefinition`). Where the column comes from is no longer part
  * of the question; whether the object is walled still is.
+ *
+ * ⛔ Do NOT "simplify" this to a field-map check (`fields.organization_id !==
+ * undefined`), however closely that reads to the ruling's sentence. Measured:
+ * it breaks the WRITE path for ordinary platform-provisioned objects. The save
+ * path strips the injected COLUMNS before it strips the materialized stamps
+ * (`stripMaterializedFromRegistry(type, stripServedSystemColumns(type, item))`,
+ * `@objectstack/metadata-protocol`), so by the time
+ * {@link SchemaRegistry.stripProvisionedTenantIndexFrom} re-stamps the
+ * remainder through this function, the body no longer HAS an
+ * `organization_id` — a field-map predicate answers "not tenant-scoped", the
+ * re-stamp adds nothing, the lists differ, the strip refuses, and the
+ * platform's own index entry is baked into `sys_metadata.metadata`, its
+ * checksum and every history diff (the #4326 regression). Reading the object's
+ * DECLARATIONS instead reaches the same verdict on a stripped body as on a
+ * whole one, which is what makes the stamp and its inverse agree.
  */
 function carriesTenantScopeColumn(schema: ServiceObject): boolean {
   return resolveInjectedSystemColumns(schema).tenant;
