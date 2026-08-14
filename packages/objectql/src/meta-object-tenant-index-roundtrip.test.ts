@@ -74,6 +74,8 @@ const PLATFORM_TENANT_INDEX = { fields: ['organization_id'] };
 const AUTHORED = {
     name: 'crm_lead',
     label: 'Lead',
+    // [#8310] The runtime object door requires an authored OWD.
+    sharingModel: 'private',
     fields: {
         name: { name: 'name', label: 'Name', type: 'text' },
         code_label: { name: 'code_label', label: 'Code label', type: 'text' },

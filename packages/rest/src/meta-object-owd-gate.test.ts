@@ -1,50 +1,44 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #7674 — the ADR-0090 D11 object posture gate, driven through the REAL save
- * path on the topology it was measured absent from.
+ * #7674 → #8310 — OWD posture at the runtime object door, driven through the
+ * REAL save path on the host-config topology, re-pinned to the ruled door
+ * ORDER.
  *
- * ## Why this file exists, and why the unit suite could not stand in for it
+ * ## The door order this file pins (#8310 maintainer ruling)
  *
- * `plugin-security/src/object-posture-gate.test.ts` is **18/18 green** and was
- * green throughout — it calls `objectPostureGate(ctx)` directly, so it proves
- * the verdict function and nothing about whether anything ever calls it. On
- * `origin/main` before this change, a grep for `owd_external_wider` across the
- * whole repo found exactly two files: the gate source and that unit test. No
- * test anywhere reached the gate through `saveMetaItem`, and the #3050 call
- * site that dispatches it was wrapped in `if (this.environmentId !== undefined)`
- * — a key the CLI's lightweight host-config assembler leaves undefined
- * (`serve.ts`'s `config.objects && !hasObjectQL` branch → `new ObjectQLPlugin()`
- * with no options; `isHostConfig` → `shouldBootWithLibrary === false` is the
- * flagship showcase's own boot shape). So R1 and R2 executed on **no
- * self-hosted deployment at all**, and the measured answers to the three PUTs
- * below were `200`, `200`, `200`.
+ * `saveMetaItem` runs `assertRuntimeAuthoringRules` (the shared lint table —
+ * 422 `INVALID_METADATA`, per-rule `issues`) BEFORE `runAuthoringGate` (the
+ * ADR-0094-seam plugin gate — 403). Since #8310 declared `object` in
+ * `validateSecurityPosture`'s `runtimeTypes`:
  *
- * A unit-tested gate with no integration coverage through the real save path is
- * exactly how that survived, which is why this file is a peer of the one-line
- * predicate change rather than a garnish on it.
+ *  - **The 422 lint door answers FIRST** for every posture defect it judges:
+ *    an unauthored `sharingModel` (`security-owd-unset` — absence is not a
+ *    decision; the ruled strictness), and external > internal
+ *    (`security-external-wider-than-internal`).
+ *  - **The 403 R1 door (`owd_widening_forbidden`, env-tighten-only over a
+ *    packaged declaration) remains** for writes that pass lint — no lint
+ *    rule can judge it, because it needs the packaged declaration.
+ *  - **R2 (`owd_external_wider`) is RETIRED from the plugin gate** as the
+ *    lint door's duplicate (same ruling; see `object-posture-gate.ts`). Its
+ *    former pins here are re-pinned onto the 422 envelope, and the door-order
+ *    case below proves the lint door answers even when R1 would also refuse.
+ *  - The former pin that a write with NO OWD keys at all SAVES (ADR-0094
+ *    read absence as the D1 `private` default) is OVERTURNED by the ruling:
+ *    absence now refuses (`security-owd-unset`), pinned below.
  *
- * ## The harness is the host-config topology, deliberately
- *
- * Nothing here is hand-built: a REAL better-sqlite3 `:memory:` engine, a REAL
- * `ObjectStackProtocolImplementation` constructed the way the lightweight
- * assembler constructs it (**no environment id, no declared channel** — so the
- * constructor default `'environment'` is what arms the gate), the REAL
- * `registerObjectPostureGate` wiring plugin-security performs at init, and the
- * REAL `PUT /api/v1/meta/:type/:name` route a client calls. `environmentId`
- * being undefined is asserted in `boot()` rather than assumed: it is the
- * premise of the whole file, and a harness that quietly grew one would turn
- * every case below into a test of the pre-#7674 code path.
+ * #7674's original point stands underneath: this file reaches the doors
+ * through the real `PUT /api/v1/meta/:type/:name` route on the host-config
+ * topology (no environment id), where a unit-only gate once silently ran on
+ * no deployment at all.
  *
  * ## Rejection cases assert the ENVELOPE (ADR-0112)
  *
- * Every refusal asserts `code` AND `status`. A bare "it failed" assertion would
- * be worthless twice over here: this route ANSWERS rather than throws, and the
- * unfixed build answers `200`, so a status-only check would at least catch it —
- * but a `rejects.toThrow()`-shaped check at the protocol level would not, since
- * an object body that reaches persistence on a misconfigured store throws a
- * bare driver `Error` whose `code` and `status` are both `undefined`. The pair
- * is what separates "refused by the gate" from "failed somewhere downstream".
+ * Every refusal asserts `code` AND `status` (and for the 422s, the lint rule
+ * id inside `issues`). This route ANSWERS rather than throws, and an object
+ * body that reaches persistence on a misconfigured store throws a bare driver
+ * `Error` whose `code` and `status` are both `undefined` — the pair is what
+ * separates "refused by the gate" from "failed somewhere downstream".
  *
  * ## Scope
  *
@@ -255,23 +249,22 @@ async function boot(opts: { channel?: MetadataAuthoringChannel; envWritableObjec
 }
 
 // ---------------------------------------------------------------------------
-// R2 — ADR-0090 D11: external ≤ internal, on all three doors the issue measured
+// The 422 lint door — external ≤ internal and authored-OWD-required (#8310)
 // ---------------------------------------------------------------------------
 
-describe('[#7674] R2 `owd_external_wider` through PUT /api/v1/meta/object/:name', () => {
+describe('[#8310] the 422 lint door through PUT /api/v1/meta/object/:name', () => {
     /**
-     * The issue's three measured 200s, as one table. They are separate doors
-     * rather than one: `?mode=draft` takes the draft branch of `saveMetaItem`,
-     * `?package=` binds the row to a software package, and the bare PUT is the
-     * active path. #4463 D1 records what happens when only one of two doors
-     * gates — the draft is the first half of a second minting path — so all
-     * three are pinned, not just the headline one.
+     * #7674 pinned these doors on the plugin gate's 403; #8310 re-pins them on
+     * the 422 lint envelope, because `validateSecurityPosture` now runs for
+     * `object` writes FIRST. The bare PUT and the package door both take the
+     * active-state gate; the draft door is pinned separately below (the lint
+     * discipline gates the draft→active PROMOTION, #4463 D1, not the draft
+     * save itself).
      */
     it.each([
         { door: 'the active path (bare PUT)', query: {} as Record<string, unknown> },
-        { door: 'the draft path (`?mode=draft`)', query: { mode: 'draft' } },
         { door: 'package authoring (`?package=demo_pkg`)', query: { package: 'demo_pkg' } },
-    ])('refuses 403 owd_external_wider on $door', async ({ query }) => {
+    ])('refuses 422 security-external-wider-than-internal on $door', async ({ query }) => {
         const { put, storedRows } = await boot();
 
         const res = await put('qa_probe', probeObject({
@@ -279,28 +272,95 @@ describe('[#7674] R2 `owd_external_wider` through PUT /api/v1/meta/object/:name'
             externalSharingModel: 'public_read',
         }), query);
 
-        // ADR-0112 envelope — both halves. `200` is what this answered before.
-        expect(res._status).toBe(403);
-        expect(res._json?.code).toBe('owd_external_wider');
-        expect(String(res._json?.error)).toContain('externalSharingModel');
+        // ADR-0112 envelope — both halves, plus the lint rule id the 422
+        // carries in `issues`. `403 owd_external_wider` is what this answered
+        // before the retirement; `200` is what it answered before #7674.
+        expect(res._status).toBe(422);
+        expect(res._json?.code).toBe('INVALID_METADATA');
+        expect((res._json?.issues ?? []).map((i: any) => i.rule))
+            .toContain('security-external-wider-than-internal');
 
         // The point the status code alone cannot make: the gate is
-        // PRE-persistence. A 403 answered after the row landed would still be
+        // PRE-persistence. A 422 answered after the row landed would still be
         // the defect, and `GET` would still return the violating pair.
         expect(await storedRows('qa_probe')).toEqual([]);
     }, 60_000);
 
-    it('catches the unset-internal case too — an absent `sharingModel` is `private` (ADR-0090 D1)', async () => {
-        // The gate resolves an unset internal to `private` rather than skipping
-        // the comparison, so the most natural authoring mistake — declaring only
-        // the external side — is refused rather than waved through.
+    it('an OWD-less publish is refused — 422 security-owd-unset (absence is not a decision)', async () => {
+        // THE RULED STRICTNESS (#8310, overturning this file's previous "no
+        // OWD keys at all SAVES" pin): ADR-0094's reading — absence defaults
+        // to the D1 `private` — governed while no lint rule ran at this door.
+        // The maintainer ruling flips it: the runtime object door requires an
+        // AUTHORED posture, and a body with no `sharingModel` is refused
+        // outright rather than silently defaulted.
+        const { put, storedRows } = await boot();
+
+        const res = await put('qa_probe', probeObject());
+
+        expect(res._status).toBe(422);
+        expect(res._json?.code).toBe('INVALID_METADATA');
+        expect((res._json?.issues ?? []).map((i: any) => i.rule)).toContain('security-owd-unset');
+        expect(await storedRows('qa_probe')).toEqual([]);
+    }, 60_000);
+
+    it('declaring only the external side is refused as the MISSING internal decision (owd-unset)', async () => {
+        // #7674's unset-internal case, re-pinned. R2 resolved the unset
+        // internal to `private` and called the defect `owd_external_wider`;
+        // the ruled door names the actual defect — the internal decision was
+        // never authored.
         const { put, storedRows } = await boot();
 
         const res = await put('qa_probe', probeObject({ externalSharingModel: 'public_read_write' }));
 
-        expect(res._status).toBe(403);
-        expect(res._json?.code).toBe('owd_external_wider');
+        expect(res._status).toBe(422);
+        expect(res._json?.code).toBe('INVALID_METADATA');
+        expect((res._json?.issues ?? []).map((i: any) => i.rule)).toContain('security-owd-unset');
         expect(await storedRows('qa_probe')).toEqual([]);
+    }, 60_000);
+
+    it('the draft door: a dirty draft SAVES (D1), and the draft→active PROMOTION refuses 422', async () => {
+        // #7674 pinned a 403 on `?mode=draft` because the plugin gate ran on
+        // drafts too. The lint discipline is deliberately different (#4463
+        // D1): drafts are work-in-progress and save ungated; the gate arms on
+        // the draft→active promotion, so the second minting path stays closed
+        // without making a half-finished body unsaveable. That discipline now
+        // governs the object door too.
+        const { put, protocol } = await boot();
+
+        const res = await put('qa_probe', probeObject({
+            sharingModel: 'private',
+            externalSharingModel: 'public_read',
+        }), { mode: 'draft' });
+        expect(res._status, `draft save must pass ungated: ${JSON.stringify(res._json)}`).toBe(200);
+
+        const err = await (protocol as any).publishMetaItem({ type: 'object', name: 'qa_probe' })
+            .then(() => null, (e: any) => e);
+        expect(err, 'the promotion is where the lint verdict binds').toBeInstanceOf(Error);
+        expect(err.status).toBe(422);
+        expect(err.code).toBe('INVALID_METADATA');
+        expect((err.issues ?? []).map((i: any) => i.rule))
+            .toContain('security-external-wider-than-internal');
+    }, 60_000);
+
+    it('door ORDER: when lint AND R1 would both refuse, the 422 lint door answers first', async () => {
+        // An env overlay over the packaged object whose body is BOTH
+        // external-wider (lint) and posture-widening against the packaged
+        // baseline (R1: external `public_read` > declared external `private`).
+        // The ruling fixes the order: the lint table answers first
+        // (`saveMetaItem` runs it before `runAuthoringGate`), so the author
+        // sees the 422 vocabulary, never a coin-flip between two doors.
+        const { put, storedRows } = await boot();
+
+        const res = await put('qa_packaged_account', packagedOverlay({
+            sharingModel: 'private',
+            externalSharingModel: 'public_read',
+        }));
+
+        expect(res._status).toBe(422);
+        expect(res._json?.code).toBe('INVALID_METADATA');
+        expect((res._json?.issues ?? []).map((i: any) => i.rule))
+            .toContain('security-external-wider-than-internal');
+        expect(await storedRows('qa_packaged_account')).toEqual([]);
     }, 60_000);
 });
 
@@ -334,11 +394,13 @@ describe('[#7674] R1 `owd_widening_forbidden` through PUT /api/v1/meta/object/:n
     }, 60_000);
 
     it('refuses a widened EXTERNAL side against the packaged baseline', async () => {
-        // Distinct from R2: `public_read` external against `public_read`
-        // internal is NOT external-wider, so R2 passes the body. Only the
-        // comparison against the PACKAGED declaration (external `private`) can
-        // refuse it. A suite that only ever sent an external-wider pair could
-        // not tell the two rules apart.
+        // Distinct from the lint door: `public_read` external against
+        // `public_read` internal is NOT external-wider, so the 422 lint table
+        // passes the body. Only the comparison against the PACKAGED
+        // declaration (external `private`) can refuse it — which is exactly
+        // why R1 SURVIVES the #8310 retirement while R2 did not. A suite that
+        // only ever sent an external-wider pair could not tell the doors
+        // apart.
         const { put, storedRows } = await boot();
 
         const res = await put('qa_packaged_account', packagedOverlay({
@@ -367,7 +429,11 @@ describe('[#7674] what the gate must still let through', () => {
         { pair: 'private / private', over: { sharingModel: 'private', externalSharingModel: 'private' } },
         { pair: 'public_read / private (external TIGHTER)', over: { sharingModel: 'public_read', externalSharingModel: 'private' } },
         { pair: 'public_read / public_read (equal, not wider)', over: { sharingModel: 'public_read', externalSharingModel: 'public_read' } },
-        { pair: 'no OWD keys at all', over: {} },
+        // 'no OWD keys at all' left this table on #8310: absence is now a
+        // 422 refusal (`security-owd-unset`), pinned in the lint-door suite
+        // above — the ruling overturned ADR-0094's absence-defaults-to-private
+        // reading at this door.
+        { pair: 'internal only, external unset', over: { sharingModel: 'private' } },
     ])('a legal pair still saves — $pair', async ({ over }) => {
         const { put, storedRows } = await boot();
 
@@ -401,10 +467,12 @@ describe('[#7674] what the gate must still let through', () => {
 
     /**
      * [#6710] The declared carve-out, preserved. A kernel that claims to BE the
-     * package author is treated as one by this door too — package authoring is
-     * gated at build time instead (`validateSecurityPosture` is `CLI_ONLY` in
-     * `AUTHORING_RULES`, and R1's own message prescribes that route: "widen it
-     * in the package source and publish through the package pipeline").
+     * package author is treated as one by BOTH doors — the lint table and the
+     * plugin gate each skip the `package-author` channel — because package
+     * authoring is gated at build time instead (`validateSecurityPosture`
+     * runs on every CLI command, and R1's own message prescribes that route:
+     * "widen it in the package source and publish through the package
+     * pipeline").
      *
      * This case is the guard against the worse defect available here: a gate
      * that starts refusing package authoring is a regression, not a fix. It is

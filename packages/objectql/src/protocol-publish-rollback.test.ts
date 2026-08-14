@@ -347,7 +347,8 @@ describe('deleteMetaItem — storage teardown (dropStorage)', () => {
         engine.syncObjectSchema = vi.fn();
         engine.dropObjectSchema = vi.fn();
         const protocol = new ObjectStackProtocolImplementation(engine);
-        await protocol.saveMetaItem({ type: 'object', name, item: { name, label: name, fields: { title: { type: 'text' } } } });
+        // [#8310] The runtime object door requires an authored OWD.
+        await protocol.saveMetaItem({ type: 'object', name, item: { name, label: name, sharingModel: 'private', fields: { title: { type: 'text' } } } });
         return { engine, rows, protocol };
     };
 

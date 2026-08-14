@@ -261,7 +261,8 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             await protocol.saveMetaItem({
                 type: 'object',
                 name: 'test_obj',
-                item: { name: 'test_obj', label: 'Test', fields: {} },
+                // [#8310] The runtime object door requires an authored OWD.
+                item: { name: 'test_obj', label: 'Test', sharingModel: 'private', fields: {} },
             });
 
             const stored = registry.getItem('object', 'test_obj');
@@ -1830,6 +1831,8 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                 item: {
                     name: 'crm_quote',
                     label: 'Quote',
+                    // [#8310] The runtime object door requires an authored OWD.
+                    sharingModel: 'private',
                     fields: { name: { type: 'text' }, amount: { type: 'number' } },
                 } as any,
             });

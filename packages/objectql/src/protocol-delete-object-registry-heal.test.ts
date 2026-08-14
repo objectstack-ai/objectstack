@@ -45,6 +45,8 @@ const APP_PKG = 'app.myapp';
 const invoiceBody = (name: string) => ({
   name,
   label: 'Invoice',
+  // [#8310] The runtime object door requires an authored OWD.
+  sharingModel: 'private',
   fields: {
     name: { name: 'name', type: 'text', label: 'Name' },
     amount: { name: 'amount', type: 'number', label: 'Amount' },

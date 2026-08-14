@@ -82,6 +82,10 @@ interface Row {
 const AUTHORED = {
     name: 'crm_lead',
     label: 'Lead',
+    // [#8310] The runtime object door requires an authored OWD
+    // (`security-owd-unset`); this suite is about designation roundtrips, so
+    // the posture is the recommended default.
+    sharingModel: 'private',
     fields: {
         name: { name: 'name', label: 'Name', type: 'text' },
         code_label: { name: 'code_label', label: 'Code label', type: 'text' },
@@ -242,6 +246,8 @@ describe('[#8268] the write path takes back the `nameField` the read added (#432
         const untitled = {
             name: AUTHORED.name,
             label: 'Lead',
+            // [#8310] The runtime object door requires an authored OWD.
+            sharingModel: 'private',
             fields: { seats: { name: 'seats', label: 'Seats', type: 'number' } },
         };
         const host = await seed(untitled);

@@ -67,6 +67,10 @@ const FIXTURES: Record<string, Fixture> = {
         valid: {
             name: 'sweep_account',
             label: 'Account',
+            // [#8310] The runtime object door requires an authored OWD
+            // (`security-owd-unset` refuses absence), so a "valid" object
+            // fixture must author its posture.
+            sharingModel: 'private',
             fields: { amount: { name: 'amount', label: 'Amount', type: 'number' } },
         },
         invalid: { label: 'No Name' },

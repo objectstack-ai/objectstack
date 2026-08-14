@@ -70,6 +70,10 @@ const packagedBody = (name: string) => ({
 const overlayBody = (name: string) => ({
     name,
     label: 'Invoice (customized)',
+    // [#8310] The runtime object door requires an authored OWD. `private`
+    // matches (does not widen) the packaged baseline, so R1 stays silent and
+    // each case keeps refusing/passing for its ORIGINAL reason.
+    sharingModel: 'private',
     fields: {
         name: { name: 'name', type: 'text', label: 'Name' },
         overlay_only: { name: 'overlay_only', type: 'text', label: 'Overlay only' },

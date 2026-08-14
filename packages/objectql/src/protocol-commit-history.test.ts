@@ -532,6 +532,8 @@ describe('#6215 — revertCommit restores a PACKAGE-BOUND overlay row', () => {
 const invoiceBody = (name: string, extra?: Record<string, unknown>) => ({
   name,
   label: 'Invoice',
+  // [#8310] The runtime object door requires an authored OWD.
+  sharingModel: 'private',
   fields: {
     name: { name: 'name', type: 'text', label: 'Name' },
     amount: { name: 'amount', type: 'number', label: 'Amount' },

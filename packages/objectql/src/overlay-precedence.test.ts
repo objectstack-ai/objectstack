@@ -237,6 +237,8 @@ describe('overlay whitelist enforcement (shared-DB invariant)', () => {
                 item: {
                     name: 'tenant_widget',
                     label: 'Widget',
+                    // [#8310] The runtime object door requires an authored OWD.
+                    sharingModel: 'private',
                     fields: { title: { name: 'title', type: 'text', label: 'Title' } },
                 },
             },

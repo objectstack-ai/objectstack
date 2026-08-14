@@ -73,6 +73,8 @@ const OTHER_PKG = 'app.healthy_demo';
 const objectBody = (name: string) => ({
   name,
   label: 'Demo',
+  // [#8310] The runtime object door requires an authored OWD.
+  sharingModel: 'private',
   fields: {
     name: { name: 'name', type: 'text', label: 'Name' },
   },
