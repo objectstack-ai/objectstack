@@ -25,7 +25,7 @@
 // This file is that measurement, taken through the real login path rather than
 // inferred from reading the resolver. Every step below is the product's own:
 // better-auth `sign-up` / `sign-in` mint the session, `session.create.before`
-// (ADR-0081 D1) is the hook that would have stamped an active organization and
+// (ADR-0093 D9) is the hook that would have stamped an active organization and
 // declines to because the user holds no `sys_member` row, `resolveAuthzContext`
 // turns that session into the execution context, and the REST route is the one
 // the Setup sharing pages call. Nothing here is simulated, and the
@@ -166,8 +166,8 @@ describe('#8158 — a manage_sharing holder with NO active organization cannot r
   });
 
   it('PRECONDITION: the exposed persona holds no membership, and its SESSION carries no active organization', async () => {
-    // This is the card's unmeasured half. `session.create.before` (ADR-0081
-    // D1) stamps `activeOrganizationId` from the caller's `sys_member` row;
+    // This is the card's unmeasured half. `session.create.before` (ADR-0093
+    // D9) stamps `activeOrganizationId` from the caller's `sys_member` row;
     // with no such row it declines, and nothing downstream re-derives one.
     const members = await ql.find('sys_member', { where: { user_id: orgLessUserId }, context: SYS });
     expect(Array.isArray(members) ? members : members?.records ?? []).toHaveLength(0);

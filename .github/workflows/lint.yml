@@ -738,6 +738,25 @@ jobs:
       - name: Engine test-double contract gate
         run: pnpm check:engine-double-contract
 
+      # WHERE-matcher conformance gate (#8494, from #7620). The read-side
+      # sibling of the gate above, and the half its header lists as not
+      # covered. #7620 corrected sixteen in-memory `matches(row, where)`
+      # doubles that short-circuited on `$or` and discarded every sibling
+      # equality key — turning a conjunction into a different query while the
+      # suites stayed green — and #8494 is the observation one level up:
+      # nothing held them corrected, so reinstating the early return failed
+      # nothing. This lifts each discovered matcher out of its file and asks
+      # it four combinator questions; it must answer correctly or throw, never
+      # answer silently wrong. Behavioural rather than syntactic on purpose —
+      # the second failure shape is an ABSENCE (no combinator branch at all),
+      # which no pattern-match over source can see. Pre-existing combinator-
+      # blind doubles are in a shrink-only measured baseline. Runs its own
+      # --self-test first: the detector can be broken while every double is
+      # fine, and a scan that quietly stops matching would report OK while
+      # reading nothing (#4868's family).
+      - name: WHERE-matcher conformance gate
+        run: pnpm check:where-matcher
+
       # Paired kernel-hook pin gate (#5282, from #5170 / #5257 / #5274). The two
       # kernels — ObjectKernel (production) and LiteKernel (vitest / serverless /
       # edge) — run the same plugin code and the same hook vocabulary, but do NOT
@@ -1326,6 +1345,27 @@ jobs:
       # would blind it to the PR that adds a new agent definition anywhere else.
       - name: Check every agent definition declares a model
         run: pnpm check:agent-model-declared
+
+      # The #8435 ratchet-remedy authority convention, enforced farm-wide instead of
+      # gate by gate. A gate whose second remedy is editing a shrink-only ratchet must
+      # either mark that path `⛔ MAINTAINER-ONLY` or turn it down outright; six gates
+      # do (PR #8517, #8539, #8549) and nothing stopped the seventh from not.
+      #
+      # A shared helper module was the obvious route and is the wrong one: a module is
+      # reachable only from gates that import it, so it standardises the gates that
+      # already agreed and is blind to the next one. #8538 is the proof — the sixth
+      # instance was found by sweeping source text, and that file imports nothing to be
+      # found by. So this sweeps `scripts/*.{mjs,mts}` — never `*.mjs`, which is the
+      # blind spot that made #8538 necessary in the first place.
+      #
+      # Runs its own --self-test first, and the self-test carries a corpus-scale
+      # positive control: a detector that quietly stopped matching would otherwise
+      # report a clean farm while reading nothing, which is the exact failure the
+      # convention it enforces is about. Static text only — no build, so it belongs in
+      # this pre-build group. No paths filter, for the standard reason: a filter on
+      # scripts/** would go dormant on the PR that reworded the convention elsewhere.
+      - name: Ratchet-remedy authority convention (#8435) across the gate farm
+        run: pnpm check:ratchet-remedy-authority
 
       - name: Check the react-blocks contract is in sync with the spec
         run: pnpm --filter @objectstack/spec check:react-blocks

@@ -33,7 +33,7 @@
  * reads them. The divergence itself is the defect, so the divergence is what is
  * pinned: same declaration, same write, both faces, one assertion.
  *
- * # The three pins, and what each one alone would miss
+ * # The four pins, and what each one alone would miss
  *
  *  - **The DDL pin** asserts the UNIQUE index the remote face emits for a
  *    `unique: true` column, by name and by key. Without it a future rewrite of
@@ -49,10 +49,20 @@
  *    `toThrow()` here is blind in both directions: it stays green on the raw
  *    `SqliteError` this card exists to remove.
  *
+ *  - **The parity pin** [#8568] asserts the two faces' refusals against EACH
+ *    OTHER — message, `code` and `status` — on one condition raised twice.
+ *    Every pin above it, and #8445's local-face suite, is single-face and pins
+ *    its own wording as a LITERAL: a reword of one package with its own literal
+ *    updated alongside it drifts the pair while every suite stays green. That
+ *    is the state this file was written to make impossible, reached from the
+ *    one direction it had left open.
+ *
  * The refusal pin carries a **positive control** beside it: with the unique
  * index present, the same `conflictKeys` upsert MERGES. Without that half, a
  * transport that refused every `conflictKeys` upsert unconditionally would pass
  * the refusal pin — and would have broken the capability instead of fixing it.
+ * The parity pin carries the same control for the same reason, doubled: two
+ * faces that refused everything would agree perfectly.
  *
  * # Reverse verification, direction predicted BEFORE it was run
  *
@@ -63,6 +73,24 @@
  * The refusal pin's negative half stays GREEN across the revert: its table
  * never had a unique index to lose, which is what makes it the pin for the
  * already-created-table case rather than a second copy of the DDL pin.
+ *
+ * The parity pin [#8568] has TWO legs to predict, because two-way redness is
+ * the entire property being bought: rewording ONLY `driver-sql`'s helper must
+ * turn it red, and rewording ONLY `driver-turso`'s must turn it red as well. A
+ * pin that reddens on one leg only is the one-way pin this card replaced. Both
+ * legs were measured (`1 failed | 9 passed` each, the failure being the message
+ * comparison in both). The REMOTE leg is the one worth reading: under it every
+ * pre-existing pin in this file stayed GREEN, the refusal pin included — its
+ * assertions are token regexes (`/crm_contact_plain/`, `/email/`, `/unique/i`)
+ * that a reword preserving those words walks straight past, which is exactly
+ * how the drift could have landed unnoticed.
+ *
+ * ⚠️ One measured trap for whoever runs that verification again: the LOCAL face
+ * arrives here through the BUILT `@objectstack/driver-sql` (this package
+ * resolves the workspace dependency to its `dist`, and there is no vitest alias
+ * to `src`). A reworded `sql-driver.ts` therefore changes nothing until that
+ * package is rebuilt — leg 1 ran GREEN against a stale `dist` before the
+ * rebuild, which reads exactly like a pin that does not work.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -275,6 +303,94 @@ describe('[#8413] `unique` is enforced on BOTH TursoDriver faces', () => {
       const rows = await remote.find(CONTACT.name, {});
       expect(rows).toHaveLength(1);
       expect(rows[0].title).toBe('second');
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Pin 4 — the two refusals held against EACH OTHER
+  // ─────────────────────────────────────────────────────────────────────
+
+  describe('[#8568] the unbacked-conflict-target refusal is ONE answer across both faces', () => {
+    /**
+     * Pin 3 above asserts the refusal on the REMOTE face; #8445's
+     * `sql-driver-upsert-conflict-target-envelope.test.ts` asserts it on the
+     * LOCAL one. Both are single-face by construction, and each pins its own
+     * wording as a LITERAL — so a reword of one package, with its own literal
+     * updated in the same commit, drifts the pair while every suite stays
+     * green. `TursoDriver` picks its face from `url`, so that drift makes the
+     * answer to one condition a property of the connection string (#5240: one
+     * condition, one wording; the defect class of #6203 / #5769).
+     *
+     * ⚠️ The assertion below is therefore two RUNTIME answers compared to EACH
+     * OTHER — never each against a literal. The literal form is what this pin
+     * exists to replace: it passes forever while the faces diverge. A parity
+     * test measures agreement, so the change that must turn it red is the
+     * SINGLE-face one, and reverse verification has to be run on each face
+     * separately to prove it (both legs measured — see the header's reverse
+     * verification section, including the stale-`dist` trap on the local leg).
+     */
+    it('answers the same message, `code` and `status` on the local and the remote face', async () => {
+      await local.initObjects([{ ...CONTACT_NO_UNIQUE, fields: { ...CONTACT_NO_UNIQUE.fields } }]);
+      await remote.initObjects([{ ...CONTACT_NO_UNIQUE, fields: { ...CONTACT_NO_UNIQUE.fields } }]);
+
+      // One condition, raised twice: the same object with no `unique`
+      // declaration, the same `conflictKeys` upsert, once per face.
+      const localErr = await captureError(() =>
+        local.upsert(CONTACT_NO_UNIQUE.name, { email: 'a@b.com', title: 'x' }, ['email'], { bypassTenantAudit: true }),
+      );
+      const remoteErr = await captureError(() =>
+        remote.upsert(CONTACT_NO_UNIQUE.name, { email: 'a@b.com', title: 'x' }, ['email']),
+      );
+
+      // Neither face may ACCEPT it — without this guard a face that stopped
+      // refusing would reach the comparison below holding `null`, and the
+      // message equality would report a `TypeError` rather than the divergence.
+      expect({ local: localErr !== null, remote: remoteErr !== null }).toEqual({ local: true, remote: true });
+
+      // The comparison this pin is for. `toBe` between two runtime values:
+      // rewording either compiler alone turns it red, whichever one it is.
+      expect(localErr!.message).toBe(remoteErr!.message);
+      expect(localErr!.code).toBe(remoteErr!.code);
+      expect(localErr!.status).toBe(remoteErr!.status);
+
+      // …and the agreement is ANCHORED, because agreement alone is satisfied by
+      // both faces regressing together: two raw SqliteErrors agree on
+      // `code: 'SQLITE_ERROR'` and on `status: undefined` just as well. What is
+      // worth pinning is agreement ON THE ADR-0112 ENVELOPE. This is a value
+      // assertion, not a wording literal — an identical reword of BOTH faces
+      // keeps #5240 satisfied and is meant to stay green here.
+      expect(localErr!.code).toBe(StandardErrorCode.enum.VALIDATION_ERROR);
+      expect(localErr!.status).toBe(400);
+
+      // Both faces also keep the SQLite ground truth as `cause` rather than
+      // replacing it — the same shape on both, so an operator debugging either
+      // deployment reads the same two layers.
+      for (const err of [localErr!, remoteErr!]) {
+        expect(String((err as unknown as { cause?: Error }).cause?.message)).toMatch(
+          /ON CONFLICT clause does not match/i,
+        );
+      }
+    });
+
+    /**
+     * The positive control for the parity pin, mirroring Pin 3's: a pair of
+     * faces that refused EVERY `conflictKeys` upsert would agree perfectly and
+     * satisfy the assertion above. Agreement is only worth pinning while the
+     * capability still works on both — so the backed target must MERGE on both.
+     */
+    it('and both faces still MERGE when a declared unique index does back the target', async () => {
+      await local.initObjects([{ ...CONTACT, fields: { ...CONTACT.fields } }]);
+      await remote.initObjects([{ ...CONTACT, fields: { ...CONTACT.fields } }]);
+
+      for (const title of ['first', 'second']) {
+        await local.upsert(CONTACT.name, { email: 'a@b.com', title }, ['email'], { bypassTenantAudit: true });
+        await remote.upsert(CONTACT.name, { email: 'a@b.com', title }, ['email']);
+      }
+
+      expect(await local.count(CONTACT.name, {})).toBe(1);
+      expect(await remote.count(CONTACT.name, {})).toBe(1);
+      expect((await local.find(CONTACT.name, {}))[0].title).toBe('second');
+      expect((await remote.find(CONTACT.name, {}))[0].title).toBe('second');
     });
   });
 });

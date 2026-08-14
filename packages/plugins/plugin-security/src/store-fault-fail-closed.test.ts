@@ -125,8 +125,13 @@ async function boot(options: BootOptions = {}) {
   const rows: Record<string, Row[]> = options.rows ?? {};
   const matches = (row: Row, where: any): boolean => {
     if (!where || typeof where !== 'object') return true;
-    if (Array.isArray(where.$and)) return where.$and.every((w: any) => matches(row, w));
+    // `$and` / `$or` are CONJOINED with their sibling keys, the way a real
+    // driver reads them — never `return`ed, which would discard every sibling
+    // equality key in the same filter object (#7620 / #8494).
+    if (Array.isArray(where.$and) && !where.$and.every((w: any) => matches(row, w))) return false;
+    if (Array.isArray(where.$or) && !where.$or.some((w: any) => matches(row, w))) return false;
     return Object.entries(where).every(([k, v]) => {
+      if (k === '$and' || k === '$or') return true;
       if (v && typeof v === 'object' && Array.isArray((v as any).$in)) {
         return (v as any).$in.map(String).includes(String(row[k]));
       }
