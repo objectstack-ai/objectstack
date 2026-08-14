@@ -1218,10 +1218,39 @@ export class SysMetadataRepository implements MetadataRepository {
    * one vocabulary, stated at both enforcement points rather than re-spelled
    * differently at each. The message stays user-actionable because here the
    * prescription is true — a writable base really is what this write needs.
+   *
+   * @internal [#8361] `saveMetaItem`'s ADR-0070 D1 gate now CALLS this emitter
+   * instead of spelling a second sentence for the same condition — the CREATE
+   * side of what #8184 did on the override side, and the reason this is
+   * `static` rather than `private static`. ⛔ Do not re-privatise without
+   * deleting that call site.
+   *
+   * Why the duplicate had to go rather than gain a copy of the clause below:
+   * D1 refuses on a strictly WIDER predicate than this door (no `namedBase`
+   * limb, no registry limbs above it), so every `saveMetaItem` write that
+   * would have reached here had already been thrown by D1 — and D1's own
+   * sentence carried no hatch clause. #8146's clause was therefore live only
+   * for the direct `put` callers (`promoteDraft` / `restoreVersion` /
+   * `revertCommit`), which carry the row's OWN package binding and never pass
+   * through D1. Teaching D1 a SECOND copy of the clause would have put two
+   * independently-authored sentences behind one condition, which is exactly
+   * how the `NOT_OVERRIDABLE`-everywhere problem started.
+   *
+   * `name` is optional and positional-LAST on purpose. Omitted, the sentence
+   * is byte-identical to the one the `put` callers have always seen (this seam
+   * has no item name to offer them). Supplied by D1, it preserves the
+   * `type/name` D1's own sentence has always shown, so delegation costs the
+   * authoring surface no information. Widening the one emitter beats forking
+   * it.
    */
-  private static readOnlyBaseCreateError(type: string, packageId: string, hatchOpen = false): Error {
+  static readOnlyBaseCreateError(
+    type: string,
+    packageId: string,
+    hatchOpen = false,
+    name?: string,
+  ): Error {
     const err: any = new Error(
-      `[writable_package_required] Cannot create ${type} in package '${packageId}': `
+      `[writable_package_required] Cannot create ${name ? `${type}/${name}` : type} in package '${packageId}': `
       + `that package is read-only (provided by code or an installed app), so it is not a writable base. `
       + `Switch to a writable package in the package selector, or create a new one, and retry.`
       // [#8146] Said only when the hatch IS set, because otherwise it is noise.

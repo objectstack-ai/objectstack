@@ -879,3 +879,324 @@ describe('#8184 — the scoped kernel answers the same code as the host-config k
     expect(metaRowsOf(engine)[0]).toMatchObject({ package_id: WRITABLE_PKG });
   }, 30_000);
 });
+
+/**
+ * [#8361] The CREATE side of the same shadowing — and the block that makes
+ * #8146's create-side hatch clause reachable from the surface it was written
+ * for.
+ *
+ * ## The defect, measured on `ffb090e6f7` before the fix
+ *
+ * #8146 gave BOTH package-door emitters a `hatchOpen` remedy selection. The
+ * override one is reachable (the block above, and #8184 made it reachable on
+ * scoped kernels too). The create one — `readOnlyBaseCreateError`, `422
+ * WRITABLE_PACKAGE_REQUIRED` — was not reachable from `saveMetaItem` on ANY
+ * topology: the ADR-0070 D1 gate throws first, on a strictly WIDER predicate
+ * (no `namedBase` limb, no registry limbs above it), and D1 spelled its own
+ * sentence with no hatch clause in it. Probed on the merged ref, hatch OPEN,
+ * `permission/probe_reviewer` into `com.example.showcase`:
+ *
+ *     [writable_package_required] Cannot save permission/probe_reviewer: the
+ *     package 'com.example.showcase' is read-only (provided by code or an
+ *     installed app). Switch to a writable package in the package selector, or
+ *     create a new one, and retry.
+ *
+ * — identical with the hatch open and with it shut. An operator who has just
+ * set `OS_METADATA_WRITABLE` is told the base is read-only and never told that
+ * the variable they set does not reach the package dimension. Milder than the
+ * override side's false prescription (D1 never told them to set it), which is
+ * why this was a finding rather than a bug: the missing half is guidance.
+ *
+ * ## THE SECONDARY DELIVERABLE — where that clause WAS live
+ *
+ * Enumerated on the merged ref, not restated from the card. `assertAllowed`
+ * reaches `readOnlyBaseCreateError` only from `put`, with `intent:
+ * 'runtime-only'` and a non-empty `packageId` (`assertDeleteAllowed` passes no
+ * base, so the delete side can never reach it). The production `put` callers
+ * carrying those two facts are:
+ *
+ *   • `saveMetaItem`                (`protocol.ts` — SHADOWED by D1: every
+ *                                    write that would reach the door was
+ *                                    already thrown by the wider gate)
+ *   • `SysMetadataRepository.promoteDraft`      ← `publishMetaDraft`
+ *   • `SysMetadataRepository.restoreVersion`    ← `revertCommit`
+ *   • `SysMetadataRepository.restoreVersion`    ← `restoreMetaVersion`
+ *
+ * The last three pass the ROW's own binding, never a caller-named base, and
+ * none of them passes through D1 — so the clause was exercised only by
+ * republish/repair traffic and never by the authoring surface it was written
+ * for. `LayeredRepository` is not a fourth route: nothing in the repo composes
+ * a `SysMetadataRepository` into one outside a TSDoc example. That route is
+ * pinned below (`the direct put callers keep their sentence verbatim`).
+ *
+ * ## The shape, and why it is delegation rather than a second clause
+ *
+ * D1 now CALLS `SysMetadataRepository.readOnlyBaseCreateError` — the lane's
+ * one-emitter direction, the create-side mirror of #8184. The two reasons the
+ * card gave for why that default might not apply were measured and did not
+ * hold: the emitter is `static` (no repository instance needed, and the
+ * override site has been calling a static sibling from this same method since
+ * #8184), and both sites already carried the IDENTICAL `docs` pointer
+ * (`0070-package-first-authoring.md`) because both implement D1. The one real
+ * difference — D1's sentence names the item, the emitter's named only the type
+ * — was closed by widening the emitter with an optional trailing `name`, so
+ * the direct `put` callers' sentence stays byte-identical.
+ *
+ * ## ⛔ What this block is NOT
+ *
+ * Not a change to the acceptance set. D1's predicate is untouched; the cases
+ * below pin both directions of that (a create into a writable base and a
+ * package-less create still LAND; the read-only create is still REFUSED with
+ * the same code and status). A shape that starts admitting or refusing
+ * anything new has left the card.
+ *
+ * Read `the sentence is the repository's, not a copy of it` as the anti-fork
+ * pin: it compares `saveMetaItem`'s message to the emitter's own output rather
+ * than to a literal, so re-spelling the sentence at D1 goes red even if the
+ * re-spelling is word-perfect on the day it is written.
+ */
+describe('#8361 — the create-side hatch clause reaches saveMetaItem', () => {
+  /** Not artifact-backed under {@link boot}, so `saveMetaItem` intends `runtime-only`. */
+  const runtimePermissionBody = { name: 'runtime_reviewer', label: 'Reviewer', objects: {} };
+  /**
+   * `job` is `allowOrgOverride: false` AND `allowRuntimeCreate: false`, so the
+   * hatch is the ONLY thing that can carry this write as far as D1 — which is
+   * what makes it the honest test of "the clause is reachable", as opposed to
+   * `permission`, which reaches D1 either way. Spec-valid on purpose: the Zod
+   * gate runs BEFORE D1, and a body missing `schedule`/`handler` answers
+   * `INVALID_METADATA` / 422 — measured, while writing this block.
+   */
+  const jobBody = {
+    name: 'nightly_sweep',
+    label: 'Nightly Sweep',
+    schedule: { type: 'interval', intervalMs: 60_000 },
+    handler: 'nightlySweep',
+  };
+
+  /** @param environmentId `undefined` = host-config kernel; a string = per-env kernel. */
+  function boot(environmentId?: string) {
+    const engine = makeFakeEngine() as unknown as Record<string, unknown>;
+    (engine as { registry: Record<string, unknown> }).registry = {
+      ...(engine.registry as Record<string, unknown>),
+      registerItem: () => {},
+      registerObject: () => {},
+      listItems: () => [],
+      getItem: () => undefined,
+      // Nothing is artifact-backed here: every case in this block is a CREATE.
+      getArtifactItem: () => undefined,
+    };
+    const protocol = new ObjectStackProtocolImplementation(
+      engine as never,
+      () => new Map(),
+      environmentId,
+    ) as unknown as { saveMetaItem(req: Record<string, unknown>): Promise<unknown> };
+    return { engine, protocol };
+  }
+
+  const metaRowsOf = (engine: Record<string, unknown>) =>
+    Array.from((engine as unknown as { rows: Map<string, Row> }).rows.values())
+      .filter((r) => r.__table === 'sys_metadata');
+
+  const save = (
+    protocol: { saveMetaItem(req: Record<string, unknown>): Promise<unknown> },
+    req: Record<string, unknown>,
+  ) => protocol.saveMetaItem(req).then(() => null, (e: unknown) => e);
+
+  const openHatch = (types: string) => {
+    process.env.OS_METADATA_WRITABLE = types;
+    resetEnvWritableMetadataTypes();
+    ObjectStackProtocolImplementation.resetEnvWritableCache();
+  };
+
+  /** The runtime-only create the whole block is about, varying only the base. */
+  const createPermission = (
+    protocol: { saveMetaItem(req: Record<string, unknown>): Promise<unknown> },
+    packageId?: string,
+  ) => save(protocol, {
+    type: 'permission', name: 'runtime_reviewer', item: runtimePermissionBody,
+    ...(packageId !== undefined ? { packageId } : {}),
+  });
+
+  beforeEach(() => {
+    delete process.env.OS_METADATA_WRITABLE;
+    resetEnvWritableMetadataTypes();
+    ObjectStackProtocolImplementation.resetEnvWritableCache();
+  });
+  afterEach(() => {
+    delete process.env.OS_METADATA_WRITABLE;
+    resetEnvWritableMetadataTypes();
+    ObjectStackProtocolImplementation.resetEnvWritableCache();
+  });
+
+  // ── the card: the clause is reachable, and only when it is TRUE ────────
+
+  it('with the hatch OPEN the refusal says the hatch does not reach the package dimension', async () => {
+    openHatch('permission');
+    const { engine, protocol } = boot();
+    const err = await createPermission(protocol, READ_ONLY_PKG) as {
+      code?: string; status?: number; packageId?: string; docs?: string; message?: string;
+    };
+
+    // The ADR-0112 envelope first — a message-only assertion cannot tell this
+    // refusal from the code-only one two limbs above it.
+    expect(err).toMatchObject({
+      code: 'WRITABLE_PACKAGE_REQUIRED',
+      status: 422,
+      packageId: READ_ONLY_PKG,
+      docs: 'docs/adr/0070-package-first-authoring.md',
+    });
+    // …then the sentence this card exists for.
+    const message = String(err.message);
+    expect(message).toContain("OS_METADATA_WRITABLE is set for 'permission'");
+    expect(message).toContain('it unlocks the metadata TYPE, not package writability');
+    // Refused, not reported: the diagnostic change persists nothing.
+    expect(metaRowsOf(engine)).toEqual([]);
+  }, 30_000);
+
+  it('with the hatch CLOSED the same request does NOT mention it — the clause is selected, not appended', async () => {
+    // THE OVER-BROAD DIRECTION. A shape that emitted the repository sentence
+    // unconditionally passes every case above and fails here: with the hatch
+    // shut the clause is noise, and worse, it names a variable the operator
+    // never set. `permission` is `allowRuntimeCreate: true`, so this request
+    // reaches D1 with the hatch shut — the same door, one variable different.
+    const { engine, protocol } = boot();
+    const err = await createPermission(protocol, READ_ONLY_PKG) as {
+      code?: string; status?: number; message?: string;
+    };
+
+    expect(err).toMatchObject({ code: 'WRITABLE_PACKAGE_REQUIRED', status: 422 });
+    const message = String(err.message);
+    expect(message).not.toContain('OS_METADATA_WRITABLE');
+    // …and the remedy that IS true here survives the selection.
+    expect(message).toContain('Switch to a writable package in the package selector');
+    expect(metaRowsOf(engine)).toEqual([]);
+  }, 30_000);
+
+  it('the item is still named — delegation costs the authoring surface no information', async () => {
+    // D1's own sentence said `Cannot save permission/runtime_reviewer`. The
+    // emitter's said only the type, because its `put` callers have no name at
+    // that seam. Delegating without this would have made the toast vaguer.
+    const { protocol } = boot();
+    const err = await createPermission(protocol, READ_ONLY_PKG) as { message?: string };
+    expect(String(err.message)).toContain('permission/runtime_reviewer');
+  }, 30_000);
+
+  it('the sentence is the repository\'s, not a copy of it', async () => {
+    // THE ANTI-FORK PIN. Compared against the emitter's OWN output rather than
+    // a literal: a re-spelling at D1 that is word-perfect on the day it lands
+    // still goes red here, which is the property "one condition, one emitter"
+    // actually needs. Both remedy directions, because the selection is what a
+    // copy would most easily get wrong.
+    const { protocol } = boot();
+
+    const shut = await createPermission(protocol, READ_ONLY_PKG) as { message?: string };
+    expect(shut.message).toBe(
+      SysMetadataRepository
+        .readOnlyBaseCreateError('permission', READ_ONLY_PKG, false, 'runtime_reviewer')
+        .message,
+    );
+
+    openHatch('permission');
+    const open = await createPermission(protocol, READ_ONLY_PKG) as { message?: string };
+    expect(open.message).toBe(
+      SysMetadataRepository
+        .readOnlyBaseCreateError('permission', READ_ONLY_PKG, true, 'runtime_reviewer')
+        .message,
+    );
+    expect(open.message).not.toBe(shut.message);
+  }, 30_000);
+
+  // ── the hatch really is what carries the write to D1 ───────────────────
+
+  it('a type with NO create channel reaches D1 only through the hatch', async () => {
+    // Both halves in one case, because either alone is ambiguous. `job` has
+    // neither `allowOrgOverride` nor `allowRuntimeCreate`: shut, the code-only
+    // refusal answers first and D1 is never consulted (so a hatch clause there
+    // would be unreachable for this type); open, `isOverlayAllowed` folds the
+    // hatch in and the write lands on D1 — carrying the clause.
+    const shutBoot = boot();
+    const shut = await save(shutBoot.protocol, {
+      type: 'job', name: 'nightly_sweep', item: jobBody, packageId: READ_ONLY_PKG,
+    }) as { code?: string; status?: number };
+    expect(shut).toMatchObject({ code: 'NOT_CREATABLE', status: 403 });
+
+    openHatch('job');
+    const openBoot = boot();
+    const open = await save(openBoot.protocol, {
+      type: 'job', name: 'nightly_sweep', item: jobBody, packageId: READ_ONLY_PKG,
+    }) as { code?: string; status?: number; message?: string };
+    expect(open).toMatchObject({ code: 'WRITABLE_PACKAGE_REQUIRED', status: 422 });
+    expect(String(open.message)).toContain("OS_METADATA_WRITABLE is set for 'job'");
+  }, 30_000);
+
+  // ── ⛔ the acceptance set does not move ────────────────────────────────
+
+  it('a runtime-only create into a WRITABLE base still lands, hatch open or shut', async () => {
+    // THE SCOPE PIN. This card changes what the operator is TOLD; if it ever
+    // starts changing what is refused, it has left its own scope. Membership,
+    // never a row count: a guard upstream that stabilised the count would make
+    // a length assertion green with this change absent.
+    const shutBoot = boot();
+    expect(await createPermission(shutBoot.protocol, WRITABLE_PKG)).toBeNull();
+    expect(metaRowsOf(shutBoot.engine)).toContainEqual(
+      expect.objectContaining({ name: 'runtime_reviewer', package_id: WRITABLE_PKG }),
+    );
+
+    openHatch('permission');
+    const openBoot = boot();
+    expect(await createPermission(openBoot.protocol, WRITABLE_PKG)).toBeNull();
+    expect(metaRowsOf(openBoot.engine)).toContainEqual(
+      expect.objectContaining({ name: 'runtime_reviewer', package_id: WRITABLE_PKG }),
+    );
+  }, 30_000);
+
+  it('a package-less runtime-only create still lands, bound to NO package', async () => {
+    // The other admitted direction: D1's `packageId != null` limb is untouched.
+    openHatch('permission');
+    const { engine, protocol } = boot();
+    expect(await createPermission(protocol)).toBeNull();
+    expect(metaRowsOf(engine)).toContainEqual(
+      expect.objectContaining({ name: 'runtime_reviewer', package_id: null }),
+    );
+  }, 30_000);
+
+  // ── topology, and the callers that never pass through D1 ───────────────
+
+  it('both kernels answer the same thing — D1 sits below the environmentId branch', async () => {
+    // Compared to each other, not to a literal, for the reason #8184's block
+    // states: the property is "one condition keeps one vocabulary", and only a
+    // comparison can tell a shared move from a divergence.
+    openHatch('permission');
+    const hostConfig = await createPermission(boot().protocol, READ_ONLY_PKG) as {
+      code?: string; status?: number; message?: string;
+    };
+    const scoped = await createPermission(boot('env_alpha').protocol, READ_ONLY_PKG) as {
+      code?: string; status?: number; message?: string;
+    };
+
+    expect(scoped.code).toBe(hostConfig.code);
+    expect(scoped.status).toBe(hostConfig.status);
+    expect(scoped.message).toBe(hostConfig.message);
+    expect(String(scoped.message)).toContain("OS_METADATA_WRITABLE is set for 'permission'");
+  }, 30_000);
+
+  it('the direct put callers keep their sentence verbatim — the widening is opt-in', async () => {
+    // `promoteDraft` / `restoreVersion` / `revertCommit` reach the emitter with
+    // the row's own binding and no item name. Their sentence is what #8146
+    // shipped and must not have moved: `name` is optional and last precisely so
+    // this stays byte-identical.
+    const engine = makeFakeEngine();
+    const repo = new SysMetadataRepository({
+      engine: engine as never, organizationId: null, orgLabel: 'env',
+    });
+    const err = await putWith(repo, {
+      type: 'job', name: 'nightly_sweep', intent: 'runtime-only', packageId: READ_ONLY_PKG,
+    }) as { message?: string };
+
+    expect(err.message).toBe(
+      SysMetadataRepository.readOnlyBaseCreateError('job', READ_ONLY_PKG, false).message,
+    );
+    // The name-less spelling, verbatim: no `job/nightly_sweep` at this seam.
+    expect(String(err.message)).toContain(`Cannot create job in package '${READ_ONLY_PKG}'`);
+  }, 30_000);
+});

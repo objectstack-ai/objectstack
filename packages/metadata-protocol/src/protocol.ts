@@ -11556,23 +11556,55 @@ export class ObjectStackProtocolImplementation implements
         // A `null` packageId is still accepted here (legacy org-overlay
         // destination); ADR-0070 D5 retires it once the surfaces always
         // resolve a base and the orphan migration has run.
+        //
+        // [#8361] THE SENTENCE IS THE REPOSITORY'S, the predicate is still
+        // D1's. `SysMetadataRepository.readOnlyBaseCreateError` is CALLED, not
+        // copied — the create-side mirror of what #8184 did four hundred lines
+        // above on the override side.
+        //
+        // ⛔ NOTHING ABOUT THE ACCEPTANCE SET MOVES. The `if` is byte-for-byte
+        // the predicate D1 has always used; only the error object it throws
+        // changes. Every create D1 refused it still refuses, every create it
+        // admitted it still admits — this card is about what the operator is
+        // TOLD, not about what is refused.
+        //
+        // WHY DELEGATE RATHER THAN TEACH D1 ITS OWN `hatchOpen` CLAUSE — the
+        // fork #8361 was filed on, and both of the reasons the one-emitter
+        // default might NOT have applied were measured here and did not hold:
+        //   • "D1 fires before the repository exists in the call." True of the
+        //     INSTANCE (`getOverlayRepo` is below), irrelevant to the emitter:
+        //     it is `static`, the class is imported at the top of this file,
+        //     and the override-side call at the top of this same method has
+        //     been calling a static sibling since #8184.
+        //   • "D1 carries its own `docs` pointer." Measured identical — both
+        //     sites set `docs/adr/0070-package-first-authoring.md`, because D1
+        //     and this emitter implement the SAME decision. (That is what
+        //     separates the create side from the override side, where the
+        //     repository points at ADR-0010 and the fork was real.)
+        // The one true difference was that D1's sentence names the ITEM and
+        // the emitter's named only the type; the emitter took an optional
+        // `name` rather than the sentence being forked.
+        //
+        // `hatchOpen` is COMPUTED here, and must be — unlike the override site,
+        // which passes a literal `false` because reaching it proves the hatch
+        // is shut. Both directions are live at D1: a type with
+        // `allowRuntimeCreate` (e.g. `permission`) arrives with the hatch shut,
+        // and a type with neither channel (e.g. `job`) arrives ONLY because
+        // `OS_METADATA_WRITABLE` opened it — `isOverlayAllowed` folds the hatch
+        // in, so an open hatch carries the write past the code-only refusal
+        // straight to this gate. Read through this class's OWN memoised reader,
+        // the one that admission decision used, so `hatchOpen` cannot disagree
+        // with the limb that let the write through.
         if (
             intent === 'runtime-only' &&
             request.packageId != null &&
             !this.isWritablePackage(request.packageId)
         ) {
-            // Surfaced verbatim as a console toast — keep the sentence
-            // user-actionable; the ADR pointer lives in `docs` below.
-            const err = new Error(
-                `[writable_package_required] Cannot save ${singularTypeForRepo}/${request.name}: `
-                + `the package '${request.packageId}' is read-only (provided by code or an installed app). `
-                + `Switch to a writable package in the package selector, or create a new one, and retry.`,
+            const envWritable = ObjectStackProtocolImplementation.envWritableTypes();
+            const hatchOpen = envWritable.has(singularTypeForRepo) || envWritable.has(request.type);
+            throw SysMetadataRepository.readOnlyBaseCreateError(
+                singularTypeForRepo, request.packageId, hatchOpen, request.name,
             );
-            (err as any).code = 'WRITABLE_PACKAGE_REQUIRED';
-            (err as any).status = 422;
-            (err as any).packageId = request.packageId;
-            (err as any).docs = 'docs/adr/0070-package-first-authoring.md';
-            throw err;
         }
         const orgId = request.organizationId ?? null;
         const repo = this.getOverlayRepo(orgId);
