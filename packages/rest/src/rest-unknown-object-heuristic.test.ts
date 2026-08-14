@@ -130,8 +130,12 @@ async function bootRealProtocol(dbError: string) {
     return mountRest(protocol as any);
 }
 
-/** A spec-valid object body, so the PUT reaches persistence rather than a 422. */
-const ACCT = { name: 'acct', label: 'Acct', fields: { name: { type: 'text', label: 'Name' } } };
+/**
+ * A spec-valid object body, so the PUT reaches persistence rather than a 422.
+ * [#8310] Its OWD is authored: the runtime object door refuses an unauthored
+ * `sharingModel` (`security-owd-unset`).
+ */
+const ACCT = { name: 'acct', label: 'Acct', sharingModel: 'private', fields: { name: { type: 'text', label: 'Name' } } };
 
 let logged: unknown[][] = [];
 let spy: ReturnType<typeof vi.spyOn>;
