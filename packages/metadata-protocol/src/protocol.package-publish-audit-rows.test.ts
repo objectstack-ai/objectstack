@@ -334,16 +334,22 @@ const opRows = (h: Harness, operation: string) =>
 const publishRows = (h: Harness, outcome: 'allowed' | 'denied') =>
     opRows(h, 'publish').filter((a) => a.outcome === outcome);
 
-/** Stage one package-bound draft through the ordinary save path. */
+/**
+ * Stage one package-bound draft through the ordinary save path.
+ *
+ * `org: null` stages it ENV-WIDE (`organization_id IS NULL`), which is how
+ * Studio and AI authoring actually write — see the scope cases below.
+ */
 async function stageDraft(
     protocol: ObjectStackProtocolImplementation,
     name: string,
     extra: Record<string, unknown> = {},
+    org: string | null = ORG,
 ) {
     await protocol.saveMetaItem({
         type: 'view',
         name,
-        organizationId: ORG,
+        ...(org ? { organizationId: org } : {}),
         item: viewBody(name, `${name} staged`, extra),
         mode: 'draft',
         packageId: PKG,
@@ -475,6 +481,68 @@ describe('[#8400] publishPackageDrafts audits the batch it publishes', () => {
             actor: 'admin',
             source: 'protocol.publishPackageDrafts',
         });
+    });
+
+    // ── scope: the row is keyed on the DRAFT's org, not the caller's ────────
+    // Both fixtures above use `ORG` for the draft AND the publishing session,
+    // so they cannot tell the two apart — an audit row keyed on either would
+    // pass. These two pin it, and they are the only cases in this file where
+    // the two values differ.
+    //
+    // Studio and AI authoring write drafts ENV-WIDE (`organization_id IS NULL`)
+    // while the publishing session may carry a non-null active org.
+    // `listDrafts` surfaces those env-wide rows to such a caller via its `$or`,
+    // and `promoteDraftForPublish` is called with the DRAFT's scope (#3115), so
+    // the active row lands env-wide. An audit row keyed on the caller's active
+    // org would therefore record the publish against a partition the active row
+    // never entered.
+    it('scope: an env-wide draft published by an org-scoped caller audits ENV-WIDE, not to the caller org', async () => {
+        const h = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(h.engine);
+
+        // Draft is env-wide…
+        await stageDraft(protocol, 'envwide_grid', {}, null);
+        // …but the publishing session carries a non-null active org.
+        const res = await protocol.publishPackageDrafts({
+            packageId: PKG, organizationId: ORG, actor: 'admin',
+        } as any);
+        expect(res.publishedCount).toBe(1);
+
+        const allowed = publishRows(h, 'allowed');
+        expect(allowed).toHaveLength(1);
+        expect(allowed[0].name).toBe('envwide_grid');
+        expect(allowed[0].organization_id).toBeNull();
+        expect(allowed[0].organization_id).not.toBe(ORG);
+    });
+
+    it('scope: an env-wide draft REFUSED under an org-scoped caller audits ENV-WIDE too', async () => {
+        const h = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(h.engine, undefined, 'env_test');
+
+        await stageDraft(protocol, 'envwide_locked', {}, null);
+        // Lock the ENV-WIDE active row — the scope `promoteDraftForPublish`
+        // reads the lock from for an env-wide draft.
+        await protocol.saveMetaItem({
+            type: 'view', name: 'envwide_locked',
+            item: viewBody('envwide_locked', 'protected', { _lock: 'no-overlay' }),
+            packageId: PKG, actor: 'admin',
+        } as any);
+
+        const res = await protocol.publishPackageDrafts({
+            packageId: PKG, organizationId: ORG, actor: 'admin',
+        } as any);
+        expect(res.publishedCount).toBe(0);
+
+        const denied = publishRows(h, 'denied');
+        expect(denied).toHaveLength(1);
+        expect(denied[0].name).toBe('envwide_locked');
+        // The denied row reads its scope from `__batchItem`, which is the
+        // `listDrafts` row — the draft's OWN scope, the same source the allowed
+        // row's `draftOrgId` comes from. Keyed on the caller's active org this
+        // would be `ORG` and the two outcomes would disagree about where the
+        // publish was refused.
+        expect(denied[0].organization_id).toBeNull();
+        expect(denied[0].organization_id).not.toBe(ORG);
     });
 
     // ── the denied outcome, and the placement that makes it durable ──────────
