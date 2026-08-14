@@ -63,6 +63,28 @@
  * 2026-08-08 ruling. Read its doc comment before touching either — the two are
  * gated on each other and the column answer is deliberately narrower than the
  * boolean.
+ *
+ * ## ⚠️ The INVERSE question lives next door — do not merge them
+ *
+ * `isUnbackedConflictTargetError` (`unbacked-conflict-target.ts`, #8567) asks
+ * whether the database refused an `ON CONFLICT` target because **no unique
+ * index exists** for it. This predicate asks whether one **exists and was
+ * violated**. Same neighbourhood, same vocabulary, inverse verdicts:
+ * answering an unbacked target with a 409 `UNIQUE_VIOLATION` tells the client
+ * to change a value when nothing collided, and answering a real conflict with
+ * "add a unique index" sends an operator after an index that is already there.
+ * Neither predicate may grow a limb belonging to the other.
+ *
+ * ⚠️ This predicate is ALREADY on the wrong side of that line for one dialect:
+ * `message`'s `unique constraint` limb matches SQLite's *missing*-index
+ * sentence, which ends `…any PRIMARY KEY or UNIQUE constraint`, so an unbacked
+ * conflict target is reported here as a violation of a constraint that does not
+ * exist. Measured on the real driver error and filed as **#8590** — read it
+ * before touching `UNIQUE_VIOLATION.message`, because the naive narrowing also
+ * drops Postgres' `violates unique constraint "..."`, which this limb has
+ * covered since it was inherited verbatim from the REST branch it replaced.
+ * `unbacked-conflict-target.test.ts` pins both predicates' verdicts per dialect
+ * so the fix cannot land silently in either direction.
  */
 
 /**

@@ -23,6 +23,12 @@ export * from './relation-sub-object.js';
 // Four hand-written vocabularies used to answer it and disagreed about MySQL,
 // which is why every MySQL conflict came back 500 instead of 409.
 export * from './unique-violation.js';
+// [#8567] The OPPOSITE question, kept deliberately separate: "is this the
+// database refusing an ON CONFLICT target that no unique index backs?" One
+// measured limb per dialect that can raise it (SQLite, Postgres); MySQL cannot,
+// because knex compiles the conflict target away. Never merge the two — a
+// merged predicate reports a working constraint as a missing one.
+export * from './unbacked-conflict-target.js';
 // [ADR-0120 D5e] The `isolated`-posture install gate for `'global'` uniques —
 // the pure enumerator both the hard stop (install seam) and the advisories
 // (`os doctor` / `os migrate plan`) read, so the three cannot drift apart.

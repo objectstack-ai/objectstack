@@ -182,13 +182,20 @@ describe('[#8445] SqlDriver.upsert refuses an unbacked conflict target in the AD
    * of `SqlDriver`, so neither source can hold it. That pin belongs in
    * `driver-turso`, outside this card's declared file surface, and is filed as
    * #8568 rather than smuggled in here.
+   *
+   * [#8567] The literal moved once, deliberately: "and SQLite refuses the
+   * statement" became "and the database refuses the statement", because
+   * recognition now covers Postgres and naming SQLite to a Postgres operator
+   * points at the wrong engine. `driver-turso`'s copy moved in the same commit,
+   * and #8568's two-way parity pin is what proves it — a reword that updated
+   * only one face reddens there, which is that file's whole purpose.
    */
   it('opens with the remote refusal’s first sentence, word for word', async () => {
     const err = await captureError(() => driver.upsert(PLAIN.name, { email: 'a@b.com', title: 'x' }, ['email']));
 
     expect(err!.message.split('. ')[0] + '.').toBe(
       'Cannot upsert into "crm_contact_plain" on conflict keys ("email"): no PRIMARY KEY or UNIQUE ' +
-        'index backs them, so the merge target does not exist and SQLite refuses the statement.',
+        'index backs them, so the merge target does not exist and the database refuses the statement.',
     );
   });
 

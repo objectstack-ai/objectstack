@@ -56,7 +56,12 @@ import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import { ExternalSchemaModeViolationError } from '@objectstack/spec/shared';
-import { isUniqueViolationError, uniqueViolationColumn, resolveTenancyPosture } from '@objectstack/types';
+import {
+  isUniqueViolationError,
+  isUnbackedConflictTargetError,
+  uniqueViolationColumn,
+  resolveTenancyPosture,
+} from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { nextUtcCalendarDay } from '@objectstack/core';
 import {
@@ -967,56 +972,27 @@ function refuseDateBucketedGroupBy(granularity: string, bucketedHere: string[], 
   throw err;
 }
 
-/**
- * [#8445] Is this the "the conflict target is not a key" failure?
+/*
+ * [#8445 → #8567] `isUnbackedConflictTargetError` — "is this the conflict
+ * target is not a key failure?" — is imported from `@objectstack/types`
+ * (`unbacked-conflict-target.ts`), not written here.
  *
- * # Which channel answers, and why it is the message
+ * It began as a private regex on SQLite's sentence, because that was the only
+ * dialect #8445's container could raise the condition on and transcribing the
+ * other two from memory was ruled out as evidence. #8567 raised it on a real
+ * Postgres 16.13 through this same knex path and found a second, unrelated
+ * sentence — so the vocabulary is now per-dialect, which is the shape that
+ * belongs beside `isUniqueViolationError` rather than inside a driver. The
+ * measurements, the reason the `code` channel is unread on BOTH dialects
+ * (SQLite's is generic; Postgres' `42P10` also fires for an out-of-range
+ * `ORDER BY` position), and the reason MySQL has no limb at all are all
+ * recorded there.
  *
- * SQLite fills exactly one: the MESSAGE. It raises a plain `SQLITE_ERROR` —
- * the same generic code a syntax error carries — so `code` cannot discriminate,
- * and a `code`-based test would swallow every other statement failure as an
- * unbacked conflict target. Measured on this face, through knex +
- * better-sqlite3, before the fix:
- *
- * ```
- * upsert('plain', { email: 'a@b.com', title: 'x' }, ['email'])
- *   -> THREW name=SqliteError code=SQLITE_ERROR status=undefined
- *      msg=insert into `plain` (...) values (...) on conflict (`email`) do update set ...
- *          - ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint
- * ```
- *
- * Note what knex does to the message: it prefixes the STATEMENT and keeps
- * SQLite's own sentence after ` - `. So the tail this predicate matches is
- * present on the local face too, and the regex is anchored on that tail rather
- * than on the whole string. The text is SQLite's own, stable since `ON
- * CONFLICT` arrived in 3.24, and narrow enough that no other failure shares it.
- *
- * # What it deliberately does NOT cover — measured, not assumed
- *
- * `driver-sql` serves three dialects, and only SQLite's wording for this
- * condition has been measured (this container has no Postgres or MySQL server
- * to raise the other two). Recognition is therefore SQLite-first by decision:
- * a Postgres deployment still gets its raw error here, exactly as before, which
- * is no worse than today and is a condition nobody has to guess at. Widening it
- * — most likely as a dialect-spanning predicate in `@objectstack/types` beside
- * `isUniqueViolationError`, whose vocabulary table is the shape it would take —
- * is #8567, and it is gated on measuring the other two dialects' text rather
- * than transcribing it from memory.
- *
- * ⚠️ Deliberately NOT `isUniqueViolationError`: that predicate answers the
- * OPPOSITE condition (a unique index exists and the row violated it).
- * Confusing the two would report a working constraint as a missing one.
- *
- * The twin lives in `driver-turso`'s `remote-transport.ts`
- * ({@link https://github.com/objectstack-ai/objectstack/issues/8413}); the two
- * faces state this recognition once each, for the reason that file's header
- * gives — the remote transport is deliberately free of knex and of `SqlDriver`,
- * so it cannot import this one.
+ * ⚠️ Deliberately NOT `isUniqueViolationError`, which is imported one line
+ * away: that predicate answers the OPPOSITE condition (a unique index exists
+ * and the row violated it). Confusing the two would report a working
+ * constraint as a missing one.
  */
-function isUnbackedConflictTargetError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error ?? '');
-  return /ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint/i.test(message);
-}
 
 /**
  * [#8445] A `conflictKeys` upsert whose target no unique index backs.
@@ -1057,17 +1033,28 @@ function isUnbackedConflictTargetError(error: unknown): boolean {
  * that already holds duplicates (`syncDeclaredIndexes` degrades rather than
  * rewriting rows), so the same table arrives here with the same missing index.
  *
- * ⚠️ The original error is kept as `cause` rather than discarded — the SQLite
- * text is the ground truth an operator debugging the table wants, and nothing
- * above this layer can recover it once replaced. It is ASSIGNED rather than
- * passed to the `Error` constructor, matching the twin: the two-argument form
- * needs the ES2022 `ErrorOptions` overload.
+ * [#8567] One clause moved, on BOTH faces in the same commit: "and SQLite
+ * refuses the statement" is now "and **the database** refuses the statement".
+ * This face serves three dialects, and once recognition covers Postgres a
+ * Postgres operator was being told SQLite had refused their statement — a
+ * sentence naming the wrong engine, which is worse than a vague one because it
+ * sends the reader to the wrong manual. #5240 still holds: one condition, one
+ * wording, so `driver-turso`'s copy moved with it and #8568's cross-face parity
+ * pin is what proves they moved together rather than drifting apart.
+ *
+ * ⚠️ The original error is kept as `cause` rather than discarded — the server's
+ * own text is the ground truth an operator debugging the table wants (SQLite's
+ * `ON CONFLICT clause does not match…`, Postgres' `there is no unique or
+ * exclusion constraint…`), and nothing above this layer can recover it once
+ * replaced. It is ASSIGNED rather than passed to the `Error` constructor,
+ * matching the twin: the two-argument form needs the ES2022 `ErrorOptions`
+ * overload.
  */
 function refuseUnbackedConflictTarget(object: string, mergeKeys: string[], cause: unknown): Error {
   const keys = mergeKeys.map((k) => `"${k}"`).join(', ');
   const err = new Error(
     `Cannot upsert into "${object}" on conflict keys (${keys}): no PRIMARY KEY or UNIQUE index ` +
-      `backs them, so the merge target does not exist and SQLite refuses the statement. This is ` +
+      `backs them, so the merge target does not exist and the database refuses the statement. This is ` +
       `usually a table created before its "unique" declaration was emitted as DDL, or conflict ` +
       `keys naming columns that were never declared unique. Fix by declaring the column(s) ` +
       `"unique: true" and re-running schema sync so the unique index is created — if the table ` +
@@ -5064,14 +5051,26 @@ export class SqlDriver implements IDataDriver {
       } catch (error) {
         // [#8445] Classified BEFORE the autonumber retry logic, for three
         // reasons that all point the same way. It is not an autonumber
-        // collision — `collidingAutoNumberReservations` asks
-        // `isUniqueViolationError`, which is false for this error, so the
-        // reservation probe would query the sequences table for nothing and
-        // then rethrow the raw error anyway. It is not transient — the same
-        // statement fails identically on every attempt, so a retry is a wasted
-        // round trip by construction. And it is the only placement that
-        // envelopes BOTH exits below: a refusal recognised after the branch
-        // would still escape raw whenever `mayRetry` is false.
+        // collision — `collidingAutoNumberReservations` gates on
+        // `isUniqueViolationError`, and this error is not a unique violation:
+        // no index existed for anything to violate.
+        //
+        // ⚠️ [#8567] That gate does NOT agree, and this comment used to claim it
+        // did ("which is false for this error"). Measured on the real SQLite
+        // error: `isUniqueViolationError` returns TRUE, because SQLite's
+        // missing-index sentence ends `…PRIMARY KEY or UNIQUE constraint` and
+        // the shared vocabulary matches the word pair `unique constraint`
+        // wherever it appears. Filed as #8590. So the ORDERING here is
+        // load-bearing rather than merely tidy: move this line below the branch
+        // and the reservation probe really does run — querying the sequences
+        // table for a collision that cannot exist, then rethrowing the raw
+        // error. Recognising first is what makes that unreachable.
+        //
+        // It is also not transient — the same statement fails identically on
+        // every attempt, so a retry is a wasted round trip by construction. And
+        // it is the only placement that envelopes BOTH exits below: a refusal
+        // recognised after the branch would still escape raw whenever
+        // `mayRetry` is false.
         if (isUnbackedConflictTargetError(error)) throw refuseUnbackedConflictTarget(object, mergeKeys, error);
         if (!mayRetry || attempt >= AUTONUMBER_COLLISION_RETRIES) throw error;
         const colliding = await this.collidingAutoNumberReservations(error, reservations, options);
