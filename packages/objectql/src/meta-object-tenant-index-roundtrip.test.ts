@@ -279,6 +279,55 @@ describe('[#8375] the write path takes back the tenant index the read added (#43
         expect(host.storedBody()!.indexes).toEqual(authored.indexes);
     });
 
+    it('[#8459] round-trips an AUTHOR-DECLARED organization_id — stamp on, strip off', async () => {
+        // The combination that could not arise before #8459: the read now stamps
+        // the tenant index on an object whose `organization_id` the AUTHOR
+        // declared, so the write path owes the counterpart on that object too —
+        // and it is not a separate implementation to write. The strip re-stamps
+        // the remainder through `provisionTenantScopeIndex` ITSELF, so widening
+        // the stamp widens the strip in the same edit; this measures that it
+        // actually did, rather than asserting it from the code shape.
+        //
+        // Two cycles and the STORED ROW, for the reason the head of this file
+        // gives: one cycle read at the served document cannot separate a strip
+        // that is bounded from one that never fires.
+        const authored = {
+            ...clone(AUTHORED),
+            fields: {
+                ...clone(AUTHORED).fields,
+                // Not byte-identical to `TENANT_SCOPE_FIELD_DEF` — the author's
+                // own shape, which is what withheld the index before this card.
+                organization_id: { type: 'lookup', reference: 'sys_organization', label: 'Org' },
+            },
+        };
+        const host = await seed(true, authored);
+        const firstStored = host.storedBody()!;
+        // Preconditions, both load-bearing: the author's row carries no index,
+        // and the column stored is the author's own (the strip that removes
+        // INJECTED columns must not have taken it — it is not the platform's).
+        expect(firstStored.indexes).toBeUndefined();
+        expect(firstStored.fields.organization_id).toEqual(authored.fields.organization_id);
+
+        for (const cycle of [1, 2]) {
+            const item = await served(host);
+            expect(item.indexes, `cycle ${cycle} served`).toEqual([PLATFORM_TENANT_INDEX]);
+            // The author's column travels out unchanged beside the index the
+            // platform added — the field half of the ruling, on the served body.
+            expect(item.fields.organization_id, `cycle ${cycle} column`)
+                .toEqual(authored.fields.organization_id);
+
+            await host.protocol.saveMetaItem({
+                type: 'object', name: AUTHORED.name, item,
+            } as never);
+
+            // The row is where a missing strip would bake the platform's entry
+            // in — into `sys_metadata.metadata`, its checksum and every history
+            // diff (#4326).
+            expect(host.storedBody()!.indexes, `cycle ${cycle} stored`).toBeUndefined();
+            expect(host.storedBody(), `cycle ${cycle} body`).toEqual(firstStored);
+        }
+    });
+
     it('adds and strips NOTHING on an object that opts out of the tenant column', async () => {
         // The stamp is gated on the spec's own derivation, not on the
         // deployment flag alone: `systemFields.tenant: false` withholds the

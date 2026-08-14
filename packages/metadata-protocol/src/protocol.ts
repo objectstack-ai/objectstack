@@ -12169,8 +12169,10 @@ export class ObjectStackProtocolImplementation implements
         // `promoteDraftForPublish` — `publishPackageDrafts` calls that inside ONE
         // `engine.transaction()`, and an audit row that rolls back with the batch
         // is a different contract from the two existing sites, which write after
-        // their repository transaction has closed. The batch path is therefore
-        // still unaudited; that is filed separately rather than smuggled in here.
+        // their repository transaction has closed. [#8400] The batch path now
+        // writes its own rows in ITS Phase 2, driven off `promoted[]`, for that
+        // reason — a separate edit at a separate site, which is why it never
+        // belonged in here.
         await this.recordMetadataAudit({
             type: request.type,
             name: request.name,
@@ -12770,6 +12772,17 @@ export class ObjectStackProtocolImplementation implements
             packageId: string | null;
             version: string;
             seq: number;
+            /**
+             * [#8400] The scope the draft was PROMOTED IN — `d.organizationId`,
+             * not the request's active org. `listDrafts` surfaces env-wide
+             * (`organization_id IS NULL`) drafts to a non-null-org caller and
+             * the promote above targets the draft's own scope (#3115), so the
+             * audit row must be keyed the same way or it records the publish
+             * against a partition the active row never entered. Captured here
+             * rather than re-derived in Phase 2 because `d` is narrowed to
+             * `{ type, name }` by the type above.
+             */
+            draftOrgId: string | null;
         };
         const promoted: PromotedDraft[] = [];
         // (assigned inside the transaction closure — keep the wide type)
@@ -12818,6 +12831,7 @@ export class ObjectStackProtocolImplementation implements
                             packageId: result.packageId,
                             version: result.version,
                             seq: result.seq,
+                            draftOrgId,
                         });
                         if (typeof result.seq === 'number') publishedSeqs.push(result.seq);
                     } catch (e: unknown) {
@@ -12853,7 +12867,8 @@ export class ObjectStackProtocolImplementation implements
             // causal item with its real error; every other draft is marked
             // BATCH_ABORTED so the caller sees the all-or-nothing semantics
             // instead of inferring them from publishedCount 0.
-            const causal = e?.__batchItem as { type: string; name: string } | undefined;
+            const causal = e?.__batchItem as
+                { type: string; name: string; organizationId?: string | null } | undefined;
             // [#8333 · P6] `failed[].error` is RESPONSE DATA, not a message, so
             // no HTTP boundary's withhold reaches it. Measured on `origin/main`
             // by failing the `sys_metadata` write under the promote: the batch
@@ -12887,6 +12902,58 @@ export class ObjectStackProtocolImplementation implements
             // One error drives the whole map — the batch is all-or-nothing — so
             // the filter runs once rather than per row.
             const causalCode = clientFacingFailureCode(e);
+            // ═══ [#8400] The refusal audit — OUTSIDE the transaction ═══
+            //
+            // This is the row whose PLACEMENT is the whole point of the card.
+            // `engine.transaction()` has already unwound by the time control
+            // reaches this `catch`, so the insert below lands in no transaction
+            // and survives the rollback that provoked it. Written INSIDE the
+            // Phase-1 closure it would roll back with the batch, and the trail
+            // would once again record nothing at all about a refused publish —
+            // the exact defect #7748 exists to close, reintroduced on the batch
+            // route.
+            //
+            // ⚠️ Note the pre-existing sibling this does NOT fix: the denial
+            // rows `assertLockAllowsWrite` / `recordOptimisticConflictAudit`
+            // write from inside `promoteDraftForPublish` ARE inside this
+            // transaction on the batch route, so they roll back. That is why
+            // this row is unconditional rather than "only when the inner gates
+            // didn't already record one": on a transactional engine there is
+            // nothing left of theirs to duplicate. Filed separately.
+            //
+            // ⚠️ `note` is WIRE-VISIBLE — `auditMetaItem` maps it straight onto
+            // the `GET /api/v1/meta/:type/:name/audit` response — so it carries
+            // {@link clientFacingFailureText}, not `e.message`. Putting the raw
+            // sentence here would route the driver dialect #8333 withheld from
+            // `failed[].error` around that rule through a second door. The full
+            // untruncated text is already in the `console.warn` above, which is
+            // where an operator reads it.
+            if (causal) {
+                await this.recordMetadataAudit({
+                    type: causal.type,
+                    name: causal.name,
+                    organizationId: causal.organizationId ?? null,
+                    operation: 'publish',
+                    outcome: 'denied',
+                    // adr0112-ok: D6b — persisted audit column, its own
+                    // vocabulary. ONE fixed value for this site rather than the
+                    // lower-cased causal code: the causal code is whatever the
+                    // catalog can produce, and lower-casing it would turn this
+                    // column's documented closed set into an open one that
+                    // drifts with every new error code. The cause is in `note`.
+                    code: 'batch_aborted',
+                    ...(request.actor ? { actor: request.actor } : {}),
+                    source: 'protocol.publishPackageDrafts',
+                    note: `batch publish of package '${request.packageId}' rolled back (ADR-0067 D2); `
+                        + `nothing landed${causalCode ? ` [${causalCode}]` : ''}: `
+                        + clientFacingFailureText(e, 'publish failed'),
+                });
+            }
+            // No row when the causal item is unidentifiable (a failure in the
+            // transaction machinery itself rather than in any one promotion):
+            // the audit row is keyed on `(type, name)`, and minting an identity
+            // for a failure nobody can attribute would put a fictional item in
+            // a compliance ledger. `console.warn` above stays the record there.
             const failedOut = ordered.map((d) =>
                 causal && d.type === causal.type && d.name === causal.name
                     ? {
@@ -12917,6 +12984,44 @@ export class ObjectStackProtocolImplementation implements
         // in publish order. Best-effort at the batch level: the metadata IS
         // live at this point, so a side-effect failure must be surfaced (via
         // materialize.failures / probes), never turned into a fake unpublish.
+
+        // ─── [#8400] ADR-0010 — one `publish`/`allowed` row per promoted item ──
+        //
+        // Studio's "publish whole app" wrote NO audit rows at all: this route
+        // calls `promoteDraftForPublish` directly, so #7748's row in
+        // `publishMetaItem` never ran for it, and the trail showed a batch
+        // publish of twenty artifacts as nothing whatsoever.
+        //
+        // PLACEMENT — Phase 2, driven off `promoted[]`, and deliberately not
+        // inside the Phase-1 closure. An audit row written in there rolls back
+        // with the batch; for an allowed publish that is arguably right, but the
+        // same placement applied to the refusal (see the `catch` above) is
+        // exactly wrong, and one route must not audit its two outcomes under two
+        // different durability rules. Driving both off the post-commit state
+        // gives the row the same meaning at both sites: it exists iff the
+        // decision is durable. This also matches the position `saveMetaItem`,
+        // `deleteMetaItem` and `publishMetaItem` all take — persistence
+        // committed, side effects not yet run.
+        //
+        // Before the side-effect loop rather than interleaved with it: every
+        // promoted item's metadata is already live, so its row must not depend
+        // on whether a later item's DDL happened to throw.
+        for (const p of promoted) {
+            await this.recordMetadataAudit({
+                type: p.d.type,
+                name: p.d.name,
+                // The draft's OWN scope — see `PromotedDraft.draftOrgId`.
+                organizationId: p.draftOrgId,
+                operation: 'publish',
+                outcome: 'allowed',
+                code: 'ok',
+                ...(request.actor ? { actor: request.actor } : {}),
+                source: 'protocol.publishPackageDrafts',
+                note: `active — package '${request.packageId}'`
+                    + (commit ? `, commit ${commit.commitId}` : ''),
+            });
+        }
+
         for (const p of promoted) {
             published.push({ type: p.d.type, name: p.d.name, version: p.version });
             try {

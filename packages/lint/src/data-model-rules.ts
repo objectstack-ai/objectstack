@@ -157,6 +157,8 @@ function indexUniqueScope(u: unknown): 'organization' | 'global' {
  * 17.x: warning. Protocol 18 rejects the spelling at validate/publish (#5082).
  * Advisory — never fails a build in 17.x.
  *
+ * Concrete harm: #8323 measured the cross-tenant 409-vs-201 oracle end to end.
+ *
  * Wiring: own AUTHORING_RULES entry (validate/build), and `lintDataModel`
  * calls it for `os lint` — each command reports each finding exactly once.
  */

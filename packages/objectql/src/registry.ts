@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveInjectedSystemColumns, isInjectedColumnDefinition, checkManagedApiMethodAffordances, LEGACY_API_METHODS, AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
+import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveInjectedSystemColumns, checkManagedApiMethodAffordances, LEGACY_API_METHODS, AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
 // [#4513] The audit-family governance table, and [#6562] the injected-column
 // DEFINITION tables it governs — see the re-exports below for why both live in a
 // package `objectql` and `metadata-protocol` both depend on.
@@ -646,21 +646,41 @@ export function applySystemFields(
  *
  * ## The predicate, stated exactly
  *
- * "The object carries a tenant column the PLATFORM provisioned" — not "this call
- * just injected one". The distinction is the whole reason the decision moved out
- * of the injection branch: at a read exit the column is ALREADY present
- * (`governServedItem` runs `applyInjectedSystemColumns` before the seam), so a
- * condition reading `!schema.fields?.organization_id` is false exactly where the
- * convergence is needed. `isInjectedColumnDefinition` answers the question the
- * old nesting was really asking, at either site, in either order.
+ * "The object carries a tenant column" — not "this call just injected one", and
+ * [#8459] not "the PLATFORM provisioned it". The first distinction is the whole
+ * reason the decision moved out of the injection branch: at a read exit the
+ * column is ALREADY present (`governServedItem` runs
+ * `applyInjectedSystemColumns` before the seam), so a condition reading
+ * `!schema.fields?.organization_id` is false exactly where the convergence is
+ * needed. {@link carriesTenantScopeColumn} answers the question the old nesting
+ * was really asking, at either site, in either order.
  *
- * An author-declared `organization_id` of the author's own shape therefore still
- * gets NO platform index, exactly as before. The one behaviour this widens is an
- * author who declares the column BYTE-IDENTICAL to `TENANT_SCOPE_FIELD_DEF`
- * (all eight keys, same values) and then gets the index — accepted for the
- * reason `stripProvisionedSearchCompanionFrom` accepts its twin: the two are
- * indistinguishable by construction, and the platform's own answer for that
- * column is the one being served either way.
+ * The second distinction is the 2026-08-13 maintainer ruling on #8459. This
+ * predicate also required the column to be the platform's OWN definition
+ * (`isInjectedColumnDefinition`, byte-for-byte), which #8375 preserved exactly
+ * rather than widening inside a convergence fix. The effect was that an author
+ * who declared their own `organization_id` — adding a label, making it
+ * `required`, pointing it at their own org table — kept the column and silently
+ * lost the index on it, while `computeTenantLayer0Filter` (plugin-security)
+ * went on AND-composing `organization_id = <org>` onto essentially every read of
+ * that object. The deployment's hottest predicate, unindexed, reached by an
+ * additive-looking authoring move that removed a guarantee the author never knew
+ * they held.
+ *
+ * The ruling is one rule, stated once: on a walled deployment the wall's
+ * predicate is indexed, whoever typed the column. ⛔ Not a type judgement — an
+ * `organization_id` declared as `text` gets the index too. Inspecting the
+ * declared type to decide whether it is "really" the tenant anchor was
+ * considered and REJECTED: it is a third predicate at the site where #8375 just
+ * reduced two to one, and its boundary is itself something an author gets
+ * subtly wrong (a `text` org code would lose the index and look fine).
+ *
+ * ⚠️ Recorded gap, deliberately left uncovered by that ruling: an author who
+ * wants NO index on the tenant column has no way to say so. If that need
+ * appears it becomes an explicit declared key — ⛔ it is not grounds to restore
+ * the injected-column condition. What exists today for a DIFFERENT index shape
+ * is {@link declaresTenantIndex}: declare your own single-column tenant index
+ * and the platform declares none.
  *
  * `multiTenant: false` declares NO index rather than a false one: on an unwalled
  * stack nothing filters by organization, so the index is dead weight — the same
@@ -690,7 +710,7 @@ function provisionTenantScopeIndex(
   opts: { multiTenant: boolean },
 ): ServiceObject {
   if (!opts.multiTenant) return schema;
-  if (!platformOwnsTenantColumn(schema)) return schema;
+  if (!carriesTenantScopeColumn(schema)) return schema;
   if (declaresTenantIndex(schema)) return schema;
 
   return {
@@ -704,26 +724,44 @@ function provisionTenantScopeIndex(
 }
 
 /**
- * [#8375] Is this object's `organization_id` the PLATFORM's column rather than
- * one the author declared?
+ * [#8375, widened by #8459] Is this object tenant-scoped — i.e. does it carry an
+ * `organization_id` column for the wall to filter on?
  *
- * Two independent conditions, and both are load-bearing:
+ * The spec's own derivation (`resolveInjectedSystemColumns`, #5378) and nothing
+ * else, so `systemFields: false`, `systemFields.tenant: false`,
+ * `tenancy.enabled: false` and `managedBy: 'better-auth'` all withhold the index
+ * exactly as they withhold the column. Re-deriving any of those rows here is the
+ * drift that plan exists to prevent.
  *
- *  - the object must carry a tenant column at all — the spec's own derivation
- *    (`resolveInjectedSystemColumns`, #5378), so `systemFields: false`,
- *    `systemFields.tenant: false`, `tenancy.enabled: false` and
- *    `managedBy: 'better-auth'` all withhold the index exactly as they withhold
- *    the column. Re-deriving any of those rows here is the drift that plan
- *    exists to prevent;
- *  - the column present must be the platform's own definition, or absent
- *    (the pre-injection shape). `isInjectedColumnDefinition` compares against
- *    the shipped table byte-for-byte, which is the same exactness
- *    `stripInjectedSystemColumns` uses to decide the same question in reverse.
+ * ⚠️ That gate is NOT a leftover of the condition #8459 lifted, and it does not
+ * contradict the ruling's "whenever the object carries `organization_id`": it is
+ * the same reasoning as `multiTenant: false`, one scope down. An object that
+ * declares itself non-tenant-scoped is one the wall composes NO predicate on —
+ * `computeTenantLayer0Filter` (plugin-security) returns `null` when
+ * `tenancyDisabled`, which reads the very same `systemFields.tenant` /
+ * `tenancy.enabled` declarations — so an index there would serve nothing. What
+ * #8459 removed is the SECOND condition this function used to carry: that the
+ * `organization_id` present be the platform's own definition byte-for-byte
+ * (`isInjectedColumnDefinition`). Where the column comes from is no longer part
+ * of the question; whether the object is walled still is.
+ *
+ * ⛔ Do NOT "simplify" this to a field-map check (`fields.organization_id !==
+ * undefined`), however closely that reads to the ruling's sentence. Measured:
+ * it breaks the WRITE path for ordinary platform-provisioned objects. The save
+ * path strips the injected COLUMNS before it strips the materialized stamps
+ * (`stripMaterializedFromRegistry(type, stripServedSystemColumns(type, item))`,
+ * `@objectstack/metadata-protocol`), so by the time
+ * {@link SchemaRegistry.stripProvisionedTenantIndexFrom} re-stamps the
+ * remainder through this function, the body no longer HAS an
+ * `organization_id` — a field-map predicate answers "not tenant-scoped", the
+ * re-stamp adds nothing, the lists differ, the strip refuses, and the
+ * platform's own index entry is baked into `sys_metadata.metadata`, its
+ * checksum and every history diff (the #4326 regression). Reading the object's
+ * DECLARATIONS instead reaches the same verdict on a stripped body as on a
+ * whole one, which is what makes the stamp and its inverse agree.
  */
-function platformOwnsTenantColumn(schema: ServiceObject): boolean {
-  if (!resolveInjectedSystemColumns(schema).tenant) return false;
-  const declared = (schema.fields as Record<string, unknown> | undefined)?.organization_id;
-  return declared === undefined || isInjectedColumnDefinition(declared, TENANT_SCOPE_FIELD_DEF);
+function carriesTenantScopeColumn(schema: ServiceObject): boolean {
+  return resolveInjectedSystemColumns(schema).tenant;
 }
 
 /**
