@@ -347,6 +347,30 @@ export interface IMetadataService {
      * especially before restating the array's LENGTH as a fact about the
      * environment (#6504).
      *
+     * ⚠️ **THIS READ PERFORMS NO OVERLAY MERGING (#8328).** It answers from the
+     * registry and this service's own loaders. It does **not** apply the
+     * `sys_metadata` customization overlay, which is merged one layer ABOVE
+     * this contract by the metadata protocol's `getMetaItems` /`getMetaItem`
+     * (per `(slot, package)`, org-scoped rows over env-wide ones). So after a
+     * runtime `PUT /api/v1/meta/<type>/<name>` returns 200, this member keeps
+     * answering with the packaged/registered row while
+     * `GET /api/v1/meta/<type>` serves the overridden one — same name, two
+     * answers, no local symptom.
+     *
+     * The trap is that nothing about the call site shows it: the type is the
+     * same, the shape is the same, and only the CONTENT is stale, and only when
+     * an override happens to exist. A consumer that must reflect runtime
+     * overrides has to read the protocol's merged listing instead; `list` is
+     * the right read for the registry/loader set itself, and for consumers that
+     * genuinely want the authored baseline. Measured on the MCP prompt bridge,
+     * which read `list('skill')` and served prompts an admin had already
+     * overridden through the meta API.
+     *
+     * Whether the merge BELONGS down here — so every `list()` consumer gets it
+     * rather than each one remembering to climb a layer — is a live contract
+     * question, deliberately left open rather than answered by this note; it is
+     * archived unscheduled and re-grades on real demand.
+     *
      * @param type - Metadata type
      * @returns Array of metadata definitions
      */

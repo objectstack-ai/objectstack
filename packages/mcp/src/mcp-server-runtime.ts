@@ -222,6 +222,83 @@ async function diagnoseListRead(
 }
 
 /**
+ * [#8328] The protocol layer's overlay-aware merged read.
+ *
+ * `IMetadataService.list()` is the registry/loader listing and applies **no**
+ * `sys_metadata` overlay merge — a runtime `PUT /api/v1/meta/<type>/<name>`
+ * lands in that store and never reaches it. The merge lives one layer up, in
+ * the protocol's `getMetaItems`, which reads the overlay rows and resolves them
+ * per `(slot, package)` over the registry and MetadataService baselines.
+ *
+ * Structurally optional, and NOT the optionality `listDiagnosed` has: a host
+ * that assembles this runtime without the metadata protocol has no merged read
+ * to offer at all, so the seam is absent rather than degraded. `undefined` here
+ * therefore means "this host cannot merge", never "merging was skipped".
+ */
+export interface McpMergedMetadataRead {
+  /** The protocol's merged listing for one metadata type. */
+  getMetaItems(request: { type: string }): Promise<unknown>;
+}
+
+/**
+ * Coerce a `getMetaItems` answer into its items array.
+ *
+ * The protocol answers `{ type, items }`, but the shape is read defensively for
+ * the reason `packages/rest` reads it defensively at every one of its own call
+ * sites: this is a duck-typed seam across a package boundary, and a host may
+ * hand back the bare array.
+ */
+function metaItemsArray(answer: unknown): unknown[] {
+  if (Array.isArray(answer)) return answer;
+  const items = (answer as { items?: unknown } | null | undefined)?.items;
+  return Array.isArray(items) ? items : [];
+}
+
+/**
+ * [#8328] List one metadata type through the **merged** read when this host has
+ * one, keeping #6504's completeness verdict on top of it.
+ *
+ * The defect this closes: the skill prompt surface read `list()` one layer
+ * below where any overlay merging happens, so a runtime meta PUT returned 200
+ * and the flip never reached MCP prompts, while `GET /api/v1/meta/skill` served
+ * it from the merged read. Two surfaces, one skill name, two answers.
+ *
+ * The composition is the point, and it is the one this file already uses for
+ * `objectstack://objects`: **items** come from the merged read, and the
+ * **verdict** from {@link diagnoseListRead}, which asks `listDiagnosed` the
+ * question `getMetaItems` cannot answer. `getMetaItems` swallows a
+ * MetadataService read failure into its own `catch` and reports a merged list
+ * either way, so taking its answer alone would have silently spent the
+ * degraded/errors contract #6504 installed — a known-partial prompt surface
+ * would go back to presenting as a complete one. Asking the metadata service
+ * directly keeps that verdict addressed to the same set the items came from:
+ * the merged list is the registry/overlay layers ON TOP of exactly the
+ * MetadataService listing whose completeness is being judged, so a loader that
+ * could not be read makes both short together.
+ *
+ * ⛔ No fallback to the un-merged `list()` when the merged read THROWS. That
+ * would answer with registry rows in the shape of merged ones — the very defect
+ * above, restored silently at the moment the overlay store is unreadable, which
+ * is exactly when an overlay is most likely to be the thing being missed.
+ * `getMetaItems` already answers registry-only for the one benign case (the
+ * `sys_metadata` table not being provisioned yet); anything it raises past that
+ * means overlay rows may exist and were not seen, and the caller's own handling
+ * — a warn and no skill prompts — is the honest report.
+ */
+async function mergedDiagnosedList(
+  metadataService: IMetadataService,
+  mergedRead: McpMergedMetadataRead | undefined,
+  type: string,
+): Promise<DiagnosedListRead> {
+  if (!mergedRead || typeof mergedRead.getMetaItems !== 'function') {
+    return diagnosedList(metadataService, type);
+  }
+  const items = metaItemsArray(await mergedRead.getMetaItems({ type }));
+  const verdict = await diagnoseListRead(metadataService, type);
+  return { items, degraded: verdict.degraded, errors: verdict.errors };
+}
+
+/**
  * [#6055] Read one metadata item, keeping the ADR-0110 D3 verdict instead of
  * flattening an outage into the same `undefined` a never-declared name
  * produces.
@@ -960,8 +1037,27 @@ export class MCPServerRuntime {
    * prompt's **body** is re-read from metadata at `prompts/get` time, so an
    * edited skill serves fresh text without a restart. The HTTP transport builds
    * its server per request and is live on both — see {@link handleHttpRequest}.
+   *
+   * [#8328] `mergedRead` is the protocol layer's overlay-aware listing (see
+   * {@link McpMergedMetadataRead}). When the host can supply it, the skill read
+   * goes through it so a runtime `PUT /api/v1/meta/skill/<name>` reaches this
+   * surface; without it the read is the pre-#8328 one, unchanged. It is a
+   * parameter rather than something resolved in here because this runtime is
+   * handed its collaborators and holds no service registry of its own — the
+   * assembly that knows both services wires them together (`plugin.ts`).
+   *
+   * ⚠️ This bridges the **long-lived** server only — the one the stdio
+   * transport serves. The HTTP surface at `/api/v1/mcp` builds a fresh server
+   * per request from a bridge the RUNTIME supplies
+   * (`packages/runtime/src/domains/mcp.ts` → `buildMcpBridge`), and its
+   * `listSkills` is a separate read that this parameter cannot reach. Both
+   * surfaces have to be pointed at the merged read to close #8328; this one is
+   * the half that lives in this package.
    */
-  async bridgePrompts(metadataService: IMetadataService): Promise<void> {
+  async bridgePrompts(
+    metadataService: IMetadataService,
+    mergedRead?: McpMergedMetadataRead,
+  ): Promise<void> {
     const logger = this.config.logger;
 
     // Register a dynamic prompt that loads agents at call time
@@ -1012,7 +1108,11 @@ export class MCPServerRuntime {
         // is also the per-call re-read behind each registered prompt's body, so
         // this is deliberately last-read-wins rather than boot-only: the
         // snapshot check below runs immediately after its own call.
-        const read = await diagnosedList(metadataService, 'skill');
+        //
+        // [#8328] Through the merged read when this host has one — the whole
+        // point of the re-read above is that an edited skill serves fresh text,
+        // and a runtime meta PUT is the edit that never arrived.
+        const read = await mergedDiagnosedList(metadataService, mergedRead, 'skill');
         skillListVerdict = { degraded: read.degraded, errors: read.errors };
         return read.items;
       },
