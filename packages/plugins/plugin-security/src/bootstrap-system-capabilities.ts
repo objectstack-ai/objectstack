@@ -119,10 +119,26 @@
  * is `config.organizationId ?? (/^(sys_|cloud_|ai_)/.test(objectName) ? undefined
  * : fallbackOrgId)` — the pinned organization SHORT-CIRCUITS the `sys_` exemption,
  * so a replayed `sys_capability` seed lands stamped with that organization's id.
- * So: an app that seeds a capability with platform provenance produces this row
- * on every new organization of a multi-tenant install. Dormant on a stock install,
- * one ordinary authoring mistake away from live — and the mistake is invisible,
- * since the resulting row is also one ADR-0066 asset ownership forbids the
+ * `applyPublishedSeeds` pins that `organizationId` from the caller's ACTIVE
+ * organization, so an app seeding a capability with platform provenance produces
+ * this row in every organization its seeds are applied into.
+ *
+ * That last link is MEASURED, not traced — against the real `SeedLoaderService`
+ * (harness shaped like objectql's `seed-loader-org-stamp.test.ts`). A
+ * `sys_capability` seed carrying `managed_by: 'platform'` inserted
+ * `organization_id: 'org_msbubm8g3j35rgx0'` with an organization pinned, and
+ * inserted the same row UNSTAMPED with none pinned — the control that shows the
+ * `sys_` exemption is otherwise intact, so the stamp is the pin's doing and not
+ * the harness's. What is deliberately NOT claimed: how many organizations a given
+ * deployment replays seeds into is a provisioning question this repository cannot
+ * answer.
+ *
+ * VERDICT — a DORMANT asymmetry with a LIVE route, not a live defect. Dormant
+ * because nothing shipped here walks the route; live-routed because walking it
+ * takes ordinary authoring and no unsupported step. The fix lands on that basis:
+ * it removes a trap and restores a declared invariant, and the severity claim
+ * stays exactly that size. The trap is worth removing because the mistake would be
+ * invisible — the resulting row is one ADR-0066 asset ownership forbids the
  * organization's own admin from editing or deleting through Setup.
  *
  * [#8536] The DERIVED half's skip is REPORTED. The guard stays exactly as #5876
