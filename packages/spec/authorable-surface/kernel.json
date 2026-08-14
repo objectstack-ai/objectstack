@@ -394,7 +394,7 @@
     "kernel/MetadataOverlay:tenantId",
     "kernel/MetadataOverlay:updatedAt",
     "kernel/MetadataOverlay:updatedBy",
-    "kernel/MetadataPluginConfig:additionalTypes",
+    "kernel/MetadataPluginConfig:additionalTypes [RETIRED]",
     "kernel/MetadataPluginConfig:bootstrap",
     "kernel/MetadataPluginConfig:cacheMaxItems",
     "kernel/MetadataPluginConfig:customizationPolicies",
