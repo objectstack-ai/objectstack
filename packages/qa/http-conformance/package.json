@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/http-conformance",
-  "version": "0.1.0-rc.5",
+  "version": "0.1.0",
   "private": true,
   "license": "Apache-2.0",
   "description": "HTTP transport-port conformance gate (ADR-0076 D11/OQ#10, #2462) — a zero-dependency node:http reference implementation of IHttpServer plus a cross-adapter suite that boots the dispatcher bridge and REST generator on it AND on plugin-hono-server, pinning that the port stays free of framework-isms. Not published; validation instrument, not a product server.",

@@ -1,5 +1,1416 @@
 # @objectstack/plugin-mcp-server
 
+## 17.0.0
+
+### Minor Changes
+
+- 2f8328c: feat(spec,metadata,mcp): let a plural metadata read say it is known-partial (#6504)
+
+  `IMetadataService.list(type)` returns an array whether every loader answered or
+  one of them was down. A consumer receiving a short list therefore had no way to
+  ask whether it was short because that is all anyone declared, or because a
+  loader was unreachable — the #5840 / PR #6051 defect on the plural read.
+
+  The verdict already existed and was already being thrown away.
+  `MetadataManager.readListUncached()` has computed a `degraded` flag since #5184,
+  and `list()` spent it entirely on picking a cache TTL. This is sharper than the
+  singular case rather than merely analogous: `list` is the read whose answer
+  carries a **count**, and a consumer restating `items.length` as "this
+  environment contains N items" makes a positive, numeric claim out of a read that
+  partly did not happen.
+
+  **New optional contract member — `listDiagnosed?(type)`.** Returns
+  `{ items, degraded, errors }`, the plural counterpart of `getDiagnosed`.
+  Optional for the same reason its singular twin is: an implementation that
+  predates it cannot report the distinction, so a consumer probes for it and falls
+  back to `list()`, which reports nothing degraded. `list()` itself is unchanged
+  in every direction — same items, same array instance, same best-effort posture —
+  so no existing caller has to do anything.
+
+  `MetadataManager` implements it through the same cache entry and the same
+  single-flight slot `list()` uses, so asking for the verdict costs no extra
+  loader walk and the two members cannot drift.
+
+  **MCP consumers, classified individually** (PR #6051's discipline, not a blanket
+  switch):
+
+  - `objectstack://objects` **mis-described**, and its degraded body changes. It
+    rendered `{ objects, totalCount }`, and during an outage `totalCount` was
+    simply false. A healthy read is byte-identical to before. A degraded read now
+    serves the same `objects` — the reachable set is still the most useful true
+    thing here — with `totalCount` **absent** and `partial: true`,
+    `returnedCount`, `warning`, plus the `code: 'SERVICE_UNAVAILABLE'` / `status:
+503` envelope the sibling `objectstack://objects/{objectName}` resource
+    already carries. Dropping the key rather than reporting a smaller number is
+    the point: a client reading `body.totalCount` now gets `undefined`, where a
+    plausible-looking integer would have been believed.
+  - the `agent_prompt` sibling **skill bridge** is a snapshot and its output is
+    unchanged. It publishes no count to any client, so a degraded read costs it
+    silently-unregistered prompts instead of a false statement; the verdict goes
+    to the operator as a `warn` naming the loader, the fact that the skills are
+    missing rather than undeclared, and that the stdio transport's snapshot stays
+    short until restart while the HTTP transport self-heals.
+
+  If you consume `objectstack://objects` and read `totalCount` unconditionally,
+  branch on `partial` (or on the key's absence) before treating any count from
+  this resource as a total.
+
+- ae490ef: feat(mcp): 开源发行版终于消费 skill —— `instructions` 半边投影为 MCP `prompts` 原语 (#3905)
+
+  `stack.zod.ts` 与 ADR-0063 §2 把 **skill 定为唯一第三方扩展原语**,而开源发行版
+  (BYO-AI,cloud ADR-0025)里零消费方:`SkillSchema` 可作者化、被两条 lint 规则认真
+  校验(`validateAiToolReferences` / `validateAiSurfaceAffinity`),却没有任何代码路径
+  读它 —— 作者写 skill → 校验通过 → lint 通过 → **永不运行且无人告知**。这正是本仓
+  ratchet 存在的意义所要消灭的 declared ≠ enforced 形状。
+
+  **skill 的两个半边,现在各自说清楚跑在哪。**
+
+  - **`instructions`(判断力)→ MCP `prompts` 原语,处处可用。** MCP 服务器补齐了
+    `prompts/list` / `prompts/get`:每个带 `instructions` 的已注册 skill 成为一个
+    MCP 客户端可以列出并取回的 prompt(prompt 名 = skill 机器名,`label` → `title`,
+    `description` 原样带上)。HTTP 与 stdio 两条传输都服务它。
+  - **`tools` / `surface` / `triggerConditions`(接线)→ 明确标注 cloud-runtime-only。**
+    绑工具与激活判定是 in-product agent 循环的属性;MCP 里模型在客户端、服务端只有
+    一张扁平工具表,AI 暴露的 Action 早已通过 `list_actions` / `run_action` 可达。
+    文档与 schema JSDoc 如实写明,不再装样子 —— 但两半边在两个发行版里都照旧接受
+    **校验**,所以开源里写的 skill 到 cloud 上语义完整,不必写两遍。
+
+  **协议合规。** `prompts` 能力按规范声明:只有当宿主能读到本环境的 skill 元数据时
+  才声明并注册处理器(能力协商如实,与 action 工具同一套优雅降级);无 skill 时
+  `prompts/list` 返回**空列表而非报错**;`prompts/get` 取不存在的名字返回
+  `-32602 InvalidParams`;没有 `instructions` 的 skill 与 `active: false` 的 skill
+  不投影。HTTP 面的投影从**本请求自己的 bridge** 读(与 `describeObject` 同一条
+  per-environment 通道),多租户宿主不会把一个环境的 skill 服务给另一个环境。
+
+  **同时修掉同仓重名。** `packages/mcp/src/skill.ts` 从来不是 skill 元数据类型,
+  而是 ADR-0036 Amendment C 的 `SKILL.md` 分发物 —— 在 `packages/mcp` 里 grep
+  `skill` 先找到的一直是它。现在按各自承载的产物命名:`skill-md.ts`(SKILL.md
+  分发物)与 `skill-prompts.ts`(skill 元数据 → prompts 投影),两侧模块头互指。
+  包的公开导出名(`renderSkillMarkdown` / `OBJECTSTACK_SKILL_NAME` /
+  `OBJECTSTACK_SKILL_DESCRIPTION` / `RenderSkillOptions`)一个未变。
+
+### Patch Changes
+
+- 879ea13: ADR-0105 Phase 0 + Phase 1: group tenancy posture; organization scope as a
+  first-class authorization dimension.
+
+  > This release carries BREAKING spec removals (see "Enforce-or-remove" below)
+  > but is recorded as `minor`: every publishable package is in the Changesets
+  > lockstep group, so one `major` would promote the whole monorepo. Breaking
+  > changes ship as `minor` during the launch window — the migration notes below
+  > are what reach consumers in `CHANGELOG.md`.
+
+  ## Tenancy is now a spectrum (D1)
+
+  `single | group | isolated`, resolved by the `tenancy` service and selected with
+  the new `OS_TENANCY_POSTURE` env var. Existing deployments are unchanged:
+  `OS_TENANCY_POSTURE` unset derives the posture from `OS_MULTI_ORG_ENABLED`
+  (`true` ⇒ `isolated`, else `single`). An unrecognized value throws at boot
+  rather than silently landing in a posture with no organization wall.
+
+  - `single` — no wall (unchanged).
+  - `group` — **new.** Organizations are membership boundaries over one shared
+    dataset; Layer 0 becomes `organization_id IN accessible_org_ids` (union / MOAC
+    semantics). Enforced by the OPEN engine.
+  - `isolated` — today's `multi`, renamed. Behavior, enterprise `org-scoping`
+    probe and degraded-boot handling all unchanged.
+
+  ## Organization scope is a first-class context field (D2)
+
+  `ExecutionContext.accessible_org_ids` — every organization the caller holds a
+  currently-valid membership in (ADR-0091 validity windows) — is resolved once by
+  `resolveAuthzContext` and carried by every transport. The `group` wall reads it
+  directly; RLS policies may reference it as
+  `organization_id IN (current_user.accessible_org_ids)`. An empty or absent set
+  fails the wall closed.
+
+  Only the Layer 0 PREDICATE widens. Composition is untouched: the wall is still
+  computed independently of the RLS compiler, AND-composed outermost, and
+  crossable only by a true `PLATFORM_ADMIN` on a posture-permitting object — so
+  ADR-0095's W1/W2 invariants hold in every posture.
+
+  ## Two P0 correctness fixes (D3, D4) — behavior changes
+
+  **D3 — app-authored org-scoped RLS policies are no longer silently dropped**
+  (finding F1, framework#3539). `collectRLSPolicies` used to strip any policy whose
+  `using` contained the substring `current_user.organization_id` when isolation was
+  inactive, which swallowed app-authored policies as well as the platform's own.
+  Stripping is now decided by PROVENANCE (identity against the shipped
+  declaration). **Upgrade impact:** in a deployment with no organization wall, an
+  app-authored policy referencing the active organization is now RETAINED and
+  fails closed (zero rows) with a one-time warning, where it previously vanished
+  and the object read unscoped. `getReadFilter` shared the defect, so analytics and
+  raw-SQL consumers were affected too. If a policy was only ever meant for
+  multi-org, delete it or install `@objectstack/organizations`.
+
+  **D4 — `viewAllRecords`/`modifyAllRecords` never cross an organization
+  boundary** (finding F2, framework#3540). Under a wall-less posture nothing
+  bounded the wildcard superuser bits `organization_admin` carries, so a
+  deployment that accumulated organizations (personal orgs on signup) made every
+  owner/admin an environment-wide superuser. `auto-org-admin-grant` now grants a
+  de-VAMA'd `organization_admin_no_bypass` variant when no wall is enforced, and
+  revokes the superseded variant whenever the posture changes. **Upgrade impact:**
+  in `single` posture an org owner/admin keeps full CRUD but loses the blanket
+  ownership/sharing/RLS bypass. Deliberate deployment-wide visibility remains
+  available through `admin_full_access` or an explicitly authored permission set —
+  it just stops being a side effect of a better-auth membership role.
+
+  ## Engine-owned organization stamping (D5)
+
+  Under any wall-enforcing posture the engine stamps `organization_id` from the
+  caller's active organization on an insert that omits it, and validates every
+  supplied value against the wall. Idempotent with the enterprise auto-stamp
+  (neither overwrites a supplied value). This also closes a real hole: the
+  pre-existing post-image check required a non-array payload, so a BULK insert
+  could carry a forged `organization_id` per row. One forged row now denies the
+  whole write.
+
+  ## Group structure, extension fields and red-line lints (D6, D7)
+
+  - `sys_organization` gains `parent_organization_id` and `sort_order` — a
+    **reporting dimension only**.
+  - New lint `validateOrgAxisRedLines` (`org-axis-permission-inheritance`,
+    `org-axis-cross-org-bu-grant`), wired into `os lint` / `os compile` /
+    `os validate`: an RLS policy or sharing rule that walks the org tree is an
+    error, as is a business-unit grant on a platform-global object.
+  - Extension fields on better-auth-managed objects ride the existing ADR-0092
+    whitelist. A new guard derives better-auth's real field surface from
+    `getAuthTables()` at the pinned version and fails the build on any name
+    collision, so a library upgrade cannot silently take ownership of a column.
+
+  ## Enforce-or-remove (D11) — BREAKING
+
+  Both removals are of surface that had **zero runtime consumers**, so no
+  behavior changes; authoring them is now a no-op instead of a lint warning.
+
+  - **`PermissionSet.contextVariables` — REMOVED.** The RLS compiler never read
+    it. FROM → TO: a set a policy needs as `field IN (current_user.<key>)` is now
+    supplied by a registered membership resolver (below); a constant belongs in
+    the policy itself as a literal (`status = 'published'`).
+  - **`Territory` / `TerritoryModel` / `TerritoryType` (`security/territory.zod.ts`)
+    — REMOVED.** No runtime object, stack field or resolver existed. FROM → TO:
+    matrix requirements are served by multi-position × business-unit anchoring; a
+    generalized dimension-security module will arrive with its own ADR.
+  - **`ExecutionContext.rlsMembership` — PRODUCTIZED.** The bag the compiler has
+    merged since ADR-0056 finally has a producer: register an
+    `IRlsMembershipResolver` (`@objectstack/spec/contracts`) under the
+    `rls-membership-resolver` service, declaring the keys it owns. Fail-closed by
+    construction — an unresolved key makes its policies drop out. Kernel-owned
+    keys (`accessible_org_ids`, `org_user_ids`, …) are reserved and cannot be
+    overwritten from this seam.
+
+  ## Edition boundary (D12)
+
+  The `group` posture's enforcement primitives ship OPEN — the union wall,
+  `accessible_org_ids` resolution, D5 stamping/validation, the D3/D4 correctness
+  fixes and the D6 lints — because the correctness of a wall is never a paid
+  feature (cloud ADR-0016 铁律「强制免费、治理收费」). `isolated` keeps its existing
+  enterprise `org-scoping` probe, so the current commercial boundary for
+  legal-entity isolation is unchanged by this release.
+
+- 2e836de: chore(packaging): CHANGELOG.md ships in every npm tarball (#4261)
+
+  The AGENTS.md post-task checklist requires breaking changesets to carry their
+  FROM → TO migration because "this text ships to consumers as `CHANGELOG.md`
+  inside the npm package and is what an upgrading agent greps after the tombstone
+  error." That delivery path was severed for 68 of the 69 publishable packages:
+  npm packs `package.json` / `README*` / `LICENSE*` unconditionally but — unlike
+  older npm versions — not `CHANGELOG.md`, and the canonical
+  `"files": ["dist", "README.md"]` whitelist never named it. Measured on npm
+  10.9.7: `npm pack --dry-run` on `@objectstack/types` shipped 3 files while its
+  70KB `CHANGELOG.md` stayed behind. Only `@objectstack/spec` listed it
+  explicitly.
+
+  The tombstone-error scenario is precisely the one where the repo is out of
+  reach — the upgrading agent has `node_modules` and nothing else — so the
+  migration text has to ride in the tarball. Every publishable package now
+  declares `CHANGELOG.md` in `files`, and the canonical whitelist is
+  `["dist", "README.md", "CHANGELOG.md"]`.
+
+  The other half is the gate: `check:published-files` gains a fifth invariant,
+  COMPLETE — a whitelist that fails to cover `CHANGELOG.md` fails the
+  always-required lint job, so the next package cannot silently sever the path
+  again. `@objectstack/spec`'s per-package EXTRA_ENTRIES exemption dissolves
+  into the canonical set.
+
+  Consumer-visible change: one more file per install (the package's changelog,
+  e.g. 70.8KB for `@objectstack/types`), and `grep -r "removed key"
+node_modules/@objectstack/*/CHANGELOG.md` now finds the migration it was
+  promised.
+
+- 3f7b4ff: `McpDataBridge.aggregate` now declares its `groupBy` / `aggregations` inputs as the engine's own `EngineAggregateOptions` slices instead of a hand-mirrored copy (#8032). The mirror had drifted in three places: `function: string` against the engine's six-name enum, `dateGranularity?: string` against the `day`/`week`/`month`/`quarter`/`year` vocabulary, and a `distinct?: boolean` the engine retired in `@objectstack/spec` 17 (#6815) — a caller passing `distinct: true` had it silently dropped, and now gets the retirement rejection at compile time instead. Delete the key; a deduplicated count is the `count_distinct` aggregation function. Runtime acceptance is unchanged on every path: the `aggregate_records` tool's zod schema already enforced exactly these shapes at the ingress, and the stdio bridge's engine call no longer needs its two casts.
+- 4f3d232: docs(mcp): `diagnoseEmptyRead` 的 TSDoc 更正一句被证伪的事实 (#6724)
+
+  `packages/mcp/src/mcp-server-runtime.ts` 里 `diagnoseEmptyRead` 的 TSDoc(#6055
+  由 PR #6051 落地)为"在空答案之后再跑一次仅取结论的探针,而不是把
+  `getObject` 换成 `getDiagnosed('object', name)`"这个设计选择给出了两条理由。
+  其中一条是事实陈述,而它是**错的**:
+
+  > `MetadataFacade.getObject`(objectql)返回 `registry.getObject(name)` —— a
+  > different shape from its own `get()`,因此等价关系在一般情况下不成立。
+
+  `SchemaRegistry.getItem` 对 `'object'` / `'objects'` 类型直接特判回
+  `getObject`,所以 facade 的 `get('object', n)` 走的是同一次查找;其后的
+  `item?.content ?? item` 解包是空操作 —— 合并后的 `ServiceObject` 根本没有
+  `content` 键。实测:命中时两个成员交回**同一个对象引用**,未命中时双方都是
+  `undefined`。三个已发布实现由 `packages/objectql/src/
+metadata-service-getobject-equivalence.test.ts`(PR #6839)钉住,契约侧的
+  `IMetadataService.getObject` 自 PR #6723(#6505)起也写明了这条等价关系。
+
+  同一句话在 `mcp-server-runtime.metadata-outage.test.ts` 里被复述过一次,一并
+  更正。
+
+  仍然成立的那半条理由被保留:`getObject` 是 `IMetadataService` 自己的成员,
+  #6055 当时它并**没有**被文档化的等价关系,在消费端擅自假定一条正是 Prime
+  Directive #12 禁止的私有方言 —— 所以解析器当初没有被换掉。
+
+  **纯注释,零行为变化。** 这次更正**不**主张把解析器换成
+  `getDiagnosed('object', name)`:那是一次独立的判断,由接手的人按其自身利弊
+  去做,本次改动既不作出也不预设。
+
+- 5c2716b: mcp: a metadata outage stops being reported to MCP clients as `Agent "X" not found`
+
+  The `agent_prompt` prompt resolved its body through `metadataService.get('agent', name)`
+  and answered the resulting `undefined` with `Error: Agent "X" not found`. That `undefined`
+  carries two opposite facts (#5840, ADR-0110 D3): the name was never declared, or every
+  loader behind the metadata service was down. So during a metadata outage an MCP client was
+  told, positively, what the author had declared — from a read that never happened. The same
+  shape sat one bridge over: the `objectstack://objects/{objectName}` resource answered
+  `getObject()`'s `undefined` with `Object "X" not found`.
+
+  **Both surfaces now separate the two.** A degraded read answers `SERVICE_UNAVAILABLE` —
+  the same catalogued code and the same "whether it exists is unknown, retry once it is
+  reachable" sentence the `sys_metadata` half of this family already emits (#5532 / #5843) —
+  and a genuine miss keeps its not-found answer, byte for byte on the prompt surface.
+  MCP's `prompts/get` and `resources/read` results carry no error envelope, so the
+  classification travels in the payload each surface already had: the prompt's text, and the
+  resource's JSON body, which now names `code` and `status` on **both** answers
+  (`SERVICE_UNAVAILABLE`/503 vs `RESOURCE_NOT_FOUND`/404) so a client can tell them apart
+  without parsing prose.
+
+  **This is a diagnosis fix, not an access change.** Both surfaces were already fail-closed:
+  no instructions and no schema were served during an outage before this, and none are now.
+  The defect was the description.
+
+  Hosts whose `metadata` slot predates the optional `getDiagnosed` member report nothing
+  degraded — exactly what they could express before — so their behaviour is unchanged. The
+  object resource additionally keeps `getObject()` as its resolver and consults the
+  diagnosed read only as a verdict probe on the miss path, because `getObject` is its own
+  contract member with no documented equivalence to `get('object', name)` (and
+  `MetadataFacade.getObject` is not that).
+
+- e437471: fix(mcp): the stdio record resource honours the ADR-0049 `apiEnabled` / `apiMethods` exposure declaration (#8266)
+
+  An object that declares `enable.apiEnabled: false` — or narrows `enable.apiMethods`
+  so a single-record read is outside the whitelist — was refused by the `get_record`
+  tool and **still readable** through the ADR-0101 record resource
+  (`objectstack://objects/{objectName}/records/{recordId}`): same transport, same key,
+  same declaration, two answers.
+
+  **This is a surface-area declaration leak, not an authorization bypass.** The gate is
+  a surface-area control by `api-exposure.ts`'s own ADR note, and this read passed the
+  ObjectQL security middleware (CRUD / FLS / RLS) — under the key's `ExecutionContext`
+  — before this change and after it. What was leaking is the author's _exposure
+  declaration_, not the data guard.
+
+  Why the resource was missed when the tool was fixed: the six object-CRUD verbs all
+  flow through `createStdioDataBridge`, which has been gated since #8083. The record
+  resource does not use that bridge — its reader is a separate closure built inline in
+  the plugin that calls `ql.find` directly and is handed to `bridgeResources`. Gating
+  the bridge therefore never reached it. That reader now applies the same gate, taking
+  its decision from the same single source of truth every other enforcement point
+  delegates to (the spec's `resolveEffectiveApiMethods` / `isApiOperationAllowed`), so
+  the three-state whitelist and the derived verbs resolve identically on all surfaces.
+
+  The gated action is `get`, matching what the HTTP path sends for a single-record
+  read. Refusals carry the same machine codes the REST surface answers with —
+  `OBJECT_API_DISABLED` and `OBJECT_API_METHOD_NOT_ALLOWED` — and reach an MCP client
+  as the resource's `{ "error": ... }` body, which is how that resource has always
+  reported a failed read. The behaviours matched to the HTTP path in #8083 are matched
+  here for the same reasons: a system context bypasses, and unresolvable metadata fails
+  open to the schema defaults.
+
+  Unaffected: the object schema and object list resources stay ungated, because the
+  HTTP bridge answers both straight off the metadata service — refusing a _schema_ read
+  here would be a fresh divergence pointing the other way. The remaining known
+  divergences between the two MCP bridges (the protocol layer's ingress `readonly`
+  strip, its existence probes, its spec-shaped receipts and `expand` / `select`) are
+  unchanged and still filed as follow-up work.
+
+- e472bbe: fix(mcp): the stdio transport honours the ADR-0049 `apiEnabled` / `apiMethods` exposure declaration (#8083)
+
+  An object that declares `enable.apiEnabled: false` — or narrows `enable.apiMethods` —
+  is telling the platform which data operations it exposes over the API. That
+  declaration was honoured on the MCP **HTTP** surface and ignored on the MCP
+  **stdio** surface: same product, same tool names, same key, different answer.
+
+  **This is a surface-area declaration leak, not an authorization bypass.** The gate
+  is a surface-area control by `api-exposure.ts`'s own ADR note, and every stdio call
+  passed the ObjectQL security middleware (CRUD / FLS / RLS) before this change and
+  after it. What was leaking is the author's _exposure declaration_, not the data
+  guard.
+
+  The two MCP hosts implement the same `McpDataBridge` over different seams — HTTP
+  through `callData`, which gates before dispatch; stdio straight onto the engine,
+  which did not. The stdio bridge now applies the same gate, and takes its decision
+  from the same single source of truth both existing enforcement points already
+  delegate to (the spec's `resolveEffectiveApiMethods` / `isApiOperationAllowed`), so
+  the three-state whitelist, the action-to-operation mapping and the derived verbs
+  resolve identically on all three surfaces.
+
+  Gated verbs are exactly the six the HTTP bridge routes through `callData`:
+  `query_records`, `get_record`, `create_record`, `update_record`, `delete_record`
+  and `aggregate_records`. `list_objects` / `describe_object` stay ungated, because
+  the HTTP bridge answers both straight off the metadata service — a schema read
+  refused on stdio and served on HTTP would be the same divergence pointing the
+  other way.
+
+  Refusals carry the same machine codes the REST surface answers with:
+  `OBJECT_API_DISABLED` (the object is hidden) and `OBJECT_API_METHOD_NOT_ALLOWED`
+  (the operation is outside the whitelist, with the effective operation set
+  attached). Three behaviours are matched to the HTTP path deliberately: a system
+  context bypasses the gate, unresolvable metadata **fails open** to the schema
+  defaults, and the flat legacy definition shape is read when there is no nested
+  `enable` block.
+
+  Unaffected: the remaining known divergences between the two MCP bridges (the
+  protocol layer's ingress `readonly` strip, its existence probes, its spec-shaped
+  receipts and `expand` / `select`) are unchanged and still filed as follow-up work.
+
+- 4810dd6: fix(mcp): stdio bridge's `update`/`remove` throw the shared `RECORD_NOT_FOUND` envelope (#8422)
+
+  The stdio MCP bridge's `update()` and `remove()` — the two by-id write seams
+  that probe for the row before mutating it — minted their own local
+  `recordNotFound(object, id)`, returning a bare `Error` with neither `code`
+  nor `status`. The HTTP bridge's `callData` path already throws
+  `recordNotFoundError` (`code: 'RECORD_NOT_FOUND'`, `status: 404`,
+  `@objectstack/core`, #4435/#5138/#7867) for the identical miss, so the same
+  operation answered a missing id with two different envelopes depending on
+  which MCP transport served it.
+
+  `packages/mcp/src/stdio-data-bridge.ts` now imports `recordNotFoundError`
+  from `@objectstack/core` — a dependency the package already declares — and
+  throws it from both seams instead. `registerObjectTools` still turns the
+  throw into a tool error exactly as before; only the thrown object's shape
+  changed. No exported symbol moves and no authorable metadata is affected, so
+  this ships as a `patch`.
+
+- 7182362: fix(mcp): the stdio MCP transport answers again — resume the stdin it just took ownership of (#7645)
+
+  `objectstack serve` with `OS_MCP_STDIO_ENABLED=true` logged
+  `[MCP] Server started (transport: stdio)`, bound the transport to a real `osk_`
+  identity — and then **never answered a single request**. `initialize`,
+  `tools/list`, `resources/list` and `resources/read` all timed out with **zero
+  bytes on stdout**; malformed input drew no error either. Every stdio MCP session
+  against the CLI was unusable, and the failure was silent on both sides: the
+  server looked started, the client just waited.
+
+  The pause came from the **host**, above the plugin. oclif's argument parser
+  reads stdin for any positional argument the caller did not supply (`tryStdin` →
+  `createInterface({input: process.stdin})`, aborted after 10 ms), and
+  `Interface.close()` calls `stdin.pause()`. `serve` declares an optional `config`
+  positional, so plain `objectstack serve --dev` left `process.stdin` explicitly
+  paused before the kernel ever booted. `StdioServerTransport.start()` only
+  attaches a `data` listener, and Node auto-switches a stream to flowing mode on
+  that listener **only while `readableFlowing` is still `null`** — never after an
+  explicit `pause()`. Listener attached, `bytesRead` stuck at 0, transport deaf.
+
+  `MCPServerRuntime.start()` now resumes `process.stdin` immediately after
+  `connect()`, which is the moment the transport takes ownership of it (after, so
+  the transport's reader is attached before any byte can flow). The resume lives
+  in the runtime rather than in the CLI's argument definitions because the pause
+  is not oclif-specific: any host that touched stdin before `start()` — a readline
+  prompt, a supervisor, an embedding process — left the transport equally deaf,
+  and this is the one place that knows a long-lived stdio transport was just
+  attached.
+
+  Measured, both directions: `objectstack serve --dev` (no config path, parser
+  reads stdin) went from timing out to answering `initialize`, while `objectstack
+serve objectstack.config.ts --dev` (parser never touches stdin) answered before
+  and after. The HTTP transport at `/api/v1/mcp` is unaffected — it is served
+  per-request and never touches stdin.
+
+  Not changed, and deliberately so: the ADR-0101 fail-closed startup contract.
+  stdio enabled without `OS_MCP_STDIO_API_KEY` still throws at plugin start, an
+  unknown/revoked key still refuses with no anonymous-but-serving fallback, and a
+  member key still binds the principal to that member.
+
+- be7360c: chore(plugins,services): declare `providesServices` on the 20 remaining init-time service providers (ADR-0116 follow-up, #4131)
+
+  ADR-0116 gave the kernel a declared ordering contract, but only
+  `ObjectQLPlugin` and `MetadataPlugin` had declared what their `init()`
+  registers. The pre-Phase-1 ordering check can only _name a provider_ for
+  services someone declared, so its coverage was two plugins wide.
+
+  An audit of every plugin's `init()` body (brace-matched, comments stripped,
+  each call classified by whether it sits inside a `try`/`if`) found 20 plugins
+  that register a service on every path without declaring it. All 20 now
+  declare `providesServices`. Purely additive: no ordering changes, no new
+  failure modes — a `providesServices` entry only lets the kernel say _who_
+  provides a service when it reports a misordering, and enriches the Phase-1
+  `getService` miss diagnostic.
+
+  Three needed a closer read before declaring, because they register the same
+  service from several branches (`cache`, `queue`, `job`): each early-return
+  branch plus the fallback registers it, so every path does — the declaration
+  is honest. ADR-0116's rule that a _conditionally_ registered service must
+  never be declared is unchanged and was applied throughout.
+
+  The same audit found 12 plugins that hard-resolve a service during `init()`
+  (11 of them `manifest`) without declaring `requiresServices`. None is a live
+  exposure — every one already declares a hard `dependencies` entry on the
+  provider, so the kernel orders them correctly today. Those are tracked
+  separately: with a hard dependency in place, `requiresServices` mostly
+  restates what the kernel already enforces, and its real value is on
+  _soft_-dependency consumers, of which `AppPlugin` is currently the only one.
+
+- 214eb30: fix(cli): `os serve` writes its banner, boot progress and kernel logs to stderr, so the stdio MCP channel carries only protocol (#7915)
+
+  With `OS_MCP_STDIO_ENABLED=true`, `objectstack serve` used `process.stdout` as
+  the MCP JSON-RPC channel **and** as its ordinary human/log output. MCP stdio
+  framing is newline-delimited JSON — a conforming client `JSON.parse`s every line
+  it reads off the server's stdout — so every banner line and every `INFO`/`WARN`
+  record reached the client as a transport error. Measured on the card's repro:
+  the `initialize` result arrived on **line 517**, behind 516 lines of
+  non-protocol text. It reads as "the transport is broken", which is also why it
+  stayed invisible until #7645 (PR #7914) made the transport answer at all.
+
+  **`serve`'s stdout is now the protocol's, and nothing else's.** Banners, boot
+  progress and kernel logs are diagnostics, not program output, and stderr is
+  where a CLI puts diagnostics — so they go there whether or not a stdio
+  transport is mounted. Two halves:
+
+  - every human line `serve` prints is written to stderr explicitly, the startup
+    banner (`✓ Server is ready`, the plugin table, `Press Ctrl+C to stop`) and the
+    boot-diagnostics replay included;
+  - everything else the process would write to stdout — `ObjectLogger`'s
+    `debug`/`info`/`warn` records, and the stray `console.log`s several packages
+    emit during boot — is forwarded to stderr for the life of the process, the
+    same route `--json` already takes (#6217). `LoggerConfig` has a level but no
+    destination knob, so the stream itself is the only seam that covers writers
+    the CLI does not own.
+
+  **Unconditional, deliberately.** "Redirect when the stdio transport is active"
+  needs a reliable signal at the moment each line prints — before the config is
+  read, before the plugin is loaded — and fails silently and in the worse
+  direction when that signal is wrong or late: a frame-corrupting line that shows
+  up only in some boots is far harder to find than one that always does. In a
+  terminal the move costs nothing, since both streams render.
+
+  **Nothing is silenced.** Every line still appears, on stderr — including the
+  boot-phase warnings #4012 rescued from the quiet window. A shell that captured
+  both streams (`> log 2>&1`) sees exactly what it saw before; one that captured
+  stdout alone now finds `serve`'s output on stderr.
+
+  `@objectstack/mcp`: the stdio transport now holds its own channel to the real
+  stdout instead of writing through `process.stdout` — a host that intercepts
+  `process.stdout.write` to move its diagnostics (which is what `serve` does)
+  would otherwise swallow the protocol frames along with them. It claims that
+  channel in every host and on every construction path, so a transport's frames
+  never depend on who booted the plugin.
+
+- 026508b: Serve the object tools over the stdio MCP transport instead of only advertising them
+
+  The stdio MCP server advertised `capabilities.tools` in its `initialize` result and then answered `-32601 Method not found` to every `tools/list` and `tools/call`, so an MCP client that connected successfully could not query or mutate a single object. The same process answered the same requests correctly over HTTP (`POST /api/v1/mcp`), which is what made the cause visible: `registerObjectTools` / `registerActionTools` were reachable only from `handleHttpRequest()`'s throwaway per-request server, and the long-lived server behind stdio received only the AI service's function-calling `ToolRegistry` — a different surface, empty on any app that registers no AI tools.
+
+  Both transports now register through one composition (`wireBridgeTools`), and the stdio host builds a principal-bound data bridge from the `OS_MCP_STDIO_API_KEY` identity, re-resolved per call so a revoked key stops working on the next tool call (ADR-0101 D1). Permissions, RLS and FLS apply exactly as they do to the same identity over REST.
+
+  The `tools`, `resources` and `prompts` capabilities are no longer hand-declared at construction: the MCP SDK declares each one when something is actually registered, so what a server advertises and what it serves can no longer disagree (ADR-0076 D12). A deployment with no principal to bind — or no metadata service — now advertises no tool capability instead of advertising an empty one, and says so in the boot log.
+
+- 3556b67: fix(security): the MCP stdio bridge stops echoing `internal: true` columns from a write, and the write-response guarantee is guarded as a PROPERTY rather than per-class (#8497)
+
+  **A live leak, found by widening a guard.** #7823 relocated the `internal: true`
+  write-response strip to the generic-data-path ingress and gated the relocation on
+  a tripwire that enumerates every `*Data` face on the protocol class. The card that
+  produced this change observed that the guard's coverage — *"every `*Data`face on
+one class"* — is narrower than the property that needs holding — *"no response body
+an external caller receives from a write carries an`internal: true`value"* — and
+that`@objectstack/rest`'s cross-object batch (a direct `ql.update`) was the
+  standing proof the two are not the same set.
+
+  Widening the guard to the property immediately found a second direct mouth that
+  was **not** covered, and it was leaking. `@objectstack/mcp`'s stdio bridge
+  (`stdio-data-bridge.ts`) is engine-only by construction — the long-lived stdio
+  host cannot reuse the runtime's request-shaped `callData` builder — and its
+  `create` arm handed `engine.insert`'s result straight back to the MCP caller.
+  Since #7823 the engine deliberately keeps its write results whole, so the flagged
+  column rode the tool response verbatim. Measured before the fix:
+
+  ```
+  {"object":"vault","id":"r1","record":{"name":"row","id":"r1","vault_secret":"<the stored secret>"}}
+  ```
+
+  The file's own header had listed its protocol-layer divergences as _"deliberate,
+  filed, not security"_. One limb of that list **was** security, and the header now
+  says so.
+
+  **What changed**
+
+  - `@objectstack/mcp` — the stdio bridge's `create` runs its response record
+    through the shared strip. `update` does too: that arm discards the engine's
+    write result and echoes the read-path row plus the caller's own patch, so no
+    _stored_ value could reach it, but a caller who puts an `internal: true` key in
+    `data` would otherwise get it echoed back — their own bytes used as an oracle
+    for a column the flag says is never returned. Read verbs are untouched (the
+    engine's read-path strip is unchanged).
+  - `@objectstack/core` — the strip helper
+    (`omitInternalFieldsFromWriteResponse` / `collectInternalWriteResponseFields`)
+    moved here from `@objectstack/metadata-protocol`. It shipped beside the protocol
+    class when that class was its only caller, but the generic write mouths are not
+    all on it: `rest` and `mcp` both reach the engine directly and **neither depends
+    on `@objectstack/metadata-protocol`**, so the old home forced each new mouth to
+    choose between a duck-typed reach through a protocol instance and a private
+    restatement of a security-relevant rule. `core` is the floor all three already
+    depend on, and already hosts this class of shared write-path helper
+    (`bulk-write.ts`). No behaviour change and no API change:
+    `@objectstack/metadata-protocol` re-exports both names unchanged.
+
+  **What guards it now.** Two new tripwires join the shipped one — which is **not**
+  replaced: its runtime prototype walk and its `leakyData` negative control are
+  untouched. Each is a runtime enumeration no author can dodge by adding code
+  without touching it, and each fails on a surface it has no disposition for:
+
+  - `metadata-protocol` — walks the protocol class for `*Data` faces (unchanged);
+  - `rest` — walks `RestServer.getRoutes()` for HTTP write routes, drives the ten
+    data-plane ones (including `POST /batch`, the direct-`ql.update` mouth) against
+    a fixture whose stored rows carry a flagged sentinel, and deep-scans each
+    response body;
+  - `mcp` — walks the `McpDataBridge` faces the factory actually returns.
+
+  Every driven case also asserts a control value is present, so a refusal or an
+  empty body cannot satisfy "no sentinel" by returning nothing.
+
+  Reverse-verified in both directions, the discipline #7823's own fix used: deleting
+  the strip from the REST batch arm turned the REST tripwire red on exactly that
+  route; adding a _second_ unstripped direct engine mouth turned it red again;
+  removing the new MCP strip turned the MCP tripwire red; every restore was proven
+  byte-identical with `git hash-object`.
+
+- Updated dependencies [50616d9]
+- Updated dependencies [430dcc2]
+- Updated dependencies [690ccf2]
+- Updated dependencies [6a67d7a]
+- Updated dependencies [333a374]
+- Updated dependencies [9fe9c1d]
+- Updated dependencies [3d5c090]
+- Updated dependencies [e5bd768]
+- Updated dependencies [08b5a3d]
+- Updated dependencies [e027b3e]
+- Updated dependencies [e6ac4bd]
+- Updated dependencies [c2429b0]
+- Updated dependencies [445a0c2]
+- Updated dependencies [d99aeb3]
+- Updated dependencies [f6609e6]
+- Updated dependencies [4727eb8]
+- Updated dependencies [a70358a]
+- Updated dependencies [0ecc656]
+- Updated dependencies [06772eb]
+- Updated dependencies [d4e0809]
+- Updated dependencies [80334c7]
+- Updated dependencies [f63cd09]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [ce5242c]
+- Updated dependencies [a7163ea]
+- Updated dependencies [e6e9379]
+- Updated dependencies [5823d59]
+- Updated dependencies [3140f9c]
+- Updated dependencies [9500ba4]
+- Updated dependencies [fa3d0cf]
+- Updated dependencies [af5a224]
+- Updated dependencies [71f76e1]
+- Updated dependencies [37b1346]
+- Updated dependencies [99736a0]
+- Updated dependencies [fe67e34]
+- Updated dependencies [fdb4f50]
+- Updated dependencies [270650f]
+- Updated dependencies [3aef718]
+- Updated dependencies [1bd5652]
+- Updated dependencies [14252d3]
+- Updated dependencies [7fb436c]
+- Updated dependencies [879ea13]
+- Updated dependencies [8828b9e]
+- Updated dependencies [1ea6bce]
+- Updated dependencies [c1dcacd]
+- Updated dependencies [ad303ed]
+- Updated dependencies [32ccb23]
+- Updated dependencies [f5a4ef0]
+- Updated dependencies [2d3e255]
+- Updated dependencies [a8940e4]
+- Updated dependencies [7d7521f]
+- Updated dependencies [5dc4d02]
+- Updated dependencies [f724f69]
+- Updated dependencies [98877c9]
+- Updated dependencies [98877c9]
+- Updated dependencies [53068c1]
+- Updated dependencies [ee58392]
+- Updated dependencies [f16e54e]
+- Updated dependencies [06be54e]
+- Updated dependencies [28ad90e]
+- Updated dependencies [76d74ec]
+- Updated dependencies [201b31f]
+- Updated dependencies [e6b1b69]
+- Updated dependencies [259459d]
+- Updated dependencies [3f7f14e]
+- Updated dependencies [e2616e0]
+- Updated dependencies [6fdc5c6]
+- Updated dependencies [8b9d71e]
+- Updated dependencies [05154a1]
+- Updated dependencies [33f5e23]
+- Updated dependencies [259af21]
+- Updated dependencies [f8644c7]
+- Updated dependencies [306ca50]
+- Updated dependencies [840ee4b]
+- Updated dependencies [978fed2]
+- Updated dependencies [cfc293f]
+- Updated dependencies [587fc91]
+- Updated dependencies [de70b42]
+- Updated dependencies [9b6fe7c]
+- Updated dependencies [64cd010]
+- Updated dependencies [fb3d99b]
+- Updated dependencies [1986594]
+- Updated dependencies [6968885]
+- Updated dependencies [eaed61f]
+- Updated dependencies [cdfbee2]
+- Updated dependencies [ad4af62]
+- Updated dependencies [debe2f6]
+- Updated dependencies [d44dbfa]
+- Updated dependencies [29c6c9d]
+- Updated dependencies [d21c001]
+- Updated dependencies [ad047d2]
+- Updated dependencies [8c711fb]
+- Updated dependencies [f1cc3a3]
+- Updated dependencies [09e4547]
+- Updated dependencies [97b0798]
+- Updated dependencies [474fe39]
+- Updated dependencies [0bc685a]
+- Updated dependencies [b949059]
+- Updated dependencies [2826d1e]
+- Updated dependencies [be1c52c]
+- Updated dependencies [c5ff96d]
+- Updated dependencies [5a84d41]
+- Updated dependencies [84e7be9]
+- Updated dependencies [91f4c78]
+- Updated dependencies [ddc2527]
+- Updated dependencies [820eff9]
+- Updated dependencies [a6c3f38]
+- Updated dependencies [debc23a]
+- Updated dependencies [0f8ad09]
+- Updated dependencies [553a47f]
+- Updated dependencies [43a7a8d]
+- Updated dependencies [a98085f]
+- Updated dependencies [20b1a9e]
+- Updated dependencies [344a22a]
+- Updated dependencies [4827e91]
+- Updated dependencies [8d895ff]
+- Updated dependencies [86f7a20]
+- Updated dependencies [a3a884d]
+- Updated dependencies [cfed092]
+- Updated dependencies [203a449]
+- Updated dependencies [8f9689f]
+- Updated dependencies [73f69dc]
+- Updated dependencies [04c56aa]
+- Updated dependencies [f6472d7]
+- Updated dependencies [57a3bb3]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [ddd075a]
+- Updated dependencies [88154be]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [9c82146]
+- Updated dependencies [5f9a987]
+- Updated dependencies [744b8f5]
+- Updated dependencies [9f5cc79]
+- Updated dependencies [ac37fc6]
+- Updated dependencies [2f3e793]
+- Updated dependencies [4820f55]
+- Updated dependencies [462d9c4]
+- Updated dependencies [78caf51]
+- Updated dependencies [7d21581]
+- Updated dependencies [37785ed]
+- Updated dependencies [62a789b]
+- Updated dependencies [2e284b2]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [789ad63]
+- Updated dependencies [f2445c9]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [2af1988]
+- Updated dependencies [0af50a3]
+- Updated dependencies [1b49eaf]
+- Updated dependencies [ae31a19]
+- Updated dependencies [b230e5e]
+- Updated dependencies [5d24f4b]
+- Updated dependencies [29b94ed]
+- Updated dependencies [07c68b0]
+- Updated dependencies [f6cd635]
+- Updated dependencies [2e836de]
+- Updated dependencies [e0f300b]
+- Updated dependencies [0161c7f]
+- Updated dependencies [e900015]
+- Updated dependencies [db02d47]
+- Updated dependencies [b5bdf48]
+- Updated dependencies [23338c3]
+- Updated dependencies [12a19a8]
+- Updated dependencies [5b843fb]
+- Updated dependencies [62b6a2f]
+- Updated dependencies [7e5af5c]
+- Updated dependencies [5b4780b]
+- Updated dependencies [a933452]
+- Updated dependencies [9d1d9c7]
+- Updated dependencies [8140915]
+- Updated dependencies [a019e52]
+- Updated dependencies [e8f8f6c]
+- Updated dependencies [41dcda3]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [b5404f4]
+- Updated dependencies [64fc6d5]
+- Updated dependencies [b746aa0]
+- Updated dependencies [b4487aa]
+- Updated dependencies [1007379]
+- Updated dependencies [65ca83a]
+- Updated dependencies [0bfdf46]
+- Updated dependencies [947d4f9]
+- Updated dependencies [f764691]
+- Updated dependencies [e120a5a]
+- Updated dependencies [e5bd2f6]
+- Updated dependencies [e9b5265]
+- Updated dependencies [e650d67]
+- Updated dependencies [04476e7]
+- Updated dependencies [67bf2e2]
+- Updated dependencies [eaaf03c]
+- Updated dependencies [d17df80]
+- Updated dependencies [7d0e7b5]
+- Updated dependencies [c6d1cb4]
+- Updated dependencies [6513c17]
+- Updated dependencies [36030ff]
+- Updated dependencies [79228cd]
+- Updated dependencies [6117f7b]
+- Updated dependencies [87aca93]
+- Updated dependencies [e533b0b]
+- Updated dependencies [cdf4d9a]
+- Updated dependencies [aee1806]
+- Updated dependencies [c13350b]
+- Updated dependencies [c13350b]
+- Updated dependencies [2c1988c]
+- Updated dependencies [9ca2d85]
+- Updated dependencies [c13350b]
+- Updated dependencies [891d345]
+- Updated dependencies [c8124e5]
+- Updated dependencies [a52e2ef]
+- Updated dependencies [5293114]
+- Updated dependencies [376a061]
+- Updated dependencies [c142ced]
+- Updated dependencies [211abdb]
+- Updated dependencies [b3363e9]
+- Updated dependencies [eda599e]
+- Updated dependencies [a1a4140]
+- Updated dependencies [c20b875]
+- Updated dependencies [7c7e246]
+- Updated dependencies [2ef1807]
+- Updated dependencies [f35cdc5]
+- Updated dependencies [d03fe25]
+- Updated dependencies [2a37694]
+- Updated dependencies [217e2e6]
+- Updated dependencies [2672f85]
+- Updated dependencies [20bc357]
+- Updated dependencies [11066f6]
+- Updated dependencies [916af17]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [86a71d1]
+- Updated dependencies [c001422]
+- Updated dependencies [77022a9]
+- Updated dependencies [d5c75e2]
+- Updated dependencies [03d26f7]
+- Updated dependencies [5966c2a]
+- Updated dependencies [2382580]
+- Updated dependencies [9ea2bc5]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [52760bf]
+- Updated dependencies [5543020]
+- Updated dependencies [880d343]
+- Updated dependencies [6e82972]
+- Updated dependencies [d4df105]
+- Updated dependencies [4615a18]
+- Updated dependencies [f505689]
+- Updated dependencies [d9fa683]
+- Updated dependencies [32d3800]
+- Updated dependencies [606d577]
+- Updated dependencies [4384921]
+- Updated dependencies [e2798fa]
+- Updated dependencies [3c628ce]
+- Updated dependencies [c2d9098]
+- Updated dependencies [0fd8556]
+- Updated dependencies [3c7bcc0]
+- Updated dependencies [4b6cac7]
+- Updated dependencies [7631964]
+- Updated dependencies [ac471a0]
+- Updated dependencies [60ae58e]
+- Updated dependencies [7f62706]
+- Updated dependencies [667fa44]
+- Updated dependencies [37e38d1]
+- Updated dependencies [e906126]
+- Updated dependencies [ce92674]
+- Updated dependencies [08363a0]
+- Updated dependencies [444de5b]
+- Updated dependencies [0f17114]
+- Updated dependencies [a227ed7]
+- Updated dependencies [7cb922e]
+- Updated dependencies [1d22114]
+- Updated dependencies [1eb13a0]
+- Updated dependencies [c52e608]
+- Updated dependencies [9613396]
+- Updated dependencies [3f7b4ff]
+- Updated dependencies [74155c7]
+- Updated dependencies [b5f9397]
+- Updated dependencies [ed77493]
+- Updated dependencies [6908830]
+- Updated dependencies [8b06bba]
+- Updated dependencies [58a03d2]
+- Updated dependencies [2bacd1a]
+- Updated dependencies [e47b342]
+- Updated dependencies [4c54037]
+- Updated dependencies [dc530b4]
+- Updated dependencies [9f601e8]
+- Updated dependencies [6a9dec6]
+- Updated dependencies [0f7157b]
+- Updated dependencies [4dc1c7d]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f598aa8]
+- Updated dependencies [4dfd002]
+- Updated dependencies [f549a0d]
+- Updated dependencies [51c5227]
+- Updated dependencies [82da264]
+- Updated dependencies [f586f1a]
+- Updated dependencies [77be690]
+- Updated dependencies [4ed7ed4]
+- Updated dependencies [9b9b70f]
+- Updated dependencies [f5a9bc2]
+- Updated dependencies [e59786e]
+- Updated dependencies [2fa4ca1]
+- Updated dependencies [bcf1112]
+- Updated dependencies [baeb4f0]
+- Updated dependencies [29488cc]
+- Updated dependencies [881a3cc]
+- Updated dependencies [f5a2320]
+- Updated dependencies [ad6317b]
+- Updated dependencies [811c30c]
+- Updated dependencies [a4a85c8]
+- Updated dependencies [859cb83]
+- Updated dependencies [07a4e26]
+- Updated dependencies [9774b78]
+- Updated dependencies [d5e9f6e]
+- Updated dependencies [8a88885]
+- Updated dependencies [deb538f]
+- Updated dependencies [b49ccfd]
+- Updated dependencies [5b89711]
+- Updated dependencies [85d95e7]
+- Updated dependencies [08cd163]
+- Updated dependencies [0c8a22f]
+- Updated dependencies [5f7669e]
+- Updated dependencies [becbe53]
+- Updated dependencies [b127c8b]
+- Updated dependencies [763931e]
+- Updated dependencies [ec975f1]
+- Updated dependencies [168f60f]
+- Updated dependencies [b07d829]
+- Updated dependencies [de9af8a]
+- Updated dependencies [eb4204b]
+- Updated dependencies [a80302a]
+- Updated dependencies [a648e96]
+- Updated dependencies [a47ac06]
+- Updated dependencies [e4c61a7]
+- Updated dependencies [cc60165]
+- Updated dependencies [474f131]
+- Updated dependencies [081aa6f]
+- Updated dependencies [91f4c78]
+- Updated dependencies [050cd82]
+- Updated dependencies [4d552af]
+- Updated dependencies [44d677c]
+- Updated dependencies [c32944d]
+- Updated dependencies [1dd780f]
+- Updated dependencies [e8d0c21]
+- Updated dependencies [244ca86]
+- Updated dependencies [546ab3c]
+- Updated dependencies [cafec0a]
+- Updated dependencies [58f3220]
+- Updated dependencies [07f1822]
+- Updated dependencies [c4df271]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [0b51bb6]
+- Updated dependencies [08f93bc]
+- Updated dependencies [d9971d3]
+- Updated dependencies [7dc1067]
+- Updated dependencies [4f13be2]
+- Updated dependencies [a41ba5c]
+- Updated dependencies [189854c]
+- Updated dependencies [0e3a226]
+- Updated dependencies [92a67f2]
+- Updated dependencies [9136327]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [eb3e650]
+- Updated dependencies [abeb375]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [73b7234]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [61cc079]
+- Updated dependencies [45dc446]
+- Updated dependencies [0e96e46]
+- Updated dependencies [c1d44f7]
+- Updated dependencies [59b794f]
+- Updated dependencies [ef4efa8]
+- Updated dependencies [cbb6a5c]
+- Updated dependencies [fc3a36a]
+- Updated dependencies [ab9fb5c]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [b25a116]
+- Updated dependencies [02dc076]
+- Updated dependencies [f985b3f]
+- Updated dependencies [795b6e1]
+- Updated dependencies [d52d4fe]
+- Updated dependencies [742cebb]
+- Updated dependencies [175d789]
+- Updated dependencies [f549a0d]
+- Updated dependencies [427344c]
+- Updated dependencies [8af76ae]
+- Updated dependencies [1d4756e]
+- Updated dependencies [720c5ad]
+- Updated dependencies [a8d1e24]
+- Updated dependencies [b85cc54]
+- Updated dependencies [a36db28]
+- Updated dependencies [7a8476f]
+- Updated dependencies [518ca7a]
+- Updated dependencies [41642b0]
+- Updated dependencies [4cca74c]
+- Updated dependencies [88ef03e]
+- Updated dependencies [9a4932a]
+- Updated dependencies [3f8817a]
+- Updated dependencies [a2443e3]
+- Updated dependencies [e1554b1]
+- Updated dependencies [9e2caf3]
+- Updated dependencies [4856789]
+- Updated dependencies [81ce41a]
+- Updated dependencies [85e1e4e]
+- Updated dependencies [c3f4916]
+- Updated dependencies [55dbbba]
+- Updated dependencies [33e0385]
+- Updated dependencies [dac6a08]
+- Updated dependencies [72c3c86]
+- Updated dependencies [2d8dba3]
+- Updated dependencies [7f1a635]
+- Updated dependencies [2205363]
+- Updated dependencies [09fe58d]
+- Updated dependencies [f9fc874]
+- Updated dependencies [d62f8eb]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [a7586cd]
+- Updated dependencies [4c5e80e]
+- Updated dependencies [4b5702a]
+- Updated dependencies [011b386]
+- Updated dependencies [e18a162]
+- Updated dependencies [394b7a1]
+- Updated dependencies [ce92674]
+- Updated dependencies [0f2fdcd]
+- Updated dependencies [d6d1a50]
+- Updated dependencies [cf2c9b7]
+- Updated dependencies [8ffa8b9]
+- Updated dependencies [d127ff0]
+- Updated dependencies [674ac99]
+- Updated dependencies [833b512]
+- Updated dependencies [9881074]
+- Updated dependencies [36d90fc]
+- Updated dependencies [7777e8f]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [d063a96]
+- Updated dependencies [8825a06]
+- Updated dependencies [5087ac6]
+- Updated dependencies [6965160]
+- Updated dependencies [677b591]
+- Updated dependencies [cf7c694]
+- Updated dependencies [ddd0f06]
+- Updated dependencies [d77d1b7]
+- Updated dependencies [0f9faa2]
+- Updated dependencies [2d1ddf0]
+- Updated dependencies [354b00f]
+- Updated dependencies [3de535b]
+- Updated dependencies [fe2e15a]
+- Updated dependencies [5b79a34]
+- Updated dependencies [502564d]
+- Updated dependencies [603cab8]
+- Updated dependencies [c757854]
+- Updated dependencies [471839d]
+- Updated dependencies [507b92a]
+- Updated dependencies [46365ab]
+- Updated dependencies [b508244]
+- Updated dependencies [df95346]
+- Updated dependencies [3dede58]
+- Updated dependencies [c6b6bb4]
+- Updated dependencies [594508e]
+- Updated dependencies [7cf42fe]
+- Updated dependencies [5966c2a]
+- Updated dependencies [0045682]
+- Updated dependencies [7309c81]
+- Updated dependencies [2f59da0]
+- Updated dependencies [d56012f]
+- Updated dependencies [f78dd83]
+- Updated dependencies [a2cd18a]
+- Updated dependencies [9051802]
+- Updated dependencies [20bc1ec]
+- Updated dependencies [1c625ca]
+- Updated dependencies [2f8328c]
+- Updated dependencies [2a6c279]
+- Updated dependencies [9319586]
+- Updated dependencies [8c8f0df]
+- Updated dependencies [8ad609c]
+- Updated dependencies [bbee302]
+- Updated dependencies [90c2b15]
+- Updated dependencies [4638aaa]
+- Updated dependencies [0222d3c]
+- Updated dependencies [08863dd]
+- Updated dependencies [39eb01b]
+- Updated dependencies [071d0dc]
+- Updated dependencies [f293d45]
+- Updated dependencies [56664f5]
+- Updated dependencies [71f205d]
+- Updated dependencies [f067930]
+- Updated dependencies [414395b]
+- Updated dependencies [42eeb7d]
+- Updated dependencies [31cbe90]
+- Updated dependencies [6b7129a]
+- Updated dependencies [c5adfe1]
+- Updated dependencies [97ace2a]
+- Updated dependencies [26e1029]
+- Updated dependencies [0a936ea]
+- Updated dependencies [90bbf25]
+- Updated dependencies [023c00b]
+- Updated dependencies [eb91eba]
+- Updated dependencies [42da73d]
+- Updated dependencies [01e124d]
+- Updated dependencies [ef7b5ef]
+- Updated dependencies [9514767]
+- Updated dependencies [8f20201]
+- Updated dependencies [155507e]
+- Updated dependencies [643b7c7]
+- Updated dependencies [7bba90b]
+- Updated dependencies [8813b90]
+- Updated dependencies [108ba8d]
+- Updated dependencies [2a5f04a]
+- Updated dependencies [4f740b0]
+- Updated dependencies [030125b]
+- Updated dependencies [7ce02eb]
+- Updated dependencies [b4ad984]
+- Updated dependencies [a9f32df]
+- Updated dependencies [aeb9b27]
+- Updated dependencies [7d27da0]
+- Updated dependencies [d0d5205]
+- Updated dependencies [1a15893]
+- Updated dependencies [b70e534]
+- Updated dependencies [7e05d8e]
+- Updated dependencies [8f1851e]
+- Updated dependencies [b4b2c7d]
+- Updated dependencies [61ea810]
+- Updated dependencies [2233a85]
+- Updated dependencies [67452d1]
+- Updated dependencies [089767f]
+- Updated dependencies [a13827e]
+- Updated dependencies [66d99ec]
+- Updated dependencies [cb43296]
+- Updated dependencies [b61afc1]
+- Updated dependencies [79021fc]
+- Updated dependencies [7733604]
+- Updated dependencies [40e420f]
+- Updated dependencies [62dd69a]
+- Updated dependencies [d13004a]
+- Updated dependencies [be7360c]
+- Updated dependencies [e15e679]
+- Updated dependencies [2ab1257]
+- Updated dependencies [0fc6219]
+- Updated dependencies [061406d]
+- Updated dependencies [e4c8b6c]
+- Updated dependencies [acb10f6]
+- Updated dependencies [605e190]
+- Updated dependencies [c6c59f1]
+- Updated dependencies [b0e78a8]
+- Updated dependencies [f31cc8d]
+- Updated dependencies [f343dc4]
+- Updated dependencies [8269e32]
+- Updated dependencies [74f7339]
+- Updated dependencies [a6c35a2]
+- Updated dependencies [c2f1002]
+- Updated dependencies [4cc4fb7]
+- Updated dependencies [cc2de0e]
+- Updated dependencies [97b6658]
+- Updated dependencies [28d1eb7]
+- Updated dependencies [06770c0]
+- Updated dependencies [2c26040]
+- Updated dependencies [f758cec]
+- Updated dependencies [5b47ab5]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [8675db6]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [27358d5]
+- Updated dependencies [1c3da1f]
+- Updated dependencies [c1f344b]
+- Updated dependencies [3eb1b2b]
+- Updated dependencies [9c93465]
+- Updated dependencies [a34fd2e]
+- Updated dependencies [ebb209c]
+- Updated dependencies [76bcb83]
+- Updated dependencies [59b85c0]
+- Updated dependencies [889ae47]
+- Updated dependencies [4f4c3fb]
+- Updated dependencies [78f0be8]
+- Updated dependencies [6e357ed]
+- Updated dependencies [d6938bf]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [0410522]
+- Updated dependencies [63b33e6]
+- Updated dependencies [f163028]
+- Updated dependencies [814db6d]
+- Updated dependencies [a5302c7]
+- Updated dependencies [31e0be9]
+- Updated dependencies [4bfd455]
+- Updated dependencies [ffd2ce2]
+- Updated dependencies [2a44c1d]
+- Updated dependencies [7084313]
+- Updated dependencies [f07808c]
+- Updated dependencies [91cefb8]
+- Updated dependencies [7ffc3d3]
+- Updated dependencies [88346ba]
+- Updated dependencies [4631592]
+- Updated dependencies [62f8017]
+- Updated dependencies [32ff033]
+- Updated dependencies [a831df1]
+- Updated dependencies [f752ee3]
+- Updated dependencies [a1b61e0]
+- Updated dependencies [cd6b9f2]
+- Updated dependencies [2cb6d3c]
+- Updated dependencies [af2a095]
+- Updated dependencies [5ac93d4]
+- Updated dependencies [695cfbd]
+- Updated dependencies [0e043d8]
+- Updated dependencies [93f267f]
+- Updated dependencies [7445149]
+- Updated dependencies [ec796d5]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0024abf]
+- Updated dependencies [8dd98bf]
+- Updated dependencies [e87fea1]
+- Updated dependencies [c65e529]
+- Updated dependencies [0848bea]
+- Updated dependencies [d51bed2]
+- Updated dependencies [dadd1ad]
+- Updated dependencies [acbf364]
+- Updated dependencies [3ca34c1]
+- Updated dependencies [7adc841]
+- Updated dependencies [239c3a3]
+- Updated dependencies [b8b3c64]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [4845f85]
+- Updated dependencies [486d526]
+- Updated dependencies [94a0bbc]
+- Updated dependencies [bf1edef]
+- Updated dependencies [d6bfb3d]
+- Updated dependencies [8a9c079]
+- Updated dependencies [7b005b4]
+- Updated dependencies [cc3555e]
+- Updated dependencies [a2266a6]
+- Updated dependencies [d25a0ec]
+- Updated dependencies [89d7b35]
+- Updated dependencies [94f7b6a]
+- Updated dependencies [5c94f83]
+- Updated dependencies [ea936f3]
+- Updated dependencies [0c0fbd9]
+- Updated dependencies [667b83e]
+- Updated dependencies [f3141d8]
+- Updated dependencies [7687f7b]
+- Updated dependencies [5a84d41]
+- Updated dependencies [fd3013a]
+- Updated dependencies [85ec26d]
+- Updated dependencies [73e576f]
+- Updated dependencies [f6476fc]
+- Updated dependencies [69ac82c]
+- Updated dependencies [4ac12ef]
+- Updated dependencies [833ed84]
+- Updated dependencies [a18abf3]
+- Updated dependencies [c6a4eeb]
+- Updated dependencies [1659072]
+- Updated dependencies [f450ae7]
+- Updated dependencies [abceb0d]
+- Updated dependencies [627b188]
+- Updated dependencies [8d4eae7]
+- Updated dependencies [c5a5996]
+- Updated dependencies [0c302a7]
+- Updated dependencies [b88f5e8]
+- Updated dependencies [857a6cf]
+- Updated dependencies [65a3a84]
+- Updated dependencies [6633337]
+- Updated dependencies [21676eb]
+- Updated dependencies [e9cb9ab]
+- Updated dependencies [42cc219]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [d5749d7]
+- Updated dependencies [f00d8d4]
+- Updated dependencies [5326b36]
+- Updated dependencies [aa4b90d]
+- Updated dependencies [ccd9397]
+- Updated dependencies [503be86]
+- Updated dependencies [54299ca]
+- Updated dependencies [ae490ef]
+- Updated dependencies [e124711]
+- Updated dependencies [dc61def]
+- Updated dependencies [bca935b]
+- Updated dependencies [d92c72d]
+- Updated dependencies [c54c822]
+- Updated dependencies [8dcc0f5]
+- Updated dependencies [75b9e51]
+- Updated dependencies [f61c8cf]
+- Updated dependencies [e3ef52b]
+- Updated dependencies [0a2f233]
+- Updated dependencies [8621cdd]
+- Updated dependencies [251e888]
+- Updated dependencies [07f1822]
+- Updated dependencies [e336549]
+- Updated dependencies [3bb9340]
+- Updated dependencies [1e604c4]
+- Updated dependencies [04fab5e]
+- Updated dependencies [183b4c4]
+- Updated dependencies [7f713b6]
+- Updated dependencies [d40f43a]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [6f23667]
+- Updated dependencies [cde1975]
+- Updated dependencies [0bc685a]
+- Updated dependencies [20526f5]
+- Updated dependencies [efedd28]
+- Updated dependencies [5d21a48]
+- Updated dependencies [5278e11]
+- Updated dependencies [c5eef1d]
+- Updated dependencies [e5e7ee0]
+- Updated dependencies [23dba62]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [c960170]
+- Updated dependencies [19365b7]
+- Updated dependencies [ba98e26]
+- Updated dependencies [b7ed26d]
+- Updated dependencies [a2ebea2]
+- Updated dependencies [800bdb0]
+- Updated dependencies [9d4dfc4]
+- Updated dependencies [1059965]
+- Updated dependencies [def5919]
+- Updated dependencies [ee264b2]
+- Updated dependencies [60b672e]
+- Updated dependencies [6b441a8]
+- Updated dependencies [ce0cfe9]
+- Updated dependencies [04f1182]
+- Updated dependencies [be87153]
+- Updated dependencies [dd0f681]
+- Updated dependencies [60f0dd8]
+- Updated dependencies [a87c5cd]
+- Updated dependencies [a47f338]
+- Updated dependencies [b3a3d83]
+- Updated dependencies [7a55913]
+- Updated dependencies [078e28b]
+- Updated dependencies [35accbf]
+- Updated dependencies [6038de7]
+- Updated dependencies [fc5f536]
+- Updated dependencies [5647006]
+- Updated dependencies [e654bfd]
+- Updated dependencies [01a7337]
+- Updated dependencies [b45c71e]
+- Updated dependencies [f8cfbb4]
+- Updated dependencies [6e6c872]
+- Updated dependencies [2598216]
+- Updated dependencies [11949fc]
+- Updated dependencies [2c7e62d]
+- Updated dependencies [eb95d97]
+- Updated dependencies [b098b0e]
+- Updated dependencies [4d00b13]
+- Updated dependencies [1363084]
+- Updated dependencies [fa5758e]
+- Updated dependencies [38f7e4f]
+- Updated dependencies [eb7613c]
+- Updated dependencies [c57f3cf]
+- Updated dependencies [ecc9110]
+- Updated dependencies [e4c2dc8]
+- Updated dependencies [97faca3]
+- Updated dependencies [57bab76]
+- Updated dependencies [c89d18c]
+- Updated dependencies [1bd2795]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [694c350]
+- Updated dependencies [361bd5b]
+- Updated dependencies [aac90a5]
+- Updated dependencies [3da3da5]
+- Updated dependencies [1e6ab15]
+- Updated dependencies [b90086a]
+- Updated dependencies [129b378]
+- Updated dependencies [88f9d94]
+- Updated dependencies [8186a70]
+- Updated dependencies [a329cca]
+- Updated dependencies [c87ef70]
+- Updated dependencies [3cb0618]
+- Updated dependencies [32a0874]
+- Updated dependencies [6eec18c]
+- Updated dependencies [4d7bebf]
+- Updated dependencies [821ac7a]
+- Updated dependencies [8f81731]
+- Updated dependencies [7055c22]
+- Updated dependencies [785a748]
+- Updated dependencies [3af0354]
+- Updated dependencies [866ff16]
+- Updated dependencies [5a85e67]
+- Updated dependencies [4965bfa]
+- Updated dependencies [8b50cb3]
+- Updated dependencies [a0fdc56]
+- Updated dependencies [b95577a]
+- Updated dependencies [0dcbc11]
+- Updated dependencies [d88f3e9]
+- Updated dependencies [ad5fe25]
+- Updated dependencies [c183a12]
+- Updated dependencies [83c161f]
+- Updated dependencies [d8c4957]
+- Updated dependencies [b9f930b]
+- Updated dependencies [f24cb83]
+- Updated dependencies [5dbbb92]
+- Updated dependencies [ea90179]
+- Updated dependencies [1818998]
+- Updated dependencies [ce92674]
+- Updated dependencies [5ef0b5b]
+- Updated dependencies [8c2db68]
+- Updated dependencies [22b5e54]
+- Updated dependencies [0166bd5]
+- Updated dependencies [8064b07]
+- Updated dependencies [09ee21c]
+- Updated dependencies [4a56dbd]
+- Updated dependencies [289d04a]
+- Updated dependencies [f549a0d]
+- Updated dependencies [48fbacb]
+- Updated dependencies [06df4fa]
+- Updated dependencies [3fc2e48]
+- Updated dependencies [c9b809f]
+- Updated dependencies [e8f435c]
+- Updated dependencies [32386f8]
+- Updated dependencies [9b702dc]
+- Updated dependencies [ab16331]
+- Updated dependencies [41610f6]
+- Updated dependencies [69f1dfd]
+- Updated dependencies [bbe05de]
+- Updated dependencies [355e951]
+- Updated dependencies [a1dd1e4]
+- Updated dependencies [dadb43f]
+- Updated dependencies [3556b67]
+  - @objectstack/spec@17.0.0
+  - @objectstack/core@17.0.0
+  - @objectstack/types@17.0.0
+  - @objectstack/formula@17.0.0
+
 ## 17.0.0-rc.6
 
 ### Patch Changes

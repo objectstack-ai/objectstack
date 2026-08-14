@@ -1,5 +1,0 @@
----
-"@objectstack/objectql": patch
----
-
-`MetadataFacade.get` / `list` / `listNames` no longer unwrap stored items through `item?.content ?? item`. `content` is a real authorable field (`doc`, `knowledge_document`), so a document registered with a `content` field read back as that field's value — a doc came back as its raw Markdown string instead of the document, silently (truthy and string-typed, so downstream `?.name` reads yielded `undefined` rather than throwing). The storage envelope the unwrap presumed has no producer anywhere in the tree: the facade's own interim `{ name, content }` boxing of non-object values — the only writer that ever produced one — was already removed in favour of a loud refusal under the #7378 register ruling, and DB hydration registers the parsed document itself. All three reads now return the stored document verbatim, restoring the ruled `register(t, n, d)` → `get(t, n)` round-trip for every metadata type that authors a `content` field. No replacement envelope key is introduced, so no other authorable key can inherit the collision.

@@ -1,5 +1,2214 @@
 # @objectstack/service-settings
 
+## 17.0.0
+
+### Minor Changes
+
+- 586d6f7: feat(auth): `membership_policy` is a platform setting, and sign-up and backfill read one source (#5152)
+
+  **What a new user joins is now configurable at runtime.** ADR-0093's
+  `membershipPolicy` decides whether a freshly created user is auto-bound to the
+  deployment's default organization (`auto`) or gets membership only from an
+  explicit act — creating a workspace, accepting an invitation, an admin adding
+  them, SSO just-in-time provisioning (`invite-only`). Until now it was settable
+  **only** as an `AuthPlugin` constructor option, and the AuthPlugin a self-hosted
+  stack gets is injected by the CLI, which passes no such option and has no env
+  fallback. Every self-hosted deployment therefore ran `auto`, with no way to say
+  otherwise. `invite-only` was, in practice, unreachable outside a custom host.
+
+  It is now `auth.membership_policy` in the platform settings — a two-value select
+  (`auto` / `invite-only`, default `auto`) alongside `signup_enabled`, which it
+  pairs with: one says whether people may self-register, the other says what they
+  join when they do. Set it in Setup → Authentication → Membership, or pin it
+  per-deployment with `OS_AUTH_MEMBERSHIP_POLICY`. It applies **without a
+  restart** — the existing `settings.subscribe('auth', …)` re-application seam
+  carries it, the same one the password-policy keys ride.
+
+  **No behaviour changes unless you set it.** Only an _explicit_ value applies;
+  the manifest's `auto` default is a UI default and never masks a deployment that
+  configured the policy in code. A stack that sets nothing keeps today's
+  auto-binding exactly.
+
+  **Bug fix — the two membership paths read one source.** Sign-up (the reconciler
+  in better-auth's `user.create.after`) read the AuthManager's live config, while
+  the ADR-0093 D6 backfill of pre-existing member-less users read the plugin's
+  **constructor options**. Wiring a setting to the first and not the second would
+  have produced "sign-up honours the new policy, backfill still runs the old one"
+  — and the backfill binds in **bulk**, so it is the more dangerous half. Both now
+  resolve the policy through the new `AuthManager.getMembershipPolicy()`, and the
+  backfill waits for the settings namespace to bind before its first pass (the two
+  `kernel:ready` hooks fire in registration order, which was the wrong order).
+
+  **An invalid value is rejected, not coerced.** `PUT /api/settings/auth` refuses
+  a policy outside the declared option table (`invalid_option`, naming the allowed
+  set). A value arriving from `OS_AUTH_MEMBERSHIP_POLICY` — which bypasses that
+  validation — is logged at `error` and **ignored**, leaving the deployment's
+  current policy in force; it is never silently read as `auto`, because that would
+  leave an operator believing a wall is up while every sign-up is auto-bound.
+
+  New public API on `@objectstack/plugin-auth`: `AuthManager.getMembershipPolicy()`,
+  plus `MEMBERSHIP_POLICIES` and `isMembershipPolicy()` from `reconcile-membership`.
+
+- 9c4f174: feat(plugin-email): durable email delivery through `sys_job_queue`, opt-in (#5160)
+
+  `IEmailService.send()` has always delivered **inline**: the SMTP session ran
+  inside the caller's `await`, and `EmailService`'s retry loop lived in the same
+  process — so a crash between the attempt and the retry dropped the message with
+  no trace beyond a `sys_email` row stuck at `queued`. The pieces for a durable
+  path all existed (`sys_job_queue`, the `DbQueueAdapter`, an `email.send.async`
+  subscriber) but nothing in the repo ever published to that topic.
+
+  **New: `queueDelivery`.** With it on, `send()` persists the `sys_email` row,
+  publishes an `email.send.async` job **referencing that row**, and returns
+  `{ status: 'queued' }` immediately. A worker delivers the row and finalizes it
+  in place (`sent` + `message_id`, or `failed` + `error`); the queue retries with
+  exponential backoff (1s → 5min cap) and dead-letters the job when the attempts
+  run out, so a restart resumes delivery instead of losing it. The `'queued'`
+  status was already in `EmailDeliveryStatus` — no spec change.
+
+  Three ways to turn it on, all default-off:
+
+  - `new EmailServicePlugin({ queueDelivery: true })`
+  - `OS_EMAIL_QUEUE_ENABLED=true` (or `config.email.queueDelivery`) on `os serve`
+  - Settings → Mail → **Durable queue delivery**, hot-applied without a restart
+
+  **One retry budget, not two.** `retries` keeps its meaning — total attempts are
+  `retries + 1` in both modes. Inline it drives the in-process loop; queued it
+  becomes the queue's `maxAttempts` and the per-row loop is pinned to one attempt
+  per delivery. Turning the toggle on changes _where_ a retry happens (durable,
+  backed off) and never _how many_ happen, so the two layers cannot multiply.
+
+  **Fixed in the same change: the `email.send.async` subscriber inserted a new
+  `sys_email` row per delivery.** It called `send()` with the message, so a job
+  the queue retried five times left five rows — four permanently `failed`, none
+  carrying the real attempt count. It now delivers the referenced row via
+  `deliverPersistedRow`, so one message is one row and `attempt_count`
+  accumulates on it. Messages published in the old shape (a bare `SendEmailInput`)
+  are still accepted and delivered inline for a migration window.
+
+  Boundaries worth knowing before you switch it on:
+
+  - **"Send test email" always sends inline**, in every mode — the button has to
+    report the provider's own answer (`535 …`), and "queued" is exactly the
+    non-answer #5087 removed from it.
+  - **Messages with attachments or custom headers are delivered inline**, because
+    `sys_email` has no columns for them and a queued copy would arrive stripped.
+    Queueing them is tracked separately; this ships the loss-free behaviour.
+  - **A declaration that cannot be honoured fails the boot.** `queueDelivery: true`
+    from the constructor or `OS_EMAIL_QUEUE_ENABLED` with no durable queue
+    registered (or with `persist: false`) throws on `kernel:ready`, naming the
+    fix — the #5132 judgement, applied to durability. The **settings toggle** is
+    the opposite trade: it logs at `error` and keeps sending inline, because one
+    save must not stop the mail.
+  - The kernel's built-in in-memory `queue` fallback does **not** count as a
+    durable queue: it delivers synchronously with no retry or DLQ, so publishing
+    to it would report `queued` for a message nothing could ever recover. Mount
+    `@objectstack/service-queue` over an ObjectQL engine (the `queue` capability
+    does this on `os serve`) to get the `sys_job_queue`-backed adapter.
+
+  Leaving `queueDelivery` unset keeps today's behaviour byte for byte.
+
+- 8597a7d: fix(service-settings,plugin-email): the mail provider dropdown lists only providers that actually deliver (#5094)
+
+  **Settings → Mail → Provider** offered `SMTP | SendGrid | Amazon SES | Postmark`.
+  `@objectstack/plugin-email` has never carried a SendGrid or an SES transport —
+  `makeTransport` knows `log` / `resend` / `postmark` / `smtp` and nothing else. So
+  selecting either of the two validated, saved, showed a success toast, and then
+  delivered no mail at all: the same declared-but-not-delivered gap #5087 closed
+  for SMTP, one field to the left.
+
+  The same field broke the invariant in the other direction at the same time:
+  **`resend` has shipped a working transport all along and was not on the list**,
+  so nobody could pick the one HTTP provider that worked.
+
+  **The dropdown is now `SMTP | Resend | Postmark | None (log only — no real
+delivery)` — exactly the set `makeTransport` can build.** No email capability was
+  removed with SendGrid and SES. Both publish SMTP endpoints, and #5087 shipped a
+  real `SmtpTransport`, so both are configured today as `smtp`:
+
+  | provider   | host                                | port | credentials                                                                        |
+  | :--------- | :---------------------------------- | :--- | :--------------------------------------------------------------------------------- |
+  | SendGrid   | `smtp.sendgrid.net`                 | 587  | username `apikey`, password = your API key                                         |
+  | Amazon SES | `email-smtp.<region>.amazonaws.com` | 587  | SES **SMTP credentials** (generated in the SES console — not your AWS access keys) |
+
+  The provider field's own description says this, so the migration is in front of
+  whoever goes looking for the option that disappeared.
+
+  `log` is listed rather than hidden. It is the one option that does not deliver —
+  but it does not pretend to: the label says so, `LogTransport` still records every
+  message to `sys_email`, and "Send test email" answers `ok: false` for it. That
+  gives an operator the deliberate, visible opt-out AGENTS.md asks a degradation to
+  be, instead of expressing "no outbound mail" as a half-filled SMTP form. It is
+  also what makes _offered_ and _deliverable_ the same set rather than merely
+  overlapping — which is the property a test can hold.
+
+  **Already saved `sendgrid` or `ses`? Nothing breaks and nothing goes quiet.** The
+  stored value outlives the dropdown, so `applyMailSettings` now recognises it
+  explicitly: the previous transport is kept (a settings row written by an older
+  release must never fail a boot), and the server logs at `error` with both halves
+  AGENTS.md requires — the consequence (_no mail is delivered through it_) and the
+  fix (the SMTP settings above), not a bare "unknown provider". It is checked
+  _before_ the API-key check, because "set an API key" is the wrong instruction for
+  a provider that has nothing to hand a key to. "Send test email" refuses the same
+  way and sends nothing. Switching the provider to `smtp` and saving recovers the
+  transport without a restart.
+
+  Two smaller corrections in the same field:
+
+  - `api_key` is now shown and required for exactly `resend` and `postmark`
+    (`provider === 'resend' || provider === 'postmark'`). It was `provider !==
+'smtp'`, which only worked because every non-SMTP option happened to be an
+    HTTP API; `required` is enforced server-side wherever the field is visible, so
+    that expression would have refused to save "None (log only)" until an API key
+    it never reads had been typed in.
+  - The built-in `mail/test` fallback (the one that runs when no email plugin is
+    mounted) rejects any `provider` outside the manifest's own option list instead
+    of answering "the form is well-formed".
+
+  **Held by a test, in both directions.** `EMAIL_TRANSPORT_PROVIDERS` is now a
+  runtime array (the `EmailTransportProvider` union is derived from it), and
+  `plugin-email`'s `mail-manifest-providers.contract.test.ts` asserts set equality
+  between it and the manifest's option values, then builds a real transport for
+  each. Adding an option without a transport fails; adding a transport without an
+  option fails. `RETIRED_EMAIL_PROVIDERS` / `isEmailTransportProvider` /
+  `unsupportedProviderFix` are exported alongside it for hosts that surface the
+  same guidance.
+
+- 59ed2e9: Add a **report-only** classifier for `sys_secret` orphans (#8103), plus the reachability
+  measurements a sweep would depend on.
+
+  `classifySysSecretRows()` is a pure, read-only function over caller-supplied snapshots: it
+  never writes, never deletes and never decrypts, and its `SecretRowSnapshot` type
+  deliberately has no `ciphertext` member. It reports which `sys_secret` rows the settings
+  subsystem still references (`in_force`), which are unreferenced and attributable to a
+  declared encrypted specifier (`orphaned`), and which it cannot attribute at all
+  (`unattributable`).
+
+  That third verdict exists because re-measuring #8063's reachability argument **falsified**
+  one of its three facts: `sys_setting.value_enc` is _not_ the only column that holds a
+  `sys_secret` handle. The store has three producers — `SettingsService`, the engine's
+  `secret`-field channel (which stores `secret:<id>` on any business row, including
+  tenant-authored objects), and the datasource credential binder (`sys_secret:<id>` at
+  `external.credentialsRef`). Two are invisible from this package and the engine's set of
+  holders is not statically enumerable, so "unreferenced by `sys_setting`" is not
+  "unreferenced". Rows that cannot be attributed are reported, never classified as orphans,
+  and the report carries explicit caveats naming its own blind spots.
+
+  The classifier also pins the two directional guards the card names: a row re-wrapped in
+  place by `rotateKey()` keeps its handle and is reported `in_force` (rotation metadata never
+  decides a verdict), and a legacy inline `value_enc` contributes no handle to the referenced
+  set while flagging any `sys_secret` row sharing its `(namespace, key)`.
+
+  No deletion ships with this change — the vehicle for removing orphans remains an open
+  maintainer decision.
+
+- e9cb9ab: feat(settings): `SETTINGS_CRYPTO_UNAVAILABLE` gets a wire spelling — the fail-closed settings refusal is now client-branchable (#8273)
+
+  The #8026 fail-closed refusal (a declared-encrypted setting refused when
+  nothing able to encrypt it is wired) used to answer over REST on the generic
+  `500 INTERNAL_ERROR` arm every unmapped service error takes. The full
+  actionable message was carried, so operators reading logs were fine — but a
+  client (the Setup UI is the consumer) could not distinguish "the deployment
+  cannot encrypt secrets, reconfigure it" from "the server crashed". Every other
+  settings error class already had a registered wire code; this one was the odd
+  one out.
+
+  - `SETTINGS_CRYPTO_UNAVAILABLE` is registered in `ERROR_CODE_LEDGER` under
+    `@objectstack/service-settings`, so `ApiErrorSchema.code` accepts it
+    (ADR-0112: declared = enforced, no silent fourth state).
+  - `settings-routes.ts`'s PUT handler maps `SettingsCryptoUnavailableError` to
+    `500 SETTINGS_CRYPTO_UNAVAILABLE` with `details: { namespace, key }` (the
+    located refusal — never the value). The status **stays 500**: this is a
+    server-side misconfiguration, and deliberately not 503 — no retry succeeds
+    until an operator wires a `cryptoProvider`, so inviting one would be
+    dishonest. The registered code carries the meaning; the status stays honest.
+
+  Clients branching on the previous generic `INTERNAL_ERROR` for this refusal
+  (none could, meaningfully — that was the bug) now read the dedicated code;
+  status and message are unchanged.
+
+- f1f40b4: refactor!: settings error bodies stop hanging undeclared keys beside `code`/`message` (#4224)
+
+  Four `/api/settings/*` error branches spread ad-hoc context as SIBLINGS of `code`
+  and `message` inside `error`. `ApiErrorSchema` declares `code`, `message`,
+  `category?`, `httpStatus?`, `details?`, `requestId?` — and none of `namespace`,
+  `key`, `reason`, `fields`. The bodies passed every gate anyway: `ApiErrorSchema`
+  is a plain `z.object`, so unknown keys were **stripped** rather than rejected,
+  and `envelopeViolations` inspects only the body's top level. They were conformant
+  _by stripping_, not by declaration. The same module already used the declared
+  slot correctly one branch over (`SETTINGS_ACTION_FAILED` → `error.details`), so
+  this is one file speaking two dialects, not a missing capability.
+
+  **Wire change — FROM → TO.** In every case the values are unchanged; only their
+  position moves, into the `details` slot the contract declares:
+
+  | Code                  | HTTP | FROM                                           | TO                                                                     |
+  | --------------------- | ---- | ---------------------------------------------- | ---------------------------------------------------------------------- |
+  | `SETTINGS_FORBIDDEN`  | 403  | `error.namespace`                              | `error.details.namespace`                                              |
+  | `UNKNOWN_KEY`         | 400  | `error.namespace`, `error.key`                 | `error.details.namespace`, `error.details.key`                         |
+  | `SETTINGS_LOCKED`     | 409  | `error.namespace`, `error.key`, `error.reason` | `error.details.namespace`, `error.details.key`, `error.details.reason` |
+  | `SETTINGS_VALIDATION` | 400  | `error.namespace`, `error.fields`              | `error.details.namespace`, `error.details.fields`                      |
+
+  **One-line fix for a consumer:** read `error.details.<key>` where you read
+  `error.<key>`, or `error.details?.<key> ?? error.<key>` if you support servers on
+  both sides of the change. The console's own fix (objectui#3078) is the tolerant
+  form.
+
+  **`SETTINGS_VALIDATION.fields` also changes shape**, because `fields` is the name
+  ADR-0114 (#3977) closed for `FieldError[]` and keeping a map under it would leave
+  one spelling meaning two shapes:
+
+  - **FROM** `{ [key]: message }` — a `Record<string, string>`, the constraint named
+    only in the prose of the message.
+  - **TO** `FieldError[]` — `{ field, code, message, label, constraint? }`, where
+    `code` is a member of the closed field-level catalog: `required` for an empty
+    required specifier, `invalid_format` for a value that misses its declared
+    `pattern` (which travels as `constraint.pattern`).
+
+  A consumer that rendered the map's values reads `f.message` per entry instead;
+  one that wants to branch on _why_ a value was rejected can now read `f.code`
+  rather than substring-matching English. objectui's `extractFieldErrors` already
+  reads `details.fields`, so settings validation failures become renderable
+  per-field there with no further change.
+
+  **The exported `SettingsValidationError.fields` changes with it** — same
+  `Record<string, string>` → `FieldError[]` mapping — since the route only relays
+  what the service throws, and the constraint kind is knowable at the throw site
+  and nowhere after it.
+
+  `sendError`'s last parameter is tightened from `extra?: Record<string, unknown>`
+  to `ApiError`'s own optional fields, and its `code` from `string` to the closed
+  ADR-0112 `ErrorCode` union. That is what keeps this fixed: an undeclared sibling
+  is now a compile error at the call site rather than a key that quietly evaporates
+  at the schema boundary.
+
+- 9c90ea0: feat(sms): 短信全局日发送配额 —— 成本总量闸 (#2814)
+
+  #2780 给 OTP 端点落了**按号码**的防滥用（60s 冷却 + 每号码 5 条/小时）。那挡住的是「一个号码花多少钱」，挡不住「这套部署一天花多少钱」：攻击者轮换上万个不同号码时，每个号码都稳稳待在自己的预算里，而日累计账单没有任何上限——这正是 SMS pumping / toll fraud 的典型打法。更要紧的是，按号码那道闸住在 better-auth 的 `hooks.before` 里，只看得见 auth 端点：`notify(channels:['sms'])` 与邀请短信从旁边直接走过去，一条都不计数。
+
+  本次新增一道**总量**闸，扣减点放在所有出站短信本来就必经的那一处 —— `SmsService.send()`。OTP、邀请、messaging `sms` channel 三条路无论从哪扇门进来，都记在同一本账上。
+
+  ## 新增设置项
+
+  `sms` 命名空间新增 `daily_quota`（Daily send limit，number，默认 `0` = 不限）：这套部署每个 **UTC 自然日**允许发出的短信总条数。超出后拒发，直到 00:00 UTC。env 覆盖沿用既有的每键机制，无需额外接线：`OS_SMS_DAILY_QUOTA=2500`。
+
+  `0` 是出厂姿态，所以升级本身不改变任何现有部署的发送行为——闸门要由运营者显式配置才会闭合。
+
+  ## Observable behaviour change
+
+  **配置配额后，发送可能被拒**，两条路径的表现分别是：
+
+  - OTP / 邀请路径 —— `SendSmsResult.status='failed'`，`error` 为 `TOO_MANY_REQUESTS: daily SMS quota exhausted`。刻意与按号码闸抛出的 `TOO_MANY_REQUESTS` 用同一个码，且**不带任何剩余额度细节**：从外面看，两道墙必须长得一样，攻击者不该能试探出自己撞的是哪一道。
+    ⚠️ 但这个码**目前到不了 HTTP 调用方**：`AuthManager.deliverPhoneOtp` 把它重抛成普通 `Error`，而 better-call 对非 `APIError` 一律回 500（实测，见 #6039）。也就是说 OTP 端点上，按号码闸回 429、总量闸回 500。补齐要动 plugin-auth，已单独立案。
+  - messaging `sms` channel —— `SendResult.ok=false`，且 `classifyError` 返回 `'rate_limited'`（此前一律 `'retryable'`）。投递落进 outbox 走退避重试 / 死信，不会被静默丢弃；`rate_limited` 与 `retryable` 走同一条重试阶梯，但把「额度用尽」与「网关抖动」在投递记录上区分开。
+
+  ## 计数落在哪里
+
+  复用仓内唯一那份定窗计数（`incrementFixedWindow`）与它的惰性存储解析（`createLazyCounterStore`，#4772/#4790），不写第三份：
+
+  - 有 kernel `cache` 服务时计在共享 cache（集群共享与否取决于 cache 本身）；
+  - 解析不到时降级为有界的进程内计数，并由解析器**点名**打一条 warn，说明降级的代价（N 节点部署最多可花 N× 配额）；
+  - 解析在**计数被消费时**发生，而非插件 init —— 后注册的 cache 也能在下一次发送时被接上（#4772 的坑）。
+
+  窗口是 UTC 自然日，且由两个机制同时保证：计数键带 UTC 日期（`sms-daily-sends:2026-08-06`），窗口开启时的 TTL 恰为距下一个 UTC 午夜的秒数。任一机制单独也能翻窗，合起来则不可能互相矛盾。
+
+  ## 两条刻意的姿态
+
+  - **fail-open**：计数存储读不到时，闸门**放行**并打一次 warn。短信成本闸不能把登录拖下水（#2814 诉求 4）。
+  - **配额值的钳制在消费侧**：manifest 上的 `min: 0` 今天并不被 `validatePatch` 执行（#5932），所以负值 / `NaN` / `Infinity` / 非数字都会原样抵达读取方。这些一律降级为 `0`（不限）并**点名**打 warn，而不是拒发、也不是替运营者编一个别的默认值——一个设置表单里的手误不该变成手机登录的全站故障，而编一个没人声明过的上限只会把手误藏进看似合理的行为里。
+
+  ## 不在本次范围
+
+  诉求中的**每租户日配额**（`daily_quota_per_tenant`）未实现：`SendSmsInput`（`@objectstack/spec/contracts`）不携带任何租户标识，而在 service 侧另造一个只此一家的拼法就是 Prime Directive #12 明令禁止的影子契约。租户维度要么落在 spec 契约上，要么不落——详见 #2814 上的讨论。
+
+### Patch Changes
+
+- eb1b231: Remove `step: 0.1` from the `ai.temperature` specifier (#6550). Since #6199 a declared `step` binds as a value constraint on both doors, and temperature's true domain is continuous on [0, 2]: the 0.1 grid refused legal values — `PUT /api/settings/ai` with `temperature: 0.15` was rejected and `OS_AI_TEMPERATURE=0.15` was loudly ignored. Both now work; `min: 0` / `max: 2` stay and keep binding (out-of-window values are still refused in the min/max vocabulary). #6199's grid machinery is untouched and still enforces any key that declares `step`.
+- 2e836de: chore(packaging): CHANGELOG.md ships in every npm tarball (#4261)
+
+  The AGENTS.md post-task checklist requires breaking changesets to carry their
+  FROM → TO migration because "this text ships to consumers as `CHANGELOG.md`
+  inside the npm package and is what an upgrading agent greps after the tombstone
+  error." That delivery path was severed for 68 of the 69 publishable packages:
+  npm packs `package.json` / `README*` / `LICENSE*` unconditionally but — unlike
+  older npm versions — not `CHANGELOG.md`, and the canonical
+  `"files": ["dist", "README.md"]` whitelist never named it. Measured on npm
+  10.9.7: `npm pack --dry-run` on `@objectstack/types` shipped 3 files while its
+  70KB `CHANGELOG.md` stayed behind. Only `@objectstack/spec` listed it
+  explicitly.
+
+  The tombstone-error scenario is precisely the one where the repo is out of
+  reach — the upgrading agent has `node_modules` and nothing else — so the
+  migration text has to ride in the tarball. Every publishable package now
+  declares `CHANGELOG.md` in `files`, and the canonical whitelist is
+  `["dist", "README.md", "CHANGELOG.md"]`.
+
+  The other half is the gate: `check:published-files` gains a fifth invariant,
+  COMPLETE — a whitelist that fails to cover `CHANGELOG.md` fails the
+  always-required lint job, so the next package cannot silently sever the path
+  again. `@objectstack/spec`'s per-package EXTRA_ENTRIES exemption dissolves
+  into the canonical set.
+
+  Consumer-visible change: one more file per install (the package's changelog,
+  e.g. 70.8KB for `@objectstack/types`), and `grep -r "removed key"
+node_modules/@objectstack/*/CHANGELOG.md` now finds the migration it was
+  promised.
+
+- 0b63b56: `company.country` adopts the `iso_3166_alpha2` value domain (#6579), the fourth case of the hole #5712 closed on localization: `pattern: '^[A-Za-z]{2}$'` constrains shape only, so `ZZ` (assigned to nobody) and `UK` (a CLDR alias, not an ISO 3166-1 code) passed the write door while the description promised ISO 3166-1. Both doors now judge membership against the explicit 249-code list (`invalid_value` with `constraint: { valueDomain: 'iso_3166_alpha2' }` on save; loud ignore on `OS_COMPANY_COUNTRY`). The pattern stays — a shape breach still speaks first as `invalid_format`. Deliberate tightening, same as #5712: membership is exact uppercase, so lowercase spellings like `us` are now refused.
+- 35e7417: fix(service-settings): settings writes reach `sys_audit_log` as `config_change` (#8145)
+
+  `GET /api/v1/data/sys_audit_log?$filter={"action":"config_change"}` answered
+  **total 0** after any settings write, for the whole life of that enum member. So
+  did the shipped `config_changes` list view and the console filter that offers the
+  value: three surfaces advertising a class of audit event the platform never
+  recorded. A settings change was audited — into `sys_setting_audit`, with
+  `action: 'set'` — and nowhere else, while the settings service's own type
+  documentation promised `sys_audit_log` rows "for every successful write".
+
+  The cause was one argument. `SettingsAuditSink` — the slot documented since
+  Phase 3 as the one that writes the generic ledger — is the second parameter of
+  `SettingsService.bindEngine`, and `SettingsServicePlugin` passed `undefined`
+  there. Nothing else was missing: the service called the sink on every write, the
+  enum declared the value, the view filtered on it.
+
+  **Both ledgers are written now** (the dual-write half of the 2026-08-12 ruling on
+  #7675, which left the choice to the implementation):
+
+  - `sys_audit_log`, `action: 'config_change'` — the platform-wide compliance
+    ledger. One row per changed key, attributed on `user_id` and `actor`, stamped
+    with the caller's tenant (and `organization_id` where the deployment declares
+    it, without which RLS would hide every row and leave the view as empty as
+    before). `metadata` carries the namespace/key/scope and whether the key is
+    encrypted; `new_value` carries a **digest**, never a value.
+  - `sys_setting_audit`, `action: 'set' | 'reset'` — unchanged. It keeps its rows
+    because it has live readers and because it records what the generic ledger has
+    no columns for (`namespace`, `key`, `scope`, `old_hash`/`new_hash`, `source`,
+    `reason`).
+
+  The new write is **best-effort and can never fail a settings write**:
+  `sys_audit_log` belongs to the optional `@objectstack/plugin-audit`, so on a
+  deployment without that plugin the table does not exist, and the sink reports the
+  gap once per process rather than raising. A write that is REFUSED — an
+  unauthorised caller, an env-pinned key, the #8026 fail-closed crypto refusal —
+  still emits no row on either ledger: a refused write is not a successful one, and
+  a ledger listing configuration changes that never happened would be a worse lie
+  than the empty view.
+
+  `settings-service.types.ts`'s contract line now states what is built rather than
+  what was intended, per the ruling's 以实现定契约.
+
+- 861ee32: The settings env door now enforces declared `pattern` constraints (#6580). An
+  `OS_*` override whose value the specifier's `pattern` rejects is loudly
+  reported (`error` log, once per var+value) and ignored — the key resolves from
+  the next cascade layer and is not locked — exactly the #5204 contract the
+  option-table, value-window/step and valueDomain families already honor. The
+  write gate's judgment is hoisted into shared helpers (`declaredPattern` /
+  `firstPatternMiss`) called by both doors, so `PUT /api/settings/:ns` behavior
+  is unchanged byte-for-byte (same `invalid_format` envelope, same tolerance for
+  uncompilable pattern declarations) and the two doors can no longer drift.
+  Family ordering agrees between doors: options → pattern → valueDomain → bounds.
+- 4022b78: Settings: an `OS_*` env override is now checked against the specifier's declared `options` table (#5204)
+
+  A manifest's `options` table has been enforced on the write path since #5131, but
+  `SettingsService.get()` produced an effective value by a second route that never
+  consulted it: an `OS_*` override was reshaped by the default's type and returned
+  straight from the top of the cascade with `locked: true`. So the providers #5094 and
+  #5133 retired from `mail.provider` could walk back in through the one door with no
+  gate on it — `OS_MAIL_PROVIDER=sendgrid` reached the mail plugin unchallenged — and a
+  plain typo such as `OS_BRANDING_THEME_MODE=drak` was served to every consumer as a
+  normal value with normal-looking provenance, each consumer left to improvise.
+
+  An override whose value the table does not declare is now **ignored** rather than
+  repaired: the value falls through to the next layer of the cascade (a stored
+  global/tenant/user value, else the manifest default), and the read API reports that
+  layer honestly instead of claiming `source: 'env'` for a value not in force. The
+  rejection is logged once at `error`, naming the variable, the rejected value, the legal
+  value set and the consequence. The same audit runs at `registerManifest`, so a
+  misconfigured deployment learns at boot rather than whenever somebody first opens the
+  settings page.
+
+  Registration **reports but never refuses**: option tables move, a pin that was legal
+  the day it was written must not turn an upgrade into a crash-on-start.
+
+  Two behaviour notes for anyone relying on the old shape:
+
+  - Keys with no declared option table are untouched — text, boolean, number and
+    password overrides behave exactly as before. The check applies only to
+    `select`/`radio`/`multiselect` specifiers that declare a non-empty table.
+  - A **rejected** override no longer pins its key against writes. `setMany` used to
+    refuse on the mere presence of the variable; judged by presence, an ignored value
+    would have left the key configurable by nothing at all — env value discarded, UI
+    refused with `SETTINGS_LOCKED`, and `get()` reporting `locked: false` to a settings
+    page whose save would then fail. An override that _is_ in force still locks the key,
+    unchanged.
+
+- 9fd9ae7: Init-time service consumption is now declared everywhere, and the declaration is enforced (#4471, ADR-0116). A new CI gate (`check:init-service-contract`) walks every plugin's `init()` call graph — including private helpers, the shape that shipped #4420 — and errors on any init-reachable `getService('X')` of a workspace-provided service that is not covered by `dependencies`, `optionalDependencies`, or `requiresServices`. Eleven previously undeclared init-time consumers (metadata, rest, cli serve plugins, and seven services) now declare `optionalDependencies` on their providers, so the kernel orders them deterministically instead of by registration luck; each still degrades on purpose when the provider is not composed. Plugin authors: a best-effort init-time `getService` must declare its provider in `optionalDependencies` (declared tolerance) — the checker never exempts it.
+- babddf6: fix(service-settings): localization's declared standards are the enforcement boundary — `valueDomain` enforced on both doors (#5712)
+
+  `localization.timezone` promised "IANA zone" and `localization.currency` promised
+  "ISO 4217 code", but since #5131 the write path treated their curated 17/9-entry
+  `options` tables as exhaustive, and since #5204 the env path agreed — so
+  `PUT /api/settings/localization` with `timezone: 'Europe/Zurich'` (or
+  `currency: 'CHF'`) was refused with `invalid_option`, and
+  `OS_LOCALIZATION_TIMEZONE=Europe/Zurich` was ignored, despite both being values
+  every `Intl`-based consumer downstream handles. Maintainer ruling (2026-08-06,
+  reading 1): the curated tables are UI convenience lists; the boundary is the
+  standard's membership.
+
+  The manifest now declares the merged spec vocabulary (#5933 / `SpecifierValueDomainSchema`)
+  on the three keys that promised a standard all along — `timezone: 'iana_time_zone'`,
+  `currency: 'iso_4217_currency'`, and `default_country: 'iso_3166_alpha2'` (third
+  case of the same hole: `^[A-Za-z]{2}$` admits `ZZ`) — and `SettingsService`
+  enforces a declared domain at the one decision point per door:
+
+  - **Write door** (`validatePatch`): a domain-bearing specifier skips the
+    exhaustive-options check and judges the standard's membership instead, after
+    `pattern` (shape and membership narrow independently; the shape breach is the
+    coarser fact and speaks first). A breach is `invalid_value` with
+    `constraint: { valueDomain }` — no `FieldErrorCode` member names a
+    standard-domain breach, and `invalid_option` would misname the set that was
+    consulted.
+  - **Env door** (`effectiveEnvOverride`): the same membership judgment, so a
+    garbage override is loudly reported and ignored (falls back down the cascade,
+    pins nothing — #5204's contract, unchanged) while a legal one wins the cascade
+    and locks the key.
+
+  Membership definitions follow the spec's pinned TSDoc: `iana_time_zone` is the
+  `Intl.DateTimeFormat` probe (NOT `Intl.supportedValuesOf('timeZone')`, whose
+  CLDR subset omits `UTC`, `Asia/Kolkata` and `Europe/Kyiv`); `iso_4217_currency`
+  is `Intl.supportedValuesOf('currency')`; `iso_3166_alpha2` is an explicit list
+  of the 249 officially assigned codes (no standard-library oracle exists —
+  `Intl.DisplayNames` names `ZZ` and `UK`).
+
+  A specifier that declares no `valueDomain` is byte-for-byte unchanged: #5131's
+  exhaustive-options semantics stay in force for registry-backed tables such as
+  `mail.provider` / `sms.provider`, pinned by regression tests on both doors.
+
+- be7360c: chore(plugins,services): declare `providesServices` on the 20 remaining init-time service providers (ADR-0116 follow-up, #4131)
+
+  ADR-0116 gave the kernel a declared ordering contract, but only
+  `ObjectQLPlugin` and `MetadataPlugin` had declared what their `init()`
+  registers. The pre-Phase-1 ordering check can only _name a provider_ for
+  services someone declared, so its coverage was two plugins wide.
+
+  An audit of every plugin's `init()` body (brace-matched, comments stripped,
+  each call classified by whether it sits inside a `try`/`if`) found 20 plugins
+  that register a service on every path without declaring it. All 20 now
+  declare `providesServices`. Purely additive: no ordering changes, no new
+  failure modes — a `providesServices` entry only lets the kernel say _who_
+  provides a service when it reports a misordering, and enriches the Phase-1
+  `getService` miss diagnostic.
+
+  Three needed a closer read before declaring, because they register the same
+  service from several branches (`cache`, `queue`, `job`): each early-return
+  branch plus the fallback registers it, so every path does — the declaration
+  is honest. ADR-0116's rule that a _conditionally_ registered service must
+  never be declared is unchanged and was applied throughout.
+
+  The same audit found 12 plugins that hard-resolve a service during `init()`
+  (11 of them `manifest`) without declaring `requiresServices`. None is a live
+  exposure — every one already declares a hard `dependencies` entry on the
+  provider, so the kernel orders them correctly today. Those are tracked
+  separately: with a hard dependency in place, `requiresServices` mostly
+  restates what the kernel already enforces, and its real value is on
+  _soft_-dependency consumers, of which `AppPlugin` is currently the only one.
+
+- 0931185: fix(rest,service-settings,service-datasource)!: four more route modules emit the declared envelope, and the guard is now shared (#3843)
+
+  #3675 and #3689 moved `service-storage` and `service-i18n` onto the declared
+  response envelope (`BaseResponseSchema` + `ApiErrorSchema`). Each scoped itself
+  to one service, and neither asked whether the same drift existed elsewhere. It
+  did — in four more modules, and in two of them it was the _older_ shape, the one
+  #3675 had already declared wrong:
+
+  | Module                                | before                                                         | now           |
+  | ------------------------------------- | -------------------------------------------------------------- | ------------- |
+  | `service-settings/settings-routes.ts` | nested `error`, no `success` on any of 5 bodies                | full envelope |
+  | `service-datasource/admin-routes.ts`  | `{ error: '<string>' }`, `message` a **sibling**               | full envelope |
+  | `rest/external-datasource-routes.ts`  | `{ error: '<string>' }` + a private `ok`                       | full envelope |
+  | `rest/package-routes.ts`              | 3 of 16 bodies had `success`, 2 failures had no `error` at all | full envelope |
+
+  ## Breaking: where to read things now
+
+  **Success payloads move under `data`.** The keys are unchanged — only their
+  depth. `unwrapResponse` in `ObjectStackClient` returns `body.data` when the flag
+  is present, so every SDK method (`packages.list()`, `datasources.external.*`)
+  resolves to exactly the object it always did. Raw `fetch` callers must add one
+  hop:
+
+  ```
+  GET  /api/v1/datasources            body.datasources     → body.data.datasources
+  GET  /api/v1/datasources/drivers    body.drivers         → body.data.drivers
+  GET  /api/v1/datasources/:name      body.datasource      → body.data.datasource
+  GET  /api/v1/packages               body.packages        → body.data.packages
+  GET  /api/v1/packages/:id           body.package         → body.data.package
+  GET  /api/settings                  body.manifests       → body.data.manifests
+  GET  /api/settings/:ns              body.manifest/.values → body.data.manifest/.values
+  POST /…/external/validate           body.ok, body.results → body.data.ok, body.data.results
+  ```
+
+  `SettingsNamespacePayloadSchema` and friends still describe those payloads
+  exactly; they now describe the envelope's `data` rather than the whole body.
+
+  **Error bodies stop being a string.** `{ error: 'datasource_admin_error',
+message }` → `{ success: false, error: { code: 'datasource_admin_error',
+message } }`. Read `body.error.message`, not `body.message`; read
+  `body.error.code`, not `body.error`. This is the asymmetry #3675 opened on: a
+  caller reading `body.error.message` previously got the real message from the
+  dispatcher and `undefined` from these routes.
+
+  **Two failures that never said why now do.** `DELETE /api/v1/packages/:id`
+  answered a bare `{ success: false }` and a bare
+  `{ success: false, failed, cleanups }`. They are now `PACKAGE_DELETE_FAILED` and
+  `PACKAGE_DELETE_PARTIAL`, with the per-item `failed` / `cleanups` arrays under
+  `error.details`.
+
+  **Codes follow ADR-0112.** #3841 settled the vocabulary while this was in review:
+  `error.code` is SCREAMING_SNAKE and `ApiErrorSchema.code` is now the closed
+  `ErrorCode` union, so an unregistered code fails schema parse. Generic conditions
+  reuse the STANDARD catalog rather than becoming registered synonyms of it, per the
+  ledger's own guidance:
+
+  ```
+  datasource_admin_unavailable  → SERVICE_UNAVAILABLE      (standard)
+  external_service_unavailable  → SERVICE_UNAVAILABLE      (standard)
+  not_found / PACKAGE_NOT_FOUND → RESOURCE_NOT_FOUND       (standard)
+  PUBLISH_FIELDS_MISSING        → MISSING_REQUIRED_FIELD   (standard)
+  INTERNAL                      → INTERNAL_ERROR           (standard)
+  datasource_admin_error        → DATASOURCE_ADMIN_ERROR   (registered)
+  external_import_error         → EXTERNAL_IMPORT_ERROR    (registered)
+  PUBLISH_MANIFEST_INVALID      → PACKAGE_MANIFEST_INVALID (registered)
+  PUBLISH_FAILED                → PACKAGE_PUBLISH_FAILED   (registered)
+  PACKAGE_DELETE_PARTIAL / PACKAGE_DELETE_FAILED / SETTINGS_ACTION_FAILED (registered)
+  ```
+
+  Which service is unavailable is carried by `message`. The seven registered codes are
+  added to `ERROR_CODE_LEDGER` under their owning packages — including a new
+  `@objectstack/service-datasource` entry.
+
+  **`POST /external/validate` keeps its `ok`.** Unlike the `{ ok: true, key }`
+  #3689 retired from storage — a private second word for `success` — this `ok` is a
+  computed verdict over the federated objects (`results.every(r => r.ok)`). The
+  request can succeed while the verdict is false, so the two flags are not the same
+  field; `ok` moves inside `data` rather than being dropped.
+
+  Consumers were taught both shapes first, so the two repos are not coupled by
+  merge order: objectui's `packages` readers were already tolerant
+  (`payload?.data ?? payload`), and its datasource page plus the generic
+  `type: 'api'` action runner now unwrap the envelope and read `error.message`
+  (the latter previously toasted `[object Object]` for any nested error).
+
+  ## The guard is shared now, not copied
+
+  `scripts/check-route-envelope.mjs` + `pnpm check:route-envelope`, wired into
+  `lint.yml` alongside the nine sibling `check:*` guards. Its load-bearing assertion
+  is structural rather than per-route: **it counts the response write sites per
+  module.** When every body goes through the `sendOk` / `sendError` pair that count
+  is fixed at two and does not grow with the route list — so a _future_ route that
+  hand-rolls a body fails the guard. That is the coverage a driven-body test can
+  never give, since it can only drive the routes that existed the day it was
+  written.
+
+  This existed three times already as an open-coded regex block (storage error,
+  storage success, i18n error). Lifting it did more than deduplicate: a per-package
+  scan **structurally cannot notice a module nobody thought to convert**, and going
+  repo-wide found two the moment it ran — neither is in #3843's hand-written survey:
+
+  - `plugin-sharing/share-link-routes.ts` — the fifth drifting module. No body
+    carries `success`, and one answers `{ ok: true }`, the private second word #3689
+    retired from storage. Filed as #3983 and pinned by the guard; converting it is
+    breaking for share-link consumers and needs its own sweep.
+  - `metadata/routes/hmr-routes.ts` — declared **exempt** with a reason (dev-only
+    SSE endpoint, not on the SDK surface), not skipped. Three states, deliberately —
+    conformant / ratcheted / exempt — because that is the honest classification
+    ADR-0049 asks for. A route module the scan finds but the table does not declare
+    is an **error**, never a default: applying `2 / 1 / 1` to an unknown module would
+    let a new one pass by coincidence.
+
+  It also drops the regex for the TypeScript AST, fixing two real bugs the copies
+  had. They stripped comments with `String.replace`, whose line-comment pattern also
+  ate `//` inside string literals and truncated the rest of that line — response
+  writes included. And `.json(` does not mean "write a response": `hmr-routes.ts`
+  calls `c.req.json()` twice to READ a request body, which a textual count reports as
+  two unenveloped responses. Comments and literals are not AST tokens, and
+  request-vs-response is a property of the callee, so both disappear. The script
+  carries a `--self-test` pinning each case — the nine sibling guards have none, but
+  both of these bugs survived a review of the regex version.
+
+  **The i18n ratchet, stated rather than hidden.** `i18n-service-plugin.ts` is
+  declared at `responses: 5, ok: 4, err: 1` with a ratchet pointing at #3973. Its
+  error half _is_ consolidated (#3675), but each of its four read routes builds
+  `{ success: true, data }` inline. Those bodies are correct — that is not envelope
+  drift — but an unconsolidated builder is a weaker guard: a fifth read route could
+  get the shape wrong and only a driven test would notice. The numbers pin today's
+  structure exactly (a new inline body fails) and drop to the conformant `2 / 1 / 1`
+  when #3973 lands.
+
+- cc3555e: Mount five ledgered-but-dead routes, and gate the class that hid them (#7526)
+
+  Three routes shipped in the ledgers, implemented in the dispatcher, and mounted
+  by nobody. Two of them answered a plausible `200` rather than a 404, which is
+  worse: `GET /meta/types` fell into the `/meta/:type` catch-all and returned
+  `{"type":"types","items":[]}`, shape-identical to `/meta/zzz_not_a_type`, and
+  `GET /meta/:type/:name/published` fell into the compound-name route and
+  returned a stub identical before publish **and for a name that does not exist**
+  — a route that structurally could not 404. `GET /meta/objects/:name/state/:field`
+  was the honest one: REST's `/meta` registrations topped out at three path
+  segments and it needs four, so it answered Hono's `notFound`. All three now
+  mount, `published` 404s for a bogus name, and the compound-name arity the SDK
+  documents (`getPublished('lead', 'views/all_leads')`) mounts with it.
+
+  The routes were the symptom. The route ledgers are a DECLARATION and every
+  guard built on them (#3563 / #3587 / #3636 / #3642) reads that union as an
+  OBSERVATION of what is mounted, so the whole audit chain was green on this
+  class by construction — `/meta/objects/:name/state/:field` counted as mounted
+  because it was ledgered. This adds the missing observation: a route-ledger ↔
+  live-mount parity gate that boots a real server, reads the mount table off it,
+  and asserts both directions — every ledgered route reachably mounted, every
+  mounted route ledgered. It never consults a second hand-written list of what is
+  mounted, and it PROBES reachability through the live router rather than
+  checking presence in a table, because a literal route registered after a
+  catch-all sibling is mounted and unreachable.
+
+  `IHttpServer` grows two optional, feature-detected members for it —
+  `getMountedRoutes()` (the live mount table, in registration order) and
+  `resolveMountedRoute(method, path)` (which registration answers a concrete
+  request, per the router itself) — implemented by the Hono adapter.
+
+  The gate found three more instances of the same class on its first run:
+  `GET /automation/actions`, `/automation/connectors` and `/automation/_status`
+  were ordered ahead of the `/:name` catch-all inside `dispatch()`, with a
+  comment saying the order was load-bearing, while the bridge that actually
+  mounts `/automation` registered `/:name` and never those three. They now mount.
+  It also found the unledgered live mounts: the four `/api/settings` routes get a
+  ledger of their own, and `GET /.well-known/objectstack` and the object-less
+  `POST /actions//:action` get rows in the dispatcher ledger.
+
+- 833ed84: fix(spec): declare the eight-bullet credential read mask once, in spec (#7572)
+
+  The string a client sees in place of a credential it may not read back was
+  declared **twice**, byte-identical by convention only:
+
+  - `SECRET_MASK` in `@objectstack/objectql` — the encrypted-**field** read mask on
+    the generic CRUD path (ADR-0100 §A/§B);
+  - `SETTINGS_SECRET_MASK` in `@objectstack/service-settings` — the settings REST
+    read boundary, added by #7522.
+
+  Nothing bound them. An edit to either literal would desynchronise the two masked
+  reads a console sees, and the break would be invisible from both sides: each
+  package asserted against its own copy, so both suites stay green while the two
+  surfaces disagree. That matters more than a cosmetic mismatch — the console
+  renders "configured vs not configured" from this value and echoes it back
+  unchanged on save, and both write paths read that echo as "unchanged"
+  (ADR-0100 §B3). A drifted mask silently turns an unchanged form round-trip into a
+  real write of the mask's literal text over a live credential.
+
+  **What changed.** The mask is declared once, in `@objectstack/spec` — the
+  contract face both sides already depend on — as `SECRET_MASK` in
+  `spec/src/data/secret-mask.ts`, alongside the rest of the ADR-0100 surface
+  (`data/field.zod.ts`, `data/object.zod.ts`). Both readers now import that one
+  declaration:
+
+  - `@objectstack/objectql` **re-exports** it, so its public API is byte-for-byte
+    unchanged — `SECRET_MASK` is still exported from the package root and from
+    `core`, with the same name, value and literal type. No consumer changes.
+  - `@objectstack/service-settings` aliases it as `SETTINGS_SECRET_MASK`, keeping
+    the name that package publishes and every existing import of it working.
+
+  **The framework-agnostic property of the settings service is intact.** #7522
+  declined to import the constant because reaching it meant depending on
+  `@objectstack/objectql`, the whole data engine — that reasoning was right and
+  still holds; no objectql import was added. It never applied to `@objectstack/spec`,
+  which is already a dependency of the package and already in its runtime graph
+  (`manifest.ts` → `@objectstack/platform-objects/system` → `@objectstack/spec/data`).
+
+  **New public API:** `SECRET_MASK` on `@objectstack/spec/data`. Additive — nothing
+  was removed or renamed on any package.
+
+  The literal keeps its deliberate spelling (eight U+2022 BULLETs written out, not
+  an escape or a `.repeat(8)`), so a grep for the mask a client actually received
+  still lands on the declaration; a source-level pin holds that, next to a byte pin
+  on the value. The far-side literal pins in `plugin-audit` and `driver-memory` are
+  deliberately left restating the mask — a pin whose job is to catch the constant
+  changing must not import the constant.
+
+- 5d7eabc: test(service-settings): resolve the remaining three workspace deps from source, emptying this package's `check-test-source-alias` registry entry (#8104)
+
+  #8063 gave this package its first `vitest.config.ts` and aliased two workspace
+  deps to source (`@objectstack/objectql`, `@objectstack/core`) — the two that
+  gate named when the package's first real-engine test landed. The other three,
+  `@objectstack/spec`, `@objectstack/platform-objects` and `@objectstack/types`,
+  stayed on their registered entry in `KNOWN_UNALIASED_TEST_IMPORTS` and kept
+  resolving through `exports` to **`dist/`**. They are now aliased to source and
+  the entry is deleted.
+
+  **How much of the suite was actually reading the artifact: 17 of 20 files.**
+  Measured, not inferred — with the three `dist/` trees removed from the checkout
+  and the pre-#8104 config in place, 17 test files fail to load at all
+  (`Cannot find package '@objectstack/spec/system'`) and only 58 of 413 cases run.
+  With the aliases below, the same tree with no `spec`, `platform-objects` or
+  `types` build output anywhere passes 413/413. The build artifact is off the
+  resolution path rather than merely shadowed by a fresh copy of it.
+
+  **The subpath entry points were the whole job, and the obvious shape does not
+  do it.** This package imports **no bare** `@objectstack/spec` and **no bare**
+  `@objectstack/platform-objects` at run time. Every specifier its tests can reach
+  for those two is a subpath — `spec/api`, `spec/contracts`, `spec/data`,
+  `spec/system`, `platform-objects/system` — joined by `spec/security`, reached
+  transitively through `@objectstack/types` ([ADR-0105 D1] tenancy posture) once
+  types itself resolves to source. So the two shapes that suggest themselves both
+  fail, in opposite directions:
+
+  - the **object** form matches by **prefix**, so a bare key whose replacement is
+    a file swallows the subpaths into `…/index.ts/system` — `ENOTDIR` at run time
+    in a config that reads as correct (#7778);
+  - the **anchored bare** form (`/^@objectstack\/spec$/`, the shape #8063 left
+    behind) does not swallow them but does not **cover** them either — all six
+    specifiers stay on `dist` and the registry entry cannot come off.
+
+  What covers them is a subpath rule. `spec` takes the one-rule-for-all-namespaces
+  form `/^@objectstack\/spec\/([a-z-]+)$/` with the capture group inside the path,
+  because its export map is uniform (`src/<ns>/index.ts` throughout) — so a new
+  namespace import cannot make it stale. `platform-objects` gets an **explicit**
+  `platform-objects/system` entry instead, because its map is _not_ uniform:
+  `./plugin` is `src/plugin.ts`, a file, so a `([a-z-]+)` rule would send
+  `platform-objects/plugin` to `src/plugin/index.ts`, a path nobody wrote, failing
+  on whoever next adds that import. `plugin-audit` writes its
+  `platform-objects/audit` entry the same way for the same reason.
+
+  **The registry deletion is half the change, not its cleanup.**
+  `KNOWN_UNALIASED_TEST_IMPORTS` is audited for set equality in both directions,
+  so the two halves constrain each other and neither is green alone: with the
+  aliases complete and the entry still present the gate fails _"registry entry is
+  no longer needed … Delete the entry"_; with the entry deleted and any one alias
+  missing it fails _"tests import 1 workspace package(s) that resolve to `dist/`
+  with no source alias"_. The gate goes from 62 registered packages to 61.
+
+  No test turned red and no assertion moved: 413 passed / 20 files before and
+  after, and **no change under `src/`**. That is the expected reading for a
+  checkout whose `dist` was built from the same commit — dist and source agree
+  here, which is exactly the condition under which the old setup looked fine. What
+  changes is that the suite no longer has an opinion about build state at all.
+
+- c08b5b3: fix(service-settings): wire the `typecheck` script so turbo stops silently no-opping the gate, and clear the 14 type errors it was hiding (#7925)
+
+  `packages/services/service-settings/package.json` declared only `build` and
+  `test`. `turbo run typecheck --filter=@objectstack/service-settings` therefore
+  exited **0 while never running a typecheck task at all** — turbo no-ops a
+  package that has no such script, and reports success. "typecheck green" for
+  this package was a claim nothing enforced.
+
+  Adding the one-line script (mirroring its sibling `service-messaging`) makes
+  the CI-equivalent command execute a real `service-settings:typecheck` task —
+  7 tasks where there were 6 — and it immediately surfaced 14 pre-existing
+  errors across five test files. Every one was a **stale test**, not a defect in
+  the source; no `service-settings/src/*.ts` non-test file changed.
+
+  - `sms.manifest.test.ts` (3), `storage.manifest.test.ts` (4), and
+    `ai.manifest.test.ts` (5, previously behind `as any`) invoked their action
+    handlers with a partial input. `SettingsActionHandler` takes
+    `{ namespace, actionId, values, payload?, ctx }` and the service always
+    passes all of it (`settings-service.ts:1809`); the tests had drifted to the
+    older two-field shape. They now call handlers the way the service does — and
+    the `as any` casts that were hiding the same drift in the `ai` tests are
+    gone rather than extended to the other two files.
+  - `settings-service.test.ts` passed `record: (e) => events.push(e)` for an
+    audit sink declared `Promise<void> | void`; the expression-bodied arrow
+    returned `Array.push`'s number.
+  - `settings-translation-coverage.test.ts` filtered the manifests barrel
+    through a hand-rolled structural `Manifest` type that had drifted from the
+    real one (`label` is `string | Record<string, string>`, not `string`),
+    making its type predicate unassignable to the exports it narrowed. It now
+    narrows to the spec's own `SettingsManifest`.
+
+  `aiTestEmbedderActionHandler` was imported by `ai.manifest.test.ts` and never
+  used — the unused import the compiler flagged. Rather than delete the import,
+  the two cases it was there for are now tested: the manifest declares a
+  `test_embedder` action button whose handler had no coverage.
+
+  No error was silenced: no `any` was added, no `@ts-expect-error`, and the
+  package tsconfig's `include` is unchanged (its tests live under `src`, so they
+  were always inside the program — only the script that reads them was missing).
+
+  The package's entry in the `check:type-check-coverage` DEBT ledger is deleted,
+  since it graduated: the gate goes from 63/77 workspace packages type-checked to
+  64/77, and the frozen raw-error total from 455 to 442.
+
+- 6ca0b49: fix(service-settings): refuse to persist a secret through the base64 `NoopCryptoAdapter` — the settings write path now fails closed like the engine's (#8026)
+
+  `SettingsService` constructed without a `cryptoProvider` + `secretStore` fell
+  back to `NoopCryptoAdapter`, whose `encrypt()` is `'b64:' + base64(plaintext)`.
+  That is **encoding, not encryption**: trivially reversible, and it leaves
+  `sys_setting.value_enc` populated — so the row reads as protected to the next
+  author and to the next audit while being plaintext with extra steps.
+
+  The engine's `Field.secret()` path has always taken the opposite posture: with
+  no `CryptoProvider` registered it throws rather than store cleartext. The
+  platform therefore had two credential-encryption paths with **opposite failure
+  modes**. This aligns the settings side onto the engine's.
+
+  **Not a live leak, and not written as one.** The shipped plugin path wires a
+  real `LocalCryptoProvider` at `kernel:ready` once an `objectql` engine resolves,
+  so a default deployment never took the base64 branch. What this closes is the
+  fail-open _direction_ on a path an engine-less deployment can still reach.
+
+  **What changed.** A write of a declared-encrypted key (`encrypted: true` or the
+  manifest's `type: 'password'`, which means "encrypt this") is now refused with
+  `SettingsCryptoUnavailableError` when the `sys_secret` path is not wired _and_
+  the inline `CryptoAdapter` declares no confidentiality. The whole batch is
+  rejected — a plain sibling key in the same patch is not half-written — and one
+  operator-actionable line is reported through the deployment logger, deduped per
+  key, so a caller that swallows the error still leaves a trace. Over REST the
+  refusal answers `500` on the declared envelope, carrying the fix in the message.
+
+  **What did not change.**
+
+  - `NoopCryptoAdapter` remains exported (public API) and its `decrypt()` is
+    untouched: existing `b64:` rows stay readable, reportable and migratable. The
+    refusal is write-only — refusing the reads too would strand exactly the data
+    worth surfacing.
+  - Injected adapters (`SettingsServicePluginOptions.crypto`) are unaffected. An
+    adapter declares itself fit to hold a secret with the new optional
+    `CryptoAdapter.confidential`; **absent means yes**, so every adapter written
+    before this flag keeps working, and only the base64 default declares `false`.
+    The exported `providesConfidentiality(adapter)` is the predicate the write
+    path uses.
+  - Clearing an encrypted key (writing `null`) is still allowed: there is no
+    plaintext to protect, and an operator must always be able to REMOVE a value on
+    a deployment that cannot store one.
+  - Validation still runs first, so a caller submitting a bad value on a namespace
+    that happens to carry a secret still gets the field-level diagnostic they can
+    act on rather than a deployment fault they cannot.
+
+- 4afdd3e: fix(service-settings): 写入路径与 env 路径执行 settings 声明的 `step` 网格 (#6199)
+
+  `step` 是 `SpecifierSchema` 五个值约束里的**第五个**,也是最后一个只声明不执行的。
+  #5932(PR #6201)补齐 `min`/`max`/`minLength`/`maxLength` 之后,`step` 在
+  `packages/services/service-settings/src/` 里仍是**零读取点**:superRefine 不校验它,
+  写入路径不读它,env 路径不读它。
+
+  **为什么判定为「值约束」而不是「纯 UI 提示」。** issue 提了两种读法,定论取自 schema
+  自己的写法:`step` 与 `min`/`max` 声明在**同一段** `/** number / slider: numeric
+bounds and step. */` 注释之下,即它是按「界」被作者写下的,而 #5932 的裁决(声明了
+  的界就必须绑定)随之传递。另一种读法(它只是 `input[type=number]` 上下箭头的步进,
+  从不表达「其他值非法」)经核查不成立:落地时 `step` 在本仓库与 `objectui` 中**没有
+  任何消费者**——没有渲染器读它。按那种读法,这个键就是在为一个并不存在的渲染器表达
+  「呈现」,那正是 ADR-0049 的洞,而不是 UI affordance。
+
+  **修法与 #5932 同形,是同一族的第五个成员:**
+
+  - `step` 挂进 `DeclaredBounds` 与 `firstRangeViolation`,因此它按构造同时到达两扇门
+    ——写入路径(`validatePatch`)与 env 路径(`effectiveEnvOverride` 这**一个**判定点)
+    ——不可能成为「只在一侧执行」的下一个键。
+  - 越界发码表里现有的 `invalid_value`(ADR-0114:「rejected for a reason no other
+    member names」)。码表里没有任何成员命名「网格」,而码表是刻意封闭的;
+    `rest-server.ts` 早已把 Zod 的 `not_multiple_of` 映射到同一个成员,即同一条件从另一
+    个方向到达时的同一裁决。⛔ `packages/spec` 未改动。
+  - 沿用 #5131 / #5932 的 **TOUCH 闸门**:只校验本次 patch 触及的键。网格在产品生命
+    周期里会被**放粗**(0.05 的滑杆改声明成 0.1),持有旧值的工作区必须仍能编辑无关设置。
+
+  **锚点(anchor)约定:** 值须落在 `min + k * step` 上;未声明 `min` 时锚点取 `0`。
+  这是 HTML step-base 约定,也是声明读起来的唯一自洽含义 —— `min: 1, step: 2` 指的是
+  **奇数**,而不是偶数;一律锚 0 会把这个 specifier 整个反转。`constraint` 同时带
+  `step` 与(声明了的话)`min`,客户端据此自行重建网格。
+
+  **容差规则:** 网格判定为 `|value - nearest| <= max(|value|, |anchor|, |step|) * 1e-9`,
+  其中 `nearest = anchor + round((value - anchor) / step) * step`。精确取模是错的 ——
+  二进制浮点下 `0.7 / 0.1` 是 `6.999999999999999`、`1.2 / 0.1` 是 `11.999999999999998`,
+  而这两个都是控制台滑杆自己会发出的值。容差取**相对**而非绝对:绝对量随操作数变化,
+  `1e-9` 在 `step: 1e-6` 上会宽到三分之一步长,在 `max: 1048576` 上又比一个 ULP 还紧。
+  `1e-9` 落在两类误差之间:double 的相对精度约 `2.2e-16`,几步算术累积约 `1e-15`,比这
+  个界低六个数量级;而真正的越格差一小截步长(`0.15` 在 `0.1` 网格上差 `0.05`,相对
+  `3e-1`),比它高八个数量级。比较在**值域**而非倍数域进行,以免容差的含义随网格粗细改变。
+  剩余存疑的方向也是刻意的:本闸门是对「昨天什么都收」的收紧,所以在算术确实分辨不出时
+  (量级大到网格比 double 自身间距还细)判**收**。
+
+  **非正的 `step` 声明不构成网格。** `step: 0`(`anchor + k * 0` 是一个点)、负值、
+  非有限值一律**不记录网格**,与「option-bearing specifier 没有 options 表」同一处置:
+  无可执行者,行为不变,永不拒写。这与 #5204 的注册期姿态一致 —— 注册**报告**、从不
+  拒绝 —— 而这里没有可报告的:声明了不可能网格的 manifest 既不拒写也不误配部署,它只是
+  没有约束住,和其余没声明 `step` 的 specifier 处境完全相同。
+
+  **已知后果,裁决时已接受:** 全仓库唯一的 `step` 声明是 `ai.manifest.ts` 的
+  `temperature`(`min: 0, max: 2, step: 0.1`)。执行之后 `0.15` 被拒。这是该声明按其
+  字面绑定,而不是本闸门的缺陷;这份声明本身是否该改(若 `0.15` 应当合法,则该 manifest
+  应声明更细的 `step` 或不声明),属于 manifest 属主的问题。
+
+- 9566c38: fix(service-settings): 写入路径与 env 路径执行 settings 声明的 min / max / minLength / maxLength (#5932)
+
+  `SpecifierSchema` 从存在起就声明了五类值约束 —— `pattern` / `min` / `max` /
+  `minLength` / `maxLength` —— 而 `SettingsService.validatePatch` 只读其中一类。
+  另外四个在整个写入路径上**没有任何读取点**:已发布的 manifest 里 42 个
+  specifier 声明了取值窗口,每一个都只是装饰。
+
+  落点最重的是 `auth.password_min_length`。它声明 `min: 6`,控制台的数字框也按这个
+  下限渲染,而 `PUT /api/settings/auth` 会接受 `1`(以及负数)并存下来,better-auth
+  的口令策略随后照这个值执行。也就是说,声明是唯一一个宣称「存在下限」的东西,却没有
+  任何一层在守它 —— 正是 Prime Directive #10 的正面形状。`ai.manifest.ts` 的六项
+  (temperature / max_tokens / timeout 等)同理。
+
+  **修法与 #5131(options 表)同形,是同一族的第三个成员:**
+
+  - `validatePatch` 补一个取值窗口分支,发既有码表里的 `FieldError`(ADR-0114 D2):
+    `min_value` / `max_value` / `min_length` / `max_length` —— 与
+    `record-validator.ts` 对同一类越界发出的码一致。`constraint` 带**完整窗口**
+    (`{ min, max }`,长度类再带 `actual`),客户端据此自行组织文案,不必解析我方
+    英文句子。⛔ `packages/spec` 未改动:约束早已声明,码表现有即够用。
+  - 沿用 #5131 的 **TOUCH 闸门**:只校验本次 patch 触及的键。取值窗口在产品生命周期里
+    会被**收紧**(口令下限从 6 提到 8),窗口下方的老工作区必须仍能编辑它无关的设置,
+    只在重写该键时才被告知。
+  - env 侧走 `effectiveEnvOverride` 这**一个**判定点,与 options 表同处,复用同一组
+    比较函数 —— #5204 的成因就是同一比较有两份实现并各自漂移。因此
+    `OS_AUTH_PASSWORD_MIN_LENGTH=1` 与写入路径得到同一个裁决:该 override 不生效、
+    不贡献 cascade 条目、不锁定该键,并在注册时打出一条(且仅一条)`error` 日志。
+
+  **刻意不做的判断:** 取值窗口只裁决**可比较的值** —— `min`/`max` 只看数字(含经
+  JSON / 表单往返变成字符串的数字),`minLength`/`maxLength` 只看字符串。布尔、数组、
+  对象不做强制转换(`Number(true)` 是 1、`Number([])` 是 0):值的**形状**是
+  `invalid_type`,属于另一个约束、另一个负责人,在这里发明裁决会拒掉本检查从未被要求
+  过问的写入。空值仍归 `required` 管。
+
+  约束的读取以**声明**为准,而不是以 specifier 的 `type` 为准 —— 与旁边按类型收口的
+  options 检查不同,这个差异是 spec 定的:`SpecifierSchema` 的 superRefine 把 options
+  表**绑定**到 `select`/`radio`/`multiselect` 三型,却没有把四个窗口键绑定到任何类型。
+  在这里自拟一份类型清单,正是 options 注释警告的「第三份会漂移的清单」,并且会把本
+  issue 原样复制到下一层:窗口键声明在清单外的类型上,照样解析、照样渲染、照样不执行。
+
+- 23bc6e1: fix(service-settings): redact encrypted setting values at the REST read boundary (#7522)
+
+  `GET /api/settings/:namespace` returned the **plaintext** of every encrypted
+  setting in the namespace — in `values.<key>.value` and repeated once more in each
+  `cascadeChain` entry. Both specifier flavours were affected: `type: 'password'`
+  and an explicit `encrypted: true`. Storage was never the problem
+  (`sys_setting.value` is null, `value_enc` holds a `sec_` handle, and `sys_secret`
+  holds aes-256-gcm ciphertext); the leak was entirely on the way out.
+
+  The endpoint requires `setup.access`, so this is defense-in-depth rather than
+  privilege escalation — but every operator, integration, proxy, browser cache and
+  HAR capture on that response path received the cleartext of every secret in the
+  namespace, which is precisely what the `value_enc` + `sys_secret` split exists to
+  prevent.
+
+  **What changed.** The REST handlers now redact before the payload leaves the
+  process, reusing the mask convention ADR-0100 already pins for encrypted
+  _fields_ on the generic CRUD path rather than inventing a sentinel:
+
+  - **Read** — a set secret is served as `SETTINGS_SECRET_MASK` (`••••••••`, the
+    same eight bullets as objectql's `SECRET_MASK`); an unset one stays `null`. The
+    redaction is presence-preserving, so "configured vs not configured" is still
+    readable, and it covers `cascadeChain` entry by entry as well as the effective
+    value. `source`, `locked`, `lockedReason` and the `409 SETTINGS_LOCKED`
+    env-lock behaviour are untouched.
+  - **Write** — a submitted value equal to the mask means "unchanged" and the key
+    is dropped from the patch, so a form round-trip that echoes what it read does
+    not overwrite the stored secret with the mask's literal text. The drop is
+    scoped to secret keys: a plain setting whose value genuinely is eight bullets
+    still writes verbatim. `PUT`'s own response is redacted the same way — it
+    carries resolved values too, including cascade entries the caller never
+    submitted.
+
+  **What deliberately did not change.** `SettingsService` still decrypts.
+  `materialiseRow()`, `get()`, `getNamespace()`, `snapshotOf()` and `createClient()`
+  keep returning real plaintext, because the mail / sms / storage / auth plugins
+  read their credentials through exactly that path. Redaction belongs to the REST
+  boundary and nowhere else; a test pins the in-process round-trip so this cannot
+  be "fixed" one layer down.
+
+  New public API on `@objectstack/service-settings`: `SETTINGS_SECRET_MASK`,
+  `redactSecretValues`, `dropEchoedSecretMasks`, and
+  `SettingsService.secretKeysOf(namespace)` — published so a client can recognise a
+  masked read instead of comparing against a hard-coded string.
+
+- 8d01f0e: fix(service-settings): rotating an encrypted setting now actually rotates it — the secret handle is repointed, and the retired ciphertext is destroyed (#8030)
+
+  A **second** `PUT` of a new value for an encrypted setting key answered **200**
+  with a correctly redacted body, advanced `updated_at`, wrote an audit row and
+  inserted a genuinely new `sys_secret` row holding the new plaintext — and left
+  `sys_setting.value_enc` pointing at the **first** handle. The effective secret
+  never changed.
+
+  Nothing an administrator can see said so. Rotating a leaked SMTP password or
+  provider API key looked exactly like a rotation that worked, while the leaked
+  credential stayed the one in force. The **first** write of any secret was
+  correct, so the defect was invisible until the second.
+
+  **Cause.** `sys_setting.value_enc` (and `updated_by`) are declared
+  `readonly: true`, and the engine strips author-declared read-only columns from a
+  **non-system** caller's UPDATE payload. `SettingsService` persisted its rows
+  through a plain, un-elevated `engine.update`, so the handle could never be
+  repointed. The INSERT path is deliberately exempt from that strip — which is
+  precisely why the first write landed and every later one did not.
+
+  **Fix.** `SettingsService` performs its own row update as a **system** write.
+  It is a privileged writer — the manifest capability gate, the env/upper-scope
+  lock pre-flight and value validation have all already run by then, and these are
+  columns it owns rather than ones a caller forged. The `IDataEngine` adapter
+  forwards that execution context on both of its branches.
+
+  ⚠️ `value_enc` **stays `readonly: true`**. The elevation is scoped to this one
+  write, so an external caller reaching `sys_setting` through the data layer still
+  cannot repoint a secret handle — that flag is a security control, and removing
+  it would have been the wrong direction on this defect. There is a test that
+  fails if someone removes it.
+
+  **Orphans are reaped, not accepted.** A rotation used to leave the previous
+  `sys_secret` row behind — one more decryptable copy of the credential the admin
+  just retired, accumulating per rotation (7 → 8 → 9 across three writes). The
+  row a rotated-away handle named is now deleted once the repoint has committed.
+  The delete is best-effort and reported if it fails: the new secret is already in
+  force at that point, and a failed cleanup must not turn a successful rotation
+  into an error.
+
+  Unaffected: the first-write path is byte-for-byte the same; the `••••••••`
+  mask-echo no-op still leaves the stored ciphertext untouched; env-locked secrets
+  still refuse writes with `409 SETTINGS_LOCKED`; and a secret store without the
+  new optional `delete` keeps working, simply accepting the orphans.
+
+- 82a06af: fix(service-settings): a settings `select` now rejects values outside its declared `options` (#5131)
+
+  `SettingsService.validatePatch` enforced two of the constraints a settings
+  manifest declares — `required` and `pattern` — and skipped the third. A
+  specifier's `options` table never took part in save-time validation, so any
+  string at all could be written into a dropdown field:
+
+  ```ts
+  await svc.setMany("mail", { provider: "sendgrid", from_email: "a@b.com" }); // stored
+  ```
+
+  Going through the console this was unreachable: the dropdown only ever emits a
+  value from the table. But `PUT /api/settings/:ns` is an authorizable public
+  surface, and scripts, migration tools and AI-authored bootstrap code write it
+  directly — where the bad value was accepted, persisted and read back **in
+  silence**, leaving every consumer to improvise its own answer for an
+  enumeration member that does not exist. It was not `mail`-specific:
+  `storage.adapter`, `sms.provider`, `ai.provider`, `localization.date_format` and
+  every other `select` behaved the same way.
+
+  This is the API-side gate that #5094 was missing. That change retired
+  `sendgrid` / `ses` from the `mail` provider table because this server cannot
+  deliver through them — with no write-side enforcement, the values it had just
+  retired could be written straight back in the same afternoon.
+
+  **Now:** a `select` / `radio` / `multiselect` value that is not a member of the
+  declared table is rejected with a `FieldError` whose `code` is `invalid_option`
+  and whose `constraint` carries the allowed set (`{ allowed: 'smtp, resend,
+postmark, log' }`), so a client composes its own message instead of parsing
+  ours. The enforced set is the spec's own: `SpecifierSchema` already _requires_ a
+  non-empty `options` on exactly those three types, so declared and enforced name
+  one list rather than two that can drift.
+
+  Two deliberate limits keep this from breaking workspaces that already carry
+  drift:
+
+  - **The check is gated on TOUCH**, like `required` and `pattern` before it. A
+    value that pre-dates the current option table only fails the patch that
+    writes that key — editing `from_name` is not rejected because a stale
+    `provider` sits in the store. The opposite rule would lock every workspace
+    with historical drift out of its own settings page entirely, which is worse
+    than the gap being closed. Resets (all-null patches) are never blocked.
+  - **A specifier that declares no option table is left alone.** It cannot say
+    what is legal, so it stays lenient rather than rejecting every write.
+
+  Values are compared in string form, so an option declared `value: 30` still
+  matches after a round trip through JSON or a form post. There is no opt-out: a
+  manifest that needs to accept custom values would declare that explicitly in
+  the spec, not rely on a tolerant consumer.
+
+- d538647: fix(service-settings): refuse a save whose `visible` predicate cannot be evaluated, instead of silently skipping the field's `required` gate (#7169)
+
+  **Before:** a settings specifier whose `visible` predicate the save-time
+  evaluator could not parse was skipped entirely — `validatePatch` answered the
+  parse failure with `catch { continue }`. Because `visible` is the gate every
+  other check hangs off, that `continue` switched off `required`, `options`,
+  `pattern`, `valueDomain` **and** the value window on that key at once, silently
+  and permanently, with no diagnostic anywhere. A half-filled provider form saved
+  clean.
+
+  **After:** the write is refused. `setMany` throws `SettingsValidationError`
+  (`SETTINGS_VALIDATION`, HTTP 400) carrying one `FieldError` per offending
+  specifier — `code: 'invalid_value'`, the parse reason in `message`, and the
+  predicate itself under `constraint.visible`, so a client can name which
+  expression refused without parsing prose. Refusal is **unconditional**, not
+  gated on the patch touching the key: the console posts only its dirty keys, so a
+  touch gate would never fire on the incident this fixes. All-null patches
+  (namespace reset) still return before the check, so a namespace whose manifest
+  is broken can always be cleared.
+
+  This is the interim stop-the-bleed half of the maintainer's 2026-08-10 ruling on
+  #7169. The declaration/implementation gap it stems from is still open:
+  `packages/spec` types both settings `visible` slots as `ExpressionInputSchema`,
+  which labels their contents **CEL**, while this service evaluates a hand-rolled
+  JS-ish subset. Measured over the 94 `visible` predicates in the bundled
+  manifests, wiring CEL into evaluation would break 93 of them and narrowing the
+  declared type would break 1 — see the PR for the numbers. Narrowing is
+  recommended and lands separately in `packages/spec`.
+
+  **Also fixed, and load-bearing for the above:** the evaluator now supports the
+  relational operators `>`, `>=`, `<`, `<=`, with the same JS semantics the
+  console's client-side evaluator applies to the same strings. The auth manifest
+  already shipped `visible: '${data.lockout_threshold > 0}'`, which this grammar
+  refused — so on the old fail-open path `auth.lockout_duration_minutes` accepted
+  `-5` and `99999` against its declared `min: 1, max: 1440`. That window is
+  enforced again.
+
+- d5749d7: refactor(types,rest,services,plugin-sharing): one shared writer for the response envelope, and `error.code` is enforced at compile time (#3973)
+
+  `BaseResponseSchema` declares one envelope for every REST body the platform
+  emits. It declared it once; the code that _wrote_ it was copied per route
+  module. After #3843 and #3983 converted the last drifting one, seven modules
+  each carried their own two-line `sendOk` / `sendError` pair — so the envelope's
+  shape lived in fourteen places rather than one.
+
+  `pnpm check:route-envelope` proved those seven copies agreed, which is why this
+  is a cleanup rather than a bug fix. But a guard proves agreement; it does not
+  create it. An eighth module starts by copying the pair again — not
+  hypothetically: `share-link-routes.ts` was found already drifting by the
+  repo-wide scan, and its drift had broken `client.shareLinks.create()` and
+  `.list()` through `unwrapResponse` (#3983).
+
+  ## What moved
+
+  `sendOk` / `sendError` now live once, in `@objectstack/types`
+  (`response-envelope.ts`), and all seven modules import them:
+
+  | Module                                |
+  | ------------------------------------- |
+  | `service-storage/storage-routes.ts`   |
+  | `service-settings/settings-routes.ts` |
+  | `service-datasource/admin-routes.ts`  |
+  | `rest/external-datasource-routes.ts`  |
+  | `rest/package-routes.ts`              |
+  | `service-i18n/i18n-service-plugin.ts` |
+  | `plugin-sharing/share-link-routes.ts` |
+
+  Placement was the open question in #3973, not design. `packages/spec` is
+  schemas-only (Prime Directive #2), and the callers span `rest`, four
+  `services/*` and one `plugins/*`, which rules out anything depending on them.
+  `@objectstack/types` depends on nothing but `@objectstack/spec`, so every caller
+  can reach it, and it is already where the repo puts a helper the HTTP boundaries
+  share — `looksLikeInternalErrorLeak` (#3867) sits one file over and made the
+  same argument first.
+
+  The builders take a structural `{ status(n), json(body) }`, so the package
+  imports no HTTP contract at all: `IHttpResponse` satisfies it, and so does the
+  `any`-typed `res` the older modules carry.
+
+  ## `error.code` is now checked by the compiler
+
+  All seven copies typed the parameter `code: string`. ADR-0112 (#3841) closed the
+  vocabulary — `ErrorCode` is `StandardErrorCode ∪ ERROR_CODE_LEDGER` — but an
+  invented code was still caught only at runtime, by a conformance suite parsing a
+  driven body, i.e. only on routes some test happened to drive.
+
+  The shared `sendError` types `code` as `ErrorCode`, so an unregistered code now
+  fails to compile, at every call site at once:
+
+  ```ts
+  sendError(res, 400, "NOT_A_REGISTERED_CODE", "invented");
+  // Argument of type '"NOT_A_REGISTERED_CODE"' is not assignable to parameter of type 'ErrorCode'.
+  ```
+
+  This cost no call-site churn: every code the seven modules emit was already
+  registered.
+
+  ## `extra` is closed at the same place
+
+  `sendError`'s last parameter is `Pick<ApiError, 'category' | 'httpStatus' |
+'details' | 'requestId'>` — exactly what `ApiErrorSchema` declares beside `code`
+  and `message`.
+
+  It was `Record<string, unknown>` while `settings-routes` still hung `namespace` /
+  `key` / `reason` / `fields` beside `code`. Those bodies passed every gate anyway:
+  `ApiErrorSchema` is a plain `z.object`, so unknown keys were STRIPPED rather than
+  rejected, and `envelopeViolations` inspects only the body's top level —
+  conformant _by stripping_ rather than by declaration. #4224 moved that module
+  onto `details`, which is what lets the parameter close here. Closing it at the
+  shared builder is the part that lasts: an undeclared sibling is now a compile
+  error in every module at once, rather than a key that quietly evaporates in
+  whichever module reintroduces it.
+
+  ## Nothing changes on the wire
+
+  The seven pairs were identical modulo the optional `status` and `extra`
+  parameters this one unions, and each module's driven conformance suite still
+  parses its real bodies against the real spec schemas. One internal call site was
+  rewritten: `package-routes` passed `details` positionally and now passes
+  `{ details }`, producing the same `error.details` it always did.
+
+  ## The guard got stronger
+
+  `scripts/check-route-envelope.mjs` counts response write sites per module. A
+  module that routes everything through the shared pair builds **none** itself, so
+  the seven now declare `0 / 0 / 0` where they used to declare `2 / 1 / 1`, and the
+  shared pair is pinned separately at `2 / 1 / 1` so the invariant stays total for
+  the surface rather than per-module. What the count asserts is no longer "your two
+  builders are the enveloped ones" but "you have no builders" — and a new route
+  that hand-rolls a body still moves it off zero and fails.
+
+- 41c3b48: feat(plugin-email): real SMTP delivery — `SmtpTransport`, settings hot-swap, and a `mail/test` that actually sends (#5087)
+
+  The **Mail Delivery** settings page has always defaulted to SMTP and offered a
+  full host / port / TLS / username / password form. Nothing behind it delivered:
+  `applyMailSettings` treated `provider: 'smtp'` as a no-op ("transport
+  unchanged"), `mail/test` answered `ok: true, "Configuration looks valid … Wire
+@objectstack/plugin-mail for actual delivery"` — a success toast for a message
+  nobody sent, naming a package that has never existed — and the code pointed
+  operators at `@objectstack/plugin-mail-smtp`, which is not in this repo or on
+  npm. A workspace that selected SMTP got a green form, a green test button, and
+  mail that only ever reached the log and the `sys_email` table. For deployments
+  in China this left **no** working channel at all: Resend and Postmark are
+  overseas HTTPS SaaS with unreliable reach and deliverability to QQ / 163 /
+  enterprise mailboxes, where SMTP is the normal path (Aliyun DirectMail, Tencent
+  SES, corporate mail servers).
+
+  **`SmtpTransport` now ships in `@objectstack/plugin-email`** (ADR-0012: SMTP in
+  core, implemented with `nodemailer`). `nodemailer` is a real dependency but is
+  imported **lazily on the first send**, so deployments that never select SMTP —
+  and non-Node runtimes — never load `node:net` / `node:tls`.
+
+  Three doors reach it, all sharing one options reader so they cannot drift:
+
+  - **Settings → Mail** (`smtp_host` / `smtp_port` / `smtp_secure` / `smtp_user` /
+    `smtp_password`) hot-swaps the live transport on save, no restart.
+  - **`os serve`** via `OS_EMAIL_PROVIDER=smtp` plus the new `OS_EMAIL_SMTP_HOST` /
+    `_PORT` / `_SECURE` / `_USER` / `_PASSWORD` (or `config.email.options`).
+  - **Constructor**: `new EmailServicePlugin({ provider: 'smtp', providerOptions:
+{ host, port, secure, user, password } })`.
+
+  TLS is one toggle with the wire behaviour derived from the port, as providers
+  document it: on `465` implicit TLS (SMTPS); on any other port a **required**
+  STARTTLS upgrade, so a server that refuses to upgrade fails the send instead of
+  leaking credentials over a cleartext socket; `secure: false` connects in the
+  clear and upgrades only when STARTTLS is offered.
+
+  **Failure is loud everywhere, because a silent fallback is the bug this fixes.**
+  On the construction path (CLI / plugin options) a `smtp` provider with no host
+  **throws** and the boot fails — it no longer degrades into a LogTransport that
+  reports every send as successful. On the settings hot-swap path a save can never
+  kill a running server, so the previous transport is kept — but the failure is
+  logged at `error` naming the consequence and the fix, and **`mail/test` now
+  performs a real delivery** through the settings on screen and reports the SMTP
+  server's own words (`535 … authentication failed`) instead of a green toast. The
+  built-in fallback `mail/test` handler (used only when no email plugin is
+  mounted) answers `ok: false` and says plainly that nothing was sent.
+
+  Nothing to migrate: `log`, `resend` and `postmark` behave exactly as before, and
+  a deployment that never selects `smtp` is unaffected.
+
+- 64f8cbe: feat(platform-objects,service-settings,verify): `sys_secret` is platform infrastructure — registered by `PlatformObjectsPlugin`, not by the settings service (#4270)
+
+  The environment's encrypted-secret store (`sys_secret`, ADR-0066 D2/④) was
+  registered by `@objectstack/service-settings`, but it has three producer
+  classes and only one of them is settings: the settings service's encrypted
+  specifiers, the ObjectQL engine's own `secret`-field encryption
+  (`encryptSecretFields`/`resolveSecret` — the generic write path of ANY
+  business object carrying a `Field.secret()`), and the datasource credential
+  binder. Unlike the `sys_migration` precedent (#4243), the failure posture is
+  fail-CLOSED: on a kernel composed without settings, every insert/update of an
+  object with a secret field threw — with an error message that told the
+  operator to "Ensure the platform-objects (sys_secret) are registered", naming
+  a package that did not register it.
+
+  The registration now lives in `PlatformObjectsPlugin`
+  (`@objectstack/platform-objects/plugin`) — the plugin `os serve` already
+  auto-injects into every served kernel — so the store exists with the
+  platform, independent of which optional services are composed, and the
+  engine's fail-closed error message is true. Definition ownership is unchanged
+  (`sys_secret` stays in `@objectstack/platform-objects` and in
+  `PLATFORM_OBJECTS_BY_PACKAGE`); the settings service remains a producer and
+  consumer through its `sys_secret`-backed secret store.
+
+  Consequences:
+
+  - `@objectstack/service-settings` no longer contributes `sys_secret` to the
+    manifest (`settingsObjects` is now `[SysSetting, SysSettingAudit]`). An
+    embedder composing `SettingsServicePlugin` on a hand-built kernel that
+    relied on it for the `sys_secret` table must compose
+    `PlatformObjectsPlugin` (the plugin every supported assembly path already
+    includes). The move REPLACES the registration — nothing registers the
+    object twice.
+  - `@objectstack/verify`'s boot harness now composes `PlatformObjectsPlugin`,
+    mirroring `os serve`'s auto-inject — which also means harness kernels now
+    carry the `sys_migration` ledger + fresh-datastore attestation (#4243) the
+    served assembly always had.
+
+- a629074: fix(auth): the second factor now obeys the operator's lockout policy instead of better-auth's defaults (#3690)
+
+  `auth-manager.ts` constructed `twoFactor()` with a schema and nothing else, so
+  better-auth's built-in `accountLockout` defaults — on, 10 attempts, 15 minutes —
+  governed two-factor verification no matter what the admin configured. An operator
+  who tightened **Setup → Authentication → Account lockout threshold** to 3 got a
+  password stage that locked at 3 and a second factor that still locked at 10: the
+  stricter door was the looser one, with nothing in the UI saying so.
+
+  `lockout_threshold` / `lockout_duration_minutes` are now projected onto
+  better-auth's own `accountLockout` shape (`enabled` / `maxFailedAttempts` /
+  `durationSeconds`, minutes converted to seconds) rather than growing a parallel
+  `two_factor_lockout_*` pair — one policy, one mental model, and a future upstream
+  field arrives as a new option instead of a conflict. The projection goes through
+  `applyConfigPatch`, which resets the cached better-auth instance, so a settings
+  change takes effect without a restart.
+
+  Threshold `0` is deliberately **not** forwarded as `enabled: false`. It is the
+  password stage's "off", and a deployment may leave that stage unlocked because
+  rate limiting or an IdP covers it; the second factor is the last check before a
+  session is issued, so it keeps better-auth's default rather than being switched
+  off by a setting that never mentioned it.
+
+  The threshold field is also no longer hidden behind `email_password_enabled` —
+  two-factor verification exists in passwordless deployments, where the setting was
+  previously unreachable.
+
+  The admin **Unlock Account** action now clears both stages. It only ever reset
+  `sys_user`, so a user locked at the second factor had no admin escape hatch and
+  had to wait the duration out — survivable while that lock needed 10 failures,
+  routine once an operator can set the threshold to 3. The second-factor clear is
+  best-effort and runs after the primary write, so an account with no enrolment
+  still unlocks normally.
+
+  Note the plugin caps attempts at 5 per challenge (`beginAttempt(5)`), which no
+  option reaches; a threshold above 5 forces a fresh challenge rather than raising
+  that cap.
+
+- Updated dependencies [50616d9]
+- Updated dependencies [430dcc2]
+- Updated dependencies [690ccf2]
+- Updated dependencies [6a67d7a]
+- Updated dependencies [098f4bb]
+- Updated dependencies [333a374]
+- Updated dependencies [9fe9c1d]
+- Updated dependencies [3d5c090]
+- Updated dependencies [e5bd768]
+- Updated dependencies [08b5a3d]
+- Updated dependencies [e027b3e]
+- Updated dependencies [e6ac4bd]
+- Updated dependencies [c2429b0]
+- Updated dependencies [445a0c2]
+- Updated dependencies [d99aeb3]
+- Updated dependencies [f6609e6]
+- Updated dependencies [4727eb8]
+- Updated dependencies [a70358a]
+- Updated dependencies [0ecc656]
+- Updated dependencies [06772eb]
+- Updated dependencies [d4e0809]
+- Updated dependencies [80334c7]
+- Updated dependencies [f63cd09]
+- Updated dependencies [97e7e3c]
+- Updated dependencies [ce5242c]
+- Updated dependencies [a7163ea]
+- Updated dependencies [e6e9379]
+- Updated dependencies [5823d59]
+- Updated dependencies [3140f9c]
+- Updated dependencies [9500ba4]
+- Updated dependencies [fa3d0cf]
+- Updated dependencies [af5a224]
+- Updated dependencies [71f76e1]
+- Updated dependencies [37b1346]
+- Updated dependencies [99736a0]
+- Updated dependencies [fe67e34]
+- Updated dependencies [fdb4f50]
+- Updated dependencies [270650f]
+- Updated dependencies [3aef718]
+- Updated dependencies [1bd5652]
+- Updated dependencies [14252d3]
+- Updated dependencies [7fb436c]
+- Updated dependencies [879ea13]
+- Updated dependencies [8828b9e]
+- Updated dependencies [1ea6bce]
+- Updated dependencies [c1dcacd]
+- Updated dependencies [ad303ed]
+- Updated dependencies [32ccb23]
+- Updated dependencies [f5a4ef0]
+- Updated dependencies [2d3e255]
+- Updated dependencies [a8940e4]
+- Updated dependencies [7d7521f]
+- Updated dependencies [5dc4d02]
+- Updated dependencies [f724f69]
+- Updated dependencies [98877c9]
+- Updated dependencies [98877c9]
+- Updated dependencies [53068c1]
+- Updated dependencies [ee58392]
+- Updated dependencies [f16e54e]
+- Updated dependencies [c44dd5e]
+- Updated dependencies [06be54e]
+- Updated dependencies [28ad90e]
+- Updated dependencies [76d74ec]
+- Updated dependencies [201b31f]
+- Updated dependencies [e6b1b69]
+- Updated dependencies [259459d]
+- Updated dependencies [3f7f14e]
+- Updated dependencies [e2616e0]
+- Updated dependencies [6fdc5c6]
+- Updated dependencies [8b9d71e]
+- Updated dependencies [05154a1]
+- Updated dependencies [33f5e23]
+- Updated dependencies [259af21]
+- Updated dependencies [f8644c7]
+- Updated dependencies [306ca50]
+- Updated dependencies [840ee4b]
+- Updated dependencies [978fed2]
+- Updated dependencies [cfc293f]
+- Updated dependencies [587fc91]
+- Updated dependencies [de70b42]
+- Updated dependencies [9b6fe7c]
+- Updated dependencies [64cd010]
+- Updated dependencies [fb3d99b]
+- Updated dependencies [1986594]
+- Updated dependencies [6968885]
+- Updated dependencies [eaed61f]
+- Updated dependencies [52200b4]
+- Updated dependencies [cdfbee2]
+- Updated dependencies [ad4af62]
+- Updated dependencies [debe2f6]
+- Updated dependencies [d44dbfa]
+- Updated dependencies [29c6c9d]
+- Updated dependencies [d21c001]
+- Updated dependencies [ad047d2]
+- Updated dependencies [8c711fb]
+- Updated dependencies [f1cc3a3]
+- Updated dependencies [09e4547]
+- Updated dependencies [97b0798]
+- Updated dependencies [474fe39]
+- Updated dependencies [0bc685a]
+- Updated dependencies [b949059]
+- Updated dependencies [2826d1e]
+- Updated dependencies [be1c52c]
+- Updated dependencies [c5ff96d]
+- Updated dependencies [5a84d41]
+- Updated dependencies [84e7be9]
+- Updated dependencies [91f4c78]
+- Updated dependencies [ddc2527]
+- Updated dependencies [820eff9]
+- Updated dependencies [a6c3f38]
+- Updated dependencies [5fa04fb]
+- Updated dependencies [debc23a]
+- Updated dependencies [0f8ad09]
+- Updated dependencies [553a47f]
+- Updated dependencies [43a7a8d]
+- Updated dependencies [a98085f]
+- Updated dependencies [20b1a9e]
+- Updated dependencies [344a22a]
+- Updated dependencies [4827e91]
+- Updated dependencies [8d895ff]
+- Updated dependencies [86f7a20]
+- Updated dependencies [a3a884d]
+- Updated dependencies [cfed092]
+- Updated dependencies [203a449]
+- Updated dependencies [8f9689f]
+- Updated dependencies [73f69dc]
+- Updated dependencies [04c56aa]
+- Updated dependencies [f6472d7]
+- Updated dependencies [57a3bb3]
+- Updated dependencies [b3efeb7]
+- Updated dependencies [ddd075a]
+- Updated dependencies [88154be]
+- Updated dependencies [e8dc61e]
+- Updated dependencies [9c82146]
+- Updated dependencies [5f9a987]
+- Updated dependencies [744b8f5]
+- Updated dependencies [9f5cc79]
+- Updated dependencies [ac37fc6]
+- Updated dependencies [9f060e5]
+- Updated dependencies [bc17d39]
+- Updated dependencies [2f3e793]
+- Updated dependencies [4820f55]
+- Updated dependencies [462d9c4]
+- Updated dependencies [78caf51]
+- Updated dependencies [7d21581]
+- Updated dependencies [37785ed]
+- Updated dependencies [62a789b]
+- Updated dependencies [2e284b2]
+- Updated dependencies [d8e8d9c]
+- Updated dependencies [789ad63]
+- Updated dependencies [f2445c9]
+- Updated dependencies [94e749b]
+- Updated dependencies [ea1d916]
+- Updated dependencies [2af1988]
+- Updated dependencies [0af50a3]
+- Updated dependencies [1b49eaf]
+- Updated dependencies [ae31a19]
+- Updated dependencies [2e836de]
+- Updated dependencies [e0f300b]
+- Updated dependencies [0161c7f]
+- Updated dependencies [e900015]
+- Updated dependencies [db02d47]
+- Updated dependencies [b5bdf48]
+- Updated dependencies [23338c3]
+- Updated dependencies [12a19a8]
+- Updated dependencies [5b843fb]
+- Updated dependencies [62b6a2f]
+- Updated dependencies [7e5af5c]
+- Updated dependencies [5b4780b]
+- Updated dependencies [a933452]
+- Updated dependencies [9d1d9c7]
+- Updated dependencies [8140915]
+- Updated dependencies [a019e52]
+- Updated dependencies [e8f8f6c]
+- Updated dependencies [41dcda3]
+- Updated dependencies [7b48cf9]
+- Updated dependencies [b5404f4]
+- Updated dependencies [64fc6d5]
+- Updated dependencies [b746aa0]
+- Updated dependencies [b4487aa]
+- Updated dependencies [1007379]
+- Updated dependencies [65ca83a]
+- Updated dependencies [0bfdf46]
+- Updated dependencies [947d4f9]
+- Updated dependencies [f764691]
+- Updated dependencies [e120a5a]
+- Updated dependencies [e5bd2f6]
+- Updated dependencies [e650d67]
+- Updated dependencies [04476e7]
+- Updated dependencies [67bf2e2]
+- Updated dependencies [eaaf03c]
+- Updated dependencies [d17df80]
+- Updated dependencies [7d0e7b5]
+- Updated dependencies [c6d1cb4]
+- Updated dependencies [6513c17]
+- Updated dependencies [36030ff]
+- Updated dependencies [79228cd]
+- Updated dependencies [6117f7b]
+- Updated dependencies [87aca93]
+- Updated dependencies [e533b0b]
+- Updated dependencies [cdf4d9a]
+- Updated dependencies [aee1806]
+- Updated dependencies [c13350b]
+- Updated dependencies [c13350b]
+- Updated dependencies [2c1988c]
+- Updated dependencies [9ca2d85]
+- Updated dependencies [c13350b]
+- Updated dependencies [891d345]
+- Updated dependencies [c8124e5]
+- Updated dependencies [a52e2ef]
+- Updated dependencies [5293114]
+- Updated dependencies [376a061]
+- Updated dependencies [c142ced]
+- Updated dependencies [211abdb]
+- Updated dependencies [b3363e9]
+- Updated dependencies [eda599e]
+- Updated dependencies [a1a4140]
+- Updated dependencies [c20b875]
+- Updated dependencies [7c7e246]
+- Updated dependencies [2ef1807]
+- Updated dependencies [f35cdc5]
+- Updated dependencies [d03fe25]
+- Updated dependencies [2a37694]
+- Updated dependencies [217e2e6]
+- Updated dependencies [2672f85]
+- Updated dependencies [20bc357]
+- Updated dependencies [11066f6]
+- Updated dependencies [916af17]
+- Updated dependencies [84c86fb]
+- Updated dependencies [2a2a9fb]
+- Updated dependencies [86a71d1]
+- Updated dependencies [c001422]
+- Updated dependencies [77022a9]
+- Updated dependencies [d5c75e2]
+- Updated dependencies [03d26f7]
+- Updated dependencies [5966c2a]
+- Updated dependencies [2382580]
+- Updated dependencies [9ea2bc5]
+- Updated dependencies [a2e157c]
+- Updated dependencies [95c4227]
+- Updated dependencies [2a61116]
+- Updated dependencies [52760bf]
+- Updated dependencies [5543020]
+- Updated dependencies [880d343]
+- Updated dependencies [6e82972]
+- Updated dependencies [d4df105]
+- Updated dependencies [4615a18]
+- Updated dependencies [f505689]
+- Updated dependencies [d9fa683]
+- Updated dependencies [32d3800]
+- Updated dependencies [606d577]
+- Updated dependencies [4384921]
+- Updated dependencies [e2798fa]
+- Updated dependencies [3c628ce]
+- Updated dependencies [c2d9098]
+- Updated dependencies [0fd8556]
+- Updated dependencies [3c7bcc0]
+- Updated dependencies [4b6cac7]
+- Updated dependencies [7631964]
+- Updated dependencies [ac471a0]
+- Updated dependencies [60ae58e]
+- Updated dependencies [7f62706]
+- Updated dependencies [667fa44]
+- Updated dependencies [37e38d1]
+- Updated dependencies [e906126]
+- Updated dependencies [ce92674]
+- Updated dependencies [08363a0]
+- Updated dependencies [444de5b]
+- Updated dependencies [a227ed7]
+- Updated dependencies [7cb922e]
+- Updated dependencies [1d22114]
+- Updated dependencies [1eb13a0]
+- Updated dependencies [c52e608]
+- Updated dependencies [9613396]
+- Updated dependencies [3f7b4ff]
+- Updated dependencies [74155c7]
+- Updated dependencies [b5f9397]
+- Updated dependencies [ed77493]
+- Updated dependencies [6908830]
+- Updated dependencies [8b06bba]
+- Updated dependencies [58a03d2]
+- Updated dependencies [2bacd1a]
+- Updated dependencies [e47b342]
+- Updated dependencies [4c54037]
+- Updated dependencies [dc530b4]
+- Updated dependencies [9f601e8]
+- Updated dependencies [6a9dec6]
+- Updated dependencies [0f7157b]
+- Updated dependencies [4dc1c7d]
+- Updated dependencies [d9bef45]
+- Updated dependencies [f598aa8]
+- Updated dependencies [4dfd002]
+- Updated dependencies [f549a0d]
+- Updated dependencies [51c5227]
+- Updated dependencies [82da264]
+- Updated dependencies [f586f1a]
+- Updated dependencies [77be690]
+- Updated dependencies [4ed7ed4]
+- Updated dependencies [9b9b70f]
+- Updated dependencies [f5a9bc2]
+- Updated dependencies [e59786e]
+- Updated dependencies [2fa4ca1]
+- Updated dependencies [bcf1112]
+- Updated dependencies [baeb4f0]
+- Updated dependencies [29488cc]
+- Updated dependencies [881a3cc]
+- Updated dependencies [f5a2320]
+- Updated dependencies [ad6317b]
+- Updated dependencies [811c30c]
+- Updated dependencies [a4a85c8]
+- Updated dependencies [859cb83]
+- Updated dependencies [07a4e26]
+- Updated dependencies [9774b78]
+- Updated dependencies [8a88885]
+- Updated dependencies [deb538f]
+- Updated dependencies [b49ccfd]
+- Updated dependencies [5b89711]
+- Updated dependencies [85d95e7]
+- Updated dependencies [08cd163]
+- Updated dependencies [0c8a22f]
+- Updated dependencies [5f7669e]
+- Updated dependencies [becbe53]
+- Updated dependencies [b127c8b]
+- Updated dependencies [763931e]
+- Updated dependencies [ec975f1]
+- Updated dependencies [168f60f]
+- Updated dependencies [b07d829]
+- Updated dependencies [de9af8a]
+- Updated dependencies [eb4204b]
+- Updated dependencies [a80302a]
+- Updated dependencies [a648e96]
+- Updated dependencies [a47ac06]
+- Updated dependencies [e4c61a7]
+- Updated dependencies [cc60165]
+- Updated dependencies [474f131]
+- Updated dependencies [081aa6f]
+- Updated dependencies [91f4c78]
+- Updated dependencies [050cd82]
+- Updated dependencies [4d552af]
+- Updated dependencies [44d677c]
+- Updated dependencies [c32944d]
+- Updated dependencies [1dd780f]
+- Updated dependencies [e8d0c21]
+- Updated dependencies [244ca86]
+- Updated dependencies [546ab3c]
+- Updated dependencies [c4df271]
+- Updated dependencies [c8d6f6e]
+- Updated dependencies [0b51bb6]
+- Updated dependencies [08f93bc]
+- Updated dependencies [d9971d3]
+- Updated dependencies [7dc1067]
+- Updated dependencies [4f13be2]
+- Updated dependencies [a41ba5c]
+- Updated dependencies [189854c]
+- Updated dependencies [0e3a226]
+- Updated dependencies [92a67f2]
+- Updated dependencies [9136327]
+- Updated dependencies [bf0ae99]
+- Updated dependencies [eb3e650]
+- Updated dependencies [abeb375]
+- Updated dependencies [cb3b6cd]
+- Updated dependencies [73b7234]
+- Updated dependencies [d2b97c3]
+- Updated dependencies [61cc079]
+- Updated dependencies [45dc446]
+- Updated dependencies [0e96e46]
+- Updated dependencies [c1d44f7]
+- Updated dependencies [59b794f]
+- Updated dependencies [ef4efa8]
+- Updated dependencies [cbb6a5c]
+- Updated dependencies [fc3a36a]
+- Updated dependencies [ab9fb5c]
+- Updated dependencies [69787f0]
+- Updated dependencies [5d022a1]
+- Updated dependencies [042b9ee]
+- Updated dependencies [b25a116]
+- Updated dependencies [02dc076]
+- Updated dependencies [f985b3f]
+- Updated dependencies [795b6e1]
+- Updated dependencies [d52d4fe]
+- Updated dependencies [742cebb]
+- Updated dependencies [175d789]
+- Updated dependencies [f549a0d]
+- Updated dependencies [524151c]
+- Updated dependencies [427344c]
+- Updated dependencies [8af76ae]
+- Updated dependencies [1d4756e]
+- Updated dependencies [720c5ad]
+- Updated dependencies [a8d1e24]
+- Updated dependencies [b85cc54]
+- Updated dependencies [a36db28]
+- Updated dependencies [7a8476f]
+- Updated dependencies [518ca7a]
+- Updated dependencies [d1cabaa]
+- Updated dependencies [41642b0]
+- Updated dependencies [4cca74c]
+- Updated dependencies [88ef03e]
+- Updated dependencies [9a4932a]
+- Updated dependencies [3f8817a]
+- Updated dependencies [a2443e3]
+- Updated dependencies [e1554b1]
+- Updated dependencies [9e2caf3]
+- Updated dependencies [4856789]
+- Updated dependencies [81ce41a]
+- Updated dependencies [85e1e4e]
+- Updated dependencies [c3f4916]
+- Updated dependencies [55dbbba]
+- Updated dependencies [33e0385]
+- Updated dependencies [dac6a08]
+- Updated dependencies [72c3c86]
+- Updated dependencies [2d8dba3]
+- Updated dependencies [7f1a635]
+- Updated dependencies [2205363]
+- Updated dependencies [09fe58d]
+- Updated dependencies [f9fc874]
+- Updated dependencies [d62f8eb]
+- Updated dependencies [d0a5ceb]
+- Updated dependencies [a7586cd]
+- Updated dependencies [4c5e80e]
+- Updated dependencies [4b5702a]
+- Updated dependencies [011b386]
+- Updated dependencies [e18a162]
+- Updated dependencies [e98fb14]
+- Updated dependencies [394b7a1]
+- Updated dependencies [ce92674]
+- Updated dependencies [0f2fdcd]
+- Updated dependencies [d6d1a50]
+- Updated dependencies [cf2c9b7]
+- Updated dependencies [8ffa8b9]
+- Updated dependencies [d127ff0]
+- Updated dependencies [674ac99]
+- Updated dependencies [833b512]
+- Updated dependencies [9881074]
+- Updated dependencies [1b9a53b]
+- Updated dependencies [36d90fc]
+- Updated dependencies [7777e8f]
+- Updated dependencies [9b86cf6]
+- Updated dependencies [d063a96]
+- Updated dependencies [8825a06]
+- Updated dependencies [5087ac6]
+- Updated dependencies [677b591]
+- Updated dependencies [cf7c694]
+- Updated dependencies [ddd0f06]
+- Updated dependencies [d77d1b7]
+- Updated dependencies [0f9faa2]
+- Updated dependencies [2d1ddf0]
+- Updated dependencies [354b00f]
+- Updated dependencies [3de535b]
+- Updated dependencies [fe2e15a]
+- Updated dependencies [5b79a34]
+- Updated dependencies [502564d]
+- Updated dependencies [603cab8]
+- Updated dependencies [c757854]
+- Updated dependencies [471839d]
+- Updated dependencies [507b92a]
+- Updated dependencies [46365ab]
+- Updated dependencies [b508244]
+- Updated dependencies [df95346]
+- Updated dependencies [3dede58]
+- Updated dependencies [c6b6bb4]
+- Updated dependencies [594508e]
+- Updated dependencies [7cf42fe]
+- Updated dependencies [5966c2a]
+- Updated dependencies [59c544d]
+- Updated dependencies [0045682]
+- Updated dependencies [7309c81]
+- Updated dependencies [2f59da0]
+- Updated dependencies [d56012f]
+- Updated dependencies [f78dd83]
+- Updated dependencies [a2cd18a]
+- Updated dependencies [9051802]
+- Updated dependencies [20bc1ec]
+- Updated dependencies [1c625ca]
+- Updated dependencies [2f8328c]
+- Updated dependencies [2a6c279]
+- Updated dependencies [9319586]
+- Updated dependencies [8c8f0df]
+- Updated dependencies [8ad609c]
+- Updated dependencies [bbee302]
+- Updated dependencies [90c2b15]
+- Updated dependencies [4638aaa]
+- Updated dependencies [0222d3c]
+- Updated dependencies [08863dd]
+- Updated dependencies [39eb01b]
+- Updated dependencies [071d0dc]
+- Updated dependencies [f293d45]
+- Updated dependencies [56664f5]
+- Updated dependencies [71f205d]
+- Updated dependencies [f067930]
+- Updated dependencies [414395b]
+- Updated dependencies [42eeb7d]
+- Updated dependencies [31cbe90]
+- Updated dependencies [6b7129a]
+- Updated dependencies [c5adfe1]
+- Updated dependencies [97ace2a]
+- Updated dependencies [26e1029]
+- Updated dependencies [0a936ea]
+- Updated dependencies [90bbf25]
+- Updated dependencies [023c00b]
+- Updated dependencies [eb91eba]
+- Updated dependencies [42da73d]
+- Updated dependencies [01e124d]
+- Updated dependencies [ef7b5ef]
+- Updated dependencies [9514767]
+- Updated dependencies [8f20201]
+- Updated dependencies [155507e]
+- Updated dependencies [643b7c7]
+- Updated dependencies [7bba90b]
+- Updated dependencies [8813b90]
+- Updated dependencies [108ba8d]
+- Updated dependencies [2a5f04a]
+- Updated dependencies [4f740b0]
+- Updated dependencies [030125b]
+- Updated dependencies [7ce02eb]
+- Updated dependencies [b4ad984]
+- Updated dependencies [e7a7506]
+- Updated dependencies [a9f32df]
+- Updated dependencies [aeb9b27]
+- Updated dependencies [7d27da0]
+- Updated dependencies [d0d5205]
+- Updated dependencies [1a15893]
+- Updated dependencies [b70e534]
+- Updated dependencies [7e05d8e]
+- Updated dependencies [8f1851e]
+- Updated dependencies [b4b2c7d]
+- Updated dependencies [61ea810]
+- Updated dependencies [2233a85]
+- Updated dependencies [67452d1]
+- Updated dependencies [089767f]
+- Updated dependencies [a13827e]
+- Updated dependencies [66d99ec]
+- Updated dependencies [cb43296]
+- Updated dependencies [b61afc1]
+- Updated dependencies [79021fc]
+- Updated dependencies [7733604]
+- Updated dependencies [4921a95]
+- Updated dependencies [40e420f]
+- Updated dependencies [62dd69a]
+- Updated dependencies [d13004a]
+- Updated dependencies [be7360c]
+- Updated dependencies [e15e679]
+- Updated dependencies [2ab1257]
+- Updated dependencies [0fc6219]
+- Updated dependencies [061406d]
+- Updated dependencies [e4c8b6c]
+- Updated dependencies [acb10f6]
+- Updated dependencies [605e190]
+- Updated dependencies [c6c59f1]
+- Updated dependencies [b0e78a8]
+- Updated dependencies [f31cc8d]
+- Updated dependencies [f343dc4]
+- Updated dependencies [8269e32]
+- Updated dependencies [74f7339]
+- Updated dependencies [a6c35a2]
+- Updated dependencies [c2f1002]
+- Updated dependencies [4cc4fb7]
+- Updated dependencies [97b6658]
+- Updated dependencies [28d1eb7]
+- Updated dependencies [06770c0]
+- Updated dependencies [2c26040]
+- Updated dependencies [f758cec]
+- Updated dependencies [5b47ab5]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [8675db6]
+- Updated dependencies [b09d8d9]
+- Updated dependencies [27358d5]
+- Updated dependencies [1c3da1f]
+- Updated dependencies [c1f344b]
+- Updated dependencies [3eb1b2b]
+- Updated dependencies [9c93465]
+- Updated dependencies [a34fd2e]
+- Updated dependencies [ebb209c]
+- Updated dependencies [76bcb83]
+- Updated dependencies [59b85c0]
+- Updated dependencies [889ae47]
+- Updated dependencies [4f4c3fb]
+- Updated dependencies [78f0be8]
+- Updated dependencies [6e357ed]
+- Updated dependencies [d6938bf]
+- Updated dependencies [35f7fb4]
+- Updated dependencies [0410522]
+- Updated dependencies [63b33e6]
+- Updated dependencies [f163028]
+- Updated dependencies [814db6d]
+- Updated dependencies [a5302c7]
+- Updated dependencies [31e0be9]
+- Updated dependencies [4bfd455]
+- Updated dependencies [ffd2ce2]
+- Updated dependencies [2a44c1d]
+- Updated dependencies [7084313]
+- Updated dependencies [f07808c]
+- Updated dependencies [91cefb8]
+- Updated dependencies [7ffc3d3]
+- Updated dependencies [88346ba]
+- Updated dependencies [4631592]
+- Updated dependencies [62f8017]
+- Updated dependencies [32ff033]
+- Updated dependencies [a831df1]
+- Updated dependencies [f752ee3]
+- Updated dependencies [a1b61e0]
+- Updated dependencies [cd6b9f2]
+- Updated dependencies [2cb6d3c]
+- Updated dependencies [af2a095]
+- Updated dependencies [5ac93d4]
+- Updated dependencies [695cfbd]
+- Updated dependencies [0e043d8]
+- Updated dependencies [93f267f]
+- Updated dependencies [7445149]
+- Updated dependencies [ec796d5]
+- Updated dependencies [071d0dc]
+- Updated dependencies [0024abf]
+- Updated dependencies [8dd98bf]
+- Updated dependencies [e87fea1]
+- Updated dependencies [c65e529]
+- Updated dependencies [0848bea]
+- Updated dependencies [d51bed2]
+- Updated dependencies [dadd1ad]
+- Updated dependencies [acbf364]
+- Updated dependencies [3ca34c1]
+- Updated dependencies [7adc841]
+- Updated dependencies [239c3a3]
+- Updated dependencies [b8b3c64]
+- Updated dependencies [2f2e63c]
+- Updated dependencies [4845f85]
+- Updated dependencies [486d526]
+- Updated dependencies [94a0bbc]
+- Updated dependencies [d6bfb3d]
+- Updated dependencies [8a9c079]
+- Updated dependencies [7b005b4]
+- Updated dependencies [cc3555e]
+- Updated dependencies [a2266a6]
+- Updated dependencies [d25a0ec]
+- Updated dependencies [89d7b35]
+- Updated dependencies [94f7b6a]
+- Updated dependencies [5c94f83]
+- Updated dependencies [ea936f3]
+- Updated dependencies [0c0fbd9]
+- Updated dependencies [667b83e]
+- Updated dependencies [f3141d8]
+- Updated dependencies [5487c20]
+- Updated dependencies [aa8b847]
+- Updated dependencies [7687f7b]
+- Updated dependencies [5a84d41]
+- Updated dependencies [fd3013a]
+- Updated dependencies [85ec26d]
+- Updated dependencies [73e576f]
+- Updated dependencies [f6476fc]
+- Updated dependencies [69ac82c]
+- Updated dependencies [4ac12ef]
+- Updated dependencies [833ed84]
+- Updated dependencies [a18abf3]
+- Updated dependencies [c6a4eeb]
+- Updated dependencies [1659072]
+- Updated dependencies [f450ae7]
+- Updated dependencies [abceb0d]
+- Updated dependencies [627b188]
+- Updated dependencies [8d4eae7]
+- Updated dependencies [c5a5996]
+- Updated dependencies [0c302a7]
+- Updated dependencies [b88f5e8]
+- Updated dependencies [857a6cf]
+- Updated dependencies [65a3a84]
+- Updated dependencies [6633337]
+- Updated dependencies [21676eb]
+- Updated dependencies [3f296bf]
+- Updated dependencies [e474853]
+- Updated dependencies [e9cb9ab]
+- Updated dependencies [42cc219]
+- Updated dependencies [d42a92f]
+- Updated dependencies [569611f]
+- Updated dependencies [51d74ad]
+- Updated dependencies [d7e0b42]
+- Updated dependencies [3510e4a]
+- Updated dependencies [d5749d7]
+- Updated dependencies [f00d8d4]
+- Updated dependencies [5326b36]
+- Updated dependencies [aa4b90d]
+- Updated dependencies [ccd9397]
+- Updated dependencies [503be86]
+- Updated dependencies [54299ca]
+- Updated dependencies [ae490ef]
+- Updated dependencies [e124711]
+- Updated dependencies [dc61def]
+- Updated dependencies [bca935b]
+- Updated dependencies [d92c72d]
+- Updated dependencies [c54c822]
+- Updated dependencies [8dcc0f5]
+- Updated dependencies [75b9e51]
+- Updated dependencies [f61c8cf]
+- Updated dependencies [e3ef52b]
+- Updated dependencies [0a2f233]
+- Updated dependencies [8621cdd]
+- Updated dependencies [251e888]
+- Updated dependencies [07f1822]
+- Updated dependencies [e336549]
+- Updated dependencies [3bb9340]
+- Updated dependencies [1e604c4]
+- Updated dependencies [04fab5e]
+- Updated dependencies [183b4c4]
+- Updated dependencies [7f713b6]
+- Updated dependencies [d40f43a]
+- Updated dependencies [2fdb36e]
+- Updated dependencies [e787608]
+- Updated dependencies [6f23667]
+- Updated dependencies [cde1975]
+- Updated dependencies [0bc685a]
+- Updated dependencies [20526f5]
+- Updated dependencies [efedd28]
+- Updated dependencies [5d21a48]
+- Updated dependencies [5278e11]
+- Updated dependencies [c5eef1d]
+- Updated dependencies [e5e7ee0]
+- Updated dependencies [23dba62]
+- Updated dependencies [e0f300b]
+- Updated dependencies [761a0ba]
+- Updated dependencies [c960170]
+- Updated dependencies [19365b7]
+- Updated dependencies [ba98e26]
+- Updated dependencies [b7ed26d]
+- Updated dependencies [a2ebea2]
+- Updated dependencies [800bdb0]
+- Updated dependencies [9d4dfc4]
+- Updated dependencies [1059965]
+- Updated dependencies [def5919]
+- Updated dependencies [ee264b2]
+- Updated dependencies [60b672e]
+- Updated dependencies [f104bab]
+- Updated dependencies [68dea0b]
+- Updated dependencies [6b441a8]
+- Updated dependencies [64f8cbe]
+- Updated dependencies [6cb81c7]
+- Updated dependencies [61282f9]
+- Updated dependencies [ce0cfe9]
+- Updated dependencies [04f1182]
+- Updated dependencies [3a2dde7]
+- Updated dependencies [8c20f75]
+- Updated dependencies [be87153]
+- Updated dependencies [dd0f681]
+- Updated dependencies [60f0dd8]
+- Updated dependencies [a87c5cd]
+- Updated dependencies [a47f338]
+- Updated dependencies [b3a3d83]
+- Updated dependencies [7a55913]
+- Updated dependencies [35accbf]
+- Updated dependencies [6038de7]
+- Updated dependencies [fc5f536]
+- Updated dependencies [5647006]
+- Updated dependencies [e654bfd]
+- Updated dependencies [01a7337]
+- Updated dependencies [b45c71e]
+- Updated dependencies [d71ff32]
+- Updated dependencies [f8cfbb4]
+- Updated dependencies [6e6c872]
+- Updated dependencies [2598216]
+- Updated dependencies [11949fc]
+- Updated dependencies [2c7e62d]
+- Updated dependencies [eb95d97]
+- Updated dependencies [b098b0e]
+- Updated dependencies [4d00b13]
+- Updated dependencies [1363084]
+- Updated dependencies [fa5758e]
+- Updated dependencies [38f7e4f]
+- Updated dependencies [eb7613c]
+- Updated dependencies [c57f3cf]
+- Updated dependencies [ecc9110]
+- Updated dependencies [9aa5510]
+- Updated dependencies [e4c2dc8]
+- Updated dependencies [97faca3]
+- Updated dependencies [57bab76]
+- Updated dependencies [c89d18c]
+- Updated dependencies [1bd2795]
+- Updated dependencies [f7bd4e2]
+- Updated dependencies [694c350]
+- Updated dependencies [361bd5b]
+- Updated dependencies [aac90a5]
+- Updated dependencies [3da3da5]
+- Updated dependencies [1e6ab15]
+- Updated dependencies [b90086a]
+- Updated dependencies [129b378]
+- Updated dependencies [88f9d94]
+- Updated dependencies [8186a70]
+- Updated dependencies [a329cca]
+- Updated dependencies [c87ef70]
+- Updated dependencies [3cb0618]
+- Updated dependencies [32a0874]
+- Updated dependencies [6eec18c]
+- Updated dependencies [4d7bebf]
+- Updated dependencies [821ac7a]
+- Updated dependencies [8f81731]
+- Updated dependencies [7055c22]
+- Updated dependencies [785a748]
+- Updated dependencies [3af0354]
+- Updated dependencies [866ff16]
+- Updated dependencies [5a85e67]
+- Updated dependencies [8b50cb3]
+- Updated dependencies [a0fdc56]
+- Updated dependencies [b95577a]
+- Updated dependencies [0dcbc11]
+- Updated dependencies [d88f3e9]
+- Updated dependencies [ad5fe25]
+- Updated dependencies [c183a12]
+- Updated dependencies [83c161f]
+- Updated dependencies [d8c4957]
+- Updated dependencies [b9f930b]
+- Updated dependencies [f24cb83]
+- Updated dependencies [5dbbb92]
+- Updated dependencies [ea90179]
+- Updated dependencies [1818998]
+- Updated dependencies [ce92674]
+- Updated dependencies [5ef0b5b]
+- Updated dependencies [8c2db68]
+- Updated dependencies [22b5e54]
+- Updated dependencies [0166bd5]
+- Updated dependencies [8064b07]
+- Updated dependencies [09ee21c]
+- Updated dependencies [4a56dbd]
+- Updated dependencies [289d04a]
+- Updated dependencies [f549a0d]
+- Updated dependencies [48fbacb]
+- Updated dependencies [06df4fa]
+- Updated dependencies [3fc2e48]
+- Updated dependencies [c9b809f]
+- Updated dependencies [e8f435c]
+- Updated dependencies [32386f8]
+- Updated dependencies [9b702dc]
+- Updated dependencies [ab16331]
+- Updated dependencies [41610f6]
+- Updated dependencies [69f1dfd]
+- Updated dependencies [bbe05de]
+- Updated dependencies [355e951]
+- Updated dependencies [a1dd1e4]
+- Updated dependencies [dadb43f]
+- Updated dependencies [3556b67]
+  - @objectstack/spec@17.0.0
+  - @objectstack/core@17.0.0
+  - @objectstack/platform-objects@17.0.0
+  - @objectstack/types@17.0.0
+
 ## 17.0.0-rc.6
 
 ### Patch Changes
