@@ -71,22 +71,15 @@
  *       REQUESTS rather than issues, because the PR body is the surface where
  *       the fact is still fixable — see the next section.
  *   H8  a card's delivering PR is MERGED while the card still carries
- *       `pm:dispatched` — the merge happened and its paired write (drop
- *       `pm:dispatched`, re-grade the remainder) never did (#8683). The
- *       delivering relation is read from merged PR bodies with H7's own
- *       code-stripped extractors: `Part of #N` or a closing keyword bound to
- *       `#N`. The measured shape is the `Part of` one — a partial delivery
- *       merges, GitHub correctly leaves the card open, and the human half of
- *       the close-out never lands; a theme-seat pre-work audit found five
- *       cards in that state at once. The closing-keyword arm is kept because
- *       an OPEN dispatched card named by a merged PR's closing keyword is a
- *       half-state no matter which mechanism failed (auto-close raced, card
- *       reopened without re-grade, keyword edited in after merge) — the sweep
- *       does not need to know which. Live mode feeds H8 a bounded window of
- *       recently merged PRs (see `listRecentlyMergedPullRequests`), so it is
- *       a patrol accelerator, never an exhaustive audit: a delivery that has
- *       aged out of the window is invisible here, and the finding clears when
- *       the paired write lands, not when the PR ages out.
+ *       `pm:dispatched` — the merge's paired write (drop the label, re-grade
+ *       the remainder) never landed (#8683). Delivery is read from merged PR
+ *       bodies with H7's code-stripped extractors (`Part of #N`, or a closing
+ *       keyword bound to `#N` — either way an OPEN dispatched card named by a
+ *       merged PR is a half-state, whichever mechanism failed). Live mode
+ *       feeds H8 a bounded window of recently merged PRs, so it is a patrol
+ *       accelerator, never an exhaustive audit: a delivery older than the
+ *       window is invisible, and the finding clears when the paired write
+ *       lands, not when the PR ages out.
  *
  * ## The close mechanism, measured (#8293)
  *
@@ -434,28 +427,19 @@ export function h7PartOfWithClosingKeyword(pr) {
 // ---------------------------------------------------------------------------
 // H8 — delivering PR merged, card still `pm:dispatched` (#8683).
 //
-// Pure over the shapes the sweep already consumes: the REST issue (labels +
-// number) plus a list of PRs from the same `/pulls` surface H7 reads (`number`,
-// `body`, plus `merged_at`, which every `/pulls` row carries). No new API
-// layer: the delivering relation is read from the PR BODY with the SAME
-// code-stripped extractors H7 pins, so everything measured about GitHub's
-// reference parsing (#8293 readings 1–5) covers this predicate too.
+// Pure over the shapes the sweep already consumes (REST issue + `/pulls`
+// rows), reusing H7's code-stripped extractors so the measured reference-
+// parser behavior (#8293) carries over. No new API layer.
 // ---------------------------------------------------------------------------
 
 /**
  * H8 — null when clean, else the finding sentence.
  *
  * A PR "delivers" card N when its body declares `Part of #N` or binds a
- * closing keyword to `#N` (both read through `stripMarkdownCode`, so a body
- * QUOTING either spelling in backticks does not deliver — the same
- * careful-author protection H7 needs). Only a PR with `merged_at` set counts:
- * a closed-unmerged PR is an abandoned attempt, not a delivery, and flagging
- * it would demand a paired write for work that never landed.
- *
- * The issue must still carry `pm:dispatched`; the sweep only lists OPEN
- * issues, so the closed case never reaches this predicate. Bound per issue
- * number exactly like H7 — a merged PR delivering card A says nothing about
- * card B.
+ * closing keyword to `#N`, read through `stripMarkdownCode` (a body QUOTING
+ * either spelling in backticks does not deliver). Only `merged_at`-set PRs
+ * count — closed-unmerged is an abandoned attempt, not a delivery. Bound per
+ * issue number exactly like H7.
  */
 export function h8MergedPrStillDispatched(issue, mergedPrs) {
   if (!labelNames(issue).includes('pm:dispatched')) return null;
@@ -871,16 +855,12 @@ async function listOpenPullRequests() {
 }
 
 /**
- * The merged-PR window H8 reads: the most recently UPDATED closed PRs, merged
- * ones only, capped at two pages (≤200 closed rows). The cap is a quota
- * decision, and its consequence is H8's stated boundary — a delivery older
- * than the window is invisible to the sweep. At this repo's measured pace
- * (~18 merges to main per working day) two pages reach back well past the
- * longest measured unexecuted-verdict latency (9 days), and a finding stays
- * visible every round until the paired write lands, because the card's
- * `pm:dispatched` is what clears it, not the PR's age. `sort=updated` rather
- * than creation order so a long-lived PR that merges late is still in the
- * window when it matters.
+ * The merged-PR window H8 reads: most recently UPDATED closed PRs, merged
+ * ones only, capped at two pages — a quota decision whose consequence is
+ * H8's stated boundary (a delivery older than the window is invisible). At
+ * ~18 merges/day two pages reach well past the longest measured
+ * unexecuted-verdict latency; `sort=updated` so a long-lived PR that merges
+ * late is still in the window when it matters.
  */
 async function listRecentlyMergedPullRequests() {
   const out = [];
@@ -939,10 +919,8 @@ async function sweepInto(findings, seen, seenPrs, seenMerged) {
     if (contradiction) findings.push([pr, 'H7', contradiction]);
   }
 
-  // H8 — the merged-PR side. One bounded listing (see the helper's window
-  // note), matched against the still-open `pm:dispatched` cards the label
-  // pages already collected — no per-card fetch, so the quota cost is the
-  // two listing pages regardless of board size.
+  // H8 — one bounded merged-PR listing (window note at the helper), matched
+  // against the already-collected open `pm:dispatched` cards; no per-card fetch.
   for (const pr of await listRecentlyMergedPullRequests()) seenMerged.set(pr.number, pr);
   const mergedWindow = [...seenMerged.values()];
   for (const issue of seen.values()) {
@@ -1113,11 +1091,8 @@ function selfTest() {
   t('H7: a fenced-only keyword is not a finding', h7PartOfWithClosingKeyword(pr('Part of #5\n\n```\nFixes #5\n```')), null);
 
   // -- H8: delivering PR merged, card still `pm:dispatched` (#8683) ----------
-  // The measured shape: a `Part of` PR merges, GitHub correctly leaves the
-  // card open, and the paired write (drop `pm:dispatched`, re-grade the
-  // remainder) never lands — a theme-seat pre-work audit found five cards in
-  // that state at once. Fixtures reuse H7's extractor pins, so the stripping
-  // and per-number-binding measurements carry over rather than being re-proved.
+  // Fixtures reuse H7's extractor pins, so the stripping and per-number-
+  // binding measurements carry over rather than being re-proved.
   const dispatched = (n) => ({ ...issue(['pm:dispatched'], ['os-help']), number: n });
   const mergedPr = (number, body, merged_at = '2026-08-13T10:00:00Z') => ({ number, body, merged_at });
 
