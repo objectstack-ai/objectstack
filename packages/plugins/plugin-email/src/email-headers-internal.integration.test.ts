@@ -35,7 +35,6 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
-import { InMemoryDriver } from '@objectstack/driver-memory';
 import { SysEmail } from '@objectstack/platform-objects/audit';
 import { EmailService, type EmailPersistence } from './email-service.js';
 import { readInternalHeadersJson, isHeadersColumnRedacted } from './internal-header-readback.js';
@@ -45,6 +44,91 @@ import type { IEmailTransport, TransportSendResult } from '@objectstack/spec/con
 const RELAY_TOKEN = 'Bearer prod_relay_tok_8149_do_not_serve';
 
 const SYSTEM_CTX = { isSystem: true, userId: 'system' } as any;
+
+/**
+ * Minimal stub driver — the same shape `objectql/src/internal-fields.test.ts`
+ * pins the flag itself against, including the `$in` batch form
+ * `resolveInternalField` reads by. A stub rather than a real storage driver on
+ * purpose: what is under test is ENGINE behaviour (the strip, and the
+ * privileged dereference), so the driver only has to store and hand back
+ * copies. Rows leave as COPIES, as a real driver's do — handing out the live
+ * stored object would let the engine's own strip mutate storage, which reads
+ * exactly like an engine bug.
+ */
+function makeStubDriver() {
+  const stores = new Map< string, Map< string, Record< string, unknown > > >();
+  const storeFor = (obj: string) => {
+    let s = stores.get(obj);
+    if (!s) { s = new Map(); stores.set(obj, s); }
+    return s;
+  };
+  let nextId = 0;
+  const matches = (row: any, where: any): boolean => {
+    if (!where || typeof where !== 'object') return true;
+    for (const [k, v] of Object.entries(where)) {
+      if (k.startsWith('$')) continue;
+      if (v && typeof v === 'object' && '$in' in (v as any)) {
+        const members = (v as any).$in;
+        if (!Array.isArray(members) || !members.includes(row[k] ?? null)) return false;
+        continue;
+      }
+      const expected = (v && typeof v === 'object' && '$eq' in (v as any)) ? (v as any).$eq : v;
+      if ((row[k] ?? null) !== (expected ?? null)) return false;
+    }
+    return true;
+  };
+  const copy = < T, >(r: T): T => (r == null ? r : ({ ...r } as T));
+  const project = (row: any, fields?: string[]) => {
+    if (!row || !Array.isArray(fields) || fields.length === 0) return copy(row);
+    const out: Record< string, unknown > = {};
+    for (const f of fields) if (f in row) out[f] = row[f];
+    return out;
+  };
+  const driver: any = {
+    name: 'memory', version: '0.0.0', supports: {},
+    async connect() {}, async disconnect() {}, async checkHealth() { return true; },
+    async execute() { return null; },
+    async find(object: string, ast: any) {
+      return Array.from(storeFor(object).values())
+        .filter((r) => matches(r, ast?.where))
+        .map((r) => project(r, ast?.fields));
+    },
+    async findOne(object: string, ast: any) {
+      for (const r of storeFor(object).values()) if (matches(r, ast?.where)) return project(r, ast?.fields);
+      return null;
+    },
+    async create(object: string, data: Record< string, unknown >) {
+      nextId += 1;
+      const id = (data.id as string) ?? `r_${nextId}`;
+      const row = { ...data, id };
+      storeFor(object).set(id, row);
+      return copy(row);
+    },
+    async update(object: string, id: string, data: Record< string, unknown >) {
+      const s = storeFor(object);
+      const cur = s.get(id);
+      if (!cur) throw new Error(`not found: ${object}/${id}`);
+      const updated = { ...cur, ...data, id };
+      s.set(id, updated);
+      return copy(updated);
+    },
+    async upsert(object: string, data: Record< string, unknown >) {
+      const id = data.id as string | undefined;
+      if (id && storeFor(object).has(id)) return this.update(object, id, data);
+      return this.create(object, data);
+    },
+    async delete(object: string, id: string) { return storeFor(object).delete(id); },
+    async count(object: string, ast: any) { return (await this.find(object, ast)).length; },
+    async bulkCreate(object: string, rows: Record< string, unknown >[]) {
+      return Promise.all(rows.map((r) => this.create(object, r)));
+    },
+    async bulkUpdate() { return []; },
+    async bulkDelete() {},
+    async beginTransaction() { return { commit: async () => {}, rollback: async () => {} }; },
+    async commit() {}, async rollback() {},
+  };
+  return { driver, stores };
+}
 
 /** Records exactly what the transport was handed. */
 function recordingTransport(): {
@@ -63,10 +147,13 @@ function recordingTransport(): {
 
 describe('sys_email.headers_json — authored headers vs the data API (#8149)', () => {
   let engine: ObjectQL | undefined;
+  let stores: Map< string, Map< string, Record< string, unknown > > >;
 
   beforeEach(async () => {
+    const stub = makeStubDriver();
+    stores = stub.stores;
     engine = new ObjectQL();
-    engine.registerDriver(new InMemoryDriver({}) as any, true);
+    engine.registerDriver(stub.driver, true);
     await engine.init();
     engine.registry.registerObject(SysEmail as any, '@objectstack/platform-objects');
   });
@@ -187,19 +274,19 @@ describe('sys_email.headers_json — authored headers vs the data API (#8149)', 
     const eng = engine!;
     const rowId = await insertQueuedRow(eng, { Authorization: RELAY_TOKEN });
 
-    // An engine that REDACTS (the real ObjectQL find/getSchema underneath, so
-    // `headers_json` is both flagged and omitted) but exposes no
-    // `resolveInternalField`. Not a shape ObjectQL can produce — the flag and
-    // the accessor ship together — but exactly the shape a foreign or
-    // version-skewed engine would take, and the one combination in which
-    // "keep going" means sending a message that silently deviates from its
-    // authored configuration.
-    const noAccessor = {
-      getSchema: (o: string) => (eng as any).getSchema(o),
-      find: (o: string, q: unknown) => (eng as any).find(o, q),
-      insert: (o: string, d: unknown, opt: unknown) => (eng as any).insert(o, d, opt),
-      update: (o: string, d: unknown, opt: unknown) => (eng as any).update(o, d, opt),
-    };
+    // An engine that REDACTS (the REAL ObjectQL `getSchema` underneath, so
+    // `headers_json` is genuinely flagged and the rows genuinely came back
+    // without it) but exposes no `resolveInternalField`. Not a shape ObjectQL
+    // can produce — the flag and the accessor ship together — but exactly the
+    // shape a foreign or version-skewed engine would take, and the one
+    // combination in which "keep going" means sending a message that silently
+    // deviates from its authored configuration.
+    //
+    // Deliberately NOT an engine double: the seam's whole surface is
+    // `getSchema` + `resolveInternalField`, so this stub declares exactly the
+    // one member it needs. Adding CRUD verbs it never calls would make it a
+    // second fake engine to keep in contract-sync for no test value.
+    const noAccessor = { getSchema: (o: string) => (eng as any).getSchema(o) };
 
     const { transport, sent } = recordingTransport();
     const svc = new EmailService({
@@ -249,8 +336,15 @@ describe('sys_email.headers_json — authored headers vs the data API (#8149)', 
     // future card that changes the at-rest story flips this pin deliberately
     // rather than by accident.
     const eng = engine!;
-    const rowId = await insertQueuedRow(eng, { Authorization: RELAY_TOKEN });
-    const stored = await (eng as any).resolveInternalField('sys_email', [rowId], 'headers_json');
-    expect(String(stored.get(rowId))).toContain(RELAY_TOKEN);
+    await insertQueuedRow(eng, { Authorization: RELAY_TOKEN });
+
+    // Scanned straight out of STORAGE, not through the accessor — an at-rest
+    // claim read back through the privileged reader would only be restating
+    // that the reader works.
+    const rows = [...(stores.get('sys_email')?.values() ?? [])];
+    expect(rows.length).toBeGreaterThan(0); // a scan of nothing proves nothing
+    const dump = rows.map((r) => Object.values(r).map((v) => String(v ?? '')).join(' ')).join(' ');
+    expect(dump).toContain(RELAY_TOKEN);
+    expect(dump).toContain('Quarterly report'); // guard the guard
   });
 });

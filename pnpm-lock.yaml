@@ -1604,9 +1604,6 @@ importers:
         specifier: ^9.0.3
         version: 9.0.3
     devDependencies:
-      '@objectstack/driver-memory':
-        specifier: workspace:*
-        version: link:../../drivers/driver-memory
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../objectql
