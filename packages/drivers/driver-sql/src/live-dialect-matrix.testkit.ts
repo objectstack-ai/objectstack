@@ -165,6 +165,50 @@ export function declareUnprovisionedCell(cell: DialectCell, matrix: string): voi
   });
 }
 
+/**
+ * Run a cell EITHER WAY — measured when it is provisioned, declared un-run when
+ * it is not — with no third outcome available to the caller.
+ *
+ * ## The hole this closes, which is not the one `declareUnprovisionedCell` closes
+ *
+ * That guard makes an UNPROVISIONED cell visible. It says nothing about the
+ * provisioned case, and a consumer that writes only half the pair —
+ *
+ * ```ts
+ * if (!MYSQL_CELL.available) declareUnprovisionedCell(MYSQL_CELL, '…');
+ * //  ^ no else: when the URL IS set, nothing is declared and nothing is run
+ * ```
+ *
+ * — inverts the whole design. Measured on this file's own MySQL cell (#8592):
+ * under Test Core (`OS_TEST_MYSQL_URL` absent) it announced itself as un-run,
+ * and under `Temporal Conformance (live PG + MySQL)` — the one job with a live
+ * MySQL 8.0 attached — it declared nothing and measured nothing. **The
+ * declaration disappeared exactly when the capability to measure appeared**, and
+ * `OS_EXPECT_LIVE_DIALECT_MATRIX=1` could not catch it because a cell that
+ * emits no suite at all is not a skip.
+ *
+ * So the fix is a TOTAL function rather than a louder warning: `measure` is a
+ * required parameter, so the one-way form above does not typecheck. A consumer
+ * can still hand-roll `if (!cell.available) … else …` (six of them do, inside a
+ * `for … continue` loop, and those are two-way already) — what it can no longer
+ * do is ask for the un-run declaration WITHOUT saying what running would mean.
+ *
+ * @param matrix which matrix this cell belongs to — names the suite and the
+ *   failure message, exactly as in {@link declareUnprovisionedCell}.
+ * @param measure declares the suites for a cell that CAN run right now.
+ */
+export function declareDialectCell(
+  cell: DialectCell,
+  matrix: string,
+  measure: (cell: DialectCell) => void,
+): void {
+  if (!cell.available) {
+    declareUnprovisionedCell(cell, matrix);
+    return;
+  }
+  measure(cell);
+}
+
 /** What a server reports about its own timezone. */
 export interface ServerZone {
   /** The dialect's own spelling: `Asia/Shanghai`, `+08:00`, `SYSTEM`, … */
