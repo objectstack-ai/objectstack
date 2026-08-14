@@ -10,7 +10,13 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * per-namespace tables (e.g. `sys_mail_config`); they declare a manifest
  * and the value persists here.
  *
- * Row identity: (namespace, key, scope, user_id?).
+ * Row identity: (organization_id, namespace, key, scope, user_id?).
+ *
+ * ⚠️ `scope` is the CASCADE LAYER, not the tenant. It names which rung of the
+ * resolution ladder below a row sits on; WHICH organization owns the row is
+ * carried by the kernel-injected `organization_id` column, and by nothing else
+ * (#8555). `scope='tenant'` therefore means "the organization layer" — one row
+ * PER organization, not one row for the installation.
  *
  * Resolution order (handled by `SettingsService.get`):
  *   1. process.env override                    (source='env',     locked=true)
@@ -188,7 +194,42 @@ export const SysSetting = ObjectSchema.create({
     // Primary lookup path: (namespace, key, scope, user_id?) is what
     // SettingsService.get hits on every resolve. The composite UNIQUE
     // covers both the row-identity constraint and the read path.
-    { fields: ['namespace', 'key', 'scope', 'user_id'], unique: true },
+    //
+    // [#8555] Scope spelled EXPLICITLY (ADR-0120 D1). On a DECLARED index bare
+    // `unique: true` is the positional spelling of `'global'` — the listed
+    // columns verbatim — so this was an installation-wide key on a
+    // tenant-scoped object.
+    //
+    // The card left the direction open: if `scope` itself encoded tenancy, the
+    // right end state was an explicit `'global'`. It does not. `scope` is the
+    // cascade LAYER (`global | tenant | user`, a priority ladder — see
+    // `scopeRank` in `SettingsService`), and the organization is carried by
+    // `organization_id`: `loadRows` says so outright ("per-tenant isolation for
+    // `tenant`-scope rows is still enforced by the engine"), and the `lifecycle`
+    // manifest depends on it — `retention_overrides` is `scope: 'tenant'` so
+    // that "regulated tenants set years; dev sets days ... one deployment can
+    // carry both". A per-organization value is the feature, so the key is
+    // per-organization.
+    //
+    // Measured live before the fix, real driver, OS_TENANCY_POSTURE=isolated:
+    //   scope='user'   org_jia 201 / org_yi SAME 409 UNIQUE_VIOLATION
+    //                  / org_yi unused 201 / org_yi's own GET 0 rows
+    //   scope='tenant' org_jia 201 / org_yi SAME *201*
+    //   scope='global' platform 201 / platform SAME *201*
+    // The 409 is the #8323 cross-tenant existence oracle. The two 201s are a
+    // SECOND defect this respelling does NOT fix: `user_id` is NULL on every
+    // `tenant`/`global` row and SQL UNIQUE is NULL-distinct, so the declared
+    // row identity is void on those limbs — even within ONE organization.
+    // Closing it means null-safety on an author-declared column plus a
+    // duplicate pre-flight for databases that already carry duplicates; filed
+    // separately rather than smuggled in here.
+    //
+    // The organization key part is NULL-safe (`COALESCE(organization_id,
+    // '__global__')`, ADR-0120 D3), which is what preserves the `scope='global'`
+    // LAYER: platform rows carry no organization, so they share one bucket and
+    // stay unique among themselves — the installation-wide platform default the
+    // resolver reads at rung 2 survives, without the whole index being global.
+    { fields: ['namespace', 'key', 'scope', 'user_id'], unique: 'organization' },
     // Common range read: full namespace dump for SettingsService.getNamespace.
     { fields: ['namespace', 'scope'], unique: false },
     // Per-user listing on the user-prefs scope.
