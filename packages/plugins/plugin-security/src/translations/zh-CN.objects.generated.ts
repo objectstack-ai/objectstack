@@ -19,7 +19,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       name: {
         label: "API 名称",
-        help: "岗位的唯一机器名称（例如 admin、editor、viewer）"
+        help: "岗位的机器名称，在每个组织内唯一（例如 sales_manager、hr_specialist）"
       },
       description: {
         label: "描述"

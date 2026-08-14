@@ -19,7 +19,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       name: {
         label: "API 名",
-        help: "ポジションの一意の機械名（例: admin、editor、viewer）"
+        help: "ポジションのマシン名（組織ごとに一意。例: sales_manager、hr_specialist）"
       },
       description: {
         label: "説明"

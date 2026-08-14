@@ -19,7 +19,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       name: {
         label: "Nombre de API",
-        help: "Nombre técnico único del puesto (p. ej. admin, editor, viewer)."
+        help: "Nombre técnico del puesto, único por organización (p. ej. sales_manager, hr_specialist)."
       },
       description: {
         label: "Descripción"
