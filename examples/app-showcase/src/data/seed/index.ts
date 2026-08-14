@@ -383,15 +383,25 @@ const invoices = defineSeed(Invoice, {
 // Line items — `product` resolves by SKU (the Product seed's externalId), and
 // `invoice` by invoice number. A contributor reaches a line only through its
 // master invoice, so these inherit the invoice's owner scoping.
+//
+// `service_start` is the inline grid's `time` FIXTURE (objectui#3569) - the one
+// place in showcase where a `time` field is rendered by an inline-edit grid.
+// DO NOT blank these clocks in a seed tidy-up: a zeroed or missing value leaves
+// the fixture unable to show the defect it exists to catch (a `time` column
+// folded onto the `date` control renders empty and writes the clock out of the
+// record on the next save), so the seeded values are deliberately NON-ZERO and
+// recognisable. Only the T&M service lines carry one - hours billed from a
+// start clock; the goods lines are empty on purpose, which is the fixture's
+// empty-cell case.
 const invoiceLines = defineSeed(InvoiceLine, {
   mode: 'upsert',
   externalId: 'description',
   records: [
-    { description: 'INV-1001 \u00b7 Consulting hours', invoice: 'INV-1001', product: 'SERVICE-HR', position: 0, quantity: 10, unit_price: 150, amount: 1500 },
+    { description: 'INV-1001 \u00b7 Consulting hours', invoice: 'INV-1001', product: 'SERVICE-HR', position: 0, quantity: 10, unit_price: 150, amount: 1500, service_start: '09:15' },
     { description: 'INV-1001 \u00b7 Widget A units', invoice: 'INV-1001', product: 'WIDGET-A', position: 1, quantity: 4, unit_price: 29.99, amount: 119.96 },
     { description: 'INV-1002 \u00b7 Gadget X units', invoice: 'INV-1002', product: 'GADGET-X', position: 0, quantity: 2, unit_price: 99, amount: 198 },
     { description: 'INV-1003 \u00b7 Widget B units', invoice: 'INV-1003', product: 'WIDGET-B', position: 0, quantity: 6, unit_price: 49.99, amount: 299.94 },
-    { description: 'INV-1004 \u00b7 Consulting hours', invoice: 'INV-1004', product: 'SERVICE-HR', position: 0, quantity: 3, unit_price: 150, amount: 450 },
+    { description: 'INV-1004 \u00b7 Consulting hours', invoice: 'INV-1004', product: 'SERVICE-HR', position: 0, quantity: 3, unit_price: 150, amount: 450, service_start: '13:40' },
   ],
 });
 

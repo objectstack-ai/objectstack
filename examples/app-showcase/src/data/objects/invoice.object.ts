@@ -185,6 +185,40 @@ export const InvoiceLine = ObjectSchema.create({
       // Thin, high-volume line items → the editable grid form factor.
       inlineEdit: 'grid',
       inlineTitle: 'Line Items',
+      /**
+       * The inline grid's columns, declared EXPLICITLY rather than auto-derived
+       * — and the declaration is load-bearing, not decoration.
+       *
+       * Auto-derivation curates: past `DEFAULT_MAX_INLINE_COLUMNS` (6) it keeps
+       * the primary + every required column, fills the rest by type usefulness,
+       * and marks the overflow `defaultHidden` (the column chooser reveals it).
+       * This line had exactly 6 editable fields, so nothing was curated. Adding
+       * `service_start` below makes 7, and the one that loses the tie-break is
+       * `receipt` — a `file` column, which the fill-priority table does not
+       * rank, so it sorts last. That column is objectui#2360's upload-in-grid
+       * fixture: demoting it out of the default view is precisely the cost that
+       * kept `time` out of objectui#3569, and it is not a cost worth paying.
+       *
+       * Declaring the set opts out of curation entirely (`deriveDetail` routes
+       * an author-supplied set through `hydrateColumns`, which never sets
+       * `defaultHidden`), so all seven stay default-visible and `receipt`'s
+       * visibility stops depending on a tie-break it happens to be losing.
+       *
+       * Bare `{ field }` entries on purpose: `hydrateColumns` fills label, type,
+       * options, lookup target, `readonlyWhen`/`requiredWhen` and the computed
+       * `expression` from the schema, so labels stay translatable and the
+       * columns cannot drift from the field definitions above. `position` is
+       * absent because it is the grid's drag-reorder sort field, never a cell.
+       */
+      inlineColumns: [
+        { field: 'product' },
+        { field: 'description' },
+        { field: 'service_start' },
+        { field: 'quantity' },
+        { field: 'unit_price' },
+        { field: 'receipt' },
+        { field: 'amount' },
+      ],
     }),
     // Catalog lookup. Picking a product auto-fills `description` + `unit_price`
     // (the grid copies same-named fields from the selected product record).
@@ -211,6 +245,29 @@ export const InvoiceLine = ObjectSchema.create({
       maxLength: 200,
       requiredWhen: P`record.quantity >= 100`,
     }),
+    /**
+     * Clock time the billed work started — the inline grid's `time` fixture
+     * (objectui#3569). ⛔ Do not "tidy" this field away: it is the ONLY place in
+     * showcase where a `time` field sits inside an inline-edit grid, and the
+     * grid's time control has no other real-machine coverage. `field_zoo.f_time`
+     * seeds a `time` value but is not a master-detail child, so it never reaches
+     * this rendering path.
+     *
+     * objectui#3569 split `date` / `datetime` / `time` into three grid controls;
+     * a renderer that folds `time` back onto the `date` control feeds `HH:mm`
+     * into an `<input type="date">`, which shows nothing and writes the clock
+     * out of the record on the next save. Only a running grid can catch that.
+     *
+     * Honest on a T&M line, and deliberately scoped: a services line bills hours
+     * (`quantity`) at a rate (`unit_price`), so a start clock plus that duration
+     * describes the whole billed window — no second `service_end` field that
+     * would only restate it. Goods lines leave it empty, which is also the
+     * fixture's empty-cell case.
+     *
+     * Authored as a literal `{ type: 'time' }` because there is no `Field.time`
+     * builder — the same form `showcase_field_zoo.f_time` uses.
+     */
+    service_start: { type: 'time', label: 'Service Start' },
     quantity: Field.number({
       label: 'Qty',
       required: true,
