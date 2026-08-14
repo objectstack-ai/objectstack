@@ -36,7 +36,14 @@ export const SysJob = ObjectSchema.create({
       required: true,
       maxLength: 255,
       searchable: true,
-      description: 'Unique job identifier (snake_case)',
+      // [#8578] "unique across the whole installation", not bare "unique". The
+      // bare wording published the boundary as an open question while the
+      // declared index below already materialized the installation-wide one —
+      // and here that materialization is CORRECT (see the index comment), so
+      // the text is corrected to match the constraint rather than the reverse.
+      description:
+        'Unique job identifier (snake_case), unique across the whole installation — ' +
+        'the job catalogue is a property of the deployment, not of an organization',
       group: 'Identity',
     }),
 
@@ -95,7 +102,28 @@ export const SysJob = ObjectSchema.create({
   },
 
   indexes: [
-    { fields: ['name'], unique: true },
+    // [#8578, ADR-0120 D1/S5] `'global'` — one holder across the whole
+    // installation. This is the EXPLICIT spelling of what bare `true` already
+    // materialized, so the physical index is byte-identical (ADR-0120 D2, zero
+    // drift); what changes is that the boundary is now stated instead of being
+    // a positional accident (#4986/#5082).
+    //
+    // Why `'global'` and not `'organization'` (the #8323 class this object was
+    // screened against): nothing writes `sys_job` per organization. The sole
+    // writer is `DbJobAdapter`, which upserts under a SYSTEM context and looks
+    // its rows up by `where: { name }` with no organization dimension — a
+    // per-organization key would make that lookup ambiguous rather than fix
+    // anything. The `job` metadata type is closed to tenants on all three
+    // flags (`allowOrgOverride: false` — "no per-org job fork" — plus
+    // `allowRuntimeCreate: false` and `supportsOverlay: false`), and `enable`
+    // below advertises no generic write verb at all. ADR-0120's S5 inventory
+    // names `sys_job.name` outright as one of the engine idempotency keys that
+    // are platform-wide by construction.
+    //
+    // The reading is PINNED in `sys-job.global-unique.test.ts`: if a
+    // per-organization write path is ever opened, that test goes red rather
+    // than this constraint silently becoming wrong.
+    { fields: ['name'], unique: 'global' },
     { fields: ['active'] },
   ],
 
