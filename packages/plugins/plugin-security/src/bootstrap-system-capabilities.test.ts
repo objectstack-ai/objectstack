@@ -47,7 +47,7 @@ function makeQl() {
       const where = q?.where ?? {};
       const matched = rows.filter((r) =>
         // (2) `null` is IS NULL, not `=== null`.
-        Object.entries(where).every(([k, v]) => (v === null ? r[k] == null : r[k] === v)),
+        Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return (v === null ? r[k] == null : r[k] === v); }),
       );
       if (q?.limit === undefined) return matched;
       // (1) The #4363 tie-breaker. BINARY collation, as SQLite compares ids.

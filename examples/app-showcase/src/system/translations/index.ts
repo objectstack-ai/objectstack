@@ -140,6 +140,19 @@ export const ShowcaseTranslationBundle = {
           incurred_at: { label: 'Incurred At' },
         },
       },
+      // Same rule, same reason as `showcase_expense_line` above: `service_start`
+      // is a NEW declared label (objectui#3569's inline-grid TIME fixture), so
+      // it must be translated at birth or check-i18n-coverage sees the example's
+      // untranslated count grow and fails. And DELIBERATELY only this one field
+      // — `product`, `description`, `quantity`, `unit_price`, `receipt` and
+      // `amount` predate the ratchet and are part of the frozen baseline;
+      // translating them here would push the count BELOW the baseline, which the
+      // same gate rejects as an un-ratcheted improvement.
+      showcase_invoice_line: {
+        fields: {
+          service_start: { label: 'Service Start' },
+        },
+      },
       showcase_preference: {
         label: 'Setting',
         pluralLabel: 'Settings',
@@ -442,6 +455,13 @@ export const ShowcaseTranslationBundle = {
       showcase_expense_line: {
         fields: {
           incurred_at: { label: '发生时间' },
+        },
+      },
+      // See the `en` side for why this entry translates exactly ONE field and
+      // no more (check-i18n-coverage is a two-sided ratchet).
+      showcase_invoice_line: {
+        fields: {
+          service_start: { label: '服务开始时间' },
         },
       },
       showcase_preference: {

@@ -210,7 +210,7 @@ describe('[#8442] raw driver text is withheld from the seed `errors[].message`',
             find: vi.fn(async (o: string, q?: any) => {
                 const rows = store[o] || [];
                 return q?.where
-                    ? rows.filter((r) => Object.entries(q.where).every(([k, v]) => r[k] === v))
+                    ? rows.filter((r) => Object.entries(q.where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }))
                     : rows;
             }),
             findOne: vi.fn(async (o: string, q?: any) => {

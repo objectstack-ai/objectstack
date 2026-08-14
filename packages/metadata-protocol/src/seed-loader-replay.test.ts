@@ -3,6 +3,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { SeedLoaderService } from './seed-loader';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
 /**
  * Replay regression: seeds with lookup natural keys must survive a dev-server
@@ -30,7 +31,7 @@ function createFaithfulEngine(): { engine: IDataEngine; store: Record<string, an
       let records = store[objectName] || [];
       if (query?.where) {
         records = records.filter((r) =>
-          Object.entries(query.where).every(([k, v]) => r[k] === v),
+          Object.entries(query.where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }),
         );
       }
       if (typeof query?.limit === 'number') {
@@ -54,6 +55,7 @@ function createFaithfulEngine(): { engine: IDataEngine; store: Record<string, an
       return record;
     }),
     update: vi.fn(async (objectName: string, data: any) => {
+      assertEngineUpdateDispatch(data, undefined);
       const records = store[objectName] || [];
       const idx = records.findIndex((r) => r.id === data.id);
       if (idx >= 0) {

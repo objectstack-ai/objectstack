@@ -24,7 +24,7 @@ function makeFakeEngine() {
     async find(table: string, opts: any = {}) {
       const t = tables.get(table) ?? [];
       return opts.where
-        ? t.filter((r) => Object.entries(opts.where).every(([k, v]) => r[k] === v))
+        ? t.filter((r) => Object.entries(opts.where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }))
         : [...t];
     },
     async insert(table: string, data: any) {

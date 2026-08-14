@@ -4,9 +4,13 @@ import { describe, it, expect } from 'vitest';
 import { resolveSearchFields } from '@objectstack/spec/data';
 import {
   validateSearchableFields,
+  checkSearchableFieldList,
+  indexObjectSearchTargets,
   SEARCHABLE_FIELD_UNKNOWN,
   SEARCHABLE_FIELD_UNSEARCHABLE,
+  SEARCHABLE_FIELD_UNPROVISIONED,
 } from './validate-searchable-fields.js';
+import { indexUnprovisionedAnchors } from './system-fields.js';
 
 /**
  * The drift this rule exists for: `email` was renamed to `billing_email` and
@@ -755,5 +759,127 @@ describe('[#6674] validateSearchableFields — a virtual formula entry', () => {
     expect(findings).toHaveLength(1);
     expect(findings[0].path).toBe('objects[0].searchableFields[0]');
     expect(findings[0].message).toContain("is a virtual 'formula' field");
+  });
+});
+
+/**
+ * [#8404] The FIFTH blanket-`SYSTEM_FIELDS` read site. Existence and provenance
+ * are different questions: on an ADR-0015 `external` object the platform
+ * registers `owner_id` and provisions no storage behind it, so the entry
+ * resolves (skip 3 keeps `searchable-field-unknown` silent, correctly) and
+ * scans a column empty on every record.
+ *
+ * The external object DECLARES a field map on purpose — an external object with
+ * none takes skip 2 and never reaches any of this, so a fixture without
+ * `fields` would assert nothing.
+ */
+describe('[#8404] validateSearchableFields — a declared unprovisioned anchor', () => {
+  const externalStack = (objectExtra: Record<string, unknown> = {}) => ({
+    objects: [
+      {
+        name: 'ext_customer',
+        external: { remoteName: 'customers' },
+        fields: { name: { type: 'text' }, tier: { type: 'select' } },
+        ...objectExtra,
+      },
+    ],
+  });
+  const only = (findings: ReturnType<typeof validateSearchableFields>) =>
+    findings.filter((f) => f.rule === SEARCHABLE_FIELD_UNPROVISIONED);
+
+  it('warns on the object\'s own canonical set, and the existence rule stays silent', () => {
+    const findings = validateSearchableFields(
+      externalStack({ searchableFields: ['name', 'owner_id'] }),
+    );
+
+    expect(findings.filter((f) => f.rule === SEARCHABLE_FIELD_UNKNOWN)).toHaveLength(0);
+    const warned = only(findings);
+    expect(warned).toHaveLength(1);
+    expect(warned[0].severity).toBe('warning');
+    expect(warned[0].path).toBe('objects[0].searchableFields[1]');
+    expect(warned[0].message).toContain('owner_id');
+    expect(warned[0].message).toContain('external object (ADR-0015)');
+    // The canonical consequence, not the narrowing one.
+    expect(warned[0].message).toContain('narrower than it declares');
+    expect(warned[0].hint).toContain('columnMap');
+  });
+
+  it('is silent on the local twin — platform storage is real (mutation: drop `external`)', () => {
+    // The negative that proves the rule discriminates on PROVENANCE rather than
+    // on the NAME: same declaration, same `owner_id`, non-external object.
+    const findings = validateSearchableFields(
+      externalStack({ external: undefined, searchableFields: ['name', 'owner_id'] }),
+    );
+
+    expect(findings).toEqual([]);
+  });
+
+  it('is silent when the author DECLARES the column (#7859 — a remote column they vouch for)', () => {
+    const findings = validateSearchableFields(
+      externalStack({
+        fields: { name: { type: 'text' }, owner_id: { type: 'text' } },
+        searchableFields: ['name', 'owner_id'],
+      }),
+    );
+
+    expect(only(findings)).toHaveLength(0);
+  });
+
+  it('names the NARROWING consequence on a list view, and warns once per authored entry', () => {
+    // Two authoring locations declare the same anchor — the object's own set
+    // and the view that narrows it. Each is a separate edit the author must
+    // make, so each warns exactly once; the emission site is the entry loop,
+    // never `resolveAllowedSet` (which would repeat the object-level fact for
+    // every view).
+    const findings = validateSearchableFields(
+      externalStack({
+        searchableFields: ['name', 'owner_id'],
+        listViews: { all: { type: 'grid', searchableFields: ['owner_id'] } },
+      }),
+    );
+
+    const warned = only(findings);
+    expect(warned.map((f) => f.path)).toEqual([
+      'objects[0].searchableFields[1]',
+      'objects[0].listViews.all.searchableFields[0]',
+    ]);
+    expect(warned[1].message).toContain('$searchFields');
+    expect(warned[1].message).toContain('empty on every');
+    // The stub keeps the anchor inside the resolved allow-list, so the #4830
+    // admissibility rule stays silent and this is the ONLY finding on it.
+    expect(findings.filter((f) => f.rule === SEARCHABLE_FIELD_UNSEARCHABLE)).toHaveLength(0);
+  });
+
+  it('asks the provenance question only when the caller builds the index', () => {
+    // The optional trailing parameter's contract: its absence is the pre-#8404
+    // behaviour, preserved for out-of-repo callers (cloud graph-lint, the AI
+    // authoring path). Same stack, same core, index withheld -> silence.
+    const stack = externalStack({ searchableFields: ['name', 'owner_id'] });
+    const targets = indexObjectSearchTargets(stack);
+
+    const withoutIndex = checkSearchableFieldList(
+      ['name', 'owner_id'],
+      'ext_customer',
+      targets,
+      'where',
+      'p',
+      'searchableFields',
+      'canonical',
+    );
+    expect(withoutIndex).toEqual([]);
+
+    const withIndex = checkSearchableFieldList(
+      ['name', 'owner_id'],
+      'ext_customer',
+      targets,
+      'where',
+      'p',
+      'searchableFields',
+      'canonical',
+      indexUnprovisionedAnchors(stack),
+    );
+    expect(withIndex).toHaveLength(1);
+    expect(withIndex[0].rule).toBe(SEARCHABLE_FIELD_UNPROVISIONED);
+    expect(withIndex[0].path).toBe('p[1]');
   });
 });

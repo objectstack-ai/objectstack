@@ -3,6 +3,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { SeedLoaderService } from './seed-loader';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
 /**
  * #3433 — a curated seed is a snapshot of ESTABLISHED facts (a project already
@@ -68,7 +69,7 @@ function createEnforcingEngine(): { engine: IDataEngine; store: Record<string, a
     find: vi.fn(async (objectName: string, query?: any) => {
       let rows = store[objectName] || [];
       if (query?.where) {
-        rows = rows.filter((r) => Object.entries(query.where).every(([k, v]) => r[k] === v));
+        rows = rows.filter((r) => Object.entries(query.where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }));
       }
       if (typeof query?.limit === 'number') rows = rows.slice(0, query.limit);
       return rows;
@@ -99,6 +100,7 @@ function createEnforcingEngine(): { engine: IDataEngine; store: Record<string, a
       return Array.isArray(data) ? written : written[0];
     }),
     update: vi.fn(async (objectName: string, data: any) => {
+      assertEngineUpdateDispatch(data, undefined);
       const rows = store[objectName] || [];
       const idx = rows.findIndex((r) => r.id === data.id);
       if (idx >= 0) {

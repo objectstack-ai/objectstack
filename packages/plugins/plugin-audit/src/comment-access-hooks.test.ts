@@ -22,13 +22,13 @@ function install(opts: {
     },
     find: async (_object, options: any) => {
       const rows = (opts.comments ?? []).filter((r) =>
-        Object.entries(options?.where ?? {}).every(([k, v]) => r[k] === v),
+        Object.entries(options?.where ?? {}).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }),
       );
       return typeof options?.limit === 'number' ? rows.slice(0, options.limit) : rows;
     },
     findOne: async (_object, options: any) =>
       (opts.comments ?? []).find((r) =>
-        Object.entries(options?.where ?? {}).every(([k, v]) => r[k] === v),
+        Object.entries(options?.where ?? {}).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }),
       ) ?? null,
   };
   installCommentAccessHooks(engine, () => opts.sharing, silentLogger());

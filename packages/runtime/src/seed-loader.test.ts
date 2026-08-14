@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SeedLoaderService } from './seed-loader';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
 import type { SeedLoaderRequest, SeedLoaderConfig } from '@objectstack/spec/data';
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
 // ==========================================================================
 // Mock Helpers
@@ -31,6 +32,7 @@ function createMockEngine(data: Record<string, any[]> = {}): IDataEngine {
       if (query?.filter) {
         return records.filter(r => {
           for (const [k, v] of Object.entries(query.filter)) {
+            if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
             if (r[k] !== v) return false;
           }
           return true;
@@ -56,6 +58,7 @@ function createMockEngine(data: Record<string, any[]> = {}): IDataEngine {
       return record;
     }),
     update: vi.fn(async (objectName: string, data: any) => {
+      assertEngineUpdateDispatch(data, undefined);
       const records = store[objectName] || [];
       const idx = records.findIndex(r => r.id === data.id);
       if (idx >= 0) {

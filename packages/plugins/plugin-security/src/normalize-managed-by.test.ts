@@ -17,7 +17,7 @@ function makeQl() {
     async find(object: string, opts: any) {
       const where = opts?.where ?? {};
       return (tables[object] ?? []).filter((r) =>
-        Object.entries(where).every(([k, v]) => r[k] === v),
+        Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }),
       );
     },
     async update(object: string, data: any) {

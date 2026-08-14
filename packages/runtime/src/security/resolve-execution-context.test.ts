@@ -17,6 +17,7 @@ function makeQl(apiKeyRows: any[]) {
       if (object !== 'sys_api_key') return [];
       return apiKeyRows.filter((row) => {
         for (const [k, v] of Object.entries(where)) {
+          if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
           if (row[k] !== v) return false;
         }
         return true;

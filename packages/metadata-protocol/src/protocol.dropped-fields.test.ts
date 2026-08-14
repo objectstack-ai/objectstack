@@ -14,6 +14,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
 const SCHEMA = {
   name: 'approval_case',
@@ -29,6 +30,7 @@ describe('updateData — forwards engine write strips as droppedFields (#3431)',
       registry: { getObject: () => SCHEMA },
       // Stand in for the engine stripping `approval_status` and reporting it.
       update: vi.fn(async (object: string, data: any, options?: any) => {
+        assertEngineUpdateDispatch(data, options);
         options?.onFieldsDropped?.({ object, fields: ['approval_status'], reason: 'readonly' });
         return { id: 'rec-1', title: data.title };
       }),
@@ -55,7 +57,8 @@ describe('updateData — forwards engine write strips as droppedFields (#3431)',
   it('forwards multiple strip passes in order (readonly_when then readonly)', async () => {
     const engine = {
       registry: { getObject: () => SCHEMA },
-      update: vi.fn(async (object: string, _data: any, options?: any) => {
+      update: vi.fn(async (object: string, data: any, options?: any) => {
+        assertEngineUpdateDispatch(data, options);
         options?.onFieldsDropped?.({ object, fields: ['locked'], reason: 'readonly_when' });
         options?.onFieldsDropped?.({ object, fields: ['approval_status'], reason: 'readonly' });
         return { id: 'rec-1' };

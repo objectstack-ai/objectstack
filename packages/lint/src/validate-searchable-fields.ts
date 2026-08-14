@@ -97,6 +97,21 @@
  *      the runtime would refuse — `created_by` in a view's narrowing — is a
  *      missed finding, not a wrong one.)
  *
+ * Skip 3 answers EXISTENCE, and since #8404 it no longer ends the matter. On an
+ * ADR-0015 `external` object the platform registers its injected anchors and
+ * provisions no storage behind them (#7865 / #8116), so `owner_id` there is
+ * addressable and empty on every record. Existence rightly stays silent —
+ * PROVENANCE is a second question, asked only of the names skip 3 already
+ * decided not to flag, and answered by the per-object index
+ * ({@link indexUnprovisionedAnchors}) rather than the object-independent union.
+ * A declared anchor survives into the resolved allow-list and the view's
+ * `$searchFields` narrowing, so it reads as search coverage and scans a column
+ * that can never match — #4830's own failure mode reached by a different route.
+ * WARNING, never gating, for #4330's cost asymmetry: the remote schema is not
+ * visible to this pass, so the finding describes a degradation, not a refusal
+ * (the same call `warnUnprovisionedAnchors` makes in `validate-expressions.ts`
+ * and the four filter/binding rules #8340 wired).
+ *
  * Dotted paths are NOT skipped here, unlike every sibling rule. Elsewhere
  * `owner_id.name` is left alone because the query engine resolves the traversal;
  * search does not — `resolveSearchFields` matches the field map by exact string,
@@ -112,10 +127,16 @@ import {
   SEARCH_AUTO_EXCLUDED_FIELDS,
   type SearchFieldMeta,
 } from '@objectstack/spec/data';
-import { SYSTEM_FIELDS } from './system-fields.js';
+import {
+  SYSTEM_FIELDS,
+  indexUnprovisionedAnchors,
+  unprovisionedAnchorCause,
+  unprovisionedAnchorHint,
+} from './system-fields.js';
 
 export const SEARCHABLE_FIELD_UNKNOWN = 'searchable-field-unknown';
 export const SEARCHABLE_FIELD_UNSEARCHABLE = 'searchable-field-unsearchable';
+export const SEARCHABLE_FIELD_UNPROVISIONED = 'searchable-field-unprovisioned';
 
 export type SearchableFieldSeverity = 'error' | 'warning';
 
@@ -324,6 +345,14 @@ export function checkSearchableFieldList(
   path: string,
   subject: string,
   role: SearchableFieldRole = 'narrowing',
+  // [#8404] `objectName -> its unprovisioned injected anchors`
+  // ({@link indexUnprovisionedAnchors}). OPTIONAL, and its absence means
+  // exactly one thing: this caller did not build the index, so the provenance
+  // question goes unasked and only existence/admissibility are answered — the
+  // pre-#8404 behaviour, preserved for out-of-repo callers of this exported
+  // core (cloud graph-lint, the AI authoring path). Every in-repo caller passes
+  // it: `validateSearchableFields` below and `validate-react-page-props`.
+  unprovisionedAnchors?: ReadonlyMap<string, ReadonlySet<string>>,
 ): SearchableFieldFinding[] {
   const findings: SearchableFieldFinding[] = [];
   if (!Array.isArray(declared) || declared.length === 0) return findings;
@@ -333,6 +362,7 @@ export function checkSearchableFieldList(
   if (!target) return findings; // ② external / introspected — no authored field map
 
   const known = target.names;
+  const anchors = unprovisionedAnchors?.get(objectName);
   const resolution = role === 'narrowing' ? resolveAllowedSet(target) : undefined;
 
   for (let i = 0; i < declared.length; i++) {
@@ -367,6 +397,39 @@ export function checkSearchableFieldList(
           (known.size > 0 ? ` Object fields: ${[...known].sort().join(', ')}.` : ''),
       });
       continue;
+    }
+
+    // ── [#8404] Provenance — the second question about a name skip 3 kept ──
+    //
+    // Existence answered "yes" (authored, or a registry-injected system
+    // column). On a federated object the injected anchor is addressable and
+    // has no storage, so the entry survives `resolveAllowedSet`'s stub into the
+    // resolved allow-list and scans a column empty on every record. Emitted
+    // HERE, per declared entry, rather than at the stub: `resolveAllowedSet`
+    // reads the OBJECT's declaration and runs once per narrowing, so warning
+    // there would repeat one object-level fact for every view and attribute it
+    // to the view's path. Deliberately NOT `continue` — the later checks are
+    // no-ops for a name absent from authored `fields` (no meta to be virtual,
+    // and the admissibility pass skips it at ③), so falling through keeps this
+    // warning additive instead of masking a finding about an authored column.
+    if (anchors?.has(name)) {
+      findings.push({
+        severity: 'warning',
+        rule: SEARCHABLE_FIELD_UNPROVISIONED,
+        where,
+        path: `${path}[${i}]`,
+        message:
+          `${subject} entry "${name}" resolves on object "${objectName}", but ` +
+          `${unprovisionedAnchorCause(objectName, name)}` +
+          (role === 'narrowing'
+            ? ` — clients echo this declaration verbatim as the '$searchFields' override, so ` +
+              `every toolbar search on this list scans a column that is empty on every ` +
+              `record: it reads as search coverage and matches nothing.`
+            : ` — 'search' scans it on every record and it can never match, so the object's ` +
+              `searchable set is narrower than it declares. Should it be the ONLY entry that ` +
+              `resolves, the set scans nothing at all.`),
+        hint: unprovisionedAnchorHint(objectName, name),
+      });
     }
 
     // ── [#6674] Virtual entries — EVERY surface, canonical included ──
@@ -481,6 +544,7 @@ export function validateSearchableFields(stack: AnyRec): SearchableFieldFinding[
 
   const objects = asArray(stack.objects);
   const fieldsByObject = indexObjectSearchTargets(stack);
+  const unprovisionedAnchors = indexUnprovisionedAnchors(stack);
 
   const check = (
     declared: unknown,
@@ -491,7 +555,16 @@ export function validateSearchableFields(stack: AnyRec): SearchableFieldFinding[
     role: SearchableFieldRole,
   ) => {
     findings.push(
-      ...checkSearchableFieldList(declared, objectName, fieldsByObject, where, path, subject, role),
+      ...checkSearchableFieldList(
+        declared,
+        objectName,
+        fieldsByObject,
+        where,
+        path,
+        subject,
+        role,
+        unprovisionedAnchors,
+      ),
     );
   };
 

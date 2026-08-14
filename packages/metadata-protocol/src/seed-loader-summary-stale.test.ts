@@ -4,6 +4,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { SeedLoadResultSchema, SeedLoaderResultSchema } from '@objectstack/spec/data';
 import { SeedLoaderService } from './seed-loader';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
 /**
  * framework#4998: a roll-up summary recompute that exhausts its retries must be
@@ -37,7 +38,7 @@ function createFaithfulEngine(): { engine: IDataEngine; store: Record<string, an
       let records = store[objectName] || [];
       if (query?.where) {
         records = records.filter((r) =>
-          Object.entries(query.where).every(([k, v]) => r[k] === v),
+          Object.entries(query.where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }),
         );
       }
       if (typeof query?.limit === 'number') records = records.slice(0, query.limit);
@@ -59,6 +60,7 @@ function createFaithfulEngine(): { engine: IDataEngine; store: Record<string, an
       return record;
     }),
     update: vi.fn(async (objectName: string, data: any) => {
+      assertEngineUpdateDispatch(data, undefined);
       const records = store[objectName] || [];
       const idx = records.findIndex((r) => r.id === data.id);
       if (idx >= 0) { records[idx] = { ...records[idx], ...data }; return records[idx]; }

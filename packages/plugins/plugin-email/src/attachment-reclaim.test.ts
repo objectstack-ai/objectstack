@@ -55,7 +55,7 @@ function fakeEngine(rows: Array<Record<string, any>>) {
     updates: [] as Array<Record<string, any>>,
     async find(table: string, o: any = {}) {
       const where = o?.where ?? {};
-      let out = rowsOf(table).filter((r) => Object.entries(where).every(([k, v]) => r[k] === v));
+      let out = rowsOf(table).filter((r) => Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }));
       if (o.limit) out = out.slice(0, o.limit);
       return out;
     },
@@ -73,7 +73,11 @@ function fakeEngine(rows: Array<Record<string, any>>) {
       const dispatch = assertEngineDeleteDispatch(o);
       if (dispatch.kind === 'multi') {
         const survivors = rowsOf(table).filter(
-          (r) => !Object.entries(o?.where ?? {}).every(([k, v]) => r[k] === v),
+          (r) =>
+            !Object.entries(o?.where ?? {}).every(([k, v]) => {
+              if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+              return r[k] === v;
+            }),
         );
         const deleted = rowsOf(table).length - survivors.length;
         tables.set(table, survivors);

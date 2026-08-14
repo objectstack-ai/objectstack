@@ -6,6 +6,7 @@ import { strictObject } from '../../shared/strict-object';
 import type { DriverDefinition } from '../datasource.zod';
 import {
   driverConfigJsonSchema,
+  placeholderFree,
   READ_ONLY_BELONGS_ON_DATASOURCE,
   SCHEMA_MODE_BELONGS_ON_DATASOURCE,
 } from './common.zod';
@@ -96,8 +97,17 @@ export const FilePersistenceConfigSchema = lazySchema(() => strictObject(
   },
   {
     type: z.literal('file'),
-    /** File path to persist data (JSON format). Defaults to `.objectstack/data/memory-driver.json`. */
-    path: z.string().optional().describe('File path to persist data'),
+    /**
+     * File path to persist data (JSON format). Defaults to `.objectstack/data/memory-driver.json`.
+     *
+     * `${…}` placeholder syntax is refused (#8495, the #8336 shape one surface
+     * over): nothing resolves it, so the driver would create and write a
+     * literal `./${DATA_DIR}/…` path — authored under a false belief. The
+     * memory driver's `initialData` stays deliberately unjudged (record
+     * values, where a literal `${…}` may be legitimate data); this key is
+     * config-material, not data.
+     */
+    path: placeholderFree(z.string(), 'persistence.path').optional().describe('File path to persist data'),
     /** Auto-save interval in milliseconds. Default: 2000ms. */
     autoSaveInterval: z.number().min(100).default(2000).describe('Auto-save interval in ms'),
   },
@@ -118,8 +128,13 @@ export const LocalStoragePersistenceConfigSchema = lazySchema(() => strictObject
   },
   {
     type: z.literal('local'),
-    /** localStorage key. Defaults to `objectstack:memory-db`. */
-    key: z.string().optional().describe('localStorage key for persisted data'),
+    /**
+     * localStorage key. Defaults to `objectstack:memory-db`.
+     *
+     * `${…}` placeholder syntax is refused (#8495): nothing resolves it, so
+     * the driver would write under the literal placeholder-bearing key.
+     */
+    key: placeholderFree(z.string(), 'persistence.key').optional().describe('localStorage key for persisted data'),
   },
 ).describe('localStorage persistence configuration'));
 
@@ -164,12 +179,20 @@ export const AutoPersistenceConfigSchema = lazySchema(() => strictObject(
   },
   {
     type: z.literal('auto'),
-    /** File path override when running in Node.js. */
-    path: z.string().optional().describe('File path override for Node.js environments'),
+    /**
+     * File path override when running in Node.js.
+     * `${…}` placeholder syntax is refused (#8495) — same judgment as the
+     * `file` branch's `path`; the auto-detected file adapter resolves nothing.
+     */
+    path: placeholderFree(z.string(), 'persistence.path').optional().describe('File path override for Node.js environments'),
     /** Auto-save interval override when running in Node.js. */
     autoSaveInterval: z.number().min(100).optional().describe('Auto-save interval override for Node.js environments'),
-    /** localStorage key override when running in a browser. */
-    key: z.string().optional().describe('localStorage key override for browser environments'),
+    /**
+     * localStorage key override when running in a browser.
+     * `${…}` placeholder syntax is refused (#8495) — same judgment as the
+     * `local` branch's `key`.
+     */
+    key: placeholderFree(z.string(), 'persistence.key').optional().describe('localStorage key override for browser environments'),
   },
 ).describe('Auto-detect persistence configuration'));
 

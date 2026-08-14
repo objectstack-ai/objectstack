@@ -53,7 +53,7 @@ function makeProtocol(opts: { firstCall?: 'throw' | 'shortReturn' } = {}) {
     const filter = args.query?.$filter ?? {};
     // Supports equality and { $in: [...] } — the id recheck (framework#3173)
     // queries by pre-assigned id $in, like the real SQL driver does.
-    return store.filter((row) => Object.entries(filter).every(([k, v]) => {
+    return store.filter((row) => Object.entries(filter).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); 
       if (v && typeof v === 'object' && Array.isArray((v as any).$in)) return (v as any).$in.includes(row[k]);
       return row[k] === v;
     }));

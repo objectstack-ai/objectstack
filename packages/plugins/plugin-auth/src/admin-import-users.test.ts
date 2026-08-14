@@ -33,7 +33,7 @@ function makeDeps(opts: {
   });
   const find = vi.fn(async (_obj: string, q: any) => {
     const where = q?.where ?? {};
-    return existing.filter((u) => Object.entries(where).every(([k, v]) => u[k] === v));
+    return existing.filter((u) => Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return u[k] === v; }));
   });
   const update = vi.fn(async () => ({}));
   const insert = vi.fn(async () => ({}));

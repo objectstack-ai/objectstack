@@ -349,6 +349,7 @@ export {
   validateSearchableFields,
   SEARCHABLE_FIELD_UNKNOWN,
   SEARCHABLE_FIELD_UNSEARCHABLE,
+  SEARCHABLE_FIELD_UNPROVISIONED,
 } from './validate-searchable-fields.js';
 export type {
   SearchableFieldFinding,

@@ -34,6 +34,7 @@ import { describe, expect, it } from 'vitest';
 
 import { DatasourceSchema } from '../datasource.zod';
 import { containsUnresolvedPlaceholder } from './common.zod';
+import { MemoryConfigSchema } from './memory.zod';
 import { MongoConfigSchema } from './mongo.zod';
 import { MysqlConfigSchema } from './mysql.zod';
 import { PostgresConfigSchema } from './postgres.zod';
@@ -167,6 +168,101 @@ describe('mongo `options` passthrough — the deep judgement (#8336)', () => {
     const before = MongoConfigSchema.safeParse(config);
     expect(before.success, JSON.stringify(before.error?.issues)).toBe(true);
     expect(MongoConfigSchema.parse(config)).toEqual(before.data);
+  });
+});
+
+/**
+ * #8495 — the #8336 shape one surface over: memory `persistence.path` (file
+ * persistence and the `auto` override) and `persistence.key` (localStorage)
+ * are config-material, not record data. A `${DATA_DIR}` written there is
+ * resolved by nothing — the driver would create and write a literal
+ * `./${DATA_DIR}/…` path (or a literal localStorage key), the same
+ * authored-under-a-false-belief defect. Inherited parent adjudication from
+ * #8336; `initialData` stays deliberately UNJUDGED (record values, where a
+ * literal `${…}` may be legitimate data) and is pinned so below.
+ */
+const MEMORY_PERSISTENCE_FAMILY = [
+  { name: 'memory file persistence.path', key: 'persistence.path',
+    valid: (v: string) => ({ persistence: { type: 'file', path: v } }),
+    literal: './data/memory-driver.json', placeholder: '${DATA_DIR}/memory-driver.json' },
+  { name: 'memory localStorage persistence.key', key: 'persistence.key',
+    valid: (v: string) => ({ persistence: { type: 'local', key: v } }),
+    literal: 'myapp:db', placeholder: 'myapp:${TENANT}:db' },
+  { name: 'memory auto persistence.path override', key: 'persistence.path',
+    valid: (v: string) => ({ persistence: { type: 'auto', path: v } }),
+    literal: '/var/data/memory.json', placeholder: '${DATA_DIR}/memory.json' },
+  { name: 'memory auto persistence.key override', key: 'persistence.key',
+    valid: (v: string) => ({ persistence: { type: 'auto', key: v } }),
+    literal: 'objectstack:memory-db', placeholder: '${STORAGE_KEY}' },
+] as const;
+
+describe.each(MEMORY_PERSISTENCE_FAMILY)('$name — unresolved placeholder refusal (#8495)', (f) => {
+  it('refuses a `${…}` placeholder, pathed under `persistence`, naming the key and the defect', () => {
+    const result = MemoryConfigSchema.safeParse(f.valid(f.placeholder));
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === f.key);
+    expect(issue, `refusal must be pathed at \`${f.key}\``).toBeDefined();
+    expect(issue!.code).toBe('custom');
+    expect(issue!.message).toContain(`\`${f.key}\``);
+    // The ruling's guidance, verbatim: the non-capability is explicit.
+    expect(issue!.message).toContain('placeholders are not resolved here');
+    // The measured defect, in the family's shared phrasing (#8078).
+    expect(issue!.message).toContain('resolved by nothing');
+    // The prescription: the literal value.
+    expect(issue!.message).toContain('Write the literal value instead');
+  });
+
+  it('accepts the literal spelling byte-identically (pin)', () => {
+    const config = f.valid(f.literal);
+    const before = MemoryConfigSchema.safeParse(config);
+    expect(before.success, JSON.stringify(before.error?.issues)).toBe(true);
+    expect(MemoryConfigSchema.parse(config)).toEqual(before.data);
+  });
+
+  it('placeholder-LOOKING literals stay accepted: `$VAR`, `{name}`, unclosed `${` are not the measured convention', () => {
+    for (const nearMiss of [
+      f.literal + '$SUFFIX',
+      f.literal + '{curly}',
+      f.literal + '-${unclosed',
+    ]) {
+      const result = MemoryConfigSchema.safeParse(f.valid(nearMiss));
+      expect(result.success, `\`${nearMiss}\` must stay accepted: ${JSON.stringify(result.error?.issues)}`).toBe(true);
+    }
+  });
+});
+
+describe('memory `initialData` stays UNJUDGED — the deliberate #8336 exclusion holds (#8495)', () => {
+  it('a literal `${…}` in a record value is legitimate DATA and keeps parsing', () => {
+    // The mother ruling's memory-driver exclusion was argued from exactly this:
+    // `initialData` carries arbitrary record values, where `${…}` may be the
+    // real payload (a template string a downstream renderer consumes). The
+    // #8495 refusal covers `persistence.path`/`persistence.key` ONLY.
+    const config = {
+      initialData: {
+        templates: [{ id: '1', body: 'Hello ${name}, your order ${order_id} shipped.' }],
+        users: [{ id: '${weird-but-legal}', name: 'Alice' }],
+      },
+      persistence: { type: 'file', path: './data/memory.json' },
+    };
+    const result = MemoryConfigSchema.safeParse(config);
+    expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+    // Byte-identical: the values are data, and data is never rewritten.
+    expect(result.data!.initialData).toEqual(config.initialData);
+  });
+});
+
+describe('DatasourceSchema — the memory refusal reaches the authored artefact (#8495)', () => {
+  it('re-paths the refusal under `config.persistence.path` for the author', () => {
+    const result = DatasourceSchema.safeParse({
+      name: 'scratch',
+      driver: 'memory',
+      config: { persistence: { type: 'file', path: '${DATA_DIR}/scratch.json' } },
+    });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'config.persistence.path');
+    expect(issue, 'issue must be re-pathed under config.persistence.path').toBeDefined();
+    expect(issue!.code).toBe('custom');
+    expect(issue!.message).toContain('placeholders are not resolved here');
   });
 });
 

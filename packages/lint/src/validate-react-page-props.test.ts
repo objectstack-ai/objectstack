@@ -13,6 +13,7 @@ import {
 import {
   SEARCHABLE_FIELD_UNKNOWN,
   SEARCHABLE_FIELD_UNSEARCHABLE,
+  SEARCHABLE_FIELD_UNPROVISIONED,
 } from './validate-searchable-fields.js';
 import { PAGE_FIELD_UNKNOWN, PAGE_FIELD_UNPROVISIONED } from './validate-page-field-bindings.js';
 // The gate PARSES `ChartAggregateSchema` since #5020, so the function
@@ -337,6 +338,32 @@ describe('validateReactPageProps — <ListView> searchableFields (#4329)', () =>
     expect(f[0].severity).toBe('error');
     expect(f[0].path).toBe('pages[0].source › searchableFields[1]');
     expect(f[0].message).toContain('400 INVALID_FIELD');
+  });
+
+  it('[#8404] warns on an unprovisioned anchor, and PINS that this surface threads the index', () => {
+    // Load-bearing beyond the warning itself. `validateReactPageProps` builds
+    // `unprovisionedAnchors` for its other field-prop checks, so if this
+    // `checkSearchableFieldList` call ever stops passing it, the index stays
+    // READ elsewhere in the same function — no TS6133, no type error, and the
+    // metadata-surface tests in validate-searchable-fields.test.ts cannot see
+    // this call site at all. Measured: with the argument dropped here, typecheck
+    // and the whole 72-file lint suite stay green. This test is the only thing
+    // that goes red, which is precisely why it exists.
+    const external = {
+      name: 'ext_account',
+      external: { remoteName: 'accounts' },
+      fields: { name: { type: 'text' } },
+    };
+    const f = validateReactPageProps(
+      listPage(list(`objectName="ext_account" searchableFields={['name', 'owner_id']}`), [external]),
+    );
+
+    expect(f).toHaveLength(1);
+    expect(f[0].rule).toBe(SEARCHABLE_FIELD_UNPROVISIONED);
+    expect(f[0].severity).toBe('warning');
+    expect(f[0].path).toBe('pages[0].source › searchableFields[1]');
+    expect(f[0].message).toContain('external object (ADR-0015)');
+    expect(f[0].message).toContain('$searchFields');
   });
 
   it('flags a dotted path — search cannot resolve the traversal', () => {

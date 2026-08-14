@@ -4723,6 +4723,68 @@ const step17: MigrationStep = {
   ],
 };
 
+/**
+ * Protocol 18 step — accumulating, uncut.
+ *
+ * v17.0.0 was cut before these narrowings landed, so their migration
+ * prescriptions belong to the NEXT major: `composeMigrationChain` filters
+ * `m <= toMajor` (default `PROTOCOL_MAJOR`), so this step is inert for every
+ * default caller until the protocol major reaches 18. The enforcement itself
+ * ships earlier on the 17.x line (launch-window convention: accept-set
+ * narrowings ride minor releases); this step is where `migrate meta` users
+ * are told, at the major boundary where they look.
+ *
+ * Mechanical: none yet. Semantic: the memory-driver persistence placeholder
+ * refusal (#8495) — the #8336 parent adjudication applied to the two
+ * config-material memory keys its deliberate `initialData` exclusion never
+ * covered.
+ */
+const step18: MigrationStep = {
+  toMajor: 18,
+  rationale:
+    'Protocol 18 extends the #8336 unresolved-placeholder refusal to the memory ' +
+    'driver\'s config-material persistence keys: `persistence.path` (file persistence ' +
+    'and the `auto` override) and `persistence.key` (localStorage and the `auto` ' +
+    'override) refuse `${…}` placeholder syntax at publish (#8495). Nothing resolves a ' +
+    'placeholder there — the driver would create a literal `./${DATA_DIR}/…` path or ' +
+    'write under the literal localStorage key — the same authored-under-a-false-belief ' +
+    'shape, one surface over. The memory driver\'s `initialData` stays deliberately ' +
+    'unjudged: it carries arbitrary record values, where a literal `${…}` may be ' +
+    'legitimate data.',
+  conversionIds: [],
+  semantic: [
+    // One file per entry under `entries/semantic/`, concatenated here sorted by
+    // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
+    // FILE — never by editing between the markers, which is generated.
+    // <os-generated semantic:18>
+    {
+      id: 'memory-persistence-placeholder-refused',
+      surface: 'memory driver config `persistence.path` (file persistence and the `auto` ' +
+        'override) and `persistence.key` (localStorage and the `auto` override) — values ' +
+        'containing `${…}` placeholder syntax',
+      replacement: 'the literal path or key. For environment-specific destinations, leave the ' +
+        'key unset and let the shared datasource factory scope the default per datasource, or ' +
+        'compute the config value in code before it enters `defineStack`',
+      reason:
+        'The #8336 defect one surface over: a `${…}` placeholder in memory persistence config ' +
+        'is resolved by NOTHING — the driver would create and write a literal `./${DATA_DIR}/…` ' +
+        'path, or write under the literal placeholder-bearing localStorage key, so the dump ' +
+        'lands in a wrongly-named location with no error naming the unresolved placeholder ' +
+        '(#8495; authored under the same false belief the #8336 ruling closes). These two keys ' +
+        'are config-material like the connection keys, so the parent adjudication applies with ' +
+        'its reason intact; the memory driver\'s `initialData` stays deliberately UNJUDGED — it ' +
+        'carries arbitrary record values, where a literal `${…}` may be legitimate data. There ' +
+        'is no mechanical rewrite: the placeholder names a value that exists only in the ' +
+        'author\'s intended deployment environment, which a source-file transform cannot know.',
+      acceptanceCriteria:
+        'Every memory datasource parses with no `${…}` span in `persistence.path` or ' +
+        '`persistence.key`; `initialData` record values containing literal `${…}` keep parsing ' +
+        'byte-identically.',
+    },
+    // </os-generated semantic:18>
+  ],
+};
+
 /** All migration steps, keyed by the major they migrate into. */
 export const MIGRATIONS_BY_MAJOR: Readonly<Record<number, MigrationStep>> = {
   11: step11,
@@ -4732,6 +4794,7 @@ export const MIGRATIONS_BY_MAJOR: Readonly<Record<number, MigrationStep>> = {
   15: step15,
   16: step16,
   17: step17,
+  18: step18,
 };
 
 /** The majors that have a step, ascending. */

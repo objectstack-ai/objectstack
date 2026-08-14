@@ -543,6 +543,41 @@ const opportunities = await engine.find('opportunity', {
 });
 ```
 
+### Filtering on a `formula` field
+
+<Callout type="warn">
+**Do not filter on a `formula` field.** A `formula` value is computed on read — no
+driver materialises a column for it — so the predicate reaches the driver, matches
+nothing, and the query answers an **empty list under a 200**. Both directions are
+wrong and `false` is the dangerous one: `where: { is_open: false }` returns no
+records where the same test against a stored boolean returns *every* record. The
+formula still reads correctly in that same response (the engine hydrates it after
+the driver returns), so the field is visibly populated and simultaneously
+unfilterable.
+
+Since #8296 both doors refuse it with `400 INVALID_FIELD` — the REST/protocol
+ingress and `engine.find()` alike:
+
+```text
+Query parameter 'where' filters on 'is_open', a virtual 'formula' field on object
+'showcase_task'. Its value is computed on read and never stored, so no driver
+materializes a column to filter on: the predicate reaches the driver, matches
+nothing, and the query answers an empty list under a 200 — in BOTH directions, so a
+false test returns no records where the same test against a stored boolean returns
+every record. Denormalise the value onto 'showcase_task' (a stored field, written
+when the source changes) and filter that.
+```
+
+`INVALID_FIELD`, not `INVALID_FILTER`: the verdict is about the **name's type**, not
+the value's shape. The remedy is the same one the sort axis prescribes — denormalise
+the value onto the queried object as a **stored** field, one this object's own rows
+carry, written when the source changes, and filter that.
+
+`summary` and `autonumber` are **not** refused: both get real, stored columns and
+filter correctly. A dotted filter path has no verdict on this axis — it is judged by
+the relation rule above.
+</Callout>
+
 ---
 
 ## 3. Sorting

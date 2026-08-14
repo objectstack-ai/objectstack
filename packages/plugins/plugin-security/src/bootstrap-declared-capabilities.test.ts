@@ -30,7 +30,7 @@ function makeQl(declared: any[] = []) {
       // `organization_id: null`, which strict `===` would make unsatisfiable
       // here while it works in production.
       return rows.filter((r) =>
-        Object.entries(where).every(([k, v]) => (v === null ? r[k] == null : r[k] === v)),
+        Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return (v === null ? r[k] == null : r[k] === v); }),
       );
     },
     async insert(object: string, data: any) {

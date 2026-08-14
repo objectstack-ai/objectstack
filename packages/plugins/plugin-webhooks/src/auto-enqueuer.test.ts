@@ -81,7 +81,7 @@ class FakeEngine implements IDataEngine {
     async find(name: string, q?: any): Promise<any[]> {
         const all = this.rows[name] ?? [];
         if (!q?.where) return all;
-        return all.filter((r) => Object.entries(q.where).every(([k, v]) => r[k] === v));
+        return all.filter((r) => Object.entries(q.where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }));
     }
     async findOne(name: string, q?: any): Promise<any> {
         return (await this.find(name, q))[0] ?? null;
@@ -104,7 +104,14 @@ class FakeEngine implements IDataEngine {
         const arr = this.rows[name] ?? [];
         const before = arr.length;
         this.rows[name] = arr.filter(
-            (r) => !(opts?.where && Object.entries(opts.where).every(([k, v]) => r[k] === v)),
+            (r) =>
+                !(
+                    opts?.where &&
+                    Object.entries(opts.where).every(([k, v]) => {
+                        if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+                        return r[k] === v;
+                    })
+                ),
         );
         return { affected: before - this.rows[name].length };
     }

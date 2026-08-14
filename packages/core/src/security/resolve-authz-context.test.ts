@@ -19,7 +19,7 @@ function makeQl(tables: Record<string, any[]>) {
       const rows = tables[object] ?? [];
       const where = opts?.where ?? {};
       return rows.filter((r) =>
-        Object.entries(where).every(([k, v]) => {
+        Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); 
           if (v && typeof v === 'object' && '$in' in (v as any)) return (v as any).$in.includes(r[k]);
           return r[k] === v;
         }),
@@ -123,7 +123,7 @@ function makeCountingQl(tables: Record<string, any[]>) {
       const rows = tables[object] ?? [];
       const where = opts?.where ?? {};
       return rows.filter((r) =>
-        Object.entries(where).every(([k, v]) => {
+        Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); 
           if (v && typeof v === 'object' && '$in' in (v as any)) return (v as any).$in.includes(r[k]);
           return r[k] === v;
         }),

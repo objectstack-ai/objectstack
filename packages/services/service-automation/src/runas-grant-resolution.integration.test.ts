@@ -30,7 +30,7 @@ function fakeObjectQl(tables: Record<string, any[]>) {
   const match = (object: string, where: any): any[] =>
     (tables[object] ?? []).filter((r) =>
       Object.entries(where ?? {}).every(([k, v]) =>
-        v && typeof v === 'object' && '$in' in (v as any) ? (v as any).$in.includes(r[k]) : r[k] === v,
+        { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return v && typeof v === 'object' && '$in' in (v as any) ? (v as any).$in.includes(r[k]) : r[k] === v; },
       ),
     );
   const engine: any = {

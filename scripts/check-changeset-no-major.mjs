@@ -882,41 +882,24 @@ function selfTest() {
   );
   assert(judge({ introduced: [], pre: { mode: 'exit' } }).verdict === 'clean', 'a diff introducing no major, outside pre-mode ⇒ clean');
 
-  // ── #7005 ITSELF, stated as one assertion against the REAL stock ──────────
+  // ── #7005 against a stock of majors: MOVED to the temp-repo STOCK block ───
   //
-  // The card's acceptance criterion, driven on the actual pending directory
-  // rather than on a synthetic stand-in for it: with N major-declaring
-  // changesets really on disk and pre-mode really exited, a PR that introduces
-  // none of them is CLEAN. Before #7005 this exact input was `enforce` and every
-  // unlabelled PR in the repo went red listing all N.
-  //
-  // The control is what keeps it from being vacuous — if the stock ever stops
-  // containing a major, the assertion below would pass for the wrong reason, so
-  // the count is asserted non-zero first and named in the message.
-  {
-    const realStock = readChangesets(REPO_ROOT);
-    assert(realStock instanceof Map, 'reader: the real .changeset directory is reachable from this script (it is what `--list` audits)');
-    const stockMajors = [...(realStock ?? new Map()).entries()].filter(([, text]) => majorPackagesIn(text).length > 0);
-    assert(
-      stockMajors.length > 0,
-      'control (#7005): the real .changeset stock must actually contain major-declaring changesets, or the assertion below is green for the wrong reason',
-    );
-    assert(
-      judge({ introduced: [], pre: { mode: 'exit' } }).verdict === 'clean',
-      `#7005: ${stockMajors.length} major-declaring changeset(s) are pending on disk and pre-mode is exited, and a PR that introduces none of them is still CLEAN — stock-scoped, this was \`enforce\` for every unlabelled PR in the repo`,
-    );
-    // And the other direction, so the pair cannot both be satisfied by a gate
-    // that simply stopped enforcing: one introduced major, same stock, is red.
-    assert(
-      judge({ introduced: [{ file: '.changeset/mine.md', majors: ['@objectstack/spec'] }], pre: { mode: 'exit' } }).verdict === 'enforce',
-      '#7005 control: the same exited pre-mode with ONE introduced major is still `enforce` — the fix narrows the gate, it does not disarm it',
-    );
-    const only = render(judge({ introduced: [{ file: '.changeset/mine.md', majors: ['@objectstack/spec'] }], pre: { mode: 'exit' } }));
-    assert(
-      only.stderr.includes('   .changeset/mine.md') && !only.stderr.some((l) => stockMajors.some(([name]) => l.includes(name))),
-      '#7005: the report names ONLY the changeset this diff introduced, never one of the pending stock files',
-    );
-  }
+  // This spot used to state #7005's acceptance criterion against the REAL
+  // `.changeset` directory, anchored by a control requiring the real stock to
+  // actually contain major-declaring changesets. That anchor was an assertion
+  // of repo PHASE, not of checker health: a release's post-exit
+  // `changeset version` consumes exactly that population, so the self-test
+  // went red on every PR in the post-cut window while saying nothing about
+  // this checker (#8654). `judge()` takes only `{ introduced, pre }` — it
+  // never reads the stock — so the one guarantee that genuinely needed a
+  // major-declaring stock was the report-scope negative ("the report names
+  // ONLY what this diff introduced, never a pending stock file"). That
+  // negative now lives in the temp-repo STOCK block below, where the stock is
+  // synthetic, really on disk at the branch point, read by the real scan, and
+  // therefore present on EVERY run, whatever the release train last did. The
+  // repo-phase halves (majors pending NOW, pre.json present NOW) are removed
+  // deliberately — asserting the repo is mid-cycle was never this control's
+  // contract.
 
   // ── Missing input is a failure, never a pass (#4690 / #7006) ──────────────
   const unreadable = judge({ introduced: null, pre: { mode: 'exit' } });
@@ -934,12 +917,38 @@ function selfTest() {
   // stay because `--list` is now the only stock view a curator has.
   {
     const real = readChangesets(REPO_ROOT);
-    assert(real !== null && real.size > 0, `reader: the real .changeset directory is non-empty — got ${real === null ? 'null' : real.size} entries`);
+    // Reachability only, never SIZE (#8654): `.changeset/` itself is tracked
+    // (README.md + config.json), so it exists in every repo phase — but its
+    // `.md` population is exactly what a release's `version packages`
+    // consumes, and "non-empty" here was an assertion of repo phase that went
+    // red on every PR in the post-cut window. What the reader must do with a
+    // POPULATED directory is asserted on the synthetic one below, which this
+    // test populates itself and is therefore populated on every run.
+    assert(real instanceof Map, 'reader: the real .changeset directory is reachable from this script (it is what `--list` audits)');
     assert(real !== null && !real.has('README.md'), 'reader: .changeset/README.md is documentation, never a changeset');
     assert(existsSync(join(REPO_ROOT, '.changeset', 'README.md')), 'reader: control — that README really exists, so the exclusion above is exercised rather than vacuous');
     assert(real !== null && [...real.keys()].every((k) => k.endsWith('.md')), 'reader: only .md files are read (pre.json and config.json are not changesets)');
+    // No third state for the real pre.json (#8654). PRESENT-and-parsing (a
+    // pre-release window) and ABSENT (post-GA — `changeset pre exit` +
+    // `version packages` legitimately removes it; absent ⇒ null ⇒ no
+    // exemption, pinned in the temp-dir block below) are both legal terminal
+    // states of the repo. The one shape that must fail here is
+    // PRESENT-but-unparsable: `readPre` collapses it to null, silently
+    // dropping an exemption nobody decided to drop — the #4690 direction
+    // pointed at the release train. Requiring presence itself was an
+    // assertion of repo phase, red on every post-cut PR, and is removed.
     const realPre = readPre(REPO_ROOT);
-    assert(realPre !== null && typeof realPre === 'object', 'reader: the real .changeset/pre.json is readable and parses');
+    if (existsSync(join(REPO_ROOT, '.changeset', 'pre.json'))) {
+      assert(
+        realPre !== null && typeof realPre === 'object',
+        'reader: the real .changeset/pre.json is PRESENT but does not parse — readPre collapses that to "no exemption" silently, a state someone must notice (#8654)',
+      );
+    } else {
+      assert(
+        realPre === null,
+        'reader: an absent real pre.json reads as null (⇒ no exemption) — absence is a legal post-GA state, never a failure (#8654)',
+      );
+    }
   }
 
   const empty = mkdtempSync(join(tmpdir(), 'changeset-no-major-'));
@@ -952,6 +961,17 @@ function selfTest() {
     assert(readPre(empty) === null, 'reader: a malformed pre.json reads as null (⇒ no exemption), never as a partial object');
     writeFileSync(join(empty, '.changeset', 'pre.json'), '{"mode":"pre","tag":"rc"}');
     assert(readPre(empty)?.mode === 'pre', 'reader: control — a well-formed pre.json DOES parse, so the two nulls above are about the input, not a broken reader');
+    // The populated-directory control (#8654): what "reader: the real
+    // .changeset directory is non-empty" used to prove, on a directory this
+    // test populates itself so the proof survives every repo phase.
+    writeFileSync(join(empty, '.changeset', 'stocked.md'), MAJOR);
+    writeFileSync(join(empty, '.changeset', 'README.md'), MAJOR);
+    const stocked = readChangesets(empty);
+    assert(
+      stocked instanceof Map && stocked.size === 1 && stocked.get('stocked.md') === MAJOR,
+      `reader: a changeset on disk is read back verbatim, keyed by file name, with pre.json and README.md beside it not counted — got ${stocked === null ? 'null' : [...(stocked ?? new Map()).keys()].join(', ')} (#8654: replaces the phase-dependent "real directory is non-empty" assertion)`,
+    );
+    assert(!stocked?.has('README.md'), 'reader: README.md is excluded even when it is shaped exactly like a major-declaring changeset');
   } finally {
     rmSync(empty, { recursive: true, force: true });
   }
@@ -1038,6 +1058,24 @@ function selfTest() {
       );
       assert(judge({ introduced, pre: { mode: 'exit' } }).verdict === 'enforce', '#7005: ... and with pre-mode exited that PR is RED');
       assert(judge({ introduced, pre: { mode: 'pre', tag: 'rc' } }).verdict === 'exempt', '#7005: ... and inside the RC window it is still exempt');
+
+      // The report-scope negative, rebuilt HERE from the real-stock block this
+      // file used to carry (#8654): the enforce report names ONLY the changeset
+      // this diff introduced, never one of the pending stock files. The control
+      // right below keeps it non-vacuous — the synthetic stock really declares
+      // majors, really sits on disk at the branch point, and the real scan just
+      // read past it — without asserting anything about the phase of the real
+      // repository.
+      assert(
+        [STOCK['.changeset/stock-1.md'], STOCK['.changeset/stock-2.md']].every((t) => majorPackagesIn(t).length > 0),
+        'control (#7005/#8654): the synthetic stock must actually contain major-declaring changesets, or the report-scope negative below is green for the wrong reason',
+      );
+      const rendered = render(judge({ introduced, pre: { mode: 'exit' } }));
+      assert(
+        rendered.stderr.includes('   .changeset/mine.md') &&
+          !rendered.stderr.some((l) => l.includes('stock-1.md') || l.includes('stock-2.md') || l.includes('stock-3.md')),
+        '#7005: the report names ONLY the changeset this diff introduced, never one of the pending stock files',
+      );
     }
 
     // Row 2: majored in place. `--diff-filter=A` alone would see nothing here.

@@ -81,7 +81,7 @@ function makeQl(row: Record<string, any>) {
       const where = query?.where ?? {};
       return (tables[object] ?? []).filter((r) =>
         Object.entries(where).every(([field, value]) =>
-          value === null ? r[field] == null : r[field] === value,
+          { if (field.startsWith('$')) throw new Error(`fake driver: unsupported operator ${field}`); return value === null ? r[field] == null : r[field] === value; },
         ),
       );
     },

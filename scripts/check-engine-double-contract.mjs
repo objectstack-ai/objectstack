@@ -350,19 +350,86 @@ function testFiles() {
   return out.sort();
 }
 
+/**
+ * The implementation a MOCK CONSTRUCTOR wraps, or null (#8639).
+ *
+ * `delete: vi.fn(async (o, opts) => …)` is a CallExpression, so the two
+ * initializer branches of `implOf` below used to answer `null` for it —
+ * `consider()` then returned before the sibling and shape tests ever ran, and
+ * the double was discovered by NEITHER side of a ledger that reconciles in both
+ * directions. Not "declared out of scope": absent. That is the DISCOVERED
+ * invariant's blind half, one layer down — `DISCOVERED != 0` catches a scan
+ * that breaks entirely and cannot catch a scan that quietly skips one spelling,
+ * and `vi.fn` is the spelling a test reaches for precisely when it wants to
+ * assert call counts on the double it just wrote.
+ *
+ * ## How wide to unwrap, measured rather than assumed
+ *
+ * Full census of the scanned corpus — every `delete`/`update` member whose
+ * initializer is a CallExpression, 310 of them, no truncation:
+ *
+ *   163  vi.fn()                              no argument at all
+ *    89  vi.fn(fn)                            ← the implementation
+ *    39  vi.fn().mockResolvedValue(value)     a VALUE, not an implementation
+ *     9  rec('DELETE')                        local recorder factory, string arg
+ *     4  vi.fn().mockImplementation(fn)       ← the implementation
+ *     3  record('DELETE')                     ditto
+ *     2  on('DELETE')                         ditto
+ *     1  vi.fn().mockRejectedValue(ERR())     a value, from a call
+ *
+ * So the criterion is STRUCTURAL and callee-agnostic: a call carrying EXACTLY
+ * ONE argument which is a function expression / arrow function. That admits the
+ * 93 that hold an implementation (`vi.fn(fn)` and, for free and correctly, the
+ * chained `.mockImplementation(fn)` — the arrow there IS what the double runs)
+ * and rejects all 217 that do not, without an allowlist of callee names that
+ * would go silently blind the day someone writes `vitest.fn` or a local wrapper.
+ *
+ * Deliberately NOT widened, both measured at ZERO occurrences on this corpus:
+ *
+ *   - a function among SEVERAL arguments (`traced('delete', fn)`). The card's
+ *     phrasing is "sole function argument" and the narrow reading is the one
+ *     that cannot mistake a lifecycle callback for the verb's implementation.
+ *   - a function in the chained receiver (`vi.fn(fn).mockResolvedValue(v)`),
+ *     which would need this to recurse into `init.expression`.
+ *
+ * Both are measurements, not opinions — re-run that census before widening,
+ * exactly as the REPOSITORY_ONLY_MEMBERS note above asks.
+ *
+ * Note which way the remaining error leans. A `vi.fn()` with no argument stays
+ * `null` and stays undiscovered, and that is correct rather than a residual
+ * gap: there is no implementation to read, so there is no function for
+ * `isEngineVerbShape` to judge and nothing that could be looser than
+ * `ObjectQL.<verb>` — the double's behaviour is `undefined`, not a lax guard.
+ */
+function unwrapCallImpl(init) {
+  if (!ts.isCallExpression(init)) return null;
+  const args = init.arguments ?? [];
+  if (args.length !== 1) return null;
+  const only = args[0];
+  if (ts.isFunctionExpression(only) || ts.isArrowFunction(only)) return only;
+  return null;
+}
+
+/**
+ * One initializer reading, shared by BOTH initializer spellings below.
+ *
+ * Shared on purpose: the object-literal (`PropertyAssignment`) and class-field
+ * (`PropertyDeclaration`) branches carried the same three lines twice and drifted
+ * apart in exactly the way that produced #8639's sibling half — a fix applied to
+ * one spelling and not the other reproduces this card at the next reading. With
+ * one function there is no second copy to forget.
+ */
+function fnInitializer(init) {
+  if (!init) return null;
+  if (ts.isFunctionExpression(init) || ts.isArrowFunction(init)) return init;
+  return unwrapCallImpl(init);
+}
+
 /** A member's function-ish implementation, or null. */
 function implOf(member) {
   if (ts.isMethodDeclaration(member) || ts.isMethodSignature(member)) return member;
-  if (ts.isPropertyAssignment(member)) {
-    const init = member.initializer;
-    if (init && (ts.isFunctionExpression(init) || ts.isArrowFunction(init))) return init;
-    return null;
-  }
-  if (ts.isPropertyDeclaration(member) && member.initializer) {
-    const init = member.initializer;
-    if (ts.isFunctionExpression(init) || ts.isArrowFunction(init)) return init;
-    return null;
-  }
+  if (ts.isPropertyAssignment(member)) return fnInitializer(member.initializer);
+  if (ts.isPropertyDeclaration(member)) return fnInitializer(member.initializer);
   if (ts.isShorthandPropertyAssignment(member)) return null;
   return null;
 }
@@ -1507,6 +1574,73 @@ const engine = {
   d = scanSource('p.test.ts', arrowFake);
   expect('an arrow-property fake engine is in scope', d.length === 1 && d[0].pinned === false);
 
+  // ── The MOCK CONSTRUCTOR spelling (#8639).
+  //
+  // `delete: vi.fn(async …)` is a CallExpression, so `implOf` answered null and
+  // the double was discovered by NEITHER side of the ledger — no output at all,
+  // the same silence #5629 found behind the arity test. Each fixture below
+  // drives ONE arm of `unwrapCallImpl`, because this file has already measured
+  // what an unfixtured arm is worth: "with only the `new Error` fixture above,
+  // neutering the call-expression arm left the self-test GREEN".
+  const viFake = (init) => `
+const engine = {
+  find: vi.fn(async (o: string) => []),
+  insert: vi.fn(async (o: string, d: any) => d),
+  update: vi.fn(async (o: string, d: any) => d),
+  delete: ${init},
+};
+`;
+  d = scanSource('v.test.ts', viFake('vi.fn(async (o: string, opts?: any) => ({ ok: true }))'));
+  expect('a vi.fn-wrapped engine delete is in scope', d.length === 1 && d[0].pinned === false);
+
+  d = scanSource('v.test.ts', IMPORT
+    + viFake('vi.fn(async (o: string, opts?: any) => { assertEngineDeleteDispatch(opts); return 1; })'));
+  expect('a vi.fn-wrapped delete that calls the predicate is pinned',
+    d.length === 1 && d[0].pinned === true);
+
+  // `.mockImplementation(fn)` holds the implementation in the SAME position the
+  // criterion reads, so it is admitted by the same rule rather than a special case.
+  d = scanSource('v.test.ts', viFake('vi.fn().mockImplementation(async (o: string, opts?: any) => 1)'));
+  expect('a .mockImplementation-wrapped engine delete is in scope', d.length === 1);
+
+  // The three call shapes that hold NO implementation must stay out: there is no
+  // function to judge, so there is nothing that could be looser than the producer.
+  expect('a bare vi.fn() with no argument is not an implementation',
+    scanSource('v.test.ts', viFake('vi.fn()')).length === 0);
+  expect('a call whose sole argument is not a function is not an implementation',
+    scanSource('v.test.ts', viFake("rec('DELETE')")).length === 0);
+  expect('a mock resolving to a VALUE is not an implementation',
+    scanSource('v.test.ts', viFake('vi.fn().mockResolvedValue(true)')).length === 0);
+
+  // The CLASS-FIELD spelling of the same thing — `implOf`'s PropertyDeclaration
+  // branch. Measured at ZERO occurrences in the corpus the fix landed against,
+  // so this fixture is the only evidence that branch works at all; without it
+  // the branch would be reachable only by a future test nobody has written yet,
+  // which is exactly how the object-literal half stayed broken unnoticed.
+  const viClassFake = `
+class FakeEngine {
+  find = vi.fn(async (o: string) => []);
+  insert = vi.fn(async (o: string, d: any) => d);
+  update = vi.fn(async (o: string, d: any) => d);
+  delete = vi.fn(async (o: string, opts?: any) => ({ ok: true }));
+}
+`;
+  d = scanSource('vc.test.ts', viClassFake);
+  expect('a vi.fn-wrapped delete on a CLASS FIELD is in scope', d.length === 1 && d[0].pinned === false);
+
+  // Unwrapping must not smuggle a double past the vetoes: the driver evidence
+  // still outranks, at the new spelling exactly as at every other one.
+  const viDriverFake = `
+const driver = {
+  find: vi.fn(async (o: string) => []),
+  create: vi.fn(async (o: string, d: any) => d),
+  update: vi.fn(async (o: string, id: string, d: any) => d),
+  delete: vi.fn(async (o: string, opts?: any) => true),
+};
+`;
+  expect('a vi.fn-wrapped DRIVER delete stays out of scope',
+    scanSource('vd.test.ts', viDriverFake).length === 0);
+
   // ── Arity: a fake omits the parameters it ignores (#5629).
   //
   // `async delete() { return false; }` is the commonest engine-double spelling
@@ -2101,6 +2235,9 @@ class Svc {
       + "engine-vs-driver sibling evidence, accepts only that slice's producer predicate (direct or "
       + "one helper deep) and never the other slice's, rejects unused imports, hand-mirrored guards "
       + 'and look-alikes, keeps an engine double in scope however many by-id helpers it declares, '
+      + 'reads the implementation a MOCK CONSTRUCTOR wraps on both the object-literal and the '
+      + 'class-field spelling while refusing the three call shapes that wrap no implementation and '
+      + 'still vetoing a driver at that spelling, '
       + 'reports EXACTLY the engine double out of a fixture holding both shapes, and proves '
       + 'discovery reaches the real tree for every slice; and, on the CONSUMER SEAMS, admits a '
       + 'by-id write only when the id is caller-supplied AND a receipt is answered, reads the '

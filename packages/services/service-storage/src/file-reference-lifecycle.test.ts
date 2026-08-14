@@ -173,7 +173,7 @@ async function driveMultiUpdate(
   data: Record<string, unknown>,
 ) {
   const rows = (engine.tables[object] ?? []).filter((r) =>
-    Object.entries(where).every(([k, v]) => r[k] === v),
+    Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }),
   );
   const options = { multi: true, where };
   const scope: Record<string, unknown> = {};
@@ -234,7 +234,7 @@ async function driveDelete(engine: Engine, object: string, input: any) {
         return (engine.tables[object] ?? []).filter((r) => ids.some((i: unknown) => String(i) === String(r.id)));
       })()
     : where
-      ? (engine.tables[object] ?? []).filter((r) => Object.entries(where).every(([k, v]) => r[k] === v))
+      ? (engine.tables[object] ?? []).filter((r) => Object.entries(where).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }))
       : [];
 
   const drop = () => {

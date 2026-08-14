@@ -248,11 +248,11 @@ describe('DatasourceAdminServicePlugin: runtime datasource durability', () => {
       getDriverByName() { return undefined; },
       findOne: async (_o: string, q: { where?: Record<string, unknown> }) => {
         const w = q.where ?? {};
-        return rows.find((r) => Object.entries(w).every(([k, v]) => r[k] === v));
+        return rows.find((r) => Object.entries(w).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }));
       },
       find: async (_o: string, q: { where?: Record<string, unknown> }) => {
         const w = q.where ?? {};
-        return rows.filter((r) => Object.entries(w).every(([k, v]) => r[k] === v));
+        return rows.filter((r) => Object.entries(w).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }));
       },
       insert: async (_o: string, row: Record<string, unknown>) => { rows.push({ ...row }); },
       update: async (_o: string, row: Record<string, unknown>, opts: { where: Record<string, unknown> }) => {

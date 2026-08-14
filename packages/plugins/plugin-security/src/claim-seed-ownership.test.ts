@@ -2,6 +2,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { claimSeedOwnership } from './claim-seed-ownership.js';
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
 const SYSTEM = 'usr_system';
 const ADMIN = 'usr_admin_human';
@@ -19,6 +20,7 @@ function makeQL(schemas: any[], rowsByObject: Record<string, any[]>) {
       return all;
     }),
     update: vi.fn(async (object: string, data: any) => {
+      assertEngineUpdateDispatch(data, undefined);
       updates.push({ object, data });
       const row = (rowsByObject[object] ?? []).find((r) => r.id === data.id);
       if (row) row.owner_id = data.owner_id;

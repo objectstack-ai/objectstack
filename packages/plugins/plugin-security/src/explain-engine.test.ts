@@ -444,7 +444,7 @@ function makeGrantQl(tables: Rows) {
     async find(object: string, opts: any) {
       const where = opts?.where ?? {};
       return (tables[object] ?? []).filter((row) =>
-        Object.entries(where).every(([key, cond]) => {
+        Object.entries(where).every(([key, cond]) => { if (key.startsWith('$')) throw new Error(`fake driver: unsupported operator ${key}`); 
           const cell = row[key];
           if (cond && typeof cond === 'object' && '$in' in (cond as any)) {
             return ((cond as any).$in as unknown[]).includes(cell);
