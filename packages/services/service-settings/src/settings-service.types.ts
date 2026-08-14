@@ -118,11 +118,23 @@ export interface SettingsEngine {
        * (`stripReadonlyFields`). Without it a secret rotation inserts the new
        * ciphertext, answers 200 with a correctly redacted body, and leaves
        * `value_enc` pointing at the OLD handle — the rotated-away credential
-       * stays in force.
+       * stays in force, and the ciphertext just written is orphaned.
        *
        * ⛔ An adapter over `IDataEngine` MUST forward this. Dropping it
-       * restores the defect silently, with every visible signal still saying
-       * the write landed.
+       * restores the defect, and every response-visible signal still says the
+       * write landed: the ONLY thing that reports it is a server-side error
+       * from `SettingsService.reapRotatedSecret`, which re-reads the row,
+       * sees it still naming the old handle, and refuses to reap (#8262).
+       *
+       * ⚠️ Between #8063 and #8262 the consequence was worse than the
+       * paragraph above, and an adapter written against that window's docs is
+       * exposed to it: the reaper INFERRED the repoint from
+       * `previousEnc !== nextEnc` and deleted the handle the row still named
+       * — destroying the credential in force and leaving a dangling
+       * `value_enc` that reads as empty, unrecoverably (the audit trail
+       * records digests, never handles or ciphertext). The reaper verifies
+       * rather than infers now, so this failure is recoverable again. That is
+       * not a licence to drop `context`: your rotations still do not happen.
        */
       context?: Record<string, unknown>;
     },

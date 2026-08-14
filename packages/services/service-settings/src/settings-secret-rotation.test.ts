@@ -66,14 +66,19 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { ObjectQL } from '@objectstack/objectql';
+// `assertEngineUpdateDispatch` re-exports the shared producer-side predicate
+// (`@objectstack/metadata-core` since #5619) through objectql, which is already
+// a devDependency here and already aliased to SOURCE by `vitest.config.ts` — so
+// the #8262 doubles below stay pinned to the real dispatch contract without
+// adding a dependency or an alias.
+import { assertEngineUpdateDispatch, ObjectQL } from '@objectstack/objectql';
 import { SysSecret, SysSetting } from '@objectstack/platform-objects/system';
 import type { SettingsManifest } from '@objectstack/spec/system';
 import { SettingsService } from './settings-service.js';
 import { wrapEngineAsSettingsEngine } from './settings-service-plugin.js';
 import { LocalCryptoProvider } from './local-crypto-provider.js';
 import { dropEchoedSecretMasks, SETTINGS_SECRET_MASK } from './settings-secret-redaction.js';
-import type { SettingsSecretStore } from './settings-service.types.js';
+import type { SettingsEngine, SettingsSecretStore } from './settings-service.types.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -174,16 +179,86 @@ function makeMemoryDriver() {
 }
 
 /**
+ * [#8262] Reproduces the adapter the `SettingsEngine` doc comment warns about:
+ * identical to `wrapEngineAsSettingsEngine` except that it DROPS `context` on
+ * the way to the engine.
+ *
+ * That single omission is the whole hazard — `sys_setting.value_enc` is
+ * declared `readonly: true` and the engine strips author-declared read-only
+ * columns from a NON-system caller's UPDATE (`stripReadonlyFields`, gated on
+ * `context.isSystem`), while the INSERT path is exempt (#3413). It is a
+ * documented extension point, so the population that reaches it is real:
+ * third-party adapter authors, who have no other discovery path.
+ */
+function wrapEngineDroppingContext(engine: any): SettingsEngine {
+  const real = wrapEngineAsSettingsEngine(engine);
+  return {
+    find: real.find.bind(real),
+    insert: real.insert.bind(real),
+    async update(objectName, opts) {
+      // Loose in exactly ONE dimension — `context` — and conformant in every
+      // other, or the row states it produces stop being evidence about the
+      // real engine. `multi: true` is passed unconditionally because that IS
+      // the settings adapter's contract (a scalar `where.id` outranks `multi`
+      // in the shared predicate, and the settings row write never has one).
+      assertEngineUpdateDispatch((opts as any)?.data ?? {}, {
+        where: (opts as any)?.where,
+        multi: true,
+      });
+      const { context: _dropped, ...withoutContext } = opts as any;
+      return real.update(objectName, withoutContext);
+    },
+  };
+}
+
+/**
+ * [#8262] Forwards `context` correctly, but makes the FIRST read after any
+ * update throw — which is exactly the reaper's post-write verification read.
+ *
+ * The constraint this exists to pin: `reapRotatedSecret` runs after the write
+ * has committed and is "never allowed to fail the write" (its call site says
+ * so). Adding a read to it must not turn a transient read failure into a
+ * failed rotation.
+ */
+function wrapEngineFailingPostUpdateReads(engine: any): SettingsEngine {
+  const real = wrapEngineAsSettingsEngine(engine);
+  let armed = false;
+  return {
+    async find(objectName, opts) {
+      if (armed) {
+        armed = false;
+        throw new Error('read replica offline');
+      }
+      return real.find(objectName, opts);
+    },
+    insert: real.insert.bind(real),
+    async update(objectName, opts) {
+      assertEngineUpdateDispatch((opts as any)?.data ?? {}, {
+        where: (opts as any)?.where,
+        multi: true,
+      });
+      const res = await real.update(objectName, opts);
+      armed = true;
+      return res;
+    },
+  };
+}
+
+/**
  * The four pieces the running server bolts together: a real engine over the
  * real system objects, the real `IDataEngine → SettingsEngine` adapter, the
  * real `sys_secret` store the plugin builds, and the real service.
  *
  * `secretStoreOverrides` lets one case break `delete` without touching the
- * others; `withDelete: false` reproduces a store that cannot reap at all.
+ * others; `withDelete: false` reproduces a store that cannot reap at all;
+ * `forwardContext: false` / `failVerificationRead` swap in the two #8262
+ * adapters above.
  */
 async function boot(opts: {
   secretStoreOverrides?: Partial<SettingsSecretStore>;
   withDelete?: boolean;
+  forwardContext?: boolean;
+  failVerificationRead?: boolean;
 } = {}) {
   const engine = new ObjectQL();
   const { driver, rowsOf } = makeMemoryDriver();
@@ -218,7 +293,11 @@ async function boot(opts: {
   const logged: string[] = [];
   const svc = new SettingsService({
     env: {},
-    engine: wrapEngineAsSettingsEngine(engine as any),
+    engine: opts.failVerificationRead
+      ? wrapEngineFailingPostUpdateReads(engine)
+      : opts.forwardContext === false
+        ? wrapEngineDroppingContext(engine)
+        : wrapEngineAsSettingsEngine(engine as any),
     cryptoProvider: new LocalCryptoProvider(),
     secretStore: { ...baseStore, ...(opts.secretStoreOverrides ?? {}) },
     logger: { error: (m) => { logged.push(m); } },
@@ -458,5 +537,128 @@ describe('#8030 — wrapEngineAsSettingsEngine forwards the execution context', 
     expect(calls).toHaveLength(1);
     expect(calls[0][1]).toMatchObject({ id: 'row_1', value_enc: 'sec_new' });
     expect(calls[0][2]).toMatchObject({ bypassTenantAudit: true, context: { isSystem: true } });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 8. #8262 — the reaper VERIFIES the repoint instead of inferring it
+// ---------------------------------------------------------------------------
+
+/**
+ * #8262 — `reapRotatedSecret` deleted the handle `upsertRow` reported as
+ * `previousEnc` without ever confirming the repoint it was cleaning up after
+ * had taken effect; it inferred that from `previousEnc !== nextEnc`.
+ *
+ * That inference holds for the shipped adapter (which forwards
+ * `context: { isSystem: true }`) and fails for one that drops it — the reader
+ * `SettingsEngine`'s own doc comment contemplates. With `context` dropped the
+ * UPDATE has `value_enc` stripped, so the row still names `previousEnc`, and
+ * the reaper deleted **the ciphertext still in force**: `materialiseRow`
+ * dereferences a dangling handle, gets nothing, and the setting silently reads
+ * empty. Unrecoverable — the audit trail records digests, never handles.
+ *
+ * Before the reaper existed the same adapter bug was non-destructive (the
+ * rotated-away credential merely stayed in force). These cases pin that the
+ * failure mode is back to recoverable, and now LOUD rather than silent.
+ *
+ * ⚠️ Direction of the counterfactual: on the pre-fix source, `three writes`
+ * below reads `[1, 1, 2]` and the value reads back `null`. The fix does not
+ * make a context-dropping adapter correct — nothing at this layer can, the
+ * repoint is stripped one layer down — it makes the failure survivable.
+ * Sections 5 and 6 are the other half of the pin: with `context` forwarded,
+ * the verification passes and reaping still happens on every rotation, so a
+ * fix that simply stopped reaping would go red there.
+ */
+describe('#8262 — the reaper never deletes the ciphertext that is still in force', () => {
+  it('a context-dropping adapter keeps the in-force ciphertext, and the setting still reads', async () => {
+    const { svc, settingRow, secretRows } = await boot({ forwardContext: false });
+
+    await svc.set('sms', 'twilio_auth_token', 'alpha');
+    const handleA = settingRow()?.value_enc as string;
+    expect(handleA).toMatch(/^sec_/);
+    expect(secretRows()).toHaveLength(1);
+
+    // The second write is where the defect lived: the repoint is stripped, so
+    // `value_enc` still names `handleA`, while `upsertRow` reports it as the
+    // handle rotated AWAY from.
+    await svc.set('sms', 'twilio_auth_token', 'beta');
+
+    // The strip itself is NOT this card's subject and is unchanged: the row
+    // still names the old handle. What must never happen is the deletion.
+    expect(settingRow()?.value_enc).toBe(handleA);
+
+    // ⛔ THE assertion. Pre-fix this row was gone and `value_enc` dangled.
+    expect(secretRows().some((r) => r.id === handleA)).toBe(true);
+
+    // …and the consequence that makes it data loss rather than a stale value:
+    // pre-fix this read returned `null` with the credential unrecoverable.
+    expect((await svc.get<string>('sms', 'twilio_auth_token')).value).toBe('alpha');
+  });
+
+  it('three writes leave the recoverable pre-reaper shape (1→2→3), not the destructive one (1→1→2)', async () => {
+    const { svc, settingRow, secretRows } = await boot({ forwardContext: false });
+
+    await svc.set('sms', 'twilio_auth_token', 'tok-1');
+    const pinned = settingRow()?.value_enc as string;
+    const afterFirst = secretRows().length;
+
+    await svc.set('sms', 'twilio_auth_token', 'tok-2');
+    const afterSecond = secretRows().length;
+
+    await svc.set('sms', 'twilio_auth_token', 'tok-3');
+    const afterThird = secretRows().length;
+
+    // The card's table, inverted. `[1, 1, 2]` is the destructive shape: the
+    // second write deleted the row the setting pointed at.
+    expect([afterFirst, afterSecond, afterThird]).toEqual([1, 2, 3]);
+    expect(settingRow()?.value_enc).toBe(pinned);
+    expect(secretRows().some((r) => r.id === pinned)).toBe(true);
+    expect((await svc.get<string>('sms', 'twilio_auth_token')).value).toBe('tok-1');
+  });
+
+  it('says so LOUDLY — the failure the adapter doc calls silent now names itself', async () => {
+    const { svc, logged } = await boot({ forwardContext: false });
+    await svc.set('sms', 'twilio_auth_token', 'alpha');
+    await svc.set('sms', 'twilio_auth_token', 'beta');
+
+    const out = logged.join('\n');
+    // The operator's question is "did my rotation happen?", so the message has
+    // to answer that, name the row, and name the cause.
+    expect(out).toMatch(/did NOT take effect/);
+    expect(out).toMatch(/sms\.twilio_auth_token/);
+    expect(out).toMatch(/context/);
+    // It must be a refusal, not a report of something already destroyed.
+    expect(out).toMatch(/REFUSED to delete/);
+  });
+
+  it('a verification read that THROWS still leaves the rotation landed (never fails the write)', async () => {
+    const { svc, settingRow, secretRows, logged } = await boot({ failVerificationRead: true });
+
+    await svc.set('sms', 'twilio_auth_token', 'alpha');
+    const handleA = settingRow()?.value_enc as string;
+
+    // The write itself must survive a reaper that cannot verify — the call
+    // site's "never allowed to fail the write" constraint covers the read the
+    // fix added, not just the delete.
+    await expect(svc.set('sms', 'twilio_auth_token', 'beta')).resolves.toBeDefined();
+
+    // The rotation landed (context IS forwarded here) …
+    const handleB = settingRow()?.value_enc as string;
+    expect(handleB).not.toBe(handleA);
+    expect((await svc.get<string>('sms', 'twilio_auth_token')).value).toBe('beta');
+
+    // … and the unverifiable handle was left alone rather than destroyed on a
+    // guess. An orphan is recoverable; a deleted in-force ciphertext is not.
+    expect(secretRows().some((r) => r.id === handleA)).toBe(true);
+    expect(logged.join('\n')).toMatch(/could not confirm/);
+  });
+
+  it('a store with no delete is unaffected — no verification read is issued at all', async () => {
+    // The verification read costs one I/O and must only be paid where a
+    // destructive delete would otherwise follow.
+    const { svc, secretRows } = await boot({ withDelete: false, forwardContext: false });
+    await svc.set('sms', 'twilio_auth_token', 'alpha');
+    await svc.set('sms', 'twilio_auth_token', 'beta');
+    expect(secretRows()).toHaveLength(2);
   });
 });
