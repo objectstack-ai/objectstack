@@ -203,8 +203,11 @@ describe('seedSuperUserRestrictedObjects (#3391)', () => {
     annotateEffectiveApiOperations(objects, (name) => schemas.find((s) => s.name === name));
     // [#3544] NO `export`: modifyAllRecords is a record-visibility bypass, not
     // an export grant, and the axis is opt-in. A super-user who should also be
-    // able to take bulk copies carries `allowExport: true` explicitly — which
-    // is exactly what the built-in admin sets now do.
+    // able to take bulk copies carries `allowExport: true` explicitly.
+    // [#8681] The built-in admin sets deliberately do NOT — their wildcard
+    // export grant was removed (it made the axis undeniable for an org admin),
+    // so this case is now the built-in admin shape rather than the counterpoint
+    // to it. An APP set is where an intended admin export is authored.
     expect(objects.widget.apiOperations).toEqual(['get', 'list', 'aggregate', 'search']);
     expect(objects.locked.apiOperations).toEqual([]);
   });
