@@ -56,6 +56,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import type { DriverQuery } from '@objectstack/spec/contracts';
 import { SqlDriver, isUnresolvableColumnError, unresolvableColumnNameOf } from './sql-driver.js';
 import { DIALECT_CELLS, declareDialectCell, type DialectCell } from './live-dialect-matrix.testkit.js';
 
@@ -71,6 +72,23 @@ const SECRET_LITERAL = 'zz-bound-literal-must-not-leak';
 
 /** Cells whose unresolvable-column wording this driver recognises. */
 const RECOGNISED_CELLS = DIALECT_CELLS.filter((c) => c.id === 'sqlite' || c.id === 'pg');
+
+/**
+ * The two routes the card names, typed as what the driver actually takes.
+ *
+ * `DriverQuery` rather than `as any`: its own docblock records that a direct
+ * caller holding only a `where` used to reach for a blanket cast and lose
+ * `where`'s type with it, which is the erasure `check:query-options-erasure`
+ * ratchets. A refusal suite that names columns for a living should be the last
+ * place to throw the type away.
+ */
+const UNRESOLVABLE: ReadonlyArray<{ label: string; where: NonNullable<DriverQuery['where']>; named: string }> = [
+  // Reachable when the registry cannot answer at all — the backstop case.
+  { label: 'a plain unknown column', where: { nosuchcol: SECRET_LITERAL }, named: 'nosuchcol' },
+  // Reachable with a FULLY populated registry: the doors judge a dotted key on
+  // its head segment only, and `title` is a real field.
+  { label: 'a dotted key on a real head', where: { 'title.x': SECRET_LITERAL }, named: 'title.x' },
+];
 
 async function caught(run: () => Promise<unknown>): Promise<any> {
   try {
@@ -105,23 +123,16 @@ describe(`[#8790] driver-sql — unresolvable WHERE column refuses on BOTH halve
   // THE RULING — both halves refuse, with the declared envelope
   // ───────────────────────────────────────────────────────────────
 
-  // A plain unknown key and a dotted one are the two routes the card names:
-  // the dotted one is what stays reachable with a fully populated registry
-  // (the doors judge a dotted key on its head segment only), the plain one is
-  // what reaches the driver when the registry cannot answer at all.
-  for (const [label, where, named] of [
-    ['a plain unknown column', { nosuchcol: SECRET_LITERAL }, 'nosuchcol'],
-    ['a dotted key on a real head', { 'title.x': SECRET_LITERAL }, 'title.x'],
-  ] as const) {
+  for (const { label, where, named } of UNRESOLVABLE) {
     it(`find() refuses ${label} with INVALID_FILTER / 400 naming the column`, async () => {
-      const err = await caught(() => driver.find(TABLE, { where } as any));
+      const err = await caught(() => driver.find(TABLE, { where }));
       expect(err.code).toBe('INVALID_FILTER');
       expect(err.status).toBe(400);
       expect(err.message).toContain(named);
     });
 
     it(`count() refuses ${label} with INVALID_FILTER / 400 naming the column`, async () => {
-      const err = await caught(() => driver.count(TABLE, { where } as any));
+      const err = await caught(() => driver.count(TABLE, { where }));
       expect(err.code).toBe('INVALID_FILTER');
       expect(err.status).toBe(400);
       expect(err.message).toContain(named);
@@ -130,8 +141,8 @@ describe(`[#8790] driver-sql — unresolvable WHERE column refuses on BOTH halve
     // The two halves must not merely both fail — they must fail the SAME way.
     // Answering one predicate two different ways is the whole defect.
     it(`find() and count() answer ${label} with the same envelope`, async () => {
-      const onFind = await caught(() => driver.find(TABLE, { where } as any));
-      const onCount = await caught(() => driver.count(TABLE, { where } as any));
+      const onFind = await caught(() => driver.find(TABLE, { where }));
+      const onCount = await caught(() => driver.count(TABLE, { where }));
       expect({ code: onCount.code, status: onCount.status, message: onCount.message })
         .toEqual({ code: onFind.code, status: onFind.status, message: onFind.message });
     });
@@ -143,8 +154,8 @@ describe(`[#8790] driver-sql — unresolvable WHERE column refuses on BOTH halve
   // predicate-text disclosure shape #7929 redacted elsewhere.
   it('neither half puts the bound literal or the compiled statement on the wire', async () => {
     for (const half of [
-      () => driver.find(TABLE, { where: { nosuchcol: SECRET_LITERAL } } as any),
-      () => driver.count(TABLE, { where: { nosuchcol: SECRET_LITERAL } } as any),
+      () => driver.find(TABLE, { where: { nosuchcol: SECRET_LITERAL } }),
+      () => driver.count(TABLE, { where: { nosuchcol: SECRET_LITERAL } }),
     ]) {
       const err = await caught(half);
       expect(err.message).not.toContain(SECRET_LITERAL);
@@ -161,25 +172,25 @@ describe(`[#8790] driver-sql — unresolvable WHERE column refuses on BOTH halve
   // ───────────────────────────────────────────────────────────────
 
   it('CONTROL a resolvable column on the same shape still returns its rows and its count', async () => {
-    const rows = await driver.find(TABLE, { where: { title: 'Design' } } as any);
+    const rows = await driver.find(TABLE, { where: { title: 'Design' } });
     expect(rows.map((r: any) => r.id)).toEqual(['t1']);
-    expect(await driver.count(TABLE, { where: { title: 'Design' } } as any)).toBe(1);
+    expect(await driver.count(TABLE, { where: { title: 'Design' } })).toBe(1);
   });
 
   it('CONTROL an unfiltered read is untouched', async () => {
-    const rows = await driver.find(TABLE, {} as any);
+    const rows = await driver.find(TABLE, {});
     expect(rows.map((r: any) => r.id).sort()).toEqual(['t1', 't2']);
     expect(await driver.count(TABLE)).toBe(2);
   });
 
   it('CONTROL a resolvable predicate that genuinely matches nothing is still an honest empty list', async () => {
     // The one empty answer that must never become a 400: the predicate ran.
-    expect(await driver.find(TABLE, { where: { title: 'no-such-title' } } as any)).toEqual([]);
-    expect(await driver.count(TABLE, { where: { title: 'no-such-title' } } as any)).toBe(0);
+    expect(await driver.find(TABLE, { where: { title: 'no-such-title' } })).toEqual([]);
+    expect(await driver.count(TABLE, { where: { title: 'no-such-title' } })).toBe(0);
   });
 
   it('CONTROL an error that is not about an unresolvable column still propagates unchanged', async () => {
-    const err = await caught(() => driver.find('no_such_table_at_all', {} as any));
+    const err = await caught(() => driver.find('no_such_table_at_all', {}));
     expect(err.code).not.toBe('INVALID_FILTER');
   });
 
@@ -191,7 +202,7 @@ describe(`[#8790] driver-sql — unresolvable WHERE column refuses on BOTH halve
     const rows = await driver.find(TABLE, {
       fields: ['title', 'nosuchfield'],
       where: { rank: { $gte: 1 } },
-    } as any);
+    });
     expect(rows.map((r: any) => r.title).sort()).toEqual(['Build', 'Design']);
   });
 
@@ -199,7 +210,7 @@ describe(`[#8790] driver-sql — unresolvable WHERE column refuses on BOTH halve
     const rows = await driver.find(TABLE, {
       orderBy: [{ field: 'nosuchfield', order: 'asc' }],
       where: { rank: { $gte: 2 } },
-    } as any);
+    });
     expect(rows.map((r: any) => r.id)).toEqual(['t2']);
   });
 
@@ -208,7 +219,7 @@ describe(`[#8790] driver-sql — unresolvable WHERE column refuses on BOTH halve
       fields: ['title', 'nosuchfield'],
       orderBy: [{ field: 'alsomissing', order: 'asc' }],
       where: { rank: { $gte: 1 } },
-    } as any);
+    });
     expect(rows).toHaveLength(2);
   });
 
@@ -219,7 +230,7 @@ describe(`[#8790] driver-sql — unresolvable WHERE column refuses on BOTH halve
   // the ladder actually fixed.
   it('refuses when the WHERE is unresolvable even though the projection was recoverable', async () => {
     const err = await caught(() =>
-      driver.find(TABLE, { fields: ['title', 'nosuchfield'], where: { alsomissing: 'x' } } as any),
+      driver.find(TABLE, { fields: ['title', 'nosuchfield'], where: { alsomissing: 'x' } }),
     );
     expect(err.code).toBe('INVALID_FILTER');
     expect(err.status).toBe(400);
