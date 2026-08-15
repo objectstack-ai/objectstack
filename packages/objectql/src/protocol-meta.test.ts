@@ -502,6 +502,22 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             });
 
             it('accepts a spec-conformant dashboard payload', async () => {
+                // [#7529] An ACTIVE dashboard save is now judged by
+                // `validateWidgetBindings` at the runtime publish gate, so
+                // "spec-conformant" includes referential coherence: the
+                // dataset the widget binds must resolve in the live registry
+                // (maintainer-ruled 2026-08-12 — a dangling binding is refused
+                // at publish, never answered 200; this fixture's old
+                // acceptance WITHOUT the dataset was exactly the card's
+                // symptom). Register the dataset the same way the engine's
+                // metadata loader does, measure named 'amount_sum' so the
+                // widget's `values` selection resolves too.
+                registry.registerItem('dataset', {
+                    name: 'opportunity_metrics',
+                    object: 'opportunity',
+                    measures: [{ name: 'amount_sum', field: 'amount', aggregate: 'sum' }],
+                }, 'name');
+
                 await expect(
                     protocol.saveMetaItem({
                         type: 'dashboard',
