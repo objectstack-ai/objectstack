@@ -13,11 +13,15 @@ and a platform-wide enforce-or-remove sweep turns silently-ignored keys —
 dashboard widget typos, dead hook events, phantom webhook triggers, unknown
 `requires` capabilities — into loud errors at authoring time.
 
-> **Release status:** the 16.0.0 train is currently published as
-> `16.0.0-rc.0`. This page describes the 16.0.0 content; section headings say
-> 16.0.0 for brevity. (15.1.1 was a small patch on the previous line —
-> better-auth family pinning and auth-plugin init isolation — covered by the
-> [v15 page](/docs/releases/v15).)
+> **Release status: 16.0.0 is released.** It was published on 2026-07-21,
+> closing a train that ran through `16.0.0-rc.0` and `16.0.0-rc.1` (cut
+> 2026-07-19 and 2026-07-20). `changeset pre exit` ran with that cut, so the
+> `@objectstack/*` packages no longer publish as `16.0.0-rc.N`. The v16 line is
+> closed: `16.1.0` followed on 2026-07-22 and is its final release, and the
+> current series is [17.0.0](/docs/releases/v17). This page describes the
+> 16.0.0 content; the 16.1.0 minor is not covered here. (15.1.1 was a small
+> patch on the previous line — better-auth family pinning and auth-plugin init
+> isolation — covered by the [v15 page](/docs/releases/v15).)
 
 ## Highlights — 16.0.0
 
@@ -528,8 +532,9 @@ directly) and the removal of the Gantt mobile QR-share context action
 > **Console vs. pin.** This section is sourced from **objectui's own
 > changesets**, not only the `@objectstack/console` bundle-bump summaries (a
 > bump pins a SHA and can lag objectui `main`). The `rc.0` bundle pins
-> `94d4876`; the pin has since advanced to `af1b0db` on `main` — that later
-> Console work is under [Landed since 16.0.0-rc.0](#landed-since-1600-rc0).
+> `94d4876`; the pin advanced to `af1b0db` before the `16.0.0-rc.1` cut — that
+> later Console work is under
+> [Landed since 16.0.0-rc.0](#landed-since-1600-rc0).
 
 ### Approvals inbox goes metadata-driven (#2678 line)
 
@@ -659,15 +664,17 @@ The four frontend changes that were pending when this page was first written
 `numberList` flow mapping — objectui#2708; ActionParamDialog upload guard +
 `autonumber` — objectui#2707; system-field classifier consolidation —
 objectui#2706) **are now bundled**: the console pin advanced `94d4876 →
-af1b0db` on `main`. They plus a further wave of Console work are described
-under [Landed since 16.0.0-rc.0](#landed-since-1600-rc0) below.
+af1b0db`, released as `@objectstack/console` 16.0.0-rc.1. They plus a further
+wave of Console work are described under
+[Landed since 16.0.0-rc.0](#landed-since-1600-rc0) below.
 
 ## Landed since 16.0.0-rc.0
 
-These changes are on `main` after the `rc.0` cut and **roll into the next 16.0
-RC** — backend from the pending changesets, Console from the objectui pin
-advancing `94d4876 → af1b0db` (objectui #2706–#2736). Sourced from each repo's
-own changesets.
+These changes are on `main` after the `rc.0` cut and **rolled into
+`16.0.0-rc.1`**, cut on 2026-07-20 — the train's last RC, so every entry below
+shipped in **16.0.0**. Backend from those changesets, Console from the objectui
+pin advancing `94d4876 → af1b0db` (objectui #2706–#2736), bundled as
+`@objectstack/console` 16.0.0-rc.1. Sourced from each repo's own changesets.
 
 ### Breaking / behavior
 
