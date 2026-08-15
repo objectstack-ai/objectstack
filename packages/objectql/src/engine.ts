@@ -3023,7 +3023,7 @@ export class ObjectQL implements IObjectQLEngine {
         fields: ['id'],
         limit: 2,
         context: { isSystem: true },
-      } as any);
+      });
       ids = (Array.isArray(rows) ? rows : [])
         .map((r: any) => (r?.id ?? r?._id))
         .filter((id: unknown) => id != null && String(id) !== '')
