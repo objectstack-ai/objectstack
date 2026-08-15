@@ -27,6 +27,7 @@ import {
   type AuthManagerOptions,
 } from './auth-manager.js';
 import { ensureDefaultOrganization } from './ensure-default-organization.js';
+import { recoverInternalFieldsForSystemRead } from './internal-field-readback.js';
 import { runAttributedToUser } from './auth-actor-attribution.js';
 import type { AuthEventAuditSurface } from './auth-session-audit.js';
 import type { ResolvedSocialProvider } from './backfill-account-issuer.js';
@@ -1539,6 +1540,12 @@ export class AuthPlugin implements Plugin {
           { context: { isSystem: true } },
         )
         .catch(() => []);
+      // [#8676] `sys_account.password` is `internal: true`, so the row above
+      // arrives without it — the engine's strip has no `isSystem` carve-out.
+      // Recover it through the privileged accessor; otherwise this probe reads
+      // `undefined` on every boot and the dev credential hint silently stops
+      // appearing (fails soft, which is why it would never be noticed).
+      await recoverInternalFieldsForSystemRead(ql, 'sys_account', accounts, ['password']);
       const hash = Array.isArray(accounts) ? accounts[0]?.password : undefined;
       if (typeof hash !== 'string' || hash.length === 0) return;
 
