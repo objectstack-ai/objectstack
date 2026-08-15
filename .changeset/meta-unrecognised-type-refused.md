@@ -45,7 +45,7 @@ have no static registry entry at all — `theme`, `webhook`, `connector`,
 deployment with zero themes is explicitly covered, because that first create is
 exactly what a live-registry check would have broken.
 
-**The refusal is scoped to the door that mints.** Reads are untouched: a running
+**The refusal is scoped to the door that mints.** Reads still ANSWER: a running
 kernel legitimately holds live type keys the static contract does not — `data`,
 `kind` and `package` all enter the registry during an ordinary `registerApp`,
 and `GET /api/v1/meta/types` lists that live set — so refusing unrecognised
@@ -54,6 +54,46 @@ names on the read path would answer 400 for types the same service advertises.
 unrecognised type before this change are real, nothing rewrites them on upgrade,
 and refusing their deletion would turn the accumulation this fixes into an
 accumulation nobody can clear.
+
+**…but one published ADVERTISEMENT narrows with it, and that is a second
+behaviour change worth reading on its own.** `GET /api/v1/meta/types` keeps
+listing every live type, and every entry keeps every field — what changes is the
+VALUE of one boolean:
+
+```
+GET /api/v1/meta/types  →  entries[] where type ∈ {policy, data, package, kind}
+  before → allowRuntimeCreate: true
+  after  → allowRuntimeCreate: false
+```
+
+The listing synthesised `allowRuntimeCreate: true` for every live type with no
+static registry entry, on the same expired premise as the write door: a name the
+registry does not carry might be a kind some plugin declared. It now derives that
+flag from the SAME predicate the mint door enforces, so the two endpoints agree
+by construction instead of via two rules maintained apart. Nothing ever honoured
+a runtime create on those four — they are internal bookkeeping (seed datasets,
+package rows, kind descriptors) — so the advertisement was a promise the platform
+did not keep, which is the same defect this card is about, relocated to the read
+door. Direct precedent: `api` declared `allowRuntimeCreate: true`, the runtime
+never honoured it, and the 2026-08-07 ruling removed the declaration rather than
+converging the read path onto it.
+
+⛔ The six plugin kinds with no registry entry — `theme`, `webhook`, `connector`,
+`sharing_rule`, `analytics_cube`, `rag_pipeline` — are **not** affected: they are
+in the static spelling contract, stay advertised `allowRuntimeCreate: true`, and
+stay mintable. A UI reading this field (Setup → Metadata, the Studio designers)
+therefore loses create affordances on exactly the four types whose creates were
+already refused, and keeps them everywhere else.
+
+**The premise behind both halves is a CURRENT posture, not a closed door.**
+Maintainer ruling, 2026-08-15, verbatim and untranslated:
+暂时不考虑让插件申明新的元数据类型 — plugins do not declare new metadata types
+*for now*. That word is recorded deliberately: plugin-declared kinds were
+considered and deferred, not ruled out. If they are ever wanted, the two sites
+that encode the deferral name it and its date in place —
+`getMetaTypes()`'s synthesis and `isRuntimeCreateAllowed` in
+`@objectstack/metadata-protocol` — so the decision is findable rather than
+re-derived from the code's silence.
 
 **Two shapes reaching the mint door are exempt, and each is a fact about the
 request rather than a claim the caller makes.**
@@ -84,21 +124,26 @@ request rather than a claim the caller makes.**
 **What breaks.** A caller creating metadata at runtime, at the simple arity,
 under a type name that is in neither half of the static spelling contract and
 has no rows already. That set is **not** empty in this repo — measured on
-`objectql`, `runtime` and `rest`: in-tree fixtures mint `trigger` (a kind ADR-0088
-retired), `policy`, and a synthetic `my_plugin_kind`, and `getMetaTypes()`
-advertises `policy` / `data` / `package` / `kind` as `allowRuntimeCreate: true`
-while this door refuses them. Whether the accept set should admit those or they
-should stop being advertised is with the maintainer (#8421); until that is ruled,
-the divergence is left visible rather than papered over. An out-of-tree plugin
-that made its kind live by registering an item of it, and then accepted runtime
-writes to that kind through `/meta`, needs its spelling in the contract; there is
-no declared-kind channel to register one through today — that is the trade
-#8586's retirement made.
+`objectql`, `runtime` and `rest`, three in-tree fixtures minted `trigger` (a kind
+ADR-0088 retired outright), `policy`, and a synthetic `my_plugin_kind`. All three
+are corrected here rather than exempted, and each for its own reason: the
+`trigger` specimens were debt independent of any ruling (a retired kind cannot
+demonstrate a live tier, and they were green only through the hole this card
+closes), `policy` becomes a refusal case of its own, and #7894's control keeps
+its `metaUrlSpellingRefusal` claim while its boundary expectation follows the
+narrowing. An out-of-tree plugin that made its kind live by registering an item
+of it, and then accepted runtime writes to that kind through `/meta`, needs its
+spelling in the contract; there is no declared-kind channel to register one
+through today — that is the trade #8586's retirement made, and the `暂时` above
+is what makes it revisitable.
 
 `@objectstack/spec` gains one export, `unrecognisedMetaTypeRefusal`, alongside
 the #7894 verdict it deliberately does not merge with: one says *you spelled a
 declared type wrongly* and can name the replacement, the other says *there is no
 such type* and never guesses. The residue pin #7894 left behind
 (`metadata-url-spelling.test.ts`, the case that asserted `fieldz` was refused by
-nobody) is **flipped, not deleted**, and #7894's positive control keeps every
-assertion it was written with.
+nobody) is **flipped, not deleted**. ⚠️ #7894's positive control keeps its own
+claim intact — `metaUrlSpellingRefusal` still cannot refuse a kind that is a
+misspelling of nothing, which is what makes that control true by construction —
+but the BOUNDARY it drives now refuses six of the twelve names it exercises,
+and that case says so in place rather than leaving it to inference.
