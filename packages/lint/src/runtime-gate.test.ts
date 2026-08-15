@@ -18,6 +18,7 @@ import {
 import type { AuthoringFinding } from './authoring-rules.js';
 import { validateVisibilityPredicates } from './validate-visibility-predicates.js';
 import { validatePredicatePathRefs } from './validate-predicate-path-refs.js';
+import { validateWidgetBindings } from './validate-widget-bindings.js';
 
 /** The issue's measured example: an approval flow whose expression approver is broken CEL. */
 const brokenApprovalFlow = {
@@ -211,6 +212,9 @@ describe('runtime publish gate (#4463)', () => {
       objects: [{ name: 'acct' }],
       permissions: [{ name: 'ops' }, { name: 'sales' }],
       books: [{ name: 'guide' }],
+      // [#7529] The fourth context collection — the dataset universe
+      // `validateWidgetBindings` resolves widget bindings against.
+      datasets: [{ name: 'orders_ds' }],
     };
 
     it('returns null for an unmapped type or a non-object body', () => {
@@ -220,11 +224,11 @@ describe('runtime publish gate (#4463)', () => {
 
     it('carries every context collection IDENTICALLY in both passes for a non-context write', () => {
       // The isolation property PR #8390's seed proof rests on, now for all
-      // three collections: a `flow` write may only differ from its baseline in
+      // four collections: a `flow` write may only differ from its baseline in
       // its own collection, so any finding derived from objects/permissions/
-      // books cancels in the gate's diff.
+      // books/datasets cancels in the gate's diff.
       const s = buildRuntimeWriteSnapshots({ type: 'flow', item: { name: 'f1' }, context })!;
-      for (const key of ['objects', 'permissions', 'books'] as const) {
+      for (const key of ['objects', 'permissions', 'books', 'datasets'] as const) {
         expect(s.baseline[key]).toEqual(context[key]);
         expect(s.candidate[key]).toEqual(context[key]);
       }
@@ -249,7 +253,7 @@ describe('runtime publish gate (#4463)', () => {
 
     it('an absent context still yields empty collections, never a throw', () => {
       const s = buildRuntimeWriteSnapshots({ type: 'book', item: { name: 'b1' } })!;
-      expect(s.baseline).toEqual({ objects: [], permissions: [], books: [] });
+      expect(s.baseline).toEqual({ objects: [], permissions: [], books: [], datasets: [] });
       expect(s.candidate.books).toEqual([{ name: 'b1' }]);
     });
   });
@@ -636,6 +640,288 @@ describe('the publish gate judges a schema-bound form at its own layer (#7815)',
         `the refusal set for \`${predicate}\` changed — the #7815 layer derivation is `
           + `advisory-only by construction, so anything moving here is a scope breach`,
       ).toEqual([...expected].sort());
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// #7529 — dashboard widget dataset bindings at the runtime publish door.
+//
+// A separate block, added at the end rather than woven into the suites above
+// (#7576 serialization): nothing in them is touched.
+//
+// The card: a dashboard widget bound to a dataset that names nothing answered
+// 200 on both save and publish — not because a validator was missing (the
+// card's own root-cause lead, falsified by measurement), but because
+// `validateWidgetBindings` provably catches this body and `dashboard` was not
+// a runtime-gated type, so the gate returned empty before building a snapshot.
+// Ruled 2026-08-12 (option B): a DRAFT may hold a forward reference;
+// publishing refuses with the key path named. Ruled 2026-08-15: `surfaces` is
+// per-RULE, so the flip puts all SIX of the rule's error ids on the door as
+// one "this board cannot render" reference-integrity class — pinned below as
+// reachable, not merely declared.
+// ─────────────────────────────────────────────────────────────────────
+
+/** A resolution universe with one real object and one real dataset. */
+const dashObjects = [
+  {
+    name: 'orders',
+    fields: [
+      { name: 'amount', type: 'number' },
+      { name: 'status', type: 'text' },
+      { name: 'region', type: 'text' },
+    ],
+  },
+];
+const ordersDataset = {
+  name: 'orders_ds',
+  object: 'orders',
+  dimensions: [{ name: 'status', field: 'status' }, { name: 'region', field: 'region' }],
+  measures: [
+    { name: 'order_count', aggregate: 'count' },
+    { name: 'sum_amount', field: 'amount', aggregate: 'sum' },
+  ],
+};
+const dashContext = { objects: dashObjects, datasets: [ordersDataset] };
+
+const dashboard = (widgets: unknown[], extra: Record<string, unknown> = {}) => ({
+  name: 'ops_board',
+  label: 'Ops Board',
+  widgets,
+  ...extra,
+});
+
+/** A widget every check passes: real dataset, real dimension, real measure. */
+const cleanWidget = (over: Record<string, unknown> = {}) => ({
+  id: 'w1',
+  type: 'bar',
+  dataset: 'orders_ds',
+  dimensions: ['status'],
+  values: ['order_count'],
+  chartConfig: { xAxis: { field: 'status' }, yAxis: [{ field: 'order_count' }] },
+  ...over,
+});
+
+const gateDashboard = (item: unknown, context: object = dashContext) =>
+  runRuntimeAuthoringRules({ type: 'dashboard', item, context });
+
+describe('dashboard widget dataset bindings at the runtime publish gate (#7529)', () => {
+  it('dispatches `dashboard` writes to validateWidgetBindings, from the shared table', () => {
+    expect(runtimeGatedTypes()).toContain('dashboard');
+    expect(stackKeyForType('dashboard')).toBe('dashboards');
+    expect(runtimeAuthoringRulesFor('dashboard').map((r) => r.name)).toEqual([
+      'validateWidgetBindings',
+    ]);
+  });
+
+  it("REFUSES the card's body — a dataset binding that names nothing", () => {
+    const { errors } = gateDashboard(
+      dashboard([cleanWidget({ dataset: 'no_such_dataset_xyz' })]),
+    );
+    const f = errors.find((e) => e.rule === 'widget-dataset-unknown');
+    expect(
+      f,
+      `the exact body #7529 measured sailing through save AND publish must now be refused at ` +
+        `publish — the rule always caught it; the door just never ran the rule.`,
+    ).toBeDefined();
+    // The 422 envelope's four keys (#4463 D3), including the ruling's own
+    // requirement: the offending key path is NAMED.
+    expect(f!.severity).toBe('error');
+    expect(f!.path).toBe('dashboards[0].widgets[0]');
+    expect(f!.where).toContain('ops_board');
+    expect(f!.message).toMatch(/no_such_dataset_xyz/);
+    expect(f!.hint.length).toBeGreaterThan(10);
+  });
+
+  it('publishes a fully legitimate multi-widget board clean, with the rule having RUN', () => {
+    // The 0-phantom half of the differential the snapshot widening exists for.
+    const legit = dashboard([
+      cleanWidget(),
+      cleanWidget({
+        id: 'w2',
+        type: 'donut',
+        dimensions: ['region'],
+        chartConfig: { series: [{ name: 'order_count' }] },
+      }),
+      cleanWidget({ id: 'w3', type: 'metric', dimensions: [], values: ['sum_amount'], chartConfig: undefined }),
+    ]);
+    const result = gateDashboard(legit);
+    expect(result.errors, JSON.stringify(result.errors)).toEqual([]);
+    expect(result.advisories, JSON.stringify(result.advisories)).toEqual([]);
+    // "clean" and "nothing ran" must stay distinguishable.
+    expect(result.rulesRun).toEqual(['validateWidgetBindings']);
+  });
+
+  it('the `datasets` snapshot key is LOAD-BEARING: without it the same board is refused', () => {
+    // The 3-phantom / 0-phantom measurement, pinned as a test. This is the
+    // reverse verification in its inverted direction: ablating the context key
+    // produces MORE errors, not fewer — every legitimate widget reads as
+    // dangling, which is why flipping the rule without widening the snapshot
+    // would have 422'd every legitimate dashboard publish in the product.
+    const legit = dashboard([
+      cleanWidget(),
+      cleanWidget({
+        id: 'w2',
+        type: 'donut',
+        dimensions: ['region'],
+        chartConfig: { series: [{ name: 'order_count' }] },
+      }),
+      cleanWidget({ id: 'w3', type: 'metric', dimensions: [], values: ['sum_amount'], chartConfig: undefined }),
+    ]);
+    const withoutDatasets = gateDashboard(legit, { objects: dashObjects });
+    expect(
+      withoutDatasets.errors.filter((e) => e.rule === 'widget-dataset-unknown'),
+      `a per-write snapshot with no dataset universe cannot tell a dangling binding from a real ` +
+        `one, so it invents a refusal per widget — the false-422 shape #8309 measured as 38-vs-4 ` +
+        `for permissions, here as 3 phantom errors on a 3-widget board`,
+    ).toHaveLength(3);
+    // And the true positive survives the widened snapshot (the fix does not
+    // buy silence): the dangling board still yields exactly its one error.
+    const dangling = gateDashboard(dashboard([cleanWidget({ dataset: 'no_such_dataset_xyz' })]));
+    expect(dangling.errors).toHaveLength(1);
+  });
+
+  it('ALL SIX error ids are reachable at the door — the class the 2026-08-15 ruling accepted', () => {
+    // `surfaces` is per-rule, so the flip enforces the rule's whole error set,
+    // not just `widget-dataset-unknown`. The ruling accepted the six as one
+    // coherent "this board cannot render" class — this test makes that
+    // acceptance REACHABLE rather than declared, and its exact error sets keep
+    // the boundary honest: a case gaining or losing an id is a scope change
+    // that must go through this line rather than around it.
+    const cases: Array<[string, unknown, string[]]> = [
+      [
+        'dangling dataset',
+        dashboard([cleanWidget({ dataset: 'no_such_dataset_xyz' })]),
+        ['widget-dataset-unknown'],
+      ],
+      [
+        'unknown dimension',
+        dashboard([cleanWidget({ dimensions: ['statuss'] })]),
+        ['widget-dimension-unknown'],
+      ],
+      [
+        'unknown measure',
+        dashboard([cleanWidget({ values: ['no_such_measure'], chartConfig: { xAxis: { field: 'status' } } })]),
+        ['widget-measure-unknown'],
+      ],
+      [
+        'chartConfig field off the selection',
+        dashboard([cleanWidget({ chartConfig: { xAxis: { field: 'not_a_dim' } } })]),
+        ['chart-field-unknown'],
+      ],
+      [
+        'legacy analytics shape as the only (dead) data wiring',
+        dashboard([{ id: 'w9', type: 'bar', categoryField: 'status' }]),
+        // The legacy-only widget also binds no dataset, so the required-binding
+        // arm of `widget-dataset-unknown` fires beside the legacy error.
+        ['widget-dataset-unknown', 'widget-legacy-analytics-unrenderable'],
+      ],
+      [
+        'dashboard filter targeting a field the bound object lacks',
+        dashboard([cleanWidget()], { dateRange: { field: 'close_date' } }),
+        ['dashboard-filter-field-unknown'],
+      ],
+    ];
+
+    const seen = new Set<string>();
+    for (const [label, item, expected] of cases) {
+      const { errors } = gateDashboard(item);
+      expect(
+        errors.map((e) => e.rule).sort(),
+        `error set changed for case "${label}"`,
+      ).toEqual([...expected].sort());
+      for (const e of errors) seen.add(e.rule);
+    }
+
+    // Non-vacuous, and the ruling's whole accept-set: exactly the six.
+    expect([...seen].sort()).toEqual([
+      'chart-field-unknown',
+      'dashboard-filter-field-unknown',
+      'widget-dataset-unknown',
+      'widget-dimension-unknown',
+      'widget-legacy-analytics-unrenderable',
+      'widget-measure-unknown',
+    ]);
+  });
+
+  it('warning-tier ids ride the ADVISORY channel and never block (#4463 P1)', () => {
+    // A `table` widget selecting only count measures with no dimensions draws
+    // `table-count-only` — a warning. The accept-set narrowing the ruling
+    // accepted is exactly the error tier; the warnings reach the author on the
+    // 2xx response instead.
+    const result = gateDashboard(
+      dashboard([{ id: 'w1', type: 'table', dataset: 'orders_ds', values: ['order_count'] }]),
+    );
+    expect(result.errors, JSON.stringify(result.errors)).toEqual([]);
+    const f = result.advisories.find((a) => a.rule === 'table-count-only');
+    expect(f, 'the advisory must still reach the author').toBeDefined();
+    expect(f!.severity).toBe('warning');
+  });
+
+  it('does not blame a dashboard write for a PRE-EXISTING dataset-level defect (#4463 D4)', () => {
+    // `measure-aggregate-incoherent` is judged per DATASET, independent of any
+    // widget — a context-only finding. Carrying `datasets` in BOTH passes is
+    // what makes it cancel in the differential; a stored dataset's
+    // pre-existing condition is not this write's to answer for.
+    const rateContext = {
+      objects: [
+        {
+          name: 'orders',
+          fields: [
+            { name: 'amount', type: 'number' },
+            { name: 'status', type: 'text' },
+            { name: 'region', type: 'text' },
+            { name: 'win_rate', type: 'percent' },
+          ],
+        },
+      ],
+      datasets: [
+        {
+          ...ordersDataset,
+          measures: [
+            ...ordersDataset.measures,
+            // SUM of a percent field — incoherent, and pre-existing.
+            { name: 'sum_rate', field: 'win_rate', aggregate: 'sum' },
+          ],
+        },
+      ],
+    };
+    const result = gateDashboard(dashboard([cleanWidget()]), rateContext);
+    expect(result.errors, JSON.stringify(result.errors)).toEqual([]);
+    expect(
+      result.advisories,
+      `a dataset-level finding present in BOTH passes must cancel in the gate's diff — ` +
+        `surfacing it here would attribute a stored dataset's condition to an unrelated publish`,
+    ).toEqual([]);
+  });
+
+  it('the runtime door and `os build` reach the SAME verdict on every corpus input', () => {
+    // The two publish verbs must not disagree (the wiring guard's own
+    // sentence), asserted behaviourally for the newly gated type: for each
+    // input the gate's finding set is IDENTICAL — id, severity, path — to what
+    // the rule reports on the equivalent whole-stack CLI run. Holds because
+    // the corpus context is clean (no context-only findings to cancel); the
+    // D4 case above covers the deliberate divergence when it is not.
+    const corpus: unknown[] = [
+      dashboard([cleanWidget()]),
+      dashboard([cleanWidget({ dataset: 'no_such_dataset_xyz' })]),
+      dashboard([cleanWidget({ dimensions: ['statuss'] })]),
+      dashboard([cleanWidget({ values: ['no_such_measure'], chartConfig: { xAxis: { field: 'status' } } })]),
+      dashboard([{ id: 'w9', type: 'bar', categoryField: 'status' }]),
+      dashboard([cleanWidget()], { dateRange: { field: 'close_date' } }),
+      dashboard([{ id: 'w1', type: 'table', dataset: 'orders_ds', values: ['order_count'] }]),
+    ];
+
+    const fingerprints = (fs: readonly AuthoringFinding[]) =>
+      fs.map((f) => `${f.severity}:${f.rule}@${f.path}`).sort();
+
+    for (const item of corpus) {
+      const gate = gateDashboard(item);
+      const cli = validateWidgetBindings({ ...dashContext, dashboards: [item] });
+      expect(
+        fingerprints([...gate.errors, ...gate.advisories]),
+        `the runtime gate and os build disagree about ${JSON.stringify(item)}`,
+      ).toEqual(fingerprints(cli as unknown as AuthoringFinding[]));
     }
   });
 });

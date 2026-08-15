@@ -413,6 +413,15 @@ export function evaluateRuntimeAuthoringGate(args: {
      * the gate's differential for every other write type.
      */
     books?: readonly unknown[];
+    /**
+     * [#7529] Live dataset declarations — the resolution universe
+     * `validateWidgetBindings` links a dashboard widget's `dataset` /
+     * `dimensions` / `values` against. Without it every widget on a fully
+     * legitimate board reads as dangling (3 phantom `widget-dataset-unknown`
+     * errors measured on a 3-widget board vs 0 with the collection carried),
+     * so the thread-through is load-bearing, not optional.
+     */
+    datasets?: readonly unknown[];
     /** ADR-0080 SDUI manifest when the host has one. */
     sduiManifest?: unknown;
     /**
@@ -446,6 +455,7 @@ export function evaluateRuntimeAuthoringGate(args: {
             objects: args.objects ?? [],
             permissions: args.permissions ?? [],
             books: args.books ?? [],
+            datasets: args.datasets ?? [],
         },
         ...(args.sduiManifest !== undefined ? { sduiManifest: args.sduiManifest } : {}),
     });
