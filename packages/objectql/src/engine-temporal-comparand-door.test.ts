@@ -159,7 +159,9 @@ describe('[#8690] the temporal-comparand door at the engine collection point', (
     expect(inWindow).toHaveLength(38);
     // The token really resolved — the door let the platform's own spelling
     // through untouched rather than judging it as an uninterpretable string.
-    expect(reads.at(-1)!.ast.where.created_date.$gte).toBe(floor);
+    // Indexed rather than `.at(-1)`: this package's tsconfig targets a lib
+    // older than ES2022, so `Array.prototype.at` is not declared for it.
+    expect(reads[reads.length - 1].ast.where.created_date.$gte).toBe(floor);
   });
 
   it('refuses on both doors — the lowered object form and the authored array sugar', async () => {
