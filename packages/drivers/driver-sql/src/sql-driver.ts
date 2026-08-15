@@ -1348,6 +1348,99 @@ function refuseAmbiguousConflictTarget(
 }
 
 /**
+ * What the upsert pre-flight tells {@link SqlDriver.upsert} once it has judged
+ * the table's physical keys — a value rather than the bare `void` it returned
+ * while every verdict it could reach was either "proceed" or a throw.
+ *
+ * `verifyIdentity` is [#8807]'s third answer: the statement may run, but the row
+ * it lands on has to be checked afterwards. `rivals` and `tableName` are carried
+ * so the refusal can name the keys the introspection actually read instead of
+ * introspecting a second time to say the same thing.
+ */
+interface ConflictTargetVerdict {
+  verifyIdentity: boolean;
+  rivals?: PhysicalIndex[];
+  tableName?: string;
+}
+
+/**
+ * [#8807] The merge landed on a row the caller never identified.
+ *
+ * # Why this is a different condition from both refusals above, per #5240
+ *
+ * {@link refuseUnbackedConflictTarget} answers *no index backs your target* and
+ * {@link refuseAmbiguousConflictTarget} answers *your target is backed but
+ * cannot be honoured* — both to a caller who NAMED a target, both before the
+ * statement is compiled. This one answers a caller who named nothing at all
+ * (or named `id`, the identity the driver itself supplies), and it can only be
+ * answered AFTER the statement has run, because the question is which row the
+ * server picked. Reusing either sentence would instruct an author to change a
+ * `conflictKeys` argument they never wrote.
+ *
+ * The ruled principle it enforces (maintainer, 2026-08-15): *an `upsert` must
+ * never modify a row whose identity the caller did not supply and whose conflict
+ * key it did not name.*
+ *
+ * # Why the write is rolled back rather than reported
+ *
+ * "Never modify" is not satisfied by noticing afterwards. The check therefore
+ * runs inside a transaction with the statement, and throwing here is what undoes
+ * the wrong write — see {@link SqlDriver.upsert}. Reporting a completed
+ * cross-row overwrite would leave the corruption and merely narrate it.
+ *
+ * # Why `VALIDATION_ERROR` / 400
+ *
+ * Same classifier, same answer as the two refusals above, and for the same
+ * reason: this is conditional on the TABLE, not on the dialect. The identical
+ * statement against the identical MySQL server is honoured the moment the table
+ * stops carrying a rival UNIQUE key, so the remedy is a schema change and not
+ * "wait for the backend". 400 also keeps the sentence on the wire — `rest`
+ * withholds the body of any 5xx, and this message is the deliverable.
+ *
+ * Measured on live MySQL 8.0.46 through the same knex + `mysql2` path, `email`
+ * and `tax_id` both `unique: true`, NO `conflictKeys` at all:
+ *
+ * ```
+ * seed upsert({email:'d@b.com', tax_id:'T-9', title:'first'})  -> id=iVvD35rMk4BIayYc
+ * B    upsert({email:'e@b.com', tax_id:'T-9', title:'second'}) -> RESOLVED, id=F-Fp1OGCQB-l5XRu
+ *      ONE row, and it is the SEEDED one: iVvD35rMk4BIayYc, its `email` rewritten
+ *      d@b.com -> e@b.com. The id the caller was handed back does not exist in the
+ *      table at all.
+ * ```
+ */
+function refuseCrossRowIdentityMerge(
+  object: string,
+  tableName: string,
+  id: unknown,
+  rivals: PhysicalIndex[],
+): Error {
+  const named = rivals.map((i) => `${i.name}(${i.columns.join(', ')})`).join(', ');
+  const err = new Error(
+    `Cannot upsert into "${object}": the merge landed on a row this call never identified. No ` +
+      `conflict target was named, so the merge target is the primary key — but this backend is ` +
+      `MySQL, whose only merge statement is ON DUPLICATE KEY UPDATE, and that statement carries ` +
+      `no conflict target. The row did not collide on its primary key; it collided on another ` +
+      `UNIQUE key on "${tableName}" — ${named} — and MySQL merged there instead, overwriting a ` +
+      `DIFFERENT row than the one this call supplied. The write has been rolled back; nothing was ` +
+      `changed. Fix by naming the business key you meant to merge on (pass it as conflictKeys, so ` +
+      `the intent is checkable), by dropping or renaming the extra UNIQUE key(s) so the primary ` +
+      `key is the only one the row can collide on, or by running this object on a dialect that ` +
+      `honours the target — SQLite and PostgreSQL compile ON CONFLICT (...), which raises a ` +
+      `unique violation here instead of merging.`,
+  ) as Error & { code?: string; status?: number; cause?: unknown };
+  err.code = StandardErrorCode.enum.VALIDATION_ERROR;
+  err.status = 400;
+  // Schema identifiers plus the id this call supplied — the same payload
+  // contract the two refusals above keep. The id is the driver's OWN value
+  // (minted here, or the caller's `id`/`_id`), never a business column value.
+  err.cause = new Error(
+    `no row on "${tableName}" carries id ${JSON.stringify(id)} after the merge; UNIQUE keys that ` +
+      `can absorb a primary-key-targeted merge: ${named}`,
+  );
+  return err;
+}
+
+/**
  * [#5158] A `FilterArray` reached the driver unlowered.
  *
  * `where` is a `FilterCondition` — `QueryASTSchema.where: FilterConditionSchema`
@@ -5548,7 +5641,11 @@ export class SqlDriver implements IDataDriver {
    * it is now one of two, and a name that describes half of what a guard refuses
    * is how the other half gets deleted by someone tidying up.
    */
-  protected async assertConflictTargetHonoured(object: string, mergeKeys: string[]): Promise<void> {
+  protected async assertConflictTargetHonoured(
+    object: string,
+    mergeKeys: string[],
+    callerNamed: boolean,
+  ): Promise<ConflictTargetVerdict> {
     // The table the statement will actually hit — same resolution `getBuilder`
     // performs for the insert, rotation shard included.
     const target = this.rotationWriteTarget(object) ?? object;
@@ -5561,15 +5658,36 @@ export class SqlDriver implements IDataDriver {
     type Verdict =
       | { kind: 'honoured' }
       | { kind: 'unbacked' }
-      | { kind: 'ambiguous'; rivals: PhysicalIndex[] };
+      | { kind: 'ambiguous'; rivals: PhysicalIndex[] }
+      | { kind: 'identity-at-risk'; rivals: PhysicalIndex[] };
 
     const judge = (keys: PhysicalIndex[]): Verdict => {
       if (!keys.some(covers)) return { kind: 'unbacked' };
-      // [#8755] The named target is the PRIMARY KEY: the driver's own identity
-      // path, and the one shape whose refusal would differ from the
-      // byte-identical default call this pre-flight never probes. Left to merge
-      // — the residue is documented, not silent (see the refusal's docblock).
-      if (keys.some((i) => i.primary === true && covers(i))) return { kind: 'honoured' };
+      // The target is the PRIMARY KEY — the driver's own identity path, and the
+      // shape the `conflictKeys`-less default compiles to byte-identically.
+      //
+      // [#8755] left this merging and documented the residue. [#8807] takes it,
+      // and the reason it is a THIRD verdict rather than a fourth caller of the
+      // ambiguous refusal is the whole of that card: here the caller named
+      // nothing (or named the identity the driver supplies), so there is no
+      // promised target to break. What the platform owes is narrower and
+      // dialect-independent — *an upsert must never modify a row whose identity
+      // the caller did not supply and whose conflict key it did not name*
+      // (maintainer ruling 2026-08-15) — and that is a statement about the row
+      // the statement LANDED on, which no pre-flight can know.
+      //
+      // So this verdict does not refuse. It reports that a rival key exists and
+      // the landing row must therefore be verified after the fact; see
+      // {@link upsert} for the check and {@link refuseCrossRowIdentityMerge}
+      // for the sentence. Refusing here instead would be the blanket option the
+      // ruling excluded: on this path every non-primary UNIQUE key is a rival,
+      // so "narrowed to tables carrying a rival key" and "every table with a
+      // business unique key" are THE SAME SET — the narrowing that made the
+      // refusal proportionate for a caller-named target does not exist here.
+      if (keys.some((i) => i.primary === true && covers(i))) {
+        const rivals = keys.filter((i) => i.primary !== true && !covers(i));
+        return rivals.length > 0 ? { kind: 'identity-at-risk', rivals } : { kind: 'honoured' };
+      }
       // A UNIQUE key that is neither the named target nor the primary key can
       // absorb the conflict instead of it. An index over the SAME columns as the
       // target is not a rival: colliding on it is colliding on the target.
@@ -5577,8 +5695,20 @@ export class SqlDriver implements IDataDriver {
       return rivals.length > 0 ? { kind: 'ambiguous', rivals } : { kind: 'honoured' };
     };
 
+    // Only the two REFUSING verdicts re-read the cache. [#8807]'s
+    // `identity-at-risk` deliberately does not, and the asymmetry is the reason:
+    // a re-read exists so a stale cache can never produce a FALSE REFUSAL, and
+    // this verdict refuses nothing. Both staleness directions are safe here — a
+    // rival created since the read means the check is skipped (exactly today's
+    // behaviour, nothing lost), and a rival DROPPED since the read means the
+    // check runs and passes, because the merge really does land on the primary
+    // key. Re-reading anyway would put a round trip on the hot path of every
+    // ordinary upsert to sharpen an answer that cannot be wrong in the
+    // expensive direction.
+    const refusing = (v: Verdict): boolean => v.kind === 'unbacked' || v.kind === 'ambiguous';
+
     let keys = await this.introspectKeyIndexes(tableName);
-    if (keys !== null && keys.length > 0 && judge(keys).kind !== 'honoured') {
+    if (keys !== null && keys.length > 0 && refusing(judge(keys))) {
       // A cache filled before the index was created is the only way a real key
       // can be missing here, and a cache filled before one was DROPPED is the
       // only way a rival key can be reported that no longer exists. Both are
@@ -5587,10 +5717,23 @@ export class SqlDriver implements IDataDriver {
       // both verdicts.
       keys = await this.introspectKeyIndexes(tableName, { fresh: true });
     }
-    if (keys === null || keys.length === 0) return;
+    if (keys === null || keys.length === 0) return { verifyIdentity: false };
 
     const verdict = judge(keys);
-    if (verdict.kind === 'honoured') return;
+    if (verdict.kind === 'honoured') return { verifyIdentity: false };
+
+    if (verdict.kind === 'identity-at-risk') {
+      return { verifyIdentity: true, rivals: verdict.rivals, tableName };
+    }
+
+    // [#8807] A target the caller did NOT name is never refused. `['id']` is
+    // what this driver substitutes when `conflictKeys` is absent, so a refusal
+    // reached from there would be refusing the driver's own default — and the
+    // two spellings compile byte-identically, which is precisely why #8755
+    // declined to separate them. Both refusals below answer a caller who named
+    // something the dialect cannot honour; with nothing named there is no such
+    // caller, and the post-hoc identity check above is the whole remedy.
+    if (!callerNamed) return { verifyIdentity: false };
 
     if (verdict.kind === 'ambiguous') {
       throw refuseAmbiguousConflictTarget(object, mergeKeys, tableName, verdict.rivals);
@@ -5612,6 +5755,48 @@ export class SqlDriver implements IDataDriver {
     );
   }
 
+  /**
+   * [#8807] After a primary-key-targeted merge on a table that carries a rival
+   * UNIQUE key: did the statement land on the identity this call supplied?
+   *
+   * # Why the absence of the row is an exact verdict, not a heuristic
+   *
+   * The statement returned without error, so it either INSERTED (the row now
+   * carries this id) or MERGED into an existing row. `id` is insert-only on the
+   * merge path since #8622 — it is stripped from the merge set — so a merge
+   * never writes this id onto the row it lands on. Therefore:
+   *
+   *   row with this id exists  ⟺  the merge landed on the primary key
+   *   row with this id absent  ⟺  it landed on some other UNIQUE key
+   *
+   * That is a biconditional, not an inference from a symptom, which is what
+   * makes this check free of false refusals — the property the ruling's
+   * excluded blanket option could not have.
+   *
+   * # Two deliberate scoping choices
+   *
+   *  - **No tenant scope.** The probe asks whether the ROW EXISTS, not whether
+   *    it is visible to this caller. `id` is the primary key, so an unscoped
+   *    lookup by it is exact and cannot match another tenant's row; adding the
+   *    scope could only hide a row that really was written and turn a correct
+   *    write into a false refusal.
+   *  - **The write target, not the object.** A rotation-sharded write lands in
+   *    the current shard, so that is where the row must be looked for. Reading
+   *    the unsharded name would report every rotated write as a cross-row merge.
+   */
+  private async assertMergeLandedOnSuppliedIdentity(
+    object: string,
+    writeTable: string,
+    id: string | number,
+    rivals: PhysicalIndex[],
+    options?: DriverOptions,
+  ): Promise<void> {
+    const landed = await this.getBuilder(writeTable, options).where('id', id).first('id');
+    if (landed) return;
+    const tableName = this.physicalTableByObject[writeTable] ?? writeTable;
+    throw refuseCrossRowIdentityMerge(object, tableName, id, rivals);
+  }
+
   async upsert(object: string, data: Record<string, any>, conflictKeys?: string[], options?: DriverOptions): Promise<Record<string, any>> {
     const { _id, ...rest } = data;
     const toUpsert = { ...rest };
@@ -5627,23 +5812,42 @@ export class SqlDriver implements IDataDriver {
 
     const mergeKeys = conflictKeys && conflictKeys.length > 0 ? conflictKeys : ['id'];
 
-    // [#8621, #8755] Pre-flight the conflict target — see
+    // [#8621, #8755, #8807] Pre-flight the conflict target — see
     // {@link assertConflictTargetHonoured} for the mechanism and why it is
     // MySQL-only. Two placement facts, both load-bearing:
     //
-    //  - It runs only when the CALLER named a target. The default `['id']` is
-    //    this driver's own primary key on every table it creates, so a probe
-    //    there could only ever confirm what the driver just built — a round
-    //    trip added to the hot path of every ordinary upsert to answer a
-    //    question that has no other answer. The defect, the card and the ruling
-    //    are all about a caller-named target.
+    //  - ⚠️ It now runs whether or not the CALLER named a target, and the
+    //    reasoning that used to stop at the caller-named case is superseded
+    //    rather than merely widened. That reasoning was *"a probe on the default
+    //    path could only ever confirm what the driver just built"*, and it was
+    //    right about the question #8621/#8755 were asking — "is `['id']` backed?"
+    //    has one possible answer on a table this driver created. #8807 asks a
+    //    different question of the same introspection — "does anything ELSE on
+    //    this table absorb a collision?" — and that one is genuinely unknown
+    //    until read. The read is cached per table
+    //    ({@link physicalKeyIndexes}), so the hot path pays it once, and the
+    //    verdict it returns is not a refusal: see below.
     //  - It runs BEFORE the retry loop, therefore before
     //    `fillAutoNumberFields`. Refusing after it would burn an autonumber
     //    reservation for a statement that never executes — a visible gap in an
     //    externally meaningful sequence, handed out for a rejected call.
-    if (conflictKeys && conflictKeys.length > 0 && this.isMysql) {
-      await this.assertConflictTargetHonoured(object, mergeKeys);
-    }
+    const callerNamed = !!(conflictKeys && conflictKeys.length > 0);
+    const preflight = this.isMysql
+      ? await this.assertConflictTargetHonoured(object, mergeKeys, callerNamed)
+      : { verifyIdentity: false };
+
+    // [#8807] The primary-key-targeted merge on a table that carries a rival
+    // UNIQUE key: MySQL may land it on a row this call never identified, and
+    // nothing before the statement can tell whether it will. So the statement
+    // and the identity check run as ONE unit of work, and the check's failure
+    // is what rolls the wrong write back.
+    //
+    // The accept set moves for exactly the calls that corrupt data: a merge
+    // that lands on the supplied identity — every insert, and every legitimate
+    // re-upsert of the same row — passes the check untouched, because `id` is
+    // insert-only (#8622) and therefore a row merged on the primary key always
+    // still carries it.
+    const verifyIdentity = preflight.verifyIdentity === true;
 
     // #6943. Measured: `upsert` does NOT share `bulkCreate`'s shape. It is
     // single-row, so a stale counter costs it exactly one burned number per
@@ -5666,7 +5870,7 @@ export class SqlDriver implements IDataDriver {
       // Rotation: conflict-merge is scoped to the CURRENT shard (telemetry is
       // effectively append-only; a cross-shard upsert would need a probe-first
       // strategy nothing on the platform requires today).
-      const builder = this.getBuilder(this.rotationWriteTarget(object) ?? object, options);
+      const writeTable = this.rotationWriteTarget(object) ?? object;
       // `created_at` is insert-only — never overwrite it when an existing row is
       // merged on conflict (the stamped/seeded value belongs to the original
       // insert). [#7011] `auto_number` columns are insert-only for the same
@@ -5710,7 +5914,6 @@ export class SqlDriver implements IDataDriver {
       // that updates a row still advances `updated_at`.
       const insertOnlyColumns = this.insertOnlyUpsertColumns(object);
       const mergeColumns = Object.keys(formatted).filter((c) => !insertOnlyColumns.has(c));
-      const insertion = builder.insert(formatted).onConflict(mergeKeys);
 
       // [#8622] Excluding `id` made a branch REACHABLE that could not fire
       // before, and the bare `merge()` below is merge-ALL: it re-admits every
@@ -5740,8 +5943,44 @@ export class SqlDriver implements IDataDriver {
       const noopMergeColumns = Object.keys(formatted).filter((c) => mergeKeys.includes(c));
       const columnsToMerge = mergeColumns.length > 0 ? mergeColumns : noopMergeColumns;
 
-      try {
+      // The statement, plus [#8807]'s identity check when one is owed. The
+      // builder is built HERE rather than above the comment block so it can be
+      // bound to whichever transaction this write runs on — the caller's, the
+      // one opened just below, or none at all. The emitted INSERT is otherwise
+      // unchanged.
+      const runStatement = async (writeOptions?: DriverOptions): Promise<void> => {
+        const insertion = this.getBuilder(writeTable, writeOptions).insert(formatted).onConflict(mergeKeys);
         await (columnsToMerge.length > 0 ? insertion.merge(columnsToMerge) : insertion.merge());
+        if (verifyIdentity) {
+          await this.assertMergeLandedOnSuppliedIdentity(
+            object,
+            writeTable,
+            toUpsert.id,
+            preflight.rivals ?? [],
+            writeOptions,
+          );
+        }
+      };
+
+      try {
+        if (verifyIdentity && options?.transaction === undefined) {
+          // [#8807] No caller transaction, so the driver opens one: the check
+          // is only worth making if its failure can UNDO the write it judged,
+          // and an autocommitted statement is already permanent by the time the
+          // row can be read back. Scoped to `verifyIdentity` so the ordinary
+          // upsert — every dialect but MySQL, and every MySQL table with no
+          // rival UNIQUE key — keeps its single autocommitted round trip.
+          //
+          // Inside a caller transaction the wrapper is deliberately NOT added:
+          // the statement is already transactional, and throwing hands the
+          // rollback decision to the owner of that transaction, exactly as the
+          // autonumber path above reasons about the same boundary.
+          await this.knex.transaction(async (trx) => {
+            await runStatement({ ...options, transaction: trx });
+          });
+        } else {
+          await runStatement(options);
+        }
         break;
       } catch (error) {
         // [#8445] Classified BEFORE the autonumber retry logic, for three
