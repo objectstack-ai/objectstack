@@ -3,11 +3,9 @@ import {
   UserSchema,
   AccountSchema,
   VerificationTokenSchema,
-  ApiKeySchema,
   type User,
   type Account,
   type VerificationToken,
-  type ApiKey,
 } from "./identity.zod";
 
 describe('UserSchema', () => {
@@ -207,78 +205,6 @@ describe('VerificationTokenSchema', () => {
     };
 
     expect(() => VerificationTokenSchema.parse(token)).not.toThrow();
-  });
-});
-
-describe('ApiKeySchema', () => {
-  it('should accept minimal API key', () => {
-    const key = {
-      id: 'key_123',
-      name: 'CI/CD Pipeline',
-      userId: 'user_123',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    const result = ApiKeySchema.parse(key);
-    expect(result.enabled).toBe(true);
-  });
-
-  it('should accept full API key with rate limiting and permissions', () => {
-    const key: ApiKey = {
-      id: 'key_123',
-      name: 'Production API Key',
-      start: 'os_pk_ab',
-      prefix: 'os_pk_',
-      userId: 'user_123',
-      organizationId: 'org_456',
-      expiresAt: new Date(Date.now() + 86400000).toISOString(),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      lastUsedAt: new Date().toISOString(),
-      lastRefetchAt: new Date().toISOString(),
-      enabled: true,
-      rateLimitEnabled: true,
-      rateLimitTimeWindow: 60000,
-      rateLimitMax: 100,
-      remaining: 95,
-      permissions: { 'publish': true, 'read': true, 'manage': false },
-      scopes: ['marketplace:publish', 'marketplace:read'],
-      metadata: { environment: 'production' },
-    };
-
-    const result = ApiKeySchema.parse(key);
-    expect(result.organizationId).toBe('org_456');
-    expect(result.scopes).toHaveLength(2);
-    expect(result.permissions?.publish).toBe(true);
-  });
-
-  it('should accept API key without optional fields', () => {
-    const key = {
-      id: 'key_123',
-      name: 'Minimal Key',
-      userId: 'user_123',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    const result = ApiKeySchema.parse(key);
-    expect(result.organizationId).toBeUndefined();
-    expect(result.expiresAt).toBeUndefined();
-    expect(result.scopes).toBeUndefined();
-  });
-
-  it('should correctly infer ApiKey type', () => {
-    const key: ApiKey = {
-      id: 'key_123',
-      name: 'Test Key',
-      userId: 'user_123',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    expect(key.id).toBe('key_123');
-    expect(key.name).toBe('Test Key');
   });
 });
 
