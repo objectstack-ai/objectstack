@@ -15473,17 +15473,28 @@ export class ObjectStackProtocolImplementation implements
     }> {
         const singularType = PLURAL_TO_SINGULAR[request.type] ?? request.type;
         const orgId = request.organizationId ?? null;
-        const events = (await this.historyMetaItem({
-            type: singularType,
-            name: request.name,
-            ...(orgId ? { organizationId: orgId } : {}),
-        })).events;
-        const versions = events
-            .map((ev: any) => (ev as any).version as number | undefined)
-            .filter((v): v is number => typeof v === 'number');
-        // The `historyMetaItem` MetadataEvent shape doesn't carry the
-        // per-(type,name) `version` directly — re-fetch via the repo
-        // to read the underlying history rows with their version.
+        // [#8798] Read the history rows DIRECTLY, once. `historyMetaItem`
+        // cannot serve this function: its `MetadataEvent` shape doesn't carry
+        // the per-(type,name) `version` a diff selects versions by, so its
+        // result was computed into a `versions` array and then discarded
+        // (`const _used = versions; void _used;`) while the real read happened
+        // below — a second, unused round trip over `sys_metadata_history` on
+        // every request to a routed, live endpoint.
+        //
+        // ⛔ Do not reinstate a `historyMetaItem` call here "for the
+        // authorization check". It never performed one for this path, measured
+        // both ways: its early return (`isOverlayAllowed` / `isRuntimeCreateAllowed`)
+        // answers `{ events: [] }` WITHOUT throwing and without touching the
+        // engine, so the five types that take it (`field`, `job`, `api`,
+        // `capability`, `agent`) had their diff served by the read below
+        // regardless — the gate never reached this function's output. What the
+        // discarded call did change was failure behaviour, and only by accident:
+        // being unguarded, it made a `sys_metadata_history` outage FATAL for
+        // gated-open types while the `try` below answered an empty diff for the
+        // five gated-shut ones. One outage, two answers, decided by type. The
+        // `catch` below is this function's only stated intent for that failure,
+        // so removing the call makes every type take it. Pinned in
+        // `protocol.diff-dead-history-read.test.ts`.
         const repo = this.getOverlayRepo(orgId);
         const fullRef = {
             type: singularType,
@@ -15575,7 +15586,6 @@ export class ObjectStackProtocolImplementation implements
                 changed: diff.changed.map((e) => ({ path: e.path, from: servedFrom[e.path], to: servedTo[e.path] })),
             };
         }
-        const _used = versions; void _used;
         return {
             type: request.type,
             name: request.name,
