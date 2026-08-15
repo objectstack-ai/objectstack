@@ -11368,8 +11368,47 @@ export class ObjectStackProtocolImplementation implements
     }
 
     async saveMetaItem(request: { type: string, name: string, item?: any, organizationId?: string, parentVersion?: string | null, actor?: string, force?: boolean, mode?: 'draft' | 'publish', packageId?: string | null, source?: string }) {
+        // [#8818] The ADR-0112 envelope this refusal always owed. Every OTHER
+        // refusal in this method declares `code` AND `status`
+        // (`NOT_OVERRIDABLE`/403, `NOT_CREATABLE`/403, `ITEM_LOCKED`/403,
+        // `OBJECT_OVERLAY_PACKAGE_MISMATCH`/422, the org-scope and
+        // destructive-change refusals, the parent-version conflict/409); this
+        // one declared neither, and an undeclared throw is withheld by
+        // {@link clientFacingFailureText} (a positive list keyed on 4xx
+        // `status`) and rendered `500 INTERNAL_ERROR` by `handleRouteError` —
+        // a SERVER FAULT for what is purely the caller's mistake, telling the
+        // author less than the producer knew and inviting a pointless retry.
+        //
+        // MEASURED reachable from the wire — this is an AUTHORING refusal, not
+        // a programming-error guard. `PUT /api/v1/meta/:type/:name` unwraps the
+        // `{ item }` / `{ metadata }` envelope shapes before calling here, so
+        // `{"item": null}` and `{"metadata": null}` arrive as `item: null` and
+        // land exactly here (measured end to end against a live server: both
+        // answered `500 INTERNAL_ERROR` before this change). ⚠️ A missing,
+        // empty or literal-`null` BODY does NOT reach this guard: the route
+        // folds it to `{}`, which is truthy, and the per-type Zod parse below
+        // refuses it with `422 INVALID_METADATA` — so this guard's whole
+        // reachable population is the explicitly-null envelope.
+        //
+        // `INVALID_REQUEST`/400 rather than the `INVALID_METADATA`/422 the
+        // sibling refusals use, and NEITHER mints a code: both are already
+        // registered to this package in the ADR-0112 ledger (D3). The 422
+        // sites all describe a body that EXISTS and failed the per-type parse,
+        // and every one carries structured `issues`; here there is no body to
+        // validate and no issues to report, so a 422 would misdescribe the
+        // failure and break that convention. The structural twin is
+        // {@link rollbackMetaItem}'s own opening guard — same class, same
+        // position, a malformed REQUEST ENVELOPE rather than an off-spec
+        // document — which is `[invalid_request]`/400.
         if (!request.item) {
-            throw new Error('Item data is required');
+            const err: any = new Error(
+                `[invalid_request] saveMetaItem requires an 'item' body for '${request.type}/${request.name}'. `
+                + `Send the metadata document as the request body, or wrap it as {"item": {...}} / {"metadata": {...}}. `
+                + `An explicitly null item is refused rather than persisted as an empty document.`,
+            );
+            err.code = 'INVALID_REQUEST';
+            err.status = 400;
+            throw err;
         }
         // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}.
         request = canonicalizeMetaRequestType(request);
