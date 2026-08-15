@@ -1,5 +1,10 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
+import {
+  isUninterpretableTemporalComparand,
+  type TemporalComparandKind,
+} from '@objectstack/core';
+
 /**
  * Which comparand SHAPES this package's filter compilers can express (#5234).
  *
@@ -266,6 +271,119 @@ function findIn(
     if (hit) return hit;
   }
   return null;
+}
+
+/**
+ * [#8690, maintainer ruling 2026-08-15] The first comparand a declared TEMPORAL
+ * member's storage rule cannot read — or `null`.
+ *
+ * ## What it is FOR: the raw-SQL bypass named in the ruling
+ *
+ * The refusal itself lives at the ObjectQL engine's filter collection point
+ * (`@objectstack/objectql`, `temporal-comparand-door.ts`), which is the one
+ * seam that holds a comparand and the field's declared type at the same moment.
+ * `NativeSQLStrategy` never reaches it: it compiles its own
+ * `SELECT … WHERE col >= $N` and binds the comparand directly, so a raw-SQL
+ * deployment would keep answering the silent zero the engine door now refuses.
+ * The ruling closes that by name:
+ *
+ * > `NativeSQLStrategy.canHandle` must **decline** an uninterpretable temporal
+ * > comparand so raw-SQL paths fall through to the engine door.
+ *
+ * So this answers a ROUTING question, exactly as {@link findCrossFieldComparand}
+ * does one seam over: not "is this filter legal" but "does serving it correctly
+ * need the path that judges it". Declining sends the query to the ObjectQL
+ * strategy, whose `engine.aggregate` passes through that door — one refusal,
+ * one wording, one place, whichever strategy the deployment's driver selects.
+ *
+ * ## Why the KIND is supplied by the caller
+ *
+ * This package holds no field map — it depends on `core`, `spec` and `types`,
+ * and on no driver. The temporal fact therefore has to arrive with the query,
+ * and it already does: a cube DIMENSION declares `type: 'time'` (compiled from
+ * the dataset's `type: 'date'`), and `resolveStorageTarget`/`lookupMember`
+ * already map a filter member to it. `kindOf` is that lookup, passed in, so
+ * this walk stays a pure function of the filter and the caller's classification.
+ *
+ * ⚠️ Consequence, recorded rather than hidden: a temporal column filtered
+ * WITHOUT being declared as a time dimension on the cube is not classified
+ * here, so it is not declined and keeps today's behaviour on the raw-SQL path.
+ * That is a strictly smaller hole than "every raw-SQL query bypasses the door",
+ * it fails in the safe direction (a missed decline degrades to today's
+ * behaviour, never to a NEW wrong answer), and closing it fully would take a
+ * field map this package deliberately does not have.
+ *
+ * The walk is structural and total for the same reason its sibling's is: a
+ * comparand three combinators deep still needs the engine path.
+ */
+export function findUninterpretableTemporalMember(
+  filter: unknown,
+  kindOf: (member: string) => TemporalComparandKind | null,
+): { field: string; kind: TemporalComparandKind; value: string } | null {
+  return findUninterpretableIn(filter, '', kindOf);
+}
+
+function findUninterpretableIn(
+  node: unknown,
+  field: string,
+  kindOf: (member: string) => TemporalComparandKind | null,
+): { field: string; kind: TemporalComparandKind; value: string } | null {
+  if (!node || typeof node !== 'object') return null;
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const hit = findUninterpretableIn(child, field, kindOf);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  if (node instanceof Date || ArrayBuffer.isView(node)) return null;
+  // A reference is not a literal — the same position this file's sibling walk
+  // routes on, and never a value any storage rule reads.
+  if (isFieldReference(node)) return null;
+  for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+    // `$`-prefixed keys are operators and combinators: the field in scope does
+    // not change. Anything else names a member and becomes the new scope.
+    const scope = key.startsWith('$') ? field : key;
+    const kind = scope ? kindOf(scope) : null;
+    if (kind) {
+      const hit = judgeTemporalLiterals(value, scope, kind);
+      if (hit) return hit;
+      continue;
+    }
+    const hit = findUninterpretableIn(value, scope, kindOf);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+/**
+ * Every literal reachable in one classified member's value position — the
+ * comparand itself, an operator bag's comparands, and each MEMBER of a list
+ * operator's array, which is a comparand in its own right.
+ */
+function judgeTemporalLiterals(
+  value: unknown,
+  field: string,
+  kind: TemporalComparandKind,
+): { field: string; kind: TemporalComparandKind; value: string } | null {
+  if (Array.isArray(value)) {
+    for (const member of value) {
+      const hit = judgeTemporalLiterals(member, field, kind);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  if (value && typeof value === 'object') {
+    if (value instanceof Date || ArrayBuffer.isView(value) || isFieldReference(value)) return null;
+    for (const nested of Object.values(value as Record<string, unknown>)) {
+      const hit = judgeTemporalLiterals(nested, field, kind);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  return isUninterpretableTemporalComparand(kind, value)
+    ? { field, kind, value: value as string }
+    : null;
 }
 
 /**
