@@ -26,8 +26,23 @@ import {
     type ObjectSchemaMaskPosture,
 } from '@objectstack/metadata-core';
 import { organizationIdForMetaWrite } from '../meta-write-org-scope.js';
+import { buildApiError } from '../error-envelope.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
+
+/**
+ * [#8848] The methods `/metadata/:type/:name` actually serves — the single
+ * source for both the `Allow` header and the refusal message, so the two
+ * cannot drift apart.
+ *
+ * `PUT` is the save branch; `GET` is the read that follows it. `HEAD` is in the
+ * set because it is **measured to be served today**: driven through the real
+ * `createHonoApp` catch-all, `HEAD /api/v1/meta/object/account` returns `200`
+ * with `protocol.getMetaItem` called once (the transport strips the body), so
+ * refusing it would not restore an invariant — it would regress a legitimate
+ * read verb that works.
+ */
+const METADATA_ITEM_METHODS = ['GET', 'HEAD', 'PUT'] as const;
 
 export function createMetaDomain(deps: DomainHandlerDeps): DomainRoute {
     return {
@@ -420,6 +435,71 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                 }
             }
             return { handled: true, response: deps.error('Save not supported', 501) };
+        }
+
+        // [#8848] The read `try` below is this block's default answer, and it
+        // used to carry NO method guard at all: every verb that is not `PUT`
+        // fell into it and was served the ordinary metadata READ.
+        //
+        // MEASURED through the real composed host (`createHonoApp`'s
+        // `${prefix}/*` catch-all → `dispatch()` → this domain), caller
+        // authenticated, path `/api/v1/meta/object/account`:
+        //
+        //     DELETE → 200, getMetaItem called once, deleteMetaItem never
+        //     PATCH  → 200, getMetaItem called once
+        //     POST   → 200, getMetaItem called once
+        //
+        // `DELETE` is the sharpest of the three: a caller asking to delete a
+        // metadata item received `200` plus the document, which is
+        // indistinguishable from a successful destructive call — and nothing
+        // was deleted. No status, header or field separated any of these
+        // answers from a real `GET`. Same defect class as #8842's falsy-body
+        // `PUT` next door, reached by a different door (AGENTS.md, Route &
+        // surface ownership §3 "Absence must be loud", §4 "machine-readable
+        // surfaces must not lie").
+        //
+        // ⚠️ NOT a privilege escalation, and please do not restate it as one:
+        // these requests are answered by the READ path, which runs the ADR-0106
+        // mask, so the caller gets exactly what `GET` would return and nothing
+        // is written. A request that does not write does not escalate by
+        // skipping a write gate.
+        //
+        // Aligning, not inventing: every OTHER route in this file already
+        // guards its verb — the `state` and `published` reads above
+        // (`!method || method === 'GET'`), `_drafts` and `_migrate-stored`
+        // below. This block was the outlier.
+        //
+        // ⛔ This REFUSES the unsupported verbs; it does not implement them.
+        // A real metadata delete exists (`protocol.deleteMetaItem`) and REST
+        // already exposes `DELETE /api/v1/meta/:type/:name`, but mounting it on
+        // THIS transport would expand the public surface and needs its own card.
+        const verb = method?.toUpperCase();
+        if (verb && verb !== 'GET' && verb !== 'HEAD') {
+            // Hand-rolled rather than `deps.error(...)` for one reason: the
+            // `Allow` header, which is how a 405 NAMES what is allowed to a
+            // machine rather than only to a human reading the message
+            // (`IHttpServer`'s unmatched-request contract in
+            // `packages/spec/src/contracts/http-server.ts`; `domains/mcp.ts`
+            // hand-rolls its 405 for exactly the same reason — `deps.error`
+            // carries no headers). The BODY still goes through the one builder,
+            // so this branch cannot drift back to a numeric `code`, and the
+            // code itself is DERIVED from the status (`METHOD_NOT_ALLOWED`)
+            // rather than spelled here — matching the other 405 sites.
+            const allow = METADATA_ITEM_METHODS.join(', ');
+            return {
+                handled: true,
+                response: {
+                    status: 405,
+                    headers: { Allow: allow },
+                    body: {
+                        success: false,
+                        error: buildApiError({
+                            message: `Method not allowed on a metadata item — use ${allow}.`,
+                            httpStatus: 405,
+                        }),
+                    },
+                },
+            };
         }
 
         try {

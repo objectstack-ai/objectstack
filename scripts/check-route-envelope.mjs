@@ -345,7 +345,6 @@ const DISPATCHER_DOMAINS = {
   'automation.ts': { handBuilt: 0 },
   'data.ts': { handBuilt: 0 },
   'i18n.ts': { handBuilt: 0 },
-  'meta.ts': { handBuilt: 0 },
   'notifications.ts': { handBuilt: 0 },
   'packages.ts': { handBuilt: 0 },
   'security.ts': { handBuilt: 0 },
@@ -369,6 +368,15 @@ const DISPATCHER_DOMAINS = {
   'share-links.ts': {
     handBuilt: 1,
     note: 'POST /share-links is a 201, same reason as /keys (#4038 removed the duplicate key it also carried)',
+  },
+  // [#8848] Was 0. `/metadata/:type/:name` used to answer EVERY non-PUT verb
+  // with the ordinary metadata read — a DELETE came back `200` plus the
+  // document while nothing was deleted. The restored guard answers 405, and it
+  // must carry `Allow:` to name what is allowed to a machine, which
+  // `deps.error` cannot express — the same reason `mcp.ts` hand-rolls its 405.
+  'meta.ts': {
+    handBuilt: 1,
+    note: 'one 405 on /metadata/:type/:name that must carry an `Allow:` header (`deps.error` takes none); the body is the declared envelope and its code is derived from the status',
   },
 
   // Kinds 1 and 2 together.
