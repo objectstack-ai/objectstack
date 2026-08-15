@@ -30,6 +30,12 @@ export * from './filter-verdict';
 // diagnostic without re-disclosing policy. Fail direction is CLOSED by
 // declaration: unmarked or ambiguous withholds, exactly like `'policy'`.
 export * from './filter-subtree-provenance';
+// [#8371] The FILTER axis' dotted-path verdict — ONE head-type classification
+// consumed by both doors (metadata-protocol's ingress gate and objectql's
+// engine seam), so the two cannot drift into answering one spelling two ways.
+// Relation / virtual / scalar heads are refused; structured-JSON heads are
+// DELIBERATELY unjudged (the ruled carve-out — live on two of three backends).
+export * from './filter-dotted-head';
 // Canonical conformance cases for the filter TEXT operators — case folding
 // (ASCII-only, #4706 Q1), literal comparands (no LIKE wildcards, no regex
 // metacharacters), and the refusal of the retired `$regex`/`$options`. A
