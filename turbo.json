@@ -32,7 +32,7 @@
         "!.turbo/**",
         "$TURBO_ROOT$/packages/**/*.object.ts",
         "$TURBO_ROOT$/packages/lint/src/**",
-        "$TURBO_ROOT$/content/docs/references/index.mdx",
+        "$TURBO_ROOT$/content/docs/references/**",
         "$TURBO_ROOT$/scripts/**",
         "$TURBO_ROOT$/packages/runtime/src/**",
         "$TURBO_ROOT$/packages/objectql/src/validation/**",
@@ -128,7 +128,45 @@
         "$TURBO_ROOT$/packages/runtime/src/**",
         "$TURBO_ROOT$/packages/services/service-realtime/src/**",
         "$TURBO_ROOT$/packages/spec/src/automation/**",
-        "$TURBO_ROOT$/packages/spec/src/data/**"
+        "$TURBO_ROOT$/packages/spec/src/data/**",
+        "$TURBO_ROOT$/examples/app-showcase/**",
+        "$TURBO_ROOT$/packages/cli/src/commands/**",
+        "$TURBO_ROOT$/packages/metadata/src/**"
+      ]
+    },
+    "@objectstack/formula#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/packages/spec/src/security/rls.zod.ts",
+        "$TURBO_ROOT$/skills/objectstack-formula/**"
+      ]
+    },
+    "@objectstack/metadata-protocol#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/scripts/check-durability-degradation-log-level.mjs"
+      ]
+    },
+    "@objectstack/downstream-contract#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/packages/spec/src/**",
+        "$TURBO_ROOT$/packages/spec/package.json"
       ]
     },
     "create-objectstack#test": {

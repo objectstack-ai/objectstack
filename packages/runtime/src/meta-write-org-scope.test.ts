@@ -61,12 +61,19 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import {
+    assertEngineDeleteDispatch,
+    assertEngineUpdateDispatch,
+    // [#8805] The predicate moved here from `../meta-write-org-scope.js` so the
+    // REST `/meta` write doors share it. This suite still drives the DISPATCHER
+    // through the real stack — that is why it stays in this package.
+    declaresOrgOverride,
+    organizationIdForMetaWrite,
+} from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { HttpDispatcher } from './http-dispatcher.js';
 import type { HttpDispatcherResult } from './http-dispatcher.js';
-import { declaresOrgOverride, organizationIdForMetaWrite } from './meta-write-org-scope.js';
 
 const ACTIVE_ORG = 'org_alpha';
 

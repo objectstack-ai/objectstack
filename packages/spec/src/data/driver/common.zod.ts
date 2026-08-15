@@ -201,19 +201,183 @@ export function urlUserinfoPassword(value: string): string | undefined {
 }
 
 /**
- * Attach the #8082 URL-userinfo credential refusal to a driver-config URL key.
+ * Per-driver credential-bearing URL QUERY PARAMETER names (#8337) — the third
+ * spelling of the same secret, one syntax over from userinfo (#8082), which was
+ * itself one syntax over from the inline key (#7990).
+ *
+ * Every entry is MEASURED against the client the driver actually hands the URL
+ * to, in the versions pinned by this tree — never inferred from documentation:
+ *
+ *  - `turso: ['authToken']` — `@libsql/core@0.17.4` `expandConfig` reads
+ *    `?authToken=` from the parsed URL and assigns it OVER the config-level
+ *    `authToken`, so a query-embedded token does not merely authenticate: it
+ *    silently overrides the secret the datasource binder injects at connect.
+ *    Keys are matched after percent-decoding (`auth%54oken` is `authToken`),
+ *    exact-case; any other spelling throws `URL_PARAM_NOT_SUPPORTED`.
+ *  - `postgres: ['password']` — `pg-connection-string@2.14.0` copies EVERY
+ *    query parameter into the client config first and only then applies the
+ *    userinfo password as a fallback (`config.password = config.password ||
+ *    …`), so `?password=` is honoured and even wins over userinfo.
+ *
+ * Deliberately absent, both measured as NOT read (refusing them would be the
+ * speculative widening the dispatch forbids — an author who writes one gets a
+ * loud auth failure at connect, not a silent workaround):
+ *
+ *  - mysql — `mysql2`'s `parseUrl` seeds `password` from userinfo before its
+ *    query loop and skips any query key already present (`if (key in options)
+ *    continue`), so `?password=` never reaches the connection;
+ *  - mongo — the `mongodb` driver takes credentials from userinfo only;
+ *    `password` is not a connection-string option.
+ *
+ * The refusal (and the read-path redactor via
+ * {@link CREDENTIAL_URL_QUERY_PARAM_NAMES}) matches these names
+ * CASE-INSENSITIVELY on the decoded key: no client reads a case variant — so
+ * no working configuration is refused — but the at-rest half is
+ * case-independent: `?AUTHTOKEN=eyJ…` persists the same JWT cleartext into
+ * `sys_metadata` as the exact spelling does.
+ */
+export const CREDENTIAL_URL_QUERY_PARAMS: Readonly<Record<string, readonly string[]>> = {
+  turso: ['authToken'],
+  postgres: ['password'],
+};
+
+/**
+ * Union of every declared credential-bearing query parameter name — what the
+ * read-path redactor (`data/datasource-credential-redaction.ts`) strips,
+ * driver-independently: declining to REFUSE an unknown driver's config is a
+ * boundary choice about authoring, but serving a query parameter literally
+ * named `password` back in cleartext is a leak under any boundary (the same
+ * asymmetry that module already documents for the inline keys).
+ */
+export const CREDENTIAL_URL_QUERY_PARAM_NAMES: readonly string[] =
+  [...new Set(Object.values(CREDENTIAL_URL_QUERY_PARAMS).flat())];
+
+/**
+ * Refusal prescription for a credential embedded in an authored URL's query
+ * string (#8337 — the #8082 refusal template, one query-parameter over).
+ *
+ * Same wording constraints as {@link URL_EMBEDDED_CREDENTIAL_REFUSED}, plus
+ * one the userinfo message must NOT be copied on: that message promises the
+ * bound secret "wins over anything embedded in the URL", which is TRUE for
+ * userinfo but FALSE for turso's query form — `@libsql/core` assigns the URL's
+ * `?authToken=` over the config-level token (measured, see
+ * {@link CREDENTIAL_URL_QUERY_PARAMS}), so a query-embedded token silently
+ * defeats the binder. The message states that inversion instead of inheriting
+ * the false reassurance.
+ */
+export const URL_CREDENTIAL_QUERY_PARAM_REFUSED = (key: string, param: string): string =>
+  `this \`${key}\` carries \`?${param}=\` in its query string — credential material that is not `
+  + 'accepted at publish (#8337): the datasource is persisted whole into `sys_metadata`, which '
+  + 'is served back by the ordinary data API, so a query-embedded credential lands in cleartext '
+  + 'at rest exactly like a userinfo password (#8082) or an inline key (#7990) — and at connect '
+  + 'it can silently override the secret the binder injects. Remove the parameter and bind the '
+  + "secret instead: the Setup → Datasources connection form's secret field hands it to the "
+  + 'datasource secret binder, which encrypts it into `sys_secret` and stores only an opaque '
+  + 'handle at `external.credentialsRef` — or reference the secrets store directly with '
+  + '`external.credentialsRef`. The resolved secret is injected at connect time. Do NOT '
+  + 'substitute a `${…}` placeholder into the URL: placeholders in authored metadata are '
+  + 'resolved by nothing and reach the database client verbatim (#8078, measured), and are '
+  + 'themselves refused at publish (#8336). Runtime-environment DSNs (`OS_DATABASE_URL` and '
+  + 'friends) do not pass through this publish door and are unaffected.';
+
+/** Percent-decode a query key the way the measured clients do; malformed encoding stays raw. */
+function decodeQueryKey(raw: string): string {
+  // `.replace` with a global regex, not `.replaceAll`: the DTS build's lib
+  // target predates es2021.
+  const plusDecoded = raw.replace(/\+/g, ' ');
+  try {
+    return decodeURIComponent(plusDecoded);
+  } catch {
+    // A malformed escape cannot spell a declared name once decoding fails, and
+    // the clients that would read it throw on it anyway (`URL_INVALID`); judge
+    // the raw spelling rather than letting a detector throw inside a parse.
+    return plusDecoded;
+  }
+}
+
+/**
+ * The declared credential name a single raw `key=value` query pair carries, or
+ * `undefined` — the ONE boundary definition behind both doors: the write-path
+ * refusal ({@link urlCredentialQueryParams}) and the read-path redactor
+ * (`redactUrlCredentials` in `data/datasource-credential-redaction.ts`) judge
+ * pairs through this same function, so the two cannot drift.
+ *
+ * Boundaries, matching the measured clients (`@libsql/core` splits on `&`,
+ * key before the FIRST `=`, percent + `+` decoding; WHATWG
+ * `URLSearchParams` — what `pg-connection-string` reads — draws the same
+ * lines):
+ *
+ *  - a pair with no `=`, or an empty value, carries NO secret (`?authToken=`
+ *    is the query twin of `user:@host`, which #8082 accepts);
+ *  - the key is percent-decoded before matching (`auth%54oken` IS `authToken`
+ *    to the client — encoding is not absence);
+ *  - names match case-insensitively (rationale on
+ *    {@link CREDENTIAL_URL_QUERY_PARAMS}).
+ */
+export function credentialQueryParamOf(
+  rawPair: string,
+  params: readonly string[],
+): string | undefined {
+  const splitIdx = rawPair.indexOf('=');
+  if (splitIdx < 0 || splitIdx === rawPair.length - 1) return undefined;
+  const key = decodeQueryKey(rawPair.slice(0, splitIdx)).toLowerCase();
+  return params.find((param) => param.toLowerCase() === key);
+}
+
+/**
+ * The declared credential-bearing query parameters an authored URL-ish string
+ * carries with a non-empty value — the query-string sibling of
+ * {@link urlUserinfoPassword} (#8337).
+ *
+ * Deliberately NOT `new URL()`, for #8082's reason: real DSNs take forms
+ * WHATWG parsing rejects, and a detector that throws on the exact inputs it
+ * must judge fails open. The boundaries are RFC 3986's: the query runs from
+ * the first `?` to the `#` that starts the fragment (a `?authToken=` inside a
+ * fragment is fragment text, read by nothing); pairs split on `&`. No
+ * authority is required — libSQL `file:` URLs carry query parameters too.
+ */
+export function urlCredentialQueryParams(
+  value: string,
+  params: readonly string[],
+): string[] {
+  if (params.length === 0) return [];
+  const hashIdx = value.indexOf('#');
+  const head = hashIdx === -1 ? value : value.slice(0, hashIdx);
+  const queryIdx = head.indexOf('?');
+  if (queryIdx === -1) return [];
+  const found: string[] = [];
+  for (const pair of head.slice(queryIdx + 1).split('&')) {
+    const match = credentialQueryParamOf(pair, params);
+    if (match !== undefined && !found.includes(match)) found.push(match);
+  }
+  return found;
+}
+
+/**
+ * Attach the #8082 URL-userinfo credential refusal to a driver-config URL key —
+ * and, for drivers whose client reads credential material out of the query
+ * string, the #8337 query-parameter refusal beside it.
  *
  * One shared check for every URL-bearing key on the four driver schemas
  * (postgres/mysql/mongo `url`, turso `url` + `syncUrl`), so the policy cannot
  * drift per driver — the maintainer's ruling names a single value-level parse
  * as the mechanism, precisely so no second copy exists to disagree with this
- * one (the rejected Option C shape).
+ * one (the rejected Option C shape). `credentialQueryParams` is the driver's
+ * entry in {@link CREDENTIAL_URL_QUERY_PARAMS}; a key with none declared is
+ * judged exactly as before.
  */
-export function credentialFreeUrl<S extends z.ZodString>(schema: S, key: string) {
+export function credentialFreeUrl<S extends z.ZodString>(
+  schema: S,
+  key: string,
+  credentialQueryParams: readonly string[] = [],
+) {
   return schema.superRefine((value, ctx) => {
     if (typeof value !== 'string') return;
     if (urlUserinfoPassword(value) !== undefined) {
       ctx.addIssue({ code: 'custom', message: URL_EMBEDDED_CREDENTIAL_REFUSED(key) });
+    }
+    for (const param of urlCredentialQueryParams(value, credentialQueryParams)) {
+      ctx.addIssue({ code: 'custom', message: URL_CREDENTIAL_QUERY_PARAM_REFUSED(key, param) });
     }
   });
 }

@@ -18,6 +18,7 @@ import { z } from 'zod';
 import { lazySchema } from '../../shared/lazy-schema';
 import { strictObject } from '../../shared/strict-object';
 import {
+  CREDENTIAL_URL_QUERY_PARAMS,
   credentialFreeUrl,
   driverConfigJsonSchema,
   DriverSslToggleSchema,
@@ -90,13 +91,21 @@ export const PostgresConfigSchema = lazySchema(() => strictObject(
    * userinfo is refused at publish exactly like an inline `password` (#7990) —
    * bind the secret (`external.credentialsRef` / the connection form's secret
    * field) and it is injected at connect time. A bare username (`user@host`)
-   * stays writable. Placeholder-free since #8336: a `${…}` span anywhere in
+   * stays writable. Since #8337 the same closure covers the query string:
+   * `pg-connection-string` copies every query parameter into the client
+   * config, so `?password=` is honoured (it even wins over userinfo —
+   * measured; see `CREDENTIAL_URL_QUERY_PARAMS` in common.zod.ts) and is
+   * refused the same way; non-credential parameters (`?sslmode=` and
+   * friends) stay writable. Placeholder-free since #8336: a `${…}` span anywhere in
    * the value is refused — placeholders in authored metadata are resolved by
    * nothing. Runtime-environment DSNs (`OS_DATABASE_URL`) never pass
    * through this schema and are unaffected.
    * Format: `postgresql://[user@][host][:port][/dbname][?params]`
    */
-  url: placeholderFree(credentialFreeUrl(z.string(), 'url'), 'url').optional()
+  url: placeholderFree(
+    credentialFreeUrl(z.string(), 'url', CREDENTIAL_URL_QUERY_PARAMS.postgres),
+    'url',
+  ).optional()
     .describe('Connection URI (supersedes the discrete fields; must not embed a password — bind the secret instead)')
     .meta({ title: 'Connection URL' }),
 
