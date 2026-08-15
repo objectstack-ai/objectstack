@@ -40,6 +40,7 @@ import {
 // both verbs enforce one definition; the engine raises, the contract decides.
 import { MAX_BULK_PER_ROW_HOOK_ROWS, resolveBulkPerRowHookBudget } from '@objectstack/spec/data';
 import { assertListComparandShapes, assertFilterIsMaterializable } from './filter-comparand-shape.js';
+import { assertTemporalComparandsInterpretable } from './temporal-comparand-door.js';
 // Seek pagination for the walks that must read EVERY row — the autonumber seed
 // scan is one (#6249). Shared with `summary-backfill` rather than re-rolled:
 // the cursor merge is the part that is easy to get subtly wrong.
@@ -658,6 +659,15 @@ function lowerWhereFilterArray<T extends object | undefined>(
     // run it against" — and because this seam is the one place EVERY
     // caller-supplied `where` passes through, whichever verb it arrived by.
     assertFilterIsMaterializable(object, operation, schema, where);
+    // [#8690] The TEMPORAL-comparand door, third on the same seam and third
+    // question about the same predicate: the shape gate asks "can this
+    // comparand run", the materializable gate asks "is there a column to run it
+    // against", and this asks "can that column's storage rule READ this value".
+    // It must run BEFORE `resolveWhereTokens` (which is downstream of every
+    // caller of this function) because the refusal has to precede the driver —
+    // hence the door steps around `{placeholder}` strings rather than judging
+    // them; the token resolver refuses the unknown ones a moment later, loudly.
+    assertTemporalComparandsInterpretable(object, operation, schema, where);
     // [#7872] The comparand-type door, on the OBJECT form. `parseFilterAST`
     // runs the same walk on everything it lowers or passes through, but
     // NEITHER door routes an object-form filter through it — Door 1 gates on
@@ -718,6 +728,11 @@ function lowerWhereFilterArray<T extends object | undefined>(
   // the array sugar (`[['is_open','=',true]]`) names fields too, and a gate on
   // one branch would answer one mistake two ways depending on the spelling.
   assertFilterIsMaterializable(object, operation, schema, condition);
+  // [#8690] Same door as the object branch, on the LOWERED condition — the
+  // array sugar (`[['at','>=','last_30_days']]`) names temporal fields too, and
+  // a gate on one branch would answer one mistake two ways depending on the
+  // spelling.
+  assertTemporalComparandsInterpretable(object, operation, schema, condition);
   lowered.where = condition;
   return lowered as T;
 }
