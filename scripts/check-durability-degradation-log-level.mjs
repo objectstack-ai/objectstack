@@ -483,6 +483,82 @@ const FAILURE_PROPAGATION_SITES = new Map([
 // `count` as a vocabulary at all — the names are generic, so the SCOPE is what
 // makes them mean "a storage seam" instead of "any data read anywhere".
 //
+// ## Measured and DELIBERATELY NOT added — the FALL-THROUGH / empty-accumulator
+// ## criterion (#8845)
+//
+// A fifth family member was proposed: a `catch` that returns nothing at all and
+// lets an accumulator declared above the `try` stand in for the answer —
+//
+//     const histRows = [];
+//     try { const rows = await engine.find(...); histRows.push(...); }
+//     catch { /* history table unavailable - fall through with empty list */ }
+//     // ... histRows read below as though the read had happened
+//
+// Same 收窄先行 discipline as #6451, same three scan roots, measured on
+// `origin/main` @ 8664a2c BEFORE anything was written. The measurement argued
+// against the criterion, so it is the MEASUREMENT that is recorded here rather
+// than the criterion that is added. The next author to notice this blind spot
+// should read these numbers before re-proposing it — that is what this block is
+// for, and it is why a negative result is written down at the same length as a
+// positive one.
+//
+// FIRST — the blind spot is real, but it is NOT "the rule cannot see the exit".
+// `walkBenignPaths` DOES model the fall-off-the-end exit: it pushes
+// `{ benign, expr: undefined, node: block }`. Both invention criteria then
+// decline it, because `inventedEmptyValue` and `identityPassThrough` each answer
+// `undefined` for a valueless exit. So this is the SAME deliberate exclusion the
+// empty-value table already states for a bare `return;` — which happens to cover
+// fall-through as well. Proven by a two-direction ablation in a scan root: a
+// planted `catch { return []; }` FAILS the gate, and the identical seam
+// rewritten to fall through into an empty accumulator is COUNTED IN THE CENSUS
+// (66 seams to 67) and reported as `no invented answer`, gate green. Surveyed,
+// cleared, harmful — the #6116 shape a third time.
+//
+// SECOND — the census, narrowing one criterion at a time: 66 read seams; 46 have
+// no `return` anywhere in the catch; 41 have a valueless exit; 31 of those are
+// silent; 25 are silent AND undiscriminated; 15 also have an empty accumulator
+// declared above the `try`, written inside it, and read below.
+//
+// THIRD — why 15 is not #6451's zero, and why narrowing does not rescue it:
+//
+//   - 7 of the 15 are ALREADY CORRECT and would each need a baseline entry on a
+//     ledger that holds exactly one today. Every one of them delivers the
+//     failure: `errors++` into a returned `{ deleted, errors }` (history-cleanup,
+//     3 seams), `issues.push` into the returned probe report (build-probes),
+//     `failed.push` into the returned envelope (deletePackage,
+//     discardPackageDrafts), and `report.unreadableObjects.push` in the
+//     dangling-reference audit — a seam written specifically so its report
+//     "cannot be mistaken for a clean bill of health".
+//   - The obvious exemption for those — "the catch WROTE something that is read
+//     later" — is unsound, and measurably so. It is INFERRED, not declared,
+//     which is the one thing this file refuses everywhere; and it clears
+//     `publishPackageDrafts`, whose catch pushes a FABRICATED revert-plan entry
+//     (`existedBefore: false, prevVersion: null`) after a failed read. An
+//     exemption that fires on an invention is not an exemption.
+//   - Narrowing further — also exempting a catch whose only statement is a jump
+//     — cuts the red set to 2, but buys that by exempting three REAL instances:
+//     `searchAll`'s per-object `continue` (hits silently short while
+//     `totalHits` is still reported as the count), `findReferencesToMeta`, and
+//     `cascadeDeleteRelations`, where a failed dependents probe skips a
+//     `restrict` guard altogether. Tuning a criterion until only the instance
+//     you already knew about is red is how a gate stops meaning anything.
+//   - Even where the verdict is right, the ACCUMULATOR is often the wrong
+//     variable: `findReferencesToMeta`'s harm lives in `out`, not in the flagged
+//     `items`; `cascadeDeleteRelations` and `checkGovernance` have no
+//     accumulator at all, only a skipped guard. A message naming the wrong
+//     variable teaches the wrong fix.
+//   - And the SCOPE is the only thing holding the line: drop the READ
+//     vocabulary and this shape matches 91 of the 314 catch clauses in these
+//     three roots.
+//
+// The honest conclusion is that this shape does not need a looser invention
+// criterion. It needs the read-seam rule to acquire its OWN declared
+// failure-propagation vocabulary — the log-level rule above has one
+// (`FAILURE_PROPAGATION_CALLEES` / `_SITES`) and the two share none, on purpose
+// — so that "the catch reported it" becomes a declared, checkable fact instead
+// of an inferred one. That is a design question with a maintainer in it, not a
+// criterion extension, and it is deliberately left un-taken here.
+//
 // ## Honest limitations, stated up front rather than discovered later
 //
 //   1. **An empty answer wrapped in an ENVELOPE is not matched.** The rule reads
@@ -524,6 +600,15 @@ const FAILURE_PROPAGATION_SITES = new Map([
 //      `durability-read-invention.baseline.json` as `reviewed-legitimate`, next
 //      to `referenceExists` — an entry that says a human read it, not a rule
 //      that guesses.
+//   5. **A `catch` that returns NOTHING is not judged at all** — it falls
+//      through and lets an accumulator declared above the `try` answer for a
+//      read that never happened (#8845). The fall-off-the-end exit IS modelled;
+//      both invention criteria decline it because there is no expression to
+//      classify, the same exclusion stated for a bare `return;`. Measured and
+//      deliberately not closed — see "Measured and DELIBERATELY NOT added"
+//      above for the census, the three narrowings that were tried, and why the
+//      real answer is a declared propagation vocabulary rather than a looser
+//      invention criterion.
 
 /**
  * Where the read-seam rule looks. Narrowed on purpose — see above.
