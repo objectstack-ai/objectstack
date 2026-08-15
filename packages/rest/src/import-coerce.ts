@@ -31,6 +31,7 @@
  * untouched, so an import stays byte-identical to the pre-coercion behaviour.
  */
 
+import { zonedWallClockToUtcMs, type WallClockParts } from '@objectstack/core';
 import type { ExportFieldMeta } from './export-format.js';
 import {
   SINGLE_OPTION_TYPES as OPTION_TYPES,
@@ -125,6 +126,13 @@ export interface CoerceContext {
   locale?: string;
   /** `II18nService.t`-compatible lookup for message overrides (#3957). */
   translate?: ValidationMessageTranslator;
+  /**
+   * Business timezone of the importing principal (`ExecutionContext.timezone`,
+   * the platform-default → global → tenant cascade). The clock an offset-free
+   * datetime cell is read in (#8485) — see {@link parseDateCell}. Absent → the
+   * cell is read as UTC, matching what the export writes when no zone resolves.
+   */
+  timezone?: string;
 }
 
 /** A per-field coercion failure, shaped like the engine's validation errors. */
@@ -236,6 +244,39 @@ function pad2(n: number): string {
 const TIME_OF_DAY = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
 
 /**
+ * A date-time cell carrying **no offset**: `YYYY-MM-DD HH:mm[:ss[.sss]]`, `T`
+ * or space separated, `/` accepted for `-` like the date fast path. Anchored at
+ * both ends, so a trailing `Z` or `+08:00` does NOT match — that cell already
+ * names an instant and is left to `Date.parse` (#8485 ruling: an explicit offset
+ * keeps being honoured exactly as written).
+ */
+const NAIVE_DATE_TIME =
+  /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})[T ](\d{1,2}):([0-5]\d)(?::([0-5]\d))?(?:\.(\d{1,3})\d*)?$/;
+
+/**
+ * Read an offset-free cell as the wall clock it is, or `undefined` when the
+ * shape does not match (caller falls through to `Date.parse`). Out-of-range
+ * components are rejected here rather than silently rolled over by `Date.UTC`.
+ */
+function parseNaiveWallClock(s: string): WallClockParts | undefined {
+  const m = NAIVE_DATE_TIME.exec(s);
+  if (!m) return undefined;
+  const parts: WallClockParts = {
+    year: Number(m[1]),
+    month: Number(m[2]),
+    day: Number(m[3]),
+    hour: Number(m[4]),
+    minute: Number(m[5]),
+    second: m[6] ? Number(m[6]) : 0,
+    millisecond: m[7] ? Number(m[7].padEnd(3, '0')) : 0,
+  };
+  if (parts.month < 1 || parts.month > 12) return undefined;
+  if (parts.day < 1 || parts.day > 31) return undefined;
+  if ((parts.hour ?? 0) > 23) return undefined;
+  return parts;
+}
+
+/**
  * Coerce a cell into the string shape the engine accepts for a date-ish field:
  *   - `date`     → `YYYY-MM-DD`
  *   - `datetime` → full ISO-8601 (`toISOString`)
@@ -245,9 +286,48 @@ const TIME_OF_DAY = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
  * Unambiguous `YYYY-MM-DD` / `YYYY/MM/DD` inputs are normalised directly to
  * avoid timezone drift; everything else falls back to `Date.parse` (which
  * covers ISO datetimes and locale-default `MM/DD/YYYY`).
+ *
+ * ## Which clock an offset-free cell is read in (#8485)
+ *
+ * A spreadsheet cell like `2026-08-01 06:00:00` carries no offset, so it is a
+ * **wall clock**, not an instant — and `new Date(s)` resolves it against the
+ * **process** `TZ`. That made the stored instant a property of the deployment
+ * host: the same file, same tenant, same cell landed eight hours apart on two
+ * hosts, decided by a setting nobody authoring the spreadsheet can see. Since
+ * export renders `datetime` cells in the business timezone (#8373), the
+ * advertised export → edit → re-import round trip was lossless only where the
+ * host `TZ` happened to equal that zone.
+ *
+ * So a naive **datetime** cell is now read in `timezone` — the caller's
+ * `ExecutionContext.timezone`, the same value the export renders in — through
+ * `@objectstack/core`'s `zonedWallClockToUtcMs` (DST-safe via the platform tz
+ * database, and the primitive the date-bucket drill path already used in its
+ * date-only form). Three things deliberately do NOT change:
+ *
+ *  - **an offset-bearing cell** (`…Z`, `…+08:00`) already names one instant and
+ *    is honoured exactly as written — `NAIVE_DATE_TIME` cannot match it;
+ *  - **the date-only fast path** stays UTC (ECMAScript reads a date-only form as
+ *    UTC, and a `date` is a timezone-naive calendar day under ADR-0053 — moving
+ *    it would re-time every date-only import to fix nothing);
+ *  - **no resolved timezone ⇒ UTC**, never the process clock. That is the
+ *    fallback the export cell path takes when no zone resolves, so the round
+ *    trip stays exact for deployments that configure none — and a process-`TZ`
+ *    fallback would preserve the defect for exactly the deployments that cannot
+ *    see it.
+ *
+ * For a naive cell landing in a `date` or `time` field the typed components are
+ * taken verbatim (`2026-08-01 06:00:00` → `2026-08-01` / `06:00:00`), which is
+ * both zone-free and host-`TZ`-free; previously those two branches also read the
+ * cell through the process clock and could report the wrong calendar day.
  */
-export function parseDateCell(raw: unknown, kind: 'date' | 'datetime' | 'time'): string | undefined {
+export function parseDateCell(
+  raw: unknown,
+  kind: 'date' | 'datetime' | 'time',
+  timezone?: string,
+): string | undefined {
   if (raw instanceof Date) {
+    // Already an instant (a JSON/programmatic caller's `Date`) — no wall clock
+    // to re-interpret, so no zone question to answer.
     if (Number.isNaN(raw.getTime())) return undefined;
     if (kind === 'datetime') return raw.toISOString();
     if (kind === 'date') return `${raw.getUTCFullYear()}-${pad2(raw.getUTCMonth() + 1)}-${pad2(raw.getUTCDate())}`;
@@ -256,9 +336,13 @@ export function parseDateCell(raw: unknown, kind: 'date' | 'datetime' | 'time'):
   const s = String(raw).trim();
   if (s === '') return undefined;
 
+  const wall = parseNaiveWallClock(s);
+
   if (kind === 'time') {
     if (TIME_OF_DAY.test(s)) return s.length === 5 ? `${s}:00` : s;
-    // A full datetime for a time field: take its clock component.
+    // A full datetime for a time field: take its clock component. Offset-free →
+    // the clock as typed; offset-bearing → the instant's UTC clock, as before.
+    if (wall) return `${pad2(wall.hour ?? 0)}:${pad2(wall.minute ?? 0)}:${pad2(wall.second ?? 0)}`;
     const t = new Date(s);
     if (!Number.isNaN(t.getTime())) return `${pad2(t.getUTCHours())}:${pad2(t.getUTCMinutes())}:${pad2(t.getUTCSeconds())}`;
     return undefined;
@@ -273,6 +357,12 @@ export function parseDateCell(raw: unknown, kind: 'date' | 'datetime' | 'time'):
     if (mo < 1 || mo > 12 || d < 1 || d > 31) return undefined;
     if (kind === 'date') return `${y}-${pad2(mo)}-${pad2(d)}`;
     return new Date(Date.UTC(y, mo - 1, d)).toISOString();
+  }
+
+  if (wall) {
+    if (kind === 'date') return `${wall.year}-${pad2(wall.month)}-${pad2(wall.day)}`;
+    const ms = zonedWallClockToUtcMs(wall, timezone);
+    return Number.isNaN(ms) ? undefined : new Date(ms).toISOString();
   }
 
   const parsed = new Date(s);
@@ -351,7 +441,8 @@ export async function coerceFieldValue(
   }
 
   if (t === 'date' || t === 'datetime' || t === 'time') {
-    const d = parseDateCell(raw, t);
+    // The business timezone an offset-free datetime cell is read in (#8485).
+    const d = parseDateCell(raw, t, ctx.timezone);
     if (d === undefined) {
       // One code, three sentences — a `time` cell is not "not a valid date".
       const key = t === 'datetime' ? 'import_invalid_datetime' : t === 'time' ? 'import_invalid_time' : 'import_invalid_date';

@@ -31,14 +31,14 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         options: {
           user: "Usuario",
           group: "Grupo",
-          position: "posición",
-          unit_and_subordinates: "Rol y subordinados",
+          position: "Puesto",
+          unit_and_subordinates: "Unidad de negocio y subordinados",
           guest: "Invitado"
         }
       },
       recipient_id: {
         label: "Destinatario",
-        help: "ID del usuario/grupo/rol que recibe acceso."
+        help: "ID del usuario/grupo/puesto que recibe acceso."
       },
       access_level: {
         label: "Nivel de acceso",

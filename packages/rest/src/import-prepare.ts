@@ -79,16 +79,39 @@ export function parseCsvToRows(csv: string, mapping: Record<string, string> = {}
 }
 
 /**
+ * The wall clock an ExcelJS date cell shows in the sheet, as the offset-free
+ * `YYYY-MM-DD HH:mm:ss` a CSV export writes.
+ *
+ * [#8485] An xlsx serial date carries **no timezone** — it is a clock reading,
+ * and ExcelJS materialises it as a `Date` whose *UTC* components are that
+ * reading (measured: a cell showing `2026-08-01 06:00:00` round-trips to
+ * `2026-08-01T06:00:00.000Z` under any host `TZ`). Rendering it with
+ * `toISOString()` therefore stamped a `Z` the file never had, and that
+ * fabricated offset then took precedence over the caller's business timezone in
+ * `parseDateCell` — which honours a written offset by contract. Every real date
+ * cell in a user-authored workbook imported as UTC, whatever the tenant's zone.
+ */
+function xlsxDateToNaiveCell(d: Date): string {
+    const p2 = (n: number) => (n < 10 ? `0${n}` : String(n));
+    return (
+        `${d.getUTCFullYear()}-${p2(d.getUTCMonth() + 1)}-${p2(d.getUTCDate())} ` +
+        `${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())}:${p2(d.getUTCSeconds())}`
+    );
+}
+
+/**
  * Flatten one ExcelJS cell value to the raw string the coercion layer expects.
  * ExcelJS hands back rich objects for formulas / hyperlinks / rich text / dates;
  * we reduce each to the human-visible text so a server-parsed xlsx yields the
- * same cells a CSV export would (dates → ISO, so parseDateCell can re-read them).
+ * same cells a CSV export would (dates → the sheet's own wall clock, so
+ * `parseDateCell` re-reads them in the business timezone; see
+ * {@link xlsxDateToNaiveCell}).
  */
 function xlsxCellToString(value: any): string {
     if (value === null || value === undefined) return '';
     if (typeof value === 'string') return value;
     if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') return String(value);
-    if (value instanceof Date) return value.toISOString();
+    if (value instanceof Date) return Number.isNaN(value.getTime()) ? '' : xlsxDateToNaiveCell(value);
     if (typeof value === 'object') {
         // Formula cell → prefer its computed result.
         if ('result' in value && value.result !== undefined && value.result !== null) return xlsxCellToString(value.result);
