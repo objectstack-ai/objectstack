@@ -1229,6 +1229,73 @@ export class AppPlugin implements Plugin {
         }
 
         this.registerHotReloadSeeder(ctx, ql);
+        this.registerSeedTenancyHandoff(ctx, ql);
+    }
+
+    /**
+     * [#8686] Adopt untenanted seed rows into the install's organization the
+     * moment that organization first exists.
+     *
+     * ## Why this cannot be done at seed time, and why boot is too late
+     *
+     * The seed loader already stamps `organization_id` on business seeds — but
+     * only when it can resolve an organization to stamp WITH
+     * (`resolveSoleOrganizationId`). On a first boot there is none: seeds land
+     * during `start()`, and the admin (and their organization) are created later,
+     * by a sign-up POST against the running server. So the loader correctly
+     * declines, the rows land `organization_id = NULL`, and the SQL driver files
+     * their numbers under the `__global__` counter.
+     *
+     * Then the first API create arrives carrying a real organization, draws from a
+     * DIFFERENT counter that is correctly empty, and mints `CASE-00001` — a value
+     * the seed already used. The partitioned unique index
+     * (`COALESCE(organization_id, '__global__'), <field>`) cannot see the
+     * collision because the two rows sit in different partitions. Measured on
+     * 17.0.0 GA: four duplicate identifiers, four 201s, no warning.
+     *
+     * `metadata-protocol`'s `kernel:ready` migration repairs an install that is
+     * ALREADY in that state, which covers every existing deployment. It cannot
+     * cover a fresh one: at `kernel:ready` the organization still does not exist,
+     * so the earliest that migration can act is the NEXT restart — by which time
+     * the duplicates of this session have already been minted and, per the ruling,
+     * are not the platform's to renumber.
+     *
+     * Hence this seam. `sys_organization` gaining its first row is exactly the
+     * event that makes the answer derivable, and it is the ownership handoff's
+     * twin: `claimSeedOwnership` already re-owns seeded rows to the first admin at
+     * the analogous moment, and `claim-seed-ownership.ts` names the missing
+     * tenancy half in its own header ("the ownership twin of org-scoping's
+     * `claimOrphanOrgRows`, which back-fills `organization_id`") — that back-fill
+     * ships in the enterprise organizations runtime, which a single-tenant install
+     * does not have. This is the open-core half of the same handoff.
+     *
+     * Cheap by construction: the backfill's first act is one indexed probe of
+     * `_objectstack_sequences`, and on any install with no untenanted counter it
+     * returns `no-split` having written nothing and logged nothing.
+     */
+    private registerSeedTenancyHandoff(ctx: PluginContext, ql: any): void {
+        if (!ql || typeof ql.registerMiddleware !== 'function') return;
+        ql.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
+            await next();
+            const isOrgCreate =
+                opCtx?.object === 'sys_organization' &&
+                (opCtx?.operation === 'create' || opCtx?.operation === 'insert');
+            if (!isOrgCreate) return;
+            try {
+                const { backfillSeedTenancy, resolveSeedTenancyExec } = await import(
+                    '@objectstack/metadata-protocol'
+                );
+                await backfillSeedTenancy(resolveSeedTenancyExec(ql), ctx.logger);
+            } catch (e: any) {
+                // Best-effort, exactly like the ownership handoff beside it: an
+                // organization was just created and that must stand whatever
+                // happens here. `warn` and not `error` — nothing was lost, and the
+                // `kernel:ready` migration retries the same repair on next boot.
+                ctx.logger.warn('[AppPlugin] seed tenancy handoff failed (#8686)', {
+                    error: e?.message ?? String(e),
+                });
+            }
+        });
     }
 
     /**

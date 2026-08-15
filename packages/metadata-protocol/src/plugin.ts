@@ -39,6 +39,10 @@ import {
     ensureSysSettingIdentityIndex,
     resolveSysSettingIndexExec,
 } from './migrations/sys-setting-identity-index.js';
+import {
+    backfillSeedTenancy,
+    resolveSeedTenancyExec,
+} from './migrations/seed-tenancy-backfill.js';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import type { MetadataAuthoringChannel } from './protocol.js';
 
@@ -235,6 +239,27 @@ export function assembleMetadataProtocol(
                     } catch (e: unknown) {
                         ctx.logger.warn(
                             '[metadata-protocol] sys_setting row-identity index migration skipped (#8629)',
+                            { error: e instanceof Error ? e.message : String(e) },
+                        );
+                    }
+                    // #8686 rides the same seam and the same gate, with one
+                    // difference worth stating: its two siblings above tighten an
+                    // INDEX, while this one moves stored ROWS. That is why it is
+                    // guarded on the install being single-tenant and on there
+                    // being exactly one organization to adopt — where the owner is
+                    // not derivable it reports and changes nothing, per the
+                    // 2026-08-15 ruling (shape 2, multi-tenant skips loudly).
+                    //
+                    // Boot is the right moment for the EXISTING-install half: the
+                    // rows are already written and the split is already there. The
+                    // FRESH-install half cannot be done here — at first boot no
+                    // organization exists yet — and is handled at the first-admin
+                    // handoff instead (see runtime's app-plugin).
+                    try {
+                        await backfillSeedTenancy(resolveSeedTenancyExec(ql), ctx.logger);
+                    } catch (e: unknown) {
+                        ctx.logger.warn(
+                            '[metadata-protocol] seed/API tenancy backfill skipped (#8686)',
                             { error: e instanceof Error ? e.message : String(e) },
                         );
                     }
