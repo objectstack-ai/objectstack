@@ -469,10 +469,24 @@ describe('[#7674] what the gate must still let through', () => {
      * [#6710] The declared carve-out, preserved. A kernel that claims to BE the
      * package author is treated as one by BOTH doors — the lint table and the
      * plugin gate each skip the `package-author` channel — because package
-     * authoring is gated at build time instead (`validateSecurityPosture`
-     * runs on every CLI command, and R1's own message prescribes that route:
-     * "widen it in the package source and publish through the package
-     * pipeline").
+     * authoring is judged at BUILD time by the same rules, before anything is
+     * published (`validateSecurityPosture` runs on every CLI command, and R1's
+     * own message prescribes that route: "widen it in the package source and
+     * publish through the package pipeline").
+     *
+     * [#8310] Read that as "judged earlier", NOT as "gated at build time
+     * instead" — the header above is the correction: the same rule answers at
+     * THIS door too for `object` writes, and the
+     * `security-external-wider-than-internal` case at the top of this file
+     * refuses the exact body used below (`private` / `public_read`) with a
+     * 422. What exempts the write here is the CHANNEL — not the posture, and
+     * not a gap in the rule's reach.
+     *
+     * That reach is not total at this door either: `security-owd-unset`
+     * exempts system objects, so an `isSystem` / `sys_*` object whose
+     * `sharingModel` is never authored stays effectively PUBLIC at runtime.
+     * Deliberate as shipped; whether it should stay is #8641's question, and
+     * nothing in this file pins it either way.
      *
      * This case is the guard against the worse defect available here: a gate
      * that starts refusing package authoring is a regression, not a fix. It is
