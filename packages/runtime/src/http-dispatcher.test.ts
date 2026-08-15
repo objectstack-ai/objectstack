@@ -2014,7 +2014,14 @@ describe('HttpDispatcher', () => {
 
             // The draft publish itself succeeded — the flip failure is surfaced, not fatal.
             expect(result.response?.status).toBe(200);
-            expect((result.response as any)?.body?.data?.unhideError).toBe('meta backend down');
+            // [#8516] Re-spelled, not weakened: this case's subject is that the
+            // door REPORTS rather than throws, and it still does. `meta backend
+            // down` is a bare `Error` declaring no 4xx, so ADR-0112 withholds
+            // its sentence and the stable one takes its place — the field, and
+            // the fact it is populated at all, are what this case pins. The
+            // disclosure itself is owned by
+            // `packages-flip-announce-disclosure.test.ts`.
+            expect((result.response as any)?.body?.data?.unhideError).toBe('visibility flip failed');
             expect(saveMetaItem).not.toHaveBeenCalled();
         });
 
@@ -2046,8 +2053,13 @@ describe('HttpDispatcher', () => {
 
                 // Unchanged contract: the drafts ARE published, so this still 200s
                 // and still carries the machine-readable `unhideError`.
+                // [#8516] The driver's sentence moved OUT of the payload and is
+                // now only in the `error` line asserted below — which is this
+                // case's actual subject and is unchanged. The two assertions
+                // together are the whole ADR-0112 rule: withheld from the
+                // caller, whole in the log.
                 expect(result.response?.status).toBe(200);
-                expect((result.response as any)?.body?.data?.unhideError).toBe('sys_metadata write rejected');
+                expect((result.response as any)?.body?.data?.unhideError).toBe('visibility flip failed');
 
                 expect(errorSpy).toHaveBeenCalledTimes(1);
                 const line = String(errorSpy.mock.calls[0]?.[0] ?? '');
@@ -2109,7 +2121,11 @@ describe('HttpDispatcher', () => {
                 // with the stack — and the failure is reported alongside them,
                 // so the body names what flipped AND that something did not.
                 expect(data?.unhiddenApps).toEqual(['alpha', 'beta']);
-                expect(data?.unhideError).toBe('sys_metadata write rejected');
+                // [#8516] The split report is what #5242 pinned here and it is
+                // untouched — the withhold changes the failure SENTENCE, never
+                // the list of what persisted beside it. The driver text is
+                // asserted in the log line below instead.
+                expect(data?.unhideError).toBe('visibility flip failed');
 
                 // ...and the same two reach the re-sync broadcast, so a
                 // boot-cached consumer picks up the apps that really changed

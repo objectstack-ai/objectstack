@@ -282,6 +282,86 @@ is moved into the client's URL slot (`connectionString` for pg, `uri` for
 mysql2) before reaching Knex. This affects only what Knex receives — the config
 you passed is preserved as-is on the driver.
 
+## MySQL (via `@objectstack/driver-sql`)
+
+```bash
+pnpm add @objectstack/driver-sql mysql2
+```
+
+```typescript
+import { SqlDriver } from '@objectstack/driver-sql';
+
+new SqlDriver({
+  client: 'mysql2',
+  connection: 'mysql://admin:secret@db.example.com:3306/myapp',
+});
+```
+
+Everything on this page's PostgreSQL section applies unchanged — the same
+`SqlDriver`, the same connect-timeout defaults, the same tenant scoping. One
+behaviour genuinely differs, and it is a limit of the dialect rather than of this
+driver.
+
+### `upsert` conflict targets: the one dialect limit
+
+<Callout type="warn">
+On MySQL, `upsert(object, data, conflictKeys)` cannot promise that the merge
+happens on `conflictKeys`. Where the table carries a UNIQUE key *outside* the
+named target, the driver **refuses the call** rather than let it merge into a row
+the caller never targeted
+([#8755](https://github.com/objectstack-ai/objectstack/issues/8755)).
+</Callout>
+
+The same `upsert` call compiles differently per dialect, and only two of the
+three can carry a conflict target at all:
+
+| Dialect | Compiles to | Honours the named target? |
+| :--- | :--- | :--- |
+| SQLite / PostgreSQL | `INSERT … ON CONFLICT (email) DO UPDATE …` | **Yes.** The named index is the arbiter. A collision on any *other* unique key raises a unique violation — a legible error. |
+| MySQL | `INSERT … ON DUPLICATE KEY UPDATE …` | **No.** The statement carries no target at all, so the merge lands on whichever UNIQUE key the row collides with first. |
+
+Measured on MySQL 8.0.46, a table with `email` and `tax_id` both declared
+`unique: true`, the caller naming `email`:
+
+```text
+upsert({ email: 'a@b.com',     tax_id: 'T-1', title: 'first'  }, ['email'])  -> seeded
+upsert({ email: 'other@b.com', tax_id: 'T-1', title: 'second' }, ['email'])
+  -> ONE row. `email` did not collide; `tax_id` did, and MySQL merged on it —
+     rewriting a row whose `email` the caller never asked to touch.
+```
+
+The identical second call on SQLite and PostgreSQL fails with
+`UNIQUE constraint failed: …tax_id` and leaves the seeded row untouched.
+
+So on MySQL the driver checks the table's physical keys *before* compiling, and
+refuses what it cannot honour — with `code: 'VALIDATION_ERROR'` and `status: 400`,
+before any row is written and before any auto-number is reserved:
+
+| Call, on MySQL | Result |
+| :--- | :--- |
+| `upsert(o, row)` — no `conflictKeys` | Merges. Not pre-flighted (see the residue below). |
+| `upsert(o, row, ['id'])` — the primary key | Merges. Compiles identically to the line above. |
+| `upsert(o, row, ['email'])`, the table's only UNIQUE key being on `email` | Merges on `email`. **The common shape is unaffected.** |
+| `upsert(o, row, ['email'])`, the table also carrying `UNIQUE(tax_id)` | **Refused.** The message names `tax_id`'s index and the workarounds. |
+| `upsert(o, row, ['email'])`, no unique index on `email` at all | **Refused** on every dialect ([#8621](https://github.com/objectstack-ai/objectstack/issues/8621)). |
+
+Two ways out, both stated in the error message:
+
+1. **Drop or rename the extra UNIQUE key** so the conflict target is the only one
+   on the table — appropriate when the second key was incidental.
+2. **Run the object on a dialect that honours the target** (SQLite, PostgreSQL) —
+   appropriate when both keys are genuine business constraints, since one of them
+   must otherwise be given up.
+
+<Callout type="info">
+**The residue, stated rather than hidden.** The refusal covers a *caller-named*
+non-primary target. It does not cover the `conflictKeys`-less default or an
+explicitly named primary key: those two compile to the same statement, and on a
+table with several UNIQUE keys that statement can still merge on one you did not
+name. If you need the target honoured exactly, name it — and on MySQL, keep one
+UNIQUE key per table.
+</Callout>
+
 ## MongoDB
 
 Configuration properties for the MongoDB driver.

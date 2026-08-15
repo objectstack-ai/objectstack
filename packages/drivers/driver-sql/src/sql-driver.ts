@@ -1069,6 +1069,104 @@ function refuseUnbackedConflictTarget(object: string, mergeKeys: string[], cause
 }
 
 /**
+ * [#8755] A `conflictKeys` upsert whose target IS backed, on a MySQL table that
+ * carries another UNIQUE key — the one that key can absorb the conflict instead.
+ *
+ * # A different condition from the one above, so a different sentence
+ *
+ * #5240 is "one condition, one wording", not "one function, one wording".
+ * {@link refuseUnbackedConflictTarget} answers *no index backs your target*, and
+ * every remedy it names is about creating that index. Here the index exists and
+ * the target is perfectly well formed; what cannot be honoured is the TARGETING,
+ * because `ON DUPLICATE KEY UPDATE` carries no target and MySQL merges on
+ * whichever unique key the row collides with first. Reusing the unbacked wording
+ * would tell an author to declare a `unique: true` they already declared, and
+ * send them to re-run a schema sync that would change nothing.
+ *
+ * Measured on live MySQL 8.0.46, `email` and `tax_id` both `unique: true`, the
+ * caller naming `email` — reproduced for this card through the same knex +
+ * `mysql2` path `upsert` takes:
+ *
+ * ```
+ * upsert({email:'a@b.com',     tax_id:'T-1', title:'first'},  ['email']) -> seeded
+ * upsert({email:'other@b.com', tax_id:'T-1', title:'second'}, ['email'])
+ *   -> RESOLVED, ONE row: merged on `tax_id`, across two different `email` values.
+ * ```
+ *
+ * # Why `VALIDATION_ERROR` / 400 and not `NOT_IMPLEMENTED` / 501
+ *
+ * The #5907 classifier this file already applies twice
+ * ({@link uncompilableAggregateFunctionError}, {@link refuseDateBucketedGroupBy})
+ * sorts a refusal by *what the caller would have to change*: a CAPABILITY gap in
+ * the backend — the request is spelled correctly and no schema anywhere makes it
+ * work — is 501, and a request that does not validate against the target it was
+ * given is 400. This one is the second: it is conditional on the TABLE, not on
+ * the dialect. The identical statement against the identical MySQL server is
+ * honoured the moment the table carries a single unique key, which is why the
+ * remedy in the message is a schema change and not "wait for the backend to
+ * implement it". 400 also keeps it off the retry-inviting 5xx band (nothing here
+ * is transient — the next attempt fails identically) and keeps the sentence
+ * itself on the wire: `@objectstack/rest` withholds the message body of any 5xx,
+ * and this message is the deliverable — the ruling requires it to name the
+ * colliding key and the way out.
+ *
+ * # What is NOT refused, and why the PRIMARY KEY never counts as a rival
+ *
+ * The primary key is excluded from the keys that trigger this refusal, in both
+ * directions, and neither is an oversight:
+ *
+ *  - **As a rival** — every table this driver creates carries an `id` PRIMARY
+ *    KEY, so counting it would refuse *every* `conflictKeys` upsert on MySQL.
+ *    The ruling's "the single-key fast path stays untouched" would then describe
+ *    nothing, and the remedy this message states ("drop or rename the extra
+ *    key") is not available for a primary key — a refusal whose only stated way
+ *    out is impossible is worse than no refusal.
+ *  - **As the named target** — `upsert(…, ['id'])` is the driver's own identity
+ *    path, byte-identical in compilation to the default `conflictKeys`-less
+ *    call, which this pre-flight deliberately never probes. Refusing the
+ *    explicit spelling while merging the implicit one would make the accept set
+ *    a property of how the caller typed the same statement. It is also the only
+ *    `conflictKeys` shape the platform itself issues (the lifecycle archiver's
+ *    hot→cold copy), whose remedy would read "drop the unique constraint you
+ *    declared on your own business column".
+ *
+ * Both residues are real and are documented as the dialect limit in
+ * `content/docs/data-modeling/drivers.mdx` rather than left for a reader to
+ * discover: on MySQL a merge can still land on an unnamed unique key whenever no
+ * target was named at all, or when the named target is the primary key.
+ */
+function refuseAmbiguousConflictTarget(
+  object: string,
+  mergeKeys: string[],
+  tableName: string,
+  rivals: PhysicalIndex[],
+): Error {
+  const keys = mergeKeys.map((k) => `"${k}"`).join(', ');
+  const named = rivals.map((i) => `${i.name}(${i.columns.join(', ')})`).join(', ');
+  const err = new Error(
+    `Cannot upsert into "${object}" on conflict keys (${keys}): a UNIQUE key other than the ` +
+      `conflict target exists on "${tableName}" — ${named} — and this backend is MySQL, whose only ` +
+      `merge statement is ON DUPLICATE KEY UPDATE. That statement carries no conflict target, so ` +
+      `the merge lands on whichever UNIQUE key the row collides with FIRST: the conflict target is ` +
+      `backed, but a collision on ${named} would silently merge a row the caller never targeted, ` +
+      `across two different values of the named key. Fix by dropping or renaming the extra UNIQUE ` +
+      `key(s) so the conflict target is the only one on the table, or by running this object on a ` +
+      `dialect that honours the target — SQLite and PostgreSQL compile ON CONFLICT (...), which ` +
+      `merges on the named key alone. Upserting on the primary key is unaffected: supply "id" and ` +
+      `omit conflictKeys.`,
+  ) as Error & { code?: string; status?: number; cause?: unknown };
+  err.code = StandardErrorCode.enum.VALIDATION_ERROR;
+  err.status = 400;
+  // The introspected keys, exactly as the unbacked refusal attaches them: schema
+  // identifiers are the ground truth an operator acts on, and row values are not.
+  err.cause = new Error(
+    `conflict target (${mergeKeys.join(', ')}) on "${tableName}" is backed, but these UNIQUE keys ` +
+      `can absorb the conflict instead: ${named}`,
+  );
+  return err;
+}
+
+/**
  * [#5158] A `FilterArray` reached the driver unlowered.
  *
  * `where` is a `FilterCondition` — `QueryASTSchema.where: FilterConditionSchema`
@@ -3375,7 +3473,7 @@ export class SqlDriver implements IDataDriver {
 
   /**
    * [#8621] PHYSICAL key indexes per table (tableName → the PRIMARY KEY and
-   * UNIQUE indexes that actually exist), for {@link assertConflictTargetBacked}.
+   * UNIQUE indexes that actually exist), for {@link assertConflictTargetHonoured}.
    *
    * Deliberately not `managedObjectIndexes`, which records what metadata
    * DECLARES. The pre-flight answers "can this conflict target resolve to a key
@@ -5060,9 +5158,14 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * [#8621] Refuse an upsert whose `conflictKeys` no PRIMARY KEY or UNIQUE index
-   * backs — BEFORE the statement is compiled, on the dialect where the server
-   * will never say so itself.
+   * Refuse an upsert whose named `conflictKeys` this dialect will not honour as
+   * the merge target — BEFORE the statement is compiled, on the dialect where
+   * the server will never say so itself. Two conditions, one introspection:
+   *
+   *  - **[#8621] unbacked** — no PRIMARY KEY or UNIQUE index covers the named
+   *    target, so there is no merge target at all;
+   *  - **[#8755] ambiguous** — the target IS covered, but another UNIQUE key on
+   *    the table can absorb the conflict instead of it.
    *
    * # Why a pre-flight exists at all, when a refusal already did
    *
@@ -5108,13 +5211,16 @@ export class SqlDriver implements IDataDriver {
    * "the compiler drops the conflict target, so the server can never be asked",
    * and MySQL is the dialect that meets it.
    *
-   * # Why it refuses only what it can PROVE is unbacked
+   * # Why it refuses only what it can PROVE
    *
    * A false refusal breaks a working merge, which is the expensive direction —
    * the same asymmetry `isUnbackedConflictTargetError` records. So every
    * uncertain answer proceeds: a failed introspection, a table with no keys at
    * all (see {@link introspectKeyIndexes}), and a possibly stale cache, which is
-   * re-read from the database before any refusal is thrown.
+   * re-read from the database before any refusal is thrown. The stale-cache leg
+   * covers BOTH verdicts and in opposite directions — an index created since the
+   * read would make a backed target read as unbacked, and one DROPPED since the
+   * read would make a rival key exist that no longer does.
    *
    * The comparison is against the conflict target as EMITTED. `onConflict()`
    * receives `mergeKeys` verbatim — the write column map is applied to the row,
@@ -5124,11 +5230,12 @@ export class SqlDriver implements IDataDriver {
    * dialects infer an arbiter index, and the only reading under which a
    * composite key means anything).
    *
-   * ⚠️ **This closes the unbacked-target hole, and not the whole MySQL gap.**
+   * # [#8755] The SECOND condition this pre-flight answers, added later
+   *
    * `ON DUPLICATE KEY UPDATE` carries no target even when the target IS backed,
    * so a table with a second unique index can still merge on a key the caller
-   * never named. Measured here on live MySQL 8.0.46, both columns unique,
-   * caller naming `email`:
+   * never named. Measured on live MySQL 8.0.46, both columns unique, caller
+   * naming `email` — re-measured for #8755 before it was fixed:
    *
    * ```
    * upsert({email:'a@b.com',     tax_id:'T-1', title:'first'},  ['email']) -> seeded
@@ -5136,29 +5243,71 @@ export class SqlDriver implements IDataDriver {
    *   -> ONE row, merged on `tax_id`. The named target was backed the whole time.
    * ```
    *
-   * That is a different condition with a different fix and is filed separately
-   * (#8755); it is deliberately NOT smuggled in here, because refusing it would
-   * mean refusing every `conflictKeys` upsert on any MySQL table carrying more
-   * than one unique index — an accept-set change far past what this card rules.
+   * #8621 deliberately left that standing — it is a different condition, and
+   * refusing it narrows the accept set past what that card ruled. #8755's
+   * maintainer ruling then took it, choosing refusal (its option A) over
+   * emulating a target-honouring statement on MySQL (its option B, rejected:
+   * a SELECT-then-branch with a race window and an execution path unlike every
+   * other dialect — *"dressing 'the dialect can't' up as 'it did'"*).
+   *
+   * The two conditions share this method because they share the QUESTION —
+   * "what keys does this table physically carry?" — asked once, cached once
+   * ({@link physicalKeyIndexes}), invalidated in one place. They do NOT share an
+   * answer: see {@link refuseAmbiguousConflictTarget} for why the second gets
+   * its own sentence, and for why the PRIMARY KEY is never a rival key.
+   *
+   * ⚠️ **Renamed from `assertConflictTargetBacked` when the second condition
+   * landed.** "Backed" was the whole question while #8621 was the whole method;
+   * it is now one of two, and a name that describes half of what a guard refuses
+   * is how the other half gets deleted by someone tidying up.
    */
-  protected async assertConflictTargetBacked(object: string, mergeKeys: string[]): Promise<void> {
+  protected async assertConflictTargetHonoured(object: string, mergeKeys: string[]): Promise<void> {
     // The table the statement will actually hit — same resolution `getBuilder`
     // performs for the insert, rotation shard included.
     const target = this.rotationWriteTarget(object) ?? object;
     const tableName = this.physicalTableByObject[target] ?? target;
 
     const wanted = new Set(mergeKeys);
-    const backs = (keys: PhysicalIndex[]): boolean =>
-      keys.some((i) => i.columns.length === wanted.size && i.columns.every((c) => wanted.has(c)));
+    const covers = (i: PhysicalIndex): boolean =>
+      i.columns.length === wanted.size && i.columns.every((c) => wanted.has(c));
+
+    type Verdict =
+      | { kind: 'honoured' }
+      | { kind: 'unbacked' }
+      | { kind: 'ambiguous'; rivals: PhysicalIndex[] };
+
+    const judge = (keys: PhysicalIndex[]): Verdict => {
+      if (!keys.some(covers)) return { kind: 'unbacked' };
+      // [#8755] The named target is the PRIMARY KEY: the driver's own identity
+      // path, and the one shape whose refusal would differ from the
+      // byte-identical default call this pre-flight never probes. Left to merge
+      // — the residue is documented, not silent (see the refusal's docblock).
+      if (keys.some((i) => i.primary === true && covers(i))) return { kind: 'honoured' };
+      // A UNIQUE key that is neither the named target nor the primary key can
+      // absorb the conflict instead of it. An index over the SAME columns as the
+      // target is not a rival: colliding on it is colliding on the target.
+      const rivals = keys.filter((i) => i.primary !== true && !covers(i));
+      return rivals.length > 0 ? { kind: 'ambiguous', rivals } : { kind: 'honoured' };
+    };
 
     let keys = await this.introspectKeyIndexes(tableName);
-    if (keys !== null && keys.length > 0 && !backs(keys)) {
+    if (keys !== null && keys.length > 0 && judge(keys).kind !== 'honoured') {
       // A cache filled before the index was created is the only way a real key
-      // can be missing here, and it is cheaper to re-read once on the refusing
-      // path than to risk refusing a call the database would have merged.
+      // can be missing here, and a cache filled before one was DROPPED is the
+      // only way a rival key can be reported that no longer exists. Both are
+      // cheaper to re-read once on the refusing path than to risk refusing a
+      // call the database would have merged — the same asymmetry, now covering
+      // both verdicts.
       keys = await this.introspectKeyIndexes(tableName, { fresh: true });
     }
-    if (keys === null || keys.length === 0 || backs(keys)) return;
+    if (keys === null || keys.length === 0) return;
+
+    const verdict = judge(keys);
+    if (verdict.kind === 'honoured') return;
+
+    if (verdict.kind === 'ambiguous') {
+      throw refuseAmbiguousConflictTarget(object, mergeKeys, tableName, verdict.rivals);
+    }
 
     // The introspected keys stand where the server's sentence stands on the
     // other two dialects: the caller-visible message is the shared wording, and
@@ -5191,8 +5340,8 @@ export class SqlDriver implements IDataDriver {
 
     const mergeKeys = conflictKeys && conflictKeys.length > 0 ? conflictKeys : ['id'];
 
-    // [#8621] Pre-flight the conflict target — see
-    // {@link assertConflictTargetBacked} for the mechanism and why it is
+    // [#8621, #8755] Pre-flight the conflict target — see
+    // {@link assertConflictTargetHonoured} for the mechanism and why it is
     // MySQL-only. Two placement facts, both load-bearing:
     //
     //  - It runs only when the CALLER named a target. The default `['id']` is
@@ -5206,7 +5355,7 @@ export class SqlDriver implements IDataDriver {
     //    reservation for a statement that never executes — a visible gap in an
     //    externally meaningful sequence, handed out for a rejected call.
     if (conflictKeys && conflictKeys.length > 0 && this.isMysql) {
-      await this.assertConflictTargetBacked(object, mergeKeys);
+      await this.assertConflictTargetHonoured(object, mergeKeys);
     }
 
     // #6943. Measured: `upsert` does NOT share `bulkCreate`'s shape. It is

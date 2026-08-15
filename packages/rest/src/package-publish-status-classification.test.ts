@@ -394,12 +394,15 @@ describe('[#8131 / #8132] the predicate now judges this phrasing — and the ret
 
 describe('[#8131] the producer re-throws exactly what the shared rule can map', () => {
   /**
-   * `declaresHttpAnswer` keys on the STATUS channel — `.status` or
-   * `.statusCode` — and deliberately not on `.code`. Asked here of the shared
-   * rule with a sentinel `fallbackStatus` no producer declares: a resolved
-   * status that is still the sentinel means nothing was declared.
+   * `declaredStatus` keys on the STATUS channel — `.status` or `.statusCode`
+   * — and deliberately not on `.code`. Delegates to the shared rule's own
+   * `ThrownHttpError.declaredStatus` field (#8634) rather than hand-spelling
+   * the sentinel trick this used to probe with: present exactly when the
+   * throw declared a status of its own, absent when it did not — including
+   * the one case a `fallbackStatus`-probe cannot tell apart, a producer that
+   * declares `0`.
    */
-  const declaredStatus = (error: unknown) => resolveThrownHttpError(error, 0).status !== 0;
+  const declaredStatus = (error: unknown) => resolveThrownHttpError(error).declaredStatus !== undefined;
 
   const SHAPES: Array<{ name: string; error: unknown; rethrown: boolean }> = [
     { name: '.status', error: Object.assign(new Error('x'), { status: 409 }), rethrown: true },
@@ -433,10 +436,10 @@ describe('[#8131] the producer re-throws exactly what the shared rule can map', 
     });
 
     // The shared rule does record it…
-    const resolved = resolveThrownHttpError(driverError, 0);
+    const resolved = resolveThrownHttpError(driverError);
     expect(resolved.declaredCode).toBe('ERR_SQLITE_ERROR');
     // …while declaring NO status of its own, which is the signal that counts.
-    expect(resolved.status).toBe(0);
+    expect(resolved.declaredStatus).toBeUndefined();
     expect(declaredStatus(driverError)).toBe(false);
 
     // And had it been re-thrown, the door would have resolved it as an
