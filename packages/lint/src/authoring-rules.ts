@@ -334,10 +334,13 @@ const CLI_AND_RUNTIME: readonly AuthoringSurface[] = ['cli', 'runtime-publish'];
  * carries `permissions` and `books` (`RuntimeStackContext` in
  * `runtime-gate.ts`) because the three cross-collection security rules were
  * measured inventing findings without them (38 phantom
- * `security-master-detail-ungranted` per-write vs 4 whole-stack, PR #7886) —
- * so for a rule whose only missing collection was one of those two, this
- * reason no longer holds and widening it is a `runtimeTypes` edit plus its
- * own rollout decision. For every other collection the sentence above stands.
+ * `security-master-detail-ungranted` per-write vs 4 whole-stack, PR #7886),
+ * and `datasets` (#7529) because `validateWidgetBindings` was measured
+ * inventing 3 phantom `widget-dataset-unknown` errors on a legitimate
+ * 3-widget board without it — so for a rule whose only missing collection is
+ * one of those three, this reason no longer holds and widening it is a
+ * `runtimeTypes` edit plus its own rollout decision. For every other
+ * collection the sentence above stands.
  */
 const RUNTIME_NEEDS_FULL_SNAPSHOT =
   'P2 (#4463): reads a stack-wide collection the per-write snapshot does not carry, so running it ' +
@@ -485,14 +488,31 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   },
   // ADR-0021 (#1719/#1721) — a widget's `dataset`/`dimensions`/`values` and its
   // chartConfig axis/series must resolve against the declared datasets.
+  //
+  // Runtime publish gate (#7529, maintainer-ruled 2026-08-12): a dashboard
+  // widget bound to a dataset that resolves to nothing sailed through save AND
+  // publish — this rule provably caught the body and was simply never invoked,
+  // because `dashboard` was not a runtime-gated type. Option B: a DRAFT may
+  // hold a forward reference; publishing refuses it with the key path named.
+  // The snapshot carries `datasets` for exactly this rule (`RuntimeStackContext`
+  // — without it every legitimate board reads as dangling, the 3-phantom
+  // measurement). `surfaces` is per-RULE, so this flip puts all SIX of the
+  // rule's error ids on the publish gate, not just `widget-dataset-unknown` —
+  // ruled 2026-08-15: they are one coherent "this board cannot render"
+  // reference-integrity class, and the ~6× wider accept-set narrowing was
+  // accepted knowingly rather than splitting the dataset limb into its own
+  // rule (traversal-duplication drift) or adding a per-finding-id surface
+  // filter (registry machinery that weakens "delete a rule from the table and
+  // enforcement stops in the same commit"). Warning-tier ids ride along on the
+  // advisory channel and never block (#4463 P1).
   {
     name: 'validateWidgetBindings',
     tier: 'gating',
     input: 'parsed',
     commands: ALL,
     source: 'packages/lint/src/validate-widget-bindings.ts',
-    surfaces: CLI_ONLY,
-    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['dashboard'],
     run: (stack) => validateWidgetBindings(stack),
   },
   // ADR-0049 / #3367 — a header or widget action naming a `script`/`modal`

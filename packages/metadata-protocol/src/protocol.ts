@@ -3859,6 +3859,10 @@ export class ObjectStackProtocolImplementation implements
         const objects = listCollection('object', 'objects');
         const permissions = listCollection('permission', 'permissions');
         const books = listCollection('book', 'books');
+        // [#7529] The resolution universe validateWidgetBindings needs for a
+        // dashboard publish — without it every legitimate board reads as
+        // dangling (see RuntimeStackContext.datasets).
+        const datasets = listCollection('dataset', 'datasets');
 
         const verdict = evaluateRuntimeAuthoringGate({
             type: singular,
@@ -3868,6 +3872,7 @@ export class ObjectStackProtocolImplementation implements
             objects,
             permissions,
             books,
+            datasets,
             ...(evt.organizationId !== undefined ? { organizationId: evt.organizationId } : {}),
             orgWallEnforced: this.orgWallEnforced(),
         });

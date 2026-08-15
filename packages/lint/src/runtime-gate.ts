@@ -110,7 +110,8 @@ const TYPE_TO_STACK_KEY: Readonly<Record<string, string>> = {
  * from this shape and keeps the two from drifting. The set is deliberately
  * BOUNDED to what the runtime-wired rules actually read (measured, not
  * projected): the three cross-collection security rules compare
- * objects × permissions × books, and nothing on the runtime surface reads
+ * objects × permissions × books, `validateWidgetBindings` resolves widget
+ * bindings against datasets (#7529), and nothing on the runtime surface reads
  * `positions` / `apps` — so those are NOT carried. Widening the snapshot is a
  * one-key edit here plus a `CONTEXT_STACK_KEYS` entry, made when a rule that
  * reads the collection actually crosses the wall, never in advance.
@@ -146,6 +147,22 @@ export interface RuntimeStackContext {
    * the differential for every other write type.
    */
   books?: readonly unknown[];
+  /**
+   * The live dataset declarations (stack key `datasets`).
+   *
+   * [#7529] The resolution universe `validateWidgetBindings` links a widget's
+   * `dataset` / `dimensions` / `values` against. Without it a per-write
+   * dashboard snapshot holds no datasets at all, so every widget on a fully
+   * legitimate board reads as dangling — measured as 3 phantom
+   * `widget-dataset-unknown` errors on a 3-widget board bound to a real
+   * dataset, vs 0 with the collection carried (and the genuinely dangling
+   * binding still yields exactly its 1 true error). Carrying it in BOTH
+   * passes also cancels dataset-level findings (`measure-aggregate-incoherent`
+   * is judged per dataset, independent of any widget) in the differential, so
+   * a stored dataset's pre-existing condition is not this write's to answer
+   * for (#4463 D4).
+   */
+  datasets?: readonly unknown[];
 }
 
 /**
@@ -153,7 +170,7 @@ export interface RuntimeStackContext {
  * facts: every entry is a key of {@link RuntimeStackContext} AND a stack key
  * some runtime-wired rule reads (`runtime-gate.test.ts` pins membership).
  */
-const CONTEXT_STACK_KEYS = ['objects', 'permissions', 'books'] as const satisfies
+const CONTEXT_STACK_KEYS = ['objects', 'permissions', 'books', 'datasets'] as const satisfies
   readonly (keyof RuntimeStackContext)[];
 
 /** One rule's verdict at the runtime surface, carrying which rule produced it. */
