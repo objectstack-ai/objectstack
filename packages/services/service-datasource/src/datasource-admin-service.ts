@@ -24,7 +24,10 @@
  *    service, and is separate from the one above — rows written before #8078
  *    can and do hold inline cleartext, which is why it is stated on its own
  *    rather than treated as a consequence.
- *  - Removal is refused while objects are still bound to the datasource.
+ *  - Removal is refused while objects are still bound to the datasource — and
+ *    (#6504) equally refused when the bound-object count could not be taken
+ *    over a COMPLETE object set, since an under-count and "nothing is bound"
+ *    are the same zero.
  */
 
 import { validateDriverConfig } from '@objectstack/spec/data';
@@ -110,6 +113,28 @@ export interface DatasourceAdminServiceConfig {
   readSecret?: (credentialsRef: string) => Promise<string | undefined>;
   /** Count objects bound to a datasource (removal blocked while > 0). */
   countBoundObjects: (datasource: string) => Promise<number>;
+  /**
+   * [#6504] The same count, plus whether the object set it was taken over could
+   * be read COMPLETELY.
+   *
+   * {@link countBoundObjects} is derived from the metadata service's object
+   * listing, and that listing is short — silently — while a loader is down
+   * (ADR-0110 D3). The number is therefore not merely an under-report: it is
+   * the input to a guard over a DESTRUCTIVE operation. `0` returned during an
+   * outage reads exactly like "nothing is bound", so
+   * {@link DatasourceAdminService.removeDatasource} deletes a datasource whose
+   * objects were simply unreadable, and unbinds its secret on the way out.
+   * This is the card's harm one step past description: a count nobody can
+   * check is being spent as a safety verdict.
+   *
+   * Optional for the reason `IMetadataService.listDiagnosed` itself is: a host
+   * whose metadata service predates the verdict cannot report the distinction,
+   * so its absence means "unchanged behaviour", never "complete". A host that
+   * supplies it gets a removal that refuses rather than guesses.
+   */
+  countBoundObjectsDiagnosed?: (
+    datasource: string,
+  ) => Promise<{ count: number; degraded: boolean; errors: string[] }>;
   /** Hot-(re)register a runtime datasource's connection pool after write. */
   registerPool?: (record: StoredDatasource) => Promise<void> | void;
   /** Tear down a runtime datasource's pool on remove. */
@@ -161,6 +186,29 @@ function withoutConfigKey(record: StoredDatasource, key: string): StoredDatasour
 /** Spread `remaining` onto a result only when there is something to report. */
 function withRemaining(remaining: string[]): { remaining?: string[] } {
   return remaining.length > 0 ? { remaining } : {};
+}
+
+/**
+ * [#6504] A refusal caused by a metadata read that could not be completed —
+ * carrying the ADR-0112 envelope so it does not land as a 400 alongside this
+ * service's genuine client errors.
+ *
+ * 503 / `SERVICE_UNAVAILABLE` for the reason `metadataStoreUnavailableError`
+ * (#5532) picks them in `metadata-protocol`: nothing about the REQUEST is
+ * wrong, the condition is a dependency outage that may clear, and a caller
+ * SHOULD retry. `SERVICE_UNAVAILABLE` is the standard catalog's own code for
+ * 503 (`HttpStatusErrorCodeMap[503]`), so this registers no new ledger
+ * vocabulary for a distinction the routes already know how to render.
+ *
+ * The loader messages ride on `cause` rather than in `message`: they name
+ * internal datasources and tables, and the message is served to an API caller.
+ */
+function metadataIncompleteError(message: string, errors: string[]): Error {
+  const err = new Error(message) as Error & { code?: string; status?: number; cause?: unknown };
+  err.code = 'SERVICE_UNAVAILABLE';
+  err.status = 503;
+  if (errors.length > 0) err.cause = new Error(errors.join('; '));
+  return err;
 }
 
 export class DatasourceAdminService implements IDatasourceAdminService {
@@ -420,6 +468,37 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     return this.toSummary(merged);
   }
 
+  /**
+   * [#6504] Remove a runtime datasource, refusing when the bound-object count
+   * behind the safety guard cannot be trusted.
+   *
+   * ## Why this consumer is GATING as well as mis-describing
+   *
+   * The card's sweep classifies each `list()`/`listObjects()` consumer by what
+   * it does with a possibly-short answer. Most publish a snapshot and are right
+   * unchanged. This one takes a **count** — the strongest positive claim a read
+   * can make — and spends it as the sole guard over an irreversible operation:
+   * the record is deleted and, on a ref-bearing row, the secret is unbound
+   * behind it. A loader outage makes `countBoundObjects` under-report, and its
+   * worst value is the benign-looking one: `0` is precisely "nothing is bound",
+   * so the guard does not merely mis-state, it OPENS.
+   *
+   * ## The direction of the refusal
+   *
+   * Withholding the destructive act is the plural analogue of the
+   * `objectstack://objects` fix, which withholds the `totalCount` claim while
+   * still serving every object it could read. Here there is no data to keep
+   * serving — the "answer" IS the deletion — so the honest response is to make
+   * none: refuse, name the outage, and let the operator retry once the loaders
+   * are back. It is fully reversible in a way the deletion is not, and a
+   * transient dependency outage is exactly the condition a 503 exists for.
+   *
+   * ⛔ Not a blanket "refuse whenever the metadata service is unhappy": a host
+   * without {@link DatasourceAdminServiceConfig.countBoundObjectsDiagnosed}
+   * behaves exactly as before, because a service that cannot report the
+   * distinction reports nothing degraded — the same optionality
+   * `IMetadataService.listDiagnosed` itself carries.
+   */
   async removeDatasource(name: string): Promise<void> {
     const existing = await this.config.getDatasourceRecord(name);
     if (!existing) throw new Error(`Datasource '${name}' not found.`);
@@ -427,10 +506,23 @@ export class DatasourceAdminService implements IDatasourceAdminService {
       throw new Error(`Datasource '${name}' is code-defined and cannot be removed at runtime.`);
     }
 
-    const bound = await this.config.countBoundObjects(name);
-    if (bound > 0) {
+    const bound = this.config.countBoundObjectsDiagnosed
+      ? await this.config.countBoundObjectsDiagnosed(name)
+      : { count: await this.config.countBoundObjects(name), degraded: false, errors: [] };
+
+    if (bound.degraded) {
+      throw metadataIncompleteError(
+        `Cannot remove datasource '${name}': the metadata service could not be fully read, so the `
+          + `number of objects bound to it is unknown (${bound.count} counted from the objects that `
+          + 'WERE readable — the true number can only be higher). Removing it now could orphan '
+          + 'objects that are still bound. Retry once the metadata service is reachable.',
+        bound.errors,
+      );
+    }
+
+    if (bound.count > 0) {
       throw new Error(
-        `Cannot remove datasource '${name}': ${bound} object(s) are still bound to it.`,
+        `Cannot remove datasource '${name}': ${bound.count} object(s) are still bound to it.`,
       );
     }
 

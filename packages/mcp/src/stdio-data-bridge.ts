@@ -86,6 +86,10 @@ import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts'
 // there is no reason to add a second import path to the same function.
 import { recordNotFoundError } from '@objectstack/core';
 import type { McpDataBridge, McpObjectSummary } from './mcp-http-tools.js';
+import {
+  diagnoseObjectListRead,
+  type DiagnosedObjectListing,
+} from './metadata-completeness.js';
 
 /** What {@link createStdioDataBridge} needs from the host plugin. */
 export interface StdioDataBridgeDeps {
@@ -294,6 +298,22 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
         label: o.label ?? o.name,
         fieldCount: o.fields ? Object.keys(o.fields).length : undefined,
       }));
+    },
+
+    /**
+     * [#6504] `listObjects` with the completeness verdict attached, so the
+     * `list_objects` tool can withhold `totalCount` on a known-partial read.
+     *
+     * The resolver above is reused rather than re-implemented: the items are
+     * whatever `listObjects()` answers, and only the verdict is asked of
+     * `listDiagnosed('object')` — see {@link diagnoseObjectListRead} for why
+     * this composition, and not resolving the items through the diagnosed read,
+     * is the correct one.
+     */
+    async listObjectsDiagnosed(): Promise<DiagnosedObjectListing<McpObjectSummary>> {
+      const objects = await bridge.listObjects();
+      const { degraded, errors } = await diagnoseObjectListRead(metadataService);
+      return { objects, degraded, errors };
     },
 
     async describeObject(name: string): Promise<unknown | null> {
