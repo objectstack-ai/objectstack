@@ -431,15 +431,69 @@ function buildSqlPool(spec: DatasourceConnectionSpec): Record<string, unknown> {
 
 /**
  * Build the Knex `connection` for mysql2 from a spec's config + secret. A DSN
- * (`url`/`connectionString`) passes through as-is — knex's mysql2 dialect
- * accepts a connection string; otherwise discrete fields, with the secret as
- * the password (never part of `config`).
+ * (`url`) selects the connection-string form; otherwise discrete fields, with
+ * the secret as the password (never part of `config`).
+ *
+ * ## A bound secret reaches the client on the DSN branch too (#8696)
+ *
+ * This arm used to be `if (url) return url;` — the DSN string became the whole
+ * knex `connection` and an injected `spec.secret` was dropped on the floor,
+ * with no diagnostic. That is the declared-≠-enforced shape one layer below
+ * Prime Directive #10: `MysqlConfigSchema.url` states the contract this code
+ * failed to keep, verbatim — *"bind the secret (`external.credentialsRef` /
+ * the connection form's secret field) and it is injected at connect time. A
+ * bare username (`user@host`) stays writable."* Since #8082 refuses a
+ * `user:password@` userinfo at the publish door, that bare-username DSN plus a
+ * bound secret is the ONLY authorable shape for a URL-shaped mysql datasource
+ * — so the dropped secret meant it connected with no credential at all, or
+ * failed with a driver-level auth error naming nothing about the binding.
+ *
+ * ## Why `{ uri, password }` and not a hand-parsed DSN
+ *
+ * `mysql2` merges a `uri` with sibling keys itself, and the EXPLICIT key wins
+ * (`ConnectionConfig`: uri-derived values are only filled in for keys the
+ * caller did not supply). So the DSN keeps being parsed by the client that
+ * owns its grammar — no URL parsing, no re-encoding, no second dialect of
+ * `mysql://…` in this repo — and the bound secret overrides even a legacy
+ * embedded password on a stored pre-#8082 row. Measured on mysql2 3.23.1:
+ *
+ * ```text
+ * {uri:'mysql://app@db.internal:3306/app', password:'INJECTED'}
+ *   -> user=app host=db.internal port=3306 database=app password=INJECTED
+ * {uri:'mysql://app:embedded@db.internal:3306/app', password:'INJECTED'}
+ *   -> password=INJECTED          (the bound secret wins, as postgres' arm declares)
+ * ```
+ *
+ * ⚠️ knex hides the key rather than passing it visibly: `Client`'s constructor
+ * calls `setHiddenProperty`, so `password` survives on `connectionSettings` as
+ * a NON-ENUMERABLE own property (measured on knex 3.3.0). `JSON.stringify` and
+ * `Object.keys` therefore both report a bare `{uri}` — a probe that serialises
+ * this object reads as "the secret was dropped" when it was not. Assert it with
+ * direct property access.
+ *
+ * ⛔ Do NOT copy this shape to the postgres arm. `pg` does the OPPOSITE merge —
+ * `Object.assign({}, config, parse(config.connectionString))`, i.e. the DSN
+ * overrides the explicit key — so `{connectionString, password}` there resolves
+ * to the DSN's own (absent) password. That is a live defect, filed separately;
+ * it is NOT fixed by symmetry with this arm, and the two clients disagreeing is
+ * exactly why each arm's precedence is measured rather than assumed.
+ *
+ * A DSN with NOTHING bound still passes through as the bare string, so a
+ * datasource that never bound a secret is byte-for-byte unaffected.
  */
 function buildMysqlConnection(spec: DatasourceConnectionSpec): unknown {
   const cfg = (spec.config ?? {}) as Record<string, unknown>;
   const mysqlSsl = resolveSslOption(spec);
   const url = cfg.url as string | undefined;
-  if (url) return url;
+  if (url) {
+    if (!spec.secret) return url;
+    // `ssl` is deliberately NOT carried here: this arm drops a declared `ssl`
+    // block on the DSN branch whether or not a secret is bound (postgres'
+    // branch does carry it), and making TLS appear only for datasources that
+    // happen to bind a credential would be a second, stranger asymmetry. That
+    // gap is a defect of its own and is filed separately, not fixed in passing.
+    return { uri: url, password: spec.secret };
+  }
   return {
     host: cfg.host,
     port: cfg.port,
@@ -531,6 +585,23 @@ function buildMemoryConfig(spec: DatasourceConnectionSpec): Record<string, unkno
  * error nobody would trace back to a config key. `authSource` was declared and
  * dropped the same way. Both now behave the way the SQL builders already did:
  * a datasource secret wins, the config value is the fallback.
+ *
+ * ⚠️ KNOWN OPEN HALF (#8696): that is true of the COMPOSED branch below only.
+ * On the `explicit` (DSN) branch a bound `spec.secret` is still dropped — an
+ * authored `mongodb://app@host/db` reaches MongoClient with an EMPTY password,
+ * measured — while the mysql arm's identical gap is closed above. The remedy is
+ * NOT a URL rewrite: `MongoClient`'s `auth` option injects the password beside
+ * an unmodified url (measured on mongodb 7.5.0, and it wins over an embedded
+ * userinfo password), and `MongoDBDriver` already spreads `config.options`
+ * into the client options, so `options.auth` is a live channel. What blocks it
+ * is that `auth` REQUIRES a username as well as a password, and reading the
+ * url's userinfo username needs the platform's own DSN grammar: `new URL()`
+ * rejects the multi-host form this schema documents (`host1[,…]`, measured
+ * ERR_INVALID_URL), and `@objectstack/spec/data` exports the password half of
+ * that grammar (`urlUserinfoPassword` / `redactUrlPassword`) but no username
+ * half. Adding one belongs beside them — deliberately not hand-rolled here,
+ * because a second copy of the userinfo boundaries is the shape #8082's ruling
+ * rejected by name. Left to its own change rather than guessed at.
  */
 function buildMongoUrl(spec: DatasourceConnectionSpec): string {
   const cfg = (spec.config ?? {}) as Record<string, unknown>;
