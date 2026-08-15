@@ -43,6 +43,34 @@ export interface ApprovalsPluginOptions {
    * manual API only (e.g. tests).
    */
   disableAutoHooks?: boolean;
+  /**
+   * [#8652] Objects on which a user who can READ the target business record may
+   * also see that record's approval requests and full action history —
+   * **read-only**. No approval action is delivered through this tier: approve,
+   * reject, reassign, recall and comment keep authorizing exactly as they do
+   * now, on the pending-approver slate, the submitter, or admin override.
+   *
+   * ```ts
+   * new ApprovalsServicePlugin({ recordReaderVisibleObjects: ['exam_sheet'] })
+   * ```
+   *
+   * **Default OFF.** Omitted (or empty) leaves visibility precisely as it is
+   * today — submitter ∪ current approver ∪ historical actor, plus the admin
+   * override — so an existing deployment's confidentiality posture is unchanged
+   * on upgrade. Opting in is per object and deliberate: enabling it for a
+   * ledger object does not enable it anywhere else.
+   *
+   * **What an enabled object exposes**, so the opt-in is informed: the request
+   * row (including its `payload` snapshot of the record at submission time) and
+   * the full action history — actor, decision, timestamp, the action's COMMENT
+   * text, and any decision attachments. Enable it on objects whose approval
+   * commentary the record's readers are meant to see.
+   *
+   * Anchored on the existing record-read permission: the platform asks the
+   * engine to read the record as the caller, so object CRUD and RLS decide.
+   * There is no new permission, role or grant type, and no host-side hook.
+   */
+  recordReaderVisibleObjects?: string[];
 }
 
 /**
@@ -144,6 +172,9 @@ export class ApprovalsServicePlugin implements Plugin {
       engine: engine as ApprovalEngine,
       logger: ctx.logger,
       publicBaseUrl: this.options.publicBaseUrl,
+      // [#8652] Read-only record-reader visibility. Default OFF — an absent
+      // declaration reaches the service as an empty set and changes nothing.
+      recordReaderVisibleObjects: this.options.recordReaderVisibleObjects,
       // [ADR-0105 D9] Cross-organization approver targeting is a `group`-posture
       // capability. Read LAZILY (not captured at start) because the tenancy
       // service resolves its posture during its own start, which may not have

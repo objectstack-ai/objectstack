@@ -548,6 +548,14 @@ export interface ApprovalServiceOptions {
    * guard stands down.
    */
   tenancyPosture?: () => string | undefined;
+  /**
+   * [#8652] Objects on which a user holding READ access to the target business
+   * record may also see that record's approval requests and action history —
+   * read-only. Empty or absent (the default) leaves visibility exactly as it
+   * was. See {@link ApprovalService.recordReaderVisibleIds} for the rule and
+   * its boundaries.
+   */
+  recordReaderVisibleObjects?: string[];
 }
 
 export class ApprovalService implements IApprovalService {
@@ -558,6 +566,12 @@ export class ApprovalService implements IApprovalService {
   private messaging?: ApprovalMessagingSurface;
   private publicBaseUrl: string;
   private tenancyPosture?: () => string | undefined;
+  /**
+   * [#8652] The enabled object set for the record-reader visibility tier.
+   * EMPTY means the tier is off — the default, and the shape every existing
+   * deployment gets on upgrade.
+   */
+  private readonly recordReaderVisibleObjects: ReadonlySet<string>;
 
   constructor(opts: ApprovalServiceOptions) {
     this.engine = opts.engine;
@@ -567,6 +581,11 @@ export class ApprovalService implements IApprovalService {
     this.messaging = opts.messaging;
     this.publicBaseUrl = (opts.publicBaseUrl ?? '').replace(/\/$/, '');
     this.tenancyPosture = opts.tenancyPosture;
+    this.recordReaderVisibleObjects = new Set(
+      (Array.isArray(opts.recordReaderVisibleObjects) ? opts.recordReaderVisibleObjects : [])
+        .map((n) => String(n ?? '').trim())
+        .filter(Boolean),
+    );
   }
 
   /** Attach (or replace) the ADR-0105 D9 posture provider. */
@@ -3770,6 +3789,7 @@ export class ApprovalService implements IApprovalService {
   private async visibleRequestIds(
     context: ExecutionContext,
     tenantOrg: string | null,
+    target?: { object?: string | null; recordId?: string | null },
   ): Promise<Set<string> | null> {
     if (this.isOverrideActor(context, tenantOrg)) return null;
     const uid = context?.userId != null ? String(context.userId) : '';
@@ -3817,7 +3837,104 @@ export class ApprovalService implements IApprovalService {
         error: err instanceof Error ? err.message : String(err),
       });
     }
+    // [#8652] The read-only record-reader tier, applied STRICTLY ON TOP of the
+    // participant set above. It only ever adds ids; it can never return `null`
+    // (the "sees everything" verdict) and never removes a constraint, so the
+    // worst it can do is the thing it is for.
+    await this.addRecordReaderVisibleIds(ids, context, tenantOrg, target);
     return ids;
+  }
+
+  /**
+   * [#8652] Read-only approval visibility derived from READ ACCESS TO THE
+   * TARGET BUSINESS RECORD.
+   *
+   * Maintainer ruling 2026-08-15: a user who can read the target record may
+   * view that record's approval requests and full action history, read-only,
+   * behind a switch that is default OFF, anchored on the EXISTING record-read
+   * permission. The rejected alternative was a host-injected visibility hook —
+   * a security predicate the platform could neither constrain nor audit.
+   *
+   * ## How the anchor is evaluated
+   *
+   * By asking the engine to read the record AS THE CALLER. That is the whole
+   * check: `engine.find(object, { where: { id }, context })` runs the ordinary
+   * ObjectQL middleware — object CRUD read, then RLS — so a denial throws and a
+   * row the caller may not see comes back empty. Both mean "no". No new
+   * permission, role or grant type is invented, and no second copy of the
+   * access rule exists to drift from the first.
+   *
+   * ⚠️ The caller's context is load-bearing. Probing with {@link SYSTEM_CTX} —
+   * the context every other read in this service uses — would read exactly like
+   * a permission check while admitting every authenticated user in the tenant.
+   *
+   * ## Why it needs a NAMED TARGET, and what that deliberately excludes
+   *
+   * The rule is anchored on one record, so it can only be evaluated where a
+   * record is named: a list filtered by `object` + `recordId` (what a record
+   * page's approval tab sends), or a request loaded by id (whose own row names
+   * its target). An UNTARGETED list — the inbox — is left exactly as it was:
+   * answering it under this tier would mean probing every request in the tenant
+   * for read access, which is unbounded, and would turn a work queue into a
+   * browse surface. The confirmed consumer is the record page; the inbox is not
+   * part of the ruling and is not widened here.
+   *
+   * ## What becomes visible (stated plainly, because the switch is an opt-in)
+   *
+   * The request row — including its `payload` snapshot of the record at
+   * submission time — plus the full action history: actor, decision, timestamp,
+   * the action's COMMENT text, and (through the same gate, via
+   * {@link ApprovalService.authorizeFileRead}) any decision attachments. The
+   * comment text is the ruling's "full action history" read literally; it is
+   * flagged on the card as the one granularity edge worth a second look.
+   *
+   * Read-only is not enforced here and must not be: the decision paths
+   * (`decideNode` / `reassign` / `recall` / `comment`) authorize on the pending
+   * approver slate, the submitter, or {@link ApprovalService.isOverrideActor},
+   * none of which this tier touches. Seeing a request confers nothing.
+   */
+  private async addRecordReaderVisibleIds(
+    ids: Set<string>,
+    context: ExecutionContext,
+    tenantOrg: string | null,
+    target?: { object?: string | null; recordId?: string | null },
+  ): Promise<void> {
+    // Default OFF: a deployment that declares nothing must see no behaviour
+    // change at all — not even a probe whose answer is discarded.
+    if (this.recordReaderVisibleObjects.size === 0) return;
+    const object = String(target?.object ?? '').trim();
+    const recordId = String(target?.recordId ?? '').trim();
+    if (!object || !recordId) return;
+    if (!this.recordReaderVisibleObjects.has(object)) return;
+    // A tokenless/anonymous caller reads nothing. Fail closed, as above.
+    const uid = context?.userId != null ? String(context.userId) : '';
+    if (!uid) return;
+
+    try {
+      // The anchor. As the CALLER — see the warning in the doc block.
+      const readable = await this.engine.find(object, {
+        where: { id: recordId }, fields: ['id'], limit: 1, context,
+      });
+      if (!Array.isArray(readable) || readable.length === 0) return;
+
+      // Admitted: every request on that record, inside the caller's tenant.
+      const orgWhere = tenantOrg ? { organization_id: tenantOrg } : {};
+      const rows = await this.engine.find('sys_approval_request', {
+        where: { object_name: object, record_id: recordId, ...orgWhere },
+        fields: ['id'], limit: ApprovalService.APPROVER_INDEX_CAP, context: SYSTEM_CTX,
+      });
+      for (const r of Array.isArray(rows) ? rows : []) {
+        if (r?.id != null) ids.add(String(r.id));
+      }
+    } catch (err) {
+      // Never widen on error — a failed or refused probe adds nothing. A CRUD
+      // denial arrives here as a throw and is the ordinary "no", so this is
+      // logged at debug rather than warn: on a deployment with the tier on it
+      // is a routine answer, not a degradation.
+      this.logger?.debug?.('[approvals] record-reader visibility probe declined', {
+        object, error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   /** Intersect an existing `where.id` constraint with the participant set. */
@@ -3866,7 +3983,11 @@ export class ApprovalService implements IApprovalService {
     // #3590: the caller-supplied `approverId` is a FILTER, not authorization —
     // omitting it used to return every request in the tenant. Intersect with
     // what this caller actually participates in.
-    if (!this.applyVisibility(where, await this.visibleRequestIds(context, tenantOrg))) return [];
+    // [#8652] The filter's own `object`/`recordId` is what names the target
+    // record the read-only tier anchors on; without them nothing is widened.
+    if (!this.applyVisibility(where, await this.visibleRequestIds(context, tenantOrg, {
+      object: filter?.object, recordId: filter?.recordId,
+    }))) return [];
 
     const findOpts: any = {
       where,
@@ -3903,8 +4024,11 @@ export class ApprovalService implements IApprovalService {
       where.id = ids.length === 1 ? ids[0] : { $in: ids };
     }
 
-    // #3590 — the count must agree with the list it paginates.
-    if (!this.applyVisibility(where, await this.visibleRequestIds(context, tenantOrg))) return 0;
+    // #3590 — the count must agree with the list it paginates, so it reads the
+    // same target (#8652) as `listRequests` above.
+    if (!this.applyVisibility(where, await this.visibleRequestIds(context, tenantOrg, {
+      object: filter?.object, recordId: filter?.recordId,
+    }))) return 0;
 
     const countFn = (this.engine as any).count;
     if (typeof countFn === 'function') {
@@ -3962,7 +4086,12 @@ export class ApprovalService implements IApprovalService {
     // — and, once decision attachments derived their access from the request
     // (#3580), its files too. Participation is the rest of the rule.
     if (enforceVisibility) {
-      const visible = await this.visibleRequestIds(context, tenantOrg ?? null);
+      // [#8652] The row itself names the target record, so a request loaded by
+      // id carries its own anchor — which is what makes `listActions` and the
+      // decision-attachment gate follow this rule without a second copy of it.
+      const visible = await this.visibleRequestIds(context, tenantOrg ?? null, {
+        object: rows[0].object_name, recordId: rows[0].record_id,
+      });
       if (visible && !visible.has(String(rows[0].id))) return null;
     }
     const row = rowFromRequest(rows[0]);
