@@ -39,8 +39,17 @@ the generic verifier cannot auto-derive.
    service + HTTP, or depends on seeded/written data).
 2. `bootStack(<appConfig>)`, `signIn()`, drive it via `api()/apiAs()`.
 3. Assert on the concrete result.
-4. **Prove it catches the bug**: temporarily revert the relevant fix and confirm
-   the test goes red. A green-on-the-bug test is not a gate.
+4. **Prove it catches the bug**: temporarily revert the relevant fix, **rebuild the
+   package** (`pnpm --filter <pkg> build` — this suite resolves the code under test
+   from each package's built `dist/`, not `src/`, so a revert without a rebuild
+   re-runs the pre-mutation build), then confirm the test goes red. A
+   green-on-the-bug test is not a gate — and an ablation run against a stale `dist/`
+   is exactly that, silently: it certifies an assertion that may never be able to
+   fail, and no later CI run can expose it (CI builds correctly, so it stays green
+   there forever). Prove the mutation actually reached the built artifact before
+   trusting the colour: `node scripts/ablation-dist-preflight.mjs <pkg> '<marker>'`
+   (`--absent` when the revert deletes a guard rather than adding something
+   identifiable) exits non-zero unless it does.
 
 ## Capability matrix (the AI-authoring angle)
 
