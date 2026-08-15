@@ -46,6 +46,11 @@ import {
   inferExpressionType,
   type FieldRole,
 } from '@objectstack/formula';
+import {
+  METADATA_UNAVAILABLE_CODE,
+  metadataPartialListingSentence,
+  type DiagnosedObjectListing,
+} from './metadata-completeness.js';
 
 export interface McpObjectSummary {
   name: string;
@@ -60,6 +65,24 @@ export interface McpObjectSummary {
  */
 export interface McpDataBridge {
   listObjects(): Promise<McpObjectSummary[]>;
+  /**
+   * [#6504] The same listing, plus whether it can be trusted as COMPLETE.
+   *
+   * The `list_objects` tool renders its answer as `{ objects, totalCount }`,
+   * and `totalCount` is a positive, numeric claim about what this environment
+   * declares. During a metadata loader outage that claim is simply false, and
+   * nothing in the payload lets a client tell it from a genuinely small
+   * environment — the ADR-0110 D3 shape the `objectstack://objects` RESOURCE
+   * already closed (PR #7721) and this TOOL did not. The two are the same
+   * question asked over two transports, so they now answer it the same way.
+   *
+   * OPTIONAL, and its optionality is the bridge's own graceful-degradation
+   * contract (same as {@link McpDataBridge.aggregate}), stacked on
+   * `IMetadataService.listDiagnosed`'s: a bridge that cannot ask its metadata
+   * service for a verdict omits this member, the tool behaves exactly as it did
+   * before, and nothing anywhere claims completeness it did not establish.
+   */
+  listObjectsDiagnosed?(): Promise<DiagnosedObjectListing<McpObjectSummary>>;
   describeObject(name: string): Promise<unknown | null>;
   query(
     object: string,
@@ -306,11 +329,48 @@ export function registerObjectTools(
         inputSchema: {},
         annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
       },
+      // [#6504] This tool MIS-DESCRIBES during a metadata loader outage, which
+      // is why it changes while most consumers in that sweep correctly do not:
+      // it publishes `totalCount`, and a count is the strongest positive claim
+      // a read can make. The fix withholds the CLAIM, not the data — the same
+      // treatment, in the same words, the `objectstack://objects` resource got
+      // in PR #7721.
+      //
+      //  - healthy   → `{ objects, totalCount }`, byte-identical to before. A
+      //                count from a complete read is a fact this tool was
+      //                always right to state.
+      //  - degraded  → the same `objects` (the reachable set is still the most
+      //                useful true thing here), `totalCount` ABSENT, and in its
+      //                place `partial` / `returnedCount` / `warning` plus the
+      //                503 envelope so a client can branch structurally.
+      //
+      // Dropping the key rather than reporting a smaller number is the point: a
+      // client reading `totalCount` gets `undefined` — which fails, or renders
+      // as nothing — where a plausible-looking integer would have been believed.
+      //
+      // `returnedCount` counts what this tool actually SERVES, i.e. after the
+      // system-object filter, not what the bridge handed over. The two differ
+      // whenever `allowSystemObjects` is false, and naming the pre-filter number
+      // here would restate the same over-claim one field along.
       async () => {
         try {
-          const objects = await bridge.listObjects();
-          const visible = allowSystem ? objects : objects.filter((o) => !isSystemObject(o.name));
-          return textResult({ objects: visible, totalCount: visible.length });
+          const diagnosed = bridge.listObjectsDiagnosed
+            ? await bridge.listObjectsDiagnosed()
+            : { objects: await bridge.listObjects(), degraded: false, errors: [] };
+          const visible = allowSystem
+            ? diagnosed.objects
+            : diagnosed.objects.filter((o) => !isSystemObject(o.name));
+          if (!diagnosed.degraded) {
+            return textResult({ objects: visible, totalCount: visible.length });
+          }
+          return textResult({
+            objects: visible,
+            partial: true,
+            returnedCount: visible.length,
+            warning: metadataPartialListingSentence('objects', visible.length),
+            code: METADATA_UNAVAILABLE_CODE,
+            status: 503,
+          });
         } catch (err) {
           return errorResult(messageOf(err));
         }
