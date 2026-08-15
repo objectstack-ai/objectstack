@@ -65,8 +65,15 @@ describe('protocol.publishPackageDrafts (ADR-0033 / ADR-0067 D2)', () => {
     expect(promote).toHaveBeenCalledTimes(3);
     expect((promote.mock.calls[0][0] as any)).toMatchObject({ type: 'object', name: 'course' });
     // Side effects ran once per promoted item, AFTER promotion, in order.
+    //
+    // [#8820] Was `requestType`, the UNFOLDED spelling Phase 2 also used to
+    // take. `ensureObjectStorage` was its only consumer, so it was removed in
+    // favour of the folded `singularType` every other consumer already read —
+    // the tolerant-lookup shape `canonicalMetaType`'s header rejects. The
+    // draft here is spelled singular either way, so this assertion pins the
+    // same fact under the surviving field name.
     expect(sideEffects).toHaveBeenCalledTimes(3);
-    expect((sideEffects.mock.calls[0][0] as any)).toMatchObject({ requestType: 'object', name: 'course' });
+    expect((sideEffects.mock.calls[0][0] as any)).toMatchObject({ singularType: 'object', name: 'course' });
     expect(res).toMatchObject({ success: true, publishedCount: 3, failedCount: 0 });
     expect(res.published.map((p) => p.name)).toEqual(['course', 'student', 'course_list']);
   });
