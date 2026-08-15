@@ -4,6 +4,8 @@
 
 feat(spec): retire `ApiKeySchema` — the identity module no longer publishes a second, fictional declaration of `sys_api_key` (#8715, ADR-0049)
 
+<!-- adr-0087: registered identity-api-key-schema-retired -->
+
 **BREAKING** public-surface removal, landing after the v17.0.0 cut (the
 lockstep launch-window convention ships it as `minor`; the migration
 prescription is registered under protocol major 18, where `os migrate meta`
