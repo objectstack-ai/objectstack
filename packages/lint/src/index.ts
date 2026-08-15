@@ -304,6 +304,8 @@ export type {
 
 export { validateFilterTokens, FILTER_TOKEN_UNKNOWN } from './validate-filter-tokens.js';
 export type { FilterTokenFinding, FilterTokenSeverity } from './validate-filter-tokens.js';
+export { validatePresetComparands, FILTER_PRESET_COMPARAND } from './validate-preset-comparands.js';
+export type { PresetComparandFinding, PresetComparandSeverity } from './validate-preset-comparands.js';
 
 // #5330 — the same subtree, judged for SHAPE rather than for its strings. The
 // runtime meaning of an empty combinator is settled (#5322: boolean identity,

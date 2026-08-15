@@ -592,6 +592,128 @@ function unsupportedFilterError(message: string): Error {
 }
 
 /**
+ * [#8790] Does this dialect error say the statement named a column the backend
+ * could not resolve?
+ *
+ * ONE spelling of the question, read by both halves that have to answer it —
+ * {@link SqlDriver.findRows}' recovery ladder and {@link SqlDriver.count}. It
+ * used to be an inline predicate inside `findRows` alone, which is exactly how
+ * one condition ended up with two behaviours: `find()` swallowed it into `[]`
+ * and `count()`, having no copy of the test, threw the dialect's own error.
+ *
+ * ⚠️ REACH, deliberately UNCHANGED from the inline predicate this replaces —
+ * SQLite (`no such column: x`) and Postgres (`column "x" does not exist`).
+ * MySQL spells the same condition `Unknown column 'x' in 'where clause'`
+ * (`ER_BAD_FIELD_ERROR`) and is matched by NEITHER arm, so on MySQL an
+ * unresolvable column has always travelled out as the raw dialect error and
+ * still does. That gap is real and is filed separately rather than closed
+ * here: widening this predicate would ALSO hand MySQL the #3821 projection and
+ * ORDER-BY recoveries it has never had, which is an accept-set change on a GA
+ * read path in the opposite direction from the one #8790 was ruled on — not a
+ * free extension of it. Widen it in a card that rules on that, not in passing.
+ */
+export function isUnresolvableColumnError(error: unknown): boolean {
+  const message = (error as { message?: unknown } | null | undefined)?.message;
+  if (typeof message !== 'string') return false;
+  return (
+    message.includes('no such column') ||
+    (message.includes('column') && message.includes('does not exist'))
+  );
+}
+
+/**
+ * [#8790] The column name the dialect named, or `null` when its wording did not
+ * yield one.
+ *
+ * The ruling requires the refusal to NAME the column, and the dialect's message
+ * is the only place that name exists: the driver reaches this point precisely
+ * when no local field map could answer the question (the registry-backstop case
+ * the ladder below exists for), so there is nothing else to ask.
+ *
+ * ⛔ The name is ALL that may be taken from that message. The rest of it is the
+ * compiled statement with the caller's bound literals inlined
+ * (`… where \`title\`.\`x\` = 'y' - no such column: title.x`), which is the
+ * predicate-text disclosure #7929 redacted elsewhere and the reason `count()`'s
+ * old raw throw was a defect rather than merely an unhelpful envelope. The full
+ * text goes to the server log — see
+ * {@link SqlDriver.refuseUnresolvableFilterColumn} — never to the caller.
+ *
+ * `null` is a real answer, not a failure to handle: an unrecognised wording
+ * still refuses, with the same code and status, just without the name. Reading
+ * a `null` as "not an unresolvable column after all" would restore the silent
+ * `[]` for every dialect message this function has not been taught.
+ */
+export function unresolvableColumnNameOf(error: unknown): string | null {
+  const message = (error as { message?: unknown } | null | undefined)?.message;
+  if (typeof message !== 'string') return null;
+  // SQLite: `… - no such column: title.x`
+  const sqlite = /no such column:\s*([^\s,;)]+)/.exec(message);
+  if (sqlite) return sqlite[1];
+  // Postgres, quoted: `… - column "nosuchcol" does not exist`
+  const pgQuoted = /column\s+"([^"]+)"\s+does not exist/.exec(message);
+  if (pgQuoted) return pgQuoted[1];
+  // Postgres, unquoted and possibly table-qualified: `column task.nosuchcol does not exist`
+  const pgBare = /column\s+([A-Za-z0-9_$.]+)\s+does not exist/.exec(message);
+  if (pgBare) return pgBare[1];
+  return null;
+}
+
+/**
+ * [#8790, maintainer ruling 2026-08-15] A WHERE the backend could not compile
+ * because it names a column that does not resolve — refused, on BOTH read
+ * halves, with the ADR-0112 envelope this path already declares.
+ *
+ * # What this replaces, and why neither old answer survived
+ *
+ * One predicate used to get two answers. `find()` fell to the #3821 ladder's
+ * terminal `return []` — a caller reading "no records exist" for what was
+ * really "your predicate never ran", the single most AI-legible failure to get
+ * wrong, since an agent writes its next query on that belief. `count()`, which
+ * has no ladder, threw the dialect's own error: `code: 'SQLITE_ERROR'`, no
+ * `status`, and the statement's bound literals inlined in the message. A list
+ * view calls both, so one query produced an empty page and a 500-shaped total.
+ *
+ * `INVALID_FILTER` / 400 is not minted here — it is the envelope every sibling
+ * refusal on this path already answers with ({@link unsupportedFilterError}),
+ * required on both SQL drivers by `cross-field-conformance-cases.ts` and pinned
+ * by `sql-driver-boolean-identity.test.ts` and
+ * `sql-driver-cross-field-conformance.test.ts`. What #8790 closes is a
+ * declared-vs-enforced gap, not a new posture.
+ *
+ * # Why refusal rather than recovery, on this clause only
+ *
+ * The ladder around it KEEPS recovering a projection and an ORDER BY, and that
+ * asymmetry is the ruling, not an oversight: "rows matter more than their
+ * order" is an argument about how rows are *presented*, and it does not
+ * transfer to a predicate. Dropping a WHERE would answer with records the
+ * caller explicitly excluded — a wrong answer, where a dropped sort is a
+ * correct answer in an unhelpful order. Recover-both was rejected for exactly
+ * that reason.
+ *
+ * # The wording
+ *
+ * The middle sentence is the ingress door's, verbatim
+ * (`assertFilterFieldsExist`, `@objectstack/metadata-protocol`): one condition
+ * refused at two layers must not be explained two different ways. This one adds
+ * what only the driver knows — that the column is missing from the TABLE, which
+ * a caller whose field map declares it can only fix by syncing the schema.
+ */
+function unresolvableFilterColumnError(object: string, column: string | null): Error {
+  return unsupportedFilterError(
+    (column === null
+      ? `A filter on object '${object}' names a column the database could not resolve`
+      : `Filter on '${column}' names a column that object '${object}' has no column for`) +
+      ', so the predicate never ran. A filter on a field that does not exist can only match ' +
+      'zero records, so the query was refused instead of answered with an empty list. Check ' +
+      "the name against the object's fields; if the field was declared recently, run schema " +
+      'sync so the column exists before filtering on it.' +
+      (column === null
+        ? ' The name the database reported is in the server log.'
+        : ''),
+  );
+}
+
+/**
  * [#7929] The full, operand-naming text of a refusal whose caller-visible
  * message was redacted — carried on the Error under a SYMBOL key.
  *
@@ -4299,11 +4421,7 @@ export class SqlDriver implements IDataDriver {
     try {
       results = await builder;
     } catch (error: any) {
-      const isUnknownColumn =
-        error.message &&
-        (error.message.includes('no such column') ||
-          (error.message.includes('column') && error.message.includes('does not exist')));
-      if (isUnknownColumn) {
+      if (isUnresolvableColumnError(error)) {
         // A `$select` projection naming a column the table lacks (e.g. a
         // generic list view auto-requesting `status`/`due_date`/`image` on an
         // object without them) makes the WHOLE query fail. Swallowing that
@@ -4324,6 +4442,18 @@ export class SqlDriver implements IDataDriver {
         // drop the sort and return them unordered rather than nothing. Ladder:
         // projection first (it is the likelier culprit and the cheaper thing
         // to lose), then the sort, then give up.
+        //
+        // [#8790, maintainer ruling 2026-08-15] Where the ladder STOPS is the
+        // other half of the same argument. Every rung is built from
+        // `buildBase()`, which always re-applies `query.where` — so the ladder
+        // can drop a projection and can drop a sort, but it can never drop the
+        // clause that failed when the unresolvable column is in the WHERE.
+        // Both rungs then raise the same error and the method used to fall to
+        // `return []`. That terminal is now a refusal: rows matter more than
+        // their order, but nothing matters more than the predicate, because
+        // answering without it returns records the caller excluded. See
+        // {@link unresolvableFilterColumnError}. The two recoveries above are
+        // deliberately untouched — the ruling narrows the terminal only.
         const retries: Array<() => any> = [];
         if (query.fields) retries.push(() => buildBase().select('*'));
         if (orderKeys.length > 0) {
@@ -4331,16 +4461,22 @@ export class SqlDriver implements IDataDriver {
         }
         results = [];
         let recovered = false;
+        // The error to NAME the column from. The last rung is the one that has
+        // dropped everything droppable, so a column still unresolved there is
+        // the caller's WHERE — naming it from the ORIGINAL error would name the
+        // projection column on a query whose projection the ladder just fixed.
+        let lastError: unknown = error;
         for (const retry of retries) {
           try {
             results = await retry();
             recovered = true;
             break;
-          } catch {
+          } catch (retryError) {
             // Try the next, broader fallback.
+            lastError = retryError;
           }
         }
-        if (!recovered) return [];
+        if (!recovered) throw this.unresolvableFilterColumnRefusal(object, lastError);
       } else {
         throw error;
       }
@@ -5890,6 +6026,34 @@ export class SqlDriver implements IDataDriver {
     return null;
   }
 
+  /**
+   * [#8790] Compose the refusal for a WHERE column the backend could not
+   * resolve, writing the dialect's own message to the SERVER LOG on the way.
+   *
+   * Logging is the half that keeps this a redaction rather than a deletion. The
+   * dialect message is genuinely useful — it carries the compiled statement —
+   * and `count()`'s old raw throw was the only place an operator ever saw it.
+   * It also carries the caller's bound literals inlined, which is why it may
+   * not travel to the caller (#7929's line, applied to the one refusal on this
+   * path that is raised from a dialect error rather than composed from the
+   * filter AST). So: statement to the log, column name to the caller.
+   *
+   * Returns the error rather than throwing it, the same shape
+   * {@link SqlDriver.resolveWithheldFilterRefusal} uses, so each call site
+   * spells its own `throw` and no reader has to know whether this returns.
+   */
+  protected unresolvableFilterColumnRefusal(object: string, error: unknown): Error {
+    const column = unresolvableColumnNameOf(error);
+    const detail = (error as { message?: unknown } | null | undefined)?.message;
+    this.logger.warn(
+      `[sql-driver] INVALID_FILTER — a WHERE column could not be resolved on '${object}'` +
+        (column === null ? '' : ` ('${column}')`) +
+        '. The dialect message below is kept server-side because it inlines the statement ' +
+        `bound literals (#7929, #8790): ${typeof detail === 'string' ? detail : String(error)}`,
+    );
+    return unresolvableFilterColumnError(object, column);
+  }
+
   async count(object: string, query?: DriverQuery, options?: DriverOptions): Promise<number> {
     const builder = this.getBuilder(object, options);
     this.applyTenantScope(builder, object, options);
@@ -5898,7 +6062,23 @@ export class SqlDriver implements IDataDriver {
       this.applyFilters(builder, query.where);
     }
 
-    const result = await builder.count<{ count: number }[]>('* as count');
+    // [#8790] `count()` has no recovery ladder and needs none — it carries no
+    // projection and no ORDER BY, so the only clause an unresolvable column can
+    // be in is the WHERE, which is the one clause {@link SqlDriver.findRows}'
+    // ladder may not drop either. What it needs is the ladder's *terminal*: the
+    // same `INVALID_FILTER` / 400, naming the same column, so the two halves of
+    // one list view stop answering one predicate two different ways. Before
+    // this, the dialect error travelled out untouched — `SQLITE_ERROR`, no
+    // `status`, bound literals inlined in the message.
+    let result: { count: number }[];
+    try {
+      result = await builder.count<{ count: number }[]>('* as count');
+    } catch (error) {
+      if (isUnresolvableColumnError(error)) {
+        throw this.unresolvableFilterColumnRefusal(object, error);
+      }
+      throw error;
+    }
     if (result && result.length > 0) {
       const row: any = result[0];
       return Number(row.count ?? row['count(*)'] ?? 0);

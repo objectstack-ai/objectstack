@@ -4999,78 +4999,68 @@ const step18: MigrationStep = {
         'stored `sys_metadata` row or authored source.',
     },
     {
-      id: 'engine-dotted-filter-refused',
+      id: 'driver-sql-unresolvable-where-column-refused',
       surface:
-        'a `where` / filter whose KEY is a dotted path with a relation, virtual-`formula` or '
-        + 'plain-scalar head (`{"project_id.name": …}`, `{"is_open.x": …}`, `{"title.x": …}`) — at '
-        + 'BOTH doors: the REST ingress (`assertFilterFieldsExist`, covering everything that reaches '
-        + '`findData`) and the engine seam itself (`engine.find` / `findOne` / `count` / `aggregate` '
-        + '/ `update` / `delete`), which saved reports, flows and dashboard widgets reach directly',
+        'a `where` naming a column the table does not have, on `driver-sql` (and its '
+        + '`TursoDriver` / `SqliteWasmDriver` subclasses) — `find()` / `findOne()` answered '
+        + '`[]` and `count()` threw the dialect\'s own error; both now refuse with '
+        + '`INVALID_FILTER` / 400',
       replacement:
-        'denormalise the value onto the queried object (a stored field, written when the source '
-        + 'changes) and filter that — the same remedy, in the same words, the SORT axis has '
-        + 'prescribed for the dotted spelling since #4256/#6924. To read a related column, `$expand` '
-        + 'is unchanged; to CONDITION on one, the stored denormalised field is the supported shape. '
-        + 'A dotted path into a structured/JSON field (`{"address.city": …}`) is NOT refused and '
-        + 'keeps its current per-driver behaviour',
+        'name a column the object actually has, or run schema sync so a recently declared '
+        + 'field exists as a column before filtering on it. A caller that legitimately wants '
+        + '"no rows unless this matches" gets that from a predicate over a real column; there '
+        + 'is no spelling of an unresolvable column that means "match nothing", which is '
+        + 'exactly what the old empty list was mistaken for',
       reason:
-        'FILTER was the last of the four query axes with no verdict for a dotted name: SORT refuses '
-        + 'it (#4256), PROJECTION refuses it at both doors (#7589), and the FILTER gates judged a '
-        + 'key on its HEAD SEGMENT only — so `where {"project_id.name": "Apollo"}` cleared the '
-        + '#7534 unknown check because `project_id` is a real field, reached a driver that cannot '
-        + 'serve the path, and answered 200 with zero rows. The #8296 virtual verdict deliberately '
-        + 'skipped dotted keys, so the axis answered one unserviceable intent two ways by spelling: '
-        + '`{is_open: true}` was refused while `{"is_open.x": true}` rode through.\n\n'
-        + 'Measured across all THREE drivers before ruling (#8371): relation-head, formula-head, '
-        + 'system-column-head and plain-scalar-head dotted filters return ZERO rows on '
-        + '`driver-memory`, `driver-sql` AND `driver-mongodb`, each under an ordinary 200 '
-        + 'indistinguishable from an empty table. There is no working capability for this refusal '
-        + 'to remove: an ObjectStack lookup stores the related record\'s SCALAR id (SQL: a string '
-        + 'column plus FK; Mongo: a single-key index on a scalar), while Mongo\'s dotted paths '
-        + 'traverse EMBEDDED DOCUMENTS — so the spelling is well-formed Mongo that matches nothing. '
-        + 'On driver-sql, knex reads the dot as a table qualifier and emits a column no dialect can '
-        + 'resolve; `find()` falls into the #3821 recovery ladder and returns `[]` silently (the '
-        + 'find/count divergence that fell out of that measurement is #8790, its own card).\n\n'
-        + 'Both doors now refuse the three measured-dead head classes with `400 INVALID_FIELD`, '
-        + 'naming the whole offending key exactly as the caller wrote it and carrying the remedy '
-        + 'sentence — no new mechanism, no new error class, per the #8371 maintainer ruling. Both '
-        + 'judge the head by the SAME `@objectstack/spec/data` classification '
-        + '(`classifyDottedFilterHead`), the one-source move #8296 made with `isVirtualSearchField`, '
-        + 'so the doors cannot drift into answering one spelling two ways. Precedence mirrors the '
-        + 'sort axis, verdict for verdict: `unknown` > `dotted` > unmaterializable.\n\n'
-        + 'DELIBERATELY UNJUDGED, per the same ruling: a dotted path whose head is a '
-        + 'structured/JSON field (`address.city`) — the one spelling the drivers genuinely disagree '
-        + 'on (live on memory and mongodb, 2 rows in the measurement; silently empty on sql). '
-        + 'Refusing it for symmetry would delete a working capability on two of three backends; '
-        + 'declaring JSON-path filtering a capability (`supports`) waits for a real consumer. '
-        + 'Array-valued heads (`multiple: true`, tag types) and file heads are unjudged for the '
-        + 'same measured reason. The nested-relation OBJECT form `{ owner: { region: "NA" } }` is '
-        + 'untouched: the refusal targets the dotted-STRING spelling alone.\n\n'
+        'One predicate had two answers. `SqlDriver.findRows()` carries the #3821 unknown-'
+        + 'column recovery ladder, whose rungs are all built from `buildBase()` — and '
+        + '`buildBase()` always re-applies `query.where`. So the ladder can drop a projection '
+        + 'and can drop an ORDER BY, but it can never drop the clause that failed when the '
+        + 'unresolvable column is in the WHERE: both rungs raise the same error and the method '
+        + 'fell to `return []`. `SqlDriver.count()` runs a separate statement with no ladder at '
+        + 'all, so the identical predicate threw. Measured on better-sqlite3, one seeded row: '
+        + "`where { 'title.x': 'y' }` gave `find()` 0 rows and NO error, while `count()` threw "
+        + "`code: 'SQLITE_ERROR'`, `status: undefined`, message `select count(*) as \\`count\\` "
+        + "from \\`task\\` where \\`title\\`.\\`x\\` = 'y' - no such column: title.x`.\n\n"
+        + 'A list view calls both halves, so one query produced an empty page from the rows '
+        + 'half and a 500-shaped failure from the total half — and a caller reading only the '
+        + 'rows got a silent empty page saying "no records exist" for what was really "your '
+        + 'predicate never ran". That is the single most AI-legible failure to get wrong: an '
+        + 'agent reads "no matching records" and writes its next query on that belief. The '
+        + "thrown half was no better — the dialect's own `code`, no `status` (an unclassified "
+        + '5xx at the REST boundary rather than a caller mistake), and the statement\'s bound '
+        + 'literals inlined in the message, the same predicate-text disclosure shape #7929 '
+        + 'redacted elsewhere.\n\n'
+        + 'Ruled 2026-08-15 on #8790: refuse BOTH halves with `INVALID_FILTER` / 400, naming '
+        + 'the column. The envelope is not minted here — it is what every sibling refusal on '
+        + 'this path already answers, required on both SQL drivers by '
+        + '`cross-field-conformance-cases.ts` and pinned by `sql-driver-boolean-identity.test.ts` '
+        + 'and `sql-driver-cross-field-conformance.test.ts` — so what closes is a declared-vs-'
+        + 'enforced gap, not a new posture. Recover-both was excluded by the card\'s own '
+        + 'argument: dropping a WHERE returns rows the caller explicitly excluded, and #3821\'s '
+        + '"rows matter more than their order" is an argument about how rows are PRESENTED, '
+        + 'which does not transfer to a predicate. The ladder KEEPS both of its recoveries — '
+        + 'only the WHERE-failure terminal became a refusal.\n\n'
+        + 'Reach, stated rather than assumed: the refusal fires on the wordings the ladder has '
+        + 'always recognised — SQLite (`no such column: x`) and Postgres (`column "x" does not '
+        + "exist`). MySQL spells it `Unknown column 'x' in 'where clause'`, which neither arm "
+        + 'matches, so on MySQL this condition still travels out as the raw dialect error; '
+        + 'widening that predicate would also hand MySQL the #3821 recoveries it has never had, '
+        + 'which is an accept-set change in the opposite direction and is filed separately.\n\n'
         + 'This is a CODE-path API, not stored metadata, so — like '
-        + '`engine-find-formula-filter-refused` and `engine-dotted-projection-refused` one step '
-        + 'down — there is no `sys_metadata` row for the D2 chain to rewrite and this ledger entry '
-        + 'is the notification channel. No mechanical rewrite exists: the platform cannot invent '
-        + 'the stored column the remedy prescribes, and it must not join or post-filter instead — '
-        + 'the drivers have already applied `limit`/`offset`, so any post-hoc predicate would '
-        + 'filter an arbitrary page.\n\n'
-        + 'AUTHOR-REACHABLE SURFACES: a saved report\'s `query.filter` (`sys_saved_report`) is '
-        + 'forwarded VERBATIM into `engine.find` by `plugin-reports`, bypassing the ingress; flow '
-        + 'node `config.filter` and dashboard widget filters are author-written the same way. A '
-        + 'dotted filter path is exactly what an AI author writes by analogy with `$expand`, '
-        + 'projection spellings and SQL joins — and it used to answer an empty list '
-        + 'indistinguishable from "no matching records", often with the related value reading '
-        + 'correctly in the very same response. It now fails loudly, with the remedy in the '
-        + 'message. Registered on the same inherited ruling as its siblings (#7095 "register it '
-        + 'anyway", re-affirmed 2026-08-13): #8371, #8296, #7589, #7534, #4256, ADR-0112.',
+        + '`engine-dotted-projection-refused` and `engine-find-formula-filter-refused` — there '
+        + 'is no `sys_metadata` row for the D2 chain to rewrite and this entry is the '
+        + 'notification channel. No mechanical rewrite exists: the platform cannot know which '
+        + 'real column a mistyped filter key meant, and guessing one would answer with rows the '
+        + 'caller never asked for. #8790, #3821, #7929, #8371, ADR-0112.',
       acceptanceCriteria:
-        'No filter key is a dotted path whose head is a relation (`lookup` / `master_detail` / '
-        + '`user` / `tree`), a `formula`, or a plain scalar — grep your saved report definitions '
-        + '(`sys_saved_report.query.filter`), flow node `config.filter`, dashboard widget filters '
-        + 'and view filters for keys containing a dot, and for each either denormalise the related '
-        + 'value onto a stored field of the queried object, or (for a relation id test) filter the '
-        + 'head field itself (`{"project_id": <id>}`). A dotted path into a structured/JSON field '
-        + '(`{"address.city": …}`) needs NO action — it is deliberately not judged. Reads complete '
-        + 'with no `INVALID_FIELD` naming a dotted filter key, at either door.',
+        'No saved report `query.filter`, flow condition, sharing/permission rule or hook '
+        + 'filters on a name the queried object has no column for. Reads and counts complete '
+        + 'with no `INVALID_FILTER` whose message says "names a column that object" or "names a '
+        + 'column the database could not resolve". Where a filter key was a relationship '
+        + 'traversal spelled as a dotted path, rewrite it against a column on the queried '
+        + 'object — the driver never resolved such a path and answered `[]`, so any list that '
+        + 'looked correct under one was already showing nothing.',
     },
     {
       id: 'field-scale-precision-integer-refused',
@@ -5099,6 +5089,62 @@ const step18: MigrationStep = {
         + 'fields declaring neither key are untouched. Stored `sys_metadata` rows carrying a '
         + 'malformed value keep loading (the rehydration seam replays the conversion, which drops '
         + 'the meaningless key).',
+    },
+    {
+      id: 'filter-preset-ordering-comparand-refused',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span already, and a nested backtick would close it.
+      surface:
+        'a dashboard date-range preset name (last_7_days / last_30_days / last_90_days, today, '
+        + 'yesterday, this_week, last_week, this_month, last_month, this_quarter, last_quarter, '
+        + 'this_year, last_year) authored as a bare ORDERING comparand in a filter — a '
+        + '$gt / $gte / $lt / $lte value or a $between endpoint on any carrier of '
+        + 'FilterConditionSchema (dashboard widget filter, dataset filter, report runtimeFilter, '
+        + 'page filter, component filter, rollup filter), a greater_than / less_than / before / '
+        + 'after / between view filter rule value, or an ordering [field, op, value] filter triple',
+      replacement:
+        'the date-macro window the preset already means — { $gte: "{30_days_ago}" } for '
+        + 'last_30_days, { $between: ["{week_start}", "{week_end}"] } for this_week, and so on '
+        + '(the rejection names the exact window per preset; DATE_RANGE_PRESET_MACRO_WINDOWS in '
+        + '@objectstack/spec/data is the table) — or an ISO date such as 2026-01-15. The preset '
+        + 'names themselves stay fully legal in the dashboard date-filter positions '
+        + '(dateRange.defaultRange, a date global filter defaultValue), which is the only place '
+        + 'any layer ever resolved them',
+      reason:
+        'The C half of #8690, maintainer-ruled 2026-08-15 alongside the engine door (PR #8808). '
+        + 'The preset vocabulary is declared in the dashboard schema and lowered to {date-macro} '
+        + 'bounds by the shipped console before any query is sent — so the names were declared in '
+        + 'one layer and unrecognised in the next, with no error at the boundary. Authored as a '
+        + 'bare comparand (a saved report, an integration, an MCP client, an AI-authored query), '
+        + 'the name reached the driver as written and compared false against every row: HTTP 200, '
+        + 'count 0, indistinguishable from "there is no data" (measured on #8690: $gte '
+        + '"last_30_days" returned 0 of 51 seeded rows where the macro spelling returned the 38 '
+        + 'in-window). The engine now refuses the bare name on a declared temporal field at query '
+        + 'time (INVALID_FILTER / 400); this entry records the AUTHORING-time half: the schema '
+        + 'door and the @objectstack/lint filter-preset-comparand rule refuse it at publish, '
+        + 'where the author — an AI author in particular — can still act on the message. '
+        + 'Ordering positions only, deliberately: equality and membership are NOT judged, because '
+        + 'a select/picklist column legitimately stores values that collide with preset names, '
+        + 'and on a temporal field the engine door already refuses those with the field type in '
+        + 'hand. ⚠️ Metadata AT REST is deliberately not rewritten and there is no D2 conversion: '
+        + 'this shape was never written by any first-party producer (every preset in this repo '
+        + 'and the example apps sits in a dashboard date-filter position — measured) and never '
+        + 'executed usefully (it returned a silent zero before #8808 and a 400 after). Coercing '
+        + 'it at load would be the platform guessing which bound the author meant. The read path '
+        + 'does not re-validate stored rows, so no stored dashboard becomes unreadable; what '
+        + 'changes is that RE-SAVING one is refused with the window named. '
+        + 'ADR-0049 / ADR-0078 / ADR-0112.',
+      acceptanceCriteria:
+        'Grep your authored filters for the thirteen preset names in ordering positions — a '
+        + '$gt/$gte/$lt/$lte value, a $between endpoint, a greater_than/less_than/before/after/'
+        + 'between view rule value, an ordering filter triple — and rewrite each to the '
+        + '{date-macro} window the rejection names (or an ISO date). `os validate` / `os lint` '
+        + 'report each one by path, so the sweep is mechanical. Leave presets in dashboard '
+        + 'date-filter positions (dateRange.defaultRange, date global filter defaultValue) '
+        + 'untouched — they remain the declared vocabulary there. A filter that carried one of '
+        + 'these shapes was never returning the window it named (silent zero before the engine '
+        + 'door, 400 after), so re-check what the surface was supposed to show rather than '
+        + 'assuming the old result set was correct.',
     },
     {
       id: 'identity-api-key-schema-retired',

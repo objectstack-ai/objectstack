@@ -105,6 +105,7 @@ import { validateViewContainers } from './validate-view-containers.js';
 import { validateWidgetBindings } from './validate-widget-bindings.js';
 import { validateDashboardActionRefs } from './validate-dashboard-action-refs.js';
 import { validateFilterTokens } from './validate-filter-tokens.js';
+import { validatePresetComparands } from './validate-preset-comparands.js';
 import { validateEmptyCombinators } from './validate-empty-combinators.js';
 import { validateReferenceIntegrity } from './reference-integrity-suite.js';
 import { validateComponentProps } from './validate-component-props.js';
@@ -541,6 +542,28 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_ONLY,
     surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateFilterTokens(stack),
+  },
+  // #8793 (the ruled C half of #8690) — a declared dashboard date-range preset
+  // name (`last_30_days`, …) authored as a bare ORDERING comparand resolves in
+  // no layer: the engine refuses it on a declared temporal field at query time
+  // (INVALID_FILTER / 400, PR #8808), and anywhere else it compares as a
+  // literal string. This is the authoring-time refusal the ruling shipped
+  // alongside the engine door, judging the filter literal in isolation —
+  // ordering positions only, all three authored filter shapes. Like
+  // `validateEmptyCombinators` it needs NO resolution context, so
+  // RUNTIME_NEEDS_FULL_SNAPSHOT does not apply and the runtime gate runs it
+  // for every filter-carrying type the gate already maps: the write path is
+  // the one door an AI author uses, and dashboards/views are where the preset
+  // vocabulary is near enough to reach for.
+  {
+    name: 'validatePresetComparands',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-preset-comparands.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['dashboard', 'view', 'object', 'page', 'flow'],
+    run: (stack) => validatePresetComparands(stack),
   },
   // #5330 — the LITERAL empty combinators (`$and: []`, `$or: []`, `$not: {}`,
   // `{}`). #5322 ruled their RUNTIME meaning to be the boolean identity, and

@@ -8,6 +8,7 @@ import type { KeySetGuidance } from '../shared/suggestions.zod';
 import { FilterConditionSchema } from '../data/filter.zod';
 import { DateGranularity } from '../data/query.zod';
 import { DATE_MACRO_WRAPPED_RE, isDateMacroToken } from '../data/date-macros.zod';
+import { DATE_RANGE_PRESETS } from '../data/date-range-presets';
 import { ChartTypeSchema, ChartConfigSchema } from './chart.zod';
 import { ActionType } from './action.zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
@@ -642,29 +643,16 @@ export const DashboardWidgetSchema = lazySchema(() => strictObject({
  * Dashboard date-range presets — the named windows a dashboard date filter may
  * select, in the display order the filter bar offers them.
  *
- * **This is the vocabulary's single source of truth (#4614).** It used to exist
- * three times: inline in `dateRange.defaultRange` below, as `PRESET_RANGES` in
- * objectui's `dashboard-filters` (the module that maps each name to its
- * date-macro bounds), and as a hand-written table in
- * `content/docs/ui/dashboards.mdx`. Three copies of one enum drift in the
- * direction nobody notices: a name the renderer knows but the schema does not is
- * rejected from metadata that would have rendered, and a name the schema knows
- * but the renderer does not validates clean and then resolves to nothing.
- *
- * Each preset resolves to a pair of date-macro token bounds at query time (see
- * `DATE_MACRO_TOKENS` in `../data/date-macros.zod`). That is why the two
- * vocabularies live one import apart and neither restates the other's grammar.
+ * The vocabulary's single source of truth (#4614) now lives in
+ * `../data/date-range-presets.ts` — re-exported here so every existing `ui`
+ * importer keeps working. #8793 moved the declaration: `data/filter.zod.ts`
+ * REFUSES these names as bare ordering comparands (the #8690 C half) and
+ * cannot import them from `ui/` without a cycle (this file already imports
+ * `data/filter.zod.ts`). The list itself, the drift history that made it a
+ * single source, and the macro-window prescriptions are all documented at the
+ * new home.
  */
-export const DATE_RANGE_PRESETS = [
-  'today',        'yesterday',
-  'this_week',    'last_week',
-  'this_month',   'last_month',
-  'this_quarter', 'last_quarter',
-  'this_year',    'last_year',
-  'last_7_days',  'last_30_days', 'last_90_days',
-] as const;
-
-export type DateRangePreset = (typeof DATE_RANGE_PRESETS)[number];
+export { DATE_RANGE_PRESETS, type DateRangePreset } from '../data/date-range-presets';
 
 /**
  * What `dashboard.dateRange.defaultRange` accepts: every preset, plus the

@@ -2,6 +2,7 @@
 
 import { z } from 'zod';
 import { normalizeFilterComparandTypes } from './filter-comparand-type';
+import { bareDateRangePresetComparandMessage, isDateRangePresetName } from './date-range-presets';
 
 /**
  * Unified Query DSL Specification
@@ -1013,6 +1014,132 @@ export const FieldOperatorsSchema = lazySchema(() => z.object({
 }));
 
 // ============================================================================
+// 3.35 Bare date-range preset names in ordering comparands — REFUSED (#8793)
+// ============================================================================
+
+/**
+ * [#8793] The ordering positions a bare dashboard date-range PRESET name is
+ * refused from — the #8690 C half, maintainer-ruled 2026-08-15 (delegated
+ * adjudication on #8690, comment 5299879288): "refuse the declared preset
+ * vocabulary (`last_7_days`/`last_30_days`/`last_90_days` as bare strings in a
+ * temporal filter) at publish time, `packages/spec` + `@objectstack/lint`".
+ *
+ * ## The defect this closes, measured end to end (#8690)
+ *
+ * ```
+ * $gte "last_30_days"   HTTP 200  count=0    <- silent zero (the defect)
+ * $gte "{30_days_ago}"  HTTP 200  count=38   <- the spelling that works
+ * ```
+ *
+ * `last_30_days` is a REAL declared name — in the dashboard date-filter
+ * positions, where the console lowers it to `{date-macro}` bounds before any
+ * query is sent. Authored as a bare comparand it was bound as written: the
+ * vocabulary was declared in one layer and unrecognised in the next, with no
+ * error at the boundary. The engine now refuses it on declared temporal fields
+ * at QUERY time (`INVALID_FILTER` / 400, PR #8808 — the B half); this check is
+ * the AUTHORING-time half, landing where an AI-generated dashboard is actually
+ * produced, so the error reaches the author instead of the first viewer.
+ *
+ * ## Why ORDERING positions only — the boundary, stated plainly
+ *
+ * This schema is field-AGNOSTIC (see {@link ComparisonOperatorSchema}'s #5685
+ * note): it cannot ask whether the column is temporal, so the judgement rides
+ * on the POSITION instead, and only the positions with no innocent reading are
+ * judged:
+ *
+ * - **`$gt` / `$gte` / `$lt` / `$lte` comparands and both `$between`
+ *   endpoints ARE judged.** An ORDERED comparison against a declared preset
+ *   name has no legitimate reading: on a temporal column the engine door
+ *   refuses it, and on a text column it orders the literal string against the
+ *   platform's own vocabulary word under backend collation — a comparison the
+ *   #5685 ruling explicitly declines to promise, against a value the platform
+ *   itself declared to mean a time window.
+ * - **Equality (`{ period: 'this_quarter' }`, `$eq`, `$ne`) and membership
+ *   (`$in` / `$nin`) are deliberately NOT judged.** A select/picklist column
+ *   legitimately stores values that collide with preset names —
+ *   `GlobalFilterSchema`'s own pins protect `type: 'select', defaultValue:
+ *   'this_quarter'` for exactly this reason — and equality against such a
+ *   stored value is a working filter today. On a declared temporal field the
+ *   engine door still refuses these at query time, with the field's type in
+ *   hand; refusing them here, blind, would trade a silent zero for false
+ *   rejections. (`@objectstack/lint`'s `filter-preset-comparand` rule draws
+ *   the same boundary at the same positions.)
+ * - **Only the 13 DECLARED names are judged** ({@link DATE_RANGE_PRESETS}) —
+ *   never a guessed superset (`last_60_days` stays a plain string here; on a
+ *   temporal field the engine's own door catches it, field type in hand).
+ *   `{placeholder}` spellings are another vocabulary with its own loud refusal
+ *   and never collide (a preset name carries no braces). The empty-string cell
+ *   stays its own card by the same ruling.
+ */
+const PRESET_JUDGED_ORDERING_OPS: ReadonlySet<string> = new Set(['$gt', '$gte', '$lt', '$lte']);
+
+/** Bounded-depth guard — mirrors the engine door's own limit. */
+const PRESET_WALK_MAX_DEPTH = 32;
+
+/** Plain filter STRUCTURE, as the engine door classifies it (a `Date` is a comparand). */
+function isPlainFilterNode(value: unknown): value is Record<string, unknown> {
+  return (
+    typeof value === 'object'
+    && value !== null
+    && !Array.isArray(value)
+    && !(value instanceof Date)
+  );
+}
+
+/**
+ * [#8793] Walk one condition node and report every bare preset name sitting in
+ * an ordering-comparand position.
+ *
+ * Descends non-`$` keys only (operator specs and nested relations): the
+ * `$and` / `$or` / `$not` members are re-parsed by {@link FilterConditionSchema}
+ * itself, so its own refinement judges them with correctly nested issue paths —
+ * descending here as well would double-report. Unrecognised `$` keys are
+ * skipped WITHOUT descending, the engine door's own conservatism: a hole, not
+ * a false refusal, is the right failure direction.
+ */
+function checkBarePresetOrderingComparands(
+  node: unknown,
+  ctx: z.RefinementCtx,
+  path: (string | number)[] = [],
+  depth = 0,
+): void {
+  if (depth > PRESET_WALK_MAX_DEPTH) return;
+  if (!isPlainFilterNode(node)) return;
+
+  for (const [key, value] of Object.entries(node)) {
+    if (key.startsWith('$')) continue; // $and/$or/$not re-parse; other $ keys stay unjudged
+    if (!isPlainFilterNode(value)) continue; // implicit equality / arrays — not judged
+    const hasOperatorKeys = Object.keys(value).some((k) => k.startsWith('$'));
+    if (!hasOperatorKeys) {
+      // Nested relation / deep equality — the schema does not re-parse these,
+      // so the walk descends itself.
+      checkBarePresetOrderingComparands(value, ctx, [...path, key], depth + 1);
+      continue;
+    }
+    for (const [op, comparand] of Object.entries(value)) {
+      if (PRESET_JUDGED_ORDERING_OPS.has(op) && isDateRangePresetName(comparand)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [...path, key, op],
+          message: bareDateRangePresetComparandMessage(comparand, op),
+        });
+        continue;
+      }
+      if (op === '$between' && Array.isArray(comparand)) {
+        comparand.forEach((endpoint, index) => {
+          if (!isDateRangePresetName(endpoint)) return;
+          ctx.addIssue({
+            code: 'custom',
+            path: [...path, key, op, index],
+            message: bareDateRangePresetComparandMessage(endpoint, '$between'),
+          });
+        });
+      }
+    }
+  }
+}
+
+// ============================================================================
 // 3.4 Logical Operators & Recursive Filter Structure
 // ============================================================================
 
@@ -1131,7 +1258,12 @@ export const FilterConditionSchema: z.ZodType<FilterCondition, FilterCondition> 
       $or: z.array(FilterConditionSchema).optional(),
       $not: FilterConditionSchema.optional(),
     })
-  )
+  // [#8793] Bare date-range preset names are refused from ordering comparands
+  // at the authoring door — see the § 3.35 block above for the ruling, the
+  // measured defect, and the ordering-only boundary. The refinement judges
+  // this node's own field entries; `$and` / `$or` / `$not` members re-enter
+  // the schema and are judged by their own pass with nested issue paths.
+  ).superRefine((node, ctx) => checkBarePresetOrderingComparands(node, ctx))
 );
 
 // ============================================================================

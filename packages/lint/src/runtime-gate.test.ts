@@ -322,6 +322,10 @@ describe('the views[] visibility-predicate family at the runtime publish gate (#
     expect(runtimeGatedTypes()).toContain('view');
     expect(stackKeyForType('view')).toBe('views');
     expect(runtimeAuthoringRulesFor('view').map((r) => r.name)).toEqual([
+      // #8793 — filter comparands, not predicates; registered ahead of the
+      // family and dispatched for `view` because list-view filter rules are
+      // one of the three shapes it judges.
+      'validatePresetComparands',
       'validateVisibilityPredicates',
       'validatePredicatePathRefs',
     ]);
@@ -480,6 +484,7 @@ describe('the views[] visibility-predicate family at the runtime publish gate (#
     expect(result.advisories, JSON.stringify(result.advisories)).toEqual([]);
     // "clean" and "nothing ran" must stay distinguishable.
     expect(result.rulesRun).toEqual([
+      'validatePresetComparands', // #8793 — dispatched for `view`, clean here
       'validateVisibilityPredicates',
       'validatePredicatePathRefs',
     ]);
@@ -572,6 +577,7 @@ describe('the publish gate judges a schema-bound form at its own layer (#7815)',
     expect(result.advisories, JSON.stringify(result.advisories)).toEqual([]);
     // "clean" and "nothing ran" must stay distinguishable.
     expect(result.rulesRun).toEqual([
+      'validatePresetComparands', // #8793 — dispatched for `view`, clean here
       'validateVisibilityPredicates',
       'validatePredicatePathRefs',
     ]);
@@ -711,6 +717,9 @@ describe('dashboard widget dataset bindings at the runtime publish gate (#7529)'
     expect(stackKeyForType('dashboard')).toBe('dashboards');
     expect(runtimeAuthoringRulesFor('dashboard').map((r) => r.name)).toEqual([
       'validateWidgetBindings',
+      // #8793 — bare preset names in widget-filter ordering comparands are
+      // judged at the same door (no resolution context needed).
+      'validatePresetComparands',
     ]);
   });
 
@@ -749,7 +758,7 @@ describe('dashboard widget dataset bindings at the runtime publish gate (#7529)'
     expect(result.errors, JSON.stringify(result.errors)).toEqual([]);
     expect(result.advisories, JSON.stringify(result.advisories)).toEqual([]);
     // "clean" and "nothing ran" must stay distinguishable.
-    expect(result.rulesRun).toEqual(['validateWidgetBindings']);
+    expect(result.rulesRun).toEqual(['validateWidgetBindings', 'validatePresetComparands']);
   });
 
   it('the `datasets` snapshot key is LOAD-BEARING: without it the same board is refused', () => {

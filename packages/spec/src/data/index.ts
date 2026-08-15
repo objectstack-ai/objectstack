@@ -63,6 +63,11 @@ export * from './pagination-conformance';
 // driver can get wrong in ways only a row-result comparison sees.
 export * from './aggregation-conformance';
 export * from './date-macros.zod';
+// Dashboard date-range preset names (#4614 single source, re-homed by #8793) —
+// declared for the dashboard date-filter positions, REFUSED as bare ordering
+// comparands by filter.zod.ts and @objectstack/lint's filter-preset-comparand
+// rule (#8690 C half). `ui/dashboard.zod.ts` re-exports the vocabulary.
+export * from './date-range-presets';
 export * from './calendar-day';
 // Session-scoped filter placeholders ({current_user_id} / {current_org_id}) —
 // the sibling vocabulary to date macros. Presentation scope only; RLS is the
