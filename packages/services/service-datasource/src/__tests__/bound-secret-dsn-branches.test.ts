@@ -52,11 +52,22 @@
  *
  * ## Reverse verification (predicted before running, then measured)
  *
- * Predicted: with `if (url) return url;` restored, the two DSN cases go RED on
- * the injected password and the discrete + no-secret cases stay GREEN — the
- * defect is branch-local, so a whole-arm regression would be the wrong shape.
- * Measured exactly that: 2 failed / 3 passed, both failures reading
- * `expected 'mysql://app@db.internal:3306/app' to be an object`.
+ * Predicted, in writing, before running it: with `if (url) return url;`
+ * restored, the two DSN cases go RED on the injected password while the
+ * no-secret DSN case and both discrete-branch cases stay GREEN — the defect is
+ * branch-local, so a whole-arm regression would be the wrong shape and would
+ * mean the pin is measuring something else. Measured exactly that set, 2 failed
+ * / 3 passed:
+ *
+ * ```text
+ * × injects the bound secret beside the DSN instead of dropping it
+ *     AssertionError: expected 'string' to be 'object'
+ * × lets the bound secret win over a legacy password embedded in a stored DSN
+ *     AssertionError: expected undefined to be 's3cr3t-from-sys_secret'
+ * ```
+ *
+ * The first failure is the whole defect in one line: the arm answered with the
+ * DSN *string*, which has no key for a credential to live in.
  *
  * ## The mongodb half is NOT closed here
  *
