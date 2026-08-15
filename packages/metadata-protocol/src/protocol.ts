@@ -15923,7 +15923,44 @@ export class ObjectStackProtocolImplementation implements
         removed: Array<{ path: string; value: unknown }>;
         changed: Array<{ path: string; from: unknown; to: unknown }>;
     }> {
-        const singularType = PLURAL_TO_SINGULAR[request.type] ?? request.type;
+        // [#8868] #4432 / #7894 — CANONICAL TYPE KEY. See {@link canonicalMetaType}.
+        // `diffMetaItem` is the NINTH `/meta` entry point on this URL family
+        // (`GET /api/v1/meta/:type/:name/diff`, caller-supplied `:type`, registered
+        // at `rest-route-ledger.ts:184`) and was the last one still deriving its type
+        // key from `PLURAL_TO_SINGULAR` — the MANIFEST-COLLECTION map #7894 moved this
+        // boundary off. The same one-line replacement #8769 (`publishMetaItem`) and
+        // #8819 (`rollbackMetaItem`) made, for the same reason.
+        //
+        // What the fold reaches here, measured rather than assumed:
+        //
+        //  • the history read below, which queries `sys_metadata_history` by `type`.
+        //    For the four MANIFEST-ABSENT types (`field`, `seed`, `external_catalog`,
+        //    `translation` — legitimately absent from the manifest map because they
+        //    are not stack collections) a plural stayed plural all the way into that
+        //    `where`, matched no row, and this function answered a well-formed EMPTY
+        //    diff for an item that DOES have history. Not a refusal and not an error:
+        //    a silent "nothing changed" on a routed live endpoint, which is why this
+        //    is a wrong-answer defect rather than #8819's protection-bypass class.
+        //    Manifest-PRESENT types (`views` → `view`) folded already and were never
+        //    affected — that asymmetry is what makes `fields` the discriminating
+        //    fixture in the pins and `views` a fold that proves nothing.
+        //  • the #7894 boundary REFUSAL, which never ran on this verb at all: an
+        //    unrecognised spelling of a declared type (`viewes`) was forwarded to the
+        //    plugin path instead of refused `400 INVALID_REQUEST`.
+        //  • the echoed `type` in the response below. Reassigning `request` is what
+        //    makes that echo report the CANONICAL spelling, and that is the precedent
+        //    this family already set rather than a new answer: `saveMetaItem` and
+        //    `deleteMetaItem` both `return { type: request.type }` AFTER their fold,
+        //    and #8819's own header calls reporting the CALLER's spelling for a row
+        //    addressed under the canonical one the defect it was fixing. The echo now
+        //    names the spelling the read actually used.
+        request = canonicalizeMetaRequestType(request);
+        // Canonical by construction from the fold above. NOT a second fold: the
+        // `PLURAL_TO_SINGULAR` lookup that used to stand here is exactly what #7894
+        // removed from this boundary. The binding survives under its own name because
+        // the read below reads it as "the key the row is stored under" — the same
+        // shape {@link rollbackMetaItem} keeps.
+        const singularType = request.type;
         const orgId = request.organizationId ?? null;
         // [#8798] Read the history rows DIRECTLY, once. `historyMetaItem`
         // cannot serve this function: its `MetadataEvent` shape doesn't carry
@@ -15970,8 +16007,46 @@ export class ObjectStackProtocolImplementation implements
                     : (typeof r.metadata === 'string' ? JSON.parse(r.metadata) : r.metadata);
                 histRows.push({ version: r.version ?? 0, body });
             }
-        } catch {
-            // history table unavailable — fall through with empty list
+        } catch (error) {
+            // [#8833] ADR-0110 D3 — a miss and an outage are different facts, and a
+            // consumer must never read one as the other.
+            //
+            // This `catch` used to be EMPTY and fall through, leaving `histRows` at
+            // `[]`. The invention then happened below, where that never-filled
+            // accumulator is read as though it were a real answer: a
+            // `sys_metadata_history` outage was served as a well-formed 200 with
+            // `added`/`removed`/`changed` all empty — byte-identical to "these two
+            // versions are the same". An operator comparing versions before a
+            // rollback, and any SDK or agent reading this endpoint, acted on
+            // "unchanged" with full confidence, and no log line was emitted either.
+            // (That fall-through shape is also why `check-durability-degradation-log-
+            // level`'s read-seam-invention rule cannot see this seam despite scanning
+            // this package: it keys on `ts.isReturnStatement` and this `catch`
+            // returned nothing. Extending that gate is #8845 in the devx lane.)
+            //
+            // Maintainer ruling (2026-08-15, #8833 comment 5302933802): route the
+            // failure through the platform's EXISTING discrimination rather than
+            // adding a response field. The genuinely-absent-table case — a minimal
+            // deployment that never provisioned history — keeps its benign empty
+            // answer, because there really are no rows and a first boot must not
+            // explode. EVERY other read failure (connection drop, timeout, permission
+            // denial, query error) propagates the 503.
+            // {@link rethrowUnlessMetadataStoreUnprovisioned} is that single
+            // discriminator — the same guard #5532 restored for `getMetaItems` and
+            // #8855 carries for `getMetaDiagnostics` — and it is conservative in the
+            // safe direction: an UNRECOGNISED error is loud, never benign.
+            //
+            // ⚠️ This ADDS loudness where there is now none, uniformly for every
+            // type. Before PR #8841 the outage threw for gated-open types (`view`)
+            // and was swallowed for gated-shut ones (`field`, `job`, `api`,
+            // `capability`, `agent`); #8841 deleted the discarded `historyMetaItem`
+            // round trip that caused that split, so it had become silent everywhere.
+            // The ruling was made against that post-#8841 state.
+            //
+            // ⛔ A `historyUnavailable: true` response key (the card's option B) was
+            // DECLINED in the same ruling — a new published key with no consumer, on
+            // the manual floor. Do not reintroduce it as "more informative".
+            this.rethrowUnlessMetadataStoreUnprovisioned(error);
         }
         const byVersion = new Map<number, Record<string, unknown> | null>();
         for (const r of histRows) byVersion.set(r.version, r.body);
