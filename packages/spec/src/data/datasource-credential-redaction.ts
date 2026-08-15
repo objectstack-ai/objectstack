@@ -65,6 +65,17 @@
  * serves (`user@host`) is exactly what the write door still accepts, which is
  * what keeps an untouched "Save" on a legacy row working.
  *
+ * #8337 extends both doors one syntax further: a credential-bearing QUERY
+ * PARAMETER (`libsql://x.turso.io?authToken=eyJ…`, `postgresql://h/db?
+ * password=…`) is the third spelling of the same secret. The read half strips
+ * the whole `key=value` pair ({@link redactUrlCredentials}) — dropped, not
+ * masked, for the same reason the inline keys are dropped — and, like the
+ * canonical key names, strips it for EVERY driver: the write door's refusal
+ * list is measured per client (`CREDENTIAL_URL_QUERY_PARAMS`), but serving a
+ * parameter literally named `password` back in cleartext is a leak under any
+ * boundary. The redacted shape (parameter absent) is again exactly what the
+ * write door accepts.
+ *
  * ## What stays in `service-datasource`
  *
  * `restoreRedactedConfig` — the write-path inverse that stops a redacted
@@ -73,6 +84,10 @@
  * spec-derived fact; restoration is a service-side write policy.
  */
 
+import {
+  CREDENTIAL_URL_QUERY_PARAM_NAMES,
+  credentialQueryParamOf,
+} from './driver/common.zod';
 import { getDriverConfigSchema } from './driver/config-registry.zod';
 
 /**
@@ -187,6 +202,52 @@ export function redactUrlPassword(value: string): string {
   return value.replace(URL_USERINFO_RE, (_m, scheme: string, user: string) => `${scheme}${user}@`);
 }
 
+/**
+ * Strip every credential-bearing query parameter (#8337) from a URL-ish
+ * string, preserving everything else — other parameters, their order, the
+ * fragment — byte-for-byte.
+ *
+ * Pair judgement is delegated to the write door's own
+ * `credentialQueryParamOf` (`driver/common.zod.ts`), so the two doors share
+ * ONE boundary definition instead of the comment-level alignment the userinfo
+ * pair needed while they lived in different packages. Consequences it
+ * inherits: names match case-insensitively on the percent-decoded key, and an
+ * EMPTY value carries no secret and is left in place (the query twin of
+ * `user:@host`, which `redactUrlPassword` also leaves).
+ *
+ * The whole pair is removed rather than masked: a masked token would
+ * round-trip through the wizard as a literal new credential and then be
+ * REFUSED at the write door — the same reasoning as the dropped inline keys.
+ * A query left empty takes its `?` with it, so the served shape is exactly
+ * what the write door accepts.
+ */
+export function redactUrlCredentialQueryParams(value: string): string {
+  const hashIdx = value.indexOf('#');
+  const head = hashIdx === -1 ? value : value.slice(0, hashIdx);
+  const fragment = hashIdx === -1 ? '' : value.slice(hashIdx);
+  const queryIdx = head.indexOf('?');
+  if (queryIdx === -1) return value;
+  const kept = head
+    .slice(queryIdx + 1)
+    .split('&')
+    .filter((pair) => credentialQueryParamOf(pair, CREDENTIAL_URL_QUERY_PARAM_NAMES) === undefined);
+  const base = head.slice(0, queryIdx);
+  return `${kept.length > 0 ? `${base}?${kept.join('&')}` : base}${fragment}`;
+}
+
+/**
+ * Both URL redactions (#8126 userinfo + #8337 query parameters) in one pass —
+ * what the read path ({@link redactDatasourceConfig}) and the write-path
+ * inverse (`service-datasource`'s `restoreRedactedConfig`) apply to every
+ * string config value. The two must use the SAME composite: the restore
+ * compares a patched value against `redact(stored)`, so a redaction the
+ * restore side does not mirror would turn every untouched "Save" on an
+ * affected legacy row into silent credential deletion.
+ */
+export function redactUrlCredentials(value: string): string {
+  return redactUrlCredentialQueryParams(redactUrlPassword(value));
+}
+
 /** A driver `config` with its credential material removed, and what was removed. */
 export interface RedactedDatasourceConfig {
   config: Record<string, unknown>;
@@ -226,7 +287,7 @@ export function redactDatasourceConfig(
       continue;
     }
     if (typeof value === 'string') {
-      const redacted = redactUrlPassword(value);
+      const redacted = redactUrlCredentials(value);
       if (redacted !== value) {
         out[key] = redacted;
         redactedKeys.push(key);

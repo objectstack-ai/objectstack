@@ -282,6 +282,73 @@ describe('write path: the scrub must not turn "Save" into credential deletion', 
   });
 });
 
+describe('#8337 — the query-parameter spelling, both halves at the service door', () => {
+  /** A legacy turso row written before #8337: the JWT rides the URL query string. */
+  const LEGACY_TURSO: StoredDatasource = {
+    name: 'legacy_turso',
+    driver: 'turso',
+    origin: 'runtime',
+    config: {
+      url: 'libsql://app-org.turso.io?authToken=eyJhbGci.x.y',
+      syncUrl: 'libsql://app-org.turso.io?tls=1&authToken=eyJhbGci.x.y',
+    },
+  };
+
+  it('RED ON MAIN — getDatasource() serves the URL parameter-free, naming what it withheld', async () => {
+    const { service } = makeService([LEGACY_TURSO]);
+    const read = await service.getDatasource('legacy_turso');
+    expect(read!.config).toEqual({
+      url: 'libsql://app-org.turso.io',
+      syncUrl: 'libsql://app-org.turso.io?tls=1',
+    });
+    expect(read!.redactedKeys).toContain('url');
+    expect(read!.redactedKeys).toContain('syncUrl');
+  });
+
+  it('an untouched round-trip keeps the stored token — the restore mirrors the new redaction', async () => {
+    const { service, records } = makeService([LEGACY_TURSO]);
+    const read = await service.getDatasource('legacy_turso');
+    await service.updateDatasource('legacy_turso', { config: read!.config, label: 'Renamed' });
+    expect(records[0].label).toBe('Renamed');
+    expect(records[0].config).toMatchObject({
+      url: 'libsql://app-org.turso.io?authToken=eyJhbGci.x.y',
+      syncUrl: 'libsql://app-org.turso.io?tls=1&authToken=eyJhbGci.x.y',
+    });
+  });
+
+  it('an author who rewrites the URL by hand WINS — the restore never overrides an edit', async () => {
+    const { service, records } = makeService([LEGACY_TURSO]);
+    await service.updateDatasource('legacy_turso', {
+      config: { url: 'libsql://elsewhere.turso.io', syncUrl: 'libsql://app-org.turso.io?tls=1' },
+    });
+    expect(records[0].config!.url).toBe('libsql://elsewhere.turso.io');
+    // The untouched syncUrl round-trips its token back, independently.
+    expect(records[0].config!.syncUrl).toBe('libsql://app-org.turso.io?tls=1&authToken=eyJhbGci.x.y');
+  });
+
+  it('a NEW `?authToken=` URL is refused at the write door (#8337 write half)', async () => {
+    const { service } = makeService([]);
+    await expect(
+      service.createDatasource({
+        name: 'nope',
+        driver: 'turso',
+        config: { url: 'libsql://x.turso.io?authToken=eyJhbGci.x.y' },
+      } as never),
+    ).rejects.toThrow(/\?authToken=/);
+
+    const refused = validateDriverConfig('turso', { url: 'libsql://x.turso.io?authToken=x' });
+    expect(refused).toMatchObject({ known: true });
+    const issues = (refused as { issues: Array<{ path: unknown[]; message: string }> }).issues;
+    expect(issues.length).toBeGreaterThan(0);
+    expect(issues[0].path).toEqual(['url']);
+    expect(issues[0].message).toContain('external.credentialsRef');
+    // The redacted shape the read path serves stays accepted, or every
+    // untouched "Save" on a legacy row would 400 (the #8126 regression shape).
+    expect(validateDriverConfig('turso', { url: 'libsql://x.turso.io' }))
+      .toEqual({ known: true, issues: [] });
+  });
+});
+
 describe('GREEN ON MAIN — #8078 is not weakened by anything above', () => {
   it('the parse refusal still fires, and its guidance still reaches the caller', async () => {
     const { service } = makeService([]);

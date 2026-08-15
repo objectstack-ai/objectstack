@@ -206,4 +206,19 @@ describe('urlCredentialKeys', () => {
     expect(urlCredentialKeys({ url: 'https://host/a:b@c' })).toEqual([]);
     expect(urlCredentialKeys({ url: 'postgresql://app@db/app' })).toEqual([]);
   });
+
+  it('finds the #8337 query-parameter spelling too — a stored `?authToken=` row must not plan `nothing-to-migrate`', () => {
+    expect(urlCredentialKeys({ url: 'libsql://x.turso.io?authToken=eyJhbGci.x.y' })).toEqual(['url']);
+    expect(urlCredentialKeys({ syncUrl: 'libsql://x.turso.io?tls=1&authToken=x' })).toEqual(['syncUrl']);
+    // A benign query parameter is not a credential.
+    expect(urlCredentialKeys({ url: 'libsql://x.turso.io?tls=1' })).toEqual([]);
+  });
+
+  it('a query-token row is REFUSED with the per-row remedy, like its userinfo sibling', () => {
+    const plan = planCredentialMigration(
+      row({ driver: 'turso', config: { url: 'libsql://x.turso.io?authToken=eyJhbGci.x.y' } }),
+    );
+    expect(plan).toMatchObject({ action: 'refuse' });
+    expect((plan as { remedy: string }).remedy).toContain('secret field');
+  });
 });
