@@ -91,9 +91,6 @@ import { z } from 'zod';
 // branch selection to the package-internal policy module #8318 extracted.
 import { formatZodIssue } from '@objectstack/spec';
 import { zodIssuesToFields } from '@objectstack/spec/api';
-import * as SpecRoot from '@objectstack/spec';
-import * as SpecApi from '@objectstack/spec/api';
-import * as SpecShared from '@objectstack/spec/shared';
 // This package's own copy of the ranking, at the surface every producer here
 // calls: `saveMetaItem`'s 422 (#5364) and `computeMetadataDiagnostics` (#5598).
 import { zodIssuesToMetadataIssues } from './protocol.js';
@@ -267,16 +264,55 @@ describe('#8660 §1 the two sides cannot be sharing an implementation', () => {
         'UNION_BRANCH_SELECTION_LIMIT',
     ] as const;
 
+    /**
+     * Every PUBLIC entry point of `@objectstack/spec` that could plausibly carry
+     * the policy, loaded dynamically.
+     *
+     * ⛔ The natural spelling of the root case — `import * as SpecRoot from
+     * '@objectstack/spec'` — is refused by this repo's `no-restricted-imports`
+     * rule, and the refusal is correct rather than an obstacle: a static
+     * namespace binding on the root keeps all fifteen domain namespaces
+     * (`Data`, `UI`, `Kernel`, …) reachable, which Node ESM cannot tree-shake,
+     * and that is the ~1.2GB RSS regression the rule exists to prevent. The
+     * lint run uses `--no-inline-config`, so there is no per-site opt-out — by
+     * design.
+     *
+     * Loading dynamically is not an evasion dressed up as a fix. This file
+     * already loads the root module for `formatZodIssue` above, so nothing
+     * extra is pulled in; what the dynamic form drops is the long-lived
+     * namespace BINDING the rule targets. {@link policySymbolsReachableFrom}
+     * reduces each namespace to the handful of names §1 asks about and lets the
+     * object go, so the assertion below is strictly LESS retentive than the
+     * static spelling it replaces — while making exactly the same claim about
+     * exactly the same public surface.
+     */
+    const SPEC_ENTRY_POINTS: ReadonlyArray<readonly [string, () => Promise<object>]> = [
+        ['@objectstack/spec', () => import('@objectstack/spec')],
+        ['@objectstack/spec/api', () => import('@objectstack/spec/api')],
+        ['@objectstack/spec/shared', () => import('@objectstack/spec/shared')],
+    ];
+
+    /**
+     * Which policy symbols one entry point actually exports.
+     *
+     * `in` against the module namespace, which is what "publicly reachable"
+     * means for an ESM consumer — the same test the static spelling ran, on the
+     * same object, without keeping it.
+     */
+    async function policySymbolsReachableFrom(load: () => Promise<object>): Promise<string[]> {
+        const mod = (await load()) as Record<string, unknown>;
+        return POLICY_SYMBOLS.filter((name) => name in mod);
+    }
+
     // If this goes red, the policy became reachable from outside `packages/spec`
     // and the right response is to REWIRE `protocol.ts` onto it — deleting its
     // copy — not to keep three copies with a parity test over two of them.
-    it.each([
-        ['@objectstack/spec', SpecRoot as Record<string, unknown>],
-        ['@objectstack/spec/api', SpecApi as Record<string, unknown>],
-        ['@objectstack/spec/shared', SpecShared as Record<string, unknown>],
-    ])('%s exports none of the policy symbols, so this package must run its own copy', (_entry, mod) => {
-        expect(POLICY_SYMBOLS.filter((name) => name in mod)).toEqual([]);
-    });
+    it.each(SPEC_ENTRY_POINTS)(
+        '%s exports none of the policy symbols, so this package must run its own copy',
+        async (_entry, load) => {
+            expect(await policySymbolsReachableFrom(load)).toEqual([]);
+        },
+    );
 
     it('drives the spec side through public surfaces that DO exist', () => {
         // The other half of the same claim: the comparison below is not green
