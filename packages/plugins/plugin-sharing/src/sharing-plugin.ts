@@ -17,6 +17,11 @@ import type {
 // it feeds enforcement (`engine.find`), so it is an `ExecutionContext`, never
 // the route-local `ShareLinkExecutionContext`.
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+// [#8430, extending #8220] The ONE filter-subtree provenance mechanism. This
+// middleware is a read-scope merge boundary and stamps the same spec-declared
+// mark `plugin-security` and `service-analytics` stamp at theirs — never a
+// local flag, never a second spelling of the same idea.
+import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 import { SysRecordShare, SysSharingRule, SysShareLink } from './objects/index.js';
 import { SysBusinessUnit, SysBusinessUnitMember } from '@objectstack/platform-objects/identity';
 import {
@@ -868,6 +873,11 @@ export function buildSharingMiddleware(
             ? { $or: [{ recipient_id: exec.userId }, { granted_by: exec.userId }] }
             : { id: '__deny_all__' };
           const ast: any = ctx.ast ?? {};
+          // [#8430] Same two marks as the general read merge below — this
+          // branch is a merge boundary too, and its scope is as
+          // platform-authored as any sharing filter.
+          markFilterSubtreeProvenance(selfScope, 'policy');
+          vouchCallerWhereBeforeRewrite(ast, ctx.options);
           ast.where = composeAnd(ast.where, selfScope);
           ast.filter = composeAnd(ast.filter, selfScope);
           ctx.ast = ast;
@@ -875,6 +885,16 @@ export function buildSharingMiddleware(
         return next();
       }
       let filter = await service.buildReadFilter(ctx.object, exec ?? {});
+      // [#8430, extending #8220 / A of the #7929 ruling] Mark the injected
+      // sharing scope `'policy'` at the moment it is produced, BEFORE any
+      // composition blurs it into a shared `$and`. Its refusals keep the
+      // #7929 redaction — which is what they already got as an unmarked
+      // subtree, so this changes no behaviour; it makes the withhold a
+      // DECLARED verdict instead of an accident of the mark's absence, and
+      // that matters the moment such a scope is ever nested inside a subtree
+      // some other boundary vouched (an unmarked node INHERITS its ancestor's
+      // mark positionally — `resolveFilterSubtreeProvenance`, innermost wins).
+      markFilterSubtreeProvenance(filter, 'policy');
       // [ADR-0090 D10] Agent/service intersection on the OWD/sharing axis. When
       // the principal acts on behalf of a user, the owner-match and record
       // shares are IDENTITY-scoped — so we re-run the visibility filter under
@@ -889,10 +909,18 @@ export function buildSharingMiddleware(
           onBehalfOf: undefined,
           __readScope: exec.__delegatorReadScope,
         });
+        // [#8430] The delegator's visibility filter is policy the caller never
+        // wrote either. Marked on its own object, so the `$and` wrapper
+        // `composeAnd` builds around the pair leaves both arms marked.
+        markFilterSubtreeProvenance(delFilter, 'policy');
         filter = composeAnd(filter, delFilter);
       }
       if (filter) {
         const ast: any = ctx.ast ?? {};
+        // [#8430] The author half, and the only user-visible change on this
+        // card: vouch the caller's own predicate BEFORE the rewrite below
+        // makes it unrecognisable to every later boundary.
+        vouchCallerWhereBeforeRewrite(ast, ctx.options);
         ast.where = composeAnd(ast.where, filter);
         ast.filter = composeAnd(ast.filter, filter);
         ctx.ast = ast;
@@ -1005,6 +1033,57 @@ export function buildSharingMiddleware(
     // application's job (and is enforced by existing field defaults).
     return next();
   };
+}
+
+/**
+ * [#8430, extending #8220 / A of the #7929 maintainer ruling 2026-08-12]
+ * Vouch the caller's own predicate as `'author'` in the instant before this
+ * middleware rewrites `ast.where` — the third read-scope merge boundary, after
+ * `plugin-security`'s CRUD injection and `service-analytics`' `withReadScope`.
+ *
+ * ## The identity vouch, and why it is the whole safety argument
+ *
+ * The mark is stamped ONLY when `ast.where` is still, by object identity, the
+ * `where` the caller handed the engine (`options.where` — the engine builds the
+ * AST by spread and `resolveWhereTokens` returns its input by reference on a
+ * placeholder-free tree, so identity holds for an untouched query). That
+ * identity is the entire evidence base: if it holds, every node inside the
+ * subtree is the caller's own, so vouching the subtree cannot vouch anyone
+ * else's predicate. If a sibling middleware already composed into `ast.where`,
+ * or the engine rewrote it resolving `{current_user_id}`-style tokens, identity
+ * FAILS and nothing is vouched — the tree stays unmarked, and unmarked
+ * WITHHOLDS. ⛔ Never widen this to a shape test or a "looks like the caller's"
+ * heuristic: the mark is permission to reveal, never a guess, and a wholesale
+ * mark on a tree that might hold another plugin's policy would disclose it.
+ *
+ * ## Why the arms of a pure `{$and:[…]}` are marked too
+ *
+ * {@link composeAnd} below has two branches, and they treat a mark differently.
+ * The nesting branch keeps the caller's object IN the tree, so a mark on it
+ * survives by reference. The FLATTENING branch — taken for a pure
+ * `{$and:[…]}`, which is exactly what `lowerWhereFilterArray`/`parseFilterAST`
+ * produce for the array authoring form — spreads the arms into a NEW root and
+ * drops the marked object out of the tree entirely, taking the vouch with it.
+ * Marking each arm as well is not a widening of the claim: the identity vouch
+ * already attests the whole subtree is the caller's, and an arm of it is a
+ * strictly smaller part of the same subtree. The condition mirrors
+ * `composeAnd`'s own, so the arms are marked exactly when they are about to be
+ * spread — ⛔ keep the two in step if either changes.
+ *
+ * Marking is first-mark-wins and never throws (see
+ * `markFilterSubtreeProvenance`), so calling this when `plugin-security` has
+ * already vouched the same object is a no-op, and a frozen caller filter simply
+ * stays unmarked — withheld.
+ */
+function vouchCallerWhereBeforeRewrite(ast: { where?: unknown }, options: unknown): void {
+  const callerWhere = ast.where;
+  if (callerWhere === null || typeof callerWhere !== 'object') return;
+  if (callerWhere !== (options as { where?: unknown } | undefined)?.where) return;
+  markFilterSubtreeProvenance(callerWhere, 'author');
+  const arms = (callerWhere as { $and?: unknown }).$and;
+  if (Array.isArray(arms) && Object.keys(callerWhere).length === 1) {
+    for (const arm of arms) markFilterSubtreeProvenance(arm, 'author');
+  }
 }
 
 function composeAnd(existing: unknown, addition: unknown): unknown {
