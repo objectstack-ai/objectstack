@@ -312,7 +312,26 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         const packageId = query?.package || undefined;
 
         // PUT /metadata/:type/:name (Save)
-        if (method === 'PUT' && body) {
+        //
+        // [#8842] The condition is the METHOD alone. It used to be
+        // `method === 'PUT' && body`, and the `&& body` was not a guard — it
+        // was a hole. Every path inside this block returns (including the
+        // terminal `501`), so a falsy body did not merely skip the write: it
+        // fell through to the read `try` below and was answered with the
+        // ordinary metadata READ. A write verb came back looking like a
+        // successful read, with no status, header or field telling the caller
+        // their write never happened — the shape "Absence must be loud" exists
+        // to prevent (AGENTS.md, Route & surface ownership §3). It also meant
+        // the `manage_metadata` gate below, the first thing this block does,
+        // was skipped entirely for such a request.
+        //
+        // Reachable from an ordinary client: the host mounting this path is the
+        // Hono adapter's catch-all, which builds `body` as
+        // `await c.req.json().catch(() => ({}))`. The `.catch` covers a parse
+        // FAILURE (empty body, garbage) — not a SUCCESSFUL parse of a falsy
+        // JSON value, so a payload of `null`, `false`, `0` or `""` arrives here
+        // falsy. Driven, not read: see `meta-put-falsy-body.test.ts`.
+        if (method === 'PUT') {
             // [#7019] The SECOND TRANSPORT for the operation #6603 gated on the
             // REST side. Same `protocol.saveMetaItem`, same metadata, different
             // door — so a gate on only one of them is not a gate, it is a
@@ -347,6 +366,16 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                 };
             }
 
+            // [#8842] Fold a nullish body to `{}` and let the per-type schema
+            // refuse it downstream with `422 INVALID_METADATA`, rather than
+            // minting a second, bespoke refusal here. This is byte-for-byte
+            // what the sibling transport already does — `packages/rest`'s
+            // `PUT /meta/:type/:name` opens `const body = req.body ?? {}` and
+            // proceeds into the save unconditionally. Two doors onto one
+            // `saveMetaItem` disagreeing about what a bodyless metadata write
+            // means was the actual defect; one answer, from one authority.
+            const item = body ?? {};
+
             // Try to get the protocol service directly
             const protocol = await deps.resolveService(_context, 'protocol');
 
@@ -366,7 +395,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     // static registry flag and not `isOverlayAllowed`.
                     const activeOrganizationId = await deps.resolveActiveOrganizationId(_context);
                     const organizationId = organizationIdForMetaWrite(type, activeOrganizationId);
-                    const result = await protocol.saveMetaItem({ type, name, item: body, organizationId, ...(packageId ? { packageId } : {}) });
+                    const result = await protocol.saveMetaItem({ type, name, item, organizationId, ...(packageId ? { packageId } : {}) });
                     return { handled: true, response: deps.success(result) };
                 } catch (e: any) {
                     // Preserve the 422 + structured spec-validation `issues` so
@@ -380,7 +409,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             const metaSvc = await deps.resolveService(_context, 'metadata', _context.environmentId);
             if (metaSvc && typeof (metaSvc as any).saveItem === 'function') {
                 try {
-                    const data = await (metaSvc as any).saveItem(type, name, body);
+                    const data = await (metaSvc as any).saveItem(type, name, item);
                     return { handled: true, response: deps.success(data) };
                 } catch (e: any) {
                     // 501 stays the FALLBACK (this branch is reached only when
