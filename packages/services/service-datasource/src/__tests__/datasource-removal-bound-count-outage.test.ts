@@ -116,7 +116,12 @@ function harness(opts: HarnessOpts = {}) {
     },
     writeSecret: async () => 'sys_secret://unused',
     removeSecret: async (ref) => { removedSecrets.push(ref); },
-    countBoundObjects: async () => opts.plainCount ?? 0,
+    // The plain count AGREES with the diagnosed one by construction. On the
+    // shipped wiring they are the same filter over the same listing, and a
+    // fixture where they disagree measures the wiring rather than the decision
+    // — see this file's reverse-verification note, where an earlier version
+    // that left this at 0 produced an extra red for exactly that reason.
+    countBoundObjects: async () => opts.plainCount ?? opts.diagnosed?.count ?? 0,
     ...(opts.diagnosed ? { countBoundObjectsDiagnosed: async () => opts.diagnosed! } : {}),
     unregisterPool: (n) => { unregistered.push(n); },
   } as DatasourceAdminServiceConfig;
