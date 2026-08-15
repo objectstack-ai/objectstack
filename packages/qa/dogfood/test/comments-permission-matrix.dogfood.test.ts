@@ -18,6 +18,36 @@
 //   (d) read is enough to comment; edit is what moderation needs
 //   (e) author_id provenance stamping
 //   (f) enable.feeds stays orthogonal, anonymous stays 401
+//
+// ⚠️ READ THIS BEFORE TRUSTING CASE (d)'s MODERATION LIMB ⚠️
+//
+// [#8408 / #8839] This file boots ORG-LESS, and the moderation half of case (d)
+// — "a user who can EDIT the record may moderate anyone's comment on it" — is
+// GREEN ONLY BECAUSE OF THAT. It is #8023's disarm, measured here rather than
+// suspected:
+//
+//   • the platform ships a wildcard row-level DELETE floor (`owner_only_deletes`,
+//     object '*', `created_by == current_user.id`, positions ['org_member'] —
+//     `plugin-security/src/objects/default-permission-sets.ts`);
+//   • an org-less boot hands every sign-up `positions: ['everyone']`, so a
+//     principal never holds `org_member` and that floor NEVER APPLIES here;
+//   • flipping this boot to `orgContext: true` and changing nothing else turns
+//     the moderation assertion RED with `PERMISSION_DENIED` on `sys_comment`,
+//     while the other 9 cases — including (d)'s FIRST half, the author deleting
+//     their OWN comment — stay green.
+//
+// So the capability `plugin-audit/src/comment-access-hooks.ts` describes as the
+// "author-or-parent-editor rule" is refused by the platform floor before that
+// rule is ever consulted, in every deployment that has an organization. This
+// fixture is not evidence that moderation works; it is evidence that moderation
+// works WHEN NOBODY IS AN ORG MEMBER.
+//
+// ⛔ Do NOT "fix" this by adding `orgContext: true` + `assertArmed` here. That
+// arming is correct and is deliberately NOT applied yet: it would land a red
+// test over an unsettled contract question (#8839 states the two readings —
+// platform floor should yield to a per-object `sys_comment` delete policy, or
+// case (d) over-claims a capability the platform does not offer). #8839 owns
+// that decision; this file gets armed as part of whichever way it lands.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
