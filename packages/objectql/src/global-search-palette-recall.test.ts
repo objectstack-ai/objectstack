@@ -315,7 +315,10 @@ describe('[#7643] palette recall === executor recall', () => {
     // definition of recall, which is what the card asked for.
     h.store.captures.length = 0;
     await h.engine.find(ACCOUNT, { search: 'hnkj', limit: 25 });
-    const executorWhere = h.store.captures.at(-1)?.where;
+    // Index arithmetic, not `.at(-1)`: this package's tsc program targets a
+    // `lib` without `Array.prototype.at`, and the TEST_DEBT ratchet re-measures
+    // that program — so `.at()` here is a +1 on a shrink-only ledger.
+    const executorWhere = h.store.captures[h.store.captures.length - 1]?.where;
 
     h.store.captures.length = 0;
     await h.protocol.searchAll({ q: 'hnkj', objects: [ACCOUNT], perObject: 25, limit: 25 });
