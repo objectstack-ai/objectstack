@@ -55,14 +55,45 @@ unrecognised type before this change are real, nothing rewrites them on upgrade,
 and refusing their deletion would turn the accumulation this fixes into an
 accumulation nobody can clear.
 
-**What breaks.** A caller creating metadata at runtime under a type name that is
-in neither half of the static spelling contract. In this repo that set is empty
-— all six plugin kinds are mapped — but an out-of-tree plugin that made its kind
-live by registering an item of it, and then accepted runtime writes to that kind
-through `/meta`, now needs its spelling in the contract. There is no
-declared-kind channel to register one through today; that is the trade #8586's
-retirement made, and this change is the half of it that stops silently accepting
-what nothing can honour.
+**Two shapes reaching the mint door are exempt, and each is a fact about the
+request rather than a claim the caller makes.**
+
+1. *The COMPOUND arity carries an OBJECT name in the `:type` segment.*
+   `PUT /api/v1/meta/lead/views/all_leads` is `type='lead'`,
+   `name='views/all_leads'` — one operation reaching one save, the shape both
+   the runtime dispatcher and the REST route document verbatim. `lead` is an
+   object, i.e. runtime data no static contract can enumerate, so a type verdict
+   applied there would refuse every object name that is not coincidentally a
+   metadata type. The ruling is about metadata TYPE names like `fieldz`.
+   ⚠️ Residue, stated rather than hidden: `PUT /meta/fieldz/a/b` is therefore
+   still accepted, because at that arity `fieldz` is a claim about an object and
+   the only way to check it is the live-registry lookup this card ruled out.
+2. *A namespace that already exists is not being minted.* `duplicatePackage`
+   re-saves every row of a package under a new name, taking each type from the
+   stored row — measured: a package holding one pre-existing residue row
+   answered `{success: false, copiedCount: 0, failedCount: 1}`, i.e. could not
+   be duplicated at all. That contradicts the `DELETE` reasoning above, so the
+   store (never the request) exempts a type that already has rows. The probe
+   runs only once the refusal has already fired, and a store that cannot answer
+   refuses — a fresh deployment has no residue to protect.
+   `migrate meta --stored` was read as a third victim and measured NOT to be
+   one: an unrecognised type has no manifest collection, hence no ADR-0087
+   chain, hence no notice, so such a row is reported `canonical` and the mint
+   door is never reached.
+
+**What breaks.** A caller creating metadata at runtime, at the simple arity,
+under a type name that is in neither half of the static spelling contract and
+has no rows already. That set is **not** empty in this repo — measured on
+`objectql`, `runtime` and `rest`: in-tree fixtures mint `trigger` (a kind ADR-0088
+retired), `policy`, and a synthetic `my_plugin_kind`, and `getMetaTypes()`
+advertises `policy` / `data` / `package` / `kind` as `allowRuntimeCreate: true`
+while this door refuses them. Whether the accept set should admit those or they
+should stop being advertised is with the maintainer (#8421); until that is ruled,
+the divergence is left visible rather than papered over. An out-of-tree plugin
+that made its kind live by registering an item of it, and then accepted runtime
+writes to that kind through `/meta`, needs its spelling in the contract; there is
+no declared-kind channel to register one through today — that is the trade
+#8586's retirement made.
 
 `@objectstack/spec` gains one export, `unrecognisedMetaTypeRefusal`, alongside
 the #7894 verdict it deliberately does not merge with: one says *you spelled a
