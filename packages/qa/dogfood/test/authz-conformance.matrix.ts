@@ -215,6 +215,40 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
     proof: 'flow-runas.dogfood.test.ts',
     note: 'ADR-0049 originally classified runAs as roadmap M2, but #1888 implemented it for flow data nodes (create/update/delete/query run under the chosen identity). Also proven for scheduled flows in flow-runas-schedule.dogfood.test.ts.' },
 
+  // ── ADR-0049 / #8613 — the RBAC grant catalogues' `active` switch ──────
+  //
+  // `sys_permission_set` and `sys_position` each ship a Deactivate action whose
+  // confirmation dialog promises, in four locales, that access stops. Until
+  // #8613 nothing in the resolution chain read the column, so deactivation
+  // moved a badge in Setup and the assignments kept granting — the ADR-0049
+  // declared-≠-enforced class, on the grant itself rather than on a catalogue
+  // entry. Both are now enforced at RESOLUTION time (the placement ADR-0091
+  // chose for validity windows, for the same reason: a security flag honoured
+  // only by a cleanup job is an unenforced security property).
+  //
+  // ONE shared predicate, `isRowActive` (@objectstack/core), backs all three
+  // readers so they cannot drift: explicitly deactivated, never "explicitly
+  // active" — an ABSENT column keeps granting (rows predating the field are not
+  // mass-revoked) and the 0/1 storage shape the primary driver returns is
+  // judged as well as a literal `false`.
+  //
+  // [#8711] Both rows carry NO `covers`, and that is a statement about the
+  // RATCHET, not an omission: `discover()` enumerates HTTP entry points from a
+  // curated per-file probe table, and a predicate inside an existing resolver
+  // adds no entry point — so neither flag could ever have surfaced as
+  // UNCLASSIFIED during the whole period it was inert, despite this file's
+  // header claiming a declared-but-unenforced primitive breaks CI. These two
+  // rows restore the ledger's stated invariant; whether the invariant's
+  // advertised SCOPE should be narrowed to what the ratchet can check, or the
+  // ratchet widened to reach in-resolver predicates, is the open half of #8711
+  // and is deliberately NOT settled here.
+  { id: 'permission-set-active', summary: '`sys_permission_set.active` — a deactivated permission set grants nothing (ADR-0049 / #8613)', state: 'enforced',
+    enforcement: 'core/security/resolve-authz-context.ts step 6b — isRowActive drops the row BEFORE any derivation, so a deactivated set contributes no name to `grants.permissions`, no systemPermissions and no tabPermissions, AND `hasPlatformAdminGrant` cannot be read off a deactivated `admin_full_access`; plugin-security/security-plugin.ts dbLoader applies the SAME predicate, which is the only place a set reached by NAME is judged (position names are commonly reused as set names, so an ACTIVE position carries a DEACTIVATED set\'s name that far); plugin-auth/last-admin-guard.ts carries `active` in PERMISSION_SET_STANDING_KEYS so deactivating the last admin set is judged as an emptying rather than read as a bootstrap window',
+    note: 'Unit-proven; an e2e dogfood proof is a follow-on, the same disposition as the ADR-0105 block above and for the same reason — the flag is a predicate inside the grant resolver, not an HTTP surface, so there is no route for a dogfood boot to drive at it directly. core/security/resolve-authz-context.test.ts "[#8613] the `active` flag on the grant catalogues (ADR-0049)" covers the derivation half, including THE HIGH-BLAST-RADIUS CASE (a deactivated admin_full_access confers no PLATFORM_ADMIN) and that deactivating ONE set leaves the others granting; plugin-security/permission-set-active.test.ts covers the loader half, including THE REACHABILITY CASE (a position name reaching a deactivated set of the same name) plus its non-vacuous twin (the same request with the set ACTIVE does resolve); core/security/row-active.test.ts pins the predicate itself (absent grants, junk does not revoke, 0/1 deactivates). Deliberately NOT in HIGH_RISK: that list marks primitives guarding object data through a sibling HTTP entry point, and this one guards grant DERIVATION. The honest upgrade path is a real proof (seed a deactivated set, drive REST as its holder, observe the refusal), not re-citing a neighbouring file.' },
+  { id: 'position-active', summary: '`sys_position.active` — a deactivated position grants nothing, and its name cannot resolve the grant one layer down (ADR-0049 / #8613)', state: 'enforced',
+    enforcement: 'core/security/resolve-authz-context.ts step 6a — isRowActive gates BOTH halves, and only both hold it: (i) only ACTIVE position ids collect their `sys_position_permission_set` linkage, so a deactivated position carries no bound set; (ii) the deactivated NAME is dropped from `grants.positions`, because resolvePermissionSetsForContext requests positions as permission-set NAMES and a name left standing resolves the same grant one layer down',
+    note: 'Only a name whose `sys_position` row is EXPLICITLY deactivated is dropped — a name with no row at all (`org_owner`, a membership-derived role, the built-in `everyone` audience anchor) has no flag to read and is untouched. Deliberately NOT a blanket revocation of the sets themselves: a set held via BOTH a deactivated position AND a direct user grant still resolves, since the direct grant is a different grant (resolve-authz-context.test.ts pins exactly that case). Symmetrically, the WRITE gates and blast-radius reads in plugin-security (assertAudienceAnchorBindingGate, setsBoundToPosition, the delegated-admin surfaces) stay UNFILTERED on purpose — dropping a deactivated row there would make a refused binding permitted, narrow a delegate\'s boundary, and make a deactivated position unmanageable. Unit-proven in core/security/resolve-authz-context.test.ts (a deactivated position stops granting its sets; an active one still grants; an absent column grants; the 0/1 shape deactivates; deactivating ONE position leaves the others granting) + core/security/row-active.test.ts. Not HIGH_RISK for the same reason as `permission-set-active`.' },
+
   // ── Experimental — declared, NOT enforced (ADR-0049/0056 D8) ───────────
   { id: 'field-encryption', summary: 'at-rest field encryption', state: 'experimental',
     note: 'no crypto provider reads the config; marked [EXPERIMENTAL] (D8). Deliberately KEPT (2026-07 D8 disposition): at-rest encryption is a real enterprise roadmap item with a stable schema shape — removing and re-adding would cost more (ADR-0087) than carrying it marked.' },
