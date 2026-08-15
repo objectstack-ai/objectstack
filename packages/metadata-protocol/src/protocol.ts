@@ -4730,8 +4730,59 @@ export class ObjectStackProtocolImplementation implements
                     organizationId: request.organizationId,
                     packageId: request.packageId,
                 } as any);
-            } catch {
-                // Type not listable in this kernel scope — skip.
+            } catch (error) {
+                // [#8855] TWO different failures used to leave through this
+                // `continue`, and only one of them is benign.
+                //
+                // BENIGN, and the reason the comment named — it is real, which
+                // is why this `catch` is narrowed rather than deleted: the type
+                // is not listable in THIS kernel scope. Skipping it is the
+                // truth, and a scope that cannot enumerate one type must not
+                // fail the whole governance sweep.
+                //
+                // NOT BENIGN: the read already ran the platform's single
+                // discrimination — `getMetaItems` classifies by error TYPE
+                // through {@link rethrowUnlessMetadataStoreUnprovisioned},
+                // returns normally for the one benign driver reason
+                // (`isMissingTableError`: `sys_metadata` not provisioned yet,
+                // so `items: []` IS the truth), and throws
+                // {@link metadataStoreUnavailableError} — a 503 — for every
+                // other read failure. That 503 says "whether rows exist is
+                // UNKNOWN". Swallowing it here put the emptiness straight back
+                // one layer up, and then published it as a NUMBER:
+                //
+                //   * `stats[t]` was never written, so the type is ABSENT from
+                //     the response — not zero, absent — byte-shaped like an
+                //     environment that declares none of it, and the Studio
+                //     directory tile the field exists to feed simply loses it;
+                //   * `total` counts entries that FAILED validation, and a
+                //     store nobody can read contributes none — so a diagnostics
+                //     endpoint whose whole job is reporting problems answered
+                //     `0 problems` precisely when it could not read anything.
+                //
+                // ADR-0110 D3 is the rule: a miss and an outage are different
+                // facts with opposite dispositions ("nothing to fix" vs "the
+                // backend is down, retry"), and a consumer must never read one
+                // as the other. #5108 restored it in `DatabaseLoader`, #5532 in
+                // `getMetaItems` itself — this is the same rule one layer up,
+                // on the consumer that turns the read into a published count.
+                //
+                // Classification is by the envelope the PRODUCER already built,
+                // not by a second reading of the driver error. Re-running
+                // `isMissingTableError` / `rethrowUnlessMetadataStoreUnprovisioned`
+                // on what arrives here would re-wrap an already-shaped 503 in
+                // another one and displace the driver error riding as `cause` —
+                // the object `logWithheldServerFault` prints for the operator
+                // (#5437). The original is rethrown UNCHANGED, so the envelope
+                // that reaches the REST boundary is the one #5532 shaped.
+                //
+                // The test is `status === 503` rather than the narrower
+                // `code === 'SERVICE_UNAVAILABLE'` on purpose, and in the
+                // direction `rethrowUnlessMetadataStoreUnprovisioned`'s own doc
+                // argues: a false "benign" silently mis-answers a question
+                // nobody can re-ask, while a false "real" costs one 503 the
+                // caller can retry.
+                if ((error as { status?: unknown } | null | undefined)?.status === 503) throw error;
                 continue;
             }
             const items: any[] = Array.isArray(listed?.items)
