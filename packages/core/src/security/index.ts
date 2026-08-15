@@ -147,6 +147,15 @@ export { isGrantActive, isGrantExpired, type GrantValidityWindow } from './grant
 // enforces it and the break-glass guard that simulates a write to it.
 export { isRowActive, type ActivatableRow } from './row-active.js';
 
+// [#8734] The measured read surface of the administrator derivation — the
+// single source `plugin-auth`'s break-glass standing-key lists correspond to.
+export {
+  ADMIN_STANDING_SURFACE,
+  adminStandingTables,
+  adminStandingColumns,
+  type AdminStandingTable,
+} from './admin-standing-surface.js';
+
 // [#7678] ADR-0090 D5/D9 — the audience-binding suggestion `?status=` vocabulary,
 // shared by the runtime dispatcher's `/security` domain and the live REST route.
 export {

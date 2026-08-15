@@ -1804,11 +1804,6 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
             helpText: "Optional. Space- or comma-separated OAuth scopes. Defaults to \"openid email profile\".",
             placeholder: "openid email profile"
           },
-          mapId: {
-            label: "Map: User ID claim",
-            helpText: "Optional. ID-token claim mapped to the user ID. Defaults to \"sub\".",
-            placeholder: "sub"
-          },
           mapEmail: {
             label: "Map: Email claim",
             helpText: "Optional. Claim mapped to email. Defaults to \"email\".",

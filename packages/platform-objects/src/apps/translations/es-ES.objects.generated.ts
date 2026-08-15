@@ -1804,11 +1804,6 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
             helpText: "Opcional. Ámbitos OAuth separados por espacios o comas. Valor predeterminado: «openid email profile».",
             placeholder: "openid email profile"
           },
-          mapId: {
-            label: "Mapeo: reclamo de ID de usuario",
-            helpText: "Opcional. Reclamo del token de ID asignado al ID de usuario. Valor predeterminado: «sub».",
-            placeholder: "sub"
-          },
           mapEmail: {
             label: "Mapeo: reclamo de correo",
             helpText: "Opcional. Reclamo asignado al correo. Valor predeterminado: «email».",
