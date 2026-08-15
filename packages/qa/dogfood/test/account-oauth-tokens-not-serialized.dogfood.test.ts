@@ -1,8 +1,20 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #7987 — `sys_account`'s three OAuth credential columns must not come back on
+ * #7987 (+ #8676) — `sys_account`'s credential columns must not come back on
  * the generic data path.
+ *
+ * [#8676] The file was #7987's three OAuth columns; it now covers the object's
+ * other two credential columns as well — `password` and
+ * `previous_password_hashes`, the one-way hashes of ADR-0100's third channel.
+ * They belong here rather than in a fixture of their own because they are the
+ * SAME object, the SAME read path, the SAME two failed barriers and the SAME
+ * two personas — so every persona arm below simply asserts one wider column
+ * set (`assertNoCredentialColumns`). What differs is the recovery: the OAuth
+ * columns are read back only by better-auth's adapter, while the password
+ * columns are also read by plugin-auth's own RAW-engine callers (the ADR-0069
+ * D1 reuse ring, the dev seed-admin probe), which the adapter seam cannot
+ * reach — see `recoverInternalFieldsForSystemRead`.
  *
  * `access_token`, `refresh_token` and `id_token` hold the user's LIVE bearer
  * credentials for someone else's service (Google, GitHub, an OIDC IdP), stored
@@ -75,6 +87,17 @@ const PLANTED = {
 
 const TOKEN_COLUMNS = ['access_token', 'refresh_token', 'id_token'] as const;
 
+/**
+ * [#8676] The two one-way password hashes on the same object — ADR-0100's third
+ * channel. They serialized on this very read path alongside the OAuth columns
+ * (the #8676 key list was captured on this fixture's own ablation run), through
+ * the same two barriers that miss them: `collectMaskedReadFields` keys on the
+ * field TYPE and exempts `managedBy: 'better-auth'`, while these are
+ * `text` / `textarea`. Asserted through the SAME persona matrix below, because
+ * the personas are identical — admin cross-user, and the member on their own row.
+ */
+const PASSWORD_HASH_COLUMNS = ['password', 'previous_password_hashes'] as const;
+
 describe('#7987: sys_account OAuth tokens never serialize on the generic data path', () => {
   let stack: VerifyStack;
   let ql: any;
@@ -96,11 +119,13 @@ describe('#7987: sys_account OAuth tokens never serialize on the generic data pa
     return map.get(memberAccountId);
   };
 
-  const assertNoTokenColumns = (record: Record<string, unknown>): void => {
+  const assertNoCredentialColumns = (record: Record<string, unknown>): void => {
     // OMIT, not mask: the key must be ABSENT. `toBeUndefined()` would also pass
     // on a masked value of `undefined`, which still ships a key whose presence
     // says "this user has a linked provider credential".
-    for (const column of TOKEN_COLUMNS) expect(Object.keys(record)).not.toContain(column);
+    const keys = Object.keys(record);
+    for (const column of TOKEN_COLUMNS) expect(keys).not.toContain(column);
+    for (const column of PASSWORD_HASH_COLUMNS) expect(keys).not.toContain(column);
   };
 
   beforeAll(async () => {
@@ -176,7 +201,7 @@ describe('#7987: sys_account OAuth tokens never serialize on the generic data pa
     const memberRow = rows.find((r: any) => String(r.id) === memberAccountId);
     expect(memberRow, "admin must still SEE the member's account row").toBeTruthy();
 
-    for (const row of rows) assertNoTokenColumns(row);
+    for (const row of rows) assertNoCredentialColumns(row);
 
     // Falsifiability: these are real, populated rows — not empty objects that
     // would satisfy any absence assertion.
@@ -190,7 +215,7 @@ describe('#7987: sys_account OAuth tokens never serialize on the generic data pa
     expect(res.status).toBe(200);
     const record = ((await res.json()) as any).record ?? {};
 
-    assertNoTokenColumns(record);
+    assertNoCredentialColumns(record);
 
     // The row is still readable and still identifies the link — admins keep the
     // account-management surface, they just stop receiving the credentials.
@@ -211,12 +236,12 @@ describe('#7987: sys_account OAuth tokens never serialize on the generic data pa
 
     expect(rows.length).toBeGreaterThan(0);
     expect(rows.every((r: any) => String(r.user_id) === memberUserId)).toBe(true);
-    for (const row of rows) assertNoTokenColumns(row);
+    for (const row of rows) assertNoCredentialColumns(row);
 
     const own = await stack.apiAs(memberToken, 'GET', `/data/sys_account/${memberAccountId}`);
     expect(own.status).toBe(200);
     const record = ((await own.json()) as any).record ?? {};
-    assertNoTokenColumns(record);
+    assertNoCredentialColumns(record);
     expect(record.id).toBe(memberAccountId);
   });
 
@@ -228,7 +253,7 @@ describe('#7987: sys_account OAuth tokens never serialize on the generic data pa
     // column out.
     const rows = await listAccountsAsAdmin('?select=id,access_token,refresh_token,id_token');
     expect(rows.length).toBeGreaterThan(0);
-    for (const row of rows) assertNoTokenColumns(row);
+    for (const row of rows) assertNoCredentialColumns(row);
     expect(rows.every((r: any) => typeof r.id === 'string')).toBe(true);
 
     const byId = await stack.apiAs(
@@ -238,7 +263,7 @@ describe('#7987: sys_account OAuth tokens never serialize on the generic data pa
     );
     expect(byId.status).toBe(200);
     const record = ((await byId.json()) as any).record ?? {};
-    assertNoTokenColumns(record);
+    assertNoCredentialColumns(record);
     expect(record.id).toBe(memberAccountId);
 
     // And the member cannot spell their way to their own refresh token either.
@@ -249,8 +274,24 @@ describe('#7987: sys_account OAuth tokens never serialize on the generic data pa
     );
     expect(memberSelect.status).toBe(200);
     for (const row of ((await memberSelect.json()) as any).records ?? []) {
-      assertNoTokenColumns(row);
+      assertNoCredentialColumns(row);
     }
+
+    // [#8676] The same spelling attack aimed at the password hashes, from both
+    // personas. The member's own row is the one that matters most here: the
+    // `sys_account_self` policy grants the read, so this is a LEGAL request for
+    // their own record that must still come back without the hash.
+    const hashSelect = '?select=id,password,previous_password_hashes';
+    const adminHashRows = await listAccountsAsAdmin(hashSelect);
+    expect(adminHashRows.length).toBeGreaterThan(0);
+    for (const row of adminHashRows) assertNoCredentialColumns(row);
+    expect(adminHashRows.every((r: any) => typeof r.id === 'string')).toBe(true);
+
+    const memberHash = await stack.apiAs(memberToken, 'GET', `/data/sys_account${hashSelect}`);
+    expect(memberHash.status).toBe(200);
+    const memberHashRows = ((await memberHash.json()) as any).records ?? [];
+    expect(memberHashRows.length).toBeGreaterThan(0);
+    for (const row of memberHashRows) assertNoCredentialColumns(row);
   });
 
   it('the system read path is stripped too — there is no `isSystem` carve-out', async () => {
@@ -263,7 +304,7 @@ describe('#7987: sys_account OAuth tokens never serialize on the generic data pa
       context: { isSystem: true },
     });
     expect(rows.length).toBe(1);
-    assertNoTokenColumns(rows[0]);
+    assertNoCredentialColumns(rows[0]);
     expect(rows[0].id).toBe(memberAccountId);
   });
 
@@ -285,21 +326,62 @@ describe('#7987: sys_account OAuth tokens never serialize on the generic data pa
     expect(byToken.length).toBe(1);
     expect(String(byToken[0].id)).toBe(memberAccountId);
     // …while that same row comes back with no token columns on it.
-    assertNoTokenColumns(byToken[0]);
+    assertNoCredentialColumns(byToken[0]);
   });
 
-  it('⛔ the accessor refuses a column that is not flagged — `password` stays unreachable', async () => {
-    // The card's scope guard, held mechanically. `password` and
-    // `previous_password_hashes` are better-auth one-way hashes (ADR-0100's
-    // third channel) and are deliberately NOT `internal`; dereferencing one
-    // through this accessor would be a mask bypass rather than a read of the
-    // internal channel, so the engine refuses it (ADR-0112 code + status).
+  it('⛔ the accessor refuses a column that is not flagged — and the refusal is SELECTIVE', async () => {
+    // The guard this test has always asserted: `resolveInternalField` has
+    // exactly one predicate — `internal === true` — so a column without the
+    // flag is refused (ADR-0112 code + status).
+    //
+    // ⚠️ Its instance changed with #8676, and only its instance. This test used
+    // to spell the predicate with `password`, because #7987 deliberately left
+    // that column unflagged and the test marked THAT card's scope boundary
+    // ("a column that is **not flagged** … are deliberately NOT `internal`").
+    // #8676 flags it, so the premise of `password`-as-example disappears while
+    // the proposition itself is untouched: `scope` is an ordinary unflagged
+    // `sys_account` column and stands in as the example. What is NOT weakened
+    // is the guard — no ADR-0100 carve-out was added, and the positive arm
+    // below is what proves the refusal is selective rather than blanket.
     const err: any = await ql
-      .resolveInternalField('sys_account', [memberAccountId], 'password')
+      .resolveInternalField('sys_account', [memberAccountId], 'scope')
       .then(() => null, (e: any) => e);
     expect(err, 'resolveInternalField must refuse a non-internal column').toBeTruthy();
     expect(err.code).toBe('INVALID_FIELD');
     expect(err.status).toBe(400);
+
+    // The discriminating positive control, in the same test: a column that IS
+    // flagged resolves through the same accessor on the same row. Without this
+    // arm the refusal above is equally satisfied by an accessor that refuses
+    // everything — including one broken by a future edit.
+    const flagged = await ql.resolveInternalField('sys_account', [memberAccountId], 'refresh_token');
+    expect(flagged.get(memberAccountId)).toBe(PLANTED.refresh_token);
+  });
+
+  it('[#8676] `password` and `previous_password_hashes` are stripped, and reachable only through the accessor', async () => {
+    // The card's own assertions, both directions. These are one-way password
+    // hashes — ADR-0100's third channel — and they serialized on the generic
+    // data API before #8676: to an admin for every user's row, and to a member
+    // for their own.
+    const rows: any[] = await ql.find('sys_account', {
+      where: { id: memberAccountId },
+      context: { isSystem: true },
+    });
+    expect(rows.length).toBe(1);
+    expect('password' in rows[0]).toBe(false);
+    expect('previous_password_hashes' in rows[0]).toBe(false);
+    // Falsifiability: a real row, not an emptied one.
+    expect(String(rows[0].id)).toBe(memberAccountId);
+
+    // …and the value is still on disk, reachable through the privileged
+    // accessor — which is how the ADR-0069 D1 reuse ring and better-auth's
+    // sign-in verifier still read it. A change that deleted the column outright
+    // would satisfy every absence assertion above and fail here.
+    const stored = await ql.resolveInternalField('sys_account', [memberAccountId], 'password');
+    const hash = stored.get(memberAccountId);
+    expect(typeof hash).toBe('string');
+    expect(String(hash).length).toBeGreaterThan(8);
+    expect(String(hash)).not.toBe(MEMBER_PASSWORD); // stored hashed, not plaintext
   });
 
   it('sign-in still works — the account read path is on the authentication route', async () => {
