@@ -19,7 +19,12 @@ import { SECRET_MASK, collectMaskedReadFields } from '@objectstack/objectql/core
 // heuristic here would be a second de-facto contract that disagrees with the
 // picker, the search companion and the approval inbox the day an author sets
 // `nameField` — the same argument the SECRET_MASK import above makes.
-import { resolveDisplayField } from '@objectstack/spec/data';
+import { resolveDisplayField, isTenancyDisabled } from '@objectstack/spec/data';
+// [#8707] The canonical spelling of the tenant anchor, imported rather than
+// re-typed. `SystemFieldName.ORGANIZATION_ID` is the reference this repo keeps
+// precisely so consumers stop inventing their own (`org_id`, `tenant_id`,
+// `space`) — the drift class framework#4330 / cloud#982 already paid for.
+import { SystemFieldName } from '@objectstack/spec/system';
 
 /**
  * Minimal structural view of `NotificationService.emit` (ADR-0030). Declared
@@ -239,6 +244,92 @@ export function createFieldPresenceProbe(
     }
     return set != null && set.has(field);
   };
+}
+
+/**
+ * [#8707] "Which column carries THIS object's own organization?" — resolved
+ * from the object's REGISTERED schema, never hard-coded to one spelling.
+ *
+ * The audit row is stamped from the organization the record is ABOUT (see the
+ * precedence note at the `tenantId` computation below, and #8287's ruling). To
+ * do that the writer has to know which column holds it, and `organization_id`
+ * is not universally the answer: `sys_api_key` carries
+ * `active_organization_id` by deliberate design (#8287). Adding a second
+ * literal name beside the first would make this writer correct for exactly two
+ * objects and silently wrong for the third, so the question is asked of the
+ * schema instead.
+ *
+ * ## Precedence — deliberately the platform's own, not a second opinion
+ *
+ * It mirrors `SqlDriver.computeTenantField` step for step, because that is the
+ * platform's single existing answer to "which column is this object
+ * tenant-scoped by", and an audit row's stamp must agree with the wall the row
+ * will later be read through. Re-derived here rather than imported: that method
+ * is `protected` on a DRIVER class, and plugin-audit takes no driver
+ * dependency (its package contract is core/objectql/platform-objects/spec).
+ * The two shared inputs ARE imported — `isTenancyDisabled` (ADR-0066's single
+ * source of truth for the opt-out) and `SystemFieldName.ORGANIZATION_ID` — so
+ * the parts that could drift are one definition, and only the ordering is
+ * restated.
+ *
+ *  1. **`tenancy.enabled === false` → `null`.** ADR-0066 platform-global
+ *     objects (`sys_sso_provider` is the shipped example) keep an optional org
+ *     FK while explicitly NOT being tenant-scoped. Stamping an audit row from
+ *     that FK would scope a global object's audit trail into one organization
+ *     and hide it from the platform admin who acted — strictly LESS visible
+ *     than today. This limb is what keeps the precedence flip from trading one
+ *     invisibility for another; it is not an optimisation.
+ *  2. **Declared `tenancy.tenantField`, when the object really has that
+ *     field.** The spec key already exists for "this object's tenant column
+ *     genuinely is not the platform's" and the driver already honours it, so an
+ *     object that declares one gets its audit rows stamped from the same column
+ *     its rows are walled by. Honoured only when the field is really present —
+ *     the same guard `computeTenantField` applies, for the same reason (#5315:
+ *     a declared name pointing at a missing column must fall through, not
+ *     resolve to nothing).
+ *  3. **The canonical injected `organization_id`, when present.** What every
+ *     multi-tenant object gets from `applySystemFields`.
+ *  4. Otherwise `null` — the object has no organization of its own, and the
+ *     caller falls back to the acting session's tenant exactly as before.
+ *
+ * ## What it deliberately does NOT do
+ *
+ * ⛔ It does not scan for "a lookup whose `reference` is `sys_organization`".
+ * That derivation is FALSIFIED by a shipped object: `sys_organization` itself
+ * declares no `organization_id` and exactly one such lookup —
+ * `parent_organization_id` — so the scan would stamp every organization's audit
+ * rows with its PARENT's id, hiding them from the very tenant they concern.
+ * Worse, reading `parent_organization_id` for a visibility decision is an
+ * ADR-0105 D6 red line that `validateOrgAxisRedLines` (@objectstack/lint) makes
+ * a build error for RLS policies, sharing rules and scopes; a plugin reaching
+ * the same conclusion through a heuristic is the same mistake with no gate on
+ * it.
+ *
+ * Consequently `sys_api_key.active_organization_id` is still NOT reachable
+ * here, and that is reported rather than papered over — see the PR for #8707.
+ * Its column is not the object's tenant-scope column and must not become one:
+ * `tenancy.tenantField` feeds `applyTenantScope` / `injectTenantOnInsert`, so
+ * declaring it would wall the credential table on an equality that excludes
+ * NULL — every pre-#8287 key would vanish from its own owner's list, which is
+ * the defect #8287 exists to have removed. A read-neutral, stamp-only
+ * declaration is a `packages/spec` contract addition and belongs to that seat.
+ *
+ * @param objectDef the registered object definition (`engine.getSchema(name)`)
+ * @param hasField the memoized field-presence probe for the SAME object — this
+ *   file asks "does the schema declare this field?" exactly one way
+ *   ({@link createFieldPresenceProbe}), and a second hand-rolled shape check
+ *   here would answer differently on the day one of them is fixed.
+ */
+export function resolveRecordOrganizationField(
+  objectDef: unknown,
+  hasField: (field: string) => boolean,
+): string | null {
+  if (!objectDef || typeof objectDef !== 'object') return null;
+  if (isTenancyDisabled(objectDef)) return null;
+  const declared = (objectDef as { tenancy?: { tenantField?: unknown } }).tenancy?.tenantField;
+  if (typeof declared === 'string' && declared.length > 0 && hasField(declared)) return declared;
+  if (hasField(SystemFieldName.ORGANIZATION_ID)) return SystemFieldName.ORGANIZATION_ID;
+  return null;
 }
 
 /** Action name produced from a HookContext.event string. */
@@ -863,6 +954,22 @@ export function installAuditWriters(
     return def;
   };
 
+  // [#8707] The object's own organization COLUMN — see
+  // `resolveRecordOrganizationField` for the precedence and for why the answer
+  // comes from the schema rather than a literal. Memoized per object like the
+  // two caches above: object schemas are static after registration, and this
+  // runs on every audited write.
+  const orgFieldCache = new Map<string, string | null>();
+  const resolveRecordOrgField = (objectName: string): string | null => {
+    const hit = orgFieldCache.get(objectName);
+    if (hit !== undefined) return hit;
+    const resolved = resolveRecordOrganizationField(getObjectDef(objectName), (field) =>
+      objectHasField(objectName, field),
+    );
+    orgFieldCache.set(objectName, resolved);
+    return resolved;
+  };
+
   // Display label for an object under a given translate fn: translated label
   // → authored def label → API name. Shared by activity summaries and the
   // collaboration notification titles below.
@@ -1159,23 +1266,51 @@ export function installAuditWriters(
     // a strict sys_user lookup); the service principal lands on `actor`.
     const actorLabel: string | null =
       userId ?? (typeof sess.actor === 'string' && sess.actor.trim() ? sess.actor.trim() : null);
-    // Prefer the active session tenant, but fall back to the audited
-    // record's own `organization_id`. This matters in two cases:
-    //   1. Background jobs / unauthenticated sudo paths where the
-    //      session has no `tenantId` populated.
-    //   2. better-auth's `activeOrganizationId` cache miss on first
-    //      requests after sign-in, before the active-org has been set
-    //      on the session row.
-    // Without this fallback, audit rows are written with
-    // `organization_id=NULL` and the SecurityPlugin's RLS predicate
-    // (`organization_id = current_user.organization_id`) hides them
-    // forever — making the audit log UI appear permanently empty even
-    // though writes succeed.
-    const recordOrgId: string | undefined =
-      (typeof (ctx.result as any)?.organization_id === 'string' && (ctx.result as any).organization_id) ||
-      (typeof before?.organization_id === 'string' && before.organization_id) ||
-      undefined;
-    const tenantId: string | undefined = sess.tenantId ?? recordOrgId;
+    // [#8707, honouring #8287's ruling] The audited RECORD'S OWN organization
+    // wins; the acting session's active organization is the fallback. ⛔ Do not
+    // flip this back to `sess.tenantId ?? recordOrgId`.
+    //
+    // An audit row describes a change to a RECORD, and it is read through
+    // `sys_audit_log`'s own tenant wall. Stamped with the ACTOR's active
+    // organization, a row about an org-A record written by someone whose active
+    // org is B lands behind B's wall: the tenant admin of A — the one party the
+    // row concerns and the only one who can act on it — cannot see it, while B,
+    // which has no claim to the record, can. That is the same
+    // invisible-audit-row defect the fallback below was added for, one layer
+    // down, and it is why the maintainer's ruling on #8287 says the stamp comes
+    // from the row's own organization.
+    //
+    // The fallback's ORIGINAL rationale is unchanged and still load-bearing —
+    // flipping the order strengthens it rather than competing with it. Audit
+    // rows must never be written with `organization_id = NULL`, or the
+    // SecurityPlugin's RLS predicate hides them forever and the audit log UI
+    // reads permanently empty while writes succeed. The session tenant still
+    // answers whenever the record has no organization of its own:
+    //   1. objects with no organization column at all (single-tenant stacks,
+    //      and ADR-0066 platform-global objects — see
+    //      `resolveRecordOrganizationField`, which returns null for both);
+    //   2. a row whose organization column is NULL/empty;
+    // and the record's own organization answers on the two cases the fallback
+    // was written for — background jobs / sudo paths with no `tenantId`, and
+    // better-auth's `activeOrganizationId` cache miss right after sign-in —
+    // exactly as it did before, since those sessions carry no tenant either way.
+    //
+    // What this does NOT change: the overwhelming majority of writes, where the
+    // actor's active organization IS the record's. Under the `isolated` posture
+    // the Layer 0 wall (`organization_id = activeOrganizationId`) makes a
+    // cross-org write of a walled object impossible in the first place, so the
+    // two agree by construction. The flip bites under `group` (a member of A
+    // and B, active in B, writing an A record — the union wall permits it) and
+    // `shared`, and on system/sudo paths that write another org's row while
+    // carrying a session.
+    const orgField = resolveRecordOrgField(ctx.object);
+    const readRecordOrg = (rec: any): string | undefined => {
+      if (!orgField || !rec || typeof rec !== 'object') return undefined;
+      const v = (rec as Record<string, unknown>)[orgField];
+      return typeof v === 'string' && v.length > 0 ? v : undefined;
+    };
+    const recordOrgId: string | undefined = readRecordOrg(ctx.result) ?? readRecordOrg(before);
+    const tenantId: string | undefined = recordOrgId ?? sess.tenantId;
 
     let oldValue: Record<string, any> | null = null;
     let newValue: Record<string, any> | null = null;

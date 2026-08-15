@@ -85,13 +85,22 @@
  *
  * `PageComponentSchema.type` is `z.union([PageComponentType, z.string()])`, an
  * open union by design: the example corpus alone authors `flex`, `grid`,
- * `object-metric`, `object-chart`, `object-grid`, `object-form`,
- * `object-master-detail-form`, `record:quick_actions`, `record:alert` and
- * `record:line_items` — 87 nodes whose props schema `ComponentPropsMap` simply
- * does not carry (SDUI blocks live in objectui's registry and in the ADR-0080
- * manifest). Judging those against an absent schema would report every one of
- * them as broken. `validate-page-field-bindings` skips unknown types for the
- * same reason and says so in its own header.
+ * `object-chart` and `record:line_items` — nodes whose props schema
+ * `ComponentPropsMap` simply does not carry (SDUI blocks live in objectui's
+ * registry and in the ADR-0080 manifest). Judging those against an absent
+ * schema would report every one of them as broken.
+ * `validate-page-field-bindings` skips unknown types for the same reason and
+ * says so in its own header.
+ *
+ * ⚠️ The skip is also the silent-failure direction, which is why the list
+ * above keeps shrinking: earlier editions of this sentence named the
+ * `object-*` family (#7751 declared six rows), then `record:reference_rail`
+ * (#8691), then `record:quick_actions` and `record:alert` (#8744, with
+ * `record:history` and `record:discussion`) — each a type with a registered
+ * renderer whose authored keys this skip was quietly waving through. A type
+ * both registered in objectui AND absent from the map is a gap to measure
+ * (see #8691's method), not a state to preserve; `object-chart`'s absence is
+ * the recorded deliberate one (#7751).
  */
 
 import { ComponentPropsMap } from '@objectstack/spec/ui';

@@ -539,7 +539,8 @@ const EXEMPT = {
 //     the fix: widen a hidden test layer's `include` one file at a time and
 //     measure each addition, because a wholesale glob can bill the layer for a
 //     non-test file it never asked to cover.)
-// `@objectstack/cli` (188 raw across 56 files) is deliberately NOT part of that
+// `@objectstack/cli` (146 raw across 65 files, after #8612 repaired the first
+// two of its 59 missing import extensions) is deliberately NOT part of that
 // graduation -- it is a programme rather than a sitting, and its entry stands.
 const TEST_DEBT = {
   '@objectstack/plugin-approvals': {
@@ -597,20 +598,37 @@ const TEST_DEBT = {
       + '`GET /meta/:type/:name` envelope convergence). Nothing else in the package moved.',
   },
   '@objectstack/cli': {
-    errors: 188,
-    note: 'TS7006 x100 (implicit any), TS2835 x59 (NodeNext extensions), TS2339 x24, TS2307 x3, TS18046 x2. '
+    errors: 146,
+    note: 'TS7006 x60 (implicit any), TS2835 x57 (NodeNext extensions), TS2339 x24, TS2307 x3, TS18046 x2. '
       + 'The package #7353 was really about, and the largest single thing the exclude-shaped detector could '
       + 'not see: `tsconfig.json` says `include: ["src"]` and has no `exclude` AT ALL, so there was never an '
-      + 'exclusion to notice, and the 56 test files in the sibling `test/` tree were read by nothing -- not '
-      + 'this gate, not `pnpm typecheck`, not CI. The other 54 test files DO sit under `src` and always '
-      + 'compiled; 188 is the outside-`test/` layer only, which is why the file count reads 56 and not 110. '
-      + 'Read the top-of-ledger NodeNext note before sizing this: TS2835 plus the TS7006 cascade it causes '
-      + 'are 159 of the 188 and are one repair, not 159. Concentrated rather than spread -- '
-      + 'test/i18n-coverage.test.ts x35, test/data-model-rules.test.ts x26, '
-      + 'test/i18n-declared-surface-gate.test.ts x19, test/i18n-section-coverage.test.ts x18, '
-      + 'test/commands.test.ts x15 are 113 of it. Measured at b9f930b with the closure built. RECORDED '
-      + 'EXACTLY, no bootstrap margin: this layer has never been gated, so the first new error in it should '
-      + 'go red rather than be absorbed.',
+      + 'exclusion to notice, and the test files in the sibling `test/` tree are read by nothing -- not '
+      + '`pnpm --filter @objectstack/cli typecheck`, which exits 0 on this package today, not CI, only this '
+      + 'ledger. 65 hidden files now, up from 56 at #7353 while the layer itself stayed frozen; the other 57 '
+      + 'test files sit under `src` and always compiled, which is why the file count reads 65 and not 122. '
+      + 'Lowered 188 -> 146 (#8612), both numbers measured on main at 35086781b with the closure built and '
+      + 'the two import extensions as the ONLY difference between the two trees, so the -42 is FULLY '
+      + 'ATTRIBUTED with no unexplained remainder: test/i18n-coverage.test.ts 35 -> 0 '
+      + '(1 TS2835 + 34 TS7006) and test/i18n-extract.test.ts 7 -> 0 (1 TS2835 + 6 TS7006), from adding the '
+      + '`.js` extension to one import each. Outside those two files the before and after diagnostic sets '
+      + 'are identical line for line, and nothing new appeared anywhere. '
+      + 'WHAT THE PILE IS NOW MADE OF, and it is not a nearly-graduated one: 57 of the 59 extension-less '
+      + 'relative imports this layer carried are still there, spread over 24 files, and every one of the 60 '
+      + 'surviving TS7006 sits in a file that also carries a TS2835 -- there is no implicit-any anywhere in '
+      + 'this layer without a broken import above it. Read the top-of-ledger NodeNext note before sizing it: '
+      + 'TS2835 plus the cascade it causes are 117 of the 146 and are 57 repairs, not 117. Concentrated '
+      + 'rather than spread -- test/data-model-rules.test.ts x26, test/i18n-declared-surface-gate.test.ts '
+      + 'x19, test/i18n-section-coverage.test.ts x18, test/commands.test.ts x15, '
+      + 'test/remote-api-commands.test.ts x12 are 90 of it. '
+      + 'One thing #8612 learned that the next extension fix here should expect: collapsing a cascade can '
+      + 'EXPOSE errors rather than only remove them. Fixing the i18n-extract import took that file from 7 '
+      + 'errors to 4 NEW TS2339, because it carried an `(e: { path: string[] })` parameter annotation '
+      + 'written to dodge the implicit-any while the import was broken, and that annotation narrowed the '
+      + 'real `ExpectedEntry` away; deleting the annotation took the file to 0. Those workaround '
+      + 'annotations are part of this debt and are invisible to the count until the import above them '
+      + 'resolves, so budget for a repair being bigger than its TS2835 line suggests. '
+      + 'RECORDED EXACTLY, no bootstrap margin: this layer has never been gated, so the first new error in '
+      + 'it should go red rather than be absorbed.',
   },
   '@objectstack/rest': {
     errors: 155,

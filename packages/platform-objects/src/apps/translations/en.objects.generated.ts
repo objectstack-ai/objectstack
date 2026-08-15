@@ -2323,7 +2323,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       name: {
         label: "Job Name",
-        help: "Unique job identifier (snake_case)"
+        help: "Unique job identifier (snake_case), unique across the whole installation — the job catalogue is a property of the deployment, not of an organization"
       },
       schedule_type: {
         label: "Schedule Type",

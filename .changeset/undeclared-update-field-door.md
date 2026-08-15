@@ -1,0 +1,11 @@
+---
+"@objectstack/objectql": patch
+---
+
+Refuse undeclared fields on update at the schema, before the `beforeUpdate` hooks run (#8738)
+
+**An undeclared key on `engine.update(...)` is now refused by the object's field map, before anything runs for a request that was already going to be refused.** Previously it travelled the whole update path and was refused at the very end by the driver — measured on both branches of the verb: `driver.update` on the by-id path and `driver.updateMany` on the predicate path each received the mistyped key. The `beforeUpdate` hooks ran first, so a hook that stamps a ledger, calls out, or derives a field executed for a write that was then rejected; in the reproduction the hook's derived value travelled into the statement the driver refused.
+
+**What a caller observes changing.** The refusal itself does not move: an undeclared update key was already rejected, and the client-facing answer is deliberately unchanged — the same `400 INVALID_FIELD` with the same message, `field` and `object`, which `@objectstack/rest` re-emits verbatim. What changes is where the refusal is decided, and therefore what the error carries **inside the process**: an in-process caller of `ObjectQL.update()` that caught the old failure saw the driver's raw error (no `code`, no `status`, its message containing the bound SQL statement) and now sees the ADR-0112 envelope (`code: 'INVALID_FIELD'`, `status: 400`) with a message naming the field. An in-process caller matching on the driver's SQL text — rather than on the envelope — is the one shape that has to change. The write no longer costs a driver round-trip either: the pre-update read is skipped along with the hooks.
+
+The door is the same one `insert()` has carried since #8682 — one condition, one implementation, now with two callers — including its three deliberate no-opinion cases, which are unchanged and reused rather than re-derived: an absent field map, a field map the door sees as empty, and `id` / `created_at` / `updated_at` when a declaration omits them. Schema drift (a declared field whose physical column is missing) stays the driver's to refuse, as before. Nothing is widened; `declared = enforced` (Prime Directive #10) is restored on the second write verb.

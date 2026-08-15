@@ -2323,7 +2323,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       name: {
         label: "任务名称",
-        help: "唯一任务标识（snake_case）"
+        help: "唯一任务标识（snake_case），在整个安装范围内唯一——后台任务目录属于该部署本身，而非某个组织"
       },
       schedule_type: {
         label: "调度类型",

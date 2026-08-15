@@ -2323,7 +2323,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       name: {
         label: "Nombre de la tarea",
-        help: "Identificador único de tarea (snake_case)."
+        help: "Identificador único de tarea (snake_case), único en toda la instalación: el catálogo de tareas es una propiedad del despliegue, no de una organización."
       },
       schedule_type: {
         label: "Tipo de programación",
