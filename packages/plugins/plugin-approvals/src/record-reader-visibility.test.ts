@@ -50,7 +50,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { assertEngineDeleteDispatch } from '@objectstack/objectql';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/objectql';
 
 import { ApprovalService } from './approval-service.js';
 
@@ -154,11 +154,20 @@ function makePermissionedEngine() {
       ensure(object).push({ ...data });
       return { ...data };
     },
-    async update(object: string, idOrData: any, _opts?: any) {
-      const data = typeof idOrData === 'object' ? idOrData : _opts;
-      const id = typeof idOrData === 'object' ? idOrData.id : idOrData;
+    async update(object: string, data: any, options?: any) {
+      // [#5480] Pinned to ObjectQL.update's OWN dispatch predicate, for the
+      // same reason as `delete` below: a double that accepts a call the real
+      // engine refuses turns a green suite into no suite at all.
+      const dispatch = assertEngineUpdateDispatch(data, options);
       const table = ensure(object);
-      const i = table.findIndex(r => r.id === id);
+      if (dispatch.kind === 'multi') {
+        let n = 0;
+        for (let i = 0; i < table.length; i++) {
+          if (matches(table[i], options?.where)) { table[i] = { ...table[i], ...data }; n++; }
+        }
+        return { updated: n };
+      }
+      const i = table.findIndex(r => r.id === dispatch.id);
       if (i >= 0) table[i] = { ...table[i], ...data };
       return table[i];
     },
