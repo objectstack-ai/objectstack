@@ -521,10 +521,10 @@ const result = AIChatWindowProps.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **position** | `Enum<'bottom' \| 'right' \| 'left'>` | optional | Where the panel docks relative to the record body — `right`/`left` dock a side panel, `bottom` renders in flow under the record body (renderer default: `bottom`). |
-| **width** | `string \| number` | optional | Panel width (e.g., "350px", "30%") — side positions (`right`/`left`) only. |
-| **collapsible** | `boolean` | optional | Whether the panel can be collapsed (renderer default: off). |
-| **defaultCollapsed** | `boolean` | optional | Whether the panel starts collapsed (renderer default: off; only meaningful with `collapsible`). |
+| **position** | `Enum<'sidebar' \| 'inline' \| 'drawer'>` | ✅ | Where to render the chatter panel |
+| **width** | `string \| number` | optional | Panel width (e.g., "350px", "30%") |
+| **collapsible** | `boolean` | ✅ | Whether the panel can be collapsed |
+| **defaultCollapsed** | `boolean` | ✅ | Whether the panel starts collapsed |
 | **feed** | `{ types?: Enum<'comment' \| 'field_change' \| 'task' \| 'event' \| 'email' \| 'call' \| 'note' \| … +6 more>[]; filterMode: Enum<'all' \| 'comments_only' \| 'changes_only' \| 'tasks_only'>; showFilterToggle: boolean; limit: integer; … }` | optional | Embedded activity feed configuration |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
 
