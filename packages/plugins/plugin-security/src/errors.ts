@@ -157,6 +157,33 @@ export class DetailRecordNotFoundError extends Error {
  * permissions. `MISSING_REQUIRED_FIELD` is the standard catalog's name for both
  * — a controlled_by_parent detail without its master reference is precisely a
  * required value that is absent.
+ *
+ * ## [#8688] …and that reasoning is why the INSERT shape mostly no longer
+ * reaches this class
+ *
+ * The maintainer ruling of 2026-08-15 took the sentence above to its
+ * conclusion: if the condition is "a required value that is absent", then the
+ * platform's contract for it is the one every adjacent missing-required-field
+ * case already gets — `400 VALIDATION_FAILED` carrying `fields[]`, which is
+ * what lets a form highlight the input — not a `[Security]`-prefixed 422 with
+ * no `fields[]`. So `assertControlledByParentWrite` now stands down on an
+ * insert whose master FK is absent and lets `validateRecord` answer, wherever
+ * validation provably covers that omission.
+ *
+ * This class keeps BOTH shapes, and both are live:
+ *
+ *   • the STORED-ROW shape, unconditionally — no reordering of insert-path
+ *     validation can reach a persisted null FK, and `fields[]` would name a
+ *     field that was never in the request;
+ *   • the INSERT shape for the three declarations validation does NOT cover
+ *     (a `master_detail` with no `required`; `required` + `readonly`;
+ *     `required` + `system`) — there this gate is the only refusal there is,
+ *     and its 422 is what stops an unreadable orphan detail row being minted.
+ *     #8772's lint refuses those shapes at publish time; until an app is
+ *     republished, this is the answer they get.
+ *
+ * The wording is unchanged in both, so a surface that pins either sentence sees
+ * the same string it always did — what moved is WHICH inserts arrive here.
  */
 export class MasterReferenceMissingError extends Error {
   readonly code = 'MISSING_REQUIRED_FIELD';

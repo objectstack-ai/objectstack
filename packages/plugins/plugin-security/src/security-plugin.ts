@@ -278,6 +278,33 @@ interface RlsFilterOptions {
 }
 
 /**
+ * A `controlled_by_parent` object's resolved master relation — the FK field key,
+ * the master object it points at, and whether required-field validation covers
+ * the FK's omission. Produced once per object by
+ * {@link SecurityPlugin.resolveCbpRelation} and cached.
+ */
+interface CbpRelation {
+  /** The detail's master reference field key. */
+  fk: string;
+  /** The master object the FK points at. */
+  master: string;
+  /**
+   * [#8688] Will `validateRecord` refuse an insert that omits {@link fk}?
+   *
+   * This is the licence for the master gate's insert leg to STAND DOWN and let
+   * the platform's ordinary missing-required-field answer (`400
+   * VALIDATION_FAILED` with `fields[]`) be the one the caller sees. It is
+   * `true` only for the shape the maintainer ruling of 2026-08-15 covers:
+   * `master_detail` + `required: true`, and NOT `readonly`/`system`.
+   *
+   * For every other declarable shape it is `false` and the gate keeps
+   * answering, because validation does not cover the same ground there — see
+   * the stand-down site for what a bare hand-over would mint.
+   */
+  omissionRefusedByValidation: boolean;
+}
+
+/**
  * [ADR-0066 / #2918] Provenance spec for the platform/application asset objects
  * whose managed rows are write-protected by {@link SecurityPlugin.assertSystemRowWriteGate}.
  *
@@ -639,7 +666,7 @@ export class SecurityPlugin implements Plugin {
   /** Unsubscribe handle for metadata-change cache invalidation (runtime metadata edits). */
   private metadataWatch: { unsubscribe: () => void } | null = null;
   /** ADR-0055: cache the resolved master-detail relation per controlled_by_parent object. */
-  private cbpRelCache = new Map<string, { fk: string; master: string } | null>();
+  private cbpRelCache = new Map<string, CbpRelation | null>();
   /**
    * [ADR-0066 D2/D3] Per-object security posture cache: `private` flag
    * (access.default), platform-global flag (tenancy disabled), and the object's
@@ -4804,10 +4831,15 @@ export class SecurityPlugin implements Plugin {
    * Resolve a controlled_by_parent object's master-detail relation (the FK field
    * key + the master object name), or null. Prefers a required `master_detail`
    * field; falls back to any `master_detail`, then a required `lookup`. Cached.
+   *
+   * [#8688] Also carries {@link CbpRelation.omissionRefusedByValidation} — the
+   * one bit the insert leg's conditional stand-down turns on. It is resolved
+   * HERE, from the same field def the relation itself came from, so the two can
+   * never describe different fields.
    */
-  private resolveCbpRelation(object: string): { fk: string; master: string } | null {
+  private resolveCbpRelation(object: string): CbpRelation | null {
     if (this.cbpRelCache.has(object)) return this.cbpRelCache.get(object) ?? null;
-    let rel: { fk: string; master: string } | null = null;
+    let rel: CbpRelation | null = null;
     const schema = typeof this.ql?.getSchema === 'function' ? this.ql.getSchema(object) : null;
     const fields = schema?.fields;
     const entries: Array<[string, any]> = Array.isArray(fields)
@@ -4821,7 +4853,28 @@ export class SecurityPlugin implements Plugin {
       pick((f) => f?.type === 'master_detail' && f?.required) ??
       pick((f) => f?.type === 'master_detail') ??
       pick((f) => f?.type === 'lookup' && f?.required);
-    if (found) rel = { fk: String(found[0]), master: String(ref(found[1])) };
+    if (found) {
+      const def = found[1];
+      rel = {
+        fk: String(found[0]),
+        master: String(ref(def)),
+        // [#8688] A MIRROR of `validateRecord`'s insert-mode gate in
+        // `@objectstack/objectql` (`record-validator.ts`): it walks every
+        // declared field but skips provenance-flagged ones outright
+        // (`if (def.system || def.readonly) continue;`) before the required
+        // check is reached, and the check itself is `def.required && isMissing`.
+        // So this predicate must track that gate literally, not approximate it
+        // — it is the licence for the guard to stand down, and every shape it
+        // reports `true` for is a shape validation provably refuses.
+        //
+        // `master_detail` is required on top of the validator's own test: the
+        // relation resolver's third fallback accepts a required `lookup`, and
+        // the ruling covers `master_detail` only. Narrower than the validator
+        // is the safe direction — the guard keeps answering.
+        omissionRefusedByValidation:
+          def?.type === 'master_detail' && !!def?.required && !def?.readonly && !def?.system,
+      };
+    }
     this.cbpRelCache.set(object, rel);
     return rel;
   }
@@ -4949,6 +5002,15 @@ export class SecurityPlugin implements Plugin {
    *   - the detail's master reference is empty → `422 MISSING_REQUIRED_FIELD`
    *     ({@link MasterReferenceMissingError})
    *
+   * [#8688] The last of those three has since NARROWED, by the maintainer
+   * ruling of 2026-08-15: on an `insert` whose master FK is absent, this gate
+   * STANDS DOWN when required-field validation provably covers the same
+   * omission (`master_detail` + `required: true`, not `readonly`/`system` —
+   * {@link CbpRelation.omissionRefusedByValidation}), so the caller gets the
+   * platform's ordinary `400 VALIDATION_FAILED` with `fields[]` instead. It
+   * keeps answering `422` for the three shapes validation does not cover, and
+   * for the stored-row shape on any other by-id write. See the branch itself.
+   *
    * [#7505] A seventh outcome is not a leg of this gate at all: if the store
    * cannot be read, the engine's own error propagates (typically
    * `ERR_DATASOURCE_UNAVAILABLE` → `503`) and this gate answers nothing. It
@@ -5001,7 +5063,40 @@ export class SecurityPlugin implements Plugin {
       if (!row) throw new DetailRecordNotFoundError(object, operation, targetId);
       masterId = row[rel.fk];
     }
-    if (masterId == null) throw new MasterReferenceMissingError(object, operation, rel.fk, detailRecordId);
+    if (masterId == null) {
+      // [#8688] CONDITIONAL stand-down — maintainer ruling of 2026-08-15.
+      //
+      // An insert that omits the master FK is a missing required field, and the
+      // platform answers those `400 VALIDATION_FAILED` with `fields[]` — which
+      // is what lets a form highlight the offending input. This gate answered
+      // the same condition `422 MISSING_REQUIRED_FIELD` with no `fields[]` and
+      // a `[Security]` prefix, because it runs in the middleware chain OUTSIDE
+      // the executor that calls `validateRecord`, so it short-circuited
+      // validation on the one field it shares with it. Standing down hands the
+      // condition back to the subsystem that owns it; the envelope is then the
+      // same one the very same field already gets when it is present but
+      // unresolvable.
+      //
+      // ⛔ The hand-over is CONDITIONAL, and the condition is not ceremony:
+      // `validateRecord` skips provenance-flagged fields before the required
+      // check (`if (def.system || def.readonly) continue;`) and never sees a
+      // field that is not `required` at all. For those three declarable shapes
+      // — no `required`; `required` + `readonly`; `required` + `system` — this
+      // gate is the ONLY thing refusing the insert, and an unconditional
+      // stand-down was measured to mint a detail row with a null master FK:
+      // unmatchable by the `controlled_by_parent` read filter (`fk IN
+      // (readable masters)`), so readable by nobody, and answering `422` on
+      // every later by-id write through the stored-row leg below. The residual
+      // envelope asymmetry is confined to exactly those shapes, which #8772's
+      // lint now refuses at publish time.
+      //
+      // Only the INSERT shape hands over. The stored-row shape (a by-id write
+      // whose persisted FK is null) keeps its 422: the caller sent no such
+      // field, so a `fields[]` naming it would name a field that was never in
+      // the request, and there is no payload the caller could send to fix it.
+      if (operation === 'insert' && rel.omissionRefusedByValidation) return;
+      throw new MasterReferenceMissingError(object, operation, rel.fk, detailRecordId);
+    }
 
     // Master edit access = CRUD update on the master AND the master row reachable
     // under BOTH halves of its own write gate (write RLS + record sharing).

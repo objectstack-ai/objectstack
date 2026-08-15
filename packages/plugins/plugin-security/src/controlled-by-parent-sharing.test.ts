@@ -38,6 +38,14 @@ import { describe, it, expect, vi } from 'vitest';
 import { SecurityPlugin } from './security-plugin.js';
 import { SharingService, type SharingEngine } from '@objectstack/plugin-sharing';
 import { matchesFilterCondition } from '@objectstack/formula';
+// [#8688] The REAL required-field validator, not a restatement of it. The
+// conditional stand-down's whole safety argument is "validation covers this
+// omission, and does not cover those" — a hand-mirrored copy of that predicate
+// would assert the belief instead of the behaviour, and would keep passing on
+// the day the validator's own skip list changes. This package's vitest config
+// aliases `@objectstack/objectql` to `packages/objectql/src`, so this resolves
+// to the source in the checkout rather than a prebuilt dist.
+import { validateRecord } from '@objectstack/objectql';
 import type { PermissionSet } from '@objectstack/spec/security';
 
 const REP = 'usr_rep';
@@ -83,6 +91,86 @@ const CONTACT_SCHEMA_NO_MASTER_DETAIL = {
   },
 };
 
+/**
+ * [#8688] The three declarations required-field validation does NOT cover, and
+ * the reason the insert-leg stand-down is conditional rather than flat.
+ *
+ * `validateRecord` (`@objectstack/objectql`) walks every declared field on an
+ * insert but skips provenance-flagged ones outright — `if (def.system ||
+ * def.readonly) continue;` — before the required check, and never fires on a
+ * field that is not `required` at all. All three shapes below are AUTHORABLE:
+ * `resolveCbpRelation`'s second fallback accepts a `master_detail` with no
+ * `required` test, and nothing at runtime refuses `readonly`/`system` on one.
+ * On each of them this gate is the only refusal an absent master FK meets, so
+ * each must still answer 422 — the suite asserts that against the REAL
+ * validator rather than against a belief about it.
+ */
+const CONTACT_SCHEMA_MASTER_NOT_REQUIRED = {
+  name: 'crm_contact',
+  sharingModel: 'controlled_by_parent',
+  fields: {
+    id: { name: 'id', type: 'text' },
+    name: { name: 'name', type: 'text' },
+    account: { name: 'account', type: 'master_detail', reference: 'crm_account' },
+  },
+};
+
+const CONTACT_SCHEMA_MASTER_READONLY = {
+  name: 'crm_contact',
+  sharingModel: 'controlled_by_parent',
+  fields: {
+    id: { name: 'id', type: 'text' },
+    name: { name: 'name', type: 'text' },
+    account: {
+      name: 'account', type: 'master_detail', required: true, readonly: true, reference: 'crm_account',
+    },
+  },
+};
+
+const CONTACT_SCHEMA_MASTER_SYSTEM = {
+  name: 'crm_contact',
+  sharingModel: 'controlled_by_parent',
+  fields: {
+    id: { name: 'id', type: 'text' },
+    name: { name: 'name', type: 'text' },
+    account: {
+      name: 'account', type: 'master_detail', required: true, system: true, reference: 'crm_account',
+    },
+  },
+};
+
+/**
+ * [#8688] `controlled_by_parent` with no `master_detail` but a REQUIRED lookup
+ * — `resolveCbpRelation`'s third fallback, and the one shape where the gate's
+ * answer is narrower than validation strictly requires. See the case that pins
+ * it for why that is deliberate.
+ */
+const CONTACT_SCHEMA_MASTER_REQUIRED_LOOKUP = {
+  name: 'crm_contact',
+  sharingModel: 'controlled_by_parent',
+  fields: {
+    id: { name: 'id', type: 'text' },
+    name: { name: 'name', type: 'text' },
+    account: { name: 'account', type: 'lookup', required: true, reference: 'crm_account' },
+  },
+};
+
+/**
+ * [#8688] The detail-object schema variants, keyed by the `boot({ detail })`
+ * selector. `valid` is the shape the ruling covers; the rest are the shapes it
+ * deliberately does not.
+ */
+const DETAIL_SCHEMAS = {
+  'valid': CONTACT_SCHEMA,
+  'no-master-detail': CONTACT_SCHEMA_NO_MASTER_DETAIL,
+  'master-not-required': CONTACT_SCHEMA_MASTER_NOT_REQUIRED,
+  'master-readonly': CONTACT_SCHEMA_MASTER_READONLY,
+  'master-system': CONTACT_SCHEMA_MASTER_SYSTEM,
+  'master-required-lookup': CONTACT_SCHEMA_MASTER_REQUIRED_LOOKUP,
+} as const;
+
+type DetailVariant = keyof typeof DETAIL_SCHEMAS;
+
 const SHARE_SCHEMA = {
   name: 'sys_record_share',
   isSystem: true,
@@ -124,10 +212,10 @@ type Row = Record<string, unknown>;
  * security plugin itself uses, so a filter this suite asserts on is a filter
  * that was really applied rather than one merely inspected.
  */
-function makeStore(rows: Record<string, Row[]>, brokenDetail = false, faultOn?: string) {
+function makeStore(rows: Record<string, Row[]>, detail: DetailVariant = 'valid', faultOn?: string) {
   const schemas: Record<string, unknown> = {
     crm_account: ACCOUNT_SCHEMA,
-    crm_contact: brokenDetail ? CONTACT_SCHEMA_NO_MASTER_DETAIL : CONTACT_SCHEMA,
+    crm_contact: DETAIL_SCHEMAS[detail],
     sys_record_share: SHARE_SCHEMA,
   };
   return {
@@ -210,8 +298,12 @@ interface BootOptions {
    * [#7474] `'no-master-detail'` swaps the detail's schema for the AUTHORING
    * DEFECT the metadata-defect leg exists to report: `controlled_by_parent`
    * declared on an object with no relation to derive access from.
+   *
+   * [#8688] `'master-not-required'` / `'master-readonly'` / `'master-system'`
+   * swap in the three master-reference declarations required-field validation
+   * does not cover — see {@link DETAIL_SCHEMAS}.
    */
-  detail?: 'valid' | 'no-master-detail';
+  detail?: DetailVariant;
   /** [#7474] Replace the detail rows — e.g. one whose master FK is null. */
   contacts?: Row[];
   /** [#7474] Replace the caller's permission set (the master-CRUD / master-RLS legs). */
@@ -227,7 +319,7 @@ async function boot(options: BootOptions = {}) {
   const shareLevel = options.shareLevel === undefined ? 'edit' : options.shareLevel;
   const fixture = fixtureRows(shareLevel);
   if (options.contacts) fixture.crm_contact = options.contacts;
-  const store = makeStore(fixture, options.detail === 'no-master-detail', options.faultOn);
+  const store = makeStore(fixture, options.detail ?? 'valid', options.faultOn);
   const sets = options.sets ?? [REP_SET];
 
   let middleware: any;
@@ -330,8 +422,17 @@ async function boot(options: BootOptions = {}) {
     return out;
   };
 
-  /** [#7474] The INSERT face — the one leg that reads the master FK off the body. */
-  const insertContact = async (data: Row): Promise<void> => {
+  /**
+   * [#7474] The INSERT face — the one leg that reads the master FK off the body.
+   *
+   * [#8688] Resolves to whether the EXECUTOR was reached. The gate standing
+   * down is not the absence of a throw, it is the write continuing down the
+   * chain to the executor — which is where `validateRecord` runs and where the
+   * missing-required-field answer now comes from. A middleware that swallowed
+   * the operation would also "not throw", and that is a different outcome
+   * entirely, so the two are told apart here rather than conflated.
+   */
+  const insertContact = async (data: Row): Promise<boolean> => {
     const opCtx: any = {
       object: 'crm_contact',
       operation: 'insert',
@@ -339,7 +440,11 @@ async function boot(options: BootOptions = {}) {
       options: {},
       context: repContext(),
     };
-    await middleware(opCtx, async () => {});
+    let executorReached = false;
+    await middleware(opCtx, async () => {
+      executorReached = true;
+    });
+    return executorReached;
   };
 
   return {
@@ -580,6 +685,15 @@ describe('[#5815] getReadFilter enforces the same read scope as the engine middl
  *   | controlled_by_parent, no master_detail | 422    | INVALID_METADATA        |
  *   | target record not found                | 404    | RECORD_NOT_FOUND        |
  *   | detail has no master reference         | 422    | MISSING_REQUIRED_FIELD  |
+ *
+ * [#8688] The last row has since NARROWED — the maintainer ruling of
+ * 2026-08-15 supersedes #7474's envelope choice for one of its two shapes. An
+ * INSERT that omits the FK is handed to required-field validation (`400
+ * VALIDATION_FAILED` with `fields[]`) wherever validation provably refuses it;
+ * the row above still holds for the stored-row shape and for the three
+ * declarations validation does not cover. The insert leg below was rewritten
+ * for that ruling, not adjusted to match observed behaviour — the successor
+ * asserts both sides of the condition.
  */
 describe('[#7474] the six refusal legs answer with six envelopes, not one', () => {
   /** The thrown error itself — `rejects.toThrow` cannot see `code` / `status`. */
@@ -701,15 +815,133 @@ describe('[#7474] the six refusal legs answer with six envelopes, not one', () =
     expect(err.message).not.toContain('requires edit access to its master record');
   });
 
-  it('422 MISSING_REQUIRED_FIELD: an insert that omits the master reference', async () => {
+  /**
+   * [#8688] THE PIN THAT MOVED, rewritten deliberately.
+   *
+   * Until the maintainer ruling of 2026-08-15 this leg read:
+   *
+   *     it('422 MISSING_REQUIRED_FIELD: an insert that omits the master reference')
+   *       expect(err.code).toBe('MISSING_REQUIRED_FIELD');
+   *       expect(err.status).toBe(422);
+   *       expect(err.message).toContain("did not supply 'account'");
+   *
+   * That assertion was correct about the code and wrong about who should be
+   * answering. The gate runs in the middleware chain OUTSIDE the executor that
+   * calls `validateRecord`, so on an insert it short-circuited required-field
+   * validation on the one field they share — and the same omission that every
+   * other required field answers `400 VALIDATION_FAILED` with `fields[]` came
+   * back `422 MISSING_REQUIRED_FIELD` with no `fields[]` and a `[Security]`
+   * prefix. Measured live on 17.0.0 GA, on the very same field whose
+   * present-but-unresolvable case already answers the wanted envelope.
+   *
+   * The ruling supersedes #7474's envelope choice on that ruling's own
+   * rationale: if a detail without its master is "precisely a required value
+   * that is absent", the platform's contract for that is the validation
+   * envelope. `fields[]` cannot be added while keeping the old code — BOTH
+   * transport doors emit `fields[]` only for the `VALIDATION_FAILED` duck-type
+   * and each overwrites `code` when it matches (`mapDataError`,
+   * `packages/rest/src/rest-server.ts`; `validationFailureDetails` /
+   * `VALIDATION_FAILED_STATUS = 400`, `packages/types/src/validation-failure.ts`)
+   * — so the pin had to move for the defect to be fixable at all.
+   *
+   * ⛔ The successor is NOT "the gate no longer refuses". The stand-down is
+   * CONDITIONAL, and the three cases below it are the condition: they are the
+   * shapes where nothing downstream would refuse, and the gate must still.
+   */
+  it('[#8688] a REQUIRED master_detail omitted on insert is validation\'s answer, not the gate\'s', async () => {
     const h = await boot({ shareLevel: 'edit' });
+    const payload = { name: 'New contact' };
+
+    // ── half 1: the gate stands down, and the write CONTINUES ───────────────
+    // Not merely "it did not throw": the executor is where `validateRecord`
+    // runs, so reaching it is the whole content of the hand-over. A middleware
+    // that silently swallowed the operation would also not throw.
+    await expect(h.insertContact(payload)).resolves.toBe(true);
+
+    // ── half 2: …and the subsystem it handed to really does refuse ──────────
+    // The REAL `validateRecord` (aliased to `packages/objectql/src` by this
+    // package's vitest config, so this is a verdict about the source in the
+    // checkout, never a prebuilt dist), on the same payload and the same
+    // schema. Without this half, half 1 would be indistinguishable from
+    // silently admitting an orphan row.
+    let err: any;
+    try {
+      validateRecord(CONTACT_SCHEMA as any, payload, 'insert');
+    } catch (e) {
+      err = e;
+    }
+    // The ADR-0112 envelope. `ValidationError` declares no `status` of its own:
+    // 400 is the transports' constant for exactly this duck-type, and BOTH
+    // properties the two doors branch on are asserted here rather than the
+    // status they derive from them.
+    expect(err?.name).toBe('ValidationError');
+    expect(err?.code).toBe('VALIDATION_FAILED');
+    // …and the half the card is actually about — a form can now highlight the
+    // offending input, which no `MISSING_REQUIRED_FIELD` body ever carried.
+    expect(err.fields).toContainEqual(
+      expect.objectContaining({ field: 'account', code: 'required' }),
+    );
+  });
+
+  /**
+   * [#8688] The three shapes the stand-down deliberately does NOT cover.
+   *
+   * `validateRecord` skips provenance-flagged fields before the required check
+   * (`if (def.system || def.readonly) continue;`) and never fires on a field
+   * that is not `required`. Handing those over would mint a detail row with a
+   * null master FK — unmatchable by the `controlled_by_parent` read filter
+   * (`fk IN (readable masters)`), so readable by nobody, and answering 422 on
+   * every later by-id write. Each case asserts BOTH halves: the gate still
+   * refuses, AND the real validator raises nothing, which is why it must.
+   */
+  it.each([
+    ['a master_detail with no `required`', 'master-not-required' as const, CONTACT_SCHEMA_MASTER_NOT_REQUIRED],
+    ['`required` + `readonly`', 'master-readonly' as const, CONTACT_SCHEMA_MASTER_READONLY],
+    ['`required` + `system`', 'master-system' as const, CONTACT_SCHEMA_MASTER_SYSTEM],
+  ])('[#8688] 422 MISSING_REQUIRED_FIELD survives on insert: %s', async (_label, detail, schema) => {
+    const payload = { name: 'New contact' };
+
+    // Validation does not cover this shape — nothing downstream would refuse.
+    expect(() => validateRecord(schema as any, payload, 'insert')).not.toThrow();
+
+    // …so the gate keeps answering, in the envelope and wording it always had.
+    const h = await boot({ shareLevel: 'edit', detail });
+    const err = await refusalOf(h.insertContact(payload));
+    expect(err.code).toBe('MISSING_REQUIRED_FIELD');
+    expect(err.status).toBe(422);
+    expect(err.statusCode).toBe(422);
+    expect(err.message).toContain("did not supply 'account'");
+    expect(err.message).not.toContain('requires edit access to its master record');
+  });
+
+  it('[#8688] 422 survives on insert when the relation resolves through the required-LOOKUP fallback', async () => {
+    // A deliberate narrowing, recorded so it is not "simplified" away later.
+    // `validateRecord` WOULD refuse this omission (the field is required and
+    // carries no provenance flag), but the ruling covers `master_detail` only,
+    // and `resolveCbpRelation`'s third fallback is a different shape — an
+    // object that declares `controlled_by_parent` with no master_detail at all.
+    // Standing down there would be the implementer widening a ruling; keeping
+    // the gate is the fail-closed direction and costs one residual envelope.
+    const h = await boot({ shareLevel: 'edit', detail: 'master-required-lookup' });
     const err = await refusalOf(h.insertContact({ name: 'New contact' }));
     expect(err.code).toBe('MISSING_REQUIRED_FIELD');
     expect(err.status).toBe(422);
-    // Same condition, same code, and the wording says which shape it is: the
-    // REQUEST omitted the FK, so the remedy is to send it.
     expect(err.message).toContain("did not supply 'account'");
-    expect(err.message).not.toContain('requires edit access to its master record');
+  });
+
+  it('[#8688] the master-access verdict SURVIVES the stand-down: present but not writable is still 403', async () => {
+    // The ruling requires this pinned as surviving. The stand-down is keyed on
+    // the FK being ABSENT; a supplied master still runs every access leg, so
+    // an insert under a master the caller cannot edit is refused exactly as
+    // before — `acct_eu` exists and is shared to nobody.
+    const h = await boot({ shareLevel: 'edit' });
+    const err = await refusalOf(h.insertContact({ name: 'New contact', account: 'acct_eu' }));
+    expect(err.code).toBe('PERMISSION_DENIED');
+    expect(err.statusCode).toBe(403);
+    expect(err.message).toContain('requires edit access to its master record');
+    // …and it is NOT the stand-down's envelope: a caller who supplied the
+    // master must never be told they omitted it.
+    expect(err.message).not.toContain("did not supply 'account'");
   });
 
   // ── the split itself ─────────────────────────────────────────────────────
