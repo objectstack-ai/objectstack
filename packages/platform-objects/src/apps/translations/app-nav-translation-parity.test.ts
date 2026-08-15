@@ -182,11 +182,15 @@ describe('dashboard widgets are translated in every locale', () => {
 // `pages.*` is out of the walk on purpose: those entries mirror page metadata
 // authored in OTHER packages (@objectstack/cloud-connection, @objectstack/mcp),
 // which this package does not import and must not depend on to run its tests.
-// That leaves the third of this bundle with no source comparison in ANY locale,
-// `en` included — the same shape as the defect above, one section over, and a
-// static walk in this package cannot close it. Tracked as #8764; the gate that
-// can see those pages is `check:app-nav-i18n`, which already boots the real
-// composition. All three were in parity when this block was written.
+// A static walk in this package cannot close that gap; where it IS covered
+// is `pnpm check:app-nav-i18n` (`packages/cli/scripts/check-app-nav-i18n.mjs`),
+// which boots the real composition and asserts the `en` copy of `pages.*` —
+// label, description, and every `page:header` title/subtitle — against the
+// composed page metadata, verbatim: the same default-locale content claim
+// this block makes for `apps.*` and `dashboards.*`, one section over.
+// Default locale only: per-locale coverage of those `pages.*` keys in
+// `zh-CN` / `ja-JP` / `es-ES` remains unasserted anywhere in this repo. All
+// three were in parity when this block was written.
 describe('the default locale bundle serves the declared source string verbatim', () => {
   type Drift = { path: string; source: string; en: string | undefined };
 
