@@ -8557,16 +8557,48 @@ export class ObjectStackProtocolImplementation implements
     // Global Search (M10.5)
     // ==========================================
     /**
-     * Cross-object substring search across all registered objects that opt in
-     * via `enable.searchable !== false` and `enable.apiEnabled !== false`.
-     * Searches text-like fields (text/textarea/email/url/phone/markdown/html/string)
-     * whose `searchable: true` flag is set, falling back to the object's
-     * `displayNameField` (or `name`) when no fields are explicitly searchable.
+     * Cross-object search across all registered objects that opt in via
+     * `enable.searchable !== false` and `enable.apiEnabled !== false`.
      *
-     * The query is split into whitespace-separated terms; each term must match
-     * (case-insensitive LIKE) at least one searchable field. RBAC/RLS is
-     * enforced by forwarding the caller's `context` to `engine.find` so users
-     * only see records they are entitled to read.
+     * ## [#7643] WHICH columns are searched is not decided here
+     *
+     * The per-object query is handed `search: <q>` and the ENGINE resolves the
+     * fields and compiles the clause (`expandSearchOnAst` →
+     * `objectql/src/search-filter.ts` `expandSearchToFilter`, ADR-0061) — the
+     * same one expansion that serves the record picker and the list
+     * quick-search. This method used to resolve its own set (text-typed fields
+     * carrying the field-level `searchable: true` flag, falling back to the
+     * title field) and build its own AND-of-OR, which made the ⌘K palette's
+     * recall a STRICT SUBSET of the executor's on two axes at once:
+     *
+     *  - it never ORed the hidden `__search` companion column, so full-pinyin
+     *    (`huaningkeji`) and initials (`hnkj`) matched the seeded CJK row
+     *    through `POST /data/:object/query {search}` and returned NOTHING from
+     *    `GET /api/v1/search` — #2486 recall, absent on this door only; and
+     *  - it read the field-level `searchable` flag, which `$search` has never
+     *    read, instead of the object's `searchableFields` — whose own declared
+     *    contract already names global search as one of its three consumers
+     *    ("the record picker, list quick-search and global search",
+     *    `object.zod.ts`). So the palette was a SECOND, narrower definition of
+     *    a recall rule the spec says is one rule.
+     *
+     * Only the CROSS-OBJECT half is this method's own: which objects are swept,
+     * the per-object cap, hit ranking and title/snippet rendering. Everything
+     * inside one object's query now has a single producer.
+     *
+     * ## Matching
+     *
+     * Whitespace-separated terms are AND-ed, fields OR-ed, and matching folds
+     * case via `$icontains`. All three are the engine expansion's decisions and
+     * this paragraph only DESCRIBES them — it is never a second declaration.
+     * [#7850] It previously read "case-insensitive LIKE": `LIKE` names no
+     * operator in this vocabulary (and since #6518's LIKE→GLOB change, not even
+     * the SQL the compilers emit), while the sentence one screen down named
+     * `$contains`, which #4706 Q2 = A defines as case-SENSITIVE. Both halves of
+     * that contradiction are gone; `$icontains` is the operator that folds.
+     *
+     * RBAC/RLS is enforced by forwarding the caller's `context` to
+     * `engine.find` so users only see records they are entitled to read.
      */
     async searchAll(request: {
         q: string;
@@ -8598,7 +8630,12 @@ export class ObjectStackProtocolImplementation implements
             ? new Set(request.objects)
             : null;
 
-        // Tokenise: each token must match (LIKE %term%) at least one searchable field
+        // [#7643] SNIPPET tokens only. The engine does its own tokenisation
+        // inside the `$search` expansion (same split, same AND-of-terms rule),
+        // so these no longer decide what MATCHES — they decide where the
+        // excerpt is cut. Kept as a separate local rather than fed to the
+        // engine: the query text is what the contract carries, and a second
+        // pre-tokenised channel is exactly the divergence this card closed.
         const terms = q.split(/\s+/).filter(Boolean).slice(0, 8);
 
         const allObjects = (this.engine as any).registry?.getAllObjects?.() ?? [];
@@ -8631,7 +8668,6 @@ export class ObjectStackProtocolImplementation implements
                     : (fieldsRaw && typeof fieldsRaw === 'object'
                         ? Object.entries(fieldsRaw).map(([name, f]: [string, any]) => ({ name, ...(f || {}) }))
                         : []);
-            const TEXT_TYPES = new Set(['text', 'textarea', 'string', 'email', 'url', 'phone', 'markdown', 'html']);
             const fieldByName = new Map(fields.map(f => [f.name, f]));
             const hasField = (n: string) => fieldByName.has(n);
             // Resolve title for a record using titleFormat → displayNameField →
@@ -8664,36 +8700,43 @@ export class ObjectStackProtocolImplementation implements
                 return String(row.id);
             };
 
-            const titleFieldName = obj.displayNameField
-                || (hasField('name') ? 'name' : undefined)
-                || (hasField('title') ? 'title' : undefined)
-                || fields.find(f => TEXT_TYPES.has(f.type))?.name;
-
-            let searchableFields = fields
-                .filter(f => f && TEXT_TYPES.has(f.type) && f.searchable === true)
-                .map(f => f.name as string);
-
-            // Fallback: if no field is explicitly searchable, scan the title field
-            if (searchableFields.length === 0 && titleFieldName) {
-                searchableFields = [titleFieldName];
-            }
+            // [#7643] The SAME resolution the engine's `$search` expansion will
+            // apply to this object one call down — `@objectstack/spec/data` owns
+            // it precisely so the layers that must agree read one function
+            // instead of each carrying a copy (#4254 moved it there for the
+            // ingress gate; this is the third face). It is consulted here for
+            // two things, and NEITHER of them is building the filter:
+            //
+            //  1. the SKIP below — an object with nothing to scan is passed
+            //     over. This is load-bearing, not tidiness: `expandSearchToFilter`
+            //     answers an empty field set with `null`, `expandSearchOnAst`
+            //     then leaves `where` unset, and a `find` with no `where` returns
+            //     the object's FIRST `perObject` rows — a global palette
+            //     answering every query with unrelated records. The old code's
+            //     equivalent `continue` guarded the same cliff one layer up.
+            //  2. the snippet source fields further down, so the excerpt is cut
+            //     from a column the search actually scanned.
+            //
+            // `expandSearchToFilter` itself is deliberately NOT imported: it
+            // lives in `@objectstack/objectql`, which DEPENDS on this package,
+            // so importing it would close a package cycle. Handing the engine
+            // `search` instead of a pre-built `where` routes through it anyway —
+            // and leaves ONE producer of search clauses rather than two callers
+            // of one helper, which is the stronger form of the same fix.
+            const fieldMetaByName: Record<string, any> = {};
+            for (const f of fields) if (f?.name) fieldMetaByName[f.name] = f;
+            const { allowed: searchableFields } = resolveSearchFieldResolution({
+                fields: fieldMetaByName,
+                searchableFields: obj.searchableFields,
+                // [ADR-0079] `nameField` is the canonical primary-title pointer;
+                // `displayNameField` is the deprecated alias (still honored).
+                // Same precedence as `expandSearchOnAst` and the #4254 gate —
+                // a third spelling here would re-split what this card merged.
+                displayField: obj.nameField ?? obj.displayNameField,
+            });
             if (searchableFields.length === 0) continue;
 
             objectsScanned++;
-
-            // Build AND-of-OR filter: every term must hit at least one field.
-            // [#7641] Case-insensitive substring matching is `$icontains`, NOT
-            // `$contains` — the comment this replaced asserted the opposite and
-            // was the same declared≠enforced defect as `search-filter.ts`'s
-            // (`$contains` is contractually case-SENSITIVE, #4706 Q2 = A). The
-            // global-search palette is a SECOND producer of search clauses and
-            // was wrong the same way; `search.global-search`'s knownGaps already
-            // recorded it as this issue's to fix. Neither operator's semantics
-            // changed — only which one the palette compiles to.
-            const andClauses = terms.map(term => ({
-                $or: searchableFields.map(f => ({ [f]: { $icontains: term } })),
-            }));
-            const where = andClauses.length === 1 ? andClauses[0] : { $and: andClauses };
 
             try {
                 // `order`, NOT `direction` — see the audit-history query above.
@@ -8702,7 +8745,16 @@ export class ObjectStackProtocolImplementation implements
                 // likely to want (#4674). Typed rather than `any` so the
                 // contract rejects the wrong key at the call site.
                 const opts: EngineQueryOptionsParsed = {
-                    where,
+                    // [#7643] The bare string IS the ADR-0061 Tier-1 contract
+                    // ("the client sends only the query text; the server
+                    // resolves which fields to search from object metadata"),
+                    // and `search` is a declared `find` option
+                    // (`EngineQueryOptionsSchema`, `ENGINE_FIND_OPTION_KEYS`) —
+                    // so this is the engine's published door, not a private one.
+                    // No `searchFields`: that key only ever NARROWS the resolved
+                    // set (ADR-0061), and the palette wants the object's full
+                    // default reach.
+                    search: q,
                     limit: perObject,
                     orderBy: [{ field: 'updated_at', order: 'desc' }],
                 };
@@ -8712,7 +8764,14 @@ export class ObjectStackProtocolImplementation implements
                 for (const row of rows || []) {
                     if (hits.length >= overallLimit) break;
                     const title = renderTitle(row);
-                    // Build snippet from first searchable field that contains a term
+                    // Build snippet from first searchable field that contains a
+                    // term. [#7643] `undefined` is a CORRECT answer here, not a
+                    // miss: a companion (pinyin) hit matches the normalized
+                    // `__search` blob, so no source column literally contains
+                    // `hnkj` — the row is a real hit with nothing to excerpt.
+                    // The companion is never a snippet source itself; it is
+                    // stripped from rows on the way out (#7642) and its content
+                    // is machine-normalized text no user typed.
                     let snippet: string | undefined;
                     for (const f of searchableFields) {
                         const v = row[f];

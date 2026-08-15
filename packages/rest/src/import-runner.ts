@@ -698,6 +698,13 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
           // Cell-coercion failures land in the same row report as the engine's
           // validation errors, so they speak the same language (#3957).
           locale: context?.locale, translate: messageTranslator,
+          // [#8485] The clock an offset-free datetime cell is read in. Already
+          // on the resolved context beside `locale` (the localization cascade's
+          // `ExecutionContext.timezone`) — the SAME value the export renders
+          // cells in (#8373), which is what makes the round trip an inverse
+          // instead of a host-`TZ` lottery. Absent ⇒ UTC, as the export writes.
+          timezone: typeof context?.timezone === 'string' && context.timezone
+            ? String(context.timezone) : undefined,
         });
         if (errors.length > 0) {
           const first = errors[0];
