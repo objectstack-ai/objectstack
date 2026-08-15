@@ -1318,21 +1318,27 @@ describe('RecordActivityProps (enhanced)', () => {
 // RecordChatterProps (replaces EmptyProps)
 // ---------------------------------------------------------------------------
 describe('RecordChatterProps', () => {
-  it('should accept empty with defaults', () => {
+  it('materializes NO defaults — an empty bag parses to an empty bag (#8762)', () => {
+    // The pre-#8762 state this pins against: `.default('sidebar')` wrote a
+    // value NO renderer branch compared onto every parsed node that said
+    // nothing, and `.default(true)` on `collapsible` INVERTED the renderer
+    // merge's own `false` fallback. Renderer fallbacks stay the renderer's
+    // facts (the `maxVisible` principle): "the author said nothing" must
+    // parse to nothing.
     const result = RecordChatterProps.parse({});
-    expect(result.position).toBe('sidebar');
-    expect(result.collapsible).toBe(true);
-    expect(result.defaultCollapsed).toBe(false);
+    expect('position' in result).toBe(false);
+    expect('collapsible' in result).toBe(false);
+    expect('defaultCollapsed' in result).toBe(false);
     expect(result.width).toBeUndefined();
     expect(result.feed).toBeUndefined();
   });
 
-  it('should accept sidebar position with width', () => {
+  it('should accept a docked side position with width', () => {
     const result = RecordChatterProps.parse({
-      position: 'sidebar',
+      position: 'right',
       width: '350px',
     });
-    expect(result.position).toBe('sidebar');
+    expect(result.position).toBe('right');
     expect(result.width).toBe('350px');
   });
 
@@ -1341,10 +1347,13 @@ describe('RecordChatterProps', () => {
     expect(result.width).toBe(400);
   });
 
-  it('should accept all position modes', () => {
-    const positions = ['sidebar', 'inline', 'drawer'] as const;
+  it("should accept exactly the renderer's position vocabulary (#8762)", () => {
+    // `RecordChatterPanel` branches on right/left (docked) vs bottom
+    // (in-flow) — measured at objectui pin 665661ab0932. One vocabulary.
+    const positions = ['bottom', 'right', 'left'] as const;
     positions.forEach(position => {
-      expect(() => RecordChatterProps.parse({ position })).not.toThrow();
+      const result = RecordChatterProps.parse({ position });
+      expect(result.position).toBe(position);
     });
   });
 
@@ -1358,7 +1367,7 @@ describe('RecordChatterProps', () => {
 
   it('should accept embedded feed configuration', () => {
     const result = RecordChatterProps.parse({
-      position: 'sidebar',
+      position: 'right',
       width: '30%',
       feed: {
         types: ['comment', 'field_change'],
@@ -1374,8 +1383,41 @@ describe('RecordChatterProps', () => {
     expect(result.feed!.enableReactions).toBe(true);
   });
 
-  it('should reject invalid position', () => {
-    expect(() => RecordChatterProps.parse({ position: 'modal' })).toThrow();
+  it('should reject a never-legal position with the plain enum refusal', () => {
+    const result = RecordChatterProps.safeParse({ position: 'modal' });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]!.code).toBe('invalid_value');
+      // 'modal' was never a legal spelling, so it gets zod's own enum
+      // message, not a retirement prescription.
+      expect(result.error.issues[0]!.message).not.toContain('was removed');
+    }
+  });
+
+  describe('the three retired spellings refuse with a per-value prescription (#8762)', () => {
+    // Each old spelling gets its own "was removed" message naming the
+    // replacement — the `view.exportOptions` `'pdf'` precedent: an
+    // enum-VALUE narrowing has no `retiredKey()` tombstone to carry the
+    // prescription, so the enum's own error map does, keyed on `issue.input`.
+    const cases = [
+      { from: 'sidebar', to: "'right'" },
+      { from: 'inline', to: "'bottom'" },
+      { from: 'drawer', to: "'right'" },
+    ] as const;
+    for (const { from, to } of cases) {
+      it(`'${from}' → refused, prescribing ${to}`, () => {
+        const result = RecordChatterProps.safeParse({ position: from });
+        expect(result.success).toBe(false);
+        if (!result.success) {
+          const issue = result.error.issues[0]!;
+          expect(issue.code).toBe('invalid_value');
+          expect(issue.path).toEqual(['position']);
+          expect(issue.message).toContain(`'${from}' was removed`);
+          expect(issue.message).toContain(`Write ${to}`);
+          expect(issue.message).toContain('os migrate meta');
+        }
+      });
+    }
   });
 });
 
@@ -1383,18 +1425,18 @@ describe('RecordChatterProps', () => {
 // ComponentPropsMap — record:chatter is no longer empty
 // ---------------------------------------------------------------------------
 describe('ComponentPropsMap record:chatter', () => {
-  it('should parse record:chatter with defaults', () => {
+  it('should parse record:chatter with no materialized defaults (#8762)', () => {
     const result = ComponentPropsMap['record:chatter'].parse({});
-    expect(result.position).toBe('sidebar');
-    expect(result.collapsible).toBe(true);
+    expect('position' in result).toBe(false);
+    expect('collapsible' in result).toBe(false);
   });
 
   it('should parse record:chatter with feed config', () => {
     const result = ComponentPropsMap['record:chatter'].parse({
-      position: 'drawer',
+      position: 'bottom',
       feed: { filterMode: 'comments_only' },
     });
-    expect(result.position).toBe('drawer');
+    expect(result.position).toBe('bottom');
     expect(result.feed!.filterMode).toBe('comments_only');
   });
 

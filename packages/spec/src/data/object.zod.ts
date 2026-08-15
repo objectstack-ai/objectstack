@@ -502,6 +502,20 @@ const TENANCY_MODES_EXPLAINER =
  * (`organization` is the product's noun). Undeclared now stays `undefined` and
  * the driver's fallback is the single source of truth.
  *
+ * `organizationField` (#8707 / #8778, maintainer-ruled option A) is the
+ * STAMP-ONLY sibling: it answers "which column says who this row is ABOUT",
+ * where `tenantField` answers "what is this object WALLED by". For ordinary
+ * objects the two coincide and `organizationField` is never needed; for
+ * credential tables they deliberately do not — `sys_api_key` records the
+ * organization a key authenticates into under `active_organization_id`
+ * precisely so the credential table does NOT become org-walled (#8287). The
+ * key is consulted exclusively by audit stamping (plugin-audit's
+ * `resolveRecordOrganizationField`); no read path reads it, and that
+ * read-neutrality is pinned by tests beside each read path. ⛔ Scope-pinned by
+ * the #8778 ruling: this is ONE stamp-only declaration key, not the opening
+ * move of a general field-roles mechanism — a consumer other than audit
+ * stamping needs its own ruling before reading it.
+ *
  * @example Shared database, platform-default tenant column (organization_id)
  * {
  *   enabled: true
@@ -511,6 +525,13 @@ const TENANCY_MODES_EXPLAINER =
  * {
  *   enabled: true,
  *   tenantField: 'workspace_id'
+ * }
+ *
+ * @example An unwalled credential table whose audit rows still stamp the
+ * organization of the record they describe (sys_api_key, #8778)
+ * {
+ *   enabled: false,
+ *   organizationField: 'active_organization_id'
  * }
  */
 export const TenancyConfigSchema = lazySchema(() => strictObject({
@@ -526,6 +547,21 @@ export const TenancyConfigSchema = lazySchema(() => strictObject({
     '`tenantPolicy()` also assume. A declared name is honoured only when the ' +
     'object really has that field — otherwise the same `organization_id` ' +
     'fallback applies. No default is materialized here on purpose (#5315).',
+  ),
+  organizationField: z.string().optional().describe(
+    'STAMP-ONLY (#8778): column carrying the organization a row is ABOUT, ' +
+    'consulted exclusively when audit rows are stamped. It does NOT ' +
+    'tenant-scope anything — no read path (`applyTenantScope`, ' +
+    '`injectTenantOnInsert`, `computeTenantLayer0Filter`) reads it, so ' +
+    'declaring it never walls the object and never hides rows. Declare it ' +
+    'only when the organization a row belongs to lives under a column that ' +
+    'deliberately is NOT the tenant column: `sys_api_key` is the shipped ' +
+    'example — a credential table that must stay unwalled (`enabled: false`) ' +
+    'while history/revocation audit rows stamp the organization of the key ' +
+    'they describe (`active_organization_id`). Ordinary tenant objects omit ' +
+    'it; their stamp column is resolved from `tenantField` / ' +
+    '`organization_id` already. Honoured only when the object really has ' +
+    'the field, like `tenantField`.',
   ),
 }));
 

@@ -124,7 +124,7 @@ const result = ApiMethod.parse(data);
 | **fields** | `Record<string, { name?: string; label?: string; type: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| … +42 more>; description?: string; … }>` | ✅ | Field definitions map. Keys must be snake_case identifiers. |
 | **indexes** | `{ name?: string; fields: string[]; unique?: boolean \| 'global' \| 'organization' }[]` | optional | Database performance indexes |
 | **fieldGroups** | `{ key: string; label: string; icon?: string; description?: string; … }[]` | optional | Ordered list of field groups (array order = display order). See ObjectFieldGroupSchema. |
-| **tenancy** | `{ enabled: boolean; tenantField?: string }` | optional | Multi-tenancy configuration for SaaS applications |
+| **tenancy** | `{ enabled: boolean; tenantField?: string; organizationField?: string }` | optional | Multi-tenancy configuration for SaaS applications |
 | **access** | `{ default?: Enum<'public' \| 'private'> }` | optional | [ADR-0066 D2] Object exposure posture (public-by-default vs private secure-by-default). |
 | **requiredPermissions** | `string[] \| { read?: string[]; create?: string[]; update?: string[]; delete?: string[] }` | optional | [ADR-0066 D3/⑤] Capabilities required to access this object (AND-gate) — `string[]` gates all CRUD, or a `{read,create,update,delete}` map gates per operation. |
 | **lifecycle** | `{ class: Enum<'record' \| 'audit' \| 'telemetry' \| 'transient' \| 'event'>; retention?: object; ttl?: object; storage?: object; … }` | optional | Data lifecycle contract (ADR-0057): class + retention/ttl/rotation/archive policies enforced by the platform LifecycleService. |
@@ -314,6 +314,7 @@ Boolean-or-predicates override for a built-in CRUD affordance.
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | ✅ | Enable multi-tenancy for this object |
 | **tenantField** | `string` | optional | Column this object is tenant-scoped by. Omit it unless the tenant column genuinely is not the platform's: when undeclared the driver falls back to `organization_id`, the kernel-injected column the RLS predicates and `tenantPolicy()` also assume. A declared name is honoured only when the object really has that field — otherwise the same `organization_id` fallback applies. No default is materialized here on purpose (#5315). |
+| **organizationField** | `string` | optional | STAMP-ONLY (#8778): column carrying the organization a row is ABOUT, consulted exclusively when audit rows are stamped. It does NOT tenant-scope anything — no read path (`applyTenantScope`, `injectTenantOnInsert`, `computeTenantLayer0Filter`) reads it, so declaring it never walls the object and never hides rows. Declare it only when the organization a row belongs to lives under a column that deliberately is NOT the tenant column: `sys_api_key` is the shipped example — a credential table that must stay unwalled (`enabled: false`) while history/revocation audit rows stamp the organization of the key they describe (`active_organization_id`). Ordinary tenant objects omit it; their stamp column is resolved from `tenantField` / `organization_id` already. Honoured only when the object really has the field, like `tenantField`. |
 
 
 ---

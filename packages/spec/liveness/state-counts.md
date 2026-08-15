@@ -27,7 +27,7 @@ for both corollaries.
 
 | Type | live | exp | dead | planned | classified |
 |---|---|---|---|---|---|
-| `object` | 49 | 0 | 0 | 1 | 50 |
+| `object` | 50 | 0 | 0 | 1 | 51 |
 | `field` | 67 | 0 | 0 | 1 | 68 |
 | `flow` | 34 | 0 | 6 | 0 | 40 |
 | `action` | 42 | 0 | 2 | 0 | 44 |
@@ -57,4 +57,4 @@ for both corollaries.
 | `api` | 25 | 0 | 0 | 2 | 27 |
 | `capability` | 12 | 0 | 0 | 0 | 12 |
 | `qa` | 4 | 0 | 5 | 0 | 9 |
-| **total** | **774** | **6** | **55** | **8** | **843** |
+| **total** | **775** | **6** | **55** | **8** | **844** |
