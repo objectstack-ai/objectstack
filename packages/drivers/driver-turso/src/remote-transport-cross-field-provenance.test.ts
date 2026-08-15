@@ -103,15 +103,22 @@ describe('[#8220] RemoteTransport cross-field refusal × filter-subtree provenan
     expect(err.message).not.toContain('budget');
   });
 
-  it('the non-$field comparand refusal is untouched — it never withheld, it never discloses more', async () => {
-    // A Uint8Array comparand is refused by NAME with no redaction (#1058);
-    // provenance resolution must leave errors that never carried the withheld
-    // symbol exactly alone.
+  it('the non-$field comparand refusal now withholds on the SAME mark — [#8197] joined it to this seam', async () => {
+    // Until #8197 this case read "untouched — it never withheld", and it was
+    // asserted with an author mark, so it kept passing when the refusal joined
+    // the withhold. Restated rather than left standing: what it pins now is
+    // that ONE mark governs BOTH refusals this transport raises, so a caller
+    // cannot learn from which branch a redaction came.
     const { t } = transport();
-    const err = await refusalOf(() =>
-      t.find('deal', { where: markFilterSubtreeProvenance({ amount: { $gt: new Uint8Array([1]) } } as never, 'author') }),
+    const comparand = () => ({ amount: { $gt: new Uint8Array([1]) } }) as never;
+    const disclosed = await refusalOf(() =>
+      t.find('deal', { where: markFilterSubtreeProvenance(comparand(), 'author') }),
     );
-    expect(err.code).toBe('INVALID_FILTER');
-    expect(err.message).toContain('deal.amount');
+    expect(disclosed.code).toBe('INVALID_FILTER');
+    expect(disclosed.message).toContain('deal.amount');
+
+    const withheld = await refusalOf(() => t.find('deal', { where: comparand() }));
+    expect(withheld.code).toBe('INVALID_FILTER');
+    expect(withheld.message).not.toContain('deal.amount');
   });
 });

@@ -575,7 +575,14 @@ const SQLITE_TIME_EXPR_REFS = 8;
  * caller can act on" is detail the caller never wrote: policy column names, and
  * the identity of the tenant-isolation column. Those refusals therefore keep
  * `code` and `status` and lose their operands; the full text goes to the server
- * log. The paragraph above still describes every other refusal in this file.
+ * log.
+ *
+ * [#8197, maintainer ruling 2026-08-15] The exception is no longer only the
+ * cross-field family. The same argument reaches one step out: on a read-scope
+ * predicate the refused constraint's TARGET column is as administrator-authored
+ * as its referent, so the five refusals named in {@link refusalSubtree} join the
+ * same seam. The paragraph above still describes every refusal in this file that
+ * neither family covers.
  */
 function unsupportedFilterError(message: string): Error {
   const err = new Error(message) as Error & { code?: string; status?: number };
@@ -701,6 +708,58 @@ export function withheldFilterDiagnosticOf(err: unknown): string | null {
   if (err === null || (typeof err !== 'object' && typeof err !== 'function')) return null;
   const text = (err as Record<symbol, unknown>)[WITHHELD_FILTER_DIAGNOSTIC];
   return typeof text === 'string' ? text : null;
+}
+
+/**
+ * [#8197, maintainer ruling 2026-08-15] The node a TARGET-FIELD refusal hands
+ * {@link SqlDriver.resolveWithheldFilterRefusal} — and the one place this
+ * family's shape is written down.
+ *
+ * # The family, and why it is exactly these five
+ *
+ * #7929/B withheld the cross-field operands; this card measured what B did not
+ * reach. Five refusals in this file name the constraint's TARGET column, and
+ * every one of them is raised by a predicate an RLS rule can plausibly produce:
+ * {@link jsonColumnOperatorError} (the #7398 gate — a CEL permission rule over a
+ * `multiple: true` field lowers to a membership test on a JSON-stored column,
+ * the most reachable of the five), {@link emptyFieldConstraintError},
+ * {@link unbindableComparandError} (which also answers a MALFORMED `{ $field }`
+ * — one that is not a `FieldReferenceSchema`, so the cross-field arm does not
+ * recognise it) and {@link betweenArityError}. On such a predicate the target
+ * column is as administrator-authored as the referent B already withholds, which
+ * is the argument the ruling accepted.
+ *
+ * # What redaction takes, and why it is more than the field name
+ *
+ * Everything DERIVED FROM THE PREDICATE: the target field, the operator, the
+ * comparand's contents, the filter path and any list index. What stays is the
+ * refusal's IDENTITY (`INVALID_FILTER` / 400), WHICH class fired, and the
+ * capability statement and prescription — none of which is derived from what the
+ * caller or the administrator wrote. That is #7929's own line, applied
+ * unchanged: it withheld both operands because "echoing the target would leave
+ * half the disclosure live", and a comparand preview (`received an object
+ * ({"a":1})`) is the administrator's literal just as surely as a column name is.
+ * ⛔ Do not soften this into "field name only" — one file must not carry two
+ * redaction disciplines.
+ *
+ * # Which node, and why the fallback is safe
+ *
+ * The DEEPEST resolvable node wins, because
+ * `resolveFilterSubtreeProvenance` reads the innermost mark on the ancestor
+ * chain: handing it an ancestor when a nearer node exists would drop a mark set
+ * closer to the leaf. `comparand` is that node when it is an object — the
+ * reference the throw site holds, findable under the query's `where` root by
+ * IDENTITY — and `enclosing` (the field-spec map, or the condition node) takes
+ * over when it is not.
+ *
+ * The fallback cannot widen disclosure, and the reason is structural rather than
+ * empirical: `markFilterSubtreeProvenance` silently no-ops on a non-object, so a
+ * primitive comparand can never carry a mark of its own, and its effective
+ * provenance IS its enclosing node's. The two candidates therefore differ only
+ * where the deeper one has nothing to say.
+ */
+function refusalSubtree(comparand: unknown, enclosing: unknown): unknown {
+  return comparand !== null && typeof comparand === 'object' ? comparand : enclosing;
 }
 
 /**
@@ -1710,7 +1769,15 @@ function isRenderableTextComparand(value: unknown): boolean {
  *    `null` reading deliberately. Primitives are therefore untouched; only
  *    objects — for which `String()` has no faithful answer — are refused.
  */
-function assertCompilableComparand(field: string, op: string, value: unknown): void {
+function assertCompilableComparand(
+  field: string,
+  op: string,
+  value: unknown,
+  // [#8197] The node ENCLOSING this comparand — the field-spec map, or the
+  // filter node for the bare `{ field: value }` spelling. Used only when the
+  // comparand itself cannot carry a mark; see {@link refusalSubtree}.
+  enclosing?: unknown,
+): void {
   const ref = fieldReferenceOf(value);
   if (ref !== null) throw crossFieldComparisonError(field, op, ref, value);
 
@@ -1739,11 +1806,66 @@ function assertCompilableComparand(field: string, op: string, value: unknown): v
 
   if (!SCALAR_COMPARAND_OPERATORS.has(op) || isBindableComparand(value)) return;
 
-  throw unsupportedFilterError(
+  throw unbindableComparandError(field, op, value, refusalSubtree(value, enclosing));
+}
+
+/**
+ * [#5041] A scalar operator's comparand that cannot become a bind parameter.
+ *
+ * [#8197] Extracted from {@link assertCompilableComparand}'s body — where it was
+ * an inline `unsupportedFilterError` — for one reason: it is a member of
+ * {@link refusalSubtree}'s family and needed somewhere to compose its redacted
+ * and restored wordings side by side, which is the arrangement every other
+ * withheld refusal in this file already uses.
+ *
+ * It also answers the MALFORMED cross-field spelling. `{ "$gt": { "$field": 42 } }`
+ * is not a `FieldReferenceSchema` (the referent must be a string), so
+ * {@link fieldReferenceOf} does not recognise it and the cross-field arm never
+ * sees it — it arrives here as an ordinary unbindable object. Its comparand
+ * preview used to print `{"$field":42}` beside the target column; both halves
+ * are predicate-derived and both are now redacted.
+ */
+function unbindableComparandError(
+  field: string,
+  op: string,
+  value: unknown,
+  subtree?: unknown,
+): Error {
+  return withheldFilterError(
+    `A comparison in this filter requires a single comparable value, but received a value that ` +
+      `cannot be bound as a SQL parameter. Use ${ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE} (or a ` +
+      `binary value); for a list use $in/$nin, and for a range use $between. The field, the ` +
+      `operator and the value this filter used are withheld from the message (#8197); the full ` +
+      `diagnostic is in the server log.`,
     `Operator "${op}" on field "${field}" requires a single comparable value, but received ` +
       `${Array.isArray(value) ? 'an array' : `an object (${safeShapePreview(value)})`}, which cannot be ` +
       `bound as a SQL parameter. Use ${ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE} (or a binary ` +
       `value); for a list use $in/$nin, and for a range use $between.`,
+    subtree,
+  );
+}
+
+/**
+ * `$between` handed something that is not a two-element range.
+ *
+ * [#8197] The operator is NAMED in the redacted half, and it is the one thing in
+ * this family that is: `$between` here is the refusal's CLASS, not a variable of
+ * it — the same "which class fired" {@link crossFieldComparisonError} keeps. The
+ * three refusals whose operator varies within one class (the JSON-column gate,
+ * the bind gate) withhold theirs, because there the operator says WHICH
+ * constraint of the predicate failed rather than which rule refused it.
+ *
+ * The target field is the whole disclosure, so redacting it leaves a sentence
+ * that is still the complete repair: a `$between` takes `[min, max]`, and an
+ * author who wrote one malformed range in one filter has no second candidate to
+ * confuse it with.
+ */
+function betweenArityError(field: string, subtree?: unknown): Error {
+  return withheldFilterError(
+    `Operator "$between" in this filter requires a [min, max] value array. The field it was ` +
+      `aimed at is withheld from the message (#8197); the full diagnostic is in the server log.`,
+    `Operator "$between" on field "${field}" requires a [min, max] value array.`,
+    subtree,
   );
 }
 
@@ -1872,13 +1994,28 @@ const JSON_COLUMN_INCOMPATIBLE_OPERATORS: ReadonlySet<string> = new Set([
  * rather than designed, which is the issue's ask 2 (`$overlaps` /
  * `$containsAny`); ask 2 is a closed-spec-set question and is deliberately not
  * answered here.
+ *
+ * [#8197] The most reachable member of {@link refusalSubtree}'s family, and the
+ * one the card led with: a CEL permission rule over a multi-select field lowers
+ * to exactly this membership test, so the column this gate names is the
+ * administrator's. The prescription survives redaction with PLACEHOLDER names —
+ * the SHAPE is the repair, and the shape names nothing.
  */
-function jsonColumnOperatorError(field: string, op: string, bare: boolean): Error {
+function jsonColumnOperatorError(field: string, op: string, bare: boolean, subtree?: unknown): Error {
   const spelling = bare
     ? `The bare equality spelling { "${field}": value }`
     : `Operator "${op}"`;
   const on = bare ? '' : ` on field "${field}"`;
-  return unsupportedFilterError(
+  return withheldFilterError(
+    `A constraint in this filter WAS NOT APPLIED: it aims a scalar comparison operator at a ` +
+      `field this driver stores as a JSON TEXT column (e.g. ["a","b"]), and such an operator ` +
+      `compares that whole serialized text against a single value — it can never equal one ` +
+      `member. Use "$contains" for membership ({ "FIELD": { "$contains": "a" } }), or an $or of ` +
+      `"$contains" for any-of ({ "$or": [{ "FIELD": { "$contains": "a" } }, ` +
+      `{ "FIELD": { "$contains": "b" } }] }). Refused rather than compiled because the answer ` +
+      `was silently wrong in BOTH directions: $in/$eq matched nothing, while $nin/$ne returned ` +
+      `the very rows they were asked to exclude (#7398). The field and the operator this filter ` +
+      `used are withheld from the message (#8197); the full diagnostic is in the server log.`,
     `${spelling}${on} WAS NOT APPLIED: "${field}" is a multi-value (or otherwise JSON-valued) ` +
       `field, stored by this driver as a JSON TEXT column (e.g. ["a","b"]), and "${op}" compares ` +
       `that whole serialized text against a single value — it can never equal one member. ` +
@@ -1887,6 +2024,7 @@ function jsonColumnOperatorError(field: string, op: string, bare: boolean): Erro
       `{ "${field}": { "$contains": "b" } }] }). Refused rather than compiled because the answer ` +
       `was silently wrong in BOTH directions: $in/$eq matched nothing, while $nin/$ne returned ` +
       `the very rows they were asked to exclude (#7398).`,
+    subtree,
   );
 }
 
@@ -2254,14 +2392,23 @@ function assertFilterNode(value: unknown, path: string): asserts value is Record
  * same reasoning #5041 applied one position over: a filter that cannot be given
  * one meaning is refused at the producer, loudly, at authoring time.
  */
-function emptyFieldConstraintError(field: string, path: string): Error {
-  return unsupportedFilterError(
+function emptyFieldConstraintError(field: string, path: string, subtree?: unknown): Error {
+  return withheldFilterError(
+    `A field constraint in this filter carries zero operators ({ "FIELD": {} }). A field ` +
+      `constraint must name at least one operator (e.g. { "FIELD": { "$eq": "value" } }) or be a ` +
+      `direct comparand (e.g. { "FIELD": "value" }). It is refused rather than ignored because ` +
+      `the backends disagreed on what it means — this driver dropped it inside $and/$or/$not ` +
+      `(matching EVERY row) while refusing it at the top level, and driver-memory / ` +
+      `@objectstack/formula answered "matches nothing". #5240. The field this filter named and ` +
+      `its position are withheld from the message (#8197); the full diagnostic is in the server ` +
+      `log.`,
     `Field constraint at ${path} carries zero operators ({ "${field}": {} }). A field constraint ` +
       `must name at least one operator (e.g. { "${field}": { "$eq": "value" } }) or be a direct ` +
       `comparand (e.g. { "${field}": "value" }). It is refused rather than ignored because the ` +
       `backends disagreed on what it means — this driver dropped it inside $and/$or/$not (matching ` +
       `EVERY row) while refusing it at the top level, and driver-memory / @objectstack/formula ` +
       `answered "matches nothing". #5240.`,
+    subtree,
   );
 }
 
@@ -2618,7 +2765,11 @@ function classifyFilterKey(key: string, value: unknown, here: string): FilterVer
   // contributes `'clause'`, exactly as #5134 classified it. This adds a refusal,
   // it does not reclassify a surviving shape, so every filter that compiled
   // before compiles byte-identically now.
-  if (isEmptyFieldConstraint(value)) throw emptyFieldConstraintError(key, here);
+  // [#8197] `value` IS the `{}` — an object, so it is markable and findable by
+  // identity under the query's `where` root. The reduction walks the same tree
+  // the merge boundaries marked, by reference, so nothing is copied between the
+  // mark and this throw.
+  if (isEmptyFieldConstraint(value)) throw emptyFieldConstraintError(key, here, value);
 
   // [#6050] `undefined` in a comparand position, refused on THIS walk for the
   // two reasons the walk exists — it is exhaustive and it runs FIRST.
@@ -9367,10 +9518,16 @@ export class SqlDriver implements IDataDriver {
     column: string,
     op: string,
     bare = false,
+    // [#8197] The filter node this constraint was read from, so the refusal can
+    // be resolved against the query's `where` root like every other withheld
+    // one. Optional, and absent means WITHHELD — a subclass that overrides this
+    // method without threading it degrades onto the fail-closed branch rather
+    // than onto the disclosing one.
+    subtree?: unknown,
   ): void {
     if (!JSON_COLUMN_INCOMPATIBLE_OPERATORS.has(op)) return;
     if (!this.isJsonColumn(table, localField)) return;
-    throw jsonColumnOperatorError(column, op, bare);
+    throw jsonColumnOperatorError(column, op, bare, subtree);
   }
 
   /**
@@ -9383,7 +9540,11 @@ export class SqlDriver implements IDataDriver {
    * recurses only into itself. So one `catch` here sees every refusal the three
    * `{ $field }` builders raise ({@link crossFieldComparisonError},
    * {@link bareFieldReferenceError}, {@link uncompilableFieldReferenceError})
-   * without a per-throw-site call, and without a re-entrancy guard.
+   * without a per-throw-site call, and without a re-entrancy guard. [#8197] It
+   * sees the target-field family the same way, including the two members raised
+   * on the REDUCTION walk ({@link emptyFieldConstraintError}) rather than in the
+   * emitter — that walk runs at the top of `applyFilterCondition`, inside this
+   * frame.
    *
    * The log is `this.logger` — the sink this driver already owns, which a host
    * injects and a test spies on. ⛔ Not `console.warn` from the module-level
@@ -9412,6 +9573,12 @@ export class SqlDriver implements IDataDriver {
    * of their merge the caller wrote) is swapped for its full author-facing
    * text: both columns, the operator, the list index, the boundary reason.
    * Same identity — `INVALID_FILTER` / 400 — different words.
+   *
+   * [#8197] Unchanged by the second family joining it, which is the point: the
+   * target-field refusals ({@link refusalSubtree}) reach this method as the same
+   * carrier with the same three keys, so there is ONE place that decides what a
+   * redacted refusal may say and one default it can decide with. A second seam
+   * would have been a second chance to get the fail direction wrong.
    *
    * ⚠️ Everything else stays REDACTED and goes to the server log, exactly as
    * #7929/B left it: a `'policy'` verdict, an UNMARKED tree (no boundary ever
@@ -9459,9 +9626,16 @@ export class SqlDriver implements IDataDriver {
     const marked = err as Record<symbol, unknown>;
     if (marked[WITHHELD_FILTER_LOGGED] === true) return;
     Object.defineProperty(err as object, WITHHELD_FILTER_LOGGED, { value: true, enumerable: false });
+    // [#8197] The wording no longer says "cross-field reference refused": this
+    // seam now carries the target-field family too, and a log line that names
+    // the wrong refusal class sends the operator reading it to the wrong part
+    // of the filter. What it states instead is the fact that is true of every
+    // line it writes — the predicate was not positively marked author-written,
+    // so the naming half went here rather than to the caller.
     this.logger.warn(
-      `[sql-driver] INVALID_FILTER — cross-field reference refused; operands withheld from the ` +
-        `response (#7929). Full diagnostic: ${diagnostic}`,
+      `[sql-driver] INVALID_FILTER — refusal detail withheld from the response because the ` +
+        `predicate was not positively marked as author-written (#7929, #8220, #8197). ` +
+        `Full diagnostic: ${diagnostic}`,
     );
   }
 
@@ -9541,7 +9715,9 @@ export class SqlDriver implements IDataDriver {
         // wording wherever the author wrote it — this position used to answer
         // with #5041's generic "cannot be bound as a SQL parameter", which
         // describes a comparand and not a constraint with no operator at all.
-        if (isEmptyFieldConstraint(value)) throw emptyFieldConstraintError(key, `filter.${key}`);
+        if (isEmptyFieldConstraint(value)) {
+          throw emptyFieldConstraintError(key, `filter.${key}`, value);
+        }
         // #6050 — the same position as the `undefined` gate on the reduction
         // walk, reached the same way `{ field: {} }` above reaches its own: this
         // loop runs when NO key of the filter carries an operator, so the walk
@@ -9554,11 +9730,14 @@ export class SqlDriver implements IDataDriver {
         assertDefinedComparands(key, value, `filter.${key}`);
         // #5041 — the plain `{ field: value }` map compiles to an implicit `=`,
         // so it is a comparison emitter too and gets the same gate.
-        assertCompilableComparand(column, '=', value);
+        // [#8197] `filters` is both this loop's node and the query's `where`
+        // root — this branch runs only when NO key carries an operator, so
+        // there is no nearer enclosing node to hand over.
+        assertCompilableComparand(column, '=', value, filters);
         // #7398 — and the column-type question the comparand gate cannot ask.
         // This loop IS the bare `{ field: value }` spelling, one of the four
         // the issue measured as silently answering zero rows on an array column.
-        this.assertOperatorAppliesToColumn(table, key, column, '=', true);
+        this.assertOperatorAppliesToColumn(table, key, column, '=', true, refusalSubtree(value, filters));
         const coerced = this.coerceFilterValue(table, key, value);
         const expr = this.filterColumnExpr(table, key, column);
         if (expr && this.applyNormalizedComparison(builder, 'and', expr, '=', coerced)) continue;
@@ -9898,12 +10077,15 @@ export class SqlDriver implements IDataDriver {
           // #5041 — reject a comparand that cannot become a bind parameter
           // BEFORE any rewrite or coercion touches it, so the message names the
           // shape the caller actually sent.
-          assertCompilableComparand(field, rawOp, opValue);
+          // [#8197] `value` — this field's operator map — is the enclosing node
+          // for both gates below: the nearest node to the constraint that is
+          // guaranteed to be an object, and therefore markable.
+          assertCompilableComparand(field, rawOp, opValue, value);
           // #7398 — the column-type gate, on the operator AS WRITTEN and ahead
           // of every rewrite and both emitters, so a JSON column cannot reach
           // the plain `whereIn` arms below NOR the normalised `whereRaw` arms
           // an external multi-value datetime column is routed to.
-          this.assertOperatorAppliesToColumn(table, localField, field, rawOp);
+          this.assertOperatorAppliesToColumn(table, localField, field, rawOp, false, value);
           // Calendar-day upper bounds first (#3777): `$lte` on a bare
           // `YYYY-MM-DD` against a datetime column compiles half-open, and a
           // `$between` whose max is a bare day decomposes into the same pair —
@@ -10024,7 +10206,11 @@ export class SqlDriver implements IDataDriver {
             case '$between': {
               const arr = Array.isArray(coerced) ? coerced : [];
               if (arr.length !== 2) {
-                throw unsupportedFilterError(`Operator "$between" on field "${field}" requires a [min, max] value array.`);
+                // [#8197] `opValue`, never `coerced`: coercion can return a NEW
+                // array, and a node the resolver cannot find under the query's
+                // own `where` root resolves to `null` — withheld — for every
+                // caller including an author who really did write it.
+                throw betweenArityError(field, refusalSubtree(opValue, value));
               }
               (builder as any)[logicalOp === 'or' ? 'orWhereBetween' : 'whereBetween'](field, arr as [any, any]);
               break;
@@ -10074,7 +10260,11 @@ export class SqlDriver implements IDataDriver {
         // condition carries an operator SOMEWHERE (so `applyFilters` routed the
         // whole node here) but not on this key. Same compilation, same gate:
         // one condition must not have two verdicts depending on its siblings.
-        this.assertOperatorAppliesToColumn(table, localField, field, '=', true);
+        // [#8197] A bare comparand is usually a primitive, so `condition` — this
+        // node, an ARM of the merge when one happened — is what carries the mark.
+        this.assertOperatorAppliesToColumn(
+          table, localField, field, '=', true, refusalSubtree(value, condition),
+        );
         const coerced = this.coerceFilterValue(table, localField, value);
         const columnExpr = this.filterColumnExpr(table, localField, field);
         if (columnExpr && this.applyNormalizedComparison(builder, logicalOp, columnExpr, '=', coerced)) continue;
