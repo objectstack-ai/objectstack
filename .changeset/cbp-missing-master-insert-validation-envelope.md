@@ -4,6 +4,16 @@
 
 fix(plugin-security)!: an insert that omits a required master-detail parent answers `400 VALIDATION_FAILED` with `fields[]`, not a `[Security]`-prefixed `422` (#8688)
 
+<!-- adr-0087: not-required (no-migration-prescription) Nothing authorable moves.
+No spec property, object or field is renamed, retired or tombstoned — the change
+is confined to which HTTP error envelope one runtime condition answers with
+(`assertControlledByParentWrite`'s insert leg), and both envelopes already exist
+in ADR-0112's closed vocabulary. There is no metadata an upgrader could migrate:
+an app's declarations are byte-identical before and after, and the only consumer
+action is branching on `VALIDATION_FAILED` instead of `MISSING_REQUIRED_FIELD`
+for this one condition, which is prose in this changeset rather than a
+prescription `objectstack migrate meta` could carry out. -->
+
 **BREAKING (error contract).** On an `insert` into a `controlled_by_parent`
 detail whose master reference is absent, the platform used to answer:
 
