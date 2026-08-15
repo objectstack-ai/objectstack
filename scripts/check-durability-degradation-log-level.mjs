@@ -270,6 +270,38 @@ const FAILURE_PROPAGATION_CALLEES = new Map([
                 + 'asked for the write is told, field-anchored, that it did not happen.',
         },
     ],
+    [
+        'handleRouteError',
+        {
+            via: 'effect',
+            why:
+                'The REST layer\'s single route-catch door (packages/rest/src/error-response.ts, one definition '
+                + 'repo-wide): it resolves the thrown error to a `{ status, body }` once and then ALWAYS writes it '
+                + '— `res.status(resolved.status).json(resolved.body)` is unconditional, with no branch that returns '
+                + 'without answering. The caller that asked for the write is told it did not happen, in the '
+                + 'ADR-0112 envelope. Declared as `effect` rather than `return` because it writes to `res` instead '
+                + 'of returning the envelope.\n'
+                + '\n'
+                + 'WHY IT IS DECLARED NOW, and why this is not a loosening (#8850). Until the ADR-0112 '
+                + 'error/fault-classification prologue was extracted from `rest-server.ts`, `handleRouteError` '
+                + 'lived in the SAME file as the two `saveMetaItem` route catches that delegate to it, so '
+                + '`collectLoggedLevels()` followed it as a same-file helper and reached `logError` two frames '
+                + 'down — the seams reported as `loud (error@120 via handleRouteError())`. The extraction moved '
+                + 'the function to its own module and that inference became unavailable: helper resolution is '
+                + 'file-scoped by construction (`functionBodies` is built per source file), so the gate lost '
+                + 'VISIBILITY while the behaviour did not move a line.\n'
+                + '\n'
+                + 'It is declared here rather than in FAILURE_PROPAGATION_SITES because the delivery is a property '
+                + 'of this callee everywhere it is used, not of one enclosing function — and the name resolves '
+                + 'unambiguously (measured: exactly one definition in the repo).\n'
+                + '\n'
+                + 'Note this classification is STRICTER than the one it replaces, not weaker. `handleRouteError` '
+                + 'logs only when `isExpectedRouteError()` is false, so "unconditionally loud" was always slightly '
+                + 'generous: a durability failure that mapped to an expected status printed no `[REST] Unhandled '
+                + 'error` at all. What IS unconditional is the answer to the caller, and that is what this entry '
+                + 'claims. `catchDeliversFailure()` still has to prove every path out of the catch reaches it.',
+        },
+    ],
 ]);
 
 /**
