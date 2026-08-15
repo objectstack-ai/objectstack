@@ -15446,7 +15446,55 @@ export class ObjectStackProtocolImplementation implements
             err.status = 400;
             throw err;
         }
-        const singularType = PLURAL_TO_SINGULAR[request.type] ?? request.type;
+        // #4432 / #7894 — CANONICAL TYPE KEY. See {@link canonicalMetaType}.
+        // `rollbackMetaItem` is the EIGHTH `/meta` entry point on this URL
+        // family (`POST /api/v1/meta/:type/:name/rollback`, caller-supplied
+        // `:type`) and was the last one still deriving its type key from
+        // `PLURAL_TO_SINGULAR` — the MANIFEST-COLLECTION map #7894 moved this
+        // boundary off. Placed AFTER the envelope guard above rather than at
+        // the very top: that is the position {@link saveMetaItem} documents for
+        // this exact pair, calling this method's opening guard its structural
+        // twin — a malformed request envelope is refused before its type key is
+        // canonicalised, and both refusals are `[invalid_request]`/400 anyway.
+        //
+        // What the fold reaches here, measured rather than assumed:
+        //
+        //  • `getEffectiveLock`'s OVERLAY limb, which queries `sys_metadata`
+        //    with the raw `type`. Its artifact limb folds; the overlay limb
+        //    does not. So an ADR-0010 `_lock` carried by the stored ACTIVE row
+        //    was looked up under a `type` no row carries and came back `'none'`
+        //    — not a neutral value but the verdict "the author declared no
+        //    protection" (#5706) — while the restore below read the folded key
+        //    and resolved the protected row perfectly. A lock addressable
+        //    around from the wire; the one limb of this verb that was not
+        //    fail-closed, and the reason this card exists.
+        //  • the revertability tier (`isOverlayAllowed` / `isRuntimeCreateAllowed`)
+        //    for the four MANIFEST-ABSENT types (`field`, `seed`,
+        //    `external_catalog`, `translation`), which stayed plural through
+        //    the manifest map and so took the PERMISSIVE PLUGIN branch — the
+        //    #7894 shape, one verb over.
+        //  • the `[not_overridable]` refusal, the two ADR-0010 audit rows and
+        //    both receipt sentences, which read `request.type` and so reported
+        //    the CALLER's spelling for a row written under the canonical one.
+        //    `recordMetadataAudit` re-folds through `PLURAL_TO_SINGULAR`
+        //    internally, which covers a manifest-present plural and misses the
+        //    four manifest-absent ones; folding here is what makes the audit
+        //    trail agree with the write for BOTH classes.
+        //
+        // ⛔ This does NOT close the class at its producer. `getEffectiveLock`'s
+        // overlay limb still queries the raw `type`, so a future caller that
+        // reaches the gate without folding first re-opens the same door. Folding
+        // there instead is the contract-first shape and is deliberately left
+        // open as its own card with its own blast-radius measurement — not
+        // answered here, and not a rider on this fix.
+        request = canonicalizeMetaRequestType(request);
+        // Canonical by construction from the fold above. NOT a second fold: the
+        // `PLURAL_TO_SINGULAR` lookup that used to stand here is exactly what
+        // #7894 removed from this boundary. The binding survives under its own
+        // name because the row operations below read it as "the key the row is
+        // stored under" — the same shape {@link deleteMetaItem} keeps for
+        // `singularTypeForRepo`.
+        const singularType = request.type;
         if (!ObjectStackProtocolImplementation.isOverlayAllowed(singularType)
             && !ObjectStackProtocolImplementation.isRuntimeCreateAllowed(singularType)) {
             const err: any = new Error(
@@ -15457,6 +15505,9 @@ export class ObjectStackProtocolImplementation implements
             throw err;
         }
         // ADR-0010 L3 — lock blocks rollback (writes a new active row).
+        // `request.type` is the CANONICAL spelling by the time it gets here
+        // (fold above), which is what makes this gate read the same row the
+        // restore below writes. It was the raw caller spelling until #8819.
         const _rollbackLockErr = await this.assertLockAllowsWrite({
             type: request.type,
             name: request.name,

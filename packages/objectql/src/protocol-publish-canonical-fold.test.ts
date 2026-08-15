@@ -204,7 +204,11 @@ async function makeProtocol() {
     engine.registry.registerObject(sysMetadataObject, 'test-package');
     const protocol = new ObjectStackProtocolImplementation(engine, undefined, 'env_prod');
     const rows = () => Array.from(stores.get('sys_metadata')?.values() ?? []) as any[];
-    return { protocol, rows };
+    // [#8819] The history table, for the rollback verb in group D — it restores
+    // a body FROM history, so the target version has to be read rather than
+    // assumed. Additive: groups A–C destructure what they need and ignore this.
+    const historyRows = () => Array.from(stores.get('sys_metadata_history')?.values() ?? []) as any[];
+    return { protocol, rows, historyRows };
 }
 
 /** The refusal envelope ADR-0112 pins: `code` AND `status`, never "it threw". */
@@ -404,5 +408,123 @@ describe('#8769 · a plural-addressed publish cannot address around the overlay 
         expect(rows().some((r) => r.state === 'draft')).toBe(true);
         const active = rows().find((r) => r.type === 'view' && r.state === 'active');
         expect(JSON.parse(active.metadata).label).toBe('v1');
+    });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// D — #8819: the SAME overlay lock, one verb over — `rollbackMetaItem`
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// `rollbackMetaItem` is the EIGHTH `/meta` entry point (`POST
+// /api/v1/meta/:type/:name/rollback`, caller-supplied `:type`) and was the last
+// one deriving its type key from `PLURAL_TO_SINGULAR` rather than the boundary
+// fold. The seam is group C's exactly: `getEffectiveLock`'s overlay limb queries
+// `sys_metadata` with the raw `type`, so a rollback addressed `views` read the
+// lock under a key no row carries, got `'none'` — the verdict "the author
+// declared no protection" (#5706) — and then restored the history body against
+// the FOLDED key, which resolves the protected row perfectly.
+//
+// ⚠️ Why this verb gets its own group rather than inheriting group C's: a
+// rollback writes a NEW ACTIVE ROW FROM HISTORY instead of promoting a draft, so
+// the "protected body unchanged" clause is a materially different assertion.
+// What a missed lock costs here is not an overwrite by a pending draft — it is
+// the active body silently REVERTING to an older one, on an item whose author
+// declared it must not be overlaid at all.
+describe('#8819 · a plural-addressed rollback cannot address around the overlay `_lock`', () => {
+    /**
+     * Stage: `view/case_grid` published twice (`v1`, then `v2`), so history
+     * carries a restorable earlier version and the ACTIVE row carries `v2`.
+     * The lock is then written straight into the stored active row — the same
+     * device group C uses and for the same reason: `saveMetaItem` refuses a
+     * write once the lock is live, and "history that predates the lock" is
+     * exactly the state this door has to hold shut.
+     */
+    async function stageLockedActiveOverRestorableHistory(opts: { locked: boolean }) {
+        const { protocol, rows, historyRows } = await makeProtocol();
+        await (protocol as any).saveMetaItem({
+            type: 'view', name: 'case_grid', organizationId: ORG, item: viewBody('v1'), mode: 'draft',
+        });
+        await (protocol as any).publishMetaItem({ type: 'view', name: 'case_grid', organizationId: ORG });
+        await (protocol as any).saveMetaItem({
+            type: 'view', name: 'case_grid', organizationId: ORG, item: viewBody('v2'),
+            mode: 'draft', force: true,
+        });
+        await (protocol as any).publishMetaItem({ type: 'view', name: 'case_grid', organizationId: ORG });
+
+        const activeRow = rows().find((r) => r.type === 'view' && r.state === 'active');
+        expect(activeRow, 'fixture: an active row must exist to carry the lock').toBeTruthy();
+        const body = typeof activeRow.metadata === 'string'
+            ? JSON.parse(activeRow.metadata) : activeRow.metadata;
+        expect(body.label, 'fixture: the active body is the SECOND publish').toBe('v2');
+        if (opts.locked) {
+            activeRow.metadata = JSON.stringify({ ...body, _lock: 'no-overlay', _lockReason: 'test fixture' });
+        }
+
+        // The version to restore is READ, never assumed: the numbering depends
+        // on how many `put`s the staging above happens to make, and a hardcoded
+        // `toVersion` that drifts turns this door into a 404 that still looks
+        // like a refusal.
+        const target = historyRows().find((h) => {
+            const m = typeof h.metadata === 'string' ? JSON.parse(h.metadata) : h.metadata;
+            return m?.label === 'v1';
+        });
+        expect(target, 'fixture: history must carry a restorable `v1` row').toBeTruthy();
+        const labelOfActive = () => {
+            const r = rows().find((x) => x.type === 'view' && x.state === 'active');
+            return JSON.parse(typeof r.metadata === 'string' ? r.metadata : JSON.stringify(r.metadata)).label;
+        };
+        return { protocol, rows, toVersion: target.version as number, labelOfActive };
+    }
+
+    it('CONTROL — the canonical spelling is refused by the lock', async () => {
+        const { protocol, toVersion } = await stageLockedActiveOverRestorableHistory({ locked: true });
+
+        const refusal = await refusalOf(() => (protocol as any).rollbackMetaItem({
+            type: 'view', name: 'case_grid', organizationId: ORG, toVersion,
+        }));
+
+        expect(refusal.code).toBe('ITEM_LOCKED');
+        expect(refusal.status).toBe(403);
+    });
+
+    it('the plural spelling is refused by the SAME lock, and the protected body is unchanged', async () => {
+        const { protocol, rows, toVersion, labelOfActive } =
+            await stageLockedActiveOverRestorableHistory({ locked: true });
+
+        const refusal = await refusalOf(() => (protocol as any).rollbackMetaItem({
+            type: 'views', name: 'case_grid', organizationId: ORG, toVersion,
+        }));
+
+        expect(refusal.code).toBe('ITEM_LOCKED');
+        expect(refusal.status).toBe(403);
+        // THE CLAUSE THAT MATTERS. The two assertions above can both hold while
+        // the write still lands; only the stored row says whether the refusal
+        // stopped the RESTORE. `v2` is the protected body — `v1` would mean the
+        // rollback went through and the lock was decorative.
+        expect(labelOfActive()).toBe('v2');
+        // …and it did not mint a second namespace on the way (#4432).
+        expect(rows().some((r) => r.type === 'views')).toBe(false);
+        expect(rows().filter((r) => r.state === 'active').map((r) => r.type)).toEqual(['view']);
+    });
+
+    it('POSITIVE CONTROL — unlocked, the SAME plural call really does restore `v1`', async () => {
+        // Without this the group is green for the wrong reason: if the harness
+        // could not perform a rollback at all, "the protected body is unchanged"
+        // would hold trivially and the lock would be pinning nothing. This is
+        // the same call, same spelling, same version — only the lock removed.
+        const { protocol, toVersion, labelOfActive } =
+            await stageLockedActiveOverRestorableHistory({ locked: false });
+
+        const receipt: any = await (protocol as any).rollbackMetaItem({
+            type: 'views', name: 'case_grid', organizationId: ORG, toVersion,
+        });
+
+        expect(receipt.success).toBe(true);
+        expect(receipt.restoredFromVersion).toBe(toVersion);
+        expect(labelOfActive()).toBe('v1');
+        // The receipt names the CANONICAL type, not the caller's spelling: the
+        // fold reaches the receipt sentence too, so a compliance reader and the
+        // stored row agree on one spelling.
+        expect(receipt.message).toContain('type=view,');
     });
 });
