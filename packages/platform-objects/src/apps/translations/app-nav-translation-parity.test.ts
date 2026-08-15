@@ -199,9 +199,15 @@ describe('dashboard widgets are translated in every locale', () => {
 // label, description, and every `page:header` title/subtitle — against the
 // composed page metadata, verbatim: the same default-locale content claim
 // this block makes for `apps.*` and `dashboards.*`, one section over.
-// Default locale only: per-locale coverage of those `pages.*` keys in
-// `zh-CN` / `ja-JP` / `es-ES` remains unasserted anywhere in this repo. All
-// three were in parity when this block was written.
+// Default locale only, and that clause needs one qualification since #8765.
+// Per-locale COVERAGE of those `pages.*` keys in `zh-CN` / `ja-JP` / `es-ES`
+// — does a translation exist for each one — is still unasserted anywhere in
+// this repo. Their FRESHNESS is no longer unjudged, though: those leaves carry
+// recorded source hashes like every other hand-authored leaf, so a `pages.*`
+// source edit makes the three translated copies fall back to the source string
+// instead of serving the pre-edit text (`source-hash.ts`). That is a serving
+// rule, not an assertion — it fails no build, and it does not make the missing
+// coverage claim above. All three were in parity when this block was written.
 describe('the default locale bundle serves the declared source string verbatim', () => {
   type Drift = { path: string; source: string; en: string | undefined };
 
