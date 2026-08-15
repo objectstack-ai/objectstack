@@ -38,6 +38,32 @@ import type { IHttpServer } from '@objectstack/spec/contracts';
 const MARKETPLACE_PREFIX = '/api/v1/marketplace';
 
 /**
+ * This plugin's own version, declared at module scope and read from there by
+ * both the class field and the outbound User-Agent.
+ *
+ * ⛔ Do NOT reach back through the class (`MarketplaceProxyPlugin.prototype.version`,
+ * the spelling this replaced). A class that references itself BY NAME inside its
+ * own body is rewritten by esbuild into `var X = class _X { … _X … }` so the inner
+ * reference binds to the class binding rather than the outer `var` — and the
+ * emitted class then reports `_X` as its `.name`. That silently killed the
+ * class-name limb of every identity registry naming this plugin (#8645): the CLI's
+ * `Serve.providesCapability` recognises a host-supplied provider by
+ * `constructor.name` as well as `plugin.name`, and against the shipped build the
+ * class-name limb matched nothing at all, leaving the guard running on one limb
+ * without knowing it. Same trap for any static/prototype self-reference in any
+ * plugin class — use `this.x` or a module-scope constant like this one.
+ *
+ * The self-reference was also reading a field that was never there:
+ * `version` is an instance field, so `prototype.version` was always `undefined`
+ * and the User-Agent below always announced the `?? '1.0.0'` fallback, whatever
+ * this plugin's real version was.
+ */
+const MARKETPLACE_PROXY_VERSION = '1.1.0';
+
+/** The outbound User-Agent for every request this proxy makes to the cloud. */
+const PROXY_USER_AGENT = `objectos-marketplace-proxy/${MARKETPLACE_PROXY_VERSION}`;
+
+/**
  * In-memory cache for GET/HEAD marketplace responses.
  *
  * Marketplace data changes infrequently (new package versions are
@@ -150,7 +176,7 @@ export interface MarketplaceProxyPluginConfig {
 
 export class MarketplaceProxyPlugin implements Plugin {
     readonly name = 'com.objectstack.runtime.marketplace-proxy';
-    readonly version = '1.1.0';
+    readonly version = MARKETPLACE_PROXY_VERSION;
 
     private readonly cloudUrl: string;
     private readonly publicBaseUrl: string;
@@ -288,7 +314,7 @@ export class MarketplaceProxyPlugin implements Plugin {
                             // don't pay for the body when nothing changed.
                             const revalHeaders: Record<string, string> = {
                                 'Accept': accept,
-                                'User-Agent': `objectos-marketplace-proxy/${MarketplaceProxyPlugin.prototype.version ?? '1.0.0'}`,
+                                'User-Agent': PROXY_USER_AGENT,
                             };
                             if (acceptLang) revalHeaders['Accept-Language'] = acceptLang;
                             if (hit.etag) revalHeaders['If-None-Match'] = hit.etag;
@@ -318,7 +344,7 @@ export class MarketplaceProxyPlugin implements Plugin {
                         // it to the cloud host. Forward only the
                         // identifying headers cloud might log.
                         'Accept': accept,
-                        'User-Agent': `objectos-marketplace-proxy/${MarketplaceProxyPlugin.prototype.version ?? '1.0.0'}`,
+                        'User-Agent': PROXY_USER_AGENT,
                     };
                     if (acceptLang) reqHeaders['Accept-Language'] = acceptLang;
                     const resp = await fetch(target, { method: 'GET', headers: reqHeaders });
