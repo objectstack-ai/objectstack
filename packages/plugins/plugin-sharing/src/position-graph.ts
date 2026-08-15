@@ -36,6 +36,16 @@ export interface PositionGraphOptions {
  *
  * All lookups elevate to a system context (assignments are platform
  * metadata); callers own their own authorization.
+ *
+ * ⚠️ A SECOND implementation of this question lives in `plugin-approvals`
+ * (`ApprovalService.expandPositionUsers`), and it is deliberately NOT identical
+ * — do not unify them without reading #8613 / #8710 first. Approval routing is
+ * an ADDRESSING path, so it reads the directory raw and applies no ADR-0091 D2
+ * window: dropping a lapsed holder there is fail-OPEN (a step routing to
+ * nobody). Note also that the `sys_position.active` gate for THIS path is not
+ * here either — it lives at the rule evaluator's call site
+ * (`positionConfersAccess` in `sharing-rule-service.ts`), which is where the
+ * same ruling put it.
  */
 export class PositionGraphService {
   private readonly engine: SharingEngine;
