@@ -15368,14 +15368,51 @@ export class ObjectStackProtocolImplementation implements
                 fromBody = byVersion.get(fromVersion) ?? null;
             }
         }
-        const diff = diffShallow(fromBody ?? {}, toBody ?? {});
+        // [#8671] Diff RAW, then redact the EMITTED values — maintainer ruling
+        // (comment 5299845282), Option B. The comparison runs on the stored
+        // bodies untouched, so a credential ROTATION still registers as a
+        // changed path; only the values leaving this function are taken from
+        // the type's redacted projection of those same bodies.
+        //
+        // ⛔ Redacting the bodies BEFORE `diffShallow` (Option A) was ruled out
+        // and must not be reintroduced as a simplification: two redacted bodies
+        // are equal at a redacted path, so the rotation would vanish into a
+        // no-diff — destroying the one fact this endpoint exists to serve.
+        //
+        // WHY SUBSTITUTION RATHER THAN PATH-MATCHING against `redactedKeys`:
+        // the two namings live on different planes. `diffShallow` is TOP-LEVEL
+        // (a nested change collapses to one entry at the top-level key, whose
+        // value is the whole sub-object), while `redactedKeys` is nested and
+        // dotted (`config.password`). So `redactedKeys.includes(entry.path)`
+        // would match NOTHING on the real leak — the leaking entry's path is
+        // `config`. Reading each emitted value out of the already-redacted body
+        // gets the nested case right for free and mints no second rule set:
+        // the redactor stays the single source of what a credential is.
+        const rawFrom = fromBody ?? {};
+        const rawTo = toBody ?? {};
+        const diff = diffShallow(rawFrom, rawTo);
+        let served = diff;
+        // Skipped entirely for the overwhelming majority of types, which register
+        // no redactor — `hasMetadataRedactor` is the seam that answers that
+        // without this call site having to know which types hold a secret.
+        if (hasMetadataRedactor(singularType)) {
+            const servedFrom = redactMetadataItem(singularType, rawFrom) as Record<string, unknown>;
+            const servedTo = redactMetadataItem(singularType, rawTo) as Record<string, unknown>;
+            // Both sides, and all three buckets: leaking either the old or the
+            // new value defeats the point (the ruling's second binding note).
+            served = {
+                added: diff.added.map((e) => ({ path: e.path, value: servedTo[e.path] })),
+                removed: diff.removed.map((e) => ({ path: e.path, value: servedFrom[e.path] })),
+                changed: diff.changed.map((e) => ({ path: e.path, from: servedFrom[e.path], to: servedTo[e.path] })),
+            };
+        }
         const _used = versions; void _used;
         return {
             type: request.type,
             name: request.name,
             fromVersion,
             toVersion,
-            ...diff,
+            ...served,
         };
     }
 
