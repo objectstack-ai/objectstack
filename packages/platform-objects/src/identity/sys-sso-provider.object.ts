@@ -99,7 +99,16 @@ export const SysSsoProvider = ObjectSchema.create({
         { name: 'clientSecret', label: 'Client Secret', type: 'text', required: true, helpText: 'OAuth client secret (stored encrypted by better-auth).' },
         { name: 'discoveryEndpoint', label: 'Discovery URL', type: 'text', required: false, helpText: 'Optional. OIDC discovery document URL. Leave blank to derive `<issuer>/.well-known/openid-configuration`.' },
         { name: 'scopes', label: 'Scopes', type: 'text', required: false, placeholder: 'openid email profile', helpText: 'Optional. Space- or comma-separated OAuth scopes. Defaults to "openid email profile".' },
-        { name: 'mapId', label: 'Map: User ID claim', type: 'text', required: false, placeholder: 'sub', helpText: 'Optional. ID-token claim mapped to the user ID. Defaults to "sub".' },
+        // No "Map: User ID claim" param here on purpose. `@better-auth/sso@1.7.0-rc.2`
+        // retired the capability: `oidcConfig.mapping` is a `z.strictObject` with no
+        // `id` member, the federated subject is hard-wired to the OIDC `sub` claim
+        // (`id: readStringClaim(rawUserInfo, "sub")` / `id: idToken.sub`), and
+        // `extraFields` is spread BEFORE `id` in the profile literal, so it is not an
+        // escape hatch either. Offering the field made the form promise a choice the
+        // runtime does not have — its only accepted values were "empty" and the `sub`
+        // it already defaults to, and anything else answers 400 (see the guard in
+        // plugin-auth `register-sso-provider.ts`, which stays as belt-and-braces for
+        // non-form callers). Removing it restores declared = enforced.
         { name: 'mapEmail', label: 'Map: Email claim', type: 'text', required: false, placeholder: 'email', helpText: 'Optional. Claim mapped to email. Defaults to "email".' },
         { name: 'mapName', label: 'Map: Name claim', type: 'text', required: false, placeholder: 'name', helpText: 'Optional. Claim mapped to display name. Defaults to "name".' },
       ],
