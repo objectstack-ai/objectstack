@@ -214,13 +214,41 @@ describe('sys_api_key is not org-walled (#8287)', () => {
     expect(apiKeyFields.has('organization_id')).toBe(false);
   });
 
+  /**
+   * [#8778] The stamp-only declaration must not move this object's Layer 0
+   * inputs. `security-plugin.ts` derives them from exactly two reads — the
+   * registered field set (`objectHasOrgIdField`) and
+   * `tenancy.enabled === false || systemFields.tenant === false`
+   * (`tenancyDisabled`) — and `tenancy.organizationField` feeds neither.
+   * Derived here against the REAL shipped object, same doctrine as the rest
+   * of this suite: a hand-written boolean and the object can drift, and this
+   * is the pair that must not.
+   */
+  const apiKeyTenancyDisabled =
+    (SysApiKey as { tenancy?: { enabled?: boolean } }).tenancy?.enabled === false ||
+    (SysApiKey as { systemFields?: { tenant?: boolean } }).systemFields?.tenant === false;
+
+  it('declares the stamp-only organizationField without acquiring the walling column (#8778)', () => {
+    // The declaration exists (the audit writer's input)…
+    expect((SysApiKey as any).tenancy?.organizationField).toBe('active_organization_id');
+    // …and it did not smuggle a wall in: the field set still has no
+    // `organization_id`, and the block states `enabled: false` explicitly.
+    expect(apiKeyFields.has('organization_id')).toBe(false);
+    expect((SysApiKey as any).tenancy?.enabled).toBe(false);
+  });
+
   for (const tenancyPosture of ['single', 'group', 'isolated'] as const) {
     it(`${tenancyPosture}: Layer 0 contributes nothing, so a key row stays visible to its owner`, () => {
       const filter = computeTenantLayer0Filter({
         ...base,
         tenancyPosture,
-        // Exactly what security-plugin.ts computes from the registered fields.
+        // Exactly what security-plugin.ts computes from the registered fields
+        // and the tenancy block — the REAL declaration, post-#8778, so this
+        // case is also the read-neutrality pin for `organizationField`: if the
+        // stamp-only key (or the `enabled: false` that must accompany it) ever
+        // started feeding the wall, this filter would stop being null.
         objectHasOrgIdField: apiKeyFields.has('organization_id'),
+        tenancyDisabled: apiKeyTenancyDisabled,
       });
       expect(filter).toBeNull();
     });

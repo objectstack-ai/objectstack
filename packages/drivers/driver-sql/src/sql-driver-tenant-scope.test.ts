@@ -510,3 +510,86 @@ describe('SqlDriver tenant scope (organization_id)', () => {
     });
   });
 });
+
+/**
+ * [#8778] `tenancy.organizationField` is STAMP-ONLY — the driver's tenant
+ * scoping must be blind to it. The key exists for the audit writer alone
+ * (which column says who a row is ABOUT); the wall keeps answering a different
+ * question (what the object is WALLED by) from `enabled` / `tenantField` /
+ * the `organization_id` column, exactly as before. These cases pin the two
+ * read paths the ruling names in this package — `applyTenantScope` (reads)
+ * and `injectTenantOnInsert` (writes) — against the declaration, in both the
+ * walled and the unwalled (`sys_api_key`-shaped) postures.
+ */
+describe('tenancy.organizationField is read-neutral in the driver (#8778)', () => {
+  let driver: SqlDriver;
+
+  beforeEach(async () => {
+    driver = new SqlDriver({
+      client: 'better-sqlite3',
+      connection: { filename: ':memory:' },
+      useNullAsDefault: true,
+    });
+    await driver.initObjects([
+      {
+        // A WALLED object that also declares the stamp-only key: scoping must
+        // keep running on `organization_id`, never on `about_org_id`.
+        name: 'ticket',
+        tenancy: { enabled: true, organizationField: 'about_org_id' },
+        fields: {
+          organization_id: { type: 'string' },
+          about_org_id: { type: 'string' },
+          name: { type: 'string' },
+        },
+      },
+      {
+        // The shipped sys_api_key shape: unwalled (`enabled: false`), stamp
+        // column under a deliberately different name, no `organization_id`.
+        name: 'api_key_like',
+        tenancy: { enabled: false, organizationField: 'active_organization_id' },
+        fields: {
+          active_organization_id: { type: 'string' },
+          name: { type: 'string' },
+          revoked: { type: 'boolean' },
+        },
+      },
+    ]);
+  });
+
+  afterEach(async () => {
+    await driver.disconnect();
+  });
+
+  it('applyTenantScope keeps walling by organization_id, not the stamp column', async () => {
+    // A row whose WALL column and STAMP column disagree is the discriminating
+    // fixture: if the driver ever read `organizationField`, org_b would see it.
+    await driver.create('ticket', { id: 't1', organization_id: 'org_a', about_org_id: 'org_b', name: 'T1' });
+    const asA = await driver.find('ticket', {}, { tenantId: 'org_a' });
+    const asB = await driver.find('ticket', {}, { tenantId: 'org_b' });
+    expect(asA.map((r) => r.id)).toEqual(['t1']);
+    expect(asB).toHaveLength(0);
+  });
+
+  it('injectTenantOnInsert stamps organization_id and NEVER the declared stamp column', async () => {
+    const created = await driver.create('ticket', { id: 't2', name: 'T2' }, { tenantId: 'org_a' });
+    expect(created.organization_id).toBe('org_a');
+    // The stamp-only column is the AUDIT WRITER's to fill from the record —
+    // driver injection writing it would fabricate "who this row is about".
+    expect(created.about_org_id ?? null).toBeNull();
+  });
+
+  it('the unwalled credential-table shape stays unwalled: reads unscoped, inserts uninjected', async () => {
+    // Pre-#8287-shaped row: no organization at all. Under any wall reading
+    // `active_organization_id` or resurrecting a scope, this row vanishes for
+    // its own owner — the defect #8287 removed and #8778 must not reintroduce.
+    await driver.create('api_key_like', { id: 'k0', name: 'legacy', revoked: false });
+    await driver.create('api_key_like', { id: 'k1', name: 'ci', active_organization_id: 'org_b', revoked: false });
+
+    const asA = await driver.find('api_key_like', {}, { tenantId: 'org_a' });
+    expect(asA.map((r) => r.id).sort()).toEqual(['k0', 'k1']);
+
+    const created = await driver.create('api_key_like', { id: 'k2', name: 'new' }, { tenantId: 'org_a' });
+    expect(created.active_organization_id ?? null).toBeNull();
+    expect('organization_id' in created).toBe(false);
+  });
+});

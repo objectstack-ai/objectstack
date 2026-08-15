@@ -1411,28 +1411,108 @@ describe('audit writers — the record\'s own organization stamps the row (#8707
     expect(stampOf(created).audit?.organization_id).not.toBe('org-parent');
   });
 
-  it('⛔ KNOWN GAP — `sys_api_key.active_organization_id` is still unreachable', async () => {
+  // ── `tenancy.organizationField` — the stamp-only declaration (#8778) ────
+  //
+  // The former ⛔ KNOWN GAP case lived here: it pinned that
+  // `sys_api_key.active_organization_id` was UNREACHABLE and stamped the
+  // ACTOR's org, and was written to go red the day a read-neutral, stamp-only
+  // declaration landed in `packages/spec`. That day is #8778 (maintainer-ruled
+  // option A): the cases below are its rewrite, expecting `org-key`.
+
+  it('stamps from a declared `tenancy.organizationField` — the #8707 repro, closed (#8778)', async () => {
+    const { engine, fire, created } = makeEngine(
+      {
+        ...MULTI_TENANT,
+        // As it really ships since #8287: no `organization_id` (better-auth
+        // managed tables get no injected system columns), and the org the key
+        // authenticates into under a deliberately different name.
+        sys_api_key: ['id', 'name', 'user_id', 'active_organization_id', 'revoked'],
+      },
+      // The shipped declaration shape (sys-api-key.object.ts): the credential
+      // table stays unwalled (`enabled: false` — `active_organization_id` is
+      // NOT a tenant-scope column and must never become one), while the
+      // stamp-only key routes the audit trail to the key's own organization.
+      // The declaration WINS over the ADR-0066 opt-out limb: an author who
+      // declares it on an unwalled object is stating exactly that the trail
+      // follows the record even though no wall does.
+      { sys_api_key: { tenancy: { enabled: false, organizationField: 'active_organization_id' } } },
+    );
+    installAuditWriters(engine as any, 'test.audit');
+
+    // The card's repro: revoking a key whose organization differs from the
+    // revoker's active one. The row now lands behind the wall of the KEY's
+    // organization — where the tenant admin who can act on it reads it — not
+    // the revoker's.
+    await fire('afterUpdate', {
+      object: 'sys_api_key',
+      input: { id: 'key-1' },
+      previous: { id: 'key-1', name: 'ci', active_organization_id: 'org-key', revoked: false },
+      result: { id: 'key-1', name: 'ci', active_organization_id: 'org-key', revoked: true },
+      session: { tenantId: 'org-actor', userId: 'user-1' },
+    });
+
+    expect(stampOf(created).audit?.organization_id).toBe('org-key');
+  });
+
+  it('honours `organizationField` only when the field exists (#5315 guard), falling through intact', async () => {
+    // A declared stamp column the object does not have must fall through to
+    // the rest of the precedence — the same guard `tenantField` carries — and
+    // for an `enabled: false` object the fall-through is the ADR-0066 limb:
+    // actor's org, exactly the pre-declaration behaviour.
+    const { engine, fire, created } = makeEngine(
+      {
+        ...MULTI_TENANT,
+        sys_api_key: ['id', 'name', 'user_id', 'revoked'],
+      },
+      { sys_api_key: { tenancy: { enabled: false, organizationField: 'active_organization_id' } } },
+    );
+    installAuditWriters(engine as any, 'test.audit');
+
+    await fire('afterUpdate', {
+      object: 'sys_api_key',
+      input: { id: 'key-1' },
+      previous: { id: 'key-1', name: 'ci', revoked: false },
+      result: { id: 'key-1', name: 'ci', revoked: true },
+      session: { tenantId: 'org-actor', userId: 'user-1' },
+    });
+
+    expect(stampOf(created).audit?.organization_id).toBe('org-actor');
+  });
+
+  it('`organizationField` outranks `tenantField` — "who is this row about" beats "what walls it"', async () => {
+    // On an object declaring both, the stamp-only key is the more specific
+    // answer to the stamping question. (No shipped object declares both; this
+    // pins the precedence so the day one does is not a coin flip.)
+    const { engine, fire, created } = makeEngine(
+      { ...MULTI_TENANT, crm_lead: ['id', 'name', 'workspace_id', 'about_org_id'] },
+      {
+        crm_lead: {
+          tenancy: { enabled: true, tenantField: 'workspace_id', organizationField: 'about_org_id' },
+        },
+      },
+    );
+    installAuditWriters(engine as any, 'test.audit');
+
+    await fire('afterInsert', {
+      object: 'crm_lead',
+      input: { id: 'lead-1' },
+      result: { id: 'lead-1', name: 'Acme', workspace_id: 'ws-1', about_org_id: 'org-about' },
+      session: { tenantId: 'org-actor', userId: 'user-1' },
+    });
+
+    expect(stampOf(created).audit?.organization_id).toBe('org-about');
+  });
+
+  it('control: without the declaration the credential table still stamps the actor\'s org', async () => {
+    // The pre-#8778 shape (no `tenancy` block at all). This is what the old
+    // KNOWN GAP case pinned; kept as the control proving the new stamp comes
+    // from the DECLARATION, not from a hidden heuristic over the column name.
     const { engine, fire, created } = makeEngine({
       ...MULTI_TENANT,
-      // As it really ships since #8287: no `organization_id` (better-auth
-      // managed tables get no injected system columns), and the org the key
-      // authenticates into under a deliberately different name.
       sys_api_key: ['id', 'name', 'user_id', 'active_organization_id', 'revoked'],
     });
     installAuditWriters(engine as any, 'test.audit');
 
-    // The card's repro: revoking a key whose organization differs from the
-    // revoker's active one. The precedence above is now correct, but the column
-    // is not resolvable — `active_organization_id` is NOT this object's
-    // tenant-scope column and must not be declared as one (`tenancy.tenantField`
-    // feeds `applyTenantScope` / `injectTenantOnInsert`, so declaring it would
-    // wall the credential table on an equality that excludes NULL and make
-    // pre-#8287 keys vanish from their own owner's list — the defect #8287
-    // exists to have removed).
-    //
-    // ⚠️ This case pins the REMAINING HALF of #8707, not a decision. It must go
-    // red — and be rewritten to expect `org-key` — on the day a read-neutral,
-    // stamp-only organization declaration lands in `packages/spec`.
     await fire('afterUpdate', {
       object: 'sys_api_key',
       input: { id: 'key-1' },

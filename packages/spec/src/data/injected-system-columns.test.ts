@@ -80,6 +80,32 @@ describe('resolveInjectedSystemColumns (#5378)', () => {
     }
   });
 
+  it('is blind to the stamp-only `tenancy.organizationField` (#8778 read-neutrality)', () => {
+    // The #8778 ruling's scope pin: `organizationField` is consulted by audit
+    // stamping ONLY. The injection plan must reach the same verdicts with and
+    // without it — on a plain tenant object, and on the shipped sys_api_key
+    // shape (better-auth managed + `enabled: false`), where the plan's
+    // better-auth bail must keep running BEFORE tenancy is read at all.
+    const withKey = resolveInjectedSystemColumns({
+      ...business,
+      tenancy: { enabled: true, organizationField: 'about_org_id' },
+    });
+    expect(withKey).toMatchObject(
+      // Same verdicts as the bare business object — the key changed nothing.
+      { tenant: true, audit: true, owner: true, owningBusinessUnit: true },
+    );
+    expect(withKey.names.has('about_org_id')).toBe(false);
+
+    const apiKeyShape = resolveInjectedSystemColumns({
+      name: 'sys_api_key',
+      managedBy: 'better-auth',
+      tenancy: { enabled: false, organizationField: 'active_organization_id' },
+      fields: {},
+    });
+    expect(apiKeyShape).toMatchObject({ tenant: false, audit: false, owner: false, owningBusinessUnit: false });
+    expect([...apiKeyShape.names]).toEqual(['id']);
+  });
+
   it('withholds the audit family for systemFields.audit: false', () => {
     const plan = resolveInjectedSystemColumns({ ...business, systemFields: { audit: false } });
     expect(plan.audit).toBe(false);
