@@ -73,6 +73,42 @@
  * and `expected a refusal, got success` (C — the locked publish went through).
  * Captured output is quoted in the PR body.
  *
+ * ── [#8819] Group D — the same lock, one verb over ─────────────────────────
+ *
+ * `rollbackMetaItem` was the EIGHTH `/meta` entry point and the last one still
+ * deriving its type key from `PLURAL_TO_SINGULAR`. Group C's seam exactly, on
+ * the verb that restores a body FROM HISTORY rather than promoting a draft — so
+ * what a missed lock costs there is the active body silently REVERTING, which is
+ * why the group carries its own "protected body unchanged" assertion instead of
+ * inheriting C's.
+ *
+ * The ablation marker moves with the call count for the same reason as above:
+ * `grep -o canonicalizeMetaRequestType dist/index.js | wc -l` is **9** with this
+ * fold (one definition + eight call sites) and **8** without it.
+ *
+ * ⚠️ Ablate against an IMMOVABLE SHA, not `origin/main`. Every worktree shares
+ * one `.git`, so `origin/main` advances under a running task: the first attempt
+ * here checked out a `protocol.ts` newer than this worktree's `spec` and died on
+ * `has no exported member 'unrecognisedMetaTypeRefusal'` — a contaminated
+ * measurement that could as easily have produced a plausible wrong number as a
+ * loud error. `git checkout <baseline-sha> -- <path>` is the form that measures
+ * what it claims to.
+ *
+ *   with the fix                    without it (baseline fd6bdf89f)
+ *   ----------------------------    ------------------------------------------
+ *   D canonical control     403     403, unchanged                      → GREEN
+ *   D plural, locked        403     200, active body reverted to `v1`   → RED
+ *   D positive control      200     200 — the restore still works; red
+ *                                   only on the receipt spelling        → RED
+ *
+ * Predicted 2 red / 8 green; measured 2 red / 8 green, and — the part worth
+ * recording — the two reds are red for DIFFERENT reasons, both predicted before
+ * the run: `expected a refusal, got success` (the locked rollback went through)
+ * and `expected 'Reverted to version 1 — type=views, n…' to contain
+ * 'type=view,'` (the restore itself succeeded; only the receipt still named the
+ * caller's spelling). A single-reason prediction would have been wrong here even
+ * though the count would have matched.
+ *
  * ── Why a REAL engine and not an engine double ─────────────────────────────
  *
  * The thing under test is which type key the protocol derives before the
