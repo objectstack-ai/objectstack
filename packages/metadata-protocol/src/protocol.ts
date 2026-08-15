@@ -11318,9 +11318,10 @@ export class ObjectStackProtocolImplementation implements
      *
      * The store — not the caller — is what says the namespace exists, so the
      * exemption cannot be claimed by a request: the probe runs only once the
-     * static verdict has already fired (never on the ordinary save path), and
-     * a store that cannot answer refuses, because a fresh deployment has no
-     * residue to protect.
+     * static verdict has already fired, never on the ordinary save path. An
+     * unprovisioned store counts as "no rows" and the refusal stands; any other
+     * read failure propagates as a 503 rather than being invented into an
+     * existence claim (see {@link metaTypeNamespaceExists}).
      */
     private async refuseUnmintableMetaType(request: { type: string, name: string }): Promise<void> {
         const unrecognised = unrecognisedMetaTypeRefusal(request.type);
@@ -11351,16 +11352,23 @@ export class ObjectStackProtocolImplementation implements
      * NAMESPACE exists, and a residue row is exactly as real in a draft or in
      * another org's overlay as it is here.
      *
-     * A store that cannot answer counts as "no" — the refusal stands. A fresh
-     * deployment has no residue to protect, and a table that is not provisioned
-     * yet is the state in which the card's own defect (minting the first row of
-     * a namespace nothing serves) is at its most reachable.
+     * An UNPROVISIONED store counts as "no" and the refusal stands — a
+     * deployment whose `sys_metadata` table does not exist yet has no residue to
+     * protect, and is the state in which this card's own defect (minting the
+     * first row of a namespace nothing serves) is at its most reachable. Any
+     * OTHER read failure propagates as `503 SERVICE_UNAVAILABLE`
+     * ({@link rethrowUnlessMetadataStoreUnprovisioned}): inventing "no rows"
+     * from an outage would answer `400 '<type>' is not a metadata type` — an
+     * existence claim about the store, stated while the store was unreachable —
+     * for a write that may be perfectly legal (AGENTS.md "Absence must be loud",
+     * #5186).
      */
     private async metaTypeNamespaceExists(type: string): Promise<boolean> {
         try {
             const row = await this.engine.findOne('sys_metadata', { where: { type } });
             return row != null;
-        } catch {
+        } catch (error) {
+            this.rethrowUnlessMetadataStoreUnprovisioned(error);
             return false;
         }
     }
