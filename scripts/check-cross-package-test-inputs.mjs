@@ -258,6 +258,7 @@ const PATH_ARG_READS = ['readFileSync', 'readdirSync', 'statSync', 'lstatSync', 
 export const RECOGNISED_PATH_SPELLINGS = [
   "const HERE = dirname(fileURLToPath(import.meta.url));   // seed (ESM)",
   'const HERE = __dirname;                                  // seed (CJS)',
+  'const HERE = import.meta.dirname;       // and dirname(import.meta.filename)',
   "const P = resolve(HERE, '<rel>');       // join() and the path.* forms too",
   "const P = fileURLToPath(new URL('<rel>', import.meta.url));",
   "const P = new URL('<rel>', import.meta.url);",
@@ -368,6 +369,13 @@ function pathExpression(expr, hereDepth, known) {
     return { end: hereDepth, min: hereDepth, vendored: false };
   }
   if (expr === '__dirname') return { end: hereDepth, min: hereDepth, vendored: false };
+  // `import.meta.dirname` / `.filename` (Node >= 20.11) are the modern spelling of
+  // the two seeds above. No test uses them TODAY — which is the reason to accept
+  // them now: the first author who reaches for them would otherwise get silence.
+  if (expr === 'import.meta.dirname') return { end: hereDepth, min: hereDepth, vendored: false };
+  if (/^(?:path\.)?dirname\(\s*import\.meta\.filename\s*\)$/.test(expr)) {
+    return { end: hereDepth, min: hereDepth, vendored: false };
+  }
 
   // A `new URL(rel, import.meta.url)` resolves against the importing FILE, so
   // its base is the file's directory — the same base as the two seeds above.
@@ -768,6 +776,18 @@ function selfTest() {
   ok(
     'does NOT flag a read argument that is an unrecognised expression',
     !at('const SRC = readFileSync(somewhereElse(x), \'utf8\');', 2),
+  );
+  ok(
+    'flags an import.meta.dirname seed (no file uses it yet — that is the point)',
+    at("const HERE = import.meta.dirname;\nconst SRC = resolve(HERE, '../../other-pkg/src/x.ts');", 1),
+  );
+  ok(
+    'flags a dirname(import.meta.filename) seed',
+    at("const HERE = dirname(import.meta.filename);\nconst SRC = resolve(HERE, '../../other-pkg/src/x.ts');", 1),
+  );
+  ok(
+    'does NOT flag an import.meta.dirname seed that stays inside the package',
+    !at("const HERE = import.meta.dirname;\nconst FIX = resolve(HERE, '../fixtures');", 2),
   );
 
   const failed = cases.filter((c) => !c.cond);
