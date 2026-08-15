@@ -13,16 +13,15 @@ readable by everyone in the tenant. Alongside that, `agent.tools[]`, the
 GraphQL surface, the `ObjectStackProtocol` alias, and a long tail of
 parsed-but-never-enforced spec clusters are removed rather than maintained.
 
-> **Release status: development is complete and the train is preparing to
-> ship.** The latest published pre-release is **17.0.0-rc.6** (cut 2026-08-10);
-> one window of 374 changesets is still open on `main` and rolls into the cut
-> that exits pre-mode. Until `changeset pre exit`, the 17.0.0 train ships
-> through Changesets **pre-mode**, so it publishes as `17.0.0-rc.N` and nothing
-> reaches the `latest` tag. Section headings say 17.0.0 for brevity. Caret ranges on
-> `^16.x` hold at 16.x until you opt in, which is the reason this train is a
-> major at all: its breaking density (the `ApiMethod` shrink, the GraphQL
-> removal, the ADR-0104 write cutover, the dead-cluster retirements) is too high
-> to auto-upgrade `^16.x` consumers into on their next install.
+> **Release status: 17.0.0 is released.** It was published to the `latest` tag
+> on 2026-08-14, closing a train that ran through `17.0.0-rc.0` … `rc.6` (the
+> last of them cut 2026-08-10). `changeset pre exit` ran with the cut, so the
+> `@objectstack/*` packages no longer publish as `17.0.0-rc.N` and a plain
+> install resolves 17.0.0. Caret ranges on `^16.x` hold at 16.x until you opt
+> in, which is the reason this train is a major at all: its breaking density
+> (the `ApiMethod` shrink, the GraphQL removal, the ADR-0104 write cutover, the
+> dead-cluster retirements) is too high to auto-upgrade `^16.x` consumers into
+> on their next install.
 
 ## Highlights — 17.0.0
 
@@ -2063,8 +2062,8 @@ move is reported under the *Landed since* window that shipped it — never
 folded into an earlier window's range — so the chain reads end to end:
 `4a4829d0ef39 → 7d9734d5e321` here (released as `rc.1`), `→ f5bc4c78be76`
 under *rc.1* (`rc.2`), `→ f995a452d2ca` under *rc.2* (`rc.4`),
-`→ 7dfbeb704e1e` under *rc.4* (`rc.5`), and `→ 0cf8f0f70d10` under *rc.5*,
-which is still open. The two author-facing breaking migrations the bundle
+`→ 7dfbeb704e1e` under *rc.4* (`rc.5`), and `→ 0cf8f0f70d10` under *rc.5*
+(`rc.6`). The two author-facing breaking migrations the bundle
 carries (objectui#3233, objectui#3172) arrived with `f995a452d2ca` and are
 documented under *Breaking changes & migration* above.
 
@@ -2849,12 +2848,14 @@ changeset of their own.
 
 ## Landed since 17.0.0-rc.6
 
-This window is **open**, and it is the last one: v17 development is complete,
-so these changes roll into the cut that exits Changesets pre-mode and publishes
-**17.0.0** on `latest`. Measured from the changesets added since the `rc.6`
-version commit: **374 pending — 11 `major`-class, 99 `minor`, 264 `patch`**,
-and none that release nothing. These numbers move until the cut; once it lands
-the package changelogs are authoritative.
+These changes are on `main` after the `rc.6` cut and **ship in 17.0.0** — the
+last window of the train, released by the cut that exited Changesets pre-mode
+and published to `latest` on 2026-08-14. The cut released **375 changesets — 11
+`major`-class, 99 `minor`, 265 `patch`**, and none that release nothing, making
+it the train's second-largest round behind `rc.6`'s 425 and ahead of `rc.4`'s
+360. The window was still open when the entries below were first written
+against 374 pending changesets; the one landing between that draft and the cut
+is called out under *Metadata, packages & authoring gates*.
 
 As in the windows above, landings that belong to a section higher up the page
 are documented **there** rather than repeated here.
@@ -3119,6 +3120,20 @@ Beyond the credential doors above:
   artifact-backed field PUT is refused rather than accepted 200 — and an
   object's overlay row is treated as a base layer, not its resolved schema
   (#8027).
+- **A tenant's own rename beats a package extension's scalar** (#8620,
+  ADR-0029 D9.2a) — the one landing between this section's draft and the cut.
+  `mergeObjectDefinitions` applied an `objectExtensions` entry's `label` /
+  `pluralLabel` / `description` last, onto whatever base it was handed — and
+  D9.2 makes the tenant's overlay that base. So a rename saved through Studio
+  answered 200, was visible under `?layers=true`, and was overwritten inside
+  the fold before any read served it. An extender's scalar now applies only
+  while the fold's base still carries the packaged owner's value; a base that
+  has diverged was authored by the tenant, and the extender yields. It is the
+  comparison-based mechanism #8284 established for the i18n catalog one layer
+  up — the same predicate, now exported from `@objectstack/spec` and imported
+  by the registry rather than re-spelled — so one rule covers both layers. No
+  provenance flags and no migration: the question is answered from two values
+  at fold time.
 - **`OS_METADATA_WRITABLE` no longer unlocks a write into a read-only package**
   (#8146), and the metadata write refusal stops depending on deployment
   topology (#8184) while reporting the package door it hit —
@@ -3213,8 +3228,9 @@ Beyond the credential doors above:
 
 ### New in Console — bundled objectui advanced `0cf8f0f70d10 → 665661ab0932`
 
-**Three pin moves** in this window, not yet released — the enumerations are
-`console-6314e87f2d49`, `console-6d77acfe3125` and `console-665661ab0932`:
+**Three pin moves**, released as **@objectstack/console 17.0.0** — the
+enumerations are `console-6314e87f2d49`, `console-6d77acfe3125` and
+`console-665661ab0932`:
 
 | Range | objectui commits | changesets releasing |
 | :-- | --: | --: |
