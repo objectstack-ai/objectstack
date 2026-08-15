@@ -9,6 +9,10 @@ import { SharingService } from './sharing-service.js';
 import { SharingRuleService } from './sharing-rule-service.js';
 import { TeamGraphService, expandPrincipal } from './team-graph.js';
 import { BusinessUnitGraphService } from './business-unit-graph.js';
+// [#8710] The ADDRESSING primitive, imported so the negative half of the
+// ruling can be pinned in the same suite as the positive half: the filter
+// belongs to the sharing CALL SITE, never to the expansion helper.
+import { PositionGraphService } from './position-graph.js';
 import { celToFilter } from './bootstrap-declared-sharing-rules.js';
 import { isMatchAllCriteria } from './rule-criteria.js';
 import { bindRuleCriteriaGuard } from './rule-hooks.js';
@@ -1696,5 +1700,211 @@ describe('[#8158] a non-system caller with NO organization does not get the syst
     await expect(rules.listRules({}, ORG2_ADMIN)).resolves.toBeTruthy();
     expect((await rules.getRule(org2RuleId, ORG2_ADMIN))?.name).toBe('org2_rule');
     expect((await rules.evaluateRule(org2RuleId, ORG2_ADMIN)).ruleId).toBe(org2RuleId);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #8710 — a DEACTIVATED `sys_position` confers no sharing-rule shares
+//
+// Maintainer ruling, 2026-08-15, the recitable line:
+//
+//   > Access-conferring paths filter deactivated positions; addressing paths
+//   > do not.
+//
+// #8613 enforced `sys_position.active` at the authorization DERIVATION seam
+// (`resolveAuthzContext`), where a deactivated position stops carrying its
+// permission sets. A sharing rule reaches users by a second road that never
+// passes that seam — `expandRecipient` → `PositionGraphService` — so a rule
+// sharing records with `cfo` kept sharing them after `cfo` was deactivated,
+// while the `deactivate_position` dialog promises, unqualified, that "the
+// position stops granting permissions until re-activated". A record share is
+// access, so the promise covers it.
+//
+// The tests below pin BOTH directions the ruling names, because the boundary
+// is the part most easily lost in a later refactor:
+//
+//   ① access-conferring — the sharing call site drops a deactivated position;
+//   ② addressing — `PositionGraphService.expandPositionUsers` stays a RAW
+//     directory read. Approval ROUTING (plugin-approvals' own expansion) and
+//     the write gates / blast-radius reads in plugin-security are the
+//     addressing consumers the ruling deliberately leaves unfiltered:
+//     filtering an approval step is fail-OPEN (it routes to nobody) and
+//     filtering a write gate is access-WIDENING (a refused binding becomes
+//     permitted). Moving this filter down into the helper would take those
+//     with it — which is exactly what the pin in ② fails on.
+// ---------------------------------------------------------------------------
+describe('#8710 — a deactivated sys_position confers no sharing-rule shares', () => {
+  let engine: ReturnType<typeof makeEngine>;
+  let sharing: SharingService;
+  let rules: SharingRuleService;
+  const SYS = { isSystem: true, organizationId: 'org1' } as any;
+
+  const RULE = {
+    name: 'cfo_won_deals', label: 'CFO — won deals', object: 'opportunity',
+    criteria: { stage: 'won' },
+    recipientType: 'position' as const, recipientId: 'cfo', accessLevel: 'read' as const,
+  };
+
+  /** Who currently holds a rule-materialised share, sorted. */
+  const shareRecipients = () =>
+    (engine._tables.sys_record_share ?? []).map((r: Row) => String(r.recipient_id)).sort();
+
+  /** The catalogue row for `cfo` in org1 — the flag under test. */
+  const cfoRow = () => (engine._tables.sys_position ?? []).find((r: Row) => r.id === 'pos_cfo')!;
+
+  beforeEach(() => {
+    engine = makeEngine();
+    engine._tables.opportunity = [
+      { id: 'opp1', stage: 'won' },
+      { id: 'opp2', stage: 'lost' },
+    ];
+    // Holders come from the platform assignment table (ADR-0057 D4).
+    engine._tables.sys_user_position = [
+      { id: 'up1', position: 'cfo', user_id: 'u_cfo', organization_id: 'org1' },
+    ];
+    engine._tables.sys_member = [];
+    engine._tables.sys_position = [
+      { id: 'pos_cfo', name: 'cfo', organization_id: 'org1', active: true },
+    ];
+    sharing = new SharingService({ engine: engine as any });
+    rules = new SharingRuleService({ engine: engine as any, sharing });
+  });
+
+  // ── ① the change: an access-conferring path stops at a deactivated row ──
+
+  it('shares nothing once the position is deactivated', async () => {
+    cfoRow().active = false;
+    const rule = await rules.defineRule(RULE, SYS);
+    const res = await rules.evaluateRule(rule.id, SYS);
+    expect(res.expandedUsers).toBe(0);
+    expect(res.grantsCreated).toBe(0);
+    expect(shareRecipients()).toEqual([]);
+  });
+
+  it('REVOKES the shares it already materialised when the position is deactivated', async () => {
+    // Deactivation has to retract, not merely stop granting: the admin's
+    // mental model is "the position stops granting permissions", and a share
+    // that survives until the next authoring edit is the leak in slow motion.
+    const rule = await rules.defineRule(RULE, SYS);
+    expect((await rules.evaluateRule(rule.id, SYS)).grantsCreated).toBe(1);
+    expect(shareRecipients()).toEqual(['u_cfo']);
+
+    cfoRow().active = false;
+    const res = await rules.evaluateRule(rule.id, SYS);
+    expect(res.grantsRevoked).toBe(1);
+    expect(shareRecipients()).toEqual([]);
+  });
+
+  it('retires the recipient on the synchronous withdrawal path too', async () => {
+    // `revokeRuleGrantsForRetiredRecipients` (#7729) is the recipient-axis
+    // revoke the write path runs synchronously — it expands the recipient
+    // through the same seam, so the deactivation must land there as well.
+    const rule = await rules.defineRule(RULE, SYS);
+    await rules.evaluateRule(rule.id, SYS);
+    expect(shareRecipients()).toEqual(['u_cfo']);
+
+    cfoRow().active = false;
+    expect(await rules.revokeRuleGrantsForRetiredRecipients(await rules.getRule(rule.id, SYS) as any)).toBe(1);
+    expect(shareRecipients()).toEqual([]);
+  });
+
+  it('reads "deactivated" with the SHARED predicate — every driver spelling of false', async () => {
+    // `isRowActive` (@objectstack/core) is the one definition of activeness
+    // #8613 established; SQLite hands back 1/0 and a JSON column can hand back
+    // 'false', so `row.active === false` would miss the deactivated row on the
+    // primary driver. Two notions of "is this row active" is how this class of
+    // defect gets made — hence the shared predicate, pinned here by its own
+    // stored spellings.
+    for (const stored of [false, 0, '0', 'false']) {
+      engine._tables.sys_record_share = [];
+      engine._tables.sys_sharing_rule = [];
+      cfoRow().active = stored;
+      const rule = await rules.defineRule(RULE, SYS);
+      expect(await rules.evaluateRule(rule.id, SYS), `active=${JSON.stringify(stored)}`)
+        .toMatchObject({ expandedUsers: 0, grantsCreated: 0 });
+      expect(shareRecipients(), `active=${JSON.stringify(stored)}`).toEqual([]);
+    }
+  });
+
+  // ── ② the anti-vacuity + fail-open controls: what must NOT change ──────
+
+  it('an ACTIVE position shares exactly as before', async () => {
+    const rule = await rules.defineRule(RULE, SYS);
+    expect(await rules.evaluateRule(rule.id, SYS)).toMatchObject({ expandedUsers: 1, grantsCreated: 1 });
+    expect(shareRecipients()).toEqual(['u_cfo']);
+  });
+
+  it('an ABSENT `active` column still grants — absent means active, never a mass revocation', async () => {
+    // Rows predating the column, arriving through a migration, or projected
+    // without it carry no value at all. Requiring `true` would revoke every
+    // such rule's shares the day this lands (row-active.ts, reason 1).
+    delete (cfoRow() as any).active;
+    const rule = await rules.defineRule(RULE, SYS);
+    expect(await rules.evaluateRule(rule.id, SYS)).toMatchObject({ expandedUsers: 1, grantsCreated: 1 });
+    expect(shareRecipients()).toEqual(['u_cfo']);
+  });
+
+  it('a name with NO catalogue row at all still grants — there is no flag to read', async () => {
+    // The membership-derived names (`sys_member.role`, ADR-0057 D4's
+    // transition source) have no `sys_position` row, and #8613 leaves exactly
+    // those untouched. `isRowActive(undefined)` is FALSE, so a fix that piped
+    // "no row" straight into the predicate would silently revoke every
+    // membership-derived position share.
+    engine._tables.sys_position = [];
+    engine._tables.sys_member = [{ id: 'm1', organization_id: 'org1', user_id: 'u_role', role: 'cfo' }];
+    const rule = await rules.defineRule(RULE, SYS);
+    expect(await rules.evaluateRule(rule.id, SYS)).toMatchObject({ grantsCreated: 2 });
+    expect(shareRecipients()).toEqual(['u_cfo', 'u_role']);
+  });
+
+  it('another org deactivating the SAME name does not stop this org\'s shares', async () => {
+    // `sys_position.name` is unique per ORGANIZATION (#8468), so two tenants
+    // legitimately hold a `cfo` row. Reading the flag off the wrong tenant's
+    // row would export one admin's deactivation into every other tenant.
+    engine._tables.sys_position.push({ id: 'pos_cfo_org2', name: 'cfo', organization_id: 'org2', active: false });
+    const rule = await rules.defineRule(RULE, SYS);
+    expect(await rules.evaluateRule(rule.id, SYS)).toMatchObject({ expandedUsers: 1, grantsCreated: 1 });
+    expect(shareRecipients()).toEqual(['u_cfo']);
+  });
+
+  it('the ADDRESSING primitive stays a RAW directory read — the filter is the call site\'s', async () => {
+    // ⛔ The load-bearing negative pin. `PositionGraphService` answers "who
+    // holds position P" for every consumer of the graph; approval ROUTING and
+    // the plugin-security write gates read that answer and MUST keep seeing
+    // the deactivated position's holders (filtering there is fail-open /
+    // access-widening respectively, #8613's carve-outs, reaffirmed by the
+    // 2026-08-15 ruling). An ablation that moves this PR's filter down into
+    // `expandPositionUsers` turns this red.
+    cfoRow().active = false;
+    const graph = new PositionGraphService({ engine: engine as any, organizationId: 'org1' });
+    expect(await graph.expandPositionUsers('cfo')).toEqual(['u_cfo']);
+  });
+
+  // ── the cache: one read per position per pass, and never one pass longer ──
+
+  it('reads the catalogue once per position per evaluator pass, and re-reads on the next', async () => {
+    // The ruling accepts the extra read but asks for it cached per evaluator
+    // pass. Both halves are the assertion: within one pass two rules naming
+    // the same position pay one read; ACROSS passes the verdict is re-read, or
+    // a deactivation would take effect late — its own defect.
+    const find = engine.find.bind(engine);
+    let catalogueReads = 0;
+    (engine as any).find = async (object: string, opts?: any) => {
+      if (object === 'sys_position') catalogueReads += 1;
+      return find(object, opts);
+    };
+    await rules.defineRule(RULE, SYS);
+    await rules.defineRule({ ...RULE, name: 'cfo_won_deals_2', label: 'CFO — won deals (2)' }, SYS);
+
+    await rules.evaluateAllForRecord('opportunity', 'opp1', SYS);
+    expect(catalogueReads).toBe(1);
+    // One share row, not two: `grant` upserts per (record, recipient), so the
+    // second rule re-grants the row the first one created.
+    expect(shareRecipients()).toEqual(['u_cfo']);
+
+    cfoRow().active = false;
+    await rules.evaluateAllForRecord('opportunity', 'opp1', SYS);
+    expect(catalogueReads).toBe(2);
+    expect(shareRecipients()).toEqual([]);
   });
 });
