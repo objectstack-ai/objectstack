@@ -234,41 +234,50 @@ describe('#8798 — a history-table outage now answers the same way for every ty
      * by whether the type happened to pass an authorization gate that has
      * nothing to do with reading history.
      *
-     * These pins do not endorse swallowing the outage — that `catch` predates
-     * this card and is filed as #8833. They pin that the answer no longer
-     * depends on the type.
+     * ## [#8833] What these two pins assert now, and why they changed
+     *
+     * They used to assert that BOTH types fall through to an EMPTY DIFF, with a
+     * note saying they did not endorse swallowing the outage because that was
+     * #8833's question. #8833 has since been ruled (maintainer, 2026-08-15,
+     * comment 5302933802): the swallow was the defect, and a non-benign read
+     * failure now propagates a 503 through
+     * `rethrowUnlessMetadataStoreUnprovisioned`.
+     *
+     * So the ASSERTED VALUE moved while this describe block's SUBJECT did not.
+     * The subject was never "an outage is empty" — it is "one outage, one
+     * answer, not an answer decided by the type", and that is what both arms
+     * still pin. `makeStubEngine`'s `throwOnHistory` throws a generic
+     * `Error('history table unavailable (simulated outage)')`, which
+     * `isMissingTableError` does NOT classify as benign, so it is a genuine
+     * outage under the new rule. The benign case (a table that was never
+     * provisioned) has its own positive control next door, in
+     * `protocol.diff-canonical-type-and-history-outage.test.ts`.
      */
-    it('gated-open type falls through to an empty diff instead of throwing', async () => {
+    it('gated-open type propagates the outage as a 503 instead of an empty diff', async () => {
         const { engine, tables } = makeStubEngine({ throwOnHistory: true });
         seedTwoVersions(tables, ORDINARY_TYPE, 'grid');
         const protocol = new ObjectStackProtocolImplementation(engine);
 
-        const res: any = await protocol.diffMetaItem({
-            type: ORDINARY_TYPE,
-            name: 'grid',
-            fromVersion: 1,
-            toVersion: 2,
-        });
+        const err: any = await protocol
+            .diffMetaItem({ type: ORDINARY_TYPE, name: 'grid', fromVersion: 1, toVersion: 2 })
+            .then(() => null, (e: unknown) => e);
 
-        expect(res.added).toEqual([]);
-        expect(res.removed).toEqual([]);
-        expect(res.changed).toEqual([]);
+        expect(err).toBeInstanceOf(Error);
+        expect(err.code).toBe('SERVICE_UNAVAILABLE');
+        expect(err.status).toBe(503);
     });
 
-    it('gated-shut type answers identically — unchanged by #8798', async () => {
+    it('gated-shut type answers identically — the answer still does not depend on the type', async () => {
         const { engine, tables } = makeStubEngine({ throwOnHistory: true });
         seedTwoVersions(tables, EARLY_RETURN_TYPE, 'my_field');
         const protocol = new ObjectStackProtocolImplementation(engine);
 
-        const res: any = await protocol.diffMetaItem({
-            type: EARLY_RETURN_TYPE,
-            name: 'my_field',
-            fromVersion: 1,
-            toVersion: 2,
-        });
+        const err: any = await protocol
+            .diffMetaItem({ type: EARLY_RETURN_TYPE, name: 'my_field', fromVersion: 1, toVersion: 2 })
+            .then(() => null, (e: unknown) => e);
 
-        expect(res.added).toEqual([]);
-        expect(res.removed).toEqual([]);
-        expect(res.changed).toEqual([]);
+        expect(err).toBeInstanceOf(Error);
+        expect(err.code).toBe('SERVICE_UNAVAILABLE');
+        expect(err.status).toBe(503);
     });
 });
