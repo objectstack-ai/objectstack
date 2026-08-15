@@ -495,7 +495,13 @@ describe('authoring-rule registry wiring (#4409)', () => {
       // for `view`. Flipping the family back to CLI-only is a legal edit that
       // must go through this line rather than around it.
       expect(wired.map((e) => e.name)).toEqual(FAMILY);
-      expect(runtimeAuthoringRulesFor('view').map((r) => r.name)).toEqual(FAMILY);
+      // `view` writes also dispatch `validatePresetComparands` (#8793) — a
+      // different judgement (filter comparands, not predicates), registered
+      // ahead of the family, so it is named here rather than folded into it.
+      expect(runtimeAuthoringRulesFor('view').map((r) => r.name)).toEqual([
+        'validatePresetComparands',
+        ...FAMILY,
+      ]);
     });
   });
 
