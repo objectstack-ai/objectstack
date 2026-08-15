@@ -75,8 +75,29 @@ const BODY_V3 = {
     config: { host: 'db.internal', username: 'reporting', password: PW_V3, url: URL_V3 },
 };
 
+/**
+ * Scalar equality only — and it REFUSES anything else rather than guessing.
+ *
+ * The two readers this double serves issue flat filters: `diffMetaItem` queries
+ * `sys_metadata_history` by `{ organization_id, type, name }`, and
+ * `SysMetadataRepository.history` by the same three. No combinator ever arrives.
+ *
+ * The `throw` is the point (`check:where-matcher`). Treating a `$or` / `$and`
+ * key as an ordinary column name is the gate's shape (b): `r.$or` is
+ * `undefined`, the comparison fails, the row is silently excluded, and the
+ * suite goes green while asserting on a query nobody wrote. Refusing makes this
+ * file RED the moment a combinator arrives, which is the honest failure — this
+ * double is not a query engine and must not pretend to be one.
+ */
 function matches(r: Record<string, unknown>, where: Record<string, unknown>): boolean {
     for (const [k, v] of Object.entries(where)) {
+        if (k.startsWith('$')) {
+            throw new Error(
+                `stub engine: WHERE combinator '${k}' is not implemented by this double — `
+                + 'it matches scalar equality only. Implement it here rather than letting it '
+                + 'be read as a field name.',
+            );
+        }
         if (v === undefined) continue;
         if (r[k] !== v) return false;
     }
