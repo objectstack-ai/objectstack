@@ -50,6 +50,21 @@
  * `ObjectStackProtocolImplementation.OVERLAY_ALLOWED_TYPES` derives from — so a
  * registry entry flipping `allowOrgOverride` moves this predicate with it and
  * there is nothing to keep in sync by hand.
+ *
+ * ── Why this lives in `metadata-core` and not in the dispatcher [#8805] ────
+ *
+ * Because the decision belongs to the CALLER, and there is more than one.
+ * `@objectstack/metadata-protocol` deliberately does not make it: an org-scoped
+ * write of a non-overridable type is REFUSED (`NOT_OVERRIDABLE`, 403) rather
+ * than coerced to env-wide, because option B of the #6190 ruling — silently
+ * rewriting the tenancy statement the author made — was rejected. So each door
+ * that writes metadata must decide, before it calls, which organization the
+ * write carries. The dispatcher was the only door that did; the REST `/meta`
+ * write doors passed nothing and stamped every `sys_metadata_audit` row
+ * env-wide, which is #8805. `@objectstack/rest` cannot import the dispatcher's
+ * copy — `runtime` depends on `rest`, so that edge is a cycle — and a second
+ * copy of a registry-derived predicate is precisely what the ⛔ above forbids.
+ * This package is the one both already depend on and that depends on neither.
  */
 
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';

@@ -34,6 +34,12 @@ import {
     resolveObjectSchemaMaskPosture,
     OBJECT_SCHEMA_MASK_NOT_APPLICABLE,
     type ObjectSchemaMaskPosture,
+    // [#8805] The organization a metadata WRITE carries, given the caller's
+    // active one — the SAME predicate the runtime `/metadata` dispatcher calls
+    // (`domains/meta.ts`), not a REST-local restatement of it. See the module's
+    // own header for why the decision belongs to the caller and why it lives in
+    // `metadata-core`.
+    organizationIdForMetaWrite,
 } from '@objectstack/metadata-core';
 import { RouteManager, type RouteEntry } from './route-manager.js';
 // [#6877] Query-parameter multiplicity. `IHttpRequest.query` declares
@@ -4932,10 +4938,61 @@ export class RestServer {
                         ? packageRaw
                         : undefined;
 
+                    // [#8805] THE WRITE-SIDE ORGANIZATION. Until this landed the
+                    // door passed none, so `recordMetadataAudit` stamped
+                    // `organization_id: null` on EVERY row a REST-authored
+                    // metadata write produced (`entry.organizationId ?? null`).
+                    // Composed with #8803's scoped read — own-org rows PLUS
+                    // env-wide ones, a limb that is required, not optional —
+                    // that made every REST-authored audit row readable by every
+                    // tenant, carrying its `actor`, `note`, `lock_state` and
+                    // `request_id`. The read half could not close it: the rows
+                    // were genuinely unscoped, so no filter could separate them.
+                    //
+                    // Two measurements decided the SHAPE, and neither is
+                    // obvious from the defect:
+                    //
+                    //  1. The organization must NOT be threaded unconditionally.
+                    //     `saveMetaItem`'s `organizationId` is one value feeding
+                    //     two things — the `sys_metadata` partition the row
+                    //     lands in AND the audit row — and the protocol REFUSES
+                    //     an org-scoped write of a type the registry declares
+                    //     `allowOrgOverride: false` (`NOT_OVERRIDABLE`, 403;
+                    //     `orgScopedWriteRefusal`, the #6190 ruling). Passing
+                    //     `ctx.tenantId` raw would turn every `PUT /meta/object/*`
+                    //     from a tenant-admin session into a 403 — trading a
+                    //     disclosure for an outage. `organizationIdForMetaWrite`
+                    //     is the registry-derived predicate that answers this,
+                    //     and it is the DISPATCHER's own: this door now behaves
+                    //     identically to its `/metadata` twin for the same
+                    //     request, which is the whole point.
+                    //  2. So a non-overridable type still audits env-wide — and
+                    //     that is correct rather than residue. Its WRITE is
+                    //     env-wide (#6190 option A: the runtime stops minting
+                    //     rows boot never reads), so an env-wide audit row is
+                    //     the truthful scope for it, symmetric with what the
+                    //     `/published` route's comment argues further down this
+                    //     file. `null` stays reserved for writes that really are
+                    //     environment-wide.
+                    //
+                    // ⚠️ NOT a new org-resolution seam — the thing the
+                    // `/published` comment forbids. `ctx` is the SAME
+                    // `resolveExecCtx` result the capability gate above already
+                    // resolved (memoised per request, called in 40+ handlers
+                    // here); no `resolveActiveOrganizationId` is minted, exactly
+                    // as #8803 did for the audit READ on the sibling route.
+                    // `computeExecCtx` assembles `tenantId` from the shared
+                    // `resolveAuthzContext` — an API key's principal tenant,
+                    // else the session's `activeOrganizationId`, which is the
+                    // very field the dispatcher twin reads.
+                    const organizationId = organizationIdForMetaWrite(
+                        req.params.type, ctx?.tenantId,
+                    );
                     const result = await p.saveMetaItem({
                         type: req.params.type,
                         name: req.params.name,
                         item,
+                        organizationId,
                         ...(environmentId ? { environmentId } : {}),
                         ...(parentVersion !== undefined ? { parentVersion } : {}),
                         ...(actor ? { actor } : {}),
@@ -5046,9 +5103,25 @@ export class RestServer {
                     // orphan table. Destructive — opt-in, defaults off.
                     const dropStorage = req.query?.dropStorage === 'true' || req.query?.dropStorage === '1';
 
+                    // [#8805] Same write-side organization as the `PUT` twins —
+                    // and on this verb it is not only the audit row. `orgId`
+                    // selects the overlay repository, so it decides WHICH row a
+                    // reset destroys. Once a `view` authored here lands
+                    // org-scoped, a delete that passed no organization would
+                    // reach past the caller's own overlay and reset the ENV-WIDE
+                    // row instead — one tenant's "reset to default" blanking the
+                    // item for every other tenant and the control plane, which
+                    // is the failure `restoreArtifactRegistryView` records having
+                    // already been paid for once. The two halves have to move
+                    // together. `ctx` is the capability gate's own
+                    // `resolveExecCtx` result, resolved above.
+                    const organizationId = organizationIdForMetaWrite(
+                        req.params.type, ctx?.tenantId,
+                    );
                     const result = await (p as any).deleteMetaItem({
                         type: req.params.type,
                         name: req.params.name,
+                        organizationId,
                         ...(environmentId ? { environmentId } : {}),
                         ...(parentVersion !== undefined ? { parentVersion } : {}),
                         ...(actor ? { actor } : {}),
@@ -5205,9 +5278,31 @@ export class RestServer {
                     const actor = await this.resolveMetaWriteActor(environmentId, req);
                     const body = (req.body && typeof req.body === 'object') ? req.body : {};
                     const message = typeof body.message === 'string' ? body.message : undefined;
+                    // [#8805] The publish half of the same organization, and it
+                    // is REQUIRED for the `PUT` fix to be usable rather than a
+                    // separate improvement: `promoteDraftForPublish` resolves the
+                    // draft through `getOverlayRepo(orgId)`, so once a draft
+                    // authored through `PUT ?mode=draft` lands org-scoped, a
+                    // publish carrying no organization looks in the env-wide
+                    // partition, finds nothing, and answers `no_draft` — the
+                    // Studio designer's save→publish loop, broken. Scoping the
+                    // save without scoping the publish is not a smaller change,
+                    // it is a broken one.
+                    //
+                    // Unlike the `PUT`/`DELETE` doors this route has no
+                    // capability gate, so it resolves no context of its own
+                    // today. `resolveExecCtx` is memoised per request and called
+                    // in 40+ handlers in this file — this is the existing
+                    // resolver, not new org plumbing (see the `/published`
+                    // comment's seam warning, which stands).
+                    const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
+                    const organizationId = organizationIdForMetaWrite(
+                        req.params.type, ctx?.tenantId,
+                    );
                     const result = await (p as any).publishMetaItem({
                         type: req.params.type,
                         name: req.params.name,
+                        organizationId,
                         ...(environmentId ? { environmentId } : {}),
                         ...(actor ? { actor } : {}),
                         ...(message ? { message } : {}),
@@ -5258,10 +5353,21 @@ export class RestServer {
                     // producer, shared by every `/meta` write (see resolveMetaWriteActor).
                     const actor = await this.resolveMetaWriteActor(environmentId, req);
                     const message = typeof body.message === 'string' ? body.message : undefined;
+                    // [#8805] The rollback half. Same argument as publish, one
+                    // step sharper: `rollbackMetaItem` resolves the row AND its
+                    // history through the organization, so an unscoped rollback
+                    // of an org-scoped item restores the env-wide body over the
+                    // env-wide row — a write to a partition the caller never
+                    // named, audited as `null`. See the `PUT` door above.
+                    const ctx = await this.resolveExecCtx(environmentId, req).catch(() => undefined);
+                    const organizationId = organizationIdForMetaWrite(
+                        req.params.type, ctx?.tenantId,
+                    );
                     const result = await (p as any).rollbackMetaItem({
                         type: req.params.type,
                         name: req.params.name,
                         toVersion,
+                        organizationId,
                         ...(environmentId ? { environmentId } : {}),
                         ...(actor ? { actor } : {}),
                         ...(message ? { message } : {}),
@@ -5478,18 +5584,42 @@ export class RestServer {
                         // layer into its own answer, so this route could no longer
                         // tell the two stores apart.
                         //
-                        // NO `organizationId`, and that is the ONE deliberate
-                        // divergence from the dispatcher twin, which resolves one
-                        // and passes it. `packages/rest` carries no
-                        // `resolveActiveOrganizationId` and no org plumbing at all
-                        // — the same seam `package-routes.ts` names at its
-                        // `deletePackage` call ("the dispatcher twin owns that
-                        // seam"). Inventing org plumbing here to close a 404 would
-                        // be a new seam smuggled in under a bug fix. Omitting it
-                        // reads the env-wide (`organization_id: null`) row, which
-                        // is symmetric with what an org-less `publishPackageDrafts`
-                        // (`request.organizationId ?? null`) writes — so this door
-                        // resolves exactly the publishes this door can produce.
+                        // [#8805] SCOPED, and this reverses what this comment
+                        // used to say. It read: "NO `organizationId`, and that
+                        // is the ONE deliberate divergence from the dispatcher
+                        // twin" — justified because omitting it read the
+                        // env-wide row, "symmetric with what an org-less
+                        // `publishPackageDrafts` writes, so this door resolves
+                        // exactly the publishes this door can produce."
+                        //
+                        // That symmetry was the whole argument, and #8805's
+                        // write-side fix is what ends it: `POST /meta/:type/
+                        // :name/publish` now carries the caller's organization
+                        // for `allowOrgOverride: true` types, so this door can
+                        // now produce an ORG-SCOPED publish. Left unscoped, this
+                        // read would answer 404 about a `view` the very same
+                        // caller published a moment earlier through the very
+                        // same transport — the #8278 defect this route exists to
+                        // close, reopened one partition over. A statement that
+                        // was true of the old write path is not evidence about
+                        // the new one.
+                        //
+                        // ⚠️ Still NOT the forbidden seam. `packages/rest` mints
+                        // no `resolveActiveOrganizationId` — the warning
+                        // `package-routes.ts` echoes at its `deletePackage` call
+                        // ("the dispatcher twin owns that seam") is about
+                        // inventing org RESOLUTION here, and this reads
+                        // `tenantId` off the execution context `resolveExecCtx`
+                        // already resolves, exactly as #8803 did for the audit
+                        // read. The raw tenant is right for a READ (the write
+                        // doors run it through `organizationIdForMetaWrite`
+                        // instead): `getMetaItemLayered`'s overlay layer is
+                        // org-scoped-first, THEN env-wide, so this is fail-open
+                        // in the safe direction — an org-less caller reads
+                        // exactly what it reads today, and an org-scoped caller
+                        // still falls back to the env-wide row. Nothing that
+                        // resolves today stops resolving.
+                        //
                         // Environment scoping still holds: it comes from WHICH
                         // protocol `resolveProtocol` hands back, not from the
                         // request payload (`getMetaItemLayered` declares no
@@ -5500,7 +5630,15 @@ export class RestServer {
                         } catch { /* fall through to the code/package snapshot below */ }
                         if (typeof publishedProtocol?.getMetaItemLayered === 'function') {
                             try {
-                                const layered = await publishedProtocol.getMetaItemLayered({ type, name });
+                                const publishedCtx = await this.resolveExecCtx(environmentId, req)
+                                    .catch(() => undefined);
+                                const layered = await publishedProtocol.getMetaItemLayered({
+                                    type,
+                                    name,
+                                    ...(publishedCtx?.tenantId
+                                        ? { organizationId: publishedCtx.tenantId }
+                                        : {}),
+                                });
                                 if (layered?.overlay !== undefined && layered?.overlay !== null) {
                                     res.json(layered.overlay);
                                     return;
@@ -5707,10 +5845,22 @@ export class RestServer {
                         ? packageRaw
                         : undefined;
 
+                    // [#8805] The compound-name twin of the write-side
+                    // organization, for the same reason #7019's gate is
+                    // duplicated here: it is word for word the same operation,
+                    // one generic `saveMetaItem` reached by a name spelled in
+                    // two segments. Gating one door and scoping the other would
+                    // leave this one the bypass — which is exactly how the
+                    // masking round-trip stayed open after #6603. Full rationale
+                    // on the single-segment `PUT` above.
+                    const organizationId = organizationIdForMetaWrite(
+                        req.params.type, ctx?.tenantId,
+                    );
                     const result = await p.saveMetaItem({
                         type: req.params.type,
                         name: compoundName,
                         item: req.body,
+                        organizationId,
                         ...(environmentId ? { environmentId } : {}),
                         ...(parentVersion !== undefined ? { parentVersion } : {}),
                         ...(actor ? { actor } : {}),
