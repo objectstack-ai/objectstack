@@ -99,8 +99,8 @@ async function bootInstall() {
   const engine = new ObjectQL();
   engine.registerDriver(driver as any, true);
   await engine.init();
-  engine.registry.registerObject(CASE_OBJECT);
-  engine.registry.registerObject(ORG_OBJECT);
+  engine.registry.registerObject(CASE_OBJECT, '#8686');
+  engine.registry.registerObject(ORG_OBJECT, '#8686');
   await driver.initObjects([CASE_OBJECT, ORG_OBJECT]);
   return { driver, engine };
 }
@@ -317,6 +317,30 @@ describe('#8686 seed/API tenancy split — autonumber scope', () => {
     expect(await countUntenanted(driver)).toBe(SEEDED_ROWS);
   });
 
+  it('[wiring] the app-plugin handoff fires on the organization insert itself', async () => {
+    // The tests above call the backfill directly, which pins WHAT it does but not
+    // that anything ever calls it on a real install. This case pins the delivery:
+    // `sys_organization` gaining its first row is what triggers the adoption, with
+    // no restart and no explicit call — the fresh-install half of the fix.
+    const { driver, engine } = await bootInstall();
+    await seedFreshInstall(engine);
+
+    const { AppPlugin } = await import('./app-plugin.js');
+    const ctx = { logger: createLogger() } as any;
+    (AppPlugin.prototype as any).registerSeedTenancyHandoff.call({}, ctx, engine);
+
+    expect(await countUntenanted(driver)).toBe(SEEDED_ROWS);
+
+    // The sign-up's organization insert — nothing else.
+    await createOrganization(engine);
+
+    expect(await countUntenanted(driver)).toBe(0);
+    expect(await readSequences(driver)).toEqual([]);
+    // And the very first API create on this install already continues the seed's
+    // sequence, which is the outcome the card measured going wrong.
+    expect((await apiCreate(engine, 'api 1')).case_number).toBe('CASE-00039');
+  });
+
   it('[GUARD] platform seeds stay global — sys_/cloud_/ai_ are never adopted', async () => {
     // The seed loader deliberately leaves platform-namespace seeds untenanted.
     // A backfill that adopted them would manufacture a NEW disagreement between
@@ -339,8 +363,8 @@ describe('#8686 seed/API tenancy split — autonumber scope', () => {
     const engine = new ObjectQL();
     engine.registerDriver(driver as any, true);
     await engine.init();
-    engine.registry.registerObject(sysObject);
-    engine.registry.registerObject(ORG_OBJECT);
+    engine.registry.registerObject(sysObject, '#8686');
+    engine.registry.registerObject(ORG_OBJECT, '#8686');
     await driver.initObjects([sysObject, ORG_OBJECT]);
 
     // Land untenanted platform rows, then bring an organization into existence.
@@ -356,7 +380,7 @@ describe('#8686 seed/API tenancy split — autonumber scope', () => {
     // guard runs, so nothing is adopted and nothing is warned about.
     expect(result.status).toBe('no-split');
     const untenanted = Number(
-      (await driver.knex('sys_audit_entry').whereNull('organization_id').count({ n: '*' }))[0].n,
+      (await (driver as any).knex('sys_audit_entry').whereNull('organization_id').count({ n: '*' }))[0].n,
     );
     expect(untenanted).toBe(3);
     expect(await readSequences(driver)).toEqual([{ tenant: GLOBAL_TENANT, lastValue: 3 }]);
