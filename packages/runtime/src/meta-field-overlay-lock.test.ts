@@ -710,19 +710,45 @@ describe('#7743 — PUT /meta/field/<object>.<field> honours the registry overla
         expect(metaRow(engine, 'themes', 'twilight')).toBeUndefined();
     });
 
-    it('#7894 POSITIVE CONTROL — a kind the platform has never heard of is still permitted', async () => {
-        // The strongest form: a name in NO map and NO registry — exactly what a
-        // third-party plugin registering a novel kind looks like. The refusal
-        // must not fire, and it cannot, by construction: it only triggers when a
-        // spelling's singular is a type the platform itself DECLARES.
+    it('#7894 POSITIVE CONTROL — the #7894 refusal still cannot reach a never-heard-of kind (#8421 CHANGED the boundary)', async () => {
+        // The strongest form: a name in NO map and NO registry. This control's
+        // OWN claim is unchanged and still holds by construction — #7894's
+        // refusal only triggers when a spelling's singular is a type the
+        // platform itself DECLARES, and `my_plugin_kind` is a misspelling of
+        // nothing, so `metaUrlSpellingRefusal` cannot fire on it whatever else
+        // the boundary does.
+        //
+        // ⚠️ [#8421, maintainer ruling 2026-08-15] What DID change is the
+        // boundary's verdict, and this case says so rather than leaving a
+        // reader to infer it. The name used to be MINTED, because "not a
+        // declared type" was read as "a kind some plugin declared". The ruling
+        // — verbatim, untranslated: 暂时不考虑让插件申明新的元数据类型 — retired
+        // that reading, so `saveMetaItem` now consults a SECOND verdict
+        // (`unrecognisedMetaTypeRefusal`) and refuses a name in neither half of
+        // the static contract. `暂时` is a current posture, not a permanent
+        // closure: see `getMetaTypes()`'s synthesis comment in
+        // `@objectstack/metadata-protocol` for the full record.
+        //
+        // The discriminating control for that narrowing is the case directly
+        // ABOVE, which must stay green: `theme` has no registry entry either
+        // and is still minted, because it IS in the static contract. If a
+        // change ever breaks both, the narrowing stopped being narrow.
         const { engine, dispatcher } = makeStack();
 
         const res = responseOf(await dispatcher.handleMetadata(
             '/my_plugin_kind/widget_a', ctx(), 'PUT', { name: 'widget_a', label: 'Widget A' },
         ));
 
-        expect(res.status).toBe(200);
-        expect(metaRow(engine, 'my_plugin_kind', 'widget_a')).toBeDefined();
+        // ADR-0112 — code AND status, never "it threw".
+        expect(res.status).toBe(400);
+        expect(res.body?.error?.code).toBe('INVALID_REQUEST');
+        // It is the not-a-type-at-all verdict, NOT #7894's misspelling verdict:
+        // it names the type and offers no replacement spelling, because there
+        // is no declared type this could have been reaching for.
+        expect(res.body?.error?.message).toContain("'my_plugin_kind' is not a metadata type");
+        expect(res.body?.error?.message).not.toContain('did you mean');
+        // …and the namespace this card is named for is never minted.
+        expect(metaRow(engine, 'my_plugin_kind', 'widget_a')).toBeUndefined();
     });
 
     // ── The refusal limb — an unrecognised spelling of a DECLARED type ────

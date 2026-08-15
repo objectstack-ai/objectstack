@@ -4597,6 +4597,54 @@ export class ObjectStackProtocolImplementation implements
             }
             // Runtime-registered type with no registry entry — synthesise a
             // minimal descriptor so the UI can still surface it.
+            //
+            // [#8421] `allowRuntimeCreate` is DERIVED FROM THE MINT DOOR'S OWN
+            // CONTRACT rather than synthesised as `true`. The two doors are the
+            // same sentence read twice — this endpoint says which types a
+            // caller may create, `refuseUnmintableMetaType` decides whether the
+            // create is honoured — so they consult ONE predicate
+            // ({@link unrecognisedMetaTypeRefusal}) instead of two
+            // independently-maintained rules that drifted apart.
+            //
+            // What this keeps, and it is the whole point: the six legitimate
+            // plugin kinds with no static registry entry — `theme`, `webhook`,
+            // `connector`, `sharing_rule`, `analytics_cube`, `rag_pipeline` —
+            // are IN the static spelling contract (limb 1 of the URL map), so
+            // the predicate accepts them and they stay advertised as creatable.
+            // `PUT /meta/theme/dark` is the operation the plugin path exists to
+            // serve and this change must not touch it.
+            //
+            // What this withdraws: `policy`, `data`, `package`, `kind` — live
+            // `SchemaRegistry` keys an ordinary `registerApp` produces, outside
+            // that contract. They were advertised `allowRuntimeCreate: true` by
+            // the blanket `true` below and nothing ever honoured a create on
+            // them; the door has refused them since this card's first cut. The
+            // read door now agrees at the honest value instead of promising a
+            // write the platform will not perform (the same remedy the
+            // 2026-08-07 ruling chose for `api`: withdraw the advertisement
+            // rather than converge the read path onto it).
+            //
+            // ## The premise, and why it is a CURRENT one (maintainer, 2026-08-15)
+            //
+            // The blanket `true` was not careless: while a plugin could DECLARE
+            // a metadata kind, a name with no registry entry might be a real
+            // kind this synthesis had not heard of, so "permissive by
+            // construction" was the safe reading. That premise is what expired.
+            // The ruling, verbatim and untranslated:
+            //
+            //     暂时不考虑让插件申明新的元数据类型
+            //
+            // ⚠️ `暂时` is load-bearing and is recorded as such: this is the
+            // platform's CURRENT posture, not a permanent architectural
+            // closure. Plugin-declared metadata kinds were considered, are
+            // understood, and are deferred — not ruled impossible. If they are
+            // ever wanted again, this derivation and its twin
+            // {@link isRuntimeCreateAllowed} are the two sites that encode the
+            // deferral, and `unrecognisedMetaTypeRefusal` in `@objectstack/spec`
+            // is the contract they both read; a declared-kind channel would
+            // have to feed that predicate before either door could widen. Start
+            // here rather than re-deriving the decision from the code's silence.
+            const mintableByContract = unrecognisedMetaTypeRefusal(singular) === null;
             return {
                 type: singular,
                 schemaId: singular, // API client expects schemaId field
@@ -4605,7 +4653,7 @@ export class ObjectStackProtocolImplementation implements
                 filePatterns: [],
                 supportsOverlay: false,
                 allowOrgOverride: writableOverrides.has(singular),
-                allowRuntimeCreate: true,
+                allowRuntimeCreate: mintableByContract,
                 supportsVersioning: false,
                 executionPinned: false,
                 loadOrder: 1000,
@@ -9919,10 +9967,17 @@ export class ObjectStackProtocolImplementation implements
      */
     /**
      * Set of type names that have a static entry in
-     * `DEFAULT_METADATA_TYPE_REGISTRY`. Anything outside this set is
-     * runtime-registered (plugin-provided types like `theme`, `api`,
-     * `connector`) — the listing endpoint at `getMetaTypes()` synthesises
-     * those with `allowRuntimeCreate: true`, so this gate must agree.
+     * `DEFAULT_METADATA_TYPE_REGISTRY`. Anything outside this set carries no
+     * declared two-tier flags of its own, so the predicates below have to
+     * decide what its absence means.
+     *
+     * ⚠️ [#8421] It used to mean "plugin-registered, therefore writable", and
+     * `getMetaTypes()` synthesised `allowRuntimeCreate: true` to match. It no
+     * longer does: the listing derives that flag from the static SPELLING
+     * contract (see {@link getMetaTypes}), which is a strictly larger set than
+     * this one — it also carries the six URL-map-only plugin kinds. Absence
+     * from THIS set is therefore not on its own an answer to "may it be
+     * created"; see {@link isRuntimeCreateAllowed} for what absence still buys.
      */
     private static readonly STATIC_REGISTRY_TYPES: ReadonlySet<string> = (() => {
         const out = new Set<string>();
@@ -10001,16 +10056,55 @@ export class ObjectStackProtocolImplementation implements
         return env.has(singular) || env.has(type);
     }
 
-    /** Does this type permit creating brand-new (artifact-free) items? */
+    /**
+     * Does this type permit creating brand-new (artifact-free) items?
+     *
+     * ## [#8421] What the second arm means now, and why it did NOT narrow
+     *
+     * The fall-through below used to be the write-side twin of a read-side
+     * rule: "no static registry entry ⇒ plugin-registered ⇒ writable", mirrored
+     * verbatim by `getMetaTypes()`'s synthesised `allowRuntimeCreate: true`.
+     * The maintainer ruling of 2026-08-15 retired that rule's premise —
+     * verbatim, untranslated:
+     *
+     *     暂时不考虑让插件申明新的元数据类型
+     *
+     * ⚠️ `暂时` is load-bearing: a CURRENT posture, deliberately not a
+     * permanent architectural closure (the full record, and what a future
+     * author reintroducing plugin-declared kinds must revisit, is in
+     * {@link getMetaTypes}'s synthesis comment — read that one first).
+     *
+     * The narrowing that ruling bought is enforced ONE layer up, at
+     * {@link refuseUnmintableMetaType}, which runs before this predicate on
+     * every `saveMetaItem` and refuses an out-of-contract type outright. This
+     * arm is therefore no longer an ADVERTISEMENT and must not be narrowed to
+     * match one: by the time it is consulted for such a type, the caller is in
+     * one of the residue paths the refusal deliberately exempts or does not
+     * guard at all —
+     *
+     *  - `deleteMetaItem` / {@link historyMetaItem} / `rollbackMetaItem` /
+     *    `promoteDraftForPublish`: rows minted under an unrecognised type
+     *    BEFORE the refusal shipped are real, and nothing rewrites them on
+     *    upgrade. Returning `false` here would route them off the repository
+     *    path and strand them — turning the accumulation this card was filed
+     *    about into an accumulation nobody can clear, which is the exact
+     *    reasoning that kept `deleteMetaItem` open in the first place;
+     *  - `saveMetaItem` behind the mint door's two exemptions (the compound
+     *    arity, and a namespace the store says already exists).
+     *
+     * So the doors agree where agreement is a claim about creating a NEW
+     * namespace — the listing and the mint door read one predicate for that —
+     * and this arm keeps the clearance path open underneath. Narrowing it would
+     * not close anything; it would only make residue unclearable.
+     */
     private static isRuntimeCreateAllowed(type: string): boolean {
         const singular = PLURAL_TO_SINGULAR[type] ?? type;
         if (this.RUNTIME_CREATE_ALLOWED_TYPES.has(singular)
             || this.RUNTIME_CREATE_ALLOWED_TYPES.has(type)) {
             return true;
         }
-        // Runtime-registered types (no static registry entry) are
-        // synthesised by getMetaTypes() with allowRuntimeCreate=true;
-        // mirror that here so /api/v1/meta and PUT /api/v1/meta agree.
+        // No static registry entry ⇒ no declared flags to consult. See the doc
+        // above: this is the residue/clearance arm, NOT the read door's twin.
         if (!this.STATIC_REGISTRY_TYPES.has(singular)
             && !this.STATIC_REGISTRY_TYPES.has(type)) {
             return true;
