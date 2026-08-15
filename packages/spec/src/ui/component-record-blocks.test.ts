@@ -294,4 +294,22 @@ describe('the `record:discussion` / `record:chatter` pair (#8744)', () => {
     const message = messagesOf(ComponentPropsMap['record:discussion'].safeParse({ dock: 'right' }));
     expect(message).toContain('`dock`');
   });
+
+  it("both names accept the renderer's position vocabulary and refuse a retired spelling with ONE prescription (#8762)", () => {
+    for (const type of ['record:chatter', 'record:discussion'] as const) {
+      for (const position of ['bottom', 'right', 'left'] as const) {
+        expect(ComponentPropsMap[type].safeParse({ position }).success).toBe(true);
+      }
+    }
+    // The retired spelling gets the same per-value prescription through
+    // either name — one schema object, one refusal (#8744 pair identity).
+    const viaChatter = ComponentPropsMap['record:chatter'].safeParse({ position: 'sidebar' });
+    const viaDiscussion = ComponentPropsMap['record:discussion'].safeParse({ position: 'sidebar' });
+    expect(viaChatter.success).toBe(false);
+    expect(viaDiscussion.success).toBe(false);
+    if (!viaChatter.success && !viaDiscussion.success) {
+      expect(viaChatter.error.issues[0]!.message).toBe(viaDiscussion.error.issues[0]!.message);
+      expect(viaChatter.error.issues[0]!.message).toContain("'sidebar' was removed");
+    }
+  });
 });

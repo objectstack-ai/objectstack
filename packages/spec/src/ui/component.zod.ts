@@ -1025,19 +1025,76 @@ export const RecordActivityProps = strictObject({
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 });
 
+// `position` old-spelling prescriptions (#8762). Declared with `//` on purpose —
+// the `LIST_VIEW_EXPORT_PDF_RETIRED` placement note applies here too: build-docs
+// takes a file's first JSDoc per exported symbol, and these need no doc page.
+// This is an enum-VALUE narrowing, so there is no `retiredKey()` tombstone to
+// hang the prescription on — the enum's own error map carries it, keyed on
+// `issue.input` so only a value which used to be legal gets the "was removed"
+// message (the `view.exportOptions` `'pdf'` precedent, #8010).
+const CHATTER_POSITION_RETIRED: ReadonlyMap<string, string> = new Map([
+  ['sidebar', "'sidebar' was removed from `record:chatter` / `record:discussion` `position` (#8762) — "
+    + 'no renderer branch ever compared the old vocabulary: `RecordChatterPanel` docks on '
+    + "'right'/'left' and renders in flow on 'bottom', so a spec-valid 'sidebar' silently fell "
+    + "through to the in-flow render. Write 'right' — the docked side panel 'sidebar' meant. "
+    + 'Run `os migrate meta` to rewrite existing sources automatically (registered under '
+    + 'protocol major 18).'],
+  ['inline', "'inline' was removed from `record:chatter` / `record:discussion` `position` (#8762) — "
+    + 'no renderer branch ever compared the old vocabulary. Write \'bottom\' — the renderer\'s '
+    + "in-flow branch, which is where 'inline' already rendered. Run `os migrate meta` to "
+    + 'rewrite existing sources automatically (registered under protocol major 18).'],
+  ['drawer', "'drawer' was removed from `record:chatter` / `record:discussion` `position` (#8762) "
+    + 'with no successor: no renderer branch ever implemented an overlay drawer — the value fell '
+    + "through to the in-flow render. Write 'right' — the docked side panel is the nearest "
+    + 'surviving shape of a side drawer. Run `os migrate meta` to rewrite existing sources '
+    + 'automatically (registered under protocol major 18).'],
+]);
+
+/**
+ * `record:chatter` / `record:discussion` — ONE shared schema object for the
+ * pair (#8744; `ComponentPropsMap` wires both names to this row, and the
+ * pair-identity pin in `component-record-blocks.test.ts` holds them together).
+ *
+ * `position` speaks the RENDERER'S vocabulary — `bottom` / `right` / `left` —
+ * since #8762 (maintainer ruling 2026-08-15: one vocabulary, no mapping
+ * layer). The schema's original `sidebar` / `inline` / `drawer` set was
+ * declared-≠-enforced in the worst direction: `RecordChatterPanel`
+ * (objectui `plugin-detail/src/RecordChatterPanel.tsx:87-96`, measured at pin
+ * `665661ab0932`) branches on exactly `right`/`left` (docked side panel) vs
+ * `bottom` (in-flow), the designer registration (`CHATTER_INPUTS`) publishes
+ * `['bottom', 'right', 'left']`, and the renderer merge
+ * (`renderers/record-chatter.tsx`) falls back to `bottom` — so the schema's
+ * own default (`sidebar`) rendered in-flow as a silent no-op while the value
+ * that actually docks the panel (`right`) was refused at publish. The three
+ * old spellings are rewritten by the ADR-0087 conversion
+ * `record-chatter-position-vocabulary` (protocol 18) and refused here with a
+ * per-value prescription ({@link CHATTER_POSITION_RETIRED}).
+ *
+ * All three keys are optional with NO schema default, for the `maxVisible`
+ * reason: the renderer's fallbacks (`position: 'bottom'`,
+ * `collapsible: false` in the renderer merge — and the auto-appended panel
+ * passes the same pair explicitly; `defaultCollapsed ?? false` in the panel)
+ * are the RENDERER'S facts, and a schema default would write them onto every
+ * parsed component — turning "the author said nothing" into "the author asked
+ * for it". `.default('sidebar')` was itself half of the #8762 defect, and the
+ * old `collapsible` default (`true`) INVERTED the renderer merge's `false`.
+ */
 export const RecordChatterProps = strictObject({
   surface: 'this `record:chatter`',
   history: PROPS_HISTORY,
   guidanceSets: COMPONENT_LEVEL_GUIDANCE,
 }, {
-  /** Panel position */
-  position: z.enum(['sidebar', 'inline', 'drawer']).default('sidebar').describe('Where to render the chatter panel'),
-  /** Panel width (for sidebar/drawer) */
-  width: z.union([z.string(), z.number()]).optional().describe('Panel width (e.g., "350px", "30%")'),
+  /** Panel position — the renderer's own vocabulary (see the row docblock). */
+  position: z.enum(['bottom', 'right', 'left'], {
+    error: (issue) =>
+      typeof issue.input === 'string' ? CHATTER_POSITION_RETIRED.get(issue.input) : undefined,
+  }).optional().describe('Where the panel docks relative to the record body — `right`/`left` dock a side panel, `bottom` renders in flow under the record body (renderer default: `bottom`).'),
+  /** Panel width — read by the docked side positions only. */
+  width: z.union([z.string(), z.number()]).optional().describe('Panel width (e.g., "350px", "30%") — side positions (`right`/`left`) only.'),
   /** Collapsible */
-  collapsible: z.boolean().default(true).describe('Whether the panel can be collapsed'),
+  collapsible: z.boolean().optional().describe('Whether the panel can be collapsed (renderer default: off).'),
   /** Default collapsed state */
-  defaultCollapsed: z.boolean().default(false).describe('Whether the panel starts collapsed'),
+  defaultCollapsed: z.boolean().optional().describe('Whether the panel starts collapsed (renderer default: off; only meaningful with `collapsible`).'),
   /** Feed configuration (delegates to RecordActivityProps) */
   feed: RecordActivityProps.optional().describe('Embedded activity feed configuration'),
   /** ARIA accessibility */
