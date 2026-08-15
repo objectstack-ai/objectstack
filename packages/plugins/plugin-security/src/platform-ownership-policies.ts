@@ -138,14 +138,15 @@ export function platformOwnershipFloorPolicyCount(): number {
  *    has its own OWD and its own gate (`assertControlledByParentWrite`) — the
  *    detail declares nothing about who may write it. ⚠️ **That reasoning is
  *    about THIS constant and stops here** (#8757). It says a detail is not
- *    org-wide-open; it was read for four months as though it also said the
- *    master gate governs a detail's by-id writes today, and measurement says
- *    the opposite: the floor answered FIRST and no widener could drop it, so
- *    the detail was creator-only — a row-level write rule the detail also never
- *    declared. The remedy is NOT to fold `controlled_by_parent` into the
- *    constant below (it is not org-wide-open, and this bullet is still right
- *    about that); it is {@link masterGovernsRowWrites}, which hands the detail
- *    to the gate this bullet already names;
+ *    org-wide-open, and it is still right about that. It was ALSO read as
+ *    saying the master gate governs a detail's by-id writes — and when this
+ *    bullet was written that was not true of the runtime: the floor answered
+ *    FIRST, before `assertControlledByParentWrite` ran, and no declared widener
+ *    could drop it, so the detail was creator-only — a row-level write rule the
+ *    detail had not declared either. The remedy was NOT to fold
+ *    `controlled_by_parent` into the constant below; it is
+ *    {@link masterGovernsRowWrites}, which hands the detail to the gate this
+ *    bullet already names, and which is what makes the sentence true;
  *  - an UNSET model on a `sys_*` / `isSystem` object is a legacy default, not
  *    an author's statement. Opening writes there would hand every member
  *    cross-creator writes on the platform's own identity tables — the shape of
