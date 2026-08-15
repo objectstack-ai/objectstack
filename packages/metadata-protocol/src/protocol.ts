@@ -15907,6 +15907,24 @@ export class ObjectStackProtocolImplementation implements
      * is used. Returns `{ added, removed, changed }` keyed by JSON
      * pointer-style paths for primitive leaves; nested objects/arrays
      * are reported as a single change record.
+     *
+     * The `type` is folded to its canonical spelling at the boundary
+     * ({@link canonicalizeMetaRequestType}), so the echoed `type` reports the
+     * spelling the history read actually used, not the caller's.
+     *
+     * @throws `INVALID_REQUEST` — 400, when `type` is an unrecognised spelling
+     *         of a type the platform DECLARES (`viewes`). Narrow by
+     *         construction: a name that reaches for no declared type is a
+     *         possible plugin kind and is served, not refused (#7894).
+     * @throws {@link metadataStoreUnavailableError} — 503 /
+     *         `SERVICE_UNAVAILABLE` (#8833), when the `sys_metadata_history`
+     *         read failed for any reason other than the table not being
+     *         provisioned yet, carrying the driver error on `cause`. The one
+     *         non-throwing failure is that unprovisioned table, where "no
+     *         history rows" is the truth rather than an unknown, so a minimal
+     *         deployment still gets its benign empty diff. Without that
+     *         asymmetry an outage would be indistinguishable from "these two
+     *         versions are identical" (ADR-0110 D3).
      */
     async diffMetaItem(request: {
         type: string;
