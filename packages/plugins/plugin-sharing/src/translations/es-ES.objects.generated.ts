@@ -38,7 +38,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       recipient_id: {
         label: "Destinatario",
-        help: "ID del usuario/grupo/rol que recibe acceso."
+        help: "ID del usuario/grupo/puesto que recibe acceso."
       },
       access_level: {
         label: "Nivel de acceso",
