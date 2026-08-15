@@ -34,6 +34,18 @@
  * pins what was deliberately NOT changed — the two recoveries — because those
  * are what an over-broad fix destroys silently.
  *
+ * ## Scope: a plain unresolvable COLUMN, not a dotted PATH
+ *
+ * The card's headline repro was a dotted key, and measuring it across live
+ * backends showed why that cannot be this suite's assertion: the three dialects
+ * do not agree on what a dotted key IS. Postgres classifies it as an undefined
+ * TABLE (`42P01`) and always did, so #8790 changed nothing there; SQLite
+ * classifies it as an undefined COLUMN and cannot be told apart from a column
+ * literally named `title.x`. The FILTER-axis verdict on dotted paths is #8371,
+ * still open. So the ruled scope — a plain column the table lacks — carries the
+ * refusal pins, and the dotted key is RECORDED per dialect in
+ * `DOTTED_STATUS_QUO` with #8371 named as the owner of the verdict.
+ *
  * ## The DIALECT axis
  *
  * `INVALID_FILTER` / 400 is required on both SQL drivers by
@@ -74,7 +86,12 @@ const SECRET_LITERAL = 'zz-bound-literal-must-not-leak';
 const RECOGNISED_CELLS = DIALECT_CELLS.filter((c) => c.id === 'sqlite' || c.id === 'pg');
 
 /**
- * The two routes the card names, typed as what the driver actually takes.
+ * The RULED scope: a plain column the table does not have.
+ *
+ * ⛔ A dotted key is deliberately NOT in this list, and the reason is measured
+ * rather than stylistic — see `DOTTED_STATUS_QUO` below. #8790's ruling is
+ * about a column the backend cannot resolve; the FILTER-axis verdict on dotted
+ * PATHS is #8371's, still open, and this suite must not decide it by assertion.
  *
  * `DriverQuery` rather than `as any`: its own docblock records that a direct
  * caller holding only a `where` used to reach for a blanket cast and lose
@@ -83,12 +100,44 @@ const RECOGNISED_CELLS = DIALECT_CELLS.filter((c) => c.id === 'sqlite' || c.id =
  * place to throw the type away.
  */
 const UNRESOLVABLE: ReadonlyArray<{ label: string; where: NonNullable<DriverQuery['where']>; named: string }> = [
-  // Reachable when the registry cannot answer at all — the backstop case.
   { label: 'a plain unknown column', where: { nosuchcol: SECRET_LITERAL }, named: 'nosuchcol' },
-  // Reachable with a FULLY populated registry: the doors judge a dotted key on
-  // its head segment only, and `title` is a real field.
-  { label: 'a dotted key on a real head', where: { 'title.x': SECRET_LITERAL }, named: 'title.x' },
 ];
+
+/**
+ * [#8790 → #8371] What a DOTTED key does per dialect, measured, and why this
+ * suite records it instead of asserting the refusal on it.
+ *
+ * The three backends do not agree on what a dotted key even IS, because knex
+ * compiles `{'title.x': v}` to the qualified reference `"title"."x"`:
+ *
+ * | dialect  | classification    | error                                        |
+ * |----------|-------------------|----------------------------------------------|
+ * | sqlite   | undefined COLUMN  | `no such column: title.x`                     |
+ * | postgres | undefined TABLE   | `42P01 missing FROM-clause entry for table`   |
+ * | mysql    | undefined COLUMN  | `ER_BAD_FIELD_ERROR Unknown column 'title.x'` |
+ *
+ * Measured live on PG 16.13 and MySQL 8.0.46, `origin/main` vs this branch.
+ * Postgres reads `title` as a TABLE, so its error is `undefined_table`, not
+ * `undefined_column` — a shape {@link isUnresolvableColumnError} does not match
+ * and never has. The consequence, and the reason this is a recording rather
+ * than a regression: on Postgres a dotted key raised a raw `42P01` on BOTH
+ * halves **before this card and after it, byte for byte**. #8790 changed
+ * nothing there. The card's headline repro (`find()` [] / `count()` throws) is
+ * SQLite-specific; on Postgres the two halves already agreed.
+ *
+ * On SQLite the dotted key DOES now refuse, because SQLite hands the driver a
+ * message indistinguishable from a plain missing column — the driver cannot
+ * tell `{'title.x': v}` (a path) from a column literally NAMED `title.x`
+ * without inspecting the key for a `.`, which is judging dotted-ness and is
+ * #8371's call. So this table pins the STATUS QUO, per dialect, and names the
+ * owner of the verdict. ⛔ Do not "fix" a cell here by teaching the classifier
+ * `42P01`: that mints a dotted-path verdict at the driver and pre-empts #8371.
+ * MySQL's cell is owned by #8926 (its wording matches neither arm at all).
+ */
+const DOTTED_STATUS_QUO: Readonly<Record<string, { code: string; enveloped: boolean }>> = {
+  sqlite: { code: 'INVALID_FILTER', enveloped: true },
+  pg: { code: '42P01', enveloped: false },
+};
 
 async function caught(run: () => Promise<unknown>): Promise<any> {
   try {
@@ -147,6 +196,28 @@ describe(`[#8790] driver-sql — unresolvable WHERE column refuses on BOTH halve
         .toEqual({ code: onFind.code, status: onFind.status, message: onFind.message });
     });
   }
+
+  // ───────────────────────────────────────────────────────────────
+  // DOTTED KEY — recorded, NOT adjudicated (verdict owned by #8371)
+  // ───────────────────────────────────────────────────────────────
+
+  // Both halves still have to AGREE — that is #8790's actual subject, and it
+  // holds on every dialect regardless of which verdict #8371 lands. What this
+  // deliberately does NOT assert is that the agreed answer is a refusal.
+  it('a dotted key answers find() and count() the same way, whatever that way is', async () => {
+    const onFind = await caught(() => driver.find(TABLE, { where: { 'title.x': SECRET_LITERAL } }));
+    const onCount = await caught(() => driver.count(TABLE, { where: { 'title.x': SECRET_LITERAL } }));
+    expect(onCount.code).toBe(onFind.code);
+    expect(onCount.status).toBe(onFind.status);
+  });
+
+  it('a dotted key is at this dialect\'s recorded status quo (see DOTTED_STATUS_QUO)', async () => {
+    const expected = DOTTED_STATUS_QUO[cell.id];
+    expect(expected, `no recorded status quo for cell '${cell.id}'`).toBeDefined();
+    const err = await caught(() => driver.find(TABLE, { where: { 'title.x': SECRET_LITERAL } }));
+    expect(err.code).toBe(expected.code);
+    expect(err.status).toBe(expected.enveloped ? 400 : undefined);
+  });
 
   // ⭐ The invariant half of the ruling — true under every branch it could have
   // taken. `count()` used to answer the dialect's own error with the bound
@@ -292,6 +363,18 @@ const DIALECT_MESSAGES: ReadonlyArray<{
     message: 'select * from "task" - column task.nosuchcol does not exist',
     recognised: true,
     column: 'task.nosuchcol',
+  },
+  // ⚠️ The measured reason the DOTTED case is recorded rather than refused.
+  // Postgres reads `title.x` as table `title`, column `x`, so it raises
+  // undefined_TABLE (42P01), not undefined_column (42703). Neither arm of the
+  // predicate matches it — before this card or after. Teaching the classifier
+  // this shape would mint a dotted-path verdict the driver has no business
+  // making; #8371 owns that. See `DOTTED_STATUS_QUO`.
+  {
+    dialect: 'postgres, DOTTED key — undefined_table, NOT recognised',
+    message: 'select * from "task" where "title"."x" = $1 - missing FROM-clause entry for table "title"',
+    recognised: false,
+    column: null,
   },
   // ⚠️ The measured gap. MySQL's wording matches neither arm of the predicate,
   // so this condition still travels out as the raw dialect error on MySQL.
