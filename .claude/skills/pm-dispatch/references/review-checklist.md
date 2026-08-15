@@ -4,10 +4,9 @@
 自述核验;本表逐项展开每份 dev 报告的复核判据。⛔ 不引用 issue 编号。
 
 - **PR 形态**:存在、是 draft、目标 `main`、正文首行引用卡片 —— **`Fixes #<n>` 仅
-  当合并应当关卡**;只落地了可实施一半(另一半在决策箱或按范围排除)⇒ 必须
-  `Part of #<n>`,否则合并会静默关掉一张正躺在决策箱里的卡,而
-  `needs-user-decision` 的收件箱过滤只看 open issue。翻 ready 之前亲核首行,别只
-  信报告。
+  当合并应当关卡**;只落地了可实施一半(另一半在决策箱或按范围排除)⇒ 必须 `Part of
+  #<n>`,否则合并会静默关掉一张正躺在决策箱里的卡,而 `needs-user-decision` 的收件
+  箱过滤只看 open issue。翻 ready 之前亲核首行,别只信报告。
 - **`Part of` PR 翻 ready 前,再扫一遍正文的闭合关键词形状**(解析器行为与安全写
   法见平台读数事实表):⛔ 永不把闭合关键词放在另一张 open 卡编号旁 —— 为防止误关
   而写的否定句恰恰就是执行误关的那句。半状态巡查器的矛盾检测只巡开着的 PR,翻
@@ -19,11 +18,12 @@
   认没有别的卡被一并关掉**(闭合关键词解析器不理会否定句,body 与 commit
   message 分开解析,细则见平台读数事实表);误关的卡以 completed 状态对一切「只看
   open」的过滤隐身,这一读是唯一能兜住它的机械检查。
-- **范围检查**(取 changed files,⛔ 不看报告自述):无 `content/docs/releases/`
-  改动、用户可见改动有 changeset、无与卡无关的文件。Tests/docs-only PR 走
-  `skip-changeset` 标签,不走空 changeset(空 changeset 滞留发布);含读者可见生
-  成产物时 dev 选 changeset 是对的 —— 以 PR 正文说明的理由为准,两条路都有效,别
-  来回改。
+- **范围检查**(取 changed files,⛔ 不看报告自述):无 `content/docs/releases/` 改
+  动、用户可见改动有 changeset、无与卡无关的文件。Tests/docs-only PR 走
+  `skip-changeset` 标签,不走空 changeset(空 changeset 滞留发布);含读者可见生成产
+  物时 dev 选 changeset 是对的 —— 以 PR 正文说明的理由为准,两条路都有效,别来回改。
+- **就地修了范围外的邻接缺陷?**四条件逐条核(同缺陷类·机械·文件无他人认领·同门禁
+  族),再核 claim 文件面同轮已修订、PR 正文点名该修并载证据;缺一条即判 REWORK。
 - **改动触及的每个包,`private: false` 即已发布 ⇒ 核 changeset 在不在**:判据是包
   的发布状态(读 `package.json`,十秒),不是改动大小,也不是「用户可见」的感觉判
   断 —— 那个判断 dev 在时间压力下会乐观化。⛔ 缺了不入队 —— 合进 main 却永不发
