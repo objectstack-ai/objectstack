@@ -76,7 +76,18 @@
  * the two wiring cases in the second describe — the plugin still WIRES the
  * diagnosed member under this ablation, it is the service that stops reading
  * it, which is exactly the failure shape a "declared but unconsumed" surface
- * has. Measured result is recorded in the PR body as it came out.
+ * has.
+ *
+ * **First measurement: 4 red / 4 green — the prediction was wrong**, and
+ * usefully so. The extra red was *"a complete read that finds bindings still
+ * refuses"*: the harness supplied that case's count ONLY through the diagnosed
+ * member, so the ablated build read the plain count as `0` and removed the
+ * datasource. That is a fixture where the two counts disagree, which measures
+ * the wiring rather than the decision — on the shipped wiring they are the same
+ * filter over the same listing. The harness now derives the plain count from
+ * the diagnosed one so the only difference between the two directions is
+ * `degraded`. **Re-measured: 3 red / 5 green**, as predicted. Both numbers are
+ * recorded because the first one is the one that found the incoherent fixture.
  */
 
 import { describe, it, expect, vi } from 'vitest';
