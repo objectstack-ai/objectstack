@@ -3072,8 +3072,12 @@ const step17: MigrationStep = {
         + 'want. Whether a given set\'s holders SHOULD be able to take a bulk copy is exactly the '
         + 'segregation-of-duties judgement the axis exists to make explicit, and it belongs to '
         + 'the operator. Two details decide who is actually affected: package-shipped sets are '
-        + 're-seeded on upgrade, so the built-ins are handled — `admin_full_access` and '
-        + '`organization_admin` now carry the grant explicitly — while ENVIRONMENT-AUTHORED sets '
+        + 're-seeded on upgrade, so the built-ins are handled — at 17.0.0 `admin_full_access` and '
+        + '`organization_admin` carried the grant explicitly, ON A `*` WILDCARD, and protocol 18 '
+        + 'REMOVES it (see `admin-export-wildcard-removed`: the wildcard made the axis undeniable '
+        + 'for an org admin, so from 18 an admin exports only what an app set grants — do not read '
+        + 'this clause as a standing promise that the built-ins keep exporting) — while '
+        + 'ENVIRONMENT-AUTHORED sets '
         + 'are not and must be edited by hand. `member_default` deliberately does NOT carry the '
         + 'grant, so ordinary authenticated users lose export until an admin grants it; that is '
         + 'the point of the flip, not an oversight. Merge semantics are unchanged and '
@@ -4818,9 +4822,13 @@ const step17: MigrationStep = {
  * `MetadataPluginConfig.additionalTypes` retirement (#8586, ADR-0049): the
  * inert plugin kind-declaration key, tombstoned on the 17.x line, with no D2
  * conversion because a plugin config is not a stack collection member (the
- * `kernel/Manifest:loading` precedent) — and the field `scale`/`precision`
+ * `kernel/Manifest:loading` precedent) — the field `scale`/`precision`
  * integer refusal (#8321), whose non-mechanical half is that only the author
- * knows the digit count they meant.
+ * knows the digit count they meant — and the removal of the `'*'` export grant
+ * from the shipped admin permission sets (#8681), the one entry here that
+ * narrows a CAPABILITY rather than an accept set, and so the one whose silence
+ * on upgrade is a working export turning into a 403 rather than a publish
+ * refusal.
  */
 const step18: MigrationStep = {
   toMajor: 18,
@@ -4845,13 +4853,77 @@ const step18: MigrationStep = {
     'floor/round semantics, which made the declaration silently inert. The schema now ' +
     'refuses both at parse (`z.number().int().min(0)`); the mechanical conversion ' +
     'deletes a malformed value from old sources and stored rows (behaviour-preserving), ' +
-    'and the semantic entry tells the author to re-declare the count they meant.',
+    'and the semantic entry tells the author to re-declare the count they meant. ' +
+    'Finally, it removes the `objects["*"].allowExport` grant from the shipped admin ' +
+    'permission sets (#8681) — `admin_full_access`, `organization_admin` and the derived ' +
+    '`organization_admin_no_bypass`. Measured on 17.0.0 GA, that wildcard made the ' +
+    'export axis undeniable for an org admin: an application could declare an object ' +
+    'exportable by nobody and the platform exported it anyway, with no supported opt-out, ' +
+    'because a code-package set cannot be edited (`403 [not_overridable]`) and the admin ' +
+    'held no app-authored set in which to write the per-object `false` that would have ' +
+    'won. It is #5491 (`member_default`\'s CRUD wildcard) applied to the export axis, ' +
+    'which had kept its wildcard by omission rather than by decision. From 18 an admin ' +
+    'exports exactly what an app-authored set grants — a posture the same run measured ' +
+    'to be already precise. Unlike everything else in this step it changes no schema, so ' +
+    'nothing refuses at publish: the upgrade signal is behavioural and belongs here.',
   conversionIds: ['field-malformed-scale-precision-removed'],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
     // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
     // FILE — never by editing between the markers, which is generated.
     // <os-generated semantic:18>
+    {
+      id: 'admin-export-wildcard-removed',
+      surface:
+        'the SHIPPED platform admin permission sets `admin_full_access`, `organization_admin` and '
+        + 'the derived `organization_admin_no_bypass` — their `objects["*"].allowExport = true` '
+        + 'wildcard grant (REMOVED; the rest of the wildcard is unchanged)',
+      replacement:
+        'an explicit `allowExport: true` on the object entries of an APP-authored permission set '
+        + 'held by the principals meant to keep exporting. Nothing replaces the grant in the '
+        + 'platform sets themselves',
+      reason:
+        'A capability NARROWING of a published set, and — like `export-axis-opt-in`, whose 17.0 '
+        + 'story this completes — one no gate can announce: the metadata is unchanged and still '
+        + 'parses, the shipped sets are re-seeded on upgrade, and the only observable is that an '
+        + 'export which returned 200 now returns 403 `EXPORT_NOT_PERMITTED`. `export-axis-opt-in` '
+        + 'told upgraders that "package-shipped sets are re-seeded on upgrade, so the built-ins '
+        + 'are handled — `admin_full_access` and `organization_admin` now carry the grant '
+        + 'explicitly"; from this major they deliberately do NOT, so a deployment that read that '
+        + 'sentence and left its admins to the built-ins must now act. What the wildcard did, '
+        + 'measured on 17.0.0 GA across 40 export probes: an org owner exported three objects on '
+        + 'which NO app permission set granted export, 200 with full rows, and the app had no way '
+        + 'to refuse — editing a code-package set answers `403 [not_overridable]`, and the org '
+        + 'admin holds no app-authored set in which to write the per-object `false` that would '
+        + 'have won. So an application could declare an object exportable by nobody, ship, and be '
+        + 'silently wrong on an exfiltration boundary — declared ≠ enforced, on the axis where a '
+        + 'silent gap costs the most. This is #5491 applied to export: that change removed '
+        + '`member_default`\'s CRUD wildcard because a wildcard in a set every principal resolves '
+        + 'is not a default but a floor nobody can get under; the export wildcard survived by '
+        + 'omission rather than by decision, one tier up. It cannot be mechanically converted, in '
+        + 'either direction: re-granting `allowExport` wherever an admin holds a set would restore '
+        + 'today\'s behaviour and defeat the entire point, and leaving it withheld may revoke '
+        + 'export an operator legitimately wants. WHICH principals may take a bulk copy is the '
+        + 'segregation-of-duties judgement the axis exists to make explicit, and it belongs to the '
+        + 'operator. Note the boundary this does NOT move: the export gate itself is unchanged and '
+        + 'was never the defect (controls C1–C3 of the same run show it enforcing exactly), '
+        + 'specific-over-wildcard precedence is unchanged, `allowExport` on a `"*"` entry remains a '
+        + 'supported authoring shape in an app\'s OWN sets, and READ is untouched — an admin still '
+        + 'sees every record they saw before. ADR-0087, maintainer ruling 2026-08-15, #8681.',
+      acceptanceCriteria:
+        'For every principal whose ADMIN export you rely on, the grant is now authored where you '
+        + 'control it: an app/environment permission set held by that principal names each object '
+        + 'they must export and carries `allowExport: true` on it. Verify BEHAVIOURALLY — nothing '
+        + 'fails at parse time, and a re-seed silently replaces the old built-ins: sign in as an '
+        + 'org owner or platform admin and call `GET /api/v1/data/<object>/export`, confirming 200 '
+        + 'where export is intended and 403 `EXPORT_NOT_PERMITTED` where it is not. ⚠️ Silence is '
+        + 'not success: a deployment that upgrades without editing anything is VALID metadata '
+        + 'whose administrators have quietly lost export on every object no app set grants, and '
+        + 'the first sign will be a support report rather than an error. The reverse reading is '
+        + 'worth one pass too — an object your app declares exportable by nobody is now genuinely '
+        + 'exportable by nobody, which is the point of the change; confirm that is what you want '
+        + 'before granting it back.',
+    },
     {
       id: 'analytics-authorable-unknown-keys-refused',
       surface: 'analytics cube definitions (`defineCube` / `defineStack({ analyticsCubes })`: the '

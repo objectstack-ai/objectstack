@@ -130,9 +130,25 @@ const baseDefaultPermissionSets: PermissionSet[] = [
         // [#3544] Export is an OPT-IN grant and is deliberately NOT implied by
         // the super-user bits — "may see all data" and "may take a bulk copy of
         // it" are separable on purpose (SAP S_GUI 61 / segregation of duties).
-        // Stated explicitly so the platform administrator keeps export, and so
-        // a deployment wanting that separation has one obvious line to remove.
-        allowExport: true,
+        //
+        // [#8681] NO `allowExport` HERE, and it is not an oversight. This set
+        // shipped `allowExport: true` on the wildcard through 17.0.0 GA, which
+        // made the export axis undeniable for anyone holding it: an app could
+        // declare an object exportable by nobody and the platform exported it
+        // anyway, with no supported opt-out (editing a code-package set answers
+        // `403 [not_overridable]`, and the admin holds no app-authored set to
+        // put the per-object `false` into). Measured on GA, hotcrm#1152: an org
+        // owner exported three objects no app set grants export on, 200 with
+        // full rows. Maintainer ruling (2026-08-15) removes the grant — the
+        // export axis's half of #5491, which removed `member_default`'s CRUD
+        // wildcard for the identical "a wildcard nobody can get under" reason.
+        //
+        // ⛔ Do not restore it, and do not restore a NARROWER wildcard either —
+        // "which platform objects should ship an explicit export grant" is an
+        // OPEN question the ruling deliberately left to a separate decision, and
+        // any `'*'` export grant here re-opens the hole for every object the
+        // platform does not know about. Where admin export is intended, grant
+        // `allowExport` per object in an APP permission set.
       },
     },
     systemPermissions: [
@@ -190,10 +206,25 @@ const baseDefaultPermissionSets: PermissionSet[] = [
         allowDelete: true,
         viewAllRecords: true,
         modifyAllRecords: true,
-        // [#3544] Explicit — the super-user bits do not imply export. Bounded
-        // by this set's organization wall (the `tenant_isolation` RLS below),
-        // so it is an org-scoped export, never a cross-tenant one.
-        allowExport: true,
+        // [#3544] The super-user bits do not imply export.
+        //
+        // [#8681] …and this set no longer GRANTS it either — read the twin
+        // comment in `admin_full_access` above for the measurement and the
+        // 2026-08-15 ruling. Two things specific to this declaration:
+        //
+        //   - The org wall bounds the SCOPE of an export, not the right to take
+        //     one. "Org-scoped rather than cross-tenant" was the old comment's
+        //     defence of the grant, and it answers a question nobody asked: the
+        //     leak measured on GA was inside a single tenant, an org admin
+        //     taking a bulk copy of objects their own app declared unexportable.
+        //   - This declaration is the SOURCE of `organization_admin_no_bypass`
+        //     (`deriveWallLessOrgAdmin` below copies everything but the
+        //     superuser bits), so the grant's removal reaches both variants from
+        //     this one line. That is the intended shape: fixing only the derived
+        //     variant would leave a wall-ENFORCING deployment leaking while the
+        //     card's two named sets both looked closed, and partial enforcement
+        //     was rejected outright — a half-closed export boundary reads as
+        //     closed and is not.
       },
       // Identity tables — go through better-auth endpoints (invite,
       // accept, remove-member, transfer, …) rather than raw CRUD.

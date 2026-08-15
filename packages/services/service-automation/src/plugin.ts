@@ -226,6 +226,26 @@ export const DECLARATIVE_RETRY_BASE_MS = 5_000;
 export const DECLARATIVE_RETRY_MAX_MS = 300_000;
 
 /**
+ * Backoff for degraded-instance retries (#3017): base · 2^(attempts-1), capped.
+ *
+ * At module scope rather than as a `private static` on the plugin, and that is
+ * load-bearing rather than stylistic (#8645): its one call site sits in an
+ * INSTANCE method, so the static spelling made the class reference itself by
+ * name inside its own body. esbuild rewrites such a class into
+ * `var X = class _X { … _X … }` — binding the inner reference to the class
+ * binding — and the emitted class then reports `_X` as its `.name`. The CLI's
+ * `Serve.providesCapability` recognises a host-supplied provider by
+ * `constructor.name` as well as `plugin.name`, so against the shipped build the
+ * `AutomationServicePlugin` class-name identity matched nothing and the
+ * `automation` capability guard was running on its registered-id limb alone.
+ * `packages/cli/test/serve-capability-identity.test.ts` now enforces the
+ * equality; keep self-references out of plugin class bodies.
+ */
+function declarativeRetryDelayMs(attempts: number): number {
+    return Math.min(DECLARATIVE_RETRY_BASE_MS * 2 ** Math.max(0, attempts - 1), DECLARATIVE_RETRY_MAX_MS);
+}
+
+/**
  * Deterministic JSON stringify (keys sorted at every level) so a signature is
  * stable regardless of authored key order — two materialization inputs that
  * differ only in key order hash identically and don't trigger a needless
@@ -1578,11 +1598,6 @@ export class AutomationServicePlugin implements Plugin {
         };
     }
 
-    /** Backoff for degraded-instance retries (#3017): base · 2^(attempts-1), capped. */
-    private static declarativeRetryDelayMs(attempts: number): number {
-        return Math.min(DECLARATIVE_RETRY_BASE_MS * 2 ** Math.max(0, attempts - 1), DECLARATIVE_RETRY_MAX_MS);
-    }
-
     private clearDeclarativeRetryTimer(): void {
         if (this.declarativeRetryTimer !== undefined) {
             clearTimeout(this.declarativeRetryTimer);
@@ -1601,9 +1616,7 @@ export class AutomationServicePlugin implements Plugin {
         this.clearDeclarativeRetryTimer();
         if (this.destroyed || this.degradedInstances.size === 0) return;
         const delay = Math.min(
-            ...[...this.degradedInstances.values()].map((d) =>
-                AutomationServicePlugin.declarativeRetryDelayMs(d.attempts),
-            ),
+            ...[...this.degradedInstances.values()].map((d) => declarativeRetryDelayMs(d.attempts)),
         );
         const timer = setTimeout(() => {
             this.declarativeRetryTimer = undefined;
