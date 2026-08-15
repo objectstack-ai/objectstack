@@ -11458,8 +11458,47 @@ export class ObjectStackProtocolImplementation implements
     }
 
     async saveMetaItem(request: { type: string, name: string, item?: any, organizationId?: string, parentVersion?: string | null, actor?: string, force?: boolean, mode?: 'draft' | 'publish', packageId?: string | null, source?: string }) {
+        // [#8818] The ADR-0112 envelope this refusal always owed. Every OTHER
+        // refusal in this method declares `code` AND `status`
+        // (`NOT_OVERRIDABLE`/403, `NOT_CREATABLE`/403, `ITEM_LOCKED`/403,
+        // `OBJECT_OVERLAY_PACKAGE_MISMATCH`/422, the org-scope and
+        // destructive-change refusals, the parent-version conflict/409); this
+        // one declared neither, and an undeclared throw is withheld by
+        // {@link clientFacingFailureText} (a positive list keyed on 4xx
+        // `status`) and rendered `500 INTERNAL_ERROR` by `handleRouteError` —
+        // a SERVER FAULT for what is purely the caller's mistake, telling the
+        // author less than the producer knew and inviting a pointless retry.
+        //
+        // MEASURED reachable from the wire — this is an AUTHORING refusal, not
+        // a programming-error guard. `PUT /api/v1/meta/:type/:name` unwraps the
+        // `{ item }` / `{ metadata }` envelope shapes before calling here, so
+        // `{"item": null}` and `{"metadata": null}` arrive as `item: null` and
+        // land exactly here (measured end to end against a live server: both
+        // answered `500 INTERNAL_ERROR` before this change). ⚠️ A missing,
+        // empty or literal-`null` BODY does NOT reach this guard: the route
+        // folds it to `{}`, which is truthy, and the per-type Zod parse below
+        // refuses it with `422 INVALID_METADATA` — so this guard's whole
+        // reachable population is the explicitly-null envelope.
+        //
+        // `INVALID_REQUEST`/400 rather than the `INVALID_METADATA`/422 the
+        // sibling refusals use, and NEITHER mints a code: both are already
+        // registered to this package in the ADR-0112 ledger (D3). The 422
+        // sites all describe a body that EXISTS and failed the per-type parse,
+        // and every one carries structured `issues`; here there is no body to
+        // validate and no issues to report, so a 422 would misdescribe the
+        // failure and break that convention. The structural twin is
+        // {@link rollbackMetaItem}'s own opening guard — same class, same
+        // position, a malformed REQUEST ENVELOPE rather than an off-spec
+        // document — which is `[invalid_request]`/400.
         if (!request.item) {
-            throw new Error('Item data is required');
+            const err: any = new Error(
+                `[invalid_request] saveMetaItem requires an 'item' body for '${request.type}/${request.name}'. `
+                + `Send the metadata document as the request body, or wrap it as {"item": {...}} / {"metadata": {...}}. `
+                + `An explicitly null item is refused rather than persisted as an empty document.`,
+            );
+            err.code = 'INVALID_REQUEST';
+            err.status = 400;
+            throw err;
         }
         // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}.
         request = canonicalizeMetaRequestType(request);
@@ -15563,17 +15602,28 @@ export class ObjectStackProtocolImplementation implements
     }> {
         const singularType = PLURAL_TO_SINGULAR[request.type] ?? request.type;
         const orgId = request.organizationId ?? null;
-        const events = (await this.historyMetaItem({
-            type: singularType,
-            name: request.name,
-            ...(orgId ? { organizationId: orgId } : {}),
-        })).events;
-        const versions = events
-            .map((ev: any) => (ev as any).version as number | undefined)
-            .filter((v): v is number => typeof v === 'number');
-        // The `historyMetaItem` MetadataEvent shape doesn't carry the
-        // per-(type,name) `version` directly — re-fetch via the repo
-        // to read the underlying history rows with their version.
+        // [#8798] Read the history rows DIRECTLY, once. `historyMetaItem`
+        // cannot serve this function: its `MetadataEvent` shape doesn't carry
+        // the per-(type,name) `version` a diff selects versions by, so its
+        // result was computed into a `versions` array and then discarded
+        // (`const _used = versions; void _used;`) while the real read happened
+        // below — a second, unused round trip over `sys_metadata_history` on
+        // every request to a routed, live endpoint.
+        //
+        // ⛔ Do not reinstate a `historyMetaItem` call here "for the
+        // authorization check". It never performed one for this path, measured
+        // both ways: its early return (`isOverlayAllowed` / `isRuntimeCreateAllowed`)
+        // answers `{ events: [] }` WITHOUT throwing and without touching the
+        // engine, so the five types that take it (`field`, `job`, `api`,
+        // `capability`, `agent`) had their diff served by the read below
+        // regardless — the gate never reached this function's output. What the
+        // discarded call did change was failure behaviour, and only by accident:
+        // being unguarded, it made a `sys_metadata_history` outage FATAL for
+        // gated-open types while the `try` below answered an empty diff for the
+        // five gated-shut ones. One outage, two answers, decided by type. The
+        // `catch` below is this function's only stated intent for that failure,
+        // so removing the call makes every type take it. Pinned in
+        // `protocol.diff-dead-history-read.test.ts`.
         const repo = this.getOverlayRepo(orgId);
         const fullRef = {
             type: singularType,
@@ -15665,7 +15715,6 @@ export class ObjectStackProtocolImplementation implements
                 changed: diff.changed.map((e) => ({ path: e.path, from: servedFrom[e.path], to: servedTo[e.path] })),
             };
         }
-        const _used = versions; void _used;
         return {
             type: request.type,
             name: request.name,

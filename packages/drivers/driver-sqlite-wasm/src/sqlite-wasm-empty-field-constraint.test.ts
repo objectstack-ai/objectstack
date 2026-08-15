@@ -14,10 +14,22 @@
  * driver's temporal / pagination / filter-logic suites exist to disprove (#4405),
  * so the fourth backend is verified rather than assumed — which is also what the
  * ruling on #5240 requires: the SAME error code from all four.
+ *
+ * [#8197, maintainer ruling 2026-08-15] This refusal now names its field and its
+ * position ONLY for a predicate positively marked author-written: on a
+ * read-scope-injected subtree both are the administrator's. The positions table
+ * below is therefore marked as what it is — the test author's own filter — so it
+ * keeps asking its original question (does the inherited refusal still name the
+ * position?) instead of quietly weakening into "does it refuse at all?".
+ *
+ * ⛔ Do not "fix" a failure here by deleting the position assertions: the mark is
+ * what this driver must inherit alongside the refusal, and the last case in the
+ * file pins that inheritance from the other side — unmarked ⇒ withheld.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { SqliteWasmDriver } from './index.js';
+import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 
 interface WireBearingError extends Error {
   code?: string;
@@ -67,13 +79,26 @@ describe('[#5240] driver-sqlite-wasm inherits the zero-operator field-constraint
 
   for (const [name, where, position] of positions) {
     it(`${name} → 400 INVALID_FILTER naming ${position}`, async () => {
-      const err = await refusalOf(where);
+      const err = await refusalOf(markFilterSubtreeProvenance(where, 'author'));
       expect(err.code).toBe('INVALID_FILTER');
       expect(err.status).toBe(400);
       expect(err.message).toContain(position);
       expect(err.message).toContain('zero operators');
     });
   }
+
+  it('[#8197] the WITHHOLD is inherited too — an unmarked predicate names nothing', async () => {
+    // The other half of the inheritance claim, and the half a fresh literal is
+    // needed for: the marks above are non-writable and first-mark-wins, so a
+    // reused fixture would carry the author verdict into this case and it would
+    // pass against a driver that had inherited no withhold at all.
+    const err = await refusalOf({ $or: [{ stage: {} }, { owner: 'u2' }] });
+    expect(err.code).toBe('INVALID_FILTER');
+    expect(err.status).toBe(400);
+    expect(err.message).toContain('zero operators');
+    expect(err.message).not.toContain('filter.$or[0].stage');
+    expect(err.message).not.toContain('stage');
+  });
 
   it('ordinary filters still run through the wasm dialect unchanged', async () => {
     expect(await ids({ stage: 'won' })).toEqual(['1']);

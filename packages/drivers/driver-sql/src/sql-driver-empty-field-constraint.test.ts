@@ -36,7 +36,22 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { SqlDriver } from '../src/index.js';
+import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 import type { FilterCondition } from '@objectstack/spec/data';
+
+/**
+ * [#8197] Every filter here is the TEST AUTHOR's own, so it is marked as one.
+ *
+ * This refusal names the offending field AND its path, and on a read-scope
+ * predicate both are the administrator's — so the message is now redacted
+ * unless the subtree is positively marked author-written. The author population
+ * still gets the whole sentence, path included, and that sentence is what the
+ * positions table below exists to pin.
+ *
+ * The withhold and its three-population discrimination live in
+ * `sql-driver-target-field-provenance.test.ts`.
+ */
+const authored = <T>(where: T): T => markFilterSubtreeProvenance(where, 'author');
 
 const FIXTURE = [
   { id: '1', stage: 'won', owner: 'u1', amount: 10 },
@@ -84,7 +99,7 @@ describe('[#5240] SqlDriver refuses a field constrained by zero operators', () =
   const ids = async (where: unknown): Promise<string[]> => {
     const rows = await driver.find('deal', {
       fields: ['id'],
-      where: where as FilterCondition,
+      where: authored(where) as FilterCondition,
     });
     return rows.map((r: any) => String(r.id)).sort();
   };
@@ -100,7 +115,7 @@ describe('[#5240] SqlDriver refuses a field constrained by zero operators', () =
 
   const sqlFor = (where: unknown): string => {
     const qb = knex('deal').select('id');
-    (driver as any).applyFilters(qb, where);
+    (driver as any).applyFilters(qb, authored(where));
     return qb.toString();
   };
 

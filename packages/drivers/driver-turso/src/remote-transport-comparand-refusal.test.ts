@@ -2,6 +2,20 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { RemoteTransport } from './remote-transport.js';
+import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
+
+/**
+ * [#8197] The filters in the cases below are the TEST AUTHOR's own, and are
+ * marked as such where the assertion is about the refusal's NAMING half.
+ *
+ * That half — `'object.field'`, the operator, the comparand preview — is now
+ * withheld unless the subtree is positively marked author-written, because on a
+ * read-scope predicate every one of those three is the administrator's. The
+ * author population still receives all of it, which is what these cases pin;
+ * the withhold and its three-population discrimination are pinned in
+ * `remote-transport-target-field-provenance.test.ts`.
+ */
+const authored = <T>(where: T): T => markFilterSubtreeProvenance(where, 'author');
 
 /**
  * Regression: the VALUE half of #1004 (#1058).
@@ -188,7 +202,9 @@ describe('RemoteTransport comparand refusal — the value half of #1004', () => 
   describe('any other comparand the transport cannot bind', () => {
     it('refuses a plain object under $eq, naming its form', async () => {
       const { t, calls } = transportWithCapturingClient();
-      await expect(t.find('deal', { where: { payload: { $eq: { a: 1 } } } })).rejects.toThrow(
+      await expect(
+        t.find('deal', { where: authored({ payload: { $eq: { a: 1 } } }) }),
+      ).rejects.toThrow(
         /Filter comparand 'deal\.payload' \$eq \{"a":1\} is an object, which this transport cannot bind/,
       );
       expect(calls).toHaveLength(0);
@@ -196,16 +212,16 @@ describe('RemoteTransport comparand refusal — the value half of #1004', () => 
 
     it('refuses an array comparand under $eq', async () => {
       const { t } = transportWithCapturingClient();
-      await expect(t.find('deal', { where: { tags: { $eq: ['a', 'b'] } } })).rejects.toThrow(
-        /'deal\.tags' \$eq \["a","b"\] is an array/,
-      );
+      await expect(
+        t.find('deal', { where: authored({ tags: { $eq: ['a', 'b'] } }) }),
+      ).rejects.toThrow(/'deal\.tags' \$eq \["a","b"\] is an array/);
     });
 
     it('refuses an array in implicit-equality position, the same as under $eq', async () => {
       const { t } = transportWithCapturingClient();
-      await expect(t.find('deal', { where: { tags: ['a', 'b'] } })).rejects.toThrow(
-        /'deal\.tags' \$eq \["a","b"\] is an array/,
-      );
+      await expect(
+        t.find('deal', { where: authored({ tags: ['a', 'b'] }) }),
+      ).rejects.toThrow(/'deal\.tags' \$eq \["a","b"\] is an array/);
     });
 
     it('lists the comparand forms it DOES accept', async () => {
@@ -218,7 +234,7 @@ describe('RemoteTransport comparand refusal — the value half of #1004', () => 
     it('truncates a large comparand rather than pasting it into the log', async () => {
       const { t } = transportWithCapturingClient();
       const big = { blob: 'x'.repeat(5_000) };
-      const err = await t.find('deal', { where: { payload: { $eq: big } } }).catch((e) => e);
+      const err = await t.find('deal', { where: authored({ payload: { $eq: big } }) }).catch((e) => e);
       expect(err.message).toContain('…');
       expect(err.message.length).toBeLessThan(600);
     });

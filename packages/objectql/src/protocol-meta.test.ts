@@ -225,10 +225,19 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
     });
 
     describe('saveMetaItem', () => {
-        it('should throw when item data is missing', async () => {
-            await expect(
-                protocol.saveMetaItem({ type: 'app', name: 'test_app' })
-            ).rejects.toThrow('Item data is required');
+        // [#8818] WAS `rejects.toThrow('Item data is required')` — a bare
+        // message match that stayed green while the refusal declared no
+        // ADR-0112 envelope at all, so `clientFacingFailureText` withheld the
+        // sentence and the REST boundary served `500 INTERNAL_ERROR`. The
+        // envelope is the contract; assert it.
+        it('refuses a missing item with the ADR-0112 envelope (400 INVALID_REQUEST)', async () => {
+            const err: any = await protocol.saveMetaItem({ type: 'app', name: 'test_app' })
+                .then(() => { throw new Error('saveMetaItem ACCEPTED a request with no item'); })
+                .catch((e: any) => e);
+
+            expect(err.code).toBe('INVALID_REQUEST');
+            expect(err.status).toBe(400);
+            expect(err.message).toContain("requires an 'item' body");
         });
 
         it('writes the saved body through to the SchemaRegistry for non-object types (#4521)', async () => {

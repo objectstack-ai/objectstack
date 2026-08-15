@@ -85,10 +85,12 @@ export interface ThrownHttpError {
    * to `status: 500`, so a caller that must tell "the producer said so" from
    * "I supplied the default" cannot read it off the value. The workaround in
    * the repo was to probe this function with a fallback no producer declares
-   * — `resolveThrownHttpError(e, 0).status !== 0`, still spelled by hand in
-   * `packages/rest`'s publish-classification suite. That is a magic number
+   * — `resolveThrownHttpError(e, 0).status !== 0`. That is a magic number
    * standing in for a fact this function already computed, and it fails
-   * silently the day a producer declares the sentinel. So the fact is stated.
+   * silently the day a producer declares the sentinel. So the fact is stated;
+   * `packages/rest`'s publish-classification suite now reads
+   * `resolveThrownHttpError(error).declaredStatus !== undefined` instead of
+   * hand-spelling the workaround.
    *
    * ## Who needs the distinction
    *
