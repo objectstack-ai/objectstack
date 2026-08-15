@@ -282,7 +282,9 @@ export const URL_CREDENTIAL_QUERY_PARAM_REFUSED = (key: string, param: string): 
 
 /** Percent-decode a query key the way the measured clients do; malformed encoding stays raw. */
 function decodeQueryKey(raw: string): string {
-  const plusDecoded = raw.replaceAll('+', ' ');
+  // `.replace` with a global regex, not `.replaceAll`: the DTS build's lib
+  // target predates es2021.
+  const plusDecoded = raw.replace(/\+/g, ' ');
   try {
     return decodeURIComponent(plusDecoded);
   } catch {

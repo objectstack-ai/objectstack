@@ -301,8 +301,7 @@ describe('#8337 — the query-parameter spelling, both halves at the service doo
       url: 'libsql://app-org.turso.io',
       syncUrl: 'libsql://app-org.turso.io?tls=1',
     });
-    expect(read!.redactedKeys).toContain('url');
-    expect(read!.redactedKeys).toContain('syncUrl');
+    expect(read!.redactedConfigKeys).toEqual(['syncUrl', 'url']);
   });
 
   it('an untouched round-trip keeps the stored token — the restore mirrors the new redaction', async () => {
