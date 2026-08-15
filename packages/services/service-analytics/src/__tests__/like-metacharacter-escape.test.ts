@@ -67,6 +67,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { Cube, FilterCondition } from '@objectstack/spec/data';
+import { isAcceptedFilterComparand } from '@objectstack/spec/data';
 import type { AnalyticsQuery, StrategyContext } from '@objectstack/spec/contracts';
 
 import { NativeSQLStrategy } from '../strategies/native-sql-strategy.js';
@@ -239,20 +240,26 @@ describe('[#5567] analytics LIKE compilers escape their comparand', () => {
      * `driver-sql`'s `isRenderableTextComparand`, mirrored — same reason the
      * escape expression is mirrored above. If either package widens or narrows
      * its allow-list, this assertion is what goes red.
+     *
+     * ⚠️ [#8186] Mirrored at its POST-#7872 spelling, which is the point of the
+     * update rather than a tidy-up. The driver's six-type membership is the
+     * shared door's now (`isAcceptedFilterComparand`, `@objectstack/spec/data`)
+     * and, since #8186, so is this package's — so a hand-written re-spelling of
+     * those six types here would have been the very third copy both changes
+     * exist to delete, and would have gone stale the first time the door moved
+     * while agreeing with nothing.
+     *
+     * What is left to mirror is exactly what the door does NOT carry: each
+     * face's local extras. That is now the whole content of these two lambdas,
+     * and it is the only part that can still drift.
      */
-    const driverSqlRenderable = (v: unknown): boolean => {
-      if (v === null || v === undefined) return true;
-      const kind = typeof v;
-      if (kind === 'string' || kind === 'number' || kind === 'bigint' || kind === 'boolean') return true;
-      return v instanceof Date;
-    };
+    const driverSqlRenderable = (v: unknown): boolean =>
+      v === undefined || isAcceptedFilterComparand(v);
 
     /** `driver-sql`'s `isBindableComparand`, mirrored — the `$in`-member half. */
     const driverSqlBindable = (v: unknown): boolean => {
-      if (v === null || v === undefined) return true;
-      const kind = typeof v;
-      if (kind === 'string' || kind === 'number' || kind === 'bigint' || kind === 'boolean') return true;
-      return v instanceof Date || ArrayBuffer.isView(v);
+      if (v === undefined) return true;
+      return isAcceptedFilterComparand(v) || ArrayBuffer.isView(v);
     };
 
     /**

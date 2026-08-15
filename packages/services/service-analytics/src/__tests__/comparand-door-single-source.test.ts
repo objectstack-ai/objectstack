@@ -53,10 +53,19 @@
 
 import { describe, it, expect } from 'vitest';
 import type { FilterCondition } from '@objectstack/spec/data';
+import {
+  isAcceptedFilterComparand,
+  ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE,
+} from '@objectstack/spec/data';
 
 import { normalizeAnalyticsFilterTree } from '../strategies/filter-normalizer.js';
 import { compileScopedFilterToSql } from '../read-scope-sql.js';
-import { isBindableComparand, isRenderableTextComparand } from '../comparand-shape.js';
+import {
+  isBindableComparand,
+  isRenderableTextComparand,
+  unbindableListMemberMessage,
+  unrenderableTextComparandMessage,
+} from '../comparand-shape.js';
 
 const tree = (where: unknown) => normalizeAnalyticsFilterTree({ where } as any);
 const scope = (where: unknown) => compileScopedFilterToSql(where as FilterCondition, 'person');
@@ -182,6 +191,63 @@ describe('[#8186] the comparand matrix is unchanged by the door reconciliation',
         expect(verdict(() => scope({ qty: { $eq: row.value } }))).toBe(row.scopeEq);
       });
     }
+  });
+
+  /**
+   * The half of #8186 the matrix above cannot see.
+   *
+   * The matrix pins that behaviour did not MOVE, which is exactly as true of a
+   * local re-spelling as of the door import — that is what "the copies agree
+   * byte-for-byte" means. So these assertions pin the other direction: the
+   * membership and the sentence are the DOOR's, so a future change to the door
+   * reaches this package instead of silently disagreeing with it. Re-spell
+   * either one locally and these go red while the matrix stays green.
+   */
+  describe('the membership and the sentence are the door’s, not a local copy', () => {
+    const EVERY_VALUE = [
+      ...MATRIX.map((r) => r.value),
+      -1.5, 0, '', false, 9007199254740993n, new Map(), Symbol('s'), () => 1, [],
+    ];
+
+    it('`isRenderableTextComparand` is exactly the door plus `undefined`', () => {
+      for (const v of EVERY_VALUE) {
+        expect(isRenderableTextComparand(v), String(typeof v)).toBe(
+          v === undefined || isAcceptedFilterComparand(v),
+        );
+      }
+    });
+
+    it('`isBindableComparand` is exactly the door plus `undefined` and binary', () => {
+      for (const v of EVERY_VALUE) {
+        expect(isBindableComparand(v), String(typeof v)).toBe(
+          v === undefined || isAcceptedFilterComparand(v) || ArrayBuffer.isView(v),
+        );
+      }
+    });
+
+    it('both refusal messages quote the door’s sentence rather than a hand copy', () => {
+      expect(unbindableListMemberMessage('$in', 'status', { foo: 1 }, 0))
+        .toContain(ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE);
+      expect(unrenderableTextComparandMessage('$contains', 'name', { foo: 1 }))
+        .toContain(ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE);
+    });
+
+    it('the sentence names `bigint`, which the old hand copy omitted', () => {
+      // Not a new capability: `bigint` is accepted in the matrix above and was
+      // before this card too. The copied sentence simply under-described the
+      // set it was copied from, which is the failure mode of copying it.
+      expect(ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE).toContain('bigint');
+      expect(unbindableListMemberMessage('$in', 'status', { foo: 1 }, 0)).toContain('bigint');
+      expect(isBindableComparand(9n)).toBe(true);
+    });
+
+    it('binary stays a package-local extra the door does not admit', () => {
+      const buf = new Uint8Array([1, 2]);
+      expect(isAcceptedFilterComparand(buf)).toBe(false);
+      expect(isBindableComparand(buf)).toBe(true);
+      expect(unbindableListMemberMessage('$in', 'status', { foo: 1 }, 0))
+        .toContain('(or a binary value)');
+    });
   });
 
   it('every one of the door’s six accepted types is accepted in every position', () => {
