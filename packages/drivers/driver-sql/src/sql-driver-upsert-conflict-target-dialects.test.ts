@@ -131,6 +131,28 @@ const PLAIN = {
   },
 } as any;
 
+/**
+ * [#8807] Two unique business keys — the shape on which MySQL merges a
+ * `conflictKeys`-less upsert onto a row the caller never identified.
+ *
+ * Declared for the ON CONFLICT dialects so the card's claim is pinned as a
+ * DIALECT DIFFERENCE rather than as a MySQL anecdote: the ruled principle
+ * ("never modify a row whose identity the caller did not supply") is
+ * dialect-independent, and the reason SQLite and PostgreSQL needed no code
+ * change is that they already uphold it — `ON CONFLICT (id)` merges on the
+ * named arbiter alone and raises a unique violation on anything else. That is
+ * the control, and it is what makes the MySQL fix a convergence rather than a
+ * new per-dialect rule.
+ */
+const TWO_KEYS = {
+  name: 'os8807_two_keys',
+  fields: {
+    email: { type: 'string', unique: true },
+    tax_id: { type: 'string', unique: true },
+    title: { type: 'string' },
+  },
+} as any;
+
 const captureError = async (run: () => Promise<unknown>): Promise<WireBearingError | null> => {
   try {
     await run();
@@ -168,12 +190,14 @@ function declareRefusalSweep(cell: DialectCell): void {
       // Live cells reuse one database, so the sweep starts from dropped tables.
       await knexInstance.schema.dropTableIfExists(BACKED.name);
       await knexInstance.schema.dropTableIfExists(PLAIN.name);
-      await driver.initObjects([BACKED, PLAIN]);
+      await knexInstance.schema.dropTableIfExists(TWO_KEYS.name);
+      await driver.initObjects([BACKED, PLAIN, TWO_KEYS]);
     });
 
     afterAll(async () => {
       await knexInstance?.schema.dropTableIfExists(BACKED.name).catch(() => {});
       await knexInstance?.schema.dropTableIfExists(PLAIN.name).catch(() => {});
+      await knexInstance?.schema.dropTableIfExists(TWO_KEYS.name).catch(() => {});
       await driver?.disconnect?.();
     });
 
@@ -270,6 +294,68 @@ function declareRefusalSweep(cell: DialectCell): void {
       const rows = await driver.find(PLAIN.name, { where: { id: 'os8567_fixed' } });
       expect(rows).toHaveLength(1);
       expect(rows[0].title).toBe('second');
+    });
+
+    /**
+     * ✅ **[#8807] THE DIALECT CONTROL — the refused branch, on the dialects
+     * that need no code change.**
+     *
+     * The identical call sequence that merged silently onto an unnamed key on
+     * MySQL (pinned in the MySQL section below) must NOT modify the seeded row
+     * here. `ON CONFLICT (id)` names its arbiter, so a collision on `tax_id`
+     * cannot be absorbed by it — the server raises a unique violation and the
+     * stored row is left alone.
+     *
+     * This case is why #8807's fix is a convergence rather than a new MySQL
+     * rule: the ruled principle already held on two of three dialects, and the
+     * assertion here is on the STORED ROW, not on the error, because that is
+     * what the principle is about. (The error's shape is the server's, not this
+     * driver's, and pinning its text would pin the server's wording on two
+     * dialects for no gain.)
+     */
+    it('[#8807] a conflictKeys-less upsert never merges onto an unnamed UNIQUE key here', async () => {
+      const seeded = await driver.upsert(TWO_KEYS.name, { email: 'd@b.com', tax_id: 'T-9', title: 'first' });
+
+      const err = await captureError(() =>
+        driver.upsert(TWO_KEYS.name, { email: 'e@b.com', tax_id: 'T-9', title: 'second' }),
+      );
+
+      expect(
+        err,
+        'this dialect honours the ON CONFLICT arbiter, so the rival key must raise rather than absorb',
+      ).not.toBeNull();
+
+      // Scoped by the colliding key: this suite shares one table across cases
+      // and one database across dialects, so an unscoped read would make the
+      // assertion depend on declaration order.
+      const after = await driver.find(TWO_KEYS.name, { where: { tax_id: 'T-9' } });
+      expect(after).toHaveLength(1);
+      expect(after[0].id).toBe(seeded.id);
+      expect(
+        after[0].email,
+        'a row the caller never identified was modified — the principle #8807 rules on is ' +
+          'dialect-independent and this dialect was supposed to already uphold it',
+      ).toBe('d@b.com');
+      expect(after[0].title).toBe('first');
+    });
+
+    /**
+     * ✅ **[#8807] the still-merging branch, same dialect, same table.** The
+     * caller supplies the identity, so the merge lands on it — the positive
+     * control that keeps the case above from being satisfied by a driver that
+     * simply stopped merging on tables with two unique keys.
+     */
+    it('[#8807] still merges onto the row whose identity the caller DID supply', async () => {
+      await driver.upsert(TWO_KEYS.name, { id: 'os8807_ctl', email: 'c@b.com', tax_id: 'T-1', title: 'first' });
+      const err = await captureError(() =>
+        driver.upsert(TWO_KEYS.name, { id: 'os8807_ctl', email: 'c@b.com', tax_id: 'T-1', title: 'second' }),
+      );
+      expect(err, 'the supplied-identity merge is the legitimate shape and must never be refused').toBeNull();
+
+      const after = await driver.find(TWO_KEYS.name, { where: { id: 'os8807_ctl' } });
+      expect(after).toHaveLength(1);
+      expect(after[0].id).toBe('os8807_ctl');
+      expect(after[0].title).toBe('second');
     });
 
     /**
@@ -700,6 +786,25 @@ const SINGLE_KEY = {
   },
 } as any;
 
+/**
+ * [#8807] The table with NO rival key at all — the primary key is the only
+ * thing a row can collide on.
+ *
+ * This is the control that separates #8807's post-hoc identity check from the
+ * blanket refusal the ruling excluded. Every pin below that asserts a refusal
+ * is also satisfied by a driver that simply stopped merging on MySQL; this
+ * fixture is where such a driver goes red. It is also the shape that must not
+ * pay for the check — no rival key means no cross-row merge is possible, so the
+ * statement keeps its single autocommitted round trip.
+ */
+const NO_RIVAL = {
+  name: 'os8807_no_rival',
+  fields: {
+    title: { type: 'string' },
+    note: { type: 'string' },
+  },
+} as any;
+
 declareDialectCell(
   MYSQL_CELL,
   'unbacked conflict-target refusal (pre-flight, MySQL)',
@@ -722,13 +827,15 @@ function declareMysqlPreflightRefusal(cell: DialectCell): void {
       await knexInstance.schema.dropTableIfExists(MISMATCHED.name);
       await knexInstance.schema.dropTableIfExists(WRONG_KEY.name);
       await knexInstance.schema.dropTableIfExists(SINGLE_KEY.name);
-      await driver.initObjects([MISMATCHED, WRONG_KEY, SINGLE_KEY]);
+      await knexInstance.schema.dropTableIfExists(NO_RIVAL.name);
+      await driver.initObjects([MISMATCHED, WRONG_KEY, SINGLE_KEY, NO_RIVAL]);
     });
 
     afterAll(async () => {
       await knexInstance?.schema.dropTableIfExists(MISMATCHED.name).catch(() => {});
       await knexInstance?.schema.dropTableIfExists(WRONG_KEY.name).catch(() => {});
       await knexInstance?.schema.dropTableIfExists(SINGLE_KEY.name).catch(() => {});
+      await knexInstance?.schema.dropTableIfExists(NO_RIVAL.name).catch(() => {});
       await driver?.disconnect?.();
     });
 
@@ -738,6 +845,7 @@ function declareMysqlPreflightRefusal(cell: DialectCell): void {
       await knexInstance(MISMATCHED.name).delete();
       await knexInstance(WRONG_KEY.name).delete();
       await knexInstance(SINGLE_KEY.name).delete();
+      await knexInstance(NO_RIVAL.name).delete();
     });
 
     /**
@@ -921,13 +1029,28 @@ function declareMysqlPreflightRefusal(cell: DialectCell): void {
      * implementing #8755. The assertion, its strength and its failure message
      * are untouched: deleting it, or weakening it to fit the refusal, would have
      * dropped #8622's only MySQL-cell coverage of a landed fix.
+     *
+     * ⚠️ **[#8807] moved the fixture a THIRD time — same reason, and the last
+     * time it can happen.** The `conflictKeys`-less wrong-key merge is now
+     * refused and rolled back, so this pin went red on the fixture #8755 left it
+     * on; that red is the fix landing, not a regression, and the honest response
+     * is another fixture move rather than a weakened assertion. #8622's claim is
+     * *a merged row keeps its own primary key when the incoming payload carries
+     * a different (freshly minted) one*, and that needs a merge which still
+     * HAPPENS. The one shape left on MySQL where a caller-supplied identity is
+     * absent and the merge is still legitimate is a caller-NAMED target on a
+     * table whose only UNIQUE key IS that target — {@link SINGLE_KEY}, the shape
+     * #8755's ruling protects by name. No wrong-key merge survives anywhere on
+     * this dialect to host it, which is precisely what #8807 changed.
      */
-    it('KEEPS the surviving row’s primary key, even merging on that wrong key', async () => {
-      await driver.upsert(WRONG_KEY.name, { email: 'a@b.com', tax_id: 'T-1', title: 'first' });
-      const seededId = (await rows(WRONG_KEY.name))[0].id;
+    it('KEEPS the merged row’s primary key when the payload carries a freshly minted one', async () => {
+      await driver.upsert(SINGLE_KEY.name, { email: 'm@b.com', title: 'first' }, ['email']);
+      const seededId = (await rows(SINGLE_KEY.name))[0].id;
 
-      await driver.upsert(WRONG_KEY.name, { email: 'other@b.com', tax_id: 'T-1', title: 'second' });
-      const merged = (await rows(WRONG_KEY.name))[0];
+      // No `id` in the payload, so `upsert` mints one — the losing insert's id,
+      // which is what #8622 stopped writing over the stored row.
+      await driver.upsert(SINGLE_KEY.name, { email: 'm@b.com', title: 'second' }, ['email']);
+      const merged = (await rows(SINGLE_KEY.name))[0];
 
       expect(
         merged.id,
@@ -935,12 +1058,11 @@ function declareMysqlPreflightRefusal(cell: DialectCell): void {
           'relationship, audit record and external id mapping pointing at the old row now dangles',
       ).toBe(seededId);
 
-      // The wrong-key merge itself is UNCHANGED and still wrong: one row, and
-      // the columns that are not insert-only still took the losing insert's
-      // values. Without this half, the pin above would also pass if the merge
-      // had simply stopped happening.
+      // Without this half the pin above would also pass if the merge had simply
+      // stopped happening — which, on this table, would mean #8807's check had
+      // spread to the single-key fast path the ruling protects.
       expect(merged.title, 'the mergeable columns must still merge — only identity is excluded').toBe('second');
-      expect(merged.email).toBe('other@b.com');
+      expect(merged.email).toBe('m@b.com');
     });
 
     /**
@@ -1060,19 +1182,22 @@ function declareMysqlPreflightRefusal(cell: DialectCell): void {
     });
 
     /**
-     * [#8755] The residue this card deliberately does NOT refuse, pinned so it is
-     * documented behaviour rather than an accident nobody measured: an
-     * explicitly named PRIMARY KEY on a table that also carries UNIQUE keys.
+     * ✅ **[#8807]'s FIRST positive control**, and the pin #8755 wrote as its
+     * residue. The behaviour it asserts is unchanged; only its meaning moved.
      *
-     * The reasoning is on `refuseAmbiguousConflictTarget` in `sql-driver.ts`. In
-     * one line: this call compiles byte-identically to the `conflictKeys`-less
-     * default that no pre-flight has ever probed, so refusing the explicit
-     * spelling while merging the implicit one would make the accept set a
-     * property of how the caller typed the same statement — and the only
-     * `conflictKeys` the platform itself issues is exactly this one (the
-     * lifecycle archiver's hot→cold copy).
+     * An explicitly named PRIMARY KEY on a table that also carries UNIQUE keys,
+     * re-upserting THE SAME row: `id`, `email` and `tax_id` all match the seeded
+     * row, so whichever key MySQL picks it lands on that one row — the identity
+     * the caller supplied. #8807's check passes it untouched, which is the whole
+     * claim: the accept set moves for cross-row merges, not for primary-key
+     * merges on tables that happen to carry a business key.
+     *
+     * ⚠️ This is no longer "the residue #8755 declines to refuse". The residue
+     * (a merge landing on a row the caller never identified) IS refused now —
+     * see the #8807 pins below. What survives here is the legitimate half of the
+     * same shape, and it must stay green or the refusal has become a ban.
      */
-    it('[#8755] leaves an explicitly named PRIMARY KEY merging, UNIQUE keys or not', async () => {
+    it('[#8755 → #8807] an explicitly named PRIMARY KEY still MERGES onto the supplied row', async () => {
       const err = await captureError(() =>
         driver.upsert(WRONG_KEY.name, { id: 'os8755_pk', email: 'pk@b.com', tax_id: 'T-4', title: 'first' }, ['id']),
       );
@@ -1084,6 +1209,192 @@ function declareMysqlPreflightRefusal(cell: DialectCell): void {
       expect(after).toHaveLength(1);
       expect(after[0].id).toBe('os8755_pk');
       expect(after[0].title).toBe('second');
+    });
+
+    // ───────────────────────────────────────────────────────────────────
+    // [#8807] The merge that lands on a row the caller never identified.
+    //
+    // Ruled principle (maintainer, 2026-08-15): *an `upsert` must never modify
+    // a row whose identity the caller did not supply and whose conflict key it
+    // did not name.* Enforcement was delegated to this lane; the shape chosen
+    // is the post-hoc identity check, not the pre-flight refusal — see the
+    // reasoning on `refuseCrossRowIdentityMerge` in `sql-driver.ts`.
+    //
+    // Measured on live MySQL 8.0.46 through the same knex + `mysql2` path, on
+    // `origin/main` @ 716ac9bf8 BEFORE this fix:
+    //
+    //   seed upsert({email:'d@b.com', tax_id:'T-9', title:'first'})  -> id=iVvD35rMk4BIayYc
+    //   B    upsert({email:'e@b.com', tax_id:'T-9', title:'second'}) -> RESOLVED
+    //        ONE row, and it is the SEEDED one, its `email` rewritten d@b.com -> e@b.com.
+    //        The id B was handed back (F-Fp1OGCQB-l5XRu) is in no row at all.
+    //
+    // The identical pair on SQLite raises `UNIQUE constraint failed: ….tax_id`
+    // and leaves the seeded row untouched — pinned as the dialect control in
+    // the ON CONFLICT sweep at the top of this file.
+    // ───────────────────────────────────────────────────────────────────
+
+    /**
+     * ① The envelope. `code` AND `status`, never a bare `rejects.toThrow()`:
+     * before the fix this call RESOLVED, so a bare throw assertion would have
+     * been green for the wrong reason on any unrelated failure (a dead
+     * connection, an unknown column) while the accept set had not moved.
+     */
+    it('[#8807] REFUSES a conflictKeys-less upsert that would merge onto an unnamed UNIQUE key', async () => {
+      await driver.upsert(WRONG_KEY.name, { email: 'd@b.com', tax_id: 'T-9', title: 'first' });
+
+      const err = await captureError(() =>
+        driver.upsert(WRONG_KEY.name, { email: 'e@b.com', tax_id: 'T-9', title: 'second' }),
+      );
+
+      expect(
+        err,
+        'MySQL merged a conflictKeys-less upsert onto a UNIQUE key the caller never named — the ' +
+          'identity check did not run (#8807)',
+      ).not.toBeNull();
+      expect(err!.code).toBe(StandardErrorCode.enum.VALIDATION_ERROR);
+      expect(err!.status).toBe(400);
+    });
+
+    /**
+     * ② **The pin that carries the ruling.** Refusing after the fact is not
+     * enough — "must never MODIFY" is a claim about the stored row, so the
+     * wrong write has to be gone. This is what the transaction around the
+     * statement exists for, and a fix that reported the violation without
+     * rolling it back would satisfy pin ① and fail here.
+     */
+    it('[#8807] ROLLS BACK the wrong write — the row it landed on is byte-for-byte untouched', async () => {
+      const seeded = await driver.upsert(WRONG_KEY.name, { email: 'd@b.com', tax_id: 'T-9', title: 'first' });
+
+      await captureError(() =>
+        driver.upsert(WRONG_KEY.name, { email: 'e@b.com', tax_id: 'T-9', title: 'second' }),
+      );
+
+      const after = await rows(WRONG_KEY.name);
+      expect(after, 'the refused call must not have inserted a row either').toHaveLength(1);
+      expect(after[0].id).toBe(seeded.id);
+      expect(
+        after[0].email,
+        'the seeded row survived with the OVERWRITTEN email — the refusal was reported but not ' +
+          'rolled back, so the corruption this card exists to stop still happened',
+      ).toBe('d@b.com');
+      expect(after[0].title).toBe('first');
+      expect(after[0].tax_id).toBe('T-9');
+    });
+
+    /**
+     * ③ The two spellings are one statement, so they get one answer. #8755
+     * declined to separate them in the merging direction; this card must not
+     * re-introduce the split in the refusing direction, or the accept set
+     * becomes a property of how the caller typed the same call.
+     */
+    it("[#8807] answers the explicit `['id']` spelling identically to the default", async () => {
+      await driver.upsert(WRONG_KEY.name, { email: 'p@b.com', tax_id: 'T-5', title: 'first' }, ['id']);
+
+      const err = await captureError(() =>
+        driver.upsert(WRONG_KEY.name, { email: 'q@b.com', tax_id: 'T-5', title: 'second' }, ['id']),
+      );
+
+      expect(err, 'naming the primary key explicitly must not buy a different accept set').not.toBeNull();
+      expect(err!.code).toBe(StandardErrorCode.enum.VALIDATION_ERROR);
+      expect(err!.status).toBe(400);
+
+      const after = await rows(WRONG_KEY.name);
+      expect(after).toHaveLength(1);
+      expect(after[0].email).toBe('p@b.com');
+      expect(after[0].title).toBe('first');
+    });
+
+    /**
+     * ④ The message is the deliverable — the defect is SILENT, so the whole
+     * value of the fix is a sentence an author can act on. It must name the key
+     * that actually absorbed the merge, say the write was undone (or an
+     * operator will go hunting for damage that is not there), and state the way
+     * out. Row values stay off it, and off `cause`: schema identifiers are what
+     * an operator acts on, the same payload contract both refusals above keep.
+     */
+    it('[#8807] names the colliding key and the rollback, and leaks no row values', async () => {
+      await driver.upsert(WRONG_KEY.name, { email: 'seed@b.com', tax_id: 'T-8', title: 'first' });
+
+      const err = await captureError(() =>
+        driver.upsert(WRONG_KEY.name, { email: 'leaked@example.com', tax_id: 'T-8', title: 'secret-title' }),
+      );
+
+      expect(err!.message).toContain('uniq_os8621_wrong_key_tax_id');
+      expect(err!.message).toContain('tax_id');
+      expect(err!.message).toContain(WRONG_KEY.name);
+      expect(err!.message).toMatch(/ON DUPLICATE KEY UPDATE/);
+      // The fact an operator needs first: nothing was changed.
+      expect(err!.message).toMatch(/rolled back/i);
+      // The three ways out, named rather than alluded to.
+      expect(err!.message).toMatch(/conflictKeys/);
+      expect(err!.message).toMatch(/drop(ping)? or renam/i);
+      expect(err!.message).toMatch(/SQLite and PostgreSQL/);
+
+      expect(err!.message).not.toContain('leaked@example.com');
+      expect(err!.message).not.toContain('secret-title');
+      expect(err!.message).not.toMatch(/insert into/i);
+
+      const causeText = String((err!.cause as Error | undefined)?.message);
+      expect(causeText).toContain('uniq_os8621_wrong_key_tax_id');
+      expect(causeText).not.toContain('leaked@example.com');
+      expect(causeText).not.toContain('secret-title');
+    });
+
+    /**
+     * ✅ **[#8807]'s SECOND positive control, and the sharpest one.** A table
+     * whose only key is the primary key: the `conflictKeys`-less default must
+     * merge there exactly as it always has, with no verification owed and no
+     * transaction opened.
+     *
+     * Without this case every refusal pin above is equally satisfied by a driver
+     * that stopped merging `conflictKeys`-less upserts on MySQL altogether —
+     * which is the blanket option the ruling excluded by name, because it would
+     * refuse the platform's own lifecycle archiver. Selectivity is the reason
+     * this enforcement was choosable at all, so it is pinned rather than argued.
+     */
+    it('[#8807] a table with NO rival UNIQUE key merges untouched — the check is selective', async () => {
+      const err = await captureError(() =>
+        driver.upsert(NO_RIVAL.name, { id: 'os8807_plain', title: 'first', note: 'a' }),
+      );
+      expect(err, 'a table with no rival UNIQUE key has nothing to verify and must never refuse').toBeNull();
+
+      await driver.upsert(NO_RIVAL.name, { id: 'os8807_plain', title: 'second', note: 'b' });
+
+      const after = await driver.find(NO_RIVAL.name, {});
+      expect(after).toHaveLength(1);
+      expect(after[0].id).toBe('os8807_plain');
+      expect(after[0].title).toBe('second');
+    });
+
+    /**
+     * ✅ **[#8807]'s THIRD positive control — the archiver's shape.**
+     *
+     * The ruling required the lifecycle archiver be handled first-party in the
+     * same PR. Measured: of the two objects in this repo that declare
+     * `lifecycle.archive` (`sys_audit_log`, `sys_metadata_audit`), ZERO declare
+     * a non-primary unique field, so the archiver never even reaches the check.
+     * But it must also survive a customer object that DOES carry one, since the
+     * archiver upserts arbitrary objects — so its exact call shape is pinned on
+     * the hostile table: `cold.upsert(object, row, ['id'])`, copying a row that
+     * keeps its own id, first as an insert and then idempotently re-run.
+     *
+     * This is the case that would go red if the enforcement had been the
+     * pre-flight refusal instead, and it is why the post-hoc check was chosen.
+     */
+    it("[#8807] the lifecycle archiver's hot->cold copy still lands, and re-runs idempotently", async () => {
+      const row = { id: 'os8807_archived', email: 'arch@b.com', tax_id: 'T-ARCH', title: 'copied' };
+
+      const first = await captureError(() => driver.upsert(WRONG_KEY.name, row, ['id']));
+      expect(first, "the archiver copy must not be refused — it supplies the row's own identity").toBeNull();
+
+      // The sweep re-runs: same row, same id, already present cold.
+      const second = await captureError(() => driver.upsert(WRONG_KEY.name, row, ['id']));
+      expect(second, 'the archiver is idempotent by design — the re-copy must merge, not refuse').toBeNull();
+
+      const after = await rows(WRONG_KEY.name);
+      expect(after).toHaveLength(1);
+      expect(after[0].id).toBe('os8807_archived');
+      expect(after[0].email).toBe('arch@b.com');
     });
 
     /**
