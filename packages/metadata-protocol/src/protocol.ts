@@ -6087,6 +6087,12 @@ export class ObjectStackProtocolImplementation implements
      * environment has not yet provisioned the table (legacy install
      * prior to ADR-0010) the call returns `{ events: [] }` instead of
      * raising, keeping the Studio tab harmless.
+     *
+     * `organizationId` SCOPES the read and is enforced in the query below:
+     * rows for that organization plus env-wide (`organization_id IS NULL`)
+     * rows, and nothing else. Omitted (or `null`) reads the env-wide rows
+     * only. It is never a hint — a caller that does not supply it does not
+     * get another tenant's rows.
      */
     async auditMetaItem(request: {
         type: string;
@@ -6113,13 +6119,58 @@ export class ObjectStackProtocolImplementation implements
             Math.max(1, request.limit ?? 100),
             500,
         );
+        // [#8747] `request.organizationId` is READ here. It was declared and
+        // never used, while the comment below described the filter it would
+        // have built — a live cross-tenant disclosure, measured rather than
+        // argued: three saves of one view name under `org_alpha`, `org_beta`
+        // and env-wide, then one `auditMetaItem({ type, name })`, returned all
+        // three orgs' rows (`actor`, `note`, `lock_state` with them).
+        //
+        // ⚠️ Nothing below this method compensates, and all three candidates
+        // were eliminated by measurement, not by reading:
+        //  - the driver's tenant wall never engages — `buildDriverOptions`
+        //    sets `DriverOptions.tenantId` only from `execCtx.tenantId`
+        //    (`objectql/engine.ts`), and this read passes no context;
+        //  - plugin-security's Layer 0 never engages — the middleware takes
+        //    its principal-less `return next()` thousands of lines before the
+        //    `objectFields.has('organization_id')` gate that would have
+        //    carried it;
+        //  - no posture would save it anyway: `computeTenantLayer0Filter`
+        //    yields `null` under `single` and the deny sentinel under
+        //    `isolated` with no tenantId.
+        // So the scope has to be BUILT here. It is unconditional — it does not
+        // depend on a posture, a principal, or a layer below choosing to act.
+        //
+        // `?? null` is the same normalization the sibling `/published` door
+        // applies (`request.organizationId ?? null`, mirroring what an org-less
+        // `publishPackageDrafts` WRITES): a caller that resolves no
+        // organization reads exactly the env-wide rows an org-less write
+        // produces. Fail-closed, and symmetric with the write path.
+        const organizationId = request.organizationId ?? null;
         try {
             // Org-scoped lookup: include rows for the specific org AND
             // env-wide (organization_id IS NULL) rows so the editor
             // sees both tenant overlays and env-level package writes.
+            //
+            // The env-wide limb is LOAD-BEARING, not defensive garnish: the
+            // REST `PUT /meta/:type/:name` door passes no `organizationId` at
+            // all, so every row that door writes is stamped
+            // `organization_id: null` (`recordMetadataAudit` persists
+            // `entry.organizationId ?? null`). Drop the limb and this read
+            // returns nothing on a REST-authored deployment — "correctly
+            // scoped" and "hides everything" are different behaviours and the
+            // tests pin them apart.
             const where: Record<string, unknown> = {
                 type: singular,
                 name: request.name,
+                ...(organizationId === null
+                    ? { organization_id: null }
+                    : {
+                        $or: [
+                            { organization_id: organizationId },
+                            { organization_id: null },
+                        ],
+                    }),
             };
             // `order`, NOT `direction`: the QueryAST sort shape is
             // `SortNodeSchema` = `{ field, order }`, and both drivers normalize
@@ -8619,10 +8670,11 @@ export class ObjectStackProtocolImplementation implements
                         : []);
             const fieldByName = new Map(fields.map(f => [f.name, f]));
             const hasField = (n: string) => fieldByName.has(n);
-            // Resolve title for a record using titleFormat → displayNameField →
-            // common conventional fields → id. titleFormat supports simple
-            // `{field}` placeholders (the `template` dialect); unresolved
-            // placeholders fall through to the next strategy.
+            // Resolve title for a record using titleFormat → the declared
+            // primary-title pointer → common conventional fields → id.
+            // titleFormat supports simple `{field}` placeholders (the
+            // `template` dialect); unresolved placeholders fall through to the
+            // next strategy.
             const titleFormatSource = (obj.titleFormat && (obj.titleFormat.source || obj.titleFormat))
                 || undefined;
             const renderTitle = (row: any): string => {
@@ -8637,7 +8689,21 @@ export class ObjectStackProtocolImplementation implements
                     if (rendered) return rendered.replace(/\s+-\s+$/, '').replace(/^\s+-\s+/, '').trim() || row.id;
                 }
                 const candidates = [
-                    obj.displayNameField,
+                    // [ADR-0079] `nameField` is the canonical primary-title
+                    // pointer; `displayNameField` is the deprecated alias
+                    // (still honored). Reading the alias ALONE made this the
+                    // one consumer a canonical designation could not reach:
+                    // `provisionPrimary` — the designation seat the registry
+                    // runs on every object at registration — stamps
+                    // `nameField` only (`spec/src/data/display-name.ts`), so
+                    // an object that declares its title canonically and does
+                    // not also carry the alias fell through this list to
+                    // `String(row.id)` and the palette showed a raw id. Same
+                    // precedence as `resolveDisplayField`, the #4254 ingress
+                    // gate, and this function's own search-field resolution 44
+                    // lines below — a fourth spelling here would re-split what
+                    // those merged.
+                    obj.nameField ?? obj.displayNameField,
                     'name', 'full_name', 'title', 'subject', 'label', 'company',
                 ].filter((c): c is string => typeof c === 'string' && hasField(c));
                 for (const c of candidates) {
@@ -15462,14 +15528,51 @@ export class ObjectStackProtocolImplementation implements
                 fromBody = byVersion.get(fromVersion) ?? null;
             }
         }
-        const diff = diffShallow(fromBody ?? {}, toBody ?? {});
+        // [#8671] Diff RAW, then redact the EMITTED values — maintainer ruling
+        // (comment 5299845282), Option B. The comparison runs on the stored
+        // bodies untouched, so a credential ROTATION still registers as a
+        // changed path; only the values leaving this function are taken from
+        // the type's redacted projection of those same bodies.
+        //
+        // ⛔ Redacting the bodies BEFORE `diffShallow` (Option A) was ruled out
+        // and must not be reintroduced as a simplification: two redacted bodies
+        // are equal at a redacted path, so the rotation would vanish into a
+        // no-diff — destroying the one fact this endpoint exists to serve.
+        //
+        // WHY SUBSTITUTION RATHER THAN PATH-MATCHING against `redactedKeys`:
+        // the two namings live on different planes. `diffShallow` is TOP-LEVEL
+        // (a nested change collapses to one entry at the top-level key, whose
+        // value is the whole sub-object), while `redactedKeys` is nested and
+        // dotted (`config.password`). So `redactedKeys.includes(entry.path)`
+        // would match NOTHING on the real leak — the leaking entry's path is
+        // `config`. Reading each emitted value out of the already-redacted body
+        // gets the nested case right for free and mints no second rule set:
+        // the redactor stays the single source of what a credential is.
+        const rawFrom = fromBody ?? {};
+        const rawTo = toBody ?? {};
+        const diff = diffShallow(rawFrom, rawTo);
+        let served = diff;
+        // Skipped entirely for the overwhelming majority of types, which register
+        // no redactor — `hasMetadataRedactor` is the seam that answers that
+        // without this call site having to know which types hold a secret.
+        if (hasMetadataRedactor(singularType)) {
+            const servedFrom = redactMetadataItem(singularType, rawFrom) as Record<string, unknown>;
+            const servedTo = redactMetadataItem(singularType, rawTo) as Record<string, unknown>;
+            // Both sides, and all three buckets: leaking either the old or the
+            // new value defeats the point (the ruling's second binding note).
+            served = {
+                added: diff.added.map((e) => ({ path: e.path, value: servedTo[e.path] })),
+                removed: diff.removed.map((e) => ({ path: e.path, value: servedFrom[e.path] })),
+                changed: diff.changed.map((e) => ({ path: e.path, from: servedFrom[e.path], to: servedTo[e.path] })),
+            };
+        }
         const _used = versions; void _used;
         return {
             type: request.type,
             name: request.name,
             fromVersion,
             toVersion,
-            ...diff,
+            ...served,
         };
     }
 
