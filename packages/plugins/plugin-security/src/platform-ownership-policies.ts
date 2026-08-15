@@ -136,7 +136,16 @@ export function platformOwnershipFloorPolicyCount(): number {
  *
  *  - `controlled_by_parent` derives its access from the MASTER record, which
  *    has its own OWD and its own gate (`assertControlledByParentWrite`) — the
- *    detail declares nothing about who may write it;
+ *    detail declares nothing about who may write it. ⚠️ **That reasoning is
+ *    about THIS constant and stops here** (#8757). It says a detail is not
+ *    org-wide-open; it was read for four months as though it also said the
+ *    master gate governs a detail's by-id writes today, and measurement says
+ *    the opposite: the floor answered FIRST and no widener could drop it, so
+ *    the detail was creator-only — a row-level write rule the detail also never
+ *    declared. The remedy is NOT to fold `controlled_by_parent` into the
+ *    constant below (it is not org-wide-open, and this bullet is still right
+ *    about that); it is {@link masterGovernsRowWrites}, which hands the detail
+ *    to the gate this bullet already names;
  *  - an UNSET model on a `sys_*` / `isSystem` object is a legacy default, not
  *    an author's statement. Opening writes there would hand every member
  *    cross-creator writes on the platform's own identity tables — the shape of
@@ -173,4 +182,82 @@ export function owdDeclaresOpenRowWrites(schema: unknown): boolean {
  */
 export function owdOpenWritesCoversOperation(operation: string): boolean {
   return operation === 'update';
+}
+
+/**
+ * [#8757] The OWD whose row-level write authority is ANOTHER OBJECT's gate.
+ *
+ * Maintainer ruling 2026-08-15 (delegated adjudication), on the card that
+ * measured a `controlled_by_parent` detail refusing a cross-creator by-id
+ * UPDATE before `assertControlledByParentWrite` ever ran — Modify All Data
+ * included: **the master gate is the sole row-write authority for a
+ * `controlled_by_parent` detail.**
+ *
+ * ADR-0055 defines the posture as "access is derived from the master". The
+ * platform floor is the platform's answer for objects whose OWD says nothing
+ * about writes; a detail's OWD does not say nothing, it says *ask the master*.
+ * Running the floor as well made two gates answer one write, and the stricter
+ * of the two — `created_by == current_user.id` — was derived from nothing the
+ * author wrote and could not be widened by ownership depth, by an `edit`-level
+ * `sys_record_share`, or by `modifyAllRecords` (`SharingService.checkEdit`
+ * abstains on the `public`-mapped model before it ever reaches the bypass
+ * branch, so the floor's only escape hatch was closed by construction).
+ *
+ * ## This predicate is HALF a licence, never a whole one
+ *
+ * It answers "does this object delegate its row-level write authority?" — a
+ * DECLARATION about the object, which is why it is read here, next to
+ * {@link owdDeclaresOpenRowWrites}, on the same reasoning that keeps
+ * `plugin-sharing`'s effective `'public'` bucket out of this file.
+ *
+ * It does NOT answer "is the delegate actually running on this write?", and the
+ * ruling gates the floor removal on exactly that:
+ *
+ *   > a test proving `assertControlledByParentWrite` actually runs on every
+ *   > by-id write path where the floor is being removed — the floor comes off
+ *   > only where the master gate demonstrably covers the same operation;
+ *   > otherwise the change is a bare widening.
+ *
+ * So the caller must vouch for coverage separately
+ * (`RlsFilterOptions.masterGateCoversThisWrite`), and the floor comes off only
+ * where BOTH hold. The path that makes the distinction load-bearing rather than
+ * ceremonial is the BULK write: `assertControlledByParentWrite` returns early
+ * when the operation addresses no single id, so nothing replaces the floor
+ * there and the floor stays — on an object this predicate answers `true` for.
+ *
+ * An unresolvable schema yields `false` and the floor stays (fail closed).
+ */
+export const OWD_DELEGATING_ROW_WRITES = 'controlled_by_parent';
+
+/**
+ * True iff this object's author DECLARED that its access — writes included —
+ * derives from a master record. Reads both the flat and the nested spot,
+ * exactly as every other OWD reader in the platform does.
+ */
+export function masterGovernsRowWrites(schema: unknown): boolean {
+  const s = schema as { sharingModel?: unknown; security?: { sharingModel?: unknown } } | null;
+  const model = s?.sharingModel ?? s?.security?.sharingModel;
+  return model === OWD_DELEGATING_ROW_WRITES;
+}
+
+/**
+ * The write classes the master gate covers, and therefore the only ones
+ * {@link masterGovernsRowWrites} may drop the floor for — `update` and
+ * `delete`, which is every write class the floor ships
+ * (`owner_only_writes` / `owner_only_deletes`).
+ *
+ * Wider than {@link owdOpenWritesCoversOperation} on purpose, and for a
+ * different KIND of reason: that one is bounded by what `public_read_write`
+ * means ("see and edit"), while this one is bounded by what the replacement
+ * gate demonstrably does. `assertControlledByParentWrite` asks for `update` on
+ * the MASTER whatever the detail's own verb is — deleting a child is not
+ * deleting the master — so a detail DELETE is covered by the same master
+ * check an UPDATE is, and both may hand their floor over to it.
+ *
+ * `insert` is absent because it has no floor to drop: the ownership floor is a
+ * pre-image construct and an insert has no pre-image (which is why creating a
+ * child under an editable master already worked).
+ */
+export function masterGateCoversOperation(operation: string): boolean {
+  return operation === 'update' || operation === 'delete';
 }

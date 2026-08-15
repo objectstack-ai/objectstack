@@ -54,6 +54,8 @@ import { computeTenantLayer0Filter, andComposeLayers } from './tenant-layer.js';
 import { isPlatformTenantPolicy, isAuthoredTenantPolicy } from './platform-tenant-policies.js';
 import {
   isPlatformOwnershipFloorPolicy,
+  masterGateCoversOperation,
+  masterGovernsRowWrites,
   owdDeclaresOpenRowWrites,
   owdOpenWritesCoversOperation,
 } from './platform-ownership-policies.js';
@@ -220,10 +222,10 @@ const EMPTY_REQUIRED_PERMISSIONS: NormalizedRequiredPermissions = Object.freeze(
 }) as NormalizedRequiredPermissions;
 
 /**
- * [#5492] Knobs on the layered RLS computation. Exactly one today, and it is a
- * COMPOSITION instruction rather than a policy switch: the caller has already
- * consulted the authority that owns the write-widening mechanisms and is telling
- * this layer whose answer wins.
+ * [#5492] Knobs on the layered RLS computation. Both are COMPOSITION
+ * instructions rather than policy switches: the caller has already consulted an
+ * authority that owns a write-widening mechanism, and is telling this layer
+ * whose answer wins.
  */
 interface RlsFilterOptions {
   /**
@@ -241,6 +243,38 @@ interface RlsFilterOptions {
    * Never affects Layer 0 (the tenant wall) or any app-authored policy.
    */
   dropPlatformOwnershipFloor?: boolean;
+  /**
+   * [#8757] The caller VOUCHES that ADR-0055's master gate
+   * ({@link SecurityPlugin.assertControlledByParentWrite}, step 2.8) runs on
+   * this exact operation, for this exact principal, after this filter is
+   * enforced — so a `controlled_by_parent` object's platform ownership floor
+   * may be handed over to it.
+   *
+   * ## Why this is a caller's claim and not a posture read
+   *
+   * The object's posture is only half the licence (see
+   * `masterGovernsRowWrites`). The maintainer ruling that removes this floor
+   * removes it "only where the master gate demonstrably covers the same
+   * operation; otherwise the change is a bare widening" — and coverage is a
+   * property of the CALL SITE, not of the object:
+   *
+   *   • the by-id write pre-image gate (step 2.7) sets it, because step 2.8
+   *     sits directly below it on the same middleware pass, guarded by a
+   *     SUPERSET of step 2.7's own condition (same `permissionSets`/`userId`/
+   *     `ql` triple, same single target id, one extra operation — `insert`);
+   *   • the BULK write path does NOT, and must not: with no single id,
+   *     `assertControlledByParentWrite` returns early and nothing replaces the
+   *     floor. Reading the posture alone here would have widened bulk writes on
+   *     every `controlled_by_parent` detail to "any row under a READABLE
+   *     master", which no gate had authorized;
+   *   • `getReadFilter` and `checkAuthoredRowWrite` do not, and need not: the
+   *     floor is `update`/`delete`-only so the read path never carries it, and
+   *     the authored-write probe already removes it by provenance.
+   *
+   * `false`/absent leaves the floor exactly where it is. Never affects Layer 0
+   * (the tenant wall) or any app-authored policy.
+   */
+  masterGateCoversThisWrite?: boolean;
 }
 
 /**
@@ -1663,12 +1697,32 @@ export class SecurityPlugin implements Plugin {
                 permissionSets,
               )) === 'allow'
             : false;
+          // [#8757] The COVERAGE VOUCH for ADR-0055 details. This gate and the
+          // master gate (step 2.8, immediately below) run on the same middleware
+          // pass, and 2.8's condition is a strict SUPERSET of this one: the same
+          // `permissionSets.length > 0 && userId && this.ql` triple, the same
+          // single target id (`extractSingleId`, or it returns early), and one
+          // additional operation (`insert`, which has no pre-image and so no
+          // floor to drop). Reaching this line therefore PROVES the master gate
+          // will answer the same write — the maintainer's precondition, held
+          // structurally rather than by comment, and pinned per-operation in
+          // `controlled-by-parent-detail-write-authority.test.ts`.
+          //
+          // [ADR-0090 D10] The on-behalf-of path is EXCLUDED, matching
+          // `floorApplies` above. Not because the master gate misses it — 2.8
+          // runs for the delegator too — but because the delegator's own filter
+          // is computed separately below and keeps its floor, so vouching here
+          // would drop one principal's floor and not the other's: a half-state
+          // no measurement on this card covers. The delegated by-id write keeps
+          // BOTH floors, exactly as before, and that residual is recorded on the
+          // card rather than resolved by a guess.
+          const masterGateCoversThisWrite = !delegatorSets;
           const writeFilter = await this.computeRlsFilter(
             permissionSets,
             opCtx.object,
             rlsOperation,
             opCtx.context,
-            { dropPlatformOwnershipFloor },
+            { dropPlatformOwnershipFloor, masterGateCoversThisWrite },
           );
           // [ADR-0090 D10] The target row must satisfy BOTH principals' write
           // RLS — a by-id write on behalf of a user may only touch rows that
@@ -4157,6 +4211,36 @@ export class SecurityPlugin implements Plugin {
     }
   }
 
+  /**
+   * [#8757] Does this object declare that its access — writes included — derives
+   * from a master record (ADR-0055 `controlled_by_parent`)?
+   *
+   * ## One read point, deliberately, and this is the whole reason it exists
+   *
+   * Two sites now depend on this answer and they depend on it in OPPOSITE
+   * directions: {@link computeLayeredRlsFilter} removes the platform ownership
+   * floor when it is `true`, and {@link assertControlledByParentWrite} installs
+   * the replacement gate when it is `true`. A disagreement between them in the
+   * `true`/`false` order — floor dropped, master gate skipped — is precisely the
+   * bare widening the maintainer's precondition exists to prevent, and it would
+   * be silent: the write would simply succeed.
+   *
+   * That disagreement is REACHABLE if each site resolves the schema its own way.
+   * `getObjectSecurityMeta` falls back to the metadata service when the live
+   * ObjectQL schema is missing and CACHES the result; the master gate reads only
+   * `ql.getSchema`. A boot window where one resolves and the other does not is
+   * enough. So the posture is read here, from the master gate's own source, and
+   * both sites call this — there is no second resolution to drift.
+   *
+   * Fail-closed by construction: an unresolvable schema is `false`, which keeps
+   * the floor on (the narrow direction) and makes the master gate a no-op on an
+   * object that never declared it (unchanged behaviour).
+   */
+  private declaresControlledByParent(object: string): boolean {
+    const schema = typeof this.ql?.getSchema === 'function' ? this.ql.getSchema(object) : null;
+    return masterGovernsRowWrites(schema);
+  }
+
   private extractSingleId(opCtx: any): string | number | bigint | null {
     const isScalar = (v: unknown): v is string | number | bigint =>
       v !== null && (typeof v === 'string' || typeof v === 'number' || typeof v === 'bigint');
@@ -4402,6 +4486,53 @@ export class SecurityPlugin implements Plugin {
       // Layer 0 (the tenant wall) is untouched — a `public_read_write` object is
       // org-wide open, never cross-tenant open.
       if (meta.owdOpensRowWrites && owdOpenWritesCoversOperation(operation)) {
+        collected = collected.filter((p) => !isPlatformOwnershipFloorPolicy(p));
+      }
+      // [#8757] An ADR-0055 `controlled_by_parent` detail does not inherit the
+      // platform's wildcard write ownership floor either — for a DIFFERENT
+      // reason from the OWD above, and under one extra condition.
+      //
+      // The reason: the detail's OWD does not say nothing about writes, it says
+      // "derive them from the master", and the master has its own gate
+      // (`assertControlledByParentWrite`, step 2.8). Running the floor as well
+      // made two gates answer one write and let the widener-blind one win — the
+      // detail became creator-only, a row-level write rule its author never
+      // declared and no mechanism could drop, `modifyAllRecords` included
+      // (`checkEdit` abstains on the `public`-mapped model above its bypass
+      // branch, so step 2.7's `dropPlatformOwnershipFloor` could never fire
+      // here). Maintainer ruling 2026-08-15: the master gate is the SOLE
+      // row-write authority for such a detail.
+      //
+      // The extra condition is the ruling's own precondition, and it is why
+      // this reads an `opts` flag while the OWD line above reads only `meta`:
+      // the floor comes off only where the master gate DEMONSTRABLY covers the
+      // same operation, which is a fact about the call site. The by-id write
+      // pre-image gate vouches for it (step 2.8 runs immediately below it on
+      // the same pass, under a superset of its own guard); the bulk-write path
+      // does not and must not, because `assertControlledByParentWrite` returns
+      // early with no single id and nothing would replace the floor there.
+      // Both directions are pinned in
+      // `controlled-by-parent-detail-write-authority.test.ts`.
+      //
+      // ⚠️ THE PLACEMENT IS LOAD-BEARING, on exactly the reasoning #8023
+      // records two comments up. Dropping the floor HERE — ahead of the #7665
+      // derive-from-select branch — leaves the write class empty, so a detail
+      // that DOES author select policies still derives its write scope from
+      // its own read narrowing. Dropping it at the `dropPlatformOwnershipFloor`
+      // filter further down would skip that branch and compile Layer 1 to null.
+      // Scope, both halves load-bearing:
+      //   - only the PLATFORM's floor (provenance, ADR-0105 D3) — an
+      //     app-authored policy spelling the identical predicate still reaches
+      //     the compiler and still refuses (ADR-0049);
+      //   - only the write classes the master gate covers
+      //     (`masterGateCoversOperation`), which is every class the floor ships.
+      // Layer 0 (the tenant wall) is untouched, and so is the read path: the
+      // floor is a write-side construct that never applied to `select`.
+      if (
+        opts?.masterGateCoversThisWrite &&
+        masterGateCoversOperation(operation) &&
+        this.declaresControlledByParent(object)
+      ) {
         collected = collected.filter((p) => !isPlatformOwnershipFloorPolicy(p));
       }
       // [#7665] The write-visibility floor: a write target must be inside the
@@ -4831,9 +4962,7 @@ export class SecurityPlugin implements Plugin {
     opCtx: any,
     context: any,
   ): Promise<void> {
-    const schema = typeof this.ql?.getSchema === 'function' ? this.ql.getSchema(object) : null;
-    const sharingModel = schema?.sharingModel ?? schema?.security?.sharingModel;
-    if (sharingModel !== 'controlled_by_parent') return;
+    if (!this.declaresControlledByParent(object)) return;
 
     // [#7474] The AUTHORIZATION verdicts — and ONLY those. Three of this gate's
     // conditions really do mean "you may not write this detail because you may

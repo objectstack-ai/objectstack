@@ -159,7 +159,27 @@ const SCHEMAS: Record<string, unknown> = {
 /** The shipped platform seed — the source of the `owner_only_writes` floor. */
 const MEMBER_DEFAULT = defaultPermissionSets.find((p) => p.name === 'member_default')!;
 
-const CRUD = { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true };
+/**
+ * Object grants wide enough that NO case below is decided by the CRUD check.
+ *
+ * The lifecycle three are here for a measured reason. Step 2.7 and step 2.8 are
+ * both pre-wired for `transfer` / `restore` / `purge` (#1883), but each maps to
+ * its own grant (`allowTransfer` / `allowRestore` / `allowPurge`,
+ * `permission.zod.ts`), so a principal holding only CRUD is refused by the
+ * OBJECT-level check long before either row gate runs — with
+ * `insufficient_permission`, not a row verdict. Granting them is what makes §1's
+ * per-operation coverage claim about the row gates rather than about the CRUD
+ * bit that never let the operation through.
+ */
+const CRUD = {
+  allowRead: true,
+  allowCreate: true,
+  allowEdit: true,
+  allowDelete: true,
+  allowTransfer: true,
+  allowRestore: true,
+  allowPurge: true,
+};
 
 /**
  * An ordinary member: object grants on everything, no RLS, no share, no bypass.
@@ -493,13 +513,36 @@ describe('[#8757] §2 the card\'s three measured refusals become the master gate
   it('Modify All Data finally reaches a detail row the holder did not create', async () => {
     const h = await boot();
     const admin = h.ctxFor(ADMIN, 'admin_set');
-    // Card line 2 — the sharp one. `admin_set` carries `modifyAllRecords: true`
-    // on BOTH objects and was refused on `mem_mkt` (created by MKT) under a
-    // master it can fully edit, because `checkEdit`'s `public` early return
-    // sits above the bypass branch and the floor was therefore undroppable.
-    expect(await h.byIdDetailWrite('update', 'mem_mkt', admin)).toMatchObject({ ok: true });
-    // Card line 3, the same shape under the other master.
+    // Card line 3. `admin_set` carries `modifyAllRecords: true` on BOTH objects
+    // and was refused on `mem_admin_selfmade` (created by MKT) under a master it
+    // owns, because `checkEdit`'s `public` early return sits above the bypass
+    // branch and the detail's floor was therefore undroppable by anything.
     expect(await h.byIdDetailWrite('update', 'mem_admin_selfmade', admin)).toMatchObject({ ok: true });
+  });
+
+  it('RESIDUAL (#8865): card line 2 is refused ONE GATE LATER now, and that refusal is a separate defect', async () => {
+    const h = await boot();
+    const admin = h.ctxFor(ADMIN, 'admin_set');
+    // The card's sharpest line — `admin_set` updating `mem_mkt`, a child it did
+    // not create, under a master it does not own — is no longer refused by the
+    // DETAIL's floor, which is this card's whole subject. It is refused one gate
+    // later, by the master gate's own write-RLS leg.
+    //
+    // That leg calls `computeRlsFilter(master, 'update')` with no
+    // `dropPlatformOwnershipFloor`, so the MASTER's floor stands there while the
+    // by-id path drops it on a sharing `allow` — the #8679 divergence surviving
+    // in the sibling leg (#8679 fixed the record-sharing half of the same gate).
+    // Filed as #8865 and deliberately NOT fixed here: a different object's
+    // floor, a different leg, and `assertControlledByParentWrite` has #8688
+    // queued behind this card.
+    const outcome = await h.byIdDetailWrite('update', 'mem_mkt', admin);
+    expect(outcome).toMatchObject({ ok: false, code: 'PERMISSION_DENIED', status: 403 });
+    expect(outcome.message).toContain("master 'crm_campaign' not editable by this user (row-level security)");
+    // THE WITNESS that makes the line above a divergence rather than an answer:
+    // the same principal, the same master row, the same operation — asked
+    // DIRECTLY — is permitted. When #8865 lands the assertion above flips to
+    // `{ ok: true }`; this witness stays exactly as it is.
+    expect(await h.byIdDetailWrite('update', 'camp_mkt', admin, 'crm_campaign')).toMatchObject({ ok: true });
   });
 
   it('the master gate still refuses when the master is not editable — the widening is bounded by it', async () => {
