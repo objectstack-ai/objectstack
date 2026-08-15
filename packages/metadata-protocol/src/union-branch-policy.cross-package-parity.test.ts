@@ -67,13 +67,24 @@
  * will NOT redden this file. Rebuild `@objectstack/spec` first, or the run is
  * reporting on the previous build.
  *
+ * ## Container descent — the exclusion this file recorded, now discharged
+ *
+ * Until #8783 the bullet below read as a deliberate exclusion: the spec walks
+ * descended `invalid_key` / `invalid_element` (#5389) and this package's copy
+ * expanded `invalid_union` only, so the corpus stayed inside `invalid_union`
+ * where all three copies made the same claim. That difference in REACH was
+ * filed as its own card and fixed there: `collectMetadataIssues` now descends
+ * the same two codes, so §5 below compares them and the exclusion is gone
+ * rather than merely still true.
+ *
+ * §5 is kept SEPARATE from §2's corpus rather than folded into it, because §3
+ * asserts that every §2 fixture really produces an `invalid_union` — the
+ * vacuity guard that keeps that corpus about branch ranking. A container
+ * fixture there would either break that guard or force it to be loosened, which
+ * would cost more than the shared list saves.
+ *
  * ## What is deliberately NOT compared
  *
- * - **Container descent** (`invalid_key` / `invalid_element`, #5389). The spec
- *   walks descend those; this package's copy expands `invalid_union` only. That
- *   is a difference in REACH, not in the ranking, and it is not what #5014 bound
- *   together — so the corpus stays inside `invalid_union`, where all three
- *   copies make the same claim. Widening it is a separate card.
  * - **The `code` vocabulary.** This package emits zod's raw code, the wire emits
  *   the ADR-0114 catalog code (#5364 records why they are not aligned). §4
  *   asserts that divergence in place rather than normalising it away, so it
@@ -401,5 +412,63 @@ describe('#8660 §4 the deliberate asymmetries, asserted rather than normalised 
         // slots, different vocabulary — aligning them is #5364's separate call.
         expect(zodIssuesToFields(issues, fixture.value).map((e) => e.code))
             .toEqual(['invalid_shape', 'required']);
+    });
+});
+
+/**
+ * [#8783] The container descent, compared the same way — the exclusion the
+ * header used to record, now an assertion.
+ *
+ * The three walks agree on REACH as well as on ranking: a `z.record`/`z.map`
+ * key or element rejection is emitted as the wrapper zod puts on the issue
+ * itself, followed by the issues the inner schema produced, on the wrapper's
+ * own slot. Nothing here is ranked — a container has one inner schema, so every
+ * issue it raised is true — which is why these fixtures live outside §2's
+ * corpus and its `invalid_union` vacuity guard.
+ */
+describe('#8783 §5 the container descent, in all three walks', () => {
+    const CONTAINER_FIXTURES: readonly Fixture[] = [
+        {
+            rule: 'a rejected record KEY carries the key schema\'s prescription, on the key\'s own slot',
+            schema: z.object({ m: z.record(z.string().min(4), z.string()) }),
+            value: { m: { ab: 'x' } },
+            expectedPaths: ['m.ab', 'm.ab'],
+        },
+        {
+            rule: 'a rejected map ELEMENT descends the same way',
+            schema: z.object({ m: z.map(z.object({ k: z.string() }), z.string().min(4)) }),
+            value: { m: new Map([[{ k: 'a' }, 'x']]) },
+            expectedPaths: ['m', 'm'],
+        },
+        {
+            rule: 'every issue the inner schema raised is emitted — containers are not ranked',
+            schema: z.object({ m: z.record(z.string().min(4).regex(/^[a-z]+$/), z.string()) }),
+            value: { m: { A1: 'x' } },
+            expectedPaths: ['m.A1', 'm.A1', 'm.A1'],
+        },
+    ];
+
+    it.each(CONTAINER_FIXTURES.map((f) => [f.rule, f] as const))('%s', (_rule, fixture) => {
+        const issues = issuesFor(fixture.schema, fixture.value);
+
+        // The fixture really is a container issue, so a future zod change that
+        // reshaped it could not leave this section green and vacuous.
+        expect((issues[0] as { code?: unknown }).code)
+            .toBe(fixture.rule.includes('ELEMENT') ? 'invalid_element' : 'invalid_key');
+
+        const mine = metadataPairs(issues);
+        expect(mine.map((v) => v.path)).toEqual([...fixture.expectedPaths]);
+        expect(mine).toEqual(wirePairs(issues, fixture.value));
+        expect(mine).toEqual(prosePairs(issues));
+    });
+
+    it('the descent is additive in all three — the wrapper is kept, never replaced', () => {
+        const fixture = CONTAINER_FIXTURES[0]!;
+        const issues = issuesFor(fixture.schema, fixture.value);
+
+        for (const pairs of [metadataPairs(issues), wirePairs(issues, fixture.value), prosePairs(issues)]) {
+            expect(pairs[0]!.message).toBe('Invalid key in record');
+            expect(pairs[1]!.message).toContain('expected string to have >=4 characters');
+        }
     });
 });

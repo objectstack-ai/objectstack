@@ -503,8 +503,8 @@ interface MetadataIssueEntry {
 }
 
 /**
- * How many levels of nested `invalid_union` are expanded below a top-level
- * issue, and how many equally-informative branches are emitted at one level.
+ * How many levels of nested issues are expanded below a top-level issue, and
+ * how many equally-informative branches are emitted at one level.
  *
  * Both bounds — and the whole selection policy below — are the ones
  * `formatZodError` landed for the CLI/spec side of this defect (#4971,
@@ -516,9 +516,54 @@ interface MetadataIssueEntry {
  * same, or one mistake gets three different prescriptions depending on whether
  * the author published from the terminal, POSTed to the data API, or saved from
  * Studio (#5364).
+ *
+ * [#8783] The depth bound is named for what it bounds — nesting — and not for
+ * `invalid_union`, because it now bounds the container descent below as well.
+ * The spec pair renamed the same constant for the same reason when #8318
+ * extracted it (`NESTED_EXPANSION_DEPTH_LIMIT` in
+ * `spec/src/shared/union-branch-policy.ts`); the value is the same 3, and it
+ * has to be, for the reason in the paragraph above.
  */
-const UNION_EXPANSION_DEPTH_LIMIT = 3;
+const NESTED_EXPANSION_DEPTH_LIMIT = 3;
 const UNION_BRANCH_EMIT_LIMIT = 3;
+
+/**
+ * [#5389/#8783] The issue codes that hang their real diagnosis on
+ * `issue.issues` rather than on `invalid_union`'s `issue.errors`.
+ *
+ * Zod raises these when a CONTAINER's inner schema rejects a key or an element
+ * that cannot be addressed by a path segment:
+ *
+ * - `invalid_key` — `z.record(K, V)`'s **key** schema rejected a key, and
+ *   `z.map(K, V)`'s key schema rejected a non-`PropertyKey` key;
+ * - `invalid_element` — `z.map(K, V)`'s **value** schema rejected the value
+ *   under a non-`PropertyKey` key.
+ *
+ * In both cases the issue's own `message` is a bare wrapper (`"Invalid key in
+ * record"`) and everything the author needs sits one level down, exactly as
+ * `invalid_union` hides a branch's prescription in `errors` (#4971). Without
+ * the descent this envelope stopped at the wrapper while the other two walks
+ * descended, so the single most-authored metadata type's commonest authoring
+ * mistake — `ObjectSchema.fields` is a record whose KEY schema carries the
+ * snake_case rule (`spec/src/data/object.zod.ts`) — reached Studio as
+ * `{path: 'fields.firstName', code: 'invalid_key', message: 'Invalid key in
+ * record'}` with the sentence naming the rule dropped (#8783).
+ *
+ * ⚠️ These issues are NOT ranked, and that is the one structural difference
+ * from the union descent below. A union's branches are competing *candidates*,
+ * so they are selected between; a container has one inner schema, so every
+ * issue it produced is a true statement about the value and dropping any would
+ * be dropping a real diagnosis. Hence the plain loop rather than
+ * {@link selectUnionBranches}.
+ *
+ * ⛔ Deliberately a local declaration, not an import. `spec`'s
+ * `CONTAINER_ISSUE_CODES` is package-internal by decision (the #4001 export
+ * pitfall) and reaching for it would be #8660's option 2 — a public-surface
+ * decision this change does not make. `union-branch-policy.cross-package-parity.test.ts`
+ * §1 is the tripwire that keeps that decision explicit, and §5 there pins this
+ * set's *behaviour* against both spec walks.
+ */
+const CONTAINER_ISSUE_CODES: ReadonlySet<string> = new Set(['invalid_key', 'invalid_element']);
 
 /**
  * A zod issue, as much of it as the expansion reads.
@@ -527,12 +572,20 @@ const UNION_BRANCH_EMIT_LIMIT = 3;
  * with each branch's paths RELATIVE to the union issue's own path. Zod raises a
  * single `invalid_union` issue whose own `message` is the literal
  * `"Invalid input"`, so everything a failing branch has to say lives down there.
+ *
+ * `issues` is the container equivalent (#8783), carried by the
+ * {@link CONTAINER_ISSUE_CODES}: the one issue list the failing key/element
+ * schema produced, with paths relative to this issue's own — the same
+ * relationship `errors` has, spelled with a different property name and without
+ * the per-branch nesting, because a container has one inner schema rather than
+ * N alternatives.
  */
 interface ZodIssueLike {
     path?: unknown;
     message?: unknown;
     code?: unknown;
     errors?: unknown;
+    issues?: unknown;
 }
 
 /** A zod issue path, normalised to the array zod always produces. */
@@ -620,16 +673,28 @@ function selectUnionBranches(
  * to it, which is the trap #5014 paid for: a branch issue's `path` names a slot
  * inside the union member, not inside the document.
  *
- * The union's entry is kept rather than replaced: it is the only entry naming
- * the slot the client sent, existing consumers already read it, and when every
- * branch is uninformative it is still the whole answer. So the expansion is
- * strictly ADDITIVE — no entry that shipped before this changed is gone or
- * renumbered, only newly accompanied.
+ * [#8783] A {@link CONTAINER_ISSUE_CODES} issue descends the same way and for
+ * the same reason, into `issue.issues` instead of `issue.errors`, with two
+ * differences: nothing is ranked (a container has one inner schema, so every
+ * issue it raised is true — see the note on the code set), and the descent is
+ * only taken when the issue's own code says the payload is a container's. That
+ * second half is what keeps this targeted: an `issues` array hanging off any
+ * other code is left alone, so the walk did not become "descend whatever
+ * nests".
+ *
+ * The wrapper's entry is kept rather than replaced — for the union and the
+ * container alike: it is the only entry naming the slot the client sent,
+ * existing consumers already read it, and when nothing below is informative it
+ * is still the whole answer. So the expansion is strictly ADDITIVE — no entry
+ * that shipped before this changed is gone or renumbered, only newly
+ * accompanied. Both spec walks were measured to do the same before #8783 copied
+ * them (`formatZodIssue` prints the wrapper line then the indented detail;
+ * `zodIssuesToFields` emits the `invalid_shape` wrapper then the detail entry).
  *
  * `seen` de-duplicates entries *within one top-level issue*: two branches that
- * reject the same key with the same words say it once. Union entries themselves
- * are exempt, since two same-path `"Invalid input"` entries can head genuinely
- * different sub-trees.
+ * reject the same key with the same words say it once. Expanded entries — union
+ * and container heads alike — are exempt, since two same-path wrapper entries
+ * can head genuinely different sub-trees.
  *
  * Deliberate divergence from the spec-side renderer: where it prints a trailing
  * "… and N more branches rejected this value", this emits nothing. That line is
@@ -651,7 +716,13 @@ function collectMetadataIssues(
                 (branch): branch is ZodIssueLike[] => Array.isArray(branch),
             )
             : [];
-    const expandable = branches.length > 0 && depth < UNION_EXPANSION_DEPTH_LIMIT;
+    const contained: readonly ZodIssueLike[] =
+        typeof issue?.code === 'string' && CONTAINER_ISSUE_CODES.has(issue.code)
+            && Array.isArray(issue?.issues)
+            ? (issue.issues as ZodIssueLike[])
+            : [];
+    const expandable = (branches.length > 0 || contained.length > 0)
+        && depth < NESTED_EXPANSION_DEPTH_LIMIT;
 
     const entry: MetadataIssueEntry = {
         path: path.join('.'),
@@ -667,10 +738,18 @@ function collectMetadataIssues(
     out.push(entry);
     if (!expandable) return;
 
-    for (const branch of selectUnionBranches(branches)) {
-        for (const nested of branch) {
-            collectMetadataIssues(nested, path, depth + 1, seen, out);
+    if (branches.length > 0) {
+        for (const branch of selectUnionBranches(branches)) {
+            for (const nested of branch) {
+                collectMetadataIssues(nested, path, depth + 1, seen, out);
+            }
         }
+        return;
+    }
+
+    // Unranked, and every one of them: see {@link CONTAINER_ISSUE_CODES}.
+    for (const nested of contained) {
+        collectMetadataIssues(nested, path, depth + 1, seen, out);
     }
 }
 
@@ -692,8 +771,19 @@ function collectMetadataIssues(
  * `formatZodErrors` (#5341) — lost prescriptions; this one lost field
  * localisation itself.
  *
+ * A rejection inside a CONTAINER is expanded for the same reason (#8783): zod
+ * hangs a `z.record`/`z.map` key or element rejection on
+ * {@link CONTAINER_ISSUE_CODES} with the bare wrapper `"Invalid key in record"`
+ * as its own message and the real rule one level down in `issue.issues`. Both
+ * spec walks have descended those since #5389 while this one stopped at the
+ * wrapper, so an author who typed `firstName` for a field key was told a key
+ * was invalid and never told what a valid one looks like — the declared
+ * snake_case prescription exists, is correct, and simply did not reach the
+ * author.
+ *
  * Branch selection is described on {@link selectUnionBranches} and is identical
- * to the other copies by construction.
+ * to the other copies by construction; the container descent is described on
+ * {@link CONTAINER_ISSUE_CODES}.
  */
 export function zodIssuesToMetadataIssues(issues: unknown): MetadataIssueEntry[] {
     if (!Array.isArray(issues)) return [];
