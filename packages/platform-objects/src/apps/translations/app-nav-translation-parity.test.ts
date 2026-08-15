@@ -163,13 +163,24 @@ describe('dashboard widgets are translated in every locale', () => {
 // translations per locale — so the invariant is asserted here instead of being
 // produced by a generator.
 //
-// Deliberately NOT claimed here: anything about zh-CN / ja-JP / es-ES. What a
-// translated locale should do when its source string changes (keep serving the
-// stale value, fall back to the source, fail the build) is a product decision,
-// not a test's to invent. This block is the half that needs no decision; the
-// half that does is #8765, and note what pinning `en` does to it — the drift
-// stops being uniform across all four bundles and becomes locale-specific,
-// invisible to every reviewer who reads the product in English.
+// Still NOT claimed here: anything about zh-CN / ja-JP / es-ES. That used to be
+// because the question was undecided — what a translated locale should do when
+// its source string changes (keep serving the stale value, fall back to the
+// source, fail the build) was a product call, not a test's to invent. It has
+// since been ruled (#8765, Option B: record the source hash at translation
+// time; a mismatch marks the translation stale, and stale falls back to the
+// source text) and implemented in `source-hash.ts`, which `setup.translation.ts`
+// applies when it assembles the served bundle.
+//
+// So the reason this block stops at `en` has changed, and the new one is worth
+// stating: staleness in a translated locale is now a SERVING rule, not an
+// assertion. Nothing here — or anywhere — fails a build because zh-CN lags a
+// source edit; the stale leaf is simply served as the source string, which is
+// the same degradation an untranslated key already produces. Asserting the
+// absence of stale translations in this file would re-introduce Option C
+// (a four-locale translation task in front of every one-word source edit),
+// which the ruling rejected. `source-hash.test.ts` pins the mechanism on
+// synthetic bundles for exactly that reason, and says so.
 //
 // Direction: source ⇒ en, one-way. A key in `en.ts` with no declaring source is
 // NOT judged — that set is exactly Setup's runtime-contributed nav leaves,
