@@ -3,16 +3,32 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { Cron, scheduledJobs } from 'croner';
 import { CronJobAdapter } from './cron-job-adapter.js';
+import {
+  NEVER_FIRES_SCHEDULE as CRON,
+  expectFixtureCannotFire,
+  expectInertRegistration,
+} from './never-fires.fixture.js';
 
+/**
+ * Every case below that asserts an EXACT call/execution count schedules on the
+ * inert `NEVER_FIRES` fixture, and pins that its own registration cannot fire.
+ * The rationale, and what the firing spellings cost, is in
+ * `never-fires.fixture.ts`.
+ */
 describe('CronJobAdapter', () => {
   let adapter: CronJobAdapter;
   afterEach(async () => { await adapter?.destroy(); });
 
+  it('the shared cron fixture cannot fire on its own', () => {
+    expectFixtureCannotFire();
+  });
+
   it('schedules and triggers a cron job', async () => {
     adapter = new CronJobAdapter();
     let calls = 0;
-    await adapter.schedule('daily', { type: 'cron', expression: '0 0 * * *' }, async () => { calls++; });
+    await adapter.schedule('daily', CRON, async () => { calls++; });
     expect(await adapter.listJobs()).toEqual(['daily']);
+    expectInertRegistration(adapter, 'daily');
 
     await adapter.trigger('daily');
     expect(calls).toBe(1);
@@ -35,7 +51,8 @@ describe('CronJobAdapter', () => {
 
   it('records executions', async () => {
     adapter = new CronJobAdapter();
-    await adapter.schedule('tracked', { type: 'cron', expression: '* * * * *' }, async () => {});
+    await adapter.schedule('tracked', CRON, async () => {});
+    expectInertRegistration(adapter, 'tracked');
     await adapter.trigger('tracked');
     const execs = await adapter.getExecutions('tracked');
     expect(execs).toHaveLength(1);
@@ -76,13 +93,14 @@ describe('CronJobAdapter retryPolicy / timeout (#3494)', () => {
     let calls = 0;
     await adapter.schedule(
       'flaky',
-      { type: 'cron', expression: '* * * * *' },
+      CRON,
       async () => {
         calls++;
         if (calls < 3) throw new Error(`attempt ${calls} boom`);
       },
       { retryPolicy: { maxRetries: 3, backoffMs: 1, backoffMultiplier: 1 } },
     );
+    expectInertRegistration(adapter, 'flaky');
     await adapter.trigger('flaky');
     expect(calls).toBe(3);
     const execs = await adapter.getExecutions('flaky');
@@ -95,10 +113,11 @@ describe('CronJobAdapter retryPolicy / timeout (#3494)', () => {
     let calls = 0;
     await adapter.schedule(
       'doomed',
-      { type: 'cron', expression: '* * * * *' },
+      CRON,
       async () => { calls++; throw new Error('always boom'); },
       { retryPolicy: { maxRetries: 2, backoffMs: 1 } },
     );
+    expectInertRegistration(adapter, 'doomed');
     await adapter.trigger('doomed');
     expect(calls).toBe(3); // initial + 2 retries
     const execs = await adapter.getExecutions('doomed');
@@ -109,10 +128,11 @@ describe('CronJobAdapter retryPolicy / timeout (#3494)', () => {
   it('does not retry when no retryPolicy is given (legacy behavior)', async () => {
     adapter = new CronJobAdapter();
     let calls = 0;
-    await adapter.schedule('legacy', { type: 'cron', expression: '* * * * *' }, async () => {
+    await adapter.schedule('legacy', CRON, async () => {
       calls++;
       throw new Error('boom');
     });
+    expectInertRegistration(adapter, 'legacy');
     await adapter.trigger('legacy');
     expect(calls).toBe(1);
     const execs = await adapter.getExecutions('legacy');
@@ -168,20 +188,27 @@ describe('CronJobAdapter — process-global croner name registry (#8362)', () =>
   const registeredFor = (jobName: string) =>
     scheduledJobs.filter((j) => (j.name ?? '').endsWith(jobName));
 
-  const DAILY = { type: 'cron', expression: '0 8 * * *' } as const;
+  // These cases scheduled on a CRON expression, hazardous for the same reason
+  // on a window one instant wide per day rather than per minute: `fired` and
+  // `calls` below are exact counts, and a self-fire at 08:00 UTC adds to them.
+  it('the shared cron fixture cannot fire on its own', () => {
+    expectFixtureCannotFire(CRON.expression);
+  });
 
   it('lets two live adapters hold the SAME job name — two environments, one container', async () => {
     const NAME = 'flow-time-relative:contract_expiry_reminder_flow';
     const fired: string[] = [];
 
     const envA = make();
-    await envA.schedule(NAME, DAILY, async () => { fired.push('A'); });
+    await envA.schedule(NAME, CRON, async () => { fired.push('A'); });
     // The FIRST bind must really have entered the named registry: a rebind pin
     // whose first bind registered nothing passes for the wrong reason.
     expect(registeredFor(NAME)).toHaveLength(1);
 
     const envB = make();
-    await envB.schedule(NAME, DAILY, async () => { fired.push('B'); });
+    await envB.schedule(NAME, CRON, async () => { fired.push('B'); });
+    expectInertRegistration(envA, NAME);
+    expectInertRegistration(envB, NAME);
 
     expect(registeredFor(NAME)).toHaveLength(2);
 
@@ -193,7 +220,7 @@ describe('CronJobAdapter — process-global croner name registry (#8362)', () =>
   it('frees the process-global name on destroy() — the job is STOPPED, not renamed around', async () => {
     const NAME = 'flow-schedule:nightly_rollup';
     const adapterA = make();
-    await adapterA.schedule(NAME, DAILY, async () => {});
+    await adapterA.schedule(NAME, CRON, async () => {});
 
     const [job] = registeredFor(NAME);
     expect(job).toBeDefined();
@@ -213,10 +240,11 @@ describe('CronJobAdapter — process-global croner name registry (#8362)', () =>
     // Somebody else already holds the exact name this adapter will register
     // under — the residual shape once per-instance namespacing rules out our
     // own collisions. Replace semantics: the holder is stopped, not tolerated.
-    const squatter = new Cron(DAILY.expression, { name: adapterA.cronRegistryName(NAME) }, () => {});
+    const squatter = new Cron(CRON.expression, { name: adapterA.cronRegistryName(NAME) }, () => {});
     expect(registeredFor(NAME)).toHaveLength(1);
 
-    await adapterA.schedule(NAME, DAILY, async () => { calls++; });
+    await adapterA.schedule(NAME, CRON, async () => { calls++; });
+    expectInertRegistration(adapterA, NAME);
 
     expect(squatter.isStopped()).toBe(true);
     const held = registeredFor(NAME);
