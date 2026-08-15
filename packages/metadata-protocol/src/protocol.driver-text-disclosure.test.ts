@@ -32,7 +32,7 @@
  *
  * Three downstream boundaries run `looksLikeInternalErrorLeak` — a heuristic
  * over the message. #8132 measured its hole for Postgres and #8263 taught it
- * the two dialects this repo runs. That is an interim by construction: a
+ * the two dialects it COVERS. That is an interim by construction: a
  * phrasing test can only ever know the dialects someone has met.
  *
  * So the dialect matrix below deliberately includes engines the predicate does
@@ -108,7 +108,7 @@ import { ObjectStackProtocolImplementation } from './protocol.js';
  *
  * The three `false` rows are the reason this card is not "add the phrasing":
  * MySQL, MSSQL and Oracle each say it differently again, and the list of
- * engines nobody here has run is unbounded.
+ * dialects this predicate does not cover is unbounded.
  */
 const DIALECTS: ReadonlyArray<{ engine: string; text: string; knownToPredicate: boolean }> = [
     { engine: 'sqlite', text: 'SQLITE_ERROR: no such table: sys_metadata', knownToPredicate: true },
@@ -273,7 +273,7 @@ async function captureThrow(run: () => Promise<unknown>): Promise<any> {
 // ---------------------------------------------------------------------------
 
 describe('[#8136] the shared leak heuristic is dialect-bounded, which is why the cure is at the producer', () => {
-    it('recognises the two engines this repo runs, and none of the three it does not', () => {
+    it('recognises the two engines the predicate covers, and none of the three it does not', () => {
         for (const { engine, text, knownToPredicate } of DIALECTS) {
             expect(looksLikeInternalErrorLeak(text), `${engine}: ${text}`).toBe(knownToPredicate);
         }

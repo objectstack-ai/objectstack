@@ -272,23 +272,26 @@ describe('#8357: the identities the cloud arm matches on are the real ones', () 
       expect(surface.identities()).toContain(real.name);
       expect(Serve.providesCapability([real], surface.identities())).toBe(true);
 
-      // The class-name limb, compared modulo ONE leading underscore. Measured,
-      // not defensive: esbuild rewrites `export class X { … X.prototype … }`
-      // — a class that references itself by name inside its own body — into
-      // `var X = class _X { … _X.prototype … }`, so the BUILT class reports
-      // `_MarketplaceProxyPlugin`. The registry deliberately keeps the source
-      // spelling; pinning the bundler's is pinning an artifact. Stripping one
-      // underscore still catches a genuine rename, which is what this guard is
-      // for. See the `name`-limb test below for why the guard holds anyway.
-      expect(surface.identities()).toContain(real.constructor.name.replace(/^_/, ''));
+      // The class-name limb, compared to the BUILT class name exactly (#8645).
+      // This used to strip one leading underscore, because
+      // `MarketplaceProxyPlugin` referenced itself by name inside its own body
+      // and esbuild emitted `var X = class _X { … }` — so the shipped class was
+      // called `_MarketplaceProxyPlugin` and this limb matched nothing. The
+      // source idiom is fixed and the equality is now enforced for every
+      // registry in `serve.ts` by `serve-capability-identity.test.ts`; the
+      // accommodation is retired rather than left as a third spelling of one
+      // rule. If this line ever fails with a `_`-prefixed name, fix the source
+      // idiom (`this.x` / a module-scope constant) — do not strip it here.
+      expect(surface.identities()).toContain(real.constructor.name);
     });
   }
 
-  it('the registered NAME alone satisfies every guard — the limb that survives bundling', () => {
-    // Load-bearing given the underscore above: against the shipped build the
-    // class-name limb is dead for at least one of these four, so the guard has
-    // to fire on `plugin.name` by itself or it does not fire at all on the
-    // deployments that matter.
+  it('the registered NAME alone satisfies every guard — the limb no bundler can touch', () => {
+    // Still asserted with the class-name limb repaired (#8645), because the two
+    // limbs are independent claims: `plugin.name` is a plain string field that
+    // no bundler rewrites, so it is what recognises a host instance reached
+    // through a factory, a subclass, or a re-export. The class-name limb is the
+    // redundancy on top — enforced now, not assumed.
     for (const surface of SURFACES) {
       expect(
         Serve.providesCapability([{ name: surface.pluginName }], surface.identities()),
