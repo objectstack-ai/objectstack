@@ -272,6 +272,19 @@ export function createFieldPresenceProbe(
  * the parts that could drift are one definition, and only the ordering is
  * restated.
  *
+ *  0. **Declared `tenancy.organizationField`, when the object really has that
+ *     field.** The read-neutral, STAMP-ONLY declaration #8778's ruling added
+ *     for exactly this consumer (option A; #8707's remaining half). It
+ *     answers "which column says who this row is ABOUT" — a different
+ *     question from "what is this object walled by", which is why it wins
+ *     over every limb below, the ADR-0066 opt-out included: an author who
+ *     declares it on an unwalled object (`sys_api_key`, `enabled: false` by
+ *     necessity — the credential table must never be org-walled, #8287) is
+ *     stating precisely that the trail should follow the record's own
+ *     organization even though no wall does. Honoured only when the field is
+ *     really present, same #5315 guard as limb 2. ⛔ Stamp-only cuts both
+ *     ways: this resolver is the key's ONLY consumer by scope pin — a read
+ *     path that starts consulting it needs its own ruling.
  *  1. **`tenancy.enabled === false` → `null`.** ADR-0066 platform-global
  *     objects (`sys_sso_provider` is the shipped example) keep an optional org
  *     FK while explicitly NOT being tenant-scoped. Stamping an audit row from
@@ -305,14 +318,13 @@ export function createFieldPresenceProbe(
  * the same conclusion through a heuristic is the same mistake with no gate on
  * it.
  *
- * Consequently `sys_api_key.active_organization_id` is still NOT reachable
- * here, and that is reported rather than papered over — see the PR for #8707.
- * Its column is not the object's tenant-scope column and must not become one:
+ * `sys_api_key.active_organization_id` is reachable through limb 0 since
+ * #8778 (it was the object that motivated the key). Its column is still not —
+ * and must never become — the object's tenant-scope column:
  * `tenancy.tenantField` feeds `applyTenantScope` / `injectTenantOnInsert`, so
- * declaring it would wall the credential table on an equality that excludes
- * NULL — every pre-#8287 key would vanish from its own owner's list, which is
- * the defect #8287 exists to have removed. A read-neutral, stamp-only
- * declaration is a `packages/spec` contract addition and belongs to that seat.
+ * declaring it there would wall the credential table on an equality that
+ * excludes NULL — every pre-#8287 key would vanish from its own owner's
+ * list, which is the defect #8287 exists to have removed.
  *
  * @param objectDef the registered object definition (`engine.getSchema(name)`)
  * @param hasField the memoized field-presence probe for the SAME object — this
@@ -325,8 +337,13 @@ export function resolveRecordOrganizationField(
   hasField: (field: string) => boolean,
 ): string | null {
   if (!objectDef || typeof objectDef !== 'object') return null;
+  const tenancy = (objectDef as { tenancy?: { organizationField?: unknown; tenantField?: unknown } }).tenancy;
+  // Limb 0 — the explicit stamp-only declaration (#8778) wins over everything,
+  // the ADR-0066 opt-out below included: see the precedence doc above.
+  const stampField = tenancy?.organizationField;
+  if (typeof stampField === 'string' && stampField.length > 0 && hasField(stampField)) return stampField;
   if (isTenancyDisabled(objectDef)) return null;
-  const declared = (objectDef as { tenancy?: { tenantField?: unknown } }).tenancy?.tenantField;
+  const declared = tenancy?.tenantField;
   if (typeof declared === 'string' && declared.length > 0 && hasField(declared)) return declared;
   if (hasField(SystemFieldName.ORGANIZATION_ID)) return SystemFieldName.ORGANIZATION_ID;
   return null;

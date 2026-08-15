@@ -840,6 +840,7 @@
     "data/StringOperator:$notContains",
     "data/StringOperator:$startsWith",
     "data/TenancyConfig:enabled",
+    "data/TenancyConfig:organizationField",
     "data/TenancyConfig:tenantField",
     "data/TursoConfig:authToken [RETIRED]",
     "data/TursoConfig:concurrency",

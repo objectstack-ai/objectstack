@@ -352,6 +352,15 @@ export const ERROR_CODE_LEDGER = {
     'INVALID_METADATA',
     'ERR_READONLY_FIELD_REJECTED', // strictReadonlyWrites: the write would strip caller-supplied fields, so it was refused (#5126; since #6437 that covers the primary_key strip too — one code, `drops` carries the per-reason breakdown)
     'ERR_SUMMARY_RECOMPUTE',
+    // [#8844] A system-context insert on a tenant-scoped application object
+    // carried no organization on a MULTI-organization install (a walled
+    // posture, or a `single` posture whose data holds several organizations).
+    // The ruled alternative to silently filing the row under the `__global__`
+    // pseudo-tenant, which forks the autonumber counter and the partitioned
+    // unique index and mints duplicate business identifiers. Not a synonym of
+    // any standard member: it is neither the client's bad input (the caller is
+    // server-side automation) nor a missing precondition on a request.
+    'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED',
     'VALIDATION_FAILED',
   ],
   '@objectstack/core': [

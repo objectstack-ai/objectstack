@@ -190,5 +190,50 @@ export const DEFAULT_CHANGES_BY_MAJOR: Readonly<Record<number, readonly Declared
       to: '"{0000}"',
       reason: AUTONUMBER_FORMAT_DEFAULT_REASON,
     },
+    {
+      key: 'ui/RecordChatterProps:position',
+      from: '"sidebar"',
+      to: '(none)',
+      reason:
+        'The dropped default was half of the #8762 defect: `sidebar` is a value NO renderer '
+        + 'branch ever compared (`RecordChatterPanel` branches on right/left vs bottom, measured '
+        + 'at objectui pin 665661ab0932), so the materialized default selected nothing and every '
+        + 'silent author got the in-flow render — exactly what the renderer merge\'s own '
+        + '`position: \'bottom\'` fallback now gives them. Deployed behaviour therefore does not '
+        + 'move: silence rendered in flow before and renders in flow after. What changes is that '
+        + 'the fiction is gone (the vocabulary itself converged on bottom/right/left in the same '
+        + 'change, maintainer ruling 2026-08-15). To dock the panel, write `position: \'right\'` '
+        + '(or \'left\') — which is also what `os migrate meta` rewrites an old authored '
+        + '`sidebar`/`drawer` to.',
+    },
+    {
+      key: 'ui/RecordChatterProps:collapsible',
+      from: 'true',
+      to: '(none)',
+      reason:
+        'The schema default (`true`) INVERTED the renderer\'s own fallback: the renderer merge '
+        + '(objectui renderers/record-chatter.tsx, measured at pin 665661ab0932) supplies '
+        + '`collapsible: false` for authored components, and the auto-appended panel passes '
+        + '`false` explicitly — so "the author said nothing" parsed into "the author asked for '
+        + 'collapsible", a value the renderer would not have chosen. Renderer fallbacks stay the '
+        + 'renderer\'s facts (the `maxVisible` principle, #8691/#8744 precedent). A page that '
+        + 'genuinely wants the collapse affordance authors `collapsible: true` explicitly; a '
+        + 'consumer reading the parsed key now sees `boolean | undefined`, where `undefined` '
+        + 'means "the renderer decides" (today: not collapsible).',
+    },
+    {
+      key: 'ui/RecordChatterProps:defaultCollapsed',
+      from: 'false',
+      to: '(none)',
+      reason:
+        'Dropped with its siblings per the `maxVisible` principle (#8762, maintainer ruling '
+        + '2026-08-15): the renderer\'s panel already resolves `defaultCollapsed ?? false` '
+        + 'itself (RecordChatterPanel, pin 665661ab0932), so the schema default duplicated the '
+        + 'renderer\'s fact and materialized an authored-looking `false` onto every silent '
+        + 'parse. Deployed behaviour does not move — silence meant expanded before and means '
+        + 'expanded after; the only visible change is that the parsed key is now absent when '
+        + 'unauthored. To start collapsed, write `defaultCollapsed: true` (with `collapsible: '
+        + 'true` for the affordance to reopen).',
+    },
   ],
 };

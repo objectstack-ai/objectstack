@@ -44,6 +44,29 @@ export const SysApiKey = ObjectSchema.create({
     reason: 'Identity table managed by better-auth — see ADR-0010.',
     docsUrl: 'https://docs.objectstack.ai/adr/0010-metadata-protection',
   },
+  // [#8778, #8707 remainder] Stamp-only organization declaration — NOT a wall.
+  //
+  // `organizationField` tells the audit writer which column carries the
+  // organization a key row is ABOUT, so history/revocation rows land behind
+  // the wall of the key's own organization instead of the revoker's active
+  // one (#8707's repro). It is read by audit stamping ONLY; no tenant-scoping
+  // path (`applyTenantScope` / `injectTenantOnInsert` /
+  // `computeTenantLayer0Filter`) reads it — pinned by tests beside each.
+  //
+  // `enabled: false` states explicitly what this table's shape already
+  // implies, and is measured behavior-identical to having no `tenancy` block
+  // for THIS object on every read path: injection bails on
+  // `managedBy: 'better-auth'` before tenancy is consulted
+  // (`resolveInjectedSystemColumns`), the SQL driver's `computeTenantField`
+  // resolves null either way (no `organization_id`, no `tenantField`), the
+  // Layer 0 wall is exempt either way (no `organization_id` column), and the
+  // memory/mongo boot guards count only an explicit `enabled: true`. ⛔ Never
+  // "upgrade" this to `enabled: true` or move the column to
+  // `tenancy.tenantField`: both wall the credential table on an equality that
+  // excludes NULL, and every pre-#8287 key vanishes from its own owner's
+  // "My Keys" list — the defect #8287 exists to have removed (see the
+  // `active_organization_id` field comment below).
+  tenancy: { enabled: false, organizationField: 'active_organization_id' },
   description: 'API keys for programmatic access',
   displayNameField: 'name',
   nameField: 'name', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)

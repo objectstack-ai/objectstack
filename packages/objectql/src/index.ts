@@ -244,6 +244,25 @@ export type {
   AuditAbortSignal,
 } from './integrity/dangling-reference-audit.js';
 
+// [#8844] System-context write organization resolution — the runtime half of
+// #8686's ruling. The refusal class is exported because a caller that catches
+// it identifies it by `code`, and the decision function because it is the
+// ruling's five binding points as one pure, directly-testable verdict.
+export {
+  resolveSystemWriteOrganization,
+  resolveTenantFieldName,
+  isPlatformNamespaceObject,
+  carriesOrganization,
+  SystemWriteOrganizationRequiredError,
+  ORGANIZATION_OBJECT,
+  GLOBAL_TENANT,
+  DEFAULT_TENANT_FIELD,
+} from './tenancy/system-write-organization.js';
+export type {
+  SystemWriteOrganizationDecision,
+  SystemWriteRefusalReason,
+} from './tenancy/system-write-organization.js';
+
 // Export MetadataFacade
 export { MetadataFacade } from './metadata-facade.js';
 
