@@ -546,7 +546,7 @@ function applyPending(
  * scoped to the ENVIRONMENT, so which org a membership sits in never changes
  * who administers this deployment.)
  */
-const MEMBER_STANDING_KEYS = ['role', 'user_id', 'userId'] as const;
+export const MEMBER_STANDING_KEYS = ['role', 'user_id', 'userId'] as const;
 
 /**
  * Same, for `sys_user_permission_set`: which permission set the grant points
@@ -554,7 +554,7 @@ const MEMBER_STANDING_KEYS = ['role', 'user_id', 'userId'] as const;
  * — every column the grant half of the enumeration consumes, in both the
  * snake_case and camelCase spellings the readers already tolerate.
  */
-const GRANT_STANDING_KEYS = [
+export const GRANT_STANDING_KEYS = [
   'permission_set_id',
   'permissionSetId',
   'user_id',
@@ -608,7 +608,90 @@ const GRANT_STANDING_KEYS = [
  * never conferred it, in the resolver or here), and org-administrator standing
  * is read from `sys_member.role`. Deactivating a position cannot empty either.
  */
-const PERMISSION_SET_STANDING_KEYS = ['name', 'active'] as const;
+export const PERMISSION_SET_STANDING_KEYS = ['name', 'active'] as const;
+
+/**
+ * [#8734] The three lists above, keyed by the table each one judges — the shape
+ * the correspondence gate consumes.
+ *
+ * The gate (`last-admin-standing-keys.test.ts`) reads
+ * `ADMIN_STANDING_SURFACE` from `@objectstack/core`, which is the MEASURED set
+ * of columns `resolveAuthzContext` reads per table, and requires every column
+ * of every standing-bearing table to have an answer here: either the guard
+ * treats it as standing-bearing (it is in the list) or it is excluded below
+ * with the reason it cannot move the administrator population.
+ *
+ * Keying by table is not cosmetic. It is what makes a resolver that starts
+ * deriving administrator standing from a NEW table fail: core reclassifies the
+ * table as `derives`, and the gate then demands a list here that does not
+ * exist. A column-set comparison alone cannot see that, because a new table is
+ * absent from both sides.
+ */
+export const STANDING_KEYS_BY_TABLE: Readonly<Record<string, readonly string[]>> = {
+  [SystemObjectName.MEMBER]: MEMBER_STANDING_KEYS,
+  [USER_PERMISSION_SET]: GRANT_STANDING_KEYS,
+  [SystemObjectName.PERMISSION_SET]: PERMISSION_SET_STANDING_KEYS,
+};
+
+/**
+ * [#8734] Columns the resolver reads that this guard deliberately does NOT
+ * treat as standing-bearing, each with the reason it cannot empty the
+ * administrator population.
+ *
+ * Every exclusion here was already argued in the prose above; what changes is
+ * that the argument is now attached to a column the gate has measured, and a
+ * column that acquires a reader gets no disposition until someone writes one.
+ * The reason strings can still go out of date in their CONTENT — that is true
+ * of any prose — but they can no longer go out of date in their SUBJECT, which
+ * is how #6084's comment about `active` survived #8613.
+ *
+ * ⚠️ An entry here is a decision that a write to that column is safe, on a path
+ * whose failure mode is an installation-wide administrator lockout with no
+ * in-product recovery. Adding one to make a red gate green is the wrong move in
+ * exactly the way this card exists to prevent; the right move is almost always
+ * to add the column to the list above.
+ */
+export const STANDING_KEY_EXCLUSIONS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  [SystemObjectName.MEMBER]: {
+    organization_id:
+      'The invariant is scoped to the ENVIRONMENT, not to each organization ("Scope" above), so '
+      + 'which org a membership sits in never changes who administers this deployment. The '
+      + 'resolver reads it to scope positions to the ACTIVE org and to build accessible_org_ids; '
+      + 'neither is a count of administrators.',
+    organizationId: 'Camel-case spelling of `organization_id` — same reason.',
+    valid_from:
+      'ADR-0091 windows are not columns on `sys_member` today. The resolver calls isGrantActive '
+      + 'on membership rows only when building `accessible_org_ids` (the group posture read '
+      + 'reach); the org-administration role projection it feeds `positions` from is NOT window '
+      + 'filtered, and this guard counts org administrators by GRADE alone (isOrgAdminGrade). So '
+      + 'no reader of administrator standing consults these bounds, and writing one cannot revoke '
+      + 'a grade. If the columns ever land on `sys_member`, the resolver is where the two halves '
+      + 'have to be reconciled first — this list follows it, it does not lead.',
+    validFrom: 'Camel-case spelling of `valid_from` — same reason.',
+    valid_until: 'Upper bound of the same absent window as `valid_from` — same reason.',
+    validUntil: 'Camel-case spelling of `valid_until` — same reason.',
+  },
+
+  [USER_PERMISSION_SET]: {},
+
+  [SystemObjectName.PERMISSION_SET]: {
+    id:
+      'On this engine `data.id` on an update ADDRESSES the row rather than proposing a new '
+      + 'primary key (see the note above `PERMISSION_SET_STANDING_KEYS`), so a key rewrite is not '
+      + 'expressible through this write path at all.',
+    system_permissions:
+      'What the set CONTAINS does not un-make a platform admin: `hasPlatformAdminGrant` is set '
+      + "from `ps.name === 'admin_full_access'` on an ACTIVE set, and the posture rung and "
+      + 'superuser bypass ride on that boolean. Emptying the blob costs the holder setup/studio '
+      + 'access — recoverable from inside the product, an ADR-0086 capability question, not a '
+      + 'break-glass one.',
+    systemPermissions: 'Camel-case spelling of `system_permissions` — same reason.',
+    tab_permissions:
+      'Tab visibility per app. Same reason as `system_permissions`: it is content of the set, '
+      + 'never the name-and-active pair the derivation reads.',
+    tabPermissions: 'Camel-case spelling of `tab_permissions` — same reason.',
+  },
+};
 
 function touchesAny(data: Record<string, unknown>, keys: readonly string[]): boolean {
   return keys.some((k) => k in data);
