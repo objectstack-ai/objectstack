@@ -8619,10 +8619,11 @@ export class ObjectStackProtocolImplementation implements
                         : []);
             const fieldByName = new Map(fields.map(f => [f.name, f]));
             const hasField = (n: string) => fieldByName.has(n);
-            // Resolve title for a record using titleFormat → displayNameField →
-            // common conventional fields → id. titleFormat supports simple
-            // `{field}` placeholders (the `template` dialect); unresolved
-            // placeholders fall through to the next strategy.
+            // Resolve title for a record using titleFormat → the declared
+            // primary-title pointer → common conventional fields → id.
+            // titleFormat supports simple `{field}` placeholders (the
+            // `template` dialect); unresolved placeholders fall through to the
+            // next strategy.
             const titleFormatSource = (obj.titleFormat && (obj.titleFormat.source || obj.titleFormat))
                 || undefined;
             const renderTitle = (row: any): string => {
@@ -8637,7 +8638,21 @@ export class ObjectStackProtocolImplementation implements
                     if (rendered) return rendered.replace(/\s+-\s+$/, '').replace(/^\s+-\s+/, '').trim() || row.id;
                 }
                 const candidates = [
-                    obj.displayNameField,
+                    // [ADR-0079] `nameField` is the canonical primary-title
+                    // pointer; `displayNameField` is the deprecated alias
+                    // (still honored). Reading the alias ALONE made this the
+                    // one consumer a canonical designation could not reach:
+                    // `provisionPrimary` — the designation seat the registry
+                    // runs on every object at registration — stamps
+                    // `nameField` only (`spec/src/data/display-name.ts`), so
+                    // an object that declares its title canonically and does
+                    // not also carry the alias fell through this list to
+                    // `String(row.id)` and the palette showed a raw id. Same
+                    // precedence as `resolveDisplayField`, the #4254 ingress
+                    // gate, and this function's own search-field resolution 44
+                    // lines below — a fourth spelling here would re-split what
+                    // those merged.
+                    obj.nameField ?? obj.displayNameField,
                     'name', 'full_name', 'title', 'subject', 'label', 'company',
                 ].filter((c): c is string => typeof c === 'string' && hasField(c));
                 for (const c of candidates) {
